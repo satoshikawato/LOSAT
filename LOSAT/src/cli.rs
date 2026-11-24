@@ -35,6 +35,10 @@ pub use reader::ArgvError;
 mod stdio_buffer;
 pub use stdio_buffer::{NcbiBuffer, NcbiStdio, NCBI_BUFSIZ};
 
+// The process's standard output with no buffer of Rust's, under the command line's writers.
+mod standard_output;
+pub(crate) use standard_output::standard_output;
+
 /// The words that ask for `install_shims`: `-install-shims` is how the top level's `-help` shows
 /// it.
 pub const INSTALL_SHIMS_WORDS: [&str; 2] = ["--install-shims", "-install-shims"];
@@ -189,10 +193,11 @@ fn top_level_after_help() -> &'static str {
 // No NCBI counterpart: `losat <program>` names the program, and a run builds the clap command of
 // that program only (`ProgramParser`).
 // LOSAT's command line, `losat <program> <words>` (`Commands`). Its command (`CommandFactory`) is
-// `cli_command`'s: `Cli::command()` has every program's arguments, which the readers of the
-// definitions walk (`api::describe`, LOSAT Web's `describe`), and clap converts a command line
-// with only its program's arguments (`command_of`, `ProgramParser::program_command`). A
-// doc comment here would be clap's description of the top level (`long_about`).
+// `cli_command`'s: `Cli::command()` has every program's arguments (`api::describe`, which reads
+// NCBI's argument tables, has a test that its options are these, line RG item K4i-3a), and clap
+// converts a command line with only its program's arguments (`command_of`,
+// `ProgramParser::program_command`). A doc comment here would be clap's description of the top
+// level (`long_about`).
 #[derive(clap::Args, Debug)]
 #[command(
     version,
@@ -736,7 +741,7 @@ pub(crate) fn xml_help_text(program: &str) -> Option<String> {
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-230
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NativeError {
     pub exit: i32,
     /// The text NCBI's `CATCH_ALL` writes, as bytes: a name of the command line or of a file
@@ -799,6 +804,22 @@ impl NativeError {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-384 (cited at
+    // `report::serial::encoder::NullElement`)
+    /// The end of a run whose ASN.1 text stream threw at an element that holds no object
+    /// (`encoder::NullElement`, the application `application`): the stream's post of its first
+    /// failure, then `CATCH_ALL`'s report of the exception (`exception`, exit status 255).
+    pub(crate) fn null_element(
+        application: &str,
+        thrown: &crate::report::serial::encoder::NullElement,
+    ) -> NativeError {
+        let mut error = Self::exception(&thrown.exception());
+        let mut message = thrown.post(Some(application));
+        message.append(&mut error.message);
+        error.message = message;
+        error
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
     /// `CATCH_ALL`'s report of a `std::exception` (one that is neither a `CException` nor
     /// `bad_alloc` nor `ios::failure`) whose `what()` is `what`: exit status 255.
@@ -821,14 +842,60 @@ impl NativeError {
     }
 
     /// The error of a report's writer as the run ends with it: an exception of NCBI's that the
-    /// writer raised mid-report (`NcbiException::of_io_error`: TBLASTX's query-anchored section,
-    /// `report::query_anchored::write_section`) is `CATCH_ALL`'s report of it (`exception`), after
-    /// what the report wrote before it; any other error is the writer's.
+    /// writer raised mid-report is `CATCH_ALL`'s report of it (`of_writer_exception`), after what
+    /// the report wrote before it; any other error is the writer's.
     pub(crate) fn of_writer(error: std::io::Error) -> anyhow::Error {
-        match crate::ncbi_exception::NcbiException::of_io_error(&error) {
-            Some(exception) => NativeError::exception(exception).into(),
+        match NativeError::of_writer_exception::<dyn std::error::Error>(&error) {
+            Some(native) => native.into(),
             None => error.into(),
         }
+    }
+
+    /// `CATCH_ALL`'s report (`exception`) of the exception of NCBI's that the error `error` of a
+    /// report's writer carries, where it carries one (`NcbiException::of_io_error`: raised
+    /// mid-report by the `-html` registries, `report::formatter_registry`, by a subject's load
+    /// that ends the run, `report::x_pairwise_par::end_here`, or by the merge of a query-anchored
+    /// section, `report::query_anchored::write_section`), whichever program wrote the report. The
+    /// one mapping of such an error: at the programs' report boundaries (`of_writer`, BLASTX's
+    /// `native::report_error`) and, through `caught`, at the command line's end
+    /// (`exit_on_native_error`) and in the library's message (`api::error::chain_bytes`), so the
+    /// library's bytes are the command line's.
+    pub(crate) fn of_writer_exception<E: CaughtError + ?Sized>(error: &E) -> Option<NativeError> {
+        error
+            .find::<std::io::Error>()
+            .and_then(crate::ncbi_exception::NcbiException::of_io_error)
+            .map(NativeError::exception)
+    }
+
+    /// The report with which `CATCH_ALL` ends a run whose error (or one error of whose chain) is
+    /// `error`, where it has one: the report of an exception of NCBI's that a report's writer
+    /// raised (`of_writer_exception`), or the `NativeError` itself.
+    pub(crate) fn caught<E: CaughtError + ?Sized>(
+        error: &E,
+    ) -> Option<std::borrow::Cow<'_, NativeError>> {
+        match NativeError::of_writer_exception(error) {
+            Some(native) => Some(std::borrow::Cow::Owned(native)),
+            None => error.find::<NativeError>().map(std::borrow::Cow::Borrowed),
+        }
+    }
+}
+
+/// An error that `NativeError::caught` reads: a run's error (anyhow's `downcast_ref`, which also
+/// finds the error under a context) or one error of a chain (`dyn Error`'s).
+pub(crate) trait CaughtError {
+    /// The error as a `T`, where it is one.
+    fn find<T: std::error::Error + Send + Sync + 'static>(&self) -> Option<&T>;
+}
+
+impl CaughtError for anyhow::Error {
+    fn find<T: std::error::Error + Send + Sync + 'static>(&self) -> Option<&T> {
+        self.downcast_ref()
+    }
+}
+
+impl CaughtError for dyn std::error::Error + 'static {
+    fn find<T: std::error::Error + Send + Sync + 'static>(&self) -> Option<&T> {
+        self.downcast_ref()
     }
 }
 
@@ -1364,19 +1431,10 @@ pub(crate) fn create_out_file(
 /// that the run already wrote (`post_native_error`) is not written again. A failed write is
 /// dropped, as NCBI's post drops it (`eprint!` would abort: tblastx `-evalue 0 -logfile /dev/full`
 /// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20). An
-/// error of a report's writer that carries an exception of NCBI's (`NcbiException::into_io_error`:
-/// the `-html` links' registry, `report::formatter_registry::InitConfig`, which NCBI's formatter
-/// reads while it writes) is that exception's report (`NativeError::of_writer`), whichever program
-/// wrote it.
+/// error of a report's writer that carries an exception of NCBI's is that exception's report
+/// (`NativeError::caught`), whichever program wrote it.
 pub fn exit_on_native_error(error: &anyhow::Error) {
-    let of_writer = error
-        .downcast_ref::<std::io::Error>()
-        .and_then(crate::ncbi_exception::NcbiException::of_io_error)
-        .map(NativeError::exception);
-    if let Some(e) = of_writer
-        .as_ref()
-        .or_else(|| error.downcast_ref::<NativeError>())
-    {
+    if let Some(e) = NativeError::caught(error) {
         if !posted(&e.message) {
             let mut stderr = std::io::stderr();
             let _ = std::io::Write::write_all(&mut stderr, catch_all_text(&e.message));

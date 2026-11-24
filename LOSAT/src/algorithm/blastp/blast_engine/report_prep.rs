@@ -364,6 +364,7 @@ pub(super) fn prefetch_reported_subjects(
                 descriptions: args.num_descriptions,
                 alignments: args.num_alignments,
             },
+            args.is_html,
         )),
         _ => None,
     });

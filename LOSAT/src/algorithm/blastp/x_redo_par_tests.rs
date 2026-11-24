@@ -1,4 +1,5 @@
 use super::*;
+use crate::algorithm::blastp::blast_engine::{sw_batch_failed, sw_endless};
 use crate::algorithm::blastp::encoding::EncodedProtein;
 use crate::core::composition_adjustment::smith_waterman_match::SwRedoEndless;
 use crate::utils::glibc_fma_libm::GlibcLibm;

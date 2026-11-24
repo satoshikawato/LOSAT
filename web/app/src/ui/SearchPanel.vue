@@ -7,7 +7,7 @@
 // the engine's refusal of the options when there is one. "Run LOSAT" starts the search and the
 // page goes to its results (`submitted`), as NCBI's BLAST button does. Explanatory copy follows
 // stop-describing-ui (Owner, 2026-11-02): NCBI's sentences stay, LOSAT's explanations go.
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import type { InputRole } from 'losat/domain';
 import type { Attention, AttentionState } from '../application/attention';
 import type { SearchDraft } from '../application/draft';
@@ -16,6 +16,7 @@ import type { ExampleLoader } from '../application/examples';
 import { changedFields, effectiveValue, placementFlags, sectionsAt } from '../domain/parameters';
 import { printSummaryParts, programById, PROGRAMS, searchSummaryParts } from '../domain/programs';
 import { announce } from './announcer';
+import { searchFormModel } from './form-model';
 import { REFUSAL_ID } from './refusal';
 import { useStore } from './useStore';
 import ExampleLine from './ExampleLine.vue';
@@ -32,9 +33,15 @@ const props = defineProps<{
   attention: Attention;
   attentionState: AttentionState;
 }>();
-/** A search was started: the ID of its first run (a group of separate searches starts several). */
-const emit = defineEmits<{ submitted: [runId: string] }>();
+/** A search was started, or the user clicked "Make counts…" in BLASTN's repeats row. */
+const emit = defineEmits<{ submitted: [runId: string]; 'make-counts': [] }>();
 const state = useStore(props.draft.state);
+const formModel = computed(() =>
+  searchFormModel(props.draft, state.value, {
+    counts: props.counts,
+    onMakeCounts: () => emit('make-counts'),
+  }),
+);
 const program = computed(() => programById(state.value.program));
 const options = computed(() => state.value.description?.parameters);
 const values = computed(() => state.value.values[state.value.program]);
@@ -146,6 +153,16 @@ function onThreads(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
   props.draft.setThreads(value === 'auto' ? 'auto' : Number(value));
 }
+
+/** Opens Algorithm parameters and moves focus to BLASTN's repeats row ("Use in BLASTN"). */
+async function focusRepeats(): Promise<void> {
+  open.value = true;
+  await nextTick();
+  const target = document.getElementById('param-window_masker_db');
+  target?.scrollIntoView({ block: 'center' });
+  target?.focus({ preventScroll: true });
+}
+defineExpose({ focusRepeats });
 </script>
 
 <template>
@@ -177,7 +194,7 @@ function onThreads(event: Event): void {
 
     <fieldset v-if="taskFields.length > 0" class="search-block" data-testid="program-selection">
       <legend>Task Selection</legend>
-      <ParameterField v-for="field in taskFields" :key="field.flag" :draft="draft" :state="state" :field="field" />
+      <ParameterField v-for="field in taskFields" :key="field.flag" :model="formModel" :field="field" />
     </fieldset>
 
     <div class="blast-row">
@@ -260,7 +277,7 @@ function onThreads(event: Event): void {
           </p>
           <button type="button" data-testid="restore-defaults" @click="restoreDefaults">Restore default search parameters</button>
         </div>
-        <ParameterForm :draft="draft" :state="state" :counts="counts" />
+        <ParameterForm :model="formModel" />
         <div class="blast-row">
           <button
             class="primary-action"

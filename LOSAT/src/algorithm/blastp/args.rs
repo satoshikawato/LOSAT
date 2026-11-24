@@ -239,8 +239,7 @@ pub struct BlastpArgs {
     )]
     pub show_gis: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
-    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224); with `-outfmt` 1 to 4 LOSAT does
-    // not write it yet (`blastinput::app::html_format_check`).
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224), for `-outfmt` 0 to 4 and 18.
     #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
     pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
@@ -536,11 +535,12 @@ pub struct ResolvedBlastpArgs {
     pub parse_deflines: bool,
     /// `-show_gis`, for the same reports.
     pub show_gis: bool,
-    /// The `-html` links of the outfmt 0 report (`blastinput::app::html_links`); None without
-    /// `-html` or outfmt 0, and for psiblast and rpsblast, which have no `-html`.
+    /// The `-html` links of the outfmt 0 to 4 reports (`blastinput::app::html_links`); None
+    /// without `-html` or any of those formats, and for psiblast and rpsblast, which have no
+    /// `-html`.
     pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
-    /// outfmt 0 and 18 reports (the organism report takes no links).
+    /// outfmt 0 to 4 and 18 reports (the organism report takes no links).
     pub is_html: bool,
     /// The `-db` value as NCBI keeps it (`db_name`), when the search is of a database.
     pub db: Option<String>,
@@ -906,11 +906,6 @@ impl BlastpArgs {
         crate::blastinput::app::formatting_handler_check(
             &choice,
             crate::blastinput::app::Program::Blastp,
-        )?;
-        crate::blastinput::app::html_format_check(
-            choice.number,
-            crate::blastinput::app::Program::Blastp,
-            self.html,
         )?;
         let html = crate::blastinput::app::html_links(
             self.html,

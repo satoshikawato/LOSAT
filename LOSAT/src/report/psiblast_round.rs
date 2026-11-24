@@ -280,6 +280,7 @@ impl RoundSections<'_> {
                 place,
                 // psiblast refuses `-html` (`ncbi_app::args::refusal`): the plain table.
                 None,
+                None,
             )?,
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1528

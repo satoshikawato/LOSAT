@@ -57,6 +57,12 @@
 //!   a store whose address the end of the row decides, which made them wait until that store was
 //!   written (line R, R1). The 16-bit lanes keep the clearing: there the store-forward blocks
 //!   were 0.1-0.2 per row and the change gained nothing.
+//! - Edge of the matrix on the 8-bit lanes (`LOSAT_X_DPEDGE`, the `LM` instances of `align8`; on
+//!   by default): the lanes at and past `limit` (the end of `B`, or the fence) are masked to 0 in
+//!   the one block that crosses `limit` only; the other blocks of the row skip the mask, which was
+//!   all ones there, so every lane holds the same value. That block is the row's last: the band
+//!   end `bend` is at most `limit`, a 32-lane block runs only while more than 16 lanes are left
+//!   before `bend`, and a block that crosses `limit` leaves no lane before it for a next block.
 //!
 //! Less work per row and per call than the 128-bit kernels: wider steps, first and last
 //! survivor tracked while the row runs (no survivor bitmap), the first lane's missing diagonal
@@ -111,6 +117,12 @@ pub(super) fn emask_on() -> bool {
     crate::utils::xswitch::on("LOSAT_X_DPEMASK")
 }
 
+/// No NCBI counterpart: LOSAT_X_DPEDGE on (`utils/xswitch.rs`): the `LM` instances of `align8`
+/// (the lane mask of the matrix edge only on the block that crosses it).
+pub(super) fn edge_on() -> bool {
+    crate::utils::xswitch::on("LOSAT_X_DPEDGE")
+}
+
 /// No NCBI counterpart: AVX2 and the features of the 128-bit AVX build (LOSAT_X_DPNOAVX, which
 /// turns that build off, turns these kernels off too).
 pub(super) fn available() -> bool {
@@ -121,7 +133,8 @@ pub(super) fn available() -> bool {
 /// Dispatch point of the 256-bit kernels: `tb == false` is the score-only recurrence
 /// (`Blast_SemiGappedAlign`, `s_BlastAlignPackedNucl`), `tb == true` is `ALIGN_EX`. The lane width
 /// is the one the 128-bit dispatch would choose (`fits_8bit`). `em`: the `EM` instances of
-/// `align8` (LOSAT_X_DPEMASK). None: not handled here; the caller runs the 128-bit dispatch.
+/// `align8` (LOSAT_X_DPEMASK); `lm`: its `LM` instances (LOSAT_X_DPEDGE). None: not handled
+/// here; the caller runs the 128-bit dispatch.
 ///
 /// # Safety
 /// `available()` must be true.
@@ -137,10 +150,11 @@ pub(super) unsafe fn align(
     tb: bool,
     check_fence: bool,
     em: bool,
+    lm: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
-    if em {
-        dispatch::<true>(
+    match (em, lm) {
+        (true, true) => dispatch::<true, true>(
             q,
             s,
             scores,
@@ -152,9 +166,8 @@ pub(super) unsafe fn align(
             tb,
             check_fence,
             sc,
-        )
-    } else {
-        dispatch::<false>(
+        ),
+        (true, false) => dispatch::<true, false>(
             q,
             s,
             scores,
@@ -166,16 +179,42 @@ pub(super) unsafe fn align(
             tb,
             check_fence,
             sc,
-        )
+        ),
+        (false, true) => dispatch::<false, true>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            tb,
+            check_fence,
+            sc,
+        ),
+        (false, false) => dispatch::<false, false>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            tb,
+            check_fence,
+            sc,
+        ),
     }
 }
 
-/// No NCBI counterpart: `align` for one choice of `EM`.
+/// No NCBI counterpart: `align` for one choice of `EM` and `LM`.
 ///
 /// # Safety
 /// `available()` must be true.
 #[inline(always)]
-unsafe fn dispatch<const EM: bool>(
+unsafe fn dispatch<const EM: bool, const LM: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -190,7 +229,7 @@ unsafe fn dispatch<const EM: bool>(
 ) -> Option<XdropResult> {
     let m8 = fits_8bit(scores, gap_open, gap_extend, x_drop);
     match (tb, m8) {
-        (true, Some(m)) if sc.x_nib => align8::<true, EM, true>(
+        (true, Some(m)) if sc.x_nib => align8::<true, EM, true, LM>(
             q,
             s,
             scores,
@@ -203,7 +242,7 @@ unsafe fn dispatch<const EM: bool>(
             check_fence,
             sc,
         ),
-        (true, Some(m)) => align8::<true, EM, false>(
+        (true, Some(m)) => align8::<true, EM, false, LM>(
             q,
             s,
             scores,
@@ -216,7 +255,7 @@ unsafe fn dispatch<const EM: bool>(
             check_fence,
             sc,
         ),
-        (false, Some(m)) => align8::<false, EM, false>(
+        (false, Some(m)) => align8::<false, EM, false, LM>(
             q,
             s,
             scores,
@@ -1121,7 +1160,7 @@ unsafe fn block8x<const TB: bool, const EM: bool>(
 // The whole DP on 8-bit lanes, the steps of the 128-bit `align_body8` in the same order. `max_m`
 // is the largest score of the matrix (`fits_8bit`). None for a problem the lanes do not hold.
 #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
+unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool, const LM: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -1321,35 +1360,61 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
         let mut lo_surv = usize::MAX;
         let mut hi_surv = 0usize;
         let mut b0 = first;
+        // the survivors of the block at `b0` (lanes `live`)
+        macro_rules! surv {
+            ($live:expr) => {{
+                let live: u32 = $live;
+                if live != 0 {
+                    if lo_surv == usize::MAX {
+                        lo_surv = b0 + live.trailing_zeros() as usize;
+                    }
+                    hi_surv = b0 + (31 - live.leading_zeros() as usize);
+                }
+            }};
+        }
+        // one 32-lane block at `b0`, lanes at and past `limit` masked by `$mask`
+        macro_rules! blk32 {
+            ($mask:expr) => {{
+                let idx = ld(sb.add(b0));
+                let sv = if small_alphabet {
+                    _mm256_shuffle_epi8(t0, idx)
+                } else {
+                    lut32(t0, t1, _mm256_add_epi8(idx, k70), _mm256_sub_epi8(idx, k10))
+                };
+                let (d0, r0) = block8::<TB, EM>(&c, &mut rs, hr, hw, e, b0, sv, $mask, hpm);
+                hpm = zero;
+                if TB && NIB {
+                    stx(tr.add((b0 - first) >> 1), nibs32(r0));
+                } else if TB {
+                    st(tr.add(b0 - first), r0);
+                }
+                surv!(!(_mm256_movemask_epi8(d0) as u32));
+                b0 += 32;
+            }};
+        }
         // 32-lane blocks while more than 16 lanes of the band are left, then 16-lane blocks for the
         // rest of the band and the row-gap extension (stop test as in `align16`).
-        while b0 + 16 < bend {
-            let idx = ld(sb.add(b0));
-            let sv = if small_alphabet {
-                _mm256_shuffle_epi8(t0, idx)
-            } else {
-                lut32(t0, t1, _mm256_add_epi8(idx, k70), _mm256_sub_epi8(idx, k10))
-            };
-            let mask = if b0 + 32 <= limit {
-                None
-            } else {
-                Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
-            };
-            let (d0, r0) = block8::<TB, EM>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
-            hpm = zero;
-            if TB && NIB {
-                stx(tr.add((b0 - first) >> 1), nibs32(r0));
-            } else if TB {
-                st(tr.add(b0 - first), r0);
+        if LM {
+            // LOSAT_X_DPEDGE: the blocks that end at or below `limit` run without the lane mask;
+            // the one block that crosses `limit`, the row's last 32-lane block (`bend <= limit`),
+            // runs with it
+            debug_assert!(bend <= limit);
+            let stop = bend.min(limit.saturating_sub(15));
+            while b0 + 16 < stop {
+                blk32!(None);
             }
-            let live = !(_mm256_movemask_epi8(d0) as u32);
-            if live != 0 {
-                if lo_surv == usize::MAX {
-                    lo_surv = b0 + live.trailing_zeros() as usize;
-                }
-                hi_surv = b0 + (31 - live.leading_zeros() as usize);
+            if b0 + 16 < bend {
+                blk32!(Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0)))));
             }
-            b0 += 32;
+        } else {
+            while b0 + 16 < bend {
+                let mask = if b0 + 32 <= limit {
+                    None
+                } else {
+                    Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
+                };
+                blk32!(mask);
+            }
         }
         let mut rx = RowX {
             carry: _mm256_castsi256_si128(rs.carry),
@@ -1359,6 +1424,37 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
         let (mut rec_b, mut slow) = (rs.rec_b, rs.slow);
         let t0x = _mm256_castsi256_si128(t0);
         let t1x = _mm256_castsi256_si128(t1);
+        // one 16-lane block at `b0`, lanes at and past `limit` masked by `$mask`
+        macro_rules! blk16 {
+            ($mask:expr) => {{
+                let idx = ldx(sb.add(b0));
+                let sv = if small_alphabet {
+                    _mm_shuffle_epi8(t0x, idx)
+                } else {
+                    lut32x(t0x, t1x, idx)
+                };
+                let (d0, r0) = block8x::<TB, EM>(
+                    &c,
+                    &mut rx,
+                    &mut rec_b,
+                    &mut slow,
+                    hr,
+                    hw,
+                    e,
+                    b0,
+                    sv,
+                    $mask,
+                    _mm256_castsi256_si128(hpm),
+                );
+                if TB && NIB {
+                    stl(tr.add((b0 - first) >> 1), nibs16(r0));
+                } else if TB {
+                    stx(tr.add(b0 - first), r0);
+                }
+                surv!((!(_mm_movemask_epi8(d0) as u32)) & 0xFFFF);
+                b0 += 16;
+            }};
+        }
         loop {
             if b0 >= bend {
                 if b0 >= limit {
@@ -1368,44 +1464,22 @@ unsafe fn align8<const TB: bool, const EM: bool, const NIB: bool>(
                     break;
                 }
             }
-            let idx = ldx(sb.add(b0));
-            let sv = if small_alphabet {
-                _mm_shuffle_epi8(t0x, idx)
-            } else {
-                lut32x(t0x, t1x, idx)
-            };
-            let mask = if b0 + 16 <= limit {
-                None
-            } else {
-                Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0))))
-            };
-            let (d0, r0) = block8x::<TB, EM>(
-                &c,
-                &mut rx,
-                &mut rec_b,
-                &mut slow,
-                hr,
-                hw,
-                e,
-                b0,
-                sv,
-                mask,
-                _mm256_castsi256_si128(hpm),
-            );
-            hpm = zero;
-            if TB && NIB {
-                stl(tr.add((b0 - first) >> 1), nibs16(r0));
-            } else if TB {
-                stx(tr.add(b0 - first), r0);
-            }
-            let live = (!(_mm_movemask_epi8(d0) as u32)) & 0xFFFF;
-            if live != 0 {
-                if lo_surv == usize::MAX {
-                    lo_surv = b0 + live.trailing_zeros() as usize;
+            if LM {
+                // LOSAT_X_DPEDGE: the block that crosses `limit` is the row's last
+                if b0 + 16 > limit {
+                    blk16!(Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0)))));
+                    break;
                 }
-                hi_surv = b0 + (31 - live.leading_zeros() as usize);
+                blk16!(None);
+            } else {
+                let mask = if b0 + 16 <= limit {
+                    None
+                } else {
+                    Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0))))
+                };
+                blk16!(mask);
             }
-            b0 += 16;
+            hpm = zero;
         }
         let proc_end = b0;
         if EM {

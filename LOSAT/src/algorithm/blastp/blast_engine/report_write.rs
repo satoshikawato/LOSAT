@@ -42,7 +42,7 @@ use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::{FormatOutput, FormatProbe};
 use crate::blastinput::fasta_reader::FastaRecord;
-use crate::report::blast_xml::matrix::XmlMatrixFailure;
+use crate::blastinput::query_batch::XmlFailingQuery;
 use crate::report::blast_xml::XmlStats;
 use crate::report::blast_xml2::SideFileSink;
 use crate::report::db_subject::ParsedSubject;
@@ -127,7 +127,7 @@ pub(super) struct ReportView<'a> {
     pub(super) filtered_empty: bool,
     /// rpsblast over several volumes (`prelim_run::PrelimRun::rps_multi_volume`).
     pub(super) rps_multi_volume: bool,
-    pub(super) xml_matrix_failure: Option<XmlMatrixFailure>,
+    pub(super) xml_matrix_failure: Option<XmlFailingQuery>,
     pub(super) xml_only_xml2: bool,
     pub(super) x_rows_pool: Option<&'a SearchPool<'a>>,
     pub(super) blastp_parallel_pool: &'a SearchPool<'a>,
@@ -451,11 +451,12 @@ pub(super) fn write_xml(
             // report of a `-subject` or psiblast run is made when the next query's
             // results arrive, or in `PrintEpilog`)
             // The report data's constructor throws for the run's first searched query,
-            // or for its second where the report is held (`blastp_xml_matrix_failure`):
+            // or where the report is held for its first of another Seq-id
+            // (`blastp_xml_matrix_failure`, `QueryScopes::xml_failing_query`):
             // in the call of that query, after the reader's messages of the batches up
             // to its own and NCBI's posts of the bytes replaced in their search strategy
             // requests (`query_posts`); a call of the queries before it writes those
-            // and no report. A run of one searched query whose report is held fails at
+            // and no report. A run whose held report has no such query fails at
             // its end (the last call, with the epilog), unless the run's stop
             // (`QueryBatches::stop`, written by `search`) ends it first. The XML2 and
             // JSON prolog is written before the search (`PrintProlog`), once: with the
@@ -470,7 +471,7 @@ pub(super) fn write_xml(
             let first = ranges.searched_base;
             let failing = failure
                 .query()
-                .checked_sub(first)
+                .and_then(|query| query.checked_sub(first))
                 .filter(|&query| query < query_records.len());
             if let Some(warnings) = warnings.as_mut() {
                 for query in 0..failing.map_or(query_records.len(), |query| query + 1) {
@@ -1357,6 +1358,7 @@ pub(super) fn write_custom_tabular(
         query_titles,
         searched_lengths: query_lengths,
         range_length: ranges.query_input.range_length,
+        ungapped: args.ungapped,
         database: context
             .database_name
             .as_deref()

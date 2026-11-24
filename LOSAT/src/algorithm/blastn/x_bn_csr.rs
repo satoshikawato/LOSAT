@@ -66,9 +66,12 @@
 //! would be (`x_mb_lookup_once::csr`), otherwise here (`serial`). Its `hashtable` and `next_pos`
 //! are then empty: the CSR replaces them (`offsets` has two elements more than `hashtable`, `qs`
 //! one element per word where `next_pos` has one per query position), so the table takes no more
-//! memory. The batch loop's keep (LOSAT_X_MBLUTKEEP) holds no CSR: `offsets` is allocated by each
-//! build and freed with the table (BNLUTDROP, graduated, frees it before the traceback), and a build
-//! laid out as CSR frees the table the keep holds, so the loop never holds a kept table beside it.
+//! memory. In the batch loop a build takes the buffer of its `offsets` from the keep
+//! (LOSAT_X_MBLUTKEEP, `Keep::take_buffer`), which takes it back when the batch drops the table
+//! (BNLUTDROP, graduated, drops it before the traceback; `x_mb_lut_keep.rs`), so the loop never
+//! holds a kept table beside the build's. Its `qs` is allocated by each build and freed with the
+//! table: the keep's `qs` (LOSAT_X_CSRQSKEEP) is for the discontiguous builds only (why, with the
+//! numbers: `x_mb_lut_keep.rs`).
 //! Every reader of the chains of a contiguous table goes through `MbLookupTable::x_csr`: the strip
 //! scan of PAIRPAR (`x_pair_seed.rs`, `scan_strip_csr`), the reference scan of a two-stage table
 //! (`two_stage_scan.rs` `scan_two_stage_lookup`, its `x_on_word_csr`; the chains' `on_word` stays as

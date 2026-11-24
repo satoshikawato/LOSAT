@@ -100,3 +100,29 @@ fn find_is_the_first_occurrence() {
     assert_eq!(find(b"ab", b"abc"), None);
     assert_eq!(find(b"xab", b"ab"), Some(1));
 }
+
+#[test]
+fn the_mask_of_a_byte_is_the_bytes_equal_to_it() {
+    // Every byte value at every place of the block, against every other value around it.
+    for byte in 0..=u8::MAX {
+        for other in 0..=u8::MAX {
+            for place in 0..16 {
+                let mut block = [other; 16];
+                block[place] = byte;
+                for wanted in [byte, other] {
+                    let (low, high) = equal_bytes_16(&block, wanted);
+                    let mask = gather_high_bits(low) | gather_high_bits(high) << 8;
+                    let expected = (0..16)
+                        .filter(|&k| block[k] == wanted)
+                        .fold(0u32, |mask, k| mask | 1 << k);
+                    assert_eq!(
+                        mask, expected,
+                        "{byte:#04x} {other:#04x} {place} {wanted:#04x}"
+                    );
+                    assert_eq!(low & !0x8080_8080_8080_8080, 0);
+                    assert_eq!(high & !0x8080_8080_8080_8080, 0);
+                }
+            }
+        }
+    }
+}

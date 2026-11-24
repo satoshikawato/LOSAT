@@ -178,7 +178,8 @@ formatter, a `cwd=` token or a token of `PROCESS_SETTINGS` (FMTCFG, NCBI, GETURL
 (LOSAT/src/api/mod.rs:78-86: the variables of the command line's switches and diagnostics, and for a database search
 what finds a database, `BLASTDB` and `.ncbirc`, and the batch and archive variables); the formatter's files and
 variables of `-html` (the run directory's `.ncbirc` and FMTCFG file, `$NCBI/<name>`, GETURL_DEBUG) are not among
-them, and `-html` reaches the library's host, LOSAT Web, in T4b (decision T4-1 of line RG).
+them, and the library's host, LOSAT Web, runs `-html` (outfmt 0 to 4 and 18) with an empty environment and a run
+directory of the files that the argv names (docs/web/abi_v2.md §3), so no Web run has them.
 psiblast's alignment queries
 (`-in_msa`, a query cell `msa:PATH`, the library's `Inputs::msa`) run through the library as on the command line.
 `--ncbi-bin` and `--losat` are taken relative to the caller's directory (made absolute before a run starts in
@@ -1274,8 +1275,9 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     # `phi_pattern`, `api::search`, until line PS item PS8b).
     # A row that sets NCBI's settings of the process for its formatter (`process_settings`: the run directory's
     # `.ncbirc` and FMTCFG file, `$NCBI`, GETURL_DEBUG) is not a library call either: the API's contract
-    # (LOSAT/src/api/mod.rs:78-86) does not name them among what a call reads of its process, and `-html` reaches
-    # the library's host, LOSAT Web, in T4b (decision T4-1 of line RG).
+    # (LOSAT/src/api/mod.rs:78-86) does not name them among what a call reads of its process, and the library's
+    # host, LOSAT Web, runs `-html` with an empty environment and a run directory of the files that the argv names
+    # (docs/web/abi_v2.md §3), so no Web run has them.
     argv = search_argv(row)
     if library and (row["program"] in ("rpsblast", "rpstblastn")
                     or ("-query" in argv and "-in_pssm" in argv)

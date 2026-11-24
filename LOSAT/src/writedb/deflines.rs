@@ -281,6 +281,10 @@ pub(crate) enum BioseqDeflinesError {
     /// (NCBI's serial error is not reproduced), or a string with bytes that NCBI's reader
     /// replaces by '#', reporting each.
     BinaryHeader(String),
+    /// A descriptor stated as `NULL` (`Seqdesc::Empty`, the empty `CRef<CSeqdesc>` of NCBI's
+    /// reader), which `x_GetBioseqBinaryHeader` dereferences as it looks for the binary lines;
+    /// NCBI's result there is not reproduced.
+    NullDescriptor,
 }
 
 /// The definition lines of a Bioseq (`ExtractBioseqDeflines`), and whether they are its binary
@@ -305,6 +309,9 @@ pub(crate) fn bioseq_deflines(
     ids: &[ParsedSeqId],
     descr: &[Seqdesc],
 ) -> Result<BioseqDeflines, BioseqDeflinesError> {
+    if descr.contains(&Seqdesc::Empty) {
+        return Err(BioseqDeflinesError::NullDescriptor);
+    }
     if let Some(header) = binary_header(descr) {
         // The one decoder of `Blast-def-line-set` records (a volume's `.phr`).
         let set = crate::seqid::ber::decode_full_set(header)
@@ -329,7 +336,7 @@ pub(crate) fn bioseq_deflines(
         .rev()
         .find_map(|descriptor| match descriptor {
             Seqdesc::Title(title) => Some(title.clone()),
-            Seqdesc::Other(_) => None,
+            Seqdesc::Other(_) | Seqdesc::Empty => None,
         })
         .unwrap_or_default();
     let set = deflines_of_bioseq(ids.to_vec(), title, &descr_taxids(descr))

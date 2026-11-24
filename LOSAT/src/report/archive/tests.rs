@@ -633,4 +633,22 @@ fn the_archive_streams_gaps_of_a_pssm_files_members() {
         crate::report::serial::encoder::Encoder::unread_delayed(&mut check);
         assert_eq!(check.gap.is_some(), gap, "{encoding:?}");
     }
+    // An element stated as NULL (a Seq-descr element, a feature's dbxref element: the reader's
+    // empty references, line RG item D3c-3b): NCBI's three streams throw at it in the middle of
+    // the archive (`NULL element while writing container`), which LOSAT's archive does not write.
+    // The first gap is named: in XML the feature's anonymous SEQUENCE comes before its dbxref.
+    const NULL_ELEMENT: Option<&str> = Some("a list element stated as NULL");
+    for (path, xml) in [
+        ("pssm/d3b_descr_elem_null.asn.gz", NULL_ELEMENT),
+        ("pssm/d3b_f_dbxref_null.asn.gz", ANONYMOUS),
+    ] {
+        let pssm = read(path);
+        for (encoding, gap) in [
+            (ArchiveEncoding::Xml, xml),
+            (ArchiveEncoding::Binary, NULL_ELEMENT),
+            (ArchiveEncoding::Text, NULL_ELEMENT),
+        ] {
+            assert_eq!(pssm_unwritten(encoding, &pssm), gap, "{path} {encoding:?}");
+        }
+    }
 }

@@ -744,6 +744,7 @@ fn blastx_description_row_is_the_highest_bit_score() {
             None,
             &mut crate::report::query_warnings::no_places,
             None,
+            None,
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -1121,6 +1122,7 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
             hits: vec![vec![0], vec![1]],
             described: vec![0, 1],
             aligned: 2,
+            html: false,
         });
     let loads = HitLoads::of(
         Some(RunThrow::every_row(AfterThrow::SkipsAlignment)),

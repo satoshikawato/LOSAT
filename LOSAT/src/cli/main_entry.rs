@@ -19,10 +19,14 @@ use crate::cli::{Cli, Commands};
 /// `Error: ` and the error's `Debug` text to standard error and exits with status 1). It takes
 /// nothing from its caller, so no caller can pass it a value it does not expect; it acts on the
 /// whole process (it can end it, it sets `cli::post_errors_in_run` for the rest of the process,
-/// and on WASI it changes the working directory), so a program that searches from its own code
-/// calls `api` instead.
+/// where a panic ends the process it installs the panic hook of
+/// `report::archive::strategy::install_panic_hook`, and on WASI it changes the working
+/// directory), so a program that searches from its own code calls `api` instead.
 #[doc(hidden)]
 pub fn main_entry() -> Result<()> {
+    // Where a panic (LOSAT's own failure) ends the process, it ends the strategy files as LOSAT's
+    // refusals end them.
+    crate::report::archive::strategy::install_panic_hook();
     let result = run_main_entry();
     // LOSAT's own errors (its refusals, which NCBI has no message for) stay on the terminal when
     // the standard error went to the `-logfile` target (tblastx, rpsblast and rpstblastn,
@@ -146,8 +150,11 @@ fn run_main_entry() -> Result<()> {
         }
         match crate::cli::install_shims(argv.get(2).map(std::ffi::OsString::as_os_str)) {
             Ok(paths) => {
+                // The names made, a line each, as the help text goes out (a failed write drops
+                // the line; the shims are made).
+                let mut out = crate::cli::standard_output();
                 for path in paths {
-                    println!("{}", path.display());
+                    write_dropping_errors(&mut out, &format!("{}\n", path.display()));
                 }
                 return Ok(());
             }
@@ -179,7 +186,7 @@ fn run_main_entry() -> Result<()> {
         if argv_is_rpsbproc {
             crate::rpsbproc::write_stdout(&text);
         } else {
-            write_dropping_errors(&mut std::io::stdout(), &text);
+            write_dropping_errors(&mut crate::cli::standard_output(), &text);
         }
         return Ok(());
     }
@@ -202,7 +209,7 @@ fn run_main_entry() -> Result<()> {
         let message = crate::cli::top_level_message(&error);
         match error.use_stderr() {
             true => write_dropping_errors(&mut std::io::stderr(), &message),
-            false => write_dropping_errors(&mut std::io::stdout(), &message),
+            false => write_dropping_errors(&mut crate::cli::standard_output(), &message),
         }
         std::process::exit(error.exit_code());
     };
@@ -226,7 +233,7 @@ fn run_main_entry() -> Result<()> {
     let read = crate::ncbi_app::read(
         tool,
         &words,
-        &mut std::io::stdout().lock(),
+        &mut crate::cli::standard_output(),
         &mut diag,
         Some(crate::cli::xml_help_text),
     );

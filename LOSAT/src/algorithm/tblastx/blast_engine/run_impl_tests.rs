@@ -177,7 +177,7 @@ fn merge_tblastx_subject_chunk_hits_keeps_current_hits_after_overlap_strip() {
     assert_eq!(combined.len(), 2);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1533
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1487-1531
 #[test]
 fn merge_tblastx_subject_chunk_hits_merges_hsp_fully_inside_overlap_strip() {
     let mut combined = vec![make_chunk_hit(0, 0, 190, 0, 190, 190)];
@@ -193,7 +193,7 @@ fn merge_tblastx_subject_chunk_hits_merges_hsp_fully_inside_overlap_strip() {
     assert_eq!(combined[0].s_aa_end, 190);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1533
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1487-1531
 #[test]
 fn merge_tblastx_subject_chunk_hits_merges_negative_subject_frame_overlap() {
     let mut combined = vec![make_chunk_hit(0, 0, 120, 0, 120, 100)];

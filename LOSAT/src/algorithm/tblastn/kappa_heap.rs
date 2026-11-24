@@ -43,7 +43,7 @@ pub(super) struct CompoHeap {
 
 #[allow(dead_code)] // Source-equivalent heap is exercised by comparison fixtures.
 impl CompoHeap {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:401-419
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:56,417-422
     pub(super) fn new(threshold: usize, ecutoff: f64) -> Result<Self> {
         ensure!(
             threshold > 0,
@@ -59,7 +59,7 @@ impl CompoHeap {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:401-415
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:417
     pub(super) fn len(&self) -> usize {
         self.records.len()
     }

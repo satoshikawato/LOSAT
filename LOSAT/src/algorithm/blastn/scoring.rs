@@ -363,7 +363,7 @@ pub(crate) fn context_blocks(
 /// and beta stay 0 and the length adjustment is 0.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:513-529
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:701-705, 768-848
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:705,768,806-812,821-824
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3989-3992, 4024-4029
 pub(crate) fn context_blocks_ungapped(
     ungapped: &[Option<KarlinParams>],
@@ -436,7 +436,7 @@ pub(crate) fn gap_x_dropoffs(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:183-188, 207, 257
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3008-3010
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2959-2963
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:496-498
 ///
 /// Under matrix-only scoring (`matrix_only`) the X-drops are the options' values as raw scores

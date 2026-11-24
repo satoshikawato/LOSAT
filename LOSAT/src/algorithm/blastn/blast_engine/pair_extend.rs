@@ -553,7 +553,7 @@ fn extend_pairs_in<const EXT_FIRST: bool, N>(
             !two_stage.contains_hit(kmer, q_off_1)
         };
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674-676
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:674
         let s_end_pos_i32 = s_end_pos as i32;
         let window_end = last_hit + window_size as i32;
         if two_hits && (hit_saved || s_end_pos_i32 > window_end) {

@@ -302,6 +302,7 @@ fn seed_stage_on_strips_equals_one_scan() {
                         let fold_part = partitioned.then(|| part::FoldPart {
                             scratch: &mut scratch,
                             parts: threads.min(DIAGHASH_NUM_BUCKETS),
+                            latest: None,
                         });
                         let stats = seed_stage_of(
                             &x, threads, target, &mut hash, &mut hits, None, false, fold_part,

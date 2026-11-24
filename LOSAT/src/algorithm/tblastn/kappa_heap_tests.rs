@@ -1,7 +1,7 @@
 use super::*;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,
-// 1560-1580; composition_adjustment/compo_heap.c:405-410:
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:64,1559-1580
+// and c++/src/algo/blast/composition_adjustment/compo_heap.c:404-409
 #[test]
 fn natural_112_subject_early_termination_matches_ncbi_call_state() {
     let trace = std::fs::read_to_string(concat!(
@@ -136,7 +136,7 @@ fn saved_ncbi_local_subject_heap_rank_and_pop_order() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:89-101,252-275,330-391
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:88-98,251-276,329-400,443-468
 #[test]
 fn heap_threshold_ties_and_discarded_record_follow_ncbi_comparator() {
     let mut heap = CompoHeap::new(2, 0.001).unwrap();

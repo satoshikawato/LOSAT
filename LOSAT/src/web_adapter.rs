@@ -19,7 +19,7 @@
 
 use std::ffi::OsString;
 
-// The command line's arguments (`cli.rs`): the clap types of every program, how NCBI's reader
+// The command line's arguments (`cli.rs`): the option types of every program, how NCBI's reader
 // and LOSAT's refusals end an argv (the text that the command line prints where its reader
 // stopped at a help word, an argument error's report, a refusal), and the command line's own
 // errors.
@@ -32,7 +32,7 @@ pub use crate::ncbi_app::args::{genetic_codes, string_values};
 
 /// `cli::try_parse_with_printing_start` for the command line's own arguments (`Cli`): the argv read
 /// as the command line reads it after its application start (NCBI's reader, LOSAT's refusals,
-/// clap's conversion: `cli::reader`). A run of ABI v2 makes its own start (`start_run`), so the
+/// the program's options: `cli::reader`). A run of ABI v2 makes its own start (`start_run`), so the
 /// toolkit's words that the start reads (`-logfile`, `-conffile`, `-dryrun`) are taken, as the
 /// library API takes them, and the help words stop the reader as on the command line, `-xmlhelp`
 /// included: the run prints their text (`ArgvError::Printed`; line WQA's D14, 2026-11-20). The
@@ -45,7 +45,7 @@ pub use crate::ncbi_app::args::{genetic_codes, string_values};
 /// start (an argv read on its own: `None`) the posts are the report's, as without `-logfile`.
 ///
 /// Only `Cli`: the adapter parses nothing else, so the façade does not offer the parser for any
-/// other clap type.
+/// other type.
 pub fn try_parse_cli<I, S>(argv: I, started: Option<&CallerStart>) -> Result<Cli, ArgvError>
 where
     I: IntoIterator<Item = S>,

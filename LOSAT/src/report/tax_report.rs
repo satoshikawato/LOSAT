@@ -28,7 +28,7 @@ use crate::seqdb::taxdb::TaxNames;
 
 /// The greater of `kMinTaxFormatLineLength` and `kFormatLineLength`: the report's line length (`m_LineLength`).
 ///
-/// NCBI reference (598d8ae6): c++/include/objtools/align_format/taxFormat.hpp:58
+/// NCBI reference (598d8ae6): c++/include/algo/blast/format/blast_format.hpp:86-87
 const LINE_LENGTH: u32 = 100;
 
 /// The longest run of spaces kept as bytes; a longer one is a `Seg::Spaces` (only the widths
@@ -1113,7 +1113,7 @@ fn organism_report(
             continue;
         }
         steps.push(Step::Read(hsp.subject));
-        // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:950-951
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:956-957
         let evalue: std::rc::Rc<[u8]> = format_evalue_ncbi(hsp.evalue).into_bytes().into();
         let bit_score: std::rc::Rc<[u8]> = format_bitscore_ncbi(hsp.bit_score).into_bytes().into();
         let mut threw = false;

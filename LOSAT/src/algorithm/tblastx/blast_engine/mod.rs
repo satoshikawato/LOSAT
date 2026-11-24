@@ -83,7 +83,7 @@ pub(crate) use super::reevaluate::{
 pub(crate) use super::report;
 pub(crate) use super::scoring::{Blosum62Score, MatrixScore, TbxScore};
 pub(crate) use super::stage_dump;
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
 pub(crate) use super::sum_stats_linking::{
     apply_sum_stats_even_gap_linking_with_parallel, calculate_link_hsp_cutoffs_ncbi,
     compute_avg_query_length_ncbi, find_smallest_lambda_params, link_one_hit_with_int4_ends,

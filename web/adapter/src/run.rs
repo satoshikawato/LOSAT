@@ -2313,7 +2313,8 @@ mod tests {
             Ok(Parsed::Prints(_))
         ));
         // -num_descriptions and -num_alignments are accepted (also as `-x=v`),
-        // parsed as on the command line; -max_target_seqs excludes both (clap's conflict).
+        // parsed as on the command line; -max_target_seqs excludes both (NCBI's reader's
+        // exclusion).
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             for option in [
                 &["-num_descriptions", "3"][..],

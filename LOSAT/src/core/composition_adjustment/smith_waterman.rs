@@ -584,7 +584,7 @@ fn find_start_row<V: CellValue>(
 /// up), avoiding `forbidden`. `gap_open` and `gap_extend` are NCBI's (a gap of `k` letters costs
 /// `gap_open + k * gap_extend`).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:276-341
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/smith_waterman.c:243-341,545-575
 // One call per scan, out of line: the row loop keeps its values in registers. On a CPU with AVX2
 // the scan compiled for it runs (`score_only_avx2`); both compute the same values.
 #[inline(never)]

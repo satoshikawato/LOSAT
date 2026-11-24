@@ -27,7 +27,6 @@
 use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -484,18 +483,21 @@ impl BlastnDatabase {
     pub(super) fn index_volumes(
         &self,
         indexname: &str,
-    ) -> Result<Vec<(String, u32)>, Option<NcbiException>> {
+    ) -> Result<Vec<(Vec<u8>, u32)>, Option<NcbiException>> {
         let path = self.db.search_path().ok_or(None)?;
-        let (paths, _) =
-            crate::seqdb::SeqDb::volume_and_alias_paths(indexname, SeqType::Nucleotide, path)
-                .map_err(|error| {
-                    if let Some(exception) = error.ncbi_exception() {
-                        return Some(exception.clone());
-                    }
-                    let text = error.ncbi_message()?;
-                    let site = crate::seqdb::throw_site(&text)?;
-                    Some(NcbiException::new(site, text))
-                })?;
+        let (paths, _) = crate::seqdb::SeqDb::volume_and_alias_paths(
+            indexname.as_bytes(),
+            SeqType::Nucleotide,
+            path,
+        )
+        .map_err(|error| {
+            if let Some(exception) = error.ncbi_exception() {
+                return Some(exception.clone());
+            }
+            let text = error.ncbi_message()?;
+            let site = crate::seqdb::throw_site(&text)?;
+            Some(NcbiException::new(site, text))
+        })?;
         paths
             .into_iter()
             .map(|vol_name| {
@@ -503,7 +505,9 @@ impl BlastnDatabase {
                     .db
                     .volumes()
                     .iter()
-                    .find(|volume| volume.base() == Path::new(&vol_name))
+                    .find(|volume| {
+                        volume.base() == &*crate::utils::os_bytes::path_of_bytes(&vol_name)
+                    })
                     .ok_or(None)?;
                 Ok((vol_name, volume.num_oids()))
             })
@@ -513,11 +517,12 @@ impl BlastnDatabase {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:453-462
     /// `SeqDB_ResolveDbPath` of `file` on this database's search path: the path of the first
     /// directory that holds the regular file `file` (an absolute `file` as it is), `None` for
-    /// NCBI's empty string.
-    pub(super) fn resolve_db_path(&self, file: &str) -> Option<String> {
+    /// NCBI's empty string. The path is the bytes of NCBI's `std::string`.
+    pub(super) fn resolve_db_path(&self, file: &[u8]) -> Option<Vec<u8>> {
         match self.db.search_path() {
             Some(search) => search.resolve_file(file),
-            None => Some(file.to_string()).filter(|path| Path::new(path).is_file()),
+            None => Some(file.to_vec())
+                .filter(|_| crate::utils::os_bytes::path_of_bytes(file).is_file()),
         }
     }
 
@@ -535,7 +540,9 @@ impl BlastnDatabase {
     /// (`loads`, `ReportedSubjects::loads`: the reads of a subject whose `Hit` throws, and of one
     /// shown only after it, are never made, so the texts of opening the taxonomy database and of a
     /// volume's first lookup of a taxid go to the loads that make them; review 1 of line DBID
-    /// pfoff-1, H1).
+    /// pfoff-1, H1). `(spans, gapped)`: the queries of each batch of the call (the whole call as
+    /// one where empty) and whether the search is gapped, for NCBI's loads by batch
+    /// (`shared::XmlBatchLoads`, `batches_prefetch`; asked only where they decide the texts).
     #[allow(clippy::type_complexity)]
     pub(super) fn read_taxids(
         &self,
@@ -543,6 +550,7 @@ impl BlastnDatabase {
         parsed: &[Option<Arc<ParsedSubject>>],
         hit_lists: &[Option<BlastnHitList>],
         loads: &HitLoads,
+        (spans, gapped, format): (&[std::ops::Range<usize>], bool, shared::PrefetchFormat),
     ) -> Result<(
         Vec<i32>,
         Vec<crate::report::blast_xml::HitTaxonomy>,
@@ -557,7 +565,32 @@ impl BlastnDatabase {
             .map(|hsp| hsp.s_idx as usize)
             .filter(|&rank| loads.loaded(rank))
             .collect();
-        shared::read_reported_taxonomy(&self.db, &self.taxdb, ordinals, &reported, parsed, PROGRAM)
+        // Each query's `Hit`s, the subjects of its HSP lists in order.
+        let batches = || {
+            shared::XmlBatchLoads::of(
+                hit_lists.len(),
+                spans,
+                &batches_prefetch(format, hit_lists, 0, spans, gapped),
+                loads,
+                |query| {
+                    hit_lists[query]
+                        .iter()
+                        .flat_map(|hit_list| &hit_list.hsplist_array)
+                        .filter_map(|hsp_list| hsp_list.hsps.first())
+                        .map(|hsp| hsp.s_idx as usize)
+                        .collect()
+                },
+            )
+        };
+        shared::read_reported_taxonomy(
+            &self.db,
+            &self.taxdb,
+            ordinals,
+            &reported,
+            parsed,
+            &batches,
+            PROGRAM,
+        )
     }
 
     /// Whether `taxdb.bti` is on the search path, asked once for the run

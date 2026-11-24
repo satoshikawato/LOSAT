@@ -35,7 +35,7 @@ which runs blastp's; the library runs psiblast through blastp's `run_local*`.
 
 ```mermaid
 flowchart LR
-  bin["losat binary<br/>main.rs → main_entry"] --> cli["cli<br/>(NCBI's reader, clap, Commands)"]
+  bin["losat binary<br/>main.rs → main_entry"] --> cli["cli<br/>(NCBI's reader, from_args, Commands)"]
   cli --> run["&lt;program&gt;::run"]
   lib["library users<br/>python/, LOSAT/examples"] --> api["api<br/>(run, run_batches, ...)"]
   api --> lb["api::local_blast"]
@@ -52,10 +52,12 @@ flowchart LR
   root). `main_entry` reads a few words before the arguments (`blastdbcmd`, `--install-shims`,
   `-version`), then reads the program's arguments with NCBI's argument reader (`ncbi_app`,
   through `cli::reader`: the help, the argument errors and the usage are NCBI's), then LOSAT's
-  refusals of what it does not run, then clap converts the arguments that NCBI's reader read into
-  the program's types (`cli::try_parse_from` for the callers that run no application start), and
-  dispatches on `cli::Commands` to the program. `losat blastdbcmd` and the other tools read their
-  arguments with NCBI's reader alone (`blastdbcmd::run`).
+  refusals of what it does not run, then the program's options read the arguments that NCBI's
+  reader read (each option type's `from_args`, through `cli::reader::options`;
+  `cli::try_parse_from` for the callers that run no application start; since line RG item
+  K4i-3c, 2026-11-24, clap's conversion before), and dispatches on `cli::Commands` to the
+  program. `losat blastdbcmd` and the other tools read their arguments with NCBI's reader alone
+  (`blastdbcmd::run`).
 - The library: `api` is the only documented module of the crate (`lib.rs`). It reads FASTA
   records, validates a command line and runs it through `api::local_blast`, which re-exports the
   programs' `run_local*` functions. A library search writes nothing to the process's standard
@@ -79,7 +81,7 @@ number (the Web adapter and the tests name them); the `losat` binary calls one h
 | `algorithm` | the search programs, one directory each ([Programs](#programs)) | `app/blast/*_app.cpp` and the per-program code of `algo/blast/core` |
 | `api` | the library API; `api::local_blast` routes reports to outputs | `algo/blast/api` (`CLocalBlast`) |
 | `blastinput` | NCBI's application layer: FASTA reader, query batches, ranges, input files, the environment and registry check, value parsers | `algo/blast/blastinput` |
-| `cli` | the command line's entry `main_entry`, NCBI's argument reader for the ten programs on clap (`cli::reader`), clap `Cli` and `Commands` (the conversion of the arguments), NCBI's `-help` and `-version`, `NativeError` and the exit, the report stream | `blastinput/blast_args.cpp`, `cmdline_flags.cpp`, `blast_app_util.hpp` |
+| `cli` | the command line's entry `main_entry` and LOSAT's top level (`losat`, `-help`, `--version`), NCBI's argument reader for the ten programs that read their own option types (`cli::reader`, each type's `from_args`), `Cli` and `Commands` (the options of the program that runs), NCBI's `-help` and `-version`, `NativeError` and the exit, the report stream | `blastinput/blast_args.cpp`, `cmdline_flags.cpp`, `blast_app_util.hpp` |
 | `core` | ports of `core/` that several programs share: encoding, composition-based statistics, HSP filters, the PSSM engine | `algo/blast/core`, `algo/blast/composition_adjustment` |
 | `stats` | Karlin-Altschul parameters, length adjustment, search space, Spouge's finite-size correction, sum statistics, the matrix tables | `core/blast_stat.c`, `core/blast_setup.c` (`BLAST_CalcEffLengths`) |
 | `report` | every output format: pairwise, tabular, XML, XML2, JSON, archive, SAM, serial ASN.1 | `objtools/align_format`, `algo/blast/format` |

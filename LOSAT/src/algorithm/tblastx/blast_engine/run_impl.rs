@@ -297,7 +297,7 @@ fn tblastx_scan_interiors(
     interiors
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-310
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:281-308
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:83-123
 fn clip_tblastx_seq_ranges_for_scan_interior(
@@ -1402,7 +1402,7 @@ fn open_search_database(
                 settings,
             )),
             outputs,
-        )?,
+        ),
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -1430,10 +1430,9 @@ fn subject_taxonomy(
     args: &mut TblastxArgs,
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
     outputs: &ReportOutputs<'_>,
-) -> Result<()> {
+) {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        "TBLASTX",
         outputs
             .formats
             .iter()
@@ -1441,10 +1440,9 @@ fn subject_taxonomy(
                 report::TblastxOutputFormat::CustomTabular(spec) => Some(spec),
                 _ => None,
             }),
-    )?;
+    );
     args.subject_taxdb = taxonomy.taxdb;
     args.tabular_taxdb = taxonomy.found;
-    Ok(())
 }
 
 /// The part of `run` after the output is opened: the options, `Query is Empty!`, the
@@ -1542,8 +1540,8 @@ pub fn run_local(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
-    // `run_local` has not (blastn's `run_local` does the same).
+    // The command line checks `-strand` when it reads it (NCBI's argument reader), before anything
+    // else; a caller of `run_local` has not (blastn's `run_local` does the same).
     crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // `run_local` searches subject records; a `-db` search runs through `run_local_database`.
     if args.db.is_some() {
@@ -1604,7 +1602,7 @@ fn run_local_formats(
     args.html_links = html_links;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     let setting = args.taxdb_setting.take();
-    subject_taxonomy(&mut args, setting.as_ref(), outputs)?;
+    subject_taxonomy(&mut args, setting.as_ref(), outputs);
     let whole_subjects = Placements::default();
     let (searched_subjects, subject_placements) = match &ranged_subjects {
         Some((cut, placements)) => (cut.as_slice(), placements),
@@ -1638,8 +1636,8 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
-    // `run_local` has not (blastn's `run_local` does the same).
+    // The command line checks `-strand` when it reads it (NCBI's argument reader), before anything
+    // else; a caller of `run_local` has not (blastn's `run_local` does the same).
     crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // The file of an unknown `-matrix`, then, as the command line's `run` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;
@@ -2842,7 +2840,7 @@ fn write_tblastx_outputs(
                         run.args.app().ncbi_name(),
                     )?
                 }
-                // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198
+                // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-199
                 // One BLAST archive per query batch (`archive`), from the Seq-aligns of outfmt 8.
                 report::TblastxOutputFormat::Archive => {
                     let handle = run
@@ -4718,7 +4716,15 @@ impl BatchReports<'_> {
                     )
                 }) =>
             {
-                database.read_taxids(shown.reported)?
+                database.read_taxids(
+                    shown.reported,
+                    (
+                        &hits,
+                        done.searched.len(),
+                        &done.spans,
+                        super::super::database::prefetch_format(&outputs.formats),
+                    ),
+                )?
             }
             _ => Default::default(),
         };

@@ -64,7 +64,7 @@ pub(super) fn batch_flags<S: TbxScore>(
     args: &TblastxArgs,
     parallel_pool: &SearchPool<'_>,
 ) -> BatchFlags {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-582
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-583
     // LOSAT-only existing diagnostics: capture configuration once per search;
     // the NCBI extension inputs and all biological decisions stay unchanged.
     let extension_debug_enabled = crate::utils::xdiag::var("LOSAT_DEBUG_EXTENSION").is_ok();

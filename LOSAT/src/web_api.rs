@@ -138,7 +138,7 @@ fn parse_extra_args(raw: &str) -> Vec<&str> {
     raw.split('\0').filter(|value| !value.is_empty()).collect()
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:36-37
 //
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 fn web_outfmt_or_default(outfmt: &str) -> &str {
@@ -172,14 +172,14 @@ fn parse_num_threads_arg(value: &str, flag: &str) -> Result<usize, String> {
 /// any other word.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
-/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2234-2236,2570-2572
 fn take_search_space_arg(
     args: &[&str],
     index: &mut usize,
     searchsp: &mut Option<i64>,
     dbsize: &mut Option<i64>,
 ) -> Result<bool, String> {
-    use crate::blastinput::value_parsers::ncbi_int8;
+    use crate::web_v1_argv::ncbi_int8;
     use crate::web_v1_argv::nonnegative_ncbi_int8;
     let flag = args[*index];
     let (name, joined) = match flag.split_once('=') {
@@ -343,14 +343,12 @@ fn parse_blastn_args(
         } else if flag == "-evalue" {
             // The forms that NCBI's CArg_Double reads, as the CLI (`blastn_evalue`).
             args.evalue = Some(
-                crate::blastinput::value_parsers::ncbi_double(next_arg(
-                    extra_args, &mut index, flag,
-                )?)
-                .map_err(|err| format!("{flag} parse error: {err}"))?,
+                crate::web_v1_argv::ncbi_double(next_arg(extra_args, &mut index, flag)?)
+                    .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
         } else if let Some(value) = flag.strip_prefix("-evalue=") {
             args.evalue = Some(
-                crate::blastinput::value_parsers::ncbi_double(value)
+                crate::web_v1_argv::ncbi_double(value)
                     .map_err(|err| format!("{flag} parse error: {err}"))?,
             );
         } else {

@@ -1,7 +1,7 @@
 //! TBLASTX's BLAST archive (outfmt 11): the request options from the arguments, the archive of
 //! each query batch from the batch's report data, and the error archive.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198
+//! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-199
 //! One archive per query batch (the reader's batch, `BATCH_SIZE` letters, 10002 by default),
 //! written after the batch's search. LOSAT's TBLASTX searches the batches first and writes every
 //! format at the end, from the hits of all of them (`write_tblastx_outputs`), so the archives are

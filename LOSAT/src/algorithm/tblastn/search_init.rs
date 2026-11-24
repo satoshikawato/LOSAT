@@ -35,7 +35,7 @@ pub(super) struct Diagonals {
     window: i32,
 }
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:51-55
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
 /// The cells of a diagonal table: NCBI's `DiagStruct` in four bytes (`LOSAT_X_TBNDIAGPACK`: last_hit
 /// in bits 0-30, flag in bit 31, `x_tbn_hitbf::XDiagCell`), or the eight of `(last_hit, flag)`.
 #[derive(Debug, PartialEq)]
@@ -523,7 +523,7 @@ impl<'a> XTwoHit<'a> {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:608-609
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:614,807
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-172
     // The end of NCBI's WordFinder call for one (frame, chunk). Every entry the unit wrote holds
     // at most `offset + subject_length - 1`, so after the step each one lies more than a window

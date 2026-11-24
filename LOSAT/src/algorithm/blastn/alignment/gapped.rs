@@ -267,8 +267,8 @@ fn gap_dp_reserve_band(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:637-662 (ALIGN_EX; the same
-// at 3176-3196 in s_BlastAlignPackedNucl)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:655-675 (ALIGN_EX; the same
+// at 3223-3241 in s_BlastAlignPackedNucl)
 // The DP writes a cell before it reads it and never addresses a cell past `N`, so of NCBI's
 // `malloc`/`realloc` block of `dp_mem_alloc` cells only the first (the smaller of `dp_mem_alloc`
 // and one more than `N`) are ever touched. `score_array` holds those cells and grows when a later
@@ -1209,7 +1209,7 @@ fn blast_align_packed_nucl_scalar(
 
 // =============================================================================
 // TRACEBACK-CAPTURING VERSION OF GAPPED EXTENSION
-// NCBI NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:364-733 (ALIGN_EX function)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:373-733 (ALIGN_EX function)
 // =============================================================================
 
 /// Script operation codes for traceback
@@ -1223,7 +1223,7 @@ const SCRIPT_EXTEND_GAP_B: u8 = 0x40;
 
 #[inline]
 fn count_identical_blastna_span(q_span: &[u8], s_span: &[u8]) -> usize {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:774-783
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:800-811
     // The comparison is still byte-for-byte BLASTNA equality; the slice equality
     // fast path only collapses long exact spans before falling back to counting.
     if q_span.as_ptr() == s_span.as_ptr() || (q_span.len() >= 64 && q_span == s_span) {
@@ -1415,7 +1415,7 @@ fn extend_gapped_one_direction_with_traceback_scalar(
     usize,
     Vec<GapEditOp>,
 ) {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:364-733 ALIGN_EX function
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:373-733 ALIGN_EX function
     // This is the traceback-capturing version (with `score_only` disabled).
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:423-426
@@ -1578,7 +1578,7 @@ fn extend_gapped_one_direction_with_traceback_scalar(
                 fence_hit = true;
                 break;
             }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578-631
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:567-631
             // Safety: b_index is within first_b_index..b_size, and b_size is kept
             // below gap_align->dp_mem_alloc / score_array.len() by the same band
             // growth checks as NCBI ALIGN_EX.
@@ -1589,7 +1589,7 @@ fn extend_gapped_one_direction_with_traceback_scalar(
             // Safety: BLASTNA encoding produces matrix indices 0..16; FENCE_SENTRY
             // was handled above before indexing the BLASTNA matrix.
             let match_score = unsafe { *score_matrix.get_unchecked(row + (sc as usize)) };
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578-579
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578
             let next_score = cell.best + match_score;
 
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:588-599
@@ -1697,7 +1697,7 @@ fn extend_gapped_one_direction_with_traceback_scalar(
             }
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:658-665
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:666-669
         // Keep only the row cells NCBI marks used. This avoids making the
         // allocation slack semantically visible during traceback.
         let used_cells = row_end_b_index
@@ -1724,7 +1724,7 @@ fn extend_gapped_one_direction_with_traceback_scalar(
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:678-727
     // Traceback: walk from best position back to origin
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:686-688
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:686-687
     if fence_hit {
         super::x_fence::x_fence_met();
         return (a_offset, b_offset, best_score, 0, 0, 0, 0, Vec::new());
@@ -1815,7 +1815,7 @@ fn extend_gapped_one_direction_with_traceback_scalar(
         gap_edit_ops_add(&mut edit_ops, op_type, 1);
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2494-2496
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2494-2495
     edit_ops.reverse();
 
     // Compute statistics from edit script
@@ -1860,7 +1860,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
     usize,
     Vec<GapEditOp>,
 ) {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:364-733 (ALIGN_EX)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:373-733 (ALIGN_EX)
     if !reverse {
         // Forward extension - use subsequences
         let q_sub = &q_seq[..len1.min(q_seq.len())];
@@ -2117,7 +2117,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
                 fence_hit = true;
                 break;
             }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578-631
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:567-631
             // Safety: b_index is within first_b_index..b_size, and b_size is kept
             // below gap_align->dp_mem_alloc / score_array.len() by the same band
             // growth checks as NCBI ALIGN_EX.
@@ -2127,7 +2127,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             // Safety: BLASTNA encoding produces matrix indices 0..16; FENCE_SENTRY
             // was handled above before indexing the BLASTNA matrix.
             let match_score = unsafe { *score_matrix.get_unchecked(row + (sc as usize)) };
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578-579
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578
             let next_score = cell.best + match_score;
 
             let mut script = SCRIPT_SUB;
@@ -2215,7 +2215,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
             }
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:658-665
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:666-669
         // Keep only the row cells NCBI marks used. This avoids making the
         // allocation slack semantically visible during traceback.
         let used_cells = row_end_b_index
@@ -2238,7 +2238,7 @@ fn extend_gapped_one_direction_with_traceback_ex_with_scratch(
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:686-688
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:686-687
     if fence_hit {
         super::x_fence::x_fence_met();
         return (a_offset, b_offset, best_score, 0, 0, 0, 0, Vec::new());

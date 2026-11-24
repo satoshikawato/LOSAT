@@ -96,7 +96,7 @@ fn partition_point_from_end<T>(items: &[T], before: impl Fn(&T) -> bool) -> usiz
 impl BitRanges {
     /// `set_range(left, right)`: the bits from `left` to `right`, or from `right` to `left`.
     ///
-    /// NCBI reference (598d8ae6): c++/include/util/bitset/bm.h:2377-2378
+    /// BitMagic 8.0.1 (NCBI 598d8ae6 copy): c++/include/util/bitset/bm.h:2377-2378
     fn set_range(&mut self, left: u32, right: u32) {
         let (left, right) = (left.min(right), left.max(right));
         let ranges = &mut self.0;
@@ -125,7 +125,7 @@ impl BitRanges {
     /// `clear_range(left, right)`, which is `set_range` to 0 (so with `left` and `right` in
     /// either order).
     ///
-    /// NCBI reference (598d8ae6): c++/include/util/bitset/bm.h:1216-1217,2377-2378
+    /// BitMagic 8.0.1 (NCBI 598d8ae6 copy): c++/include/util/bitset/bm.h:1216-1217,2377-2378
     fn clear_range(&mut self, left: u32, right: u32) {
         let (left, right) = (left.min(right), left.max(right));
         let ranges = &mut self.0;

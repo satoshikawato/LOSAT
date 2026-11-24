@@ -87,24 +87,26 @@ fn every_gi_of_ncbi_files_finds_its_record() {
             }
         };
         let gis: std::collections::BTreeSet<u32> = big_endian.iter().map(|e| e.0).collect();
-        // One window for every lookup (in the order of the offset file, not of the data file),
-        // and a new one for each.
+        // One lookup and one window for every lookup (in the order of the offset file, not of
+        // the data file), and a new lookup and window for each.
+        let mut lookup = files.lookup();
         let mut window = DataWindow::default();
         for &(gi, vol, off) in &big_endian {
             let data = std::fs::read(dir.join(data_name(vol))).unwrap();
             let mut got = Vec::new();
-            files.ranges_into(gi, &mut got, &mut window).unwrap();
+            lookup.ranges_into(gi, &mut got, &mut window).unwrap();
             assert_eq!(got, record(&data, off as usize, be), "{name} gi {gi}");
             assert!(!got.is_empty(), "{name} gi {gi}");
             let mut alone = Vec::new();
             files
+                .lookup()
                 .ranges_into(gi, &mut alone, &mut DataWindow::default())
                 .unwrap();
             assert_eq!(alone, got, "{name} gi {gi}");
             for other in [gi.wrapping_sub(1), gi.wrapping_add(1)] {
                 if !gis.contains(&other) {
                     let mut none = Vec::new();
-                    files.ranges_into(other, &mut none, &mut window).unwrap();
+                    lookup.ranges_into(other, &mut none, &mut window).unwrap();
                     assert!(none.is_empty(), "{name} gi {other}");
                 }
             }
@@ -221,26 +223,41 @@ fn reads_across_chunks_and_windows_are_the_file_s_bytes() {
             assert_eq!(out, bytes[start..start + len], "{start} {len}");
         }
     }
-    // The numbers of the arrays: in one chunk, across a chunk's end, the last ones, outside.
+    // The numbers of the arrays through one view (the chunk it holds, another chunk, back) and
+    // through a view each: in one chunk, across a chunk's end, the last ones, outside.
+    let mut view = file.view();
     for start in (c - 6..c + 2)
         .chain(2 * c - 6..2 * c + 2)
+        .chain([10, 2 * c + 8, c + 8, 11])
         .chain(bytes.len() - 6..bytes.len() - 3)
     {
         let want: [u8; 4] = bytes[start..start + 4].try_into().unwrap();
         assert_eq!(
-            file.u32_at(start as i64).unwrap(),
+            view.u32(start as i64).unwrap(),
             u32::from_ne_bytes(want),
             "{start}"
         );
         assert_eq!(
-            file.mapped::<4>(start as i64).unwrap(),
+            file.view().u32(start as i64).unwrap(),
+            u32::from_ne_bytes(want),
+            "{start}"
+        );
+        assert_eq!(
+            view.mapped::<4>(start as i64).unwrap(),
+            Some(want),
+            "{start}"
+        );
+        assert_eq!(
+            file.view().mapped::<4>(start as i64).unwrap(),
             Some(want),
             "{start}"
         );
     }
-    for start in [bytes.len() as i64 - 3, -1] {
-        let error = file.u32_at(start).unwrap_err();
-        assert!(matches!(&error, SeqDbError::Format { .. }), "{error}");
+    for start in [bytes.len() as i64 - 3, -1, -(CHUNK as i64), i64::MIN] {
+        for error in [view.u32(start), file.view().u32(start)] {
+            let error = error.unwrap_err();
+            assert!(matches!(&error, SeqDbError::Format { .. }), "{error}");
+        }
     }
     // One read over three chunks, the last bytes, and reads outside the file.
     let mut out = vec![0u8; c + 40];

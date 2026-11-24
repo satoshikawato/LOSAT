@@ -1,0 +1,24 @@
+{
+  "version": "1.2",
+  "dbname": "vpP",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "vpP",
+  "number-of-letters": 140,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-23T08:09:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49544,
+  "bytes-to-cache": 230,
+  "files": [
+    "vpP.pdb",
+    "vpP.phr",
+    "vpP.pin",
+    "vpP.pog",
+    "vpP.pos",
+    "vpP.pot",
+    "vpP.psq",
+    "vpP.ptf",
+    "vpP.pto"
+  ]
+}

@@ -1,5 +1,6 @@
 use super::*;
 use crate::ncbi_exception::NCBI_BUILD_ROOT;
+use crate::report::serial::seqalign::{row_range_exception, std_seg_lengths_not_accurate};
 
 // NCBI BLAST+ 2.17.0 (the official Linux x64 release), rows db.x2g.bx.f0616.0,
 // db.x2g.bx.f0616.subj.6 and db.rpstbn.sw.nest.p.0: `CATCH_ALL`'s report of the three exceptions.

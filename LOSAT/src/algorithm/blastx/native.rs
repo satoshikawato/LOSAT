@@ -116,7 +116,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         || error.is::<crate::report::tax_report::TaxReportRefusal>()
         || error.is::<crate::report::tabular::FailedLookupRefusal>()
         || error.is::<crate::algorithm::common::database::ParsedRefusal>()
-        || error.is::<super::empty_rows::EmptyRowsRefusal>()
+        || error.is::<crate::report::pairwise::EmptyRowsRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
     {
         // LOSAT's refusal of a title NCBI's XML crashes on, of the database counts a report
@@ -126,7 +126,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // row at which NCBI stops (`report::tabular::check_failed_lookups`), of a database
         // sequence that a query-anchored report (outfmt 1 to 4) would show as a query
         // (`ParsedRefusal`, `report::write_pairwise`), or of a report of an ungapped HSP of
-        // length 0 in a form LOSAT does not write (`empty_rows::EmptyRowsRefusal`): not an error
+        // length 0 in a form LOSAT does not write (`report::pairwise::EmptyRowsRefusal`): not an error
         // of NCBI's engine or of its output stream.
         error
     } else if error.downcast_ref::<NativeError>().is_some_and(|e| {

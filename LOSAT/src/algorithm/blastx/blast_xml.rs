@@ -50,9 +50,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use anyhow::{ensure, Context, Result};
 
 use super::args::ResolvedOptions;
-use super::empty_rows::{
-    row_range_exception, rows_empty, rows_range, std_seg_lengths_not_accurate, SubjectLoc,
-};
+use super::empty_rows::{rows_empty, rows_range, SubjectLoc};
 use super::input::FastaRecord;
 use super::report::{
     display_query_residue, has_seqalign, query_endpoints, reported, ShownSubjects,
@@ -76,7 +74,9 @@ use crate::report::blast_xml2::{
     RunSideFiles, SideFiles, Xml2Document, Xml2Kind, Xml2Run, Xml2Target, Xml2Writer,
 };
 use crate::report::query_warnings::{EMPTY_DATABASE_MESSAGE, INVALID_QUERY_MESSAGE};
-use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue};
+use crate::report::serial::seqalign::{
+    read_num_ident, row_range_exception, seqalign_evalue, std_seg_lengths_not_accurate,
+};
 
 const PROGRAM: &str = "BLASTX";
 

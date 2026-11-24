@@ -34,6 +34,7 @@ use std::io::Write;
 
 use crate::blastinput::app::Program;
 use crate::common::GapEditOp;
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryNames, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::seqid::SeqId;
@@ -1187,7 +1188,7 @@ pub(crate) enum AlignRow {
 
 /// Why `CSeq_align::GetSeqRange` throws on a row of a translated search's Seq-align (`segs std`,
 /// one Std-seg per segment of an HSP's edit script, `write_std_segs`): the exceptions of
-/// `Seq_align.cpp`, which `algorithm::blastx::empty_rows::row_range_exception` makes.
+/// `Seq_align.cpp`, which `row_range_exception` makes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RowRangeError {
     /// `Row is empty` (Seq_align.cpp:227): no segment has a location of letters in the row, the
@@ -1200,6 +1201,55 @@ pub(crate) enum RowRangeError {
     /// Smith-Waterman redo (`-use_sw_tback`), which `ALIGN_EX` runs from the Smith-Waterman start;
     /// an X-drop alignment starts with a substitution. A gap at the row's end is read as any.
     SeqidsNotConsistent,
+}
+
+/// The `__FILE__` of `Seq_align.cpp` in BLAST+'s build (the `seq` library compiles it from
+/// `src/objects/seq`), as NCBI's reports name it.
+const SEQ_ALIGN_CPP: &str = "src/objects/seq/../seqalign/Seq_align.cpp";
+
+/// `CSeq_align::GetSeqRange`'s exception `error` (`RowRangeError`) where a formatter asks for the
+/// range of such a row: `Row is empty` (Seq_align.cpp:227; the deflines of outfmt 0, `qcovs`, BLAST
+/// XML with `-db`), `Row seqids not consistent. Cannot determine range.` (Seq_align.cpp:186; the
+/// same readers of a row that starts with a gap, and the prefetch).
+pub(crate) fn row_range_exception(error: RowRangeError) -> NcbiException {
+    let (line, kind, message) = match error {
+        RowRangeError::Empty => (
+            227,
+            "CSeqalignException::eInvalidAlignment",
+            "CSeq_align::GetSeqRange(): Row is empty",
+        ),
+        RowRangeError::SeqidsNotConsistent => (
+            186,
+            "CSeqalignException::eInvalidRowNumber",
+            "CSeq_align::GetSeqRange(): Row seqids not consistent. Cannot determine range.",
+        ),
+    };
+    NcbiException::new(
+        ThrowSite {
+            file: SEQ_ALIGN_CPP,
+            line,
+            kind,
+            function: None,
+        },
+        message,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:788-803
+/// `CreateDensegFromStdseg(): Std-seg segment lengths not accurate!` (Seq_align.cpp:801): the
+/// Std-seg of `-subject` that the Seq-loc mapper rewrote, a query row of one
+/// nucleotide and an empty subject row (0 is neither 3 nor a third of 1, nor 1), where a formatter
+/// makes a Dense-seg of it (the tabular rows' alignment block, BLAST XML).
+pub(crate) fn std_seg_lengths_not_accurate() -> NcbiException {
+    NcbiException::new(
+        ThrowSite {
+            file: SEQ_ALIGN_CPP,
+            line: 801,
+            kind: "CSeqalignException::eInvalidInputAlignment",
+            function: None,
+        },
+        "CreateDensegFromStdseg(): Std-seg segment lengths not accurate!",
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191

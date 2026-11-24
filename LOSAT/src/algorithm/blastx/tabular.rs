@@ -22,9 +22,8 @@ use anyhow::Result;
 
 use super::args::ResolvedOptions;
 use super::empty_rows::{
-    empty_row_scores, row_range, row_range_exception, rows_empty, std_seg_lengths_not_accurate,
-    subject_mapped_rows, tabular_empty_row, AlignQueryIds, EmptyRowsRefusal, MappedRows,
-    SubjectLoc, TabularEmptyRow,
+    empty_row_scores, row_range, rows_empty, subject_mapped_rows, tabular_empty_row, AlignQueryIds,
+    MappedRows, SubjectLoc, TabularEmptyRow,
 };
 use super::input::FastaRecord;
 use super::report::{
@@ -34,8 +33,11 @@ use super::report::{
 use super::runtime::BatchResults;
 use crate::algorithm::common::tabular::FailedValues;
 use crate::cli::NativeError;
+use crate::report::pairwise::EmptyRowsRefusal;
 use crate::report::serial::seqalign::{mapped_empty_query_nucleotide, ungapped_interval};
-use crate::report::serial::seqalign::{AlignRow, RowRangeError};
+use crate::report::serial::seqalign::{
+    row_range_exception, std_seg_lengths_not_accurate, AlignRow, RowRangeError,
+};
 use crate::report::tabular::{
     coverage_percent, taxdb_warning_line, union_length, DeflineIds, QueryCoveragePerHsp,
     SubjectLookup, TabularField, TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec,

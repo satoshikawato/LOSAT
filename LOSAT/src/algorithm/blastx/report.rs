@@ -7,7 +7,6 @@ use crate::algorithm::tblastx::report::display_codon;
 use crate::{common::GapEditOp, report::query_warnings::EMPTY_DATABASE_MESSAGE};
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
 use super::empty_rows::SubjectLoc;
-use crate::cli::NativeError;
 use crate::report::query_anchored::MaskSeek;
 use crate::utils::matrix::protein_display_score;
 use anyhow::{ensure, Result};
@@ -1117,37 +1116,8 @@ fn write_pairwise(
             ShownSubjects::Database { reported, .. } => reported.loads(),
         },
     )
-    .map_err(empty_rows_stop)?;
+    .map_err(crate::report::pairwise::empty_rows_stop)?;
     Ok(())
-}
-
-/// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0 or at a
-/// row that starts with a gap (`EmptyRowsStop`) is NCBI's exception, `CSeq_align::GetSeqRange`'s
-/// where the sorts or the description table read such a row (after the query's `Length=`;
-/// `empty_rows::row_range_exception`), `CreateDensegFromStdseg` where they or
-/// `-subject`'s alignment section make a Dense-seg of the Seq-loc mapper's rows, or LOSAT's
-/// refusal of a query-anchored section whose merge NCBI frees a segment in (before the call's
-/// first byte); the exception of a subject's load that ends the run (`cli::NativeError::of_writer`,
-/// `x_pairwise_par::alignment_end`); a write error stays. TBLASTN's outfmt 0 maps its writer's
-/// errors with it too.
-pub(crate) fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
-    use crate::report::pairwise::EmptyRowsStop;
-    match error
-        .get_ref()
-        .and_then(|e| e.downcast_ref::<EmptyRowsStop>())
-    {
-        Some(EmptyRowsStop::RowRange(error)) => {
-            NativeError::exception(&super::empty_rows::row_range_exception(*error)).into()
-        }
-        Some(EmptyRowsStop::StdSegLengths) => {
-            NativeError::exception(&super::empty_rows::std_seg_lengths_not_accurate()).into()
-        }
-        Some(EmptyRowsStop::MergeFreesSegment) => super::empty_rows::EmptyRowsRefusal(
-            super::empty_rows::UNPORTED_ANCHORED_FREE.to_string(),
-        )
-        .into(),
-        None => NativeError::of_writer(error),
-    }
 }
 
 /// The hits of the HSPs that the reports of `batches` show (`has_seqalign`), in the order of the

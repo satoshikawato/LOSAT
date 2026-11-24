@@ -475,9 +475,68 @@ pub(crate) enum EmptyRowsStop {
     StdSegLengths,
     /// Not an exception: the merge of a query-anchored section (outfmt 1 to 4) frees a segment
     /// that it still reads (`blastx_anchored_stop`), which LOSAT refuses before the call's first
-    /// byte (`algorithm::blastx::empty_rows::UNPORTED_ANCHORED_FREE`).
+    /// byte (`UNPORTED_ANCHORED_FREE`).
     MergeFreesSegment,
 }
+
+/// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0 or at a
+/// row that starts with a gap (`EmptyRowsStop`) is NCBI's exception, `CSeq_align::GetSeqRange`'s
+/// where the sorts or the description table read such a row (after the query's `Length=`;
+/// `serial::seqalign::row_range_exception`), `CreateDensegFromStdseg` where they or
+/// `-subject`'s alignment section make a Dense-seg of the Seq-loc mapper's rows, or LOSAT's
+/// refusal of a query-anchored section whose merge NCBI frees a segment in (before the call's
+/// first byte); the exception of a subject's load that ends the run (`cli::NativeError::of_writer`,
+/// `x_pairwise_par::alignment_end`); a write error stays. The one map of the writers' stops: BLASTX's
+/// and TBLASTN's outfmt 0 to 4 map their writer's errors with it.
+pub(crate) fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
+    match error
+        .get_ref()
+        .and_then(|e| e.downcast_ref::<EmptyRowsStop>())
+    {
+        Some(EmptyRowsStop::RowRange(error)) => crate::cli::NativeError::exception(
+            &super::serial::seqalign::row_range_exception(*error),
+        )
+        .into(),
+        Some(EmptyRowsStop::StdSegLengths) => crate::cli::NativeError::exception(
+            &super::serial::seqalign::std_seg_lengths_not_accurate(),
+        )
+        .into(),
+        Some(EmptyRowsStop::MergeFreesSegment) => {
+            EmptyRowsRefusal(UNPORTED_ANCHORED_FREE.to_string()).into()
+        }
+        None => crate::cli::NativeError::of_writer(error),
+    }
+}
+
+/// LOSAT's refusal of a report of an ungapped HSP of length 0 whose form LOSAT does not
+/// reproduce: not an error of NCBI's engine or formatters.
+#[derive(Debug)]
+pub(crate) struct EmptyRowsRefusal(pub(crate) String);
+
+impl std::fmt::Display for EmptyRowsRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for EmptyRowsRefusal {}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:598-606 (cited at
+// `report::query_anchored::aln_mix::Mix::place`), c++/src/objtools/alnmgr/alnsegments.cpp:
+// 310-327 (cited at `report::query_anchored::aln_mix::Mix::fill_unaligned_regions`)
+/// The refusal of a query-anchored report (outfmt 1 to 4) whose section NCBI's merge frees a
+/// segment in (`EmptyRowsStop::MergeFreesSegment`,
+/// `report::query_anchored::aln_mix::MixError::NcbiFreesSegment`): the Dense-seg of an HSP of
+/// length 0 has no widths, so `DisplaySeqalign` merges it with the HSPs of the query's frame +1
+/// (`report::query_anchored::HspStrands::no_widths`), as a segment of length 0 of a query row.
+/// One whose query row starts at a codon of one of those HSPs splits that HSP's segment at a
+/// length of 0, which replaces every reference to the segment while the merge still walks it
+/// (`Mix::place`). One that its query row's next segment does not follow at once is where
+/// `FillUnalignedRegions` starts to fill the row, which replaces the row's reference to its
+/// segment: the last one unless the segment is the last that the merge made (`x_Merge`'s local
+/// `CRef`), so the segment is freed while `m_Segments` still lists it and `x_CreateDenseg`
+/// reads it (`Mix::fill_unaligned_regions`). PD-LOSAT-NCBI-DEFECTS rule 3.
+pub(crate) const UNPORTED_ANCHORED_FREE: &str = "BLASTX -ungapped -window_size 0 with -outfmt 1 to 4: a one-hit ungapped alignment of length 0 among the alignments shown where NCBI BLAST+'s merge of the query-anchored alignments frees memory that it still reads (it crashed in our runs): one whose query row starts at the first nucleotide of a codon of an alignment in the query's reading frame +1, whose segment the merge splits at a length of 0, or one followed on its query row by unaligned letters, whose segment of length 0 the merge's FillUnalignedRegions replaces, unless it is the last segment the merge made, which LOSAT does not support";
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1522-1530
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3074-3094
@@ -3273,7 +3332,7 @@ fn blastx_mapped_empty_rows(remaps: bool, hits: &[&PairwiseHit]) -> bool {
 /// `FillUnalignedRegions` after a segment of length 0). `None` for a report without such an
 /// HSP among its aligned subjects. What NCBI writes before the crash is what its stream had flushed
 /// (no prefix of it is NCBI's, as for `query_anchored::ncbi_aborts`): the program refuses the
-/// report before the call's first byte (`empty_rows::UNPORTED_ANCHORED_FREE`), unless a query
+/// report before the call's first byte (`UNPORTED_ANCHORED_FREE`), unless a query
 /// before it ends the run with an exception.
 fn blastx_anchored_stop(
     config: &PairwiseConfig,

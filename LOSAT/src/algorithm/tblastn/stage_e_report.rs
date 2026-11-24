@@ -1598,7 +1598,7 @@ fn write_pairwise(
     // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`); a
     // sort or the description table may stop at a query row that starts with a gap
     // (`EmptyRowsStop`, `TblastnSections::head`).
-    .map_err(crate::algorithm::blastx::report::empty_rows_stop)?;
+    .map_err(crate::report::pairwise::empty_rows_stop)?;
     Ok(())
 }
 

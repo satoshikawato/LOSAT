@@ -28,7 +28,6 @@ use super::stage_e_report::{
     aligned_sequences_into, record_coordinates, ReportRanges, ShownSubjects,
 };
 use super::x_subject_store::SubjectLetters;
-use crate::algorithm::blastx::empty_rows::row_range_exception;
 use crate::algorithm::common::tabular::{TabularSubjects, COUNTS_BLOCK};
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -37,6 +36,7 @@ use crate::config::ScoringMatrix;
 use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::row_letters::QueryLetters;
+use crate::report::serial::seqalign::row_range_exception;
 use crate::report::serial::seqalign::{std_seg_row_range, AlignRow};
 use crate::report::tabular::{
     coverage_percent, taxdb_warning_line, union_length, QueryCoveragePerHsp, TabularField,

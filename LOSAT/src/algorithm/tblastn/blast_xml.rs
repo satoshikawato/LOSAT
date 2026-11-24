@@ -36,7 +36,6 @@ use super::stage_e_report::{
     aligned_sequences_into, record_coordinates, ReportRanges, ShownSubjects,
 };
 use super::x_subject_store::SubjectLetters;
-use crate::algorithm::blastx::empty_rows::row_range_exception;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::config::ProteinScoringSpec;
 use crate::report::blast_xml::hsp::translation_frame;
@@ -49,6 +48,7 @@ use crate::report::blast_xml::{
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
 use crate::report::query_warnings::{query_messages, QueryWarnings};
+use crate::report::serial::seqalign::row_range_exception;
 use crate::report::serial::seqalign::{
     read_num_ident, seqalign_evalue, std_seg_row_range, AlignRow,
 };

@@ -150,12 +150,14 @@ Strategy files:
 
 - A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback (with `-ungapped`, the ungapped re-evaluation) makes NCBI read the translation of the subject's frame, which it never makes for a subject this short. NCBI then crashes.
 - In practice this happens with `-window_size 0`: no frame of such a subject, three letters at most, holds two words that do not overlap.
+- LOSAT writes the results of the query batches before and then stops with the error.
 - With `-window_size 0` (the one-hit word finder) and a low `-threshold`, LOSAT refuses the cases below.
 - Two gapped starts of one-hit alignments of negative length that lie at the end of their 5,000,000-letter part of a frame, or past it. NCBI never finishes on them.
 - With `-in_pssm`, a one-hit alignment whose window of 11 letters passes the PSSM's last position. NCBI reads past its matrix.
 - With `-in_pssm` and a PSSM whose `-` column scores above NCBI's minimum, a one-hit alignment whose gapped start lies past the end of NCBI's translation of the subject (after its last frame). NCBI's gapped alignment reads the byte after its end, which it never sets, or past it.
 - A one-hit alignment whose gapped start lies after the end of its frame's translation and that reaches NCBI's traceback. NCBI reads a byte its translation does not set there.
 - The report of a one-hit alignment whose traceback starts on the end marker. NCBI places its column past the subject's end, and LOSAT does not reproduce that result yet. Such alignments that NCBI drops before its reports give NCBI's output (apart from the version line, which names LOSAT).
+- For each of these `-window_size 0` refusals but the last, LOSAT writes the results of the query batches before (with `-in_pssm`, one batch: the report's header) and then stops with the error.
 - With `-db_hard_mask`, where a sequence's masks leave a reading frame an empty part at its start (a mask within the sequence's first two bases, or within the one or two bases after its last whole codon, for example [1200, 1202) of 1,202 bases, or an empty mask at its start), NCBI searches the next part as the whole frame, then frees memory that it did not allocate and crashes in every run. LOSAT searches the frame as outside the mask; see [Differences](differences.md).
 - Where a frame's first part, from the frame's first letter, ends at a mask with no other part of the frame after it (masks at or near either end of a sequence), LOSAT searches the part alone; see [Differences](differences.md).
 - With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI never finishes is refused. Only a large `-evalue` or a small search space (`-searchsp`, `-dbsize`, or a small query and subject) can reach it.

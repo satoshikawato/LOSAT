@@ -1782,8 +1782,11 @@ impl ParsedSubject {
             ""
         };
         match (shown.holder, shown.by) {
-            (Some(other), ShownBy::Holder | ShownBy::Weak) => format!(
-                "has the Seq-align id {id}, {failing}which database sequence {other}, loaded before, also holds: psiblast's PSSM reads the subject by that id (also beyond -max_target_seqs), and NCBI BLAST+ 2.17.0 takes that sequence's letters for it"
+            (Some(other), ShownBy::Holder) => format!(
+                "has the Seq-align id {id}, {failing}which database sequence {other} also holds: psiblast's PSSM reads the subject by that id (also beyond -max_target_seqs), and NCBI BLAST+ 2.17.0 takes that sequence's letters for it"
+            ),
+            (Some(other), ShownBy::Weak) => format!(
+                "has the Seq-align id {id}, {failing}which can match an id of database sequence {other} weakly (an accession with a version for one without, a name with or without an accession, a pir or prf accession as a name): psiblast's PSSM reads the subject by that id (also beyond -max_target_seqs), and NCBI BLAST+ 2.17.0 takes that sequence's letters for it"
             ),
             _ => {
                 let why = self.shown_unknown(shown);

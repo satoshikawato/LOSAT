@@ -43,7 +43,9 @@ use super::{
     x_bn_pv_once, x_bn_rank_once, x_dc_csr, x_mb_hit_prefetch, DiagHashTable, DiagStruct,
     OffsetPair, SmallNaWord, SubjectChunk, UngappedHit, OFFSET_ARRAY_SIZE,
 };
-use crate::algorithm::blastn::lookup::{x_mb_chain_pf, TwoStageLookup, XChainFifo, XHeadFifo};
+use crate::algorithm::blastn::lookup::{
+    x_fm_pipe, x_mb_chain_pf, TwoStageLookup, XChainFifo, XChainPipe, XHeadFifo,
+};
 use std::mem::MaybeUninit;
 
 /// What the scan of one subject chunk with a two-stage table reads: the batch's word finder
@@ -621,31 +623,62 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
             // every word goes to `on_word` at once, as below.
             let mut emit =
                 |(s_off, s_range, index): (usize, usize, u64)| on_word(s_off, s_range, index, None);
-            let mut fifo: XChainFifo<(usize, usize, u64)> = XChainFifo::new();
-            let (fifo_ref, emit_ref, without_ref) = (&mut fifo, &mut emit, &mut words_without_hits);
-            scan_subject_kmers_with_ranges(
-                search_seq_packed,
-                s_len,
-                word_length,
-                lut_word_length,
-                scan_step,
-                subject_seq_ranges,
-                subject_masked,
-                mb_scan_kind,
-                move |kmer_start, s_range, current_lut_kmer| {
-                    if pv_view.has_hits(current_lut_kmer) {
-                        two_stage.x_prefetch_mb_head(current_lut_kmer);
-                        fifo_ref.push(
-                            (kmer_start, s_range, current_lut_kmer),
-                            |w| two_stage.x_prefetch_mb_link(w.2),
-                            emit_ref,
-                        );
-                    } else {
-                        *without_ref += 1;
-                    }
-                },
-            );
-            fifo.flush(&mut emit);
+            let (gap, steps) = x_fm_pipe();
+            if steps > 0 {
+                let mut pipe: XChainPipe<(usize, usize, u64)> = XChainPipe::new(gap, steps);
+                let (pipe_ref, emit_ref, without_ref) =
+                    (&mut pipe, &mut emit, &mut words_without_hits);
+                scan_subject_kmers_with_ranges(
+                    search_seq_packed,
+                    s_len,
+                    word_length,
+                    lut_word_length,
+                    scan_step,
+                    subject_seq_ranges,
+                    subject_masked,
+                    mb_scan_kind,
+                    move |kmer_start, s_range, current_lut_kmer| {
+                        if pv_view.has_hits(current_lut_kmer) {
+                            pipe_ref.push(
+                                (kmer_start, s_range, current_lut_kmer),
+                                current_lut_kmer,
+                                two_stage,
+                                emit_ref,
+                            );
+                        } else {
+                            *without_ref += 1;
+                        }
+                    },
+                );
+                pipe.flush(&mut emit);
+            } else {
+                let mut fifo: XChainFifo<(usize, usize, u64)> = XChainFifo::new();
+                let (fifo_ref, emit_ref, without_ref) =
+                    (&mut fifo, &mut emit, &mut words_without_hits);
+                scan_subject_kmers_with_ranges(
+                    search_seq_packed,
+                    s_len,
+                    word_length,
+                    lut_word_length,
+                    scan_step,
+                    subject_seq_ranges,
+                    subject_masked,
+                    mb_scan_kind,
+                    move |kmer_start, s_range, current_lut_kmer| {
+                        if pv_view.has_hits(current_lut_kmer) {
+                            two_stage.x_prefetch_mb_head(current_lut_kmer);
+                            fifo_ref.push(
+                                (kmer_start, s_range, current_lut_kmer),
+                                |w| two_stage.x_prefetch_mb_link(w.2),
+                                emit_ref,
+                            );
+                        } else {
+                            *without_ref += 1;
+                        }
+                    },
+                );
+                fifo.flush(&mut emit);
+            }
         } else {
             scan_subject_kmers_with_ranges(
                 search_seq_packed,

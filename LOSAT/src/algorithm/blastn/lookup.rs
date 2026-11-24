@@ -932,6 +932,101 @@ impl<T: Copy> XChainFifo<T> {
     }
 }
 
+/// EXPERIMENT (LOSAT_X_MBCHAINPF, probe of line FM s4): the gap and the number of steps of
+/// `XChainPipe` (`LOSAT_X_FMPIPE=G,S`; default 4,4; S = 0 takes `XChainFifo`).
+pub(crate) fn x_fm_pipe() -> (usize, usize) {
+    static V: std::sync::OnceLock<(usize, usize)> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        let v = std::env::var("LOSAT_X_FMPIPE").unwrap_or_default();
+        let mut it = v.split(',').map(|x| x.trim().parse::<usize>().ok());
+        match (it.next().flatten(), it.next().flatten()) {
+            (Some(g), Some(st)) if g >= 1 && g * st <= 48 => (g, st),
+            _ => (4, 4),
+        }
+    })
+}
+
+/// No NCBI counterpart (scheduling only): the words with hits of the scan of a contiguous table
+/// of chains (LOSAT_X_MBCHAINPF) in a FIFO of `gap * steps` words, whose walks are begun ahead of
+/// time: a word enters after the prefetch of its head; every `gap` words after that it takes one
+/// more step of its chain (its head, then its elements' links, each read from the cache where the
+/// step before prefetched it, and the next one prefetched), until its chain ends or it has taken
+/// `steps - 1` steps; `gap * steps` words after it entered it leaves through `emit`, unchanged and
+/// in order, for the walk itself, whose first `steps` reads hit the cache. The words, and so every
+/// pair and its order, are the scan's own.
+pub(crate) struct XChainPipe<T: Copy> {
+    buf: [std::mem::MaybeUninit<(T, u64, u32)>; 64],
+    n: usize,
+    gap: usize,
+    steps: usize,
+}
+
+impl<T: Copy> XChainPipe<T> {
+    #[inline(always)]
+    pub(crate) fn new(gap: usize, steps: usize) -> Self {
+        debug_assert!(gap >= 1 && gap * steps < 64);
+        Self {
+            buf: [std::mem::MaybeUninit::uninit(); 64],
+            n: 0,
+            gap,
+            steps,
+        }
+    }
+
+    /// The word `w` (cell `index`) enters; the words in the FIFO take their steps; the word
+    /// `gap * steps` places back leaves through `emit`.
+    #[inline(always)]
+    pub(crate) fn push(
+        &mut self,
+        w: T,
+        index: u64,
+        lut: &TwoStageLookup,
+        emit: &mut impl FnMut(T),
+    ) {
+        let n = self.n;
+        let depth = self.gap * self.steps;
+        if n >= depth {
+            // SAFETY: word `n - depth` was pushed and written; the words pushed since then wrote
+            // other slots (`depth < 64`).
+            emit(unsafe { self.buf[(n - depth) & 63].assume_init() }.0);
+        }
+        lut.x_prefetch_mb_head(index);
+        self.buf[n & 63] = std::mem::MaybeUninit::new((w, index, 0));
+        for j in 1..self.steps {
+            let back = j * self.gap;
+            if n < back {
+                break;
+            }
+            let slot = (n - back) & 63;
+            // SAFETY: word `n - back` was pushed and written (`back < depth < 64`).
+            let (word, cell, cur) = unsafe { self.buf[slot].assume_init() };
+            let next = if j == 1 {
+                lut.x_mb_head(cell)
+            } else if cur != 0 {
+                lut.x_mb_link(cur)
+            } else {
+                0
+            };
+            if next != 0 {
+                lut.x_prefetch_mb_link_of(next);
+            }
+            self.buf[slot] = std::mem::MaybeUninit::new((word, cell, next));
+        }
+        self.n = n + 1;
+    }
+
+    /// The words still in the FIFO leave through `emit`, in order.
+    pub(crate) fn flush(&mut self, emit: &mut impl FnMut(T)) {
+        let depth = self.gap * self.steps;
+        for m in self.n.saturating_sub(depth)..self.n {
+            // SAFETY: `m < n` and `m >= n - depth`: word `m` was pushed, and no later word wrote
+            // its slot.
+            emit(unsafe { self.buf[m & 63].assume_init() }.0);
+        }
+        self.n = 0;
+    }
+}
+
 impl TwoStageLookup {
     /// EXPERIMENT (LOSAT_X_MBCHAINPF): prefetches the head of a contiguous table's word, in its
     /// chains' heads or a table's 3-byte heads (`XChainFifo`). A prefetch accesses no memory
@@ -960,6 +1055,38 @@ impl TwoStageLookup {
                     }
                 }
             }
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_MBCHAINPF): the head of a contiguous table's word (0: none), from its
+    /// chains' heads or a table's 3-byte heads (`XChainPipe`).
+    #[inline(always)]
+    pub(crate) fn x_mb_head(&self, index: u64) -> u32 {
+        let mb = &self.mb_lookup;
+        match mb.x_narrow.as_ref() {
+            Some(narrow) => narrow.x_head(index as usize),
+            None => mb.hashtable.get(index as usize).copied().unwrap_or(0),
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_MBCHAINPF): the link of a contiguous table's chain element `q_off`
+    /// (0: the chain ends; `XChainPipe`).
+    #[inline(always)]
+    pub(crate) fn x_mb_link(&self, q_off: u32) -> u32 {
+        let mb = &self.mb_lookup;
+        match mb.x_narrow.as_ref() {
+            Some(narrow) => narrow.x_link(q_off),
+            None => mb.next_pos.get(q_off as usize).copied().unwrap_or(0),
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_MBCHAINPF): prefetches the link of chain element `q_off` (`XChainPipe`).
+    #[inline(always)]
+    pub(crate) fn x_prefetch_mb_link_of(&self, q_off: u32) {
+        let mb = &self.mb_lookup;
+        match mb.x_narrow.as_ref() {
+            Some(narrow) => narrow.x_prefetch_link_of(q_off),
+            None => x_dc_csr::prefetch(mb.next_pos.as_ptr().wrapping_add(q_off as usize)),
         }
     }
 

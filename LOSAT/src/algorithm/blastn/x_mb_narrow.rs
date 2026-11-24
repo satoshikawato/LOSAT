@@ -165,6 +165,29 @@ impl Narrow {
         super::x_dc_csr::prefetch(self.heads.as_ptr().cast::<u8>().wrapping_add(3 * cell));
     }
 
+    /// EXPERIMENT (LOSAT_X_MBCHAINPF): the head of `cell` (0: none).
+    #[inline(always)]
+    pub(super) fn x_head(&self, cell: usize) -> u32 {
+        get(&self.heads, cell)
+    }
+
+    /// EXPERIMENT (LOSAT_X_MBCHAINPF): the link of element `q_off` (0: the chain ends).
+    #[inline(always)]
+    pub(super) fn x_link(&self, q_off: u32) -> u32 {
+        get(&self.chain, q_off as usize)
+    }
+
+    /// EXPERIMENT (LOSAT_X_MBCHAINPF): prefetches the link of element `q_off`.
+    #[inline(always)]
+    pub(super) fn x_prefetch_link_of(&self, q_off: u32) {
+        super::x_dc_csr::prefetch(
+            self.chain
+                .as_ptr()
+                .cast::<u8>()
+                .wrapping_add(3 * q_off as usize),
+        );
+    }
+
     /// EXPERIMENT (LOSAT_X_MBCHAINPF): reads the head of `cell` (prefetched before) and prefetches
     /// the link of the chain's first element (`lookup::XChainFifo`).
     #[inline(always)]

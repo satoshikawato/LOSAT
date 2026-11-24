@@ -732,13 +732,8 @@ impl SeqDb {
         column.read_blobs(range.first, range.end, &mut block.blobs);
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2520-2523
-    // For each sequence the GI comes first, then `x_Open` of the algorithm, then the lookup.
-    // NCBI keeps the files once opened and opens them again at the next sequence after a failed
-    // opening, which fails again on the same files: the block opens them at its first sequence
-    // whose GI is read, and a failure is the error of every later sequence whose GI is read.
     /// [`SeqDb::read_mask_block`] of a database with GI masks: the ranges of every sequence of
-    /// `range`, or its error, into `block`.
+    /// `range`, or its error, into `block`, read by one [`GiMasks::reader`].
     fn read_gi_mask_block(
         &self,
         masks: &GiMasks,
@@ -749,21 +744,10 @@ impl SeqDb {
         block.source = BlockSource::Gi;
         block.ranges.clear();
         block.gi_spans.clear();
-        let volume = &self.volumes[range.volume];
-        let mut files = None;
+        let mut reader = masks.reader(range.volume, &self.volumes[range.volume], algo_id);
         for vol_oid in range.first..range.end {
             let start = block.ranges.len();
-            let read = masks
-                .seq_gi_key(range.volume, volume, vol_oid)
-                .and_then(
-                    |key| match files.get_or_insert_with(|| masks.open(algo_id)) {
-                        Ok(files) => {
-                            files.ranges_into(key, &mut block.ranges, &mut block.gi_window)
-                        }
-                        Err(error) => Err(error.duplicate()),
-                    },
-                );
-            let span = match read {
+            let span = match reader.ranges_into(vol_oid, &mut block.ranges, &mut block.gi_window) {
                 Ok(()) => Ok(start..block.ranges.len()),
                 Err(error) => {
                     block.ranges.truncate(start);

@@ -3,7 +3,7 @@
 //! makes NCBI BLAST+ 2.17.0 post the member as missing and go on where an input fails that check;
 //! LOSAT refuses the run there, after the output NCBI writes before its default error. Every other
 //! value, the other variable, and every input that passes the check run as without the variable
-//! (probes D3c-3d A and B: each input under each value, NCBI and LOSAT).
+//! (probes D3c-3d A, B and C: each input under each value, NCBI and LOSAT).
 
 use std::ffi::OsStr;
 use std::fmt::Debug;
@@ -125,8 +125,8 @@ fn unchanged<S: AsRef<OsStr> + Debug>(dir: &Path, args: &[S]) {
 }
 
 /// A PSSM whose read lacks a mandatory member (`c20`: a User-object without its type; `norows`:
-/// the matrix without numRows), and one whose query's feature table has a column without the
-/// field-name that NCBI gets (`get`), for psiblast and tblastn `-in_pssm`.
+/// the matrix without numRows, in ASN.1 text and in XML), and one whose query's feature table has
+/// a column without the field-name that NCBI gets (`get`), for psiblast and tblastn `-in_pssm`.
 #[test]
 fn a_pssm_that_fails_a_check_is_refused_with_the_check_off() {
     let dir = temp_dir("pssm");
@@ -150,7 +150,13 @@ fn a_pssm_that_fails_a_check_is_refused_with_the_check_off() {
         ),
     )
     .unwrap();
+    let one = std::fs::read_to_string("tests/fixtures/pssm/ps9_one.xml").unwrap();
+    let xml_rows = "      <Pssm_numRows>28</Pssm_numRows>\n";
+    assert_eq!(one.matches(xml_rows).count(), 1);
+    let norows_xml = dir.join("norows.xml");
+    std::fs::write(&norows_xml, one.replacen(xml_rows, "", 1)).unwrap();
     let (norows, get) = (norows.to_str().unwrap(), get.to_str().unwrap());
+    let norows_xml = norows_xml.to_str().unwrap();
     let psiblast = |pssm: &str, outfmt: &str| {
         [
             "psiblast",
@@ -177,6 +183,12 @@ fn a_pssm_that_fails_a_check_is_refused_with_the_check_off() {
     refused(
         &dir,
         &psiblast(norows, "6"),
+        READ,
+        &format!("{lacks} PSIBLAST"),
+    );
+    refused(
+        &dir,
+        &psiblast(norows_xml, "6"),
         READ,
         &format!("{lacks} PSIBLAST"),
     );
@@ -210,11 +222,18 @@ fn a_pssm_that_fails_a_check_is_refused_with_the_check_off() {
         READ,
         &format!("{lacks} TBLASTN"),
     );
+    refused(
+        &dir,
+        &tblastn(norows_xml),
+        READ,
+        &format!("{lacks} TBLASTN"),
+    );
     refused(&dir, &tblastn(get), GET, &format!("{not_set} TBLASTN"));
     unchanged(
         &dir,
         &psiblast("tests/fixtures/db_search/db.ps.asn.rnd.6.asn", "6"),
     );
+    unchanged(&dir, &tblastn("tests/fixtures/pssm/ps9_one.xml"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

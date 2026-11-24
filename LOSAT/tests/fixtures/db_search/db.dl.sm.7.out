@@ -1,0 +1,60 @@
+# DELTABLAST 2.17.0+
+# Query: qserp mutated serpin consensus
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qserp	s1	43.014	365	205	2	2	364	3	366	1.01e-140	393
+# DELTABLAST 2.17.0+
+# Query: qserp mutated serpin consensus
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+qserp	s2	33.241	361	231	7	8	364	2	356	1.08e-79	237
+# DELTABLAST 2.17.0+
+# Query: YP_009220615.1 putative protein kinase [White spot syndrome virus]
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+YP_009220615.1	s1	36.364	33	19	1	492	524	298	328	1.8	18.1
+YP_009220615.1	s1	45.455	11	6	0	386	396	288	298	4.2	16.6
+# DELTABLAST 2.17.0+
+# Query: YP_009220615.1 putative protein kinase [White spot syndrome virus]
+# Database: User specified sequence set (Input: )
+# 0 hits found
+# DELTABLAST 2.17.0+
+# Query: CDD:29117 cd00172, SERPIN, SERine Proteinase INhibitors (serpins) exhibit conformational polymorphism shifting from native to cleaved, latent, delta, or polymorphic forms. Many serpins, such as antitrypsin and antichymotrypsin, function as serine protease inhibitors which regulate blood coagulation cascades. Non-inhibitory serpins perform many diverse functions such as chaperoning proteins or transporting hormones. Serpins are of medical interest because mutants have been associated with blood clotting disorders, emphysema, cirrhosis, and dementia.
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+CDD:29117	s1	53.552	366	167	2	1	364	2	366	4.08e-141	394
+# DELTABLAST 2.17.0+
+# Query: CDD:29117 cd00172, SERPIN, SERine Proteinase INhibitors (serpins) exhibit conformational polymorphism shifting from native to cleaved, latent, delta, or polymorphic forms. Many serpins, such as antitrypsin and antichymotrypsin, function as serine protease inhibitors which regulate blood coagulation cascades. Non-inhibitory serpins perform many diverse functions such as chaperoning proteins or transporting hormones. Serpins are of medical interest because mutants have been associated with blood clotting disorders, emphysema, cirrhosis, and dementia.
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+CDD:29117	s2	42.659	361	197	7	8	364	2	356	8.33e-80	237
+# DELTABLAST 2.17.0+
+# Query: CDD:200983 pfam00079, Serpin, Structure is a multi-domain fold containing a bundle of helices and a beta sandwich.
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+CDD:200983	s1	75.204	367	91	0	2	368	2	368	8.43e-147	408
+# DELTABLAST 2.17.0+
+# Query: CDD:200983 pfam00079, Serpin, Structure is a multi-domain fold containing a bundle of helices and a beta sandwich.
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+CDD:200983	s2	48.219	365	178	7	9	369	2	359	3.70e-80	238
+# DELTABLAST 2.17.0+
+# Query: CDD:197513 smart00093, SERPIN
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+CDD:197513	s1	56.438	365	148	7	1	358	8	368	5.56e-130	365
+# DELTABLAST 2.17.0+
+# Query: CDD:197513 smart00093, SERPIN
+# Database: User specified sequence set (Input: )
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+CDD:197513	s2	66.760	358	119	0	2	359	2	359	2.99e-91	266
+# BLAST processed 10 queries

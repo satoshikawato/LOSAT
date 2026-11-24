@@ -1,0 +1,108 @@
+DELTABLAST 2.17.0+
+
+
+Reference for DELTA-BLAST: Grzegorz M. Boratyn, Alejandro A.
+Schaffer, Richa Agarwala, Stephen F. Altschul, David J. Lipman and
+Thomas L. Madden (2012) "Domain enhanced lookup time accelerated
+BLAST", Biology Direct 7:12.
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+
+Database: dbs.faa
+           492 sequences; 341,132 total letters
+
+
+
+Query= rnd random
+
+Length=30
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT61694.1 wsv433-like protein [Marsupenaeus japonicus endogenous...  21.5    0.42 
+BDT63116.1 wsv270-like protein [Sicyonia whispovirus]                 19.5    1.8  
+BDT61717.1 leucine-rich repeat-containing protein [Marsupenaeus j...  19.5    2.2  
+BDT63560.1 scv136-like protein [Pasiphaea japonica whispovirus]       18.0    8.2  
+
+
+>BDT61694.1 wsv433-like protein [Marsupenaeus japonicus endogenous 
+nimavirus]
+Length=1399
+
+ Score = 21.5 bits (44),  Expect = 0.42, Method: Composition-based stats.
+ Identities = 8/14 (57%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+
+Query  4    HPKQCYRWNMHFWQ  17
+            H K  YR N  FWQ
+Sbjct  356  HTKPLYRKNKTFWQ  369
+
+
+>BDT63116.1 wsv270-like protein [Sicyonia whispovirus]
+Length=296
+
+ Score = 19.5 bits (39),  Expect = 1.8, Method: Composition-based stats.
+ Identities = 5/12 (42%), Positives = 8/12 (67%), Gaps = 0/12 (0%)
+
+Query  2    WWHPKQCYRWNM  13
+            WW+  +C R N+
+Sbjct  137  WWNANRCLRENI  148
+
+
+>BDT61717.1 leucine-rich repeat-containing protein [Marsupenaeus 
+japonicus endogenous nimavirus]
+Length=2552
+
+ Score = 19.5 bits (39),  Expect = 2.2, Method: Composition-based stats.
+ Identities = 7/20 (35%), Positives = 8/20 (40%), Gaps = 0/20 (0%)
+
+Query  8     CYRWNMHFWQCPYRGWTMHK  27
+             CY    H   C  R W + K
+Sbjct  1835  CYLKGFHSCHCKDRSWKIDK  1854
+
+
+>BDT63560.1 scv136-like protein [Pasiphaea japonica whispovirus]
+Length=368
+
+ Score = 18.0 bits (35),  Expect = 8.2, Method: Composition-based stats.
+ Identities = 5/9 (56%), Positives = 5/9 (56%), Gaps = 0/9 (0%)
+
+Query  22   GWTMHKWYQ  30
+            GW  H WY 
+Sbjct  183  GWYKHCWYH  191
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.150    0.766    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0460    0.140     1.90     42.6     43.6 
+
+Effective search space used: 8466800
+
+
+  Database: dbs.faa
+    Posted date:  Oct 25, 2026  12:08 AM
+  Number of letters in database: 341,132
+  Number of sequences in database:  492
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

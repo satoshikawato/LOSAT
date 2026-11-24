@@ -1,0 +1,26 @@
+DELTABLAST 2.17.0+
+
+
+Reference for DELTA-BLAST: Grzegorz M. Boratyn, Alejandro A.
+Schaffer, Richa Agarwala, Stephen F. Altschul, David J. Lipman and
+Thomas L. Madden (2012) "Domain enhanced lookup time accelerated
+BLAST", Biology Direct 7:12.
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+
+Database: dbs.faa
+           492 sequences; 341,132 total letters
+

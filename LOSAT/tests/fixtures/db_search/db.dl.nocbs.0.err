@@ -1,0 +1,2 @@
+BLAST engine error: tests/db_search/delta/deltatest_nocbs contains no frequency ratios needed for composition-based statistics.
+Please disable composition-based statistics when searching against tests/db_search/delta/deltatest_nocbs.

@@ -1242,7 +1242,6 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
         })
         .collect();
     let report = BlastnPairwiseReport {
-        version: "2.17.0+".to_string(),
         intro: BlastnIntro {
             megablast: true,
             indexed_megablast: false,
@@ -1263,10 +1262,23 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
         num_alignments: 250,
         unsearched: vec![false; queries.len()],
         epilog: true,
-        prolog: true,
         parsed_subjects: Vec::new(),
         subject_sources: Vec::new(),
     };
+    // The prolog, which the search writes before the first query batch (`run`'s
+    // `write_pairwise_prologs`), then the reports.
+    let mut prolog = Vec::new();
+    write_blastn_pairwise_prolog(
+        &mut prolog,
+        "2.17.0+",
+        report.intro,
+        &report.database_name,
+        report.database_num_sequences,
+        report.database_total_letters,
+        None,
+        None,
+    )
+    .unwrap();
     // Query 0: subjects 1 (2 HSPs) and 2; query 1: no hits; queries 2 and 3: subject 1.
     let hits: Vec<PairwiseHit> = [(0, 1), (0, 1), (0, 2), (2, 1), (3, 1)]
         .into_iter()
@@ -1314,12 +1326,12 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
                 written
             };
             let whole = write(0..queries.len());
-            let text = String::from_utf8(whole.clone()).unwrap();
+            let text = String::from_utf8([prolog.as_slice(), &whole].concat()).unwrap();
             assert!(text.starts_with("BLASTN 2.17.0+"), "{text}");
             assert_eq!(text.matches("Query= ").count(), queries.len(), "{text}");
             assert!(text.contains("No hits found"), "{text}");
             for cuts in [vec![1], vec![2], vec![3], vec![1, 2, 3], vec![1, 3]] {
-                let mut joined = Vec::new();
+                let mut joined = prolog.clone();
                 let mut start = 0;
                 for end in cuts.into_iter().chain([queries.len()]) {
                     joined.extend(write(start..end));

@@ -4983,7 +4983,6 @@ fn blastn_pairwise_report(
     // The defaults are 500 descriptions and 250 alignments (format_flags.cpp:219,221).
     let (num_descriptions, num_alignments) = (report.num_descriptions, report.num_alignments);
     let pairwise_report = BlastnPairwiseReport {
-        version: crate::wording::REPORT_VERSION.to_string(),
         intro: BlastnIntro {
             megablast: report.megablast,
             indexed_megablast: report.indexed_megablast,
@@ -5004,8 +5003,6 @@ fn blastn_pairwise_report(
         num_alignments,
         unsearched,
         epilog: report.epilog,
-        // Written before the search, to every sink (`write_pairwise_prologs`).
-        prolog: false,
         parsed_subjects: report.database_parsed.to_vec(),
         subject_sources: report.database_sources.to_vec(),
     };

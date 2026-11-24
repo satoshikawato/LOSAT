@@ -2462,7 +2462,6 @@ fn write_tblastx_outputs(
                         args.report_counts.num_alignments,
                     );
                     let pairwise_report = crate::report::pairwise::TblastxPairwiseReport {
-                        version: crate::wording::REPORT_VERSION.to_string(),
                         database_name: database.clone().into(),
                         // `-db`: the `Database:` lines are the database's (`database` below).
                         // NCBI's `Int8` counts (`PairwiseDatabase`); a FASTA set's records are
@@ -2486,8 +2485,6 @@ fn write_tblastx_outputs(
                         // A search that stops at a query batch (`Empty CBlastQueryVector` with
                         // `-query_loc`) writes no epilog (tblastx_app.cpp:209, `PrintEpilog`).
                         epilog: run.epilog,
-                        // Written before the search (`write_pairwise_prologs`).
-                        prolog: false,
                         parsed_subjects: match &run.database {
                             Some(database) => database.reported.parsed.clone(),
                             None => records_parsed.clone(),

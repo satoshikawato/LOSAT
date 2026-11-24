@@ -302,29 +302,6 @@ fn the_xml_checks_agree_with_the_writers_functions() {
     }
 }
 
-#[test]
-fn a_file_is_created_at_the_first_write_or_flush() {
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-x-qblock-{}",
-        crate::utils::test_dir::process_id()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("out.tsv");
-    let _ = std::fs::remove_file(&path);
-    let mut output = OutputSink::File(&path);
-    {
-        let mut sink = XBlockSink::new(&mut output);
-        assert!(!path.exists());
-        sink.flush().unwrap();
-        assert!(path.exists());
-        sink.write_all(b"a\t1\n").unwrap();
-        sink.write_all(b"b\t2\n").unwrap();
-        sink.flush().unwrap();
-    }
-    assert_eq!(std::fs::read(&path).unwrap(), b"a\t1\nb\t2\n");
-    std::fs::remove_dir_all(&dir).unwrap();
-}
-
 // The redo's store of SEG-masked subject ranges is the blocks' only for the subjects encoded
 // for all blocks (`x_block_seg_store`): its key is a subject's index in the redo's subjects,
 // which in another set (another encoding, a `-db` search's listed subjects, whose ranks differ

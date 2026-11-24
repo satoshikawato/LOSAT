@@ -662,11 +662,11 @@
   2026-11-24 to question Q-XT2, 「A」; numbered after 1.98; first 1.97)
   1.100 2026-11-24 (BLASTP, psiblast, RPSBLAST and TBLASTN, line RG item T4b-f: the prolog of
   `-outfmt` 0 to 4 is written before the first query batch, where NCBI writes it (before its first
-  search strategy request), as BLASTN's, BLASTX's and TBLASTX's, so the explicit rejections that
-  come at a query batch, in the search or at the report follow the prolog instead of coming before
-  the first byte, as NCBI's stops there follow it (rows whose stdout is NCBI's prolog of a search of
-  the same database, `db.pro.*` and `db.id.pro.*`); no new exception, rule 3; Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.99)
+  search strategy request), as BLASTN's, BLASTX's, TBLASTX's and RPSTBLASTN's, so the explicit
+  rejections that come at a query batch, in the search or at the report follow the prolog instead
+  of coming before the first byte, as NCBI's stops there follow it (rows whose stdout is NCBI's
+  prolog of a search of the same database, `db.pro.*` and `db.id.pro.*`); no new exception, rule
+  3; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.99)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:

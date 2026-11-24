@@ -7089,11 +7089,10 @@ fn x_query_block_plan(
     // output of several is a writer of the caller: the search of all queries writes each output's
     // whole report in turn and opens its sink just before (`OutputSink::open`), while the block
     // search opens every sink once and writes them block by block, so two outputs on standard
-    // output would get each block's formats in turn, two outputs to one file would write over each
-    // other through two handles (the search of all queries leaves the last report), and a file that
-    // cannot be created would stop the run after the first block's part of the outputs before it
-    // instead of after their whole reports (test
-    // `several_file_outputs_are_written_one_after_the_other`); no `-db` (the records' `s_idx` of a
+    // output or to one file (one handle, `KeptFile`; the search of all queries leaves the reports
+    // one after the other) would get each block's formats in turn, and a file that cannot be
+    // created would stop the run after the first block's part of the outputs before it instead of
+    // after their whole reports (test `several_file_outputs_are_written_one_after_the_other`); no `-db` (the records' `s_idx` of a
     // database search rank the subjects that the call's lists name); an observer only with the hit
     // records, which count the HSPs of each block for the observer's indices (`XOffsetObserver`).
     let x_web = outputs.formats.len() > 1 || outputs.hits.is_some() || outputs.observer.is_some();
@@ -7914,19 +7913,8 @@ fn write_reports_without_queries(
                         .map(|links| crate::report::html_ids::HtmlReport::new(links, [])),
                     unreadable_query: None,
                 };
-                // No query writes warnings; an `-html` prolog's references post on the
-                // diagnostics (`pairwise::html_with_diagnostics`).
-                let mut warnings = crate::report::query_warnings::QueryWarnings::of_posts(
-                    &[],
-                    None,
-                    &mut *outputs.diagnostics,
-                )
-                .with_html_posts(
-                    outputs
-                        .html_posts
-                        .as_deref_mut()
-                        .map(|posts| posts as &mut dyn std::io::Write),
-                );
+                // No query writes warnings, and the search wrote the prolog before
+                // (`write_pairwise_prologs`): the epilog alone.
                 write_blastp_pairwise_report(
                     &[],
                     &mut writer,
@@ -7940,9 +7928,7 @@ fn write_reports_without_queries(
                     None,
                     pairwise_database.as_ref(),
                     None,
-                    Some(&mut warnings),
-                    // The search wrote the prolog before (`write_pairwise_prologs`).
-                    false,
+                    None,
                     true,
                     None,
                     &crate::report::db_subject::HitLoads::default(),

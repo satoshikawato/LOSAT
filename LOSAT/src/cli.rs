@@ -1222,8 +1222,9 @@ impl<'a> NcbiOstream<'a> {
     /// `ReportStream` (the organism report's is NCBI's buffer, `report_destination`), which the
     /// library's `run_to_file` makes the same (`api::local_blast::OutFile`) and which a library
     /// caller or LOSAT Web gives (no stream of NCBI's to model); or, for a library call's `Stdout`
-    /// and `File` sinks, LOSAT's buffered standard output or file (no stream of NCBI's either: the
-    /// report's bytes are NCBI's, the times at which they reach the device are not).
+    /// and `File` sinks, LOSAT's buffered standard output or file (the file kept for the run,
+    /// `api::local_blast::KeptFile`; no stream of NCBI's either: the report's bytes are NCBI's,
+    /// the times at which they reach the device are not).
     pub(crate) fn sink(
         sink: &'a mut crate::api::local_blast::OutputSink<'_>,
     ) -> std::io::Result<Self> {

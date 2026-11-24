@@ -729,11 +729,11 @@ fn an_observer_without_hit_records_numbers_the_hsps_over_the_whole_search() {
 // No NCBI counterpart (NCBI has one output per run): the block search of blastp declines a call of
 // several outputs of which one is not a writer of the caller (`OutputSink::File`, `Stdout`;
 // `x_query_block_plan`). The search of all queries writes each output's whole report in turn and
-// creates its file just before; the block search opens every output once and writes them block by
-// block. Over queries that make several blocks, two outputs to one file leave the second report
-// whole (the blocks would write both through two handles of the file), and an output whose file
-// cannot be created stops the call after the first output's whole report (the blocks would stop
-// after the first block's part of it).
+// creates its file where it first writes it; the block search opens every output once and writes
+// them block by block. Over queries that make several blocks, two outputs to one file leave the
+// two reports one after the other (one handle of the file, `KeptFile`; the blocks would write
+// each block's parts in turn), and an output whose file cannot be created stops the call after the
+// first output's whole report (the blocks would stop after the first block's part of it).
 #[test]
 fn several_file_outputs_are_written_one_after_the_other() {
     let (query, subject) = block_inputs();
@@ -791,11 +791,12 @@ fn several_file_outputs_are_written_one_after_the_other() {
     let shared = TempFasta(temp_path("blocks_shared_out.txt"));
     call(&shared.0, &shared.0).expect("run_local");
     let written = std::fs::read(&shared.0).expect("the file");
+    let both = whole.outputs.concat();
     assert!(
-        written == whole.outputs[1],
-        "two outputs to one file leave the second report whole: {} bytes, not {}",
+        written == both,
+        "two outputs to one file leave the reports one after the other: {} bytes, not {}",
         written.len(),
-        whole.outputs[1].len()
+        both.len()
     );
 
     let first = TempFasta(temp_path("blocks_first_out.txt"));

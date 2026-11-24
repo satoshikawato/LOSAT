@@ -1015,8 +1015,6 @@ pub(super) fn write_pairwise(
                 pairwise_database.as_ref(),
                 probe.as_mut(),
                 warnings.as_mut(),
-                // The search wrote the prolog before (`write_pairwise_prologs`).
-                false,
                 crate::report::pairwise::psiblast_round::ReportRound {
                     number: io.state.number(),
                     found_before: psi_found_before
@@ -1043,8 +1041,6 @@ pub(super) fn write_pairwise(
             pairwise_database.as_ref(),
             probe.as_mut(),
             warnings.as_mut(),
-            // The search wrote the prolog before (`write_pairwise_prologs`).
-            false,
             reports.epilog && !prolog_only,
             x_pool,
             anchored_sequences

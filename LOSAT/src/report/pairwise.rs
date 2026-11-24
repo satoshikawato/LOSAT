@@ -270,24 +270,6 @@ impl PairwiseConfig {
     }
 }
 
-/// `write_prolog`'s `html` of a report of `-html` links `links` (`None`: the plain report): the
-/// links and the sink of the report's posts (`QueryWarnings::html_posts_sink`: the run's
-/// diagnostics), which a `-html` report of outfmt 0 to 4 gets at any place among the run's
-/// formats (`query_warnings::report_posts`, `ReportFormat::writes_html_links`). One without them
-/// is LOSAT's internal error (its posts would be lost).
-pub(crate) fn html_with_diagnostics<'w>(
-    links: Option<&'w super::html_ids::HtmlLinks>,
-    warnings: Option<&'w mut super::query_warnings::QueryWarnings<'_>>,
-) -> io::Result<Option<(&'w super::html_ids::HtmlLinks, &'w mut dyn Write)>> {
-    match (links, warnings) {
-        (None, _) => Ok(None),
-        (Some(links), Some(warnings)) => Ok(Some((links, warnings.html_posts_sink()))),
-        (Some(_), None) => Err(io::Error::other(
-            super::query_warnings::HTML_POSTS_WITHOUT_WARNINGS,
-        )),
-    }
-}
-
 impl PairwiseConfig {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1525-1528
     /// Whether the report is TBLASTX's (`m_Program` is "tblastx"): the sorts and the description
@@ -2252,9 +2234,10 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
 /// Whether a report's writer is flushed after its prolog, before the search (`write_prolog`):
 /// `html`, the report is `-html`; `own_buffer`, the writer is a buffer of LOSAT's, not a stream
 /// of NCBI's (`OutputSink::open` of a library call's `Stdout` sink, or of a `File` sink's file
-/// kept for the run, `api::local_blast::KeptFile`), flushed so that its write errors show. A plain report flushes there in every program (blastp's driver and
-/// tblastn too since line RG item T4b-f, which writes their prolog before the search, where NCBI
-/// writes it: their write failure now shows there, as NCBI's at its prolog's first flush). An
+/// kept for the run, `api::local_blast::KeptFile`), flushed so that its write errors show. A
+/// plain report flushes there in every program (blastp's driver and tblastn too since line RG
+/// item T4b-f, which writes their prolog before the search, where NCBI writes it: their write
+/// failure now shows there, as NCBI's at its prolog's first flush). An
 /// `-html` report does not flush there: NCBI's `PrintProlog` flushes `cout` with the `NcbiEndl`
 /// pair after the version line and writes the references and the database lines after it without
 /// a flush, so its `cout` keeps those bytes until a post on `cerr` (tied to `cout`:
@@ -2907,10 +2890,9 @@ fn write_final_database_report<W: Write>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:372-424
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1589
-/// The report of `queries`: the prolog when `prolog` is set (false in the reports of blastp's
-/// driver, whose search writes it before the first query batch, `write_pairwise_prologs`, also
-/// in every query block of the block search, EXPERIMENT (LOSAT_X_BPQBLOCK)), each query's
-/// section, and the epilog when `epilog` is set. `query_gapped_k` is
+/// The report of `queries`: each query's section and the epilog when `epilog` is set. The prolog
+/// is not part of it: the search writes it before the first query batch, as NCBI does
+/// (`write_blastp_pairwise_prolog`, the driver's `write_pairwise_prologs`). `query_gapped_k` is
 /// rpsblast's gapped K of each query's footer (`rps_search::engine::batch_gapped_k`), `None` for
 /// blastp and psiblast (the report's `gapped_karlin`).
 pub fn write_blastp_pairwise_report<W: Write>(
@@ -2927,7 +2909,6 @@ pub fn write_blastp_pairwise_report<W: Write>(
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
-    prolog: bool,
     epilog: bool,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     loads: &crate::report::db_subject::HitLoads,
@@ -2947,7 +2928,6 @@ pub fn write_blastp_pairwise_report<W: Write>(
         database,
         probe,
         warnings,
-        prolog,
         epilog,
         x_pool,
         None,
@@ -2958,9 +2938,9 @@ pub fn write_blastp_pairwise_report<W: Write>(
 
 /// The queries `query_range` of a BLASTP pairwise report, whose `hits` are those queries' (the
 /// rows of a caller that makes them a window of queries at a time, as BLASTN's and TBLASTX's
-/// do, `x_pairwise_par::query_windows`): the prolog with the report's first query, the epilog
-/// with its last. `anchored`: the sequences of the query-anchored sections (`config.view` of
-/// outfmt 1 to 4; `None` for outfmt 0).
+/// do, `x_pairwise_par::query_windows`): the epilog with its last query (the prolog is the
+/// search's, `write_blastp_pairwise_report`). `anchored`: the sequences of the query-anchored
+/// sections (`config.view` of outfmt 1 to 4; `None` for outfmt 0).
 #[allow(clippy::too_many_arguments)]
 pub fn write_blastp_pairwise_window<W: Write>(
     hits: &[PairwiseHit],
@@ -2977,7 +2957,6 @@ pub fn write_blastp_pairwise_window<W: Write>(
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
-    prolog: bool,
     epilog: bool,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
@@ -2987,19 +2966,6 @@ pub fn write_blastp_pairwise_window<W: Write>(
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
-
-    if prolog && query_range.start == 0 {
-        write_blastp_pairwise_prolog(
-            writer,
-            &report.version,
-            &config.program,
-            &report.database_name,
-            report.database_num_sequences,
-            report.database_total_letters,
-            database,
-            html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
-        )?;
-    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
     // Each hit keeps its index in `hits` (the final result order), which identifies it
@@ -3714,8 +3680,8 @@ pub struct BlastnPairwiseQuery {
 /// Run-level data of the BLASTN pairwise report.
 #[derive(Debug, Clone)]
 pub struct BlastnPairwiseReport {
-    pub version: String,
-    /// The program line and references of the prolog (`-task megablast`, matrix-only scoring).
+    /// The task and its scoring (`BlastnIntro`), of which the report follows matrix-only scoring
+    /// (the prolog, which follows the rest too, is the search's: `write_blastn_pairwise_prolog`).
     pub intro: BlastnIntro,
     pub database_name: Vec<u8>,
     /// NCBI's `Int8` (`BlastpPairwiseReport::database_num_sequences`).
@@ -3745,9 +3711,6 @@ pub struct BlastnPairwiseReport {
     /// Whether NCBI's epilog (the database and statistics footer, `PrintEpilog`) ends the
     /// report.
     pub epilog: bool,
-    /// Whether the report starts with NCBI's prolog (`PrintProlog`); false when the caller
-    /// wrote it before the search, as NCBI does.
-    pub prolog: bool,
     /// The database sequences with parsed Seq-ids by subject index (empty without them): their
     /// descriptions and headings come from their definition lines (`db_subject::ParsedSubject`).
     pub parsed_subjects: Vec<Option<Arc<crate::report::db_subject::ParsedSubject>>>,
@@ -4486,8 +4449,9 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
 ///
 /// `hits` is the final hit list of those queries in its order (queries in input order, then
 /// subjects and HSPs in result order); each hit's index in it identifies it to the probe. The
-/// prolog comes with the first query of `queries`, the epilog with the last: the reports of
-/// consecutive ranges written in turn are the report of all of them.
+/// epilog comes with the last query of `queries`: the reports of consecutive ranges written in
+/// turn are the report of all of them. The prolog is not part of it: the search writes it before
+/// the first query batch, as NCBI does (`write_blastn_pairwise_prolog`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1589
 // Kept out of line: this runs only for outfmt 0 or hit records, and inlining it into the
@@ -4503,7 +4467,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
     subject_titles: &[Arc<[u8]>],
     report: &BlastnPairwiseReport,
     probe: Option<&mut FormatProbe<'_>>,
-    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
     // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
@@ -4513,21 +4477,8 @@ pub fn write_blastn_pairwise_report<W: Write>(
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    // The prolog with the report's first query, the epilog with its last (`query_range` is all of
-    // `queries`, or one window of a caller that makes the rows a window at a time,
-    // `x_pairwise_par::query_windows`).
-    if report.prolog && query_range.start == 0 {
-        write_blastn_pairwise_prolog(
-            writer,
-            &report.version,
-            report.intro,
-            &report.database_name,
-            report.database_num_sequences,
-            report.database_total_letters,
-            report.database.as_ref(),
-            html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
-        )?;
-    }
+    // The epilog with the report's last query (`query_range` is all of `queries`, or one window
+    // of a caller that makes the rows a window at a time, `x_pairwise_par::query_windows`).
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
         if let Some(bucket) = (hit.hit.q_idx as usize)
@@ -4810,7 +4761,6 @@ pub struct TblastxPairwiseQuery {
 /// Run-level data of the TBLASTX pairwise report.
 #[derive(Debug, Clone)]
 pub struct TblastxPairwiseReport {
-    pub version: String,
     pub database_name: Vec<u8>,
     /// NCBI's `Int8` (`BlastpPairwiseReport::database_num_sequences`).
     pub database_num_sequences: i64,
@@ -4828,9 +4778,6 @@ pub struct TblastxPairwiseReport {
     pub unsearched: Vec<bool>,
     /// Whether NCBI's epilog (`PrintEpilog`) ends the report.
     pub epilog: bool,
-    /// Whether the report starts with NCBI's prolog (`PrintProlog`); false when the caller
-    /// wrote it before the search, as NCBI does.
-    pub prolog: bool,
     /// The database sequences with parsed Seq-ids by subject index (empty without them), as
     /// BLASTN's (`BlastnPairwiseReport::parsed_subjects`).
     pub parsed_subjects: Vec<Option<Arc<crate::report::db_subject::ParsedSubject>>>,
@@ -5065,9 +5012,10 @@ pub(crate) fn cpp_default_double(value: f64) -> String {
 ///
 /// `hits` is the final hit list of those queries in its order (queries in input order, then
 /// subjects and HSPs in result order); each hit's index in it identifies it to the probe. The
-/// prolog comes with the first query of `queries`, the epilog with the last: the reports of
-/// consecutive ranges written in turn are the report of all of them. The probe numbers the HSPs
-/// over the whole report, so a caller with a probe passes every query (`0..queries.len()`).
+/// epilog comes with the last query of `queries`: the reports of consecutive ranges written in
+/// turn are the report of all of them. The prolog is not part of it: the search writes it before
+/// the first query batch, as NCBI does (`write_tblastx_pairwise_prolog`). The probe numbers the
+/// HSPs over the whole report, so a caller with a probe passes every query (`0..queries.len()`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1589
 // Kept out of line: this runs only for outfmt 0.
@@ -5083,7 +5031,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     report: &TblastxPairwiseReport,
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
-    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
     // The sequences of the query-anchored sections (outfmt 1 to 4, `config.view`; `None` for
     // outfmt 0).
@@ -5095,19 +5043,8 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    // The prolog with the report's first query, the epilog with its last (`query_range` is all of
-    // `queries`, or one window of a caller that makes the rows a window at a time).
-    if report.prolog && query_range.start == 0 {
-        write_tblastx_pairwise_prolog(
-            writer,
-            &report.version,
-            &report.database_name,
-            report.database_num_sequences,
-            report.database_total_letters,
-            database,
-            html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
-        )?;
-    }
+    // The epilog with the report's last query (`query_range` is all of `queries`, or one window
+    // of a caller that makes the rows a window at a time).
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {
         if let Some(bucket) = (hit.hit.q_idx as usize)

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.100
+- Version: 1.101
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -660,12 +660,21 @@
   answer of 2026-11-24 to question Q-XT1 of line RG item X-short-tbx-link, 「Q-XT1=A」; and the
   same for several subjects on the route of a negative expected length, the Owner's answer of
   2026-11-24 to question Q-XT2, 「A」; numbered after 1.98; first 1.97);
-  1.100 2026-11-24 (a `MASKLIST` name that is not UTF-8 is read by its bytes, as NCBI's
+  1.100 2026-11-24 (FASTA records past NCBI's 32-bit `TSeqPos`, line RG item KC-11d: rule 3 for a
+  nucleotide piece that NCBI's reader packs into 0 bytes and for `makembindex -old_style_index
+  true`'s chunk end past 2^32; `losat windowmasker` reads records of 4,294,967,296 letters or more
+  as NCBI's reader does instead of refusing them; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.99; first 1.94, then 1.97 at the merge of dev that brought
+  line NP item M4c-2's 1.94, line NP item M4b-3b's 1.95 and line DBID item pfoff-4's 1.96, then 1.99 at
+  the merge of dev that brought line RG items X-short-bat's 1.97 and X-bpgap's 1.98, then 1.100 at
+  the merge of dev that brought line RG item X-short-tbx-link's 1.99);
+  1.101 2026-11-24 (a `MASKLIST` name that is not UTF-8 is read by its bytes, as NCBI's
   `std::string` is: the rejection of 1.94 is withdrawn, and blastdbcmd, the search programs,
   makeblastdb's copy and makembindex read such GI-indexed masks as NCBI's do; line RG item K10a,
-  round 2 of its review, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.99;
+  round 2 of its review, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.100;
   first 1.97, then 1.99 at the merge of dev of 2026-11-24 that brought 1.97 and 1.98, then 1.100 at
-  the merge of dev of 2026-11-24 that brought 1.99, line RG item X-short-tbx-link)
+  the merge of dev of 2026-11-24 that brought 1.99, line RG item X-short-tbx-link, then 1.101 at the
+  merge of dev of 2026-11-25 that brought 1.100, line RG item KC-11d)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2292,7 +2301,7 @@ file would differ, and NCBI's programs still could not open the database).
   at any thread count (60 of 60), gave the same bytes. LOSAT writes NCBI's `-num_threads 1` output
   at every thread count in all five, as every `-db` search does (PD-LOSAT-DATABASE-SEARCH, DB-3).
   The explicit rejections of an empty `.nog` and of a `.nog` entry past its mapping are in the
-  rule-3 list; a `MASKLIST` name that is not UTF-8 is read by its bytes since version 1.100
+  rule-3 list; a `MASKLIST` name that is not UTF-8 is read by its bytes since version 1.101
   (`LOSAT/tests/non_utf8_names`, cases `K10_*_gimask_*`). Fixtures
   `LOSAT/tests/seqdb/gi_mask_read` (`make_gi_mask_read_fixtures.py`, NCBI BLAST+ 2.17.0: the rows
   `bdc_wide_*` of a data file past 64 KiB, `bdc_sv4n*` and `bn_sv4n*` of the `.nog` cut or edited,
@@ -3617,8 +3626,8 @@ file would differ, and NCBI's programs still could not open the database).
     it and its loop reads past the table.
   - An optimized ascii counts file whose hash-parameter line leaves a value unread, which NCBI then
     checks uninitialised; an `obinary` file with units of 1 or 2 letters, whose empty array NCBI
-    reads past; a FASTA record or database sequence of 4,294,967,296 letters or more, whose
-    positions NCBI counts in 32 bits.
+    reads past. (A FASTA record of 4,294,967,296 letters or more, refused here until version 1.100,
+    is read as NCBI's reader reads it, with its length modulo 2^32; see the packing item below.)
 - `losat makeprofiledb -dbtype rps` (version 1.82, 2026-11-22, psiblast line item PS10a, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): where NCBI's makeprofiledb 2.17.0 crashes,
   aborts, never ends or reads memory that is not its data. LOSAT refuses each (exit 1, "... is not
@@ -3690,7 +3699,7 @@ file would differ, and NCBI's programs still could not open the database).
   - A volume whose offsets or positions pass 2^31, or whose word table passes `Int4` bytes: NCBI's
     counters of them are `Int4`, and the files hold 32-bit fields, so no valid file can be defined.
 - The readers of GI-indexed masks, a damaged `.nog` (version 1.94, 2026-11-24, line NP item
-  M4c-2, review S4 and N8; the rejection of a `MASKLIST` name that is not UTF-8 withdrawn in 1.100; Owner-delegated, standing
+  M4c-2, review S4 and N8; the rejection of a `MASKLIST` name that is not UTF-8 withdrawn in 1.101; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; the outcomes of a `.nog` cut short that NCBI
   reaches and LOSAT reproduces, rule 2, are in the list above). An empty `.nog` is mapped as a
   null pointer: NCBI's blastdbcmd and blastn crash with SIGSEGV where a sequence's GI is read
@@ -3764,6 +3773,29 @@ file would differ, and NCBI's programs still could not open the database).
     never writes.
   TBLASTN and TBLASTX refuse masks that overlap or are stored out of order (`Unsorted`), as before
   (line NP item M4b-3c); BLASTN is unchanged.
+
+- A nucleotide FASTA record that NCBI's `CFastaReader` packs into a segment of 4294967293 to
+  4294967295 bases of NCBI2na, or of 4294967295 bases of NCBI4na, in `losat makeblastdb -dbtype
+  nucl`, `dustmasker`, `windowmasker`, `makembindex` and `convert2blastmask` (version 1.100,
+  2026-11-24, line RG item KC-11d, Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07): `AssembleSeq` packs the record's pieces with `CDelta_ext::AddAndSplit`
+  (`fasta.cpp:1456-1458,1504`), whose `CDelta_ext_PackTarget::NewSegment` sizes a segment as
+  `(length + 3) / 4` or `(length + 1) / 2` bytes in a `TSeqPos` (`Delta_ext.cpp:163-164`); that
+  wraps to 0 and the conversion writes past it. Every program ends with SIGSEGV (exit status 139;
+  probes `remaining-gaps-20261112/K/kc/p11d/p2` s3n and s7n, through the `N` of `>?` gap lines,
+  and `p3` b4n and b5n, 4294967295 letters of `ACGT` and of `ACGTN`, in dustmasker and
+  makeblastdb). LOSAT refuses (exit 1, "... is not supported by LOSAT's <program>") at that
+  record, after the substitution's `std::out_of_range`, which NCBI throws first. A protein is
+  stored unpacked and meets no such segment.
+- `losat makembindex -old_style_index true` of a FASTA record of 4,294,914,101 letters or more,
+  counting the letters of its `>?` gap lines and modulo 2^32 (same version, line and delegation):
+  `CSubjectMap_Factory_TBase::AddSequenceChunk` takes a chunk's end as
+  `(TSeqPos)(chunk_start + chunk_size_)` (`dbindex_factory.cpp:724-725`), which wraps for a chunk
+  that starts 4,289,967,296 letters or more into the sequence (the chunks are 5,000,000 letters,
+  4,999,900 apart); the chunk's one valid interval is then 5,000,000 letters from its start, past
+  the sequence's end, and the index reads them (probes `p3` l93n and l94n, 4294967293 and 4294967294
+  letters: SIGSEGV after `creating ....00.idx...`, no file left). LOSAT refuses (exit 1) at that
+  sequence.
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

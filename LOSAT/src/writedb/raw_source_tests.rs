@@ -436,7 +436,7 @@ fn write_column_db(base: &str, prefix: &str, masks: bool) {
             length: 8,
             seq_data: Some(SeqData::Ncbieaa(b"MKVLAAGW".to_vec())),
             parsed: None,
-            past_seq_pos: None,
+            delta_fix: None,
         };
         db.extract_bioseq_deflines(&bioseq);
         db.add_sequence(bioseq).unwrap();

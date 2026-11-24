@@ -53,6 +53,7 @@ None that change the output of a normal run. A byte outside visible ASCII in `-m
 
 - Masking information that LOSAT's writer cannot write as NCBI does.
 - A failed write of a `maskinfo_*` output. A failed write of `interval` goes on silently, as in NCBI.
+- A nucleotide FASTA record that NCBI packs into a piece of 4,294,967,293 bases or more (such as 4,294,967,293 letters of `A`, `C`, `G` and `T` in a row), where NCBI crashes. Other records of 4,294,967,296 letters or more are read as NCBI reads them.
 
 See [What LOSAT refuses](../refusals.md).
 

@@ -250,7 +250,11 @@ impl<R: Read> SequenceSource for FastaSource<R> {
             MaskReadError::Ncbi(exception) => Failure::Ncbi(exception),
             MaskReadError::Read(error) => read_failure(error),
             MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
+            MaskReadError::Std(what) => Failure::Std(what),
             MaskReadError::Refused(what) => Failure::Refused(unsupported(&what)),
+            MaskReadError::SeqMap { error, .. } => {
+                Failure::Ncbi(crate::seqmasks_io::fasta_reader::seq_map_exception(error))
+            }
         })?;
         let titles = self.titles;
         Ok(record.map(|record| Record {

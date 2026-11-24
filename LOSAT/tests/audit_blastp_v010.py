@@ -123,7 +123,7 @@ def load_manifest(path: Path, repo_root: Path) -> list[Case]:
 
 
 # NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:46-94
-# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:190-210
+# NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:208
 def build_commands(case: Case, oracle: Path, losat_bin: Path, outputs: Path) -> tuple[list[str], list[str]]:
     ncbi_output = outputs / f"{case.case_id}.ncbi.tsv"
     losat_output = outputs / f"{case.case_id}.losat.tsv"

@@ -198,6 +198,18 @@ enum Failed {
     Refused(String),
 }
 
+/// The text of a database or index volume path that the search path resolved (its bytes are
+/// NCBI's `std::string`); the MegaBLAST index loader reads its files by text paths, so a path
+/// whose bytes are not UTF-8 is refused.
+fn utf8_index_path(path: Vec<u8>) -> Result<String, Failed> {
+    String::from_utf8(path).map_err(|error| {
+        Failed::Refused(format!(
+            "a MegaBLAST index or database volume path that is not UTF-8 ('{}')",
+            String::from_utf8_lossy(error.as_bytes())
+        ))
+    })
+}
+
 /// What a loader found: the index volume whose header `s_CheckMinWordSize` reads, and the
 /// volumes (`volumes_` of `CIndexedDb_New`: each index volume of an indexed database volume
 /// with its number of sequences, or the path and the sequences of a database volume without an
@@ -334,8 +346,8 @@ impl Loader<'_> {
         // `volumes_`: each index volume of an indexed database volume, or the database
         // volume's own path for one without an index.
         let mut entries: Vec<Entry> = Vec::new();
-        for (vol_name, dbnseq) in &volumes {
-            self.add_index_info(vol_name, *dbnseq, &mut entries)?;
+        for (vol_name, dbnseq) in volumes {
+            self.add_index_info(&utf8_index_path(vol_name)?, dbnseq, &mut entries)?;
         }
         if !entries.iter().any(|entry| entry.has_index) {
             return Err(Failed::Ncbi(NcbiException::new(
@@ -401,12 +413,16 @@ impl Loader<'_> {
         let mut names = Vec::new();
         let mut total_idxvol_oids: u64 = 0;
         for i in 0..shdr.num_vol {
-            let Some(name) = self.database.resolve_db_path(&volume_name(vol_name, i)) else {
+            let Some(name) = self
+                .database
+                .resolve_db_path(&volume_name(vol_name.as_bytes(), i))
+            else {
                 self.error(format!(
                     "index volume  not resolved; index will not be used for {vol_name}"
                 ));
                 return Ok(None);
             };
+            let name = utf8_index_path(name)?;
             let idxvol_oids = match crate::dbindex::format::volume_oids(Path::new(&name)) {
                 VolumeOids::Count(count) => count,
                 VolumeOids::ReadFailure(place) => {
@@ -481,8 +497,9 @@ impl Loader<'_> {
                     };
                     if let Some(name) = self
                         .database
-                        .resolve_db_path(&format!("{index_base}.{number}.idx"))
+                        .resolve_db_path(format!("{index_base}.{number}.idx").as_bytes())
                     {
+                        let name = utf8_index_path(name)?;
                         if last_i + 1 < i {
                             self.posts.push(Post::Gaps(last_i + 1, i));
                         }

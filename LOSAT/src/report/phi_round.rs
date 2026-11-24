@@ -19,6 +19,7 @@ use super::super::{
 };
 use super::{ReportRound, RoundSections, RoundWriter};
 use crate::api::local_blast::{FormatProbe, HspIndex};
+use crate::report::ostream::ReportWrite;
 use crate::report::query_warnings::ReportPlace;
 use crate::report::x_pairwise_par::QueryGroup;
 use std::io::{self, Write};
@@ -73,7 +74,7 @@ impl RowDecoration for PatternRow {
 /// Gapped BLAST reference and the database's lines.
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506
 pub(crate) fn write_phi_prolog(
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
     config: &PairwiseConfig,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
@@ -85,7 +86,6 @@ pub(crate) fn write_phi_prolog(
         writer,
         blastp_family_program(&config.program),
         &report.version,
-        false,
         false,
         false,
         false,
@@ -119,7 +119,7 @@ pub(crate) fn write_phi_round_report(
     result_warning: &[u8],
     info: Option<&PhiQueryInfo<'_>>,
     footer: PhiFooter,
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
     config: &PairwiseConfig,
     queries: &[BlastpPairwiseQuery],
     query_titles: &[Arc<[u8]>],
@@ -258,7 +258,7 @@ pub(crate) fn write_phi_round_report(
 
 /// The footer `footer` of query `q_idx`'s report (`PhiFooter`).
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478
-fn write_phi_footer<W: Write>(
+fn write_phi_footer<W: ReportWrite>(
     writer: &mut W,
     sections: &RoundSections<'_>,
     q_idx: usize,

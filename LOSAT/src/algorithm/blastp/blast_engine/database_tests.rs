@@ -2125,10 +2125,10 @@ fn blocks_with_the_prefetch_need_lookups_that_cannot_be_refused() {
         (Some("btd_empty"), true),
     ] {
         let taxdb = taxdb.map(|name| tests.join("seqdb/taxdb").join(name));
-        let search =
-            SearchPath::new(&cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+        let search = SearchPath::new(&cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None);
         let database = BlastpDatabase {
-            db: SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap(),
+            db: SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search)
+                .unwrap(),
             name: "sprot_tax".to_string(),
             taxdb: shared::TaxdbRun::default(),
             program: "BLASTP",

@@ -303,6 +303,10 @@ pub(super) struct ReportedPrefetch {
     /// What the XML2 and JSON reports do at each subject's `Hit` (`ListedTitles::hit_loads`), for
     /// the writer.
     pub(super) hit_loads: crate::report::db_subject::HitLoads,
+    /// The XML2 and JSON reports' loads by batch, which their taxonomy lookups follow on a
+    /// database whose volume holds the offset error's taxid and another taxid of its slot
+    /// (`shared::read_reported_taxonomy`); made only for such a run.
+    pub(super) xml2_loads: Option<Vec<crate::algorithm::common::database::XmlBatchLoads>>,
 }
 
 /// Check the reported subjects before any format is written and read each query batch's prefetch
@@ -909,10 +913,28 @@ pub(super) fn prefetch_reported_subjects(
             titles.note_loaded(database, ranges.x_ordinal_base, || loaded(hit_lists.len()));
         }
     }
+    // The batches before a stop: each `Hit`'s read where a batch's prefetch is off, the final
+    // hit list's subjects in order (as `xml2_scope_utf8` reads them).
+    let xml2_loads =
+        if xml2_prefetch && database.is_some_and(|database| database.cache_may_refuse()) {
+            crate::algorithm::common::database::XmlBatchLoads::of(
+                reported_lists.len(),
+                batch_ranges,
+                batch_prefetch,
+                &hit_loads,
+                |query| {
+                    database::ListedTitles::reported_ranks(std::slice::from_ref(&hit_lists[query]))
+                        .collect()
+                },
+            )
+        } else {
+            None
+        };
     Ok(ReportedPrefetch {
         subject_reads,
         posts: prefetch_posts,
         hit_loads,
+        xml2_loads,
     })
 }
 

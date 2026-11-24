@@ -550,7 +550,7 @@ fn test_compo_heap_would_insert_view_equals_would_insert_and_a_false_stays_false
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:391-414
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:443-468
 #[test]
 fn test_compo_heap_pop_returns_worst_record_first() {
     let mut heap = BlastCompoHeap::new(2, 1e-50);

@@ -799,6 +799,7 @@ fn blastx_query_warnings_follow_the_reports_before_them() {
             self.1.write_all(&std::mem::take(&mut self.0))
         }
     }
+    impl crate::report::ostream::ReportWrite for Held {}
     let first = tblastx_hit(1);
     let mut empty = tblastx_hit(1);
     empty.hit.q_idx = 2;

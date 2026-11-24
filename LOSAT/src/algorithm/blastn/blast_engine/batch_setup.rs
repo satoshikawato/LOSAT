@@ -59,7 +59,7 @@ pub(super) fn query_block(
     seq_data: &SequenceData<'_>,
 ) -> QueryBlock {
     // Build per-context query sequences (plus/minus) for blastn.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:839-847
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:844-847
     // NCBI reference (598d8ae6): c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:166-174
     let mut query_contexts: Vec<QueryContext> = Vec::new();
     let mut query_context_masks: Vec<Vec<MaskedInterval>> = Vec::new();

@@ -1,0 +1,69 @@
+{
+  "BlastOutput2": {
+    "report": {
+      "program": "rpsblast",
+      "version": "RPSBLAST 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "rps_odd_sc"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 1
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "q_c1",
+          "query_len": 22,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|CDD|237975",
+                  "accession": "237975",
+                  "title": "cd00001, PTS_IIB_man, PTS_IIB, PTS system, Mannose/sorbose specific IIB subunit. The bacterial phosphoenolpyruvate: sugar phosphotransferase system (PTS) is a multi-protein system involved in the regulation of a variety of metabolic and transcriptional processes. This family is one of four structurally and functionally distinct group IIB PTS system cytoplasmic enzymes, necessary for the uptake of carbohydrates across the cytoplasmic membrane and their phosphorylation. The active site histidine receives a phosphate group from the IIA subunit and transfers it to the substrate.",
+                  "taxid": 2
+                }
+              ],
+              "len": 22,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 43.3733,
+                  "score": 103,
+                  "evalue": 3.4321e-14,
+                  "identity": 22,
+                  "positive": 22,
+                  "query_from": 1,
+                  "query_to": 22,
+                  "hit_from": 1,
+                  "hit_to": 22,
+                  "align_len": 22,
+                  "gaps": 0,
+                  "qseq": "IVLARIDDRLIHGQVATTWTKE",
+                  "hseq": "IVLARIDDRLIHGQVATTWTKE",
+                  "midline": "IVLARIDDRLIHGQVATTWTKE"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 3,
+            "db_len": 47,
+            "hsp_len": 0,
+            "eff_space": 1034,
+            "kappa": 0.077064876,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+}

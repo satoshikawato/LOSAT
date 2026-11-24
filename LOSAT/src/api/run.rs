@@ -21,7 +21,8 @@ use super::local_blast::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_database_blastn,
     run_local_database_blastp, run_local_database_blastx, run_local_database_tblastn,
     run_local_database_tblastx, run_local_tblastn, run_local_tblastx, with_run_pool,
-    FormatObserver, FormatOutput, HspIndex, OutFile, OutputSink, ReportOutputs, ReportedSubject,
+    FormatObserver, FormatOutput, HspIndex, OutFile, OutputSink, PostsFirst, ReportOutputs,
+    ReportedSubject,
 };
 use super::parts::Parts;
 use super::program::Program;
@@ -1075,10 +1076,14 @@ pub fn run_to_file(
         searches(search, inputs, &formats, &start, &mut log)?.1
     };
     let command = start.command();
-    let mut file = OutFile::new(path, out_file_program(search.program()), outfmt);
-    with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
+    let app = search.program().name();
+    let mut file = OutFile::new(path, out_file_program(search.program()), app, outfmt);
+    let posts = file.posts();
+    with_run_pool(threads, app, || -> Result<(), Error> {
         let mut sink = log.sink(&mut *diagnostics, true);
         let result = {
+            // The file's posts, in their place among the run's messages (`PostsFirst`).
+            let mut messages = PostsFirst::new(posts, &mut sink);
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
                 html_posts: None,
@@ -1087,12 +1092,15 @@ pub fn run_to_file(
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Out(&mut file),
                 }],
-                diagnostics: &mut sink,
+                diagnostics: &mut messages,
                 later_warnings: None,
                 hits: None,
                 observer: None,
             };
-            run_local(command, inputs, &mut outputs, &mut start)
+            let result = run_local(command, inputs, &mut outputs, &mut start);
+            drop(outputs);
+            let _ = messages.drain();
+            result
         };
         result.map(drop).map_err(|error| sink.failed(&error))
     })

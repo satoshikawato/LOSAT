@@ -134,6 +134,23 @@ impl MaskBdbReader {
         self.get_title = true;
     }
 
+    /// The taxonomy database of the reads and the lookups of the volumes' caches.
+    pub(crate) fn taxonomy(&self) -> &crate::algorithm::common::database::TaxdbRun {
+        &self.taxdb
+    }
+
+    /// The reads look names up in the taxonomy database of `previous`, a run of another
+    /// `CSeqDB` of the process (windowmasker's `-mk_counts` opens the input again on each pass):
+    /// NCBI's taxonomy database is one per process (`CSeqDBTaxInfo`), so its texts of opening come
+    /// once, while each `CSeqDB`'s volumes have their own caches
+    /// (`TaxdbRun::sequential_after`). Before the first read.
+    pub(crate) fn follow_taxonomy_of(
+        &mut self,
+        previous: &crate::algorithm::common::database::TaxdbRun,
+    ) {
+        self.taxdb = previous.sequential_after();
+    }
+
     /// Whether the read of the last record's header may have met a UTF8String for a
     /// VisibleString (`SeqDb::take_utf8_post_at` finds its member and whether the run posts it
     /// now): makembindex's post level shows NCBI's warning 803.10, the maskers' does not.

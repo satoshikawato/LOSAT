@@ -121,12 +121,42 @@ fn a_front_line_without_ids_writes_no_short_header() {
 
 #[test]
 fn sequence_lines_are_the_width_with_a_shorter_last() {
-    let mut out = Vec::new();
-    write_sequence(b"ACGTACGT", 3, &mut out);
-    assert_eq!(out, b"ACG\nTAC\nGT\n");
-    out.clear();
-    write_sequence(b"ACGTAC", 3, &mut out);
-    assert_eq!(out, b"ACG\nTAC\n");
+    let mut out = CutBuffer::default();
+    write_sequence(b"ACGTACGT", 3, &[], &mut out);
+    assert_eq!(out.bytes, b"ACG\nTAC\nGT\n");
+    let mut out = CutBuffer::default();
+    write_sequence(b"ACGTAC", 3, &[], &mut out);
+    assert_eq!(out.bytes, b"ACG\nTAC\n");
+}
+
+// NCBI 2.17.0 blastdbcmd `-line_length 1000` and 10000 (line RG T8 survey `out/wpat/`, probe
+// `T/t8/impl/probe/u/`): a line across letter 1024 (and each multiple) is two insertions.
+#[test]
+fn a_line_across_the_iterator_cache_is_two_insertions() {
+    let letters = vec![b'A'; 2100];
+    let mut out = CutBuffer::default();
+    write_sequence(&letters, 1000, &[], &mut out);
+    assert_eq!(
+        out_ends(&out),
+        [1000, 1001, 1025, 2001, 2002, 2050, 2102, 2103]
+    );
+}
+
+// A mask's start and end split the line there (`x_GetMaskingStates`).
+#[test]
+fn mask_changes_split_the_lines() {
+    let changes = mask_changes(&[(2, 4), (4, 6)], None, 10, false);
+    assert_eq!(changes, [2, 6]);
+    assert_eq!(mask_changes(&[(2, 4)], None, 10, true), [6, 8]);
+    let mut out = CutBuffer::default();
+    write_sequence(b"ACGTACGTAC", 5, &changes, &mut out);
+    assert_eq!(out.bytes, b"ACGTA\nCGTAC\n");
+    assert_eq!(out_ends(&out), [2, 5, 6, 7, 11, 12]);
+}
+
+/// The ends of the insertions and `put`s of `out`.
+fn out_ends(out: &CutBuffer) -> Vec<usize> {
+    out.cuts.ends()
 }
 
 #[test]

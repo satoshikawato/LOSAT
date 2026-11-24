@@ -135,12 +135,23 @@ fn received_log_target(name: Option<&OsStr>, file: impl FnOnce(&[u8]) -> DiagTar
 /// goes to the receiver as it is written (`FileReceiver::open`) or whole when the run ends; the
 /// run's files end when the run ends (when the last clone of this and every opening of a file is
 /// dropped), in the order the run opened them.
+///
+/// The tools' output streams that the run opened (`keep_stream`: NCBI's `-out` and `cout`,
+/// `ncbi_app::files::tool_stream`) are ended after the run and its texts (`finish_streams`), as
+/// NCBI's arguments close their streams after `Run`.
 #[derive(Clone)]
-pub(crate) struct OpenFiles(Option<Arc<FileTable>>);
+pub(crate) struct OpenFiles {
+    table: Option<Arc<FileTable>>,
+    streams: Arc<Mutex<Vec<crate::report::ostream::ReportStream>>>,
+}
 
 impl std::fmt::Debug for OpenFiles {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(if self.0.is_some() { "Receiver" } else { "Disk" })
+        f.write_str(if self.table.is_some() {
+            "Receiver"
+        } else {
+            "Disk"
+        })
     }
 }
 
@@ -163,25 +174,57 @@ enum Opening {
 impl OpenFiles {
     /// The files of a run whose files go to `files`.
     pub(crate) fn new(files: &RunFiles) -> Self {
-        OpenFiles(match files {
-            RunFiles::Disk => None,
-            RunFiles::Receiver(receiver) => Some(Arc::new(FileTable {
-                receiver: receiver.clone(),
-                files: Mutex::new(Vec::new()),
-            })),
-        })
+        OpenFiles {
+            table: match files {
+                RunFiles::Disk => None,
+                RunFiles::Receiver(receiver) => Some(Arc::new(FileTable {
+                    receiver: receiver.clone(),
+                    files: Mutex::new(Vec::new()),
+                })),
+            },
+            streams: Arc::default(),
+        }
     }
 
     /// The files of a run on the file system (`RunFiles::Disk`).
     pub(crate) fn disk() -> Self {
-        OpenFiles(None)
+        OpenFiles {
+            table: None,
+            streams: Arc::default(),
+        }
+    }
+
+    /// Keeps `stream`, a tool's output stream of the run, to end it after the run
+    /// (`finish_streams`).
+    pub(crate) fn keep_stream(&self, stream: crate::report::ostream::ReportStream) {
+        self.streams
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(stream);
+    }
+
+    /// Ends the tools' output streams of the run, in the order it opened them
+    /// (`ReportStream::finish_tool`): whether a write met a closed pipe, which ended NCBI's
+    /// process (`report::ostream::ends_like_sigpipe`).
+    pub(crate) fn finish_streams(&self) -> bool {
+        let streams = std::mem::take(
+            &mut *self
+                .streams
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        let mut closed = false;
+        for stream in streams {
+            closed |= stream.finish_tool().is_err() || stream.closed();
+        }
+        closed
     }
 
     /// The target of the `-logfile` value `name` (`RunFiles::log_target`), whose file, for a
     /// `Receiver`, is an opening of the run's file of that path that appends to it
     /// (`DiagTarget::Stream`).
     pub(crate) fn log_target(&self, name: Option<&OsStr>) -> DiagTarget {
-        match &self.0 {
+        match &self.table {
             None => diag_target(name),
             Some(table) => received_log_target(name, |bytes| {
                 let key = log_key(bytes).expect("a file of log_name has a path");
@@ -207,7 +250,7 @@ impl OpenFiles {
     /// does not reproduce (`Created::Refused`).
     pub(crate) fn create(&self, name: &(impl AsRef<OsStr> + ?Sized)) -> Result<Created, Unopened> {
         let name = name.as_ref();
-        let Some(table) = &self.0 else {
+        let Some(table) = &self.table else {
             return File::create(name)
                 .map(|file| Created::File(OpenedFile::Disk(file)))
                 .map_err(|_| Unopened);

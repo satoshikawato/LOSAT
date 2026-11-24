@@ -174,19 +174,29 @@ impl Write for Room {
     }
 }
 
+/// The caller's writer `out` as NCBI's stream (`OutputFile::Caller`).
+fn caller(out: &mut dyn Write) -> OutputFile<'_> {
+    OutputFile::Caller(CallerOutput {
+        out,
+        bad: false,
+        closed: false,
+    })
+}
+
 // NCBI's `ostream` after a failed write: `badbit`, and later writes, even ones that would
 // fit, do nothing; nothing reports it.
 #[test]
 fn an_ostream_drops_every_write_after_the_first_that_fails() {
     let mut room = Room(4, Vec::new());
-    let mut out = Ostream::new(&mut room);
+    let mut out = caller(&mut room);
     out.write_all(b"abc").unwrap();
-    assert!(!out.bad());
+    assert!(!out.bad().unwrap());
     out.write_all(b"de").unwrap();
-    assert!(out.bad());
+    assert!(out.bad().unwrap());
     out.write_all(b"f").unwrap();
     out.flush().unwrap();
-    assert!(out.bad() && !out.closed());
+    assert!(out.bad().unwrap() && !out.closed());
+    drop(out);
     assert_eq!(room.1, b"abc");
 }
 
@@ -208,16 +218,41 @@ impl Write for ClosedPipe {
 #[test]
 fn a_closed_pipe_ends_the_writes_where_sigpipe_ends_ncbi() {
     let mut pipe = ClosedPipe;
-    let mut out = Ostream::new(&mut pipe);
+    let mut out = caller(&mut pipe);
     let first = out.write_all(b"a");
     let later = out.write_all(b"b");
-    assert!(out.bad());
     if cfg!(windows) {
         assert!(first.is_ok() && later.is_ok() && !out.closed());
+        assert!(out.bad().unwrap());
     } else {
         assert!(out.closed() && ends_like_sigpipe(&first.unwrap_err()));
         assert!(ends_like_sigpipe(&later.unwrap_err()));
     }
+}
+
+// The tool's stream of a file (`ReportStream::tool_file`): NCBI's buffer holds what it takes
+// (`NcbiStdio::File`), the run's end writes it (`OpenFiles::finish_streams`); a closed pipe met
+// there ends the run (exit status 0), any other failed write leaves the stream bad.
+#[test]
+fn a_tool_stream_writes_at_its_end_and_reports_a_closed_pipe() {
+    let files = OpenFiles::disk();
+    let pipe = ReportStream::tool_file(Box::new(ClosedPipe), "");
+    files.keep_stream(pipe.share());
+    let mut out = OutputFile::Stream(pipe);
+    out.write_all(b"held").unwrap();
+    assert!(!out.closed());
+    assert_eq!(files.finish_streams(), cfg!(not(windows)));
+    assert_eq!(out.closed(), cfg!(not(windows)));
+
+    let files = OpenFiles::disk();
+    let full = ReportStream::tool_file(Box::new(Room(4, Vec::new())), "");
+    files.keep_stream(full.share());
+    let mut out = OutputFile::Stream(full);
+    out.write_all(b"abc").unwrap();
+    out.write_all(b"de").unwrap();
+    assert!(!files.finish_streams());
+    assert!(out.bad().unwrap() && !out.closed());
+    out.write_all(b"f").unwrap();
 }
 
 #[test]
@@ -250,7 +285,7 @@ fn a_stream_that_does_not_open_is_ncbi_s_exception() {
             &mut stdout,
             &OpenFiles::disk()
         ),
-        Ok(OutputFile::Stdout(_))
+        Ok(OutputFile::Caller(_))
     ));
     assert_eq!(
         open_output_file(

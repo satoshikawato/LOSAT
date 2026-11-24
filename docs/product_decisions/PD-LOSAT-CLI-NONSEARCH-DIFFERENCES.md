@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.30 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
+- Version: 1.31 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -69,6 +69,9 @@
   standard error is NCBI's, the run goes on; exception 5 for every format of the search programs
   and for their standard error, its timing of 1.2 restated, the Owner's answer A to line RG's T6-Q1 of 2026-11-17; line RG item
   T6a, RG DECISIONS T6-1, T6-2 and T6-3 of 2026-11-17, Owner-delegated, the same standing
+  instruction); 1.31 2026-11-25 (exception 10: the tools end at NCBI's write that meets the
+  closed pipe, through NCBI's stream of their output, so the lines NCBI wrote before that write
+  are written; line RG item T8a, RG DECISIONS T8-1; Owner-delegated, the same standing
   instruction)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
@@ -283,9 +286,13 @@ BLAST+.
    shell, no message; exception 5). LOSAT's runtime ignores SIGPIPE (exception 5), so LOSAT
    sees the failed write and ends the program at once, with exit status 0 and no message, in
    every mode and format: nothing more is read, written or reported, as in NCBI's ended process.
-   As NCBI's `cerr` is tied to `cout`, the programs flush their output before each line of
-   diagnostics, so the closed pipe is met before the line (and with `2>&1` the lines come after
-   the output written before them, as NCBI's do).
+   Since version 1.31 (line RG item T8a) the output goes through NCBI's stream (its buffer, its
+   insertions and flushes), so LOSAT meets the closed pipe at NCBI's write that meets it: at the
+   flush of a `-out` file's buffer when it fills or is flushed, or, as NCBI's `cerr` is tied to
+   `cout`, at the writes of the standard output's buffer before a line of diagnostics. The lines
+   NCBI wrote before that write are written and none after (with `2>&1` the lines come between
+   the output's writes where NCBI's do); before, LOSAT flushed its output before each line and
+   ended there, without the lines NCBI wrote before its fatal write.
    Since version 1.19 (line RG item E3, RG DECISIONS E3-3) the same holds for the version, help
    and argument-error texts of every other program but rpsbproc (exception 9): a closed pipe
    drops the text and the program ends with its exit status (0 for a version or a help), where
@@ -308,8 +315,10 @@ BLAST+.
    still hold fails, else 0; 300 runs of NCBI 2.17.0 on a full device and under file size limits,
    `tests/blastdbcmd_metadata_failures.rs`). A run whose writes all succeed is identical to NCBI's; so
    is a closed pipe that NCBI's writes never reach (a short output read by `head -c 100`).
-   Functions: `ncbi_app::files::Ostream` (one stream of `-out` for each program;
-   `ends_like_sigpipe`, `flush_before_diagnostic`), `dustmasker::work::run`
+   Functions: `ncbi_app::files::OutputFile` (one stream of `-out` for each program, the searches'
+   `report::ostream::ReportStream` without an exception mask; `ends_like_sigpipe`), `ncbi_app::Diag`
+   (the tie before a text), `report::run_files::OpenFiles::finish_streams` (the end of the
+   streams after the run), `dustmasker::work::run`
    (`Failure::ClosedPipe`), `segmasker::work::run_masks` (`Failure::ClosedPipe`), `windowmasker::work`
    (`Failure::ClosedPipe`), `convert2blastmask::work::run_masks`
    (`Failure::ClosedPipe`), `blastdbcmd::retrieve::process` (`Stop::ClosedPipe`, `Run::post`),

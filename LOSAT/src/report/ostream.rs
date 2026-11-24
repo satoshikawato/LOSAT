@@ -189,6 +189,22 @@ fn caught_failure() -> std::io::Error {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873 (cited at
+// `Core::failed_ncbi_write`: SIGPIPE keeps its default action)
+/// Whether the failed write `error` is one that ends NCBI's process by SIGPIPE: a closed pipe,
+/// outside Windows (exit status 141, no text). LOSAT's runtime ignores the signal: a tool's stream
+/// (`ReportStream::tool_file`) returns the error from that write, and the tool ends at once with
+/// exit status 0 and no text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10). On Windows NCBI's
+/// write fails without a signal, as any failed write.
+pub(crate) fn ends_like_sigpipe(error: &std::io::Error) -> bool {
+    cfg!(not(windows)) && error.kind() == std::io::ErrorKind::BrokenPipe
+}
+
+/// The error of an operation of a tool's stream that met a closed pipe (`Core::closed`).
+fn closed_pipe() -> std::io::Error {
+    std::io::Error::from(std::io::ErrorKind::BrokenPipe)
+}
+
 fn undecided_failure() -> std::io::Error {
     std::io::Error::other(ReportWriteFailure {
         kind: FailureKind::Undecided,
@@ -269,6 +285,11 @@ struct Core {
     /// declaration of its region, `set_site`): LOSAT may insert a whole object in several writes
     /// (the archive's), all of which before the failed one reached the device.
     object_start: Option<(NcbiBuffer, u64)>,
+    /// The tools' end at a closed pipe (`ReportStream::tool_file`, `tool_standard_output`): a
+    /// write that meets a pipe whose reader closed it ends the run there (`ends_like_sigpipe`).
+    sigpipe: bool,
+    /// A write met a closed pipe (`sigpipe`): that operation and every later one return its error.
+    closed: bool,
     /// Every write of NCBI's is made where NCBI makes it (the tests' reference of `pending`).
     #[cfg(test)]
     immediate: bool,
@@ -408,7 +429,21 @@ impl Core {
             self.held.extend_from_slice(buf);
             return Ok(());
         }
-        self.insert_slow(buf)
+        self.insert_slow(buf, false)
+    }
+
+    /// One `put` of the byte `buf` holds (`NcbiBuffer::sputc`): a file's buffer holds it where an
+    /// insertion of one byte is written (8,190 bytes held).
+    #[inline]
+    fn put(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        debug_assert_eq!(buf.len(), 1, "a put is one byte");
+        if 1 < self.room {
+            self.room -= 1;
+            self.inserted += 1;
+            self.held.extend_from_slice(buf);
+            return Ok(());
+        }
+        self.insert_slow(buf, true)
     }
 
     /// NCBI's buffer as the bytes it holds make it.
@@ -428,11 +463,11 @@ impl Core {
         };
     }
 
-    /// An insertion that NCBI's buffer may write: what it writes of the bytes held and `buf` is
-    /// NCBI's write (`NcbiWrite`), made now in a region that does not defer it, where it is large,
-    /// or where `PENDING_BYTES` are pending; it holds the rest.
+    /// An insertion (or a `put`, `put`) that NCBI's buffer may write: what it writes of the bytes
+    /// held and `buf` is NCBI's write (`NcbiWrite`), made now in a region that does not defer it,
+    /// where it is large, or where `PENDING_BYTES` are pending; it holds the rest.
     #[inline(never)]
-    fn insert_slow(&mut self, buf: &[u8]) -> std::io::Result<()> {
+    fn insert_slow(&mut self, buf: &[u8], put: bool) -> std::io::Result<()> {
         // An empty write is no insertion of NCBI's (a part of a report that NCBI does not write).
         if buf.is_empty() {
             return Ok(());
@@ -449,7 +484,11 @@ impl Core {
             return self.emit(buf);
         };
         let mut buffer = before;
-        buffer.sputn(buf.len(), buf);
+        if put {
+            buffer.sputc(buf);
+        } else {
+            buffer.sputn(buf.len(), buf);
+        }
         let kept = buffer.held();
         self.buffer = Some(buffer);
         if kept == before.held() + buf.len() {
@@ -487,6 +526,9 @@ impl Core {
     #[cold]
     #[inline(never)]
     fn insert_bad(&mut self) -> std::io::Result<()> {
+        if self.closed {
+            return Err(closed_pipe());
+        }
         // An object written to the bad stream after `~CBlastFormat` (the error archive of
         // `PrintErrorArchive`): its buffer's first write fails without an exception mask, a
         // write fault at the buffer's position then (`write_fault`).
@@ -500,8 +542,9 @@ impl Core {
     }
 
     /// The insertions `report[from..at]` for each cut `(at, _)` of `cuts` (all of them
-    /// `Cut::Insertion`) and `report[last..to]` (`ReportWrite::insert_cut_run`): NCBI's writes
-    /// among them are made together, at the end, where the region defers them.
+    /// `Cut::Insertion`, or `Cut::Put` after a byte that is a `put`) and `report[last..to]`
+    /// (`ReportWrite::insert_cut_run`): NCBI's writes among them are made together, at the end,
+    /// where the region defers them.
     fn insert_cut_run(
         &mut self,
         report: &[u8],
@@ -510,11 +553,19 @@ impl Core {
         to: usize,
     ) -> std::io::Result<()> {
         let defers = self.defers();
+        let segments = cuts
+            .iter()
+            .map(|&(end, cut)| (end, cut == Cut::Put))
+            .chain([(to, false)]);
         let Some(mut buffer) = self.model().filter(|_| !self.bad && defers) else {
             let mut at = from;
-            for end in cuts.iter().map(|&(end, _)| end).chain([to]) {
+            for (end, put) in segments {
                 let end = end.max(at);
-                self.insert(&report[at..end])?;
+                if put && end == at + 1 {
+                    self.put(&report[at..end])?;
+                } else {
+                    self.insert(&report[at..end])?;
+                }
                 at = end;
             }
             return Ok(());
@@ -523,13 +574,17 @@ impl Core {
         let mut at = from;
         // The bytes of the run that NCBI's buffer has written at its last write in the run.
         let mut written = None;
-        for end in cuts.iter().map(|&(end, _)| end).chain([to]) {
+        for (end, put) in segments {
             let end = end.max(at);
             let n = end - at;
             if n > 0 {
                 let held = buffer.held();
                 // An insertion within the room is held whole (`NcbiBuffer::room`).
-                buffer.sputn(n, &report[..end]);
+                if put && n == 1 {
+                    buffer.sputc(&report[..end]);
+                } else {
+                    buffer.sputn(n, &report[..end]);
+                }
                 if buffer.held() != held + n {
                     let mut write = self.write_here(false, None);
                     write.end = start + (end - from - buffer.held()) as u64;
@@ -606,7 +661,11 @@ impl Core {
     /// them (a post, another region, the run's end).
     fn sync(&mut self) -> std::io::Result<()> {
         if self.out == 0 {
-            return Ok(());
+            return if self.closed {
+                Err(closed_pipe())
+            } else {
+                Ok(())
+            };
         }
         self.emit(&[])
     }
@@ -631,9 +690,19 @@ impl Core {
             Some(write) => self.failed_ncbi_write(write, error),
             None => {
                 self.bad = true;
-                Ok(())
+                self.closed_by(&error)
             }
         }
+    }
+
+    /// A failed write of a tool's stream at a closed pipe (`sigpipe`): the stream is closed, and
+    /// the write returns the error that ends the run there.
+    fn closed_by(&mut self, error: &std::io::Error) -> std::io::Result<()> {
+        if self.sigpipe && ends_like_sigpipe(error) {
+            self.closed = true;
+            return Err(closed_pipe());
+        }
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/connect/ncbi_socket.c:866-873 (NCBI keeps the default
@@ -647,11 +716,11 @@ impl Core {
     fn failed_ncbi_write(
         &mut self,
         write: NcbiWrite,
-        _error: std::io::Error,
+        error: std::io::Error,
     ) -> std::io::Result<()> {
         self.bad = true;
         if !write.throws {
-            return Ok(());
+            return self.closed_by(&error);
         }
         if let (Some(object), false) = (write.object, self.standard_output) {
             self.undecided = Some(object);
@@ -823,6 +892,9 @@ impl Core {
     /// end, `thrown`: the first insertion of a query's `Iteration` after a caught failure throws
     /// again).
     fn after_failure(&mut self) -> std::io::Result<()> {
+        if self.closed {
+            return Err(closed_pipe());
+        }
         if self.throws {
             self.thrown(self.site, false)
         } else {
@@ -898,6 +970,9 @@ impl Core {
     /// (`std::terminate`); the text is not written.
     fn tie(&mut self) -> std::io::Result<()> {
         if self.bad {
+            if self.closed {
+                return Err(closed_pipe());
+            }
             // A flush of a bad `cout` throws while the formatter lives (NCBI's runs terminate).
             if self.throws {
                 self.failure = Some(Failure::Terminate);
@@ -1007,6 +1082,8 @@ impl ReportStream {
             landed: 0,
             undecided: None,
             object_start: None,
+            sigpipe: false,
+            closed: false,
             #[cfg(test)]
             immediate: false,
         })))
@@ -1101,6 +1178,90 @@ impl ReportStream {
         );
         *lock(&TIED_REPORT) = Some(std::sync::Arc::downgrade(&report.0));
         report
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799 (`CArg_OutputFile` opens a
+    // `CNcbiOfstream`, or takes `cout`, and sets no exception mask on it)
+    /// A tool's stream (dustmasker, segmasker, windowmasker, convert2blastmask, blastdbcmd, the
+    /// file of makeprofiledb's `-logfile`): the `-out` file `device` of `program`, NCBI's file
+    /// buffer (`NcbiStdio::File`). It has no exception mask: a failed write sets `badbit`, later
+    /// insertions are dropped and the run goes on; a write that meets a closed pipe returns its
+    /// error from that insertion, flush or tie (`ends_like_sigpipe`), where NCBI's process ends.
+    /// NCBI's writes are made as the searches' are (`Core::sync`): together, before a text and at
+    /// the stream's end (`finish_tool`).
+    pub(crate) fn tool_file(device: Box<dyn std::io::Write + Send>, program: &'static str) -> Self {
+        let stream = Self::new(
+            device,
+            Some(NcbiBuffer::new(NcbiStdio::File)),
+            false,
+            program,
+            Site::Report,
+        );
+        stream.set_tool();
+        stream
+    }
+
+    /// A tool's standard output (`cout`, `tool_file`'s stream on the process's standard output,
+    /// tied to standard error): the command line's.
+    pub(crate) fn tool_standard_output(program: &'static str) -> Self {
+        let stream = Self::new(
+            standard_output_device(),
+            Some(NcbiBuffer::new(NcbiStdio::cout())),
+            true,
+            program,
+            Site::Report,
+        );
+        stream.set_tool();
+        stream
+    }
+
+    /// The tools' mode (`tool_file`): no exception mask, and the end at a closed pipe.
+    fn set_tool(&self) {
+        let mut core = lock(&self.0);
+        core.throws = false;
+        core.sigpipe = true;
+    }
+
+    /// Makes this the stream that a text on standard error makes NCBI's writes of first
+    /// (`tie_standard_output`, `sync_report`): a tool's stream of the command line's process
+    /// (`cli::is_command_line_run`), as `of_cli` registers the searches'. A library run's stream
+    /// is not tied (`api::run_dustmasker` and the others: the caller's diagnostics).
+    pub(crate) fn tie_to_process(&self) {
+        *lock(&TIED_REPORT) = Some(std::sync::Arc::downgrade(&self.0));
+    }
+
+    /// Another handle of the same stream (the run keeps one to end it, `finish_tool`).
+    pub(crate) fn share(&self) -> Self {
+        ReportStream(self.0.clone())
+    }
+
+    /// Whether a write of the device failed (`badbit`), NCBI's writes so far made first: a tool's
+    /// serial writer reports it (`seqmasks_io::run::serial_write_failure`). A closed pipe is
+    /// `Err` (`ends_like_sigpipe`).
+    pub(crate) fn bad(&self) -> std::io::Result<bool> {
+        let mut core = lock(&self.0);
+        core.sync()?;
+        Ok(core.bad)
+    }
+
+    /// Whether a write met a closed pipe (`tool_file`).
+    pub(crate) fn closed(&self) -> bool {
+        lock(&self.0).closed
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1124-1131 (the arguments, with the
+    // `-out` stream, are destroyed after `Run` and its reports)
+    /// The end of a tool's stream after the run and its texts: the `-out` file's buffer is written
+    /// as the stream closes, standard output's at the exit. `Err` where a write met a closed pipe
+    /// (`ends_like_sigpipe`): NCBI's process ended at that write.
+    pub(crate) fn finish_tool(&self) -> std::io::Result<()> {
+        let mut core = lock(&self.0);
+        core.sync()?;
+        if core.bad {
+            return Ok(());
+        }
+        core.flush_buffer(false);
+        core.sync()
     }
 
     /// The handle by which a formatter that writes into the stream declares NCBI's regions and
@@ -1380,6 +1541,9 @@ pub enum Cut {
     /// NCBI flushes the stream here (`endl`, `ReportWrite::ncbi_flush`); the insertion before ends
     /// here.
     Flush,
+    /// The one byte before is NCBI's `put` (`NcbiBuffer::sputc`: an inserted `char`, the line feed
+    /// of `endl`), not an insertion of a string; the insertion before it ends where it starts.
+    Put,
 }
 
 /// The places in a part of the report formatted into a buffer where NCBI's insertions end and
@@ -1415,6 +1579,16 @@ impl Cuts {
         self.0.extend(other.0);
     }
 
+    /// The ends of the insertions and `put`s, in order (tests of the writers' units).
+    #[cfg(test)]
+    pub(crate) fn ends(&self) -> Vec<usize> {
+        self.0
+            .iter()
+            .filter(|(_, cut)| matches!(cut, Cut::Insertion | Cut::Put))
+            .map(|&(at, _)| at)
+            .collect()
+    }
+
     /// A cursor that writes the buffer from its start.
     pub fn cursor(&self) -> CutCursor<'_> {
         CutCursor {
@@ -1430,7 +1604,7 @@ impl Cuts {
 /// A part of the report formatted into a buffer (`bytes`) away from the stream (on a pool's
 /// thread), with NCBI's regions and flushes made there (`cuts`), to be written with them
 /// (`CutCursor::write`).
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct CutBuffer {
     /// The part's bytes.
     pub bytes: Vec<u8>,
@@ -1463,6 +1637,46 @@ impl ReportWrite for CutBuffer {
     fn ncbi_flush(&mut self) -> std::io::Result<()> {
         self.cuts.push(self.bytes.len(), Cut::Flush);
         Ok(())
+    }
+}
+
+impl CutBuffer {
+    /// An insertion of NCBI's of `bytes` (`operator<<` of a string or a number): its end is cut.
+    #[inline]
+    pub fn insertion(&mut self, bytes: &[u8]) {
+        self.bytes.extend_from_slice(bytes);
+        self.cuts.push(self.bytes.len(), Cut::Insertion);
+    }
+
+    /// The end of an insertion of NCBI's whose bytes were added to `bytes` since the last cut.
+    #[inline]
+    pub fn end_insertion(&mut self) {
+        self.cuts.push(self.bytes.len(), Cut::Insertion);
+    }
+
+    /// NCBI's `put` of `byte` (`operator<<` of a `char`).
+    #[inline]
+    pub fn put(&mut self, byte: u8) {
+        self.bytes.push(byte);
+        self.cuts.push(self.bytes.len(), Cut::Put);
+    }
+
+    /// NCBI's `endl`: a `put` of a line feed, then a flush.
+    #[inline]
+    pub fn endl(&mut self) {
+        self.put(b'\n');
+        self.cuts.push(self.bytes.len(), Cut::Flush);
+    }
+
+    /// Writes the buffer to `writer` as NCBI inserts it (`CutCursor::write`) and empties it.
+    pub fn write_to(&mut self, writer: &mut dyn ReportWrite) -> std::io::Result<()> {
+        let result = self
+            .cuts
+            .cursor()
+            .write(writer, &self.bytes, 0, self.bytes.len());
+        self.bytes.clear();
+        self.cuts.0.clear();
+        result
     }
 }
 
@@ -1523,10 +1737,9 @@ impl CutCursor<'_> {
             // The run of insertions up to the next region or flush (or `to`), in one call.
             let run = self.next;
             let mut next = run;
-            while cuts
-                .get(next)
-                .is_some_and(|&(cut_at, cut)| cut_at <= to && cut == Cut::Insertion)
-            {
+            while cuts.get(next).is_some_and(|&(cut_at, cut)| {
+                cut_at <= to && matches!(cut, Cut::Insertion | Cut::Put)
+            }) {
                 next += 1;
             }
             let other = cuts.get(next).copied().filter(|&(cut_at, _)| cut_at <= to);
@@ -1552,7 +1765,7 @@ impl CutCursor<'_> {
             }
             self.skipping = false;
             match cut {
-                Cut::Insertion => {}
+                Cut::Insertion | Cut::Put => {}
                 Cut::Site(site) => {
                     if let Err(error) = writer.site(site) {
                         // The region's writes, made at its end, failed where NCBI's formatter

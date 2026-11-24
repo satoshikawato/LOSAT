@@ -1,9 +1,7 @@
 //! `CDustMaskApplication::Run`: the writer of `-outfmt`, the reader of `-infmt`, and the masks of
 //! each nucleotide sequence.
 
-use std::io::Write;
-
-use crate::ncbi_app::files::{open_input_file, Cin, Ostream};
+use crate::ncbi_app::files::{open_input_file, Cin, OutputFile};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{err_post_x, NcbiException, ThrowSite};
 use crate::seqdb::mask::FilterProgram;
@@ -62,7 +60,7 @@ pub(super) enum Failure {
     Refused(String),
     /// A `CArgException` of `AsInputFile` in `Run` (the reader's report of it).
     Arg(crate::ncbi_app::args::ArgException),
-    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`Ostream::closed`): the
+    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`OutputFile::closed`): the
     /// run ends at once, exit status 0, no message.
     ClosedPipe,
 }
@@ -181,29 +179,21 @@ fn writer(options: &Options<'_>) -> Result<MaskWriter, Failure> {
 pub(super) fn run(
     options: &Options<'_>,
     stdin: &mut Cin<'_>,
-    out: &mut dyn Write,
+    out: &mut OutputFile<'_>,
     diag: &mut Diag,
 ) -> Result<(), Failure> {
     let mut writer = writer(options)?;
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
-    let mut out = Ostream::new(out);
-    let result = masks_of_input(options, stdin, &mut writer, &mut out, diag);
-    finish(
-        writer,
-        &mut out,
-        diag,
-        result,
-        options.outfmt,
-        super::PROGRAM,
-    )
+    let result = masks_of_input(options, stdin, &mut writer, out, diag);
+    finish(writer, out, diag, result, options.outfmt, super::PROGRAM)
 }
 
 fn masks_of_input(
     options: &Options<'_>,
     stdin: &mut Cin<'_>,
     writer: &mut MaskWriter,
-    out: &mut Ostream<'_>,
+    out: &mut OutputFile<'_>,
     diag: &mut Diag,
 ) -> Result<(), Failure> {
     let mut source = reader(options, stdin)?;
@@ -211,7 +201,7 @@ fn masks_of_input(
     let window = options.window as u32;
     let linker = options.linker as u32;
     while let Some(record) = source.next_record()? {
-        post_read_texts::<Failure>(&record.texts, out, diag)?;
+        post_read_texts::<Failure>(&record.texts, diag)?;
         if record.iupac.is_empty() {
             continue;
         }

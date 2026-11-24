@@ -5,7 +5,7 @@ use std::io::Write;
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::{ArgException, Args};
-use crate::ncbi_app::files::{file_exception, open_input_file, Cin, Ostream};
+use crate::ncbi_app::files::{file_exception, open_input_file, Cin};
 use crate::ncbi_app::Diag;
 use crate::ncbi_exception::{err_post_x, NcbiException};
 use crate::report::pairwise::cpp_default_double;
@@ -35,7 +35,7 @@ enum Failure {
     Std(String),
     /// A case LOSAT does not reproduce: a whole message.
     Refused(String),
-    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`Ostream::closed`): the
+    /// A write found the pipe closed where SIGPIPE ends NCBI's process (`OutputFile::closed`): the
     /// run ends at once, exit status 0, no message.
     ClosedPipe,
 }
@@ -152,14 +152,13 @@ fn run_masks(
         settings.blastdb.as_deref(),
         stdin,
     )?;
-    let mut output = args.output_file("out", out).map_err(file_failure)?;
-    let mut writer = writer(outfmt, window, locut, hicut);
     // A failed write leaves NCBI's stream bad, and the text writers go on silently (exit 0):
     // `out` drops the bytes after the first failed write.
-    let mut out = Ostream::new(&mut output);
+    let mut out = args.output_file("out", out).map_err(file_failure)?;
+    let mut writer = writer(outfmt, window, locut, hicut);
     let result = (|| {
         while let Some(record) = source.next_record()? {
-            post_read_texts::<Failure>(&record.texts, &mut out, diag)?;
+            post_read_texts::<Failure>(&record.texts, diag)?;
             let masks = seg_masks(&masker, &record.stdaa);
             let mask: Vec<(u32, u32)> = masks
                 .iter()

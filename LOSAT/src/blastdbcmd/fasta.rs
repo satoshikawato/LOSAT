@@ -5,9 +5,9 @@
 //! `CFastaOstream::WriteSequence`.
 
 use std::collections::HashSet;
-use std::io::Write;
 
 use crate::report::defline::{bioseq_title_from_source, generate_bioseq_defline};
+use crate::report::ostream::CutBuffer;
 use crate::seqid::accguide::parse_flags::PARTIAL_OK;
 use crate::seqid::label::{bare, bioseq_fasta, fasta};
 use crate::seqid::model::Dbtag;
@@ -89,6 +89,8 @@ impl FastaFormatter {
         }
         let mut text = std::mem::take(&mut self.text);
         text.clear();
+        // NCBI's insertion of the definition lines (`m_Out << fasta_deflines`; the long header
+        // of `CFastaOstream::Write` is taken as one too, LOSAT's form of it).
         if self.long_seqids {
             // The Bioseq's first source, from every line the filter keeps (the target's first),
             // names the organism of a title made from it: the long header's alone.
@@ -111,11 +113,20 @@ impl FastaFormatter {
         if config.strand_minus {
             reverse_complement(&mut letters);
         }
-        write_sequence(&letters, self.width, &mut text);
-        // `out` writes to an `ncbi_app::files::Ostream` (`retrieve::process`): a failed write
-        // does nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
-        let written = out.write_all(&text).map_err(Stop::write);
-        self.text = text;
+        let changes = match &masks {
+            Some(masks) => mask_changes(masks, range, letters.len(), config.strand_minus),
+            None => Vec::new(),
+        };
+        let mut units = CutBuffer {
+            bytes: text,
+            cuts: Default::default(),
+        };
+        units.end_insertion();
+        write_sequence(&letters, self.width, &changes, &mut units);
+        // `out` writes to a `files::OutputFile` (`retrieve::process`): a failed write does
+        // nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
+        let written = out.insertions(&mut units);
+        self.text = units.bytes;
         written
     }
 
@@ -389,15 +400,89 @@ fn generated_title(
     Ok(defline.text)
 }
 
-// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3295-3317
+// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3074-3120
+/// The places of the letters `len` of the output where NCBI's masking state changes
+/// (`x_GetMaskingStates`: the masks `masks` mapped to the range `range`, overlapping and
+/// abutting ones merged, each start and each end), as the letters show them: with `minus` the
+/// letters were reverse-complemented after the masks went on (`apply_masks`), so are the places.
+fn mask_changes(
+    masks: &[(u32, u32)],
+    range: Option<(u32, u32)>,
+    len: usize,
+    minus: bool,
+) -> Vec<usize> {
+    let from = range.map_or(0, |(from, _)| from) as usize;
+    let mut spans: Vec<(usize, usize)> = masks
+        .iter()
+        .filter_map(|&(first, second)| {
+            let start = (first as usize).max(from);
+            let end = (second as usize).min(from + len);
+            (start < end).then_some((start - from, end - from))
+        })
+        .collect();
+    spans.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
+    for (start, end) in spans {
+        match merged.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    if minus {
+        merged.reverse();
+        for span in &mut merged {
+            *span = (len - span.1, len - span.0);
+        }
+    }
+    merged
+        .into_iter()
+        .flat_map(|(start, end)| [start, end])
+        .collect()
+}
+
+/// The letters that NCBI's sequence iterator holds at a time (`CSeqVector_CI`'s `kCacheSize`),
+/// filled from the first letter of the output on.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:56
+const SEQ_VECTOR_CACHE: usize = 1024;
+
+// NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3164-3320
 /// The sequence lines of `CFastaOstream::x_WriteSequence`: lines of `width` letters, the
-/// last one shorter, each ended by a line feed.
-fn write_sequence(letters: &[u8], width: u32, out: &mut Vec<u8>) {
+/// last one shorter, each ended by a line feed, as NCBI's insertions into `out`. NCBI takes the
+/// letters a piece at a time: up to the end of its iterator's cache (`SEQ_VECTOR_CACHE`) or to
+/// the next change of the masking state (`changes`, increasing), whichever comes first. Each
+/// line, or the part of it in a piece, is one insertion (`x_WriteBuffer`), and each line feed a
+/// `put` (NCBI's `<<` of a `char`), the last one also after a shorter last line.
+fn write_sequence(letters: &[u8], width: u32, changes: &[usize], out: &mut CutBuffer) {
     let width = width.max(1) as usize;
-    out.reserve(letters.len() + letters.len().div_ceil(width));
-    for line in letters.chunks(width) {
-        out.extend_from_slice(line);
-        out.push(b'\n');
+    let len = letters.len();
+    out.bytes.reserve(len + len.div_ceil(width));
+    out.cuts
+        .reserve(2 * len.div_ceil(width) + len / SEQ_VECTOR_CACHE + changes.len() + 1);
+    let mut changes = changes.iter().copied().peekable();
+    let mut rem_line = width;
+    let mut pos = 0;
+    while pos < len {
+        while changes.next_if(|&change| change <= pos).is_some() {}
+        let mut end = ((pos / SEQ_VECTOR_CACHE + 1) * SEQ_VECTOR_CACHE).min(len);
+        if let Some(&change) = changes.peek() {
+            end = end.min(change);
+        }
+        let mut at = pos;
+        while end - at >= rem_line {
+            out.insertion(&letters[at..at + rem_line]);
+            out.put(b'\n');
+            at += rem_line;
+            rem_line = width;
+        }
+        if end > at {
+            out.insertion(&letters[at..end]);
+            rem_line -= end - at;
+        }
+        pos = end;
+    }
+    if rem_line < width {
+        out.put(b'\n');
     }
 }
 

@@ -6,12 +6,13 @@
 //! A mask is the list of masked intervals of one sequence, 0-based and inclusive, in order
 //! (`CSymDustMasker::TMaskList`).
 
-use std::io::{self, Write};
+use std::io;
 
 use crate::ncbi_app::Diag;
 use crate::report::archive::masks::write_ranges_seq_loc;
 use crate::report::db_subject::bioseq_facts;
 use crate::report::defline::generate_bioseq_defline;
+use crate::report::ostream::{CutBuffer, ReportWrite};
 use crate::report::seqid::SeqId;
 use crate::report::serial::asn_ber::AsnBinaryEncoder;
 use crate::report::serial::asn_text::AsnTextEncoder;
@@ -20,6 +21,7 @@ use crate::report::serial::xml::XmlEncoder;
 use crate::seqdb::mask::FilterProgram;
 use crate::seqid::label::bioseq_fasta;
 use crate::seqid::ParsedSeqId;
+use crate::utils::decimal::push_decimal;
 
 /// One sequence as the writers see it (`CBioseq_Handle`): its Seq-ids in order, its title
 /// descriptor and its letters in `eCoding_Iupac`.
@@ -114,38 +116,54 @@ impl MaskWriter {
         MaskWriter::MaskInfo(MaskInfoWriter::new(serial, algo_id, program, options))
     }
 
-    /// `Print` of the writer, given `bsh`, the mask and `parsed_id`; `diag` takes the posts of the
-    /// serial stream (`write_document`).
+    /// `Print` of the writer, given `bsh`, the mask and `parsed_id`, into `out` in NCBI's
+    /// insertions and flushes (`CutBuffer`: a text on standard error between two records comes
+    /// after NCBI's last write, `ncbi_app::Diag`); `diag` takes the posts of the serial stream
+    /// (`write_document`).
+    ///
+    /// The definition line of the `interval` and `fasta` writers is one insertion followed by
+    /// `endl` (a `put` of the line feed and a flush). Each interval line is four insertions (the
+    /// two numbers, ` - ` and the line feed); each `acclist` line six (the id, a tab, a number, a
+    /// tab, a number, the line feed); each FASTA line of letters two (the letters, the line feed).
     pub(crate) fn print(
         &mut self,
         seq: &MaskedBioseq<'_>,
         mask: &[(u32, u32)],
         parsed_id: bool,
-        out: &mut dyn Write,
+        out: &mut dyn ReportWrite,
         diag: &mut Diag,
     ) -> Result<(), WriteError> {
         match self {
             MaskWriter::Interval => {
                 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_int.cpp:41-56
-                let mut text = id_to_string(seq, parsed_id)?;
-                text.push(b'\n');
+                let mut text = CutBuffer::default();
+                text.insertion(&id_to_string(seq, parsed_id)?);
+                text.endl();
                 interval_lines(mask, &mut text);
-                out.write_all(&text)?;
+                text.write_to(out)?;
             }
             MaskWriter::Tabular => {
                 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_tab.cpp:40-49
                 let id = id_to_string(seq, parsed_id)?;
-                let mut text = Vec::new();
+                let mut text = CutBuffer::default();
+                let mut number = Vec::with_capacity(10);
                 for &(from, to) in mask {
-                    text.extend_from_slice(&id);
-                    text.extend_from_slice(format!("\t{from}\t{to}\n").as_bytes());
+                    text.insertion(&id);
+                    text.insertion(b"\t");
+                    number.clear();
+                    push_decimal(&mut number, i64::from(from));
+                    text.insertion(&number);
+                    text.insertion(b"\t");
+                    number.clear();
+                    push_decimal(&mut number, i64::from(to));
+                    text.insertion(&number);
+                    text.insertion(b"\n");
                 }
-                out.write_all(&text)?;
+                text.write_to(out)?;
             }
             MaskWriter::Fasta { hard_masking } => {
-                let mut text = id_to_string(seq, parsed_id)?;
-                text.push(b'\n');
-                fasta_letters(seq.iupac, mask, *hard_masking, text, out)?;
+                let id = id_to_string(seq, parsed_id)?;
+                fasta_letters(&id, seq.iupac, mask, *hard_masking, out)?;
             }
             MaskWriter::SeqLoc(serial) => {
                 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_seqloc.cpp:61-90
@@ -155,7 +173,9 @@ impl MaskWriter {
                 let mut bytes = Vec::new();
                 let document = Document::SeqLoc(seq_id(seq), mask);
                 write_document(*serial, &document, &mut bytes, out, diag)?;
+                // The object stream's buffer, then its `Close`'s flush of the stream.
                 out.write_all(&bytes)?;
+                out.ncbi_flush()?;
             }
             MaskWriter::MaskInfo(writer) => {
                 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_blastdb_maskinfo.cpp:137-176
@@ -173,7 +193,11 @@ impl MaskWriter {
     /// (`x_ConsolidateListOfMasks`, :108-136, moves the Seq-loc of each list into one list and
     /// sets its `more` to false.)
     /// (`m_OutputFormat` `eSerial_None`, the format `interval`, writes nothing either.)
-    pub(crate) fn finish(self, out: &mut dyn Write, diag: &mut Diag) -> Result<(), WriteError> {
+    pub(crate) fn finish(
+        self,
+        out: &mut dyn ReportWrite,
+        diag: &mut Diag,
+    ) -> Result<(), WriteError> {
         let MaskWriter::MaskInfo(writer) = self else {
             return Ok(());
         };
@@ -182,7 +206,9 @@ impl MaskWriter {
         };
         let mut bytes = Vec::new();
         write_document(serial, &Document::MaskInfo(&writer), &mut bytes, out, diag)?;
+        // The object stream's buffer, then its `Close`'s flush of the stream.
         out.write_all(&bytes)?;
+        out.ncbi_flush()?;
         Ok(())
     }
 }
@@ -215,15 +241,15 @@ impl MaskInfoWriter {
         &mut self,
         id: &ParsedSeqId,
         mask: &[(u32, u32)],
-        out: &mut dyn Write,
+        out: &mut dyn ReportWrite,
     ) -> Result<(), WriteError> {
         if mask.is_empty() {
             return Ok(());
         }
         if self.serial.is_none() {
-            let mut text = Vec::new();
+            let mut text = CutBuffer::default();
             interval_lines(mask, &mut text);
-            out.write_all(&text)?;
+            text.write_to(out)?;
             return Ok(());
         }
         self.masks.push((id.clone(), mask.to_vec()));
@@ -231,14 +257,22 @@ impl MaskInfoWriter {
     }
 }
 
-/// `CMaskWriterInt::PrintMasks`: one line `from - to` for each interval.
+/// `CMaskWriterInt::PrintMasks`: one line `from - to` for each interval, four insertions (the
+/// numbers, ` - `, the line feed).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_int.cpp:49-56
 /// The lines are added to `text`.
-fn interval_lines(mask: &[(u32, u32)], text: &mut Vec<u8>) {
+fn interval_lines(mask: &[(u32, u32)], text: &mut CutBuffer) {
+    let mut number = Vec::with_capacity(10);
     for &(from, to) in mask {
-        // Writing to a `Vec<u8>` does not fail.
-        let _ = writeln!(text, "{from} - {to}");
+        number.clear();
+        push_decimal(&mut number, i64::from(from));
+        text.insertion(&number);
+        text.insertion(b" - ");
+        number.clear();
+        push_decimal(&mut number, i64::from(to));
+        text.insertion(&number);
+        text.insertion(b"\n");
     }
 }
 
@@ -287,7 +321,7 @@ fn write_document(
     serial: Serial,
     document: &Document<'_>,
     out: &mut Vec<u8>,
-    stream: &mut dyn Write,
+    stream: &mut dyn ReportWrite,
     diag: &mut Diag,
 ) -> Result<(), WriteError> {
     let start = out.len();
@@ -320,10 +354,10 @@ fn module(document: &Document<'_>) -> &'static str {
 
 /// `document` written again from `start` of `out` through `Traced`, and NCBI's posts of the
 /// bytes that its stream replaced (`Diag::post_replaced`), which come while the document is
-/// written, NCBI's `cerr` tied to `cout`: each after the output written before and the bytes of
-/// the document that NCBI's serial buffer (`COStreamBuffer`, `Traced`) had written to the output
-/// by then (`Posted::written`), which go to `stream` first and leave `out`. The error of the
-/// second writing, if any.
+/// written: each after the bytes of the document that NCBI's serial buffer (`COStreamBuffer`,
+/// `Traced`) had written to the output by then (`Posted::written`, one insertion), which go to
+/// `stream` first and leave `out`; the post makes NCBI's writes of the output first (`cerr`'s tie,
+/// `Diag`). The error of the second writing, if any.
 #[cold]
 #[inline(never)]
 fn rewrite_and_post(
@@ -331,7 +365,7 @@ fn rewrite_and_post(
     document: &Document<'_>,
     out: &mut Vec<u8>,
     start: usize,
-    stream: &mut dyn Write,
+    stream: &mut dyn ReportWrite,
     diag: &mut Diag,
 ) -> io::Result<Option<SerialError>> {
     out.truncate(start);
@@ -353,8 +387,10 @@ fn rewrite_and_post(
                 stream.write_all(&out[handed..written])?;
                 handed = written;
             }
-            let _ = stream.flush();
             diag.post_replaced(std::slice::from_ref(&posted.replaced));
+            if diag.closed() {
+                return Err(io::ErrorKind::BrokenPipe.into());
+            }
         }
         out.drain(start..handed);
     }
@@ -443,37 +479,41 @@ fn id_to_string(seq: &MaskedBioseq<'_>, parsed_id: bool) -> Result<Vec<u8>, Writ
     Ok(text)
 }
 
-/// The letters of `CMaskWriterFasta::Print`: lines of 60, the masked letters in lower case
-/// (`N` with `-hard_masking`).
+/// `CMaskWriterFasta::Print` of the definition line `id` and the letters `iupac`: the line and
+/// `endl`, then lines of 60 letters, the masked letters in lower case (`N` with `-hard_masking`),
+/// each line two insertions (the letters, then a line feed of one byte).
 ///
-/// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_fasta.cpp:57-101
-/// `text` is the definition line; it and the lines go to `out` a block of lines at a time
-/// (NCBI writes each line to its buffered stream), so the text of a record is never held
-/// whole. Each line is copied whole and then masked in place ([`mask_line`]): the loop over
-/// the letters touches only the line, not the growing text.
+/// NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_fasta.cpp:46-101
+/// The lines go to `out` a block at a time (each line is one of NCBI's insertions into its
+/// buffered stream, `CutBuffer`), so the text of a record is never held whole. Each line is copied
+/// whole and then masked in place ([`mask_line`]): the loop over the letters touches only the
+/// line, not the growing text.
 fn fasta_letters(
+    id: &[u8],
     iupac: &[u8],
     mask: &[(u32, u32)],
     hard_masking: bool,
-    mut text: Vec<u8>,
-    out: &mut dyn Write,
+    out: &mut dyn ReportWrite,
 ) -> io::Result<()> {
     const LINE: usize = 60;
     const BLOCK: usize = 1 << 16;
+    let mut text = CutBuffer::default();
+    text.insertion(id);
+    text.endl();
     let mut imask = 0;
     let mut pos = 0u64;
     for letters in iupac.chunks(LINE) {
-        let at = text.len();
-        text.extend_from_slice(letters);
-        mask_line(&mut text[at..], pos, mask, &mut imask, hard_masking);
-        text.push(b'\n');
+        let at = text.bytes.len();
+        text.bytes.extend_from_slice(letters);
+        mask_line(&mut text.bytes[at..], pos, mask, &mut imask, hard_masking);
+        text.end_insertion();
+        text.insertion(b"\n");
         pos += letters.len() as u64;
-        if text.len() >= BLOCK {
-            out.write_all(&text)?;
-            text.clear();
+        if text.bytes.len() >= BLOCK {
+            text.write_to(out)?;
         }
     }
-    out.write_all(&text)
+    text.write_to(out)
 }
 
 /// NCBI's walk over the mask for the letters of one line, the first at `pos`: a letter at or

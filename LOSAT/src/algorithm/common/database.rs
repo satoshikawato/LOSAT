@@ -6029,6 +6029,27 @@ impl TaxdbRun {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:218-222 (one
+    // `CTaxDBFileInfo` per process, made at the first `GetTaxNames`)
+    /// A sequential run ([`TaxdbRun::sequential`]) of another `CSeqDB` of the process of this run:
+    /// the taxonomy database is the one this run opened (NCBI's one per process), so its texts of
+    /// opening are not written again; the volumes' caches are the new database's, whose lookups
+    /// write their texts again (NCBI 2.17.0, windowmasker `-mk_counts -infmt blastdb`, line RG
+    /// T8 survey W1: the open error once in three passes, the offset error in each).
+    pub(crate) fn sequential_after(&self) -> Self {
+        let run = TaxdbRun::sequential();
+        if let Some(lazy) = self.lazy.get() {
+            let _ = run.lazy.set(std::sync::Arc::clone(lazy));
+        }
+        if let Some(&texts) = self.texts.get() {
+            let _ = run.texts.set(texts);
+        }
+        if let Some(&found) = self.found.get() {
+            let _ = run.found.set(found);
+        }
+        run
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1462-1466
     // `GetBioseq` makes the sources of a Bioseq it gives (one with definition lines and, with its
     // data, letters) through `x_GetTaxonomy` (cited at `SlotHolds::walk`), whose `GetTaxNames`

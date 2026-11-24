@@ -15,7 +15,7 @@ use std::ffi::OsString;
 use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::{
-    log_file, preparse, ApplicationSettings, ApplicationStart, DiagTarget, Preparsed,
+    log_file, preparse, ApplicationSettings, ApplicationStart, DiagTarget, Preparsed, TextPlace,
 };
 use crate::report::run_files::{OpenFiles, RunFiles};
 use crate::report::serial::encoder::ReplacedChar;
@@ -101,8 +101,12 @@ pub(crate) struct Diag<'a> {
     tool: &'static Tool,
     /// A copy of the texts written since `start_record` (`take_record`).
     record: Option<Vec<u8>>,
-    /// Whether a write to the standard error failed (`Tool::write_failure`).
+    /// Whether a write to the standard error failed (`Tool::write_failure`; NCBI's bad `cerr`,
+    /// which takes no later text and whose tie no longer writes standard output first).
     failed: bool,
+    /// A write of the run's output met a closed pipe where NCBI's process ended before a text
+    /// (`closed`): no later text is written.
+    closed: bool,
 }
 
 impl<'a> Diag<'a> {
@@ -120,6 +124,7 @@ impl<'a> Diag<'a> {
             tool,
             record: None,
             failed: false,
+            closed: false,
         }
     }
 }
@@ -145,6 +150,37 @@ impl Write for Noted<'_> {
 }
 
 impl Diag<'_> {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696 (cited at
+    // `report::ostream::Cerr`: `cerr` is tied to `cout`)
+    /// NCBI's writes of the run's output before a text that goes to `place`: `cerr` makes the
+    /// output's (standard output writes what it holds, a `-out` file the writes that NCBI's buffer
+    /// made so far: `report::ostream::tie_standard_output`), the file of `-logfile` the writes
+    /// that NCBI's buffer made so far (`sync_report`), nowhere nothing. Whether the text is
+    /// written: not where one of those writes met a closed pipe, where NCBI's process ended
+    /// (`closed`), nor after.
+    fn before_text(&mut self, place: TextPlace) -> bool {
+        if self.closed {
+            return false;
+        }
+        let made = match place {
+            TextPlace::StandardError if !self.failed => {
+                crate::report::ostream::tie_standard_output()
+            }
+            TextPlace::LogFile => crate::report::ostream::sync_report(),
+            _ => Ok(()),
+        };
+        if made.is_err_and(|error| files::ends_like_sigpipe(&error)) {
+            self.closed = true;
+        }
+        !self.closed
+    }
+
+    /// Whether a write of the run's output met a closed pipe before a text (`before_text`): the
+    /// run ends at once, exit status 0, no text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+    pub(crate) fn closed(&self) -> bool {
+        self.closed
+    }
+
     /// The standard error stream, which notes a failed write.
     fn noted(&mut self) -> Noted<'_> {
         Noted {
@@ -168,6 +204,9 @@ impl Diag<'_> {
     /// Writes `text`, diagnostic lines that end with their line feeds (an NCBI report made by
     /// `crate::ncbi_exception`: `err_post_x`, `NcbiException::report_default_ex`).
     pub(crate) fn write_text(&mut self, text: &[u8]) {
+        if text.is_empty() || !self.before_text(self.target.place()) {
+            return;
+        }
         if let Some(record) = &mut self.record {
             record.extend_from_slice(text);
         }
@@ -192,6 +231,9 @@ impl Diag<'_> {
     /// Writes `text` to the standard error stream itself (an insertion into `cerr`), not to the
     /// target of `-logfile`: segmasker's report of an exception its `Run` catches.
     pub(crate) fn cerr(&mut self, text: &[u8]) {
+        if !self.before_text(TextPlace::StandardError) {
+            return;
+        }
         let mut stderr = self.noted();
         let _ = stderr.write_all(text);
         let _ = stderr.flush();
@@ -294,6 +336,7 @@ impl Diag<'_> {
             }
             text.push_str(&"=".repeat(72));
             text.push_str("\n\n");
+            self.before_text(TextPlace::StandardError);
             let mut stderr = self.noted();
             let _ = stderr.write_all(text.as_bytes());
             let _ = stderr.flush();
@@ -590,25 +633,34 @@ fn run_app(
     // after the arguments have passed their definitions; LOSAT refuses the settings it refuses
     // in a run first). NCBI BLAST+ 2.17.0 dustmasker: `-in missing.fa -dryrun` and
     // `-infmt blastdb -in missing -dryrun` give exit status 0 and no output.
-    if dryrun {
-        return match tool.dry_run {
+    let status = if dryrun {
+        match tool.dry_run {
             Some(init) => init(
-                &args,
+                &args.with_files(&files),
                 &settings,
                 &mut files::Cin::new(input),
                 out,
                 &mut diag,
             ),
             None => 0,
-        };
+        }
+    } else {
+        body(
+            &args.with_files(&files),
+            &settings,
+            &mut files::Cin::new(input),
+            out,
+            &mut diag,
+        )
+    };
+    // NCBI's arguments close the program's output streams after `Run` and its texts (the `-out`
+    // file's buffer is written then, standard output's at the exit). Where a write of them met a
+    // closed pipe, NCBI's process ended there by SIGPIPE: exit status 0, no message
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+    if files.finish_streams() || diag.closed() {
+        return 0;
     }
-    body(
-        &args.with_files(&files),
-        &settings,
-        &mut files::Cin::new(input),
-        out,
-        &mut diag,
-    )
+    status
 }
 
 #[cfg(test)]

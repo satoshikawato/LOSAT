@@ -6,19 +6,22 @@ fn fasta_letters_follow_ncbis_one_step_mask_iterator() {
     // once per position, so the second interval [3, 3] after [0, 1] is reached at 2 and
     // its letter 3 is masked; a third interval right after is reached only at its own
     // positions.
-    let mut out = Vec::new();
+    let mut out = CutBuffer::default();
     fasta_letters(
+        b">x",
         b"ACGTACGT",
         &[(0, 1), (3, 3), (4, 5)],
         false,
-        Vec::new(),
         &mut out,
     )
     .unwrap();
-    assert_eq!(out, b"acGtacGT\n");
-    let mut out = Vec::new();
-    fasta_letters(&[b'A'; 61], &[(59, 60)], true, Vec::new(), &mut out).unwrap();
-    assert_eq!(&out[..], [&[b'A'; 59][..], b"N\nN\n"].concat());
+    assert_eq!(out.bytes, b">x\nacGtacGT\n");
+    let mut out = CutBuffer::default();
+    fasta_letters(b">x", &[b'A'; 61], &[(59, 60)], true, &mut out).unwrap();
+    assert_eq!(
+        &out.bytes[..],
+        [&b">x\n"[..], &[b'A'; 59][..], b"N\nN\n"].concat()
+    );
 }
 
 /// NCBI's per-letter loop as `fasta_letters` had it before lines were masked in place: the
@@ -100,8 +103,12 @@ fn fasta_letters_masked_by_line_equal_the_per_letter_walk() {
                 mask[0] = (b + 1, a);
             }
             for hard_masking in [false, true] {
-                let mut out = b">x\n".to_vec();
-                fasta_letters(&iupac, &mask, hard_masking, b">x\n".to_vec(), &mut out).unwrap();
+                let mut out = CutBuffer {
+                    bytes: b">x\n".to_vec(),
+                    cuts: Default::default(),
+                };
+                fasta_letters(b">x", &iupac, &mask, hard_masking, &mut out).unwrap();
+                let out = out.bytes;
                 let want = [
                     &b">x\n"[..],
                     &b">x\n"[..],

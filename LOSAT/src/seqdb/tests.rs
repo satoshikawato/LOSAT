@@ -1623,6 +1623,23 @@ fn a_record_holds_a_seqid_where_any_line_has_one() {
         path
     )
     .unwrap());
+    // A line without its mandatory `seqid` member (a title only; a title and then a taxid; no
+    // member) or with a member out of order fails NCBI's read check: the full read reports it,
+    // so the walk counts it as holding one, even after a line whose list is empty.
+    let title_only = [
+        0x30, 0x80, 0x30, 0x80, 0xa0, 0x80, 0x1a, 0x01, b't', 0, 0, 0, 0, 0, 0,
+    ];
+    assert!(holds_a_seqid(&title_only, path).unwrap());
+    assert!(holds_a_seqid(&set(&[&without, &title_only]), path).unwrap());
+    let title_taxid = [
+        0x30, 0x0c, 0x30, 0x0a, 0xa0, 0x03, 0x1a, 0x01, b't', 0xa2, 0x03, 0x02, 0x01, 0x07,
+    ];
+    assert!(holds_a_seqid(&title_taxid, path).unwrap());
+    assert!(holds_a_seqid(&[0x30, 0x02, 0x30, 0x00], path).unwrap());
+    let taxid_then_ids = [
+        0x30, 0x0b, 0x30, 0x09, 0xa2, 0x03, 0x02, 0x01, 0x07, 0xa1, 0x02, 0x30, 0x00,
+    ];
+    assert!(holds_a_seqid(&taxid_then_ids, path).unwrap());
     // An empty record is read as before; one cut short is the reader's error.
     assert!(holds_a_seqid(&[], path).unwrap());
     assert!(holds_a_seqid(&without[..without.len() - 4], path).is_err());

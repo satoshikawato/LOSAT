@@ -8,7 +8,9 @@
 //! of files and databases, `BLASTDB` of the environment and of `.ncbirc`, and words that name a
 //! format, an algorithm, an entry or a range; the names of an alias file's `MASKLIST`, which
 //! blastdbcmd, the searches, makeblastdb's copy and makembindex read; the path of a profile
-//! database that rpsblast and rpstblastn name in their errors). NCBI BLAST+ 2.17.0 keeps such a name's bytes (`std::string`) where it opens, lists and writes it; LOSAT wrote U+FFFD, found
+//! database that rpsblast and rpstblastn name in their errors); and every value of
+//! blastdb_aliastool that names a file, a database or a title (`K10d_*`, line RG item K10d: each
+//! mode, existing and missing names). NCBI BLAST+ 2.17.0 keeps such a name's bytes (`std::string`) where it opens, lists and writes it; LOSAT wrote U+FFFD, found
 //! nothing or failed before. The expected bytes are NCBI's, frozen by `non_utf8_names/make_fixtures.py`
 //! (`non_utf8_names/README.md`) from the cases of `non_utf8_names/cases.tsv`, which this test runs
 //! the same way: `{D}` in them is the case's directory, and the time of makeblastdb's line
@@ -29,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod temp_support;
-use temp_support::{expected_losat_bytes, home_and_worker_log, unique_dir};
+use temp_support::{expected_losat_bytes, home_and_worker_log, undated_seqid_list, unique_dir};
 
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 
@@ -254,9 +256,15 @@ fn starts_with_date_text(data: &[u8]) -> bool {
 /// `data`, the bytes of the file `path` below `d`, with the build's dates as `<DATE>`: the date
 /// field of an index file (`index_date`) and every date text (`starts_with_date_text`); in a
 /// metadata file (`.njs`, `.pjs`) `bytes-total` counts the index files it lists without their
-/// date fields, whose length changes with the date (`make_fixtures.py`'s `undated`).
+/// date fields, whose length changes with the date; in a binary seqid list (`.bsl`) its date
+/// (`temp_support::undated_seqid_list`) (`make_fixtures.py`'s `undated`).
 fn undated(d: &Path, path: &[u8], data: &[u8]) -> Vec<u8> {
     let mut data = data.to_vec();
+    if path.ends_with(b".bsl") {
+        if let Some(undated) = undated_seqid_list(&data) {
+            data = undated;
+        }
+    }
     if INDEX.iter().any(|end| path.ends_with(end.as_bytes())) {
         if let Some((start, end)) = index_date(&data) {
             data = [&data[..start], b"<DATE>", &data[end..]].concat();
@@ -419,6 +427,6 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
             ));
         }
     }
-    assert_eq!(ran, 109, "the cases of cases.tsv");
+    assert_eq!(ran, 159, "the cases of cases.tsv");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }

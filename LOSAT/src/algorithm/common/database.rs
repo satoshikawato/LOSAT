@@ -8817,7 +8817,8 @@ fn prefetch_load_key(db: &SeqDb, subject: &PrefetchSubject<'_>) -> (u64, Option<
 /// subjects whose lookups stop the batch (`ParsedSubject::prefetch_stops`) load nothing; the
 /// others load by their handle's place to the stops ([`LoadOrder::before`]). Unknown besides: a
 /// Seq-align id that another subject has too, and every subject of a batch of more than
-/// [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids (whose stops' order LOSAT does not know either).
+/// [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids or with one whose handle LOSAT does not know
+/// (whose stops' order LOSAT does not know either).
 /// The one owner of NCBI's order of a stopping batch's loads and lookups.
 fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> LoadOrder {
     let (places, many) = load_places(db, subjects);
@@ -8844,9 +8845,9 @@ fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> LoadOrder {
 /// [`LoadBeforeStop`]): its handle's key ([`prefetch_load_key`]), whether its lookup stops the
 /// batch (`ParsedSubject::prefetch_stops`), and why its place is not known: a Seq-align id that
 /// another subject has too, and every subject of a batch of more than [`PREFETCH_ONE_MAP_IDS`]
-/// distinct Seq-align ids (the second value). The one owner of that map for the stops
-/// ([`load_before_stop`]) and for the place of NCBI's warning of a UTF8String header among the
-/// loads ([`scope_utf8_prefetch_loads`]).
+/// distinct Seq-align ids or with one whose handle LOSAT does not know (the second value). The
+/// one owner of that map for the stops ([`load_before_stop`]) and for the place of NCBI's warning
+/// of a UTF8String header among the loads ([`scope_utf8_prefetch_loads`]).
 fn load_places(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> (Vec<LoadPlace>, bool) {
     let stops = |subject: &PrefetchSubject<'_>| {
         subject
@@ -8862,18 +8863,12 @@ fn load_places(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> (Vec<LoadPlace>,
     let mut shared = std::collections::HashSet::new();
     let mut ids = 0;
     for (subject, (_, handle)) in subjects.iter().zip(&keys) {
-        // An id without a handle that LOSAT knows (`prefetch_load_key`) counts once for each of
-        // its Seq-aligns: NCBI makes a new handle for each Seq-align of a Textseq-id with neither
-        // accession nor name (review 1 of line NP item O4b2-3, F6; for a giim id, an upper bound).
-        // Such a handle's key is unpacked: its place among the unpacked handles is their
-        // addresses' order ([`LoadPlace::order_unknown`], [`LoadOrder::before`]).
-        let Some(handle) = handle else {
-            ids += 1;
-            continue;
-        };
         if !ordinals.insert(subject.ordinal) {
             continue;
         }
+        let Some(handle) = handle else {
+            continue;
+        };
         match handles.entry(handle) {
             std::collections::hash_map::Entry::Vacant(entry) => {
                 entry.insert(subject.ordinal);
@@ -8885,7 +8880,7 @@ fn load_places(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> (Vec<LoadPlace>,
             }
         }
     }
-    let many = ids > PREFETCH_ONE_MAP_IDS;
+    let many = map_unknown(&keys, ids);
     let places = subjects
         .iter()
         .zip(&keys)
@@ -8899,17 +8894,38 @@ fn load_places(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> (Vec<LoadPlace>,
             }),
             many,
             stops: stops(subject),
-            unknown: if many {
-                Some("the batch has more than 200 Seq-align ids, which NCBI's prefetch sorts by CSortableSeq_id and loads in pieces of 100")
-            } else if shared.contains(&subject.ordinal) {
-                Some("another subject of the batch has the same Seq-align id")
-            } else {
-                None
-            },
+            unknown: many.or_else(|| {
+                shared
+                    .contains(&subject.ordinal)
+                    .then_some("another subject of the batch has the same Seq-align id")
+            }),
         })
         .collect::<Vec<_>>();
-    (places, many)
+    (places, many.is_some())
 }
+
+/// Why LOSAT does not know NCBI's map of the Seq-id handles of a batch whose Seq-align ids have
+/// the keys `keys` ([`prefetch_load_key`]), `ids` of them distinct handles that LOSAT knows: more
+/// than [`PREFETCH_ONE_MAP_IDS`] ids, which NCBI's prefetch sorts otherwise and loads in pieces;
+/// or an id without such a handle, as NCBI makes a new handle for each Seq-align of a Textseq-id
+/// with neither accession nor name (one for each HSP of a gapped search) and LOSAT does not know a
+/// giim id's, so the number of handles in the map is not known (review 1 of line NP item O4b2-3,
+/// F6; re-review of item O4b2-7, R2-H1).
+fn map_unknown(keys: &[(u64, Option<Vec<u8>>)], ids: usize) -> Option<&'static str> {
+    if keys.iter().any(|(_, handle)| handle.is_none()) {
+        Some(UNNAMED_MAP)
+    } else {
+        (ids > PREFETCH_ONE_MAP_IDS).then_some(MANY_IDS)
+    }
+}
+
+/// Why NCBI's order of a batch's loads is not known where it has more than
+/// [`PREFETCH_ONE_MAP_IDS`] Seq-align ids ([`load_places`]).
+const MANY_IDS: &str = "the batch has more than 200 Seq-align ids, which NCBI's prefetch sorts by CSortableSeq_id and loads in pieces of 100";
+
+/// Why NCBI's order of a batch's loads is not known where a Seq-align id has no Seq-id handle
+/// that LOSAT knows ([`load_places`]).
+const UNNAMED_MAP: &str = "a Seq-align id of the batch has no Seq-id handle that LOSAT knows (NCBI makes one for each Seq-align of a text id with neither accession nor name; a giim id), so the number of ids in NCBI's map, which decides whether its prefetch sorts them by CSortableSeq_id in pieces of 100, is not known";
 
 /// NCBI's order of the loads and lookups of a stopping batch's subjects ([`load_before_stop`]).
 struct LoadOrder {
@@ -8920,7 +8936,7 @@ struct LoadOrder {
     /// ([`LoadOrder::stop_key`]), a group of one key in the batch's order (NCBI orders a group by
     /// the addresses of the handles' infos).
     stops: Vec<usize>,
-    /// The batch has more than [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids.
+    /// LOSAT does not know NCBI's map of the batch ([`LoadPlace::many`]).
     many: bool,
 }
 
@@ -8937,19 +8953,19 @@ struct LoadPlace {
     /// Its handle's identity (a hash of [`prefetch_load_key`]'s; `None` where no pure function
     /// knows it): two subjects of one handle are one load of NCBI's map.
     handle: Option<u64>,
-    /// The batch has more than [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids.
-    many: bool,
+    /// Why LOSAT knows the order of none of the batch's loads ([`MANY_IDS`], [`UNNAMED_MAP`]).
+    many: Option<&'static str>,
 }
 
 impl LoadPlace {
     /// Why NCBI's order of this load and the load `other` is not known, for the place of NCBI's
     /// warning of a UTF8String header among a prefetch's loads ([`scope_utf8_prefetch_loads`]):
-    /// a batch of more than [`PREFETCH_ONE_MAP_IDS`] ids, or two handles of one key (one packed
+    /// a batch whose map LOSAT does not know (`many`), or two handles of one key (one packed
     /// number, or neither packed), which NCBI's map orders by the address of their info
     /// ([`ADDRESS_ORDER`]); `None` where the keys order them or they are one handle (one load).
     fn order_unknown(self, other: LoadPlace) -> Option<&'static str> {
-        if self.many {
-            return Some("the batch has more than 200 Seq-align ids, which NCBI's prefetch sorts by CSortableSeq_id and loads in pieces of 100");
+        if let Some(why) = self.many {
+            return Some(why);
         }
         if self.order != other.order || (self.handle.is_some() && self.handle == other.handle) {
             return None;

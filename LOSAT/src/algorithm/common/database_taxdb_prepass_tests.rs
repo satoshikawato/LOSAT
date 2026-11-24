@@ -3424,3 +3424,17 @@ fn a_header_record_cut_before_its_elements_ends_the_search_with_exit_status_0() 
     assert_eq!(native(&[0x30, 0x80]), (255, false));
     assert_eq!(native(&[0x30, 0x80, 0x30, 0x80, 0xbf]), (255, false));
 }
+
+/// `map_unknown`: NCBI's map of a batch's Seq-id handles is unknown with more than 200 distinct
+/// ids, and with any id whose handle LOSAT does not know, whatever the count (NCBI makes one
+/// handle for each of its Seq-aligns; re-review of item O4b2-7, R2-H1).
+#[test]
+fn the_map_of_a_batch_with_an_unknown_handle_is_unknown() {
+    let named = |n: u64| (n, Some(n.to_le_bytes().to_vec()));
+    let keys: Vec<_> = (0..200).map(named).collect();
+    assert_eq!(map_unknown(&keys, 200), None);
+    let keys: Vec<_> = (0..201).map(named).collect();
+    assert_eq!(map_unknown(&keys, 201), Some(MANY_IDS));
+    let keys = [named(1), (u64::MAX, None)];
+    assert_eq!(map_unknown(&keys, 1), Some(UNNAMED_MAP));
+}

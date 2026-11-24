@@ -1,0 +1,9 @@
+# TBLASTN 2.17.0+
+# Query: qa
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/xsb_s.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+qa	pa	100.000	31	0	0	1	31	1	93	1.79e-22	64.7
+qa	pa	41.667	12	6	1	11	22	81	49	0.22	11.9
+qa	pa	75.000	4	1	0	5	8	20	9	1.4	10.0
+# BLAST processed 1 queries

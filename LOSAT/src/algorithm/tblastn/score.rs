@@ -493,7 +493,9 @@ impl<'a> TbnScore for PssmScore<'a> {
     // the PSSM's '-' column, then the next frame's letters, and past NCBI's buffer NULLBs, exception
     // 3). A window past the PSSM's last row reads past NCBI's matrix (`data` has one row per query
     // position, no sentinel row; exception 3 reads letters past a sequence, not rows past a matrix):
-    // no result to port, so the search stops (PD-LOSAT-NCBI-DEFECTS, rule 3).
+    // no result to port, so the search stops (PD-LOSAT-NCBI-DEFECTS, rule 3), after NCBI's prolog
+    // (`blastinput::app::ErrorAfterBatchReports`, as every refusal of a step where NCBI's search
+    // crashes).
     fn gapped_start_int4(
         self,
         _query_window: &[u8; GAPPED_START_WINDOW],
@@ -503,10 +505,7 @@ impl<'a> TbnScore for PssmScore<'a> {
         _matrix: ScoringMatrix,
     ) -> Result<usize> {
         if q_start + GAPPED_START_WINDOW > self.0.rows.len() {
-            anyhow::bail!(
-                "TBLASTN -in_pssm with -window_size 0: a one-hit alignment of negative length at query position {} would read past the PSSM (NCBI BLAST+ reads past its matrix there), which LOSAT does not support",
-                q_start + 1
-            );
+            return Err(x_window_past_pssm(q_start));
         }
         Ok(pssm_get_start_for_gapped_alignment(
             self.0,
@@ -701,6 +700,18 @@ impl<'a> TbnScore for PssmScore<'a> {
     }
 }
 
+/// The refusal of `PssmScore::gapped_start_int4`'s window past the PSSM's last row, at the query
+/// position `q_start` (from 0): after NCBI's prolog, as every refusal of a step where NCBI's search
+/// crashes (`blastinput::app::ErrorAfterBatchReports`).
+#[cold]
+#[inline(never)]
+fn x_window_past_pssm(q_start: usize) -> anyhow::Error {
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+        "TBLASTN -in_pssm with -window_size 0: a one-hit alignment of negative length at query position {} would read past the PSSM (NCBI BLAST+ reads past its matrix there), which LOSAT does not support",
+        q_start + 1
+    )))
+}
+
 /// No NCBI counterpart: a type of its own for the PSSM's rows in TBLASTN's one-hit word finder
 /// (`PssmScore::one_hit`), so that `pssm_extend_one_hit` is compiled for it apart from BLASTP's PSSM
 /// stage, which calls it for `QueryPssm` and keeps its code; the rows read are `QueryPssm`'s.
@@ -733,7 +744,7 @@ impl XUngapWalks for XPssmWalks<'_> {
         self,
         _query: &[u8],
         subject: &[u8],
-        s_left_off: usize,
+        s_left_off: i32,
         s_right_off: usize,
         q_right_off: usize,
         dropoff: i32,
@@ -742,7 +753,7 @@ impl XUngapWalks for XPssmWalks<'_> {
         Some(Some(pssm_extend_two_hit(
             self.0,
             subject,
-            s_left_off as i32,
+            s_left_off,
             s_right_off as i32,
             q_right_off as i32,
             dropoff,
@@ -777,7 +788,7 @@ impl XUngapWalks for std::convert::Infallible {
         self,
         _query: &[u8],
         _subject: &[u8],
-        _s_left_off: usize,
+        _s_left_off: i32,
         _s_right_off: usize,
         _q_right_off: usize,
         _dropoff: i32,

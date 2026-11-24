@@ -70,6 +70,23 @@ impl FastaFormatter {
         let (set, shown, length) = (&bioseq.set, bioseq.shown(), bioseq.length);
         let target_seqid = bioseq.target.as_ref();
         let range = config.range.clipped(length);
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:462-489
+        // The masks of the algorithm are read first; a Seq-loc of the masks (where the sequence has
+        // some) or of the range takes the Bioseq's best id, which a front line without Seq-ids
+        // leaves null: NCBI's dereference throws before any byte of the sequence (line RG
+        // D1c-1c-b; `-strand minus` alone reads no id).
+        let masks = if config.filt_algo != -1 {
+            Some(source.masks(oid, config.filt_algo)?)
+        } else {
+            None
+        };
+        let no_ids = shown
+            .deflines
+            .first()
+            .is_some_and(|line| line.ids.is_empty());
+        if no_ids && (range.is_some() || masks.as_ref().is_some_and(|masks| !masks.is_empty())) {
+            return Err(super::retrieve::null_pointer());
+        }
         let mut text = std::mem::take(&mut self.text);
         text.clear();
         if self.long_seqids {
@@ -88,8 +105,8 @@ impl FastaFormatter {
         // the whole length of a protein (NCBI's whole-sequence mapper keeps the first third
         // of it), and a sequence without masks of the algorithm stays in upper case (NCBI
         // keeps the mask of the batch line before when the Seq-id is the same).
-        if config.filt_algo != -1 {
-            apply_masks(&mut letters, &source.masks(oid, config.filt_algo)?, range);
+        if let Some(masks) = &masks {
+            apply_masks(&mut letters, masks, range);
         }
         if config.strand_minus {
             reverse_complement(&mut letters);
@@ -278,7 +295,12 @@ fn short_header(
     out: &mut Vec<u8>,
 ) -> Result<(), Stop> {
     let ids = &set.deflines[0].ids;
-    let first = &ids[0];
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:959-985
+    // A front line without Seq-ids gives no first id: NCBI writes no header line, the letters
+    // follow (line RG D1c-1c-b).
+    let Some(first) = ids.first() else {
+        return Ok(());
+    };
     let range_text = range.map(|(from, to)| {
         if config.strand_minus {
             format!(":c{}-{} ", to + 1, from + 1)

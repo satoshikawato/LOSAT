@@ -219,13 +219,27 @@ pub(crate) fn kind_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
 pub(crate) fn version_keys(id: &ParsedSeqId) -> Option<(u64, u64)> {
     let text = id.textseq()?;
     let accession = text.accession.as_ref()?.to_ascii_uppercase();
-    let key = |versioned: bool| {
-        let mut hasher = DefaultHasher::new();
-        (b"version kind", versioned, &accession).hash(&mut hasher);
-        hasher.finish()
-    };
     let versioned = text.version.is_some();
-    Some((key(versioned), key(!versioned)))
+    Some((
+        version_kind_key(&accession, versioned),
+        version_kind_key(&accession, !versioned),
+    ))
+}
+
+/// One key of `version_keys` of a text Seq-id with an accession: of its own kind of version
+/// (`own`), or of the other kind.
+pub(crate) fn version_key(id: &ParsedSeqId, own: bool) -> Option<u64> {
+    let text = id.textseq()?;
+    let accession = text.accession.as_ref()?.to_ascii_uppercase();
+    Some(version_kind_key(&accession, text.version.is_some() == own))
+}
+
+/// The key of the accession `accession` (in upper case) of a text Seq-id with or without a version
+/// (`version_keys`).
+fn version_kind_key(accession: &[u8], versioned: bool) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    (b"version kind", versioned, accession).hash(&mut hasher);
+    hasher.finish()
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/Textseq_id.cpp:141-153

@@ -496,24 +496,19 @@ impl QueryScope {
     /// with the other kind of `version_keys`, asked only where the scope has ids of that form; for
     /// a PDB Seq-id, any of another form. A scope keeps nothing more per id for it.
     fn add_version_form(&mut self, id: &crate::seqid::ParsedSeqId) -> bool {
-        use crate::seqid::id_scope::{MATCH_FORMS_ACCESSION, MATCH_FORMS_PDB};
+        use crate::seqid::id_scope::{version_key, MATCH_FORMS_ACCESSION, MATCH_FORMS_PDB};
         let form = crate::seqid::id_scope::match_form(id);
-        let pdb = form & MATCH_FORMS_PDB != 0;
-        let kinds = if pdb {
-            MATCH_FORMS_PDB
-        } else {
-            MATCH_FORMS_ACCESSION
-        };
-        let other_forms = self.forms & kinds & !form != 0;
-        self.forms |= form;
-        match crate::seqid::id_scope::version_keys(id) {
-            Some((own, other)) => {
-                let other_form = other_forms && self.keys.contains(&other);
-                self.keys.insert(own);
-                other_form
-            }
-            None => pdb && other_forms,
+        if form & MATCH_FORMS_ACCESSION == 0 {
+            // A PDB Seq-id, or one without an accession: no `version_keys`.
+            let other_form = form != 0 && self.forms & MATCH_FORMS_PDB & !form != 0;
+            self.forms |= form;
+            return other_form;
         }
+        let other_form = self.forms & MATCH_FORMS_ACCESSION & !form != 0
+            && version_key(id, false).is_some_and(|other| self.keys.contains(&other));
+        self.forms |= form;
+        self.keys.extend(version_key(id, true));
+        other_form
     }
 
     /// Adds the keys and the forms of the queries of `other`.

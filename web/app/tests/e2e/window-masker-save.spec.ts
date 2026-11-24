@@ -176,12 +176,11 @@ function runNativeWindowMasker(
   };
 }
 
-test('Save, Replace (over download and made copy, Escape cancels to Save), CountsLine after reload, saved picker, and Delete', async ({
+test('Save, Replace (over download and made copy, Escape cancels to Save), Use in BLASTN, and Delete', async ({
   page,
 }) => {
   const site = await stubCountsSite(page);
   await openSearch(page);
-  const backend = await page.getByTestId('storage-status').getAttribute('data-backend');
 
   // 1) Download taxid 562 from stubbed FTP first so Replace over a download is tested.
   await program(page, 'blastn');
@@ -260,37 +259,51 @@ test('Save, Replace (over download and made copy, Escape cancels to Save), Count
   await expect(page.getByTestId('counts-download')).toHaveCount(0);
   await expect(page.getByTestId('counts-delete')).toBeVisible();
 
-  // 5) After reload (OPFS), CountsLine says "Made in this browser" and -ustat / -in selects list it.
-  if (backend === 'opfs') {
-    await reload(page);
-    await described(page);
-    await program(page, 'blastn');
-    await openParameters(page);
-    await page.getByTestId(`param-${FLAG}`).check();
-    await page.getByTestId(`param-${FLAG}-taxid`).fill(String(TAXID));
-    await expect(page.getByTestId('counts-note')).toHaveText(/^Made in this browser \(\d{4}-\d{2}-\d{2}, .+\)$/);
-    await expect(page.getByTestId('counts-download')).toHaveCount(0);
-    expect(site.away).toEqual([COUNTS_URL]);
-
-    await showWmTab(page);
-    await page.getByTestId('wm-stage-mask').check();
-    const ustatOption = page.locator('[data-testid="wm-ustat-select"] option[value="saved:562"]');
-    await expect(ustatOption).toHaveCount(1);
-    await expect(ustatOption).toContainText('windowmasker/562/wmasker.obinary (made in this browser,');
-
-    await page.getByTestId('wm-stage-convert').check();
-    const convertOption = page.locator('[data-testid="wm-convert-select"] option[value="saved:562"]');
-    await expect(convertOption).toHaveCount(1);
-    await expect(convertOption).toContainText('windowmasker/562/wmasker.obinary (made in this browser,');
-
-    await page.getByTestId('tab-search').click();
-  }
-
   // 6) Delete removes the made copy and brings Download back.
   await page.getByTestId('counts-delete').click();
   await expect(page.getByTestId('counts-note')).toHaveText('Downloads wmasker.obinary for 562 from ftp.ncbi.nlm.nih.gov');
   await expect(page.getByTestId('counts-download')).toBeVisible();
   expect(site.away).toEqual([COUNTS_URL]);
+});
+
+test('a made copy saved for 562 is read after a reload: CountsLine says Made in this browser, and the -ustat and -in selects list it', async ({
+  page,
+}) => {
+  const site = await stubCountsSite(page);
+  await openSearch(page);
+  const backend = await page.getByTestId('storage-status').getAttribute('data-backend');
+  test.skip(backend !== 'opfs', 'a copy kept across a reload needs OPFS');
+
+  await showWmTab(page);
+  await page.getByTestId('wm-fasta-input').fill('>g1\nACGTTGCAAAGCTTAGGCTAACGTTGCAAAGCTTAGGCTAACGTTGCAAAGCTTAGGCTA\n');
+  await submitWm(page);
+  await waitStatus(page, 1, 'completed', 120_000);
+  await pickRun(page, 1);
+  await page.getByTestId('tool-tab-file-0').click();
+  await page.getByTestId('tool-save-taxid-input').fill(String(TAXID));
+  await page.getByTestId('tool-save-taxid-button').click();
+  await expect(page.getByTestId('tool-save-status')).toHaveText('Saved for taxonomy ID 562.');
+
+  await reload(page);
+  await described(page);
+  await program(page, 'blastn');
+  await openParameters(page);
+  await page.getByTestId(`param-${FLAG}`).check();
+  await page.getByTestId(`param-${FLAG}-taxid`).fill(String(TAXID));
+  await expect(page.getByTestId('counts-note')).toHaveText(/^Made in this browser \(\d{4}-\d{2}-\d{2}, .+\)$/);
+  await expect(page.getByTestId('counts-download')).toHaveCount(0);
+
+  await showWmTab(page);
+  await page.getByTestId('wm-stage-mask').check();
+  const ustatOption = page.locator('[data-testid="wm-ustat-select"] option[value="saved:562"]');
+  await expect(ustatOption).toHaveCount(1);
+  await expect(ustatOption).toContainText('windowmasker/562/wmasker.obinary (made in this browser,');
+
+  await page.getByTestId('wm-stage-convert').check();
+  const convertOption = page.locator('[data-testid="wm-convert-select"] option[value="saved:562"]');
+  await expect(convertOption).toHaveCount(1);
+  await expect(convertOption).toContainText('windowmasker/562/wmasker.obinary (made in this browser,');
+  expect(site.away).toEqual([]);
 });
 
 test('save is refused while another tab downloads the same ID, and cross-tab changes sync across pages', async ({
@@ -386,7 +399,7 @@ test.describe('real reactors and native CLI parity', () => {
   test.skip(!BUILD_HAS_ENGINE, 'needs the engine build (LOSAT_WEB_REACTORS)');
   test.skip(NATIVE === undefined, NO_NATIVE_REASON);
 
-  test('made counts (ascii, binary, obinary) saved for 562 match native BLASTN -window_masker_taxid before and after reload, and -ustat from saved copy matches native', async ({
+  test('made counts (ascii, binary, obinary) saved for 562 match native BLASTN -window_masker_taxid', async ({
     page,
   }, testInfo) => {
     const away = trackExternalNet(page);
@@ -405,12 +418,9 @@ test.describe('real reactors and native CLI parity', () => {
     writeFileSync(join(nativeDir, 'subject.fa'), subjectBytes);
 
     await openWindowMasker(page);
-    const backend = await page.getByTestId('storage-status').getAttribute('data-backend');
     await addWmFastaFile(page, 'genome.fa', genomeBytes);
 
     let runNo = 0;
-    let lastCountsBytes!: Buffer;
-    let lastBlastnExpect!: ReturnType<typeof nativeExpectation>;
 
     for (const fmt of ['ascii', 'binary', 'obinary'] as const) {
       await showWmTab(page);
@@ -424,7 +434,6 @@ test.describe('real reactors and native CLI parity', () => {
       await pickRun(page, mkRun);
       await page.getByTestId('tool-tab-file-0').click();
       const countsBytes = await downloadToolActiveTab(page);
-      lastCountsBytes = countsBytes;
 
       // Check counts bytes match native windowmasker -mk_counts -sformat <fmt>.
       const nativeMk = runNativeWindowMasker(
@@ -453,7 +462,6 @@ test.describe('real reactors and native CLI parity', () => {
         nativeDir,
         { WINDOW_MASKER_PATH: join(nativeDir, 'wm') },
       );
-      lastBlastnExpect = nativeBn;
 
       // Use in BLASTN -> switches to -window_masker_taxid 562 -> run BLASTN -> compare outfmt 0, 6, 7 & stderr.
       await page.getByTestId('tool-use-in-blastn').click();
@@ -491,53 +499,89 @@ test.describe('real reactors and native CLI parity', () => {
       await expect(page.getByTestId('run-window-masker-url')).toHaveCount(0);
     }
 
-    // After reload (OPFS): CountsLine says "Made in this browser", BLASTN runs identically with 0 requests,
-    // and WindowMasker Mask (-ustat from saved copy) equals native `losat windowmasker -ustat`.
-    if (backend === 'opfs') {
-      await reload(page);
-      await described(page);
-      await program(page, 'blastn');
-      await openParameters(page);
-      await page.getByTestId(`param-${FLAG}`).check();
-      await page.getByTestId(`param-${FLAG}-taxid`).fill(String(TAXID));
-      await expect(page.getByTestId('counts-note')).toHaveText(/^Made in this browser \(\d{4}-\d{2}-\d{2}, .+\)$/);
-      await openFiles(page, 'query', [{ name: 'query.fa', text: queryBytes }]);
-      await openFiles(page, 'subject', [{ name: 'subject.fa', text: subjectBytes }]);
-      await task(page, 'blastn');
-      await page.getByTestId('threads').selectOption('1');
-      await submit(page);
-      await waitStatus(page, 1, 'completed', 180_000);
-      const afterReload = await storedOutputs(page, 1);
-      expect({ 0: sha256(afterReload.outputs[0]), 6: sha256(afterReload.outputs[6]), 7: sha256(afterReload.outputs[7]) }).toEqual(
-        lastBlastnExpect.sha256,
-      );
-      expect(sha256(afterReload.warnings)).toBe(lastBlastnExpect.stderrSha256);
+    expect(away, 'zero external network requests').toEqual([]);
+  });
 
-      // Mask using saved taxonomy-ID copy in WindowMasker -ustat picker.
-      await showWmTab(page);
-      await page.getByTestId('wm-stage-mask').check();
-      await page.getByTestId('wm-ustat-select').selectOption(`saved:${TAXID}`);
-      await expect(page.getByTestId('wm-ustat-chosen')).toContainText(`windowmasker/${TAXID}/wmasker.obinary`);
-      await addWmFastaFile(page, 'query.fa', queryBytes);
-      await submitWm(page);
-      await waitStatus(page, 2, 'completed', 180_000);
-      await pickRun(page, 2);
-      await page.getByTestId('results-view-outputs').click();
-      await page.getByTestId('tool-tab-stdout').click();
-      await expect(page.getByTestId('tool-output-download')).toContainText('Download output (');
-      const maskStdout = await downloadToolActiveTab(page);
+  test('after a reload, the copy saved for 562 reads as Made in this browser, BLASTN gives native bytes with no request, and -ustat from it equals native', async ({
+    page,
+  }, testInfo) => {
+    const away = trackExternalNet(page);
+    const nativeDir = testInfo.outputPath('native-reload');
+    const wmDir = join(nativeDir, 'wm', String(TAXID));
+    mkdirSync(wmDir, { recursive: true });
+    const genomeBytes = makeSyntheticGenome(40 * 1024);
+    const seqLines = genomeBytes.toString('utf8').split('\n').slice(1).filter((l) => l.length > 0);
+    const queryBytes = Buffer.from(`>q1\n${seqLines.slice(0, 12).join('\n')}\n`);
+    const subjectBytes = Buffer.from(`>s1\n${seqLines.slice(0, 60).join('\n')}\n`);
+    writeFileSync(join(nativeDir, 'query.fa'), queryBytes);
+    writeFileSync(join(nativeDir, 'subject.fa'), subjectBytes);
 
-      const ustatDir = join(nativeDir, 'ustat-check');
-      mkdirSync(join(ustatDir, 'windowmasker', String(TAXID)), { recursive: true });
-      writeFileSync(join(ustatDir, 'windowmasker', String(TAXID), 'wmasker.obinary'), lastCountsBytes);
-      writeFileSync(join(ustatDir, 'query.fa'), queryBytes);
-      const nativeMask = runNativeWindowMasker(
-        ['-ustat', `windowmasker/${TAXID}/wmasker.obinary`, '-in', 'query.fa'],
-        ustatDir,
-      );
-      expect(nativeMask.status).toBe(0);
-      expect(sha256(maskStdout), '-ustat from saved copy stdout').toBe(sha256(nativeMask.stdout));
-    }
+    await openWindowMasker(page);
+    const backend = await page.getByTestId('storage-status').getAttribute('data-backend');
+    test.skip(backend !== 'opfs', 'a copy kept across a reload needs OPFS');
+
+    // Make obinary counts and save them for 562.
+    await addWmFastaFile(page, 'genome.fa', genomeBytes);
+    await page.getByTestId('wm-param-sformat').selectOption('obinary');
+    await submitWm(page);
+    await waitStatus(page, 1, 'completed', 180_000);
+    await pickRun(page, 1);
+    await page.getByTestId('tool-tab-file-0').click();
+    const countsBytes = await downloadToolActiveTab(page);
+    await page.getByTestId('tool-save-taxid-input').fill(String(TAXID));
+    await page.getByTestId('tool-save-taxid-button').click();
+    await expect(page.getByTestId('tool-save-status')).toHaveText(`Saved for taxonomy ID ${TAXID}.`);
+    writeFileSync(join(wmDir, 'wmasker.obinary'), countsBytes);
+    const nativeBn = nativeExpectation(
+      ['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-task', 'blastn', '-window_masker_taxid', String(TAXID)],
+      nativeDir,
+      { WINDOW_MASKER_PATH: join(nativeDir, 'wm') },
+    );
+
+    // After a reload, with no request.
+    await reload(page);
+    await described(page);
+    await program(page, 'blastn');
+    await openParameters(page);
+    await page.getByTestId(`param-${FLAG}`).check();
+    await page.getByTestId(`param-${FLAG}-taxid`).fill(String(TAXID));
+    await expect(page.getByTestId('counts-note')).toHaveText(/^Made in this browser \(\d{4}-\d{2}-\d{2}, .+\)$/);
+    await openFiles(page, 'query', [{ name: 'query.fa', text: queryBytes }]);
+    await openFiles(page, 'subject', [{ name: 'subject.fa', text: subjectBytes }]);
+    await task(page, 'blastn');
+    await page.getByTestId('threads').selectOption('1');
+    await submit(page);
+    await waitStatus(page, 1, 'completed', 180_000);
+    const afterReload = await storedOutputs(page, 1);
+    expect({ 0: sha256(afterReload.outputs[0]), 6: sha256(afterReload.outputs[6]), 7: sha256(afterReload.outputs[7]) }).toEqual(
+      nativeBn.sha256,
+    );
+    expect(sha256(afterReload.warnings)).toBe(nativeBn.stderrSha256);
+
+    // Mask using saved taxonomy-ID copy in WindowMasker -ustat picker.
+    await showWmTab(page);
+    await page.getByTestId('wm-stage-mask').check();
+    await page.getByTestId('wm-ustat-select').selectOption(`saved:${TAXID}`);
+    await expect(page.getByTestId('wm-ustat-chosen')).toContainText(`windowmasker/${TAXID}/wmasker.obinary`);
+    await addWmFastaFile(page, 'query.fa', queryBytes);
+    await submitWm(page);
+    await waitStatus(page, 2, 'completed', 180_000);
+    await pickRun(page, 2);
+    await page.getByTestId('results-view-outputs').click();
+    await page.getByTestId('tool-tab-stdout').click();
+    await expect(page.getByTestId('tool-output-download')).toContainText('Download output (');
+    const maskStdout = await downloadToolActiveTab(page);
+
+    const ustatDir = join(nativeDir, 'ustat-check');
+    mkdirSync(join(ustatDir, 'windowmasker', String(TAXID)), { recursive: true });
+    writeFileSync(join(ustatDir, 'windowmasker', String(TAXID), 'wmasker.obinary'), countsBytes);
+    writeFileSync(join(ustatDir, 'query.fa'), queryBytes);
+    const nativeMask = runNativeWindowMasker(
+      ['-ustat', `windowmasker/${TAXID}/wmasker.obinary`, '-in', 'query.fa'],
+      ustatDir,
+    );
+    expect(nativeMask.status).toBe(0);
+    expect(sha256(maskStdout), '-ustat from saved copy stdout').toBe(sha256(nativeMask.stdout));
 
     expect(away, 'zero external network requests').toEqual([]);
   });
@@ -650,6 +694,127 @@ test.describe('real reactors and native CLI parity', () => {
     await page.getByTestId('tool-tab-file-0').click();
     const runningOut = await downloadToolActiveTab(page);
     expect(sha256(runningOut), 'running removed .gz output sha256').toBe(sha256(nativeMed.file!));
+
+    expect(away, 'zero external network requests').toEqual([]);
+  });
+
+  test('Replace and Delete are refused while a -window_masker_taxid search is queued or running, and the search completes with native bytes', async ({
+    page,
+  }, testInfo) => {
+    const away = trackExternalNet(page);
+    const nativeDir = testInfo.outputPath('native-lock');
+    const wmDir = join(nativeDir, 'wm', String(TAXID));
+    mkdirSync(wmDir, { recursive: true });
+
+    const genomeBytes = makeSyntheticGenome(40 * 1024);
+    const genomeText = genomeBytes.toString('utf8');
+    const seqLines = genomeText.split('\n').slice(1).filter((l) => l.length > 0);
+    const queryBytes = Buffer.from(`>q1\n${seqLines.slice(0, 12).join('\n')}\n`);
+    const subjectBytes = Buffer.from(`>s1\n${seqLines.slice(0, 60).join('\n')}\n`);
+    writeFileSync(join(nativeDir, 'genome.fa'), genomeBytes);
+    writeFileSync(join(nativeDir, 'query.fa'), queryBytes);
+    writeFileSync(join(nativeDir, 'subject.fa'), subjectBytes);
+
+    await openWindowMasker(page);
+    const backend = await page.getByTestId('storage-status').getAttribute('data-backend');
+    test.skip(backend !== 'opfs', 'Web Lock protection of OPFS saved counts requires OPFS');
+
+    // Run 1: build obinary counts for genome.fa and save for taxonomy ID 562.
+    await addWmFastaFile(page, 'genome.fa', genomeBytes);
+    await page.getByTestId('wm-param-sformat').selectOption('obinary');
+    await submitWm(page);
+    await waitStatus(page, 1, 'completed', 180_000);
+    await pickRun(page, 1);
+    await page.getByTestId('tool-tab-file-0').click();
+    const countsBytes = await downloadToolActiveTab(page);
+    await page.getByTestId('tool-save-taxid-input').fill(String(TAXID));
+    await page.getByTestId('tool-save-taxid-button').click();
+    await expect(page.getByTestId('tool-save-status')).toHaveText(`Saved for taxonomy ID ${TAXID}.`);
+
+    // Native expectation for BLASTN -window_masker_taxid 562 using run 1's counts.
+    writeFileSync(join(wmDir, 'wmasker.obinary'), countsBytes);
+    const nativeBn = nativeExpectation(
+      ['blastn', '-query', 'query.fa', '-subject', 'subject.fa', '-task', 'blastn', '-window_masker_taxid', String(TAXID)],
+      nativeDir,
+      { WINDOW_MASKER_PATH: join(nativeDir, 'wm') },
+    );
+
+    // Run 2: make a second counts file so we can attempt Replace on 562.
+    await showWmTab(page);
+    await clearWmFasta(page);
+    await page.getByTestId('wm-param-sformat').selectOption('ascii');
+    await page.getByTestId('wm-fasta-input').fill('>other\nACGTACGTACGTACGTACGT\n');
+    await submitWm(page);
+    await waitStatus(page, 2, 'completed', 180_000);
+
+    // Run 3: start a long WindowMasker run to keep the Engine worker busy.
+    const longPath = testInfo.outputPath('long-lock-blocker.fa');
+    writeFileSync(longPath, makeSyntheticGenome(4 * MIB));
+    await showWmTab(page);
+    await clearWmFasta(page);
+    await openWmOptions(page);
+    await page.getByTestId('wm-param-unit').fill('14');
+    await page.getByTestId('wm-param-mem').fill('1');
+    await page.getByTestId('wm-fasta-files').setInputFiles(longPath);
+    await expect(page.locator('[data-testid="wm-fasta-list"] > li').first()).toHaveAttribute('data-status', 'ready', {
+      timeout: 60_000,
+    });
+    await submitWm(page);
+    await expect(page.getByTestId('run-3-option')).toHaveAttribute('data-status', 'running', { timeout: 60_000 });
+
+    // Run 4: queue a BLASTN -window_masker_taxid 562 search behind Run 3.
+    await page.getByTestId('tab-search').click();
+    await program(page, 'blastn');
+    await openParameters(page);
+    await page.getByTestId(`param-${FLAG}`).check();
+    await page.getByTestId(`param-${FLAG}-taxid`).fill(String(TAXID));
+    await expect(page.getByTestId('counts-note')).toHaveText(/^Made in this browser \(\d{4}-\d{2}-\d{2}, .+\)$/);
+    await openFiles(page, 'query', [{ name: 'query.fa', text: queryBytes }]);
+    await openFiles(page, 'subject', [{ name: 'subject.fa', text: subjectBytes }]);
+    await task(page, 'blastn');
+    await page.getByTestId('threads').selectOption('1');
+    await submit(page);
+    await expect(page.getByTestId('run-4-option')).toHaveAttribute('data-status', 'queued', { timeout: 60_000 });
+
+    // Attempt Replace from Run 2 while Run 4 is queued: must be refused in place without touching the stored copy.
+    await pickRun(page, 2);
+    await page.getByTestId('tool-tab-file-0').click();
+    await page.getByTestId('tool-save-taxid-input').fill(String(TAXID));
+    await page.getByTestId('tool-save-taxid-button').click();
+    const expectedRefusal = `A search that uses the counts for ${TAXID} is queued or running.`;
+    await expect(page.getByTestId('tool-save-error')).toHaveText(expectedRefusal);
+    await expect(page.getByTestId('replace-counts-dialog')).not.toBeVisible();
+
+    // Attempt Delete on Search tab while Run 4 is queued: must be refused in place.
+    await page.getByTestId('tab-search').click();
+    await page.getByTestId('counts-delete').click();
+    await expect(page.getByTestId('counts-error')).toHaveText(expectedRefusal);
+    await expect(page.getByTestId('counts-note')).toHaveText(/^Made in this browser \(\d{4}-\d{2}-\d{2}, .+\)$/);
+    await expect(page.getByTestId('counts-delete')).toBeVisible();
+
+    // Cancel Run 3 so Run 4 runs; Run 4 must complete with native's exact bytes.
+    await page.getByTestId('tab-results').click();
+    await pickRun(page, 3);
+    await page.getByTestId('run-status-cancel').click();
+    await waitStatus(page, 3, 'cancelled', 60_000);
+    await waitStatus(page, 4, 'completed', 180_000);
+    const { outputs, warnings } = await storedOutputs(page, 4);
+    expect({ 0: sha256(outputs[0]), 6: sha256(outputs[6]), 7: sha256(outputs[7]) }).toEqual(nativeBn.sha256);
+    expect(sha256(warnings)).toBe(nativeBn.stderrSha256);
+
+    // Once Run 4 ends, the shared lock is released: Replace and Delete both succeed.
+    await pickRun(page, 2);
+    await page.getByTestId('tool-tab-file-0').click();
+    await page.getByTestId('tool-save-taxid-input').fill(String(TAXID));
+    await page.getByTestId('tool-save-taxid-button').click();
+    await expect(page.getByTestId('replace-counts-dialog')).toBeVisible();
+    await page.getByTestId('replace-counts-confirm').click();
+    await expect(page.getByTestId('tool-save-status')).toHaveText(`Saved for taxonomy ID ${TAXID}.`);
+
+    await page.getByTestId('tab-search').click();
+    await page.getByTestId('counts-delete').click();
+    await expect(page.getByTestId('counts-note')).toHaveText('Downloads wmasker.obinary for 562 from ftp.ncbi.nlm.nih.gov');
+    await expect(page.getByTestId('counts-download')).toBeVisible();
 
     expect(away, 'zero external network requests').toEqual([]);
   });

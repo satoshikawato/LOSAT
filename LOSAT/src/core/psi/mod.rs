@@ -267,17 +267,13 @@ pub(crate) fn create_pssm_with_options(
         options.nsg_compatibility_mode,
         &mut internal,
     )?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:385-414
-    stages::convert_freq_ratios_to_pssm(&mut internal, &msa.query, sbp, &seq_weights.std_prob);
-    if options.ungapped_block_missing {
-        return Err(PsiError::NoUngappedKarlinBlock);
-    }
-    let ungapped =
-        stages::scale_matrix(&msa.query, &seq_weights.std_prob, &mut internal, sbp, None)?;
-    let gapped = KarlinBlk {
-        k: stages::gapped_psi_k(ungapped, sbp),
-        ..sbp.gap_psi
-    };
+    let (ungapped, gapped) = stages::create_and_scale_pssm(
+        &mut internal,
+        &msa.query,
+        sbp,
+        &seq_weights.std_prob,
+        options.ungapped_block_missing,
+    )?;
     let diagnostics =
         stages::save_diagnostics(&msa, &aligned_block, &seq_weights, &internal, request);
     Ok(PsiPssm {

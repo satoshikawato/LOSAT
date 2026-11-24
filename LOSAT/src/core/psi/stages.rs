@@ -1132,6 +1132,32 @@ pub(super) fn gapped_psi_k(kbp_psi: KarlinBlk, sbp: &PsiScoreBlk) -> f64 {
     kbp_psi.k * sbp.gap_std_k / sbp.ideal_k
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:385-414
+/// `_PSICreateAndScalePssmFromFrequencyRatios`, the end of both of NCBI's PSSM engines (from an
+/// alignment, `PSICreatePssmWithDiagnostics`, and from conserved domains, `PSICreatePssmFromCDD`):
+/// the frequency ratios made scores and scaled to the query's ungapped Lambda. Returns the
+/// ungapped block that the scaling leaves (`kbp_psi[0]`) and the gapped one with its K
+/// (`kbp_gap_psi[0]`). `ungapped_block_missing`: the score block has no `kbp_psi[0]`
+/// (`PsiOptions::ungapped_block_missing`).
+pub(super) fn create_and_scale_pssm(
+    internal: &mut InternalPssm,
+    query: &[u8],
+    sbp: &PsiScoreBlk,
+    std_probs: &[f64; BLASTAA_SIZE],
+    ungapped_block_missing: bool,
+) -> Result<(KarlinBlk, KarlinBlk), PsiError> {
+    convert_freq_ratios_to_pssm(internal, query, sbp, std_probs);
+    if ungapped_block_missing {
+        return Err(PsiError::NoUngappedKarlinBlock);
+    }
+    let ungapped = scale_matrix(query, std_probs, internal, sbp, None)?;
+    let gapped = KarlinBlk {
+        k: gapped_psi_k(ungapped, sbp),
+        ..sbp.gap_psi
+    };
+    Ok((ungapped, gapped))
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2100-2119
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2699-2704
 /// Whether `Blast_ScoreFreqNew` makes the score frequencies of `pssm` in

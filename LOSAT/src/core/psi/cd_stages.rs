@@ -8,10 +8,10 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:229-321
 
 use super::stages::{
-    column_freq_ratios, column_specific_pseudocounts, convert_freq_ratios_to_pssm, gapped_psi_k,
-    scale_matrix, ColumnPseudocounts, InternalPssm, GAP, K_EPSILON, PSEUDO_MAX, X,
+    column_freq_ratios, column_specific_pseudocounts, create_and_scale_pssm, ColumnPseudocounts,
+    InternalPssm, GAP, K_EPSILON, PSEUDO_MAX, X,
 };
-use super::{KarlinBlk, PsiDiagnostics, PsiError, PsiPssm, PsiScoreBlk};
+use super::{PsiDiagnostics, PsiError, PsiPssm, PsiScoreBlk};
 use crate::utils::matrix::BLASTAA_SIZE;
 
 /// The data of one aligned column of a conserved domain (`PSICdMsaCellData`): the domain's
@@ -220,12 +220,8 @@ pub(crate) fn create_pssm_from_cdd(
     let weights = compute_frequencies_from_cds(msa);
     let mut internal = InternalPssm::new(msa.query.len());
     compute_freq_ratios_from_cds(msa, &weights, sbp, pseudo_count, &mut internal)?;
-    convert_freq_ratios_to_pssm(&mut internal, &msa.query, sbp, &weights.std_prob);
-    let ungapped = scale_matrix(&msa.query, &weights.std_prob, &mut internal, sbp, None)?;
-    let gapped = KarlinBlk {
-        k: gapped_psi_k(ungapped, sbp),
-        ..sbp.gap_psi
-    };
+    let (ungapped, gapped) =
+        create_and_scale_pssm(&mut internal, &msa.query, sbp, &weights.std_prob, false)?;
     let frequency_ratios = Some(internal.freq_ratios.clone());
     Ok(PsiPssm {
         scores: internal.into_scores(),

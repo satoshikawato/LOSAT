@@ -9,7 +9,7 @@ use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, format_total_bits
 use super::serial::asn_text::itoa_i32;
 use super::serial::seqalign::{AlignRow, RowRangeError};
 use crate::api::local_blast::{FormatProbe, HspIndex};
-use crate::common::Hit;
+use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
 use crate::ncbi_str::truncate_spaces;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
@@ -406,20 +406,21 @@ impl PairwiseHit {
         )
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1100-1122
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2576-2613
-    /// The gaps of the HSP's header line (`Gaps = `, `x_GetNumGaps`): the gap columns inside the
-    /// query row's aligned range, so the query row's end gaps of a Smith-Waterman alignment
-    /// (`serial::seqalign::row_end_gaps`) are left out; the line's denominators stay the
-    /// alignment's columns. The one count of every program's header (`write_hsp_identities`,
-    /// `write_tblastn_hsp_info`); `gaps` (also the library's `HspRecord::gaps`) stays the
-    /// alignment's.
-    pub(crate) fn shown_gaps(&self) -> usize {
-        let gaps = self.gaps.unwrap_or_else(|| self.hit.gap_letters());
-        let end_gaps = super::serial::seqalign::row_end_gaps(
-            self.hit.gap_info.as_deref().unwrap_or_default(),
-            AlignRow::Query,
-        );
-        gaps.saturating_sub(end_gaps.columns())
+    /// The HSP's columns, gap letters and gap openings inside the query row's aligned range
+    /// (`serial::seqalign::AlignLengths::within_query_range`: the query row's end gaps of a
+    /// Smith-Waterman alignment left out), as NCBI's tables count them (`GetAlignLengths`) and
+    /// outfmt 0's HSP header its `Gaps` (`x_GetNumGaps`, in `write_hsp_identities` and
+    /// `write_tblastn_hsp_info`; the line's denominators stay the alignment's columns). The
+    /// library's `HspRecord` holds them (`api::run::records`); `gaps` stays the alignment's.
+    pub(crate) fn query_range_lengths(&self) -> super::serial::seqalign::AlignLengths {
+        super::serial::seqalign::AlignLengths {
+            length: self.hit.length,
+            gaps: self.gaps.unwrap_or_else(|| self.hit.gap_letters()),
+            gap_opens: self.hit.gapopen,
+        }
+        .within_query_range(self.hit.gap_info.as_deref().unwrap_or_default())
     }
 }
 
@@ -1474,7 +1475,7 @@ fn write_hsp_identities<W: Write>(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
     let pos_pct = ncbi_percent_match(positives, align_len);
 
-    let gaps = hit.shown_gaps();
+    let gaps = hit.query_range_lengths().gaps;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
     let gap_pct = ncbi_percent_match(gaps, align_len);
 
@@ -1580,16 +1581,7 @@ pub fn write_alignment<W: Write>(
 
     // If we have actual sequences, display them
     if let (Some(ref qseq), Some(ref sseq)) = (&hit.query_seq, &hit.subject_seq) {
-        write_alignment_with_sequences(
-            writer,
-            h,
-            qseq,
-            sseq,
-            [&hit.query_stored_gaps, &hit.subject_stored_gaps],
-            hit.query_case,
-            masks,
-            config,
-        )?;
+        write_alignment_with_sequences(writer, h, qseq, sseq, hit.query_case, masks, config)?;
     } else {
         // No sequences available - show placeholder
         writeln!(
@@ -1612,16 +1604,14 @@ pub fn write_alignment<W: Write>(
 /// Write alignment with actual sequences: the rows of BLASTP, RPSBLAST, PSIBLAST and DELTABLAST
 /// (`seqalign::protein_row_segments`) and of BLASTN (`seqalign::nucleotide_row_segments`; a
 /// minus-strand HSP's Dense-seg is reversed, `query_anchored::HspAlnVec`, so its subject row runs
-/// from high to low), rows of letters (`write_hsp_rows`). `stored_gaps` are the columns of the
-/// query's and the subject's rows whose `-` is a residue (`PairwiseHit::query_stored_gaps`,
-/// `PairwiseHit::subject_stored_gaps`), `query_case` how the query row's letters compare
-/// (`PairwiseHit::query_case`), `masks` the rows' masks under `-html` (`write_hsp_rows`).
+/// from high to low), rows of letters (`write_hsp_rows`), the columns of `hit`'s edit script.
+/// `query_case` is how the query row's letters compare (`PairwiseHit::query_case`), `masks` the
+/// rows' masks under `-html` (`write_hsp_rows`).
 fn write_alignment_with_sequences<W: Write>(
     writer: &mut W,
     hit: &Hit,
     query_seq: &str,
     subject_seq: &str,
-    stored_gaps: [&[u32]; 2],
     query_case: super::row_letters::QueryCase,
     masks: Option<&super::query_anchored::HspMasks>,
     config: &PairwiseConfig,
@@ -1636,17 +1626,15 @@ fn write_alignment_with_sequences<W: Write>(
     let max_start_len = coordinate_width(hit);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1570-1573
     let nucleotide = config.program == "blastn";
-    // The rows' end gaps (`end_gap_span`; a `-` that is a residue, the query's gap residue or a
-    // gap stored in the subject, is a residue). A BLASTN alignment (X-drop or greedy) starts and
-    // ends with a substitution and has none: a `-` at the end of its query row fills a segment
-    // past the query's end, the gap character (alnvec.cpp:288-297, cited at `end_gap_span`;
+    // The rows' end gaps (`row_spans`). A BLASTN alignment (X-drop or greedy) starts and ends
+    // with a substitution and has none: a `-` at the end of its query row fills a segment past the
+    // query's end, the gap character (alnvec.cpp:288-297, cited at `row_spans`;
     // `algorithm::blastn::pairwise::context_letters`).
-    let [query_span, subject_span] = if nucleotide {
-        [(0, q_chars.len()), (0, s_chars.len())]
-    } else {
-        [(&q_chars, stored_gaps[0]), (&s_chars, stored_gaps[1])]
-            .map(|(row, stored)| end_gap_span(row, stored))
+    let ops = match nucleotide {
+        true => &[][..],
+        false => hit.gap_info.as_deref().unwrap_or_default(),
     };
+    let [query_span, subject_span] = row_spans(ops, [q_chars.len(), s_chars.len()]);
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2131-2155
     // The rows may carry lowercase masking, which NCBI applies only when it prints a
@@ -2013,7 +2001,7 @@ fn write_wrapped<W: Write>(writer: &mut W, text: &[u8]) -> io::Result<()> {
 }
 
 /// The row `row` (`text`, its `char`s `chars`) as NCBI's row string (`GetWholeAlnSeqString`):
-/// its end gaps (the columns outside `span`, `end_gap_span`) the end character, a space. A row
+/// its end gaps (the columns outside `span`, `row_spans`) the end character, a space. A row
 /// of ASCII letters without end gaps is its text as it is.
 fn row_string<'a>(
     text: &'a str,
@@ -2035,7 +2023,7 @@ fn row_string<'a>(
 }
 
 /// The row `row` of ASCII letters as NCBI's row string (`row_string`): its columns outside `span`
-/// (`end_gap_span`) a space.
+/// (`row_spans`) a space.
 fn ascii_row_string(row: &[u8], span: (usize, usize)) -> std::borrow::Cow<'_, [u8]> {
     if span == (0, row.len()) {
         return std::borrow::Cow::Borrowed(row);
@@ -2047,50 +2035,41 @@ fn ascii_row_string(row: &[u8], span: (usize, usize)) -> std::borrow::Cow<'_, [u
 }
 
 /// The rows `[query, subject]` of ASCII letters of a translated program's HSP (BLASTX's,
-/// TBLASTN's) as NCBI's row strings (`ascii_row_string`), `stored` the columns of each row whose
-/// `-` is a residue (`PairwiseHit::query_stored_gaps`, `PairwiseHit::subject_stored_gaps`): a
-/// Smith-Waterman alignment that starts with a gap (RPSTBLASTN's `-use_sw_tback`, line PS item
-/// PS12d) shows it as spaces, as the end gaps of BLASTP's rows (`write_alignment_with_sequences`).
+/// TBLASTN's), the columns of its edit script `ops`, as NCBI's row strings (`ascii_row_string`):
+/// a Smith-Waterman alignment that starts with a gap (`-use_sw_tback`, line PS item PS12d) shows
+/// it as spaces, as the end gaps of BLASTP's rows (`write_alignment_with_sequences`).
 fn ascii_row_strings<'a>(
     rows: [&'a [u8]; 2],
-    stored: [&[u32]; 2],
+    ops: &[GapEditOp],
 ) -> [std::borrow::Cow<'a, [u8]>; 2] {
-    [0, 1].map(|row| ascii_row_string(rows[row], end_gap_span(rows[row], stored[row])))
+    let spans = row_spans(ops, rows.map(<[u8]>::len));
+    [0, 1].map(|row| ascii_row_string(rows[row], spans[row]))
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:386-393
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:362-370 (`GetWholeAlnSeqString`)
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:279-297
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1209-1216
 // (`eShowEndGaps` is set by the query-anchored views only, blast_format.cpp:1754-1758; the
 // tabular writer sets the gap character alone, tabular.cpp:982-986.)
-/// The columns `lo..hi` of a row of a pairwise alignment between its end gaps: its columns before
-/// its first residue and after its last, which NCBI's alignment strings fill with the end
-/// character (a space in the pairwise view and in the tabular `qseq`, `sseq` and `btop`) where an
-/// inner gap is `-`. `stored` holds the columns (sorted) whose `-` is a residue: a gap character
-/// of the sequence (a database's stored `-`, a PSSM query's gap residue). Only a Smith-Waterman
-/// alignment has end gaps (rpsblast's `-use_sw_tback`: `ALIGN_EX` runs from the Smith-Waterman
-/// start over a rectangle whose best path may start with a gap); an X-drop alignment starts and
-/// ends with a substitution. The `-` that
-/// fills a segment past a sequence's end is the gap character (alnvec.cpp:279-297): `-subject`'s
-/// mapped row of BLASTX, which the tables write as it is (`tabular::TabularHsp::end_gaps`) and
-/// outfmt 0 refuses (decision X2g-5 of line RG), and BLASTN's query row of an HSP that NCBI keeps
-/// outside its query context (`algorithm::blastn::pairwise::context_letters`), whose rows the
-/// tables and outfmt 0 write without this span (remaining-gaps X1b-p).
-pub(crate) fn end_gap_span<T: Copy + PartialEq + From<u8>>(
-    row: &[T],
-    stored: &[u32],
-) -> (usize, usize) {
-    let gap = T::from(b'-');
-    let end_gap =
-        |column: usize| row[column] == gap && stored.binary_search(&(column as u32)).is_err();
-    let lo = (0..row.len())
-        .find(|&column| !end_gap(column))
-        .unwrap_or(row.len());
-    let hi = (lo..row.len())
-        .rev()
-        .find(|&column| !end_gap(column))
-        .map_or(lo, |column| column + 1);
-    (lo, hi)
+/// The columns `lo..hi` of the query's and the subject's rows (of `lens` columns) of an HSP whose
+/// edit script is `ops` between their end gaps (`serial::seqalign::row_end_gaps`): a row's gap
+/// operations before its first letter and after its last, which NCBI's alignment strings fill
+/// with the end character (a space in the pairwise view and in the tabular `qseq`, `sseq` and
+/// `btop`, `report::tabular::push_alignment_row`) where an inner gap is `-`. NCBI decides by where
+/// a `-` comes from: a `-` that is a residue (a database's stored `-`, a PSSM query's gap
+/// residue) is a letter of the script, as is the gap character that fills a segment past a
+/// sequence's end (BLASTN's query row of an HSP that NCBI keeps outside its query context,
+/// `algorithm::blastn::pairwise::context_letters`, whose rows are shown without a script,
+/// remaining-gaps X1b-p). Only a Smith-Waterman alignment has end gaps (`-use_sw_tback`:
+/// `ALIGN_EX` runs from the Smith-Waterman start over a rectangle whose best path may start with
+/// a gap); an X-drop alignment starts and ends with a substitution.
+fn row_spans(ops: &[GapEditOp], lens: [usize; 2]) -> [(usize, usize); 2] {
+    use super::serial::seqalign::row_end_gaps;
+    [
+        row_end_gaps(ops, AlignRow::Query).span(lens[0]),
+        row_end_gaps(ops, AlignRow::Subject).span(lens[1]),
+    ]
 }
 
 /// Check if two amino acids are a positive match (similar)
@@ -5762,7 +5741,7 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
     let percent = |n: usize| ncbi_percent_match(n, length);
     let positives = hit.positives.unwrap_or(h.num_positives);
-    let gaps = hit.shown_gaps();
+    let gaps = hit.query_range_lengths().gaps;
     writeln!(
         writer,
         " Identities = {}/{} ({:.0}%), Positives = {}/{} ({:.0}%), Gaps = {}/{} ({:.0}%)",
@@ -5819,7 +5798,7 @@ fn write_tblastn_alignment<W: Write>(
         ));
     }
     let width = coordinate_width(&hit.hit);
-    let rows = ascii_row_strings([q, s], [&hit.query_stored_gaps, &hit.subject_stored_gaps]);
+    let rows = ascii_row_strings([q, s], hit.hit.gap_info.as_deref().unwrap_or_default());
     write_hsp_rows(
         writer,
         |segments| tblastn_row_segments(hit, segments),
@@ -6399,7 +6378,7 @@ fn write_blastx_alignment(
             "BLASTX alignment string lengths differ",
         ));
     }
-    let rows = ascii_row_strings([q, s], [&hit.query_stored_gaps, &hit.subject_stored_gaps]);
+    let rows = ascii_row_strings([q, s], hit.hit.gap_info.as_deref().unwrap_or_default());
     write_hsp_rows(
         writer,
         |segments| blastx_row_segments(hit, segments),

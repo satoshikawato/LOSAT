@@ -76,7 +76,6 @@ fn rows_text(query: &str, subject: &str, q_start: usize, s_start: usize, line: u
         &hit,
         query,
         subject,
-        [&[], &[]],
         Default::default(),
         None,
         &config,
@@ -85,7 +84,7 @@ fn rows_text(query: &str, subject: &str, q_start: usize, s_start: usize, line: u
     String::from_utf8(out).unwrap()
 }
 
-// showalign.cpp:1209-1216 and 1497-1502 (cited at `end_gap_span` and
+// showalign.cpp:1209-1216 and 1497-1502 (cited at `row_spans` and
 // `write_alignment_with_sequences`): a row's end gaps are spaces, a chunk without the row's
 // letters leaves the row out (the Query row with its middle line), and the next chunk's row
 // shows its first residue's number.

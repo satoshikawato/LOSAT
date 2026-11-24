@@ -65,6 +65,7 @@ fn hsp<'a>(
         subject,
         q_offset,
         q_end: q_offset + q_len as i32,
+        q_left_out: 0,
         s_offset,
         s_end: s_offset + s_len as i32,
         q_frame: frames.0,
@@ -566,6 +567,7 @@ fn blastp_ungapped_documents(format: SerialFormat, db_title: Option<&[u8]>) -> V
                     subject,
                     q_offset: q_start,
                     q_end: q_start + len,
+                    q_left_out: 0,
                     s_offset: s_start,
                     s_end: s_start + len,
                     q_frame: 0,
@@ -735,6 +737,7 @@ fn blastn_ungapped_dendiag_documents_equal_ncbi() {
                 subject,
                 q_offset: q_start,
                 q_end: q_start + len,
+                q_left_out: 0,
                 s_offset: s_start,
                 s_end: s_start + len,
                 q_frame: if minus { -1 } else { 1 },
@@ -1105,8 +1108,9 @@ fn std_segs_are_written_for_every_segment_of_the_records() {
 
 /// The mapper of a `-subject` search leaves out the first and the last Std-seg when it has a gap
 /// row, once each (seq_align_mapper_base.cpp:1568-1580): `mapped_script` gives the kept operations
-/// and the letters left out at each end; an X-drop script (a substitution at each end) and an
-/// ungapped HSP (no script) keep everything.
+/// and the letters left out at each end (the query's, which the coverage still counts, in
+/// `query_left_out`); an X-drop script (a substitution at each end) and an ungapped HSP (no
+/// script) keep everything.
 #[test]
 fn mapped_script_leaves_out_an_end_segment_with_a_gap_row_once() {
     use super::seqalign::{mapped_script, MappedScript};
@@ -1120,6 +1124,8 @@ fn mapped_script_leaves_out_an_end_segment_with_a_gap_row_once() {
         }
     );
     assert!(mapped_script(&ops).drops(&ops));
+    // The coverage still counts the query letters left out: the end `Ins(3)`.
+    assert_eq!(mapped_script(&ops).query_left_out(), 3);
     // The Smith-Waterman alignment of the probe: 95 subject letters before the query's first.
     let sw = [Del(95), Sub(190)];
     assert_eq!(
@@ -1130,6 +1136,7 @@ fn mapped_script_leaves_out_an_end_segment_with_a_gap_row_once() {
             end: [0, 0],
         }
     );
+    assert_eq!(mapped_script(&sw).query_left_out(), 0);
     // Only the first segment goes, though the next one has a gap row too.
     let two = [Ins(4), Del(2), Sub(7)];
     assert_eq!(
@@ -1140,11 +1147,13 @@ fn mapped_script_leaves_out_an_end_segment_with_a_gap_row_once() {
             end: [0, 0],
         }
     );
+    assert_eq!(mapped_script(&two).query_left_out(), 4);
     let xdrop = [Sub(10), Ins(1), Sub(5), Del(2), Sub(3)];
     let kept = mapped_script(&xdrop);
     assert_eq!(kept.kept, 0..5);
     assert!(!kept.drops(&xdrop));
     assert_eq!((kept.start, kept.end), ([0, 0], [0, 0]));
+    assert_eq!(kept.query_left_out(), 0);
     assert_eq!(mapped_script(&[]).kept, 0..0);
     // A script of one gap segment (never made) keeps nothing.
     assert_eq!(mapped_script(&[Del(3)]).kept, 1..1);

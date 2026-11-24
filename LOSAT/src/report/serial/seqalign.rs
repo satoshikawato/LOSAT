@@ -246,6 +246,7 @@ pub(crate) fn protein_row_segments(hit: &crate::common::Hit, segments: &mut Segm
         subject: 0,
         q_offset: hit.q_start as i32 - 1,
         q_end: hit.q_end as i32,
+        q_left_out: 0,
         s_offset: hit.s_start as i32 - 1,
         s_end: hit.s_end as i32,
         q_frame: 0,
@@ -291,6 +292,7 @@ pub(crate) fn nucleotide_row_segments(
         subject: 0,
         q_offset,
         q_end,
+        q_left_out: 0,
         s_offset: s_low as i32 - 1,
         s_end: s_high as i32,
         q_frame: if minus { -1 } else { 1 },
@@ -364,6 +366,7 @@ pub(crate) fn translated_row_segments(
         subject: 0,
         q_offset,
         q_end,
+        q_left_out: 0,
         s_offset,
         s_end,
         q_frame,
@@ -848,7 +851,7 @@ fn write_score_list<E: Encoder>(enc: &mut E, hsp: &HspRecord<'_>, query_length: 
         write_score_real(
             enc,
             "hsp_percent_coverage",
-            query_coverage(hsp.q_offset, hsp.q_end, query_length),
+            query_coverage(hsp.q_offset, hsp.q_end + hsp.q_left_out, query_length),
         );
     }
 }
@@ -1032,11 +1035,12 @@ fn std_seg_kept(seg: usize, numseg: usize, gap: impl Fn(usize) -> bool) -> bool 
 /// and the letters of the operations it leaves out before them (`start`) and after them (`end`),
 /// each `[query, subject]` in the rows' letters (a `Del` has the subject's, an `Ins` the
 /// query's). The mapped HSP starts `start` letters later in each row and ends `end` letters
-/// earlier; its scores are the HSP's. BLASTX and TBLASTN apply it once to the records of a
-/// `-subject` report (`algorithm::blastx::report::sort_lists`,
-/// `algorithm::tblastn::stage_e_report::render`), so that every format, the Seq-aligns
-/// (`write_std_segs`) among them, reads the mapped HSP. An empty script (an ungapped HSP) keeps
-/// everything.
+/// earlier; its scores are the HSP's, its coverage too (`MappedScript::query_left_out`). BLASTX
+/// and TBLASTN apply it once to the records of a `-subject` report
+/// (`algorithm::blastx::runtime::BatchResults::put_in_report_order`,
+/// `algorithm::tblastn::stage_d_results::KappaResultHitList::put_in_report_order`, which refuse
+/// a second mapping), so that every format, the Seq-aligns (`write_std_segs`) among them, reads
+/// the mapped HSP. An empty script (an ungapped HSP) keeps everything.
 pub(crate) fn mapped_script(ops: &[GapEditOp]) -> MappedScript {
     let numseg = ops.len();
     let gap = |seg: usize| !ops[seg].is_sub();
@@ -1076,15 +1080,25 @@ impl MappedScript {
     pub(crate) fn drops(&self, ops: &[GapEditOp]) -> bool {
         self.kept != (0..ops.len())
     }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1221-1225
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:184-189
+    /// The query letters that the mapper leaves out (of an end `Ins`), which the HSP's
+    /// `hsp_percent_coverage` (`query_coverage`, the tables' `qcovhsp`) still counts: NCBI
+    /// computes that score on the BlastHSP before `s_RemapToSubjectLoc`, whose mapper keeps the
+    /// Seq-align's scores (`HspRecord::q_left_out`).
+    pub(crate) fn query_left_out(&self) -> u32 {
+        self.start[0] + self.end[0]
+    }
 }
 
 /// The Std-segs of an HSP of a gapped translated search (`segs std`), one per segment, with
 /// the remap of the query row (`RemapToQueryLoc`, `CStd_seg::OffsetRow`: the `-query_loc`
 /// start added to an interval's ends) and of the subject row (`s_RemapToSubjectLoc` of a
-/// `-subject` search, `remapped`: the `-subject_loc` start, on the plus strand that LOSAT's
+/// `-subject` search: the `-subject_loc` start of `offsets`, on the plus strand that LOSAT's
 /// ranges have; the mapper keeps each interval's strand, `CMappingRange::Map_Strand` with
-/// the strand set). The records of a `-subject` report come mapped (`mapped_script`): every
-/// segment is written.
+/// the strand set). The records of a `-subject` report come mapped (`mapped_script`, which
+/// leaves out the end segments that the mapper drops): every segment is written.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:306-368
 /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Std_seg.cpp:170-189
@@ -1272,7 +1286,9 @@ impl AlignLengths {
     /// count them (`GetAlignLengths` over the query row's aligned range): the query row's end
     /// gaps (`row_end_gaps`, a Smith-Waterman alignment of `-use_sw_tback`) come off the three.
     /// The one count of every table writer (`report::tabular::TabularHsp::within_query_range`, the
-    /// default fields of BLASTP and TBLASTN); an X-drop alignment has no end gaps.
+    /// default fields of BLASTP and TBLASTN), of outfmt 0's `Gaps` and of the library's
+    /// `HspRecord` (`report::pairwise::PairwiseHit::query_range_lengths`); an X-drop alignment
+    /// has no end gaps.
     pub(crate) fn within_query_range(self, ops: &[GapEditOp]) -> Self {
         let end_gaps = row_end_gaps(ops, AlignRow::Query);
         Self {

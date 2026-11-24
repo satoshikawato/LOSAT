@@ -554,7 +554,7 @@ pub(crate) fn render_queries(
     xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
-    sort_lists(batches, SubjectLoc::of(shown) == SubjectLoc::Interval);
+    sort_lists(batches, SubjectLoc::of(shown));
     render_queries_with(
         writer,
         stderr,
@@ -592,25 +592,15 @@ pub(super) struct LocalReport<'a, 'p> {
     pub html_posts: Option<&'a mut dyn Write>,
 }
 
-/// Sorts the HSPs of each list of `batches` by e-value, the order of every report: NCBI sorts each
-/// list's HSPs, on their own ends, before it makes their Seq-aligns (`Hsp::seqalign_ends`); then,
-/// for a report of `-subject` records (`remaps`), maps them as `-subject`'s Seq-loc mapper does
-/// (`HspList::map_subject_alignments`). Each batch's report calls it once, before any format reads
-/// the lists (`render_queries`, the archive's `native::ArchiveBatch::write`, `run_local`'s batch):
-/// the mapper leaves out a first and a last segment with a gap row once each, so it is not
-/// repeated.
+/// Puts each batch of `batches`, whose subjects are `loc`'s, in the order of every report
+/// (`BatchResults::put_in_report_order`: sorted by e-value, `-subject`'s HSPs mapped, once).
+/// Each batch's report calls it before any format reads the lists (`render_queries`, the
+/// archive's `native::ArchiveBatch::write`, `run_local`'s batch).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
-pub(super) fn sort_lists(batches: &mut [BatchResults], remaps: bool) {
+pub(super) fn sort_lists(batches: &mut [BatchResults], loc: SubjectLoc) {
     for batch in batches.iter_mut() {
-        for lists in &mut batch.queries {
-            for list in lists {
-                list.sort_evalue();
-                if remaps {
-                    list.map_subject_alignments();
-                }
-            }
-        }
+        batch.put_in_report_order(loc);
     }
 }
 

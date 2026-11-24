@@ -58,6 +58,11 @@ pub struct Hsp {
     pub positive: usize,
     pub edit_script: Vec<GapEditOp>,
     pub composition_method: i32,
+    /// The query letters that `-subject`'s Seq-loc mapper left out of the HSP
+    /// (`HspList::map_subject_alignments`: an end `Ins` segment), which its `qcovhsp` and its
+    /// Seq-align's `hsp_percent_coverage` still count
+    /// (`serial::seqalign::MappedScript::query_left_out`); 0 for every other HSP.
+    pub query_left_out: u32,
 }
 
 impl Hsp {
@@ -128,9 +133,11 @@ impl HspList {
     /// sort (`sort_evalue`; the mapper works on the sorted Seq-aligns): each HSP as
     /// `serial::seqalign::mapped_script` keeps it, an end segment with a gap row left out (a
     /// Smith-Waterman alignment of `-use_sw_tback` that starts with a gap): its starts move past
-    /// the left-out letters and its ends back before them; the scores and the identities stay.
-    /// Every format reads the mapped HSP (`report::sort_lists` maps once per batch).
-    pub(crate) fn map_subject_alignments(&mut self) {
+    /// the left-out letters and its ends back before them; the scores and the identities stay, and
+    /// so does the coverage (`Hsp::query_left_out`). Every format reads the mapped HSP. Only
+    /// `BatchResults::put_in_report_order` maps, once per batch: a second mapping would leave out
+    /// a segment again (a script that starts `[Del, Ins, ..]`).
+    fn map_subject_alignments(&mut self) {
         for hsp in &mut self.hsps {
             let mapped = crate::report::serial::seqalign::mapped_script(&hsp.edit_script);
             if !mapped.drops(&hsp.edit_script) {
@@ -141,6 +148,7 @@ impl HspList {
             raw.s_start += mapped.start[1] as i32;
             raw.q_end -= mapped.end[0] as i32;
             raw.s_end -= mapped.end[1] as i32;
+            hsp.query_left_out = mapped.query_left_out();
             hsp.edit_script = hsp.edit_script[mapped.kept].to_vec();
         }
     }
@@ -153,6 +161,30 @@ impl HspList {
         hsps
     }
 }
+impl super::runtime::BatchResults {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
+    /// Puts the batch's lists in the order of every report, once: each list's HSPs sorted by
+    /// e-value (NCBI sorts each list's HSPs, on their own ends, before it makes their Seq-aligns;
+    /// `Hsp::seqalign_ends`), then, where the subjects are `-subject`'s records
+    /// (`SubjectLoc::Interval`), mapped as its Seq-loc mapper maps them
+    /// (`HspList::map_subject_alignments`). A later call leaves the lists as they are
+    /// (`in_report_order`): the mapper leaves out a first and a last segment with a gap row once
+    /// each, and a sort of the mapped HSPs could order ties otherwise.
+    pub(crate) fn put_in_report_order(&mut self, loc: super::empty_rows::SubjectLoc) {
+        if std::mem::replace(&mut self.in_report_order, true) {
+            return;
+        }
+        for lists in &mut self.queries {
+            for list in lists {
+                list.sort_evalue();
+                if loc == super::empty_rows::SubjectLoc::Interval {
+                    list.map_subject_alignments();
+                }
+            }
+        }
+    }
+}
+
 pub(crate) fn compare_list(a: &HspList, b: &HspList) -> Ordering {
     match (a.hsps.first(), b.hsps.first()) {
         (None, None) => Ordering::Equal,
@@ -824,3 +856,7 @@ mod boundary_tests;
 #[cfg(test)]
 #[path = "results_negative_length_tests.rs"]
 mod negative_length_tests;
+
+#[cfg(test)]
+#[path = "results_report_order_tests.rs"]
+mod report_order_tests;

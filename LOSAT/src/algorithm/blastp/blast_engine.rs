@@ -2707,8 +2707,7 @@ fn write_blastp_tabular_hit_lists(
                 // in the query's row are left out), as every table counts them.
                 let counts = crate::report::serial::seqalign::AlignLengths {
                     length: hsp.length,
-                    gaps: usize::try_from(hsp.length as i64 - hsp.num_ident as i64 - hsp.mismatch)
-                        .unwrap_or(0),
+                    gaps: hsp.gap_letters(),
                     gap_opens: hsp.gapopen,
                 }
                 .within_query_range(hsp.gap_info.as_deref().unwrap_or_default());

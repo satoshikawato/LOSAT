@@ -52,6 +52,7 @@ fn ungapped(q_start: i32, q_end: i32) -> super::super::results::Hsp {
         positive: 0,
         edit_script: Vec::new(),
         composition_method: 0,
+        query_left_out: 0,
     }
 }
 

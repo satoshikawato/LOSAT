@@ -689,9 +689,8 @@ pub(super) fn write_blastx_tabular(
                                 rows: Some(mapped.rows()).filter(|_| counts_by_fields),
                                 // The mapped row's `-` past the query's end is the gap character
                                 // inside its segment, not an end gap (alnvec.cpp:279-297,
-                                // `TabularHsp::end_gaps`).
-                                end_gaps: false,
-                                stored_gaps: [&[], &[]],
+                                // `TabularHsp::ops`): no script.
+                                ops: &[],
                                 qcovhsp: qcovhsp.of_hsp(0, mapped.length() as i32),
                             };
                             (row, tabular_query, tabular_subject)
@@ -713,8 +712,7 @@ pub(super) fn write_blastx_tabular(
                                 q_frame: 0,
                                 s_frame: 0,
                                 rows: None,
-                                end_gaps: true,
-                                stored_gaps: [&[], &[]],
+                                ops: &[],
                                 qcovhsp: -1,
                             };
                             catch_ids = AlignQueryIds::of(query);
@@ -759,12 +757,12 @@ pub(super) fn write_blastx_tabular(
                                 q_frame: i32::from(a.frame),
                                 s_frame: 0,
                                 rows,
-                                end_gaps: true,
-                                stored_gaps: [&[], &[]],
+                                ops: &hsp.edit_script,
                                 qcovhsp: qcovhsp.of_hsp(
                                     // The HSP's own ends (`Blast_HSPGetQueryCoverage` of the
-                                    // BlastHSP, blast_seqalign.cpp:1223-1224), not the Seq-align's.
-                                    raw.q_end - raw.q_start,
+                                    // BlastHSP, blast_seqalign.cpp:1223-1224), not the Seq-align's,
+                                    // with the letters that `-subject`'s mapper left out.
+                                    raw.q_end - raw.q_start + hsp.query_left_out as i32,
                                     // The Seq-align's nucleotides; `-subject`'s mapped empty row
                                     // has one.
                                     if empty {
@@ -773,8 +771,7 @@ pub(super) fn write_blastx_tabular(
                                         (a.qstart - a.qend).abs() + 1
                                     },
                                 ),
-                            }
-                            .within_query_range(&hsp.edit_script);
+                            };
                             (row, tabular_query, tabular_subject)
                         };
                         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1102-1108

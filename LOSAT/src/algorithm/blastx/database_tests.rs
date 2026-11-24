@@ -114,9 +114,11 @@ fn one_query(lists: &[(usize, i32)]) -> Vec<BatchResults> {
         positive: 1,
         edit_script: Vec::new(),
         composition_method: 0,
+        query_left_out: 0,
     };
     vec![BatchResults {
         query_ordinal: 0,
+        in_report_order: false,
         queries: vec![lists
             .iter()
             .map(|&(oid, score)| HspList {

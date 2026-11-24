@@ -23,7 +23,7 @@ use crate::report::pairwise::{
     write_tblastn_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport, PairwiseConfig,
     PairwiseDatabase, PairwiseHit,
 };
-use crate::report::row_letters::{stored_gap_columns, QueryLetters, RowSide};
+use crate::report::row_letters::QueryLetters;
 use crate::sequence::packed_subject::SubjectNt;
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
@@ -339,13 +339,9 @@ pub(super) fn render(
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
     // Sorts each HSP list by E-value (`Blast_HSPListSortByEvalue`) during Seq-align conversion.
+    // `-subject`'s Seq-loc mapper maps the HSPs then, once, before any format reads them.
     for hitlist in hitlists.iter_mut() {
-        hitlist.sort_hsps_for_report();
-        hitlist.drop_zero_score_hsps();
-        // `-subject`'s Seq-loc mapper, once, before any format reads the HSPs.
-        if matches!(shown, ShownSubjects::Fasta { .. }) {
-            hitlist.map_subject_alignments();
-        }
+        hitlist.put_in_report_order(matches!(shown, ShownSubjects::Fasta { .. }));
     }
     // A PSSM query's Bioseq letters where they are not its record's, which the reports read; its
     // counts are the rows' where its reports read other letters than its search and a report
@@ -1398,15 +1394,10 @@ fn pairwise_hits(
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1765-1810 sets the HSP
                     // linked count; showalign.cpp:3595-3598 prints sum_n.
                     sum_n: Some(linked.num),
+                    // No reader of these rows needs their gap residues (a PSSM query's): their
+                    // end gaps come from the edit script (`pairwise::row_spans`).
                     subject_stored_gaps: Vec::new(),
-                    // A PSSM query's gap residues (`row_letters::stored_gap_columns`).
-                    query_stored_gaps: stored_gap_columns(
-                        query,
-                        b'-',
-                        usize::try_from(hsp.q_start)?,
-                        &payload.edit_script,
-                        RowSide::Query,
-                    ),
+                    query_stored_gaps: Vec::new(),
                     query_case: query_letters.case(),
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:519-531
                     // The Seq-align's `num_ident` (`tabular.rs`, the outfmt 8 / 11 / 12

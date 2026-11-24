@@ -134,6 +134,7 @@ pub(super) fn query_records_of<'a>(
                 subject,
                 q_offset: hsp.q_start,
                 q_end: hsp.q_end,
+                q_left_out: i32::try_from(payload.query_left_out)?,
                 s_offset: hsp.s_start,
                 s_end: hsp.s_end,
                 q_frame: 0,

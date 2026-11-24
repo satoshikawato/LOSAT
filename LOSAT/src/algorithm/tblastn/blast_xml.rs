@@ -619,10 +619,10 @@ impl PreparedXml {
                             let mut translation = TargetTranslation::of(subject_seq, &code);
                             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
                                 let hsp = &linked.hsp;
-                                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243-245
                                 // The start of a row whose range the XML cannot take, the query's
                                 // first: a row that starts with a gap (`-subject`'s mapping drops
-                                // such a first segment, `KappaResultHitList::map_subject_alignments`).
+                                // such a first segment, `KappaResultHitList::put_in_report_order`).
                                 // NCBI catches it in `s_BlastXMLAddIteration` (`CaughtException`).
                                 let row_range = |row| {
                                     std_seg_row_range(

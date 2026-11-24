@@ -7,6 +7,7 @@ use super::{
     archive,
     args::{BlastxArgs, ResolvedOptions, SemanticOptionsError},
     database::{BlastxDatabase, ReportedSubjects},
+    empty_rows::SubjectLoc,
     input::FastaRecord,
     native::{
         archive_error, database_search_error, engine, input_error, options_error, output_error,
@@ -837,7 +838,7 @@ fn write_run(
         // search strategy request holds (`take` below).
         batch_take.note_searched(queries, results, queries_before)?;
         // Every format and the hit list read the lists in the order of the reports.
-        report::sort_lists(results, database.is_none());
+        report::sort_lists(results, SubjectLoc::of_run(database.is_some()));
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288 (cited at
         // `native::run_inner`'s batches)
         // A database: the titles of the batch's reported sequences, read in NCBI's traceback

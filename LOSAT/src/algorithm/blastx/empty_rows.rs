@@ -44,7 +44,7 @@ pub(crate) fn row_range(hsp: &super::results::Hsp, row: AlignRow) -> Option<RowR
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2907-2930
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243-245
 /// What a formatter that reads the query's range of `hsp`'s Seq-align and then the subject's finds
 /// (`row_range`): the first exception, `None` where both are taken. The description table of
 /// outfmt 0 to 4 (`s_ProcessAlignSet`) and BLAST XML (`s_SeqAlignToXMLHsp`) read them so; an HSP of
@@ -121,9 +121,19 @@ pub(crate) enum SubjectLoc {
 impl SubjectLoc {
     /// The subjects of the report `shown`.
     pub(crate) fn of(shown: &super::report::ShownSubjects<'_>) -> Self {
-        match shown {
-            super::report::ShownSubjects::Fasta { .. } => SubjectLoc::Interval,
-            super::report::ShownSubjects::Database { .. } => SubjectLoc::Whole,
+        Self::of_run(matches!(
+            shown,
+            super::report::ShownSubjects::Database { .. }
+        ))
+    }
+
+    /// The subjects of a run that searches a database (`-db`), or `-subject`'s records: the one
+    /// test of whether the run's Seq-aligns are mapped (`BatchResults::put_in_report_order`).
+    pub(crate) fn of_run(database: bool) -> Self {
+        if database {
+            SubjectLoc::Whole
+        } else {
+            SubjectLoc::Interval
         }
     }
 

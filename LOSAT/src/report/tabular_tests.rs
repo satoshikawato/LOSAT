@@ -353,8 +353,7 @@ fn taxonomy_names_get_ncbis_fillers() {
             q_frame: 1,
             s_frame: 1,
             rows: None,
-            end_gaps: true,
-            stored_gaps: [&[], &[]],
+            ops: &[],
             qcovhsp: 100,
         };
         let mut out = Vec::new();
@@ -551,8 +550,7 @@ fn protein_rows_frames_and_rounds_are_ncbis() {
             q_frame: 1,
             s_frame: 1,
             rows,
-            end_gaps: true,
-            stored_gaps: [&[], &[]],
+            ops: &[],
             qcovhsp: 100,
         };
         let mut out = Vec::new();
@@ -648,8 +646,7 @@ fn id_columns_are_the_subject_s_own() {
         q_frame: 1,
         s_frame: 1,
         rows: None,
-        end_gaps: true,
-        stored_gaps: [&[], &[]],
+        ops: &[],
         qcovhsp: 100,
     };
     let mut out = Vec::new();
@@ -694,8 +691,7 @@ fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
         q_frame: 1,
         s_frame: 1,
         rows: None,
-        end_gaps: true,
-        stored_gaps: [&[], &[]],
+        ops: &[],
         qcovhsp: 50,
     };
     let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
@@ -1196,46 +1192,60 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
 
 #[test]
 fn btop_counts_runs() {
+    use crate::common::GapEditOp::{Del, Sub};
     let mut out = Vec::new();
-    write_btop(&mut out, b"ACGT-A", b"ACCTTA", true, [&[], &[]]);
+    write_btop(&mut out, b"ACGT-A", b"ACCTTA", &[Sub(4), Del(1), Sub(1)]);
     assert_eq!(out, b"2GC1-T1");
 }
 
-// tabular.cpp:982-1027 (cited at `push_alignment_row` and `write_btop`): a row's end gaps
-// are spaces, its inner gaps `-`; an end-gap column of `btop` is a letter and a space.
+// tabular.cpp:982-1027 (cited at `push_alignment_row` and `write_btop`): a row's end gaps (its
+// gap operations of the script before its first letter and after its last, `row_end_gaps`) are
+// spaces, its inner gaps `-`; an end-gap column of `btop` is a letter and a space.
 #[test]
 fn end_gaps_are_spaces_in_the_rows_and_btop() {
+    use crate::common::GapEditOp::{Del, Ins, Sub};
+    use crate::report::serial::seqalign::AlignRow::{Query, Subject};
     let mut out = Vec::new();
-    push_alignment_row(&mut out, b"---AC-DE--", true, &[]);
+    let script = [Del(3), Sub(2), Del(1), Sub(2), Del(2)];
+    push_alignment_row(&mut out, b"---AC-DE--", &script, Query);
     assert_eq!(out, b"   AC-DE  ");
     out.clear();
-    push_alignment_row(&mut out, b"MKV-L", true, &[]);
+    push_alignment_row(&mut out, b"MKV-L", &[Sub(3), Del(1), Sub(1)], Query);
     assert_eq!(out, b"MKV-L");
     out.clear();
-    write_btop(&mut out, b"MQLAC-D", b"---ACKD", true, [&[], &[]]);
+    let script = [Ins(3), Sub(2), Del(1), Sub(1)];
+    push_alignment_row(&mut out, b"---ACKD", &script, Subject);
+    assert_eq!(out, b"   ACKD");
+    out.clear();
+    write_btop(&mut out, b"MQLAC-D", b"---ACKD", &script);
     assert_eq!(out, b"M Q L 2-K1");
     out.clear();
-    write_btop(&mut out, b"AC-DKK", b"ACGD--", true, [&[], &[]]);
+    write_btop(
+        &mut out,
+        b"AC-DKK",
+        b"ACGD--",
+        &[Sub(2), Del(1), Sub(1), Ins(2)],
+    );
     assert_eq!(out, b"2-G1K K ");
-    // Rows whose `-` fill a segment (BLASTX's mapped row past a query's end, db.x2g.bx.s1o.subj.6w
-    // and .10: NCBI's `TCGGCATGGCTG-` and BTOP `...-X`).
+    // Rows whose `-` fill a segment, without a script (BLASTX's mapped row past a query's end,
+    // db.x2g.bx.s1o.subj.6w and .10: NCBI's `TCGGCATGGCTG-` and BTOP `...-X`).
     out.clear();
-    push_alignment_row(&mut out, b"TCG-", false, &[]);
+    push_alignment_row(&mut out, b"TCG-", &[], Query);
     assert_eq!(out, b"TCG-");
     out.clear();
-    write_btop(&mut out, b"TCG-", b"TANX", false, [&[], &[]]);
+    write_btop(&mut out, b"TCG-", b"TANX", &[]);
     assert_eq!(out, b"1CAGN-X");
-    // A `-` that is a residue (a PSSM query's gap residue, a database's stored gap
-    // character) is no end gap (M4a-1c LG probe `ts_std0first.f2`: NCBI's qseq `-ASLG...`
-    // and BTOP `-M23...` for a query whose first residue is the gap residue).
+    // A `-` that is a residue (a PSSM query's gap residue, a database's stored gap character) is
+    // a letter of the script, no end gap (M4a-1c LG probe `ts_std0first.f2`: NCBI's qseq
+    // `-ASLG...` and BTOP `-M23...` for a query whose first residue is the gap residue).
     out.clear();
-    push_alignment_row(&mut out, b"-ASL-", true, &[0]);
+    push_alignment_row(&mut out, b"-ASL-", &[Sub(4), Del(1)], Query);
     assert_eq!(out, b"-ASL ");
     out.clear();
-    write_btop(&mut out, b"-ASL", b"MASL", true, [&[0], &[]]);
+    write_btop(&mut out, b"-ASL", b"MASL", &[Sub(4)]);
     assert_eq!(out, b"-M3");
     out.clear();
-    write_btop(&mut out, b"MASLK", b"MASL-", true, [&[], &[4]]);
+    write_btop(&mut out, b"MASLK", b"MASL-", &[Sub(5)]);
     assert_eq!(out, b"4K-");
 }
 
@@ -1323,49 +1333,45 @@ fn the_sequence_exception_names_the_codings_of_the_query() {
 }
 
 /// A table row counts only the columns inside the query row's aligned range
-/// (`TabularHsp::within_query_range`, NCBI's `GetAlignLengths`): the query row's end gaps of a
-/// Smith-Waterman alignment come off `length`, `gaps` and `gapopen`; a subject row's end gaps and
-/// the inner gaps of an X-drop script stay.
+/// (`TabularHsp::within_query_range` of its script, NCBI's `GetAlignLengths`): the query row's end
+/// gaps of a Smith-Waterman alignment come off `length`, `gaps` and `gapopen`; a subject row's end
+/// gaps and the inner gaps of an X-drop script stay.
 #[test]
 fn table_counts_leave_out_the_query_rows_end_gaps() {
-    use crate::common::GapEditOp::{Del, Ins, Sub};
-    let row = |length, gap_opens, gaps| TabularHsp {
-        q_start: 1,
-        q_end: 190,
-        s_start: 1,
-        s_end: 285,
-        evalue: 1e-100,
-        bit_score: 380.0,
-        score: 990,
-        length,
-        gap_opens,
-        gaps,
-        num_ident: 190,
-        q_frame: 0,
-        s_frame: 0,
-        rows: None,
-        end_gaps: true,
-        stored_gaps: [&[], &[]],
-        qcovhsp: 100,
+    use crate::common::GapEditOp::{self, Del, Ins, Sub};
+    let counts = |length, gap_opens, gaps, ops: &[GapEditOp]| {
+        let hsp = TabularHsp {
+            q_start: 1,
+            q_end: 190,
+            s_start: 1,
+            s_end: 285,
+            evalue: 1e-100,
+            bit_score: 380.0,
+            score: 990,
+            length,
+            gap_opens,
+            gaps,
+            num_ident: 190,
+            q_frame: 0,
+            s_frame: 0,
+            rows: None,
+            ops,
+            qcovhsp: 100,
+        }
+        .within_query_range();
+        (hsp.length, hsp.gaps, hsp.gap_opens)
     };
-    let counts = |hsp: TabularHsp<'_>| (hsp.length, hsp.gaps, hsp.gap_opens);
     // The probe's alignment: 95 gaps before the query's first letter.
-    assert_eq!(
-        counts(row(285, 1, 95).within_query_range(&[Del(95), Sub(190)])),
-        (190, 0, 0)
-    );
+    assert_eq!(counts(285, 1, 95, &[Del(95), Sub(190)]), (190, 0, 0));
     // A gap end in the query's row, with an inner gap that stays.
     assert_eq!(
-        counts(row(20, 2, 6).within_query_range(&[Sub(10), Ins(2), Sub(4), Del(4)])),
+        counts(20, 2, 6, &[Sub(10), Ins(2), Sub(4), Del(4)]),
         (16, 2, 1)
     );
     // The subject row's end gaps are inside the query row's range.
-    assert_eq!(
-        counts(row(14, 2, 4).within_query_range(&[Ins(3), Sub(10), Ins(1)])),
-        (14, 4, 2)
-    );
+    assert_eq!(counts(14, 2, 4, &[Ins(3), Sub(10), Ins(1)]), (14, 4, 2));
     // An X-drop script (a substitution at each end) and an ungapped HSP keep their counts.
     let xdrop = [Sub(10), Ins(1), Sub(5), Del(2), Sub(3)];
-    assert_eq!(counts(row(21, 2, 3).within_query_range(&xdrop)), (21, 3, 2));
-    assert_eq!(counts(row(190, 0, 0).within_query_range(&[])), (190, 0, 0));
+    assert_eq!(counts(21, 2, 3, &xdrop), (21, 3, 2));
+    assert_eq!(counts(190, 0, 0, &[]), (190, 0, 0));
 }

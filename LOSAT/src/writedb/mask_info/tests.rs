@@ -617,7 +617,7 @@ fn posts_equal_what_makeblastdb_posts() {
         assert!(!rest.contains("(803."), "{file}: {rest}");
         posting += usize::from(!posted.is_empty());
     }
-    assert_eq!(posting, 13);
+    assert_eq!(posting, 14);
 }
 
 #[test]

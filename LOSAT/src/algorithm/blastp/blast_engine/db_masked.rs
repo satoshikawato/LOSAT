@@ -651,7 +651,6 @@ fn join_chunk_hits(
 /// own letters by [`BlastpPrelimKernel::search_subject_in_neg`], a shorter one only moving the
 /// offset ([`BlastpPrelimKernel::neg_window_exit_of`]). No table of its own and no move of the
 /// offset apart: the table's state is NCBI's.
-#[allow(clippy::too_many_arguments)]
 fn neg_window_chunks(
     kernel: &BlastpPrelimKernel<'_>,
     scratch: &mut BlastpSubjectScratch,

@@ -234,7 +234,7 @@ pub(crate) fn write_phi_round_report(
             };
             let aligned = group.aligned(report.num_alignments);
             let end = crate::report::x_pairwise_par::aligned_end(
-                config.view.after_throw(),
+                config.after_throw(),
                 aligned,
                 |s_idx| sections.thrown(s_idx),
             );

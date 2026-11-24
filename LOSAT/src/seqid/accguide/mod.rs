@@ -14,8 +14,9 @@
 //! What is not ported: the branches of `AddRule` for a type name that this build does not
 //! know (the fallbacks: every name of the built-in guide is known, which the tests check),
 //! the diagnostics of the loading (`ERR_POST_X` 2-21: the built-in guide raises none of
-//! Warning severity, also checked; the Info ones are not shown by makeblastdb), and the
-//! fallback warning of `IdentifyAccession` (no value of the built-in guide is a fallback).
+//! Warning severity, also checked, by the build of every part that makes them; the Info ones
+//! are not shown by makeblastdb), and the fallback warning of `IdentifyAccession` (no value of
+//! the built-in guide is a fallback).
 
 mod acc_info;
 
@@ -26,6 +27,7 @@ use std::sync::OnceLock;
 pub use acc_info::*;
 
 use super::model::ParsedSeqId;
+use crate::utils::byte_search::find_byte;
 use crate::utils::byte_search::find_first;
 
 /// A `CSeq_id::EAccessionInfo` value.
@@ -217,14 +219,15 @@ impl Specials {
 /// format reads every line in order, so that `SHints` holds what it holds in NCBI's loading when
 /// a line of that format is added; it adds no specials of other formats, which never change
 /// those of this one: every line that adds a special first makes its format the current one
-/// (`FindSubMap`), which forgets the small special of another format.
+/// (`FindSubMap`), which forgets the small special of another format. It keeps no prefix
+/// either, and it passes over the range lines of the other formats' blocks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Part {
     /// The rules without the specials (the `special` and `special2` lines are not read).
     Rules,
     /// Every rule, with the specials of one format.
     Specials(u32),
-    /// Every rule, with every special (the tests).
+    /// Every rule, with every special, and the diagnostics of the loading (the tests).
     All,
 }
 
@@ -236,6 +239,19 @@ impl Part {
             Part::Specials(only) => only == fmt,
             Part::All => true,
         }
+    }
+
+    /// Whether a build of this part keeps the prefixes and wildcards (a build of the specials of
+    /// a format keeps only them).
+    fn keeps_prefixes(self) -> bool {
+        !matches!(self, Part::Specials(_))
+    }
+
+    /// Whether a build of this part makes the diagnostics of the loading that need lookups of
+    /// the guide (`FindSpecial` and `Find` of each special): only the build of every part.
+    /// They change no rule, and the built-in guide raises none (the tests check it).
+    fn diagnoses(self) -> bool {
+        self == Part::All
     }
 }
 
@@ -332,20 +348,33 @@ fn bit_number(digits: &[u8]) -> u32 {
     crate::ncbi_str::string_to_uint(digits).unwrap_or(0)
 }
 
+/// The size of an accession of the format `fmt` (`x_SplitSpecial`'s normal size).
+fn normal_size(fmt: u32) -> usize {
+    (fmt >> 16) as usize + (fmt & 0xffff) as usize
+}
+
+/// The number of last digits that `x_SplitSpecial` reads as the bit of an accession of the
+/// format's size, at most `kMaxSmallSpecialDigits`; the letters and digits before them key the
+/// small special.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1599-1605
+fn bit_digits(fmt: u32) -> u32 {
+    let digits = fmt & 0xffff;
+    if digits == MAX_SMALL_SPECIAL_DIGITS + 1 {
+        digits - 2
+    } else {
+        digits.min(MAX_SMALL_SPECIAL_DIGITS)
+    }
+}
+
 /// `SAccGuide::x_SplitSpecial` of `acc` and `fmt`: the length of the prefix that keys the special
 /// and the number that is its bit.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1596-1629
 fn split_special(acc: &[u8], fmt: u32) -> (usize, u32) {
     let raw_digits = fmt & 0xffff;
-    let mut digits = raw_digits;
-    let normal_size = (fmt >> 16) as usize + digits as usize;
-    if digits == MAX_SMALL_SPECIAL_DIGITS + 1 {
-        digits -= 2;
-    } else if digits > MAX_SMALL_SPECIAL_DIGITS {
-        digits = MAX_SMALL_SPECIAL_DIGITS;
-    }
-    if acc.len() == normal_size {
+    let digits = bit_digits(fmt);
+    if acc.len() == normal_size(fmt) {
         let pos = acc.len() - digits as usize;
         (pos, bit_number(&acc[pos..]))
     } else {
@@ -357,6 +386,47 @@ fn split_special(acc: &[u8], fmt: u32) -> (usize, u32) {
             result = result.wrapping_add(high.wrapping_mul(BV_SIZES[digits as usize - 2]));
         }
         (pos, result)
+    }
+}
+
+/// Whether `text` is ASCII digits alone (true when empty).
+fn all_digits(text: &[u8]) -> bool {
+    text.iter().all(u8::is_ascii_digit)
+}
+
+/// The number that at most 9 ASCII digits write (0 for none): `bit_number` of them when there
+/// are some.
+fn digits_value(digits: &[u8]) -> u32 {
+    debug_assert!(digits.len() <= MAX_SMALL_SPECIAL_DIGITS as usize && all_digits(digits));
+    digits
+        .iter()
+        .fold(0, |number, &c| number * 10 + u32::from(c - b'0'))
+}
+
+/// `number` (of at least as many digits) with its last digits replaced by `digits`.
+fn with_last_digits(number: u32, digits: &[u8]) -> u32 {
+    // Divisions by constants (multiplications in the machine code).
+    let cleared = match digits.len() {
+        0 => number,
+        1 => number / 10 * 10,
+        2 => number / 100 * 100,
+        3 => number / 1_000 * 1_000,
+        4 => number / 10_000 * 10_000,
+        5 => number / 100_000 * 100_000,
+        6 => number / 1_000_000 * 1_000_000,
+        7 => number / 10_000_000 * 10_000_000,
+        8 => number / 100_000_000 * 100_000_000,
+        9 => number / 1_000_000_000 * 1_000_000_000,
+        _ => 0,
+    };
+    cleared + digits_value(digits)
+}
+
+/// Writes `number` (below 10 to the power of the length of `text`) into `text` as digits.
+fn write_digits(text: &mut [u8], mut number: u32) {
+    for c in text.iter_mut().rev() {
+        *c = b'0' + (number % 10) as u8;
+        number /= 10;
     }
 }
 
@@ -502,23 +572,29 @@ impl AccGuide {
         fmt
     }
 
-    /// `SAccGuide::x_AddSpecial` with a submap, hints, `fmt`, `from`, `to`, `value`, `old_name`
-    /// and `new_name`, for a known type name (`old_name` null).
-    ///
-    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1513-1597
-    /// A bit vector needs no size here (`BitRanges`); `x_SplitSpecial` never gives a bit
-    /// past it. A build that does not make the specials of `fmt` adds nothing (see [`Part`]).
-    fn add_special(&mut self, hints: &mut Hints, fmt: u32, from: &[u8], to: &[u8], value: AccInfo) {
-        if !self.part.has_specials_of(fmt) {
-            return;
-        }
-        let (from_len, left) = split_special(from, fmt);
-        let (to_len, right) = split_special(to, fmt);
-        let specials = self
-            .rules
+    /// The specials of `fmt` that a build adds to (made by `FindSubMap` of a build that makes
+    /// them).
+    fn specials_mut(&mut self, fmt: u32) -> &mut Specials {
+        self.rules
             .get_mut(&fmt)
             .and_then(|submap| submap.specials.get_mut())
-            .expect("FindSubMap made the rules and their specials");
+            .expect("FindSubMap made the rules and their specials")
+    }
+
+    /// `SAccGuide::x_AddSpecial` with the submap of `fmt` (its `specials`), hints, `fmt`, `from`,
+    /// `to`, `value`, `old_name` and `new_name`, for a known type name (`old_name` null).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1513-1597
+    fn add_special(
+        specials: &mut Specials,
+        hints: &mut Hints,
+        fmt: u32,
+        from: &[u8],
+        to: &[u8],
+        value: AccInfo,
+    ) {
+        let (from_len, left) = split_special(from, fmt);
+        let (to_len, right) = split_special(to, fmt);
         let (from_pfx, to_pfx) = (&from[..from_len], &to[..to_len]);
         if from_pfx != to_pfx {
             let entry = specials
@@ -528,6 +604,23 @@ impl AccGuide {
             entry.1 = value;
             return;
         }
+        Self::add_small_special(specials, hints, from_pfx, left, right, value);
+    }
+
+    /// The small special of `x_AddSpecial`: the bits `left` to `right` of the key `from_pfx`
+    /// get `value`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1541-1587
+    /// A bit vector needs no size here (`BitRanges`); `x_SplitSpecial` never gives a bit past
+    /// it.
+    fn add_small_special(
+        specials: &mut Specials,
+        hints: &mut Hints,
+        from_pfx: &[u8],
+        left: u32,
+        right: u32,
+        value: AccInfo,
+    ) {
         let same = |option: &(BitRanges, AccInfo)| option.1 & !F_FALLBACK == value & !F_FALLBACK;
         let hint = hints
             .prev_small_special
@@ -594,7 +687,7 @@ impl AccGuide {
         } else if tokens.len() >= 3 && first.eq_ignore_ascii_case(b"special2") {
             self.add_special2_rule(tokens, hints);
         } else if tokens.len() >= 2 && first == b":" {
-            self.add_special2_ranges(&tokens[1..], hints);
+            self.add_special2_ranges(tokens[1..].iter().copied(), hints);
         } else if tokens.len() == 3 && first.eq_ignore_ascii_case(b"gnl") {
             // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1324-1329,1349-1351
             hints.special2_submap = None;
@@ -638,6 +731,9 @@ impl AccGuide {
             return;
         };
         self.find_sub_map(hints, fmt);
+        if !self.part.keeps_prefixes() {
+            return;
+        }
         let submap = self.rules.get_mut(&fmt).expect("FindSubMap made the rules");
         if tokens.len() == 4 {
             value |= F_SPECIALS;
@@ -677,7 +773,11 @@ impl AccGuide {
             .position(|&c| c == b'-')
             .map(|offset| pos + offset);
         let fmt = format_key(pos, pos2.unwrap_or(range.len()) - pos);
-        let old = self.find_special(hints, fmt, range);
+        let old = if self.part.diagnoses() {
+            self.find_special(hints, fmt, range)
+        } else {
+            F_SPECIALS
+        };
         let value = Self::find_acc_info_hinted(hints, tokens[2]);
         let first = &range[..pos2.unwrap_or(range.len())];
         if old & F_SPECIALS == 0 {
@@ -695,8 +795,10 @@ impl AccGuide {
             Some(value) => {
                 hints.prev_special_key = range.to_vec();
                 self.find_sub_map(hints, fmt);
-                let last = pos2.map_or(range, |pos2| &range[pos2 + 1..]);
-                self.add_special(hints, fmt, first, last, value);
+                if self.part.has_specials_of(fmt) {
+                    let last = pos2.map_or(range, |pos2| &range[pos2 + 1..]);
+                    Self::add_special(self.specials_mut(fmt), hints, fmt, first, last, value);
+                }
             }
         }
         hints.prev_special_type_name.clear();
@@ -727,7 +829,11 @@ impl AccGuide {
         let mut acc = letters.to_vec();
         acc.resize(letters.len() + digits, b'0');
         hints.prev_special2_acc = acc.clone();
-        let old = self.find_special(hints, fmt, &acc);
+        let old = if self.part.diagnoses() {
+            self.find_special(hints, fmt, &acc)
+        } else {
+            F_SPECIALS
+        };
         if old & F_SPECIALS == 0 {
             let mut why = Vec::new();
             self.find(fmt, &acc, Some(&mut why));
@@ -750,7 +856,16 @@ impl AccGuide {
     /// of the block's running accession.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1292-1323
-    fn add_special2_ranges(&mut self, ranges: &[&[u8]], hints: &mut Hints) {
+    /// While each range replaces digits only among those that `x_SplitSpecial` reads as the
+    /// bit (`bit_digits`), the accession keeps its size and its key, and its bit is kept as a
+    /// number: `from` and `to` are then a small special of that key, from the bit after the
+    /// low digits to the bit after the high ones. Every range of the built-in guide is of this
+    /// form; any other is added from the text of the accession.
+    fn add_special2_ranges<'t>(
+        &mut self,
+        ranges: impl Iterator<Item = &'t [u8]>,
+        hints: &mut Hints,
+    ) {
         if hints.version < 2 {
             self.load_warnings
                 .push("special2 continuation lines valid only in version 2+ guides".to_string());
@@ -760,14 +875,33 @@ impl AccGuide {
                 .push("ignoring misplaced special2 ranges line.".to_string());
             return;
         };
+        if !self.part.has_specials_of(fmt) {
+            return;
+        }
         let value = hints.special2_type;
+        let specials = self.specials_mut(fmt);
         let mut acc = std::mem::take(&mut hints.prev_special2_acc);
-        let mut from = Vec::with_capacity(acc.len());
+        let digits = bit_digits(fmt) as usize;
+        let key_len = normal_size(fmt) - digits;
+        let mut bit = (acc.len() == normal_size(fmt) && all_digits(&acc[key_len..]))
+            .then(|| digits_value(&acc[key_len..]));
+        let mut from = Vec::new();
         for range in ranges {
             let (low, high) = match range.iter().position(|&c| c == b'-') {
                 Some(dash) => (&range[..dash], &range[dash + 1..]),
                 None => (&range[..], &b""[..]),
             };
+            if let Some(number) = bit {
+                if low.len().max(high.len()) <= digits && all_digits(low) && all_digits(high) {
+                    let left = with_last_digits(number, low);
+                    let right = with_last_digits(left, high);
+                    bit = Some(right);
+                    Self::add_small_special(specials, hints, &acc[..key_len], left, right, value);
+                    continue;
+                }
+                write_digits(&mut acc[key_len..], number);
+                bit = None;
+            }
             let end = acc.len();
             acc[end - low.len()..].copy_from_slice(low);
             from.clear();
@@ -775,7 +909,10 @@ impl AccGuide {
             if !high.is_empty() {
                 acc[end - high.len()..].copy_from_slice(high);
             }
-            self.add_special(hints, fmt, &from, &acc, value);
+            Self::add_special(specials, hints, fmt, &from, &acc, value);
+        }
+        if let Some(number) = bit {
+            write_digits(&mut acc[key_len..], number);
         }
         hints.prev_special2_acc = acc;
     }
@@ -798,24 +935,27 @@ impl AccGuide {
         };
         let mut hints = Hints::default();
         let mut ranges = RangeLines::new(RANGES);
-        for line in RULES.lines() {
-            if line == ":" {
-                if part == Part::Rules
-                    || hints
-                        .special2_submap
-                        .is_some_and(|fmt| !part.has_specials_of(fmt))
+        let mut words: Vec<&[u8]> = Vec::new();
+        for line in rule_lines(RULES.as_bytes()) {
+            if line == b":" {
+                if part == Part::Rules {
+                    // No block is read, so the place in the range lines is not kept.
+                    continue;
+                }
+                if hints
+                    .special2_submap
+                    .is_some_and(|fmt| !part.has_specials_of(fmt))
                 {
                     ranges.skip_block();
                     continue;
                 }
-                while let Some(tokens) = ranges.next_line() {
-                    let mut words: Vec<&[u8]> = vec![b":"];
-                    words.extend(tokens.split(|&c| c == b' '));
-                    guide.add_rule(&words, &mut hints);
+                while let Some(range_line) = ranges.next_line() {
+                    guide.add_special2_ranges(range_line.split(|&c| c == b' '), &mut hints);
                 }
                 continue;
             }
-            let words: Vec<&[u8]> = line.split(' ').map(str::as_bytes).collect();
+            words.clear();
+            words.extend(line.split(|&c| c == b' '));
             guide.add_rule(&words, &mut hints);
         }
         for specials in guide
@@ -846,6 +986,26 @@ impl AccGuide {
 /// The lines of `kBuiltInGuide` that `AddRule` reads, except the range lines of `special2`
 /// blocks; a line `:` stands for one block of them (`make_accguide.py`).
 const RULES: &str = include_str!("rules.txt");
+
+/// The lines of `text` as `str::lines` gives them (without the `\n` or `\r\n` that ends each).
+fn rule_lines(text: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let mut rest = text;
+    std::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        let line = match find_byte(rest, b'\n') {
+            Some(end) => {
+                let line = &rest[..end];
+                rest = &rest[end + 1..];
+                line.strip_suffix(b"\r").unwrap_or(line)
+            }
+            None => std::mem::take(&mut rest),
+        };
+        Some(line)
+    })
+}
+
 /// The range lines, four bits per character (`make_accguide.py`).
 const RANGES: &[u8] = include_bytes!("ranges.bin");
 

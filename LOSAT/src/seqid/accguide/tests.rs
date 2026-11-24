@@ -453,3 +453,130 @@ fn lookups_answer_as_with_the_old_builder() {
     }
     assert!(lookups > 1_500_000, "{lookups}");
 }
+
+/// `rule_lines` splits as `str::lines`.
+#[test]
+fn rule_lines_split_as_str_lines() {
+    for text in [
+        RULES, "", "a", "a\n", "a\r\n", "a\n\nb", "a\r", "\r\n", "x\ry\n", "\n\n", "a\r\r\nb",
+    ] {
+        let expected: Vec<&[u8]> = text.lines().map(str::as_bytes).collect();
+        let got: Vec<&[u8]> = rule_lines(text.as_bytes()).collect();
+        assert!(got == expected, "{text:?}");
+    }
+}
+
+/// The ranges of a `special2` block added from the text of the accession, range by range
+/// (NCBI's loop, which `add_special2_ranges` follows for a range that changes the key).
+fn add_ranges_from_text(guide: &mut AccGuide, hints: &mut Hints, ranges: &[&[u8]]) {
+    let fmt = hints.special2_submap.expect("a special2 block");
+    let value = hints.special2_type;
+    let mut acc = std::mem::take(&mut hints.prev_special2_acc);
+    for range in ranges {
+        let (low, high) = match range.iter().position(|&c| c == b'-') {
+            Some(dash) => (&range[..dash], &range[dash + 1..]),
+            None => (&range[..], &b""[..]),
+        };
+        let end = acc.len();
+        acc[end - low.len()..].copy_from_slice(low);
+        let from = acc.clone();
+        if !high.is_empty() {
+            acc[end - high.len()..].copy_from_slice(high);
+        }
+        AccGuide::add_special(guide.specials_mut(fmt), hints, fmt, &from, &acc, value);
+    }
+    hints.prev_special2_acc = acc;
+}
+
+/// Random digits for one side of a range: mostly at most `bit` of them, sometimes up to `size`
+/// with a letter first.
+fn random_range_part(next: &mut impl FnMut(u64) -> u64, bit: usize, size: usize) -> Vec<u8> {
+    let long = next(10) == 0;
+    let max = if long { size } else { bit };
+    let len = next(1 + max as u64) as usize;
+    let mut out: Vec<u8> = (0..len).map(|_| b'0' + next(10) as u8).collect();
+    if long && !out.is_empty() && next(3) == 0 {
+        out[0] = b'A' + next(26) as u8;
+    }
+    out
+}
+
+/// `add_special2_ranges` adds random ranges as they are added from the text, in formats of
+/// every split of `x_SplitSpecial` (no digits, fewer than 10, 10, more than 10), with ranges
+/// that keep the key and ranges that do not (too long, with a second `-`, with letters), and
+/// blocks of the same key and of others one after the other.
+#[test]
+fn special2_ranges_add_as_from_the_text() {
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut next = |bound: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % bound
+    };
+    let empty = || AccGuide {
+        rules: BTreeMap::new(),
+        general: BTreeMap::new(),
+        load_warnings: Vec::new(),
+        part: Part::All,
+    };
+    for (letters, digits) in [(2usize, 0usize), (2, 6), (3, 7), (1, 9), (2, 10), (4, 12)] {
+        let (mut numeric, mut text) = (empty(), empty());
+        let (mut numeric_hints, mut text_hints) = (Hints::default(), Hints::default());
+        let size = letters + digits;
+        let fmt = format_key(letters, digits);
+        let bit = bit_digits(fmt) as usize;
+        let spec = format!("{}+{digits}", &"ABCD"[..letters]);
+        let types = ["embl_prot", "ddbj_prot", "gb_prot"];
+        for block in 0..60 {
+            let mut letters_now = spec.clone().into_bytes();
+            if block % 4 == 3 {
+                letters_now[0] = b'Q';
+            }
+            let type_name = types[next(3) as usize].as_bytes();
+            let header: [&[u8]; 3] = [b"special2", &letters_now, type_name];
+            for (guide, hints) in [
+                (&mut numeric, &mut numeric_hints),
+                (&mut text, &mut text_hints),
+            ] {
+                guide.add_rule(&[&b"version"[..], &b"2"[..]], hints);
+                guide.add_rule(&header, hints);
+            }
+            for _ in 0..1 + next(4) {
+                let mut tokens: Vec<Vec<u8>> = Vec::new();
+                for _ in 0..1 + next(30) {
+                    let mut token = random_range_part(&mut next, bit, size);
+                    if next(4) != 0 {
+                        let mut high = random_range_part(&mut next, bit, size);
+                        if next(40) == 0 {
+                            high.push(b'-');
+                            high.extend(random_range_part(&mut next, bit, size));
+                        }
+                        high.truncate(size);
+                        token.push(b'-');
+                        token.extend(high);
+                    }
+                    tokens.push(token);
+                }
+                let ranges: Vec<&[u8]> = tokens.iter().map(Vec::as_slice).collect();
+                numeric.add_special2_ranges(ranges.iter().copied(), &mut numeric_hints);
+                add_ranges_from_text(&mut text, &mut text_hints, &ranges);
+                assert_eq!(
+                    String::from_utf8_lossy(&numeric_hints.prev_special2_acc),
+                    String::from_utf8_lossy(&text_hints.prev_special2_acc)
+                );
+                assert_eq!(
+                    numeric_hints.prev_small_special,
+                    text_hints.prev_small_special
+                );
+            }
+        }
+        let specials = |guide: &AccGuide| {
+            canonical_new(guide, |_, submap| {
+                submap.specials.get().expect("a build of every part")
+            })
+        };
+        assert!(specials(&numeric) == specials(&text), "{letters}+{digits}");
+        assert!(!specials(&numeric)[0].4.is_empty());
+    }
+}

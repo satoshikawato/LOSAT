@@ -28,10 +28,7 @@ fn the_documented_refusals_are_one_of_each_kind() {
             _ => None,
         })
         .collect();
-    assert_eq!(
-        formats,
-        [0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 13, 14, 15, 16, 17, 18, 20]
-    );
+    assert_eq!(formats, [0, 1, 2, 3, 4, 5, 11, 13, 14, 15, 16, 17, 18]);
     assert!(documented.contains(&Refusal::BinaryArchive));
     assert!(documented.contains(&Refusal::XmlArchive));
     assert!(documented.contains(&Refusal::FatalMessage));
@@ -43,8 +40,9 @@ fn the_documented_refusals_are_one_of_each_kind() {
 #[test]
 fn the_texts_are_losat_s() {
     assert_eq!(
-        Refusal::OutputFormat(6).reason(),
-        "output format 6 is not supported by LOSAT's BLAST_FORMATTER (it writes 8, 9 and 12)"
+        Refusal::OutputFormat(5).reason(),
+        "output format 5 is not supported by LOSAT's BLAST_FORMATTER (it writes 6, 7, 8, 9, 10, \
+         12 and 20)"
     );
     assert_eq!(
         Refusal::Rid.reason(),

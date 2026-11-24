@@ -320,7 +320,7 @@ pub(crate) fn seq_align_id(align: V<'_>, row: usize) -> Result<&ParsedSeqId, Sto
 }
 
 /// `CSeq_align::GetSeq_id(): can not get seq-id for the row requested.` (Seq_align.cpp:396).
-fn invalid_row() -> Stop {
+pub(crate) fn invalid_row() -> Stop {
     seqalign_exception(
         SEQ_ALIGN_CPP,
         396,

@@ -427,6 +427,28 @@ impl TabularSpec {
         Self::of_fields(format, &choice.spec, delimiter)
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:425
+    /// The tabular report (outfmt 6, 7, 10, 20) of blast_formatter's `-outfmt` `choice`:
+    /// blast_formatter hands its custom delimiter to its formatter for every program
+    /// (`SetCustomDelimiter`), and the `std` fields with a tab are `std`'s spec. `None` for a
+    /// format that is not tabular (outfmt 18 included).
+    pub fn of_formatter(choice: &FormatChoice) -> Option<Self> {
+        let format = ReportFormat::from_number(choice.number)?;
+        if !matches!(
+            format,
+            ReportFormat::Tabular
+                | ReportFormat::TabularWithComments
+                | ReportFormat::CommaSeparatedValues
+                | ReportFormat::CommaSeparatedValuesWithHeader
+        ) {
+            return None;
+        }
+        Some(
+            Self::of_fields(format, &choice.spec, &choice.delimiter)
+                .unwrap_or_else(|| Self::std(format == ReportFormat::TabularWithComments).clone()),
+        )
+    }
+
     /// [`TabularSpec::of_app`] with the delimiter `delimiter` (empty: the format's own).
     fn of_fields(format: ReportFormat, spec: &str, delimiter: &str) -> Option<Self> {
         let (kind, default_delimiter) = match format {
@@ -1122,10 +1144,17 @@ pub fn failed_database_title(oid: impl std::fmt::Display) -> String {
 /// The post's header alone after NCBI's main-thread diagnostic stream failed
 /// (`ncbi_exception::post_line`; line RG D3-1 `om/mute/` e09).
 pub fn taxdb_warning_line(program: &str) -> String {
+    taxdb_warning_line_of(Some(program))
+}
+
+/// `taxdb_warning_line` with the post's prefix `tag` (`[blastn] `), none where the application
+/// sets none (blast_formatter: frozen set A of line RG item F3, `6 std qlen slen staxids
+/// sscinames stitle qcovs`).
+pub fn taxdb_warning_line_of(tag: Option<&str>) -> String {
     String::from_utf8(crate::ncbi_exception::post_line(
         crate::ncbi_exception::Severity::Warning,
         None,
-        Some(program),
+        tag,
         b"Taxonomy name lookup from taxid requires installation of taxdb database with ftp://ftp.ncbi.nlm.nih.gov/blast/db/taxdb.tar.gz",
     ))
     .expect("ASCII")

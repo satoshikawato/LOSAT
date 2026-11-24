@@ -139,14 +139,22 @@ fn the_seq_annot_formats_write_the_archive_s_seq_aligns() {
 
 #[test]
 fn the_other_formats_are_refused_after_ncbi_s_checks() {
-    let (status, out, err) = run_archive(&["-outfmt", "6"]);
+    let (status, out, err) = run_archive(&["-outfmt", "5"]);
     assert_eq!(
         (status, out.as_slice(), err),
         (
             1,
             &b""[..],
-            format!("Error: {}\n", Refusal::OutputFormat(6).reason())
+            format!("Error: {}\n", Refusal::OutputFormat(5).reason())
         )
+    );
+    // The tabular formats are written.
+    let (status, out, err) = run_archive(&["-outfmt", "6"]);
+    assert_eq!((status, err.as_str()), (0, ""));
+    assert!(
+        out.starts_with(b"q1\ts1\t"),
+        "{}",
+        String::from_utf8_lossy(&out)
     );
     // NCBI's check of SAM comes first; this archive is blastn's, so SAM is refused too.
     let (status, _, err) = run_archive(&["-outfmt", "17"]);

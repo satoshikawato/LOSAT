@@ -24,7 +24,7 @@
 //! minus frame with `fNegativeStrand`, which `Add` reads as `fForceTranslation` (`AddFlags`).
 
 mod aln_mix;
-mod aln_vec;
+pub(crate) mod aln_vec;
 
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -419,6 +419,41 @@ impl HspAlnVec {
 }
 
 impl Denseg {
+    /// The Dense-seg of two rows, the sequences `keys`: the segments' `starts` (two per segment,
+    /// row 0's then row 1's, -1 for a gap) and `lens`, each row's strand (`strands`, the first
+    /// segment's, which `CAlnMap` reads: `IsPositiveStrand` is any strand but minus), reversed by
+    /// `CDense_seg::Reverse` where `reverse` (the caller's rule: the tabular formats reverse a
+    /// Dense-seg that is not translated and whose first strand is minus, tabular.cpp:943-952),
+    /// without widths. The archive path's Dense-seg (`report::tabular_seqalign`);
+    /// `HspAlnVec::set` keeps its own vectors.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:643-680
+    pub(crate) fn pair(
+        keys: [SeqKey; 2],
+        starts: &[i32],
+        lens: &[u32],
+        strands: [crate::report::serial::seqalign::Strand; 2],
+        reverse: bool,
+    ) -> Self {
+        let mut ds = Denseg {
+            ids: keys.to_vec(),
+            lens: lens.to_vec(),
+            starts: starts.to_vec(),
+            plus: Vec::new(),
+            widths: Vec::new(),
+        };
+        let mut strands = strands;
+        if reverse {
+            ds.reverse();
+            strands = strands.map(crate::report::serial::seqalign::Strand::reversed);
+        }
+        ds.plus = strands
+            .iter()
+            .map(|&strand| strand != crate::report::serial::seqalign::Strand::Minus)
+            .collect();
+        ds
+    }
+
     /// `CDense_seg::Reverse`: the segments in the other order, each row on the other strand
     /// (here the rows' strands are the caller's, `HspAlnVec::set`).
     ///

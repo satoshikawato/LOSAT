@@ -220,31 +220,48 @@ impl Results {
     /// has one gives it); for `rpsblast` and `rpstblastn`, the first string (as left) with
     /// "Matrix: " gives the matrix, the rest after the text is removed.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:2187-2215
-    #[cfg(test)] // read by the formats of later pull requests (decision C3-3)
+    #[cfg(test)] // the numbers are read by the formats of later pull requests (decision C3-3)
     pub(crate) fn search_stats(&self, service: &[u8]) -> SearchStats {
-        let mut out = SearchStats::default();
+        let (effective_search_space, length_adjustment, matrix) = self.stats_parts(service);
+        SearchStats {
+            effective_search_space,
+            length_adjustment,
+            matrix,
+        }
+    }
+
+    /// The matrix of the search statistics of an `rpsblast` or `rpstblastn` service, which
+    /// `GetResultSet` sets on the options of the first search object (`search_stats`).
+    pub(crate) fn rps_matrix(&self, service: &[u8]) -> Option<Vec<u8>> {
+        self.stats_parts(service).2
+    }
+
+    /// `search_stats` as its parts.
+    fn stats_parts(&self, service: &[u8]) -> (i64, i64, Option<Vec<u8>>) {
+        let (mut effective_search_space, mut length_adjustment) = (0, 0);
         let mut stats: Vec<Vec<u8>> = match self.reply().get("search-stats") {
             Some(list) => list.items().map(|text| text.str().to_vec()).collect(),
-            None => return out,
+            None => return (0, 0, None),
         };
         let number = |text: &[u8]| crate::ncbi_str::string_to_int8(text, 0).unwrap_or(0);
         for text in &mut stats {
             if replace_all(text, b"Effective search space used: ") {
-                out.effective_search_space = number(text);
+                effective_search_space = number(text);
             }
             if replace_all(text, b"Length adjustment: ") {
-                out.length_adjustment = number(text);
+                length_adjustment = number(text);
             }
         }
+        let mut matrix = None;
         if service == b"rpsblast" || service == b"rpstblastn" {
             for mut text in stats {
                 if replace_all(&mut text, b"Matrix: ") {
-                    out.matrix = Some(text);
+                    matrix = Some(text);
                     break;
                 }
             }
         }
-        out
+        (effective_search_space, length_adjustment, matrix)
     }
 }
 
@@ -253,7 +270,6 @@ impl Results {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3401-3428
 // (`start_pos` 0 and `max_replace` 0 by default; the search was found, so the first test
 // does not return.)
-#[cfg(test)] // read by the formats of later pull requests (decision C3-3)
 fn replace_all(text: &mut Vec<u8>, search: &[u8]) -> bool {
     let mut from = 0;
     let mut found = false;

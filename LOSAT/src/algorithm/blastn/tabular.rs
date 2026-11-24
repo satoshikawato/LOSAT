@@ -386,22 +386,22 @@ fn uniq_subject_coverage(hsps: &[BlastnHsp], query_length: usize) -> i32 {
 
 /// NCBI's `CRange<TSeqPos>`: `from` and `to_open` as `TSeqPos` (unsigned 32-bit, wrapping).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SeqRange {
-    from: u32,
-    to_open: u32,
+pub(crate) struct SeqRange {
+    pub(crate) from: u32,
+    pub(crate) to_open: u32,
 }
 
 impl SeqRange {
     /// `CRange` from `from` to `to` (`Set` calls `SetFrom` with `from` and `SetTo` with `to`,
     /// which is `SetToOpen` with `to` plus 1).
-    fn new(from: u32, to: u32) -> Self {
+    pub(crate) fn new(from: u32, to: u32) -> Self {
         SeqRange {
             from,
             to_open: to.wrapping_add(1),
         }
     }
 
-    fn to(self) -> u32 {
+    pub(crate) fn to(self) -> u32 {
         self.to_open.wrapping_sub(1)
     }
 
@@ -414,7 +414,7 @@ impl SeqRange {
     }
 
     /// `CombineWith`.
-    fn combine_with(&mut self, r: SeqRange) {
+    pub(crate) fn combine_with(&mut self, r: SeqRange) {
         if !r.is_empty() {
             if !self.is_empty() {
                 self.from = self.from.min(r.from);
@@ -428,7 +428,7 @@ impl SeqRange {
     /// `s_FixMinusStrandRange`.
     ///
     /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4829-4836
-    fn fix_minus_strand(self) -> Self {
+    pub(crate) fn fix_minus_strand(self) -> Self {
         if self.from > self.to() {
             SeqRange::new(self.to(), self.from)
         } else {
@@ -441,7 +441,7 @@ impl SeqRange {
 /// `x_CombineWith`, `x_Subtract` and `GetCoveredLength` that `GetUniqSeqCoverage` calls, with
 /// their `TSeqPos` arithmetic).
 #[derive(Clone, Debug, Default)]
-struct RangeCollection(Vec<SeqRange>);
+pub(crate) struct RangeCollection(pub(crate) Vec<SeqRange>);
 
 impl RangeCollection {
     /// `lower_bound(begin, end, pos, p)` of `x_CombineWith` and `x_Subtract` (cited below) from
@@ -460,7 +460,7 @@ impl RangeCollection {
     /// `x_CombineWith` of a `TRange`.
     ///
     /// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:321-346
-    fn combine_with(&mut self, r: SeqRange) {
+    pub(crate) fn combine_with(&mut self, r: SeqRange) {
         let mut pos_from = r.from;
         let pos_to_open = r.to_open;
         if pos_from == 0 {
@@ -483,7 +483,7 @@ impl RangeCollection {
     /// `x_Subtract` of a `TRange`.
     ///
     /// NCBI reference (598d8ae6): c++/include/util/range_coll.hpp:348-376
-    fn subtract(&mut self, r: SeqRange) {
+    pub(crate) fn subtract(&mut self, r: SeqRange) {
         let pos_from = r.from;
         let pos_to_open = r.to_open;
         let mut begin = self.lower_bound(0, pos_from);
@@ -509,7 +509,7 @@ impl RangeCollection {
     }
 
     /// `GetCoveredLength`: the sum of the lengths, in `TSeqPos`.
-    fn covered_length(&self) -> u32 {
+    pub(crate) fn covered_length(&self) -> u32 {
         self.0
             .iter()
             .fold(0u32, |total, range| total.wrapping_add(range.length()))

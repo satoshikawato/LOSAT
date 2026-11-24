@@ -174,6 +174,16 @@ pub fn format_evalue_ncbi_tabular(e_value: f64) -> String {
         "0.0".to_string()
     } else if e_value < 0.0009 {
         format_scientific_ncbi(e_value, 2)
+    } else if e_value.is_nan() {
+        // `GetScoreString`'s last form (`%2.0lf`) of a NaN, which no comparison above takes:
+        // glibc's `-nan` where its sign bit is set (the NaN of NCBI's reader of `NOT-A-NUMBER` in
+        // an archive, blast_formatter), else `nan`.
+        if e_value.is_sign_negative() {
+            "-nan"
+        } else {
+            "nan"
+        }
+        .to_string()
     } else {
         format_evalue_ncbi(e_value)
     }

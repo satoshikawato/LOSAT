@@ -584,12 +584,49 @@ struct Lines<'t> {
     lines: FastaLines,
 }
 
-impl Lines<'_> {
+/// Where the letters of a Bioseq go (`append_letters`): a FASTA text in lines (`Lines`), or the
+/// letters alone (`bioseq_letters`).
+trait LetterSink {
     /// The next letters, at most [`LETTER_BLOCK`] of them.
+    fn write(&mut self, letters: &[u8]) -> Result<(), RenderError>;
+}
+
+impl LetterSink for Lines<'_> {
     fn write(&mut self, letters: &[u8]) -> Result<(), RenderError> {
         self.lines.write(letters, &mut self.text.bytes);
         self.text.spill()
     }
+}
+
+impl LetterSink for Vec<u8> {
+    fn write(&mut self, letters: &[u8]) -> Result<(), RenderError> {
+        self.extend_from_slice(letters);
+        Ok(())
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:108-140
+/// The letters of the request's Bioseq `bioseq` as the tabular formats' `CAlnVec` reads them
+/// (`x_GetSeqVector`: the Bioseq's `CSeqVector` in `ncbieaa` for a protein, `inst.mol` `aa`, else
+/// IUPAC; `append_letters`), from its first to its last; a Bioseq without its length is LOSAT's
+/// refusal (NCBI's reader of the archive keeps none).
+pub(crate) fn bioseq_letters(bioseq: Bioseq<'_>) -> Result<Vec<u8>, RenderError> {
+    let length = match bioseq.length() {
+        Some(length) => seq_length(length)?,
+        None => {
+            return Err(RenderError::Unsupported(
+                "a Bioseq without its length".into(),
+            ))
+        }
+    };
+    let mut out = Vec::with_capacity(length as usize);
+    append_letters(
+        bioseq.value().field("inst"),
+        length,
+        bioseq.molecule() == MOL_AA,
+        &mut out,
+    )?;
+    Ok(out)
 }
 
 /// A segment of the sequence map: a Seq-data and its length, or a gap.
@@ -628,7 +665,7 @@ fn append_letters(
     inst: V<'_>,
     length: u32,
     protein: bool,
-    out: &mut Lines<'_>,
+    out: &mut impl LetterSink,
 ) -> Result<(), RenderError> {
     let pieces = sequence_map(inst, length)?;
     let target = if protein { NCBIEAA } else { IUPACNA };
@@ -804,7 +841,7 @@ fn data_letters(
     data: V<'_>,
     length: u32,
     target: u32,
-    out: &mut Lines<'_>,
+    out: &mut impl LetterSink,
 ) -> Result<(), RenderError> {
     if length == 0 {
         return Ok(());

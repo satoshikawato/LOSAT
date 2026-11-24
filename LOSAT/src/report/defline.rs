@@ -353,6 +353,19 @@ pub fn tabular_subject_id(
     } else {
         replaced
     };
+    listed_subject_id(replaced, title, protein)
+}
+
+/// The subject ID of the tabular formats of a subject whose local ID `s_ReplaceLocalId` made
+/// `replaced` (`tabular_subject_id`; blast_formatter's `-parse_deflines` keeps the local ID's
+/// text), its title `title`: `GetSeqIdList`'s first word of the title that `GenerateDefline`
+/// makes where `replaced` names a local `Subject_` ID, else `replaced`.
+#[inline]
+pub fn listed_subject_id(
+    replaced: &[u8],
+    title: &[u8],
+    protein: bool,
+) -> Result<Vec<u8>, UnknownEncoding> {
     if replaced.starts_with(b"Subject_") || contains(replaced, b"lcl|Subject_") {
         let defline = generate_defline(title, protein, false)?.text;
         let token = first_word(&defline);

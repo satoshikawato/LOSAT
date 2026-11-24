@@ -12,7 +12,7 @@ use crate::ncbi_app::Diag;
 
 /// The output formats that blast_formatter writes; it refuses the others by name
 /// (`Refusal::OutputFormat`).
-pub(crate) const WRITTEN_FORMATS: [i32; 3] = [8, 9, 12];
+pub(crate) const WRITTEN_FORMATS: [i32; 7] = [6, 7, 8, 9, 10, 12, 20];
 
 /// The output formats of NCBI's blast_formatter (0 to 18 and 20; `-help`, probe P2.201): the
 /// tests' list of the refusals (`documented`).
@@ -64,6 +64,10 @@ pub(crate) enum Refusal {
     /// a delay buffer). The bytes of the Seq-annot that went to the output before it stay
     /// written.
     Unwritable(&'static str, i32),
+    /// A form of a BLAST archive that the tabular formats (6, 7, 10 and 20) do not write yet: the
+    /// translated programs, queries given as locations, and the forms whose subjects or rows
+    /// NCBI's scope may find otherwise than LOSAT (decision F3-13 of line RG). What it is.
+    Tabular(String),
 }
 
 impl Refusal {
@@ -122,6 +126,11 @@ impl Refusal {
                  supported by LOSAT's {}",
                 super::PROGRAM
             ),
+            Refusal::Tabular(what) => format!(
+                "the tabular output formats (6, 7, 10 and 20) of a BLAST archive with {what} are \
+                 not supported by LOSAT's {}",
+                super::PROGRAM
+            ),
         }
     }
 
@@ -147,6 +156,7 @@ impl Refusal {
             Refusal::Prefetch => "`PRE_FETCH_SEQS_LIMIT=2147483647`".to_string(),
             Refusal::Program(_) => "mapper".to_string(),
             Refusal::Unwritable(..) => "an archive's results".to_string(),
+            Refusal::Tabular(_) => "tabular output formats".to_string(),
         }
     }
 }
@@ -192,6 +202,7 @@ pub(crate) fn documented() -> Vec<Refusal> {
         Refusal::Prefetch,
         Refusal::Program("mapr2g"),
         Refusal::Unwritable("", 12),
+        Refusal::Tabular(String::new()),
     ]);
     refusals
 }

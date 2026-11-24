@@ -864,7 +864,7 @@ pub fn write_document_end<D: crate::report::blast_xml::writer::StructuredXml + ?
     report: &[u8],
     document: &mut D,
     program: &str,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let mut hits = HitPosts::default();

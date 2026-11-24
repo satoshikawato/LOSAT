@@ -263,7 +263,7 @@ of native LOSAT speed at 1 thread (`1.25×` to `1.59×` overhead) and `42%` to `
 (`1.47×` to `2.36×` overhead). Under those estimated times at 16 threads, WebAssembly LOSAT was
 faster than native C++ NCBI BLAST+ 2.17.0 in 7 of 8 modes (`1.33×` on `blastx` to `12.3×` on
 `blastn-short`) and about equal on `dc-megablast` (`3.06 s` vs. `3.111 s`, `1.02×` / 1.7%
-difference, within scaling estimate precision). At 1 thread it is estimated faster in 7 of 8 modes
+difference; Figure 5 marks estimates within ±5% as `~equal`). At 1 thread it is estimated faster in 7 of 8 modes
 (`1.34×` on `megablast` to `3.08×` on `blastn`) and slower on `blastn-short` (`0.83×`). Peak memory
 at 16 threads stayed below native BLAST+ in 4 of 8 modes. The serial build was not timed.
 

@@ -487,6 +487,8 @@ def render_fig1(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
             _put_mem_row(yv, float(r["losat_rss_mib"]), float(r["ncbi_rss_mib"]), float(r["mem_reduction"]), False, theme["wasm"])
 
     def _runs_summary(rows_t: list[dict[str, str]]) -> str:
+        if not rows_t:
+            return ""
         by_pair: dict[tuple[int, int], list[str]] = defaultdict(list)
         for r in rows_t:
             by_pair[(int(r["losat_runs"]), int(r["ncbi_runs"]))].append(r["label"])
@@ -667,7 +669,7 @@ def render_fig2(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
         s_lo, f_lo = float(by_lcase["M2_reads1e6s"]["losat_wall_s"]), float(by_lcase["M2_reads1e6"]["losat_wall_s"])
         stdin_note = (
             f" Piping 1M reads via stdin slows BLAST+ {s_nc / f_nc:.1f}\u00d7 ({fmt_sec(f_nc)} \u2192 {fmt_sec(s_nc)}) "
-            f"vs {s_lo / f_lo:.2f}\u00d7 for LOSAT ({fmt_sec(f_lo)} \u2192 {fmt_sec(s_lo)})."
+            f"vs {s_lo / f_lo:.2f}\u00d7 for LOSAT ({fmt_sec(f_lo)} \u2192 {fmt_sec(s_lo)}; 1M-read stdin and file rows shown first as a pair in a)."
         )
     excl_wrapped = textwrap.fill(
         f"Plotted times are summed over the BLAST calls in each workflow (medians of 3 rounds in a, b; 4 runs in c); memory shows peak max RSS (% of BLAST+, shorter = smaller).{stdin_note} "
@@ -913,6 +915,7 @@ def render_fig3(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
 # ---------------------------------------------------------------------------
 def render_fig4(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> Path:
     ur50 = read_tsv(snap / "vs_heuristics_uniref50.tsv")
+    ur50_plot = [r for r in ur50 if r["exact_ncbi_parity"] != "baseline_retimed"]
     silva = read_tsv(snap / "vs_heuristics_silva.tsv")
     meta = read_meta(snap)
     by_sc = {(r["case"], r["arm"]): r for r in silva}
@@ -925,7 +928,7 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
     }
 
     def _gib_rng(tool: str) -> tuple[float, float]:
-        vals = [float(r["max_rss_gib"]) for r in ur50 if r["tool"] == tool]
+        vals = [float(r["max_rss_gib"]) for r in ur50_plot if r["tool"] == tool]
         return min(vals), max(vals)
 
     lo_lo, lo_hi = _gib_rng("LOSAT")
@@ -1006,7 +1009,7 @@ def render_fig4(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
     ]):
         ax = fig.add_axes(rect)
         ax.set_facecolor(theme["surface"])
-        sub = [r for r in ur50 if r["query_set"] == qset]
+        sub = [r for r in ur50_plot if r["query_set"] == qset]
         ax.axhspan(98.6, 103.8, color=theme["zone"], alpha=0.60, zorder=0)
         ax.axhline(100.0, color=theme["losat"], lw=0.9, ls="--", alpha=0.7, zorder=1)
         ax.text(xlim[0] * 1.15, 100.8, "100% exact NCBI BLAST+ parity", fontsize=6.9, fontweight="semibold", color=theme["losat"], va="bottom")
@@ -1251,7 +1254,8 @@ def render_fig5(snap: Path, out: Path, theme: dict[str, object], dark: bool) -> 
 
     wasm_sha = short_sha(meta.get("wasm_commit") or "")
     derived_note = (
-        f"Note: {wasm_sha} times are scaled from measured build {base_sha} by a side-by-side ratio run; NCBI BLAST+ tblastx was not timed in this set."
+        f"Note: {wasm_sha} times are scaled from measured build {base_sha} by a side-by-side ratio run; "
+        f"'~equal' means within \u00b15% of the estimate (ratio 0.95\u20131.05). NCBI BLAST+ tblastx was not timed in this set."
         if wasm_derived
         else "Direct paired native, WebAssembly, and NCBI BLAST+ runs in the same lease."
     )

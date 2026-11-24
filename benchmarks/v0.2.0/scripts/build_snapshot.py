@@ -562,6 +562,17 @@ def build_vs_heuristics_uniref50(
             ("losat_bp", "LOSAT", "blastp", "no", bp16_by[(qset, "losat_bp")][rnd][:3], (1.0, 1.0), "yes", f"LOSAT {losat_commit}"),
             ("losat_fast", "LOSAT", "blastp-fast", "no", bp16_by[(qset, "losat_fast")][rnd][:3], rec[qset]["ncbi_fast"], "yes_fast", f"LOSAT {losat_commit}"),
             ("ncbi_def", "NCBI BLAST+", "blastp", "no", main_by[(qset, "ncbi_def")][rnd][:3], (1.0, 1.0), "baseline", "NCBI BLAST+ 2.17.0"),
+        ]
+        if qset == "q100":
+            bp16_ncbi = bp16_by.get(("q100", "ncbi"), {}).get(1)
+            if bp16_ncbi is None:
+                sys.exit(f"missing q100 ncbi round 1 in {bp16_summary}")
+            if bp16_ncbi[3] != ncbi_def_sha:
+                sys.exit(f"UniRef50 re-timed q100 NCBI parity mismatch: {bp16_ncbi[3]} vs {ncbi_def_sha}")
+            entries.append(
+                ("ncbi_def_bp16", "NCBI BLAST+", "blastp", "no", bp16_ncbi[:3], (1.0, 1.0), "baseline_retimed", "NCBI BLAST+ 2.17.0 (re-timed in the LOSAT run, 2026-11-02)")
+            )
+        entries.extend([
             ("ncbi_fast", "NCBI BLAST+", "blastp-fast", "no", main_by[(qset, "ncbi_fast")][rnd][:3], rec[qset]["ncbi_fast"], "baseline_fast", "NCBI BLAST+ 2.17.0"),
             ("dmnd_def", "DIAMOND", "default", "no", main_by[(qset, "dmnd_def")][rnd][:3], rec[qset]["dmnd_def"], "no", "DIAMOND 2.2.8"),
             ("dmnd_ms", "DIAMOND", "--more-sensitive", "no", main_by[(qset, "dmnd_ms")][rnd][:3], rec[qset]["dmnd_ms"], "no", "DIAMOND 2.2.8"),
@@ -570,7 +581,7 @@ def build_vs_heuristics_uniref50(
             ("mmseqs_s75_noidx", "MMseqs2", "-s 7.5 (no index)", "no", mm_noidx[(qset, "s75_bioconda")][rnd], rec[qset]["s75"], "no", "MMseqs2 18.8cc5c"),
             ("mmseqs_s57_idx", "MMseqs2", "-s 5.7 (101 GiB idx)", "yes", mm_idx[(qset, "s57_bioconda")][rnd], rec[qset]["s57"], "no", "MMseqs2 18.8cc5c"),
             ("mmseqs_s75_idx", "MMseqs2", "-s 7.5 (101 GiB idx)", "yes", mm_idx[(qset, "s75_bioconda")][rnd], rec[qset]["s75"], "no", "MMseqs2 18.8cc5c"),
-        ]
+        ])
         for arm_id, tool, mode, indexed, (wall, rss_g, anon_g), (r_unc, r_best), parity, bnote in entries:
             out.append({
                 "query_set": qset,

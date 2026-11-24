@@ -2,6 +2,7 @@ query_set	arm_id	tool	mode	indexed	threads	wall_s	max_rss_gib	rss_anon_gib	recal
 q100	losat_bp	LOSAT	blastp	no	32	407.04	0.111	0.116	1.0	1.0	yes	LOSAT 995281681
 q100	losat_fast	LOSAT	blastp-fast	no	32	28.05	0.138	0.141	0.891	1.0	yes_fast	LOSAT 995281681
 q100	ncbi_def	NCBI BLAST+	blastp	no	32	1067.88	13.395	0.195	1.0	1.0	baseline	NCBI BLAST+ 2.17.0
+q100	ncbi_def_bp16	NCBI BLAST+	blastp	no	32	1069.9	13.395	0.2	1.0	1.0	baseline_retimed	NCBI BLAST+ 2.17.0 (re-timed in the LOSAT run, 2026-11-02)
 q100	ncbi_fast	NCBI BLAST+	blastp-fast	no	32	91.67	13.385	0.194	0.891	1.0	baseline_fast	NCBI BLAST+ 2.17.0
 q100	dmnd_def	DIAMOND	default	no	32	39.58	5.018	5.027	0.647	1.0	no	DIAMOND 2.2.8
 q100	dmnd_ms	DIAMOND	--more-sensitive	no	32	162.82	8.995	9.004	0.897	1.0	no	DIAMOND 2.2.8

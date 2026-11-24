@@ -100,25 +100,19 @@ pub(crate) fn prints_title(outfmt: &str) -> bool {
 }
 
 impl MaskBdbReader {
-    /// A new `CSeqDB` of `name` and the molecule, on the search path of the environment and
-    /// the registry of `database` (the `[BLAST] BLASTDB` of the configuration:
-    /// `ApplicationSettings::blastdb`, `Err` when LOSAT does not read the entry as NCBI does),
-    /// whose definition lines are read under the checks of `database`
-    /// (`SeqDb::refuse_unchecked_reads`). `program` names LOSAT's program in a refusal.
+    /// A new `CSeqDB` of `name` (the bytes of NCBI's `std::string`) and the molecule, on the
+    /// search path of the environment and the registry of `database` (the `[BLAST] BLASTDB` of
+    /// the configuration: `ApplicationSettings::blastdb`), whose definition lines are read under
+    /// the checks of `database` (`SeqDb::refuse_unchecked_reads`). `program` names LOSAT's
+    /// program in a refusal.
     pub(crate) fn open(
-        name: &str,
+        name: &[u8],
         molecule: SeqType,
         database: DatabaseSettings<'_>,
         title_printed: bool,
         program: &'static str,
     ) -> Result<Self, BdbError> {
-        let registry = database.registry.map_err(|reason| {
-            BdbError::Refused(
-                crate::algorithm::common::database::refusal(reason, program).to_string(),
-            )
-        })?;
-        let path = SearchPath::from_environment(registry)
-            .map_err(|error| database_error(error, program))?;
+        let path = SearchPath::from_environment(database.registry);
         // `GetNumOIDs`, not the OIDs that the alias files' ranges include.
         let mut db = SeqDb::open_every_oid_in(name, molecule, &path)
             .map_err(|error| database_error(error, program))?;
@@ -169,7 +163,7 @@ impl MaskBdbReader {
     /// `FindVolumePaths` (with its flag true) of the database opened as `name`: the paths of its
     /// volumes (without extension), each once, in NCBI's order.
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-966
-    pub(crate) fn volume_paths(&self, name: &str) -> Result<Vec<String>, BdbError> {
+    pub(crate) fn volume_paths(&self, name: &[u8]) -> Result<Vec<Vec<u8>>, BdbError> {
         SeqDb::volume_and_alias_paths(name, self.molecule, &self.path)
             .map(|(volumes, _)| volumes)
             .map_err(|error| database_error(error, self.program))

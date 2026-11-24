@@ -20,8 +20,10 @@ use super::masker::dust_masks_skip_ns;
 /// The arguments of the run, as NCBI's `CArgs` gives them (`AsInteger`, `AsString`,
 /// `AsBoolean`).
 pub(super) struct Options<'a> {
-    pub input: &'a str,
-    pub infmt: &'a str,
+    /// `-in`: the bytes of a FASTA file's name or of a database's.
+    pub input: &'a std::ffi::OsStr,
+    /// `-infmt`, which NCBI compares as its bytes.
+    pub infmt: std::borrow::Cow<'a, [u8]>,
     pub outfmt: &'a str,
     pub window: i32,
     pub level: i32,
@@ -241,13 +243,13 @@ fn reader<'a>(
     options: &Options<'_>,
     stdin: &'a mut Cin<'_>,
 ) -> Result<Box<dyn SequenceSource + 'a>, Failure> {
-    match options.infmt {
-        "fasta" => {
+    match &*options.infmt {
+        b"fasta" => {
             let input = open_input_file("in", options.input, stdin).map_err(Failure::Arg)?;
             super::fasta::source(input, options.parse_seqids)
         }
-        "blastdb" => Ok(Box::new(DatabaseSource::open(
-            options.input,
+        b"blastdb" => Ok(Box::new(DatabaseSource::open(
+            &crate::utils::os_bytes::os_str_bytes(options.input),
             options.database,
             prints_title(options.outfmt),
         )?)),
@@ -262,7 +264,7 @@ struct DatabaseSource {
 
 impl DatabaseSource {
     fn open(
-        name: &str,
+        name: &[u8],
         database: crate::blastinput::ncbi_environment::DatabaseSettings<'_>,
         title_printed: bool,
     ) -> Result<Self, Failure> {

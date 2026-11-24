@@ -730,7 +730,7 @@ fn the_registry_value_of_blastdb_is_ncbis() {
         )
         .unwrap_or_else(|reason| panic!("{id}: {reason}"));
         let expected = (registry != "<none>").then(|| place(registry));
-        assert_eq!(settings.blastdb, Ok(expected), "{id}");
+        assert_eq!(settings.blastdb, expected.map(String::into_bytes), "{id}");
         cases += 1;
     }
     assert!(cases >= 15, "{cases} cases");
@@ -887,7 +887,7 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
             "{program}"
         );
         let settings = start.settings.unwrap();
-        assert_eq!(settings.blastdb, Ok(Some("/dbs".to_string())), "{program}");
+        assert_eq!(settings.blastdb, Some(b"/dbs".to_vec()), "{program}");
         let registry = settings.window_masker_registry.unwrap();
         assert_eq!(registry.path.as_deref(), Some("/w"), "{program}");
         let mut posts = Posts::new();
@@ -1044,12 +1044,11 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbireg.cpp:753-781 (cited at
-// `ncbi_registry::read_lines`): the escapes of a value are read, and a value that is not
-// UTF-8 is not a path LOSAT reads.
-/// A value of `[BLAST] BLASTDB` that LOSAT cannot read is no reason to reject a program
-/// that opens no database: it is kept as the reason for the program that does.
+// `ncbi_registry::read_lines`): the escapes of a value are read, and the value is the bytes
+// they make.
+/// A value of `[BLAST] BLASTDB` is its bytes, as NCBI's string is, UTF-8 or not.
 #[test]
-fn an_unreadable_blastdb_value_is_kept_for_the_program_that_opens_a_database() {
+fn the_blastdb_value_is_its_bytes() {
     let dir = crate::utils::test_dir::temp_dir().join(format!(
         "losat-ncbi-environment-blastdb-unreadable-{}",
         crate::utils::test_dir::process_id()
@@ -1076,22 +1075,21 @@ fn an_unreadable_blastdb_value_is_kept_for_the_program_that_opens_a_database() {
     let ini = dir.join("blastp.ini");
     let _ = std::fs::remove_file(&ini);
     std::fs::write(&ncbirc, "[BLAST]\nBLASTDB = C:\\db\n").unwrap();
-    assert_eq!(settings(&[]).blastdb, Ok(Some("C:db".to_string())));
-    std::fs::write(&ncbirc, "[BLAST]\nBLASTDB = /d\\xffb\n").unwrap();
-    let unreadable = settings(&[]);
-    assert!(unreadable.data_loaders);
-    let reason = unreadable.blastdb.unwrap_err();
-    assert!(reason.contains("[BLAST] BLASTDB") && reason.contains("UTF-8"));
+    assert_eq!(settings(&[]).blastdb, Some(b"C:db".to_vec()));
+    std::fs::write(&ncbirc, "[BLAST]\nBLASTDB = /d\\xff/b\n").unwrap();
+    let bytes = settings(&[]);
+    assert!(bytes.data_loaders);
+    assert_eq!(bytes.blastdb, Some(b"/d\xff/b".to_vec()));
     // A layer above the file answers first.
     assert_eq!(
         settings(&[("NCBI_CONFIG__BLAST__BLASTDB", "/db")]).blastdb,
-        Ok(Some("/db".to_string()))
+        Some(b"/db".to_vec())
     );
     std::fs::write(&ini, "[BLAST]\nBLASTDB = /ini\n").unwrap();
-    assert_eq!(settings(&[]).blastdb, Ok(Some("/ini".to_string())));
+    assert_eq!(settings(&[]).blastdb, Some(b"/ini".to_vec()));
     std::fs::write(&ini, "[BLAST]\nBLASTDB = /a\\\"b\n").unwrap();
-    assert_eq!(settings(&[]).blastdb, Ok(Some("/a\"b".to_string())));
-    assert_eq!(ApplicationSettings::default().blastdb, Ok(None));
+    assert_eq!(settings(&[]).blastdb, Some(b"/a\"b".to_vec()));
+    assert_eq!(ApplicationSettings::default().blastdb, None);
     std::fs::remove_file(&ini).unwrap();
     std::fs::remove_file(&ncbirc).unwrap();
     std::fs::remove_dir(&dir).unwrap();
@@ -1574,7 +1572,7 @@ fn rpsbproc_starts_without_the_usage_report() {
     let read = start(&[("BLAST_USAGE_REPORT", "abc")]);
     assert_eq!(read.usage_report, Ok(String::new()));
     assert_eq!(read.config, Ok(ConfigLoad::Loaded(String::new())));
-    assert_eq!(read.settings.unwrap().blastdb, Ok(Some("/db".to_string())));
+    assert_eq!(read.settings.unwrap().blastdb, Some(b"/db".to_vec()));
     std::fs::write(&ncbirc, "[BLAST]\nBLASTDB=/db\ngarbage\n").unwrap();
     let malformed = start(&[]);
     assert_eq!(malformed.usage_report, Ok(String::new()));
@@ -1585,10 +1583,7 @@ fn rpsbproc_starts_without_the_usage_report() {
             crate::wording::losat_text(post).into_owned()
         ))
     );
-    assert_eq!(
-        malformed.settings.unwrap().blastdb,
-        Ok(Some("/db".to_string()))
-    );
+    assert_eq!(malformed.settings.unwrap().blastdb, Some(b"/db".to_vec()));
     std::fs::remove_file(&ncbirc).unwrap();
     std::fs::write(dir.join("rpsbproc.ini"), "garbage\n").unwrap();
     let report = "Error: (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\nError: (106.15) Application's initialization failed (CRegistryException::eEntry) Invalid registry entry format: 'garbage' (m_Pos = 1)\n";
@@ -1634,7 +1629,7 @@ fn dustmasker_starts_without_the_usage_report() {
     let read = start(&[("BLAST_USAGE_REPORT", "abc")]);
     assert_eq!(read.usage_report, Ok(String::new()));
     assert_eq!(read.config, Ok(ConfigLoad::Loaded(String::new())));
-    assert_eq!(read.settings.unwrap().blastdb, Ok(Some("/db".to_string())));
+    assert_eq!(read.settings.unwrap().blastdb, Some(b"/db".to_vec()));
     std::fs::write(&ncbirc, "[BLAST]\nBLASTDB=/db\ngarbage\n").unwrap();
     let malformed = start(&[]);
     assert_eq!(malformed.usage_report, Ok(String::new()));
@@ -1685,7 +1680,7 @@ fn the_start_reads_the_files_as_ncbi_reads_them() {
     assert_eq!(partial.config, loaded(&critical(3)));
     assert_eq!(
         partial.settings.as_ref().unwrap().blastdb,
-        Ok(Some("/db".to_string()))
+        Some(b"/db".to_vec())
     );
     let late = start(&[("BLAST_USAGE_REPORT", "false")]);
     assert_eq!(late.usage_report, Ok(String::new()));
@@ -1694,7 +1689,7 @@ fn the_start_reads_the_files_as_ncbi_reads_them() {
         let off = start(&[(variable, "")]);
         assert_eq!(off.usage_report, Ok(String::new()));
         assert_eq!(off.config, loaded(""));
-        assert_eq!(off.settings.unwrap().blastdb, Ok(None));
+        assert_eq!(off.settings.unwrap().blastdb, None);
     }
     // `[NCBI] DONT_USE_NCBIRC` in the program's file: the usage report's read alone.
     std::fs::write(&ini, "[NCBI]\nDONT_USE_NCBIRC=1\n").unwrap();

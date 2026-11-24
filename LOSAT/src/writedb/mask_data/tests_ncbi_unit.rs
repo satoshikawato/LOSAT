@@ -13,7 +13,8 @@ use super::registry::{
 use super::tests::{bioseq, new_db};
 use super::{MaskInfoRegistry, MaskedRanges};
 use crate::seqdb::{MaskRanges, SeqDb, SeqType};
-use crate::writedb::tests::{files_named, TempDir};
+use crate::utils::test_dir::TempDir;
+use crate::writedb::tests::{base_in, files_named};
 use crate::writedb::writer::DbVersion;
 use crate::writedb::WriteDbError;
 
@@ -144,9 +145,9 @@ fn register_too_many_variants_of_other() {
 fn mask_data_column() {
     const NUM_SEQS: usize = 3;
     for version in [DbVersion::V4, DbVersion::V5] {
-        let tmp = TempDir::new("ncbi-mask-data-column");
+        let tmp = TempDir::unique("writedb-ncbi-mask-data-column");
         let mut db = new_db(
-            &tmp.base("mask-data-db"),
+            &base_in(&tmp, "mask-data-db"),
             b"Oct 12, 2026  3:22 PM",
             0,
             version,
@@ -204,14 +205,14 @@ fn mask_data_column() {
 
         // NCBI leaves the files untested; the column files are written, and the reader finds
         // what was set.
-        let written = files_named(&tmp.0, "mask-data-db.");
+        let written = files_named(&tmp, "mask-data-db.");
         for extension in ["paa", "pab", "pac", "phr", "pin", "psq"] {
             assert!(
                 written.contains(&format!("mask-data-db.{extension}")),
                 "{version:?} {written:?}"
             );
         }
-        let reader = SeqDb::open(&tmp.base("mask-data-db"), SeqType::Protein).unwrap();
+        let reader = SeqDb::open(&base_in(&tmp, "mask-data-db"), SeqType::Protein).unwrap();
         for (oid, sets) in expected.iter().enumerate() {
             for algo in [seg_id, repeat_id] {
                 let want = sets
@@ -233,9 +234,9 @@ fn mask_data_column() {
 // NCBI unit test (598d8ae6): c++/src/objtools/blast/seqdb_writer/unit_test/writedb_unit_test.cpp:2006-2017 DuplicateAlgoId
 #[test]
 fn duplicate_algo_id() {
-    let tmp = TempDir::new("ncbi-duplicate-algo-id");
+    let tmp = TempDir::unique("writedb-ncbi-duplicate-algo-id");
     let mut db = new_db(
-        &tmp.base("mask-data-db"),
+        &base_in(&tmp, "mask-data-db"),
         b"Oct 12, 2026  3:22 PM",
         0,
         DbVersion::V4,
@@ -251,9 +252,9 @@ fn duplicate_algo_id() {
 // NCBI unit test (598d8ae6): c++/src/objtools/blast/seqdb_writer/unit_test/writedb_unit_test.cpp:2019-2050 TooManyAlgoId
 #[test]
 fn too_many_algo_id() {
-    let tmp = TempDir::new("ncbi-too-many-algo-id");
+    let tmp = TempDir::unique("writedb-ncbi-too-many-algo-id");
     let mut db = new_db(
-        &tmp.base("mask-data-db"),
+        &base_in(&tmp, "mask-data-db"),
         b"Oct 12, 2026  3:22 PM",
         0,
         DbVersion::V4,
@@ -281,9 +282,9 @@ fn too_many_algo_id() {
 // NCBI unit test (598d8ae6): c++/src/objtools/blast/seqdb_writer/unit_test/writedb_unit_test.cpp:2052-2089 UndefinedAlgoID
 #[test]
 fn undefined_algo_id() {
-    let tmp = TempDir::new("ncbi-undefined-algo-id");
+    let tmp = TempDir::unique("writedb-ncbi-undefined-algo-id");
     let mut db = new_db(
-        &tmp.base("mask-data-db"),
+        &base_in(&tmp, "mask-data-db"),
         b"Oct 12, 2026  3:22 PM",
         0,
         DbVersion::V4,
@@ -317,9 +318,9 @@ fn undefined_algo_id() {
 // NCBI unit test (598d8ae6): c++/src/objtools/blast/seqdb_writer/unit_test/writedb_unit_test.cpp:2091-2126 MaskDataBoundsError
 #[test]
 fn mask_data_bounds_error() {
-    let tmp = TempDir::new("ncbi-mask-bounds");
+    let tmp = TempDir::unique("writedb-ncbi-mask-bounds");
     let mut db = new_db(
-        &tmp.base("mask-data-db"),
+        &base_in(&tmp, "mask-data-db"),
         b"Oct 12, 2026  3:22 PM",
         0,
         DbVersion::V4,

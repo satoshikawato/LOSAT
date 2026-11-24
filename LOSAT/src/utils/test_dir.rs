@@ -1,7 +1,8 @@
-//! The directory of the tests' temporary files, the number in their names, and the name NCBI's
-//! database reader gives such a directory (`ncbi_dir`).
+//! The directory of the tests' temporary files, the number in their names, the guard that removes
+//! a test's directory (`TempDir`), and the name NCBI's database reader gives such a directory
+//! (`ncbi_dir`).
 //!
-//! No NCBI counterpart for the first two: test plumbing; the product code that needs a temporary
+//! No NCBI counterpart for the first three: test plumbing; the product code that needs a temporary
 //! directory handles WASI itself (`blastinput::input_files::temporary_directory`).
 
 /// `std::env::temp_dir()` off WASI. On WASI Rust's `temp_dir()` panics ("no filesystem on wasm",
@@ -49,6 +50,50 @@ pub(crate) fn process_id() -> u32 {
             // starts gives the same number to both, which only a test run on a coarse clock meets.
             (since.as_secs() as u32).wrapping_mul(1_000_003) ^ since.subsec_nanos()
         })
+    }
+}
+
+/// A directory of a test's files, `<temp_dir>/<name>`: made empty when it is made, and removed
+/// with what it holds when it is dropped, at the end of the test that holds it, passed or failed.
+#[derive(Debug)]
+pub(crate) struct TempDir(std::path::PathBuf);
+
+impl TempDir {
+    pub(crate) fn new(name: &str) -> Self {
+        let dir = temp_dir().join(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Self(dir)
+    }
+
+    /// A directory of its own for each call of the process: `losat-<stem>-<process>-<number>`.
+    pub(crate) fn unique(stem: &str) -> Self {
+        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        Self::new(&format!(
+            "losat-{stem}-{}-{}",
+            process_id(),
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ))
+    }
+}
+
+impl std::ops::Deref for TempDir {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl AsRef<std::path::Path> for TempDir {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

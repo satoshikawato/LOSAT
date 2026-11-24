@@ -1139,4 +1139,5 @@ fn an_argument_error_posts_to_the_calls_logfile() {
         );
         assert!(!log.exists(), "{name}: validate makes no file");
     }
+    let _ = std::fs::remove_dir_all(&dir);
 }

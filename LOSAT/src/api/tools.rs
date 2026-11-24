@@ -299,7 +299,7 @@ pub fn run_makeblastdb(
     }
     let converted = match crate::cli::reader::refusal_after_read(tool, &args) {
         Some(reason) => Err(reason),
-        None => crate::cli::reader::convert(tool, &args, false),
+        None => crate::cli::reader::options(tool, &args, false),
     };
     let args = match converted {
         Ok(Commands::Makedb(args)) => args,

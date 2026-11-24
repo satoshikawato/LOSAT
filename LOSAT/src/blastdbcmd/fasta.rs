@@ -50,7 +50,7 @@ impl FastaFormatter {
         source: &Source,
         oid: u32,
         config: &Config,
-        target: Option<&str>,
+        target: Option<&[u8]>,
         out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
         DbBioseq::with(source, oid, false, target, target_id, out, |bioseq, out| {
@@ -178,7 +178,7 @@ impl FastaFormatter {
 /// The id of a `-target_only` target as `GetBioseq` gets it: the GI of a number
 /// (`GetBioseq` with `oid` and `gi`, which `x_GetTaxDefline` makes a `CSeq_id` of type `e_Gi` with
 /// the number `gi`), else the Seq-id of the text.
-fn target_id(target: &str) -> Result<ParsedSeqId, Stop> {
+fn target_id(target: &[u8]) -> Result<ParsedSeqId, Stop> {
     match numeric_target(target) {
         Some(number) => Ok(ParsedSeqId::Gi(number)),
         None => parse_target(target),

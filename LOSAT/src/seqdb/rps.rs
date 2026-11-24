@@ -82,9 +82,9 @@ const LOO_HEADER_BYTES: usize = 40;
 /// Why a volume's RPS files cannot be searched.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RpsOpenError {
-    /// NCBI's own error (`CBlastException` with `eRpsInit`): the text after `BLAST engine
-    /// error: `.
-    Ncbi(String),
+    /// NCBI's own error (`CBlastException` with `eRpsInit`): the bytes after `BLAST engine
+    /// error: ` (a path in them as the system's bytes).
+    Ncbi(Vec<u8>),
     /// LOSAT's refusal of files that NCBI would read outside their bounds or that LOSAT does not
     /// search.
     Refused(String),
@@ -152,18 +152,18 @@ pub(crate) fn parse_aux(text: &str) -> Option<RpsAux> {
 }
 
 /// The path that NCBI's errors name: the volume's directory made absolute, with links and `..`
-/// resolved (`CSeqDB::FindVolumePaths`), and the volume's name without extension.
-pub(crate) fn canonical_volume_path(base: &Path) -> String {
+/// resolved (`CSeqDB::FindVolumePaths`), and the volume's name without extension, as the
+/// system's bytes (NCBI's `std::string`).
+pub(crate) fn canonical_volume_path(base: &Path) -> Vec<u8> {
     let name = base.file_name().map(PathBuf::from).unwrap_or_default();
     let dir = match base.parent() {
         Some(dir) if !dir.as_os_str().is_empty() => dir.to_path_buf(),
         _ => PathBuf::from("."),
     };
-    std::fs::canonicalize(&dir)
+    let path = std::fs::canonicalize(&dir)
         .map(|dir| dir.join(&name))
-        .unwrap_or_else(|_| base.to_path_buf())
-        .to_string_lossy()
-        .into_owned()
+        .unwrap_or_else(|_| base.to_path_buf());
+    crate::utils::os_bytes::path_bytes(&path).into_owned()
 }
 
 /// A `.freq` file read at offsets: the file itself where the platform has positioned reads, else
@@ -446,19 +446,37 @@ impl RpsVolumeFiles {
             PathBuf::from(path)
         };
         let aux_text = std::fs::read(with(".aux")).map_err(|_| {
-            RpsOpenError::Ncbi(format!("Cannot open RPS-BLAST auxiliary file: {shown}.aux"))
+            RpsOpenError::Ncbi(
+                [
+                    b"Cannot open RPS-BLAST auxiliary file: ",
+                    &shown[..],
+                    b".aux",
+                ]
+                .concat(),
+            )
         })?;
         let map = |extension: &str| {
             MappedFile::open(&with(extension)).map_err(|_| {
-                RpsOpenError::Ncbi(format!(
-                    "Cannot memory map RPS-BLAST database file: {shown}{extension}"
-                ))
+                RpsOpenError::Ncbi(
+                    [
+                        b"Cannot memory map RPS-BLAST database file: ",
+                        &shown[..],
+                        extension.as_bytes(),
+                    ]
+                    .concat(),
+                )
             })
         };
         let magic_error = |extension: &str| {
-            RpsOpenError::Ncbi(format!(
-                "RPS BLAST profile file ({shown}{extension}) is either corrupt or constructed for an incompatible architecture"
-            ))
+            RpsOpenError::Ncbi(
+                [
+                    b"RPS BLAST profile file (",
+                    &shown[..],
+                    extension.as_bytes(),
+                    b") is either corrupt or constructed for an incompatible architecture",
+                ]
+                .concat(),
+            )
         };
         let empty = |extension: &str| {
             RpsOpenError::Refused(format!(
@@ -620,11 +638,20 @@ impl RpsVolumeFiles {
         program: &str,
         database_name: Option<&str>,
     ) -> Result<(), RpsOpenError> {
-        let shown = database_name.map_or_else(|| canonical_volume_path(base), str::to_string);
+        let shown = database_name.map_or_else(
+            || canonical_volume_path(base),
+            |name| name.as_bytes().to_vec(),
+        );
         let missing = || {
-            RpsOpenError::Ncbi(format!(
-                "{shown} contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against {shown}."
-            ))
+            RpsOpenError::Ncbi(
+                [
+                    &shown[..],
+                    b" contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against ",
+                    &shown[..],
+                    b".",
+                ]
+                .concat(),
+            )
         };
         let mut path = base.as_os_str().to_os_string();
         path.push(".freq");

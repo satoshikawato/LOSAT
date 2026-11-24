@@ -6,11 +6,12 @@
 # - cargo: LOSAT, one pull request per dependency. web/adapter/tools/check_build_identity.py
 #   (web.yml, job `adapter`) requires web/adapter/Cargo.lock to hold the same version of every
 #   package it shares with LOSAT/Cargo.lock, and Dependabot updates only the direct dependencies
-#   of a directory (web/adapter's are LOSAT and clap). So before merging, add a commit that moves
+#   of a directory (web/adapter's are LOSAT, sha2, and the dev-dependencies bzip2 and flate2, which
+#   LOSAT also requires). So before merging, add a commit that moves
 #   web/adapter's lock file to the same versions, for each package that changed:
 #     cargo update --manifest-path web/adapter/Cargo.toml -p <package>@<old> --precise <new>
 #   (`@<old>` picks one when the lock file holds two versions of the package), and raise
-#   web/adapter/Cargo.toml's own requirement when clap moves to a new major. Then run
+#   web/adapter/Cargo.toml's own requirement when bzip2 or flate2 moves to a new major. Then run
 #     python3 scripts/third_party_licenses.py
 #   and commit THIRD_PARTY_LICENSES and python/THIRD_PARTY_LICENSES, which name the version of
 #   every linked crate (ci.yml, job `rust lint`, fails while they are stale).

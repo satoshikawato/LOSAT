@@ -4,8 +4,9 @@
 
 use std::path::Path;
 
+use crate::utils::test_dir::TempDir;
 use crate::writedb::makeblastdb::run_with;
-use crate::writedb::tests::{parse_makedb_words, seqdb_fixtures, time_of, TempDir, LINUX};
+use crate::writedb::tests::{base_in, parse_makedb_words, seqdb_fixtures, time_of, LINUX};
 
 /// The run of makeblastdb with `words`: exit status, standard output, standard error.
 fn makeblastdb(words: &[&str]) -> (i32, String, String) {
@@ -85,16 +86,16 @@ fn assert_copy_is_the_original(
     masks: &[(&str, String)],
     more: &[&str],
 ) {
-    let tmp = TempDir::new(&format!("raw-{label}"));
+    let tmp = TempDir::unique(&format!("writedb-raw-{label}"));
     let fasta = seqdb_fixtures().join(fasta).to_string_lossy().into_owned();
     let masks: Vec<String> = masks
         .iter()
         .map(|(name, text)| {
-            std::fs::write(tmp.0.join(name), text).unwrap();
-            tmp.base(name)
+            std::fs::write(tmp.join(name), text).unwrap();
+            base_in(&tmp, name)
         })
         .collect();
-    let (source, copy) = (tmp.base("src/db"), tmp.base("dst/db"));
+    let (source, copy) = (base_in(&tmp, "src/db"), base_in(&tmp, "dst/db"));
     let mut words = vec![
         "-in",
         &fasta,
@@ -134,7 +135,7 @@ fn assert_copy_is_the_original(
         "{label}: {log}"
     );
 
-    let (source_dir, copy_dir) = (tmp.0.join("src"), tmp.0.join("dst"));
+    let (source_dir, copy_dir) = (tmp.join("src"), tmp.join("dst"));
     let files = files_of(&source_dir);
     assert_eq!(files, files_of(&copy_dir), "{label}: files");
     let ext = if dbtype == "prot" { 'p' } else { 'n' };
@@ -238,9 +239,9 @@ fn not_found(name: &str) -> String {
     ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
 )]
 fn the_errors_before_the_copy_are_makeblastdb_s() {
-    let tmp = TempDir::new("raw-errors");
-    let dir = tmp.0.to_string_lossy().into_owned();
-    let out = tmp.base("db");
+    let tmp = TempDir::unique("writedb-raw-errors");
+    let dir = tmp.to_string_lossy().into_owned();
+    let out = base_in(&tmp, "db");
     // NCBI's message in LOSAT's words (AGENTS.md rule 8).
     let same_name = crate::wording::losat_text(
         "BLAST options error: Cannot create a BLAST database from an existing one without \
@@ -295,7 +296,7 @@ fn the_errors_before_the_copy_are_makeblastdb_s() {
             "{name}"
         );
     }
-    assert_eq!(files_of(&tmp.0), Vec::<String>::new());
+    assert_eq!(files_of(&tmp), Vec::<String>::new());
     // With no name at all NCBI reads the title of the first database of none (makeblastdb
     // 2.17.0: a segmentation fault, probe d3c2_empty/b).
     let (status, _, err) = run(&["-in", "", "-out", &out]);
@@ -318,7 +319,7 @@ fn the_errors_before_the_copy_are_makeblastdb_s() {
             .as_ref()
         )
     );
-    assert_eq!(files_of(&tmp.0), Vec::<String>::new());
+    assert_eq!(files_of(&tmp), Vec::<String>::new());
 }
 
 /// An alias file whose OID list file NCBI cannot read as a list (no byte: SIGSEGV; the header
@@ -331,8 +332,8 @@ fn the_errors_before_the_copy_are_makeblastdb_s() {
     ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
 )]
 fn oid_list_files_ncbi_cannot_read_are_refused() {
-    let tmp = TempDir::new("raw-oidlist");
-    let out = tmp.base("db");
+    let tmp = TempDir::unique("writedb-raw-oidlist");
+    let out = base_in(&tmp, "db");
     for (name, file) in [("p_empty", "empty.msk"), ("p_hdr", "hdr.msk")] {
         let input = format!("tests/db_search/oidlist/{name}");
         let (status, log, err) = makeblastdb(&[
@@ -354,7 +355,7 @@ fn oid_list_files_ncbi_cannot_read_are_refused() {
             err.ends_with("this database is not supported as input by LOSAT's makeblastdb\n"),
             "{name}: {err}"
         );
-        assert_eq!(files_of(&tmp.0), Vec::<String>::new(), "{name}");
+        assert_eq!(files_of(&tmp), Vec::<String>::new(), "{name}");
     }
 }
 
@@ -369,8 +370,8 @@ fn oid_list_files_ncbi_cannot_read_are_refused() {
     ignore = "runs makeblastdb on files named from the working directory (tests/...): a WASI module has none, the runner preopens /"
 )]
 fn a_sequence_the_mask_type_leaves_without_a_line_is_refused() {
-    let tmp = TempDir::new("raw-oidmask");
-    let out = tmp.base("db");
+    let tmp = TempDir::unique("writedb-raw-oidmask");
+    let out = base_in(&tmp, "db");
     for (name, dbtype, oid) in [
         ("ompx", "prot", 2),
         ("tall", "prot", 1),
@@ -398,7 +399,7 @@ fn a_sequence_the_mask_type_leaves_without_a_line_is_refused() {
             )),
             "{name}: {err}"
         );
-        assert_eq!(files_of(&tmp.0), Vec::<String>::new(), "{name}");
+        assert_eq!(files_of(&tmp), Vec::<String>::new(), "{name}");
     }
 }
 
@@ -413,7 +414,7 @@ fn write_column_db(base: &str, prefix: &str, masks: bool) {
     use crate::writedb::writer::{DbVersion, Indices, WriteDb};
 
     let mut db = WriteDb::new(
-        base,
+        base.as_bytes(),
         true,
         b"T",
         b"Nov 21, 2026  9:00 AM",
@@ -471,8 +472,8 @@ fn write_column_db(base: &str, prefix: &str, masks: bool) {
     ignore = "runs makeblastdb on files of a temporary directory named from the working directory"
 )]
 fn masks_are_read_from_each_volume_s_first_column() {
-    let tmp = TempDir::new("raw-first-column");
-    let (user, masked) = (tmp.base("u"), tmp.base("m"));
+    let tmp = TempDir::unique("writedb-raw-first-column");
+    let (user, masked) = (base_in(&tmp, "u"), base_in(&tmp, "m"));
     write_column_db(&user, "u", false);
     write_column_db(&masked, "m", true);
     // The column files (`.pa?` and `.pb?`) of the two sources.
@@ -486,11 +487,11 @@ fn masks_are_read_from_each_volume_s_first_column() {
             .collect()
     };
     assert_eq!(
-        column_files(&tmp.0),
+        column_files(&tmp),
         ["m.paa", "m.pab", "m.pac", "m.pba", "m.pbb", "u.paa", "u.pab"]
     );
     for names in [format!("{user} {masked}"), format!("{masked} {user}")] {
-        let out = tmp.base(&format!("c{}", names.len()));
+        let out = base_in(&tmp, &format!("c{}", names.len()));
         let (status, _, err) = makeblastdb(&[
             "-in",
             &names,
@@ -507,7 +508,7 @@ fn masks_are_read_from_each_volume_s_first_column() {
         // The column under the volume's name with its links followed, as NCBI's reader names it
         // (`crate::utils::test_dir::ncbi_dir`): a `contains` of the path as given passed on macOS
         // only because `/var/...` is the end of `/private/var/...`.
-        let column = crate::utils::test_dir::ncbi_dir(&tmp.0).join("u.paa");
+        let column = crate::utils::test_dir::ncbi_dir(&tmp).join("u.paa");
         assert!(
             err.starts_with(&format!(
                 "losat makeblastdb: {}: unsupported database: the first column of",
@@ -517,7 +518,7 @@ fn masks_are_read_from_each_volume_s_first_column() {
         );
     }
 
-    let out = tmp.base("copy");
+    let out = base_in(&tmp, "copy");
     let (status, _, err) = makeblastdb(&[
         "-in",
         &masked,
@@ -529,7 +530,7 @@ fn masks_are_read_from_each_volume_s_first_column() {
         &out,
     ]);
     assert_eq!((status, err.as_str()), (0, ""));
-    let copied: Vec<String> = column_files(&tmp.0)
+    let copied: Vec<String> = column_files(&tmp)
         .into_iter()
         .filter(|name| name.starts_with("copy."))
         .collect();
@@ -570,7 +571,7 @@ fn the_memory_of_algorithm_lookups_is_ncbi_s() {
 /// first (probes of T5d merge 18, 2026-11-23, Linux x86-64; the copies are written in both).
 #[test]
 fn a_utf8_string_of_the_input_s_headers_is_warned_once_in_the_run() {
-    let tmp = TempDir::new("raw-utf8");
+    let tmp = TempDir::unique("writedb-raw-utf8");
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let input = root.join("tests/db_search/t5/nhd_utf8");
     let input = input.to_string_lossy();
@@ -581,16 +582,16 @@ fn a_utf8_string_of_the_input_s_headers_is_warned_once_in_the_run() {
         )
     };
     let words = ["-input_type", "blastdb", "-dbtype", "nucl", "-in", &input];
-    let copied = tmp.base("copied");
+    let copied = base_in(&tmp, "copied");
     let mut run = words.to_vec();
     run.extend(["-out", &copied]);
     let (status, _, err) = makeblastdb(&run);
     assert_eq!((status, err), (0, warning("Blast-def-line-set.E.title")));
-    assert!(files_of(&tmp.0).contains(&"copied.nhr".to_string()));
+    assert!(files_of(&tmp).contains(&"copied.nhr".to_string()));
 
     let mask = root.join("tests/seqdb/mask_parse/b_utf8_options.asnb");
     let mask = mask.to_string_lossy();
-    let masked = tmp.base("masked");
+    let masked = base_in(&tmp, "masked");
     let mut run = words.to_vec();
     run.extend(["-mask_data", &mask, "-out", &masked]);
     let (status, _, err) = makeblastdb(&run);
@@ -604,5 +605,5 @@ fn a_utf8_string_of_the_input_s_headers_is_warned_once_in_the_run() {
                    filtering program as well as makeblastdb.\n"
         )
     );
-    assert!(files_of(&tmp.0).contains(&"masked.nhr".to_string()));
+    assert!(files_of(&tmp).contains(&"masked.nhr".to_string()));
 }

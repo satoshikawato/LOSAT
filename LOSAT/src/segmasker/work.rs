@@ -146,7 +146,7 @@ fn run_masks(
     let masker = seg_masker(window, locut, hicut);
     let mut source = reader(
         value("infmt"),
-        value("in"),
+        args.os_value("in").expect("-in has a default"),
         parse_seqids,
         prints_title(outfmt),
         settings.database(),
@@ -265,7 +265,7 @@ enum Source<'a> {
 /// (`-infmt` takes only the two values of its constraint.)
 fn reader<'a>(
     infmt: &str,
-    input: &str,
+    input: &std::ffi::OsStr,
     parse_seqids: bool,
     title_printed: bool,
     database: crate::blastinput::ncbi_environment::DatabaseSettings<'_>,
@@ -280,7 +280,7 @@ fn reader<'a>(
                 .map_err(read_failure)
         }
         "blastdb" => MaskBdbReader::open(
-            input,
+            &crate::utils::os_bytes::os_str_bytes(input),
             SeqType::Protein,
             database,
             title_printed,

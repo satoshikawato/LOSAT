@@ -27,10 +27,11 @@
 //!   3; segmasker writes `e.what()` and a line feed and exits with 1); `Read(std::io::Error)`,
 //!   a failed read of the input; `OutOfMemory`, the `std::bad_alloc` of a gap line's length;
 //!   `Std(what)`, another standard exception of the reader (the `std::out_of_range` of a record
-//!   past NCBI's 32-bit positions); `SeqMap { error, length, id }`, the object manager's
-//!   exception for a record of 4294967295 letters or one whose gaps NCBI keeps as delta pieces
-//!   because their sum wraps NCBI's 32-bit length to 0 (`seq_map_error`), which the programs
-//!   report as NCBI's do (dustmasker, which crashes on the first, refuses it).
+//!   past NCBI's 32-bit positions); `SeqMap { error, first_segment, length }`, the object
+//!   manager's exception for a protein record of 4294967295 letters or a record whose gap
+//!   pieces cross NCBI's 32-bit positions (`seq_map_error`), which the programs report as
+//!   NCBI's do; `Refused(what)`, a nucleotide record of 4294967295 letters, on which NCBI's
+//!   reader crashes (`ReadError::PackOverflow`).
 //! - Warnings (`writedb::fasta_source::reader::ReaderWarning`, passed to a
 //!   `FnMut(ReaderWarning<'_>)`): `Line(message)`, which NCBI writes as the line `message`
 //!   (`LOG_POST`), and `SeqId(warning)`, which it writes as `Warning: (1306.<subcode>)
@@ -46,8 +47,8 @@ use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::writedb::bioseq::SeqData;
 use crate::writedb::fasta_source::pack::{self, Coding};
 use crate::writedb::fasta_source::reader::{
-    out_of_range_what, DeltaSeq, ErrCode, FastaReader, ReadError, ReaderFlags, ReaderWarn, Record,
-    SeqInst,
+    out_of_range_what, pack_overflow_what, DeltaSeq, ErrCode, FastaReader, ReadError, ReaderFlags,
+    ReaderWarn, Record, SeqInst,
 };
 
 // The text is observed, not taken from a library's source: NCBI's line reader reads through
@@ -95,14 +96,17 @@ pub(crate) enum MaskReadError {
     /// Another standard exception of the reader, its `what()`: the `std::out_of_range` of a
     /// record past NCBI's `TSeqPos` (`ReadError::OutOfRange`).
     Std(String),
-    /// The `CSeqMap` exception of a record of `length` letters (`Seq-inst.length`), whose first
-    /// id is `id` (its FASTA label), past NCBI's `TSeqPos` (`seq_map_error`), thrown where the
-    /// program reads its letters.
+    /// The `CSeqMap` exception of a record of `length` letters (`Seq-inst.length`) past NCBI's
+    /// `TSeqPos` (`seq_map_error`), thrown where the program reads its letters; `first_segment`
+    /// when the lookup of the first segment throws it.
     SeqMap {
         error: SeqMapError,
+        first_segment: bool,
         length: u64,
-        id: String,
     },
+    /// What LOSAT refuses (before "is not supported by LOSAT's <program>"): a nucleotide
+    /// record on which NCBI's reader crashes (`ReadError::PackOverflow`).
+    Refused(String),
 }
 
 /// `CMaskFastaReader`.
@@ -179,20 +183,25 @@ impl<R: Read> MaskFastaReader<R> {
                 // A raw sequence of 4294967295 letters, or gaps that stayed pieces (without
                 // `fParseGaps` only where their sum wraps NCBI's `TSeqPos` to 0 past 2^32
                 // letters, `RecordState::assemble_seq`), meet the map's errors.
-                if let Some(error) = seq_map_error(&record.inst) {
+                let read = if reader.is_protein() {
+                    SeqMapRead::Range
+                } else {
+                    SeqMapRead::Sequential
+                };
+                if let Some(SeqMapFault {
+                    error,
+                    first_segment,
+                }) = seq_map_error(&record.inst, read)
+                {
                     let (SeqInst::Delta { length, .. } | SeqInst::Raw { length, .. }) = record.inst
                     else {
                         unreachable!("only a raw sequence or a delta meets a map error")
                     };
-                    let mut id = Vec::new();
-                    if let Some(first) = record_ids(record.ids, record.local_id, reader).first() {
-                        crate::seqid::label::fasta(first, &mut id);
-                    }
                     self.reader = None;
                     return Err(MaskReadError::SeqMap {
                         error,
+                        first_segment,
                         length,
-                        id: String::from_utf8_lossy(&id).into_owned(),
                     });
                 }
                 Ok(Some(mask_record(record, reader)))
@@ -217,6 +226,10 @@ impl<R: Read> MaskFastaReader<R> {
                 self.reader = None;
                 Err(MaskReadError::Std(out_of_range_what(pos, size)))
             }
+            Err(ReadError::PackOverflow) => {
+                self.reader = None;
+                Err(MaskReadError::Refused(pack_overflow_what()))
+            }
         }
     }
 }
@@ -226,56 +239,141 @@ impl<R: Read> MaskFastaReader<R> {
 /// wrapped NCBI's `TSeqPos` to 0).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SeqMapError {
-    /// A raw sequence of 4294967295 letters (`kInvalidSeqPos`, a record whose gap lines make
-    /// that length): the map's one data segment has the length it cannot resolve. segmasker
-    /// reports it as it is (survey 11d sm4), dustmasker crashes (SIGSEGV, dm4).
-    InvalidRawLength,
-    /// A gap of 4294967295 (`kInvalidSeqPos`), whose length the map cannot resolve.
+    /// A segment of 4294967295 letters (`kInvalidSeqPos`), whose length the map cannot
+    /// resolve (`x_ResolveSegmentLength`).
     InvalidLength,
-    /// A piece whose end wraps the 32-bit position or reaches `kInvalidSeqPos`.
+    /// A segment's end that wraps the 32-bit position or is `kInvalidSeqPos`, where the map
+    /// resolves the position after it (`x_ResolveSegmentPosition`, `x_FindSegment`).
     PositionOverflow,
+}
+
+/// A `CSeqMap` error and where it is thrown: `first_segment` where the vector's iterator finds
+/// the segment of position 0 (`CSeqVector_CI::x_InitSeg`, before segmasker's range test, which
+/// reports it as it is), otherwise as the letters are read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SeqMapFault {
+    pub(crate) error: SeqMapError,
+    pub(crate) first_segment: bool,
+}
+
+/// How a program reads the letters of a sequence through `CSeqVector`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SeqMapRead {
+    /// From the first letter to the last (dustmasker, windowmasker, makembindex): the iterator
+    /// moves to the next segment where the current one ends (`CSeqVector_CI::x_UpdateSeg`).
+    Sequential,
+    /// segmasker's `GetSeqData`, which first tests the whole range
+    /// (`CSeqVector_CI::CanGetRange`, `CSeqMap::CanResolveRange`): every segment that starts
+    /// within it and the one after it are resolved, and a failure is its own
+    /// `seq_vector_exception`.
+    Range,
 }
 
 /// `kInvalidSeqPos`.
 const INVALID_SEQ_POS: u64 = u32::MAX as u64;
 
-/// The `CSeqMap` error where a `CSeqVector` over the sequence of `inst` reads its letters, or
-/// `None`. The vector is as long as `Seq-inst.length`, and `CSeqMap::x_FindSegment` resolves the
-/// segments in order up to the position read, so those that start before the length: a
-/// segment whose length is `kInvalidSeqPos` throws first, then one whose end wraps or is
-/// `kInvalidSeqPos`. dustmasker, windowmasker and makembindex report it, segmasker's
-/// `CanGetRange` turns that of a delta into its own (`seq_vector_exception`). A raw sequence
-/// meets it only with 4294967295 letters, a delta only with gap pieces
-/// (`RecordState::assemble_seq`).
+/// The `CSeqMap` error where a `CSeqVector` over the sequence of `inst` reads its `length`
+/// letters as `read` does, or `None`. A raw sequence meets one only with 4294967295 letters, a
+/// delta only with gap pieces (`RecordState::assemble_seq`); nothing is read of a sequence of
+/// no letters (`GetSeqData` returns at once).
 ///
-/// NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:343-370,403-428
-pub(crate) fn seq_map_error(inst: &SeqInst) -> Option<SeqMapError> {
+/// The map's segments are the pieces between its two end markers, each at the sum of the
+/// lengths before it. Resolving a segment's length throws for 4294967295; resolving the
+/// position after a segment throws where the sum wraps or is 4294967295. The iterator first
+/// finds the segment of position 0 (`x_FindSegment`, past empty pieces). Read in order, a
+/// segment is left where its end (a `TSeqPos`) is at or below the position, so one whose end
+/// wraps is left at once (`x_InitSeg`, whose `x_FindSegment` throws), one that ends at
+/// 4294967295 is read to the length, and moving to the next resolves its length; empty
+/// segments are passed. The range test moves from each segment that starts before the length
+/// to the next (`CSeqMap_CI_SegmentInfo::x_Move`), resolving its length and then its position,
+/// up to the end marker.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:343-428 (`x_ResolveSegmentLength`,
+/// `x_ResolveSegmentPosition`, `x_FindSegment`), c++/src/objmgr/seq_map_ci.cpp:106-118
+/// (`x_Move`), c++/src/objmgr/seq_vector_ci.cpp:207-300,691-726 (`CanGetRange`, `x_InitSeg`,
+/// `x_IncSeg`, `x_UpdateSeg`), c++/src/objmgr/seq_map.cpp (`CanResolveRange`)
+pub(crate) fn seq_map_error(inst: &SeqInst, read: SeqMapRead) -> Option<SeqMapFault> {
     let (length, pieces) = match inst {
         SeqInst::Raw { length, .. } if *length == INVALID_SEQ_POS => {
-            return Some(SeqMapError::InvalidRawLength);
+            return Some(SeqMapFault {
+                error: SeqMapError::InvalidLength,
+                first_segment: true,
+            });
         }
-        SeqInst::Delta { length, pieces, .. } => (length, pieces),
+        SeqInst::Delta { length, pieces, .. } if *length > 0 => (*length, pieces),
         _ => return None,
     };
-    let mut start = 0u64;
-    for piece in pieces {
-        if start >= *length {
+    let piece_length = |piece: &DeltaSeq| match piece {
+        DeltaSeq::LocNull => 0,
+        DeltaSeq::Gap { length } => *length,
+        DeltaSeq::Literal(segment) => u64::from(segment.length),
+    };
+    let fault = |error, first_segment| {
+        Some(SeqMapFault {
+            error,
+            first_segment,
+        })
+    };
+    // The segment of position 0.
+    let mut index = 0;
+    loop {
+        let Some(piece) = pieces.get(index) else {
+            return None;
+        };
+        let piece_length = piece_length(piece);
+        if piece_length == INVALID_SEQ_POS {
+            return fault(SeqMapError::InvalidLength, true);
+        }
+        if piece_length > 0 {
             break;
         }
-        let piece_length = match piece {
-            DeltaSeq::LocNull => 0,
-            DeltaSeq::Gap { length } => *length,
-            DeltaSeq::Literal(segment) => u64::from(segment.length),
-        };
-        if piece_length == INVALID_SEQ_POS {
-            return Some(SeqMapError::InvalidLength);
-        }
-        start += piece_length;
-        if start >= INVALID_SEQ_POS {
-            return Some(SeqMapError::PositionOverflow);
+        index += 1;
+    }
+    let mut start = 0u64;
+    loop {
+        let end = start + piece_length(&pieces[index]);
+        match read {
+            SeqMapRead::Sequential => {
+                if end > u64::from(u32::MAX) {
+                    return fault(SeqMapError::PositionOverflow, false);
+                }
+                if end >= length {
+                    return None;
+                }
+                // `x_IncSeg` past empty segments: each move resolves the next length (the end
+                // before it is below the length, so its position does not overflow).
+                loop {
+                    index += 1;
+                    let Some(piece) = pieces.get(index) else {
+                        return None;
+                    };
+                    let next_length = piece_length(piece);
+                    if next_length == INVALID_SEQ_POS {
+                        return fault(SeqMapError::InvalidLength, false);
+                    }
+                    if next_length > 0 {
+                        break;
+                    }
+                }
+                start = end;
+            }
+            SeqMapRead::Range => {
+                // The end marker after the last piece has no length to resolve.
+                let next = pieces.get(index + 1);
+                if next.is_some_and(|piece| piece_length(piece) == INVALID_SEQ_POS) {
+                    return fault(SeqMapError::InvalidLength, false);
+                }
+                if end >= INVALID_SEQ_POS {
+                    return fault(SeqMapError::PositionOverflow, false);
+                }
+                if next.is_none() || end >= length {
+                    return None;
+                }
+                index += 1;
+                start = end;
+            }
         }
     }
-    None
 }
 
 /// The `CSeqMapException` of `error` (`eDataError`, which prints as `eSeqDataError`).
@@ -283,9 +381,7 @@ pub(crate) fn seq_map_error(inst: &SeqInst) -> Option<SeqMapError> {
 /// NCBI reference (598d8ae6): c++/src/objmgr/seq_map.cpp:366-367,416-418
 pub(crate) fn seq_map_exception(error: SeqMapError) -> NcbiException {
     let (line, message) = match error {
-        SeqMapError::InvalidRawLength | SeqMapError::InvalidLength => {
-            (367, "Invalid sequence length")
-        }
+        SeqMapError::InvalidLength => (367, "Invalid sequence length"),
         SeqMapError::PositionOverflow => (417, "Sequence position overflow"),
     };
     NcbiException::new(

@@ -694,6 +694,9 @@ impl<'a> BuildDatabase<'a> {
             SourceErrorKind::Std => {
                 WriteDbError::Other(String::from_utf8_lossy(&error.message).into_owned())
             }
+            SourceErrorKind::Refused => {
+                WriteDbError::Unsupported(String::from_utf8_lossy(&error.message).into_owned())
+            }
         })? {
             let bioseq_id = bioseq.first_id_fasta();
             if let Some(parsed) = bioseq.parsed.as_mut() {

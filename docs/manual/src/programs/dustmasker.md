@@ -55,7 +55,7 @@ None that change the output of a normal run. When the reader of the output close
 
 `dustmasker` runs every option of `-help`. It stops with an error, where NCBI crashes or reads memory outside its buffers, in these cases:
 
-- A FASTA record of exactly 4,294,967,295 letters, counting the letters of its gap lines. Longer records are read as NCBI reads them.
+- A nucleotide FASTA record that NCBI packs into a piece of 4,294,967,293 bases or more (such as 4,294,967,293 letters of `A`, `C`, `G` and `T` in a row), where NCBI crashes. Other records of 4,294,967,296 letters or more are read as NCBI reads them.
 - A database title in a text encoding that NCBI cannot tell, or a database definition line with bytes that NCBI reads as `#`.
 - A database sequence with a tax id whose record is in an empty `taxdb.btd`, or in a damaged `taxdb.btd` that reaches past the end of NCBI's mapping of the file.
 - A failed write of a `seqloc_*` or `maskinfo_*` output.

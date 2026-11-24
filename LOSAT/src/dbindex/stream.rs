@@ -491,13 +491,22 @@ impl<'a> FastaStream<'a> {
                 | ReadError::OutOfMemory
                 | ReadError::OutOfRange { .. },
             ) => return Ok(None),
+            // NCBI crashes (SIGSEGV) where the reader packs the record.
+            Err(ReadError::PackOverflow) => {
+                return Err(StreamError::Refused(super::unsupported(
+                    &crate::writedb::fasta_source::reader::pack_overflow_what(),
+                )));
+            }
         };
         // Gaps stay pieces only where their sum wraps NCBI's `TSeqPos` to 0 past 2^32
         // letters (`reader::RecordState::assemble_seq`); the index reads the sequence's
         // `CSeqVector` outside the reader's `try`.
-        if let Some(error) = crate::seqmasks_io::fasta_reader::seq_map_error(&record.inst) {
+        if let Some(fault) = crate::seqmasks_io::fasta_reader::seq_map_error(
+            &record.inst,
+            crate::seqmasks_io::fasta_reader::SeqMapRead::Sequential,
+        ) {
             return Err(StreamError::Ncbi(
-                crate::seqmasks_io::fasta_reader::seq_map_exception(error),
+                crate::seqmasks_io::fasta_reader::seq_map_exception(fault.error),
             ));
         }
         let id = if self.titles {

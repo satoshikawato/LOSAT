@@ -822,6 +822,23 @@ fn residues_past_32_bits() {
         error.message,
         b"basic_string::append: __pos (which is 20) > this->size() (which is 6)"
     );
+    // A piece of 61 unambiguous bases packs into 0 bytes of NCBI2na (`(61 + 3) / 4` modulo
+    // 2^6), on which NCBI crashes (makeblastdb 2.17.0 on ws, p11d/p3 b4n: SIGSEGV), whatever
+    // the record's length (here 7 with its gap); 60 are read.
+    let error = read(&record(&[(b"ACGT", 15), (b"A", 1), (b">?10", 1)]), false).unwrap_err();
+    assert_eq!(error.kind, SourceErrorKind::Refused);
+    assert_eq!(
+        error.message,
+        format!(
+            "{} is not supported by LOSAT's makeblastdb",
+            reader::pack_overflow_what()
+        )
+        .into_bytes()
+    );
+    let bioseq = read(&record(&[(b"ACGT", 15), (b">?10", 1)]), false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(bioseq.length, 6);
 }
 
 /// A reader that fails after its bytes.

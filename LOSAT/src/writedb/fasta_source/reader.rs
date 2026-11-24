@@ -325,6 +325,23 @@ pub(crate) enum ReadError {
     /// The `std::out_of_range` of `basic_string::append` from position `pos` of a string of
     /// `size` (`RecordState::substituted`), which no reader catches either.
     OutOfRange { pos: u64, size: u64 },
+    /// A nucleotide piece that NCBI's reader packs into a segment whose byte count wraps its
+    /// `TSeqPos` to 0: `CDelta_ext_PackTarget::NewSegment` sizes an NCBI2na segment of `length`
+    /// bases as `(length + 3) / 4` bytes and an NCBI4na one as `(length + 1) / 2`, so one of
+    /// 4294967293 to 4294967295 bases (NCBI2na) or of 4294967295 (NCBI4na) gets 0 bytes, and
+    /// the conversion writes past them (SIGSEGV in every program; survey 11d dm4, probe 2 s3n
+    /// and s7n, probe 3 b4n and b5n). LOSAT's programs refuse it (`pack_overflow_what`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1466-1470,1519-1520
+    /// NCBI reference (598d8ae6): c++/src/objects/seq/Delta_ext.cpp:141-164,201-205
+    PackOverflow,
+}
+
+/// What LOSAT refuses for `ReadError::PackOverflow` (before "is not supported by LOSAT's ...").
+pub(crate) fn pack_overflow_what() -> String {
+    "a nucleotide FASTA record with a stretch of 4,294,967,293 letters or more that NCBI packs \
+     as one piece (NCBI counts the piece's bytes in 32 bits, gets 0 and crashes)"
+        .to_string()
 }
 
 impl From<ParseError> for ReadError {
@@ -1008,6 +1025,11 @@ impl RecordState {
             }
             pos += 1;
         }
+        // `m_SeqData.resize(m_CurrentPos)` with the `TSeqPos` position (fasta.cpp:985): past
+        // 2^32 residues the string keeps those written since the position last wrapped.
+        if self.seq_data.len() as u64 >= self.seq_pos_modulus {
+            self.wrap_seq_data();
+        }
 
         if !self.bad_positions.is_empty() {
             let mut message = b"FASTA-Reader: Ignoring invalid residues at position(s): ".to_vec();
@@ -1020,6 +1042,16 @@ impl RecordState {
             );
         }
         Ok(())
+    }
+
+    /// The residues of a record past `seq_pos_modulus` (2^32) of them: those since the count
+    /// last wrapped, the last (count modulo 2^32), as NCBI's `m_SeqData` after a data line.
+    /// `CheckDataLine` then tests the next line again where none are left, as NCBI's does
+    /// for an empty `m_SeqData`.
+    #[cold]
+    fn wrap_seq_data(&mut self) {
+        let kept = (self.seq_data.len() as u64 % self.seq_pos_modulus) as usize;
+        self.seq_data.drain(..self.seq_data.len() - kept);
     }
 
     /// `bIsNuc` of `ParseDataLine` and of `CheckDataLine`: `fAssumeNuc` (with `fForceType`),
@@ -1282,17 +1314,12 @@ impl RecordState {
         self.close_gap(false, self.seq_data.len(), 0);
         self.close_mask();
         // NCBI keeps the positions of a record in `TSeqPos` (`m_CurrentPos`, `SGap::m_uPos`,
-        // `m_TotalGapLength`), which wrap at 2^32 (`RecordState::seq_pos_modulus`). Each data
-        // line resizes `m_SeqData` to `m_CurrentPos` and the line, and back to `m_CurrentPos`
-        // after it, so past 2^32 residues it holds those read since `m_CurrentPos` last
-        // wrapped, the record's last (count modulo 2^32), which all that follows reads:
+        // `m_TotalGapLength`), which wrap at 2^32 (`RecordState::seq_pos_modulus`); past 2^32
+        // residues `m_SeqData` holds the last (count modulo 2^32), which all that follows
+        // reads (`wrap_seq_data`, after each data line).
         //
         // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:816,863-865,985
         let modulus = self.seq_pos_modulus;
-        if self.seq_data.len() as u64 >= modulus {
-            let kept = (self.seq_data.len() as u64 % modulus) as usize;
-            self.seq_data.drain(..self.seq_data.len() - kept);
-        }
         let is_aa = match self.flags.molecule {
             Molecule::Protein => true,
             Molecule::Nucleotide => false,
@@ -1306,21 +1333,35 @@ impl RecordState {
 
         // `GetCurrentPos(ePosWithGaps)`, `m_CurrentPos` plus `m_TotalGapLength`: the record's
         // length modulo 2^32, which makeblastdb tests and the `Seq-inst` takes.
-        let current = self.seq_data.len() as u64;
+        let current = self.seq_data.len() as u64 % modulus;
         let total_gap_length = self.total_gap_length % modulus;
         let length = (current + total_gap_length) % modulus;
-        if self.flags.build_db_length_limit && length > i32::MAX as u64 {
-            return Ok((SeqInst::TooLong { length }, is_aa));
-        }
 
         // The substituted string holds the residues and the runs, never empty; its pieces are
-        // those of its first `length` letters, and none for a length that wrapped to 0.
+        // those of its first `length` letters, and none for a length that wrapped to 0. NCBI
+        // substitutes before it packs the data and before makeblastdb tests the length, so the
+        // substitution's warnings and `std::out_of_range` come first, then the packing's crash
+        // (`ReadError::PackOverflow`), which only a nucleotide piece of `modulus - 3` letters
+        // or more can meet. A record that ends at the length keeps no letters here unless its
+        // packing is to be checked.
         let substituted = !self.flags.parse_gaps && total_gap_length > 0;
+        let packed = if substituted { length } else { current };
+        let check_packing = !is_aa && packed + 3 >= modulus;
+        let too_long = self.flags.build_db_length_limit && length > i32::MAX as u64;
         if substituted {
-            self.seq_data = self.substituted(length, is_aa, warn)?;
+            let keep = if too_long && !check_packing {
+                0
+            } else {
+                length
+            };
+            self.seq_data = self.substituted(keep, is_aa, warn)?;
             self.gaps.clear();
             self.total_gap_length = 0;
-        } else if self.gaps.is_empty() && self.seq_data.is_empty() {
+        }
+        if too_long && !check_packing {
+            return Ok((SeqInst::TooLong { length }, is_aa));
+        }
+        if !substituted && self.gaps.is_empty() && self.seq_data.is_empty() {
             if !self.flags.disable_no_residues {
                 return Err(ReadError::Parse(ParseError::fasta_error(
                     ErrCode::NoResidues,
@@ -1351,7 +1392,10 @@ impl RecordState {
             }
         };
         let mut pieces = Vec::new();
-        let add = |pieces: &mut Vec<DeltaSeq>, residues: &[u8], (start, end): (usize, usize)| {
+        let add = |pieces: &mut Vec<DeltaSeq>,
+                   residues: &[u8],
+                   (start, end): (usize, usize)|
+         -> Result<(), ReadError> {
             if is_aa {
                 if end > start {
                     pieces.push(DeltaSeq::Literal(Segment {
@@ -1360,8 +1404,9 @@ impl RecordState {
                         length: (end - start) as u32,
                     }));
                 }
+                Ok(())
             } else {
-                add_and_split(pieces, residues, start, end);
+                add_and_split(pieces, residues, start, end, modulus)
             }
         };
         let gap_pos = |gap: &Gap| gap.position as u64 % modulus;
@@ -1372,7 +1417,7 @@ impl RecordState {
             } else {
                 length
             };
-            add(&mut pieces, &self.seq_data, span(0, len));
+            add(&mut pieces, &self.seq_data, span(0, len))?;
         }
         for i in 0..n {
             let gap = self.gaps[i];
@@ -1388,10 +1433,13 @@ impl RecordState {
             };
             if next_start != gap_pos(&gap) {
                 let seq_len = (next_start + modulus - gap_pos(&gap)) % modulus;
-                add(&mut pieces, &self.seq_data, span(gap_pos(&gap), seq_len));
+                add(&mut pieces, &self.seq_data, span(gap_pos(&gap), seq_len))?;
             }
         }
 
+        if too_long {
+            return Ok((SeqInst::TooLong { length }, is_aa));
+        }
         if let [piece] = pieces[..] {
             let seq_data = match piece {
                 DeltaSeq::Literal(segment) => {
@@ -1426,7 +1474,8 @@ impl RecordState {
     /// `AssembleSeq` without `fParseGaps` (protein input, and every input of the mask readers):
     /// the `>?` gaps become runs of `X` (protein) or `N` (nucleotide), and the record's residues
     /// are the first `length` letters (`GetCurrentPos(ePosWithGaps)`) of the string that this
-    /// builds. Its letters before a gap are appended where the gap's (wrapped) position is past
+    /// builds, of which `keep` are stored (`length`, or 0 for a record that ends before its data
+    /// are used). Its letters before a gap are appended where the gap's (wrapped) position is past
     /// the last one, cut to the residues; an append from a position past them throws
     /// `std::out_of_range` (`ReadError::OutOfRange`; only past 2^32 residues, two gaps before
     /// the wrap beyond the residues kept). Only the first `length` letters are stored: NCBI
@@ -1436,7 +1485,7 @@ impl RecordState {
     /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1386-1424
     fn substituted(
         &self,
-        length: u64,
+        keep: u64,
         is_aa: bool,
         warn: ReaderWarn<'_>,
     ) -> Result<Vec<u8>, ReadError> {
@@ -1445,9 +1494,9 @@ impl RecordState {
         let size = residues.len() as u64;
         let mut new_data = Vec::new();
         new_data
-            .try_reserve_exact(length as usize)
+            .try_reserve_exact(keep as usize)
             .map_err(|_| ReadError::OutOfMemory)?;
-        let room = |new_data: &Vec<u8>| length as usize - new_data.len();
+        let room = |new_data: &Vec<u8>| keep as usize - new_data.len();
         let mut pos = 0u64;
         for gap in &self.gaps {
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1393-1410
@@ -1595,20 +1644,33 @@ pub(crate) fn sequence_type(data: &[u8]) -> Option<bool> {
 }
 
 /// `CDelta_ext::AddAndSplit` of the IUPACna residues `residues[start..end]`: one literal
-/// for each segment of `CSeqConvert::Pack`.
+/// for each segment of `CSeqConvert::Pack`, or `ReadError::PackOverflow` at a segment whose
+/// byte count (`(length + 3) / 4` for NCBI2na, `(length + 1) / 2` for NCBI4na) wraps the
+/// `TSeqPos` (2^32, `modulus`) to 0.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/Delta_ext.cpp:141-147,163-164,183-185,201-205
-fn add_and_split(pieces: &mut Vec<DeltaSeq>, residues: &[u8], start: usize, end: usize) {
-    pieces.extend(
-        pack::pack_iupacna(&residues[start..end])
-            .into_iter()
-            .map(|segment| {
-                DeltaSeq::Literal(Segment {
-                    start: segment.start + start as u32,
-                    ..segment
-                })
-            }),
-    );
+fn add_and_split(
+    pieces: &mut Vec<DeltaSeq>,
+    residues: &[u8],
+    start: usize,
+    end: usize,
+    modulus: u64,
+) -> Result<(), ReadError> {
+    for segment in pack::pack_iupacna(&residues[start..end]) {
+        let rounding = match segment.coding {
+            Coding::Ncbi2na => 3,
+            Coding::Ncbi4na => 1,
+            Coding::Ncbieaa => 0,
+        };
+        if u64::from(segment.length) + rounding >= modulus {
+            return Err(ReadError::PackOverflow);
+        }
+        pieces.push(DeltaSeq::Literal(Segment {
+            start: segment.start + start as u32,
+            ..segment
+        }));
+    }
+    Ok(())
 }
 
 /// The warnings of `ParseGapLine` about the modifiers of a `>?` line.

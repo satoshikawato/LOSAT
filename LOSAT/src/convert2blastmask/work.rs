@@ -15,7 +15,7 @@ use crate::seqid::rank::{best_rank_score, find_best};
 use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
 use crate::seqmasks_io::writer::{MaskInfoWriter, MaskWriter, Serial, WriteError};
 use crate::writedb::fasta_source::reader::{
-    out_of_range_what, FastaReader, ReadError, ReaderFlags,
+    out_of_range_what, pack_overflow_what, FastaReader, ReadError, ReaderFlags,
 };
 
 /// How a run stops early.
@@ -58,17 +58,19 @@ impl RunFailure for Failure {
     }
 }
 
+/// LOSAT's refusal of `what` (a noun phrase).
+fn unsupported(what: &str) -> String {
+    crate::seqmasks_io::run::unsupported(what, super::PROGRAM)
+}
+
 /// A `CArgException` of `AsInputFile` or `AsOutputFile`, which `Run` catches.
 fn file_failure(error: ArgException) -> Failure {
     match file_exception(&error) {
         Some(exception) => Failure::Caught(exception),
-        None => Failure::Refused(crate::seqmasks_io::run::unsupported(
-            &format!(
-                "the argument error '{}' inside the run",
-                error.message_text()
-            ),
-            super::PROGRAM,
-        )),
+        None => Failure::Refused(unsupported(&format!(
+            "the argument error '{}' inside the run",
+            error.message_text()
+        ))),
     }
 }
 
@@ -241,6 +243,7 @@ impl<'a> MaskFromFasta<'a> {
                 ReadError::Ncbi(exception) => Failure::Caught(*exception),
                 ReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
                 ReadError::OutOfRange { pos, size } => Failure::Std(out_of_range_what(pos, size)),
+                ReadError::PackOverflow => Failure::Refused(unsupported(&pack_overflow_what())),
             }
         })?;
         let best_id = if parses_ids {

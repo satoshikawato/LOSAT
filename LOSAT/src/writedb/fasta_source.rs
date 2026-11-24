@@ -49,6 +49,10 @@ pub enum SourceErrorKind {
     /// handler prints after "Error: " (`WriteDbError::Other`): the `std::out_of_range` of a
     /// record past NCBI's 32-bit positions (`reader::ReadError::OutOfRange`).
     Std,
+    /// LOSAT's refusal (`message` ends with "is not supported by LOSAT's makeblastdb";
+    /// `WriteDbError::Unsupported`): a record on which NCBI's reader crashes
+    /// (`reader::ReadError::PackOverflow`).
+    Refused,
 }
 
 impl SourceError {
@@ -152,6 +156,17 @@ impl<R: Read> FastaBioseqSource<R> {
                 return Err(SourceError {
                     message: reader::out_of_range_what(pos, size).into_bytes(),
                     kind: SourceErrorKind::Std,
+                });
+            }
+            Err(ReadError::PackOverflow) => {
+                self.reader = None;
+                return Err(SourceError {
+                    message: format!(
+                        "{} is not supported by LOSAT's makeblastdb",
+                        reader::pack_overflow_what()
+                    )
+                    .into_bytes(),
+                    kind: SourceErrorKind::Refused,
                 });
             }
             Err(ReadError::Ncbi(exception)) => {

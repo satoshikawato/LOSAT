@@ -140,6 +140,7 @@ The full list is on [Differences from NCBI BLAST+](../differences.md).
 
 - `-gi_mask` with two mask files whose GI-mask files are the same files (one `-gi_mask_name` twice, or two names of one path), when both would write one data file at the same time. NCBI's files then depend on how its C++ runtime buffers two streams on one file. LOSAT stops at the sequence where the second would start writing that file (see [What LOSAT refuses](../refusals.md)). Where one of the two writes nothing, or their data files are written one after the other, LOSAT writes NCBI's files.
 - `-input_type asn1_txt` and `asn1_bin`. `fasta` and `blastdb` work.
+- With `-dbtype nucl`, a FASTA record that NCBI packs into a piece of 4,294,967,293 bases or more (such as 4,294,967,293 letters of `A`, `C`, `G` and `T` in a row), where NCBI crashes.
 - NCBI settings that change which ids are parsed or which titles are stored (`[BLAST] LONG_SEQID`, a `[BLAST] MAX_SEQID_LENGTH` that `makeblastdb` would use with `-parse_seqids`, `DIAG_*` variables and other `NCBI_CONFIG_*` entries).
 
 For the complete list with the message you see, see [What LOSAT refuses](../refusals.md).

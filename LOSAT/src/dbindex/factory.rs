@@ -329,6 +329,21 @@ impl SubjectMap {
         } else {
             self.chunks.last().expect("a chunk").seq_start as usize + (step / CR) as usize
         };
+        // NCBI's chunk end, `(TSeqPos)(chunk_start + chunk_size_)`, wraps where it passes 2^32:
+        // the chunk's one valid interval is then `chunk_size` letters from its start, past the
+        // sequence's end, and building the index reads them (SIGSEGV for 4294967293 and
+        // 4294967294 letters; remaining-gaps-20261112/K/kc/p11d/p3 l93n, l94n).
+        if chunk_start < self.seq_len()
+            && u64::from(chunk_start) + self.chunk_size > u32::MAX.into()
+        {
+            let first_wrapping = (u64::from(u32::MAX) + 1 - self.chunk_size).div_ceil(step) * step;
+            return Err(StreamError::Refused(super::unsupported(&format!(
+                "a sequence of {} letters or more, whose last chunk of {} letters NCBI's \
+                 makembindex reads past the sequence's end (its end wraps at 32 bits)",
+                crate::ncbi_str::with_commas(first_wrapping + 1),
+                crate::ncbi_str::with_commas(self.chunk_size),
+            ))));
+        }
         if !self.add_chunk_base(seq_off) {
             return Ok((false, false));
         }
@@ -970,4 +985,44 @@ pub(crate) fn make_index(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dbindex::stream::Bases;
+
+    /// A chunk whose end passes 2^32 (here with chunks of 2^32 - 10 letters, 5 apart) is
+    /// refused: NCBI's `TSeqPos` end wraps and its index reads past the sequence (line RG
+    /// DECISIONS KC-11d; makembindex 2.17.0 on ws, remaining-gaps-20261112/K/kc/p11d/p3 l93n,
+    /// l94n: SIGSEGV).
+    #[test]
+    fn a_chunk_whose_end_wraps_is_refused() {
+        let options = Options {
+            chunk_size: (1 << 32) - 10,
+            chunk_overlap: (1 << 32) - 15,
+            ..Options::default_options()
+        };
+        let mut map = SubjectMap::new(&options);
+        map.new_sequence_init(
+            Some(Rc::new(SeqData {
+                bases: Bases::of_letters(&b"ACGT".repeat(5)),
+                masks: Vec::new(),
+                id: None,
+                texts: Vec::new(),
+            })),
+            0,
+        );
+        assert!(matches!(map.add_sequence_chunk(), Ok((true, false))));
+        assert!(matches!(map.add_sequence_chunk(), Ok((true, false))));
+        let Err(StreamError::Refused(what)) = map.add_sequence_chunk() else {
+            panic!("not refused")
+        };
+        assert_eq!(
+            what,
+            "a sequence of 11 letters or more, whose last chunk of 4,294,967,286 letters NCBI's \
+             makembindex reads past the sequence's end (its end wraps at 32 bits) is not \
+             supported by LOSAT's makembindex"
+        );
+    }
 }

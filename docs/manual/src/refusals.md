@@ -318,6 +318,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `[BLAST] LONG_SEQID`, or a `[BLAST] MAX_SEQID_LENGTH` that `makeblastdb` would use with `-parse_seqids` | Refused. They change which ids are parsed. |
 | `DIAG_*` variables and other `NCBI_CONFIG_*` entries outside the accepted list | Refused. |
 | A non-empty `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS` | Refused. It changes which titles are stored. |
+| A nucleotide FASTA record that NCBI packs into a piece of 4,294,967,293 bases or more: 4,294,967,293 to 4,294,967,295 bases of `A`, `C`, `G` and `T` in a row, or 4,294,967,295 bases in a row with other letters among them (the runs of `N` that NCBI makes of `>?` gap lines count) (`-dbtype nucl`) | Refused. NCBI crashes: it counts the bytes of the piece in 32 bits and gets 0. Other records of 4,294,967,296 letters or more are handled as NCBI handles them, with their length modulo 2^32. |
 | An index file (`.pin`, `.nin`) of a finished build that a failed write (a full disk) left with no bytes, or with a header field that reaches past the end of the file's last 4 KiB page | Refused. NCBI maps an empty file as a null pointer and crashes. What NCBI reads past its mapping depends on its memory. A file cut short inside that page is read as NCBI reads it, with zeros past its end. |
 
 Example:
@@ -351,7 +352,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A database definition line with bytes NCBI reads as `#` | Refused. |
 | A database sequence with a tax id, in any `-outfmt`, when `taxdb.btd` is empty | Refused. NCBI maps the file as a null pointer and crashes. |
 | A failed write of a `seqloc_*` or `maskinfo_*` output | Refused. NCBI's serial stream reports it; the other formats go on silently, as NCBI's. |
-| A FASTA record of exactly 4,294,967,295 letters, counting the letters of its `>?` gap lines | Refused. NCBI crashes: it counts the length of a record in 32 bits and takes that length for an invalid position. Longer records are read as NCBI reads them, with their length modulo 2^32. |
+| A nucleotide FASTA record that NCBI packs into a piece of 4,294,967,293 bases or more: 4,294,967,293 to 4,294,967,295 bases of `A`, `C`, `G` and `T` in a row, or 4,294,967,295 bases in a row with other letters among them (the runs of `N` that NCBI makes of `>?` gap lines count) | Refused. NCBI crashes: it counts the bytes of the piece in 32 bits and gets 0. Other records of 4,294,967,296 letters or more are read as NCBI reads them, with their length modulo 2^32. |
 | A value that is not UTF-8 of any option but `-out` and `-logfile` | Refused, after NCBI's own argument errors and `-dryrun`. The error names the option. NCBI reads the bytes. `-out` and `-logfile` take such a name and write that file, as NCBI's. |
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#dustmasker).
@@ -367,7 +368,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-mk_counts` or `-convert` of units of 1 to 3 letters to `oascii` or `obinary` with an `-smem` that is a multiple of 65536 | Refused. NCBI keeps the low 16 bits of `-smem` (0 megabytes); its search for a hash table is then undefined. With units of 4 letters or more NCBI's error is written as NCBI writes it. |
 | A counts file whose `##pct:` line holds a number that C++ libraries read differently (`inf`, `nan`, a hexadecimal number such as `0x10`, a number with letters after it such as `5x`, or a number beyond the range of a double), with a `-t_*_pct` option or `-convert` | Refused. Other lines are read as NCBI reads them: a value that is missing, or a word that does not start with a number, is 0. |
 | An `ascii` counts file with units of 17 letters or more | Refused. NCBI's result is undefined. |
-| A FASTA record or database sequence of 4,294,967,296 letters or more | Refused. NCBI counts positions in 32 bits. |
+| A nucleotide FASTA record that NCBI packs into a piece of 4,294,967,293 bases or more: 4,294,967,293 to 4,294,967,295 bases of `A`, `C`, `G` and `T` in a row, or 4,294,967,295 bases in a row with other letters among them (the runs of `N` that NCBI makes of `>?` gap lines count) | Refused. NCBI crashes: it counts the bytes of the piece in 32 bits and gets 0. Other records of 4,294,967,296 letters or more are read as NCBI reads them, with their length modulo 2^32. |
 | A value that is not UTF-8 of any option but `-out` and `-logfile` | Refused, after NCBI's own argument errors and `-dryrun`. The error names the option. NCBI reads the bytes. `-out` and `-logfile` take such a name and write that file, as NCBI's. |
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#windowmasker).
@@ -393,6 +394,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A value that is not UTF-8 of any option but `-out` and `-logfile` | Refused, after NCBI's own argument errors and `-dryrun`. The error names the option. NCBI reads the bytes. `-out` and `-logfile` take such a name and write that file, as NCBI's. |
 | A `Blast-db-mask-info` that LOSAT's serial writer cannot write as NCBI does | Refused. |
 | A failed write of a `maskinfo_*` output | Refused. NCBI's serial stream reports it. `interval` goes on silently, as NCBI's, as for `dustmasker` and `segmasker`. |
+| A nucleotide FASTA record that NCBI packs into a piece of 4,294,967,293 bases or more: 4,294,967,293 to 4,294,967,295 bases of `A`, `C`, `G` and `T` in a row, or 4,294,967,295 bases in a row with other letters among them (the runs of `N` that NCBI makes of `>?` gap lines count) | Refused. NCBI crashes: it counts the bytes of the piece in 32 bits and gets 0. |
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#convert2blastmask).
 
@@ -407,7 +409,8 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A value that is not UTF-8 of any option but `-out` and `-logfile` | Refused, after NCBI's own argument errors and `-dryrun`. The error names the option. NCBI reads the bytes. `-out` and `-logfile` take such a name and write that file, as NCBI's. |
 | The database sequences, definition lines and damaged taxonomy records that `dustmasker` refuses | Refused, as for `dustmasker`. |
 | A database sequence without letters (only a damaged database has one), or, with `-old_style_index true`, one whose every definition line an alias file's `OID_MASK_TYPE` hides | Refused. NCBI's `makembindex` stops with a null-pointer report. |
-| A FASTA record of 4,294,967,296 letters or more (`-old_style_index true`) | Refused. |
+| A nucleotide FASTA record that NCBI packs into a piece of 4,294,967,293 bases or more: 4,294,967,293 to 4,294,967,295 bases of `A`, `C`, `G` and `T` in a row, or 4,294,967,295 bases in a row with other letters among them (the runs of `N` that NCBI makes of `>?` gap lines count) | Refused. NCBI crashes: it counts the bytes of the piece in 32 bits and gets 0. |
+| A FASTA record of 4,294,914,101 letters or more, counting the letters of its `>?` gap lines and modulo 2^32 (`-old_style_index true`) | Refused. NCBI's last chunk of 5,000,000 letters of it ends past 2^32; the end wraps at 32 bits and NCBI reads past the end of the sequence (it crashes). Other records of 4,294,967,296 letters or more are read as NCBI reads them, with their length modulo 2^32. |
 | An index volume of more than 4 GiB of packed sequences, which needs a `-volsize` of about 18,000 or more and more than 16 Gbp of sequences in one index volume | Refused when the sequence that passes 4 GiB is read. NCBI writes an index whose sizes and positions wrap at 32 bits. |
 
 ## makeprofiledb

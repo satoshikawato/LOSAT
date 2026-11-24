@@ -1153,7 +1153,8 @@ fn plain_table(window: usize, offset: i32) -> DiagHashTable {
 
 // EXPERIMENT (LOSAT_X_DCLATEST): seed by seed, the fold on the map of the latest inserts makes the
 // decisions (rejected, two-hit branch) and the inserts of the fold on the chains, and gives its
-// hits, for every template and windows from 1 to 64: with NCBI's take-over window in the scope (w
+// hits (and that fold on the chains gives the hits and the table of `fold_two_hit_t`, the chains'
+// own fold), for every template and windows from 1 to 64: with NCBI's take-over window in the scope (w
 // + 1, module comment (iii) of `x_dc_latest.rs`) at every window, with LOSAT's
 // (`diag_hash_insert_window`) outside the band 2w + 2 < wl; inside the band, and wherever w < wl,
 // neither fold extends a seed (module comment (v)).
@@ -1223,6 +1224,25 @@ fn the_fold_on_the_map_makes_the_decisions_of_the_chains() {
                             &mut FoldCounts::default(),
                             &mut part::PartOut::default(),
                             &[],
+                        );
+                        // the chains' own fold (`fold_two_hit_t`, written out) is that fold
+                        let mut own = plain_table(w, diag_offset as i32);
+                        let mut own_hits = Vec::new();
+                        fold_two_hit_t::<false, false, false, true>(
+                            &xw,
+                            &seeds,
+                            &mut own,
+                            &mut own_hits,
+                            None,
+                            &mut 0,
+                            &mut FoldCounts::default(),
+                            &mut part::PartOut::default(),
+                            &[],
+                        );
+                        assert_eq!(hit_keys(&own_hits), hit_keys(&hits), "{at}: fold_two_hit_t");
+                        assert!(
+                            hash_state(&own) == hash_state(&hash),
+                            "{at}: fold_two_hit_t's table"
                         );
                         let mut map = DiagLatest::default();
                         map.begin(lv.bound(diag_offset as usize));

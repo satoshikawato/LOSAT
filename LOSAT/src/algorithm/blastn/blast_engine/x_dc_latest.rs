@@ -384,7 +384,15 @@ impl DiagLatest {
             };
         }
         if s < bucket.diag[UNTIL] {
-            return self.find_stash(diag, b);
+            if let Some(i) = self.find_stash(diag) {
+                let e = &self.stash[i];
+                return Found {
+                    level: e.level,
+                    saved: e.saved,
+                    bucket: b as u32,
+                    at: STASHED + i as u32,
+                };
+            }
         }
         Found {
             bucket: b as u32,
@@ -392,22 +400,13 @@ impl DiagLatest {
         }
     }
 
-    /// `find` in the stash (its home bucket `b` has a stash entry that may be live).
+    /// `find` in the stash (the home bucket has a stash entry that may be live): the place of
+    /// `diag`'s entry. (A place, not a `Found`: a `Found` returned through memory kept every
+    /// seed's `Found` on the stack, written in 4-byte fields and read back 8 bytes at a time.)
     #[cold]
     #[inline(never)]
-    fn find_stash(&self, diag: i32, b: usize) -> Found {
-        match self.stash.iter().position(|e| e.diag == diag) {
-            Some(i) => Found {
-                level: self.stash[i].level,
-                saved: self.stash[i].saved,
-                bucket: b as u32,
-                at: STASHED + i as u32,
-            },
-            None => Found {
-                bucket: b as u32,
-                ..Found::NONE
-            },
-        }
+    fn find_stash(&self, diag: i32) -> Option<usize> {
+        self.stash.iter().position(|e| e.diag == diag)
     }
 
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
@@ -455,7 +454,7 @@ impl DiagLatest {
             *slot = diag;
             lane
         } else {
-            self.put_stashed(found, Entry { diag, level, saved }, s, bound);
+            self.put_stashed(found.at, b, Entry { diag, level, saved }, s, bound);
             return;
         };
         // SAFETY: as in `find`.
@@ -472,9 +471,9 @@ impl DiagLatest {
     /// `put` over the stash entry `find` found.
     #[cold]
     #[inline(never)]
-    fn put_stashed(&mut self, found: Found, e: Entry, s: i32, bound: i32) {
-        self.stash[(found.at - STASHED) as usize] = e;
-        self.raise_until(found.bucket as usize, e.level, s, bound);
+    fn put_stashed(&mut self, at: u32, b: usize, e: Entry, s: i32, bound: i32) {
+        self.stash[(at - STASHED) as usize] = e;
+        self.raise_until(b, e.level, s, bound);
     }
 
     /// `stash_until` of bucket `b` raised past the last S at which an entry of level `level` is

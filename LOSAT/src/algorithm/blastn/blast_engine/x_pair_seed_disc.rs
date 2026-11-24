@@ -453,9 +453,10 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
 }
 
 /// No NCBI counterpart (the layout of the table only): where `fold_two_hit_on` keeps the
-/// diagonals' inserts. `Chains` is NCBI's diagonal hash (`DiagHashTable`, the code before
-/// LOSAT_X_DCLATEST), `Latest` the map of each diagonal's latest insert of that switch
-/// (`x_dc_latest.rs`). The fold makes the same statements in the same order on either.
+/// diagonals' inserts. `Latest` is the map of each diagonal's latest insert of LOSAT_X_DCLATEST
+/// (`x_dc_latest.rs`); `Chains` (tests only) is NCBI's diagonal hash, on which the tests run
+/// `fold_two_hit_on` against `fold_two_hit_t`. The fold makes the same statements in the same order
+/// on either.
 trait FoldTable {
     /// Whether the fold gives `ahead` the seed `latest::AHEAD` places after the one being folded
     /// (not for the chains, whose fold then has no code for it).
@@ -491,16 +492,26 @@ trait FoldTable {
     );
 }
 
-/// The diagonal hash of a fold (NCBI's table): with `PT` a partition's table
-/// (LOSAT_X_PAIRPARFOLD), `LEAN` and `MEMO` as for `fold_two_hit`, `TRACK` as for
+/// The diagonal hash of a fold (NCBI's table) for the tests of `fold_two_hit_on`: with `PT` a
+/// partition's table (LOSAT_X_PAIRPARFOLD), `LEAN` and `MEMO` as for `fold_two_hit`, `TRACK` as for
 /// `fold_two_hit_t`; with LOSAT_X_DIAGLV's bounds (`x_lv`) the retrieve skips the walks below the
 /// seed's bound.
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 struct Chains<'a, const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool> {
     hash: &'a mut DiagHashTable,
     x_lv: bool,
     x_lv_seeds: super::super::x_diag_lv::LvSeeds,
 }
 
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl<'a, const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool>
     Chains<'a, PT, LEAN, MEMO, TRACK>
 {
@@ -523,6 +534,11 @@ impl<'a, const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool>
     }
 }
 
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 impl<const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool> FoldTable
     for Chains<'_, PT, LEAN, MEMO, TRACK>
 {
@@ -685,8 +701,13 @@ fn fold_two_hit<const PT: bool, const LEAN: bool, const MEMO: bool>(
 
 /// `fold_two_hit`; EXPERIMENT (LOSAT_X_DCSEEDLEAN): without `TRACK` the inserts of a partition
 /// do not record the buckets they change (`part::insert_t`; the merge then writes back every
-/// bucket of the partition). The function of the fold on the chains, `diag_hash` its argument
-/// (`fold_two_hit_on` inlined with `Chains`), as before LOSAT_X_DCLATEST.
+/// bucket of the partition). The fold on the chains, the code before LOSAT_X_DCLATEST, written out
+/// here and not through `FoldTable`: every form of `fold_two_hit_on` on the chains that was tried
+/// (a table struct holding the hash; the trait on `DiagHashTable` itself, with the fold's
+/// constants in a struct or in the locals of this function) compiled to other code than this, and
+/// the struct form cost about 4 % more cycles at 8 and 16 threads with LOSAT_X_DCLATEST=0 (FD-3,
+/// 2026-11-24). The tests run `fold_two_hit_on` on the chains against this function (hits and
+/// table).
 #[allow(clippy::too_many_arguments)]
 fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool>(
     x: &Inputs<'_>,
@@ -699,17 +720,295 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
     out: &mut part::PartOut,
     pos: &[u32],
 ) {
-    fold_two_hit_on::<PT, LEAN, _>(
-        x,
-        seeds,
-        &mut Chains::<PT, LEAN, MEMO, TRACK>::new(x, diag_hash),
-        ungapped_hits,
-        timing,
-        scan_pause_ns,
-        counts,
-        out,
-        pos,
-    );
+    let two_stage = x.two_stage;
+    let lut_word_length = two_stage.lut_word_length();
+    let word_length = two_stage.word_length();
+    let exact_ungapped = x.exact_ungapped;
+    // EXPERIMENT (LOSAT_X_FOLDLEAN): `type_of_word` returns at its early return (na_ungapped.c:531).
+    let x_tow = LEAN && word_length == lut_word_length;
+    let s_len = x.s_len;
+    let search_seq_packed = x.search_seq_packed;
+    let diag_offset = x.diag_offset;
+    let diag_hash_window = x.diag_hash_window;
+    let window_size = x.window_size;
+    let scan_range = x.scan_range;
+    let two_hits = window_size > 0;
+    let timing_enabled = timing.is_some();
+    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the table has level bounds; the bound's
+    // constants of these seeds.
+    let x_lv = diag_hash.x_lv_on();
+    let x_lv_seeds = super::super::x_diag_lv::LvSeeds::new(two_hits, word_length, window_size);
+    counts.seeds += seeds.len() as u64;
+    for (x_k, seed) in seeds.iter().enumerate() {
+        // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the seed's place in the stage.
+        let x_key = if PT { out.key(pos, x_k) } else { 0 };
+        let context_idx = seed.context as usize;
+        let ctx = &x.query_contexts[context_idx];
+        let q_idx = context_idx as u32;
+        let q_context_start = ctx.query_offset as usize;
+        let q_context_end = q_context_start + ctx.len;
+        let cutoff_score = x.cutoff_scores[context_idx];
+        let q_ext_start = seed.q as usize;
+        let s_ext_start = seed.s as usize;
+        let s_range = seed.s_range as usize;
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-839
+        let diag = s_ext_start as isize - q_ext_start as isize;
+        let (last_hit, hit_saved) = {
+            // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same decisions without the walk
+            // of a bucket below the bound (the `last_hit` test and the window test).
+            let (level, _hit_len, hit_saved) = if x_lv {
+                diag_hash.retrieve_below::<MEMO>(
+                    diag as i32,
+                    &x_lv_seeds,
+                    s_ext_start + diag_offset as usize,
+                )
+            } else {
+                diag_hash.retrieve(diag as i32)
+            }
+            .unwrap_or((0, 0, false));
+            (level, hit_saved)
+        };
+        let s_off_pos = s_ext_start + diag_offset as usize;
+        let s_off_pos_i32 = s_off_pos as i32;
+
+        // Hit within explored area should be rejected
+        if s_off_pos_i32 < last_hit {
+            counts.skipped += 1;
+            continue;
+        }
+
+        let mut q_off = q_ext_start;
+        let mut s_off = s_ext_start;
+        let mut s_end = s_ext_start + word_length;
+        let mut s_end_pos = s_end + diag_offset as usize;
+        let mut off_found = false;
+        let mut hit_ready = true;
+        let query_mask = ctx.masks.as_slice();
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
+        let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
+            if s_pos + lut_word_length > s_len {
+                return true;
+            }
+            let kmer = mask_lookup_index(
+                packed_kmer_at_seed_mask(search_seq_packed, s_pos, lut_word_length),
+                lut_word_length,
+            );
+            if !two_stage.has_hits(kmer) {
+                return true;
+            }
+            let q_off_1 = (q_pos + 1) as u32;
+            !two_stage.contains_hit(kmer, q_off_1)
+        };
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:841-851
+        let s_end_pos_i32 = s_end_pos as i32;
+        let window_end = last_hit + window_size as i32;
+        if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
+            let (word_type, extended, q_off_adj, s_off_adj) = if x_tow {
+                (1, 0, q_off, s_off)
+            } else {
+                type_of_word(
+                    q_off,
+                    s_off,
+                    !query_mask.is_empty(),
+                    q_context_end,
+                    s_range,
+                    word_length,
+                    lut_word_length,
+                    true, // check for double-word extension
+                    &mut is_seed_masked,
+                )
+            };
+            q_off = q_off_adj;
+            s_off = s_off_adj;
+
+            // Skip this seed when `word_type` is zero (non-word).
+            if word_type == 0 {
+                continue;
+            }
+
+            // Advance `s_end` and `s_end_pos` by `extended`.
+            s_end += extended;
+            s_end_pos += extended;
+
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:853-886
+            // (`scan_range` is 0 in the scope, so `Delta` is 0 and the loop runs no
+            // iteration; the statements are kept as the reference has them.)
+            if word_type == 1 {
+                let delta_calc = window_size as isize - word_length as isize;
+                let delta_max = if delta_calc < 0 {
+                    0
+                } else {
+                    scan_range.min(delta_calc as usize) as isize
+                };
+                let s_a = s_off_pos as isize + word_length as isize - window_size as isize;
+                let s_b = s_end_pos as isize - 2 * word_length as isize;
+                let diag_i32 = diag as i32;
+                for delta in 1..=delta_max {
+                    if let Some((off_s_end, off_s_l, _)) =
+                        diag_hash.retrieve(diag_i32 + delta as i32)
+                    {
+                        if off_s_l > 0
+                            && (off_s_end as isize - delta) >= s_a
+                            && (off_s_end as isize - off_s_l as isize) <= s_b
+                        {
+                            off_found = true;
+                            break;
+                        }
+                    }
+                    if let Some((off_s_end, off_s_l, _)) =
+                        diag_hash.retrieve(diag_i32 - delta as i32)
+                    {
+                        if off_s_l > 0
+                            && (off_s_end as isize) >= s_a
+                            && (off_s_end as isize - off_s_l as isize + delta) <= s_b
+                        {
+                            off_found = true;
+                            break;
+                        }
+                    }
+                }
+                if !off_found {
+                    hit_ready = false;
+                }
+            }
+        } else {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:887-895
+            let (wt, ext, q_off_adj, s_off_adj) = if x_tow {
+                (1, 0, q_off, s_off)
+            } else {
+                type_of_word(
+                    q_off,
+                    s_off,
+                    !query_mask.is_empty(),
+                    q_context_end,
+                    s_range,
+                    word_length,
+                    lut_word_length,
+                    false, // skip double-word check (not in two-hit block)
+                    &mut is_seed_masked,
+                )
+            };
+            if wt == 0 {
+                continue;
+            }
+            q_off = q_off_adj;
+            s_off = s_off_adj;
+            s_end += ext;
+            s_end_pos += ext;
+        }
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:897,939-941
+        if !hit_ready {
+            part::insert_t::<PT, LEAN, MEMO, TRACK>(
+                diag_hash,
+                out,
+                x_key,
+                diag as i32,
+                s_end_pos as i32,
+                (s_end_pos - s_off_pos) as i32,
+                false,
+                s_off_pos as i32,
+                diag_hash_window,
+            );
+            continue;
+        }
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:908-920
+        let x_dropoff = x.x_dropoff_scores[context_idx];
+        let reduced_cutoff = x.reduced_cutoff_scores[context_idx];
+        let ungapped_start = if timing_enabled {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
+        let ungapped = if exact_ungapped {
+            extend_hit_ungapped_exact_ncbi(
+                x.encoded_query_concat_blastna,
+                search_seq_packed,
+                q_off,
+                s_off,
+                s_len,
+                x_dropoff,
+                x.score_matrix,
+            )
+        } else {
+            extend_hit_ungapped_approx_ncbi(
+                x.encoded_query_concat_blastna,
+                search_seq_packed,
+                q_off,
+                s_off,
+                s_end,
+                s_len,
+                x_dropoff,
+                x.nucl_score_table,
+                reduced_cutoff,
+                x.score_matrix,
+            )
+        };
+        if let Some(ungapped_start) = ungapped_start {
+            let elapsed_ns = ungapped_start.elapsed().as_nanos() as u64;
+            if PT {
+                // a partition's own counters, added to the shared ones once per stage
+                out.ungapped_ns += elapsed_ns;
+                out.ungapped_calls += 1;
+            } else if let Some(timing) = timing {
+                timing.ungapped_ns.fetch_add(elapsed_ns, Ordering::Relaxed);
+                timing.ungapped_calls.fetch_add(1, Ordering::Relaxed);
+            }
+            *scan_pause_ns = scan_pause_ns.saturating_add(elapsed_ns);
+        }
+        let ungapped_se = ungapped.s_start + ungapped.length;
+        let ungapped_score = ungapped.score;
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:928-929
+        let ungapped_s_end_pos = ungapped_se + diag_offset as usize;
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:923-932,939-941
+        if !(off_found || ungapped_score >= cutoff_score) {
+            hit_ready = false;
+            part::insert_t::<PT, LEAN, MEMO, TRACK>(
+                diag_hash,
+                out,
+                x_key,
+                diag as i32,
+                s_end_pos as i32,
+                if hit_ready {
+                    0
+                } else {
+                    (s_end_pos - s_off_pos) as i32
+                },
+                hit_ready,
+                s_off_pos as i32,
+                diag_hash_window,
+            );
+            continue;
+        }
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:924-927
+        super::super::x_push_ungapped(
+            ungapped_hits,
+            UngappedHit::saved(q_idx, ctx, q_off, s_off, &ungapped),
+        );
+        if PT {
+            out.hit_keys.push(x_key);
+        }
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
+        part::insert_t::<PT, LEAN, MEMO, TRACK>(
+            diag_hash,
+            out,
+            x_key,
+            diag as i32,
+            ungapped_s_end_pos as i32,
+            0,
+            true,
+            s_off_pos as i32,
+            diag_hash_window,
+        );
+    }
 }
 
 /// EXPERIMENT (LOSAT_X_DCLATEST): `fold_two_hit` on the map of the latest inserts `map` (the
@@ -741,9 +1040,10 @@ fn fold_two_hit_latest<const PT: bool, const LEAN: bool>(
     );
 }
 
-/// The body of `fold_two_hit_t` and `fold_two_hit_latest` on the table `table`, inlined into each
-/// (so that the table's fields and the place `find` gave a seed stay in registers, and the
-/// diagonal hash is the function's own argument as before the table was a parameter).
+/// The body of `fold_two_hit_latest` on the table `table`, inlined into it (so that the table's
+/// fields and the place `find` gave a seed stay in registers): the statements of `fold_two_hit_t`
+/// in the same order, through `FoldTable` (the tests run it on the chains, `Chains`, against
+/// `fold_two_hit_t`).
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn fold_two_hit_on<const PT: bool, const LEAN: bool, T: FoldTable>(

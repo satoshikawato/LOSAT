@@ -312,13 +312,15 @@ pub(crate) struct BioseqDeflines {
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1001-1012
 // A descriptor stated as NULL throws where a loop over the descriptors reaches it: the binary
 // lines' loop before it finds them (it ends there), then, without binary lines, the loop of
-// `x_BuildDeflinesFromBioseq` over all of them (for a Bioseq with ids; one without has no lines).
+// `x_BuildDeflinesFromBioseq` over all of them, which runs before the ids are looked at (its test
+// of the ids is always true), so a Bioseq without ids throws there too (makeprofiledb 2.17.0, row
+// NE27 of `tests/fixtures/makeprofiledb`).
 pub(crate) fn bioseq_deflines(
     ids: &[ParsedSeqId],
     descr: &[Seqdesc],
 ) -> Result<BioseqDeflines, BioseqDeflinesError> {
     let header = binary_header(descr)?;
-    if header.is_none() && !ids.is_empty() && descr.contains(&Seqdesc::Empty) {
+    if header.is_none() && descr.contains(&Seqdesc::Empty) {
         return Err(BioseqDeflinesError::NullDescriptor);
     }
     if let Some(header) = header {

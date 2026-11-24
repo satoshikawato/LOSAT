@@ -791,7 +791,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     }
 
     /// `BeginNamedType`: `<Type>` (the object mode).
-    fn begin_named(&mut self, type_name: &str) {
+    fn begin_named(&mut self, type_name: &'static str) {
         if OBJECT {
             self.pending_elem = false;
             self.push_name(&[type_name.as_bytes()]);
@@ -1076,8 +1076,9 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         Ok(())
     }
 
-    /// `m_Output.GetLine()` of the object mode: 1 + the ends of line held (`encoder::Traced` adds
-    /// those handed on).
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:193-196
+    /// The position of NCBI's XML stream in the object mode, the line count of its output buffer:
+    /// 1 + the ends of line held (`encoder::Traced` adds those handed on).
     fn position(&mut self) -> Option<StreamPosition> {
         if !OBJECT {
             return None;

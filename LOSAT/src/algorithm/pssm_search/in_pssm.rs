@@ -121,6 +121,13 @@ pub(crate) struct PssmReader<'a> {
     /// The run's BLAST archive (outfmt 11), which saves each of the reader's posts as one message
     /// of its severity (`diag_log::Posts::write`); `None` without one.
     pub(crate) archive: Option<&'a crate::report::archive::ArchiveHandle>,
+    /// The run's `SERIAL_VERIFY_DATA_WRITE` when it changes what NCBI writes, and whether the run
+    /// writes `-out_pssm` (psiblast's round 1 writes the PSSM as read there; tblastn has no such
+    /// file): a PSSM with a list element stated as NULL is refused where the setting leaves the
+    /// element out of a file that the run writes (`PsiSearch::writes_pssm_as_read`).
+    pub(crate) write_verification:
+        Option<&'a crate::blastinput::ncbi_environment::WriteVerification>,
+    pub(crate) out_pssm: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
@@ -147,6 +154,8 @@ impl PssmReader<'static> {
         strategy: false,
         database: true,
         archive: None,
+        write_verification: None,
+        out_pssm: false,
     };
 }
 
@@ -563,7 +572,9 @@ pub(crate) fn psi_search_and_object_of(
     // addresses, crashes, undefined behaviour) is refused at the same place, as the run's stop
     // (`annot_index::Abort::Refused`): after psiblast's prolog of its format, which NCBI writes
     // before it reads the entry (NCBI BLAST+ 2.17.0, probe D3c-3c `probeC`: the prolog, then the
-    // report of memory addresses or the crash), before any output of tblastn's. With `-db` no
+    // report of memory addresses or the crash), before any output of tblastn's. Where NCBI crashes
+    // its output holds only what its buffer had flushed (the version line); LOSAT writes the whole
+    // prolog before the refusal, as a crash is not reproduced (D3c-3c IMPL_DONE D1). With `-db` no
     // other sequence is in NCBI's scope before the query (`PssmReader::database`).
     let program = reader.program.to_ascii_lowercase();
     let mut annot = super::annot_index::index_entry(&program, entry, reader.database)
@@ -1008,6 +1019,30 @@ pub(crate) fn psi_search_and_object_of(
         from_msa: false,
         query_other_coding: mol_other,
     };
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:233-262 (cited at
+    // `ncbi_environment::WriteVerification`)
+    // Under a `SERIAL_VERIFY_DATA_WRITE` that turns the check of what is written off, NCBI leaves
+    // a list element stated as NULL out of the PSSM where it writes it, and throws there by
+    // default (`report::serial::encoder::NullElement`, which LOSAT reproduces). LOSAT does not
+    // write the PSSM without the element: it refuses such a run here, before any output, and only
+    // where the run writes the PSSM (`PsiSearch::writes_pssm_as_read`; tblastn's archive holds no
+    // PSSM, `tblastn::in_pssm`); the other runs are NCBI's with the setting too (NCBI BLAST+
+    // 2.17.0, probe D3c-3c review `probeF`: the strategy's request, `-out_pssm` and the archive
+    // change, the reports of a run without them do not).
+    if let Some(verification) = reader.write_verification.filter(|setting| setting.off()) {
+        let archive = reader.program == PssmReader::PSIBLAST.program
+            && reader.archive.is_some_and(|handle| {
+                handle.encoding() != crate::report::archive::ArchiveEncoding::Nothing
+            });
+        if search.writes_pssm_as_read(reader.strategy, reader.database, reader.out_pssm, archive)
+            && crate::report::archive::pssm_holds_null_element(&pssm)
+        {
+            return Err(reader.refuse(format!(
+                "{}, which makes NCBI BLAST+ leave out an element stated as NULL of the -in_pssm PSSM where the run writes it (-export_search_strategy, -out_pssm or -outfmt 11),",
+                verification.variable()
+            )));
+        }
+    }
     // The title's refusals (above), for a run whose reports NCBI writes (line RG F1b-2, review 4
     // R5-6: with `-export_search_strategy -subject`, an invalid PSSM or the PSSM engine's error, NCBI
     // writes the prolog and its error whatever the title; so it does when its object manager's

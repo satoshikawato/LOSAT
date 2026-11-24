@@ -415,6 +415,8 @@ fn the_request_holds_the_pssm_as_read_and_the_engines_errors_come_in_order() {
         strategy: request,
         database: true,
         archive: None,
+        write_verification: None,
+        out_pssm: false,
     };
     // A PSSM of frequency ratios only: the request holds it as read (no scores), the search
     // and the file the engine's scores (`with_computed_scores`).
@@ -1158,6 +1160,8 @@ fn a_karlin_altschul_value_that_is_not_finite_is_refused_where_losat_does_not_co
         strategy: false,
         database: true,
         archive: None,
+        write_verification: None,
+        out_pssm: false,
     };
     let refusal = |kind: &str, name: &str, what: &str, program: &str| {
         format!(
@@ -1261,4 +1265,82 @@ fn a_karlin_altschul_value_that_is_not_finite_is_refused_where_losat_does_not_co
         )
     );
     assert_eq!(search(binary("real_negzero"), PssmReader::PSIBLAST), Ok(()));
+}
+
+// D3c-3c review R1: under a `SERIAL_VERIFY_DATA_WRITE` that turns the check of what is written off,
+// a PSSM with a list element stated as NULL is refused where the run writes the PSSM, and only
+// there (NCBI BLAST+ 2.17.0, probe D3c-3c review `probeF`, rows `u.*`: the strategy's request and
+// `-out_pssm` change, also before the query set-up's stop; the reports and a `-subject` strategy,
+// which NCBI stops first, do not).
+#[test]
+fn a_null_element_is_refused_where_the_setting_leaves_it_out_of_a_written_file() {
+    use crate::blastinput::ncbi_environment::WriteVerification;
+    let off = WriteVerification::of(std::ffi::OsStr::new("NO"));
+    let always = WriteVerification::of(std::ffi::OsStr::new("ALWAYS"));
+    let run = |name: &str,
+               setting: Option<&WriteVerification>,
+               (strategy, database, out_pssm): (bool, bool, bool),
+               program: &'static str| {
+        let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(name)).unwrap();
+        let reader = PssmReader {
+            program,
+            strategy,
+            database,
+            write_verification: setting,
+            out_pssm,
+            ..PssmReader::PSIBLAST
+        };
+        psi_search_and_object(pssm, reader)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    };
+    let refused = |program: &str| {
+        Err(format!(
+            "the environment variable SERIAL_VERIFY_DATA_WRITE=NO, which makes NCBI BLAST+ leave out an element stated as NULL of the -in_pssm PSSM where the run writes it (-export_search_strategy, -out_pssm or -outfmt 11), is not supported by LOSAT's {program}"
+        ))
+    };
+    let hist = "pssm/d3b_hist_ids.asn.gz";
+    assert_eq!(
+        run(hist, off.as_ref(), (true, true, false), "PSIBLAST"),
+        refused("PSIBLAST")
+    );
+    assert_eq!(
+        run(hist, off.as_ref(), (true, true, false), "TBLASTN"),
+        refused("TBLASTN")
+    );
+    assert_eq!(
+        run(hist, off.as_ref(), (false, true, true), "PSIBLAST"),
+        refused("PSIBLAST")
+    );
+    assert_eq!(
+        run(hist, off.as_ref(), (false, true, false), "PSIBLAST"),
+        Ok(())
+    );
+    assert_eq!(
+        run(hist, off.as_ref(), (true, false, true), "PSIBLAST"),
+        Ok(())
+    );
+    assert_eq!(
+        run(hist, always.as_ref(), (true, true, true), "PSIBLAST"),
+        Ok(())
+    );
+    assert_eq!(run(hist, None, (true, true, true), "PSIBLAST"), Ok(()));
+    let base = "pssm/d3b_base.asn.gz";
+    assert_eq!(
+        run(base, off.as_ref(), (true, true, true), "PSIBLAST"),
+        Ok(())
+    );
+    let descr = "pssm/d3b_descr_elem_null.asn.gz";
+    assert_eq!(
+        run(descr, off.as_ref(), (true, true, false), "PSIBLAST"),
+        refused("PSIBLAST")
+    );
+    assert_eq!(
+        run(descr, off.as_ref(), (false, true, true), "PSIBLAST"),
+        refused("PSIBLAST")
+    );
+    assert_eq!(
+        run(descr, off.as_ref(), (false, true, false), "PSIBLAST"),
+        Ok(())
+    );
 }

@@ -882,9 +882,10 @@ fn add_profiles(
 /// (`BioseqDeflinesError::NullDescriptor`): the `CCoreException` of a NULL `CRef`, which `Run`'s
 /// handler reports as a `CException` (`Error: ERROR: Attempt to access NULL pointer.`, exit status
 /// 255); the volume begun is closed as at any error (makeprofiledb 2.17.0, probe D3c-3c `probeB`:
-/// nothing for the first profile, the closed volume of the profiles before for a later one).
+/// nothing for the first profile, the closed volume of the profiles before for a later one). The
+/// message is the one owner's (`ncbi_exception::NULL_POINTER`).
 fn null_descriptor() -> RunError {
-    RunError::Exception(b"Attempt to access NULL pointer.".to_vec())
+    RunError::Exception(crate::ncbi_exception::NULL_POINTER.as_bytes().to_vec())
 }
 
 /// The profile's query added to the database: its definition lines (the query's descriptors,

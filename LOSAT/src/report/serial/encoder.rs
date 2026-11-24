@@ -335,8 +335,9 @@ pub trait Encoder {
     /// StringStore alias, any other alias), around the value's own calls. Only the XML object
     /// stream of the archive (`XmlEncoder::archive`) writes anything for it (`<Type>`); the
     /// ASN.1 text, ASN.1 binary and JSON streams write nothing for a named type, so the
-    /// default does nothing.
-    fn begin_named(&mut self, type_name: &str) {
+    /// default does nothing. The name is one of the writers' constants, which `Traced` keeps for
+    /// its frames without a copy.
+    fn begin_named(&mut self, type_name: &'static str) {
         let _ = type_name;
     }
     /// `EndNamedType`.
@@ -496,7 +497,7 @@ enum Frame {
     /// A named type that is neither a SEQUENCE nor a CHOICE (`Encoder::begin_named`): nothing in
     /// the trace; NCBI's XML stream alone pushes a frame for it (`eFrameNamed`, whose name the
     /// exception's frames show: `Seq-descr`), the ASN.1 text and binary streams none.
-    Type(String),
+    Type(&'static str),
 }
 
 /// The encoder `E` (ASN.1 text, ASN.1 binary, or XML in the archive's object mode, whose
@@ -865,9 +866,9 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Encoder for Tra
     fn end_sequence(&mut self) {
         self.call(Piece::Markup, |inner| inner.end_sequence());
     }
-    fn begin_named(&mut self, type_name: &str) {
+    fn begin_named(&mut self, type_name: &'static str) {
         self.name_element(type_name);
-        self.frames.push(Frame::Type(type_name.to_string()));
+        self.frames.push(Frame::Type(type_name));
         self.call(Piece::Markup, |inner| inner.begin_named(type_name));
     }
     fn end_named(&mut self) {
@@ -1020,3 +1021,7 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> Traced<E, P> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "encoder_tests.rs"]
+mod tests;

@@ -592,7 +592,7 @@ impl<E: Encoder> Encoder for Flushing<'_, E> {
         self.inner.end_sequence();
         self.flush();
     }
-    fn begin_named(&mut self, type_name: &str) {
+    fn begin_named(&mut self, type_name: &'static str) {
         self.inner.begin_named(type_name);
         self.flush();
     }

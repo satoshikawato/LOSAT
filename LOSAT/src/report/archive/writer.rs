@@ -264,13 +264,11 @@ impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> ArchiveOut<'_, 
     }
 
     /// `finish` of an archive written through `Traced` with a post function, or `finish_thrown`
-    /// where its stream threw (`thrown` is then set).
-    fn finish_archive(mut self, application: &str, thrown: &mut bool) -> Result<()> {
+    /// where its stream threw: then the error is NCBI's (`cli::NativeError`), which no other
+    /// error of `finish` is.
+    fn finish_archive(mut self, application: &str) -> Result<()> {
         match self.enc.take_thrown() {
-            Some(null_element) => {
-                *thrown = true;
-                self.finish_thrown(|_| Ok(()), application, &null_element)
-            }
+            Some(null_element) => self.finish_thrown(|_| Ok(()), application, &null_element),
             None => self.finish(),
         }
     }
@@ -761,13 +759,7 @@ pub fn write_archive<A: AlignSource>(
     let messages = handle.take_messages();
     let params = handle.options().database_params();
     let as_is = request_written_as_is(encoding, request, &batch.request, &sets, &params);
-    // The posts of the bytes replaced while the archive is written, which NCBI's handler saves
-    // too until its `ResetMessages` after the archive (`write_unsaved`).
-    let posted = std::cell::RefCell::new(Vec::new());
     let post = |replaced: &ReplacedChar| {
-        posted
-            .borrow_mut()
-            .push(replaced.post(Some(request.application)));
         super::post_replaced(
             diagnostics,
             handle,
@@ -785,7 +777,6 @@ pub fn write_archive<A: AlignSource>(
         messages: &messages,
     };
     let application = request.application;
-    let mut thrown = false;
     let written = match (encoding, as_is) {
         (ArchiveEncoding::Nothing, _) => Ok(()),
         (ArchiveEncoding::Xml, true) => write
@@ -797,7 +788,7 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 aligns,
             )?
-            .finish_archive(application, &mut thrown),
+            .finish_archive(application),
         (ArchiveEncoding::Text, true) => write
             .to(AsnTextEncoder::new(&mut buf), sink, aligns)?
             .finish(),
@@ -807,7 +798,7 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 aligns,
             )?
-            .finish_archive(application, &mut thrown),
+            .finish_archive(application),
         (ArchiveEncoding::Binary, true) => write
             .to(AsnBinaryEncoder::new(&mut buf), sink, aligns)?
             .finish(),
@@ -817,18 +808,18 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 aligns,
             )?
-            .finish_archive(application, &mut thrown),
+            .finish_archive(application),
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:265-276
-    // NCBI's stream threw inside `WriteArchive`, so the handler's `ResetMessages` after it is not
-    // reached: its messages (those the archive was given and those posted while it was written)
-    // stay for the error archive (`PrintErrorArchive` of the application's `CATCH_ALL`).
-    if thrown {
+    // NCBI's stream threw inside `WriteArchive` (`finish_archive`'s error is NCBI's then), so the
+    // handler's `ResetMessages` after it is not reached: the messages the archive was given stay
+    // for the error archive (`PrintErrorArchive` of the application's `CATCH_ALL`). No byte is
+    // replaced while such an archive is written before the throw: the PSSM's strings were
+    // replaced when NCBI read it, and what the archive writes before its queries is LOSAT's own
+    // (D3c-3c review R8, probe `review/p5`).
+    if matches!(&written, Err(error) if error.is::<crate::cli::NativeError>()) {
         for (severity, text) in &messages {
             handle.post(*severity, text);
-        }
-        for text in posted.take() {
-            handle.post(crate::report::diag_log::ERROR, &text);
         }
     }
     written

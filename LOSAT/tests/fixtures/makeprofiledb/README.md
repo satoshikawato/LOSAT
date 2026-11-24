@@ -67,7 +67,7 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
   `l_QR06.lst` (`e2_n8` alone: NCBI's process ends as its writer closes, review O6) and `l_QR07.lst` (a gap,
   where NCBI's conversion reads past its table; not run) have no row either. The test checks LOSAT's refusal of
   each.
-- Rows `NE00`-`NE26` (line RG item D3c-3c, run the same way on 2026-11-24 by
+- Rows `NE00`-`NE27` (line RG item D3c-3c, run the same way on 2026-11-24 by
   `remaining-gaps-20261112/D/d3/c3c/tools/run_probeB3.sh`, inputs from `c3c/tools/gen_probeB3.py`, rows added by
   `c3c/tools/freeze_ne.py`, outside the repository): an element stated as `NULL` in a list of a profile's query.
   `zs.smp` is `z_bh1.smp` without its binary definition lines; `zs_d1`, `zs_d2`, `zs_d0` hold `descr { NULL }`,
@@ -80,7 +80,11 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
   descriptors; `e_bh_org_null`, `e_bh_null_org` (`NE15`, `NE16`) put an organism before or after the `NULL` (the
   taxid loop stops at the first organism). `NE17`-`NE26` hold a `NULL` element in lists makeprofiledb does not
   read (Seq-hist ids and assembly, Seq-ext seg and delta, BioSource subtype, a feature's dbxref and qual, a
-  Variation-ref set, population-data and clinical-test, whose deprecation NCBI posts): the database.
+  Variation-ref set, population-data and clinical-test, whose deprecation NCBI posts): the database. `NE27`
+  (D3c-3c review R2, `c3c/probeF/mpdb`, run the same way) is `e_noid_oss_null`: a Bioseq with an empty id
+  list whose descriptors hold a title, binary definition lines of an empty octet string and a `NULL`; NCBI
+  builds the definition lines from the descriptors before it looks at the ids, so it dereferences the element
+  there too.
 
 The whole oracle (248 cases) is compared by `compare.py` of the survey; these rows are the part kept in the
 repository (about 1.2 MB).

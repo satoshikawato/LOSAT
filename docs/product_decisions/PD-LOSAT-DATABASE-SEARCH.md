@@ -121,8 +121,8 @@
   UTC (tables of them; daylight time without a rule followed glibc's `posixrules`), which wait for
   the maintainer's decision on its pull request; on 2026-11-23 line NP item M (b) read the
   Seq-locs of a mask file nested to any depth, which LOSAT refused past 400 levels, as makeblastdb
-  reads them with a stack large enough (PD-LOSAT-NCBI-DEFECTS exception 28, pending: question
-  Q-MDEPTH, ad-M4a-15 2026-11-22); the rest of this history under the
+  reads them with a stack large enough (PD-LOSAT-NCBI-DEFECTS approved exception 28, the Owner's
+  「Q-MDEPTH=B」 of 2026-11-24); the rest of this history under the
   maintainer's standing delegation (Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07))
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the

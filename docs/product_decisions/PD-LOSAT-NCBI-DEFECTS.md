@@ -511,7 +511,7 @@
   there); rule 2; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07);
   1.94 2026-11-23 (makeblastdb `-mask_data`, line NP item M (b): exception 28, a mask file whose
   Seq-locs nest deeper than NCBI's stack holds, read to any depth, rule 1, as approved exception 15
-  reads a PSSM; its approval pending the Owner's answer to question Q-MDEPTH (asked 2026-11-23); the
+  reads a PSSM; approved by the Owner's answer 「Q-MDEPTH=B」 of 2026-11-24 to question Q-MDEPTH; the
   refusal of nests deeper than 400 object frames removed; numbered after 1.93, which line NP item
   M4c-2 took after dev's 1.92; first 1.77 (exception
   24), then 1.81 (exception 25) at the merge of dev that brought 1.76 to 1.80 (line RG items X4b-2,
@@ -1230,15 +1230,14 @@ refuses depths that NCBI reads at every start and reads depths at which NCBI cra
     `nests_of_any_depth_are_walked_without_recursion` and `nested_multi_data_are_read_without_recursion`
     (`LOSAT/src/algorithm/pssm_search/annot_index/tests.rs`, `table_tests.rs`).
 
-## Exception 28 (makeblastdb `-mask_data`, Seq-locs nested deeper than NCBI's stack holds, version 1.94), pending
+## Approved exception 28 (makeblastdb `-mask_data`, Seq-locs nested deeper than NCBI's stack holds, version 1.94)
 
-pending: question Q-MDEPTH, ad-M4a-15 2026-11-22
-
-Version 1.94, line NP item M (b). Approval: pending the Owner's answer to question Q-MDEPTH (asked
-2026-11-23). Built under the maintainer's standing delegation (standing instruction 2026-09-29,
-restated 2026-10-07) as that question's recommended option B, the form of approved exception 15, in
-a pull request that stays a draft until the Owner answers. Not taken: option A, refusing the depths
-at which NCBI may crash: NCBI's crash depth moves by some dozen levels from run to run and differs
+Version 1.94, line NP item M (b). The Owner answered on 2026-11-24 (09:13 JST, through the session
+board, record ce1e4751-4972-4b38-bd21-36be4d8fbd98) 「Q-MDEPTH=B」. The question Q-MDEPTH was
+「入れ子の深いマスクファイルを makeblastdb -mask_data でどこまで読むか」 (how deep should makeblastdb
+`-mask_data` read a mask file whose Seq-locs nest?), and its option B read 「B: 深さに関係なく読む（推奨）」
+(B: read at any depth (recommended)), the form of approved exception 15. Not taken: option A, refusing
+the depths at which NCBI may crash: NCBI's crash depth moves by some dozen levels from run to run and differs
 between text and binary files, so any limit refuses files that NCBI reads at every start or reads
 files on which NCBI crashes at every start. Until this version LOSAT refused nests deeper than 400
 object frames, 97 levels of `mix` and more, which NCBI reads at every start.

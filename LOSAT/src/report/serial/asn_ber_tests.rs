@@ -231,22 +231,35 @@ fn reals_are_a_decimal_form_byte_and_posix_digits() {
     );
 }
 
-/// A NaN or an infinity is one content byte of its own (X.690, 8.5.9), as NCBI's binary stream
-/// writes them: the bit score of a Seq-align whose Lambda is +inf is `09 01 40`.
+/// A NaN or an infinity is its special content octet, as NCBI BLAST+ 2.17.0 writes it (probe
+/// real of line RG-F3 PR 2: `09 01 40` for `PLUS-INFINITY`, `41` for `MINUS-INFINITY`, `42` for
+/// `NOT-A-NUMBER`; the whole archives in `xml_archive_tests`); any NaN is `42`. The binary
+/// reader reads each back (`asn_types::read_ber_tests`).
+// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:738-816
 #[test]
-fn a_non_finite_real_is_a_special_value() {
-    for (value, byte) in [
+fn a_non_finite_real_is_its_special_value() {
+    for (value, special) in [
         (f64::INFINITY, 0x40),
         (f64::NEG_INFINITY, 0x41),
         (f64::NAN, 0x42),
         (-f64::NAN, 0x42),
+        (crate::ncbi_str::NCBI_NAN, 0x42),
     ] {
-        let mut buf = Vec::new();
-        let mut enc = AsnBinaryEncoder::new(&mut buf);
-        enc.real(value);
-        assert_eq!(enc.error(), None);
-        assert_eq!(buf, [0x09, 0x01, byte]);
+        assert_eq!(bytes(|enc| enc.real(value)), [0x09, 0x01, special]);
     }
+}
+
+/// A UTF8String has a VisibleString's tag (`SERIAL_WRITE_UTF8STRING_TAG` false, its default)
+/// and its bytes as they are, a control byte included (probe XB of line RG-F3 PR 2: NCBI's
+/// `1a 03 c3 a9 01` of `"é\x01"`).
+// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:281-314
+#[test]
+fn a_utf8_string_has_the_visible_string_tag_and_its_bytes() {
+    assert_eq!(
+        bytes(|enc| enc.utf8_str("é\u{1}".as_bytes())),
+        [0x1a, 0x03, 0xc3, 0xa9, 0x01]
+    );
+    assert_eq!(bytes(|enc| enc.utf8_str(b"")), [0x1a, 0x00]);
 }
 
 /// The structure calls: a SEQUENCE is `30 80 ... 00 00`, a SET OF `31 80`, and every member and

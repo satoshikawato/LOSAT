@@ -355,6 +355,51 @@ impl PssmWithParameters {
         }
         value
     }
+
+    /// The object after a stream of the format `written` wrote it: each member that the reader
+    /// kept in a delay buffer of another format holds the value read from it, which every later
+    /// write writes (`asn_types::write::update_delayed`). The members that a delay buffer can
+    /// hold are among the values of the generic reader, which this walks.
+    pub(crate) fn update_delayed(&mut self, written: super::asn_types::Encoding) {
+        use super::asn_types::write::update_delayed;
+        let update = |ty: u16, value: &mut Value| update_delayed(ty, value, written);
+        if let Some(query) = self.pssm.query.as_mut() {
+            match query {
+                SeqEntry::Seq(query) => {
+                    for descriptor in query.descr.iter_mut().flatten() {
+                        if let Seqdesc::Other(value) = descriptor {
+                            update(named::SEQDESC, value);
+                        }
+                    }
+                    let inst = &mut query.inst;
+                    if let Some(fuzz) = inst.fuzz.as_mut() {
+                        update(named::INT_FUZZ, fuzz);
+                    }
+                    if let Some(SeqData::Other(value)) = inst.seq_data.as_mut() {
+                        update(named::SEQ_DATA, value);
+                    }
+                    if let Some(ext) = inst.ext.as_mut() {
+                        update(named::SEQ_EXT, ext);
+                    }
+                    if let Some(hist) = inst.hist.as_mut() {
+                        update(named::SEQ_HIST, hist);
+                    }
+                    for annot in query.annot.iter_mut().flatten() {
+                        update(named::SEQ_ANNOT, annot);
+                    }
+                }
+                SeqEntry::Set(set) => update(named::BIOSEQ_SET, set),
+            }
+        }
+        if let Some(params) = self.params.as_mut() {
+            if let Some(constraints) = params.constraints.as_mut() {
+                update(named::COREDEF, constraints);
+            }
+            if let Some(sites) = params.annotated_sites.as_mut() {
+                update(named::SITE_ANNOT_SET, sites);
+            }
+        }
+    }
 }
 
 /// The document of a PSSM (`WriteFileHeader`, the object, `EndOfWrite` and the separator), with

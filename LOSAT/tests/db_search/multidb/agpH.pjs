@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "agpH",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "agpH",
+  "number-of-letters": 140,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-23T17:30:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49628,
+  "bytes-to-cache": 238,
+  "files": [
+    "agpH.pdb",
+    "agpH.phr",
+    "agpH.pin",
+    "agpH.pnd",
+    "agpH.pni",
+    "agpH.pog",
+    "agpH.pos",
+    "agpH.pot",
+    "agpH.psq",
+    "agpH.ptf",
+    "agpH.pto"
+  ]
+}

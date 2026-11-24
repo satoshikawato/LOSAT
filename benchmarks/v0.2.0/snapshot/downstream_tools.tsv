@@ -1,39 +1,39 @@
-program	tool	threads_label	threads_num	cases_count	ncbi_mt_s	losat_mt_s	mt_speedup	ncbi_n1_s	losat_n1_s	n1_speedup	same_output	note
-blastn	ABRicate	8	8	9	7.02	2.42	2.9008	29.08	16.98	1.7126	yes	
-blastn	BRIG	16	16	3	65.94	11.82	5.5787	70.35	21.7	3.2419	yes	
-blastn	BlobToolKit	16	16	1	2.07	0.81	2.5556	3.97	3.03	1.3102	yes	
-blastn	CheckV	16	16	1	0.25	0.04	6.25	0.28	0.12	2.3333	yes	
-blastn	Galaxy	16	16	1	0.1	0.0					yes	losat_under_10ms
-blastn	Kaptive	16	16	2	5.54	0.85	6.5176	18.63	7.29	2.5556	yes	
-blastn	MAKER	16	16	1	0.11	0.01	11.0	0.1	0.01	10.0	yes	
-blastn	MOB-suite	16	16	1	3.43	0.99	3.4646	24.18	14.47	1.671	yes	
-blastn	QIIME 2	16	16	1	0.78	0.13	6.0	2.45	1.64	1.4939	yes	
-blastn	mlst	16	16	3	1.22	0.15	8.1333	1.36	1.09	1.2477	yes	
-blastn	nf-core blast	16	16	1	0.1	0.01	10.0	0.09	0.01	9.0	yes	
-blastp	AMRFinderPlus	16	16	1	1.6	0.08	20.0	1.66	0.34	4.8824	yes	
-blastp	Galaxy	16	16	1	0.35	0.03	11.6667	0.44	0.14	3.1429	yes	
-blastp	OrthoFinder	16 × 1	16	1	9.104	2.57	3.5424				yes	
-blastp	Prokka	16 × 1	16	3	60.941	21.843	2.79	233.44	84.314	2.7687	yes	
-blastp	RGI	16	16	1	0.13	0.02	6.5	0.31	0.09	3.4444	yes	
-blastp	Roary	16 × 1	16	1	62.041	21.373	2.9028	980.14	362.36	2.7049	yes	
-blastp	Trinotate	16	16	1	13.12	4.47	2.9351	200.84	79.1	2.5391	yes	
-blastp	nf-core blast	16	16	1	0.15	0.03	5.0	0.18	0.03	6.0	yes	
-blastx	Galaxy	16	16	1	0.12	0.02	6.0	0.11	0.02	5.5	yes	
-blastx	MAKER	16	16	2	3.78	1.24	3.0484	42.17	19.11	2.2067	yes	
-blastx	Trinotate	16	16	1	40.09	15.93	2.5166	648.92	284.87	2.278	yes	
-tblastn	BUSCO	16	16	2	10.36	5.12	2.0234	152.74	71.82	2.1267	yes	
-tblastn	Galaxy	16	16	1	0.09	0.01	9.0				yes	
-tblastn	Kaptive	16	16	2	13.54	5.62	2.4093	202.02	84.61	2.3877	yes	
-tblastn	nf-core blast	16	16	1	0.14	0.01	14.0	0.17	0.03	5.6667	yes	
-tblastx	Galaxy	16	16	1	0.11	0.02	5.5	0.13	0.02	6.5	yes	
-tblastx	ViPTreeGen	16	16	3	15.4	3.8	4.0526	91.51	50.41	1.8153	yes	
-blastn	ResFinder / PlasmidFinder	1	1	5				3.545	0.49	7.2347	yes	1t_only_dt15
-blastn	Bakta	1	1	3				1.665	0.445	3.7416	yes	1t_only_dt15
-blastn	Easyfig	1	1	3				49.725	14.615	3.4023	yes	1t_only_dt15
-blastn	SISTR	1	1	4				25.305	9.03	2.8023	yes	1t_only_dt15
-blastn	pyani ANIb	1	1	12				667.485	264.36	2.5249	yes	1t_only_dt15
-blastn	ECTyper	1	1	2				22.565	11.93	1.8915	yes	1t_only_dt15
-blastn	rBLAST (R)	1	1	2				12.535	7.035	1.7818	yes	1t_only_dt15
-blastx	Biopython	1	1	1				11.215	5.925	1.8928	yes	1t_only_dt1
-tblastn	Unicycler	1	1	1				70.99	27.875	2.5467	yes	1t_only_dt13
-tblastx	Easyfig	1	1	1				0.23	0.065	3.5385	yes	1t_only_dt1
+program	tool	threads_label	threads_num	cases_count	ncbi_mt_s	losat_mt_s	mt_speedup	ncbi_mt_rss_mib	losat_mt_rss_mib	mt_mem_reduction	ncbi_n1_s	losat_n1_s	n1_speedup	ncbi_n1_rss_mib	losat_n1_rss_mib	n1_mem_reduction	same_output	ncbi_mt_differs	note
+blastn	ABRicate	8	8	9	7.02	2.42	2.9008	91.6	35.3	2.5949	29.08	16.98	1.7126				yes	no	
+blastn	BRIG	16	16	3	65.94	11.82	5.5787	218.0	145.5	1.4983	70.35	21.7	3.2419				yes	no	
+blastn	BlobToolKit	16	16	1	2.07	0.81	2.5556	389.9	307.6	1.2676	3.97	3.03	1.3102				yes	no	
+blastn	CheckV	16	16	1	0.25	0.04	6.25	141.2	81.1	1.7411	0.28	0.12	2.3333				yes	no	
+blastn	Galaxy	16	16	1	0.1	0.0		80.0	9.0	8.8889							yes	no	losat_under_10ms
+blastn	Kaptive	16	16	2	5.54	0.85	6.5176	113.2	64.2	1.7632	18.63	7.29	2.5556				yes	no	
+blastn	MAKER	16	16	1	0.11	0.01	11.0	92.8	10.0	9.28	0.1	0.01	10.0				yes	no	
+blastn	MOB-suite	16	16	1	3.43	0.99	3.4646	811.0	179.2	4.5257	24.18	14.47	1.671				yes	no	
+blastn	QIIME 2	16	16	1	0.78	0.13	6.0	99.3	47.7	2.0818	2.45	1.64	1.4939				yes	yes	
+blastn	mlst	16	16	3	1.22	0.15	8.1333	180.9	55.5	3.2595	1.36	1.09	1.2477				yes	no	
+blastn	nf-core blast	16	16	1	0.1	0.01	10.0	82.0	10.0	8.2	0.09	0.01	9.0				yes	no	
+blastp	AMRFinderPlus	16	16	1	1.6	0.08	20.0	132.0	21.1	6.2559	1.66	0.34	4.8824				yes	no	
+blastp	Galaxy	16	16	1	0.35	0.03	11.6667	124.0	70.0	1.7714	0.44	0.14	3.1429				yes	no	
+blastp	OrthoFinder	16 × 1	16	1	9.104	2.57	3.5424	77.1	20.0	3.855							yes	no	
+blastp	Prokka	16 × 1	16	3	60.941	21.843	2.79	84.0	20.0	4.2	233.44	84.314	2.7687				yes	no	
+blastp	RGI	16	16	1	0.13	0.02	6.5	75.3	14.0	5.3786	0.31	0.09	3.4444				yes	no	
+blastp	Roary	16 × 1	16	1	62.041	21.373	2.9028	86.9	22.8	3.8114	980.14	362.36	2.7049				yes	no	
+blastp	Trinotate	16	16	1	13.12	4.47	2.9351	300.4	36.3	8.2755	200.84	79.1	2.5391				yes	no	
+blastp	nf-core blast	16	16	1	0.15	0.03	5.0	73.7	14.0	5.2643	0.18	0.03	6.0				yes	no	
+blastx	Galaxy	16	16	1	0.12	0.02	6.0	75.2	13.0	5.7846	0.11	0.02	5.5				yes	no	
+blastx	MAKER	16	16	2	3.78	1.24	3.0484	119.8	20.0	5.99	42.17	19.11	2.2067				yes	no	
+blastx	Trinotate	16	16	1	40.09	15.93	2.5166	309.6	74.0	4.1838	648.92	284.87	2.278				yes	no	
+tblastn	BUSCO	16	16	2	10.36	5.12	2.0234	191.3	97.1	1.9701	152.74	71.82	2.1267				yes	yes	
+tblastn	Galaxy	16	16	1	0.09	0.01	9.0	75.0	10.0	7.5							yes	no	
+tblastn	Kaptive	16	16	2	13.54	5.62	2.4093	202.5	73.8	2.7439	202.02	84.61	2.3877				yes	no	
+tblastn	nf-core blast	16	16	1	0.14	0.01	14.0	75.2	11.0	6.8364	0.17	0.03	5.6667				yes	no	
+tblastx	Galaxy	16	16	1	0.11	0.02	5.5	75.6	13.0	5.8154	0.13	0.02	6.5				yes	no	
+tblastx	ViPTreeGen	16	16	3	15.4	3.8	4.0526	113.9	55.0	2.0709	91.51	50.41	1.8153				yes	no	
+blastn	ResFinder / PlasmidFinder	1	1	5							3.545	0.49	7.2347	178.81	85.47	2.092	yes	no	1t_only_dt15
+blastn	Bakta	1	1	3							1.665	0.445	3.7416	224.91	108.45	2.0739	yes	no	1t_only_dt15
+blastn	Easyfig	1	1	3							49.725	14.615	3.4023	189.75	95.01	1.9971	yes	no	1t_only_dt15
+blastn	SISTR	1	1	4							25.305	9.03	2.8023	248.66	131.7	1.8881	yes	no	1t_only_dt15
+blastn	pyani ANIb	1	1	12							667.485	264.36	2.5249	169.53	127.44	1.3302	yes	no	1t_only_dt15
+blastn	ECTyper	1	1	2							22.565	11.93	1.8915	135.0	55.11	2.4498	yes	no	1t_only_dt15
+blastn	rBLAST (R)	1	1	2							12.535	7.035	1.7818	97.28	17.0	5.7224	yes	no	1t_only_dt15
+blastx	Biopython	1	1	1							11.215	5.925	1.8928	270.0	12.0	22.5	yes	no	1t_only_dt1
+tblastn	Unicycler	1	1	1							70.99	27.875	2.5467	85.14	35.86	2.3742	yes	no	1t_only_dt13
+tblastx	Easyfig	1	1	1							0.23	0.065	3.5385	80.0	16.0	5.0	yes	no	1t_only_dt1

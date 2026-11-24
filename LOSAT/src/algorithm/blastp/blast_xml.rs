@@ -26,7 +26,7 @@ use crate::report::blast_xml::{
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::QueryNames;
-use crate::report::serial::seqalign::seqalign_evalue_read;
+use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue_read};
 
 /// What the BLASTP document needs besides the final hit lists.
 pub(crate) struct BlastpXml<'a> {
@@ -48,6 +48,9 @@ pub(crate) struct BlastpXml<'a> {
     pub searched: Vec<bool>,
     /// The program, for the refusals' messages (`BLASTP`).
     pub program: &'static str,
+    /// The app's program type (`BlastpApp::program_type`, `RunRecord::program_type`): psiblast's
+    /// Seq-align of an HSP of 0 identities has no `num_ident` (`serial::seqalign::read_num_ident`).
+    pub program_type: Option<crate::report::record::ProgramType>,
     /// Whether the document ends with this call.
     pub epilog: bool,
     /// Whether the run stops after this call: no epilog and no later report call (the block
@@ -177,7 +180,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                 let hit = XmlHit::of(subject, xml.subjects.length(s_idx));
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time.
-                posts.hit(sink.position(), s_idx as u32, |texts| {
+                posts.hit(sink.position(), &hit, s_idx as u32, |texts| {
                     if posting {
                         taxdb_printer.at_names(s_idx, subject, texts)
                     } else {
@@ -199,6 +202,16 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                             .get(next_row)
                             .context("BLASTP report rows do not cover the hit list")?;
                         next_row += 1;
+                        let identities =
+                            read_num_ident(row.seqalign_num_ident as i64, xml.program_type);
+                        if hsps.unaligned([XmlHsp::unaligned(
+                            hsp.raw_score,
+                            hsp.bit_score,
+                            seqalign_evalue_read(hsp.e_value),
+                            identities,
+                        )])? {
+                            continue;
+                        }
                         let (Some(qrow), Some(srow)) = (&row.query_seq, &row.subject_seq) else {
                             bail!("unimplemented BLASTP report alignment for final HSP");
                         };
@@ -217,6 +230,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                             ops: hsp.gap_info.as_deref(),
                             query_first: hsp.q_start as i32 - 1,
                             query_step: 1,
+                            alignment_identities: identities,
                         })?;
                     }
                     Ok(())

@@ -46,7 +46,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 
 `-in_pssm FILE` replaces `-query` and searches with a position-specific scoring matrix, as NCBI's PSI-TBLASTN does. `-in_pssm -` reads the PSSM from the standard input. The report header says `PSITBLASTN`.
 
-- The file is a PSSM in NCBI's ASN.1 text form (`PssmWithParameters`), such as `psiblast -out_pssm` writes, or in its ASN.1 binary form. [psiblast](psiblast.md) describes what it accepts. An XML PSSM, or a compressed file, is refused.
+- The file is a PSSM in NCBI's ASN.1 text form (`PssmWithParameters`), such as `psiblast -out_pssm` writes, in its ASN.1 binary form, or in NCBI's XML form. [psiblast](psiblast.md) describes what it accepts. A compressed file is refused.
 - The PSSM's scores replace the matrix, and its Karlin-Altschul values set the cutoffs, E-values and bit scores.
   - Values that are negative, infinite (`PLUS-INFINITY`) or not a number (`NOT-A-NUMBER`) are used as NCBI BLAST+ uses them (E-values `0.0`, bit scores `inf` or `-1.0`). A query whose Seq-inst `length` is one less than its letters is searched as its first `length` letters. A PSSM of frequency ratios only whose `length` is one less than its letters or more stops with NCBI BLAST+'s PSSM engine error (exit status 3). A gapped Lambda so small that NCBI BLAST+'s search for the hit-saving cutoff passes 32-bit integers (such as 1e-9), or a gapped Lambda below 0, is refused.
 - As in NCBI, `-comp_based_stats` has no effect, alignments are linked only with `-sum_stats true`, and `-task tblastn-fast` changes nothing. The word size is 2 to 4 and the matrix is one of the standard ones.

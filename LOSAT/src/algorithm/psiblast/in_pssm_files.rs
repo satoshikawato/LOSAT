@@ -316,7 +316,12 @@ impl InPssmRounds {
         let (Some(object), Some(_)) = (self.object.as_ref(), request.asn_path.as_ref()) else {
             return Ok((None, Vec::new()));
         };
-        // The six values are written in place of the object's (no copy of the object).
+        // Round 1's write of the object (`files`) read each delay buffer of another format into
+        // it (`PssmWithParameters::update_delayed`): this write writes the values read, without
+        // the messages of that read again (line RG-F3, PR 2: probe AR4 P).
+        let mut object = object.clone();
+        object.update_delayed(crate::report::serial::asn_input::Encoding::Text);
+        // The six values are written in place of the object's (NCBI sets them in its object).
         let karlin = crate::report::serial::pssm::FinalKarlin {
             lambda: gapped.lambda,
             kappa: gapped.k,
@@ -325,7 +330,7 @@ impl InPssmRounds {
             kappa_ungapped: ungapped.k,
             h_ungapped: ungapped.h,
         };
-        crate::report::serial::pssm::asn_text_posting_with_karlin(object, Some(karlin))
+        crate::report::serial::pssm::asn_text_posting_with_karlin(&object, Some(karlin))
             .map(|(asn, posts)| (Some(asn), posts))
             .map_err(|error| anyhow::anyhow!("{error}"))
     }

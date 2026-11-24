@@ -149,7 +149,8 @@ impl<R: Read> XmlStream<R> {
         }
         match read_document(&mut self.reader, evcut, data) {
             Ok(document) => Ok(Some(document)),
-            Err(XmlError::Format(_)) => {
+            // (`NotBool` is the object stream's only.)
+            Err(XmlError::Format(_) | XmlError::NotBool) => {
                 self.done = true;
                 Ok(None)
             }

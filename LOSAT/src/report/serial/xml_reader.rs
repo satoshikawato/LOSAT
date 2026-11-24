@@ -21,13 +21,14 @@
 //! end of the input inside a document is therefore its failure, as LOSAT reads it.
 //!
 //! What LOSAT does not read is `XmlError::Unsupported`, refused where the reader meets it, also in
-//! a document that NCBI would then reject for another reason: XML attributes (NCBI skips unknown
-//! ones, with its own handling of `xmlns` and `nil`), names with a namespace prefix (NCBI strips
-//! the prefix and keeps namespace maps), control characters in character data (NCBI replaces
-//! them with `#` and posts a warning with its stack of the read). NCBI's BLAST XML writers produce
-//! none of them.
+//! a document that NCBI would then reject for another reason: in rpsbproc's reader, XML
+//! attributes (NCBI skips unknown ones, with its own handling of `xmlns` and `nil`), names with a
+//! namespace prefix (NCBI strips the prefix and keeps namespace maps), control characters in
+//! character data (NCBI replaces them with `#` and posts a warning with its stack of the read);
+//! NCBI's BLAST XML writers produce none of them. The object stream reads all three as NCBI does
+//! (`read_name`, `read_undefined_attributes`, `x_VerifyChar`).
 
-use super::asn_text_reader::AsnSource;
+use super::asn_text_reader::{buffer_number, AsnSource, NumberStop};
 use crate::ncbi_str::{is_space, string_to_double_posix};
 
 /// A failure while a document is read.
@@ -37,6 +38,9 @@ pub(crate) enum XmlError {
     Format(String),
     /// What LOSAT does not read (an explicit refusal, the whole message).
     Unsupported(String),
+    /// The value of a `nil` attribute that `NStr::StringToBool` does not convert: its
+    /// `CStringException` (`read_name`), which the object stream throws as NCBI's.
+    NotBool,
 }
 
 pub(crate) type Result<T> = std::result::Result<T, XmlError>;
@@ -44,6 +48,10 @@ pub(crate) type Result<T> = std::result::Result<T, XmlError>;
 fn fail<T>(message: &str) -> Result<T> {
     Err(XmlError::Format(message.to_string()))
 }
+
+/// The message of the end of the input (`CEofException`, `CIStreamBuffer::FillBuffer`): the
+/// object stream (`asn_types::read_xml`) tells it from the other failures by it.
+pub(super) const EOF_MESSAGE: &str = "end of the input";
 
 fn unsupported(what: &str) -> XmlError {
     XmlError::Unsupported(format!(
@@ -53,7 +61,7 @@ fn unsupported(what: &str) -> XmlError {
 
 /// `m_TagState`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TagState {
+pub(super) enum TagState {
     Outside,
     InsideOpening,
     InsideClosing,
@@ -226,20 +234,42 @@ pub(crate) const fn optional(name: &'static str) -> Member {
 
 /// The reader of XML documents from one source.
 pub(crate) struct XmlReader<S: AsnSource> {
-    src: S,
+    pub(super) src: S,
     /// The position of the next byte to read (`m_CurrentPos`).
-    pos: usize,
-    state: TagState,
+    pub(super) pos: usize,
+    pub(super) state: TagState,
     /// `m_RejectedTag`: a tag name read and given back (`UndoClassMember`).
-    rejected: Option<Vec<u8>>,
+    pub(super) rejected: Option<Vec<u8>>,
     /// `m_LastTag`.
-    last_tag: Vec<u8>,
+    pub(super) last_tag: Vec<u8>,
     /// `m_Encoding`.
-    encoding: Encoding,
+    pub(super) encoding: Encoding,
     /// `m_Utf8Buf` and `m_Utf8Pos`: the UTF-8 bytes of a character being returned one by one.
     utf8: Vec<u8>,
     utf8_at: usize,
+    /// The object stream of a type table (`asn_types::read_xml`: NCBI's XML object stream, as
+    /// `-in_pssm` and blast_formatter's archives open it) rather than rpsbproc's reader of a BLAST
+    /// XML document: attributes are skipped as NCBI skips the ones it does not know, a name with a
+    /// namespace prefix is read as NCBI reads it, and a control character is replaced by `#` with
+    /// a post (`x_VerifyChar`), where rpsbproc's reader refuses all three.
+    object: bool,
+    /// `m_Input.GetLine()`: the line counter of NCBI's input buffer, which only
+    /// `SkipEndOfLine` advances.
+    pub(super) line: usize,
+    /// The bytes replaced by `#` (`ReplaceVisibleChar` of `x_VerifyChar`) and the line of each,
+    /// for the object stream to post.
+    pub(super) replaced: Vec<(u8, usize)>,
+    /// `m_Attlist`: an attribute list being read (`read_undefined_attributes`).
+    attlist: bool,
+    /// `m_CurrNsPrefix`: the prefix of the last name read with one (`read_name`).
+    ns_prefix: Vec<u8>,
+    /// `m_NsPrefixToName`: the namespaces declared (`xmlns`, `xmlns:<prefix>`), by prefix.
+    namespaces: Vec<(Vec<u8>, Vec<u8>)>,
 }
+
+/// `s_SchemaInstanceNamespace`: the namespace whose `nil` attribute NCBI's reader reads.
+// NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:50-50
+const SCHEMA_INSTANCE_NAMESPACE: &[u8] = b"http://www.w3.org/2001/XMLSchema-instance";
 
 impl<S: AsnSource> XmlReader<S> {
     pub(crate) fn new(src: S) -> Self {
@@ -252,32 +282,60 @@ impl<S: AsnSource> XmlReader<S> {
             encoding: Encoding::Unknown,
             utf8: Vec::new(),
             utf8_at: 0,
+            object: false,
+            line: 1,
+            replaced: Vec::new(),
+            attlist: false,
+            ns_prefix: Vec::new(),
+            namespaces: Vec::new(),
         }
+    }
+
+    /// The reader of an object stream (see `object`).
+    pub(super) fn object_stream(src: S) -> Self {
+        XmlReader {
+            object: true,
+            ..Self::new(src)
+        }
+    }
+
+    /// `UngetChar` of `count` bytes just read.
+    pub(super) fn skip_back(&mut self, count: usize) {
+        self.pos -= count;
+    }
+
+    /// `ResetState` of an object stream at its root frame: no tag open, none given back.
+    pub(super) fn reset_state(&mut self) {
+        self.state = TagState::Outside;
+        self.rejected = None;
+        self.last_tag.clear();
+        self.utf8.clear();
+        self.utf8_at = 0;
     }
 
     /// `PeekChar` at `offset`: the byte, or the failure of the end of the input (`CEofException`).
     #[inline]
-    fn peek(&mut self, offset: usize) -> Result<u8> {
+    pub(super) fn peek(&mut self, offset: usize) -> Result<u8> {
         match self.src.byte_at(self.pos + offset) {
             Some(c) => Ok(c),
-            None => fail("end of the input"),
+            None => fail(EOF_MESSAGE),
         }
     }
 
     /// `PeekCharNoEOF` at `offset`: the byte, 0 past the end of the input.
     #[inline]
-    fn peek_no_eof(&mut self, offset: usize) -> u8 {
+    pub(super) fn peek_no_eof(&mut self, offset: usize) -> u8 {
         self.src.byte_at(self.pos + offset).unwrap_or(0)
     }
 
     #[inline]
-    fn skip(&mut self, count: usize) {
+    pub(super) fn skip(&mut self, count: usize) {
         self.pos += count;
     }
 
     /// `GetChar()`.
     #[inline]
-    fn get_char(&mut self) -> Result<u8> {
+    pub(super) fn get_char(&mut self) -> Result<u8> {
         let c = self.peek(0)?;
         self.pos += 1;
         Ok(c)
@@ -297,7 +355,8 @@ impl<S: AsnSource> XmlReader<S> {
 
     /// `CIStreamBuffer::SkipEndOfLine` of `lastChar`: a `\r\n` or `\n\r` pair is one end of line.
     // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:526-537
-    fn skip_end_of_line(&mut self, last: u8) {
+    pub(super) fn skip_end_of_line(&mut self, last: u8) {
+        self.line += 1;
         let next = self.peek_no_eof(0);
         if i32::from(last) + i32::from(next as i8) == i32::from(b'\r' + b'\n') {
             self.pos += 1;
@@ -328,7 +387,7 @@ impl<S: AsnSource> XmlReader<S> {
 
     /// `SkipWS`: white space inside a tag.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:223-241
-    fn skip_ws(&mut self) -> Result<u8> {
+    pub(super) fn skip_ws(&mut self) -> Result<u8> {
         loop {
             let c = self.skip_spaces()?;
             match c {
@@ -347,7 +406,7 @@ impl<S: AsnSource> XmlReader<S> {
     // (`m_LeadingWs`, the spaces counted here, is given to the next `ReadTagData`; every tag
     // read resets it (`Found_lt`, `Found_gt`), and the character data of a member is read just
     // after its opening tag, so it is always 0 there: LOSAT does not keep it.)
-    fn skip_ws_and_comments(&mut self) -> Result<u8> {
+    pub(super) fn skip_ws_and_comments(&mut self) -> Result<u8> {
         self.src.release_before(self.pos);
         loop {
             let c = self.skip_spaces()?;
@@ -391,7 +450,7 @@ impl<S: AsnSource> XmlReader<S> {
 
     /// `EndTag`: the end (`>`) of the tag being read.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:308-340
-    fn end_tag(&mut self) -> Result<()> {
+    pub(super) fn end_tag(&mut self) -> Result<()> {
         let c = self.skip_ws()?;
         if c != b'>' && self.read_undefined_attributes()? != b'>' {
             return fail("'>' expected");
@@ -404,7 +463,26 @@ impl<S: AsnSource> XmlReader<S> {
     /// `ReadUndefinedAttributes`: the end of a tag, or an attribute (refused).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:914-931
     // (`ReadName` throws for a byte that cannot start a name.)
-    fn read_undefined_attributes(&mut self) -> Result<u8> {
+    // (An object stream skips each attribute: its name, `=` and the quoted value. `read_name`
+    // reads an `xmlns` declaration and a `nil` attribute itself, as NCBI's `ReadName` does under
+    // `m_Attlist`; the `m_IsNil` it sets is used only for a nillable member (`eReadAsNil`), which
+    // no type of an ASN.1 module has.)
+    pub(super) fn read_undefined_attributes(&mut self) -> Result<u8> {
+        if self.object {
+            self.attlist = true;
+            loop {
+                let c = self.skip_ws()?;
+                if is_end_of_tag_char(c) {
+                    self.attlist = false;
+                    return Ok(c);
+                }
+                self.read_name(c)?;
+                // (`read_name` reads an `xmlns` or `nil` attribute itself.)
+                if !self.last_tag.is_empty() {
+                    self.read_attribute_value()?;
+                }
+            }
+        }
         let c = self.skip_ws()?;
         if is_end_of_tag_char(c) {
             return Ok(c);
@@ -418,7 +496,7 @@ impl<S: AsnSource> XmlReader<S> {
     /// `EndOpeningTagSelfClosed`: ends an opening tag being read; whether it was self-closed.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:342-378
     // (No frame of these types is read without its tag (`GetNotag`).)
-    fn end_opening_tag_self_closed(&mut self) -> Result<bool> {
+    pub(super) fn end_opening_tag_self_closed(&mut self) -> Result<bool> {
         if self.state == TagState::InsideOpening {
             let mut c = self.skip_ws()?;
             if c == b'/' && self.peek(1)? == b'>' {
@@ -445,7 +523,7 @@ impl<S: AsnSource> XmlReader<S> {
 
     /// `BeginData`: ends an opening tag being read.
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrxml.inl:111-131
-    fn begin_data(&mut self) -> Result<()> {
+    pub(super) fn begin_data(&mut self) -> Result<()> {
         if self.state == TagState::InsideOpening {
             self.end_tag()?;
         }
@@ -454,7 +532,7 @@ impl<S: AsnSource> XmlReader<S> {
 
     /// `BeginOpeningTag`: reads `<` and gives the byte after it (not read).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:405-418
-    fn begin_opening_tag(&mut self) -> Result<u8> {
+    pub(super) fn begin_opening_tag(&mut self) -> Result<u8> {
         self.begin_data()?;
         if self.skip_ws_and_comments()? != b'<' {
             return fail("'<' expected");
@@ -470,7 +548,7 @@ impl<S: AsnSource> XmlReader<S> {
 
     /// `BeginClosingTag`: reads `</` and gives the byte after it (not read).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:420-430
-    fn begin_closing_tag(&mut self) -> Result<u8> {
+    pub(super) fn begin_closing_tag(&mut self) -> Result<u8> {
         self.begin_data()?;
         if self.skip_ws_and_comments()? != b'<' || self.peek(1)? != b'/' {
             return fail("'</' expected");
@@ -481,39 +559,123 @@ impl<S: AsnSource> XmlReader<S> {
     }
 
     /// `ReadName` of `c`: the name that starts with `c` (not read yet), into `last_tag`.
-    // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:432-469
+    ///
+    /// rpsbproc's reader refuses a name with a namespace prefix. The object stream reads it as
+    /// NCBI does for the types of an ASN.1 module: the name after the last `:`, the prefix kept as
+    /// `m_CurrNsPrefix` (none for `xml`); an `xmlns:` declaration, and an `xmlns` attribute in an
+    /// attribute list (`m_Attlist`), read with its value into the namespace map, and the name
+    /// after it read in its place (none, an empty `last_tag`, at the end of the tag); a `nil`
+    /// attribute in an attribute list whose prefix is not declared or names the schema-instance
+    /// namespace read with its value, which `NStr::StringToBool` converts (`XmlError::NotBool`
+    /// where it throws), and the name after it read in its place. (The namespace maps decide
+    /// nothing else in the reading of such a type; `SetNamespacePrefix` of a type with a
+    /// namespace name only changes what NCBI's writers write.)
+    // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:432-524
     // (`m_Doctype_found` is false for the types of an ASN.1 module (ReadFileHeader:
-    // `GetDataSpec()` is `EDataSpec::eDTD`). A `:` after the first byte makes a namespace prefix,
-    // refused; the `xmlns` and `nil` names of `m_Attlist` are attributes, refused before.)
-    fn read_name(&mut self, c: u8) -> Result<()> {
+    // `GetDataSpec()` is `EDataSpec::eDTD`).)
+    pub(super) fn read_name(&mut self, c: u8) -> Result<()> {
         if !is_first_name_char(c) {
             return fail("Name begins with an invalid character");
         }
         let mut i = 1;
+        let mut colon = 0;
         let next = loop {
             let next = self.peek(i)?;
             if !is_name_char(next) {
                 break next;
             }
             if next == b':' {
-                return Err(unsupported("a name with a namespace prefix"));
+                if !self.object {
+                    return Err(unsupported("a name with a namespace prefix"));
+                }
+                colon = i + 1;
             }
             i += 1;
         };
         self.last_tag.clear();
-        let name = self.src.bytes(self.pos..self.pos + i);
+        let name = self.src.bytes(self.pos + colon..self.pos + i);
         self.last_tag.extend_from_slice(name);
+        let prefix = (colon > 1).then(|| self.src.bytes(self.pos..self.pos + colon - 1).to_vec());
         self.skip(i);
         if next == b'\n' || next == b'\r' {
             self.skip(1);
             self.skip_end_of_line(next);
         }
+        if self.object {
+            return self.name_namespaces(prefix);
+        }
         Ok(())
+    }
+
+    /// The namespace part of `read_name` in the object stream, after the name (`prefix`: the
+    /// bytes before its last `:`).
+    #[cold]
+    fn name_namespaces(&mut self, prefix: Option<Vec<u8>>) -> Result<()> {
+        match prefix {
+            Some(prefix) if prefix == b"xmlns" => {
+                let value = self.read_attribute_value()?;
+                let declared = std::mem::take(&mut self.last_tag);
+                self.declare(declared, value);
+                return self.name_after_attribute();
+            }
+            Some(prefix) if prefix == b"xml" => {}
+            Some(prefix) => self.ns_prefix = prefix,
+            None => {
+                if !self.attlist {
+                    self.ns_prefix.clear();
+                }
+                if self.attlist && self.last_tag == b"xmlns" {
+                    let value = self.read_attribute_value()?;
+                    self.declare(b"xmlns".to_vec(), value);
+                    return self.name_after_attribute();
+                }
+            }
+        }
+        if self.attlist && self.last_tag == b"nil" {
+            let schema = self
+                .namespaces
+                .iter()
+                .find(|(prefix, _)| *prefix == self.ns_prefix)
+                .is_none_or(|(_, name)| name.as_slice() == SCHEMA_INSTANCE_NAMESPACE);
+            if schema {
+                let value = self.read_attribute_value()?;
+                let text = String::from_utf8_lossy(&value);
+                if crate::ncbi_str::string_to_bool(&text).is_none() {
+                    return Err(XmlError::NotBool);
+                }
+                return self.name_after_attribute();
+            }
+        }
+        Ok(())
+    }
+
+    /// Records `name` as the namespace of `prefix` in `m_NsPrefixToName`, replacing an earlier
+    /// declaration of the prefix (NCBI also keeps the map the other way, which reading does not use).
+    fn declare(&mut self, prefix: Vec<u8>, name: Vec<u8>) {
+        match self
+            .namespaces
+            .iter_mut()
+            .find(|(known, _)| *known == prefix)
+        {
+            Some(entry) => entry.1 = name,
+            None => self.namespaces.push((prefix, name)),
+        }
+    }
+
+    /// The name after an attribute that `read_name` read itself: none (`last_tag` empty) at the
+    /// end of the tag, else the next one.
+    fn name_after_attribute(&mut self) -> Result<()> {
+        let c = self.skip_ws()?;
+        if is_end_of_tag_char(c) {
+            self.last_tag.clear();
+            return Ok(());
+        }
+        self.read_name(c)
     }
 
     /// `UndoClassMember`: gives back the name of the opening tag being read.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2379-2389
-    fn undo_class_member(&mut self) {
+    pub(super) fn undo_class_member(&mut self) {
         if self.state == TagState::InsideOpening {
             self.rejected = Some(self.last_tag.clone());
             self.state = TagState::Outside;
@@ -557,7 +719,7 @@ impl<S: AsnSource> XmlReader<S> {
     /// `ReadAttributeValue` of `value` for a processing instruction (`m_Attlist` false: the closing
     /// quote is read).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:891-912
-    fn read_attribute_value(&mut self) -> Result<Vec<u8>> {
+    pub(super) fn read_attribute_value(&mut self) -> Result<Vec<u8>> {
         if self.skip_ws()? != b'=' {
             return fail("'=' expected");
         }
@@ -595,7 +757,7 @@ impl<S: AsnSource> XmlReader<S> {
     /// (not read). A character reference of 2^31 and more is negative, as NCBI's `int` of its
     /// `unsigned`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:722-800
-    fn read_escaped_char(&mut self, ending: u8) -> Result<(i32, bool)> {
+    pub(super) fn read_escaped_char(&mut self, ending: u8) -> Result<(i32, bool)> {
         let c = self.peek(0)?;
         if c == b'&' {
             self.skip(1);
@@ -686,6 +848,12 @@ impl<S: AsnSource> XmlReader<S> {
             c
         };
         if bad_char(c) {
+            if self.object {
+                // `ReplaceVisibleChar` of `c` with `eFNP_ReplaceAndWarn`: the post at the line now,
+                // and `#` (`x_FixCharsSubst`).
+                self.replaced.push((c as u8, self.line));
+                return Ok(i32::from(b'#'));
+            }
             return Err(XmlError::Unsupported(format!(
                 "a control character (0x{c:02x}) in the character data of an XML document is not supported by LOSAT's rpsbproc (NCBI replaces it and posts a warning)"
             )));
@@ -719,7 +887,7 @@ impl<S: AsnSource> XmlReader<S> {
     /// with NCBI's end-of-line handling (a first `\r` is dropped; from it to the next `\n`, every
     /// `\r` is a `\n`) and NUL characters dropped.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1297-1354
-    fn read_tag_data(&mut self, out: &mut Vec<u8>) -> Result<()> {
+    pub(super) fn read_tag_data(&mut self, out: &mut Vec<u8>) -> Result<()> {
         self.begin_data()?;
         let mut cr = false;
         loop {
@@ -753,7 +921,7 @@ impl<S: AsnSource> XmlReader<S> {
     /// `ReadWord` of `str`: the character data up to white space or the next tag, after white
     /// space.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1356-1374
-    fn read_word(&mut self, out: &mut Vec<u8>) -> Result<()> {
+    pub(super) fn read_word(&mut self, out: &mut Vec<u8>) -> Result<()> {
         self.begin_data()?;
         self.skip_ws()?;
         loop {
@@ -768,59 +936,78 @@ impl<S: AsnSource> XmlReader<S> {
         Ok(())
     }
 
-    /// `CIStreamBuffer::GetInt4` and `GetInt8` up to their sign: whether the number is
-    /// negative and its magnitude, at most `max` (`kMax_I4` or `kMax_I8`) or one more when
-    /// negative.
-    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:617-670
-    // (`GetInt8`, strbuffer.cpp:703-745, is the same with `Uint8` and `kMax_I8`.)
-    fn get_number(&mut self, max: u64) -> Result<(bool, u64)> {
-        let mut c = loop {
+    /// `CIStreamBuffer::GetInt4`, `GetUint4` (`signed` false) and `GetInt8` (`max`): `SkipWs`, then
+    /// the one port of the buffer's numbers (`asn_text_reader::buffer_number!`). The end of the
+    /// input in `SkipWs` or after the sign is the lexer's failure; the number's own stop is given
+    /// to the caller, whose stream reports it in its form.
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:617-624
+    pub(super) fn get_number(
+        &mut self,
+        max: u64,
+        signed: bool,
+    ) -> Result<std::result::Result<i64, NumberStop>> {
+        let c = loop {
             let c = self.get_char()?;
             if !is_space(c) {
                 break c;
             }
         };
-        let negative = match c {
-            b'-' => {
-                c = self.get_char()?;
-                true
-            }
-            b'+' => {
-                c = self.get_char()?;
-                false
-            }
-            _ => false,
-        };
-        if !c.is_ascii_digit() {
-            return fail("bad number");
+        let start = self.pos - 1;
+        let number = self.number_from(start, c, max, signed);
+        if number == Err(NumberStop::Eof) {
+            return fail(EOF_MESSAGE);
         }
-        let mut n = u64::from(c - b'0');
-        let max_before_mul = max / 10;
-        let max_limit_add = (max % 10) as u8 + u8::from(negative);
-        loop {
-            let d = self.peek_no_eof(0).wrapping_sub(b'0');
-            if d > 9 {
-                break;
-            }
-            self.skip(1);
-            if n > max_before_mul || (n == max_before_mul && d > max_limit_add) {
-                return fail("number overflow");
-            }
-            n = n * 10 + u64::from(d);
-        }
-        Ok((negative, n))
+        Ok(number)
     }
 
-    /// `ReadInt4`: an INTEGER.
+    /// The number whose first byte `c` is at `start` (`buffer_number!`), or where it stops.
+    #[inline(always)]
+    fn number_from(
+        &mut self,
+        start: usize,
+        c: u8,
+        max: u64,
+        signed: bool,
+    ) -> std::result::Result<i64, NumberStop> {
+        buffer_number!(self, start, c, max, signed)
+    }
+
+    /// `PeekChar()` after a number's sign (`buffer_number!`): the end of the input stops the
+    /// number at `pos`.
+    #[inline]
+    fn char_at(&mut self, pos: usize) -> std::result::Result<u8, NumberStop> {
+        match self.src.byte_at(pos) {
+            Some(c) => Ok(c),
+            None => {
+                self.pos = pos;
+                Err(NumberStop::Eof)
+            }
+        }
+    }
+
+    /// Where a number stops, as it is (`buffer_number!`): `get_number`'s caller reports it.
+    #[inline(always)]
+    fn number_stop(&self, stop: NumberStop) -> NumberStop {
+        stop
+    }
+
+    /// `get_number` in rpsbproc's reader: a number's stop is a failure of the document.
+    fn number(&mut self, max: u64) -> Result<i64> {
+        match self.get_number(max, true)? {
+            Ok(n) => Ok(n),
+            Err(NumberStop::Bad) => fail("bad number"),
+            Err(_) => fail("number overflow"),
+        }
+    }
+
+    /// `ReadInt4`: an INTEGER (`get_number`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:987-997
     // (No member of these types has a default: `ExpectSpecialCase` is 0. For `-2147483648`,
     // the negation of `n` cast to `Int4` negates `INT_MIN`, a signed overflow; LOSAT gives the
     // number's value, `INT_MIN`, which both NCBI builds give too (PS16d oracle `p_intmin`).)
     pub(crate) fn int4(&mut self) -> Result<i32> {
         self.begin_data()?;
-        let (negative, n) = self.get_number(i32::MAX as u64)?;
-        let n = n as i64;
-        Ok((if negative { -n } else { n }) as i32)
+        Ok(self.number(i32::MAX as u64)? as i32)
     }
 
     /// `ReadInt8`: a BigInt.
@@ -828,9 +1015,7 @@ impl<S: AsnSource> XmlReader<S> {
     // (`-9223372036854775808` is read as its value, as `int4` reads `-2147483648`.)
     pub(crate) fn int8(&mut self) -> Result<i64> {
         self.begin_data()?;
-        let (negative, n) = self.get_number(i64::MAX as u64)?;
-        let n = i128::from(n);
-        Ok((if negative { -n } else { n }) as i64)
+        self.number(i64::MAX as u64)
     }
 
     /// `ReadDouble`: a REAL.
@@ -864,9 +1049,9 @@ impl<S: AsnSource> XmlReader<S> {
     /// comments and the `DOCTYPE` before the first element, whose name it gives back
     /// (`UndoClassMember`).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:582-670
-    // (The namespace prefix of the type name is refused by `read_name`; without one,
-    // `m_CurrNsPrefix` is empty and a colon followed by `typeName` never equals a type's name.)
-    fn read_file_header(&mut self) -> Result<Vec<u8>> {
+    // (No type of an ASN.1 module has a `:` in its name, so `m_CurrNsPrefix`, `:` and `typeName`
+    // never equal it, whether `read_name` read a prefix or, in rpsbproc's reader, refused it.)
+    pub(super) fn read_file_header(&mut self) -> Result<Vec<u8>> {
         if self.peek(0)? == 0xEF && self.peek(1)? == 0xBB && self.peek(2)? == 0xBF {
             self.skip(3);
             self.encoding = Encoding::Utf8;
@@ -965,7 +1150,7 @@ impl<S: AsnSource> XmlReader<S> {
 
     /// `ThisTagIsSelfClosed`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1672-1678
-    fn this_tag_is_self_closed(&mut self) -> Result<bool> {
+    pub(super) fn this_tag_is_self_closed(&mut self) -> Result<bool> {
         if self.state == TagState::InsideOpening {
             return self.end_opening_tag_self_closed();
         }
@@ -974,19 +1159,19 @@ impl<S: AsnSource> XmlReader<S> {
 
     /// `NextTagIsClosing` and `NextIsTag`.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1658-1670
-    fn next_tag_is_closing(&mut self) -> Result<bool> {
+    pub(super) fn next_tag_is_closing(&mut self) -> Result<bool> {
         self.begin_data()?;
         Ok(self.skip_ws_and_comments()? == b'<' && self.peek(1)? == b'/')
     }
 
-    fn next_is_tag(&mut self) -> Result<bool> {
+    pub(super) fn next_is_tag(&mut self) -> Result<bool> {
         self.begin_data()?;
         Ok(self.skip_ws_and_comments()? == b'<' && self.peek(1)? != b'/' && self.peek(1)? != b'!')
     }
 
     /// `HasAttlist` of an opening tag: whether something other than its end follows.
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1650-1656
-    fn has_attlist(&mut self) -> Result<bool> {
+    pub(super) fn has_attlist(&mut self) -> Result<bool> {
         if matches!(
             self.state,
             TagState::InsideOpening | TagState::InsideClosing

@@ -1,0 +1,151 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: pt
+Masked using: 'seg', options: 'window=12; locut=2.2; hicut=2.5'
+           5 sequences; 912 total letters
+
+
+
+Query= q1
+
+Length=280
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AAA00001.1 p one                                                      15.8    1.1  
+
+
+>AAA00001.1 p one
+Length=195
+
+ Score = 15.8 bits (29),  Expect = 1.1, Method: Compositional matrix adjust.
+ Identities = 9/31 (29%), Positives = 12/31 (39%), Gaps = 1/31 (3%)
+ Frame = +1
+
+Query  1   HRSLLYFSQGPAR-YYPVSVSIDFSPDSKKK  90
+           H  +L     P R Y P  +  DF  D   +
+Sbjct  3   HVMMLDMIFEPCRKYQPNMMDWDFQNDCMHE  33
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 54648
+
+
+Query= q2
+
+Length=520
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AAA00001.1 p one                                                      15.4    2.7  
+
+
+>AAA00001.1 p one
+Length=195
+
+ Score = 15.4 bits (28),  Expect = 2.7, Method: Compositional matrix adjust.
+ Identities = 8/26 (31%), Positives = 10/26 (38%), Gaps = 5/26 (19%)
+ Frame = -3
+
+Query  452  SRTGFLGVAQPAHVETPLFALSLAYF  375
+            +R G L   Q       L+   L YF
+Sbjct  41   NRNGSLWNKQQG-----LYCHKLIYF  61
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 110448
+
+
+Query= q6
+
+Length=180
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AAA00004.1 p four no lc                                               21.9    0.003
+
+
+>AAA00004.1 p four no lc
+Length=150
+
+ Score = 21.9 bits (45),  Expect = 0.003, Method: Compositional matrix adjust.
+ Identities = 10/35 (29%), Positives = 15/35 (43%), Gaps = 0/35 (0%)
+ Frame = -1
+
+Query  150  RSTTCFASIATHTHTHTHTHTHTHTHTHTHLYWRS  46
+                CF S+ T    +TH H+  +T     L+ R 
+Sbjct  109  EECKCFLSLITFQWYNTHRHSPCYTQIKAQLWQRC  143
+
+
+ Score = 16.2 bits (30),  Expect = 0.37, Method: Compositional matrix adjust.
+ Identities = 5/10 (50%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = +3
+
+Query  150  WWTGRKLAIL  179
+            WW   + AIL
+Sbjct  21   WWCTEEFAIL  30
+
+
+ Score = 14.6 bits (26),  Expect = 1.4, Method: Compositional matrix adjust.
+ Identities = 5/18 (28%), Positives = 9/18 (50%), Gaps = 0/18 (0%)
+ Frame = -2
+
+Query  89   HTHTHTHTHTFTGGVVWS  36
+            +TH H+  +T     +W 
+Sbjct  124  NTHRHSPCYTQIKAQLWQ  141
+
+
+ Score = 13.1 bits (22),  Expect = 5.1, Method: Compositional matrix adjust.
+ Identities = 5/13 (38%), Positives = 7/13 (54%), Gaps = 0/13 (0%)
+ Frame = -3
+
+Query  94   THTHTHTHTHTPL  56
+            T    +TH H+P 
+Sbjct  119  TFQWYNTHRHSPC  131
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 32480
+
+
+  Database: pt
+  Masked using: 'seg', options: 'window=12; locut=2.2; hicut=2.5'
+    Posted date:  Nov 20, 2026  8:20 PM
+  Number of letters in database: 912
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

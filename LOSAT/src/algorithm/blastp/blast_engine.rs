@@ -7963,7 +7963,7 @@ fn preliminary_search_error(
     query_batch_skipped: &[bool],
     first_batch: bool,
     database_name: &str,
-    text: &str,
+    text: &[u8],
 ) -> anyhow::Error {
     if !(first_batch || query_batch_skipped.first() == Some(&false)) {
         return unsearched_batches_then_engine_error(
@@ -8413,7 +8413,7 @@ fn unsearched_batches_then_engine_error(
     query_batches: &[seq_range::RangedBatch],
     query_batch_skipped: &[bool],
     database_name: &str,
-    text: &str,
+    text: &[u8],
 ) -> anyhow::Error {
     let first_searched = query_batches
         .iter()
@@ -8433,7 +8433,8 @@ fn unsearched_batches_then_engine_error(
             format!("the database {database_name}")
         };
         return anyhow::anyhow!(
-            "a search of {searched} that fails with NCBI BLAST+'s error \"{text}\" after a first query batch that NCBI BLAST+ does not search is not supported by LOSAT's {}",
+            "a search of {searched} that fails with NCBI BLAST+'s error \"{}\" after a first query batch that NCBI BLAST+ does not search is not supported by LOSAT's {}",
+            String::from_utf8_lossy(text),
             args.app.name()
         );
     };
@@ -9672,7 +9673,7 @@ fn run_call(
                 &query_batch_skipped,
                 first_batch,
                 database_name,
-                text,
+                text.as_bytes(),
             )
         };
     // An ungapped search's failures before the search of its first query batch

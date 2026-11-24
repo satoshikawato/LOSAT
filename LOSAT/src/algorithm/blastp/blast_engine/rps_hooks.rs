@@ -35,11 +35,11 @@ use crate::stats::KarlinParams;
 /// batch's queries), so the error is the first batch's whatever its queries' validity, after
 /// what that batch writes before (`preliminary_search_error`; series PR, item PS12f, review S1).
 #[derive(Debug)]
-pub(super) struct RpsEngineError(pub(super) String);
+pub(super) struct RpsEngineError(pub(super) Vec<u8>);
 
 impl std::fmt::Display for RpsEngineError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{ENGINE_ERROR} {}", self.0)
+        write!(f, "{ENGINE_ERROR} {}", String::from_utf8_lossy(&self.0))
     }
 }
 
@@ -397,7 +397,10 @@ pub(super) fn rps_search(
             // N2 of review A (PS12a): the score block of each query of the first batch fails.
             Err(RpsVolumeError::NoMatrix) => {
                 let queries = run.batches.first().map_or(0, |batch| batch.len());
-                return Err(RpsEngineError("Error: Unknown error code -1 ".repeat(queries)).into());
+                return Err(RpsEngineError(
+                    "Error: Unknown error code -1 ".repeat(queries).into_bytes(),
+                )
+                .into());
             }
         };
         // The unit's concatenated length where NCBI's engine meets it, in the unit's search of the

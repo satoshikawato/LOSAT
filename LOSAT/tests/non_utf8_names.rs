@@ -6,21 +6,23 @@
 //! exception report quotes (`R4`); and the values of dustmasker, segmasker, windowmasker,
 //! makembindex, makeprofiledb, convert2blastmask and blastdbcmd (`K10_*`, line RG item K10a: names
 //! of files and databases, `BLASTDB` of the environment and of `.ncbirc`, and words that name a
-//! format, an algorithm, an entry or a range; the names of an alias file's `MASKLIST`). NCBI BLAST+ 2.17.0 keeps such a name's bytes (`std::string`) where it opens, lists and writes it; LOSAT wrote U+FFFD, found
+//! format, an algorithm, an entry or a range; the names of an alias file's `MASKLIST`, which
+//! blastdbcmd, the searches, makeblastdb's copy and makembindex read; the path of a profile
+//! database that rpsblast and rpstblastn name in their errors). NCBI BLAST+ 2.17.0 keeps such a name's bytes (`std::string`) where it opens, lists and writes it; LOSAT wrote U+FFFD, found
 //! nothing or failed before. The expected bytes are NCBI's, frozen by `non_utf8_names/make_fixtures.py`
 //! (`non_utf8_names/README.md`) from the cases of `non_utf8_names/cases.tsv`, which this test runs
 //! the same way: `{D}` in them is the case's directory, and the time of makeblastdb's line
 //! `Building a new DB, current time: ` and the seconds of its `added <n> sequences in` are not
 //! compared (as `dropin_corpus.py`); the files and
-//! directories the run made are, with the contents of the files but those that hold their time of
-//! writing (`expected/<case>.files`, `made`, `DATED`). `R9` (a `-matrix` name that NCBI's 1,024-byte buffer cuts inside a character) is a case the
+//! directories the run made, changed or removed are, with the contents of the files, the build's
+//! dates in them masked (`expected/<case>.files`, `made`, `undated`). `R9` (a `-matrix` name that NCBI's 1,024-byte buffer cuts inside a character) is a case the
 //! survey left open.
 //!
 //! Unix only, and not macOS: a file name there is the system's bytes, and APFS refuses a name that
 //! is not UTF-8 (Windows and WASI keep a name as Unicode text; `LOSAT/src/utils/os_bytes.rs`).
 #![cfg(all(unix, not(target_os = "macos")))]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
@@ -172,8 +174,8 @@ fn masked(output: &[u8], before: &[u8], after: &[u8], with: &[u8]) -> Vec<u8> {
     [&output[..start], with, &output[end..]].concat()
 }
 
-/// The paths below `d`, `/`-separated, a directory's with a final `/` (`make_fixtures.py`'s
-/// `paths`).
+/// The paths below `d`, `/`-separated, a directory's (or a link to one, which is not followed)
+/// with a final `/` (`make_fixtures.py`'s `paths`).
 fn paths(d: &Path) -> BTreeSet<Vec<u8>> {
     let mut found = BTreeSet::new();
     let mut stack = vec![(d.to_path_buf(), Vec::new())];
@@ -182,9 +184,11 @@ fn paths(d: &Path) -> BTreeSet<Vec<u8>> {
             let entry = entry.unwrap();
             let mut name = prefix.clone();
             name.extend_from_slice(entry.file_name().as_bytes());
-            if entry.file_type().unwrap().is_dir() {
+            if entry.path().is_dir() {
                 name.push(b'/');
-                stack.push((entry.path(), name.clone()));
+                if !entry.file_type().unwrap().is_symlink() {
+                    stack.push((entry.path(), name.clone()));
+                }
             }
             found.insert(name);
         }
@@ -192,9 +196,118 @@ fn paths(d: &Path) -> BTreeSet<Vec<u8>> {
     found
 }
 
-/// The files that hold the time they were written (`make_fixtures.py`'s `DATED`): a database's
-/// index file, alias file and metadata file. Their contents are not compared.
-const DATED: [&str; 6] = [".nin", ".pin", ".nal", ".pal", ".njs", ".pjs"];
+/// The paths below `d` (`paths`), each with the bytes of its file (`None` for a directory, or a
+/// link to one) (`make_fixtures.py`'s `snapshot`).
+fn snapshot(d: &Path) -> BTreeMap<Vec<u8>, Option<Vec<u8>>> {
+    paths(d)
+        .into_iter()
+        .map(|path| {
+            let full = path_in(d, path.clone());
+            let data = (path.last() != Some(&b'/') && full.is_file())
+                .then(|| std::fs::read(&full).unwrap());
+            (path, data)
+        })
+        .collect()
+}
+
+/// A database's index files, whose header holds the build's date in a field of its own length
+/// (`make_fixtures.py`'s `INDEX`).
+const INDEX: [&str; 2] = [".nin", ".pin"];
+
+/// The span of the date field of an index file's header (its 4-byte length and its bytes with
+/// their padding: after the version, the type, in version 5 the volume, the title and in version
+/// 5 the LMDB file's name), or `None` for a file without such a header (`make_fixtures.py`'s
+/// `index_date`).
+fn index_date(data: &[u8]) -> Option<(usize, usize)> {
+    let int4 = |at: usize| {
+        data.get(at..at + 4)
+            .map(|bytes| u32::from_be_bytes(bytes.try_into().unwrap()) as usize)
+    };
+    let version = int4(0)?;
+    let (mut at, strings) = match version {
+        4 => (8, 1),
+        5 => (12, 2),
+        _ => return None,
+    };
+    for _ in 0..strings {
+        at += 4 + int4(at)?;
+    }
+    let end = at + 4 + int4(at)?;
+    (end <= data.len()).then_some((at, end))
+}
+
+/// Whether `data` starts with a text of the build's local time, of a fixed length: NCBI's `CTime`
+/// form (`MM/DD/YYYY hh:mm:ss`: an alias file's comment, the index file of a column or of a GI
+/// mask) or the metadata file's (`YYYY-MM-DDThh:mm:ss`, `last-updated`) (`make_fixtures.py`'s
+/// `DATE_TEXTS`).
+fn starts_with_date_text(data: &[u8]) -> bool {
+    let fits = |form: &[u8]| {
+        data.len() >= form.len()
+            && form.iter().zip(data).all(|(&f, &b)| match f {
+                b'9' => b.is_ascii_digit(),
+                _ => f == b,
+            })
+    };
+    fits(b"99/99/9999 99:99:99") || fits(b"9999-99-99T99:99:99")
+}
+
+/// `data`, the bytes of the file `path` below `d`, with the build's dates as `<DATE>`: the date
+/// field of an index file (`index_date`) and every date text (`starts_with_date_text`); in a
+/// metadata file (`.njs`, `.pjs`) `bytes-total` counts the index files it lists without their
+/// date fields, whose length changes with the date (`make_fixtures.py`'s `undated`).
+fn undated(d: &Path, path: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut data = data.to_vec();
+    if INDEX.iter().any(|end| path.ends_with(end.as_bytes())) {
+        if let Some((start, end)) = index_date(&data) {
+            data = [&data[..start], b"<DATE>", &data[end..]].concat();
+        }
+    } else if path.ends_with(b".njs") || path.ends_with(b".pjs") {
+        let directory = path_in(d, path.to_vec()).parent().unwrap().to_path_buf();
+        let key = b"\"files\": [";
+        let listed = data
+            .windows(key.len())
+            .position(|w| w == key)
+            .map(|at| &data[at + key.len()..])
+            .and_then(|rest| rest.split(|&b| b == b']').next())
+            .unwrap_or_default();
+        let mut dates = 0;
+        for name in listed.split(|&b| b == b'"').skip(1).step_by(2) {
+            if INDEX.iter().any(|end| name.ends_with(end.as_bytes())) {
+                let index =
+                    std::fs::read(directory.join(OsString::from_vec(name.to_vec()))).unwrap();
+                let (start, end) = index_date(&index).unwrap();
+                dates += end - start;
+            }
+        }
+        let key = b"\"bytes-total\": ";
+        if let Some(at) = data.windows(key.len()).position(|w| w == key) {
+            let start = at + key.len();
+            let end = start
+                + data[start..]
+                    .iter()
+                    .take_while(|b| b.is_ascii_digit())
+                    .count();
+            let total: usize = std::str::from_utf8(&data[start..end])
+                .unwrap()
+                .parse()
+                .unwrap();
+            let total = (total - dates).to_string();
+            data = [&data[..start], total.as_bytes(), &data[end..]].concat();
+        }
+    }
+    let mut out = Vec::with_capacity(data.len());
+    let mut i = 0;
+    while i < data.len() {
+        if data[i].is_ascii_digit() && starts_with_date_text(&data[i..]) {
+            out.extend_from_slice(b"<DATE>");
+            i += "MM/DD/YYYY hh:mm:ss".len();
+        } else {
+            out.push(data[i]);
+            i += 1;
+        }
+    }
+    out
+}
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
@@ -202,13 +315,22 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     })
 }
 
-/// Each path of `after` not in `before` (below `d`), one per line in byte order, a byte that is
-/// not printable ASCII or is the backslash as `\xHH`; a file's line then has its size and the
-/// FNV-1a 64 of its bytes, `d` in them written as `{D}`, after tabs (`*` for both for the files
-/// of `DATED`) (`make_fixtures.py`'s `made`, `expected/<case>.files`).
-fn made(d: &Path, before: &BTreeSet<Vec<u8>>, after: &BTreeSet<Vec<u8>>) -> Vec<u8> {
+/// Each path below `d` that the run made, changed or removed (`before` and `after` are
+/// `snapshot`s), one per line in byte order, a byte that is not printable ASCII or is the
+/// backslash as `\xHH`; a file's line then has its size and the FNV-1a 64 of its bytes, the
+/// build's dates as `<DATE>` (`undated`) and `d` as `{D}`, after tabs; a removed path's line ends
+/// with a tab and `gone` (`make_fixtures.py`'s `made`, `expected/<case>.files`).
+fn made(
+    d: &Path,
+    before: &BTreeMap<Vec<u8>, Option<Vec<u8>>>,
+    after: &BTreeMap<Vec<u8>, Option<Vec<u8>>>,
+) -> Vec<u8> {
     let mut out = Vec::new();
-    for path in after.difference(before) {
+    let all: BTreeSet<&Vec<u8>> = before.keys().chain(after.keys()).collect();
+    for path in all {
+        if before.get(path).is_some() && before.get(path) == after.get(path) {
+            continue;
+        }
         for &b in path {
             if b.is_ascii_graphic() && b != b'\\' {
                 out.push(b);
@@ -216,16 +338,15 @@ fn made(d: &Path, before: &BTreeSet<Vec<u8>>, after: &BTreeSet<Vec<u8>>) -> Vec<
                 out.extend_from_slice(format!("\\x{b:02x}").as_bytes());
             }
         }
-        if path.last() != Some(&b'/') {
-            if DATED.iter().any(|end| path.ends_with(end.as_bytes())) {
-                out.extend_from_slice(b"\t*\t*");
-            } else {
-                let data = std::fs::read(path_in(d, path.clone())).unwrap();
-                let data = replace(&data, d.as_os_str().as_bytes(), b"{D}");
+        match after.get(path) {
+            None => out.extend_from_slice(b"\tgone"),
+            Some(Some(data)) => {
+                let data = replace(&undated(d, path, data), d.as_os_str().as_bytes(), b"{D}");
                 out.extend_from_slice(
                     format!("\t{}\t{:016x}", data.len(), fnv1a64(&data)).as_bytes(),
                 );
             }
+            Some(None) => {}
         }
         out.push(b'\n');
     }
@@ -269,9 +390,9 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
             command.env(name, OsString::from_vec(words(value, &db)));
         }
         let _files = home_and_worker_log(&mut command, &format!("non_utf8_{case}"));
-        let before = paths(&d);
+        let before = snapshot(&d);
         let output = command.output().expect("run LOSAT");
-        let made = made(&d, &before, &paths(&d));
+        let made = made(&d, &before, &snapshot(&d));
         ran += 1;
         let rc: i32 = std::fs::read_to_string(fixtures().join(format!("expected/{case}.rc")))
             .unwrap()
@@ -298,6 +419,6 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
             ));
         }
     }
-    assert_eq!(ran, 101, "the cases of cases.tsv");
+    assert_eq!(ran, 109, "the cases of cases.tsv");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }

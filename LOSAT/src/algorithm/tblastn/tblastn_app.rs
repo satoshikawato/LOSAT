@@ -50,7 +50,7 @@ fn fails_one_batch(error: &anyhow::Error) -> bool {
 /// error) is returned as `Err` to stop the run before its first byte.
 fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
     if let Some(SetupEngineError(text)) = error.downcast_ref::<SetupEngineError>() {
-        return Ok(crate::blastinput::app::engine_error(text));
+        return Ok(crate::blastinput::app::engine_error(text.as_bytes()));
     }
     let error = match error.downcast::<ErrorAfterBatchReports>() {
         Ok(ErrorAfterBatchReports(refusal)) => return Ok(refusal),

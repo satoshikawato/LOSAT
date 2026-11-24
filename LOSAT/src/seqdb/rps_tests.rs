@@ -210,25 +210,25 @@ fn the_score_bound_of_a_profile_sums_its_rows_positive_maxima() {
 fn a_missing_or_bad_freq_file_is_ncbis_error_and_a_short_one_is_refused() {
     let dir = scratch("freqerr");
     let base = write_volume(&dir, 28, AUX);
-    let shown = canonical_volume_path(&base);
+    let shown = String::from_utf8(canonical_volume_path(&base)).unwrap();
     let text = format!(
         "{shown} contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against {shown}."
     );
     let mut files = RpsVolumeFiles::open(&base, &[3, 2]).unwrap();
     assert_eq!(
         files.open_freq(&base, "RPSBLAST", None).err(),
-        Some(RpsOpenError::Ncbi(text.clone()))
+        Some(RpsOpenError::Ncbi(text.clone().into_bytes()))
     );
     std::fs::write(base.with_extension("freq"), words(&[7, 2, 0, 4, 7])).unwrap();
     assert_eq!(
         files.open_freq(&base, "RPSBLAST", None).err(),
-        Some(RpsOpenError::Ncbi(text))
+        Some(RpsOpenError::Ncbi(text.into_bytes()))
     );
     // A database of one volume: its `-db` value as given (`RpsVolumeSetup::with_database`).
     assert_eq!(
         files.open_freq(&base, "RPSTBLASTN", Some("./cdd")).err(),
         Some(RpsOpenError::Ncbi(
-            "./cdd contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against ./cdd.".to_string()
+            "./cdd contains no frequency ratios needed for composition-based statistics.\nPlease disable composition-based statistics when searching against ./cdd.".into()
         ))
     );
     write_freq(&base, 28);
@@ -245,28 +245,28 @@ fn a_missing_or_bad_freq_file_is_ncbis_error_and_a_short_one_is_refused() {
 fn ncbis_errors_come_in_ncbis_file_order() {
     let dir = scratch("errors");
     let base = write_volume(&dir, 28, AUX);
-    let shown = canonical_volume_path(&base);
+    let shown = String::from_utf8(canonical_volume_path(&base)).unwrap();
     let open = || RpsVolumeFiles::open(&base, &[3, 2]).err();
     std::fs::write(base.with_extension("rps"), words(&[7, 2])).unwrap();
     assert_eq!(
         open(),
         Some(RpsOpenError::Ncbi(format!(
             "RPS BLAST profile file ({shown}.rps) is either corrupt or constructed for an incompatible architecture"
-        )))
+        ).into_bytes()))
     );
     std::fs::remove_file(base.with_extension("loo")).unwrap();
     assert_eq!(
         open(),
-        Some(RpsOpenError::Ncbi(format!(
-            "Cannot memory map RPS-BLAST database file: {shown}.loo"
-        )))
+        Some(RpsOpenError::Ncbi(
+            format!("Cannot memory map RPS-BLAST database file: {shown}.loo").into_bytes()
+        ))
     );
     std::fs::remove_file(base.with_extension("aux")).unwrap();
     assert_eq!(
         open(),
-        Some(RpsOpenError::Ncbi(format!(
-            "Cannot open RPS-BLAST auxiliary file: {shown}.aux"
-        )))
+        Some(RpsOpenError::Ncbi(
+            format!("Cannot open RPS-BLAST auxiliary file: {shown}.aux").into_bytes()
+        ))
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

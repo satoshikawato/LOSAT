@@ -56,12 +56,17 @@ authoritative, current guidance for agent behavior in LOSAT.
      the TBLASTX exception or authorize NCBI as a runtime/build dependency.
    - Approved CLI exceptions outside the search results, for every program
      (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`): with `-subject`, LOSAT honors `-num_threads` and does not print NCBI's
-     two thread warnings; a write failure in outfmt 6/7, where NCBI aborts,
-     is reported with a non-zero exit; an allocation failure aborts (NCBI:
-     "BLAST ran out of memory", exit 4); an outfmt 0 write to a closed pipe,
-     where NCBI is ended by SIGPIPE, is reported as "BLAST failed to write
-     output", exit 6, and a closed pipe that LOSAT's completed writes do not
-     reach ends LOSAT with exit 0 (timing; NCBI's later flush gets SIGPIPE);
+     two thread warnings; an allocation failure aborts (NCBI: "BLAST ran out of
+     memory", exit 4); a write to a closed pipe, where NCBI is ended by SIGPIPE, ends as
+     that format's failed write on standard output (outfmt 0-4 and 18: "BLAST failed to
+     write output", exit 6, outfmt 0-4 abort where the alignments' flush fails; 5, 8, 9,
+     11, 12, 15, 16 and 6/7/10 abort; SAM exit 0), a closed pipe on standard error as
+     NCBI's failed write there (the messages are lost and the run goes on), and a closed
+     pipe that LOSAT's completed writes do not reach ends LOSAT with exit 0 (timing: a
+     write fails only when it comes after the reader closes, and LOSAT makes up to 8 KiB
+     of NCBI's writes together, so a short report is one write at the run's end, which
+     succeeds when it lands before the close), as does one reached only by the writes
+     after the formatter (NCBI does not report a failed device there);
      a standard output closed at the start (`>&-`), where NCBI's first write
      fails (outfmt 0 exit 6, outfmt 6/7 abort), is the `/dev/null` that the
      Rust runtime opens before `main`, so LOSAT discards the report and exits

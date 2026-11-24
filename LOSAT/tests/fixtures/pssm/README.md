@@ -68,4 +68,4 @@ BLAST+ 2.17.0 Linux build, `-num_threads 1`, an address limit of 8 GiB) are in `
 The `losat-rejection` rows are LOSAT's refusals of a value of another type than the declared one and of an element stated
 as `NULL` outside a skip (`docs/manual/src/refusals-edge-cases.md`).
 
-`ps15b2_tk_other_stdaa.asn.gz`: `ps4_tk_paja.asn.gz` with its query's Seq-inst molecule `aa` changed to `other` (the first `mol aa,`; ncbistdaa letters), gzipped; the PSSM query of rows `db.ps15b2.p.othr.crash.*`, `.open.*`, `.prow.*`, `.loop.*` and `.freed.*` (line PS, PS15b-2 fix 1).
+`ps15b2_tk_other_stdaa.asn.gz`: `ps4_tk_paja.asn.gz` with its query's Seq-inst molecule `aa` changed to `other` (the first `mol aa,`; ncbistdaa letters), gzipped; the PSSM query of rows `db.ps15b2.p.othr.crash.*`, `.open.*`, `.prow.*`, `.loop.*` and `.past.*` (line PS, PS15b-2 fix 1).

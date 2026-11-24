@@ -724,7 +724,7 @@ function checkSurface(reactor, native) {
   // file of -conffile as a registry file (kind 2), and -dryrun.
   const started = reactor.call("losat_web2_start", ["tblastx", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-logfile", "run.log", "-dryrun"].join("\0"));
   assert.equal(started.status, 0, started.error);
-  assert.deepEqual(JSON.parse(started.streams.get(2).toString()), { conffile: "e1w3a.ini", log_file: "run.log", dry_run: true, register_inputs: false, prints: null, database: false });
+  assert.deepEqual(JSON.parse(started.streams.get(2).toString()), { conffile: "e1w3a.ini", log_file: "run.log", strategy_file: null, dry_run: true, register_inputs: false, prints: null, database: false });
   const parsed = reactor.call("losat_web2_start", ["blastn", "-query", "q", "-subject", "s", "-parse_deflines"].join("\0"));
   assert.equal(JSON.parse(parsed.streams.get(2).toString()).register_inputs, true, "-parse_deflines reads the inputs together");
   const conffile = ["blastp", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-outfmt", "x", "-dryrun"].join("\0");
@@ -1251,6 +1251,100 @@ async function checkLogfileNames(reactor, native, scratch, engine, waitForWorker
   return rows;
 }
 
+// -export_search_strategy (line RG item F1w, review 1 S3): the file of a run of two or more query batches at NCBI's
+// default batch sizes (the browser gives no BATCH_SIZE), for each program, on each engine and its thread counts (the
+// threaded engine's parallel search, -num_threads 4 too), against the CLI's file of the same argv: stream 8 holds the
+// CLI's file under the name, and the argv's output (outfmt 6, and outfmt 11's archive, whose options handle the
+// strategy shares) is the CLI's. The queries and subjects are seeded letters, written once into `scratch`; each
+// subject is pieces of the queries, so that the searches find hits.
+function seededFasta(seed, records, length, letters, prefix) {
+  let state = seed >>> 0;
+  const next = () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const sequences = [];
+  for (let record = 0; record < records; record++) {
+    let sequence = "";
+    for (let at = 0; at < length; at++) sequence += letters[Math.floor(next() * letters.length)];
+    sequences.push(sequence);
+  }
+  const text = sequences.map((sequence, record) => `>${prefix}${record} record ${record}\n${sequence.match(/.{1,60}/g).join("\n")}\n`).join("");
+  return { text, sequences };
+}
+
+const STRATEGY_BATCHES = [
+  // [program, words, query: [records, length, alphabet], subject alphabet]: query letters past the program's batch size
+  // (blastp 10000, tblastn 20000 residues, blastx and tblastx 10002, BLASTN's -task blastn 100000 bases).
+  ["blastp", [], [30, 400, "protein"], "protein"],
+  ["tblastn", [], [60, 400, "protein"], "nucleotide"],
+  ["blastx", [], [30, 400, "nucleotide"], "protein"],
+  ["tblastx", [], [30, 400, "nucleotide"], "nucleotide"],
+  ["blastn", ["-task", "blastn"], [260, 400, "nucleotide"], "nucleotide"],
+];
+const ALPHABETS = { protein: "ACDEFGHIKLMNPQRSTVWY", nucleotide: "ACGT" };
+// The CLI's translation of a piece of a nucleotide query, for a protein subject (the standard code).
+function translated(bases) {
+  const code = "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG";
+  const index = { T: 0, C: 1, A: 2, G: 3 };
+  let protein = "";
+  for (let at = 0; at + 3 <= bases.length; at += 3) {
+    protein += code[index[bases[at]] * 16 + index[bases[at + 1]] * 4 + index[bases[at + 2]]];
+  }
+  return protein.replaceAll("*", "W");
+}
+
+async function checkStrategyFiles(reactor, native, scratch, engine, waitForWorkers) {
+  let rows = 0;
+  for (const [index, [program, words, [records, length, queryAlphabet], subjectAlphabet]] of STRATEGY_BATCHES.entries()) {
+    const query = seededFasta(0xf1 + index, records, length, ALPHABETS[queryAlphabet], "q");
+    // Three subjects, each of pieces of three queries: a protein subject of a nucleotide query takes their translation,
+    // a nucleotide subject of a protein query takes seeded bases.
+    const pieces = (from) => [0, 1, 2].map((shift) => {
+      const sequence = query.sequences[(from + shift * 7) % records].slice(60, 360);
+      if (subjectAlphabet === queryAlphabet) return sequence;
+      return subjectAlphabet === "protein" ? translated(sequence) : seededFasta(0x5e + from + shift, 1, 900, ALPHABETS.nucleotide, "x").sequences[0];
+    }).join("");
+    const subjectText = [0, 1, 2].map((record) => `>s${record} subject ${record}\n${pieces(record * 3).match(/.{1,60}/g).join("\n")}\n`).join("");
+    const directory = fs.mkdtempSync(path.join(scratch, "strategy."));
+    fs.writeFileSync(path.join(directory, "q.fa"), query.text);
+    fs.writeFileSync(path.join(directory, "s.fa"), subjectText);
+    const handles = [query.text, subjectText].map((text, role) => {
+      const registered = reactor.call("losat_web2_register", program, role, 1, Buffer.from(text));
+      assert.ok(registered.status > 0, registered.error);
+      return registered.status;
+    });
+    for (const format of program === "blastp" || program === "blastx" ? [6, 11] : [6]) {
+      const argv = [program, "-query", "q.fa", "-subject", "s.fa", ...words, "-outfmt", String(format), "-export_search_strategy", "s.asn"];
+      const cli = nativeOnPipes(native, [...argv, "-num_threads", "1", "-out", "o.out"], directory);
+      const label = `${engine.name} ${program} outfmt ${format}`;
+      assert.equal(cli.status, 0, `${label}: native: ${cli.stderr}`);
+      const file = fs.readFileSync(path.join(directory, "s.asn")), out = fs.readFileSync(path.join(directory, "o.out"));
+      const requests = file.toString().split("Blast4-request ::=").length - 1;
+      assert.ok(requests >= 2, `${label}: the CLI wrote ${requests} request(s), not a run of two or more batches`);
+      for (const threads of engine.threads) {
+        const run = reactor.call("losat_web2_run", [...argv, "-num_threads", String(threads)].join("\0"), ...handles);
+        if (waitForWorkers) await waitForWorkers();
+        assert.equal(run.status, 0, `${label} threads ${threads}: ${run.error}`);
+        const sent = run.streams.has(8) ? storedZipEntries(run.streams.get(8)) : [];
+        assert.deepEqual(sent.map(([name, bytes]) => [name, sha256(bytes)]), [["s.asn", sha256(file)]],
+                         `${label} threads ${threads}: the file of the run (stream 8) is the CLI's (${requests} requests)`);
+        const stream = format === 6 ? 6 : CUSTOM_STREAM;
+        assert.equal(sha256(run.streams.get(stream) || Buffer.alloc(0)), sha256(out), `${label} threads ${threads}: outfmt ${format}`);
+        rows++;
+      }
+      fs.rmSync(path.join(directory, "s.asn"));
+      fs.rmSync(path.join(directory, "o.out"));
+    }
+    for (const handle of handles) assert.equal(reactor.call("losat_web2_release", handle).status, 0);
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+  return rows;
+}
+
 // The frames of stream 12 (abi_v2.md §5): `chunks`, the run's emits, as the files they write in the order of their
 // numbers: [{ name, bytes, writes, ended }], `bytes` the file as the frames leave it and `writes` the number of its
 // frames of bytes. Each frame is one emit of at most 1 MiB: 8 bytes (the file's number from 0, in the order the run
@@ -1411,6 +1505,8 @@ async function main() {
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const logRows = await checkLogfileNames(own, options.native, scratch, engine.name, waitForWorkers);
     console.log(`ok ${engine.name} -logfile names: ${logRows} runs as the CLI's`);
+    const strategyRows = await checkStrategyFiles(own, options.native, scratch, engine, waitForWorkers);
+    console.log(`ok ${engine.name} -export_search_strategy: ${strategyRows} runs of two or more batches as the CLI's`);
     console.log(`ok ${engine.name} help and version: ${checkPrints(own, options.native)} argvs as the CLI`);
     const subjects = new Map(); // "program subject data_loaders" -> handle, kept across runs
     const subjectReactors = new Map(); // the same key -> the reactor that holds the handle (a run directory's instance has its own)

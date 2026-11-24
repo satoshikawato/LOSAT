@@ -46,6 +46,22 @@ pub struct Volume {
 /// (`ReadVerification::refused`).
 const HEADER_RECORD: &str = "a database header record";
 
+/// `error` of a decode of a header record under `setting` (`SeqDb::refuse_unchecked_reads`):
+/// NCBI's exception of a check that the setting turns off is LOSAT's refusal, any other error
+/// stays. The one place of that choice for every read of a volume's records
+/// (`Volume::with_header_record`, `Volume::visit_headers`).
+#[cold]
+#[inline(never)]
+fn refused_read(setting: &ReadVerification, error: SeqDbError) -> SeqDbError {
+    match &error {
+        SeqDbError::Ncbi(exception) => match setting.refused(exception, HEADER_RECORD) {
+            Some(refused) => SeqDbError::Setting(refused),
+            None => error,
+        },
+        _ => error,
+    }
+}
+
 /// A list's rule for the definition lines of a volume's sequences, with the volume's first OID in
 /// the database (`m_VolStart`), which NCBI adds to the tag of each `BL_ORD_ID` before the rule
 /// reads the Seq-ids (`Volume::line_mask`).
@@ -556,7 +572,24 @@ impl Volume {
     /// path of the header file, which the messages of its decode name: the open file's own, not a
     /// name built again for each record. The record is lent from the thread's buffer of the reads
     /// of a range (`DbFile::with_range`): a read of one header per sequence allocates no record.
+    /// Under a setting that turns a check of NCBI's reader off, `read`'s error is the one
+    /// `refused_read` makes; NCBI's default reads with `read` itself, so that a record that
+    /// decodes costs nothing more than the test of the setting.
     fn with_header_record<T>(
+        &self,
+        oid: u32,
+        read: impl FnOnce(&[u8], &Path) -> Result<T, SeqDbError>,
+    ) -> Result<T, SeqDbError> {
+        match self.read_verification.as_deref() {
+            None => self.read_header_record(oid, read),
+            Some(setting) => self.read_header_record(oid, |record, path| {
+                read(record, path).map_err(|error| refused_read(setting, error))
+            }),
+        }
+    }
+
+    /// `with_header_record`'s read of the record.
+    fn read_header_record<T>(
         &self,
         oid: u32,
         read: impl FnOnce(&[u8], &Path) -> Result<T, SeqDbError>,
@@ -564,34 +597,7 @@ impl Volume {
         self.check_range(oid, oid.saturating_add(1))?;
         let (start, end) = self.index.header_range(oid)?;
         let file = self.hdr_file()?;
-        let mut result = file.with_range(start, end, |record| read(record, file.path()))?;
-        self.check(&mut result);
-        result
-    }
-
-    /// `result`, a decode of a header record, with NCBI's exception of a check that the run's
-    /// settings turn off made LOSAT's refusal (`SeqDb::refuse_unchecked_reads`): the one place of
-    /// that choice for every read of the volume's records (`with_header_record`,
-    /// `visit_headers`). It takes the result where the read put it: a record that decodes costs
-    /// the test of its result, and its value is not moved.
-    #[inline(always)]
-    fn check<T>(&self, result: &mut Result<T, SeqDbError>) {
-        if let Err(error) = result {
-            self.unchecked(error);
-        }
-    }
-
-    /// `check`'s error, replaced in place, out of line.
-    #[cold]
-    #[inline(never)]
-    fn unchecked(&self, error: &mut SeqDbError) {
-        if let (SeqDbError::Ncbi(exception), Some(setting)) =
-            (&*error, self.read_verification.as_deref())
-        {
-            if let Some(refused) = setting.refused(exception, HEADER_RECORD) {
-                *error = SeqDbError::Setting(refused);
-            }
-        }
+        file.with_range(start, end, |record| read(record, file.path()))?
     }
 
     /// Sets the run's settings of NCBI's checks of what it reads (`SeqDb::refuse_unchecked_reads`).
@@ -1301,6 +1307,19 @@ impl Volume {
         decode: &dyn Fn(u32, &[u8], &Path) -> Result<T, SeqDbError>,
         visit: &mut dyn FnMut(u32, Result<T, SeqDbError>) -> bool,
     ) -> bool {
+        // As `with_header_record`: under a setting that turns a check of NCBI's reader off, the
+        // records read in a piece decode with `refused_read`'s errors (`single` reads through
+        // `with_header_record`).
+        let refusing;
+        let decode = match self.read_verification.as_deref() {
+            None => decode,
+            Some(setting) => {
+                refusing = move |oid: u32, record: &[u8], path: &Path| {
+                    decode(oid, record, path).map_err(|error| refused_read(setting, error))
+                };
+                &refusing as &dyn Fn(u32, &[u8], &Path) -> Result<T, SeqDbError>
+            }
+        };
         let one_by_one =
             |oids: std::ops::Range<u32>,
              visit: &mut dyn FnMut(u32, Result<T, SeqDbError>) -> bool| {
@@ -1344,9 +1363,10 @@ impl Volume {
             for j in i..stop {
                 let lo = (u64::from(offsets[j]) - start) as usize;
                 let hi = (u64::from(offsets[j + 1]) - start) as usize;
-                let mut decoded = decode(first + j as u32, &data[lo..hi], &hr_path);
-                self.check(&mut decoded);
-                if !visit(first + j as u32, decoded) {
+                if !visit(
+                    first + j as u32,
+                    decode(first + j as u32, &data[lo..hi], &hr_path),
+                ) {
                     return false;
                 }
             }

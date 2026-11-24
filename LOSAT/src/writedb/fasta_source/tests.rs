@@ -82,6 +82,16 @@ fn fate(bioseq: &Bioseq) -> Fate {
     Fate::Stored
 }
 
+/// `bioseq` with the length that `s_FixBioseqDeltas` gives its data, as
+/// `CBuildDatabase::delta_fix` sets it after `fate`'s tests (`Bioseq::delta_fix`).
+fn fixed(mut bioseq: Bioseq) -> Bioseq {
+    if let Some(DeltaFix::Length(length)) = bioseq.delta_fix {
+        bioseq.length = length;
+        bioseq.delta_fix = None;
+    }
+    bioseq
+}
+
 /// Reads `input` to its end as `CBuildDatabase::AddFasta` does: the source, `fate` for
 /// each sequence, and `No sequences added` (build_db.cpp:1410-1412).
 fn run<R: Read>(input: R, protein: bool) -> Outcome {
@@ -104,7 +114,7 @@ fn run<R: Read>(input: R, protein: bool) -> Outcome {
         };
         assert_eq!(bioseq.is_aa, protein);
         match fate(&bioseq) {
-            Fate::Stored => outcome.added.push(bioseq),
+            Fate::Stored => outcome.added.push(fixed(bioseq)),
             Fate::Ignored(id) => outcome.ignored.push(id),
             Fate::Error(message) => {
                 outcome.error = Some(message);
@@ -297,7 +307,7 @@ fn one(input: &[u8], protein: bool) -> Bioseq {
 #[test]
 fn seq_data_choice_and_bytes() {
     let data = |input: &[u8], protein| {
-        let bioseq = one(input, protein);
+        let bioseq = fixed(one(input, protein));
         (bioseq.length, bioseq.seq_data)
     };
     // One or two unambiguous bases are NCBI4na (the writer adds an empty ambiguity block:
@@ -651,53 +661,64 @@ fn record_above_the_length_limit() {
 }
 
 /// A record of 4,294,967,296 residues or more (gaps included) comes with NCBI's length, its
-/// count modulo 2^32, and no data (line RG DECISIONS K3-6, K3-8): makeblastdb's checks
-/// test that length, and `s_FixBioseqDeltas` throws for a protein whose gaps stayed a
-/// delta, leaves a delta that starts with `Seq-loc null` without data, and builds the rest,
-/// which LOSAT refuses.
+/// count modulo 2^32, and the data that NCBI builds of it (line RG DECISIONS K3-6, K3-8,
+/// KC-11d): makeblastdb's checks test that length; nucleotide gaps stay delta pieces, of which
+/// `s_FixBioseqDeltas` converts the first (sum of the pieces modulo 2^32) letters; a protein's
+/// gap lines become runs of `X` cut to the length, or stay a delta (sum wrapped to 0), which
+/// throws; a delta that starts with `Seq-loc null` stays without data. Only the letters kept
+/// are made (here a few, where NCBI makes 4 GiB).
 #[test]
 fn record_past_32_bits() {
-    for (input, protein, length, past) in [
-        // Nucleotide gaps are parsed: a delta whose first piece is a literal.
-        (
-            &b">a\nA\n>?4294967295\n"[..],
-            false,
-            0,
-            Some(PastSeqPos::Refused {
-                length: 4_294_967_296,
-            }),
-        ),
+    let ncbi4na = |letters: &[u8]| Some(SeqData::Ncbi4na(pack::iupacna_to_ncbi4na(letters)));
+    for (input, protein, length, seq_data, fix) in [
+        // Length 0 (makeblastdb ignores it) and no letters of the pieces.
+        (&b">a\nA\n>?4294967295\n"[..], false, 0, ncbi4na(b""), None),
         (
             b">a\nACGT\n>?4294967295\n>?4294967295\nAC\n",
             false,
             4,
-            Some(PastSeqPos::Refused {
-                length: 8_589_934_596,
-            }),
+            ncbi4na(b"ACGT"),
+            None,
+        ),
+        // The first survey's mk1 (makeblastdb 2.17.0 stores `ACGTACGT`).
+        (
+            b">a\nACGTACGTAC\n>?4294967290\nACGT\n",
+            false,
+            8,
+            ncbi4na(b"ACGTACGT"),
+            None,
+        ),
+        // The gap's letters within the length are `N`.
+        (
+            b">a\nAC\n>?4294967295\n>?3\nACGT\n",
+            false,
+            8,
+            ncbi4na(b"ACNNNNNN"),
+            None,
         ),
         // A lone hyphen first: `Seq-loc null`, no data.
-        (b">a\n-\n>?4294967295\n>?1\nA\n", false, 1, None),
+        (b">a\n-\n>?4294967295\n>?1\nA\n", false, 1, None, None),
         // Protein gaps that sum to 2^32 are kept (`m_TotalGapLength` is 0): a protein delta.
         (
             b">a\nM\n>?4294967295\n>?1\nK\n",
             true,
             2,
-            Some(PastSeqPos::ProteinDelta),
+            None,
+            Some(DeltaFix::ProteinDelta),
         ),
-        // Other sums are runs of `X` in NCBI, longer than the length.
+        // Other sums are runs of `X`, cut to the length.
         (
             b">a\nM\n>?4294967295\n>?2\nK\n",
             true,
             3,
-            Some(PastSeqPos::Refused {
-                length: 4_294_967_299,
-            }),
+            Some(SeqData::Ncbieaa(b"MXX".to_vec())),
+            None,
         ),
     ] {
         let bioseq = one(input, protein);
         assert_eq!(
-            (bioseq.length, bioseq.seq_data, bioseq.past_seq_pos),
-            (length, None, past),
+            (bioseq.length, bioseq.seq_data, bioseq.delta_fix),
+            (length, seq_data, fix),
             "{}",
             String::from_utf8_lossy(input)
         );
@@ -705,9 +726,119 @@ fn record_past_32_bits() {
     // NCBI's length 4,294,967,294 is above the limit: its error, as without the wrap.
     let bioseq = one(b">a\n>?4294967295\n>?4294967295\n", false);
     assert_eq!(
-        (bioseq.length, bioseq.seq_data, bioseq.past_seq_pos),
+        (bioseq.length, bioseq.seq_data, bioseq.delta_fix),
         (4_294_967_294, None, None)
     );
+}
+
+/// Past 2^32 residues (here past 64, `with_seq_pos_modulus`) the record keeps those since its
+/// position last wrapped, and its gaps are at their wrapped positions (line RG DECISIONS
+/// KC-11d): a nucleotide's pieces then repeat or skip residues and `s_FixBioseqDeltas` gives
+/// the sum of them as the length; a protein's runs of `X` go where `AssembleSeq`'s appends put
+/// them, and an append from past the residues is `std::out_of_range`.
+#[test]
+fn residues_past_32_bits() {
+    let read = |input: &[u8], protein| {
+        let mut source =
+            FastaBioseqSource::with_parse_ids(input, protein, false).with_seq_pos_modulus(64);
+        source.next_bioseq(&mut |_| ())
+    };
+    let ncbi4na = |letters: &[u8]| Some(SeqData::Ncbi4na(pack::iupacna_to_ncbi4na(letters)));
+    let record = |parts: &[(&[u8], usize)]| {
+        let mut input = b">a\n".to_vec();
+        for &(part, count) in parts {
+            if part.starts_with(b">?") {
+                input.extend_from_slice(part);
+            } else {
+                input.extend(
+                    part.repeat(count)
+                        .chunks(10)
+                        .flat_map(|line| [line, b"\n"].concat()),
+                );
+            }
+            if part.starts_with(b">?") {
+                input.push(b'\n');
+            }
+        }
+        input
+    };
+    // 70 residues: the last 6.
+    let bioseq = read(&record(&[(b"A", 60), (b"ACGTAC", 1), (b"GGGG", 1)]), false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (bioseq.length, bioseq.seq_data, bioseq.delta_fix),
+        (
+            6,
+            Some(SeqData::Ncbi2na(pack::iupacna_to_ncbi2na(b"ACGGGG"))),
+            None
+        )
+    );
+    // Exactly 64: no residues (makeblastdb ignores the record).
+    let bioseq = read(&record(&[(b"A", 64)]), false).unwrap().unwrap();
+    assert_eq!((bioseq.length, bioseq.seq_data), (0, None));
+    // A gap at 20, past the 12 residues kept, and one at 71 (7): the residues, the first gap,
+    // the second, and residues 7..12 again; `Seq-inst.length` is 17, the data 22.
+    let input = record(&[(b"A", 20), (b">?3", 1), (b"C", 51), (b">?2", 1), (b"G", 5)]);
+    let bioseq = read(&input, false).unwrap().unwrap();
+    assert_eq!(
+        (bioseq.length, bioseq.seq_data, bioseq.delta_fix),
+        (
+            17,
+            ncbi4na(b"CCCCCCCGGGGGNNNNNGGGGG"),
+            Some(DeltaFix::Length(22))
+        )
+    );
+    // The protein of that shape: the residues, then both runs.
+    let input = record(&[(b"M", 20), (b">?3", 1), (b"K", 51), (b">?2", 1), (b"W", 5)]);
+    let bioseq = read(&input, true).unwrap().unwrap();
+    assert_eq!(
+        (bioseq.length, bioseq.seq_data, bioseq.delta_fix),
+        (
+            17,
+            Some(SeqData::Ncbieaa(b"KKKKKKKWWWWWXXXXX".to_vec())),
+            None
+        )
+    );
+    // Gaps at 20 and 30, both past the 6 residues kept: a nucleotide's pieces skip them, a
+    // protein's second append starts past the residues.
+    let shape = |letter: &'static [u8]| {
+        record(&[
+            (letter, 20),
+            (b">?3", 1),
+            (letter, 10),
+            (b">?4", 1),
+            (b"G", 40),
+        ])
+    };
+    let bioseq = read(&shape(b"A"), false).unwrap().unwrap();
+    assert_eq!(
+        (bioseq.length, bioseq.seq_data, bioseq.delta_fix),
+        (13, ncbi4na(b"GGGGGGNNNNNNN"), None)
+    );
+    let error = read(&shape(b"M"), true).unwrap_err();
+    assert_eq!(error.kind, SourceErrorKind::Std);
+    assert_eq!(
+        error.message,
+        b"basic_string::append: __pos (which is 20) > this->size() (which is 6)"
+    );
+    // A piece of 61 unambiguous bases packs into 0 bytes of NCBI2na (`(61 + 3) / 4` modulo
+    // 2^6), on which NCBI crashes (makeblastdb 2.17.0 on ws, p11d/p3 b4n: SIGSEGV), whatever
+    // the record's length (here 7 with its gap); 60 are read.
+    let error = read(&record(&[(b"ACGT", 15), (b"A", 1), (b">?10", 1)]), false).unwrap_err();
+    assert_eq!(error.kind, SourceErrorKind::Refused);
+    assert_eq!(
+        error.message,
+        format!(
+            "{} is not supported by LOSAT's makeblastdb",
+            reader::pack_overflow_what()
+        )
+        .into_bytes()
+    );
+    let bioseq = read(&record(&[(b"ACGT", 15), (b">?10", 1)]), false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(bioseq.length, 6);
 }
 
 /// A reader that fails after its bytes.
@@ -740,9 +871,9 @@ fn read_error_ends_the_reading() {
     assert_eq!(source.next_bioseq(&mut |_| ()), Ok(None));
 }
 
-/// A delta whose gap is longer than any allocation is the error that makeblastdb reports
-/// as "BLAST ran out of memory", not an abort. (The reader hands over no length above
-/// 2,147,483,647; the length here only makes the reservation fail on every machine.)
+/// The letters of a delta, and the error that makeblastdb reports as "BLAST ran out of
+/// memory" (not an abort) where they cannot be allocated; of a sum of pieces past 2^32 the
+/// letters modulo 2^32 are made.
 #[test]
 fn a_delta_that_cannot_be_allocated_is_an_error() {
     let delta = |gap: u64| SeqInst::Delta {
@@ -759,9 +890,18 @@ fn a_delta_that_cannot_be_allocated_is_an_error() {
     };
     assert_eq!(
         fix_bioseq_deltas(delta(2)).unwrap(),
-        (3, Some(SeqData::Ncbi4na(vec![0x1f, 0xf0])))
+        (3, Some(SeqData::Ncbi4na(vec![0x1f, 0xf0])), None)
     );
-    assert!(fix_bioseq_deltas(delta(u64::MAX - 1)).is_err());
+    // NCBI converts as many letters as the `TSeqPos` of the size of `seq8na`, the sum modulo 2^32,
+    // and makes it the length; LOSAT makes only those letters.
+    assert_eq!(
+        fix_bioseq_deltas(delta((1 << 32) + 1)).unwrap(),
+        (
+            (1 << 32) + 2,
+            Some(SeqData::Ncbi4na(vec![0x1f])),
+            Some(DeltaFix::Length(2))
+        )
+    );
     let error = SourceError::out_of_memory();
     assert_eq!(error.kind, SourceErrorKind::OutOfMemory);
     assert_eq!(error.message, b"BLAST ran out of memory");

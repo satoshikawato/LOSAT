@@ -14,7 +14,9 @@ use crate::seqid::model::{ObjectId, ParsedSeqId};
 use crate::seqid::rank::{best_rank_score, find_best};
 use crate::seqmasks_io::run::{finish, serial_write_failure, write_failure, RunFailure};
 use crate::seqmasks_io::writer::{MaskInfoWriter, MaskWriter, Serial, WriteError};
-use crate::writedb::fasta_source::reader::{FastaReader, ReadError, ReaderFlags};
+use crate::writedb::fasta_source::reader::{
+    out_of_range_what, pack_overflow_what, FastaReader, ReadError, ReaderFlags,
+};
 
 /// How a run stops early.
 enum Failure {
@@ -56,17 +58,19 @@ impl RunFailure for Failure {
     }
 }
 
+/// LOSAT's refusal of `what` (a noun phrase).
+fn unsupported(what: &str) -> String {
+    crate::seqmasks_io::run::unsupported(what, super::PROGRAM)
+}
+
 /// A `CArgException` of `AsInputFile` or `AsOutputFile`, which `Run` catches.
 fn file_failure(error: ArgException) -> Failure {
     match file_exception(&error) {
         Some(exception) => Failure::Caught(exception),
-        None => Failure::Refused(crate::seqmasks_io::run::unsupported(
-            &format!(
-                "the argument error '{}' inside the run",
-                error.message_text()
-            ),
-            super::PROGRAM,
-        )),
+        None => Failure::Refused(unsupported(&format!(
+            "the argument error '{}' inside the run",
+            error.message_text()
+        ))),
     }
 }
 
@@ -113,17 +117,22 @@ fn run_masks(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> Result<(), Failure> {
-    let value = |name| {
-        args.value(name)
+    let bytes = |name| {
+        args.bytes(name)
             .expect("a key with a default or a mandatory key")
     };
-    let outfmt = value("outfmt");
+    let outfmt = args.value("outfmt").expect("-outfmt has a default");
+    let input = args.os_value("in").expect("-in has a default");
     let mut reader = MaskFromFasta::new(
-        Box::new(open_input_file("in", value("in"), stdin).map_err(file_failure)?),
+        Box::new(open_input_file("in", input, stdin).map_err(file_failure)?),
         args.flag("parse_seqids"),
     )?;
     let mut output = args.output_file("out", out).map_err(file_failure)?;
-    let mut writer = writer(outfmt, value("masking_algorithm"), value("masking_options"));
+    let mut writer = writer(
+        outfmt,
+        &bytes("masking_algorithm"),
+        bytes("masking_options").into_owned(),
+    );
     // A failed write leaves NCBI's stream bad, and the `interval` lines go on silently (exit
     // 0): `out` drops the bytes after the first failed write.
     let mut out = Ostream::new(&mut output);
@@ -152,13 +161,13 @@ fn run_masks(
 /// NCBI reference (598d8ae6): c++/src/app/blastdb/convert2blastmask.cpp:199-217
 /// (`AsOutputFile` opens `-out` first: `run_masks` opens it before this. `NStr::ToLower` is
 /// `tolower` of each byte, the C locale's.)
-fn writer(outfmt: &str, algorithm: &str, options: &str) -> MaskInfoWriter {
-    let program = match algorithm.to_ascii_lowercase().as_str() {
-        "not_set" => FilterProgram::NotSet,
-        "dust" => FilterProgram::Dust,
-        "seg" => FilterProgram::Seg,
-        "windowmasker" => FilterProgram::Windowmasker,
-        "repeat" => FilterProgram::Repeat,
+fn writer(outfmt: &str, algorithm: &[u8], options: Vec<u8>) -> MaskInfoWriter {
+    let program = match algorithm.to_ascii_lowercase().as_slice() {
+        b"not_set" => FilterProgram::NotSet,
+        b"dust" => FilterProgram::Dust,
+        b"seg" => FilterProgram::Seg,
+        b"windowmasker" => FilterProgram::Windowmasker,
+        b"repeat" => FilterProgram::Repeat,
         _ => FilterProgram::Other,
     };
     let serial = match outfmt {
@@ -168,7 +177,7 @@ fn writer(outfmt: &str, algorithm: &str, options: &str) -> MaskInfoWriter {
         "maskinfo_xml" => Some(Serial::Xml),
         other => unreachable!("-outfmt {other} passed its constraint"),
     };
-    MaskInfoWriter::new(serial, 0, program, options.as_bytes().to_vec())
+    MaskInfoWriter::new(serial, 0, program, options)
 }
 
 /// One record of `CMaskFromFasta`: `GetBestID()` and `GetMask()`.
@@ -238,6 +247,8 @@ impl<'a> MaskFromFasta<'a> {
                 ReadError::Parse(error) => Failure::Caught(error.exception()),
                 ReadError::Ncbi(exception) => Failure::Caught(*exception),
                 ReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
+                ReadError::OutOfRange { pos, size } => Failure::Std(out_of_range_what(pos, size)),
+                ReadError::PackOverflow => Failure::Refused(unsupported(&pack_overflow_what())),
             }
         })?;
         let best_id = if parses_ids {

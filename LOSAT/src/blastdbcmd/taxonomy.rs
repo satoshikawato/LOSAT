@@ -46,13 +46,20 @@ pub(super) fn tax_id_list(
     diag: &mut Diag,
     stdin: &mut Cin<'_>,
 ) -> Result<BTreeSet<i32>, Ended> {
-    let ids: Vec<Vec<u8>> = match (args.value("taxids"), args.value("taxidlist")) {
-        (Some(""), _) => Vec::new(),
-        (Some(input), _) => input.split(',').map(|id| id.as_bytes().to_vec()).collect(),
+    let ids: Vec<Vec<u8>> = match (args.bytes("taxids"), args.os_value("taxidlist")) {
+        (Some(input), _) if input.is_empty() => Vec::new(),
+        (Some(input), _) => input
+            .split(|&byte| byte == b',')
+            .map(<[u8]>::to_vec)
+            .collect(),
         (None, Some(file)) => {
             let Ok(bytes) = read_input_file("taxidlist", file, stdin) else {
                 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-180
-                let message = arg_message("taxidlist", "File is not accessible", file.as_bytes());
+                let message = arg_message(
+                    "taxidlist",
+                    "File is not accessible",
+                    &crate::utils::os_bytes::os_str_bytes(file),
+                );
                 diag.post_bytes(&[b"Command line argument error: ".as_slice(), &message].concat());
                 return Err(Ended(1));
             };
@@ -67,8 +74,8 @@ pub(super) fn tax_id_list(
         None
     } else {
         match path
-            .resolve_file(TAXONOMY_FILE)
-            .map(|file| DbFile::open(file.as_ref()))
+            .resolve_file(TAXONOMY_FILE.as_bytes())
+            .map(|file| DbFile::open(&crate::utils::os_bytes::path_of_bytes(&file)))
         {
             Some(Ok(file)) => Some(file),
             _ => {
@@ -285,8 +292,10 @@ enum LineNames {
 /// `-tax_info` of `db`: the number of its taxids, then a line for each, ascending, to `out`;
 /// the exit status.
 pub(super) fn tax_info(db: &SeqDb, args: &Args, diag: &mut Diag, out: &mut Ostream<'_>) -> i32 {
-    let fmt = args.value("outfmt").unwrap_or("%f");
-    let Ok(fields) = TaxFields::parse(fmt.as_bytes()) else {
+    let fmt = args
+        .bytes("outfmt")
+        .unwrap_or(std::borrow::Cow::Borrowed(b"%f"));
+    let Ok(fields) = TaxFields::parse(&fmt) else {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-176
         diag.post(&format!(
             "{QUERY_OPTIONS_ERROR} Invalid format options for tax_info."

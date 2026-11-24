@@ -584,7 +584,7 @@ fn int4_linking_keeps_hsps_of_length_zero_or_less_that_change_nothing() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:838-893
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-1091; c++/src/algo/blast/core/blast_hits.c:452-453,687,699
 // HSPs of length 0 or less with any score, anywhere in the list: every HSP leaves the linking
 // call once (those of length 0 or less too, for the re-evaluation's fetch of the subject),
 // serially and on the pool alike.

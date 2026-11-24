@@ -50,7 +50,7 @@ fn fails_one_batch(error: &anyhow::Error) -> bool {
 /// error) is returned as `Err` to stop the run before its first byte.
 fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, anyhow::Error> {
     if let Some(SetupEngineError(text)) = error.downcast_ref::<SetupEngineError>() {
-        return Ok(crate::blastinput::app::engine_error(text));
+        return Ok(crate::blastinput::app::engine_error(text.as_bytes()));
     }
     let error = match error.downcast::<ErrorAfterBatchReports>() {
         Ok(ErrorAfterBatchReports(refusal)) => return Ok(refusal),
@@ -817,7 +817,7 @@ fn open_search_database(
                 settings,
             )),
             outputs,
-        )?,
+        ),
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -846,17 +846,15 @@ fn subject_taxonomy(
     args: &mut TblastnArgs,
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
     outputs: &ReportOutputs<'_>,
-) -> Result<()> {
+) {
     let specs: Vec<_> = outputs
         .formats
         .iter()
         .filter_map(|format| super::tabular::tabular_spec(format.outfmt))
         .collect();
-    let taxonomy =
-        crate::algorithm::common::database::subject_taxonomy(setting, "TBLASTN", &specs)?;
+    let taxonomy = crate::algorithm::common::database::subject_taxonomy(setting, &specs);
     args.subject_taxdb = taxonomy.taxdb;
     args.tabular_taxdb = taxonomy.found;
-    Ok(())
 }
 
 /// The part of `run` after the files are opened: NCBI's processing of the options,
@@ -1377,7 +1375,7 @@ fn run_local_formats(
     let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     let setting = args.taxdb_setting.take();
-    subject_taxonomy(&mut args, setting.as_ref(), outputs)?;
+    subject_taxonomy(&mut args, setting.as_ref(), outputs);
     let whole_subjects = seq_range::Placements::default();
     let (searched_subjects, subject_placements) = match &ranged_subjects {
         Some((cut, placements)) => (cut.as_slice(), placements),
@@ -1626,7 +1624,7 @@ fn search(
     // `-in_pssm` (PSI-TBLASTN): the query's PSSM, which the batch's search and reports read.
     let pssm = resolved.pssm.clone();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_memento_priv.hpp:64-74
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:288
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:289
     // IDENTITY's reset (`search_settings`) writes through the memento's pointers into the options
     // that every query batch reuses: the first batch resets the mode and warns its queries, and
     // the later batches start in mode 0 without the warning. These are the searched queries of

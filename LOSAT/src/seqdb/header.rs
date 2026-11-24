@@ -148,6 +148,54 @@ pub fn decode_full(record: &[u8], path: &Path) -> Result<DeflineSet, SeqDbError>
     crate::seqid::ber::decode_full_set(record).map_err(|error| format_error(error, path))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqinfosrc_aux.cpp:51-69
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1579-1586
+// The Seq-align builder takes the best of the ids of every definition line (`GetSeqIDs`) and
+// makes no Seq-align of a sequence whose lines hold none. makeblastdb writes no line without a
+// Seq-id; an edited header can hold one (line RG D1c-1c-b, `SURVEY_D1c1cb.md` 1.1).
+/// Whether the `Blast-def-line-set` `record` holds a Seq-id in any of its definition lines: read
+/// up to the first `seqid` list that is not empty, every other member skipped by its length (no
+/// Seq-id or title is decoded). An empty record counts as holding one (no read of NCBI's was seen
+/// on it; LOSAT reads it as before). The reader's error of a record that is no valid encoding up
+/// to there.
+pub fn holds_a_seqid(record: &[u8], path: &Path) -> Result<bool, SeqDbError> {
+    if record.is_empty() {
+        return Ok(true);
+    }
+    seqid_in_set(record).map_err(|error| format_error(error, path))
+}
+
+fn seqid_in_set(record: &[u8]) -> Result<bool, BerError> {
+    let mut ber = Reader::new(record);
+    ber.expect_tag(TAG_SEQUENCE, "Blast-def-line-set")?;
+    let set_end = ber.open()?;
+    while !ber.at_end(set_end)? {
+        ber.expect_tag(TAG_SEQUENCE, "Blast-def-line")?;
+        let defline_end = ber.open()?;
+        while !ber.at_end(defline_end)? {
+            let tag = ber.tag()?;
+            if tag.class != TAG_CONTEXT_CONSTRUCTED || tag.number > u32::from(DEFLINE_LAST_MEMBER) {
+                return Err(ber.error(format!(
+                    "tag {:#04x}/{} is not a member of Blast-def-line",
+                    tag.class, tag.number
+                )));
+            }
+            let member_end = ber.open()?;
+            if tag.number == u32::from(DEFLINE_SEQID) {
+                ber.expect_tag(TAG_SEQUENCE, "the Seq-id list")?;
+                let list_end = ber.open()?;
+                if !ber.at_end(list_end)? {
+                    return Ok(true);
+                }
+            }
+            while !ber.at_end(member_end)? {
+                ber.skip_value(0)?;
+            }
+        }
+    }
+    Ok(false)
+}
+
 fn decode_ordinal_deflines(
     record: &[u8],
     oid: u32,

@@ -33,27 +33,13 @@ pub(crate) fn open_search_database(
     name: &str,
     seqtype: SeqType,
     settings: &ApplicationSettings,
-) -> Result<SeqDb, DatabaseOpenError> {
-    let registry = match &settings.blastdb {
-        Ok(value) => value.as_deref(),
-        Err(reason) => return Err(DatabaseOpenError::Registry(reason.clone())),
-    };
-    let path = SearchPath::from_environment(registry).map_err(DatabaseOpenError::Reader)?;
+) -> Result<SeqDb, SeqDbError> {
+    let path = SearchPath::from_environment(settings.blastdb.as_deref());
     // The errors of the alias files' counts depend on the list, and those of the headers come
     // after them (`restrict_database`).
-    let mut db = SeqDb::open_search_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)?;
+    let mut db = SeqDb::open_search_in(name.as_bytes(), seqtype, &path)?;
     db.fail_search_reads_with_oid_list();
     Ok(db)
-}
-
-/// Why `open_search_database` could not open a database.
-#[derive(Debug)]
-pub(crate) enum DatabaseOpenError {
-    /// The registry entry `[BLAST] BLASTDB` has a value that LOSAT does not read as NCBI
-    /// does (`ApplicationSettings::blastdb`).
-    Registry(String),
-    /// An error of the reader (NCBI's own, or LOSAT's refusal: `database_error`).
-    Reader(SeqDbError),
 }
 
 /// Opens the database of `-db name` (`open_search_database`) with the command line's
@@ -64,10 +50,7 @@ pub(crate) fn open_database(
     settings: &ApplicationSettings,
     program: &str,
 ) -> Result<SeqDb> {
-    open_search_database(name, seqtype, settings).map_err(|error| match error {
-        DatabaseOpenError::Registry(reason) => refusal(&reason, program),
-        DatabaseOpenError::Reader(error) => database_error(error, program),
-    })
+    open_search_database(name, seqtype, settings).map_err(|error| database_error(error, program))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:109-139
@@ -1267,15 +1250,19 @@ impl ReportedHeader {
     }
 }
 
-/// Whether the sequences of a database search keep a definition line under its list
-/// (`SeqDb::line_read`), each read once: the one check of NCBI's two places that drop a
-/// sequence without a line, the fetches with `check_oid_exclusion` (`FetchExcluded`) and the
-/// Seq-aligns (`SeqAligned`), with whether NCBI's read of the record there takes a UTF8String
-/// for a VisibleString (its warning, `seqdb::Utf8Reads`). A header that cannot be read as
-/// NCBI's header read adjusts it is not kept in the cache: each place decides what its error
-/// does.
+/// Whether the sequences of a database search keep a definition line with a Seq-id
+/// (`SeqDb::line_read`): the one check of NCBI's two places that drop a sequence without one,
+/// the fetches with `check_oid_exclusion` (`FetchExcluded`) and the Seq-aligns (`SeqAligned`),
+/// with whether NCBI's read of the record there takes a UTF8String for a VisibleString (its
+/// warning, `seqdb::Utf8Reads`). Under a list (`SeqDb::drops_lineless_hits`) each header is
+/// decoded once and kept in the cache; without one the check walks the record to its first
+/// Seq-id at each ask (`seqdb::header::holds_a_seqid`) and keeps nothing. A header that cannot
+/// be read as NCBI's header read adjusts it is not kept in the cache: each place decides what
+/// its error does.
 struct LineCheck<'a> {
     db: &'a SeqDb,
+    /// `SeqDb::drops_lineless_hits`: whether the reads decode the header (and the cache keeps it).
+    filters: bool,
     kept: std::sync::Mutex<std::collections::HashMap<u32, LineRead>>,
 }
 
@@ -1291,13 +1278,18 @@ impl<'a> LineCheck<'a> {
     fn new(db: &'a SeqDb) -> Self {
         LineCheck {
             db,
+            filters: db.drops_lineless_hits(),
             kept: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
-    /// What the read of `ordinal`'s header finds (read at its first check; the lock is not held
-    /// while the header is read and decoded), or the reader's error.
+    /// What the read of `ordinal`'s header finds (under a list read at its first check; the lock
+    /// is not held while the header is read and decoded), or the reader's error.
     fn read(&self, ordinal: u32) -> Result<LineRead, SeqDbError> {
+        if !self.filters {
+            let (kept, utf8) = self.db.line_read(ordinal)?;
+            return Ok(LineRead { kept, utf8 });
+        }
         let cached = self
             .kept
             .lock()
@@ -1771,7 +1763,8 @@ impl std::error::Error for FetchRefusal {}
 
 /// NCBI's Seq-aligns of the final hit lists of a database search (line DBID item lineless):
 /// a hit on a sequence that the database's list keeps without any of its definition
-/// lines gets none (`SeqDb::keeps_line`, blast_seqalign.cpp:1582-1586), so it leaves every
+/// lines, or whose lines hold no Seq-id (an edited header, without a list too; line RG
+/// D1c-1c-b), gets none (`SeqDb::keeps_line`, blast_seqalign.cpp:1582-1586), so it leaves every
 /// report, the prefetch, the taxonomy lookups and psiblast's PSSM, while it was searched, took
 /// its place in the hit list before the cut to `-max_target_seqs` and counts in the
 /// statistics. Each program drops such hit lists right after that cut, before the reads of
@@ -1789,18 +1782,16 @@ pub(crate) struct SeqAligned<'a> {
 }
 
 impl<'a> SeqAligned<'a> {
-    /// The check of `db`'s hits; `None` where no hit is dropped here: no list removes
-    /// lines, or the search's fetches have excluded the sequences without a line before
-    /// (`fetched`, the caller's: the search fetches its subjects with `check_oid_exclusion`, a
-    /// gapped search or an ungapped one of a nucleotide database; and the database's list is
-    /// negative, `SeqDb::excludes_lineless_at_fetch`).
+    /// The check of `db`'s hits; `None` where no hit is dropped here: the search's fetches have
+    /// excluded the sequences without a line before (`fetched`, the caller's: the search fetches
+    /// its subjects with `check_oid_exclusion`, a gapped search or an ungapped one of a nucleotide
+    /// database; and the database's list is negative, `SeqDb::excludes_lineless_at_fetch`, which
+    /// erases every line without a Seq-id).
     pub(crate) fn of(db: &'a SeqDb, fetched: bool) -> Option<Self> {
-        (db.drops_lineless_hits() && !(fetched && db.excludes_lineless_at_fetch())).then(|| {
-            SeqAligned {
-                check: LineCheck::new(db),
-                utf8: None,
-                failed: false,
-            }
+        (!(fetched && db.excludes_lineless_at_fetch())).then(|| SeqAligned {
+            check: LineCheck::new(db),
+            utf8: None,
+            failed: false,
         })
     }
 
@@ -4384,25 +4375,27 @@ pub(crate) fn reports_may_refuse(
             Ok(self)
         }
     }
-    let lineless_dropped = db.drops_lineless_hits();
     let check = |kept: &mut Kept,
                  headers: &HeaderReader<'_>,
                  ordinal: u32,
                  header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>|
      -> std::result::Result<(), ReportRefusal> {
-        // A sequence left without a line gets no Seq-align (`SeqAligned`): none of its hits is
-        // reported, so it cannot make a report refuse (an error of its header comes below). The
-        // header read here is the filtered one: a sequence with a line is kept without asking
-        // again (review 1 of line RG D1c-1b, F2). A set of no line and a read that failed ask
-        // `SeqDb::keeps_line` (a volume that filters no line keeps a record of none, and a seqid
-        // list's read of a sequence it leaves no line fails; review 2 of D1c-1b, G3).
-        if lineless_dropped
-            && match &header {
-                Ok(crate::seqdb::SequenceHeader::Ordinal(lines)) if !lines.is_empty() => false,
-                Ok(crate::seqdb::SequenceHeader::Parsed(set)) if !set.deflines.is_empty() => false,
-                _ => matches!(db.keeps_line(ordinal), Ok(false)),
+        // A sequence left without a line with a Seq-id gets no Seq-align (`SeqAligned`): none of
+        // its hits is reported, so it cannot make a report refuse (an error of its header comes
+        // below). The header read here is the filtered one: a sequence with a line that holds a
+        // Seq-id is kept without asking again (review 1 of line RG D1c-1b, F2; an ordinal line
+        // holds its `BL_ORD_ID`). A set of no such line and a read that failed ask
+        // `SeqDb::keeps_line` (an empty record is kept, and a seqid list's read of a sequence it
+        // leaves no line fails; review 2 of D1c-1b, G3).
+        if match &header {
+            Ok(crate::seqdb::SequenceHeader::Ordinal(lines)) if !lines.is_empty() => false,
+            Ok(crate::seqdb::SequenceHeader::Parsed(set))
+                if set.deflines.iter().any(|defline| !defline.ids.is_empty()) =>
+            {
+                false
             }
-        {
+            _ => matches!(db.keeps_line(ordinal), Ok(false)),
+        } {
             return Ok(());
         }
         match reported_header(headers, header, ordinal, 0, program) {
@@ -5801,13 +5794,13 @@ impl TaxdbRun {
             .get_or_init(|| {
                 let last = self.prefetch_texts(db).offset_error_taxid?;
                 let (volume, other) = taxonomy_cache_collision(db, last)?;
-                let path = db.search_path()?.resolve_file("taxdb.bti")?;
+                let path = db.search_path()?.resolve_file(b"taxdb.bti")?;
                 let volume_name = db
                     .volumes()
                     .get(volume)
                     .map_or_else(String::new, |vol| vol.base().display().to_string());
                 Some((
-                    std::path::PathBuf::from(path),
+                    crate::utils::os_bytes::path_from_bytes(path),
                     format!(
                         "taxid {last}, the last entry of the taxonomy database, begins past the \
                          end of taxdb.btd, and the volume {volume_name} holds it and taxid \
@@ -6810,7 +6803,7 @@ where
 /// API gives it to a search of records whose reports look every taxid up (`api::run`, with the
 /// call's start); LOSAT Web gives none (it has no files: the database is not found).
 #[derive(Clone, Debug)]
-pub struct TaxdbSetting(Result<Option<String>, String>);
+pub struct TaxdbSetting(Option<Vec<u8>>);
 
 impl TaxdbSetting {
     /// The value of `settings`.
@@ -6831,14 +6824,14 @@ pub(crate) struct SubjectTaxonomy {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:582-606
-/// What the tabular reports `specs` of a `-subject` search of `program` (upper case) ask of the
+/// What the tabular reports `specs` of a `-subject` search ask of the
 /// taxonomy database where NCBI makes their formatters: whether `taxdb.bti` is on the search path
 /// of `setting` (`x_CheckTaxDB`'s `SeqDB_ResolveDbPath` of `taxdb.bti`: the current directory,
 /// `BLASTDB` and the registry's `[BLAST] BLASTDB`, as a database is looked for, `seqdb::SearchPath`)
 /// for the plural names, which warn without it, and the organism report, whose lookups open it
 /// (`SubjectTaxdb`). A report of singular names reads nothing: NCBI looks a singular name up by
-/// the subject's taxid, and the records of `-subject` have none. A registry value that LOSAT does
-/// not read as NCBI is its refusal, as for `-db`. `setting` is `None` in LOSAT Web: not found.
+/// the subject's taxid, and the records of `-subject` have none. `setting` is `None` in LOSAT Web:
+/// not found.
 ///
 /// The command line and the library's searches of records call it at the same point, after the
 /// options are processed (each program's `open_search_database`).
@@ -6846,44 +6839,34 @@ pub(crate) struct SubjectTaxonomy {
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:126-134
 pub(crate) fn subject_taxonomy<'s>(
     setting: Option<&TaxdbSetting>,
-    program: &str,
     specs: impl IntoIterator<Item = &'s crate::report::tabular::TabularSpec>,
-) -> Result<SubjectTaxonomy> {
+) -> SubjectTaxonomy {
     let (mut looks_up, mut tax_report) = (false, false);
     for spec in specs {
         looks_up |= spec.looks_up_every_taxid();
         tax_report |= spec.kind == crate::report::tabular::TabularKind::TaxReport;
     }
     if !looks_up {
-        return Ok(SubjectTaxonomy::default());
+        return SubjectTaxonomy::default();
     }
     let Some(setting) = setting else {
-        return Ok(SubjectTaxonomy {
+        return SubjectTaxonomy {
             taxdb: None,
             found: Some(false),
-        });
+        };
     };
-    let path = subject_search_path(setting, program)?;
-    let found = path.resolve_file("taxdb.bti").is_some();
+    let path = SearchPath::from_environment(setting.0.as_deref());
+    let found = path.resolve_file(b"taxdb.bti").is_some();
     // The organism report's lookups open the run's own database.
     let taxdb = (tax_report && found).then(|| {
         SubjectTaxdb(std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(
             path,
         )))
     });
-    Ok(SubjectTaxonomy {
+    SubjectTaxonomy {
         taxdb,
         found: Some(found),
-    })
-}
-
-/// The search path of NCBI's databases of a `-subject` search (`subject_taxonomy`).
-fn subject_search_path(setting: &TaxdbSetting, program: &str) -> Result<SearchPath> {
-    let registry = match &setting.0 {
-        Ok(value) => value.as_deref(),
-        Err(reason) => bail!("{reason}; this is not supported by LOSAT's {program}"),
-    };
-    SearchPath::from_environment(registry).map_err(|error| database_error(error, program))
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
@@ -7537,10 +7520,10 @@ fn slot_refusal(db: &SeqDb, message: String) -> SeqDbError {
 /// LOSAT's refusals of the taxonomy cache name.
 fn taxdb_bti_path(db: &SeqDb) -> std::path::PathBuf {
     db.search_path()
-        .and_then(|search_path| search_path.resolve_file("taxdb.bti"))
+        .and_then(|search_path| search_path.resolve_file(b"taxdb.bti"))
         .map_or_else(
             || std::path::PathBuf::from("taxdb.bti"),
-            std::path::PathBuf::from,
+            crate::utils::os_bytes::path_from_bytes,
         )
 }
 
@@ -8306,7 +8289,7 @@ pub(crate) fn prefetch_warning(program: &str) -> Vec<u8> {
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:781-784 (cited at
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:774-777 (cited at
 // `ParsedSubject::prefetched`)
 /// The stop of NCBI's prefetch of one query batch's reported subjects `subjects` for a first
 /// format that writes the taxonomy database's texts at each `Hit` (`TaxdbPrinter`: the XML2 and

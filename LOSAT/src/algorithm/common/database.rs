@@ -5500,6 +5500,15 @@ impl TaxdbRun {
         crate::report::db_subject::LoadsBefore::after_calls(self.calls_before)
     }
 
+    /// The sequences whose blobs the run's record registered, by ordinal id, in order (tests).
+    #[cfg(test)]
+    pub(crate) fn loaded(&self) -> Vec<u32> {
+        self.loaded
+            .read()
+            .expect("the run's record")
+            .registered_sequences()
+    }
+
     /// The loads before a walk of the reports' loads whose first report is of the query batch
     /// `batch` (`db_subject::LoadsBefore`, the one producer): the run's record as it is now, whose
     /// last batch's scope the reports share where it is `batch` (psiblast's rounds before of the
@@ -8921,19 +8930,24 @@ pub(crate) fn check_prefetched_parsed(
     program: &str,
 ) -> Result<()> {
     if let crate::report::db_subject::HitLoad::Shown(shown) = load {
-        let differs = db.taxdb_found()
-            && match shown.holder {
-                Some(holder) => {
-                    let other = db
-                        .defline_set(holder.ordinal())
-                        .map_err(|error| database_error(error, program))?;
-                    lookup_texts_differ(
-                        db,
-                        &[&subject.volume_taxids(), &defline_set_taxids(&other)],
-                    )
-                }
-                None => true,
-            };
+        // The holder's blob is loaded by the id: where no line of it holds the id as
+        // `GetBioseqNoData`'s filter takes it, NCBI's prefetch stops (`other_bioseq`); else the
+        // prefetch looks its taxids up instead.
+        let other = match shown.holder {
+            Some(holder) => Some(
+                db.defline_set(holder.ordinal())
+                    .map_err(|error| database_error(error, program))?,
+            ),
+            None => None,
+        };
+        let stops = other
+            .as_ref()
+            .is_some_and(|set| set.bioseq_defline(subject.alignment_id()).is_none());
+        let differs = stops
+            || (db.taxdb_found()
+                && other.as_ref().is_none_or(|set| {
+                    lookup_texts_differ(db, &[&subject.volume_taxids(), &defline_set_taxids(set)])
+                }));
         if differs {
             return Err(parsed_refusal(
                 db.oid(ordinal),

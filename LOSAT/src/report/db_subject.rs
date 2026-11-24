@@ -640,6 +640,19 @@ impl ScopeRecord {
         found
     }
 
+    /// The sequences that the registry holds, by ordinal id, in order (tests).
+    #[cfg(test)]
+    pub fn registered_sequences(&self) -> Vec<u32> {
+        let mut ordinals: Vec<u32> = self
+            .registry
+            .values()
+            .map(|registrant| registrant.sequence.ordinal())
+            .collect();
+        ordinals.sort_unstable();
+        ordinals.dedup();
+        ordinals
+    }
+
     /// The number of notes and loads now: a walk's start ([`LoadsBefore`]).
     fn now(&self) -> (u32, u32) {
         (
@@ -720,7 +733,9 @@ impl LoadsBefore {
 
     /// Whether `other` is the same record as these loads, as it was (no note since).
     fn same_record(&self, other: &LoadsBefore) -> bool {
-        std::sync::Arc::ptr_eq(&self.record, &other.record)
+        // Two records with no note (`TaxdbRun::calls_before` makes one each time) are the same.
+        let empty = |loads: &LoadsBefore| (loads.notes, loads.loads) == (0, 0);
+        (std::sync::Arc::ptr_eq(&self.record, &other.record) || (empty(self) && empty(other)))
             && (self.notes, self.loads, self.unrecorded)
                 == (other.notes, other.loads, other.unrecorded)
     }
@@ -766,6 +781,9 @@ pub struct ScopeWalk {
     registry: std::collections::HashMap<HandleKey, Registrant>,
     /// The walk's own places of the current scope.
     scope: ScopePlaces,
+    /// The keys of every blob that the walk loaded, by ordinal id, for the run (a holder that the
+    /// loader gives in a later batch is loaded again by them, `held_blob`).
+    blobs: std::collections::HashMap<u32, std::sync::Arc<BlobKeys>>,
     /// The query batch of the current scope (`None`: none named yet).
     batch: Option<usize>,
     /// Whether the current scope began in the record (`before.batch`'s scope).
@@ -788,6 +806,7 @@ impl ScopeWalk {
             before,
             registry: Default::default(),
             scope: ScopePlaces::default(),
+            blobs: Default::default(),
             batch,
             in_record: true,
             keeps_scope: keeps_scope.unwrap_or(false),
@@ -868,6 +887,9 @@ impl ScopeWalk {
         let Some(sequence) = keys.sequence else {
             return;
         };
+        self.blobs
+            .entry(sequence.ordinal())
+            .or_insert_with(|| keys.clone());
         for &handle in keys.lines.iter().flat_map(|line| &line.handles) {
             self.registry.insert(
                 handle,
@@ -944,7 +966,7 @@ impl ScopeWalk {
     /// line that holds the handle, where LOSAT holds its keys (the walk's or the record's).
     fn held_blob(&mut self, holder: DbSequence, handle: HandleKey) {
         let loads = self.before.loads;
-        let keys = self.scope.keys_of(holder, u32::MAX).or_else(|| {
+        let keys = self.blobs.get(&holder.ordinal()).cloned().or_else(|| {
             self.before
                 .read(|record| record.places.keys_of(holder, loads))
         });
@@ -995,6 +1017,14 @@ impl ScopeWalk {
         }
         let resolved = match scope.then(|| self.scope_match(keys)).flatten() {
             Some(resolved) => Some(resolved),
+            // A scope kept for the run (outfmt 5) after calls whose loads LOSAT has no record
+            // of may hold a holder that LOSAT lists from the database (`ScopeHolders::scope`).
+            None if scope && self.keeps_scope && self.before.unrecorded => {
+                match subject.resolution.unrecorded.scope.first() {
+                    Some(holder) => Some(Resolved::Unknown(holder, ShownBy::Calls)),
+                    None => self.loader(subject, keys),
+                }
+            }
             None => self.loader(subject, keys),
         };
         if let (Some(handle), Some(resolved)) = (keys.handle, resolved) {
@@ -1083,6 +1113,7 @@ impl ScopeWalk {
                 before: self.before.clone(),
                 registry: start.clone(),
                 scope: self.scope.clone(),
+                blobs: self.blobs.clone(),
                 batch: self.batch,
                 in_record: self.in_record,
                 keeps_scope: self.keeps_scope,
@@ -1094,6 +1125,9 @@ impl ScopeWalk {
                 .into_iter()
                 .filter(|(handle, registrant)| start.get(handle) != Some(registrant))
                 .collect();
+            for (ordinal, keys) in alone.blobs {
+                self.blobs.entry(ordinal).or_insert(keys);
+            }
             results.push((resolved, changed, alone.scope));
         }
         let mut merged: std::collections::HashMap<HandleKey, Registrant> = Default::default();
@@ -1568,6 +1602,13 @@ impl ParsedSubject {
     /// nor name), so that the stop of a prefetch takes any load for one that may register it.
     pub fn id_handle_unknown(&self) -> bool {
         self.id_keys().handle.is_none()
+    }
+
+    /// The other sequences that NCBI's places may give for this subject's Seq-align id after the
+    /// calls of the run before, of which LOSAT has no record ([`ScopeHolders`]; tests).
+    #[cfg(test)]
+    pub fn unrecorded(&self) -> &ScopeHolders {
+        &self.resolution.unrecorded
     }
 
     /// The other sequences that, in an API call after the first, the data loader may give for

@@ -35,16 +35,17 @@ fn unit_results(queries: usize, skipped: bool) -> Vec<BatchResults> {
     }]
 }
 
-/// A reader batch (any `BATCH_SIZE`) is split into units of at most 10002 letters, as a run
-/// without `BATCH_SIZE` batches its queries; the last unit is marked, and the units cover the
-/// batch in order.
+/// A reader batch (any `BATCH_SIZE`) is split into units that end at the first query that brings
+/// them to 10002 letters, as a run without `BATCH_SIZE` batches its queries; the last unit is
+/// marked, and the units cover the batch in order; each takes one place in the flow.
 #[test]
 fn a_reader_batch_is_split_into_units_of_10002_letters() {
     let batch = [4000, 4000, 4000, 100, 10002, 5, 20000, 1]
         .map(record)
         .to_vec();
     let options = super::super::stage_c_tests::options();
-    let units = XUnit::split(&batch, &options, false);
+    let subjects: Subjects<'_> = (&batch[..1]).into();
+    let units = XUnit::split(&batch, &options, subjects, false);
     let ranges: Vec<_> = units.iter().map(|unit| unit.range.clone()).collect();
     // 4000 + 4000 + 4000 reaches 10002 at the third record; 100 + 10002 at the fifth;
     // 5 + 20000 at the seventh; the rest is the last unit.
@@ -54,11 +55,32 @@ fn a_reader_batch_is_split_into_units_of_10002_letters() {
         [false, false, false, true]
     );
     assert_eq!(units[1].queries().len(), 2);
-    // A reader batch of at most 10002 letters (the default, or a smaller `BATCH_SIZE`) is
-    // one unit.
-    let small = XUnit::split(&batch[..3], &options, false);
+    // A reader batch whose last query is the first to bring it to 10002 letters (the default,
+    // or a smaller `BATCH_SIZE`) is one unit.
+    let small = XUnit::split(&batch[..3], &options, subjects, false);
     assert_eq!(small.len(), 1);
     assert!(small[0].last);
+    assert!(units.iter().chain(&small).all(|unit| unit.places == 1));
+}
+
+/// A reader batch searched whole (`query_setup::searches_batch_whole`, here `-use_sw_tback`) is
+/// one unit that takes the places of the units the split would make of it in the flow
+/// (`XUnit::places`, line NP item M4b-3b fix round 6); a batch the split leaves whole takes one.
+#[test]
+fn a_reader_batch_searched_whole_takes_the_places_of_its_units() {
+    let batch = [4000, 4000, 4000, 100, 10002, 5, 20000, 1]
+        .map(record)
+        .to_vec();
+    let mut options = super::super::stage_c_tests::options();
+    options.use_sw_tback = true;
+    let subjects: Subjects<'_> = (&batch[..1]).into();
+    let whole = XUnit::split(&batch, &options, subjects, false);
+    assert_eq!(whole.len(), 1);
+    assert_eq!(whole[0].range, 0..8);
+    assert!(whole[0].last);
+    assert_eq!(whole[0].places, 4);
+    let small = XUnit::split(&batch[..3], &options, subjects, false);
+    assert_eq!((small.len(), small[0].places), (1, 1));
 }
 
 /// A unit whose phase 1 did not end with a preparation (it failed) is prepared again with
@@ -73,9 +95,9 @@ fn a_unit_without_its_phase_1_fails_as_its_reader_batch() {
         .map(record)
         .collect();
     let options = super::super::stage_c_tests::options();
-    let units = XUnit::split(&batch, &options, false);
-    assert_eq!(units.len(), 2);
     let subjects: Subjects<'_> = (&batch[1..2]).into();
+    let units = XUnit::split(&batch, &options, subjects, false);
+    assert_eq!(units.len(), 2);
     for unit in &units {
         let error = unit
             .take_prep(&options, subjects)
@@ -107,4 +129,98 @@ fn the_units_results_are_the_reader_batchs() {
         .unwrap();
     assert_eq!(results.len(), 2);
     assert!(results.iter().all(|r| r.search_skipped));
+}
+
+/// A unit of several places gives them back when its scan ends (`x_flow`, line NP item M4b-3b fix
+/// round 8): three reader batches of 4 places each on 4 places are scanned one at a time, the next
+/// one's search starts during the batch end of the one before it (each batch end here waits for
+/// it), and the reports are written in the reader's order.
+#[test]
+fn a_unit_gives_back_its_places_when_its_scan_ends() {
+    use std::sync::{Condvar, Mutex};
+    const UNITS: usize = 3;
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .expect("a pool of 4 threads");
+    let batches: Vec<Vec<FastaRecord>> = (0..UNITS)
+        .map(|index| {
+            let mut query = record(30);
+            query.internal_id = index.to_string();
+            vec![query]
+        })
+        .collect();
+    // The units whose search started, and the number whose scan has not ended.
+    let started = (Mutex::new((Vec::<usize>::new(), 0usize)), Condvar::new());
+    let written = Mutex::new(Vec::<usize>::new());
+    let result = pool.install(|| {
+        let split = |queries: &[FastaRecord]| {
+            vec![XUnit {
+                batch: std::sync::Arc::new(queries.to_vec()),
+                range: 0..queries.len(),
+                last: true,
+                places: 4,
+                prep: None,
+            }]
+        };
+        let prepare = |_: &[FastaRecord],
+                       _: Option<&std::sync::Arc<ReaderBatchShape>>|
+         -> Result<UnitPrep> { unreachable!("no unit is prepared ahead") };
+        let search = |unit: &XUnit, _alone: bool, scan_end: &dyn Fn()| {
+            let index: usize = unit.batch[0].internal_id.parse().expect("a unit's number");
+            let (lock, wake) = &started;
+            {
+                let mut state = lock.lock().expect("the units started");
+                state.0.push(index);
+                state.1 += 1;
+                assert_eq!(state.1, 1, "unit {index} scans beside another");
+                wake.notify_all();
+            }
+            lock.lock().expect("the units started").1 -= 1;
+            scan_end();
+            if index + 1 < UNITS {
+                let state = lock.lock().expect("the units started");
+                let (state, waited) = wake
+                    .wait_timeout_while(state, std::time::Duration::from_secs(60), |state| {
+                        !state.0.contains(&(index + 1))
+                    })
+                    .expect("the units started");
+                drop(state);
+                assert!(
+                    !waited.timed_out(),
+                    "unit {} waited for the batch end of unit {index}",
+                    index + 1
+                );
+            }
+            Ok(unit_results(1, false))
+        };
+        let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
+                        _: &mut dyn FnMut(&[u8]) -> Result<()>|
+         -> Result<()> {
+            for batch in &batches {
+                deliver(batch)?;
+            }
+            Ok(())
+        };
+        x_flow(
+            2 * UNITS,
+            0,
+            usize::MAX,
+            4,
+            &mut read,
+            &split,
+            &prepare,
+            &search,
+            &mut |batch: &[FastaRecord], _, _, results: Result<Vec<BatchResults>>| {
+                results?;
+                let index = batch[0].internal_id.parse().expect("a unit's number");
+                written.lock().expect("the units written").push(index);
+                Ok(())
+            },
+            &mut |_: &[u8]| Ok(()),
+        )
+    });
+    result.expect("the flow's run");
+    assert_eq!(*written.lock().unwrap(), [0, 1, 2]);
+    assert_eq!(started.0.lock().unwrap().0, [0, 1, 2]);
 }

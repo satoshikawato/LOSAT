@@ -15,7 +15,9 @@
 //! times the mean subject length; with `=0` they are the grid of `k` subjects. `LOSAT_TIMING`
 //! shows that the flow ran (and the waves did not). The fallback to the waves where a diagonal offset could pass 2^30 (`-window_size` near 2^28, a
 //! diagonal table of 1 GiB or more) is a unit test of the module. That the bytes equal NCBI's
-//! is the business of the BLASTX fixtures and the campaign's comparison runs.
+//! is the business of the BLASTX fixtures and the campaign's comparison runs, but for the frozen
+//! `-db_hard_mask` rows of `ov_m1`, whose bytes depend on what a worker's table holds when it
+//! takes its next subject: they are run here with the waves and with the grid of 64.
 //!
 //! The query is 9,000 letters of AP027131 (one batch, one chunk, so the pool searches its
 //! subjects); the subjects are the proteins of AP027131, AP027132 and AP027133 (1,711 records).
@@ -24,6 +26,9 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod temp_support;
+use temp_support::InLosatWords;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -433,4 +438,124 @@ fn the_chunks_of_a_split_query_take_the_flow_one_after_another() {
     );
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+// The frozen NCBI rows `db.pmask.bx.hard.ov_m1.*` (`tests/db_search_manifest/blastx.pmask.tsv`,
+// two-hit and one-hit; review 4 of M4b-3b, L1). NCBI's one thread moves the diagonal offset by
+// each subject's length and the window. In `ov_m1` the 64th subject, P (no masks), is one that
+// NCBI's one-thread search starts on a new table below the entries that no sequence wrote, and the
+// first subject of each later group of 64 is a copy of a subject with rows. With two threads or
+// more the waves (`LOSAT_X_BXSUBJFLOW=0`) and the grid of 64 (`LOSAT_X_BXTASKRES=0`) give the worker
+// that searched P one of those copies next, on P's table: the copy has NCBI's rows only where P's
+// search leaves the offset past those entries (`DiagonalWalk::plain` and its end move), and the rows
+// of one to four copies were lost before that. LOSAT_TIMING shows which loop ran.
+#[test]
+fn the_subject_after_a_sequence_on_a_new_table_has_ncbis_rows_in_waves_and_the_grid() {
+    let manifest = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search_manifest/blastx.pmask.tsv"),
+    )
+    .unwrap();
+    let mut lines = manifest.lines().filter(|line| !line.starts_with('#'));
+    let columns: Vec<&str> = lines.next().unwrap().split('\t').collect();
+    let column = |name: &str| columns.iter().position(|c| *c == name).unwrap();
+    let frozen = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/db_search");
+    let mut rows = 0;
+    for line in lines {
+        let cells: Vec<&str> = line.split('\t').collect();
+        let row = cells[column("row_id")];
+        if !row.starts_with("db.pmask.bx.hard.ov_m1.") {
+            continue;
+        }
+        let expected_out = temp_support::expected_losat_bytes(
+            std::fs::read(frozen.join(format!("{row}.out"))).unwrap(),
+        );
+        let expected_err = std::fs::read_to_string(frozen.join(format!("{row}.err")))
+            .unwrap_or_default()
+            .in_losat_words();
+        let mut args: Vec<&str> = cells[column("extra_args")].split_whitespace().collect();
+        assert!(
+            args.iter().all(|arg| !arg.contains('=')),
+            "{row}: a row without variables"
+        );
+        args.extend([
+            "-db",
+            cells[column("db")],
+            "-outfmt",
+            cells[column("outfmt")],
+        ]);
+        let query = Path::new(cells[column("query")]);
+        for threads in [2, 4] {
+            for switch in ["LOSAT_X_BXSUBJFLOW", "LOSAT_X_BXTASKRES"] {
+                let what = format!("{row} threads {threads} {switch}=0");
+                let env = [(switch, "0"), ("LOSAT_TIMING", "1")];
+                let (code, stdout, stderr) = frozen_row_blastx(query, &args, threads, &env);
+                assert_eq!(
+                    code.map(|code| code.to_string()).as_deref(),
+                    Some(cells[column("rc")]),
+                    "{what}: {stderr}"
+                );
+                assert!(stdout == expected_out, "{what}: the bytes of NCBI differ");
+                if switch == "LOSAT_X_BXSUBJFLOW" {
+                    assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0, "{what}");
+                    assert!(
+                        timing(&stderr, "blastx_subject_waves", "waves") > 0,
+                        "{what}: the waves did not run"
+                    );
+                } else {
+                    // The grid of 64: the 600 subjects in 10 tasks.
+                    assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 1, "{what}");
+                    assert_eq!(
+                        timing(&stderr, "blastx_subject_flow", "tasks"),
+                        10,
+                        "{what}"
+                    );
+                }
+                let stderr: String = stderr
+                    .split_inclusive('\n')
+                    .filter(|line| !line.starts_with("[TIMING]"))
+                    .collect();
+                assert_eq!(stderr, expected_err, "{what}: standard error differs");
+            }
+        }
+        rows += 1;
+    }
+    assert_eq!(rows, 2);
+}
+
+/// A frozen row's search from `LOSAT/` (the manifest's paths are relative to it) in the
+/// environment of `db_search_fixtures.py check`: no `LOSAT_*` variable but the worker log (`losat`),
+/// no BATCH_SIZE, NCBI* or BLAST* variable, HOME an empty directory; then `env`. Returns the exit
+/// status, standard output and standard error.
+fn frozen_row_blastx(
+    query: &Path,
+    args: &[&str],
+    threads: u32,
+    env: &[(&str, &str)],
+) -> (Option<i32>, Vec<u8>, String) {
+    let mut command = losat();
+    for (name, _) in std::env::vars_os() {
+        let text = name.to_string_lossy();
+        if text == "BATCH_SIZE" || text.starts_with("NCBI") || text.starts_with("BLAST") {
+            command.env_remove(name);
+        }
+    }
+    let _log = temp_support::worker_log_if_unset(&mut command, "blastx_subject_flow_frozen");
+    let home = temp_support::unique_dir("losat-blastx-subject-flow-home");
+    let output = command
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("HOME", home.path())
+        .arg("blastx")
+        .arg("-query")
+        .arg(query)
+        .args(args)
+        .args(["-num_threads", &threads.to_string()])
+        .envs(env.iter().copied())
+        .output()
+        .expect("run LOSAT");
+    (
+        output.status.code(),
+        output.stdout,
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
 }

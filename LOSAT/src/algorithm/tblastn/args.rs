@@ -225,6 +225,12 @@ pub struct TblastnArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+    /// `SERIAL_VERIFY_DATA_WRITE` of the run's application settings when it changes what NCBI
+    /// writes (`ncbi_environment::WriteVerification`), set with the settings by the command line's
+    /// `run` and the library's entries; `-in_pssm`'s reader refuses a PSSM that the run would write
+    /// otherwise (`in_pssm::PssmReader::write_verification`). Not a public option.
+    #[arg(skip)]
+    pub write_verification: Option<crate::blastinput::ncbi_environment::WriteVerification>,
     /// The run's search strategy export (`-export_search_strategy`), made by `run` and by LOSAT
     /// Web's `web_adapter::give_strategy` (`strategy::StrategyExport::for_args`).
     #[arg(skip)]
@@ -577,6 +583,7 @@ impl TblastnArgs {
                 self.export_search_strategy.is_some(),
                 self.db.is_some(),
                 self.archive.as_ref(),
+                self.write_verification.as_ref(),
                 diagnostics,
             )?)),
             None => None,

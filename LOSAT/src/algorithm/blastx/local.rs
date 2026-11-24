@@ -64,7 +64,7 @@ pub fn run_local(
     // A search of records reads no database: `run_local_database` searches the database of `-db`.
     // `check_options` (LOSAT Web's `validate`) checks `-db` as the command line does (line WQA D12a).
     if args.db.is_some() {
-        bail!("-db (a database search) is not supported in the browser yet");
+        bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
     let requested = requested_formats(outputs);
     let (choices, resolutions) = read_options(&args, &requested)?;
@@ -258,11 +258,6 @@ pub(super) fn subject_taxonomy(
 struct DatabaseReports<'a> {
     database: &'a BlastxDatabase,
     pairwise: &'a crate::report::pairwise::PairwiseDatabase,
-    /// A call of the library's batches after the first (`api::run_batches`, the arguments'
-    /// `first_query_ordinal`): the calls before searched with a database of their own, whose
-    /// loads the stop of a batch's prefetch here has no record of
-    /// (`common::database::PrefetchQueries::after_unrecorded_calls`).
-    unrecorded_calls: bool,
 }
 
 /// What `report_batches` reports: the checks of the options and of the inputs are done.
@@ -871,13 +866,12 @@ fn write_run(
                 search_options,
                 asks,
                 results,
-                queries,
+                (queries, queries_before),
                 query_scopes
                     .borrow()
                     .as_ref()
                     .map(|scopes| scopes.numbered_from(queries_before)),
-                &crate::algorithm::common::database::PrefetchQueries::new(0, &scope)
-                    .after_unrecorded_calls(run.unrecorded_calls),
+                &crate::algorithm::common::database::PrefetchQueries::new(0, &scope),
                 &mut *diagnostics,
             )?),
             None => None,
@@ -1227,7 +1221,8 @@ fn search_database(
         &mut *outputs.diagnostics,
         super::args::ProgramName::BLASTX.upper,
     )?
-    .showing_gis(args.show_gis);
+    .showing_gis(args.show_gis)
+    .after_calls(args.first_query_ordinal > 0);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
         args.strategy.as_ref(),
@@ -1287,7 +1282,15 @@ fn search_database(
             &mut *outputs.diagnostics,
         )?;
         if let Some(mask) = &mask {
-            database.check_mask_limits(mask)?;
+            // Once per word and window of the formats' options (they are the same search's).
+            let mut checked: Vec<(i32, i32)> = Vec::new();
+            for options in &resolved {
+                let scan = (options.word_size, options.window_size);
+                if !checked.contains(&scan) {
+                    database.check_mask_limits(mask, options)?;
+                    checked.push(scan);
+                }
+            }
         }
         for options in &mut resolved {
             options.db_mask = mask.clone();
@@ -1359,7 +1362,6 @@ fn search_database(
             database: Some(DatabaseReports {
                 database: &database,
                 pairwise: &pairwise,
-                unrecorded_calls: args.first_query_ordinal > 0,
             }),
             archive,
             // The search strategy file of LOSAT Web's run (`web_adapter::give_strategy`); the

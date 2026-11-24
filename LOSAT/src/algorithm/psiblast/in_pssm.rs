@@ -116,9 +116,9 @@ pub(crate) fn check_in_pssm_options(
         bail!("output format {number} with {option} is not supported by LOSAT's PSIBLAST yet");
     }
     // The archive's request holds the PSSM that the search holds (`PsiSearch::archive_pssm`):
-    // `-in_pssm`'s object, whose members the XML and ASN.1 binary streams do not all write yet
-    // (`report::archive::pssm_unwritten`; the later rounds' PSSMs keep its query). Lifted where
-    // those streams write them (line RG item F3's encoder, for XML).
+    // `-in_pssm`'s object, whose delayed member of another format the archive's stream does not
+    // write yet where NCBI's read of it fails (`report::archive::pssm_unwritten`; the later
+    // rounds' PSSMs keep its query).
     if outfmts.contains(&crate::blastinput::app::output_format::ARCHIVE_FORMAT) {
         if let (Some(handle), Some(pssm)) = (args.archive.as_ref(), psi.archive_pssm.as_deref()) {
             // NCBI's stream stops at the matrix name that a PSSM of frequency ratios only lacks,
@@ -135,7 +135,8 @@ pub(crate) fn check_in_pssm_options(
                     super::in_pssm_files::matrix_name_refusal("in the archive of -outfmt 11")
                 );
             }
-            if let Some(what) = crate::report::archive::pssm_unwritten(handle.encoding(), pssm) {
+            if let Some(gap) = crate::report::archive::pssm_unwritten(handle.encoding(), pssm) {
+                let what = gap.what();
                 let stream = match handle.encoding() {
                     crate::report::archive::ArchiveEncoding::Xml => "XML (ARCHIVE_FORMAT=xml)",
                     crate::report::archive::ArchiveEncoding::Text => {

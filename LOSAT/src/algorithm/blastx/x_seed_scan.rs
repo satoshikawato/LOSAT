@@ -542,7 +542,7 @@ fn x_word_finder_direct_with<const HIT_BF: bool, E, O>(
     extend_one: O,
 ) -> Result<Vec<InitHsp>>
 where
-    E: Fn(&[u8], &[u8], usize, usize, usize, i32, usize) -> Option<BlastpTwoHitUngappedResult>,
+    E: Fn(&[u8], &[u8], i32, usize, usize, i32, usize) -> Option<BlastpTwoHitUngappedResult>,
     O: Fn(&[u8], &[u8], usize, usize, i32, usize) -> Option<BlastpOneHitUngappedResult>,
 {
     let query = &batch.sequence_start[1..];
@@ -678,7 +678,8 @@ where
                     context = context_of(q);
                     let p = &parameters[context];
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
-                    if q - diff < batch.contexts[context].offset as i32 {
+                    // (unsigned, as in `seed::word_finder_over`)
+                    if (q.wrapping_sub(diff) as u32) < batch.contexts[context].offset as u32 {
                         entry.set_last_hit(s.wrapping_add(diagonals.offset));
                         continue;
                     }
@@ -686,7 +687,7 @@ where
                     let Some(result) = extend(
                         query,
                         subject,
-                        (previous + word) as usize,
+                        previous + word,
                         s as usize,
                         q as usize,
                         p.word_xdrop,

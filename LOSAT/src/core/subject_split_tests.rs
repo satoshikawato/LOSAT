@@ -12,7 +12,7 @@ fn chunks_of(masks: &[(u32, u32)], length: usize, nucleotide: bool) -> Vec<HardC
     std::iter::from_fn(|| split.next_chunk(DBSEQ_CHUNK_OVERLAP)).collect()
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 579-584 (quoted
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 579-584 (cited
 // at `HardSplitState::next_chunk`)
 // The fields that the refusals read: the "no chunking" branch of a chunk from 0 before a mask
 // that runs to the end (after empty masks at 0 as well, review F1), the range of each chunk,
@@ -68,4 +68,34 @@ fn protein_chunks_start_at_their_range() {
     let found = chunks_of(&[(0, 400)], 400, false);
     assert_eq!(found.len(), 1);
     assert!(found[0].full_range && found[0].length == 0);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276 (cited at
+// `HardSplitState::next_chunk`)
+// Masks that overlap or nest, or are out of the order of their start (series NP, M4b-3b): the range
+// between them runs back from the end of one mask to the start of the next, and its chunk's length
+// is NCBI's `Int4` difference, negative (no letters); touching masks give a chunk of length 0. The
+// chunks stop once the next range starts at the end, also where a later range would start before
+// it.
+#[test]
+fn protein_chunks_of_overlapping_masks_have_signed_lengths() {
+    let of = |masks: &[(u32, u32)], length: usize| {
+        chunks_of(masks, length, false)
+            .iter()
+            .map(|c| (c.offset, c.length, c.letters()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        of(&[(40, 60), (55, 70)], 240),
+        [(0, 40, 40), (60, -5, 0), (70, 170, 170)]
+    );
+    assert_eq!(
+        of(&[(40, 100), (50, 60)], 240),
+        [(0, 40, 40), (100, -50, 0), (60, 180, 180)]
+    );
+    assert_eq!(
+        of(&[(40, 60), (60, 70)], 240),
+        [(0, 40, 40), (60, 0, 0), (70, 170, 170)]
+    );
+    assert_eq!(of(&[(40, 240), (60, 100)], 240), [(0, 40, 40)]);
 }

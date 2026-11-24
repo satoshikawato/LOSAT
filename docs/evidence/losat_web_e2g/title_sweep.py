@@ -24,6 +24,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "losat_web_e2a"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "LOSAT" / "tests"))
+from losat_wording import losat_bytes, losat_output_bytes  # noqa: E402
 from run_oracle import ENGINE  # noqa: E402
 
 QUERY = ENGINE / "tests/fasta/outfmt0/multi_query.fasta"
@@ -88,6 +90,14 @@ def title(defline: str) -> str:
     return clean_and_compress(trim_end(text, ",;~ "))
 
 
+def ncbi_run(argv: list[str]) -> subprocess.CompletedProcess:
+    """One NCBI run, its streams in LOSAT's words (AGENTS.md rule 8)."""
+    run = subprocess.run(argv, capture_output=True, timeout=60)
+    run.stdout = bytes(losat_output_bytes(run.stdout))
+    run.stderr = bytes(losat_bytes(run.stderr))
+    return run
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--bin-dir", type=Path, required=True)
@@ -106,7 +116,7 @@ def main() -> int:
         subject.write_text(f">{defline}\n{residues}\n")
         argv = ["-query", str(QUERY), "-subject", str(subject)]
         try:
-            ncbi = subprocess.run([str(args.bin_dir / "blastn"), *argv], capture_output=True, timeout=60)
+            ncbi = ncbi_run([str(args.bin_dir / "blastn"), *argv])
             ours = subprocess.run([str(args.losat.resolve()), "blastn", *argv], capture_output=True, timeout=60)
         except subprocess.TimeoutExpired:
             return defline, "timeout", None
@@ -118,8 +128,7 @@ def main() -> int:
             placeholder = "Z" * len(expected_title)
             stand_in = args.work / f"title_{index}_p.fa"
             stand_in.write_text(f">{placeholder}\n{residues}\n")
-            other = subprocess.run([str(args.bin_dir / "blastn"), "-query", str(QUERY), "-subject", str(stand_in)],
-                                   capture_output=True, timeout=60)
+            other = ncbi_run([str(args.bin_dir / "blastn"), "-query", str(QUERY), "-subject", str(stand_in)])
             expected = (other.stdout.replace(placeholder.encode(), expected_title.encode())
                         .replace(stand_in.name.encode(), subject.name.encode()))
             if other.returncode == 0 and ours.stdout == expected and ours.stderr == other.stderr:

@@ -1,0 +1,847 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qN"
+                  }
+                }
+              },
+              title "qN"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 90,
+              seq-data ncbi2na 'EBAEBAEBAEBAEBA4D34D34D34D34D3EBAEBAEBAEBAEBA0
+'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qA2"
+                  }
+                }
+              },
+              title "qA2"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 165,
+              seq-data ncbi2na '3801E7CCF9C042040FDFFBC0DD3FF76D07A08007AB78F8
+2F42758F7B76EF823AC74230DEDEBDE0027BC0'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qB"
+                  }
+                }
+              },
+              title "qB"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 165,
+              seq-data ncbi2na '3AF7B75A78C01C3BC09E7EAB02FAE74E7AE0CEB9E09DE8
+1B3BF7B7FD61C7007CFF593FE37B74EBDE7400'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_4"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qC"
+                  }
+                }
+              },
+              title "qC"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 165,
+              seq-data ncbi2na '3B71C35805906C01C06C31C36DB5908EF03F5ABAEB40FB
+EBAEFCDE7966DBAD66DEAEF6E71DB007DE06C0'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_5"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">qD"
+                  }
+                }
+              },
+              title "qD"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 132,
+              seq-data ncbi2na '380BDE9E7ACFBEB79E7A74371FA9E05AF1D08100239DE7
+80AEFDE001E4279DE8EB'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/pw",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 0
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 280
+          },
+          {
+            id str "blast_score",
+            value int 280
+          },
+          {
+            id str "e_value",
+            value real { 74406928964825, 10, -53 }
+          },
+          {
+            id str "bit_score",
+            value real { 112464113536903, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 55
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 55
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              general {
+                db "PIG",
+                tag str "abc"
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 164,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 0,
+                to 54,
+                strand unknown,
+                id general {
+                  db "PIG",
+                  tag str "abc"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 263
+          },
+          {
+            id str "blast_score",
+            value int 263
+          },
+          {
+            id str "e_value",
+            value real { 280806133744014, 10, -51 }
+          },
+          {
+            id str "bit_score",
+            value real { 105915720746308, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 51
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 53
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_2",
+              gi 7001
+            },
+            loc {
+              int {
+                from 0,
+                to 164,
+                strand plus,
+                id local str "Query_2"
+              },
+              int {
+                from 0,
+                to 54,
+                strand unknown,
+                id gi 7001
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 290
+          },
+          {
+            id str "blast_score",
+            value int 290
+          },
+          {
+            id str "e_value",
+            value real { 228498844910579, 10, -55 }
+          },
+          {
+            id str "bit_score",
+            value real { 116316109296076, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 55
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 55
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_3",
+              general {
+                db "ti",
+                tag str "xyz"
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 164,
+                strand plus,
+                id local str "Query_3"
+              },
+              int {
+                from 0,
+                to 54,
+                strand unknown,
+                id general {
+                  db "ti",
+                  tag str "xyz"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 173
+          },
+          {
+            id str "blast_score",
+            value int 173
+          },
+          {
+            id str "e_value",
+            value real { 159243435327582, 10, -37 }
+          },
+          {
+            id str "bit_score",
+            value real { 712477589137461, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 55
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 55
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_4",
+              general {
+                db "BL_ORD_ID",
+                tag str "zz"
+              }
+            },
+            loc {
+              int {
+                from 0,
+                to 164,
+                strand plus,
+                id local str "Query_4"
+              },
+              int {
+                from 0,
+                to 54,
+                strand unknown,
+                id general {
+                  db "BL_ORD_ID",
+                  tag str "zz"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 147
+          },
+          {
+            id str "blast_score",
+            value int 147
+          },
+          {
+            id str "e_value",
+            value real { 623684741516635, 10, -34 }
+          },
+          {
+            id str "bit_score",
+            value real { 612325699398949, 10, -13 }
+          },
+          {
+            id str "num_ident",
+            value int 30
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 30
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 686818181818182, 10, -13 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_5",
+              general {
+                db "xyz",
+                tag id 77
+              }
+            },
+            loc {
+              int {
+                from 42,
+                to 131,
+                strand plus,
+                id local str "Query_5"
+              },
+              int {
+                from 14,
+                to 43,
+                strand unknown,
+                id general {
+                  db "xyz",
+                  tag id 77
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 0,
+              to 87,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 85,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 86,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 3,
+              to 89,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 65,
+              to 88,
+              id local str "Query_1"
+            },
+            {
+              from 5,
+              to 28,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 87,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 58,
+              id local str "Query_2"
+            },
+            {
+              from 112,
+              to 160,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 59,
+              to 113,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 63,
+              to 98,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 65,
+              to 79,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 10,
+              to 85,
+              id local str "Query_3"
+            },
+            {
+              from 97,
+              to 148,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 29,
+              to 86,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 29,
+              to 94,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 52,
+              to 87,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 93,
+              to 138,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 88,
+              to 157,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 77,
+              to 146,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 66,
+              to 164,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 74,
+              to 139,
+              id local str "Query_4"
+            },
+            {
+              from 26,
+              to 52,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 79,
+              to 141,
+              id local str "Query_4"
+            },
+            {
+              from 19,
+              to 57,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 6,
+              to 39,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame plus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 10,
+              to 85,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 9,
+              to 41,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame minus1
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 6474",
+      "Effective search space used: 6474",
+      "Length adjustment: 3"
+    }
+  }
+}

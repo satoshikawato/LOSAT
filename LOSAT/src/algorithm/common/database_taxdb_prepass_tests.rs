@@ -405,7 +405,7 @@ fn a_seq_align_id_of_any_kind_is_left_to_the_lookup() {
         (
             "ids/pshare_v5",
             2,
-            Some("whose lookup in the database fails".to_string()),
+            Some("whose lookup in the database throws on the id itself".to_string()),
         ),
     ] {
         let db = db_search(name, None, &cwd);
@@ -494,7 +494,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
         (
             "ids/pshare_v5",
             2,
-            Err("whose lookup in the database fails"),
+            Err("whose lookup in the database throws on the id itself"),
         ),
         // An id that the lookup finds nowhere, and one that it finds first on sequence 5,
         // none of whose ids compares equal: nothing is read.
@@ -532,7 +532,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
         );
         assert_eq!(
             subject.prefetch_fails(),
-            want == Err("whose lookup in the database fails"),
+            want == Err("whose lookup in the database throws on the id itself"),
             "{name} {ordinal}"
         );
     }
@@ -1469,7 +1469,7 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
             db,
             run,
             read.iter().map(|&ordinal| (ordinal, ordinal, None)),
-            false,
+            RowLookups::None,
             "BLASTP",
         )
         .unwrap();
@@ -1532,7 +1532,8 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
     // A batch between whose prefetch loads `|1` (its posts before query 1's report) takes
     // them first: the stop of query 2 writes NCBI's error alone.
     let mut between = crate::report::diag_log::Posts::new();
-    between.loads(subject_read_texts(&db, &run, [(1, 1, None)], false, "BLASTP").unwrap());
+    between
+        .loads(subject_read_texts(&db, &run, [(1, 1, None)], RowLookups::None, "BLASTP").unwrap());
     let prefetched = |query: usize| (query == 1).then_some(&between);
     let taken = XmlCuts::of(true, &cut)
         .reports_before(&reads, &prefetched)
@@ -1619,7 +1620,7 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
             (1, 1, None),
             (holder, holder, parsed[holder as usize].as_deref()),
         ],
-        false,
+        RowLookups::None,
         "BLASTP",
     )
     .unwrap()];
@@ -1793,7 +1794,7 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
             (1, 1, None),
             (holder, holder, parsed[holder as usize].as_deref()),
         ],
-        false,
+        RowLookups::None,
         "BLASTP",
     )
     .unwrap()];
@@ -1915,10 +1916,6 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
             ),
             (3, error.clone())
         );
-        assert_eq!(
-            stopped(batch_prefetch_stop(&db, &run, alone, "BLASTN", &stop_queries(3)).map(drop)),
-            (3, error.clone())
-        );
         // With another subject whose load writes the texts of opening the taxonomy database:
         // its `gnl|BL_ORD_ID|n` (packed) loads before the stopping `lcl|` id (not packed) in
         // NCBI's order, so its texts come before the error.
@@ -1946,68 +1943,23 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                     .1,
                     error
                 );
-                assert_eq!(
-                    stopped(
-                        batch_prefetch_stop(&db, &run, both(), "BLASTN", &stop_queries(0))
-                            .map(drop)
-                    )
-                    .1,
-                    error
-                );
-                assert_eq!(
-                    stopped(
-                        held_batch_prefetch_stop(
-                            &db,
-                            &TaxdbRun::default(),
-                            std::iter::empty(),
-                            std::iter::empty(),
-                            both(),
-                            "BLASTN",
-                            &stop_queries(0)
-                        )
-                        .map(drop)
-                    )
-                    .1,
-                    error
-                );
             }
             Some(_) => {
-                // Each in a run that has looked nothing up: a stopped prefetch has recorded
-                // its loads in its run.
-                for stop in [
-                    batch_prefetch(
-                        &db,
-                        &TaxdbRun::default(),
-                        std::iter::empty(),
-                        both(),
-                        "BLASTN",
-                        &stop_queries(0),
-                    )
-                    .map(drop),
-                    batch_prefetch_stop(
-                        &db,
-                        &TaxdbRun::default(),
-                        both(),
-                        "BLASTN",
-                        &stop_queries(0),
-                    )
-                    .map(drop),
-                    held_batch_prefetch_stop(
-                        &db,
-                        &TaxdbRun::default(),
-                        std::iter::empty(),
-                        std::iter::empty(),
-                        both(),
-                        "BLASTN",
-                        &stop_queries(0),
-                    )
-                    .map(drop),
-                ] {
-                    assert_eq!(stopped(stop), (0, format!("{open}{error}")));
-                }
+                // In a run that has looked nothing up: the texts of the load before the stop,
+                // then the error.
+                let stop = batch_prefetch(
+                    &db,
+                    &TaxdbRun::default(),
+                    std::iter::empty(),
+                    both(),
+                    "BLASTN",
+                    &stop_queries(0),
+                )
+                .map(drop);
+                assert_eq!(stopped(stop), (0, format!("{open}{error}")));
                 // A batch after one whose prefetch opened it and looked the other subject up
-                // (the formats whose prefetch writes the texts, `batch_prefetch`): its load
-                // writes nothing now, so NCBI's error.
+                // (every format that prefetches, the XML2 and JSON ones too, line DBID taxpf-1):
+                // its load writes nothing now, so NCBI's error.
                 let run = TaxdbRun::default();
                 assert!(!batch_prefetch(
                     &db,
@@ -2033,54 +1985,8 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                     ),
                     (1, error.clone())
                 );
-                // The same after a batch whose XML2 or JSON reports looked it up: in the run
-                // that holds their lookups (BLASTX, `batch_prefetch_stop`), and in the record
-                // made where the batch stops of the subjects that the batches before report
-                // (`held_batch_prefetch_stop`; with no batch before, refused above).
-                let run = TaxdbRun::default();
-                read_reported_taxonomy(
-                    &db,
-                    &run,
-                    &[other],
-                    &std::collections::BTreeSet::from([0]),
-                    &[None::<&crate::report::db_subject::ParsedSubject>],
-                    "BLASTN",
-                )
-                .unwrap();
-                assert_eq!(
-                    stopped(
-                        batch_prefetch_stop(&db, &run, both(), "BLASTN", &stop_queries(1))
-                            .map(drop)
-                    ),
-                    (1, error.clone())
-                );
-                assert_eq!(
-                    stopped(
-                        held_batch_prefetch_stop(
-                            &db,
-                            &TaxdbRun::default(),
-                            [subject(other, &None)],
-                            std::iter::empty(),
-                            both(),
-                            "BLASTN",
-                            &stop_queries(1)
-                        )
-                        .map(drop)
-                    ),
-                    (1, error.clone())
-                );
             }
         }
-        // No stopping subject: nothing for the XML2 and JSON formats.
-        batch_prefetch_stop(
-            &db,
-            &run,
-            [subject(other, &None)],
-            "BLASTN",
-            &stop_queries(0),
-        )
-        .map(drop)
-        .unwrap();
     }
     // Another subject whose lookup throws on its id, which the prefetch catches and which ends
     // its loads: whether the stop comes first is the order's, refused. (A text tag of
@@ -2100,7 +2006,10 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
         (**parsed[stop].as_ref().unwrap())
             .clone()
             .found_instead(Some(crate::report::db_subject::FoundInstead::ThrowsOnId(
-                "Invalid choice selection".into(),
+                crate::ncbi_exception::NcbiException::new(
+                    crate::seqdb::isam::OBJECT_ID_GET_ID,
+                    "Invalid choice selection",
+                ),
             ))),
     ));
     assert!(throws.as_ref().unwrap().prefetch_fails());
@@ -2116,9 +2025,10 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
             &stop_queries(0),
         )
         .map(drop),
-        batch_prefetch_stop(
+        batch_prefetch(
             &db,
             &run,
+            std::iter::empty(),
             [subject(other, &throws), subject(stop as u32, &parsed[stop])],
             "BLASTN",
             &stop_queries(0),
@@ -3279,7 +3189,10 @@ fn a_prefetch_with_a_failed_lookup_refuses_its_loads_of_the_cache_slot() {
         parsed[1]
             .clone()
             .found_instead(Some(crate::report::db_subject::FoundInstead::ThrowsOnId(
-                "Invalid choice selection".into(),
+                crate::ncbi_exception::NcbiException::new(
+                    crate::seqdb::isam::OBJECT_ID_GET_ID,
+                    "Invalid choice selection",
+                ),
             )));
     assert!(throws.prefetch_fails());
     let run = TaxdbRun::default();

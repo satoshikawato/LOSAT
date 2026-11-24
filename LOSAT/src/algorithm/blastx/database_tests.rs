@@ -204,7 +204,6 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
             crate::report::tabular::PrintedIds::default(),
             false,
             false,
-            false,
             usize::MAX,
             (crate::report::db_subject::FormatThrow::Unread, None, 0),
         )
@@ -282,7 +281,6 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
             crate::report::tabular::PrintedIds::default(),
             false,
             false,
-            false,
             usize::MAX,
             (crate::report::db_subject::FormatThrow::Unread, None, 0),
         )
@@ -307,7 +305,7 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
                     ),
                 ),
                 false,
-                false,
+                crate::algorithm::common::database::RowLookups::None,
                 None,
             )
             .unwrap();

@@ -147,11 +147,16 @@ pub enum FoundInstead {
     /// The lookup fails on a file of the database (`LookupFailure`): NCBI's formatters, and its
     /// prefetch, stop with the `CSeqDBException`.
     Failed(LookupFailure),
-    /// The lookup throws on the id itself before it reads a file (`SeqidLookup::throws_on_id`: a
-    /// `gnl|BL_ORD_ID|0` that makeblastdb stores with a text tag), with this message: NCBI's
-    /// formatters stop, its prefetch catches the exception with its warning
-    /// (`ParsedSubject::prefetch_fails`).
-    ThrowsOnId(String),
+    /// The lookup throws this exception on the id itself before it reads a file
+    /// (`SeqidLookup::throws_on_id`: a `gnl|PIG|abc` or `gnl|BL_ORD_ID|zz` that makeblastdb stores
+    /// with a text tag, `CObject_id::GetId`'s `CInvalidChoiceSelection`; a `gnl|ti|xyz`,
+    /// `NStr::StringToInt8`'s `CStringException`): NCBI's prefetch catches it with its warning
+    /// (`ParsedSubject::prefetch_fails`), which ends its loads, and its formatters, which then
+    /// load the batch's subjects one by one, meet it where they load the subject
+    /// (`ParsedSubject::lookup_throws`): each format writes it as where a lookup fails on a file
+    /// with the prefetch off (`FormatThrow`, `HitLoad::Throws`; line DBID pfoff-7), and a run that
+    /// it ends ends with `Error: ` and its `what()`, exit status 255 (`cli::NativeError::exception`).
+    ThrowsOnId(crate::ncbi_exception::NcbiException),
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:832-939 (cited at `ScopeWalk::load`)
@@ -397,6 +402,9 @@ struct ScopePlaces {
     exact: std::collections::HashMap<HandleKey, Vec<u32>>,
     taken: std::collections::HashMap<u64, Vec<u32>>,
     kinds: std::collections::HashMap<u64, Vec<u32>>,
+    /// The ranges of loads whose order among themselves LOSAT does not know (a failed prefetch's,
+    /// [`ScopeWalk::failed_prefetch`]).
+    unordered: Vec<std::ops::Range<u32>>,
 }
 
 impl ScopePlaces {
@@ -442,6 +450,24 @@ impl ScopePlaces {
         found.sort_unstable();
         found.dedup_by_key(|(at, _)| *at);
         found
+    }
+
+    /// The first of the loads `found` (of [`ScopePlaces::holders`]) as the scope's index gives it:
+    /// its sequence, `Unknown` where a load of another sequence in its unordered range
+    /// (`unordered`) holds the id too.
+    fn first_of(&self, found: &[(u32, ShownBy)]) -> Option<Resolved> {
+        let &(first, by) = found.first()?;
+        let sequence = self.sequence(first);
+        let tied = self.unordered.iter().find(|range| range.contains(&first));
+        if let Some(range) = tied {
+            if found
+                .iter()
+                .any(|&(at, _)| range.contains(&at) && self.sequence(at) != sequence)
+            {
+                return Some(Resolved::Unknown(Some(sequence), ShownBy::Order));
+            }
+        }
+        Some(Resolved::Blob(sequence, by))
     }
 
     /// The sequence of the load `at`.
@@ -896,8 +922,8 @@ impl ScopeWalk {
                     return found;
                 }
             }
-            if let Some(&(first, by)) = self.scope.holders(keys, exact).first() {
-                return Some(Resolved::Blob(self.scope.sequence(first), by));
+            if let Some(found) = self.scope.first_of(&self.scope.holders(keys, exact)) {
+                return Some(found);
             }
         }
         None
@@ -995,12 +1021,7 @@ impl ScopeWalk {
     /// that handle) registers its lines again and puts its Bioseq into the scope by the first
     /// line that holds the handle, where LOSAT holds its keys (the walk's or the record's).
     fn held_blob(&mut self, holder: DbSequence, handle: HandleKey) {
-        let loads = self.before.loads;
-        let keys = self.blobs.get(&holder.ordinal()).cloned().or_else(|| {
-            self.before
-                .read(|record| record.places.keys_of(holder, loads))
-        });
-        if let Some(keys) = keys {
+        if let Some(keys) = self.blob_of(holder) {
             if let Some(line) = keys.line_of(handle) {
                 self.load_blob(&keys, line);
             }
@@ -1173,6 +1194,100 @@ impl ScopeWalk {
             }
         }
         answers
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:756-788
+    // NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:1999-2070
+    // NCBI's prefetch loads the batch's blobs in `CSeq_id_Handle`'s order until the lookup that
+    // throws on the id, whose exception ends the bulk pass (caught with its warning): the blobs
+    // loaded before it have registered their lines; which ones those are LOSAT does not follow
+    // (the pass's pieces of 100 and 200 ids, line DBID pfoff-7).
+    /// The prefetch of a batch that fails at a subject whose lookup throws on the id
+    /// (`ParsedSubject::prefetch_fails`): each other subject of its reports, `subjects`, may have
+    /// been loaded before the failure, in an order that LOSAT does not follow, so each blob that
+    /// its load would give (the loader's registrant of its handle, else its lookup's) may have
+    /// registered its lines (a handle that such a blob and another sequence may hold last is not
+    /// sure afterwards) and entered the scope by the line of that load, where their order is not
+    /// known either (`ScopePlaces::unordered`). No id is resolved: the reports load each one by one.
+    pub fn failed_prefetch<'p>(
+        &mut self,
+        subjects: impl IntoIterator<Item = (usize, &'p ParsedSubject)> + Clone,
+    ) {
+        if let Some(other) = &mut self.other {
+            other.failed_prefetch(subjects.clone());
+        }
+        let blobs: Vec<(std::sync::Arc<BlobKeys>, usize)> = subjects
+            .into_iter()
+            .filter_map(|(_, subject)| self.first_blob(subject))
+            .collect();
+        let mut registered: std::collections::HashMap<HandleKey, Registrant> = Default::default();
+        for (keys, _) in &blobs {
+            let Some(sequence) = keys.sequence else {
+                continue;
+            };
+            self.blobs
+                .entry(sequence.ordinal())
+                .or_insert_with(|| keys.clone());
+            for &handle in keys.lines.iter().flat_map(|line| &line.handles) {
+                registered
+                    .entry(handle)
+                    .and_modify(|registrant| registrant.sure &= registrant.sequence == sequence)
+                    .or_insert(Registrant {
+                        sequence,
+                        sure: true,
+                        note: 0,
+                    });
+            }
+        }
+        for (handle, mut registrant) in registered {
+            if let Some(before) = self.registered(handle) {
+                registrant.sure &= before.sure && before.sequence == registrant.sequence;
+            }
+            self.registry.insert(handle, registrant);
+        }
+        let start = u32::try_from(self.scope.loads.len()).unwrap_or(u32::MAX);
+        for (keys, line) in &blobs {
+            self.scope.add(keys, *line);
+        }
+        let end = u32::try_from(self.scope.loads.len()).unwrap_or(u32::MAX);
+        if end > start + 1 {
+            self.scope.unordered.push(start..end);
+        }
+    }
+
+    /// The blob that a load of `subject` by the loader would give without the scope's index
+    /// ([`ScopeWalk::loader`] without its records): none where the scope's cache resolved its
+    /// Seq-align id, the blob of the sequence that the loader registered for its handle last (by
+    /// the first line that holds it), else its lookup's.
+    fn first_blob(&self, subject: &ParsedSubject) -> Option<(std::sync::Arc<BlobKeys>, usize)> {
+        let keys = subject.id_keys();
+        if let Some(handle) = keys.handle {
+            if self.cached(handle).is_some() {
+                return None;
+            }
+            if let Some(registrant) = self.registered(handle) {
+                let blob = match subject.mine(registrant.sequence) {
+                    true => Self::keys_as(subject, registrant.sequence),
+                    false => self.blob_of(registrant.sequence)?,
+                };
+                let line = blob.line_of(handle)?;
+                return Some((blob, line));
+            }
+        }
+        match subject.resolution.found {
+            Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_)) => None,
+            _ => subject.loaded_blob(),
+        }
+    }
+
+    /// The keys of the sequence `sequence` where LOSAT holds them (the walk's blobs, or a load of
+    /// the record's).
+    fn blob_of(&self, sequence: DbSequence) -> Option<std::sync::Arc<BlobKeys>> {
+        let loads = self.before.loads;
+        self.blobs.get(&sequence.ordinal()).cloned().or_else(|| {
+            self.before
+                .read(|record| record.places.keys_of(sequence, loads))
+        })
     }
 
     /// [`ScopeWalk::bulk`] of ids with one place in `CSeq_id_Handle`'s order but different handles
@@ -1407,6 +1522,20 @@ impl LookupFailure {
 impl std::fmt::Display for LookupFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&String::from_utf8_lossy(&self.message))
+    }
+}
+
+/// What NCBI does where it reads a subject whose lookup throws on the id itself
+/// (`FoundInstead::ThrowsOnId`), for the reason of LOSAT's refusal: its prefetch writes its warning
+/// and its formatters meet the exception where they load the subject, each format as where a
+/// lookup fails on a file with the prefetch off ([`LookupFailure::what_ncbi_does`]'s situation);
+/// where the run's formats refuse it (`refused`, [`FormatThrow::Refused`]), with the words of that
+/// situation ([`ThrowRefusal::words`]).
+fn throws_on_id_does(refused: Option<ThrowRefusal>) -> std::borrow::Cow<'static, str> {
+    const DOES: &str = "NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data, and its formatters fail to read it and stop or go on as each format does";
+    match refused {
+        Some(refused) => format!("{DOES}; {}", refused.words()).into(),
+        None => DOES.into(),
     }
 }
 
@@ -2005,13 +2134,17 @@ impl ParsedSubject {
     // outside any `catch` of the hit; the report function of outfmt 15 and 16 catches it, 13 and 14
     // end the program with it (probe of line DBID mixdb, `PU.off`; DECISIONS 62 (2)).
     /// The exception that NCBI's lookup of the Seq-align id throws where a formatter loads the
-    /// subject one by one (a batch whose prefetch is off): a lookup that fails on a file with
-    /// NCBI's `CSeqDBException` whose place LOSAT knows (`FoundInstead::Failed`,
-    /// `LookupFailure::exception`). Where the batch prefetches, its prefetch throws first and
-    /// stops the run (`prefetch_stops`).
+    /// subject one by one (a batch whose prefetch is off, or fails): a lookup that fails on a file
+    /// with NCBI's `CSeqDBException` whose place LOSAT knows (`FoundInstead::Failed`,
+    /// `LookupFailure::exception`; where the batch prefetches, its prefetch throws first and
+    /// stops the run, `prefetch_stops`), or one that throws on the id itself
+    /// (`FoundInstead::ThrowsOnId`, whose prefetch catches it, `prefetch_fails`). The one owner of
+    /// "the load by this id throws": the walk of the reports' loads (`HitLoads`) and every
+    /// writer's answer to it (`FormatThrow`) take it, whatever the cause.
     pub fn lookup_throws(&self) -> Option<crate::ncbi_exception::NcbiException> {
         match &self.resolution.found {
             Some(FoundInstead::Failed(failure)) => failure.exception(),
+            Some(FoundInstead::ThrowsOnId(exception)) => Some(exception.clone()),
             _ => None,
         }
     }
@@ -2099,8 +2232,10 @@ impl ParsedSubject {
                 "has the Seq-align id {id}, whose lookup in the database fails ({failure}; {})",
                 failure.what_ncbi_does(refused)
             ),
-            FoundInstead::ThrowsOnId(message) => format!(
-                "has the Seq-align id {id}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0 stops)"
+            FoundInstead::ThrowsOnId(exception) => format!(
+                "has the Seq-align id {id}, whose lookup in the database throws on the id itself ({}; {})",
+                String::from_utf8_lossy(exception.get_msg()),
+                throws_on_id_does(refused)
             ),
             FoundInstead::Nothing => format!(
                 "has the Seq-align id {id}, by which NCBI BLAST+'s formatters do not find the sequence (NCBI BLAST+ 2.17.0 writes Unknown or another sequence's names, or stops)"
@@ -2138,9 +2273,10 @@ impl ParsedSubject {
             // The prefetch catches the exception of a failed lookup and writes its warning, or
             // rethrows a database error (`CSeqDBException`) and stops; the formats that read the
             // Bioseq stop (`fetched`).
-            Some(FoundInstead::ThrowsOnId(message)) => Prefetched::Failed(format!(
-                "has the Seq-align id {}, whose lookup in the database fails ({message}; NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data, and a report that reads it stops)",
-                String::from_utf8_lossy(&self.alignment_fasta())
+            Some(FoundInstead::ThrowsOnId(exception)) => Prefetched::Failed(format!(
+                "has the Seq-align id {}, whose lookup in the database throws on the id itself ({}; NCBI BLAST+ 2.17.0's prefetch writes Error pre-fetching sequence data, and its later loads of the batch's subjects are made one by one)",
+                String::from_utf8_lossy(&self.alignment_fasta()),
+                String::from_utf8_lossy(exception.get_msg())
             )),
             Some(FoundInstead::Failed(failure)) => Prefetched::Failed(format!(
                 "has the Seq-align id {}, whose lookup in the database fails ({failure}; {})",
@@ -3887,15 +4023,22 @@ pub enum HitLoad {
 }
 
 /// How one query's report reads its subjects in [`HitLoads::of`]: whether its batch's prefetch is
-/// off, so that the report loads each subject where it reaches it (`one_by_one`,
-/// `common::database::BatchPrefetch::reads_one_by_one`), and the query batch whose scope it reads
-/// in (`batch`: a number that the program gives each query batch of the run, the same in its
-/// record, `common::database::TaxdbRun::loads_before`; `None` for a report read in the scope of the
-/// report before, as `From<bool>` makes it: one query batch).
+/// off or fails, so that the report loads each subject where it reaches it (`one_by_one`,
+/// `common::database::BatchPrefetch::loads_one_by_one`), the query batch whose scope it reads in
+/// (`batch`: a number that the program gives each query batch of the run, the same in its record,
+/// `common::database::TaxdbRun::loads_before`; `None` for a report read in the scope of the report
+/// before, as `From<bool>` makes it: one query batch), and whether the batch's prefetch ran and
+/// failed at a subject whose lookup throws on the id (`prefetch_fails`,
+/// `ParsedSubject::prefetch_fails`; `one_by_one` then holds too): the prefetch may have loaded
+/// each other subject of the batch before the failure, in an order that LOSAT does not follow
+/// (`common::database::batch_prefetch` refuses such a batch where a load writes a text), so the
+/// walk takes every subject of the batch's reports whose load does not throw as loaded before
+/// them, a superset of the loads that NCBI's scope may hold there (line DBID pfoff-7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReportRead {
     pub one_by_one: bool,
     pub batch: Option<usize>,
+    pub prefetch_fails: bool,
 }
 
 impl From<bool> for ReportRead {
@@ -3903,6 +4046,7 @@ impl From<bool> for ReportRead {
         ReportRead {
             one_by_one,
             batch: None,
+            prefetch_fails: false,
         }
     }
 }
@@ -3963,14 +4107,17 @@ impl HitLoads {
     ///   (`pairwise_report`); one whose batch prefetches gives its entries in any order.
     ///
     /// A batch whose prefetch runs loads every subject of its reports at once before them
-    /// ([`ScopeWalk::bulk`]; a lookup that throws stops the prefetch first,
-    /// `common::database::batch_prefetch`). A subject is loaded where some report loads it; one
-    /// that throws in a report throws in every report that reaches it. `run` (the run's answer,
-    /// [`FormatThrow::of_formats`]; `None` for `Unread`): where a format of the run refuses the
-    /// throw (`HitLoad::Refused`, with the reason), LOSAT does not know the order of the loads of
-    /// each format's NCBI run, so a subject is shown wherever another sequence loaded in the run
-    /// may stand for it ([`HitLoads::unordered`]); where no format reads the subjects, only the
-    /// batches' prefetch loads them.
+    /// ([`ScopeWalk::bulk`]; a lookup that fails on a file stops the prefetch first,
+    /// `common::database::batch_prefetch`); one whose prefetch fails at a lookup that throws on the
+    /// id (`ReportRead::prefetch_fails`) may have loaded each other subject of the batch before
+    /// the failure ([`ScopeWalk::failed_prefetch`]), and its reports then read one by one. A
+    /// subject is loaded where some report loads it; one that throws in a report throws in every
+    /// report that reaches it. `run` (the run's answer, [`FormatThrow::of_formats`]; `None` for
+    /// `Unread`): where a format of the run refuses the throw (`HitLoad::Refused`, with the
+    /// reason), LOSAT does not know the order of the loads of each format's NCBI run, so a subject
+    /// is shown wherever another sequence loaded in the run may stand for it
+    /// ([`HitLoads::unordered`]); where no format reads the subjects, only the batches' prefetch
+    /// loads them.
     ///
     /// NCBI's application ends at the report whose load ends the run (`CATCH_ALL`): no report,
     /// and no batch's prefetch, after it runs ([`HitLoads::reaches`]).
@@ -4019,6 +4166,17 @@ impl HitLoads {
         };
         let mut loaded = std::collections::HashSet::new();
         let mut passed = std::collections::HashSet::new();
+        // The subjects of the reports of each batch whose prefetch fails, which that prefetch may
+        // have loaded before its failure (`ReportRead::prefetch_fails`).
+        let mut failed_prefetches: std::collections::HashMap<Option<usize>, Vec<usize>> =
+            Default::default();
+        for (read, keys) in reports.iter().filter(|(read, _)| read.prefetch_fails) {
+            let subjects = failed_prefetches.entry(read.batch).or_default();
+            match keys {
+                ReportKeys::Entries(entries) => subjects.extend(entries.iter().flatten()),
+                ReportKeys::Pairwise(reads) => subjects.extend(reads.hits.iter().flatten()),
+            }
+        }
         // The reports given, of which the run reaches those before the first that comes after
         // its end (`reached`).
         let mut given = 0;
@@ -4030,6 +4188,21 @@ impl HitLoads {
             }
             given = report + 1;
             walk.enter(read.batch);
+            // The batch's prefetch, which the run reaches, may have loaded every subject of the
+            // batch whose load does not throw before it failed (`ScopeWalk::failed_prefetch`).
+            if let Some(prefetched) = failed_prefetches
+                .remove(&read.batch)
+                .filter(|_| read.prefetch_fails && !ended.get())
+            {
+                let keys: Vec<usize> = prefetched
+                    .into_iter()
+                    .filter(|&key| {
+                        parsed(key).is_none_or(|subject| subject.lookup_throws().is_none())
+                    })
+                    .collect();
+                walk.failed_prefetch(keys.iter().filter_map(|&key| Some((key, parsed(key)?))));
+                loaded.extend(keys);
+            }
             if !read.one_by_one {
                 // A batch's prefetch loads every subject of its reports before them, unless the
                 // run ended before.

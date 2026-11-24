@@ -1456,7 +1456,9 @@ no last separator, a GI past 2^32, `#`, empty, a bad count, missing at the absol
 `/losat-idlist-fixture-missing/none.txt`, two files in one value). The rows are `db.il.*` (every search program;
 `rps/ilmiss.pal` and `ilmissw.pal` over `rps_mini` with a missing GILIST) and blastdbcmd's cases A272-A366
 (`tests/blastdbcmd_alias_keys.rs`). `u_np101.txt`, `u_p10102.txt` and `u_np103.txt` are the searches' own
-`-seqidlist` files beside the alias files' lists.
+`-seqidlist` files beside the alias files' lists. `pw` and `nw` (version 4, line DBID pfoff-7) hold general ids whose
+lookups throw on the id itself (`gnl|PIG|abc`, `gnl|ti|xyz`, `gnl|BL_ORD_ID|zz`), for the rows `db.pfo.<program>.thr.*`
+with the queries `pwq.faa` and `pwq.fna`.
 
 ## Ungapped nucleotide databases (line NP, O4a-1)
 

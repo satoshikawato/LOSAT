@@ -578,7 +578,7 @@ impl PreparedXml {
                     // time (nothing for the other formats).
                     posts.hit(sink.position(), &hit, first as u32, |texts| {
                         if posting {
-                            taxdb_printer.at_names(first, names, texts)
+                            taxdb_printer.at_names(names, texts)
                         } else {
                             Ok(())
                         }

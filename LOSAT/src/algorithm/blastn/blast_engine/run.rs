@@ -9058,14 +9058,23 @@ fn run_in_pool(
                 && (taxdb_found || database.parsed_seqids())
             {
                 // A custom tabular report with a plural name looks every taxid of its rows up,
-                // taxid 0 too, which the prefetch does not: the rows of a batch with hits may open
-                // the taxonomy database before a later batch's prefetch
-                // (`TaxdbRun::open_for_rows`).
-                let plural_names = taxdb_found
-                    && matches!(
-                        output_formats.first(),
-                        Some(BlastnOutputFormat::CustomTabular(spec)) if spec.looks_up_every_taxid()
-                    );
+                // taxid 0 too, and the XML2 and JSON `Hit`s each taxid that is not 0, which the
+                // prefetch does not: the rows of a batch with hits may open the taxonomy database
+                // before a later batch's prefetch (`shared::RowLookups`).
+                let rows = if taxdb_found {
+                    crate::algorithm::common::database::RowLookups::of_first_format(
+                        outputs
+                            .formats
+                            .first()
+                            .and_then(crate::api::local_blast::FormatOutput::report_format),
+                        matches!(
+                            output_formats.first(),
+                            Some(BlastnOutputFormat::CustomTabular(spec)) if spec.looks_up_every_taxid()
+                        ),
+                    )
+                } else {
+                    crate::algorithm::common::database::RowLookups::None
+                };
                 // A query's own fetches where the batch's prefetch is off: the texts of the
                 // subjects its report reads, kept by subject where the first format writes them
                 // where it reads each (`ReportFormat::places_subject_reads`), else returned for the
@@ -9081,7 +9090,7 @@ fn run_in_pool(
                     run: &run_loads,
                     places: first_report
                         .is_some_and(crate::blastinput::app::ReportFormat::places_subject_reads),
-                    plural_names,
+                    rows,
                     pairwise: database::pairwise_reading(
                         &output_formats,
                         args.formatting.report_sort(),
@@ -9183,28 +9192,6 @@ fn run_in_pool(
                         })
                 };
                 Some(prefetch)
-            } else if output_formats
-                .first()
-                .is_some_and(|format| format.xml2_kind().is_some())
-                && database.parsed_seqids()
-            {
-                // The XML2 and JSON formats write the taxonomy texts at each `Hit`: of the
-                // batch's prefetch (where it is on and loads a sequence) only its stop
-                // (`BlastnDatabase::xml2_prefetch`, with NCBI's scope at the batch's prefetch as
-                // above).
-                database.xml2_prefetch(
-                    &titles,
-                    &hit_lists,
-                    &batch_spans,
-                    (
-                        run_loads.answer(),
-                        database::prefetch_format(&output_formats),
-                    ),
-                    &batch_hit_lists,
-                    !args.ungapped,
-                    &prefetch_queries,
-                    &mut query_reads[start..],
-                )
             } else {
                 None
             };

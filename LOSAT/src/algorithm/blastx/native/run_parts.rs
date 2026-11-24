@@ -288,7 +288,6 @@ impl ArchiveBatch<'_> {
                             crate::report::tabular::PrintedIds::default(),
                             false,
                             false,
-                            false,
                             usize::MAX,
                             (
                                 crate::report::db_subject::FormatThrow::Unread,

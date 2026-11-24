@@ -375,11 +375,6 @@ impl BlastnDatabase {
         shared::tabular_names(&self.db, &self.taxdb, spec, taxonomy, PROGRAM)
     }
 
-    /// The open of the taxonomy database by the rows of a query batch (`shared::TaxdbRun::open_for_rows`).
-    pub(super) fn open_for_tabular_rows(&self) -> Result<()> {
-        self.taxdb.open_for_rows(&self.db, PROGRAM)
-    }
-
     // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:222-234
     /// The IUPAC letters `[from, to)` of database sequence `ordinal` (outfmt 17 with `SQ`):
     /// only the bytes of the range are read, and the sequence's length and ambiguity runs are
@@ -522,9 +517,8 @@ impl BlastnDatabase {
     /// and JSON formats (`algorithm::common::database::read_reported_taxonomy`); the sequences
     /// of `hit_lists` with HSPs are the reported ones, of which those that the reports load
     /// (`loads`, `ReportedSubjects::loads`: the reads of a subject whose `Hit` throws, and of one
-    /// shown only after it, are never made, so the texts of opening the taxonomy database and of a
-    /// volume's first lookup of a taxid go to the loads that make them; review 1 of line DBID
-    /// pfoff-1, H1).
+    /// shown only after it, are never made; review 1 of line DBID pfoff-1, H1). The texts of the
+    /// loads are the batches' prefetches' or reads' (`QueryFetches`), modelled before this call.
     #[allow(clippy::type_complexity)]
     pub(super) fn read_taxids(
         &self,
@@ -598,7 +592,7 @@ impl BlastnDatabase {
         &self,
         titles: &DatabaseTitles,
         hit_lists: &[Option<BlastnHitList>],
-        rows_open: bool,
+        rows: shared::RowLookups,
         pairwise: Option<crate::report::pairwise::PairwiseReading>,
         loads: &HitLoads,
     ) -> Result<crate::report::query_warnings::QueryReads> {
@@ -625,42 +619,7 @@ impl BlastnDatabase {
             .into_iter()
             .filter(|&oid| loads.reached(oid as usize))
             .map(|oid| (oid, oid, parsed(oid)));
-        shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows_open, PROGRAM)
-    }
-
-    /// The XML2 and JSON formats, a batch of `hit_lists` (by query) whose prefetch is off: each
-    /// query's report's `Hit` loads (`shared::scope_utf8_hit_reads`, the subjects in the hit
-    /// list's order), into `reads` by query.
-    fn scope_utf8_hit_reads(
-        &self,
-        titles: &DatabaseTitles,
-        hit_lists: &[Option<BlastnHitList>],
-        after: Option<crate::report::db_subject::RunThrow>,
-        reads: &mut [crate::report::query_warnings::QueryReads],
-    ) {
-        if !self.db.scope_utf8_seen() {
-            return;
-        }
-        for (index, hit_list) in hit_lists.iter().enumerate() {
-            let subjects = hit_list.iter().flat_map(|hit_list| {
-                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                hit_list.hsplist_array[..count]
-                    .iter()
-                    .filter(|hsp_list| !hsp_list.hsps.is_empty())
-                    .map(|hsp_list| {
-                        let parsed = match titles.get(&hsp_list.oid) {
-                            Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
-                            _ => None,
-                        };
-                        (hsp_list.oid, hsp_list.oid, parsed)
-                    })
-            });
-            let query =
-                shared::scope_utf8_hit_reads(&self.db, &self.taxdb, after, subjects, PROGRAM);
-            if !query.is_empty() {
-                reads[index] = query;
-            }
-        }
+        shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows, PROGRAM)
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:307-308
@@ -693,63 +652,6 @@ impl BlastnDatabase {
             PROGRAM,
             queries,
         )
-    }
-
-    /// NCBI's prefetch of the query batch of `queries` whose final hit lists are `hit_lists`, for
-    /// the XML2 and JSON formats, which write the taxonomy texts at each `Hit`: where
-    /// `PRE_FETCH_SEQS_LIMIT` turns it off (`shared::prefetch_off`), the `Hit` loads of each
-    /// query's report (`scope_utf8_hit_reads`, into `reads`, by query of the batch) and `None`;
-    /// where it is on and loads a sequence (a batch with Seq-aligns), its stop
-    /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches
-    /// before, whose final hit lists are `before` (by ordinal id, as `hit_lists`; `spans`: the
-    /// queries of each of those batches, numbered from 0, as BLASTN holds them all; the reports
-    /// read every reported subject that they load: `hit_loads` of `batches_prefetch`, the reports'
-    /// own answer, which leaves out a subject whose `Hit` throws and one shown only after it, with
-    /// `after`; review 1 of line DBID pfoff-1, H1; review 2, N-M2), which BLASTN writes
-    /// after the stop (the XML formats are not streamed, `x_rpt_stream`). `Some(Ok)`: the warning
-    /// of a UTF8String header that a load of a batch that does not stop posts
-    /// (`shared::batch_prefetch_stop`), for the batch's prefetch posts.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn xml2_prefetch(
-        &self,
-        titles: &DatabaseTitles,
-        before: &[Option<BlastnHitList>],
-        spans: &[std::ops::Range<usize>],
-        (after, format): (
-            crate::report::db_subject::FormatThrow,
-            shared::PrefetchFormat,
-        ),
-        hit_lists: &[Option<BlastnHitList>],
-        gapped: bool,
-        queries: &shared::PrefetchQueries<'_>,
-        reads: &mut [crate::report::query_warnings::QueryReads],
-    ) -> Option<Result<crate::report::diag_log::Posts>> {
-        let seq_aligns = seq_aligns_of(hit_lists, gapped);
-        if shared::prefetch_off(format, seq_aligns) {
-            self.scope_utf8_hit_reads(titles, hit_lists, after.run(), reads);
-            return None;
-        }
-        (seq_aligns > 0).then(|| {
-            let prefetch = batches_prefetch(format, before, 0, spans, gapped);
-            let loads = hit_loads(
-                before,
-                &prefetch,
-                (after, None),
-                self.taxdb.calls_before(),
-                |ordinal| titled_parsed(titles, ordinal),
-            );
-            shared::held_batch_prefetch_stop(
-                &self.db,
-                &self.taxdb,
-                Self::prefetch_subjects(titles, before, gapped, SubjectFetch::Every)
-                    .filter(|subject| loads.loaded(subject.ordinal as usize)),
-                std::iter::empty(),
-                Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
-                PROGRAM,
-                queries,
-            )
-            .map(crate::report::diag_log::Posts::of_lines)
-        })
     }
 
     /// The run's record of the sequences that NCBI's BLAST database data loader loaded for a query
@@ -1823,21 +1725,33 @@ pub(super) fn seq_aligns_of(hit_lists: &[Option<BlastnHitList>], gapped: bool) -
 // results against `PRE_FETCH_SEQS_LIMIT`)
 /// Whether the batch of each query of `hit_lists` (final hit lists by query) prefetches
 /// (`shared::BatchPrefetch::of`): `batches` are the queries of each batch, numbered from `first`
-/// (the query of `hit_lists[0]`), and `seq_aligns_of` counts a batch's Seq-aligns (`gapped`). The
-/// one producer of the prefetch that the reports' loads read (`hit_loads`), for both of its
-/// readers: the stop of a later batch, of the batches before it
-/// (`BlastnDatabase::batch_prefetch_stop`), and the reports (`reported_subjects`), so the two
-/// cannot disagree on what the batches before loaded (review 2 of line DBID pfoff-1, N-M2).
+/// (the query of `hit_lists[0]`), `seq_aligns_of` counts a batch's Seq-aligns (`gapped`), and a
+/// batch's prefetch fails where one of its subjects' lookup throws on the id (`titles`). The one
+/// producer of the prefetch that the reports' loads read (`hit_loads`; `reported_subjects`).
 fn batches_prefetch(
     format: shared::PrefetchFormat,
-    hit_lists: &[Option<BlastnHitList>],
+    (hit_lists, titles): (&[Option<BlastnHitList>], &DatabaseTitles),
     first: usize,
     batches: &[std::ops::Range<usize>],
     gapped: bool,
 ) -> shared::BatchPrefetch {
-    shared::BatchPrefetch::of(format, hit_lists.len(), first, batches, |span| {
-        seq_aligns_of(&hit_lists[span], gapped)
-    })
+    shared::BatchPrefetch::of(
+        format,
+        hit_lists.len(),
+        first,
+        batches,
+        |span| seq_aligns_of(&hit_lists[span], gapped),
+        |span| {
+            shared::BatchPrefetch::prefetch_fails_among(
+                hit_lists[span]
+                    .iter()
+                    .flatten()
+                    .flat_map(|hit_list| hit_list.hsplist_array.iter())
+                    .filter(|hsp_list| !hsp_list.hsps.is_empty())
+                    .map(|hsp_list| titled_parsed(titles, hsp_list.oid as usize)),
+            )
+        },
+    )
 }
 
 /// The database sequences that the reports show, by rank (`reported_subjects`).
@@ -1951,6 +1865,7 @@ fn report_loads(
     let read = crate::report::db_subject::ReportRead {
         one_by_one: true,
         batch: before.batch(),
+        prefetch_fails: false,
     };
     run.loads(
         before,
@@ -1985,9 +1900,10 @@ pub(super) struct QueryFetches<'a> {
     /// Whether the first format writes the texts where it reads each subject
     /// (`ReportFormat::places_subject_reads`), else with the query's warnings.
     pub(super) places: bool,
-    /// Whether the first format is a table with a plural name, which looks every taxid of its
-    /// rows up, taxid 0 too (`TabularSpec::looks_up_every_taxid`), with `taxdb.bti` found.
-    pub(super) plural_names: bool,
+    /// Which rows of the first format look a taxid up themselves (`shared::RowLookups`: a table
+    /// with a plural name, `TabularSpec::looks_up_every_taxid`, or the XML2 and JSON `Hit`s), with
+    /// `taxdb.bti` found.
+    pub(super) rows: shared::RowLookups,
     /// How the run's pairwise reports read the subjects (`pairwise_reading`), for the loads.
     pub(super) pairwise: Option<crate::report::pairwise::PairwiseReading>,
     /// Whether the first format is a pairwise one, which places the texts in the order of its
@@ -1998,30 +1914,35 @@ pub(super) struct QueryFetches<'a> {
 }
 
 impl QueryFetches<'_> {
-    /// The open of the taxonomy database by the rows of `hit_lists` that look every taxid up
-    /// (`plural_names`, `BlastnDatabase::open_for_tabular_rows`): rows of a subject that the
-    /// reports load (`loads`; all of them where the batch's prefetch loads them, `None`). A row
-    /// whose load throws keeps the names of the rows before and looks nothing up (review 1 of
-    /// line DBID pfoff-2, H1).
+    /// The open of the taxonomy database by the rows of `hit_lists` that look a taxid up
+    /// (`rows`, `shared::RowLookups::open_after_prefetch`): rows of a subject that the reports load
+    /// (`loads`; all of them where the batch's prefetch loads them, `None`). A row whose load
+    /// throws keeps the names of the rows before and looks nothing up (review 1 of line DBID
+    /// pfoff-2, H1).
     pub(super) fn rows_open(
         &self,
         hit_lists: &[Option<BlastnHitList>],
         loads: Option<&HitLoads>,
     ) -> Result<()> {
-        let looks_up = |hsp_list: &BlastnHspList| {
+        let looks_up = |hsp_list: &&BlastnHspList| {
             loads.is_none_or(|loads| {
                 !hsp_list.hsps.is_empty() && loads.loaded(hsp_list.oid as usize)
             })
         };
-        if self.plural_names
-            && hit_lists
-                .iter()
-                .flatten()
-                .any(|hit_list| hit_list.hsplist_array.iter().any(looks_up))
-        {
-            self.database.open_for_tabular_rows()?;
-        }
-        Ok(())
+        let subjects = hit_lists
+            .iter()
+            .flatten()
+            .flat_map(|hit_list| &hit_list.hsplist_array)
+            .filter(looks_up)
+            .map(|hsp_list| {
+                let parsed = match self.titles.get(&hsp_list.oid) {
+                    Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
+                    _ => None,
+                };
+                (hsp_list.oid, parsed)
+            });
+        self.rows
+            .open_after_prefetch(&self.database.db, &self.database.taxdb, subjects, PROGRAM)
     }
 
     /// The fetches of each query of the batch whose final hit lists are `batch` (the query of
@@ -2051,7 +1972,7 @@ impl QueryFetches<'_> {
                         query_reads[first + index] = self.database.subject_read_texts(
                             self.titles,
                             shown,
-                            self.plural_names,
+                            self.rows,
                             self.pairwise.filter(|_| self.pairwise_first),
                             &loads,
                         )?;
@@ -2118,8 +2039,8 @@ pub(super) fn reports_unchanged_by_load_throws(output_formats: &[BlastnOutputFor
 
 /// What the reports of `hit_lists` (final hit lists by query, in the order of the reports; the
 /// subjects named by `key`, an ordinal id or a rank) do at each subject's `Hit` (`HitLoads::of`,
-/// the one answer): `prefetch` tells by query whether its batch reads one by one
-/// (`BatchPrefetch::reads_one_by_one`), `parsed` gives the subject with parsed Seq-ids of a
+/// the one answer): `prefetch` tells by query whether its batch loads one by one
+/// (`BatchPrefetch::report_read`), `parsed` gives the subject with parsed Seq-ids of a
 /// key; the `Hit`s are those that `blast_xml::write_blastn_xml` makes, or the pairwise reports'
 /// reads (`pairwise`: how they read them, `pairwise_keys`), after the loads `before`
 /// (`HitLoads::of`).
@@ -2227,7 +2148,7 @@ pub(super) fn reported_subjects(
     // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read
     // them one by one; `shared::BatchReads::shown`); where the prefetch fails, the batch writes
     // NCBI's warning (`BlastnDatabase::batch_prefetch`).
-    let prefetch = batches_prefetch(format, hit_lists, first_query, batches, gapped);
+    let prefetch = batches_prefetch(format, (hit_lists, titles), first_query, batches, gapped);
     let reads = prefetch.reads(
         hit_lists
             .iter()

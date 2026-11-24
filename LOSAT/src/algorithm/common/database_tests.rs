@@ -266,9 +266,15 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
     use crate::report::archive::options::RequestKind;
     let table = PrefetchFormat::of(6, RequestKind::Blastp);
     let of_format = |limit, format, first, batches: &[std::ops::Range<usize>]| {
-        let prefetch = BatchPrefetch::at(limit, format, counts.len(), first, batches, |span| {
-            counts[span].iter().sum()
-        });
+        let seq_aligns = |span: std::ops::Range<usize>| counts[span].iter().sum();
+        let prefetch = BatchPrefetch::at(
+            limit,
+            format,
+            counts.len(),
+            first,
+            batches,
+            (seq_aligns, |_| false),
+        );
         // A query of no batch (`None`, taken both ways) shows as `true`.
         (0..counts.len() + 1)
             .map(|query| prefetch.batch_of(query).unwrap_or(true))
@@ -349,7 +355,8 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
     // 7 in both batches, 8 in the first (3 Seq-aligns, on under limit 3), 9 in the second
     // (4, off), whose reports read it one by one (the walk's, `report::db_subject::ScopeWalk`).
     let sum = |span: std::ops::Range<usize>| counts[span].iter().sum();
-    let reads = BatchPrefetch::at(Some(3), table, 5, 0, &[0..2, 2..5], sum).reads([
+    let never = |_: std::ops::Range<usize>| false;
+    let reads = BatchPrefetch::at(Some(3), table, 5, 0, &[0..2, 2..5], (sum, never)).reads([
         (0, 7),
         (4, 7),
         (1, 8),
@@ -358,17 +365,54 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
     assert!(reads.prefetched(7));
     assert!(reads.prefetched(8));
     assert!(!reads.prefetched(9));
-    let every = BatchPrefetch::at(None, table, 5, 0, &[0..2, 2..5], sum).reads([(3, 9)]);
+    let every = BatchPrefetch::at(None, table, 5, 0, &[0..2, 2..5], (sum, never)).reads([(3, 9)]);
     assert!(every.prefetched(9));
-    let none = BatchPrefetch::at(Some(0), table, 5, 0, &[0..2, 2..5], sum).reads([(0, 7)]);
+    let none = BatchPrefetch::at(Some(0), table, 5, 0, &[0..2, 2..5], (sum, never)).reads([(0, 7)]);
     assert!(!none.prefetched(7));
     // Review 5 of line DBID pfoff-4, H3: psiblast's outfmt 8 reads its subjects one by one.
     let seq_annot = PrefetchFormat::of(8, RequestKind::Psiblast);
-    let annot = BatchPrefetch::at(None, seq_annot, 5, 0, &[0..2, 2..5], sum).reads([(3, 9)]);
+    let annot =
+        BatchPrefetch::at(None, seq_annot, 5, 0, &[0..2, 2..5], (sum, never)).reads([(3, 9)]);
     assert!(!annot.prefetched(9));
     // Review 1 M1: a query of no batch (5, beyond the call's 5) is taken both ways.
-    let beyond = BatchPrefetch::at(Some(3), table, 5, 0, &[0..2, 2..5], sum).reads([(5, 6)]);
+    let beyond =
+        BatchPrefetch::at(Some(3), table, 5, 0, &[0..2, 2..5], (sum, never)).reads([(5, 6)]);
     assert!(beyond.prefetched(6));
+    // Line DBID pfoff-7: a batch whose prefetch fails at a subject whose lookup throws on the id
+    // (the second, `2..5`) prefetches, and its reports load its subjects one by one after it; the
+    // reads whose texts its reports write stay the prefetch's. A batch whose prefetch is off is
+    // not asked.
+    let second = |span: std::ops::Range<usize>| span.start == 2;
+    let failing = BatchPrefetch::at(None, table, 5, 0, &[0..2, 2..5], (sum, second));
+    assert!(!failing.reads_one_by_one(3) && failing.loads_one_by_one(3));
+    assert!(!failing.loads_one_by_one(1));
+    assert_eq!(
+        (
+            failing.report_read(3, 0).one_by_one,
+            failing.report_read(3, 0).prefetch_fails
+        ),
+        (true, true)
+    );
+    assert_eq!(
+        (
+            failing.report_read(0, 0).one_by_one,
+            failing.report_read(0, 0).prefetch_fails
+        ),
+        (false, false)
+    );
+    let fails_reads = failing.reads([(0, 7), (4, 7), (1, 8), (3, 9)]);
+    assert!(fails_reads.prefetched(9));
+    assert!(fails_reads.prefetched(8));
+    assert!(fails_reads.prefetched(7));
+    let off = BatchPrefetch::at(
+        Some(0),
+        table,
+        5,
+        0,
+        &[0..2, 2..5],
+        (sum, |_| unreachable!()),
+    );
+    assert!(off.loads_one_by_one(3) && !off.report_read(3, 0).prefetch_fails);
     let shown = ParsedShown {
         prefetched: true,
         ..ParsedShown::default()

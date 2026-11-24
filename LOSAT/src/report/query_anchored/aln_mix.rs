@@ -40,8 +40,9 @@
 //! writes through that null row (`MixError::NcbiNullSecondRow`). The matches of two rows come
 //! first (`SortByScore`), so where one of them throws, that exception is NCBI's end; `Build`
 //! comes after `x_Merge`, and where a segment's start on a row lies behind that row's walk at its
-//! end, NCBI reads past the end of the row's starts (`MixError::NcbiReadsPastEnd`).
-//! `super::write_unreadable_section` refuses each of them.
+//! end, NCBI reads past the end of the row's starts (`MixError::NcbiReadsPastEnd`); a match whose
+//! walk on its query row finds the next start before its own position takes a length below zero
+//! (`MixError::NcbiWrapsLength`). `super::write_unreadable_section` refuses each of them.
 //!
 //! Strands and widths (lines RG T3b and T3c). A row's strand is set where it gets its first start.
 //! The query's (the refseq of the first pass) is plus with `fPreserveRows`
@@ -182,6 +183,17 @@ pub(crate) enum MixError {
     /// the width 3 whose letters are a protein's gets there (module doc);
     /// `super::write_unreadable_section` refuses the report there.
     NcbiReadsPastEnd,
+    /// NCBI computes a segment's length below zero: the walk of a match over the starts of its
+    /// first row (`Mix::place`, a new segment before `start_i`) finds `start_i` before its own
+    /// position, and the new segment's length, the unsigned distance from the walk's position to
+    /// `start_i`'s start in letters of the row, wraps to near 2^32 / width1. With the widths 3 and 1, NCBI then goes on from 0, 1 or 2 positions before
+    /// `start_i` by the wrap's remainder: where that is not `start_i`'s own start, each later turn
+    /// of the walk stores a segment of length 0 there and never moves (NCBI runs forever), else it
+    /// goes on with lengths near 2^32. Neither is a checkable result, so it is an NCBI failure
+    /// (found by the random HSP sets of `super::tests_ps15b2`; no search of the corpora met it).
+    /// Only a query read at the width 3 whose letters are a protein's gets there (module doc);
+    /// `super::write_unreadable_section` refuses the report there.
+    NcbiWrapsLength,
 }
 
 /// NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnseq.hpp:139-185
@@ -682,6 +694,9 @@ impl Mix {
                     }
                     let tmp_key = tmp_start_i.expect("the new start");
                     let seg_len = match start_i {
+                        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:665-678
+                        // (`start_i` before `start`: `MixError::NcbiWrapsLength`.)
+                        Some(key) if key < start => return Err(MixError::NcbiWrapsLength),
                         Some(key) if start + curr_len * width1 > key => (key - start) / width1,
                         _ => {
                             // `hi_start_i` takes `start_i` and steps back by one unless it is

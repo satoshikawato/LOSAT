@@ -7,7 +7,7 @@
 //! starts (`MixError::NcbiReadsPastEnd`), with SIGSEGV where a query letter against a gap of the
 //! subject opens a row of its own (`MixError::NcbiNullSecondRow`), and with a read of freed memory
 //! where `FillUnalignedRegions` replaces the last reference to a listed segment
-//! (`MixError::NcbiFreesSegment`). Each expectation is NCBI's own run: the rows are NCBI's `-outfmt
+//! (`MixError::NcbiFreesSegment`); a length below zero (`MixError::NcbiWrapsLength`) is refused. Each expectation is NCBI's own run: the rows are NCBI's `-outfmt
 //! "6 sseqid qstart sstart btop"` rows (from the PSSM's molecule `aa` twin, whose search is the
 //! same), in their order, subjects numbered in order of first appearance, of psiblast with the
 //! review kit's molecule `other` PSSMs
@@ -378,15 +378,41 @@ fn a_fill_that_frees_a_listed_segment_is_refused() {
     assert_eq!(section(&hsps), Err(MergeFailure::Freed));
 }
 
+/// Case 2890 of `random_sections_end_as_ncbis_merge_can`: a match's walk on its query row finds
+/// the next start before its own position, where NCBI's length of the new segment wraps (no NCBI
+/// run: NCBI then runs forever or goes on with lengths near 2^32).
+#[test]
+fn a_length_below_zero_is_refused() {
+    let hsps = unreadable(&[
+        (0, 115, 77, "36A-3"),
+        (0, 120, 69, "10-A-A-A29A-18A-A-A-A-29"),
+        (1, 116, 150, "23"),
+        (1, 8, 4, "9"),
+        (1, 65, 4, "38-A-A32"),
+        (2, 46, 1, "4A-A-4A-18-A-A-A-A12"),
+        (2, 116, 109, "9-A-A-A-A11"),
+        (3, 102, 126, "24-A-A-A-A33A-A-A-13"),
+        (3, 4, 67, "39"),
+        (3, 116, 89, "15A-35A-5A-A-A-A-39"),
+    ]);
+    let merged = merge_groups(&hsps);
+    assert!(
+        matches!(merged, Err(aln_mix::MixError::NcbiWrapsLength)),
+        "{:?}",
+        merged.err()
+    );
+    assert_eq!(section(&hsps), Err(MergeFailure::Wraps));
+}
+
 #[test]
 fn random_sections_end_as_ncbis_merge_can() {
     // Each merge of the HSPs that a search can give such a query returns (a line feed) or ends as
     // NCBI's does: never at a LOSAT internal error or a panic. 1 to 4 subjects of 1 to 3 HSPs
     // each, anywhere on the first 150 letters of the query and the subject.
     let mut cases = Cases(0x5eed_0015_b2f1_0001);
-    let mut ends = [0usize; 4];
+    let mut ends = [0usize; 5];
     let mut unexpected = Vec::new();
-    for case in 0..4000 {
+    for case in 0..40_000 {
         let mut hsps = Vec::new();
         for subject in 0..1 + cases.below(4) {
             for _ in 0..1 + cases.below(3) {
@@ -415,6 +441,7 @@ fn random_sections_end_as_ncbis_merge_can() {
                 Some(MergeFailure::Exception) => 1,
                 Some(MergeFailure::Crash) => 2,
                 Some(MergeFailure::Freed) => 3,
+                Some(MergeFailure::Wraps) => 4,
                 None => {
                     unexpected.push(format!("case {case}: {rows:?}: {error}"));
                     continue;
@@ -428,7 +455,7 @@ fn random_sections_end_as_ncbis_merge_can() {
         ends[end] += 1;
     }
     // Every case ends as one of NCBI's ends, and each end is met (line feed, exception, crash,
-    // freed memory).
+    // freed memory, a length below zero).
     assert!(
         unexpected.is_empty(),
         "{} cases: {:?}",

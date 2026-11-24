@@ -65,23 +65,19 @@ fn dependencies(xml: &str) -> Vec<(String, String)> {
 
 // The arguments of NCBI's XML, which NCBI's reader reads (its tables are made from the XML), and
 // those that the programs' options read are one table (line RG DECISIONS K4i-2b-2 (2), item
-// K4i-3c): each argument of the XML is read into the options under its name, as a key or a flag
-// as the XML says, or refused by name after the read (`Refusal::Read`, never read); the options
-// read no other argument. The XML that `-xmlhelp` prints keeps exactly the arguments not refused
-// (by name or at the run, `Refusal::Run`).
+// K4i-3c): each argument of the XML is read into the options under its name, or refused by name
+// after the read (`Refusal::Read`, never read); the options read no other argument. Each read is
+// of the argument's kind in the tables, a key or a flag as the XML says (the debug check of
+// `Args::check_read`, on in the tests). The XML that `-xmlhelp` prints keeps exactly the arguments
+// not refused (by name or at the run, `Refusal::Run`).
 #[test]
 fn the_xml_names_are_the_arguments_that_the_options_read() {
     for program in READER_PROGRAMS {
         let xml = xml_help_text(program).unwrap();
         let tool = crate::cli::reader::tool(program).unwrap();
         let read = crate::cli::reader::options_tests::names_read(tool);
-        let kind = |name: &str| {
-            crate::ncbi_app::args::described(tool)
-                .find(|arg| arg.name == name)
-                .map(|arg| arg.kind)
-        };
         let names = ncbi_argument_names(program);
-        for &(name, flag) in &names {
+        for &(name, _) in &names {
             let kept = has_argument(&xml, name);
             if READ_BEFORE_OR_HELP.contains(&name) || name == "xmlhelp" || name == "help-full" {
                 assert!(kept, "{program} -{name}");
@@ -90,13 +86,6 @@ fn the_xml_names_are_the_arguments_that_the_options_read() {
             let row = refusal(program, name);
             let by_name = matches!(row, Some(Refusal::Read(_)));
             assert_eq!(read.contains(name), !by_name, "{program} -{name}");
-            if read.contains(name) {
-                assert_eq!(
-                    kind(name) == Some(crate::ncbi_app::args::Kind::Flag),
-                    flag,
-                    "{program} -{name}: a key of the XML is a key of the options"
-                );
-            }
             assert_eq!(kept, row.is_none(), "{program} -{name}");
         }
         // The options read nothing that the reader does not read (the hooks of LOSAT Web are no

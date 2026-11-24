@@ -1,34 +1,122 @@
-# LOSAT's top level before line RG item K4i-3c (clap's), frozen by src/cli/top_level_tests.rs: name, exit
-# status, stream, text (@help for help.txt, @version, or the text with \n), words ('' empty, \xff a byte).
-none	2	stderr	@help	
-h	0	stdout	@help	-h
-help	0	stdout	@help	-help
-dashdash_help	0	stdout	@help	--help
-version	0	stdout	@version	--version
-capital_v	2	stderr	error: unknown option or argument '-V'; use -help to list the options\n	-V
-dash_version	2	stderr	error: unknown option or argument '-version'; use -help to list the options\n	-version
-help_word	2	stderr	error: unknown option or argument 'help'; use -help to list the options\n	help
-help_word_blastn	2	stderr	error: unknown option or argument 'help'; use -help to list the options\n	help blastn
-unknown_word	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	nosuch
-unknown_flag	2	stderr	error: unknown option or argument '-x'; use -help to list the options\n	-x
-unknown_long	2	stderr	error: unknown option or argument '--nosuch'; use -help to list the options\n	--nosuch
-h_blastn	0	stdout	@help	-h blastn
-help_blastn_h	0	stdout	@help	-help blastn -h
-dashdash_help_blastn	0	stdout	@help	--help blastn
-version_blastn	0	stdout	@version	--version blastn
-help_version	0	stdout	@help	-help --version
-version_h	0	stdout	@version	--version -h
-version_version	0	stdout	@version	--version --version
-h_h	0	stdout	@help	-h -h
-h_help	0	stdout	@help	-h --help
-help_unknown	0	stdout	@help	--help nosuch
-h_unknown_flag	0	stdout	@help	-h -x
-dashdash	2	stderr	error: unknown option or argument '--'; use -help to list the options\n	-- blastn
-dash	2	stderr	error: unknown option or argument '-'; use -help to list the options\n	-
-empty	2	stderr	error: unknown option or argument ''; use -help to list the options\n	''
-help_full	2	stderr	error: unknown option or argument '-help-full'; use -help to list the options\n	-help-full
-help_eq	2	stderr	error: unknown option or argument '--help=x'; use -help to list the options\n	--help=x
-version_eq	2	stderr	error: unknown option or argument '--version=1'; use -help to list the options\n	--version=1
-upper_blastn	2	stderr	error: unknown option or argument 'BLASTN'; use -help to list the options\n	BLASTN
-not_utf8	2	stderr	error: unknown option or argument 'a�b'; use -help to list the options\n	a\xffb
-not_utf8_after_h	0	stdout	@help	-h a\xffb
+# LOSAT's top level before line RG item K4i-3c (clap's), frozen by src/cli/top_level_tests.rs from the
+# release build of dev 2cd5a1906 (2026-11-24), run with each argv[0] (a copy named losat.exe and mylosat,
+# a link x/y/mylosat, and argc 0 for `(none)`). Columns: name, os (`-` every platform, `unix`, `windows`),
+# exit status, stream, text (`@help NAME` for help.txt with its usage line naming NAME, `@version`, or the
+# text with \n), argv[0] (`(none)` for an empty argv), words ('' an empty word, \xff a byte; the words
+# are separated by spaces). The `windows` rows follow from the same rule: the file name of argv[0] on
+# Windows, where `\` separates its parts.
+none	-	2	stderr	@help losat	losat	
+h	-	0	stdout	@help losat	losat	-h
+help	-	0	stdout	@help losat	losat	-help
+dashdash_help	-	0	stdout	@help losat	losat	--help
+version	-	0	stdout	@version	losat	--version
+capital_v	-	2	stderr	error: unknown option or argument '-V'; use -help to list the options\n	losat	-V
+dash_version	-	2	stderr	error: unknown option or argument '-version'; use -help to list the options\n	losat	-version
+help_word	-	2	stderr	error: unknown option or argument 'help'; use -help to list the options\n	losat	help
+help_word_blastn	-	2	stderr	error: unknown option or argument 'help'; use -help to list the options\n	losat	help blastn
+unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	losat	nosuch
+unknown_flag	-	2	stderr	error: unknown option or argument '-x'; use -help to list the options\n	losat	-x
+unknown_long	-	2	stderr	error: unknown option or argument '--nosuch'; use -help to list the options\n	losat	--nosuch
+h_blastn	-	0	stdout	@help losat	losat	-h blastn
+help_blastn_h	-	0	stdout	@help losat	losat	-help blastn -h
+dashdash_help_blastn	-	0	stdout	@help losat	losat	--help blastn
+version_blastn	-	0	stdout	@version	losat	--version blastn
+help_version	-	0	stdout	@help losat	losat	-help --version
+version_h	-	0	stdout	@version	losat	--version -h
+version_version	-	0	stdout	@version	losat	--version --version
+h_h	-	0	stdout	@help losat	losat	-h -h
+h_help	-	0	stdout	@help losat	losat	-h --help
+help_unknown	-	0	stdout	@help losat	losat	--help nosuch
+h_unknown_flag	-	0	stdout	@help losat	losat	-h -x
+dashdash	-	2	stderr	error: unknown option or argument '--'; use -help to list the options\n	losat	-- blastn
+dash	-	2	stderr	error: unknown option or argument '-'; use -help to list the options\n	losat	-
+empty	-	2	stderr	error: unknown option or argument ''; use -help to list the options\n	losat	''
+help_full	-	2	stderr	error: unknown option or argument '-help-full'; use -help to list the options\n	losat	-help-full
+help_eq	-	2	stderr	error: unknown option or argument '--help=x'; use -help to list the options\n	losat	--help=x
+version_eq	-	2	stderr	error: unknown option or argument '--version=1'; use -help to list the options\n	losat	--version=1
+upper_blastn	-	2	stderr	error: unknown option or argument 'BLASTN'; use -help to list the options\n	losat	BLASTN
+not_utf8	-	2	stderr	error: unknown option or argument 'a�b'; use -help to list the options\n	losat	a\xffb
+not_utf8_after_h	-	0	stdout	@help losat	losat	-h a\xffb
+exe_none	-	2	stderr	@help losat.exe	losat.exe	
+exe_h	-	0	stdout	@help losat.exe	losat.exe	-h
+exe_help	-	0	stdout	@help losat.exe	losat.exe	-help
+exe_dashdash_help	-	0	stdout	@help losat.exe	losat.exe	--help
+exe_version	-	0	stdout	@version	losat.exe	--version
+exe_unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	losat.exe	nosuch
+dot_exe_none	-	2	stderr	@help losat.exe	./losat.exe	
+dot_exe_h	-	0	stdout	@help losat.exe	./losat.exe	-h
+dot_exe_help	-	0	stdout	@help losat.exe	./losat.exe	-help
+dot_exe_dashdash_help	-	0	stdout	@help losat.exe	./losat.exe	--help
+dot_exe_version	-	0	stdout	@version	./losat.exe	--version
+dot_exe_unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	./losat.exe	nosuch
+renamed_none	-	2	stderr	@help mylosat	mylosat	
+renamed_h	-	0	stdout	@help mylosat	mylosat	-h
+renamed_help	-	0	stdout	@help mylosat	mylosat	-help
+renamed_dashdash_help	-	0	stdout	@help mylosat	mylosat	--help
+renamed_version	-	0	stdout	@version	mylosat	--version
+renamed_unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	mylosat	nosuch
+link_none	-	2	stderr	@help mylosat	x/y/mylosat	
+link_h	-	0	stdout	@help mylosat	x/y/mylosat	-h
+link_help	-	0	stdout	@help mylosat	x/y/mylosat	-help
+link_dashdash_help	-	0	stdout	@help mylosat	x/y/mylosat	--help
+link_version	-	0	stdout	@version	x/y/mylosat	--version
+link_unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	x/y/mylosat	nosuch
+abs_link_none	-	2	stderr	@help mylosat	/usr/local/bin/mylosat	
+abs_link_h	-	0	stdout	@help mylosat	/usr/local/bin/mylosat	-h
+abs_link_help	-	0	stdout	@help mylosat	/usr/local/bin/mylosat	-help
+abs_link_dashdash_help	-	0	stdout	@help mylosat	/usr/local/bin/mylosat	--help
+abs_link_version	-	0	stdout	@version	/usr/local/bin/mylosat	--version
+abs_link_unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	/usr/local/bin/mylosat	nosuch
+bad_dir_none	-	2	stderr	@help mylosat	\xff/mylosat	
+bad_dir_h	-	0	stdout	@help mylosat	\xff/mylosat	-h
+bad_dir_help	-	0	stdout	@help mylosat	\xff/mylosat	-help
+bad_dir_dashdash_help	-	0	stdout	@help mylosat	\xff/mylosat	--help
+bad_dir_version	-	0	stdout	@version	\xff/mylosat	--version
+bad_dir_unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	\xff/mylosat	nosuch
+bad_name_none	-	2	stderr	@help losat	x/\xffy	
+bad_name_h	-	0	stdout	@help losat	x/\xffy	-h
+bad_name_help	-	0	stdout	@help losat	x/\xffy	-help
+bad_name_dashdash_help	-	0	stdout	@help losat	x/\xffy	--help
+bad_name_version	-	0	stdout	@version	x/\xffy	--version
+bad_name_unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	x/\xffy	nosuch
+empty_argv0_none	-	2	stderr	@help losat	''	
+empty_argv0_h	-	0	stdout	@help losat	''	-h
+empty_argv0_help	-	0	stdout	@help losat	''	-help
+empty_argv0_dashdash_help	-	0	stdout	@help losat	''	--help
+empty_argv0_version	-	0	stdout	@version	''	--version
+empty_argv0_unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	''	nosuch
+root_none	-	2	stderr	@help losat	/	
+root_h	-	0	stdout	@help losat	/	-h
+root_help	-	0	stdout	@help losat	/	-help
+root_dashdash_help	-	0	stdout	@help losat	/	--help
+root_version	-	0	stdout	@version	/	--version
+root_unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	/	nosuch
+dotdot_none	-	2	stderr	@help losat	x/..	
+dotdot_h	-	0	stdout	@help losat	x/..	-h
+dotdot_help	-	0	stdout	@help losat	x/..	-help
+dotdot_dashdash_help	-	0	stdout	@help losat	x/..	--help
+dotdot_version	-	0	stdout	@version	x/..	--version
+dotdot_unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	x/..	nosuch
+backslash_none	unix	2	stderr	@help C:\x\losat.exe	C:\x\losat.exe	
+backslash_none_windows	windows	2	stderr	@help losat.exe	C:\x\losat.exe	
+backslash_h	unix	0	stdout	@help C:\x\losat.exe	C:\x\losat.exe	-h
+backslash_h_windows	windows	0	stdout	@help losat.exe	C:\x\losat.exe	-h
+backslash_help	unix	0	stdout	@help C:\x\losat.exe	C:\x\losat.exe	-help
+backslash_help_windows	windows	0	stdout	@help losat.exe	C:\x\losat.exe	-help
+backslash_dashdash_help	unix	0	stdout	@help C:\x\losat.exe	C:\x\losat.exe	--help
+backslash_dashdash_help_windows	windows	0	stdout	@help losat.exe	C:\x\losat.exe	--help
+backslash_version	-	0	stdout	@version	C:\x\losat.exe	--version
+backslash_unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	C:\x\losat.exe	nosuch
+long_none	-	2	stderr	@help aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	x/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	
+long_h	-	0	stdout	@help aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	x/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	-h
+long_help	-	0	stdout	@help aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	x/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	-help
+long_dashdash_help	-	0	stdout	@help aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	x/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	--help
+long_version	-	0	stdout	@version	x/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	--version
+long_unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	x/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	nosuch
+spaced_none	-	2	stderr	@help my losat	my losat	
+spaced_h	-	0	stdout	@help my losat	my losat	-h
+spaced_help	-	0	stdout	@help my losat	my losat	-help
+spaced_dashdash_help	-	0	stdout	@help my losat	my losat	--help
+spaced_version	-	0	stdout	@version	my losat	--version
+spaced_unknown_word	-	2	stderr	error: unknown option or argument 'nosuch'; use -help to list the options\n	my losat	nosuch
+no_argv	-	2	stderr	@help losat	(none)	

@@ -153,7 +153,7 @@ fn entry_program_description(name: &str) -> &'static str {
 }
 
 /// The `after_help` of the top level: the programs that `losat NAME` runs and `Commands` does not
-/// list (derived from `ENTRY_NAMES` and `PROGRAMS`, so that a new name shows up), and the shims.
+/// list (derived from `ENTRY_NAMES` and `is_program`, so that a new name shows up), and the shims.
 /// No NCBI counterpart.
 fn top_level_after_help() -> &'static str {
     static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -197,9 +197,9 @@ impl Cli {
     }
 }
 
-/// The options of the program that a command line runs, one variant for each program of
-/// `PROGRAMS`, in its order: each read from NCBI's arguments by its type's `from_args`
-/// (`reader::options`, line RG DECISIONS K4i-3-1).
+/// The options of the program that a command line runs, one variant for each program on the
+/// reader's table (`reader::tool`), in its order: each read from NCBI's arguments by its type's
+/// `from_args` (`reader::options`, line RG DECISIONS K4i-3-1).
 #[derive(Debug, Clone)]
 pub enum Commands {
     Blastx(blastx::BlastxArgs),
@@ -293,13 +293,13 @@ pub(crate) struct TopLevel {
 pub(crate) fn top_level(argv: &[OsString]) -> TopLevel {
     let Some(first) = argv.get(1) else {
         return TopLevel {
-            text: top_level_help(),
+            text: top_level_help(usage_name(argv)),
             error: true,
             status: 2,
         };
     };
     let (text, error) = match first.to_str() {
-        Some("-h" | "-help" | "--help") => (top_level_help(), false),
+        Some("-h" | "-help" | "--help") => (top_level_help(usage_name(argv)), false),
         Some("--version") => (format!("losat {}\n", env!("CARGO_PKG_VERSION")), false),
         _ => (
             format!(
@@ -316,8 +316,9 @@ pub(crate) fn top_level(argv: &[OsString]) -> TopLevel {
     }
 }
 
-/// The programs whose options are LOSAT's types (`Commands`), in the order of its variants, each
-/// with what the top level's help says of it.
+/// What the top level's help says of each program whose options are LOSAT's types: the programs on
+/// the reader's table (`reader::tool`), in its order
+/// (`reader::options_tests::one_list_of_programs`).
 const PROGRAMS: [(&str, &str); 10] = [
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
     (
@@ -362,27 +363,28 @@ const PROGRAMS: [(&str, &str); 10] = [
     ),
 ];
 
-/// Whether `name` is a program whose options are LOSAT's types (`PROGRAMS`, `Commands`).
+/// Whether `name` is a program whose options are LOSAT's types (`Commands`): one on the reader's
+/// table (`reader::tool`).
 pub(crate) fn is_program(name: &str) -> bool {
-    PROGRAMS.iter().any(|(program, _)| *program == name)
+    reader::tool(name).is_some()
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:3815-3826
 // The help opens with NCBI's two headings, `USAGE` and `DESCRIPTION`: tools that call BLAST+ look
 // for them (BRIG takes a `blastn -help` that prints `USAGE` as BLAST+ found).
-/// The top level's help: its usage, its description, the programs (`PROGRAMS`, and a `help` that
-/// the top level of LOSAT 0.2.0 listed), its two flags, and the other programs and the shims
-/// (`top_level_after_help`).
-fn top_level_help() -> String {
+/// The top level's help, whose usage names the executable `executable` (`usage_name`): its usage,
+/// its description, the programs (`PROGRAMS`, and a `help` that the top level of LOSAT 0.2.0
+/// listed), its two flags, and the other programs and the shims (`top_level_after_help`).
+fn top_level_help(executable: &str) -> String {
     const HELP: (&str, &str) = (
         "help",
         "Print this message or the help of the given subcommand(s)",
     );
     let listed = || PROGRAMS.iter().chain([&HELP]);
     let width = listed().map(|(name, _)| name.len()).max().unwrap_or(0);
-    let mut text = String::from(
-        "USAGE\n  losat <COMMAND>\n\nDESCRIPTION\n   Pure-Rust pairwise alignment that matches NCBI \
-         BLAST+ on LOSAT's test fixtures, with genetic-code exceptions\n\nCommands:\n",
+    let mut text = format!(
+        "USAGE\n  {executable} <COMMAND>\n\nDESCRIPTION\n   Pure-Rust pairwise alignment that \
+         matches NCBI BLAST+ on LOSAT's test fixtures, with genetic-code exceptions\n\nCommands:\n",
     );
     for (name, about) in listed() {
         text += &format!("  {name:<width$}  {about}\n");
@@ -391,6 +393,18 @@ fn top_level_help() -> String {
     text += top_level_after_help();
     text.push('\n');
     text
+}
+
+// No NCBI counterpart: the name that the top level of LOSAT 0.2.0 wrote, frozen in
+// `top_level_tests` for each form of `argv[0]`.
+/// The name that the top level's usage gives the executable: the file name of `argv[0]`, as it was
+/// called (`losat.exe`, the name of a link), when `argv[0]` has one that is UTF-8; else `losat`
+/// (no `argv[0]`, an empty one, `/`, a file name that is not UTF-8).
+fn usage_name(argv: &[OsString]) -> &str {
+    argv.first()
+        .and_then(|argv0| std::path::Path::new(argv0).file_name())
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("losat")
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270
@@ -442,7 +456,7 @@ where
     S: Into<OsString>,
 {
     let tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
-    // A program's name (`PROGRAMS`).
+    // A program's name (`is_program`).
     let name = tokens.get(1)?.to_str().filter(|word| is_program(word))?;
     // NCBI's reading of the words before the arguments (`ncbi_environment::preparse`): not
     // after `--`, nor as the value of `-logfile` or `-conffile` (`blastn -logfile -version`

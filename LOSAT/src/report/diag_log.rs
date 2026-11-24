@@ -276,14 +276,15 @@ pub struct DiagLog {
 }
 
 impl DiagLog {
-    /// Saves the lines that `bytes` complete as warnings (a line of standard error is a
-    /// warning or reader message; the error lines of an aborted run are posted with
-    /// `post`).
+    /// Saves the lines that `bytes` complete, each of the severity that its header shows
+    /// (`line_severity`: a line of standard error is a warning or reader message, or the one-line
+    /// error of a load, such as the taxonomy database's; the error lines of an aborted run are
+    /// posted with `post`).
     pub fn feed(&mut self, bytes: &[u8]) {
         for &byte in bytes {
             if byte == b'\n' {
                 let line = std::mem::take(&mut self.line);
-                self.post(WARNING, &line);
+                self.post(line_severity(&line), &line);
             } else {
                 self.line.push(byte);
             }
@@ -313,6 +314,22 @@ impl DiagLog {
     /// Whether no message is waiting for an archive.
     pub fn is_empty(&self) -> bool {
         self.saved.is_empty()
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:4017-4018, 5835-5844
+/// The severity of a one-line post by the header that NCBI's diagnostics write before its text,
+/// the severity's name and `:` (`Error: [psiblast] Error: Tax database file has wrong magic
+/// number.`, a load's lookup of the taxonomy database, NCBI BLAST+ 2.17.0 psiblast `-outfmt 11`:
+/// `code 2`; `Warning: (803.10) [blastp] ...`); a line without such a header (a reader's message)
+/// is a warning.
+fn line_severity(line: &[u8]) -> i32 {
+    if line.starts_with(b"Error: ") {
+        ERROR
+    } else if line.starts_with(b"Critical: ") {
+        CRITICAL
+    } else {
+        WARNING
     }
 }
 

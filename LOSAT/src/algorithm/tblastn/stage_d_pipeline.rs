@@ -39,13 +39,14 @@ use super::stage_d_stats::{
     LocalParameterCall, LocalParameterOptions, LocalSubjectParameters, LocalUngappedSearch,
 };
 use super::x_subject_store::{SubjectLetters, XPrelimSubject, XSearchSubject};
-use crate::algorithm::blastn::query_split::SplitSizes;
+use crate::algorithm::blastn::query_split::{ChunkQuery, SplitSizes};
 use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
 };
 use crate::algorithm::blastp::protein_query_split::{
-    protein_chunk_part_in_record, protein_chunk_would_be_split, split_protein_batch,
-    ProteinQueryChunk,
+    protein_chunk_part_in_record, split_batch_reaches_read, split_protein_batch,
+    splits_query_batches, ChunkStep, ProteinQueryChunk, SetupCheckFailure, SplitBatchSteps,
+    UnmetChecks,
 };
 use crate::algorithm::common::database::{FetchExcluded, FetchMarks};
 use crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile;
@@ -188,7 +189,16 @@ pub(super) struct SubjectSetNumbers {
     /// No Gumbel block (`gumbel_block`): `-searchsp` at any value, or the environment variable
     /// `OLD_FSC` (`app::old_fsc_environment`).
     pub old_fsc: bool,
+    /// Where NCBI's first read of a `-db` database whose sequences LOSAT could not read fails
+    /// (`None`: they were read). `tblastn_app::search` fails the first batch with a valid context
+    /// with that read's error; a split batch reads the database in the preliminary search of a
+    /// chunk, after the chunk stops before it (`SplitBatchSteps`).
+    pub read_fails: Option<ReadFails>,
 }
+
+/// Where the preliminary search of a query chunk first fails to read a `-db` database
+/// (`SubjectSetNumbers::read_fails`; the one owner of BLASTP's and TBLASTN's split batches).
+pub(super) use crate::algorithm::blastp::protein_query_split::ReadFails;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:131-136
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-922
@@ -435,7 +445,7 @@ pub(super) fn run_local_for_report_threads(
             &mut setup,
             None,
             Some(pool),
-            false,
+            None,
         )?;
         let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
         Ok((
@@ -471,7 +481,7 @@ pub(super) fn x_run_local_for_report_in_pool(
         &mut setup,
         None,
         Some(pool),
-        false,
+        None,
     )?;
     let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
     Ok((
@@ -1059,25 +1069,47 @@ fn run_local_search(
         &mut None,
         observer,
         None,
-        false,
+        None,
     )
 }
 
-/// The set-up of a query batch without its search (`run_local_search_with_pool` up to the batch's
-/// `LocalBatchSetup`): the validity of each query's context, or the set-up's error
-/// (`SetupEngineError`: the average subject length, the hit-saving parameters). With a database the
-/// numbers are its own, and `subjects` may hold none. `tblastn_app::refused_batch_setup_error` sets up the
-/// records of a refused batch that are first in their scope with it (line WQA D10 round 5,
-/// 2026-11-20).
+/// A record of NCBI's query batch in the set-up of a batch without its search (`set_up_batch`): its
+/// length, by which NCBI's query splitter counts it (the interval of its own record, also for a
+/// repeated id), and the index among the set-up's queries of the letters that NCBI's set-up reads
+/// for it, where LOSAT has them (`None`: a repeated id, which NCBI reads in its earlier record's
+/// letters).
+pub(super) type BatchRecord = (usize, Option<usize>);
+
+/// The set-up of a query batch without its search (`set_up_batch`): NCBI's batch (`records`), and
+/// whether NCBI's search of it reads the subjects (`reads`), which the set-up decides.
+struct SetUpOnly<'a> {
+    records: &'a [BatchRecord],
+    reads: bool,
+}
+
+/// The set-up of a query batch without its search (`run_local_search_with_pool` up to where NCBI's
+/// search of the batch reads its subjects): whether it gets there (with a database whose read fails,
+/// `SubjectSetNumbers::read_fails`, where that read fails), or the set-up's error
+/// (`SetupEngineError`: the average subject length, the hit-saving parameters; a stop of a chunk of
+/// a split batch). With a database the numbers are its own, and `subjects` may hold none.
+/// `tblastn_app::refused_batch_setup_error` sets up the records of a refused batch that are first in
+/// their scope with it (`queries`; line WQA D10 round 5, 2026-11-20), and the batch is NCBI's
+/// (`records`, which also hold the repeated ids): NCBI splits it by all its records, and its chunks
+/// meet their stops and the setup checks in the chunk loop's order (`SplitBatchSteps`) where a part
+/// of a record with its own letters has a valid context (line RG item X-short-bat, review 4 M1).
 pub(super) fn set_up_batch(
     queries: &[Vec<u8>],
+    records: &[BatchRecord],
     subjects: SubjectLetters<'_>,
     profile: LocalStageDProfile<'_>,
     compo_adjust_mode: BlastCompoAdjustMode,
     do_sum_stats: bool,
     scoring: LocalStageDScoring,
-) -> Result<Vec<bool>> {
-    let mut setup = None;
+) -> Result<bool> {
+    let mut set_up = SetUpOnly {
+        records,
+        reads: false,
+    };
     run_local_search_with_pool(
         queries,
         subjects,
@@ -1085,13 +1117,12 @@ pub(super) fn set_up_batch(
         compo_adjust_mode,
         do_sum_stats,
         scoring,
-        &mut setup,
+        &mut None,
         None,
         None,
-        true,
+        Some(&mut set_up),
     )?;
-    let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
-    Ok(setup.query_validity)
+    Ok(set_up.reads)
 }
 
 /// NCBI's engine error of a query batch's setup (`BLAST_GapAlignSetUp`, c++/src/algo/blast/core/blast_setup.c:888-1000):
@@ -1156,25 +1187,49 @@ impl std::fmt::Display for SetupEngineError {
 
 impl std::error::Error for SetupEngineError {}
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980 and
+// blast_parameters.c:759-760 (cited at `BatchSplit::whole_batch_checks` and at
+// `stats::setup::hit_saving_parameters_fail`)
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-301
-/// LOSAT's refusal of a batch's setup where NCBI's crashes (`common::database::check_setup_count`:
-/// the statistics' count of 0 without the Gumbel block). NCBI writes the reports of each batch
-/// before the next is searched, so its tabular output before the crash holds those of the batches
-/// before (NCBI 2.17.0, D1a-5 of line RG: `OLD_FSC=1 BATCH_SIZE=1` over `NSEQ 0`, two queries
-/// without letters to search then a valid one, the 152 bytes of their outfmt 7 reports without the
-/// last line; the crash cuts the buffered output of the other formats short):
-/// `tblastn_app::batch_failure` makes the refusal after them, as an engine error of the batch.
-#[derive(Debug)]
-pub(crate) struct SetupRefusal(pub(crate) anyhow::Error);
-
-impl std::fmt::Display for SetupRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+/// The checks of the setup of NCBI's preliminary search (`BLAST_GapAlignSetUp`, after its
+/// Karlin-Altschul check) that fail a query batch. First the statistics' count `setup_count` of 0
+/// of a positive total `setup_total` without the Gumbel block (`gumbel` false): NCBI divides by it
+/// and crashes, and LOSAT refuses (`common::database::check_setup_count`, D1a-5 of line RG). NCBI
+/// writes the reports of each batch before the next is searched, so its tabular output before the
+/// crash holds those of the batches before (NCBI 2.17.0: `OLD_FSC=1 BATCH_SIZE=1` over `NSEQ 0`,
+/// two queries without letters to search then a valid one, the 152 bytes of their outfmt 7 reports
+/// without the last line; the crash cuts the buffered output of the other formats short): the
+/// refusal comes after them (`blastinput::app::ErrorAfterBatchReports`). Then NCBI's engine error of
+/// a subject length of `min_subject_length` (`None`: not positive, `SUBJECT_LENGTH_INVALID`) and of
+/// the hit-saving parameters it gives (`HIT_SAVING_PARAMETERS`) for a gapped search or not
+/// (`gapped`).
+fn preliminary_setup_checks(
+    setup_total: i64,
+    setup_count: i32,
+    gumbel: bool,
+    min_subject_length: Option<i32>,
+    do_sum_stats: bool,
+    gapped: bool,
+) -> Result<()> {
+    crate::algorithm::common::database::check_setup_count(
+        setup_total,
+        setup_count,
+        gumbel,
+        "TBLASTN",
+    )
+    .map_err(|refusal| {
+        anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(refusal))
+    })?;
+    match min_subject_length {
+        None => Err(SetupEngineError::SUBJECT_LENGTH_INVALID.into()),
+        Some(length)
+            if crate::stats::setup::hit_saving_parameters_fail(do_sum_stats, gapped, length) =>
+        {
+            Err(SetupEngineError::HIT_SAVING_PARAMETERS.into())
+        }
+        Some(_) => Ok(()),
     }
 }
-
-impl std::error::Error for SetupRefusal {}
 
 /// Diagnostic (LOSAT_TIMING): adds the time from `start` to its drop to the common line's `search`
 /// (utils/xtiming.rs). No NCBI counterpart; it reads the clock only with LOSAT_TIMING.
@@ -1212,7 +1267,7 @@ fn run_local_search_with_pool(
     setup: &mut Option<LocalBatchSetup>,
     observer: Option<&mut StageDBoundaryTrace>,
     pool: Option<&SearchPool<'_>>,
-    setup_only: bool,
+    setup_only: Option<&mut SetUpOnly<'_>>,
 ) -> Result<Vec<KappaResultHitList>> {
     if scoring.smith_waterman {
         return run_local_search_with_redo(
@@ -1256,7 +1311,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
     setup: &mut Option<LocalBatchSetup>,
     mut observer: Option<&mut StageDBoundaryTrace>,
     pool: Option<&SearchPool<'_>>,
-    setup_only: bool,
+    setup_only: Option<&mut SetUpOnly<'_>>,
     match_redo: &R,
 ) -> Result<Vec<KappaResultHitList>> {
     ensure!(
@@ -1341,7 +1396,20 @@ fn run_local_search_with_redo<R: MatchRedo>(
         )
     };
     let options_searchsp = profile.subject_set.searchsp;
-    let average_subject_length = profile.subject_set.average_subject_length(&subjects);
+    // The query-set inputs of the batch's setup, which the chunks of a split batch take too.
+    let inputs = QuerySetInputs {
+        profile,
+        scoring,
+        gapped,
+        ungapped: &ungapped,
+        gumbel: gumbel.as_ref(),
+        total_nt: stats_nt,
+        num_subjects,
+        min_subject_length: min_subject_length.unwrap_or(0),
+        compo_adjust_mode,
+        do_sum_stats,
+        average_subject_length: profile.subject_set.average_subject_length(&subjects),
+    };
     let QuerySetSetup {
         working_frames,
         contexts,
@@ -1351,62 +1419,31 @@ fn run_local_search_with_redo<R: MatchRedo>(
         recipe,
     } = query_set_setup(
         queries,
-        QuerySetInputs {
-            profile,
-            scoring,
-            gapped,
-            ungapped: &ungapped,
-            gumbel: gumbel.as_ref(),
-            total_nt: stats_nt,
-            num_subjects,
-            min_subject_length: min_subject_length.unwrap_or(0),
-            compo_adjust_mode,
-            do_sum_stats,
-            average_subject_length,
-        },
+        inputs,
         options_searchsp.as_ref().map(std::slice::from_ref),
         true,
         pool,
     )?;
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
-    // Without the Gumbel block (`-searchsp`, `OLD_FSC` or an ungapped search, which has none
-    // either, blast_setup.c:517-527) a set of subjects whose average is
-    // below one letter, in nucleotides, fails the setup of a batch that NCBI searches (one with
-    // a valid context): `tblastn_app::search` fails it with NCBI's engine error after the
-    // reports of the batches before (`SetupEngineError::SUBJECT_LENGTH_INVALID`). A count of 0
-    // (of a positive total) is the division by 0 where NCBI crashes, LOSAT's refusal there
-    // (`common::database::check_setup_count`, D1a-5 of line RG), after the same reports
-    // (`SetupRefusal`); a run whose batches have no valid context does not reach it and is
-    // reported as NCBI's. `query_set_setup` above (NCBI's `BLAST_CalcEffLengths`,
-    // blast_setup.c:946-951, before the division at :975) refuses first where NCBI's search
-    // space overflows: with a count of 0 as well, that LOSAT refusal takes the place of this one
-    // for a run that NCBI does not finish. It is not a batch failure, so it comes before the
-    // reports of the batches before, which NCBI writes before it crashes (line RG D1a-6,
-    // review A F2).
-    if valid_contexts.iter().any(|&valid| valid) {
-        crate::algorithm::common::database::check_setup_count(
+    let split = BatchSplit::of(
+        queries,
+        setup_only.as_ref().map(|set_up| set_up.records),
+        &profile,
+        scoring.gapped,
+    )?;
+    let setup_checks = || {
+        preliminary_setup_checks(
             total_nt,
             num_subjects,
             gumbel.is_some(),
-            "TBLASTN",
+            min_subject_length,
+            do_sum_stats,
+            scoring.gapped,
         )
-        .map_err(SetupRefusal)?;
-        match min_subject_length {
-            None => return Err(SetupEngineError::SUBJECT_LENGTH_INVALID.into()),
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:759-760
-            // (cited at `stats::setup::hit_saving_parameters_fail`).
-            Some(length)
-                if crate::stats::setup::hit_saving_parameters_fail(
-                    do_sum_stats,
-                    scoring.gapped,
-                    length,
-                ) =>
-            {
-                return Err(SetupEngineError::HIT_SAVING_PARAMETERS.into())
-            }
-            Some(_) => {}
-        }
-    }
+    };
+    let any_valid = valid_contexts.iter().any(|&valid| valid);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-980 (cited at
+    // `BatchSplit::whole_batch_checks`)
+    split.whole_batch_checks(any_valid, profile.subject_set.read_fails, setup_checks)?;
     let batch_setup = LocalBatchSetup {
         parameters: parameters.clone(),
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:72-115:
@@ -1425,19 +1462,31 @@ fn run_local_search_with_redo<R: MatchRedo>(
         trace.subject_nt_lengths = subjects.x_read_lengths()?;
     }
     *setup = Some(batch_setup);
-    // The set-up alone (`set_up_batch`): no search.
-    if setup_only {
+    // The set-up alone (`set_up_batch`): no search. A batch with a valid context reads its
+    // subjects, one searched whole after the checks above (`BatchSplit::set_up_reads`).
+    if let Some(set_up) = setup_only {
+        set_up.reads = any_valid
+            && split.set_up_reads(
+                queries,
+                set_up.records,
+                &parameters,
+                inputs,
+                setup_checks,
+                pool,
+            )?;
         return Ok(Vec::new());
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:322-327:
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2815-2824:
-    // Preserve the parameter/validity state for reporting, then skip subject
-    // search when every query context has failed Karlin setup.
-    if !valid_contexts.iter().any(|&valid| valid) || subjects.count() == 0 {
-        return (0..queries.len())
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:322-327 (cited at
+    // `BatchSplit::searches`)
+    // The parameter/validity state above is kept for reporting; a batch whose subjects are not
+    // searched finds nothing.
+    let no_hits = || {
+        (0..queries.len())
             .map(|_| KappaResultHitList::new(profile.max_target_seqs))
-            .collect();
+            .collect::<Result<Vec<_>>>()
+    };
+    if !split.searches(any_valid, profile.subject_set.read_fails, subjects.count())? {
+        return no_hits();
     }
     // Diagnostic (LOSAT_TIMING): from here to the end of the batch's search (the preliminary
     // search of all subjects, which translates them and builds the lookup table inside, the
@@ -1511,21 +1560,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
             total_nt,
         )
     });
-    let protein_split =
-        crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(20000)?;
-    let batch_lengths: Vec<usize> = queries.iter().map(Vec::len).collect();
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:122-129 (cited at
-    // `blastp::blast_engine::psi_round::run_queries`)
-    // A PSSM query (`-in_pssm`: `CPsiBlast` searches the PSSM's query through a
-    // `CObjMgrFree_QueryFactory`, psiblast_impl.cpp:115-119) is never split; the sizes above are
-    // still read, as NCBI's query splitter reads them first.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:60-61
-    // NCBI does not split the queries of an ungapped search either.
-    let split = match profile.pssm {
-        None if scoring.gapped => split_protein_batch(&batch_lengths, protein_split),
-        _ => None,
-    };
-    let preliminary_hitlists = match split {
+    let preliminary_hitlists = match &split.chunks {
         None => run_preliminary_subjects(
             &PreliminaryInputs {
                 queries: &query_refs,
@@ -1554,29 +1589,24 @@ fn run_local_search_with_redo<R: MatchRedo>(
             pool,
             observer.as_deref_mut(),
         )?,
-        Some(chunks) => split_preliminary_hitlists(
-            queries,
-            &chunks,
-            protein_split,
-            &parameters,
-            option_spaces.as_deref(),
-            QuerySetInputs {
-                profile,
-                scoring,
-                gapped,
-                ungapped: &ungapped,
-                gumbel: gumbel.as_ref(),
-                total_nt: stats_nt,
-                num_subjects,
-                min_subject_length: min_subject_length.unwrap_or(0),
-                compo_adjust_mode,
-                do_sum_stats,
-                average_subject_length,
-            },
-            subjects,
-            prelim_size,
-            pool,
-        )?,
+        Some(chunks) => {
+            let hitlists = split_preliminary_hitlists(
+                queries,
+                chunks,
+                split.sizes,
+                &parameters,
+                option_spaces.as_deref(),
+                inputs,
+                setup_checks(),
+                subjects,
+                prelim_size,
+                pool,
+            )?;
+            if subjects.count() == 0 {
+                return no_hits();
+            }
+            hitlists
+        }
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1839-1846
     // `ADAPTIVE_CBS`: the stream's close trims each query's preliminary hit list
@@ -1642,7 +1672,12 @@ fn run_local_search_with_redo<R: MatchRedo>(
     }
     // The subject of a list in the stream, for NCBI's fetches with `check_oid_exclusion`.
     let list_ordinal = |(_, oid, _): &(usize, usize, LinkedHspList)| u32::try_from(*oid).ok();
-    let fetch_refusal = |failed| FetchExcluded::refusal(failed, "TBLASTN");
+    // A refusal fails the batch after the reports of the batches before (`ErrorAfterBatchReports`),
+    // where NCBI's search ends.
+    let fetch_refusal = |failed| -> anyhow::Error {
+        crate::blastinput::app::ErrorAfterBatchReports(FetchExcluded::refusal(failed, "TBLASTN"))
+            .into()
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1527
     // An ungapped search has no traceback fetch: its re-evaluation's fetch excluded the subjects
     // that the negative seqid list keeps without a line (`ungapped_subject_steps`).
@@ -1703,15 +1738,15 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // The one read of their headers also gives the subjects whose header holds a UTF8String where
     // a VisibleString is expected (`fetched_utf8`, in the stream's order): the first that the
     // redo fetches posts NCBI's warning (`RedoFetchNotes::redo`, after the redo or before the
-    // batch's failure).
-    let (excluded_at_fetch, fetched_utf8) = FetchMarks::of_noting(
+    // batch's failure). The lists of the subjects whose header cannot be read stay in the stream:
+    // a fetch of one is LOSAT's refusal (`RedoFetchNotes::refused`).
+    let (excluded_at_fetch, fetched) = FetchMarks::of_noting(
         profile.fetch_excluded.map(|fetches| fetches.excluded),
         &preliminary_lists,
         list_ordinal,
         |(context, _, list)| (*context, list.best_evalue, !list.hsps.is_empty()),
-    )
-    .map_err(fetch_refusal)?;
-    let redo_notes = RedoFetchNotes::new(profile.fetch_excluded, fetched_utf8, &preliminary_lists);
+    );
+    let redo_notes = RedoFetchNotes::new(profile.fetch_excluded, fetched, &preliminary_lists);
     // A PSSM query's Smith-Waterman redo (`-in_pssm`, composition-based statistics 0) is refused at
     // its first match, the first list that the fetch keeps (the heaps are empty there, so early
     // termination lets it go on): `match_redo::sw_pssm_refusal`.
@@ -1723,6 +1758,10 @@ fn run_local_search_with_redo<R: MatchRedo>(
         let first_kept = (0..preliminary_lists.len())
             .find(|&index| !excluded_at_fetch.excluded(index))
             .unwrap_or(usize::MAX);
+        // A header that cannot be read among them ends NCBI's search first.
+        if let Some(refusal) = redo_notes.first_unreadable(first_kept) {
+            return Err(refusal);
+        }
         redo_notes.first(first_kept);
         return Err(sw_pssm_refusal());
     }
@@ -2151,7 +2190,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
                     };
                     let item =
                         match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)
-                            .inspect_err(|_| redo_notes.redo(&heaps, first + at))?;
+                            .map_err(|error| redo_notes.failed(&heaps, first + at, error))?;
                     keep_item(*context, &mut heaps, item);
                 }
             }
@@ -2195,12 +2234,16 @@ fn run_local_search_with_redo<R: MatchRedo>(
                     .then_some(&mut heaps[..]),
             );
             let item = match_outcome::<R, _>(item, &mut sw_status, redo_params.do_link_hsps)
-                .inspect_err(|_| redo_notes.redo(&heaps, index))?;
+                .map_err(|error| redo_notes.failed(&heaps, index, error))?;
             keep_item(context, &mut heaps, item);
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779 (cited at
     // `match_redo::sw_batch_failed`)
+    // A fetch of the redo that read a header that cannot be read ended NCBI's search before.
+    if let Some(refusal) = redo_notes.refused(&heaps, usize::MAX) {
+        return Err(refusal);
+    }
     // The status of the last match the Smith-Waterman redo reached fails the batch.
     if R::SMITH_WATERMAN && sw_status.failed() {
         redo_notes.redo(&heaps, usize::MAX);
@@ -2242,25 +2285,69 @@ type FetchedRead = (
 /// The notes of a batch's redo of the fetches that read a header with a UTF8String where a
 /// VisibleString is expected: the subjects of such headers (`fetched`, in the stream's order,
 /// `FetchMarks::of_noting`) and the query and subject of each list of the stream (`stream`,
-/// `redo_stream`); nothing is noted without the batch's fetches.
+/// `redo_stream`); nothing is noted without the batch's fetches. The subjects whose header
+/// cannot be read (`unreadable`): a fetch of one is LOSAT's refusal (`refused`).
 struct RedoFetchNotes<'a> {
     fetches: Option<BatchFetches<'a>>,
     fetched: Vec<FetchedRead>,
+    unreadable: Vec<FetchedRead>,
     stream: Vec<(usize, i32)>,
 }
 
 impl<'a> RedoFetchNotes<'a> {
     fn new<L>(
         fetches: Option<BatchFetches<'a>>,
-        fetched: Vec<FetchedRead>,
+        fetched: crate::algorithm::common::database::FetchedReads<(usize, f64, bool)>,
         lists: &[(usize, usize, L)],
     ) -> Self {
-        let stream = redo_stream(lists, &fetched);
+        let stream = if fetched.utf8.is_empty() {
+            redo_stream(lists, &fetched.unreadable)
+        } else {
+            redo_stream(lists, &fetched.utf8)
+        };
         RedoFetchNotes {
             fetches,
-            fetched,
+            fetched: fetched.utf8,
+            unreadable: fetched.unreadable,
             stream,
         }
+    }
+
+    /// LOSAT's refusal where the redo, of the lists up to the stream's place `until` with the
+    /// heaps `heaps`, fetched a subject whose header cannot be read (as `note_redo_fetched`
+    /// finds a fetch): NCBI's search ended there (`FetchExcluded::refusal_at`), after the reports
+    /// of the batches before (`ErrorAfterBatchReports`).
+    fn refused(&self, heaps: &[CompoHeap], until: usize) -> Option<anyhow::Error> {
+        let ordinal = redo_first_fetched(heaps, &self.unreadable, &self.stream, until)?;
+        self.refusal_of(ordinal)
+    }
+
+    /// The refusal of `refused` at the fetch of `ordinal`.
+    #[cold]
+    #[inline(never)]
+    fn refusal_of(&self, ordinal: u32) -> Option<anyhow::Error> {
+        let fetches = self.fetches?;
+        Some(
+            crate::blastinput::app::ErrorAfterBatchReports(FetchExcluded::refusal_at(
+                fetches.excluded.db(),
+                ordinal,
+                "TBLASTN",
+            ))
+            .into(),
+        )
+    }
+
+    /// `error`, the redo's of the list at the stream's place `until` with the heaps `heaps`:
+    /// LOSAT's refusal instead where a fetch up to it read a header that cannot be read
+    /// (`refused`); otherwise the fetches up to it are noted (`redo`).
+    #[cold]
+    #[inline(never)]
+    fn failed(&self, heaps: &[CompoHeap], until: usize, error: anyhow::Error) -> anyhow::Error {
+        if let Some(refusal) = self.refused(heaps, until) {
+            return refusal;
+        }
+        self.redo(heaps, until);
+        error
     }
 
     /// [`note_redo_fetched`] of the lists up to the stream's place `until`, with the heaps
@@ -2269,6 +2356,16 @@ impl<'a> RedoFetchNotes<'a> {
         if let Some(fetches) = self.fetches {
             note_redo_fetched(fetches, heaps, &self.fetched, &self.stream, until);
         }
+    }
+
+    /// `refused` where the redo's heaps are still empty (no early termination test ends a list
+    /// with HSPs), of the lists up to the stream's place `until`.
+    fn first_unreadable(&self, until: usize) -> Option<anyhow::Error> {
+        let (read, _) = self
+            .unreadable
+            .iter()
+            .find(|(read, (_, _, has_hsps))| *has_hsps && read.index <= until)?;
+        self.refusal_of(read.ordinal)
     }
 
     /// [`note_first_fetched`] of the lists up to the stream's place `until`.
@@ -2311,17 +2408,29 @@ fn note_redo_fetched(
     stream: &[(usize, i32)],
     until: usize,
 ) {
-    let first =
-        crate::algorithm::common::database::first_redo_fetch(fetched, stream, until, |before| {
-            heaps
-                .iter()
-                .enumerate()
-                .map(|(query, heap)| heap.redo_heap(|oid| before.contains(&(query, oid))))
-                .collect()
-        });
-    if let Some(ordinal) = first {
+    if let Some(ordinal) = redo_first_fetched(heaps, fetched, stream, until) {
         fetches.note(ordinal);
     }
+}
+
+/// The first of `fetched` that the redo fetches, of the lists of the stream `stream` up to its
+/// place `until`, with each query's heap as at the turn (the records of `heaps`, as the redo left
+/// them, from the lists before it): `common::database::first_redo_fetch`.
+#[cold]
+#[inline(never)]
+fn redo_first_fetched(
+    heaps: &[CompoHeap],
+    fetched: &[FetchedRead],
+    stream: &[(usize, i32)],
+    until: usize,
+) -> Option<u32> {
+    crate::algorithm::common::database::first_redo_fetch(fetched, stream, until, |before| {
+        heaps
+            .iter()
+            .enumerate()
+            .map(|(query, heap)| heap.redo_heap(|oid| before.contains(&(query, oid))))
+            .collect()
+    })
 }
 
 /// Notes the first fetch, of the lists up to the stream's place `until`, that read a header
@@ -2656,12 +2765,272 @@ fn preliminary_profile<'a>(
     }
 }
 
+/// LOSAT's refusal of a stop of a split batch's chunks (`SplitBatchSteps`), after the reports of
+/// the batches before (the form of PD-LOSAT-NCBI-DEFECTS 1.40 for a refusal in the middle of a
+/// run).
+fn split_batch_stop(refusal: anyhow::Error) -> anyhow::Error {
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(refusal))
+}
+
+/// The setup checks of a split batch (`preliminary_setup_checks`) as its chunks meet them
+/// (`SplitBatchSteps`): NCBI's engine errors of the setup (`SetupEngineError`), apart from LOSAT's
+/// refusal of a count of 0.
+fn split_setup_checks(checks: Result<()>) -> Result<(), SetupCheckFailure> {
+    checks.map_err(|error| {
+        if error.is::<SetupEngineError>() {
+            SetupCheckFailure::Engine(error)
+        } else {
+            SetupCheckFailure::Refusal(error)
+        }
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:233-252 (cited at
+// `SplitBatchSteps`)
+/// The error of the traceback's own setup of a split batch that meets the setup checks that no
+/// chunk met (`SplitBatchSteps::unmet_checks`): NCBI's engine error `Traceback failed` in
+/// TBLASTN's form of an engine error of the setup (`SetupEngineError`); LOSAT's refusal of a count
+/// of 0 stays the refusal (line RG item X-bpgap, NCBI 2.17.0 probe `t2_qgv_short`).
+fn split_traceback_error(unmet: UnmetChecks) -> anyhow::Error {
+    match unmet {
+        UnmetChecks::TracebackFailed => SetupEngineError(std::borrow::Cow::Borrowed(
+            crate::blastinput::app::TRACEBACK_FAILED,
+        ))
+        .into(),
+        UnmetChecks::Refusal(refusal) => refusal,
+    }
+}
+
+/// The search of a query batch got to its first read of a `-db` database whose read fails
+/// (`SubjectSetNumbers::read_fails`): a batch searched whole with a valid context, or a split one
+/// whose chunks get there (`SplitBatchSteps`). `tblastn_app::search` fails the batch with that
+/// read's error; a batch whose search reads nothing (a split batch without a chunk with a valid
+/// context) is reported (NCBI 2.17.0 probe `t5_qgv_nonsq` of line RG item X-bpgap).
+#[derive(Debug)]
+pub(super) struct DatabaseReadReached;
+
+impl std::fmt::Display for DatabaseReadReached {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the search of a query batch reads a database whose read fails")
+    }
+}
+
+impl std::error::Error for DatabaseReadReached {}
+
+/// NCBI's split of a query batch (`run_local_search_with_pool`): the sizes of NCBI's query
+/// splitter (`protein_query_split_sizes`) and the chunks of the batch (`split_protein_batch`;
+/// `None`: the batch is searched whole).
+struct BatchSplit {
+    sizes: SplitSizes,
+    chunks: Option<Vec<ProteinQueryChunk>>,
+}
+
+impl BatchSplit {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:122-129 (cited at
+    // `blastp::blast_engine::psi_round::run_queries`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:60-61
+    /// The split of the batch whose records are `records` (for the set-up alone, NCBI's batch:
+    /// `SetUpOnly::records`), or else `queries`, by the one rule of whether NCBI splits a search's
+    /// batches (`splits_query_batches`): a PSSM query (`-in_pssm`: `CPsiBlast` searches the PSSM's
+    /// query through a `CObjMgrFree_QueryFactory`, psiblast_impl.cpp:115-119) is never split, nor
+    /// are the queries of an ungapped search (`gapped` false); the sizes are still read, as NCBI's
+    /// query splitter reads them first.
+    fn of(
+        queries: &[Vec<u8>],
+        records: Option<&[BatchRecord]>,
+        profile: &LocalStageDProfile<'_>,
+        gapped: bool,
+    ) -> Result<Self> {
+        let sizes =
+            crate::algorithm::blastp::protein_query_split::protein_query_split_sizes(20000)?;
+        let lengths: Vec<usize> = match records {
+            Some(records) => records.iter().map(|&(length, _)| length).collect(),
+            None => queries.iter().map(Vec::len).collect(),
+        };
+        let chunks = splits_query_batches(gapped, profile.pssm.is_some(), false)
+            .then(|| split_protein_batch(&lengths, sizes))
+            .flatten();
+        Ok(Self { sizes, chunks })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-937
+    /// The setup checks `setup_checks` (`preliminary_setup_checks`) of the batch, where NCBI
+    /// searches it whole with a valid context (`any_valid`). Without the Gumbel block
+    /// (`-searchsp`, `OLD_FSC` or an ungapped search, which has none either,
+    /// blast_setup.c:517-527) a set of subjects whose average is below one letter, in nucleotides,
+    /// fails the setup of the preliminary search of a batch that NCBI searches (one with a valid
+    /// context): `tblastn_app::search` fails it with NCBI's engine error after the reports of the
+    /// batches before. A count of 0 (of a positive total) is the division by 0 where NCBI crashes,
+    /// LOSAT's refusal there (`common::database::check_setup_count`, D1a-5 of line RG), after the
+    /// same reports; a run whose batches have no valid context does not reach it and is reported
+    /// as NCBI's. A batch that NCBI splits meets these checks in the setup of its first chunk with
+    /// a valid context, after the chunk stops before it (`SplitBatchSteps`). `query_set_setup`,
+    /// which the caller runs first (NCBI's `BLAST_CalcEffLengths`, blast_setup.c:946-951, before
+    /// the division at :975), refuses first where NCBI's search space overflows: with a count of 0
+    /// as well, that LOSAT refusal takes the place of this one for a run that NCBI does not
+    /// finish. It is not a batch failure, so it comes before the reports of the batches before,
+    /// which NCBI writes before it crashes (line RG D1a-6, review A F2). The setup's read of OID 0
+    /// (`read_fails` of `ReadFails::Setup`) comes before these checks: a batch searched whole on
+    /// such a database fails with that read's error (`tblastn_app::search`), with `-searchsp` or
+    /// `OLD_FSC` too (NCBI 2.17.0, rows `db.ak.tbn.e0nseq.sp.6`, `.fsc.6`; line RG item X-short-bat
+    /// fix 5), as a split batch's chunks meet it first.
+    fn whole_batch_checks(
+        &self,
+        any_valid: bool,
+        read_fails: Option<ReadFails>,
+        setup_checks: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        if self.chunks.is_none() && any_valid && read_fails != Some(ReadFails::Setup) {
+            setup_checks()?;
+        }
+        Ok(())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180,197-224
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:322-327
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2815-2824
+    /// Whether the batch's subjects are searched (`false`: the batch finds nothing). Not when every
+    /// query context has failed the Karlin setup (`any_valid` false). A batch searched whole with a
+    /// valid context gets to the read of a database whose read fails (`read_fails`;
+    /// `DatabaseReadReached`: `tblastn_app::search` fails it with the read's error), and with no
+    /// subject in hand otherwise (`subject_count` 0: a list that kept no sequence) finds nothing; a
+    /// split batch meets its chunk stops first (`SplitBatchSteps`).
+    fn searches(
+        &self,
+        any_valid: bool,
+        read_fails: Option<ReadFails>,
+        subject_count: usize,
+    ) -> Result<bool> {
+        if !any_valid {
+            return Ok(false);
+        }
+        if self.chunks.is_some() {
+            return Ok(true);
+        }
+        if read_fails.is_some() {
+            return Err(DatabaseReadReached.into());
+        }
+        Ok(subject_count > 0)
+    }
+
+    /// Whether NCBI's search of the batch, which has a valid context, reads the subjects, for the
+    /// set-up of a batch without its search (`set_up_batch`, NCBI's batch `records`): a batch
+    /// searched whole does, after its setup checks, and a split one where its chunks first get to
+    /// that read (`split_batch_reads`, with the setup checks `setup_checks` and the batch's
+    /// parameters and query-set inputs).
+    fn set_up_reads(
+        &self,
+        queries: &[Vec<u8>],
+        records: &[BatchRecord],
+        batch_parameters: &LocalSubjectParameters,
+        inputs: QuerySetInputs<'_>,
+        setup_checks: impl FnOnce() -> Result<()>,
+        pool: Option<&SearchPool<'_>>,
+    ) -> Result<bool> {
+        match &self.chunks {
+            None => Ok(true),
+            Some(chunks) => split_batch_reads(
+                queries,
+                records,
+                chunks,
+                self.sizes,
+                batch_parameters,
+                inputs,
+                setup_checks(),
+                pool,
+            ),
+        }
+    }
+}
+
+/// The letters of the part `part` of the query `query` (of `queries`) as a chunk of a split batch
+/// reads them: with lower-case masking, the masks of its whole record restricted to the part
+/// (`protein_chunk_part_in_record`).
+fn chunk_part_letters(
+    queries: &[Vec<u8>],
+    profile: &LocalStageDProfile<'_>,
+    query: usize,
+    part: &ChunkQuery,
+) -> Vec<u8> {
+    let letters = &queries[query];
+    if !profile.mask_lowercase {
+        return letters[part.from..part.to].to_vec();
+    }
+    let (record, offset) = profile
+        .query_records
+        .get(query)
+        .copied()
+        .unwrap_or((letters, 0));
+    protein_chunk_part_in_record(record, offset, part)
+}
+
+/// Whether NCBI's search of a split batch gets to a read of the subjects (`SplitBatchSteps`), for
+/// the set-up of a batch without its search (`set_up_batch`): NCBI's batch is `records` (each
+/// part of a chunk is of one of them), split into `chunks`; its stops and the setup checks
+/// (`setup_checks`) are its errors. A chunk is valid where a part of a record whose letters LOSAT
+/// has (`queries`, the records with their own letters) has a valid context; the parts of a repeated
+/// id, which NCBI reads in its earlier record's letters, are left out. A chunk valid only through
+/// such a part is passed over: where LOSAT then gives NCBI's error, at a later chunk, it is the
+/// same error (the setup checks and the reads are the same for every chunk), and elsewhere the
+/// caller's refusal stands. The setups of the chunks take the batch's effective search spaces.
+#[allow(clippy::too_many_arguments)]
+fn split_batch_reads(
+    queries: &[Vec<u8>],
+    records: &[BatchRecord],
+    chunks: &[ProteinQueryChunk],
+    sizes: SplitSizes,
+    batch_parameters: &LocalSubjectParameters,
+    inputs: QuerySetInputs<'_>,
+    setup_checks: Result<()>,
+    pool: Option<&SearchPool<'_>>,
+) -> Result<bool> {
+    let mut steps = SplitBatchSteps::new(
+        "TBLASTN",
+        chunks,
+        sizes,
+        inputs.profile.subject_set.read_fails,
+        split_setup_checks(setup_checks),
+        &split_batch_stop,
+    )?;
+    let batch_eff_searchsp: Vec<i64> = batch_parameters
+        .lengths
+        .iter()
+        .map(|length| length.eff_searchsp)
+        .collect();
+    let reads = split_batch_reaches_read(&mut steps, chunks, |chunk| {
+        let parts: Vec<Vec<u8>> = chunk
+            .queries
+            .iter()
+            .filter_map(|part| {
+                records[part.query]
+                    .1
+                    .map(|query| chunk_part_letters(queries, &inputs.profile, query, part))
+            })
+            .collect();
+        Ok(!parts.is_empty()
+            && query_set_setup(&parts, inputs, Some(&batch_eff_searchsp), false, pool)?
+                .valid_contexts
+                .iter()
+                .any(|&valid| valid))
+    })?;
+    // A batch whose chunks find nothing ends at the traceback's own setup of the batch.
+    match steps.unmet_checks() {
+        Some(unmet) if !reads => Err(split_traceback_error(unmet)),
+        _ => Ok(reads),
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-290
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:171-182
 // The preliminary stage of a split batch (RP-4): each chunk is a query set of its parts
 // (the chunk's query factory, with the lower-case masks restricted to each part), with the
-// batch's effective search spaces, and its hit lists merge into the batch's. A chunk whose
-// contexts all fail the Karlin-Altschul setup finds nothing (NCBI ignores its error).
+// batch's effective search spaces, and its hit lists merge into the batch's. NCBI's stops in the
+// batch's search and the setup of each chunk come in its order (`SplitBatchSteps`); a chunk whose
+// contexts all fail the Karlin-Altschul setup finds nothing (NCBI ignores its error). With no
+// subject in hand (`subjects` empty: a list that kept none, or a database whose read fails,
+// `SubjectSetNumbers::read_fails`) the chunks find nothing, the stops still come where NCBI meets
+// them, and a read that fails ends the stage where NCBI meets it (`DatabaseReadReached`).
 #[allow(clippy::too_many_arguments)]
 fn split_preliminary_hitlists(
     queries: &[Vec<u8>],
@@ -2670,20 +3039,19 @@ fn split_preliminary_hitlists(
     batch_parameters: &LocalSubjectParameters,
     option_spaces: Option<&[i64]>,
     inputs: QuerySetInputs<'_>,
+    setup_checks: Result<()>,
     subjects: SubjectLetters<'_>,
     prelim_size: usize,
     pool: Option<&SearchPool<'_>>,
 ) -> Result<Vec<Option<KappaResultHitList>>> {
-    // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below
-    // it; NCBI's `size_t` chunk ranges then wrap (split_query_cxx.cpp:145-171).
-    ensure!(
-        !sizes.negative_chunk_size(),
-        "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s size_t chunk ranges wrapped, which is not supported by LOSAT's TBLASTN"
-    );
-    ensure!(
-        !protein_chunk_would_be_split(chunks, sizes),
-        "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's TBLASTN"
-    );
+    let mut steps = SplitBatchSteps::new(
+        "TBLASTN",
+        chunks,
+        sizes,
+        inputs.profile.subject_set.read_fails,
+        split_setup_checks(setup_checks),
+        &split_batch_stop,
+    )?;
     // The options' spaces of the chunks (`SplitQuery_SetEffectiveSearchSpace`): the batch's own,
     // or the preliminary stage's where they differ (`run_local_search_with_pool`).
     let batch_eff_searchsp: Vec<i64> = match option_spaces {
@@ -2697,32 +3065,20 @@ fn split_preliminary_hitlists(
     let per_subject = inputs.profile.subject_set.per_subject();
     let mut merged: Vec<Option<KappaResultHitList>> = (0..queries.len()).map(|_| None).collect();
     for chunk in chunks {
-        // NCBI fails to make the query factory of a chunk without a query ("Empty
-        // CBlastQueryVector"); `split_protein_batch` makes none.
-        ensure!(
-            !chunk.queries.is_empty(),
-            "a query chunk without a query is not supported by LOSAT's TBLASTN"
-        );
         let parts: Vec<Vec<u8>> = chunk
             .queries
             .iter()
-            .map(|part| {
-                let query = &queries[part.query];
-                if !inputs.profile.mask_lowercase {
-                    return query[part.from..part.to].to_vec();
-                }
-                let (record, offset) = inputs
-                    .profile
-                    .query_records
-                    .get(part.query)
-                    .copied()
-                    .unwrap_or((query, 0));
-                protein_chunk_part_in_record(record, offset, part)
-            })
+            .map(|part| chunk_part_letters(queries, &inputs.profile, part.query, part))
             .collect();
         // A chunk's setup is inside `search` (the common line marks only the batch's own).
         let setup = query_set_setup(&parts, inputs, Some(&batch_eff_searchsp), false, pool)?;
-        if !setup.valid_contexts.iter().any(|&valid| valid) {
+        match steps.before_read(chunk, setup.valid_contexts.iter().any(|&valid| valid))? {
+            ChunkStep::Read => {}
+            ChunkStep::Skip => continue,
+            ChunkStep::End => return Err(DatabaseReadReached.into()),
+        }
+        steps.before_search(subjects.count() > 0)?;
+        if subjects.count() == 0 {
             continue;
         }
         let query_lengths: Vec<i32> = parts
@@ -2778,6 +3134,11 @@ fn split_preliminary_hitlists(
             &parts_and_offsets,
             sizes.overlap as u32 as i32,
         )?;
+    }
+    // Every chunk was searched or found nothing: the traceback's own setup of the batch meets the
+    // setup checks that no chunk met (NCBI 2.17.0 probe `t2_qgv_short` of line RG item X-bpgap).
+    if let Some(unmet) = steps.unmet_checks() {
+        return Err(split_traceback_error(unmet));
     }
     Ok(merged)
 }
@@ -2857,6 +3218,33 @@ impl LocalParameterRecipe<'_> {
             call,
         )
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2782-2791
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:171-172
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:192-197
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:90-93
+/// The refusal of a PSSM query (`-in_pssm`) whose letters give no Karlin-Altschul parameters (one
+/// that `-seg` masks completely; NCBI 2.17.0 SIGSEGV, probes `gs.masked` of line PS and
+/// `pssmmasked.f0` of line RG X-short-bat). `Blast_ScoreBlkKbpUngappedCalc` invalidates its one
+/// context, frees its `kbp_std` and makes no `kbp_psi`; `BLAST_MainSetUp` then fails with that
+/// warning alone (blast_setup.c:652-664), which `CSetupFactory::CreateScoreBlock` does not throw,
+/// and `PsiBlastSetupScoreBlock` reads the block that is not there. NCBI crashes in the setup of
+/// the preliminary search (`CBlastPrelimSearch`, psiblast_impl.cpp:132-135, in `CPsiBlast::Run`,
+/// tblastn_app.cpp:327), after the prolog (`PrintProlog`, tblastn_app.cpp:270) and the search
+/// strategy (:307), before the database's first read and the setup checks of the search's run
+/// (`BLAST_GapAlignSetUp`: OID 0's length, `SetupEngineError`). The refusal comes after the
+/// prolog, as every refusal of a step where NCBI's search of a batch crashes
+/// (`blastinput::app::ErrorAfterBatchReports`): line PS's DECISIONS 35 Q5 (as psiblast's,
+/// DECISIONS 12 S4) refused it before anything was written; line RG item X-short-bat moved it after
+/// the prolog for TBLASTN on 2026-11-18 (the bytes that NCBI's crash loses from its output buffer
+/// are not imitated).
+#[cold]
+#[inline(never)]
+fn x_masked_pssm_query() -> anyhow::Error {
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+        "a PSSM query whose letters give no Karlin-Altschul parameters (one that -seg masks completely), with which NCBI BLAST+ 2.17.0's tblastn crashes, is not supported by LOSAT's TBLASTN"
+    )))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-654,964-1024:
@@ -3105,6 +3493,12 @@ fn query_set_setup<'a>(
         // the effective lengths keep `kbp_gap_std` and the gap trigger `kbp_std`
         // (`LocalKarlinBlocks`).
         Some(psi) => {
+            // A PSSM query without a valid context (its letters give no Karlin-Altschul
+            // parameters: one that `-seg` masks completely) is the one that NCBI crashes with, in
+            // the setup of its preliminary search (`x_masked_pssm_query`).
+            if !valid_contexts.iter().any(|&valid| valid) {
+                return Err(x_masked_pssm_query());
+            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:960-961
             // `BlastExtensionParametersNew` looks for a valid `sbp->kbp`, which is `kbp_psi`
             // (blast_stat.c:2826; cited at `SetupEngineError::NO_VALID_KARLIN_BLOCK`), before the
@@ -3112,13 +3506,10 @@ fn query_set_setup<'a>(
             // context a valid `kbp_std` but whose file's ungapped values make `kbp_psi` invalid
             // (`lambdaUngapped`, `kappaUngapped` or `hUngapped` negative) stops the search's
             // setup, before any subject is read, with NCBI's engine error of an invalid query
-            // (probes `x.ungneg.*`, `r3.*ungneg.*` of the PS7 review). A PSSM query without a
-            // valid context is the one that NCBI crashes with, refused after the batches.
-            if valid_contexts.iter().any(|&valid| valid)
-                && !contexts.iter().any(|context| {
-                    context.is_valid && psi.ungapped_karlin_valid(&context.karlin_params)
-                })
-            {
+            // (probes `x.ungneg.*`, `r3.*ungneg.*` of the PS7 review).
+            if !contexts.iter().any(|context| {
+                context.is_valid && psi.ungapped_karlin_valid(&context.karlin_params)
+            }) {
                 return Err(SetupEngineError::NO_VALID_KARLIN_BLOCK.into());
             }
             LocalParameterRecipe {

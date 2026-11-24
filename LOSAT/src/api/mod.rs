@@ -197,7 +197,6 @@ pub use program::Program;
 pub use run::{
     run, run_collect, run_to_file, HspRecord, Outcome, QueryRounds, QueryStats, Report, Strand,
 };
-pub(crate) use search::file_options;
 pub use search::{validate, Search, API_OWNED};
 pub use tools::{
     run_blastdbcmd, run_convert2blastmask, run_dustmasker, run_makeblastdb, run_makembindex,

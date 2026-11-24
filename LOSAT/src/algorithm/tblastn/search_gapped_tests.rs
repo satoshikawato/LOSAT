@@ -2376,6 +2376,11 @@ fn whole_windows_hold_the_whole_translation() {
             .unwrap_err()
             .to_string();
         assert_eq!(partial, expected, "frame {frame}");
+        // NCBI dies after the reports of the query batches before: so does the refusal.
+        assert!(whole
+            .get(frame, -1, 2)
+            .unwrap_err()
+            .is::<crate::blastinput::app::ErrorAfterBatchReports>());
     }
     // The bound: NCBI translates a subject of 12 bases (`0 < 12 / 3 - 3`), none shorter.
     for n in 1..=12 {

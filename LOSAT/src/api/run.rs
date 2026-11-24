@@ -716,6 +716,23 @@ fn run_local_entry(
     // How the reading of the query records ended, which the search meets in its batch
     // (`Inputs::query_end`).
     let end = inputs.end();
+    // The BLAST XML report under a `SERIAL_VERIFY_DATA_WRITE` that changes it, refused as on the
+    // command line (`cli::main_entry`), before the search: the call, or the format alone
+    // (`FormatRefusal`).
+    let verification = start.settings().write_verification;
+    for format in outputs.formats.iter_mut() {
+        let number = crate::blastinput::app::parse_formatting_string(format.outfmt)
+            .ok()
+            .map(|choice| choice.number);
+        if let Some(refusal) =
+            crate::blastinput::ncbi_environment::WriteVerification::blast_xml_refusal(
+                verification.as_ref(),
+                number.into_iter(),
+            )
+        {
+            format.refusal.check(Err(anyhow::Error::msg(refusal)))?;
+        }
+    }
     if inputs.database {
         let settings = start.settings();
         return match command {
@@ -766,6 +783,7 @@ fn run_local_entry(
                 args.find_matrix_file(&settings.matrix_search)?;
             }
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastn);
+            args.write_verification = start.settings().write_verification;
             run_local_tblastn(args, query, end, subject, outputs)
         }
         Commands::Blastn(mut args) => {
@@ -816,6 +834,7 @@ fn run_local_entry(
         Commands::Psiblast(args) => {
             let mut args = psiblast_args(args, outputs)?;
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Psiblast);
+            args.write_verification = start.settings().write_verification;
             run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)

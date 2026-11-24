@@ -8,6 +8,11 @@
   ],
   "parameters": [
    {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
+    "takes_value": true
+   },
+   {
     "flag": "-task",
     "help": "Task to execute",
     "takes_value": true,
@@ -454,6 +459,11 @@
    7
   ],
   "parameters": [
+   {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
+    "takes_value": true
+   },
    {
     "flag": "-task",
     "help": "Task to execute",
@@ -1060,6 +1070,11 @@
   ],
   "parameters": [
    {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
+    "takes_value": true
+   },
+   {
     "flag": "-task",
     "help": "Task to execute",
     "takes_value": true,
@@ -1611,6 +1626,11 @@
    7
   ],
   "parameters": [
+   {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
+    "takes_value": true
+   },
    {
     "flag": "-task",
     "help": "Task to execute",
@@ -2169,6 +2189,11 @@
    7
   ],
   "parameters": [
+   {
+    "flag": "-export_search_strategy",
+    "help": "File name to record the search strategy used",
+    "takes_value": true
+   },
    {
     "flag": "-db",
     "help": "BLAST database name",

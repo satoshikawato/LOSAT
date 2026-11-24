@@ -390,7 +390,6 @@ impl<'h> QueryGroup<'h> {
                 .iter()
                 .map(|shown| members.remove(shown).unwrap_or_default())
                 .collect(),
-            html: reading.html,
         }
     }
 }
@@ -443,7 +442,6 @@ pub(crate) fn writer_reads(
             .map(position)
             .collect(),
         aligned: group.aligned(reading.shown.alignments).len(),
-        html: reading.html,
     }
 }
 
@@ -762,15 +760,15 @@ pub(crate) fn write<S: QuerySections, W: ReportWrite>(
 }
 
 /// Where the alignments of the query of `group` end the run (`aligned_end` of what the report's
-/// view does after a throw, `PairwiseView::after_throw`, the answer that the model of the loads
-/// takes too, `FormatThrow::of`, and of the loads of its aligned subjects,
-/// `QuerySections::thrown`).
+/// view does after a throw, with `-html` where the report has its links,
+/// `PairwiseView::after_throw`, the answer that the model of the loads takes too,
+/// `FormatThrow::of`, and of the loads of its aligned subjects, `QuerySections::thrown`).
 fn alignment_end<'s, S: QuerySections>(
     sections: &'s S,
     group: &QueryGroup<'_>,
 ) -> Option<(usize, &'s crate::ncbi_exception::NcbiException)> {
     aligned_end(
-        sections.view().after_throw(),
+        sections.view().after_throw(sections.html_links().is_some()),
         group.aligned(sections.num_alignments()),
         |s_idx| sections.thrown(s_idx),
     )

@@ -338,14 +338,14 @@ fn unknown_algorithm_and_names_of_algorithms() {
             options: "window=64; level=20; linker=1".to_string(),
         }
     );
-    assert_eq!(algorithms.id_of("dustX"), Some(100));
-    assert_eq!(algorithms.id_of("wmY"), Some(101));
-    assert_eq!(algorithms.id_of("nothing"), None);
+    assert_eq!(algorithms.id_of("dustX").ok(), Some(100));
+    assert_eq!(algorithms.id_of("wmY").ok(), Some(101));
+    assert_eq!(algorithms.id_of("nothing").ok(), None);
 
     // A description of two items is its own name: the key is the whole text.
     let db = SeqDb::open(&db_name("mask_nucl_v4"), SeqType::Nucleotide).unwrap();
     let algorithms = db.mask_algorithms().unwrap();
-    assert_eq!(algorithms.id_of("30:"), Some(30));
+    assert_eq!(algorithms.id_of("30:").ok(), Some(30));
     assert_eq!(
         algorithms.details(30).unwrap(),
         MaskAlgorithm {
@@ -359,9 +359,9 @@ fn unknown_algorithm_and_names_of_algorithms() {
 
     let db = SeqDb::open(&db_name("mask_remap"), SeqType::Nucleotide).unwrap();
     let algorithms = db.mask_algorithms().unwrap();
-    assert_eq!(algorithms.id_of("dustX"), Some(100));
-    assert_eq!(algorithms.id_of("wmY"), Some(101));
-    assert_eq!(algorithms.id_of("wmZ"), Some(102));
+    assert_eq!(algorithms.id_of("dustX").ok(), Some(100));
+    assert_eq!(algorithms.id_of("wmY").ok(), Some(101));
+    assert_eq!(algorithms.id_of("wmZ").ok(), Some(102));
 }
 
 /// An OID past the volumes fails at the locator (`SeqDb::locate_oid`, NCBI's `FindVol`) with
@@ -413,7 +413,7 @@ fn a_database_without_columns_has_no_masks() {
     let algorithms = db.mask_algorithms().unwrap();
     assert!(algorithms.ids().is_empty());
     assert_eq!(algorithms.descriptions().unwrap(), "");
-    assert_eq!(algorithms.id_of("dust"), None);
+    assert_eq!(algorithms.id_of("dust").ok(), None);
     assert_eq!(
         oid_mask_ranges(&db, 0, 11).unwrap(),
         MaskRanges::Ranges(Vec::new())
@@ -1158,7 +1158,7 @@ fn descriptions_of_four_items_and_wide_columns() {
             options: "o1:y".to_string(),
         }
     );
-    assert_eq!(algorithms.id_of(&long_name), Some(3));
+    assert_eq!(algorithms.id_of(&long_name).ok(), Some(3));
     // setw(40) does not cut a longer text.
     assert_eq!(
         algorithms.descriptions().unwrap(),

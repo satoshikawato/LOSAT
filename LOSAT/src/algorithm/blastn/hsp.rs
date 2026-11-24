@@ -124,49 +124,53 @@ impl BlastnOutputFormat {
         }
     }
 
-    /// What the format does with a subject whose lookup throws where its batch's prefetch is off
-    /// (`report::db_subject::FormatThrow::of`): the default tables write the row (their `saccver`
-    /// is a field of the subject block), a table with a field list as its fields say
-    /// (`TabularSpec::format_throw`), the XML2 and JSON documents as their form says, the pairwise
-    /// reports as their view says (`PairwiseView::after_throw`); the Seq-annots and the archive
-    /// read nothing of the subject; LOSAT refuses it in the others.
-    pub(crate) fn format_throw(&self) -> crate::report::db_subject::FormatThrow {
-        use crate::report::db_subject::{AfterThrow, FormatThrow, RunThrow};
-        match *self {
-            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => {
-                FormatThrow::Writes(RunThrow::every_row(AfterThrow::WritesRow))
-            }
-            BlastnOutputFormat::CustomTabular(spec) => {
-                spec.format_throw(crate::blastinput::app::Program::Blastn)
-            }
-            BlastnOutputFormat::Xml2(kind) => {
-                FormatThrow::Writes(RunThrow::every_row(kind.after_throw()))
-            }
+    /// The `-outfmt` format of the report (the inverse of `of`): a custom tabular report's is its
+    /// field list's kind (`TabularSpec::kind`).
+    pub(crate) fn report_format(self) -> ReportFormat {
+        use crate::report::tabular::TabularKind;
+        match self {
             BlastnOutputFormat::Pairwise(view) => {
-                FormatThrow::Writes(RunThrow::every_row(view.after_throw()))
+                ReportFormat::from_number(view.outfmt()).expect("outfmt 0 to 4")
             }
-            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => FormatThrow::Unread,
-            BlastnOutputFormat::Xml | BlastnOutputFormat::Sam(_) => {
-                FormatThrow::Refused(crate::report::db_subject::ThrowRefusal::Format)
+            BlastnOutputFormat::Tabular => ReportFormat::Tabular,
+            BlastnOutputFormat::TabularWithComments => ReportFormat::TabularWithComments,
+            BlastnOutputFormat::CustomTabular(spec) => match spec.kind {
+                TabularKind::Tabular => ReportFormat::Tabular,
+                TabularKind::Commented => ReportFormat::TabularWithComments,
+                TabularKind::Csv => ReportFormat::CommaSeparatedValues,
+                TabularKind::CsvWithHeader => ReportFormat::CommaSeparatedValuesWithHeader,
+                TabularKind::TaxReport => ReportFormat::TaxFormat,
+            },
+            BlastnOutputFormat::Seqalign(serial) => {
+                ReportFormat::from_number(serial.outfmt()).expect("outfmt 8, 9 or 12")
             }
+            BlastnOutputFormat::Xml => ReportFormat::Xml,
+            BlastnOutputFormat::Xml2(kind) => kind.report_format(),
+            BlastnOutputFormat::Archive => ReportFormat::ArchiveFormat,
+            BlastnOutputFormat::Sam(_) => ReportFormat::Sam,
         }
     }
 
+    /// What the format does with a subject whose lookup throws where its batch's prefetch is off,
+    /// with `-html` where `html`: `report::db_subject::FormatThrow::of` of its format and field
+    /// list, the one answer of every program.
+    pub(crate) fn format_throw(&self, html: bool) -> crate::report::db_subject::FormatThrow {
+        crate::report::db_subject::FormatThrow::of(
+            self.report_format(),
+            self.tabular_spec(),
+            crate::blastinput::app::Program::Blastn,
+            html,
+        )
+    }
+
     /// Whether the format writes the same where every load of a subject with a positive taxid
-    /// throws (`report::db_subject::unchanged_by_load_throws`, of which this is BLASTN's form).
+    /// throws: `report::db_subject::unchanged_by_load_throws` of its format and field list.
     pub(crate) fn unchanged_by_load_throws(&self) -> bool {
-        match *self {
-            BlastnOutputFormat::CustomTabular(spec) => {
-                spec.unchanged_by_load_throws(crate::blastinput::app::Program::Blastn)
-            }
-            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => true,
-            BlastnOutputFormat::Tabular
-            | BlastnOutputFormat::TabularWithComments
-            | BlastnOutputFormat::Xml2(_)
-            | BlastnOutputFormat::Pairwise(_)
-            | BlastnOutputFormat::Xml
-            | BlastnOutputFormat::Sam(_) => false,
-        }
+        crate::report::db_subject::unchanged_by_load_throws(
+            self.report_format(),
+            self.tabular_spec(),
+            crate::blastinput::app::Program::Blastn,
+        )
     }
 
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
@@ -175,24 +179,36 @@ impl BlastnOutputFormat {
     /// the call's first report, the taxonomy database's messages of that prefetch go with the
     /// query warnings.
     pub(crate) fn prefetches_subjects(self) -> bool {
-        crate::algorithm::common::database::prefetches_subjects(match self {
-            BlastnOutputFormat::Pairwise(view) => Some(view.outfmt()),
-            BlastnOutputFormat::Xml => Some(5),
-            BlastnOutputFormat::Tabular => Some(6),
-            BlastnOutputFormat::TabularWithComments => Some(7),
-            // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
-            // they read the subjects as 6 and 7 do; the rows' own lookups of the taxonomy names
-            // come with the rows (`report::tabular::TabularNames`).
-            BlastnOutputFormat::CustomTabular(spec) => Some(match spec.kind {
-                crate::report::tabular::TabularKind::Commented => 7,
-                _ => 6,
-            }),
-            BlastnOutputFormat::Sam(_) => Some(17),
-            BlastnOutputFormat::Seqalign(serial) => Some(serial.outfmt()),
-            // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
-            // (`TaxdbPrinter`).
-            BlastnOutputFormat::Archive | BlastnOutputFormat::Xml2(_) => None,
-        })
+        // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
+        // (`TaxdbPrinter`).
+        crate::algorithm::common::database::prefetches_subjects(Some(self.prefetch_format()))
+    }
+
+    /// The format as the first format of a BLASTN run that NCBI's prefetch of each query batch
+    /// asks (`common::database::PrefetchFormat`, the one owner of whether a batch prefetches).
+    pub(crate) fn prefetch_format(self) -> crate::algorithm::common::database::PrefetchFormat {
+        use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, JSON, SAM, XML};
+        crate::algorithm::common::database::PrefetchFormat::of(
+            match self {
+                BlastnOutputFormat::Pairwise(view) => view.outfmt(),
+                BlastnOutputFormat::Xml => XML,
+                BlastnOutputFormat::Tabular => 6,
+                BlastnOutputFormat::TabularWithComments => 7,
+                // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and
+                // 20): they read the subjects as 6 and 7 do; the rows' own lookups of the
+                // taxonomy names come with the rows (`report::tabular::TabularNames`).
+                BlastnOutputFormat::CustomTabular(spec) => match spec.kind {
+                    crate::report::tabular::TabularKind::Commented => 7,
+                    _ => 6,
+                },
+                BlastnOutputFormat::Sam(_) => SAM,
+                BlastnOutputFormat::Seqalign(serial) => serial.outfmt(),
+                // The XML2 and JSON documents prefetch as each of 13 to 16 does.
+                BlastnOutputFormat::Xml2(_) => JSON,
+                BlastnOutputFormat::Archive => ARCHIVE_FORMAT,
+            },
+            crate::report::archive::options::RequestKind::Blastn,
+        )
     }
 
     /// Whether the format is the pairwise report of outfmt 0 to 4 (`Pairwise`): the same prolog,

@@ -154,10 +154,10 @@ pub(crate) fn write_psiblast_round_report(
         sections.head(writer, q_idx, group.as_ref(), &mut place)?;
         if let Some(group) = &group {
             // An aligned subject's load may end the run where the view's answer says
-            // (`PairwiseView::after_throw`, as `x_pairwise_par::alignment_end` asks it).
+            // (`PairwiseConfig::after_throw`, as `x_pairwise_par::alignment_end` asks it).
             let aligned = group.aligned(report.num_alignments);
             let end = crate::report::x_pairwise_par::aligned_end(
-                config.view.after_throw(),
+                config.after_throw(),
                 aligned,
                 |s_idx| sections.thrown(s_idx),
             );

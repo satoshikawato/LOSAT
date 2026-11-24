@@ -546,7 +546,6 @@ fn the_model_of_the_reads_is_the_writers_group() {
                                 descriptions,
                                 alignments,
                             },
-                            html: false,
                         };
                         let model = QueryGroup::read_order(
                             rows.iter().map(|row| (row.hit.s_idx, row)),
@@ -786,11 +785,23 @@ fn the_writers_end_the_run_at_an_aligned_subject_whose_load_throws() {
         _ => None,
     };
     let end = |after, aligned: &[u32]| aligned_end(after, aligned, thrown).map(|(at, _)| at);
-    assert_eq!(end(AfterThrow::SkipsAlignment, &[7, 1]), Some(0));
-    assert_eq!(end(AfterThrow::SkipsAlignment, &[1, 7]), None);
-    assert_eq!(end(AfterThrow::SkipsAlignment, &[9, 7]), None);
-    assert_eq!(end(AfterThrow::EndsAtAlignment, &[1, 9, 7]), Some(1));
-    let at = aligned_end(AfterThrow::EndsAtAlignment, &[1, 7], thrown);
+    assert_eq!(
+        end(AfterThrow::SkipsAlignment { html: false }, &[7, 1]),
+        Some(0)
+    );
+    assert_eq!(
+        end(AfterThrow::SkipsAlignment { html: false }, &[1, 7]),
+        None
+    );
+    assert_eq!(
+        end(AfterThrow::SkipsAlignment { html: false }, &[9, 7]),
+        None
+    );
+    assert_eq!(
+        end(AfterThrow::EndsAtAlignment { html: false }, &[1, 9, 7]),
+        Some(1)
+    );
+    let at = aligned_end(AfterThrow::EndsAtAlignment { html: false }, &[1, 7], thrown);
     assert!(end_here(at, 0).is_ok());
     let error = end_here(at, 1).unwrap_err();
     let carried = crate::ncbi_exception::NcbiException::of_io_error(&error).unwrap();

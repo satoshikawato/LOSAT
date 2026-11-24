@@ -15,6 +15,12 @@ use crate::record::FastaRecord;
 use crate::report::blast_xml::XmlStats;
 use crate::report::PairwiseHit;
 
+/// What every program's `run_local` returns when its arguments name `-db` (no NCBI counterpart:
+/// the caller contract of LOSAT's entries). `run_local` searches the caller's subject records; a
+/// `-db` search runs through the program's `run_local_database` (or the command line's `run`).
+pub(crate) const RUN_LOCAL_DB_REFUSAL: &str =
+    "-db (a database search) is run by run_local_database, not run_local";
+
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:106-111
 pub use crate::algorithm::tblastx::blast_engine::run_local as run_local_tblastx;
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:113-119
@@ -121,6 +127,18 @@ impl OutputSink<'_> {
                 | OutputSink::Out(_)
                 | OutputSink::Report(_)
         )
+    }
+
+    /// The same sink, borrowed for a view of the outputs (`ViewParts::view`).
+    fn reborrow(&mut self) -> OutputSink<'_> {
+        match self {
+            OutputSink::Stdout => OutputSink::Stdout,
+            OutputSink::File(path) => OutputSink::File(path),
+            OutputSink::Writer(writer) => OutputSink::Writer(&mut **writer),
+            OutputSink::Out(out) => OutputSink::Out(out),
+            OutputSink::Report(stream) => OutputSink::Report(stream),
+            OutputSink::Files(writer, side) => OutputSink::Files(&mut **writer, side.clone()),
+        }
     }
 }
 
@@ -667,7 +685,7 @@ pub struct ReportOutputs<'a> {
     pub html_posts: Option<&'a mut (dyn Write + Send)>,
 }
 
-impl ReportOutputs<'_> {
+impl<'a> ReportOutputs<'a> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1452 (cited at
     // `FormatOutput::writes_query_warnings`): a structured report returns before the warnings.
     /// Whether the first format writes the queries' result warnings with its reports (a call
@@ -705,6 +723,32 @@ impl ReportOutputs<'_> {
                 OutputSink::Out(out) => out.finish(result),
                 _ => result,
             })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627 (cited at
+    // `app::early_format_choice`)
+    /// Each requested format as the command line's early reading of its `-outfmt` reads it before
+    /// the option handlers (`app::early_format_choice`), with LOSAT's refusal of a format that
+    /// `program` does not write (`EarlyFormat::report_format`, with the format's `-out`,
+    /// `FormatOutput::side_out` of the run's `out`). `strategy`: the argv names a search strategy
+    /// file (`-export_search_strategy`), with which a value that does not parse is left to the
+    /// program's formatting handler, after the arguments' own errors, as on the command line (line
+    /// RG F1w review 2, S-a: LOSAT Web gives such a value as the run's one format and as the
+    /// arguments' `-outfmt`, which the handlers read again).
+    pub(crate) fn early_choices(
+        &self,
+        program: crate::blastinput::app::Program,
+        out: Option<&Path>,
+        strategy: bool,
+    ) -> anyhow::Result<Vec<crate::blastinput::app::EarlyFormat>> {
+        self.formats
+            .iter()
+            .map(|format| {
+                let choice = crate::blastinput::app::early_format_choice(format.outfmt, strategy)?;
+                choice.report_format(program, format.side_out(out))?;
+                Ok(choice)
+            })
+            .collect()
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:887-899
@@ -820,6 +864,36 @@ impl ReportOutputs<'_> {
         handle: crate::report::archive::ArchiveHandle,
         f: impl FnOnce(&mut ReportOutputs<'_>) -> R,
     ) -> R {
+        let (formats, diagnostics, mut parts) = self.split();
+        let mut tee = crate::report::archive::DiagTee::new(diagnostics, handle);
+        let mut view = parts.view(
+            formats
+                .iter_mut()
+                .map(|format| FormatOutput {
+                    outfmt: format.outfmt,
+                    sink: format.sink.reborrow(),
+                    // Moved into the view and back after `f` (a format that fails alone).
+                    refusal: std::mem::take(&mut format.refusal),
+                })
+                .collect(),
+            &mut tee,
+        );
+        let result = f(&mut view);
+        let refusals = view.into_refusals();
+        FormatOutput::take_back(formats, refusals);
+        result
+    }
+
+    /// The outputs as their formats, their diagnostics stream and the rest (`ViewParts`), for a
+    /// view of them that sees the formats through other sinks or the diagnostics through another
+    /// stream (`ViewParts::view`).
+    fn split(
+        &mut self,
+    ) -> (
+        &mut Vec<FormatOutput<'a>>,
+        &mut (dyn Write + Send),
+        ViewParts<'_, 'a>,
+    ) {
         let ReportOutputs {
             other_outfmts,
             formats,
@@ -829,49 +903,110 @@ impl ReportOutputs<'_> {
             observer,
             html_posts,
         } = self;
-        let mut tee = crate::report::archive::DiagTee::new(&mut **diagnostics, handle);
-        let mut view = ReportOutputs {
-            other_outfmts,
-            formats: formats
-                .iter_mut()
-                .map(|format| FormatOutput {
-                    outfmt: format.outfmt,
-                    sink: match &mut format.sink {
-                        OutputSink::Stdout => OutputSink::Stdout,
-                        OutputSink::File(path) => OutputSink::File(path),
-                        OutputSink::Writer(writer) => OutputSink::Writer(&mut **writer),
-                        OutputSink::Out(out) => OutputSink::Out(out),
-                        OutputSink::Report(stream) => OutputSink::Report(stream),
-                        OutputSink::Files(writer, sink) => {
-                            OutputSink::Files(&mut **writer, sink.clone())
-                        }
-                    },
-                    // Moved into the view and back after `f` (a format that fails alone).
-                    refusal: std::mem::take(&mut format.refusal),
-                })
-                .collect(),
-            diagnostics: &mut tee,
-            // Not saved in the archive: the archive's run (outfmt 11 first) writes none of them.
-            later_warnings: later_warnings.as_deref_mut(),
-            // A later search's `-html` posts go where they went (`ReportOutputs::html_posts`).
-            html_posts: html_posts
-                .as_deref_mut()
-                .map(|posts| posts as &mut (dyn Write + Send)),
-            hits: hits.as_mut().map(|hits| &mut **hits as &mut HitsSink<'_>),
-            observer: observer
-                .as_mut()
-                .map(|observer| &mut **observer as &mut (dyn FormatObserver + Send)),
-        };
-        let result = f(&mut view);
-        let refusals: Vec<FormatRefusal> = view
-            .formats
+        (
+            formats,
+            &mut **diagnostics,
+            ViewParts {
+                other_outfmts,
+                later_warnings,
+                hits,
+                observer,
+                html_posts,
+            },
+        )
+    }
+
+    /// The refusal of each format of a view (`ViewParts::view`), which `FormatOutput::take_back`
+    /// gives back to the formats it was lent from.
+    fn into_refusals(self) -> Vec<FormatRefusal> {
+        self.formats
             .into_iter()
             .map(|format| format.refusal)
-            .collect();
+            .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:250-262 (cited at
+    // `strategy::check_report_stream`): the report stream before NCBI's first request.
+    /// A run of records (each program's `run_local` and `run_local_database`) as the command
+    /// line's run of the argv ends: `run` searches and reports, with the BLAST archive (outfmt 11)
+    /// of `archive`, whose diagnostics stream saves the messages (`with_archive_diagnostics`); the
+    /// run ends with the search strategy file of the arguments (`strategy`,
+    /// `strategy::end_run`, LOSAT Web's: `strategy::open_strategy_file_in`), and then the archive's
+    /// error archive (`finish_archive`; `no_query`: the run has no query, NCBI's `Query is
+    /// Empty!`). Each format's writer takes the run's bytes as the command line's report stream
+    /// takes them: where LOSAT refuses the strategy file at NCBI's first request
+    /// (`strategy::check_report_stream`), what a format was written before that point (NCBI's
+    /// prolog) stays before the refusal, and a run that NCBI ends before it keeps what each format
+    /// was written.
+    pub(crate) fn run_records(
+        &mut self,
+        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+        no_query: bool,
+        run: impl FnOnce(&mut ReportOutputs<'_>) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        let result = match archive {
+            Some(handle) => self.with_archive_diagnostics(handle.clone(), run),
+            None => run(self),
+        };
+        let result = crate::report::archive::strategy::end_run(strategy, result);
+        match archive {
+            Some(handle) => self.finish_archive(handle, no_query, result),
+            None => result,
+        }
+    }
+}
+
+/// The fields of a `ReportOutputs` other than its formats and its diagnostics stream
+/// (`ReportOutputs::split`), which a view of the outputs borrows as they are.
+struct ViewParts<'s, 'a> {
+    other_outfmts: &'a [&'a str],
+    later_warnings: &'s mut Option<&'a mut [Vec<u8>]>,
+    hits: &'s mut Option<&'a mut HitsSink<'a>>,
+    observer: &'s mut Option<&'a mut (dyn FormatObserver + Send)>,
+    html_posts: &'s mut Option<&'a mut (dyn Write + Send)>,
+}
+
+impl ViewParts<'_, '_> {
+    /// The outputs seen through `formats` (each format's `-outfmt` text, the sink that the step
+    /// writes it through, and its refusal, moved into the view and back after it) and the
+    /// diagnostics stream `diagnostics`, with the other fields as they are: the one rebuild of the
+    /// outputs for a step that sees them through other sinks or another diagnostics stream (the
+    /// BLAST archive's saved messages, `ReportOutputs::with_archive_diagnostics`). The view's
+    /// refusals go back with `ReportOutputs::into_refusals` and `FormatOutput::take_back`.
+    fn view<'v>(
+        &'v mut self,
+        formats: Vec<FormatOutput<'v>>,
+        diagnostics: &'v mut (dyn Write + Send),
+    ) -> ReportOutputs<'v> {
+        ReportOutputs {
+            other_outfmts: self.other_outfmts,
+            formats,
+            diagnostics,
+            later_warnings: self.later_warnings.as_deref_mut(),
+            // A later search's `-html` posts go where they went (`ReportOutputs::html_posts`).
+            html_posts: self
+                .html_posts
+                .as_deref_mut()
+                .map(|posts| posts as &mut (dyn Write + Send)),
+            hits: self
+                .hits
+                .as_mut()
+                .map(|hits| &mut **hits as &mut HitsSink<'_>),
+            observer: self
+                .observer
+                .as_mut()
+                .map(|observer| &mut **observer as &mut (dyn FormatObserver + Send)),
+        }
+    }
+}
+
+impl FormatOutput<'_> {
+    /// Gives each of `formats` back the refusal of its view (`ReportOutputs::into_refusals`).
+    fn take_back(formats: &mut [FormatOutput<'_>], refusals: Vec<FormatRefusal>) {
         for (format, refusal) in formats.iter_mut().zip(refusals) {
             format.refusal = refusal;
         }
-        result
     }
 }
 

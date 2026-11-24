@@ -206,9 +206,9 @@ fn the_posts_of_a_hit_follow_the_report_up_to_the_place_of_its_load() {
     let mut sink = log.clone();
     report.write_all(b"{0}\n").unwrap();
     let mut posts = HitPosts::new(false);
-    posts.hit(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
-    posts.hit(2, 2, |_| Ok(())).unwrap();
-    posts.hit(2, 3, |texts| texts.write_all(b"T3\n")).unwrap();
+    posts.mark(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
+    posts.mark(2, 2, |_| Ok(())).unwrap();
+    posts.mark(2, 3, |texts| texts.write_all(b"T3\n")).unwrap();
     posts
         .write(b",\n{1}\n", &mut report, &mut sink, |_, _, _| Ok(()))
         .unwrap();
@@ -222,8 +222,8 @@ fn the_posts_of_a_hit_follow_the_report_up_to_the_place_of_its_load() {
     let (mut report, mut sink) = (log.clone(), log.clone());
     let mut warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
     let mut posts = HitPosts::new(warnings.reads_with_texts(0));
-    posts.hit(0, 5, |texts| texts.write_all(b"P5\n")).unwrap();
-    posts.hit(4, 6, |texts| texts.write_all(b"P6\n")).unwrap();
+    posts.mark(0, 5, |texts| texts.write_all(b"P5\n")).unwrap();
+    posts.mark(4, 6, |texts| texts.write_all(b"P6\n")).unwrap();
     write_hit_posts(b"<H5><H6>", &posts, 0, &mut report, Some(&mut warnings)).unwrap();
     drop(warnings);
     let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
@@ -237,7 +237,7 @@ fn the_posts_of_a_hit_follow_the_report_up_to_the_place_of_its_load() {
         "{lost}"
     );
     let mut marks = HitPosts::new(true);
-    marks.hit(0, 5, |_| Ok(())).unwrap();
+    marks.mark(0, 5, |_| Ok(())).unwrap();
     let mut alone = Vec::new();
     write_hit_posts(b"<H5><H6>", &marks, 0, &mut alone, None).unwrap();
     assert_eq!(alone, b"<H5><H6>");
@@ -258,7 +258,7 @@ fn the_post_of_a_caught_exception_follows_the_loads_before_it() {
     let (mut report, mut sink) = (log.clone(), log.clone());
     let mut warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
     let mut posts = HitPosts::new(warnings.reads_with_texts(0));
-    posts.hit(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
+    posts.mark(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
     posts.document(crate::report::blast_xml::DocumentPosts {
         cut: true,
         ..Default::default()

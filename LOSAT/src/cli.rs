@@ -35,6 +35,10 @@ pub use reader::ArgvError;
 mod stdio_buffer;
 pub use stdio_buffer::{NcbiBuffer, NcbiStdio, NCBI_BUFSIZ};
 
+// The process's standard output with no buffer of Rust's, under the command line's writers.
+mod standard_output;
+pub(crate) use standard_output::standard_output;
+
 /// The words that ask for `install_shims`: `-install-shims` is how the top level's `-help` shows
 /// it.
 pub const INSTALL_SHIMS_WORDS: [&str; 2] = ["--install-shims", "-install-shims"];

@@ -1,0 +1,3 @@
+Error: [tblastn] Error: Tax database file has wrong magic number.
+terminate called after throwing an instance of 'std::__ios_failure'
+  what():  basic_ios::clear: iostream error

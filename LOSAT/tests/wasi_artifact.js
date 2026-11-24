@@ -146,7 +146,29 @@ function createSharedMemory(initial, maximum, stepDown, create = descriptor => n
   throw failure;
 }
 
-module.exports = { inspectArtifact, prepareArtifact, unsignedWasiImports, blockingStdioWrite, waitForStream, createSharedMemory };
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
+// The module's abort. LOSAT aborts where NCBI BLAST+ 2.17.0 aborts (the tabular report whose last
+// flush fails in its destructor ends in std::terminate: exit status -6 to a parent, 134 in a shell),
+// and a panic aborts too (the release profile's `panic = "abort"`). WASI has no signals: Rust's
+// abort there is wasi-libc's, a trap of `unreachable`. A host of a LOSAT command ends that trap as
+// the native program ends its abort, by SIGABRT, with no text after the module's own (before, the
+// runners printed the trap's stack and exited 1). Every other trap (memory out of bounds, an
+// injected fault, a host error) keeps its report and its exit.
+// Node's worker threads block the process's signals, so the abort that a guest thread sends is
+// taken by another thread while the sender runs on, and a SIGTERM sent after it (failWorker's end)
+// ends the process at once, before the abort's core dump starts (2026-11-23, WSL: the guest
+// thread's abort ended by SIGTERM). The sender waits for the abort instead, at most ABORT_WAIT_MS
+// (an abort that does not come, as where the parent ignores SIGABRT, leaves the caller's report
+// and end); the main thread takes its own abort at once.
+const ABORT_WAIT_MS = 30000;
+function endOnAbortTrap(err) {
+  if (!(err instanceof WebAssembly.RuntimeError && err.message === "unreachable")) return;
+  process.kill(process.pid, "SIGABRT");
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ABORT_WAIT_MS);
+}
+
+module.exports = { inspectArtifact, prepareArtifact, unsignedWasiImports, blockingStdioWrite, waitForStream, createSharedMemory,
+  endOnAbortTrap };
 if (require.main === module) {
   try { console.log(JSON.stringify(inspectArtifact(require("node:fs").readFileSync(process.argv[2]), process.argv[3]), null, 2)); }
   catch (error) { console.error(error); process.exitCode = 1; }

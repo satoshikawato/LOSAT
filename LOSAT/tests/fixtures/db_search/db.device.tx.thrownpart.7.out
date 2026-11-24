@@ -1,0 +1,5 @@
+# TBLASTX 2.17.0+
+# Query: mix2_u glob1 of multidb/nnp (no accession table)
+# Database: tests/db_search/multidb/na tests/db_search/multidb/nnp
+# Fields: query id, subject length, evalue
+# 1 hits found

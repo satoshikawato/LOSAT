@@ -14,6 +14,7 @@ use super::header::{decode_defline_set, decode_defline_taxids};
 use super::index::IndexFile;
 use super::*;
 use crate::core::blast_encoding::{encode_iupac_to_blastna, iupacna_to_ncbi4na};
+use crate::utils::test_dir::ncbi_dir;
 
 /// NCBIstdaa: the residue at position `i` has the code `i`
 /// (c++/src/algo/blast/core/blast_encoding.c:115-118, `NCBISTDAA_TO_AMINOACID`).
@@ -1118,9 +1119,14 @@ fn alias_oid_lists_select_ncbis_oids() {
     let db = open("u").unwrap();
     assert_eq!(oids(&db), [0, 2, 3, 4, 5, 9]);
     assert_eq!(db.ncbi_num_seqs(), 6);
-    // A missing file is the constructor's error when it scans.
+    // A missing file is the constructor's error when it scans. Its path is the directory of the
+    // first volume, which NCBI names with its links followed (seqdbalias.cpp:851-862, 2001-2005).
     write("x.pal", b"DBLIST prot_v4\nOIDLIST none.msk\n");
-    let missing = dir.join("none.msk").to_str().unwrap().to_string();
+    let missing = ncbi_dir(&dir)
+        .join("none.msk")
+        .to_str()
+        .unwrap()
+        .to_string();
     let text = format!("To be memory mapped the file must exist: '{missing}'");
     let error = open("x").unwrap_err();
     assert!(
@@ -1214,10 +1220,11 @@ fn oid_lists_over_unions_of_ranges_keep_ncbis_oids() {
     let db = SeqDb::open(dir.join("pb").to_str().unwrap(), SeqType::Protein).unwrap();
     let error = db.build_oid_list().unwrap_err();
     assert!(error.ncbi_crashes(), "{error}");
+    // The alias file under the name NCBI resolves it to, its links followed (`ncbi_dir`).
     assert!(
         error
             .to_string()
-            .starts_with(&format!("{}:", dir.join("pb.pal").display())),
+            .starts_with(&format!("{}:", ncbi_dir(&dir).join("pb.pal").display())),
         "{error}"
     );
     write("pa.pal", b"DBLIST c3 c4\nFIRST_OID 10\nLAST_OID 10\n");
@@ -1277,9 +1284,11 @@ fn an_unreadable_oid_list_file_is_ncbis_memory_map_error() {
     }
     std::fs::write(dir.join("np.pal"), b"DBLIST prot_v4\nOIDLIST np.msk\n").unwrap();
     let error = SeqDb::open(dir.join("np").to_str().unwrap(), SeqType::Protein).unwrap_err();
+    // The list beside the alias file, in the directory NCBI names with its links followed
+    // (seqdbalias.cpp:325-335, 2001-2005).
     let text = format!(
         "CMemoryFile: Cannot memory map file '{}':Permission denied",
-        mask.display()
+        ncbi_dir(&dir).join("np.msk").display()
     );
     assert_eq!(error.ncbi_request_message().unwrap(), text.as_bytes());
     assert_eq!(
@@ -3026,7 +3035,8 @@ fn has_parsed_seqids_leaves_an_unreadable_header_file_to_its_first_read() {
     let dir = temp_dir("parsed-unreadable");
     copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
     let name = dir.join("prot_v4").to_str().unwrap().to_string();
-    let phr = dir.join("prot_v4.phr");
+    // The header file under the name the reader opens it by, its links followed (`ncbi_dir`).
+    let phr = ncbi_dir(&dir).join("prot_v4.phr");
     let len = std::fs::metadata(&phr).unwrap().len();
     file::refused_reads::refuse(&phr, &dir);
     let db = SeqDb::open(&name, SeqType::Protein).unwrap();
@@ -3052,7 +3062,7 @@ fn has_parsed_seqids_leaves_an_unreadable_header_file_to_its_first_read() {
         &std::fs::read(later.join("prot_v4.phr")).unwrap()[..1],
     )
     .unwrap();
-    file::refused_reads::refuse(&later.join("prot_v4.phr"), &short);
+    file::refused_reads::refuse(&ncbi_dir(&later).join("prot_v4.phr"), &short);
     let db = SeqDb::open(&name, SeqType::Protein).unwrap();
     assert!(!db.has_parsed_seqids().unwrap());
     let error = db.deflines(0).expect_err("the header is not read");

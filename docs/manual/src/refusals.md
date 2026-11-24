@@ -123,6 +123,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-use_sw_tback` without composition-based statistics (`-comp_based_stats 0`, and `-matrix IDENTITY`, which NCBI searches without them) | Refused. With `-comp_based_stats` 1 to 3 it works. |
 | `-use_sw_tback` with `-ungapped` (which only `-comp_based_stats 0` allows) | Refused at the first query batch that is searched, as in `blastx`. NCBI crashes there, whether the batch has hits or not. |
 | `-ungapped` with a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY` | Refused. NCBI aborts. |
+| `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` (see [Environment](environment.md)) that split a query batch where NCBI BLAST+ stops (a piece it would split again, or one left without a query), or a negative chunk size above a negative overlap whose pieces leave gaps between them (NCBI BLAST+ searches on and loses the hits there) | Refused after the output of the query batches before: at the stop, before the database's errors and `-searchsp`'s average subject length error that NCBI BLAST+ meets later, and for the gaps where the batch's first piece with searchable query letters would read the subjects. With no subject to search, or no such piece, the batch is reported as NCBI BLAST+ reports it. `psiblast` and `tblastn` do the same. |
 | `-ungapped` with a `-matrix` name that NCBI reads from a matrix file | Refused. NCBI aborts or fails. See [Environment](environment.md). |
 | `-ungapped` with a protein subject of more than 5,000,000 residues, from `-subject` or from a database | Refused. NCBI searches it in overlapping parts, which LOSAT does not do yet. |
 | `-comp_based_stats` with unified P-values (`1u`, `2u`, `3u`), when a query with a residue that can be scored is followed in the same batch of queries by one with none (all `X`, empty, or masked whole by `-seg yes`) and `-searchsp` is not given or is 0 | Refused. NCBI reports every e-value of the first of the two as 0. |
@@ -169,7 +170,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-use_sw_tback` with `-ungapped` (which only `-comp_based_stats 0` allows) | Refused at the first query batch that is searched, as in `blastx`. NCBI crashes there, whether the batch has hits or not. |
 | `-ungapped` with a `-matrix` name that begins with `IDENTITY` but is not `IDENTITY`, or with a matrix file that NCBI BLAST+ finds (see [Environment](environment.md)) | Refused. NCBI aborts. |
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7) | Refused, as in `blastp`. |
-| `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
+| `-threshold` with the compressed lookup table | Refused, as in `blastp`. LOSAT writes the results of the query batches before and then stops with the error. |
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused, as in `blastp`. |
 | An infinite `-evalue` (`+inf`, `1e999`) | Refused. |
 | An `-evalue` of 1.7976931348623157e308 (`DBL_MAX`) with composition-based statistics (`-comp_based_stats` 1 to 3) | Refused. NCBI's `tblastn` crashes on some inputs with it. With `-comp_based_stats 0`, `-matrix IDENTITY` or `-ungapped` it runs. |
@@ -256,7 +257,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-use_sw_tback` | Refused when the search finds an alignment, after the report's header. Depending on the input, NCBI fails its traceback (`BLAST engine error: Traceback failed`), throws an exception, crashes (with `-subject` and with `-db`), never finishes, or writes rows that change from one run to the next. A search that finds nothing runs, as in NCBI. |
 | `-outfmt 11` | Refused. NCBI searches, then stops with a C++ exception whose report (in its error archive too) changes from run to run. |
 | `-mt_mode 1` with more than one thread and `-db` | Refused. |
-| A PSSM query that `-seg` masks completely | Refused. |
+| A PSSM query that `-seg` masks completely | Refused. LOSAT writes the report's header and then stops with the error. |
 | `-outfmt` 12 to 16 and 18 | Refused: not yet supported. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
 | `-db_gencode 32` | Refused. It is not one of NCBI's codes; LOSAT's `tblastn` takes it for its own translations. |
 | `-in_pssm` in LOSAT Web | Refused. The library API and pylosat take it as an input. |

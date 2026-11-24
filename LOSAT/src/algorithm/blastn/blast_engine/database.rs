@@ -1631,7 +1631,9 @@ impl BlastnDatabase {
     /// fetches (`fetched`: the first that read a UTF8String header). NCBI's warning of the batch's
     /// first read of such a header goes to the posts of `reads` (the batch's reader messages and
     /// request posts, before its prefetch), also where the read fails after it
-    /// (`shared::Utf8Read::of_read`). The error is `read_titles`'.
+    /// (`shared::Utf8Read::of_read`), then NCBI's posts of the titles that its Seq-aligns read
+    /// (`shared::batch_title_posts`, or those before a failed read,
+    /// `shared::HeaderReadError::title_posts`). The error is `read_titles`'.
     pub(super) fn batch_titles(
         &self,
         fetched: Option<crate::seqdb::SeqLocation>,
@@ -1646,7 +1648,6 @@ impl BlastnDatabase {
         if let Some(warning) = &warning {
             posts.append(warning);
         }
-        read?;
         // NCBI's posts of the titles that the batch's Seq-aligns read, in `read_titles`' order.
         let aligned = hit_lists.iter().flatten().flat_map(|hit_list| {
             let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
@@ -1654,6 +1655,15 @@ impl BlastnDatabase {
                 .iter()
                 .map(|hsp_list| hsp_list.oid)
         });
+        if let Err(error) = read {
+            // A read that NCBI cannot make ends the batch's Seq-aligns: the posts of the reads
+            // before it come before its error.
+            let error = shared::HeaderReadError::after_seq_aligns(error, aligned);
+            if let Some(failure) = error.downcast_ref::<shared::HeaderReadError>() {
+                posts.append(&failure.title_posts(&self.db, warning.is_some(), PROGRAM)?);
+            }
+            return Err(error);
+        }
         posts.append(&shared::batch_title_posts(
             &self.db,
             aligned,

@@ -2640,9 +2640,11 @@ impl SeqDb {
             .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Notes that a reader read the title of a reported sequence that holds a byte outside
-    /// ' ' ..= '~' (`algorithm::common::database::HeaderReader`): the reads of NCBI's cache of
-    /// header records are modelled from here on (`read_header_record`).
+    /// Notes that a reader read a title that holds a byte outside ' ' ..= '~' (a reported
+    /// sequence's, `algorithm::common::database::HeaderReader`; a failed read's,
+    /// `HeaderReadError::title_posts`; any sequence's in the check before a search,
+    /// `reports_may_refuse`): the reads of NCBI's cache of header records are modelled from here
+    /// on (`read_header_record`).
     #[cold]
     #[inline(never)]
     pub fn note_replaced_title(&self) {
@@ -2681,6 +2683,19 @@ impl SeqDb {
         let read = *slot != Some(at.vol_oid);
         *slot = Some(at.vol_oid);
         read
+    }
+
+    /// The model of NCBI's cache of header records (`read_header_record`) back to a run's start,
+    /// for a search again of batches whose reads NCBI made once (BLASTP's batches before a failed
+    /// one).
+    #[cold]
+    #[inline(never)]
+    pub fn restart_header_reads(&self) {
+        self.header_cache
+            .lock()
+            .expect("the header cache is not poisoned")
+            .0
+            .clear();
     }
 
     /// What NCBI's read of the header record of the sequence at `at` posts for the bytes outside

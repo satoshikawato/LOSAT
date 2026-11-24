@@ -395,16 +395,17 @@ impl ParsedSubject {
     // probe of the ID2a review). LOSAT refuses that subject instead of repeating a defect of
     // NCBI's.
     /// The subject of the definition lines `set` of a database. `Err` names what LOSAT does not
-    /// write as NCBI: a stored title or Seq-id with a byte outside ' ' ..= '~' (NCBI writes an
-    /// error message each time it reads the definition line) and a definition line without a
-    /// Seq-id (NCBI's formatters take the best of none; makeblastdb writes none such).
+    /// write as NCBI: a stored Seq-id with a byte outside ' ' ..= '~' (NCBI writes an error
+    /// message each time it reads the definition line; such a title is the reports' refusal,
+    /// `replaced_title_bytes`) and a definition line without a Seq-id (NCBI's formatters take the
+    /// best of none; makeblastdb writes none such).
     pub fn new(set: DeflineSet) -> Result<Self, String> {
         if set
             .deflines
             .iter()
-            .any(|defline| defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
+            .any(|defline| defline.replaced_id_bytes > 0)
         {
-            return Err("has a stored title or Seq-id with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line)".into());
+            return Err("has a stored Seq-id with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line)".into());
         }
         if set.deflines.iter().any(|defline| defline.ids.is_empty()) {
             return Err("has a definition line without a Seq-id".into());
@@ -1344,6 +1345,15 @@ impl ParsedSubject {
             .first()
             .and_then(|defline| defline.title.as_deref())
             .unwrap_or_default()
+    }
+
+    /// Whether a stored title of its definition lines held a byte outside ' ' ..= '~', read as
+    /// '#' (`algorithm::common::database::check_reported_title`).
+    pub fn replaced_title_bytes(&self) -> bool {
+        self.set
+            .deflines
+            .iter()
+            .any(|defline| defline.replaced_title_bytes > 0)
     }
 
     /// The start of the outfmt 0 description line (`description_id` of `GetDisplayIds`' id) and

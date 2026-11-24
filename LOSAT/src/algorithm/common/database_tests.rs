@@ -876,3 +876,73 @@ fn an_unreadable_header_stays_in_the_redo_stream_and_ends_the_traceback() {
         "{refusal}"
     );
 }
+
+// RG-KB 9(b) review 1 (F1): NCBI BLAST+ 2.17.0 (`db.tchar.*.dmg.*`) posts the 803.7 of the
+// title of OID 0 (0xE9), which the batch's Seq-aligns read before OID 1, whose title tag it
+// cannot read, and then fails; a later read of OID 0 finds it in the cache of header records.
+#[test]
+fn a_failed_header_read_keeps_the_posts_of_the_seq_aligns_before_it() {
+    let base =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/tchar/tc_dmg_p");
+    let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+    let failure = |title_reads: Vec<u32>| {
+        anyhow::Error::new(HeaderReadError {
+            query: 0,
+            error: anyhow::anyhow!("unreadable"),
+            utf8: None,
+            title_reads,
+        })
+    };
+    // The reads of the batch's Seq-aligns before the first read of the failed one, then it.
+    let error = HeaderReadError::after_seq_aligns(failure(vec![1]), [2, 0, 1, 2, 1]);
+    let failed = error.downcast_ref::<HeaderReadError>().unwrap();
+    assert_eq!(failed.title_reads, [2, 0, 1]);
+    // A failure elsewhere (a fetch, the prefetch) has no such reads.
+    let elsewhere = HeaderReadError::after_seq_aligns(failure(Vec::new()), [0, 1]);
+    let elsewhere = elsewhere.downcast_ref::<HeaderReadError>().unwrap();
+    assert!(elsewhere.title_reads.is_empty());
+    assert_eq!(
+        elsewhere.title_posts(&db, false, "BLASTP").unwrap(),
+        Default::default()
+    );
+    assert!(!db.replaced_titles());
+    // With NCBI's warning of a UTF8String header in the batch: LOSAT's refusal.
+    let utf8 = failed
+        .title_posts(&db, true, "BLASTP")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        utf8.contains("database sequence 0 has a stored title"),
+        "{utf8}"
+    );
+    db.restart_header_reads();
+    let mut posted = crate::report::diag_log::Posts::default();
+    posted.post(
+        crate::report::diag_log::ERROR,
+        b"Error: (803.7) [blastp] Blast-def-line-set.E.title\nBad char [0xE9] in string at byte \
+          18\nd0 fam\xe9one\n"
+            .to_vec(),
+    );
+    assert_eq!(failed.title_posts(&db, false, "BLASTP").unwrap(), posted);
+    assert!(db.replaced_titles());
+    assert_eq!(
+        failed.title_posts(&db, false, "BLASTP").unwrap(),
+        Default::default()
+    );
+}
+
+// RG-KB 9(b) review 1 (F3): a call's first UTF8String read posts NCBI's warning in its own
+// batch alone.
+#[test]
+fn the_utf8_read_of_a_call_is_of_its_batch_alone() {
+    let call = CallUtf8::default();
+    assert!(!call.of_batch(0));
+    let read = Utf8Read {
+        query: 1,
+        path: "Blast-def-line-set.E.title".to_string(),
+    };
+    call.note(2, Some(&read));
+    call.note(4, Some(&read));
+    assert!(call.of_batch(2));
+    assert!(!call.of_batch(0) && !call.of_batch(4));
+}

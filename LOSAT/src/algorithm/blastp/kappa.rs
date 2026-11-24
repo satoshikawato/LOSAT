@@ -327,6 +327,7 @@ pub(crate) fn evalue_adjust_contexts(
                         query: batch.start,
                         error: unified_p_without_search_space(refusal, q_idx),
                         utf8: None,
+                        title_reads: Vec::new(),
                     }
                     .into());
                 }

@@ -122,12 +122,25 @@ impl BlastpDatabase {
         self.rps_units.as_ref()
     }
 
-    /// The taxonomy database's lookups back to a run's start (`shared::TaxdbRun::restart`), and the
-    /// loads' posts of NCBI's warning of a UTF8String header (`SeqDb::restart_utf8_loads`), for the
-    /// search again of the batches before a failed one.
+    /// NCBI's posts of the titles that the failed batch of `failure` read where it made its
+    /// Seq-aligns, which posted NCBI's warning of a UTF8String header or not (`utf8_posted`;
+    /// `HeaderReadError::title_posts`).
+    pub(super) fn failed_title_posts(
+        &self,
+        failure: &HeaderReadError,
+        utf8_posted: bool,
+    ) -> Result<crate::report::diag_log::Posts> {
+        failure.title_posts(&self.db, utf8_posted, self.program)
+    }
+
+    /// The taxonomy database's lookups back to a run's start (`shared::TaxdbRun::restart`), the
+    /// loads' posts of NCBI's warning of a UTF8String header (`SeqDb::restart_utf8_loads`) and the
+    /// model of NCBI's cache of header records (`SeqDb::restart_header_reads`), for the search
+    /// again of the batches before a failed one.
     pub(super) fn restart_taxonomy(&self) {
         self.taxdb.restart();
         self.db.restart_utf8_loads();
+        self.db.restart_header_reads();
     }
 
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
@@ -1085,6 +1098,7 @@ fn fetch_refused(database: &BlastpDatabase, query: usize, ordinal: u32) -> anyho
         query,
         error: shared::FetchExcluded::refusal_at(&database.db, ordinal, database.program),
         utf8: None,
+        title_reads: Vec::new(),
     }
     .into()
 }
@@ -1137,10 +1151,11 @@ impl<'a> CallTitles<'a> {
             .map(|batch| batch.searched.start)
             .collect();
         let titles = if x_lean {
-            listed.x_read_titles_lean(database, hit_lists, &starts)?
+            listed.x_read_titles_lean(database, hit_lists, &starts)
         } else {
-            listed.read_titles(database, hit_lists, &starts)?
-        };
+            listed.read_titles(database, hit_lists, &starts)
+        }
+        .map_err(|error| self.after_seq_aligns(error, listed, hit_lists))?;
         if let Some(read) = &titles.utf8 {
             let batch = self
                 .batches
@@ -1150,6 +1165,34 @@ impl<'a> CallTitles<'a> {
             self.utf8.note(batch, Some(read));
         }
         Ok(Some(titles))
+    }
+
+    /// `HeaderReadError::after_seq_aligns` of `error` with the Seq-align reads of the batch whose
+    /// read failed (`ListedSubjects::seq_align_reads` of its final hit lists of `hit_lists`): the
+    /// failed batch writes their posts before its error (`HeaderReadError::title_posts`).
+    #[cold]
+    #[inline(never)]
+    fn after_seq_aligns(
+        &self,
+        error: anyhow::Error,
+        listed: &ListedSubjects,
+        hit_lists: &[Option<BlastpHitList>],
+    ) -> anyhow::Error {
+        let Some(batch) = error
+            .downcast_ref::<HeaderReadError>()
+            .and_then(|failure| {
+                self.batches
+                    .iter()
+                    .find(|batch| batch.searched.contains(&failure.query))
+            })
+            .map(|batch| batch.searched.clone())
+        else {
+            return error;
+        };
+        HeaderReadError::after_seq_aligns(
+            error,
+            listed.seq_align_reads(hit_lists.get(batch).unwrap_or_default()),
+        )
     }
 
     /// The call's first read of such a header in its batches' Seq-aligns (`titles`).
@@ -1277,6 +1320,21 @@ impl ListedSubjects {
                 .fetched = database.db.location_of(ordinal).map(|at| (query, at));
         }
         Ok(())
+    }
+
+    /// The reads of the headers where NCBI makes the Seq-aligns of the final hit lists `lists` (of
+    /// one batch; `shared::batch_title_posts`): the ordinal id of each subject of each list, query
+    /// by query in the order of each list, as `read_titles` reads them.
+    pub(super) fn seq_align_reads<'h>(
+        &'h self,
+        lists: &'h [Option<BlastpHitList>],
+    ) -> impl Iterator<Item = u32> + Clone + 'h {
+        lists.iter().flatten().flat_map(|hit_list| {
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            hit_list.hsplist_array[..count]
+                .iter()
+                .map(|hsp_list| self.ordinals[hsp_list.oid as usize])
+        })
     }
 
     /// The reader of the reported sequences' headers of the call (`read_titles`), whose batches
@@ -1619,7 +1677,8 @@ impl ParsedSubjects {
     /// Reads the header of the subject `ordinal` of rank `rank` (of `ranks`) of `database` with
     /// `headers` (its reader), where the hit list of query `query` reaches it
     /// (`shared::read_header`): its stored title (`shared::StoredTitle`), or for a sequence with
-    /// parsed Seq-ids, kept here, the title of its first definition line.
+    /// parsed Seq-ids, kept here, the title of its first definition line (whose `replaced_bytes`
+    /// say whether any of its titles held a byte read as '#', `check_reported_titles`).
     pub(super) fn read(
         &mut self,
         database: &BlastpDatabase,
@@ -1633,12 +1692,14 @@ impl ParsedSubjects {
             shared::ReportedHeader::Stored(stored) => Ok(stored),
             shared::ReportedHeader::Parsed(subject) => {
                 let title = subject.first_title().to_vec();
+                let replaced_bytes = subject.replaced_title_bytes();
                 if self.by_rank.is_empty() {
                     self.by_rank = vec![None; ranks];
                 }
                 self.by_rank[rank] = Some(subject);
                 Ok(shared::StoredTitle {
                     title,
+                    replaced_bytes,
                     ..Default::default()
                 })
             }
@@ -1877,13 +1938,9 @@ impl ListedTitles<'_> {
             return Ok(posts);
         }
         for batch in batches {
-            let lists = hit_lists.get(batch.clone()).unwrap_or_default();
-            let aligned = lists.iter().flatten().flat_map(|hit_list| {
-                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                hit_list.hsplist_array[..count]
-                    .iter()
-                    .map(|hsp_list| self.listed.ordinals[hsp_list.oid as usize])
-            });
+            let aligned = self
+                .listed
+                .seq_align_reads(hit_lists.get(batch.clone()).unwrap_or_default());
             let utf8 = self
                 .utf8
                 .as_ref()

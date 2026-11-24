@@ -3791,6 +3791,15 @@ fn run_batch_loop(
                 earlier,
                 &mut reports.titles.borrow_mut(),
             );
+            // NCBI's reads of the titles where it makes the batch's Seq-aligns: each run of HSPs
+            // of one query and subject is one Seq-align set's subject, in `read_titles`' order.
+            let aligned = || {
+                let mut previous = None;
+                ordered.iter().filter_map(move |hsp| {
+                    let key = (hsp.hit.q_idx, hsp.hit.s_idx);
+                    (previous.replace(key) != Some(key)).then_some(hsp.hit.s_idx)
+                })
+            };
             match read {
                 // NCBI's warning of its first read of a UTF8String header follows the batch's
                 // reader messages and request posts (`warnings[start]`), before its prefetch.
@@ -3804,17 +3813,10 @@ fn run_batch_loop(
                         warnings[start].append(posts);
                         batch_warnings.append(posts);
                     }
-                    // NCBI's posts of the titles that the batch's Seq-aligns read: each run of
-                    // HSPs of one query and subject is one Seq-align set's subject, in
-                    // `read_titles`' order.
-                    let mut previous = None;
-                    let aligned = ordered.iter().filter_map(move |hsp| {
-                        let key = (hsp.hit.q_idx, hsp.hit.s_idx);
-                        (previous.replace(key) != Some(key)).then_some(hsp.hit.s_idx)
-                    });
+                    // NCBI's posts of the titles that the batch's Seq-aligns read.
                     let titled = crate::algorithm::common::database::batch_title_posts(
                         &database.db,
-                        aligned,
+                        aligned(),
                         utf8.is_some(),
                         "TBLASTX",
                     )?;
@@ -3822,18 +3824,24 @@ fn run_batch_loop(
                     batch_warnings.append(&titled);
                 }
                 Err(error) => {
-                    match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
+                    use crate::algorithm::common::database::HeaderReadError;
+                    match HeaderReadError::after_seq_aligns(error, aligned())
+                        .downcast::<HeaderReadError>()
+                    {
                         Ok(failure) => {
+                            // NCBI's warning of its first read of a UTF8String header, then the
+                            // posts of the titles that the Seq-aligns read before the failure.
+                            let utf8 = crate::algorithm::common::database::Utf8Read::post_of(
+                                failure.utf8.as_ref(),
+                                &database.db,
+                                "tblastx",
+                            );
+                            let titled =
+                                failure.title_posts(&database.db, utf8.is_some(), "TBLASTX")?;
                             reports.write_before_failed_batch(outputs, done, &warnings)?;
                             batch_warnings
                                 .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                            if let Some(posts) =
-                                crate::algorithm::common::database::Utf8Read::post_of(
-                                    failure.utf8.as_ref(),
-                                    &database.db,
-                                    "tblastx",
-                                )
-                            {
+                            for posts in utf8.iter().chain([&titled]) {
                                 posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                             }
                             return Err(failure.error);

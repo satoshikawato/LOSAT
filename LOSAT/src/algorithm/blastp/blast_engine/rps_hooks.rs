@@ -697,6 +697,7 @@ fn failed_batch_error(run: &RpsSearchRun<'_>, batch: usize, error: anyhow::Error
         query: run.batches[batch].start,
         error,
         utf8: None,
+        title_reads: Vec::new(),
     }
     .into()
 }

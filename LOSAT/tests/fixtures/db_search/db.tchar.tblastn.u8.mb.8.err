@@ -1,0 +1,7 @@
+Warning: (803.10) [tblastn] CObjectIStreamAsnBinary: UTF8String data for VisibleString member Blast-def-line-set.E.title, ASN.1 specification may need an update
+Error: (803.7) [tblastn] Blast-def-line-set.E.title
+Bad char [0xE9] in string at byte 18
+u1 faméone
+Error: (803.7) [tblastn] Blast-def-line-set.E.title
+Bad char [0xE9] in string at byte 23
+u2 utf8 famébee

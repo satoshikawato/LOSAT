@@ -6902,15 +6902,21 @@ fn search(
                 .write_all(&batches.warnings[searched_start])?;
             write_request_posts(&args, &mut *outputs.diagnostics)?;
             // NCBI's warning of its first read of a UTF8String header, where the failed batch
-            // made it (before its failure; a batch before posted its own in its reports).
-            if let Some(posts) = database.and_then(|database: &database::BlastpDatabase| {
+            // made it (before its failure; a batch before posted its own in its reports), then
+            // the posts of the titles that its Seq-aligns read before the failure.
+            let utf8 = database.and_then(|database: &database::BlastpDatabase| {
                 database::Utf8Read::post_in(
                     failure.utf8.as_ref(),
                     0..failed_end,
                     database.seqdb(),
                     args.app.ncbi_name(),
                 )
-            }) {
+            });
+            let titled = match database {
+                Some(database) => database.failed_title_posts(&failure, utf8.is_some())?,
+                None => Default::default(),
+            };
+            for posts in utf8.iter().chain([&titled]) {
                 posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
             }
             Err(failure.error)
@@ -8668,6 +8674,7 @@ fn search_split_query_batches(
                     query: range.start,
                     error: refusal,
                     utf8: None,
+                    title_reads: Vec::new(),
                 }
                 .into()
             }

@@ -717,6 +717,12 @@ pub(crate) struct HeaderReadError {
     /// itself before its failure, took for a VisibleString (`HeaderReader::first_utf8`): NCBI
     /// posted its warning before the error (`Utf8Read::post`).
     pub(crate) utf8: Option<Utf8Read>,
+    /// Where the error is NCBI's read of a reported sequence's header where it makes the batch's
+    /// Seq-aligns (`reported_header`): the ordinal ids of the reads of those Seq-aligns up to the
+    /// failed one, which ends them (that one alone until the batch adds the reads before it,
+    /// `after_seq_aligns`), whose titles NCBI posted before the error (`title_posts`); empty for
+    /// a failure elsewhere (a fetch, the prefetch).
+    pub(crate) title_reads: Vec<u32>,
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:304-309
@@ -890,6 +896,11 @@ impl CallUtf8 {
         self.0.get().map(|(_, read)| read)
     }
 
+    /// Whether the read is of the batch whose first query is `batch`, which posts its warning.
+    pub(crate) fn of_batch(&self, batch: usize) -> bool {
+        self.0.get().is_some_and(|(first, _)| *first == batch)
+    }
+
     /// [`Utf8Read::reach`] of the read, before the model of the loads of the batch of the
     /// queries `batch`.
     pub(crate) fn reach(&self, batch: &std::ops::Range<usize>, db: &SeqDb) {
@@ -936,6 +947,76 @@ impl HeaderReadError {
             }
             Err(error) => error,
         }
+    }
+
+    /// `error` of a batch whose Seq-aligns NCBI makes from the reads `reads` (as
+    /// [`batch_title_posts`] takes them: the ordinal ids of the subjects of its final hit lists
+    /// that get a Seq-align, query by query in the order of each list), where it is a
+    /// `HeaderReadError` of the read of one of them (`title_reads`): with the reads before the
+    /// first of that one, which NCBI made before it failed.
+    pub(crate) fn after_seq_aligns(
+        error: anyhow::Error,
+        reads: impl IntoIterator<Item = u32>,
+    ) -> anyhow::Error {
+        match error.downcast::<HeaderReadError>() {
+            Ok(mut failure) => {
+                if let &[failed] = failure.title_reads.as_slice() {
+                    failure.title_reads = reads
+                        .into_iter()
+                        .take_while(|&ordinal| ordinal != failed)
+                        .chain([failed])
+                        .collect();
+                }
+                anyhow::Error::new(failure)
+            }
+            Err(error) => error,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1568-1582
+    /// NCBI's posts of the titles that the failed batch's Seq-aligns read before the error
+    /// (`title_reads`), which posted NCBI's warning of a UTF8String header or not
+    /// (`utf8_posted`), with the post prefix of `program`, as [`batch_title_posts`] makes a
+    /// batch's: the failed read posts what it read of its titles before it failed
+    /// (`seqid::ber::title_replaced_chars`). No prefetch or formatter of the batch reads anything
+    /// after them, so they are NCBI's in every format. LOSAT's refusal where a posting read's
+    /// volume filters the header records it reads ([`check_reported_title`]: NCBI's fetches read
+    /// them too), and `batch_title_posts`' with that warning. The caller writes them after the
+    /// warning, before the error (and in the run's BLAST archive, `Posts::write`).
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn title_posts(
+        &self,
+        db: &SeqDb,
+        utf8_posted: bool,
+        program: &str,
+    ) -> Result<crate::report::diag_log::Posts> {
+        if self.title_reads.is_empty() {
+            return Ok(crate::report::diag_log::Posts::default());
+        }
+        let prefix = program.to_ascii_lowercase();
+        let posts_at = |at: crate::seqdb::SeqLocation| !db.title_posts_at(at, &prefix).is_empty();
+        // A run whose reader met no such title before (none of its records in the cache posts)
+        // models the cache from these reads on, from an empty one.
+        if !db.replaced_titles()
+            && self
+                .title_reads
+                .iter()
+                .any(|&ordinal| db.location_of(ordinal).is_some_and(posts_at))
+        {
+            db.note_replaced_title();
+        }
+        if db.replaced_titles() {
+            for &ordinal in &self.title_reads {
+                if db
+                    .location_of(ordinal)
+                    .is_some_and(|at| db.filters_header_sets(at) && posts_at(at))
+                {
+                    check_reported_title(db, ordinal, true, TitleReads::SeqAligns, program)?;
+                }
+            }
+        }
+        batch_title_posts(db, self.title_reads.iter().copied(), utf8_posted, program)
     }
 }
 
@@ -1184,7 +1265,8 @@ pub(crate) fn stored_title(
     query: usize,
     program: &str,
 ) -> Result<StoredTitle> {
-    let mut deflines = deflines.map_err(|error| header_read_error(error, query, program, None))?;
+    let mut deflines =
+        deflines.map_err(|error| header_read_error(error, query, program, (None, None)))?;
     // makeblastdb without -parse_seqids writes one definition line per sequence; NCBI
     // shows the others of a sequence as ` >id title` after the first.
     if deflines.len() != 1 {
@@ -1228,18 +1310,20 @@ pub(crate) fn keep_source(
 /// of NCBI's that LOSAT reports as NCBI's, `reported_exception`: the `CSerialException` of its
 /// read of the record, or the conversion of a `ti` tag under an id list, line RG D1c-1) is a
 /// `HeaderReadError` that names the query, so the batch fails after the outfmt 0 prolog as NCBI's
-/// does; LOSAT's refusals are errors of their own.
+/// does; LOSAT's refusals are errors of their own. `read`: the sequence whose read failed where
+/// NCBI makes the batch's Seq-aligns (`HeaderReadError::title_reads`).
 fn header_read_error(
     error: SeqDbError,
     query: usize,
     program: &str,
-    utf8: Option<&Utf8Read>,
+    (utf8, read): (Option<&Utf8Read>, Option<u32>),
 ) -> anyhow::Error {
     if error.ncbi_message().is_some() || reported_exception(&error).is_some() {
         anyhow::Error::new(HeaderReadError {
             query,
             error: database_error(error, program),
             utf8: utf8.cloned(),
+            title_reads: read.into_iter().collect(),
         })
     } else {
         database_error(error, program)
@@ -3078,6 +3162,11 @@ impl<'a> HeaderReader<'a> {
                 let Ok(copy) = crate::report::db_subject::ParsedSubject::new(set_b) else {
                     return RecordCopy::Differs;
                 };
+                // A copy whose title holds a byte read as '#' is taken to differ: what the reports
+                // read of it posts (`check_reported_title`).
+                if copy.replaced_title_bytes() {
+                    return RecordCopy::Differs;
+                }
                 let other = copy.volume_taxids();
                 // The texts first: every report that reads the Bioseq shows them, a generated
                 // title only some (`ParsedSubject::generated_title_fetched`).
@@ -3142,6 +3231,9 @@ fn reported_header(
             crate::report::db_subject::ParsedSubject::new(set)
                 .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))
                 .map(|subject| {
+                    if subject.replaced_title_bytes() {
+                        db.note_replaced_title();
+                    }
                     let mut scope_utf8 = None;
                     let (found, weak, also_held) =
                         headers.found_instead(&subject, ordinal, &mut scope_utf8);
@@ -3178,9 +3270,12 @@ fn reported_header(
                 error,
                 query,
                 program,
-                headers
-                    .first_utf8_before(Utf8Phase::Reported, query)
-                    .as_ref(),
+                (
+                    headers
+                        .first_utf8_before(Utf8Phase::Reported, query)
+                        .as_ref(),
+                    Some(ordinal),
+                ),
             ))
         }
     }
@@ -3751,7 +3846,8 @@ impl ParsedShown {
 
 /// LOSAT's refusals of the reported database sequence `ordinal` with parsed Seq-ids `subject` in
 /// the reports `shown` (`protein` for a protein database; `taxdb_found`: `SeqDb::taxdb_found`),
-/// as BLASTX's (`blastx::database::ReportedSubjects::for_batch`): a sequence that NCBI's
+/// as BLASTX's (`blastx::database::ReportedSubjects::for_batch`): a title with a byte outside
+/// ' ' ..= '~' that the reports read besides the Seq-aligns (`check_reported_title`), a sequence that NCBI's
 /// formatters do not find by its Seq-align id, an outfmt 0 description or heading that LOSAT
 /// does not write as NCBI (`check_shown_parsed_subject`), a tabular id that it does not
 /// write as NCBI (`ParsedSubject::tabular_ids`), and where only the prefetch reads the subject
@@ -3770,6 +3866,13 @@ pub(crate) fn check_reported_parsed(
     ordinal: u32,
     program: &str,
 ) -> Result<()> {
+    check_reported_title(
+        db,
+        ordinal,
+        subject.replaced_title_bytes(),
+        shown.titles,
+        program,
+    )?;
     if shown.reads_bioseq() {
         subject
             .fetched(shown.taxonomy, shown.one_by_one, load)
@@ -3968,8 +4071,10 @@ pub(crate) enum ReportRefusal {
 /// of them may be refused (`taxids_may_refuse`). Under `-parse_deflines` no sequence may have the
 /// id of a query of `queries` (`refuse_id_of_a_query`; the scope of every query of the run, a
 /// superset of each batch's). A reader error is a refusal too. The headers are read in `pool`;
-/// nothing is written and no state of the run changes. `None`: no report of any sequence can be
-/// refused.
+/// nothing is written, and the one state of the run that changes is the note of a title with a
+/// byte outside ' ' ..= '~' (`SeqDb::note_replaced_title`): the model of NCBI's cache of header
+/// records then starts at the run's first Seq-align read, from an empty cache, which gives the
+/// same posts. `None`: no report of any sequence can be refused.
 pub(crate) fn reports_may_refuse(
     db: &SeqDb,
     shown: ParsedShown,
@@ -8749,6 +8854,7 @@ fn prefetch_stop(
         }
         .into(),
         utf8: None,
+        title_reads: Vec::new(),
     })
 }
 

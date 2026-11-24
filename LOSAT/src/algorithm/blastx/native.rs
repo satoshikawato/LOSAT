@@ -1217,8 +1217,9 @@ fn reported_error(error: anyhow::Error) -> anyhow::Error {
 /// NCBI's warning of its first read of a UTF8String header (`BatchTitles::utf8`, or that of the
 /// failed read) is written to `diagnostics` there: after the batch's reader messages and request
 /// posts, before its prefetch; then NCBI's posts of the titles that the batch's Seq-aligns read
-/// (`common::database::batch_title_posts`), each one message of the run's BLAST archive
-/// (`archive`, `diag_log::Posts::write`).
+/// (`common::database::batch_title_posts`, or those before a failed read,
+/// `HeaderReadError::title_posts`), each one message of the run's BLAST archive (`archive`,
+/// `diag_log::Posts::write`).
 pub(super) fn batch_titles(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
@@ -1260,7 +1261,6 @@ pub(super) fn batch_titles(
     if let Some(posts) = &utf8 {
         posts.write(diagnostics, None)?;
     }
-    let titles = titles.map_err(reported_error)?;
     // NCBI's posts of the titles that the batch's Seq-aligns read, in `read_titles`' order.
     let aligned = results.iter().flat_map(|batch| {
         batch.queries.iter().flat_map(|lists| {
@@ -1270,6 +1270,20 @@ pub(super) fn batch_titles(
                 .filter_map(|list| u32::try_from(list.oid).ok())
         })
     });
+    let titles = match titles {
+        Ok(titles) => titles,
+        Err(error) => {
+            // A read that NCBI cannot make ends the batch's Seq-aligns: the posts of the reads
+            // before it come before its error.
+            let error = HeaderReadError::after_seq_aligns(error, aligned);
+            if let Some(failure) = error.downcast_ref::<HeaderReadError>() {
+                failure
+                    .title_posts(&database.db, utf8.is_some(), database.program)?
+                    .write(diagnostics, archive)?;
+            }
+            return Err(reported_error(error));
+        }
+    };
     crate::algorithm::common::database::batch_title_posts(
         &database.db,
         aligned,

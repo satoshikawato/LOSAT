@@ -159,6 +159,7 @@ impl Runtime<'_> {
                 query: self.ordinal,
                 path,
             }),
+            title_reads: Vec::new(),
         }
         .into()
     }

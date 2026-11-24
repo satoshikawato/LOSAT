@@ -1299,41 +1299,51 @@ pub fn utf8_string_path(record: &[u8]) -> Option<String> {
 /// (`title_replaced_chars`: `GetStackTrace` of the read, `Blast-def-line-set.E.title`).
 const TITLE_TRACE: &str = "Blast-def-line-set.E.title";
 
-// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:724-738
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886
 /// What NCBI's read of `record` (a `Blast-def-line-set`, as `decode_full_set` reads it) posts for
 /// the bytes outside ' ' ..= '~' of its titles: for each such byte, in the order of the read, the
 /// byte, the position of the stream after the whole string (the same for every byte of one
 /// string) and the string as it is when NCBI posts it, the bytes before replaced by '#' and this
-/// one and those after still stored (`report::serial::encoder::ReplacedChar`, whose `post` is the
-/// text). The record is read again up to a failure (NCBI posts what it read before it): asked only
-/// of a record whose read replaced a title's byte (`seqdb::header::Defline::replaced_title_bytes`).
+/// one and those after still stored (`FixVisibleChars`, whose one port is
+/// `report::serial::asn_ber_reader::fix_visible_chars`; `report::serial::encoder::ReplacedChar`,
+/// whose `post` is the text). The record is read again up to a failure (NCBI posts what it read
+/// before it). Asked at each read of a record that the model of NCBI's cache of header records
+/// does not answer, once a title with such a byte was read (`SeqDb::title_posts_at`), and of a
+/// read that failed (`algorithm::common::database::HeaderReadError::title_posts`): a record whose
+/// titles hold none returns nothing.
 #[cold]
 #[inline(never)]
 pub fn title_replaced_chars(record: &[u8]) -> Vec<crate::report::serial::encoder::ReplacedChar> {
+    use crate::report::serial::asn_input::StringPost;
     use crate::report::serial::encoder::{ReplacedChar, StreamPosition};
     let mut ber = Reader::new(record);
     ber.replaced_titles = Some(Vec::new());
     let _ = read_set(&mut ber);
-    let mut replaced = Vec::new();
+    let mut posts = Vec::new();
     for range in ber.replaced_titles.take().unwrap_or_default() {
-        let end = range.end;
-        let mut string = record[range].to_vec();
-        for at in 0..string.len() {
-            let byte = string[at];
-            if (b' '..=b'~').contains(&byte) {
-                continue;
-            }
-            replaced.push(ReplacedChar {
+        let end = StreamPosition::Byte(range.end as u64);
+        crate::report::serial::asn_ber_reader::fix_visible_chars(
+            &mut record[range].to_vec(),
+            end,
+            &mut posts,
+        );
+    }
+    posts
+        .into_iter()
+        .filter_map(|post| match post {
+            StringPost::BadChar {
+                position,
+                byte,
+                string,
+            } => Some(ReplacedChar {
                 trace: TITLE_TRACE.to_string(),
                 byte,
-                position: StreamPosition::Byte(end as u64),
-                string: string.as_slice().into(),
-            });
-            string[at] = b'#';
-        }
-    }
-    replaced
+                position,
+                string: string.into(),
+            }),
+            StringPost::Utf8Tag => None,
+        })
+        .collect()
 }
 
 /// NCBI's warning of a UTF8String read where a VisibleString is expected (cited at

@@ -552,6 +552,9 @@ pub(super) struct CallReads<'a> {
     /// NCBI's posts of the titles that each batch's Seq-aligns read, by the batch's first query
     /// (`shared::seq_align_title_posts`, `take_title_posts`).
     titled: std::sync::Mutex<Vec<(usize, crate::report::diag_log::Posts)>>,
+    /// Those of the failed batch, by its first query, which its Seq-aligns read before the
+    /// failure (`shared::HeaderReadError::title_posts`, `write_failed`).
+    failed_titled: std::sync::Mutex<Option<(usize, crate::report::diag_log::Posts)>>,
 }
 
 impl<'a> CallReads<'a> {
@@ -575,6 +578,7 @@ impl<'a> CallReads<'a> {
             notes,
             utf8: shared::CallUtf8::default(),
             titled: Default::default(),
+            failed_titled: Default::default(),
         }
     }
 
@@ -653,17 +657,20 @@ impl<'a> CallReads<'a> {
         let aligned = drop_unaligned(database, hitlists);
         let earlier = shared::EarlierUtf8::of_batch(range.start, fetched, aligned);
         let read = read_titles(database, hitlists, range.start, earlier, titles);
-        let first = shared::Utf8Read::of_read(&read, Option::as_ref);
-        let utf8 = first.is_some();
-        self.utf8.note(range.start, first);
+        self.utf8.note(
+            range.start,
+            shared::Utf8Read::of_read(&read, Option::as_ref),
+        );
+        // Whether this batch posts the call's warning of a UTF8String header (a batch before may
+        // have read it).
+        let utf8 = self.utf8.of_batch(range.start);
+        // NCBI's posts of the titles that the batch's Seq-aligns read, in `read_titles`' order.
+        let aligned = hitlists
+            .iter()
+            .flat_map(KappaResultHitList::lists)
+            .filter_map(|list| u32::try_from(list.oid).ok());
         match read {
             Ok(_) => {
-                // NCBI's posts of the titles that the batch's Seq-aligns read, in `read_titles`'
-                // order.
-                let aligned = hitlists
-                    .iter()
-                    .flat_map(KappaResultHitList::lists)
-                    .filter_map(|list| u32::try_from(list.oid).ok());
                 let posts = shared::batch_title_posts(&database.db, aligned, utf8, PROGRAM)?;
                 if !posts.is_empty() {
                     self.titled
@@ -673,8 +680,17 @@ impl<'a> CallReads<'a> {
                 }
                 Ok(None)
             }
-            Err(error) => match error.downcast::<shared::HeaderReadError>() {
-                Ok(failure) => Ok(Some(failure.error)),
+            Err(error) => match shared::HeaderReadError::after_seq_aligns(error, aligned)
+                .downcast::<shared::HeaderReadError>()
+            {
+                Ok(failure) => {
+                    let posts = failure.title_posts(&database.db, utf8, PROGRAM)?;
+                    *self
+                        .failed_titled
+                        .lock()
+                        .expect("the title posts are not poisoned") = Some((range.start, posts));
+                    Ok(Some(failure.error))
+                }
                 Err(error) => Err(error),
             },
         }
@@ -779,7 +795,8 @@ impl<'a> CallReads<'a> {
 
     /// Writes NCBI's warning of that read to `diagnostics` (and the archive's messages) where the
     /// failed batch of the queries `range` made it with its Seq-aligns, before the failure: after
-    /// the batch's reader messages and request posts.
+    /// the batch's reader messages and request posts; then the posts of the titles that those
+    /// Seq-aligns read before the failure (`titles`).
     pub(super) fn write_failed(
         &self,
         range: &std::ops::Range<usize>,
@@ -787,10 +804,19 @@ impl<'a> CallReads<'a> {
         archive: Option<&crate::report::archive::ArchiveHandle>,
     ) -> Result<()> {
         let db = self.database.map(|database| &database.db);
-        match self.utf8.failed_post(db, PROGRAM_NAME, range.start) {
-            Some(posts) => Ok(posts.write(diagnostics, archive)?),
-            None => Ok(()),
+        if let Some(posts) = self.utf8.failed_post(db, PROGRAM_NAME, range.start) {
+            posts.write(diagnostics, archive)?;
         }
+        if let Some((_, posts)) = self
+            .failed_titled
+            .lock()
+            .expect("the title posts are not poisoned")
+            .as_ref()
+            .filter(|(first, _)| *first == range.start)
+        {
+            posts.write(diagnostics, archive)?;
+        }
+        Ok(())
     }
 }
 

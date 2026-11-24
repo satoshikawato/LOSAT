@@ -490,8 +490,9 @@ impl ReportedSubjects {
     /// (their Seq-ids), before the batch's prefetch: NCBI's reader error stops the run at this
     /// batch (`HeaderReadError`). A sequence with parsed Seq-ids is read with every Seq-id
     /// (`shared::read_header`). A title LOSAT does not show as NCBI is its refusal
-    /// (`check_reported_title`; with `pairwise`, `StoredTitle::check_shown_source`). The rest of
-    /// the batch's reported sequences is `for_batch`.
+    /// (`check_reported_title`, after the batch's reads, whose error comes first: NCBI's Seq-aligns
+    /// end there, before any report; with `pairwise`, `StoredTitle::check_shown_source`). The rest
+    /// of the batch's reported sequences is `for_batch`.
     pub(crate) fn read_titles(
         database: &BlastxDatabase,
         batches: &[BatchResults],
@@ -507,6 +508,8 @@ impl ReportedSubjects {
         let mut sources: BTreeMap<usize, crate::report::defline::SourceTaxname> = BTreeMap::new();
         let headers = shared::HeaderReader::new(&database.db);
         headers.note_earlier(earlier);
+        // The first title that the reports refuse (`check_reported_title`).
+        let mut refused = None;
         for batch in batches {
             for (qidx, lists) in batch.queries.iter().enumerate() {
                 for list in lists {
@@ -528,14 +531,15 @@ impl ReportedSubjects {
                         database.program,
                     )? {
                         shared::ReportedHeader::Stored(stored) => {
-                            shared::check_reported_title(
+                            if let Err(refusal) = shared::check_reported_title(
                                 &database.db,
                                 ordinal,
                                 stored.replaced_bytes,
                                 title_reads,
                                 database.program,
-                            )?;
-                            if pairwise {
+                            ) {
+                                refused.get_or_insert(refusal);
+                            } else if pairwise {
                                 stored.check_shown_source(
                                     || database.db.oid(ordinal),
                                     database.program,
@@ -547,12 +551,24 @@ impl ReportedSubjects {
                             listed.insert(list.oid, Some(Arc::from(stored.title)));
                         }
                         shared::ReportedHeader::Parsed(subject) => {
+                            if let Err(refusal) = shared::check_reported_title(
+                                &database.db,
+                                ordinal,
+                                subject.replaced_title_bytes(),
+                                title_reads,
+                                database.program,
+                            ) {
+                                refused.get_or_insert(refusal);
+                            }
                             listed.insert(list.oid, Some(Arc::from(subject.first_title())));
                             parsed.insert(list.oid, subject);
                         }
                     }
                 }
             }
+        }
+        if let Some(refusal) = refused {
+            return Err(refusal);
         }
         Ok(BatchTitles {
             listed,

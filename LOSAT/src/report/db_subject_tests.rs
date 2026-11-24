@@ -2433,3 +2433,26 @@ fn a_thrown_description_is_the_alignment_id_and_unknown() {
         assert_eq!(title.text, [gap, b"Unknown"].concat());
     }
 }
+
+// RG-KB 9(b) review 1 (F2): a database with parsed Seq-ids (`tests/db_search/tchar/tc_ps_p`,
+// makeblastdb -parse_seqids) whose stored title holds 0xE9 is a subject, read as '#', whose
+// Seq-aligns NCBI makes as of the others (`db.tchar.*.ps.8`); a byte of a stored Seq-id is
+// refused.
+#[test]
+fn a_parsed_subject_with_a_replaced_title_byte_is_read() {
+    let base =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/tchar/tc_ps_p");
+    let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+    let replaced = ParsedSubject::new(db.defline_set(0).unwrap()).unwrap();
+    assert!(replaced.replaced_title_bytes());
+    assert_eq!(replaced.first_title(), b"fam#one");
+    let clean = ParsedSubject::new(db.defline_set(1).unwrap()).unwrap();
+    assert!(!clean.replaced_title_bytes());
+    let mut set = db.defline_set(1).unwrap();
+    set.deflines[0].replaced_id_bytes = 1;
+    let refusal = ParsedSubject::new(set).unwrap_err().to_string();
+    assert!(
+        refusal.contains("stored Seq-id with a byte outside"),
+        "{refusal}"
+    );
+}

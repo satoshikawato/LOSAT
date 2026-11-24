@@ -3,7 +3,7 @@
 
 use std::io::Read;
 
-use crate::seqmasks_io::fasta_reader::{MaskFastaReader, MaskReadError};
+use crate::seqmasks_io::fasta_reader::{seq_map_exception, MaskFastaReader, MaskReadError};
 
 use super::work::{Failure, Record, SequenceSource};
 
@@ -32,7 +32,10 @@ impl<R: Read> SequenceSource for FastaSource<R> {
                 MaskReadError::Ncbi(exception) => Failure::Ncbi(exception),
                 MaskReadError::Read(error) => read_failure(error),
                 MaskReadError::OutOfMemory => Failure::Std("std::bad_alloc".to_string()),
+                MaskReadError::Std(what) => Failure::Std(what),
+                // A record NCBI's reader crashes on (`ReadError::PackOverflow`).
                 MaskReadError::Refused(what) => Failure::Refused(super::work::unsupported(&what)),
+                MaskReadError::SeqMap { error, .. } => Failure::Ncbi(seq_map_exception(error)),
             })?;
         Ok(record.map(|record| Record {
             ids: record.ids,

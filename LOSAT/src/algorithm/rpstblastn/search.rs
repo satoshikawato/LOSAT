@@ -30,7 +30,7 @@ use crate::algorithm::rps_search::engine::{
     batch_gapped_k, RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers, NUM_FRAMES,
 };
 use crate::algorithm::rps_search::volumes::{
-    mask_unsupported_letters, merge_volume, report_ordinal_ids, shift_ordinal_ids, Consensus,
+    mask_unsupported_letters, merge_volume, report_ordinal_ids, shift_ordinal_ids, ProfileLetters,
     RpsUnits, RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
 };
 use crate::core::blast_util::frame_to_context;
@@ -577,7 +577,7 @@ impl TranslatedRpsSearch {
             };
             let traced = run.search_volume(
                 &files,
-                &Consensus::new(setup, volume, &files),
+                &ProfileLetters::new(setup, volume, volumes.starts[index]),
                 pool,
                 workers,
             );

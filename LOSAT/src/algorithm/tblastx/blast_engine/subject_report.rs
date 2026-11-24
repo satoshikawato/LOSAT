@@ -167,7 +167,7 @@ pub(super) fn linked_hits_to_report<S: TbxScore>(
             raw_score: h.raw_score,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4754-4767
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:808-812
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1353
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1354
             // TBLASTX ScoreCompareHSPs uses the context/frame-relative
             // BlastSeg offsets stored in Blast_HSPInit, not formatted
             // nucleotide coordinates or LOSAT's concatenated frame bases.

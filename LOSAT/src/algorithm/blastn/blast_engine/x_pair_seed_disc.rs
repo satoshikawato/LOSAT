@@ -2054,7 +2054,7 @@ fn fold_two_hit_array<const LEAN: bool>(
             continue;
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:758-761
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:753-756
         super::super::x_push_ungapped(
             ungapped_hits,
             UngappedHit::saved(q_idx, ctx, q_off, s_off, &ungapped),

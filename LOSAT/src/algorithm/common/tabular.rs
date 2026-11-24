@@ -281,6 +281,7 @@ pub(crate) fn subject_lookup_failure(
             subject_id: true,
             all_ids: false,
             bioseq: false,
+            lineless: false,
         }),
         None => failed_id.then(|| crate::report::tabular::LookupFailure::of_plain(database)),
     }

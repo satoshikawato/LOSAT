@@ -3538,6 +3538,19 @@ fn reported_header(
         _ => {}
     }
     match header {
+        // No NCBI counterpart: LOSAT's refusal. makeprofiledb writes no definition line without a
+        // Seq-id, and NCBI's reports of a profile database with one were not probed (line RG
+        // D1c-1c-b, survey 4.3): RPS-BLAST and RPS-tBLASTn refuse such a profile as before.
+        Ok(crate::seqdb::SequenceHeader::Parsed(set))
+            if matches!(program, "RPSBLAST" | "RPSTBLASTN")
+                && set.deflines.iter().any(|defline| defline.ids.is_empty()) =>
+        {
+            Err(parsed_refusal(
+                db.oid(ordinal),
+                "has a definition line without a Seq-id",
+                program,
+            ))
+        }
         Ok(crate::seqdb::SequenceHeader::Parsed(set)) => {
             crate::report::db_subject::ParsedSubject::new(set)
                 .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))
@@ -4024,7 +4037,7 @@ pub(crate) fn check_shown_parsed_subject(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:913-917
     // The unsigned length wraps for an id longer than 65 bytes: NCBI 2.17.0 then pads the
     // line with spaces without end (probe of the ID2a review, `tests/db_search/ids/refuse.faa`).
-    if subject.description_start().len() > 65 {
+    if subject.description_start(protein).len() > 65 {
         return Err(parsed_refusal(oid(), LONG_DESCRIPTION_ID, program));
     }
     if subject.pairwise_title_reads_source(protein, taxdb_found) {
@@ -6462,7 +6475,8 @@ fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
 /// has): the third vector holds, by rank, what the taxonomy database said about the taxid of each
 /// definition line of such a sequence (empty where nothing was asked), as NCBI's `HitDescr` loop
 /// asks it (`SubjectNames::of_parsed`): `Unnamed` for a definition line without a taxid, and no
-/// answer after the first `NotFound` (NCBI's loop ends there). The volume's lookups are those of
+/// answer after the first `NotFound` nor from the first definition line without a Seq-id on
+/// (NCBI's loop ends there). The volume's lookups are those of
 /// `ParsedSubject::volume_taxids`.
 pub(crate) fn read_reported_taxonomy<P>(
     db: &SeqDb,
@@ -6586,7 +6600,16 @@ where
             continue;
         };
         let mut answers = Vec::new();
-        for taxid in defline_taxids(subject) {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:370-371
+        // The loop throws at a line without a Seq-id before it looks its taxid up.
+        let ends = subject
+            .deflines()
+            .iter()
+            .position(|defline| defline.ids.is_empty());
+        for taxid in defline_taxids(subject)
+            .into_iter()
+            .take(ends.unwrap_or(usize::MAX))
+        {
             let answer = if taxid == 0 {
                 HitTaxonomy::Unnamed
             } else {

@@ -2525,7 +2525,9 @@ fn blastp_seq_aligns(hit_lists: &[Option<BlastpHitList>], gapped: bool) -> usize
 /// format's refusal is that format's (`FormatRefusal::check`). `parsed`: the subjects' parsed
 /// Seq-ids (a database's listed titles'); `loads`: the reports' loads (`HitLoads::of`), whose
 /// throwing subjects are refused where the first row of a report stops NCBI
-/// (`TabularSpec::may_stop_at_failed_lookup`).
+/// (`TabularSpec::may_stop_at_failed_lookup`). NCBI's run stops in the batch of the query whose
+/// row it has no result for, after the reports of the batches before: a refusal that fails the
+/// call is that batch's failure (`database::HeaderReadError` of the query, `failed_lookup_batch`).
 #[allow(clippy::too_many_arguments)]
 fn check_tabular_lookups(
     formats: &mut [crate::api::local_blast::FormatOutput<'_>],
@@ -2552,6 +2554,10 @@ fn check_tabular_lookups(
         ) {
             continue;
         }
+        // The queries of the result sets, in their order.
+        let queries: Vec<usize> = (0..hit_lists.len())
+            .filter(|&query| hit_lists[query].is_some())
+            .collect();
         let checked = crate::report::tabular::check_failed_lookups(
             spec,
             hit_lists.iter().flatten().map(|hit_list| {
@@ -2572,10 +2578,11 @@ fn check_tabular_lookups(
                     s_idx,
                 )
             },
-            |s_idx| match listed_titles {
+            |s_idx, failure| match listed_titles {
                 Some(titles) => crate::report::tabular::failed_database_subject(
                     titles.oid(s_idx),
                     loads.thrown(s_idx),
+                    failure,
                 ),
                 None => crate::report::tabular::failed_record_title(
                     s_idx,
@@ -2584,9 +2591,34 @@ fn check_tabular_lookups(
             },
             application,
         );
+        let checked = match format.refusal {
+            crate::api::local_blast::FormatRefusal::FailsCall => {
+                checked.map_err(|error| failed_lookup_batch(error, &queries))
+            }
+            _ => checked,
+        };
         format.refusal.check(checked)?;
     }
     Ok(())
+}
+
+/// A refusal of `report::tabular::check_failed_lookups` (`FailedLookupRefusal`, at the result set
+/// of `queries[set]`) as the failure of that query's batch (`database::HeaderReadError`): the
+/// call writes the reports of the batches before, as NCBI's run does before it stops (the Owner's
+/// form of 2026-11-16 for line RG's Q-X2c). Any other error stays.
+fn failed_lookup_batch(error: anyhow::Error, queries: &[usize]) -> anyhow::Error {
+    let query = error
+        .downcast_ref::<crate::report::tabular::FailedLookupRefusal>()
+        .and_then(|refusal| queries.get(refusal.set()).copied());
+    match query {
+        Some(query) => database::HeaderReadError {
+            query,
+            error,
+            utf8: None,
+        }
+        .into(),
+        None => error,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108

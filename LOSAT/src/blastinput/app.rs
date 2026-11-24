@@ -74,7 +74,12 @@ pub fn query_error(message: &str) -> anyhow::Error {
 /// unchanged: TBLASTX's (`tblastx::blast_engine::run_impl`, the X2c form, the Owner's decision of
 /// 2026-11-16 on line RG's Q-X2c: "the results of the query batches before are written") and
 /// TBLASTN's (`tblastn::tblastn_app::batch_failure`). Any other refusal of a batch's search comes
-/// before the run's first byte.
+/// before the run's first byte. A tabular row at which NCBI stops in a batch's report
+/// (`report::tabular::FailedLookupRefusal`) comes after the reports of the batches before too:
+/// TBLASTN and TBLASTX, which check every batch's rows at once, write those reports first
+/// (`FailedLookupRefusal::batch_start`), BLASTP and PSIBLAST fail that query's batch
+/// (`common::database::HeaderReadError`), and BLASTX and BLASTN check each batch's rows when they
+/// write them.
 #[derive(Debug)]
 pub(crate) struct ErrorAfterBatchReports(pub(crate) anyhow::Error);
 

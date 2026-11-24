@@ -2045,6 +2045,7 @@ fn parsed_subject_ids_of_a_title_ncbi_cannot_decode_fail_the_lookup() {
             subject_id: true,
             all_ids: false,
             bioseq: false,
+            lineless: false,
         })
     );
     assert_eq!(
@@ -2814,7 +2815,7 @@ fn a_thrown_description_is_the_alignment_id_and_unknown() {
     let gi = ParsedSubject::new(one_defline(vec![ParsedSeqId::Gi(1234)])).unwrap();
     for subject in [gi.clone(), gi.showing_gis(true)] {
         let (start, title) = subject.thrown_description();
-        assert_eq!(start, subject.description_start());
+        assert_eq!(start, subject.description_start(true));
         let gap: &[u8] = if subject.show_gis { b"  " } else { b"" };
         assert_eq!(title.text, [gap, b"Unknown"].concat());
     }
@@ -3230,4 +3231,165 @@ fn a_failed_lookup_is_held_by_the_loader_for_the_run_and_by_the_scope_for_its_ba
         );
         assert_eq!(same.load(3), H(Some(weak)), "{after:?}");
     }
+}
+
+// Line RG D1c-1c-b PR 2b (NCBI BLAST+ 2.17.0 probes `D/logs/d1c1cb/probe`, rows db.il.*.x1.*,
+// db.il.bp.xw.*): a definition line without a Seq-id beside lines with them. Each format's walk of
+// the lines takes the line's best id, null there, and its `catch` decides what is written.
+fn titled(lines: Vec<(Vec<ParsedSeqId>, Option<&str>)>) -> ParsedSubject {
+    let deflines = lines
+        .into_iter()
+        .map(|(ids, title)| BlastDefline {
+            title: title.map(|title| title.as_bytes().to_vec()),
+            ids,
+            ..BlastDefline::default()
+        })
+        .collect();
+    ParsedSubject::new(DeflineSet {
+        deflines,
+        utf8: false,
+    })
+    .unwrap()
+}
+
+// The description walk adds ` >`, the FASTA label and a space before each later title, and stops
+// only once the text passes 4096 bytes: a text of 4095 or 4096 bytes walks on to the line without
+// a Seq-id (NCBI's `catch`: the Seq-align id and `Unknown`), one of 4097 stops before it (rows
+// db.il.bp.xw.q0.0 and db.il.bp.xw.q1.0).
+#[test]
+fn the_description_walk_meets_a_line_without_a_seq_id_until_it_passes_4096_bytes() {
+    let second = gb("B00002", 1);
+    let mut label = Vec::new();
+    label::fasta(&second, &mut label);
+    let fixed = "s".len() + " >".len() + label.len() + " ".len();
+    for (total, caught) in [(4095, true), (4096, true), (4097, false)] {
+        let long = "w".repeat(total - fixed);
+        let subject = titled(vec![
+            (vec![gb("A00001", 1)], Some("s")),
+            (vec![second.clone()], Some(&long)),
+            (vec![], Some("tail")),
+        ]);
+        let (start, line, thrown) = subject.description_line(true);
+        assert_eq!(thrown, caught, "a text of {total} bytes");
+        if caught {
+            assert_eq!(text(&line.text), "Unknown");
+            assert_eq!(start, subject.thrown_description().0);
+        } else {
+            assert!(line.text.starts_with(b"s"), "{total}");
+        }
+        assert_eq!(subject.description_start(true), start);
+    }
+}
+
+// `GetDisplayIds` labels each line up to the display line's, so a line without a Seq-id before it
+// throws whatever the lengths; the walk labels a line before it looks at its title, so an untitled
+// one throws there too (x1 OIDs 3 and 4).
+#[test]
+fn a_line_without_a_seq_id_before_the_display_line_or_without_a_title_is_met() {
+    let a = || vec![gb("A00001", 1)];
+    for (lines, caught) in [
+        (vec![(vec![], Some("zero")), (a(), Some("a"))], true),
+        (vec![(vec![], None), (a(), Some("a"))], true),
+        (vec![(a(), Some("a")), (vec![], None)], true),
+        (vec![(a(), Some("a")), (vec![], Some(""))], true),
+        (
+            vec![(a(), Some("a")), (vec![gb("B00002", 1)], Some("b"))],
+            false,
+        ),
+    ] {
+        let shown = format!("{lines:?}");
+        assert_eq!(titled(lines).description_line(true).2, caught, "{shown}");
+    }
+}
+
+// `x_FillAlnDispParams` labels every line first: each HSP's heading is the skipped id.
+#[test]
+fn every_heading_of_a_subject_with_a_line_without_a_seq_id_is_the_skipped_id() {
+    let subject = titled(vec![
+        (vec![gb("A00001", 1)], Some("a")),
+        (vec![], Some("b")),
+    ]);
+    let skipped = subject.skipped_id().to_vec();
+    assert_eq!(
+        subject.heading(true, false, None).unwrap(),
+        Err(skipped.clone())
+    );
+    assert_eq!(
+        subject.heading(true, true, None).unwrap(),
+        Err(skipped.clone())
+    );
+    assert_eq!(subject.heading_skipped_id(true, false), Some(skipped));
+}
+
+// Outfmt 5 takes the id string of the first titled line (no throw for an empty list there) and
+// throws only at a titled line without a Seq-id after it (an empty title counts): the `Hit`'s
+// `catch` (`xml_hit` gives `None`).
+#[test]
+fn outfmt_5_catches_a_titled_line_without_a_seq_id_after_the_first_titled_line() {
+    let a = || vec![gb("A00001", 1)];
+    for (lines, named) in [
+        (vec![(a(), Some("a")), (vec![], Some("b"))], false),
+        (vec![(a(), Some("a")), (vec![], Some(""))], false),
+        (vec![(a(), Some("a")), (vec![], None)], true),
+        (vec![(vec![], Some("z")), (a(), Some("a"))], true),
+        (vec![(vec![], None), (a(), Some("a"))], true),
+        (
+            vec![(vec![], None), (a(), Some("a")), (vec![], Some("c"))],
+            false,
+        ),
+    ] {
+        let shown = format!("{lines:?}");
+        assert_eq!(titled(lines).xml_hit().is_some(), named, "{shown}");
+    }
+}
+
+// The tabular ids of a line without a Seq-id: `Unknown` and GI 0 (`sallseqid`, `sallgi`); its
+// `sallacc` is NCBI's null pointer (`LookupFailure::lineless`, refused by `failed_lookup_stop`).
+#[test]
+fn a_line_without_a_seq_id_is_unknown_in_the_tabular_ids_and_its_sallacc_stops() {
+    let subject = titled(vec![
+        (vec![gb("A00001", 1)], Some("a")),
+        (vec![], Some("b")),
+    ]);
+    let all = subject.all_tabular_ids(true).unwrap();
+    assert!(!all.failed);
+    assert_eq!(text(&all.ids[1].id), "Unknown");
+    assert_eq!(all.ids[1].gi, 0);
+    assert_eq!(
+        subject.lookup_failure(true).unwrap(),
+        Some(crate::report::tabular::LookupFailure {
+            lineless: true,
+            ..Default::default()
+        })
+    );
+    let plain = titled(vec![(vec![gb("A00001", 1)], Some("a"))]);
+    assert_eq!(plain.lookup_failure(true).unwrap(), None);
+}
+
+// The organism report stops at the line without a Seq-id (Owner question Q-D1c1cb-18): refused
+// there, the lines before it as always; a set with no Seq-id at all gets no Seq-align (PR 2a) and
+// is an internal error here.
+#[test]
+fn the_organism_report_refuses_a_line_without_a_seq_id_and_a_set_without_any_is_internal() {
+    use crate::report::tax_report::TaxTitle;
+    let subject = titled(vec![
+        (vec![gb("A00001", 1)], Some("a")),
+        (vec![], Some("b")),
+    ]);
+    let lines = subject.tax_deflines(true);
+    assert!(matches!(&lines[0].title, TaxTitle::Text(title) if title == b"a"));
+    assert!(matches!(
+        &lines[1].title,
+        TaxTitle::Refused { reason, shown_only: false } if reason == LINELESS_TAX_REPORT
+    ));
+    let none = DeflineSet {
+        deflines: vec![BlastDefline {
+            title: Some(b"t".to_vec()),
+            ..BlastDefline::default()
+        }],
+        utf8: false,
+    };
+    assert!(ParsedSubject::new(none)
+        .unwrap_err()
+        .contains("internal error"));
 }

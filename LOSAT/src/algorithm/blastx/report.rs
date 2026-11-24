@@ -512,6 +512,7 @@ impl ShownSubjects<'_> {
                         subject_id: true,
                         all_ids: false,
                         bioseq: false,
+                        lineless: false,
                     }),
                 None => reported
                     .tabular_ids(oid)
@@ -641,11 +642,12 @@ fn check_failed_lookups(
                     .map(|list| list.oid)
             }),
             |oid| shown.lookup_failure(options.tabular, &subjects[oid], oid),
-            |oid| match shown {
+            |oid, failure| match shown {
                 ShownSubjects::Database { reported, .. } => {
                     crate::report::tabular::failed_database_subject(
                         reported.oid(oid),
                         reported.loads().thrown(oid),
+                        failure,
                     )
                 }
                 ShownSubjects::Fasta { .. } => {

@@ -1,0 +1,86 @@
+<?xml version="1.0"?>
+<!DOCTYPE Blast4-archive PUBLIC "-//NCBI//NCBI Blast4/EN" "NCBI_Blast4.dtd">
+<Blast4-archive>
+  <Blast4-archive_request>
+    <Blast4-request>
+      <Blast4-request_ident>2.17.0+</Blast4-request_ident>
+      <Blast4-request_body>
+        <Blast4-request-body>
+          <Blast4-request-body_queue-search>
+            <Blast4-queue-search-request>
+              <Blast4-queue-search-request_program>blastp</Blast4-queue-search-request_program>
+              <Blast4-queue-search-request_service>psi</Blast4-queue-search-request_service>
+              <Blast4-queue-search-request_queries>
+                <Blast4-queries>
+                  <Blast4-queries_pssm>
+                    <PssmWithParameters>
+                      <PssmWithParameters_pssm>
+                        <Pssm>
+                          <Pssm_isProtein value="true"/>
+                          <Pssm_numRows>28</Pssm_numRows>
+                          <Pssm_numColumns>30</Pssm_numColumns>
+                          <Pssm_byRow value="false"/>
+                          <Pssm_query>
+                            <Seq-entry>
+                              <Seq-entry_seq>
+                                <Bioseq>
+                                  <Bioseq_id>
+                                    <Seq-id>
+                                      <Seq-id_local>
+                                        <Object-id>
+                                          <Object-id_str>Query_1</Object-id_str>
+                                        </Object-id>
+                                      </Seq-id_local>
+                                    </Seq-id>
+                                  </Bioseq_id>
+                                  <Bioseq_descr>
+                                    <Seq-descr>
+                                      <Seqdesc>
+                                        <Seqdesc_title>rnd random</Seqdesc_title>
+                                      </Seqdesc>
+                                    </Seq-descr>
+                                  </Bioseq_descr>
+                                  <Bioseq_inst>
+                                    <Seq-inst>
+                                      <Seq-inst_repr value="raw"/>
+                                      <Seq-inst_mol value="aa"/>
+                                      <Seq-inst_length>30</Seq-inst_length>
+                                      <Seq-inst_seq-data>
+                                        <Seq-data>
+                                          <Seq-data_ncbistdaa>
+                                            <NCBIstdaa>0C1414080E0A0F031610140D0C0806140F030E16100714120C080A14160F</NCBIstdaa>
+                                          </Seq-data_ncbistdaa>
+                                        </Seq-data>
+                                      </Seq-inst_seq-data>
+                                      <Seq-inst_hist>
+                                        <Seq-hist>
+                                          <Seq-hist_assembly><?xml version="1.0"?>
+<!DOCTYPE Blast4-archive PUBLIC "-//NCBI//NCBI Blast4/EN" "NCBI_Blast4.dtd">
+<Blast4-archive>
+  <Blast4-archive_request>
+    <Blast4-request>
+      <Blast4-request_body>
+        <Blast4-request-body>
+          <Blast4-request-body_get-request-info>
+            <Blast4-get-request-info-request>
+              <Blast4-get-request-info-request_request-id>Error</Blast4-get-request-info-request_request-id>
+            </Blast4-get-request-info-request>
+          </Blast4-request-body_get-request-info>
+        </Blast4-request-body>
+      </Blast4-request_body>
+    </Blast4-request>
+  </Blast4-archive_request>
+  <Blast4-archive_results>
+    <Blast4-get-search-results-reply></Blast4-get-search-results-reply>
+  </Blast4-archive_results>
+  <Blast4-archive_messages>
+    <Blast4-error>
+      <Blast4-error_code>2</Blast4-error_code>
+      <Blast4-error_message>Error: (802.5) [psiblast] CObjectOStream: error at line 57: Blast4-archive.request.body.queue-search.queries.pssm.pssm.query.seq.inst.hist.assembly: cannot write unassigned member NULL element while writing container</Blast4-error_message>
+    </Blast4-error>
+    <Blast4-error>
+      <Blast4-error_code>2</Blast4-error_code>
+      <Blast4-error_message>Error: NCBI C++ Exception: T0 &quot;/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrxml.cpp&quot;, line 1272: Error: (CUnassignedMember::eWrite) ncbi::CObjectOStreamXml::WriteContainerContents() - line 57: cannot write unassigned member NULL element while writing container ( at Blast4-archive.request.body.queue-search.queries.pssm.pssm.query.seq.inst.hist.assembly)</Blast4-error_message>
+    </Blast4-error>
+  </Blast4-archive_messages>
+</Blast4-archive>

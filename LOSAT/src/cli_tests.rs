@@ -603,6 +603,20 @@ fn the_command_of_one_program_is_its_command_among_every_program() {
     }
 }
 
+// Every run of a clap program converts its arguments with `command_of` (`reader::convert`), whose
+// argv names the program first: its command has no list of the other programs, which only the top
+// level's help shows (`top_level_after_help`, built where that help can be asked for).
+#[test]
+fn the_command_of_a_program_builds_no_list_of_the_other_programs() {
+    for name in program_names() {
+        assert!(command_of(&name).get_after_help().is_none(), "{name}");
+    }
+    assert!(Cli::command().get_after_help().is_some());
+    assert!(Cli::program_command(&[OsString::from("losat")])
+        .get_after_help()
+        .is_some());
+}
+
 // `program_args` adds the arguments that clap's derive defers for each variant of `Commands`
 // (`PROGRAM_ARGS` is in the variants' order), and keeps the variant's description, which clap's
 // deferred `Args` replaces where a doc comment of an `Args` gives one.

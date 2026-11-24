@@ -256,9 +256,12 @@ impl ProgramParser for Cli {
     }
 }
 
-/// `Cli`'s command with the arguments of `program` only (`cli_command`).
+/// `Cli`'s command with the arguments of `program` only (`cli_command`), for an argv that names
+/// `program` first: the conversion of the arguments NCBI's reader read (`reader::convert`, every
+/// run of a clap program) and LOSAT Web's v1 reader. Such an argv never shows the top level's
+/// help, so the command has no list of the other programs (`top_level_after_help`).
 pub(crate) fn command_of(program: &str) -> clap::Command {
-    cli_command::<false>(|name| name == program, true)
+    cli_command::<false>(|name| name == program, false)
 }
 
 /// The words that LOSAT's top level takes (`top_level_error`), before the program's name: its help

@@ -169,6 +169,19 @@ fn initial_tabular_oracle_bytes() {
             hits: None,
             observer: None,
         };
+        // The outfmt 0 prolog comes before the search, as in `search` (line RG item T4b-f).
+        super::super::tblastn_app::write_first_batch_prologs(
+            &mut outputs,
+            Some(subject_path),
+            subjects.len(),
+            crate::algorithm::tblastn::x_subject_store::SubjectLetters::Records(&subject_seqs),
+            None,
+            false,
+            "TBLASTN",
+            None,
+            true,
+        )
+        .unwrap();
         render(
             &mut outputs,
             &queries,

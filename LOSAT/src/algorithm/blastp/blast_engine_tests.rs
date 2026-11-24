@@ -337,6 +337,15 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
                 observer: None,
                 later_warnings: None,
             };
+            // The outfmt 0 prolog comes before the search, as in `search` (line RG item T4b-f).
+            write_pairwise_prologs(
+                &resolved,
+                BlastpSubjectSource::Fasta(&[]),
+                "",
+                &mut outputs,
+                true,
+            )
+            .expect("the prolog");
             write_reports_without_queries(
                 &resolved,
                 BlastpSubjectSource::Fasta(&[]),

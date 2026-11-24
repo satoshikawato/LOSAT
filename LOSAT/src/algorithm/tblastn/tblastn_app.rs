@@ -1404,7 +1404,7 @@ fn run_local_formats(
 /// `num_subjects` records (`subject_letters`); a database search shows its `Database:` lines
 /// (`database`).
 #[allow(clippy::too_many_arguments)]
-fn write_first_batch_prologs(
+pub(super) fn write_first_batch_prologs(
     outputs: &mut ReportOutputs<'_>,
     subject_path: Option<&std::path::Path>,
     num_subjects: usize,

@@ -6,7 +6,7 @@ use super::range::{
     interval_parts, point_parts, Handle, HandleRangeMap, LiveHandles, Range, Strand, UNKNOWN,
 };
 use super::view::V;
-use super::{Indexer, Refusal, Stop};
+use super::{Indexer, RefElement, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
 
 /// Std-seg's `dim` above which NCBI's rows depend on the machine's memory (`hrmaps.resize`
@@ -51,7 +51,7 @@ pub(super) fn process_align<'v>(
                     continue;
                 };
                 *index += 1;
-                sub
+                sub.deref_raw()?
             }
         };
         let Some(segs) = align.get("segs") else {
@@ -61,19 +61,19 @@ pub(super) fn process_align<'v>(
         match variant {
             "dendiag" => {
                 for diag in segs.items() {
-                    dense_diag(ix, rows, diag);
+                    dense_diag(ix, rows, diag.deref_raw()?)?;
                 }
             }
             "denseg" => dense_seg(ix, rows, segs)?,
             "std" => {
                 for seg in segs.items() {
-                    std_seg(&mut ix.handles, rows, seg)?;
+                    std_seg(&mut ix.handles, rows, seg.deref_raw()?)?;
                 }
             }
             "packed" => packed_seg(&mut ix.handles, rows, segs)?,
             "disc" => discs.push((segs, 0)),
-            "spliced" => spliced_seg(&mut ix.handles, rows, segs),
-            "sparse" => sparse_seg(ix, rows, segs),
+            "spliced" => spliced_seg(&mut ix.handles, rows, segs)?,
+            "sparse" => sparse_seg(ix, rows, segs)?,
             other => unreachable!("Seq-align.segs has no variant {other}"),
         }
     }
@@ -94,7 +94,11 @@ fn row_map(rows: &mut [HandleRangeMap], row: usize) -> &mut HandleRangeMap {
 
 // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:571-606
 // `dim` is `int` (DEFAULT 2, Dense_diag_.hpp), compared with the sizes as `int`.
-fn dense_diag(ix: &mut Indexer<'_>, rows: &mut Vec<HandleRangeMap>, diag: V<'_>) {
+fn dense_diag(
+    ix: &mut Indexer<'_>,
+    rows: &mut Vec<HandleRangeMap>,
+    diag: V<'_>,
+) -> Result<(), Stop> {
     let mut dim = diag.get("dim").map_or(2, V::int) as i32;
     let ids = diag.field("ids");
     let starts = diag.field("starts");
@@ -131,8 +135,10 @@ fn dense_diag(ix: &mut Indexer<'_>, rows: &mut Vec<HandleRangeMap>, diag: V<'_>)
         let from = at(starts, row) as u32;
         let to = from.wrapping_add(len).wrapping_sub(1);
         let strand = strands.map_or(UNKNOWN, |strands| at(strands, row));
-        row_map(rows, row).add_range(id.seq_id(), Range::new(from, to), strand, &mut ix.handles);
+        let id = id.deref_raw()?.seq_id();
+        row_map(rows, row).add_range(id, Range::new(from, to), strand, &mut ix.handles);
     }
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:606-651
@@ -195,7 +201,7 @@ fn dense_seg(ix: &mut Indexer<'_>, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) -
             let to = from.wrapping_add(len).wrapping_sub(1);
             let strand = strands.map_or(UNKNOWN, |strands| at(strands, seg_index * dim + row));
             row_map(rows, row).add_range(
-                id.seq_id(),
+                id.deref_raw()?.seq_id(),
                 Range::new(from, to),
                 strand,
                 &mut ix.handles,
@@ -225,6 +231,7 @@ fn std_seg(
         grow(rows, dim as usize);
     }
     for loc in seg.field("loc").items() {
+        let loc = loc.deref_raw()?;
         // The iterator's ranges are made when it is constructed (`x_ProcessLocation` of the whole
         // location), so a `feat` anywhere stops before any row.
         let mut ranges = Vec::new();
@@ -274,7 +281,7 @@ fn loc_ci_ranges<'a>(
                     continue;
                 };
                 *index += 1;
-                part
+                part.deref_raw()?
             }
         };
         let (variant, value) = loc.choice();
@@ -288,8 +295,8 @@ fn loc_ci_ranges<'a>(
             "int" => push(interval_parts(value)),
             "pnt" => push(point_parts(value)),
             "packed-int" => {
-                for part in value.items().map(interval_parts) {
-                    push(part);
+                for part in value.items() {
+                    push(interval_parts(part.deref_raw()?));
                 }
             }
             "packed-pnt" => {
@@ -377,7 +384,8 @@ fn packed_seg(
             let strand = strands
                 .and_then(|strands| strands.int_at(i))
                 .unwrap_or(UNKNOWN);
-            row_map(rows, row).add_range(id.seq_id(), Range::new(from, to), strand, handles);
+            let id = id.deref_raw()?.seq_id();
+            row_map(rows, row).add_range(id, Range::new(from, to), strand, handles);
         }
     }
     Ok(())
@@ -385,7 +393,11 @@ fn packed_seg(
 
 // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:727-778
 // The resize to 2 rows also cuts rows that a Seq-align before it in the same `disc` made.
-fn spliced_seg(handles: &mut LiveHandles, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) {
+fn spliced_seg(
+    handles: &mut LiveHandles,
+    rows: &mut Vec<HandleRangeMap>,
+    seg: V<'_>,
+) -> Result<(), Stop> {
     rows.truncate(2);
     grow(rows, 2);
     let genomic_id = seg.get("genomic-id");
@@ -398,6 +410,7 @@ fn spliced_seg(handles: &mut LiveHandles, rows: &mut Vec<HandleRangeMap>, seg: V
         }
     };
     for exon in seg.field("exons").items() {
+        let exon = exon.deref_raw()?;
         if let Some(id) = exon.get("genomic-id").or(genomic_id) {
             let from = exon.field("genomic-start").int() as u32;
             let to = exon.field("genomic-end").int() as u32;
@@ -417,16 +430,22 @@ fn spliced_seg(handles: &mut LiveHandles, rows: &mut Vec<HandleRangeMap>, seg: V
             row_map(rows, 0).add_range(id.seq_id(), Range::new(from, to), strand, handles);
         }
     }
+    Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/annot_object.cpp:780-836
 // The second strand is read at the row's index, not the segment's (past `second-strands` for a
 // row beyond its size): no strand changes an output of the index (`packed_seg`), so it is read as
 // `unknown` there.
-fn sparse_seg(ix: &mut Indexer<'_>, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) {
+fn sparse_seg(
+    ix: &mut Indexer<'_>,
+    rows: &mut Vec<HandleRangeMap>,
+    seg: V<'_>,
+) -> Result<(), Stop> {
     let sparse_rows: Vec<V<'_>> = seg.field("rows").items().collect();
     grow(rows, sparse_rows.len() + 1);
     for (row, aln) in sparse_rows.iter().enumerate() {
+        let aln = aln.deref_raw()?;
         let mut numseg = aln.field("numseg").int() as i32 as i64 as u64;
         let first_starts = aln.field("first-starts");
         let second_starts = aln.field("second-starts");
@@ -487,4 +506,5 @@ fn sparse_seg(ix: &mut Indexer<'_>, rows: &mut Vec<HandleRangeMap>, seg: V<'_>) 
             );
         }
     }
+    Ok(())
 }

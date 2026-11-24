@@ -501,77 +501,160 @@ fn a_psiblast_round_writes_its_step_and_composition_mode() {
     assert!(!subject.contains("Web_StepNumber"), "{subject}");
 }
 
-// Review fixes of line PS item PS15b-1, XA (2026-11-23): what LOSAT's XML and ASN.1 binary archives
-// do not write yet of a PSSM file's members, which NCBI BLAST+ 2.17.0's psiblast writes with
-// `-outfmt 11` (`pssm_unwritten`: the run is refused before any output). ASN.1 text writes them all.
+// Review fixes of line PS item PS15b-1, XA (2026-11-23), and line RG-F3's PR 2: what LOSAT's
+// archives do not write yet of a PSSM file's members, which NCBI BLAST+ 2.17.0's psiblast writes
+// with `-outfmt 11` (`pssm_unwritten`: the run is refused before any output). Since PR 2 every
+// stream writes the anonymous types, NULLs, UTF8Strings and REAL specials of these files and a
+// delayed member that it copies or reads again without a message; a delayed member of another
+// format that NCBI reads again with an error or a post stays refused.
+/// The PSSM file `path` under tests/fixtures (gzipped when it ends with `.gz`) as psiblast's
+/// `-in_pssm` reads it: ASN.1 binary for `.asnb`, XML for `.xml`, else ASN.1 text.
+fn fixture_pssm(path: &str) -> crate::report::serial::pssm::PssmWithParameters {
+    let mut bytes = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(path),
+    )
+    .unwrap();
+    if path.ends_with(".gz") {
+        let mut inflated = Vec::new();
+        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut inflated)
+            .unwrap();
+        bytes = inflated;
+    }
+    if path.ends_with(".asnb") {
+        crate::blastinput::pssm_text::read_pssm_binary(&bytes)
+            .result
+            .unwrap()
+    } else if path.contains(".xml") {
+        crate::blastinput::pssm_text::read_pssm_xml(&bytes)
+            .result
+            .unwrap()
+    } else {
+        crate::blastinput::pssm_text::read_pssm_with_parameters(&bytes).unwrap()
+    }
+}
+
 #[test]
 fn the_archive_streams_gaps_of_a_pssm_files_members() {
-    let read = |path: &str| {
-        let bytes = std::fs::read(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures")
-                .join(path),
-        )
-        .unwrap();
-        let mut text = Vec::new();
-        if path.ends_with(".gz") {
-            std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&bytes[..]), &mut text)
-                .unwrap();
-        } else {
-            text = bytes;
-        }
-        crate::blastinput::pssm_text::read_pssm_with_parameters(&text).unwrap()
-    };
-    const ANONYMOUS: Option<&str> = Some("an anonymous SEQUENCE or CHOICE");
-    const DELAYED: Option<&str> = Some("a member read into a delay buffer");
-    for (path, xml, binary) in [
+    const READ_AGAIN: Option<PssmGap> = Some(PssmGap::ReadAgain);
+    // (file, the gap of the XML, ASN.1 binary and ASN.1 text archives)
+    for (path, xml, binary, text) in [
         // A title only.
-        ("db_search/db.ps.asn.rnd.6.asn", None, None),
+        ("db_search/db.ps.asn.rnd.6.asn", None, None, None),
         // A User-object (`User-field.data`, an anonymous CHOICE; a UTF8String).
-        ("pssm/d3a_c10_user.asn.gz", ANONYMOUS, Some("a UTF8String")),
-        // A Pubdesc whose `Auth-list.names` the reader keeps in a delay buffer.
-        ("pssm/d3a_c11_delay.asn.gz", DELAYED, DELAYED),
+        ("pssm/d3a_c10_user.asn.gz", None, None, None),
+        // A Pubdesc whose `Auth-list.names` the reader keeps in a delay buffer: read again
+        // without a message in XML and ASN.1 binary, copied in ASN.1 text.
+        ("pssm/d3a_c11_delay.asn.gz", None, None, None),
         // Seq-annot `locs` (`Seq-annot.data`, an anonymous CHOICE) with a NULL Seq-loc.
-        ("pssm/d3a_c17_locs.asn.gz", ANONYMOUS, None),
+        ("pssm/d3a_c17_locs.asn.gz", None, None, None),
+        // A frequency ratio of PLUS-INFINITY in a PSSM file in ASN.1 binary.
+        ("pssm/ps9_ber_real_list_pinf.asnb", None, None, None),
+        // A delayed `Auth-list.names` with a control byte in a name: copied by the stream of its
+        // own format, read again with NCBI's post (803.7) by the others, which write it through
+        // `Traced`.
+        ("pssm/ps9_xml_bin_dl_ctrl.asnb", None, None, None),
+        ("pssm/ps9_xml_dl_ctrl.xml", None, None, None),
+        // One whose number is past its storage: read again with an error.
+        ("pssm/ps9_xml_dl_ovf.xml", None, READ_AGAIN, READ_AGAIN),
     ] {
-        let pssm = read(path);
+        let pssm = fixture_pssm(path);
         assert_eq!(pssm_unwritten(ArchiveEncoding::Xml, &pssm), xml, "{path}");
         assert_eq!(
             pssm_unwritten(ArchiveEncoding::Binary, &pssm),
             binary,
             "{path}"
         );
-        assert_eq!(pssm_unwritten(ArchiveEncoding::Text, &pssm), None, "{path}");
+        assert_eq!(pssm_unwritten(ArchiveEncoding::Text, &pssm), text, "{path}");
+        assert_eq!(
+            pssm_unwritten(ArchiveEncoding::Nothing, &pssm),
+            None,
+            "{path}"
+        );
     }
-    // A frequency ratio of PLUS-INFINITY (a PSSM file in ASN.1 binary, whose REAL NCBI's reader
-    // takes): NCBI writes it in each stream, LOSAT's BER encoder does not (`NonFiniteReal`).
-    let bytes = std::fs::read(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/pssm/ps9_ber_real_list_pinf.asnb"),
-    )
-    .unwrap();
-    let pinf = crate::blastinput::pssm_text::read_pssm_binary(&bytes)
-        .result
-        .unwrap();
-    assert_eq!(pssm_unwritten(ArchiveEncoding::Xml, &pinf), None);
-    assert_eq!(pssm_unwritten(ArchiveEncoding::Text, &pinf), None);
-    assert_eq!(
-        pssm_unwritten(ArchiveEncoding::Binary, &pinf),
-        Some("a NaN or an infinite REAL")
-    );
-    // A member that the ASN.1 text stream re-reads with a message (a delay buffer of a binary
-    // file): the one arm of `unread_delayed` for every stream that fails on it.
-    for (encoding, gap) in [
-        (ArchiveEncoding::Xml, true),
-        (ArchiveEncoding::Binary, true),
-        (ArchiveEncoding::Text, true),
-        (ArchiveEncoding::Nothing, false),
+    // An element stated as NULL (a Seq-descr element, a feature's dbxref element: the reader's
+    // empty references, line RG item D3c-3b): NCBI's three streams throw at it in the middle of
+    // the archive (`NULL element while writing container`), as LOSAT's do (line RG item D3c-3c,
+    // `writer::write_archive`): no gap. (The XML stream writes the feature's anonymous SEQUENCE
+    // before its dbxref, line RG-F3 PR 2.)
+    for path in [
+        "pssm/d3b_descr_elem_null.asn.gz",
+        "pssm/d3b_f_dbxref_null.asn.gz",
     ] {
-        let mut check = PssmGaps {
-            encoding,
-            gap: None,
-        };
-        crate::report::serial::encoder::Encoder::unread_delayed(&mut check);
-        assert_eq!(check.gap.is_some(), gap, "{encoding:?}");
+        let pssm = fixture_pssm(path);
+        assert!(pssm_holds_null_element(&pssm), "{path}");
+        for encoding in [
+            ArchiveEncoding::Xml,
+            ArchiveEncoding::Binary,
+            ArchiveEncoding::Text,
+        ] {
+            assert_eq!(pssm_unwritten(encoding, &pssm), None, "{path} {encoding:?}");
+        }
     }
+    assert!(!pssm_holds_null_element(&fixture_pssm(
+        "db_search/db.ps.asn.rnd.6.asn"
+    )));
+}
+
+/// A delayed member of another format whose read posts a replaced byte is written through
+/// `Traced` in every archive (`pssm_written_as_is`), which posts it while it writes; a buffer of
+/// the archive's own format is copied without a read.
+#[test]
+fn an_archive_writes_a_delayed_member_that_posts_through_traced() {
+    let posting = fixture_pssm("pssm/ps9_xml_dl_ctrl.xml");
+    assert!(pssm_written_as_is(ArchiveEncoding::Xml, &posting));
+    assert!(!pssm_written_as_is(ArchiveEncoding::Binary, &posting));
+    let posting = fixture_pssm("pssm/ps9_xml_bin_dl_ctrl.asnb");
+    assert!(pssm_written_as_is(ArchiveEncoding::Binary, &posting));
+    assert!(!pssm_written_as_is(ArchiveEncoding::Xml, &posting));
+    let quiet = fixture_pssm("pssm/ps9_xml_dl_base.xml");
+    assert!(pssm_written_as_is(ArchiveEncoding::Binary, &quiet));
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
+/// NCBI's ASN.1 text write of a PSSM file's object (`-out_pssm`, the search strategy's request)
+/// reads each delay buffer of another format into the object once (`CDelayBuffer::Update`):
+/// `PssmWithParameters::update_delayed` leaves the object that later writes write, the same
+/// text without the read's posts, with nothing left that an archive cannot write; a buffer of
+/// text, and one whose read fails, stays.
+#[test]
+fn a_text_write_reads_a_pssm_files_delay_buffers_of_other_formats_into_it() {
+    use crate::report::serial::asn_input::Encoding;
+    use crate::report::serial::pssm::asn_text_posting;
+    // (file, the posts of its first text write, whether the update keeps the object as read)
+    for (path, posts, kept) in [
+        ("pssm/d3a_c11_delay.asn.gz", 0, true),
+        ("pssm/ps9_xml_dl_base.xml", 0, false),
+        ("pssm/ps9_xml_dl_ctrl.xml", 1, false),
+        ("pssm/ps9_xml_bin_dl_ctrl.asnb", 1, false),
+    ] {
+        let pssm = fixture_pssm(path);
+        let (text, first) = asn_text_posting(&pssm).unwrap();
+        assert_eq!(first.len(), posts, "{path}");
+        let mut updated = pssm.clone();
+        updated.update_delayed(Encoding::Text);
+        assert_eq!(updated == pssm, kept, "{path}");
+        let (again, second) = asn_text_posting(&updated).unwrap();
+        assert!(again == text && second.is_empty(), "{path}");
+        for encoding in [
+            ArchiveEncoding::Text,
+            ArchiveEncoding::Xml,
+            ArchiveEncoding::Binary,
+        ] {
+            assert_eq!(pssm_unwritten(encoding, &updated), None, "{path}");
+        }
+    }
+    // A write of the buffer's own format copies it, so the buffer stays.
+    let pssm = fixture_pssm("pssm/ps9_xml_dl_base.xml");
+    let mut updated = pssm.clone();
+    updated.update_delayed(Encoding::Xml);
+    assert!(updated == pssm);
+    // A read that fails (an INTEGER past Int4): the buffer stays, which NCBI's text write
+    // stops at with its exception.
+    let pssm = fixture_pssm("pssm/ps9_xml_dl_ovf.xml");
+    let mut updated = pssm.clone();
+    updated.update_delayed(Encoding::Text);
+    assert!(updated == pssm);
+    assert!(asn_text_posting(&updated).is_err());
 }

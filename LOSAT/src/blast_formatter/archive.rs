@@ -787,9 +787,7 @@ fn write_streamed(
 /// writer's.
 fn unwritable(error: SerialError, format: SerialFormat) -> anyhow::Error {
     let what = match error {
-        SerialError::JsonDouble(_) | SerialError::NonFiniteReal => {
-            "a NaN or an infinite real number"
-        }
+        SerialError::JsonDouble(_) => "a NaN or an infinite real number",
         SerialError::OctetString => "an OCTET STRING",
         SerialError::Unwritten(what) => what,
         other => return SeqAlignError::Serial(other).into(),
@@ -1076,8 +1074,8 @@ fn read_error(error: ReadError) -> anyhow::Error {
 
 /// Where NCBI's code stops on the archive (`Stop`), as the run ends there: the serial exceptions
 /// of a CHOICE or an unset member are `invalid_archive` (the loop's `catch`); an exception is
-/// `exception_error`'s; a null pointer, an `abort` and a read of memory the input does not decide
-/// are refused.
+/// `exception_error`'s; a null pointer (an element stated as `NULL` in a list too), an `abort`
+/// and a read of memory the input does not decide are refused.
 fn stop_error(stop: Stop) -> anyhow::Error {
     match stop {
         Stop::Exception(exception) => exception_error(&exception),
@@ -1085,6 +1083,7 @@ fn stop_error(stop: Stop) -> anyhow::Error {
         Stop::NullPointer(what) | Stop::Abort(what) | Stop::Undefined(what) => {
             Refusal::Undecided(what).into()
         }
+        Stop::NullElement => Refusal::Undecided("an element stated as NULL in a list").into(),
     }
 }
 

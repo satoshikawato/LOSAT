@@ -19,10 +19,14 @@ use crate::cli::{Cli, Commands};
 /// `Error: ` and the error's `Debug` text to standard error and exits with status 1). It takes
 /// nothing from its caller, so no caller can pass it a value it does not expect; it acts on the
 /// whole process (it can end it, it sets `cli::post_errors_in_run` for the rest of the process,
-/// and on WASI it changes the working directory), so a program that searches from its own code
-/// calls `api` instead.
+/// where a panic ends the process it installs the panic hook of
+/// `report::archive::strategy::install_panic_hook`, and on WASI it changes the working
+/// directory), so a program that searches from its own code calls `api` instead.
 #[doc(hidden)]
 pub fn main_entry() -> Result<()> {
+    // Where a panic (LOSAT's own failure) ends the process, it ends the strategy files as LOSAT's
+    // refusals end them.
+    crate::report::archive::strategy::install_panic_hook();
     let result = run_main_entry();
     // LOSAT's own errors (its refusals, which NCBI has no message for) stay on the terminal when
     // the standard error went to the `-logfile` target (tblastx, rpsblast and rpstblastn,
@@ -151,8 +155,11 @@ fn run_main_entry() -> Result<()> {
         }
         match crate::cli::install_shims(argv.get(2).map(std::ffi::OsString::as_os_str)) {
             Ok(paths) => {
+                // The names made, a line each, as the help text goes out (a failed write drops
+                // the line; the shims are made).
+                let mut out = crate::cli::standard_output();
                 for path in paths {
-                    println!("{}", path.display());
+                    write_dropping_errors(&mut out, &format!("{}\n", path.display()));
                 }
                 return Ok(());
             }
@@ -184,7 +191,7 @@ fn run_main_entry() -> Result<()> {
         if argv_is_rpsbproc {
             crate::rpsbproc::write_stdout(&text);
         } else {
-            write_dropping_errors(&mut std::io::stdout(), &text);
+            write_dropping_errors(&mut crate::cli::standard_output(), &text);
         }
         return Ok(());
     }
@@ -207,7 +214,7 @@ fn run_main_entry() -> Result<()> {
         let message = crate::cli::top_level_message(&error);
         match error.use_stderr() {
             true => write_dropping_errors(&mut std::io::stderr(), &message),
-            false => write_dropping_errors(&mut std::io::stdout(), &message),
+            false => write_dropping_errors(&mut crate::cli::standard_output(), &message),
         }
         std::process::exit(error.exit_code());
     };
@@ -231,7 +238,7 @@ fn run_main_entry() -> Result<()> {
     let read = crate::ncbi_app::read(
         tool,
         &words,
-        &mut std::io::stdout().lock(),
+        &mut crate::cli::standard_output(),
         &mut diag,
         Some(crate::cli::xml_help_text),
     );
@@ -280,6 +287,25 @@ fn run_main_entry() -> Result<()> {
             ));
         }
         return Ok(());
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:784-793 (cited at
+    // `ncbi_environment::WriteVerification`)
+    // The BLAST XML report (outfmt 5) of every search program changes under a
+    // `SERIAL_VERIFY_DATA_WRITE` of `ALWAYS` or `DEFVALUE_ALWAYS`: LOSAT refuses such a run here,
+    // before any output, with its other refusals of the settings (the settings that each program
+    // refuses come first, in its own arm below).
+    if let Ok(settings) = start.settings() {
+        let number = search_outfmt(&cli.command)
+            .and_then(|outfmt| crate::blastinput::app::parse_formatting_string(outfmt).ok())
+            .map(|choice| choice.number);
+        if let Some(refusal) =
+            crate::blastinput::ncbi_environment::WriteVerification::blast_xml_refusal(
+                settings.write_verification.as_ref(),
+                number.into_iter(),
+            )
+        {
+            return Err(anyhow::Error::msg(refusal));
+        }
     }
     // The messages of tblastx's, rpsblast's and rpstblastn's runs go where the diagnostics go
     // (`ncbi_environment::run_messages_follow_log`): the standard error becomes the `-logfile`
@@ -525,6 +551,21 @@ fn import_strategy(
 /// LOSAT's refusal, an error (exit 1) written as `main` writes an error, through
 /// `rpsbproc::write_stderr_bytes` (a closed standard error: exit 4; the message may quote data
 /// bytes).
+/// The `-outfmt` value of a search program's command line; `None` for the other programs.
+fn search_outfmt(command: &Commands) -> Option<&str> {
+    match command {
+        Commands::Blastx(args) => Some(&args.outfmt),
+        Commands::Blastn(args) => Some(&args.outfmt),
+        Commands::Blastp(args) => Some(&args.outfmt),
+        Commands::Tblastx(args) => Some(&args.outfmt),
+        Commands::Tblastn(args) => Some(&args.outfmt),
+        Commands::Psiblast(args) => Some(&args.outfmt),
+        Commands::Rpsblast(args) => Some(&args.outfmt),
+        Commands::Rpstblastn(args) => Some(&args.outfmt),
+        Commands::Makedb(_) | Commands::Rpsbproc(_) => None,
+    }
+}
+
 fn exit_rpsbproc(outcome: crate::rpsbproc::Outcome) {
     match outcome {
         crate::rpsbproc::Outcome::Exit(0) => {}

@@ -275,7 +275,7 @@ fn the_first_header_of_each_volume_is_read_at_open() {
     for program in ["BLASTP", "PSIBLAST"] {
         let database = BlastpDatabase::open(&name, &settings, program)
             .unwrap_or_else(|error| panic!("{program}: {error:#}"));
-        let headers = shared::HeaderReader::new(&database.db);
+        let headers = shared::HeaderReader::new(&database.db, false);
         shared::read_header(&headers, 0, 3, program).unwrap();
         let read = headers.first_utf8().expect("the UTF8String read").clone();
         assert_eq!(
@@ -292,7 +292,7 @@ fn the_first_header_of_each_volume_is_read_at_open() {
         );
         assert!(read.post(&database.db, "blastp").is_none());
         // Once posted, a reader names no member again.
-        let again = shared::HeaderReader::new(&database.db);
+        let again = shared::HeaderReader::new(&database.db, false);
         shared::read_header(&again, 0, 0, program).unwrap();
         assert!(again.first_utf8().is_none());
     }
@@ -1322,7 +1322,8 @@ mod x_db_cut_blocks {
 // (`tests/db_search/x4excl/fwd`), sx_frag (ordinal 3, a ti-only line) is kept without a line,
 // so the redo's fetch excludes it (`exclude_fetched`): its lists leave the hit lists and leave
 // marks of their places, by query, each with the number of kept lists before it in its
-// query's order. Without the list nothing leaves and there is no mark.
+// query's order. Without the list, or without the fetches (`-ungapped`), nothing leaves and
+// there is no mark.
 #[test]
 fn excluded_lists_leave_marks_of_their_places() {
     let name = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/db_search/x4excl/fwd");
@@ -1371,7 +1372,7 @@ fn excluded_lists_leave_marks_of_their_places() {
     )
     .unwrap();
     let mut lists = make();
-    let listed = ListedSubjects::x_list(&database, &mut lists, &mut []).unwrap();
+    let listed = ListedSubjects::x_list(&database, &mut lists, &mut [], true).unwrap();
     assert_eq!(listed.ordinals, [0, 1, 2]);
     assert_eq!(oids(&lists), [vec![0, 1], vec![2]]);
     let mark = |query, position, best_evalue| FetchExcludedMatch {
@@ -1380,9 +1381,23 @@ fn excluded_lists_leave_marks_of_their_places() {
         best_evalue,
     };
     assert_eq!(listed.fetch_excluded, [mark(0, 2, 0.04), mark(2, 0, 1e-9)]);
+    // An ungapped search fetches no subject (`fetched` false): sx_frag stays in both lists, with
+    // no mark (it leaves at the Seq-aligns, `drop_unaligned`).
+    let mut lists = make();
+    let listed = ListedSubjects::x_list(&database, &mut lists, &mut [], false).unwrap();
+    assert_eq!(listed.ordinals, [0, 1, 2, 3]);
+    assert_eq!(oids(&lists), [vec![0, 1, 3], vec![3, 2]]);
+    assert!(listed.fetch_excluded.is_empty());
+    // There it leaves at the Seq-aligns (ranks equal ordinals here); a gapped search's
+    // `drop_unaligned` leaves the lists as they are (its fetches have excluded it).
+    let mut kept = lists.clone();
+    listed.drop_unaligned(&database, &mut kept, true);
+    assert_eq!(oids(&kept), [vec![0, 1, 3], vec![3, 2]]);
+    listed.drop_unaligned(&database, &mut lists, false);
+    assert_eq!(oids(&lists), [vec![0, 1], vec![2]]);
     let database = BlastpDatabase::open(name, &settings, "BLASTP").unwrap();
     let mut lists = make();
-    let listed = ListedSubjects::x_list(&database, &mut lists, &mut []).unwrap();
+    let listed = ListedSubjects::x_list(&database, &mut lists, &mut [], true).unwrap();
     assert_eq!(listed.ordinals, [0, 1, 2, 3]);
     assert_eq!(oids(&lists), [vec![0, 1, 3], vec![3, 2]]);
     assert!(listed.fetch_excluded.is_empty());
@@ -1411,7 +1426,7 @@ fn listed_subjects_read_the_stored_residues_by_rank() {
         vec![Some(first), None, Some(second)]
     };
     let mut lists = make();
-    let listed = ListedSubjects::x_list(&database, &mut lists, &mut []).unwrap();
+    let listed = ListedSubjects::x_list(&database, &mut lists, &mut [], true).unwrap();
     assert_eq!(listed.ordinals, [0, 2, 7, 9]);
     assert!(listed.encoded.is_empty());
     // The subjects are renamed to their ranks: ordinals 7, 2, 9 and 2, 0 are ranks 2, 1, 3
@@ -1465,7 +1480,7 @@ fn listed_subjects_read_the_stored_residues_by_rank() {
         (XShownResidues::Final, &[][..], [false, true, false, true]),
         (XShownResidues::Listed, &[][..], [true; 4]),
     ] {
-        let mut shown = ListedSubjects::x_list(&database, &mut make(), &mut []).unwrap();
+        let mut shown = ListedSubjects::x_list(&database, &mut make(), &mut [], true).unwrap();
         // The redo reads the subjects of the final lists (and finds the O of p03).
         for rank in [1, 3] {
             shown.redo_subjects(&database, None).read(rank).unwrap();
@@ -1523,7 +1538,9 @@ fn listed_subjects_are_read_by_ordinal_and_renamed_to_ranks() {
     let mut hit_lists = vec![Some(first), None, Some(second)];
     let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
     assert_eq!(listed.ordinals, [0, 2, 7, 9]);
-    let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
+    let titles = listed
+        .read_titles(&database, &hit_lists, (&[0], false))
+        .unwrap();
     let oids = |hit_list: &Option<BlastpHitList>| -> Vec<(u32, Vec<u32>)> {
         let hit_list = hit_list.as_ref().unwrap();
         hit_list.hsplist_array[..hit_list.hsplist_count]
@@ -1603,9 +1620,11 @@ fn lean_titles_are_the_records_titles_and_letters() {
     let first = hit_lists[0].as_mut().unwrap();
     first.hsplist_array.retain(|hsp_list| hsp_list.oid == 1);
     first.hsplist_count = first.hsplist_array.len();
-    let records = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
+    let records = listed
+        .read_titles(&database, &hit_lists, (&[0], false))
+        .unwrap();
     let lean = listed
-        .x_read_titles_lean(&database, &hit_lists, &[0])
+        .x_read_titles_lean(&database, &hit_lists, (&[0], false))
         .unwrap();
     let ListedShown::Lean(lean_titles) = &lean.shown else {
         panic!("lean titles");
@@ -1683,7 +1702,9 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
     let mut hit_lists = vec![None, hit_list(vec![list(3, 1e-9), list(1, 1e-3)], 1)];
     let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
     assert_eq!(listed.ordinals, [1, 3]);
-    let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
+    let titles = listed
+        .read_titles(&database, &hit_lists, (&[0], false))
+        .unwrap();
     assert_eq!(
         titles.records()[1].title(),
         b"p04 lower case and ambiguity codes"
@@ -1692,7 +1713,7 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
     assert_eq!(titles.records()[0].seq(), b"I");
     // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles do not read it either.
     let lean = listed
-        .x_read_titles_lean(&database, &hit_lists, &[0])
+        .x_read_titles_lean(&database, &hit_lists, (&[0], false))
         .unwrap();
     assert_eq!(lean.title(1), b"p04 lower case and ambiguity codes");
     assert_eq!(lean.title(0), b"");
@@ -1706,7 +1727,7 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
     let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
     assert_eq!(listed.ordinals, [0, 1, 3, 9]);
     let error = listed
-        .read_titles(&database, &hit_lists, &[0])
+        .read_titles(&database, &hit_lists, (&[0], false))
         .err()
         .expect("a missing header file")
         .downcast::<HeaderReadError>()
@@ -1720,7 +1741,7 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
     // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles are read in the same order, with
     // the same error.
     let lean_error = listed
-        .x_read_titles_lean(&database, &hit_lists, &[0])
+        .x_read_titles_lean(&database, &hit_lists, (&[0], false))
         .err()
         .expect("a missing header file")
         .downcast::<HeaderReadError>()
@@ -1786,7 +1807,9 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
     clean.update(list(0));
     let mut hit_lists = vec![Some(clean)];
     let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
-    let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
+    let titles = listed
+        .read_titles(&database, &hit_lists, (&[0], false))
+        .unwrap();
     titles.check_reported_titles(&hit_lists).unwrap();
     // The subject with the bad byte: read as `#`, and rejected when it is reported.
     let mut bad = BlastpHitList::new(10);
@@ -1794,7 +1817,9 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
     bad.update(list(0));
     let mut hit_lists = vec![Some(bad)];
     let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
-    let titles = listed.read_titles(&database, &hit_lists, &[0]).unwrap();
+    let titles = listed
+        .read_titles(&database, &hit_lists, (&[0], false))
+        .unwrap();
     assert_eq!(titles.records()[1].title(), b"p10 l#st protein");
     let error = titles.check_reported_titles(&hit_lists).unwrap_err();
     assert!(
@@ -1805,7 +1830,7 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
     // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles hold the same title and flag, and
     // give the same refusal.
     let lean = listed
-        .x_read_titles_lean(&database, &hit_lists, &[0])
+        .x_read_titles_lean(&database, &hit_lists, (&[0], false))
         .unwrap();
     assert_eq!(lean.title(1), b"p10 l#st protein");
     let lean_error = lean.check_reported_titles(&hit_lists).unwrap_err();

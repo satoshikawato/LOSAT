@@ -1,6 +1,16 @@
 use super::*;
 use crate::report::serial::asn_types::Value;
 
+/// The text of the stop `abort`: NCBI's report, or LOSAT's refusal.
+fn abort_text(abort: &super::super::annot_index::Abort) -> String {
+    match abort {
+        super::super::annot_index::Abort::Native { message, .. } => {
+            String::from_utf8(message.clone()).unwrap()
+        }
+        super::super::annot_index::Abort::Refused(text) => text.clone(),
+    }
+}
+
 /// A stream that gives `self.0` and then fails, as a directory given as the standard input
 /// does at once (`read`: EISDIR).
 struct FailsAfter(&'static [u8]);
@@ -51,13 +61,13 @@ use crate::report::serial::pssm::Seqdesc;
 /// (`read_in_pssm`): "read", NCBI's "Unrecognized format" of a `CSerialException`, the silent
 /// "end" of a `CEofException`.
 fn outcome(bytes: &[u8]) -> &'static str {
-    use crate::blastinput::pssm_text::{read_pssm, read_pssm_binary};
+    use crate::blastinput::pssm_text::{read_pssm, read_pssm_binary, read_pssm_xml};
     let read = match guess_format(bytes) {
         PssmFileFormat::TextAsn { start } => read_pssm(&bytes[start..]),
         PssmFileFormat::BinaryAsn { start } => read_pssm_binary(&bytes[start..]),
+        PssmFileFormat::Xml { start } => read_pssm_xml(&bytes[start..]),
         PssmFileFormat::Unsupported => return "Unsupported format",
         PssmFileFormat::Exception(_) => return "exception",
-        PssmFileFormat::Refused { what: XML_PSSM, .. } => return "XML refused",
         PssmFileFormat::Refused { .. } => return "refused",
     };
     match read.result {
@@ -74,7 +84,7 @@ fn outcome(bytes: &[u8]) -> &'static str {
 fn the_format_guess_is_ncbis() {
     use PssmFileFormat as P;
     let binary = |format: &P| matches!(format, P::BinaryAsn { start: 0 });
-    let xml = |format: &P| matches!(format, P::Refused { what: XML_PSSM, .. });
+    let xml = |format: &P| matches!(format, P::Xml { start: 0 });
     assert!(matches!(guess_format(b""), P::Unsupported));
     assert!(matches!(guess_format(b"\x1f\x8b\x08\x00"), P::Unsupported));
     assert!(matches!(guess_format(b">q\nMKV\n"), P::Unsupported));
@@ -222,7 +232,7 @@ fn the_query_entry_joins_the_scope_as_ncbis_object_manager_adds_it() {
             let abort = search.annot.abort.as_ref().unwrap();
             (
                 String::from_utf8(search.annot.posts.text()).unwrap(),
-                String::from_utf8(abort.message.clone()).unwrap(),
+                abort_text(abort),
             )
         })
     };
@@ -288,9 +298,7 @@ fn the_query_entry_joins_the_scope_as_ncbis_object_manager_adds_it() {
                 .annot
                 .abort
                 .as_ref()
-                .map_or_else(String::new, |abort| {
-                    String::from_utf8(abort.message.clone()).unwrap()
-                })
+                .map_or_else(String::new, abort_text)
         })
     };
     let ids =
@@ -300,9 +308,11 @@ fn the_query_entry_joins_the_scope_as_ncbis_object_manager_adds_it() {
         error.contains("duplicate Bioseq id emb|AAA00001.1| present in\n  seq1: emb|AAA00001.1| | emb|AAA00001.1|\n  seq2: emb|AAA00001.1| | emb|AAA00001.1|\n"),
         "{error}"
     );
-    let refusal = two(ids, false).unwrap_err().to_string();
+    // LOSAT's refusal stops the run at the same place (`annot_index::Abort::Refused`).
+    let refusal = two(ids, false).unwrap();
     assert!(
-        refusal.contains("may write as a subject record spelled it"),
+        refusal.contains("may write as a subject record spelled it")
+            && refusal.ends_with("is not supported by LOSAT's PSIBLAST"),
         "{refusal}"
     );
     // Two versions are two handles: no exception.
@@ -359,8 +369,9 @@ fn the_object_managers_stop_comes_before_the_pssms_values() {
 
 // NCBI's unit-test PSSMs: one of frequency ratios only whose query has a gi and a swissprot
 // Seq-id, read (line RG Q1b; NCBI BLAST+ 2.17.0 psiblast: `Query= P01013 Gene X protein
-// (Ovalbumin-related)`, the warning label `129295`, the first id), and one without a query
-// (NCBI's application stops with a C++ exception), refused before the search.
+// (Ovalbumin-related)`, the warning label `129295`, the first id), and one without a query,
+// which ends with NCBI's exception of its empty Seq-entry, exit status 255 (row
+// db.ps.inpssm.err.noquery).
 #[test]
 fn ncbis_unit_test_pssms_are_read_or_refused() {
     let read = |name: &str| {
@@ -375,12 +386,16 @@ fn ncbis_unit_test_pssms_are_read_or_refused() {
         );
         assert_eq!(query.warning_id(), b"129295");
     }
-    let error = psi_search_of(read("pssm/pssm_zero_fratios.asn.gz"))
-        .unwrap_err()
-        .to_string();
-    assert!(
-        error.contains("not supported by LOSAT's PSIBLAST"),
-        "{error}"
+    let search = psi_search_of(read("pssm/pssm_zero_fratios.asn.gz")).unwrap();
+    assert!(search.request.is_none() && !search.joins_scope());
+    assert_eq!(
+        search.annot.abort,
+        Some(super::super::annot_index::Abort::Native {
+            exit: 255,
+            message: b"Error: CSeq_entry::GetSeq(): Invalid choice selection: \
+          NCBI-Seqset::Seq-entry.not set\n\n"
+                .to_vec()
+        })
     );
 }
 
@@ -400,6 +415,8 @@ fn the_request_holds_the_pssm_as_read_and_the_engines_errors_come_in_order() {
         strategy: request,
         database: true,
         archive: None,
+        write_verification: None,
+        out_pssm: false,
     };
     // A PSSM of frequency ratios only: the request holds it as read (no scores), the search
     // and the file the engine's scores (`with_computed_scores`).
@@ -1143,6 +1160,8 @@ fn a_karlin_altschul_value_that_is_not_finite_is_refused_where_losat_does_not_co
         strategy: false,
         database: true,
         archive: None,
+        write_verification: None,
+        out_pssm: false,
     };
     let refusal = |kind: &str, name: &str, what: &str, program: &str| {
         format!(
@@ -1246,4 +1265,82 @@ fn a_karlin_altschul_value_that_is_not_finite_is_refused_where_losat_does_not_co
         )
     );
     assert_eq!(search(binary("real_negzero"), PssmReader::PSIBLAST), Ok(()));
+}
+
+// D3c-3c review R1: under a `SERIAL_VERIFY_DATA_WRITE` that turns the check of what is written off,
+// a PSSM with a list element stated as NULL is refused where the run writes the PSSM, and only
+// there (NCBI BLAST+ 2.17.0, probe D3c-3c review `probeF`, rows `u.*`: the strategy's request and
+// `-out_pssm` change, also before the query set-up's stop; the reports and a `-subject` strategy,
+// which NCBI stops first, do not).
+#[test]
+fn a_null_element_is_refused_where_the_setting_leaves_it_out_of_a_written_file() {
+    use crate::blastinput::ncbi_environment::WriteVerification;
+    let off = WriteVerification::of(std::ffi::OsStr::new("NO"));
+    let always = WriteVerification::of(std::ffi::OsStr::new("ALWAYS"));
+    let run = |name: &str,
+               setting: Option<&WriteVerification>,
+               (strategy, database, out_pssm): (bool, bool, bool),
+               program: &'static str| {
+        let pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(name)).unwrap();
+        let reader = PssmReader {
+            program,
+            strategy,
+            database,
+            write_verification: setting,
+            out_pssm,
+            ..PssmReader::PSIBLAST
+        };
+        psi_search_and_object(pssm, reader)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    };
+    let refused = |program: &str| {
+        Err(format!(
+            "the environment variable SERIAL_VERIFY_DATA_WRITE=NO, which makes NCBI BLAST+ leave out an element stated as NULL of the -in_pssm PSSM where the run writes it (-export_search_strategy, -out_pssm or -outfmt 11), is not supported by LOSAT's {program}"
+        ))
+    };
+    let hist = "pssm/d3b_hist_ids.asn.gz";
+    assert_eq!(
+        run(hist, off.as_ref(), (true, true, false), "PSIBLAST"),
+        refused("PSIBLAST")
+    );
+    assert_eq!(
+        run(hist, off.as_ref(), (true, true, false), "TBLASTN"),
+        refused("TBLASTN")
+    );
+    assert_eq!(
+        run(hist, off.as_ref(), (false, true, true), "PSIBLAST"),
+        refused("PSIBLAST")
+    );
+    assert_eq!(
+        run(hist, off.as_ref(), (false, true, false), "PSIBLAST"),
+        Ok(())
+    );
+    assert_eq!(
+        run(hist, off.as_ref(), (true, false, true), "PSIBLAST"),
+        Ok(())
+    );
+    assert_eq!(
+        run(hist, always.as_ref(), (true, true, true), "PSIBLAST"),
+        Ok(())
+    );
+    assert_eq!(run(hist, None, (true, true, true), "PSIBLAST"), Ok(()));
+    let base = "pssm/d3b_base.asn.gz";
+    assert_eq!(
+        run(base, off.as_ref(), (true, true, true), "PSIBLAST"),
+        Ok(())
+    );
+    let descr = "pssm/d3b_descr_elem_null.asn.gz";
+    assert_eq!(
+        run(descr, off.as_ref(), (true, true, false), "PSIBLAST"),
+        refused("PSIBLAST")
+    );
+    assert_eq!(
+        run(descr, off.as_ref(), (false, true, true), "PSIBLAST"),
+        refused("PSIBLAST")
+    );
+    assert_eq!(
+        run(descr, off.as_ref(), (false, true, false), "PSIBLAST"),
+        Ok(())
+    );
 }

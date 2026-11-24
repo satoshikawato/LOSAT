@@ -538,7 +538,14 @@ fn the_structured_formats_read_no_displayed_counts_and_write_no_query_warnings()
     // DBID item T: the formats whose batches' prefetch writes the taxonomy database's
     // messages (not the archive, XML2 and JSON; the Seq-annots only with
     // `PRE_FETCH_SEQS_LIMIT=2147483647`, DBID P3, which the test process may have set).
-    let seq_annots = |number| crate::algorithm::common::database::seq_annots_prefetch(Some(number));
+    let seq_annots = |number| {
+        crate::algorithm::common::database::seq_annots_prefetch(Some(
+            crate::algorithm::common::database::PrefetchFormat::of(
+                number,
+                crate::report::archive::options::RequestKind::Tblastx,
+            ),
+        ))
+    };
     for (outfmt, prefetches) in [
         ("0", true),
         ("5", true),

@@ -26,7 +26,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 - **Query.** `-query` takes a protein FASTA file with one or more records. The default is the standard input, so `-query -` and no `-query` at all read the standard input. A name ending in `.gz`, `.bz2` or `.zst` is decompressed for you. To search with a profile instead, see [Searching with a PSSM](#searching-with-a-pssm).
 - **Subject.** `-subject` takes a nucleotide FASTA file in the same forms. LOSAT translates each record in six frames and compares your query with every frame.
 - **Database.** `-db` searches a nucleotide BLAST database written by `makeblastdb` or `losat makeblastdb`, or one of NCBI's downloaded nucleotide databases. Name several databases in one string (`-db "a b"`). `-db` and `-subject` cannot be used together. See [BLAST databases](../databases.md).
-- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist` and `-negative_seqidlist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants). `-db_soft_mask` and `-db_hard_mask` use the masks stored in a database that was built with `makeblastdb -mask_data` (see [Masks](../databases.md#masks)).
+- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist` and `-negative_seqidlist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants). `-db_soft_mask` and `-db_hard_mask` use the masks stored in a database that was built with `makeblastdb -mask_data`, or its GI-indexed masks (`makeblastdb -gi_mask`, ids 0, 1, ... or the names of its alias file's `MASKLIST`; see [Masks](../databases.md#masks)).
 - **Genetic code.** `-db_gencode` (default 1) selects the code that translates the subject. See [Genetic code of the subject](#genetic-code-of-the-subject).
 - **Locations.** `-query_loc START-STOP` searches part of the query (in residues), and `-subject_loc START-STOP` part of the subject (in nucleotides, with `-subject` only). Positions are 1-based and inclusive.
 - **Masking.** SEG is on by default (`12 2.2 2.5`; `-seg no` turns it off). `-lcase_masking` treats lower-case letters of the query as masked.
@@ -46,7 +46,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 
 `-in_pssm FILE` replaces `-query` and searches with a position-specific scoring matrix, as NCBI's PSI-TBLASTN does. `-in_pssm -` reads the PSSM from the standard input. The report header says `PSITBLASTN`.
 
-- The file is a PSSM in NCBI's ASN.1 text form (`PssmWithParameters`), such as `psiblast -out_pssm` writes, or in its ASN.1 binary form. [psiblast](psiblast.md) describes what it accepts. An XML PSSM, or a compressed file, is refused.
+- The file is a PSSM in NCBI's ASN.1 text form (`PssmWithParameters`), such as `psiblast -out_pssm` writes, in its ASN.1 binary form, or in NCBI's XML form. [psiblast](psiblast.md) describes what it accepts. A compressed file is refused.
 - The PSSM's scores replace the matrix, and its Karlin-Altschul values set the cutoffs, E-values and bit scores.
 - As in NCBI, `-comp_based_stats` has no effect, alignments are linked only with `-sum_stats true`, and `-task tblastn-fast` changes nothing. The word size is 2 to 4 and the matrix is one of the standard ones.
 - The subjects are translated with genetic code 1 whatever `-db_gencode` says. LOSAT still checks the value.

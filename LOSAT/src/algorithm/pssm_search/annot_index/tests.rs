@@ -24,6 +24,16 @@ fn index(annots: &[&str]) -> Result<AnnotOutcome, Refusal> {
     index_annots("psiblast", &values, &[])
 }
 
+impl Abort {
+    /// The `CATCH_ALL` report of NCBI's end (`Abort::Native`); no other end is expected.
+    fn message(&self) -> Vec<u8> {
+        match self {
+            Abort::Native { message, .. } => message.clone(),
+            Abort::Refused(text) => panic!("refused: {text}"),
+        }
+    }
+}
+
 /// The messages of an index that goes on.
 fn posts(annots: &[&str]) -> String {
     let outcome = index(annots).unwrap();
@@ -161,7 +171,7 @@ fn exceptions_stop_the_run_with_their_report() {
     let partial = "{ header { field-id partial }, data bit '80'H }";
     assert_eq!(
         abort(&table(1, &format!("{partial}, {partial}"))),
-        Abort {
+        Abort::Native {
             exit: 255,
             message: report(
                 TABLE,
@@ -175,7 +185,7 @@ fn exceptions_stop_the_run_with_their_report() {
         "{{ header {{ field-id location }}, data loc {{ int {{ from 0, to 4, id {Q1} }} }} }}"
     );
     assert_eq!(
-        abort(&table(1, &format!("{loc}, {loc}"))).message,
+        abort(&table(1, &format!("{loc}, {loc}"))).message(),
         report(
             TABLE,
             355,
@@ -188,7 +198,7 @@ fn exceptions_stop_the_run_with_their_report() {
             1,
             &format!("{loc}, {{ header {{ field-id location-id }}, data id {{ {Q1} }} }}")
         ))
-        .message,
+        .message(),
         report(
             TABLE,
             466,
@@ -197,7 +207,7 @@ fn exceptions_stop_the_run_with_their_report() {
         )
     );
     assert_eq!(
-        abort(&table(1, "{ header { field-id location }, data int2 { -32768 } }")).message,
+        abort(&table(1, "{ header { field-id location }, data int2 { -32768 } }")).message(),
         report(
             "src/objects/seq/../seqtable/SeqTable_multi_data_.cpp",
             207,
@@ -206,7 +216,7 @@ fn exceptions_stop_the_run_with_their_report() {
         )
     );
     assert_eq!(
-        abort(&table(1, &format!("{{ header {{ field-id location-id }}, data id {{ {Q1} }} }}, {{ header {{ field-id location-from }}, data int8 {{ 4294967296 }} }}"))).message,
+        abort(&table(1, &format!("{{ header {{ field-id location-id }}, data id {{ {Q1} }} }}, {{ header {{ field-id location-from }}, data int8 {{ 4294967296 }} }}"))).message(),
         report(
             "src/objects/seq/../seqtable/SeqTable_multi_data.cpp",
             441,
@@ -215,7 +225,7 @@ fn exceptions_stop_the_run_with_their_report() {
         )
     );
     assert_eq!(
-        abort(&table(1, &format!("{{ header {{ field-id location-id }}, data id {{ {Q1} }} }}, {{ header {{ field-name \"disabled\" }}, default int 2 }}"))).message,
+        abort(&table(1, &format!("{{ header {{ field-id location-id }}, data id {{ {Q1} }} }}, {{ header {{ field-name \"disabled\" }}, default int 2 }}"))).message(),
         report(
             "src/objects/seq/../seqtable/SeqTable_single_data.cpp",
             58,
@@ -224,7 +234,7 @@ fn exceptions_stop_the_run_with_their_report() {
         )
     );
     assert_eq!(
-        abort("{ data align { { type global, dim 2, segs std { { dim 2, loc { feat local id 1, int { from 0, to 5, id local id 2 } } } } } } }").message,
+        abort("{ data align { { type global, dim 2, segs std { { dim 2, loc { feat local id 1, int { from 0, to 5, id local id 2 } } } } } } }").message(),
         report(
             "src/objects/seq/../seqloc/Seq_loc.cpp",
             1552,
@@ -234,7 +244,7 @@ fn exceptions_stop_the_run_with_their_report() {
     );
     assert_eq!(
         abort(&format!("{{ data align {{ {{ type global, dim 2, segs std {{ {{ dim -1, loc {{ int {{ from 0, to 5, id {Q1} }} }} }} }} }} }} }}")),
-        Abort {
+        Abort::Native {
             exit: 255,
             message: b"Error: vector::_M_default_append\n".to_vec()
         }
@@ -288,7 +298,7 @@ fn the_failed_stream_keeps_the_headers() {
     .unwrap();
     assert_eq!(
         outcome.abort,
-        Some(Abort {
+        Some(Abort::Native {
             exit: 255,
             message: b"\n".to_vec()
         })
@@ -302,7 +312,7 @@ fn the_failed_stream_keeps_the_headers() {
         ),
     ])
     .unwrap();
-    assert_eq!(outcome.abort.unwrap().message, b"\n");
+    assert_eq!(outcome.abort.unwrap().message(), b"\n");
 }
 
 // The values of a table's rows: a sparse bit set (t87), an int-delta column (t52), a sorted table
@@ -339,7 +349,7 @@ fn an_empty_region_after_the_failed_stream_writes_the_object() {
         let outcome = index(annots).unwrap();
         assert_eq!(
             outcome.abort,
-            Some(Abort {
+            Some(Abort::Native {
                 exit: 0,
                 message: Vec::new()
             })
@@ -649,7 +659,7 @@ fn a_bit_bvector_decodes_only_for_a_value() {
 /// `CATCH_ALL`'s report of BitMagic's `std::logic_error`: NCBI's text in LOSAT's words
 /// (`crate::wording::losat_text`).
 fn bm_invalid() -> Abort {
-    Abort {
+    Abort::Native {
         exit: 255,
         message: crate::wording::losat_text("Error: BM::Invalid serialization format\n")
             .into_owned()
@@ -690,7 +700,7 @@ fn bitmagic_exceptions_and_refusals() {
         assert_eq!(index(&[&annot]).unwrap().abort, Some(bm_invalid()), "{case}");
         assert_eq!(
             index(&[&failing_feature(), &annot]).unwrap().abort,
-            Some(Abort {
+            Some(Abort::Native {
                 exit: 255,
                 message: b"\n".to_vec()
             }),
@@ -840,4 +850,74 @@ fn nests_of_any_depth_are_walked_without_recursion() {
         .expect("a thread")
         .join()
         .expect("no overflow");
+}
+
+// Probe D3c-3b probe6, probe7 (NCBI 2.17.0): an element stated as `NULL` is dereferenced where
+// the object manager reads it (rc 255 with a report of memory addresses, or a crash: refused) and
+// nowhere else (rc 0: `dbxref`, `qual`, a `locs` of two, the `id`s after an `other` with an
+// accession).
+#[test]
+fn elements_stated_as_null_are_dereferenced_where_ncbi_reads_them() {
+    let feature = |more: &str| {
+        format!("{{ data ftable {{ {{ data comment NULL, location whole {Q1}{more} }} }} }}")
+    };
+    for annot in [
+        feature(", qual { NULL }, dbxref { NULL }"),
+        format!("{{ id {{ other {{ accession \"A\" }}, NULL }}, data ftable {{ {{ data comment NULL, location whole {Q1} }} }} }}"),
+        format!("{{ desc {{ user {{ type str \"Other\", data {{ NULL }} }} }}, data locs {{ whole {Q1}, NULL }} }}"),
+        "{ data ids { NULL } }".to_string(),
+        format!("{{ data align {{ {{ type global, dim 2, segs denseg {{ dim 2, numseg 1, ids {{ NULL, {Q1} }}, starts {{ -1, 0 }}, lens {{ 1 }} }} }} }} }}"),
+    ] {
+        assert_eq!(posts(&[&annot]), "", "{annot}");
+    }
+    let refused = |annots: &[&str]| index(annots).expect_err("refused");
+    for annot in [
+        "{ data ftable { NULL } }".to_string(),
+        feature(", ids { NULL }"),
+        feature(", xref { NULL }"),
+        format!("{{ data ftable {{ {{ data comment NULL, location mix {{ whole {Q1}, NULL }} }} }} }}"),
+        format!("{{ data ftable {{ {{ data comment NULL, product packed-int {{ NULL }}, location whole {Q1} }} }} }}"),
+        format!("{{ id {{ NULL }}, data ftable {{ {{ data comment NULL, location whole {Q1} }} }} }}"),
+        format!("{{ desc {{ name \"n\", NULL }}, data ftable {{ {{ data comment NULL, location whole {Q1} }} }} }}"),
+        "{ desc { user { type str \"AnnotationTrack\", data { NULL } } }, data ids { } }".to_string(),
+        "{ data align { NULL } }".to_string(),
+        "{ data graph { NULL } }".to_string(),
+        "{ data align { { type disc, segs disc { NULL } } } }".to_string(),
+        format!("{{ data align {{ {{ type global, dim 2, segs denseg {{ dim 2, numseg 1, ids {{ {Q1}, NULL }}, starts {{ 0, 0 }}, lens {{ 1 }} }} }} }} }}"),
+        table(1, "NULL"),
+    ] {
+        assert_eq!(refused(&[&annot]), Refusal::NullElement, "{annot}");
+    }
+    // The annotation itself (`CBioseq_Base_Info::x_SetAnnot`), after the one before it is made.
+    let (first, _) = read_document(
+        format!("Seq-annot ::= {}", feature("")).as_bytes(),
+        named::SEQ_ANNOT,
+        Names::PSSM,
+    );
+    assert_eq!(
+        index_annots("psiblast", &[first.unwrap(), Value::Null], &[]),
+        Err(Refusal::NullElement)
+    );
+    // A row's location stated as `NULL` is the row's empty reference: the table row's null pointer.
+    assert_eq!(
+        refused(&[&table(
+            1,
+            "{ header { field-id location }, data loc { NULL } }"
+        )]),
+        Refusal::NullPointer
+    );
+    // After the stream failed, the exception's report is its line feed (exit status 255).
+    let outcome = index(&[
+        &failing_feature(),
+        "{ data ftable { { data comment NULL, location mix { NULL } } } }",
+    ])
+    .unwrap();
+    assert_eq!(String::from_utf8(outcome.posts.text()).unwrap(), FAILED);
+    assert_eq!(
+        outcome.abort,
+        Some(Abort::Native {
+            exit: 255,
+            message: b"\n".to_vec()
+        })
+    );
 }

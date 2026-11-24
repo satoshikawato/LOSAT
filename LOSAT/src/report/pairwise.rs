@@ -191,29 +191,30 @@ impl PairwiseView {
     }
 
     /// What the format's report does after a subject whose lookup throws where its batch's
-    /// prefetch is off (`report::db_subject::AfterThrow`): outfmt 0 skips the alignments of such a
-    /// subject (or ends the run at its first alignment), 1 to 4 end the run at the first.
-    pub fn after_throw(self) -> crate::report::db_subject::AfterThrow {
+    /// prefetch is off (`report::db_subject::AfterThrow`), with `-html` where `html`: outfmt 0
+    /// skips the alignments of such a subject (or ends the run at its first alignment), 1 to 4 end
+    /// the run at the first; with `-html` the run ends at its description line
+    /// (`AfterThrow::description_end`). The one answer of the model of the loads
+    /// (`db_subject::FormatThrow::of`) and of the writers (`PairwiseConfig::after_throw`).
+    pub fn after_throw(self, html: bool) -> crate::report::db_subject::AfterThrow {
         use crate::report::db_subject::AfterThrow;
         match self {
-            Self::Pairwise => AfterThrow::SkipsAlignment,
-            Self::QueryAnchored { .. } => AfterThrow::EndsAtAlignment,
+            Self::Pairwise => AfterThrow::SkipsAlignment { html },
+            Self::QueryAnchored { .. } => AfterThrow::EndsAtAlignment { html },
         }
     }
 
     /// How a report of this view reads its subjects (`PairwiseReading`): `sort` as it reads it
-    /// (`report_sort`), what it shows of each query (`shown`, `-num_descriptions` and
-    /// `-num_alignments`) and whether it is the `-html` report (`html`).
+    /// (`report_sort`) and what it shows of each query (`shown`, `-num_descriptions` and
+    /// `-num_alignments`).
     pub fn reading(
         self,
         sort: super::hit_sort::ReportSort,
         shown: crate::report::db_subject::Shown,
-        html: bool,
     ) -> PairwiseReading {
         PairwiseReading {
             sort: self.report_sort(sort),
             shown,
-            html,
         }
     }
 
@@ -233,21 +234,39 @@ impl PairwiseView {
 
 /// How a pairwise report (outfmt 0 to 4) reads the subjects of each query, for the models of its
 /// reads made before it is written (`x_pairwise_par::QueryGroup::read_order`): the order of its
-/// sorted hits (`sort`, `PairwiseView::report_sort` of `-sorthits` and `-sorthsps`), what it
-/// shows of them (`shown`, `-num_descriptions` and `-num_alignments`) and whether it is the
-/// `-html` report (`html`, whose description lines end the run at a subject whose load throws:
-/// `db_subject::PairwiseReads::html`), as its view's writer reads them (`PairwiseView::reading`).
+/// sorted hits (`sort`, `PairwiseView::report_sort` of `-sorthits` and `-sorthsps`) and what it
+/// shows of them (`shown`, `-num_descriptions` and `-num_alignments`), as its view's writer reads
+/// them (`PairwiseView::reading`). Where `-html`'s description lines end the run is what the
+/// report does after a throw (`PairwiseView::after_throw`, `AfterThrow::description_end`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PairwiseReading {
     pub sort: super::hit_sort::ReportSort,
     pub shown: crate::report::db_subject::Shown,
-    pub html: bool,
 }
 
 impl PairwiseConfig {
     /// The run's `-html` data of the report's prolog (`write_prolog`), `None` for the plain report.
     pub(crate) fn html_links(&self) -> Option<&super::html_ids::HtmlLinks> {
         self.html.as_ref().map(|report| &*report.links)
+    }
+
+    /// What the report does after a subject whose lookup throws (`PairwiseView::after_throw` of
+    /// its view, with `-html` where it has its links).
+    pub(crate) fn after_throw(&self) -> crate::report::db_subject::AfterThrow {
+        self.view.after_throw(self.html.is_some())
+    }
+
+    /// The `-html` report with what it does after a throw (`after_throw`), for its description
+    /// table (`HtmlRows`); `None` for the plain report.
+    pub(crate) fn html_rows(
+        &self,
+    ) -> Option<(
+        &super::html_ids::HtmlReport,
+        crate::report::db_subject::AfterThrow,
+    )> {
+        self.html
+            .as_ref()
+            .map(|report| (report, self.after_throw()))
     }
 }
 
@@ -1461,7 +1480,10 @@ fn write_hsp_identities<W: Write>(
     } else if config.program == "blastn" {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1794-1805,2131-2141
         // The displayed counts come from the two rows (before the lowercase masking of
-        // the display), and the gaps are the gap columns of both rows.
+        // the display), and the gaps are the gap columns of the alignment (`x_GetNumGaps`'s
+        // chunks): `gaps` above, the hit's count of its edit script's gaps, which BLASTN's rows
+        // always give (`algorithm::blastn::pairwise::Rows`; a query letter past the query's
+        // record shows the gap character too, remaining-gaps X1b-p).
         let (query_row, subject_row) = (
             hit.query_seq.as_deref().unwrap_or_default().as_bytes(),
             hit.subject_seq.as_deref().unwrap_or_default().as_bytes(),
@@ -1471,11 +1493,6 @@ fn write_hsp_identities<W: Write>(
             .iter()
             .zip(subject_row)
             .filter(|(q, s)| q.eq_ignore_ascii_case(s))
-            .count();
-        let gaps = query_row
-            .iter()
-            .chain(subject_row)
-            .filter(|&&residue| residue == b'-')
             .count();
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:310-320
         // The query is always shown on its plus strand (showalign.cpp:1852-1858).
@@ -1603,9 +1620,16 @@ fn write_alignment_with_sequences<W: Write>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1570-1573
     let nucleotide = config.program == "blastn";
     // The rows' end gaps (`end_gap_span`; a `-` that is a residue, the query's gap residue or a
-    // gap stored in the subject, is a residue).
-    let [query_span, subject_span] = [(&q_chars, stored_gaps[0]), (&s_chars, stored_gaps[1])]
-        .map(|(row, stored)| end_gap_span(row, stored));
+    // gap stored in the subject, is a residue). A BLASTN alignment (X-drop or greedy) starts and
+    // ends with a substitution and has none: a `-` at the end of its query row fills a segment
+    // past the query's end, the gap character (alnvec.cpp:288-297, cited at `end_gap_span`;
+    // `algorithm::blastn::pairwise::context_letters`).
+    let [query_span, subject_span] = if nucleotide {
+        [(0, q_chars.len()), (0, s_chars.len())]
+    } else {
+        [(&q_chars, stored_gaps[0]), (&s_chars, stored_gaps[1])]
+            .map(|(row, stored)| end_gap_span(row, stored))
+    };
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2131-2155
     // The rows may carry lowercase masking, which NCBI applies only when it prints a
@@ -2026,12 +2050,15 @@ fn ascii_row_strings<'a>(
 /// its first residue and after its last, which NCBI's alignment strings fill with the end
 /// character (a space in the pairwise view and in the tabular `qseq`, `sseq` and `btop`) where an
 /// inner gap is `-`. `stored` holds the columns (sorted) whose `-` is a residue: a gap character
-/// of the sequence (a database's stored `-`, a PSSM query's gap residue). Only a Smith-Waterman alignment has end gaps (rpsblast's
-/// `-use_sw_tback`: `ALIGN_EX` runs from the Smith-Waterman start over a rectangle whose best path
-/// may start with a gap); an X-drop alignment starts and ends with a substitution. The `-` that
+/// of the sequence (a database's stored `-`, a PSSM query's gap residue). Only a Smith-Waterman
+/// alignment has end gaps (rpsblast's `-use_sw_tback`: `ALIGN_EX` runs from the Smith-Waterman
+/// start over a rectangle whose best path may start with a gap); an X-drop alignment starts and
+/// ends with a substitution. The `-` that
 /// fills a segment past a sequence's end is the gap character (alnvec.cpp:279-297): `-subject`'s
 /// mapped row of BLASTX, which the tables write as it is (`tabular::TabularHsp::end_gaps`) and
-/// outfmt 0 refuses (decision X2g-5 of line RG).
+/// outfmt 0 refuses (decision X2g-5 of line RG), and BLASTN's query row of an HSP that NCBI keeps
+/// outside its query context (`algorithm::blastn::pairwise::context_letters`), whose rows the
+/// tables and outfmt 0 write without this span (remaining-gaps X1b-p).
 pub(crate) fn end_gap_span<T: Copy + PartialEq + From<u8>>(
     row: &[T],
     stored: &[u32],
@@ -2089,10 +2116,13 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
     show_sum_n: bool,
     columns: Option<SortColumns>,
     place: super::query_warnings::ReportHook<'_, W>,
-    // `-html`: the rows' links, the subjects with parsed Seq-ids by subject index and what the
-    // report's loads do at each subject (`HtmlRows`).
+    // `-html`: the rows' links with what the report does after a throw, the subjects with parsed
+    // Seq-ids by subject index and what the report's loads do at each subject (`HtmlRows`).
     html: Option<(
-        &super::html_ids::HtmlReport,
+        (
+            &super::html_ids::HtmlReport,
+            crate::report::db_subject::AfterThrow,
+        ),
         &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
         &crate::report::db_subject::HitLoads,
     )>,
@@ -2113,8 +2143,9 @@ fn write_subject_summary_table_with_sum_n<W: Write>(
             )
         },
         place,
-        html.map(|(report, parsed, loads)| HtmlRows {
+        html.map(|((report, after), parsed, loads)| HtmlRows {
             report,
+            after,
             parsed,
             loads,
         }),
@@ -3555,8 +3586,9 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 )
             },
             place,
-            self.config.html.as_ref().map(|report| HtmlRows {
+            self.config.html_rows().map(|(report, after)| HtmlRows {
                 report,
+                after,
                 parsed: self.parsed_subjects,
                 loads: self.loads,
             }),
@@ -3898,14 +3930,14 @@ fn write_description_table<W: Write>(
     }
     writeln!(writer)?;
     writeln!(writer)?;
+    // Where the `-html` rows end the run (`HtmlRows::end`).
+    let end = html.and_then(|html| html.end(&rows.iter().map(|row| row.0).collect::<Vec<_>>()));
     for (index, (s_idx, best, total, sum_n, values)) in rows.iter().enumerate() {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1587-1589
         // Each line loads its subject (`x_GetDeflineInfo` of `x_DisplayDeflineTableBody`) after
         // the lines before it are written (`QueryWarnings::subject_read`).
         place(super::query_warnings::ReportPlace::Load(*s_idx), writer)?;
-        if let Some(html) = html {
-            html.end_at_thrown(*s_idx)?;
-        }
+        super::x_pairwise_par::end_here(end, index)?;
         let bits = format_bitscore_ncbi(best.hit.bit_score);
         match html {
             None => {
@@ -4174,24 +4206,29 @@ impl DescriptionLabel {
 #[derive(Clone, Copy)]
 struct HtmlRows<'a> {
     report: &'a super::html_ids::HtmlReport,
+    /// What the report does after a throw (`PairwiseConfig::after_throw`), where its description
+    /// lines end the run (`AfterThrow::description_end`).
+    after: crate::report::db_subject::AfterThrow,
     parsed: &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>],
     /// What the report's loads do at each subject, by subject (`HitLoads::thrown`).
     loads: &'a crate::report::db_subject::HitLoads,
 }
 
-impl HtmlRows<'_> {
+impl<'a> HtmlRows<'a> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1588-1611
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3904-3907
-    /// The end of the run at the `-html` row of subject `s_idx` where its load throws
-    /// (`HitLoads::thrown`): the `catch` of the row's load makes the row's link, whose
-    /// `GetIDUrl` loads the subject again with the scope, and that throw leaves the report. The
-    /// writer's error is the load's exception (as `x_pairwise_par::end_here`), after the rows
-    /// before it and the row's own read; the plain row is the `catch`'s `Unknown`.
-    fn end_at_thrown(self, s_idx: u32) -> io::Result<()> {
-        match self.loads.thrown(s_idx as usize) {
-            Some(exception) => Err(exception.clone().into_io_error()),
-            None => Ok(()),
-        }
+    /// Where the `-html` rows of the subjects `described` (in their order) end the run: the
+    /// position of the first whose load throws (`HitLoads::thrown`) and its exception, as the
+    /// report's answer says (`AfterThrow::description_end`, which the model of the loads asks
+    /// too): the `catch` of the row's load makes the row's link, whose `GetIDUrl` loads the
+    /// subject again with the scope, and that throw leaves the report. The writer returns the
+    /// exception there as its error (`x_pairwise_par::end_here`), after the rows before it and the
+    /// row's own read; the plain row is the `catch`'s `Unknown`.
+    fn end(self, described: &[u32]) -> Option<(usize, &'a crate::ncbi_exception::NcbiException)> {
+        let at = self.after.description_end(described.iter(), |&s_idx| {
+            self.loads.thrown(s_idx as usize).is_some()
+        })?;
+        Some((at, self.loads.thrown(described[at] as usize)?))
     }
 
     /// The start of the `-html` description row of rank `rank` (from 1) for the subject `s_idx`
@@ -4283,8 +4320,12 @@ fn write_blastn_description_table<W: Write>(
     protein: bool,
     columns: Option<SortColumns>,
     place: super::query_warnings::ReportHook<'_, W>,
-    // `-html`: the report's links and OIDs (`PairwiseConfig::html`).
-    html: Option<&super::html_ids::HtmlReport>,
+    // `-html`: the report's links and OIDs (`PairwiseConfig::html`), with what it does after a
+    // throw (`PairwiseConfig::html_rows`).
+    html: Option<(
+        &super::html_ids::HtmlReport,
+        crate::report::db_subject::AfterThrow,
+    )>,
     loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
     write_description_table(
@@ -4311,8 +4352,9 @@ fn write_blastn_description_table<W: Write>(
             )
         },
         place,
-        html.map(|report| HtmlRows {
+        html.map(|(report, after)| HtmlRows {
             report,
+            after,
             parsed,
             loads,
         }),
@@ -4632,7 +4674,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             false,
             self.config.sort_columns(query.query_length),
             place,
-            self.config.html.as_ref(),
+            self.config.html_rows(),
             self.loads,
         )?;
         writeln!(writer)
@@ -5203,7 +5245,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             false,
             self.config.sort_columns(query.query_length),
             place,
-            self.config.html.as_ref(),
+            self.config.html_rows(),
             self.loads,
         )?;
         writeln!(writer)
@@ -5565,7 +5607,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             false,
             self.config.sort_columns(query.query_length),
             place,
-            self.config.html.as_ref(),
+            self.config.html_rows(),
             self.loads,
         )?;
         writeln!(writer)
@@ -6059,7 +6101,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
             !self.options.gapped && self.options.sum_stats,
             self.config.sort_columns(query.query_length),
             place,
-            self.config.html.as_ref().map(|report| {
+            self.config.html_rows().map(|report| {
                 let parsed = match self.database {
                     Some((_, _, parsed, _)) => parsed,
                     None => self.records_parsed,

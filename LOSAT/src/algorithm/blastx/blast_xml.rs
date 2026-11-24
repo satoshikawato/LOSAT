@@ -76,7 +76,7 @@ use crate::report::blast_xml2::{
     RunSideFiles, SideFiles, Xml2Document, Xml2Kind, Xml2Run, Xml2Target, Xml2Writer,
 };
 use crate::report::query_warnings::{EMPTY_DATABASE_MESSAGE, INVALID_QUERY_MESSAGE};
-use crate::report::serial::seqalign::seqalign_evalue;
+use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue};
 
 const PROGRAM: &str = "BLASTX";
 
@@ -105,6 +105,21 @@ impl XmlRefusal {
             XmlRefusal(format!("{error:#}")).into()
         } else {
             error
+        }
+    }
+
+    /// The error of a query's writes: LOSAT's refusal of a load that the stream leaves out
+    /// (`report::query_warnings::CutRefusal`) becomes a refusal that carries its message (it drops
+    /// what the run holds, as the run's other refusals of the taxonomy cache's slot do); any other
+    /// error is returned as it is.
+    pub(super) fn of_cut(error: anyhow::Error) -> anyhow::Error {
+        let refusal = error
+            .downcast_ref::<io::Error>()
+            .and_then(crate::report::query_warnings::CutRefusal::of)
+            .map(str::to_string);
+        match refusal {
+            Some(text) => XmlRefusal(text).into(),
+            None => error,
         }
     }
 }
@@ -1030,7 +1045,9 @@ fn scan_query_stream<R: std::io::Read>(
 /// `QueryScan::query_scopes`. LOSAT's refusal of two queries of one scope with one id stops the run
 /// at its batch, after the reports of the batches before, as a batch that NCBI fails does: the read
 /// ends there, and the search gives the refusal where it adds that batch (`QueryScopes::read_ahead`;
-/// line WQA D10 round 4, 2026-11-20). The batches are the reader's (`read`), as NCBI counts them
+/// line WQA D10 round 4, 2026-11-20). A refusal that the run's XML failure for its matrix name may
+/// take (`ScopeRefusal::xml_takes`) does not end the read: the search's add of its batch decides
+/// (`native::add_batch_scope`). The batches are the reader's (`read`), as NCBI counts them
 /// (`query_batch::BatchCount`).
 pub(super) fn scan_queries(
     options: &ResolvedOptions,
@@ -1044,23 +1061,29 @@ pub(super) fn scan_queries(
     // the document holds its report back.
     let mut written = 0usize;
     let mut held: Option<Result<()>> = None;
-    // The batches added to the scopes, and the refusal of the batch after them.
+    // The batches added to the scopes, and the refusals of the batches: those that the run's XML
+    // failure for its matrix name may take (`ScopeRefusal::xml_takes`), after which the read goes
+    // on, and the one that ends it.
     let mut batches = 0usize;
-    let mut refusal = None;
+    let mut refusals = Vec::new();
     let scanned = read(&mut |batch| {
         if !super::archive::written_batch(batch, options) {
             anyhow::bail!("NCBI stops the run at this batch");
         }
         if let Some(scopes) = query_scopes.as_mut() {
-            let added = scopes.add_batch_ids(
+            let added = scopes.add_batch_records(
                 super::input::scope_records(batch)
                     .into_iter()
-                    .map(|(believed, length, _)| (believed, length)),
+                    .map(|(believed, length, place)| (believed, length, place.is_some())),
                 written,
             );
             if let Err(error) = added {
-                refusal = Some((batches, error));
-                anyhow::bail!("LOSAT refuses this batch");
+                let xml_takes = crate::blastinput::query_batch::ScopeRefusal::of(&error)
+                    .is_some_and(crate::blastinput::query_batch::ScopeRefusal::xml_takes);
+                refusals.push((batches, error));
+                if !xml_takes {
+                    anyhow::bail!("LOSAT refuses this batch");
+                }
             }
             batches += 1;
         }
@@ -1093,7 +1116,7 @@ pub(super) fn scan_queries(
         written += batch.len();
         Ok(())
     });
-    scan.query_scopes = query_scopes.map(|scopes| scopes.read_ahead(refusal));
+    scan.query_scopes = query_scopes.map(|scopes| scopes.read_ahead(refusals));
     match scanned {
         Err(error) if error.is::<XmlRefusal>() => Err(error),
         // The end of the queries: the epilog writes the held report.
@@ -1251,19 +1274,18 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     batches: &[BatchResults],
     queries_before: usize,
     stops: bool,
-    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
 ) -> Result<()> {
     let gapped_karlin = gapped_karlin(options);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389 (cited at
     // `blast_xml::matrix::XmlMatrixFailure`)
     // The formatting table is found by the name as typed (`strcmp`): a lower-case name stops the
-    // report data of the run's first query, or of its second where the report is held
-    // (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id, the second as
-    // LOSAT refuses two queries of one id before any output; `xml_matrix`, the run's
-    // `xml_matrix_failure`), in the batch of that query (`BLAST engine
-    // error:`, exit 3), before any byte of the reports; a batch before it writes nothing (its
-    // reader messages and request posts are the batch loop's).
+    // report data of the run's first query, or where the report is held of NCBI's next query of
+    // another Seq-id (`XmlMatrixFailure::SecondQueryOrEnd`; `xml_matrix`, the run's
+    // `xml_matrix_failure` at its query of the read-ahead scopes, `QueryScopes::xml_failing_query`),
+    // in the batch of that query (`BLAST engine error:`, exit 3), before any byte of the reports; a
+    // batch before it writes nothing (its reader messages and request posts are the batch loop's).
     let Some(positives) = FormattingMatrix::new(&options.matrix) else {
         let failure =
             xml_matrix.context("LOSAT internal error: no run decision for an XML matrix")?;
@@ -1376,10 +1398,16 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 if let std::collections::hash_map::Entry::Vacant(slot) =
                     subject_cache.entry(list.oid)
                 {
-                    // A subject whose lookup throws where its `Hit` loads it keeps the
-                    // exception for the `Hit`; one that no report loads gets no names
+                    // A subject whose lookup throws where its `Hit` loads it has the names of
+                    // NCBI's `catch` with the exception; one that no report loads gets no names
                     // (`HitNames::of`).
-                    slot.insert(HitNames::of(loads, list.oid, || {
+                    let parsed = match shown {
+                        ShownSubjects::Database { reported, .. } => {
+                            reported.parsed_subject(list.oid)
+                        }
+                        ShownSubjects::Fasta { .. } => None,
+                    };
+                    slot.insert(HitNames::of(loads, list.oid, parsed, || {
                         subject_names(shown, &subjects[list.oid], list.oid)
                     })?);
                 }
@@ -1482,7 +1510,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time.
-                    posts.hit(sink.position(), first as u32, |texts| {
+                    posts.hit(sink.position(), &hit, first as u32, |texts| {
                         taxdb_printer.at_names(first, names, texts)
                     })?;
                     sink.hit(&hit, |hsps| {
@@ -1497,6 +1525,17 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                 .iter()
                                 .filter(|hsp| has_seqalign(hsp, options.gapped))
                             {
+                                let identities = read_num_ident(hsp.identity as i64, None);
+                                // The `catch` of an HSP whose subject's lookup throws comes before
+                                // NCBI reads its rows (`HspSink::reads_alignment`).
+                                if hsps.unaligned([XmlHsp::unaligned(
+                                    hsp.hsp.score,
+                                    hsp.bit_score,
+                                    seqalign_evalue(hsp.evalue),
+                                    identities,
+                                )])? {
+                                    continue;
+                                }
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243
                                 // An HSP of length 0 (`empty_rows`): the Dense-seg of `-subject`'s
@@ -1547,6 +1586,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                     // strand, where the row runs backwards.
                                     query_first: if plus { query_from - 1 } else { query_to - 1 },
                                     query_step: if plus { 3 } else { -3 },
+                                    alignment_identities: identities,
                                 })?;
                             }
                         }
@@ -1581,7 +1621,8 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 &mut *writer,
                 &mut *diagnostics,
                 reads.as_mut(),
-            )?;
+            )
+            .map_err(XmlRefusal::of_cut)?;
             if let Some(post) = caught {
                 writer.flush()?;
                 diagnostics.write_all(&post)?;

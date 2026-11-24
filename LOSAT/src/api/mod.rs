@@ -191,6 +191,7 @@ mod view;
 
 pub use crate::record::FastaRecord;
 pub use batches::{run_batches, Batch, Batches};
+pub(crate) use describe::parameters as described_parameters;
 pub use describe::{describe, Description, Parameter, ValueKind};
 pub use error::Error;
 pub use id::Id;
@@ -202,7 +203,6 @@ pub use program::Program;
 pub use run::{
     run, run_collect, run_to_file, HspRecord, Outcome, QueryRounds, QueryStats, Report, Strand,
 };
-pub(crate) use search::file_options;
 pub use search::{validate, Search, API_OWNED};
 pub use strategy::Strategy;
 pub use tools::{

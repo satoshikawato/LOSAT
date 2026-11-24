@@ -121,6 +121,8 @@ pub(crate) struct Desc {
     constraint: Option<Constraint>,
     /// `AddKey` (a key without `optional="true"`): the key must be given (`CArgDescMandatory`).
     mandatory: bool,
+    /// `<description>`: the argument's comment, which NCBI's `-help` prints (`described`).
+    description: Text,
 }
 
 impl Desc {
@@ -295,20 +297,59 @@ pub fn choices(program: &str, name: &str) -> Option<Vec<String>> {
     }
 }
 
-/// The default of `program`'s key `name` in NCBI's XML (`<default>`, a key of `AddDefaultKey`);
-/// `None` for a key without one, a flag and a name that is no argument of `program`. What the
-/// library API's and LOSAT Web's descriptions of a program give as an option's default (line RG
-/// DECISIONS K4i-2b-1 (3)).
-pub fn default_value(program: &str, name: &str) -> Option<&'static str> {
-    find_desc(arguments(program)?, name)?.default()
+/// One argument that LOSAT's descriptions of a program list (`described`), as NCBI's tables give
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Described {
+    /// The name, without its dash.
+    pub(crate) name: &'static str,
+    pub(crate) kind: Kind,
+    /// `<default>`: the default of a key of `AddDefaultKey`, which the library API's and LOSAT
+    /// Web's descriptions give as the option's default (line RG DECISIONS K4i-2b-1 (3)).
+    pub(crate) default: Option<&'static str>,
+    /// The values of its set (`choices`); empty for a key of another constraint or none, and for
+    /// a flag.
+    pub(crate) choices: Vec<String>,
+    /// `<description>`: NCBI's comment of the argument, which its `-help` prints (NCBI's words).
+    pub(crate) description: &'static str,
+}
+
+// No NCBI counterpart: line RG DECISIONS K4i-3-1. NCBI's `-help` prints the usage line first, which
+// names the arguments in the order in which the program described them (`usage_position`), then the
+// arguments with their comments, by group.
+/// The arguments of `tool`'s program that LOSAT's descriptions of it list (the library API's
+/// `describe`, LOSAT Web's): every argument of its XML (the arguments of every NCBI application,
+/// the help flags, `-logfile`, `-conffile`, `-version`, ..., are not in its tables) but those that
+/// LOSAT refuses by name (`Refusal::Read`), in the order of the usage line of NCBI's `-help`
+/// (`usage_position` in `Tool::help`; blastn: `-task`, `-db`, `-dbsize`, ...), not of the list of
+/// arguments under it (blastn: `-query`, `-query_loc`, `-strand`, `-task`, ...).
+pub(crate) fn described(tool: &Tool) -> impl Iterator<Item = Described> {
+    let mut listed: Vec<(usize, Described)> = tool_arguments(tool)
+        .descs()
+        .iter()
+        .filter(|desc| !matches!(refusal(tool.program, desc.name()), Some(Refusal::Read(_))))
+        .map(|desc| {
+            let name = desc.name();
+            let described = Described {
+                name,
+                kind: desc.kind,
+                default: desc.default(),
+                choices: choices(tool.program, name).unwrap_or_default(),
+                description: desc.description.get(),
+            };
+            (usage_position(tool.help, name), described)
+        })
+        .collect();
+    listed.sort_by_key(|(position, _)| *position);
+    listed.into_iter().map(|(_, described)| described)
 }
 
 // The tables (`TEXT`, `HELP_FLAGS`, `FILE_ARGUMENTS`, `DESCS`, `ALIASES`, `DEPENDENCIES`,
-// `STRING_VALUES`, `INTEGER_VALUES`, `REFUSALS`, `DISPLAY_ORDERS`, `PROGRAMS`), written by `LOSAT/build.rs`
-// (`build/ncbi_args.rs`) from the XML of every program LOSAT embeds. `HELP_FLAGS` are the
-// arguments of every `CArgDescriptions` before the program's own (the help flags of its
-// constructor), `FILE_ARGUMENTS` those of every application after them
-// (`AddDefaultFileArguments`: `-logfile`, `-conffile`); the build script cites NCBI's lines.
+// `STRING_VALUES`, `INTEGER_VALUES`, `REFUSALS`, `DISPLAY_ORDERS`, `PROGRAMS`), written by
+// `LOSAT/build.rs` (`build/ncbi_args.rs`) from the XML of every program LOSAT embeds. `HELP_FLAGS`
+// are the arguments of every `CArgDescriptions` before the program's own (the help flags of its
+// constructor), `FILE_ARGUMENTS` those of every application after them (`AddDefaultFileArguments`:
+// `-logfile`, `-conffile`); the build script cites NCBI's lines.
 include!(concat!(env!("OUT_DIR"), "/ncbi_args.rs"));
 
 /// Whether `name` is one of the arguments that every NCBI application has after its own

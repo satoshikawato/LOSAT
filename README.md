@@ -23,12 +23,12 @@ On the v0.2.0 release test set, LOSAT writes the same output as NCBI BLAST+ 2.17
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="benchmarks/v0.2.0/figures/fig1_standard_workloads_dark.png">
-    <img alt="Wall time and peak memory of LOSAT 0.2.0 and NCBI BLAST+ 2.17.0 in 12 search modes, 1 and 16 threads" src="benchmarks/v0.2.0/figures/fig1_standard_workloads.png" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="benchmarks/v0.2.0/figures/fig1_suite_overview_dark.png">
+    <img alt="Wall-time speedup (16 and 1 threads) and remaining peak memory footprint (% of BLAST+) for LOSAT 0.2.0 vs NCBI BLAST+ 2.17.0 across all 12 search modes and 3 utilities" src="benchmarks/v0.2.0/figures/fig1_suite_overview.png" width="100%">
   </picture>
 </p>
 
-*Twelve search modes on a dual Xeon Gold 6338 workstation (64 cores), LOSAT at commit `93ca2f652` against NCBI BLAST+ 2.17.0. At 16 threads LOSAT was faster in all twelve: 629 times on `tblastx` (4.72 s against 2,970.75 s), 1.7 to 18.3 times on ten other modes, and 1.02 times on `psiblast`. Where the subject is a FASTA file, LOSAT ran `-subject` and NCBI BLAST+ `-db` on a database made from the same file. Inputs, commands and every number: [benchmarks/v0.2.0](benchmarks/v0.2.0/README.md).*
+*All twelve search modes and three single-threaded utilities (`makeblastdb`, `rpsbproc`) on a dual Xeon Gold 6338 workstation (64 cores), LOSAT at commit `93ca2f652` against NCBI BLAST+ 2.17.0 and `rpsbproc` 0.5.1. At 16 threads LOSAT was faster in all twelve search modes: 1.02× on `psiblast`, 1.7× to 18.3× on ten modes, and 629× on `tblastx` (4.72 s vs 2,971 s), using 4.1% to 77% of BLAST+'s peak resident memory (1.3× to 24.6× lower). Where the subject is a FASTA file, LOSAT ran `-subject` and NCBI BLAST+ ran `-db` on a database made from the same file. Inputs, commands, and every number: [benchmarks/v0.2.0](benchmarks/v0.2.0/README.md).*
 
 ---
 
@@ -149,12 +149,12 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="benchmarks/v0.2.0/figures/fig3_downstream_tools_dark.png">
-    <img alt="Time of the BLAST steps of published tools with LOSAT 0.2.0 and with NCBI BLAST+ 2.17.0" src="benchmarks/v0.2.0/figures/fig3_downstream_tools.png" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="benchmarks/v0.2.0/figures/fig2_real_pipelines_dark.png">
+    <img alt="Wall-time speedup and remaining peak memory footprint (% of BLAST+) for large reference workflows and published bioinformatics tools with LOSAT 0.2.0 vs NCBI BLAST+ 2.17.0" src="benchmarks/v0.2.0/figures/fig2_real_pipelines.png" width="100%">
   </picture>
 </p>
 
-[benchmarks/v0.2.0](benchmarks/v0.2.0/README.md) has all four figures (standard searches, scaling with threads, queries and database size, published tools, WebAssembly), the inputs, and the measured values as TSV files.
+[benchmarks/v0.2.0](benchmarks/v0.2.0/README.md) has all six figures (all 12 search modes and 3 utilities, large reference workflows and published tools, scaling with database size, query volume and threads, exact BLAST+ parity vs. heuristic aligners on UniRef50 and SILVA 144, WebAssembly, and LOSAT v0.1.0 to v0.2.0), the inputs, and the measured values as TSV files.
 
 ---
 

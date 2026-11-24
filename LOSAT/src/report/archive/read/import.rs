@@ -27,6 +27,7 @@ use anyhow::Result;
 use super::options::{import_request, EProgram, ImportedOptions, SeqRange, Setter};
 use super::queries::{render_queries, RenderError, Rendered, Text};
 use super::request::{Queries, Request, Subject};
+use super::Stop as RequestStop;
 use crate::blastinput::app::Program;
 use crate::cli::{Commands, NativeError};
 use crate::ncbi_exception::NcbiException;
@@ -266,8 +267,17 @@ pub(crate) fn recover(command: &Command<'_>) -> std::result::Result<Imported, Im
         }
     }
     .map_err(|e| fail(&warnings, e))?;
-    let request =
-        Request::from_strategy(value).map_err(|exception| fail(&warnings, caught(&exception)))?;
+    let request = Request::from_strategy(value).map_err(|stop| {
+        let error = match stop {
+            RequestStop::Exception(exception) => caught(&exception),
+            RequestStop::NullElement => unported(
+                "a search strategy with an element stated as NULL in a list",
+                program,
+            ),
+            other => unreachable!("not a stop of the strategy's import: {other:?}"),
+        };
+        fail(&warnings, error)
+    })?;
     let options = import_request(&request).map_err(|e| fail(&warnings, caught(&e)))?;
     let subject = if command.override_subject {
         warnings.push("Overriding database/subject in saved strategy".into());

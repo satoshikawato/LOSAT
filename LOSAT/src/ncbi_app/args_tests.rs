@@ -88,13 +88,31 @@ fn xml(program: &str) -> String {
     crate::ncbi_xmlhelp::print(program, |_| false).unwrap()
 }
 
-/// `NStr::XmlEncode` undone (`&amp;`, `&lt;`, `&gt;`, `&apos;`, `&quot;`).
+/// `NStr::XmlEncode` undone (`&amp;`, `&lt;`, `&gt;`, `&apos;`, `&quot;`, and the character
+/// references of the characters it writes as numbers, `&#xa;`).
 fn xml_decode(text: &str) -> String {
-    text.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&apos;", "'")
-        .replace("&quot;", "\"")
-        .replace("&amp;", "&")
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('&') {
+        out.push_str(&rest[..at]);
+        let (entity, after) = rest[at + 1..].split_once(';').expect("an entity's end");
+        out.push(match entity {
+            "lt" => '<',
+            "gt" => '>',
+            "apos" => '\'',
+            "quot" => '"',
+            "amp" => '&',
+            // A character reference (`&#xa;`: the line breaks of a comment).
+            _ => entity
+                .strip_prefix("#x")
+                .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+                .and_then(char::from_u32)
+                .unwrap_or_else(|| panic!("an entity: &{entity};")),
+        });
+        rest = after;
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The elements `<key name=...` and `<flag name=...` of `xml`: (tag, name, the element's text).
@@ -239,6 +257,17 @@ fn every_argument_of_the_xml_is_in_its_table() {
             assert_eq!(
                 desc.default().map(str::to_string),
                 default,
+                "{program} -{name}"
+            );
+            // The argument's comment (its first `<description>`, before a constraint's), which
+            // LOSAT's descriptions give as its help (line RG DECISIONS K4i-3-1), kept for every
+            // program.
+            let comment = element
+                .split_once("<description>")
+                .map(|(_, rest)| xml_decode(rest.split_once("</description>").unwrap().0));
+            assert_eq!(
+                Some(desc.description.get().to_string()),
+                comment,
                 "{program} -{name}"
             );
             let usage = element.split_once("<constraint").map(|(_, rest)| {
@@ -681,12 +710,13 @@ fn every_reader_knows_the_help_flags_and_the_file_arguments() {
 /// booleans and the integer type of a table (a function or a variable could be a pointer).
 #[test]
 fn the_tables_hold_no_pointer() {
-    const LOWER: [&str; 22] = [
+    const LOWER: [&str; 23] = [
         "name",
         "kind",
         "default",
         "constraint",
         "mandatory",
+        "description",
         "first",
         "count",
         "at",
@@ -927,8 +957,38 @@ fn display_orders_are_the_tables_sets() {
     assert_eq!(choices("blastn", "ungapped"), None);
     assert_eq!(choices("blastn", "evalue"), None);
     assert_eq!(choices("blastn", "no_such_option"), None);
-    assert_eq!(default_value("blastn", "task"), Some("megablast"));
-    assert_eq!(default_value("blastp", "task"), Some("blastp"));
-    assert_eq!(default_value("blastp", "evalue"), None);
-    assert_eq!(default_value("blastn", "ungapped"), None);
+    // The defaults that LOSAT's descriptions give (`Described::default`): a key's `<default>`.
+    let default =
+        |program, name| find_desc(arguments(program).unwrap(), name).and_then(Desc::default);
+    assert_eq!(default("blastn", "task"), Some("megablast"));
+    assert_eq!(default("blastp", "task"), Some("blastp"));
+    assert_eq!(default("blastp", "evalue"), None);
+    assert_eq!(default("blastn", "ungapped"), None);
+    assert_eq!(default("blastn", "no_such_option"), None);
+}
+
+// No NCBI counterpart: line RG DECISIONS K4i-3-1 (Q3 = A). LOSAT's descriptions list a program's
+// arguments in the order of the usage line of NCBI's `-help`: each one is in the usage's synopsis,
+// in its order; those refused by name are not listed, the others are.
+#[test]
+fn the_described_arguments_follow_the_usage() {
+    for program in crate::api::Program::ALL {
+        let tool = crate::cli::reader::tool(program.name()).expect("a program on the reader");
+        let listed: Vec<Described> = described(tool).collect();
+        let positions: Vec<usize> = listed
+            .iter()
+            .map(|argument| usage_position(tool.help, argument.name))
+            .collect();
+        assert!(!positions.contains(&usize::MAX), "{program}: {positions:?}");
+        assert!(
+            positions.windows(2).all(|pair| pair[0] < pair[1]),
+            "{program}"
+        );
+        let arguments = arguments(tool.program).expect("its XML");
+        for desc in arguments.descs() {
+            let refused = matches!(refusal(tool.program, desc.name()), Some(Refusal::Read(_)));
+            let shown = listed.iter().any(|argument| argument.name == desc.name());
+            assert_eq!(shown, !refused, "{program} -{}", desc.name());
+        }
+    }
 }

@@ -1,5 +1,6 @@
 //! The values that NCBI computes over a whole query batch (LOSAT's reader batch, `BATCH_SIZE`
-//! letters) and LOSAT's search units of at most 10002 letters must share.
+//! letters) and LOSAT's search units (which end at the first query that brings them to 10002
+//! letters) must share.
 use super::{
     args::ResolvedOptions,
     input::FastaRecord,
@@ -183,37 +184,47 @@ impl ReaderBatchShape {
 /// valid context; the average subject length, the hit-saving parameters: `subject_parameters`),
 /// then of the search's first read of the database (a sequence file that cannot be opened,
 /// `Subjects::sequence_file_read_error`; line WQA D10 round 6, review 4 M2), for the caller's
-/// `search_error`; `None` where the set-up passes or no context is valid. NCBI
-/// splits no batch of two queries or more (`split::calculate_num_chunks`), and a refused batch
-/// that is set up holds two (line WQA D10 round 5, 2026-11-20).
+/// `search_error` (`BatchSetUp::Fails`); `Searched` where the set-up passes with a valid context,
+/// `Unknown` where no context is valid (or the queries or the subjects' numbers cannot be read).
+/// NCBI splits no batch of two queries or more (`split::calculate_num_chunks`), and a refused
+/// batch that is set up holds two (line WQA D10 round 5, 2026-11-20).
 pub(crate) fn set_up_error(
     queries: &[FastaRecord],
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
-) -> Option<anyhow::Error> {
-    let prepared = prepare_unit_queries(queries, None, options).ok()?;
+) -> crate::blastinput::query_batch::BatchSetUp {
+    use crate::blastinput::query_batch::BatchSetUp;
+    let Ok(prepared) = prepare_unit_queries(queries, None, options) else {
+        return BatchSetUp::Unknown;
+    };
     let mut params = score_block_for(&prepared, options.scoring);
     if !params.iter().any(|p| p.valid) {
-        return None;
+        return BatchSetUp::Unknown;
     }
     if subjects.is_unreadable() {
-        return Some(super::subjects::UnreadableSubjects.into());
+        return BatchSetUp::Fails(super::subjects::UnreadableSubjects.into());
     }
-    let numbers = subjects.numbers().ok()?;
-    subject_parameters(&prepared, &mut params, options, numbers, None)
+    let Ok(numbers) = subjects.numbers() else {
+        return BatchSetUp::Unknown;
+    };
+    match subject_parameters(&prepared, &mut params, options, numbers, None)
         .err()
         .or_else(|| subjects.sequence_file_read_error())
+    {
+        Some(error) => BatchSetUp::Fails(error),
+        None => BatchSetUp::Searched,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:416-416,990-990
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2450-2453
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:954-957
 // NCBI sets up and searches a reader batch (one `BATCH_SIZE` query batch) as a whole, so these
-// values are taken over all its contexts. LOSAT searches the batch in units of at most 10002
-// letters. Phase 1 prepares every unit (translation, filtering, the statistical blocks of the
-// contexts, and the unit's cutoff minima with the batch's average length, which the layout of the
-// records gives), reduces the batch's values, and hands each unit its preparation with the shape
-// attached; phase 2 searches the units as before, from these. A batch with no valid context is
+// values are taken over all its contexts. LOSAT searches the batch in units that end at the first
+// query that brings them to 10002 letters. Phase 1 prepares every unit (translation, filtering,
+// the statistical blocks of the contexts, and the unit's cutoff minima with the batch's average
+// length, which the layout of the records gives), reduces the batch's values, and hands each unit
+// its preparation with the shape attached; phase 2 searches the units as before, from these. A batch with no valid context is
 // not searched, and a database refused before its sequences are read (`Subjects::Unreadable`)
 // ends the search before they are used, so the minima are not taken then.
 /// Phase 1 for one unit (`queries`) of a reader batch of `layout`. The unit's preparation has
@@ -297,13 +308,16 @@ pub(crate) fn prepare_unit(
 /// A reader batch of one unit prepared: its queries translated and filtered, and the statistical
 /// blocks of its contexts. `search::search_core` prepares such a batch with it when it is searched,
 /// and the capped batch flow (`LOSAT_X_BXCAPFILL`, `x_bx_mem.rs`) ahead of its search. Such a batch
-/// has no shape (its unit's values are the batch's) and no cutoff minima to reduce.
+/// has no shape (its unit's values are the batch's) and no cutoff minima to reduce. `on_pool`: a
+/// reader batch searched whole, whose contexts' blocks are computed on the pool
+/// (`parameters::score_block_for_in`).
 pub(crate) fn prepare_lone_unit(
     queries: &[FastaRecord],
     options: &ResolvedOptions,
+    on_pool: bool,
 ) -> Result<UnitPrep> {
     let prepared = prepare_queries(queries, options)?;
-    let params = score_block_for(&prepared, options.scoring);
+    let params = super::parameters::score_block_for_in(&prepared, options.scoring, on_pool);
     Ok(UnitPrep {
         prepared,
         params,

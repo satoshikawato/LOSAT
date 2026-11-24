@@ -139,7 +139,7 @@ impl SubjectPasses<'_> {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1469-1470 (the subject's
     /// preliminary search) and c++/src/algo/blast/core/blast_traceback.c:1521,1632-1633 (its traceback)
-    fn search_subject<const UNGAPPED: bool>(
+    fn search_subject<const UNGAPPED: bool, const NEG: bool>(
         &self,
         s_idx: usize,
         subject: BlastnSubjectRef<'_>,
@@ -183,7 +183,13 @@ impl SubjectPasses<'_> {
             s_id,
             s_len_full,
         };
-        if let Some(kept) = prelim_source {
+        // The traceback calls the instance without a window below 0 (`traceback_pass`), so the
+        // window's instance holds no traceback, and `traceback_subject` keeps one caller per form.
+        debug_assert!(
+            !NEG || prelim_source.is_none(),
+            "the traceback runs no word finder"
+        );
+        if let (false, Some(kept)) = (NEG, prelim_source) {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1521,1632-1633
             // The traceback of the HSPs that the preliminary stage kept
             // (`traceback_subject::traceback_subject`).
@@ -204,7 +210,7 @@ impl SubjectPasses<'_> {
             // The preliminary stage gives the subject's HSPs to the collector (`search_subjects`).
             (
                 None,
-                prelim_subject::prelim_subject::<UNGAPPED>(
+                prelim_subject::prelim_subject::<UNGAPPED, NEG>(
                     scan.expect("the preliminary stage's calls pass the pass's values"),
                     &subject_ctx,
                     subject,
@@ -228,7 +234,7 @@ impl SubjectPasses<'_> {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1434-1443 and
     /// c++/src/algo/blast/core/blast_traceback.c:1598-1628 (cited at `stats::setup::subject_eff_lengths`)
-    fn special_subject<const UNGAPPED: bool>(
+    fn special_subject<const UNGAPPED: bool, const NEG: bool>(
         &self,
         s_idx: usize,
         subject: BlastnSubjectRef<'_>,
@@ -273,7 +279,13 @@ impl SubjectPasses<'_> {
                 trace_batch: &trace_batch,
                 ..*self
             }
-            .search_subject::<UNGAPPED>(s_idx, subject, state, scan, prelim_source)
+            .search_subject::<UNGAPPED, NEG>(
+                s_idx,
+                subject,
+                state,
+                scan,
+                prelim_source,
+            )
         } else {
             let prelim_batch = PrelimBatch {
                 query_eff_searchsp: &subject_spaces,
@@ -295,7 +307,7 @@ impl SubjectPasses<'_> {
                 ..*self
             };
             let mut found =
-                passes.search_subject::<UNGAPPED>(s_idx, subject, state, scan.as_ref(), None);
+                passes.search_subject::<UNGAPPED, NEG>(s_idx, subject, state, scan.as_ref(), None);
             if let Some(stage) = ungapped {
                 passes.x_ungapped_database_stage(stage, s_idx as u32, &mut found.1);
             }
@@ -314,7 +326,7 @@ impl SubjectPasses<'_> {
     /// soon as it is searched, so only the HSPs the hit lists keep stay in memory. Two or more
     /// threads search all subjects of the batch and then hand them over, or, with
     /// `LOSAT_X_BNSTREAM`, hand each subject over in OID order while they search the next ones.
-    fn search_subjects<const UNGAPPED: bool>(
+    fn search_subjects<const UNGAPPED: bool, const NEG: bool>(
         &self,
         kept: Option<&[Vec<PrelimHit>]>,
         scan: Option<&ScanBatch<'_>>,
@@ -323,7 +335,7 @@ impl SubjectPasses<'_> {
         let use_parallel = self.prelim_batch.use_parallel;
         let new_state = || self.new_scratch();
         let search_one = |state: &mut SubjectState, s_idx: usize| {
-            self.search_subject::<UNGAPPED>(
+            self.search_subject::<UNGAPPED, NEG>(
                 s_idx,
                 self.subjects
                     .prepared()
@@ -508,7 +520,10 @@ impl SubjectPasses<'_> {
     /// without a filtering option: the HSP collector, `PrelimHitCollector` here; `-culling_limit` chooses
     /// the culling writer in the body below, and `-best_hit_overhang` / `-best_hit_score_edge` the best
     /// hit writer)
-    pub(super) fn prelim_pass<const UNGAPPED: bool>(
+    ///
+    /// `NEG` is the search's window below 0 (`neg_window.rs`), chosen once by the caller; the subject
+    /// and chunk loops below run the instance of the window and test nothing of it.
+    pub(super) fn prelim_pass<const UNGAPPED: bool, const NEG: bool>(
         &self,
         split_prelim_lists: Option<PrelimHitLists>,
         lookup_tables: &LookupTables,
@@ -527,7 +542,7 @@ impl SubjectPasses<'_> {
                 self.prelim_hitlist_size,
                 self.args.culling_limit_value(),
             );
-            self.prelim_into::<UNGAPPED, _>(lookup_tables, &mut |oid, prelim| {
+            self.prelim_into::<UNGAPPED, NEG, _>(lookup_tables, &mut |oid, prelim| {
                 writer.add(oid, prelim)
             })?;
             Ok(writer.finish())
@@ -540,14 +555,14 @@ impl SubjectPasses<'_> {
                 self.prelim_hitlist_size,
                 params,
             );
-            self.prelim_into::<UNGAPPED, _>(lookup_tables, &mut |oid, prelim| {
+            self.prelim_into::<UNGAPPED, NEG, _>(lookup_tables, &mut |oid, prelim| {
                 writer.add(oid, prelim)
             })?;
             Ok(writer.finish())
         } else {
             let mut collector =
                 PrelimHitCollector::new(self.prelim_batch.queries.len(), self.prelim_hitlist_size);
-            self.prelim_into::<UNGAPPED, _>(lookup_tables, &mut |oid, prelim| {
+            self.prelim_into::<UNGAPPED, NEG, _>(lookup_tables, &mut |oid, prelim| {
                 collector.add(oid, prelim)
             })?;
             Ok(collector.hit_lists)
@@ -563,7 +578,11 @@ impl SubjectPasses<'_> {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413 (the loop on the subjects,
     /// which `search_subjects` and `database::search_blocks` replace)
-    fn prelim_into<const UNGAPPED: bool, M: FnMut(usize, Vec<PrelimHit>) + Send>(
+    fn prelim_into<
+        const UNGAPPED: bool,
+        const NEG: bool,
+        M: FnMut(usize, Vec<PrelimHit>) + Send,
+    >(
         &self,
         lookup_tables: &LookupTables,
         sink: &mut M,
@@ -573,12 +592,16 @@ impl SubjectPasses<'_> {
         let scan = ScanBatch::new(self.prelim_batch, lookup_tables);
         match self.subjects {
             SubjectSource::Prepared(_) => {
-                self.search_subjects::<UNGAPPED>(None, Some(&scan), &mut |oid, _, mut prelim| {
-                    if UNGAPPED {
-                        self.x_ungapped_query_coverage(&mut prelim);
-                    }
-                    sink(oid, prelim)
-                });
+                self.search_subjects::<UNGAPPED, NEG>(
+                    None,
+                    Some(&scan),
+                    &mut |oid, _, mut prelim| {
+                        if UNGAPPED {
+                            self.x_ungapped_query_coverage(&mut prelim);
+                        }
+                        sink(oid, prelim)
+                    },
+                );
                 Ok(())
             }
             SubjectSource::Database(database) => {
@@ -639,7 +662,7 @@ impl SubjectPasses<'_> {
                                 return None;
                             }
                             match (special, stage) {
-                                (None, None) => self.search_subject::<UNGAPPED>(
+                                (None, None) => self.search_subject::<UNGAPPED, NEG>(
                                     ordinal as usize,
                                     subject,
                                     state,
@@ -647,7 +670,7 @@ impl SubjectPasses<'_> {
                                     None,
                                 ),
                                 (None, Some(stage)) => {
-                                    let mut found = self.search_subject::<UNGAPPED>(
+                                    let mut found = self.search_subject::<UNGAPPED, NEG>(
                                         ordinal as usize,
                                         subject,
                                         state,
@@ -658,7 +681,7 @@ impl SubjectPasses<'_> {
                                     found
                                 }
                                 (Some(special), stage) => crate::stats::setup::apart(|| {
-                                    self.special_subject::<UNGAPPED>(
+                                    self.special_subject::<UNGAPPED, NEG>(
                                         ordinal as usize,
                                         subject,
                                         state,
@@ -673,7 +696,7 @@ impl SubjectPasses<'_> {
                     }
                     (None, None, None) => {
                         database_prelim_blocks!(|ordinal, subject, state| self
-                            .search_subject::<UNGAPPED>(
+                            .search_subject::<UNGAPPED, NEG>(
                                 ordinal as usize,
                                 subject,
                                 state,
@@ -683,7 +706,7 @@ impl SubjectPasses<'_> {
                     }
                     (None, None, Some(stage)) => {
                         database_prelim_blocks!(|ordinal, subject, state| {
-                            let mut found = self.search_subject::<UNGAPPED>(
+                            let mut found = self.search_subject::<UNGAPPED, NEG>(
                                 ordinal as usize,
                                 subject,
                                 state,
@@ -697,7 +720,7 @@ impl SubjectPasses<'_> {
                     (None, Some(special), stage) => {
                         database_prelim_blocks!(|ordinal, subject, state| {
                             crate::stats::setup::apart(|| {
-                                self.special_subject::<UNGAPPED>(
+                                self.special_subject::<UNGAPPED, NEG>(
                                     ordinal as usize,
                                     subject,
                                     state,
@@ -747,6 +770,8 @@ impl SubjectPasses<'_> {
         &self,
         prelim_lists: PrelimHitLists,
     ) -> Result<Vec<Option<BlastnHitList>>> {
+        // The traceback runs no word finder (every subject has its kept HSPs, `prelim_source`), so its
+        // subjects take the instance without the window below 0 (`NEG` false).
         let (queries_ref, hitlist_size) = (self.prelim_batch.queries, self.hitlist_size);
         match self.subjects {
             SubjectSource::Prepared(_) => {
@@ -754,7 +779,7 @@ impl SubjectPasses<'_> {
                 let mut hit_lists: Vec<Option<BlastnHitList>> =
                     Vec::with_capacity(queries_ref.len());
                 hit_lists.resize_with(queries_ref.len(), || None);
-                self.search_subjects::<UNGAPPED>(Some(&kept), None, &mut |_, hits, _| {
+                self.search_subjects::<UNGAPPED, false>(Some(&kept), None, &mut |_, hits, _| {
                     if let Some(hits) = hits {
                         update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
                     }
@@ -803,7 +828,7 @@ impl SubjectPasses<'_> {
                         // One test per listed subject (a subject with HSPs): the batch's statistics
                         // (`TraceBatch`), or the statistics of each subject apart (`special_subject`).
                         let (mut subject_hits, _) = match self.special {
-                            None => self.search_subject::<UNGAPPED>(
+                            None => self.search_subject::<UNGAPPED, false>(
                                 ordinal as usize,
                                 subject,
                                 state,
@@ -811,7 +836,7 @@ impl SubjectPasses<'_> {
                                 Some(kept),
                             ),
                             Some(special) => crate::stats::setup::apart(|| {
-                                self.special_subject::<UNGAPPED>(
+                                self.special_subject::<UNGAPPED, false>(
                                     ordinal as usize,
                                     subject,
                                     state,

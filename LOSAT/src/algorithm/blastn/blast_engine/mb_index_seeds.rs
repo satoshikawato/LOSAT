@@ -1,15 +1,16 @@
 //! The search of a query batch with a MegaBLAST database index (`-use_index true` with an index
-//! that NCBI's loader kept, [`super::mb_index`]): the index's seeds of each index volume, searched
-//! when the preliminary stage first reaches a sequence of the volume (`CIndexedDb_New::UpdateIndex`;
-//! every volume of an old-style index the same way, whose seeds NCBI searches before the
-//! subjects, with the same result), the sequences without seeds skipped (`CheckOid`), and the word
-//! finder of a chunk with seeds (`MB_IndexedWordFinder`): each seed in the order of its list,
-//! extended on its diagonal unless an extension on the diagonal already passed its end, and kept
-//! with its extension when it reaches the context's cutoff. The chunk's HSP list is then that of
-//! every chunk (`prelim_subject::chunk_hsp_list`), without the count of the saved initial hits:
-//! NCBI's indexed word finder does not update the ungapped statistics, so the hits of an indexed
-//! volume do not size the next query batch. The sequences of a database volume without an index
-//! (a mixed search) are scanned with the lookup table as without an index.
+//! that NCBI's loader kept, [`super::mb_index`]): the index's seeds of each index volume that the
+//! preliminary stage reaches, searched before the stage on the whole pool (NCBI's first search
+//! thread that reaches a sequence of the volume searches it, `CIndexedDb_New::UpdateIndex`; every
+//! volume of an old-style index the same way, whose seeds NCBI searches before the subjects; what
+//! a volume's search finds does not depend on when it runs), the sequences without seeds skipped
+//! (`CheckOid`), and the word finder of a chunk with seeds (`MB_IndexedWordFinder`): each seed in
+//! the order of its list, extended on its diagonal unless an extension on the diagonal already
+//! passed its end, and kept with its extension when it reaches the context's cutoff. The chunk's
+//! HSP list is then that of every chunk (`prelim_subject::chunk_hsp_list`), without the count of
+//! the saved initial hits: NCBI's indexed word finder does not update the ungapped statistics, so
+//! the hits of an indexed volume do not size the next query batch. The sequences of a database
+//! volume without an index (a mixed search) are scanned with the lookup table as without an index.
 //!
 //! With `-db_hard_mask` NCBI's word finder takes the list of the index's chunk whose number is the
 //! hard chunk's, of another range or of the next sequence; LOSAT searches the index with the masked
@@ -50,6 +51,7 @@ use crate::dbindex::search::{
 };
 use crate::dbindex::volume::IndexVolume;
 use crate::seqdb::OidMap;
+use crate::utils::threading::SearchPool;
 
 /// What a search of the index does with each volume (`CIndexedDb_New::UpdateIndex` over the
 /// database sequences in order).
@@ -137,10 +139,10 @@ pub(super) fn plan_search(
 /// concatenated query and lookup segments, the search options, the number of the search among
 /// the index's searches (from 1; 0 for a batch without a valid context, which NCBI does not
 /// search), what the search does with each volume and whether it reaches the volume (a database
-/// sequence of it is searched), each index volume's seeds once searched (or `None` after an
-/// error), whether the word finder took a list of each index volume, the initial hits (up to 2)
-/// that the scan of each database volume without an index saved, and LOSAT's refusal of the
-/// search, the first by volume and kind.
+/// sequence of it is searched), each index volume's seeds once searched (or the refusal of its
+/// search, which is kept when a reader reaches the volume), whether the word finder took a list
+/// of each index volume, the initial hits (up to 2) that the scan of each database volume without
+/// an index saved, and LOSAT's refusal of the search, the first by volume and kind.
 pub(super) struct IndexSeeds<'a> {
     index: &'a LoadedIndex,
     oids: OidMap<'a>,
@@ -150,7 +152,7 @@ pub(super) struct IndexSeeds<'a> {
     search: u32,
     plan: Vec<VolumePlan>,
     visited: Vec<bool>,
-    volumes: Vec<OnceLock<Option<Arc<VolumeSeeds>>>>,
+    volumes: Vec<OnceLock<Result<Arc<VolumeSeeds>, String>>>,
     moved: Vec<AtomicBool>,
     scanned_hits: Vec<AtomicU32>,
     error: Mutex<Option<((usize, u8), String)>>,
@@ -245,34 +247,65 @@ impl<'a> IndexSeeds<'a> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:812-857
     /// The seeds of index volume `at`: those of an earlier search that it keeps, or the volume
     /// read and searched by the first caller (the others wait, as on NCBI's mutex) and unmapped
-    /// after its search; `None` after an error, which is kept for [`Self::check`].
+    /// after its search; `None` after an error, which is kept for [`Self::check`]. The
+    /// preliminary stage searches the volumes before the sequences ([`Self::search_volumes`]);
+    /// a volume searched here runs on one thread.
     fn volume(&self, at: usize) -> Option<&VolumeSeeds> {
         if let VolumePlan::Earlier(seeds) = &self.plan[at] {
             return Some(seeds);
         }
-        self.volumes[at]
-            .get_or_init(|| {
-                let path = &self.index.volumes[at].path;
-                let searched = IndexVolume::open(std::path::Path::new(path)).and_then(|volume| {
-                    let masks = self.volume_masks(at);
-                    search(&volume, self.query, &self.segments, self.options, &masks)
-                        .map_err(|_| "a list or an offset outside its sections".to_string())
-                });
-                match searched {
-                    Ok(seeds) => Some(Arc::new(seeds)),
-                    Err(why) => {
-                        self.fail(
-                            at,
-                            0,
-                            format!(
-                                "a MegaBLAST index volume that LOSAT does not read ({path}: {why})"
-                            ),
-                        );
-                        None
-                    }
-                }
+        match self.volumes[at].get_or_init(|| self.search_volume(at, &SearchPool::x_serial())) {
+            Ok(seeds) => Some(seeds),
+            Err(what) => {
+                self.fail(at, 0, what.clone());
+                None
+            }
+        }
+    }
+
+    /// The search of index volume `at` on `pool`: the volume read, searched and unmapped, or
+    /// the refusal of its search.
+    fn search_volume(&self, at: usize, pool: &SearchPool<'_>) -> Result<Arc<VolumeSeeds>, String> {
+        let path = &self.index.volumes[at].path;
+        IndexVolume::open(std::path::Path::new(path))
+            .and_then(|volume| {
+                let masks = self.volume_masks(at);
+                search(
+                    &volume,
+                    self.query,
+                    &self.segments,
+                    self.options,
+                    &masks,
+                    pool,
+                )
+                .map_err(|_| "a list or an offset outside its sections".to_string())
             })
-            .as_deref()
+            .map(Arc::new)
+            .map_err(|why| {
+                format!("a MegaBLAST index volume that LOSAT does not read ({path}: {why})")
+            })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_dbindex.cpp:812-857
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1364-1366
+    /// The searches of the volumes that the preliminary stage of the batch reaches (NCBI's first
+    /// search thread that reaches each volume's first sequence searches it, under its mutex,
+    /// before the sequences of the volume), and of those whose results stay for later searches
+    /// ([`Self::check`] reads them): one volume after another, each on the whole of `pool`, before
+    /// the stage; none for a batch that NCBI does not search. What a volume's search finds does
+    /// not depend on when it runs, and its refusal is kept only when a reader reaches the volume
+    /// ([`Self::volume`]), as without this step.
+    pub(super) fn search_volumes(&self, pool: &SearchPool<'_>) {
+        if self.search == 0 {
+            return;
+        }
+        for (at, plan) in self.plan.iter().enumerate() {
+            if let VolumePlan::Searched { kept } = *plan {
+                if kept || self.visited[at] {
+                    self.volumes[at].get_or_init(|| self.search_volume(at, pool));
+                }
+            }
+        }
     }
 
     /// With `-db_hard_mask`: the masked letters of the database sequences of index volume `at`
@@ -437,7 +470,7 @@ impl<'a> IndexSeeds<'a> {
             if let Some(list) = seeds.seeds(subj, number) {
                 self.moved[at].store(true, Ordering::Relaxed);
                 for seed in list {
-                    if seed.s_off as usize >= chunk.length {
+                    if seed.s_off as usize >= chunk.letters() {
                         let path = &self.index.volumes[at].path;
                         self.fail(
                             at,
@@ -566,7 +599,7 @@ impl HardSeeds {
             chunks.push(HardSlot {
                 offset: chunk.offset,
                 residual: chunk.residual,
-                length: chunk.length,
+                length: chunk.letters(),
                 range: chunk.range,
                 seeds: Vec::new(),
             });

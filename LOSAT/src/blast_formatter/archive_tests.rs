@@ -96,6 +96,12 @@ fn exceptions_end_the_run_as_catch_all_s_branches() {
     // What NCBI does not decide is refused.
     let refused = stop_error(Stop::Undefined("front() of an empty list"));
     assert!(refused.downcast_ref::<Refusal>().is_some());
+    // An element stated as `NULL` in a list: NCBI's null-pointer report, with its stack's
+    // addresses (`read::Stop::NullElement`).
+    assert_eq!(
+        stop_error(Stop::NullElement).downcast_ref::<Refusal>(),
+        Some(&Refusal::Undecided("an element stated as NULL in a list"))
+    );
 }
 
 /// The run of `losat blast_formatter` with `words` over the fixture archive on the standard input.

@@ -45,31 +45,28 @@ enum PssmFileFormat {
     TextAsn { start: usize },
     /// `eBinaryASN`: the binary reader reads the stream from `start` (the stream read as `MSerial_AsnBinary`).
     BinaryAsn { start: usize },
+    /// `eXml`: the XML reader reads the stream from `start` (the stream read as `MSerial_Xml`).
+    Xml { start: usize },
     /// A format that the `switch` sends to "Unsupported format for PSSM" (`eUnknown` and every format but the
     /// three).
     Unsupported,
     /// The guess threw (`TestFormatGlimmer3`'s `NStr::StringToInt`): `CATCH_ALL`'s report (exit status 255).
     Exception(NcbiException),
-    /// LOSAT's refusal (`what`, then `detail` and the path in parentheses): an XML PSSM, or a file whose guess
-    /// reads memory the file does not decide.
+    /// LOSAT's refusal (`what`, then `detail` and the path in parentheses): a file whose guess reads memory the
+    /// file does not decide.
     Refused {
         what: &'static str,
         detail: &'static str,
     },
 }
 
-/// The refusal of a PSSM file that NCBI's XML reader reads.
-const XML_PSSM: &str = "a PSSM file in XML";
 /// The refusal of a guess that reads memory its file does not decide.
 const UNDECIDED_GUESS: &str =
     "a PSSM file whose format NCBI's format guess decides by reading memory past the file";
 
 /// The format that `CFormatGuess` guesses for the stream (`utils::format_guess`, the whole order of `sm_CheckOrder`
 /// without hints) and the `switch` of `CPsiBlastArgs` on it. A test that reads past its data decides nothing here when
-/// the formats it could make the guess are all unsupported (`TestFormatFasta` before `eTextASN` and `eBinaryASN`); `eXml`
-/// is refused (the XML reader's first failure is its file header: `CObjectIStreamXml::ReadFileHeader`,
-/// objistrxml.cpp:582-660, with the declaration's attributes and encodings, comments, `DOCTYPE` and namespace
-/// prefixes, not ported).
+/// the formats it could make the guess are all unsupported (`TestFormatFasta` before `eTextASN` and `eBinaryASN`).
 fn guess_format(bytes: &[u8]) -> PssmFileFormat {
     let guessed = match FormatGuess::over(bytes).guess_format() {
         Ok(guessed) => guessed,
@@ -92,9 +89,8 @@ fn guess_format(bytes: &[u8]) -> PssmFileFormat {
         Format::BinaryAsn => PssmFileFormat::BinaryAsn {
             start: guessed.stream_pos,
         },
-        Format::Xml => PssmFileFormat::Refused {
-            what: XML_PSSM,
-            detail: "its XML reader is not ported",
+        Format::Xml => PssmFileFormat::Xml {
+            start: guessed.stream_pos,
         },
         _ => PssmFileFormat::Unsupported,
     }
@@ -121,6 +117,13 @@ pub(crate) struct PssmReader<'a> {
     /// The run's BLAST archive (outfmt 11), which saves each of the reader's posts as one message
     /// of its severity (`diag_log::Posts::write`); `None` without one.
     pub(crate) archive: Option<&'a crate::report::archive::ArchiveHandle>,
+    /// The run's `SERIAL_VERIFY_DATA_WRITE` when it changes what NCBI writes, and whether the run
+    /// writes `-out_pssm` (psiblast's round 1 writes the PSSM as read there; tblastn has no such
+    /// file): a PSSM with a list element stated as NULL is refused where the setting leaves the
+    /// element out of a file that the run writes (`PsiSearch::writes_pssm_as_read`).
+    pub(crate) write_verification:
+        Option<&'a crate::blastinput::ncbi_environment::WriteVerification>,
+    pub(crate) out_pssm: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1338-1340
@@ -147,6 +150,8 @@ impl PssmReader<'static> {
         strategy: false,
         database: true,
         archive: None,
+        write_verification: None,
+        out_pssm: false,
     };
 }
 
@@ -233,6 +238,9 @@ pub(crate) fn read_in_pssm(
         }
         PssmFileFormat::BinaryAsn { start } => {
             crate::blastinput::pssm_text::read_pssm_binary(&bytes[start..])
+        }
+        PssmFileFormat::Xml { start } => {
+            crate::blastinput::pssm_text::read_pssm_xml(&bytes[start..])
         }
         PssmFileFormat::Unsupported => {
             return Err(crate::blastinput::app::options_error(
@@ -497,9 +505,10 @@ const SEQ_ENTRY_GET_SEQ: crate::ncbi_exception::ThrowSite = crate::ncbi_exceptio
     function: None,
 };
 
-/// The PSSM search of a PSSM that has no query Seq-entry (the alignment's `-in_msa` PSSM, whose
-/// query NCBI's `x_ExtractQueryForPssm` did not find): the application adds the empty entry to
-/// its scope and `GetSeq()` of it ends the run after the prolog, before any report.
+/// The PSSM search of a PSSM that has no query Seq-entry (an `-in_pssm` PSSM without one, the
+/// alignment's `-in_msa` PSSM whose query NCBI's `x_ExtractQueryForPssm` did not find): the
+/// application adds the empty entry to its scope and `GetSeq()` of it ends the run after the
+/// prolog, before any report.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537-540 (cited at
 /// `psi_search_and_object`)
@@ -546,11 +555,12 @@ pub(crate) fn psi_search_and_object_of(
     ids_of: &str,
 ) -> Result<(PsiSearch, InPssmFile)> {
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:535-540
-    // NCBI's application adds the query's Seq-entry to its scope and takes its Bioseq here (a PSSM
-    // without one ends with a C++ exception of the release build).
+    // NCBI's application adds the query's Seq-entry to its scope and takes its Bioseq here: a
+    // PSSM without one (no `query`, or `query NULL`) gets an empty Seq-entry, whose `GetSeq()`
+    // ends the run as the alignment's PSSM without a query does (NCBI BLAST+ 2.17.0, psiblast and
+    // tblastn, probe D3c-3b q_absent_ps, q_absent_tbn, t_query_null, q_null_tbn, b_query_null).
     let Some(entry) = pssm.pssm.query.as_ref() else {
-        return Err(reader
-            .refuse("a PSSM without a query sequence (NCBI BLAST+ stops with a C++ exception)"));
+        return Ok(psi_search_unset_query(pssm));
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:537 (c++/src/app/blast/tblastn_app.cpp:226)
     // The query's Seq-entry joins NCBI's scope with its annotations, which NCBI's object manager
@@ -558,11 +568,18 @@ pub(crate) fn psi_search_and_object_of(
     // diagnostic stream it can leave failed, its exceptions), after the reader and the subjects and
     // before NCBI reads anything else of the PSSM; the run writes them where NCBI does
     // (`PsiSearch::write_annot_posts`). What NCBI does not do the same way on every run (memory
-    // addresses, crashes, undefined behaviour) is refused here, before any output. With `-db` no
+    // addresses, crashes, undefined behaviour) is refused at the same place, as the run's stop
+    // (`annot_index::Abort::Refused`): after psiblast's prolog of its format, which NCBI writes
+    // before it reads the entry (NCBI BLAST+ 2.17.0, probe D3c-3c `probeC`: the prolog, then the
+    // report of memory addresses or the crash), before any output of tblastn's. Where NCBI crashes
+    // its output holds only what its buffer had flushed (the version line); LOSAT writes the whole
+    // prolog before the refusal, as a crash is not reproduced (D3c-3c IMPL_DONE D1). With `-db` no
     // other sequence is in NCBI's scope before the query (`PssmReader::database`).
     let program = reader.program.to_ascii_lowercase();
     let mut annot = super::annot_index::index_entry(&program, entry, reader.database)
-        .map_err(|refusal| reader.refuse(refusal.text()))?;
+        .unwrap_or_else(|refusal| {
+            super::annot_index::AnnotOutcome::refused(reader.refuse(refusal.text()).to_string())
+        });
     // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:539-540 (c++/src/app/blast/tblastn_app.cpp:228)
     // A query Seq-entry set that the object manager took ends the run here: `GetSeq()` of a set is
     // NCBI's `CInvalidChoiceSelection` (NCBI BLAST+ 2.17.0, line RG D3-1 fix 4 `r4/probe` s06, s07,
@@ -638,15 +655,24 @@ pub(crate) fn psi_search_and_object_of(
     // (`SetupQueries_OMF` checks each query's molecule before its letters), also for a PSSM of
     // frequency ratios only, whose engine sets the query up first too.
     let nucleotide_query = matches!(query.inst.mol.1, 1 | 2 | 4);
-    let invalid_residues = if nucleotide_query && validation_error.is_none() {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:532-543
+    // Then the set-up takes the query's title (`GetTitle`, before its letters), which reads every
+    // descriptor's variant: an empty descriptor is the query's error
+    // (`report::query_warnings::null_descriptor_error`; NCBI BLAST+ 2.17.0, psiblast and tblastn,
+    // on every report path and with a PSSM of frequency ratios only, probe D3c-3b `probe4`).
+    let query_error = if validation_error.is_some() {
+        None
+    } else if nucleotide_query {
         Some("Nucleotide Bioseq specified in program which expects protein query".to_string())
+    } else if query.has_empty() {
+        Some(crate::report::query_warnings::null_descriptor_error())
     } else {
         invalid_residues
     };
     let (mut scores_error, setup_error) = if ratios_only {
-        (invalid_residues, None)
+        (query_error, None)
     } else {
-        (None, invalid_residues)
+        (None, query_error)
     };
     let reads_values =
         validation_error.is_none() && scores_error.is_none() && setup_error.is_none();
@@ -970,6 +996,23 @@ pub(crate) fn psi_search_and_object_of(
     .then(|| PssmQueryRequest {
         pssm: std::sync::Arc::new(pssm.clone()),
     });
+    // NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
+    // That ASN.1 text write reads each delay buffer of another format (`CDelayBuffer::Update`):
+    // one whose read fails stops NCBI with its exception after part of the strategy file (rc
+    // 255; line RG-F3, PR 2: probe AR5 SO), refused before any output as `-out_pssm` refuses it
+    // (`algorithm::psiblast::in_pssm_files`).
+    if let Some(request) = &request {
+        let text = crate::report::archive::ArchiveEncoding::Text;
+        // (A list element stated as NULL is written: the strategy's writer throws where NCBI's
+        // stream does, `report::serial::encoder::NullElement`.)
+        if crate::report::archive::pssm_unwritten(text, &request.pssm)
+            == Some(crate::report::archive::PssmGap::ReadAgain)
+        {
+            return Err(reader.refuse(
+                "-export_search_strategy with a PSSM whose author names (a member read into a delay buffer of another format) NCBI reads again with an error (NCBI BLAST+ writes part of the file and stops with a C++ exception)",
+            ));
+        }
+    }
     let search = PsiSearch {
         pssm: QueryPssm { rows },
         freq_ratios,
@@ -992,6 +1035,30 @@ pub(crate) fn psi_search_and_object_of(
         from_msa: false,
         query_other_coding: mol_other,
     };
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:233-262 (cited at
+    // `ncbi_environment::WriteVerification`)
+    // Under a `SERIAL_VERIFY_DATA_WRITE` that turns the check of what is written off, NCBI leaves
+    // a list element stated as NULL out of the PSSM where it writes it, and throws there by
+    // default (`report::serial::encoder::NullElement`, which LOSAT reproduces). LOSAT does not
+    // write the PSSM without the element: it refuses such a run here, before any output, and only
+    // where the run writes the PSSM (`PsiSearch::writes_pssm_as_read`; tblastn's archive holds no
+    // PSSM, `tblastn::in_pssm`); the other runs are NCBI's with the setting too (NCBI BLAST+
+    // 2.17.0, probe D3c-3c review `probeF`: the strategy's request, `-out_pssm` and the archive
+    // change, the reports of a run without them do not).
+    if let Some(verification) = reader.write_verification.filter(|setting| setting.off()) {
+        let archive = reader.program == PssmReader::PSIBLAST.program
+            && reader.archive.is_some_and(|handle| {
+                handle.encoding() != crate::report::archive::ArchiveEncoding::Nothing
+            });
+        if search.writes_pssm_as_read(reader.strategy, reader.database, reader.out_pssm, archive)
+            && crate::report::archive::pssm_holds_null_element(&pssm)
+        {
+            return Err(reader.refuse(format!(
+                "{}, which makes NCBI BLAST+ leave out an element stated as NULL of the -in_pssm PSSM where the run writes it (-export_search_strategy, -out_pssm or -outfmt 11),",
+                verification.variable()
+            )));
+        }
+    }
     // The title's refusals (above), for a run whose reports NCBI writes (line RG F1b-2, review 4
     // R5-6: with `-export_search_strategy -subject`, an invalid PSSM or the PSSM engine's error, NCBI
     // writes the prolog and its error whatever the title; so it does when its object manager's

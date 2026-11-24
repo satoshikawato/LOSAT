@@ -6,8 +6,8 @@ The companion of `asn_spec_gen.py` (a maintainer tool; LOSAT's build runs neithe
      writes from the same NCBI source;
   2. every SEQUENCE and CHOICE of the table, named or anonymous, against its
      `BEGIN_NAMED_*_INFO` block in NCBI's generated `*_.cpp`: the member or variant names in
-     order, the `->SetOptional()` and `->SetDefault(` marks, the delayed member
-     (`->SetDelayBuffer(`), and the set flag of each SEQUENCE member (`->SetSetFlag(`);
+     order, the `->SetOptional()` and `->SetDefault(` marks, and the delayed member
+     (`->SetDelayBuffer(`);
   3. every value list (ENUMERATED and INTEGER with named values) against its
      `BEGIN_NAMED_ENUM_*INFO` block: the names and numbers in order, and whether it is an INTEGER;
   4. the C++ storage of every INTEGER member and list element against the `typedef` of the
@@ -22,7 +22,13 @@ The companion of `asn_spec_gen.py` (a maintainer tool; LOSAT's build runs neithe
   7. no type that a delayed member reaches is a named alias or a named SEQUENCE OF / SET OF:
      NCBI's skip of a delayed value pushes an `eFrameNamed` frame for them (`SkipNamedType`,
      objistr.cpp:1302-1312), which the typed reader does not (it reads, and skips, the
-     member's value with the frames of its class, choice and list types only).
+     member's value with the frames of its class, choice and list types only);
+  8. the REF mark of every SEQUENCE member against its macro (`ADD_NAMED_REF_MEMBER`, a member
+     held by `CRef<>`, which has no `SetSetFlag`; every other member has one), and the `refs` mark
+     of every SEQUENCE OF / SET OF (a member's anonymous list, a named list's implicit class)
+     against `STL_CRef` in its macro: the readers read NCBI's pointer forms (`NULL`, `@n`,
+     `:Type`) where these `CRef<>`s are empty, and add `error while reading` for a member with a
+     set flag (`ReadWithSetFlagMember`).
 
 Usage:
   asn_spec_check.py <NCBI c++ source dir> [--table <table.rs>]
@@ -241,7 +247,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     objects = args.source / "src" / "objects"
     include = args.source / "include" / "objects"
     classes, enums, aliases = blocks_by_key(objects)
-    checked = {"classes": 0, "lists": 0, "storage": 0, "kinds": 0}
+    checked = {"classes": 0, "lists": 0, "storage": 0, "kinds": 0, "refs": 0}
 
     def owner_of(entry_path: str) -> str:
         return entry_path.split(".", 1)[0]
@@ -261,16 +267,13 @@ def main(argv: Optional[list[str]] = None) -> int:
                 if names != want:
                     continue
                 marks: list[str] = []
-                for (spec, ty_index, delayed), ln in zip(e.members, lines):
+                for (spec, _, delayed), ln in zip(e.members, lines):
                     if e.kind == "Sequence":
                         optional = "->SetOptional()" in ln or "->SetDefault(" in ln
                         if (spec.optional or spec.default is not None) != optional:
                             marks.append(f"{spec.name}: OPTIONAL/DEFAULT")
                         if (spec.default is not None) != ("->SetDefault(" in ln):
                             marks.append(f"{spec.name}: DEFAULT")
-                        set_flag = gen.has_set_flag(table, e, spec.name, ty_index)
-                        if set_flag != ("->SetSetFlag(" in ln):
-                            marks.append(f"{spec.name}: set flag")
                     if delayed != ("->SetDelayBuffer(" in ln):
                         marks.append(f"{spec.name}: delayed")
                 if "SetRandomOrder(true)" in body:
@@ -297,6 +300,21 @@ def main(argv: Optional[list[str]] = None) -> int:
                     if not kind_agrees(mine, ncbi):
                         problems.append(f"{key}.{spec.name}: value kind {mine}, NCBI {ncbi}")
                     checked["kinds"] += 1
+                    # 8. CRef<> members (no set flag) and CRef<> list elements.
+                    if e.kind == "Sequence":
+                        ref = gen.is_ref_member(table, e, spec.name, ty)
+                        if ref != (macro == "ADD_NAMED_REF_MEMBER"):
+                            problems.append(f"{key}.{spec.name}: REF {ref}, NCBI {macro}")
+                        if ref == ("SetSetFlag(" in ln):
+                            problems.append(f"{key}.{spec.name}: REF {ref}, set flag "
+                                            f"{'SetSetFlag(' in ln}")
+                        checked["refs"] += 1
+                    target = table.entries[ty]
+                    if target.kind == "List" and not target.name:
+                        refs = gen.is_class(table, target.element)
+                        if refs != ("STL_CRef" in rest):
+                            problems.append(f"{key}.{spec.name}: list refs {refs}, NCBI {rest.strip()}")
+                        checked["refs"] += 1
                 found = True
                 break
             if not found:
@@ -320,6 +338,18 @@ def main(argv: Optional[list[str]] = None) -> int:
                         if got and got != {element.storage}:
                             problems.append(f"{key}.{spec.name}.E: storage {element.storage}, NCBI {sorted(cxx)}")
                         checked["storage"] += 1 if got else 0
+        elif e.kind == "List" and e.name:
+            # 8. A named list (NCBI's implicit class): its one member's elements.
+            bodies = classes.get(e.name, [])
+            lines = [ln for body in bodies for ln in body.split("\n")
+                     if re.search(r'ADD_NAMED_[A-Z_]*MEMBER\("",', ln)]
+            if len(lines) != 1:
+                problems.append(f"{key}: no implicit class block with one member")
+            else:
+                refs = gen.is_class(table, e.element)
+                if refs != ("STL_CRef" in lines[0]):
+                    problems.append(f"{key}: list refs {refs}, NCBI {lines[0].strip()}")
+                checked["refs"] += 1
         elif e.kind == "Integer" and e.name:
             # 4. The storage of a named INTEGER (`PubMedId ::= INTEGER`), from its alias info.
             kind, arg = aliases.get("C" + e.name.replace("-", "_"), ("", ""))
@@ -373,7 +403,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(problem)
     print(f"{checked['classes']} SEQUENCE/CHOICE types, {checked['lists']} value lists, "
           f"{checked['storage']} INTEGER storages, {checked['kinds']} member value kinds, "
-          f"{checked['delayed']} types under delayed members checked: "
+          f"{checked['delayed']} types under delayed members, {checked['refs']} CRef marks checked: "
           f"{len(problems)} differences")
     return 1 if problems else 0
 

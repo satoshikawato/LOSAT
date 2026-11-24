@@ -204,9 +204,9 @@ fn the_posts_of_a_hit_follow_the_report_up_to_the_place_of_its_load() {
     let mut sink = log.clone();
     report.write_all(b"{0}\n").unwrap();
     let mut posts = HitPosts::new(false);
-    posts.hit(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
-    posts.hit(2, 2, |_| Ok(())).unwrap();
-    posts.hit(2, 3, |texts| texts.write_all(b"T3\n")).unwrap();
+    posts.mark(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
+    posts.mark(2, 2, |_| Ok(())).unwrap();
+    posts.mark(2, 3, |texts| texts.write_all(b"T3\n")).unwrap();
     posts
         .write(b",\n{1}\n", &mut report, &mut sink, |_, _, _| Ok(()))
         .unwrap();
@@ -220,8 +220,8 @@ fn the_posts_of_a_hit_follow_the_report_up_to_the_place_of_its_load() {
     let (mut report, mut sink) = (log.clone(), log.clone());
     let mut warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
     let mut posts = HitPosts::new(warnings.reads_with_texts(0));
-    posts.hit(0, 5, |texts| texts.write_all(b"P5\n")).unwrap();
-    posts.hit(4, 6, |texts| texts.write_all(b"P6\n")).unwrap();
+    posts.mark(0, 5, |texts| texts.write_all(b"P5\n")).unwrap();
+    posts.mark(4, 6, |texts| texts.write_all(b"P6\n")).unwrap();
     write_hit_posts(b"<H5><H6>", &posts, 0, &mut report, Some(&mut warnings)).unwrap();
     drop(warnings);
     let text = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
@@ -235,7 +235,7 @@ fn the_posts_of_a_hit_follow_the_report_up_to_the_place_of_its_load() {
         "{lost}"
     );
     let mut marks = HitPosts::new(true);
-    marks.hit(0, 5, |_| Ok(())).unwrap();
+    marks.mark(0, 5, |_| Ok(())).unwrap();
     let mut alone = Vec::new();
     write_hit_posts(b"<H5><H6>", &marks, 0, &mut alone, None).unwrap();
     assert_eq!(alone, b"<H5><H6>");
@@ -256,7 +256,7 @@ fn the_post_of_a_caught_exception_follows_the_loads_before_it() {
     let (mut report, mut sink) = (log.clone(), log.clone());
     let mut warnings = QueryWarnings::of_posts(&[], None, &mut sink).with_subject_reads(&reads);
     let mut posts = HitPosts::new(warnings.reads_with_texts(0));
-    posts.hit(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
+    posts.mark(2, 1, |texts| texts.write_all(b"T1\n")).unwrap();
     posts.document(crate::report::blast_xml::DocumentPosts {
         cut: true,
         ..Default::default()
@@ -290,6 +290,7 @@ fn loaded(
             lead: 0,
             opening,
             scope_utf8: false,
+            cut_refusal: None,
         }),
     }
 }
@@ -352,7 +353,7 @@ fn a_cut_report_leaves_its_texts_to_the_next_load_that_asks() {
     load.opening = 0;
     assert_eq!(load.place(b"X\n".to_vec()), b"X\nE0\n");
     assert_eq!(load.opening, 0);
-    load.left_out(b"X\nE0\n");
+    load.left_out(b"X\nE0\n").unwrap();
     let next = loaded(&texts, 8, b"", (0, true, 0));
     assert_eq!(next.placed(), b"X\nE0\n");
     texts.clear();
@@ -481,7 +482,7 @@ fn the_texts_left_before_a_batch_are_those_the_writers_leave() {
     let model = std::sync::Arc::new(LoadTexts::default());
     let (reads, prefetch) = shapes(&model);
     let prefetched = |query: usize| (query == 1).then_some(&prefetch);
-    let left = LoadTexts::left_before(&reads, &|query| query == 0, &prefetched, 3);
+    let left = LoadTexts::left_before(&reads, &|query| query == 0, &prefetched, 3).unwrap();
     assert_eq!(pending(&left), written);
     assert!(pending(&model) == (Vec::new(), Vec::new()) && !left.is_empty());
     // The stop's load of volume 0 that looks the taxid up writes volume 0's error.
@@ -490,7 +491,7 @@ fn the_texts_left_before_a_batch_are_those_the_writers_leave() {
     assert_eq!(stop.text, b"E0\n");
     assert!(left.is_empty());
     // Up to query 1 only (a stop in query 1's batch): its prefetch is that batch's own.
-    let left = LoadTexts::left_before(&reads, &|query| query == 0, &prefetched, 1);
+    let left = LoadTexts::left_before(&reads, &|query| query == 0, &prefetched, 1).unwrap();
     assert_eq!(
         pending(&left),
         (
@@ -499,7 +500,9 @@ fn the_texts_left_before_a_batch_are_those_the_writers_leave() {
         )
     );
     // No cut: nothing left.
-    assert!(LoadTexts::left_before(&reads, &|_| false, &prefetched, 3).is_empty());
+    assert!(LoadTexts::left_before(&reads, &|_| false, &prefetched, 3)
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -619,4 +622,23 @@ fn a_html_post_flushes_the_report_first_where_it_goes_to_the_standard_error() {
         .write_all(b"d")
         .unwrap();
     assert_eq!((apart, diagnostics), (b"a".to_vec(), b"d".to_vec()));
+}
+
+/// A load that LOSAT's model followed through the slot of the taxonomy cache on a database whose
+/// volume holds the offset error's taxid and another of its slot (`ReadLoad::cut_refusal`) is
+/// LOSAT's refusal where NCBI's XML stream cuts it out: the later loads' texts would follow another
+/// slot. Nothing is left in the ledger.
+#[test]
+fn a_cut_of_a_load_of_the_cache_slot_is_refused() {
+    let texts = std::sync::Arc::new(LoadTexts::default());
+    let mut read = loaded(&texts, 0, b"E0\n", (0, true, 0));
+    read.load.as_mut().unwrap().cut_refusal = Some(std::sync::Arc::from("refused"));
+    let reads = vec![vec![read]];
+    let mut cursor = ReadCursor::in_ledger(&reads, &texts);
+    let error = cursor.cut(0, &mut Vec::new(), &mut Vec::new()).unwrap_err();
+    assert_eq!(error.to_string(), "refused");
+    // LOSAT's refusal, not a failed write (review 1 of item O4b2-5, H2).
+    assert_eq!(CutRefusal::of(&error), Some("refused"));
+    assert_eq!(CutRefusal::of(&io::Error::other("refused")), None);
+    assert!(texts.is_empty());
 }

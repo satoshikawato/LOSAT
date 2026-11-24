@@ -395,6 +395,65 @@ fn the_objects_of_a_stream_end_as_ncbis_did() {
     }
 }
 
+/// NCBI's pointer forms in an archive, one element added to `blastn_subject_mixnh.asn` (NCBI
+/// 2.17.0's blast_formatter, outfmt 8, line RG item F3, agent C8, 2026-11-24): a value of another
+/// class where an element of the algorithm options, the alignments or the messages belongs
+/// (`:Object-id`, a class NCBI does not have, `:Seq-entry`) and `@0` end with "Invalid input
+/// format for BLAST Archive." and exit status 1 before anything is formatted, the reader's
+/// `CSerialException` (`Names::ARCHIVE`); a value stated with its own class is read as without
+/// it (NCBI's output equal to the archive's); an element stated as `NULL` there is NCBI's
+/// null-pointer report with the addresses of its stack, exit status 255: refused
+/// (`Stop::NullElement`), before the messages are posted.
+#[test]
+fn the_pointer_forms_of_an_archive_end_as_ncbis_did() {
+    let text = String::from_utf8(fixture("blastn_subject_mixnh.asn")).unwrap();
+    let (options, alignments, end) = (
+        "      algorithm-options {\n        {\n",
+        "    alignments {\n      {\n",
+        "  }\n}\n",
+    );
+    assert!(text.contains(options) && text.contains(alignments) && text.ends_with(end));
+    let option = |element: &str| {
+        let added = format!("      algorithm-options {{\n        {element},\n        {{\n");
+        text.replacen(options, &added, 1)
+    };
+    let alignment = |element: &str| {
+        let added = format!("    alignments {{\n      {element},\n      {{\n");
+        text.replacen(alignments, &added, 1)
+    };
+    let message = |element: &str| {
+        let body = &text[..text.len() - end.len()];
+        format!("{body}  }},\n  messages {{\n    {element}\n  }}\n}}\n")
+    };
+    let entry = ":Seq-entry seq { id { local str \"x\" }, inst { repr raw, mol na, length 1 } }";
+    for (name, archive) in [
+        ("option of another class", option(":Object-id id 5")),
+        ("option of no class", option(":No-such-type { }")),
+        ("option @0", option("@0")),
+        ("alignment of another class", alignment(":Object-id id 5")),
+        ("alignment as a Seq-entry", alignment(entry)),
+        ("message of another class", message(":Object-id id 5")),
+    ] {
+        assert_eq!(outcome(archive.as_bytes()), Ok((0, End::Serial)), "{name}");
+    }
+    let own = option(":Blast4-parameter { name \"MaskAtHash\", value boolean TRUE }");
+    assert_eq!(outcome(own.as_bytes()), Ok((1, End::Data)));
+    for (name, archive) in [
+        ("option", option("NULL")),
+        ("alignment", alignment("NULL")),
+        ("message", message("NULL")),
+    ] {
+        let (archives, error) = archives(archive.as_bytes());
+        assert_eq!(error, None, "{name}");
+        assert_eq!(archives.len(), 1, "{name}");
+        assert!(archives[0].messages.is_empty(), "{name}");
+        assert!(
+            matches!(archives[0].search, Err(Stop::NullElement)),
+            "{name}"
+        );
+    }
+}
+
 /// `GetSeqAlignSets`: the alignments of each query, cut where the id of the first row changes;
 /// a query without alignments before the run of the next one gets none (here the queries
 /// without hits, and NCBI's own form when a query between two others has none).
@@ -1294,7 +1353,7 @@ fn a_strategy_request_needs_no_ident() {
     assert_eq!(&request.program[..], &b"blastn"[..]);
     let error = "Blast4-request ::= { body get-request-info { request-id \"Error\" } }";
     match Request::from_strategy(value(named::BLAST4_REQUEST, error)) {
-        Err(e) => assert_eq!(e.get_msg(), b"No body in CBlast4_request"),
+        Err(Stop::Exception(e)) => assert_eq!(e.get_msg(), b"No body in CBlast4_request"),
         other => panic!("{other:?}"),
     }
 }

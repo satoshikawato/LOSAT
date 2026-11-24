@@ -42,9 +42,9 @@ const STRATEGY_FILES: &[&str] = &["export_search_strategy"];
 /// search strategy, `STRATEGY_FILES`, line RG item F1b-1; the same for every program): they are not in an argv that
 /// `validate` accepts, and `describe` leaves them out. psiblast's PSSM files (`-out_pssm`,
 /// `-out_ascii_pssm`, `-save_pssm_after_last_round`, `-save_each_pssm`) are written where the
-/// command line writes them (series Q item Q6a). The searches of records of LOSAT Web take none
-/// of them either, and tblastn's `-in_pssm` neither until line PS's PSW1
-/// (`web_adapter::records_refused_options`).
+/// command line writes them (series Q item Q6a). The searches of records of LOSAT Web take the
+/// search strategy file, through the run's files (line RG item F1w, `web_adapter::give_strategy`),
+/// and refuse tblastn's `-in_pssm` until line PS's PSW1 (`web_adapter::records_refused_options`).
 pub(crate) fn file_options(_program: Program) -> &'static [&'static str] {
     STRATEGY_FILES
 }

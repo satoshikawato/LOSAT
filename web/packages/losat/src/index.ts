@@ -42,7 +42,7 @@ export {
 export { inspectReactor, type MemoryLimits, type ReactorArtifact, type ReactorKind } from './infra/reactor/artifact.js';
 export { engineBuildName, type EngineAssets, type ReactorAsset } from './infra/reactor/assets.js';
 export { ReactorInputChecker } from './infra/reactor/checker.js';
-export { reactorControl, toProgramDescription, type EngineControl } from './infra/reactor/control.js';
+export { reactorControl, toProgramDescription, type EngineControl, type ToolControl } from './infra/reactor/control.js';
 export { ReactorInflater } from './infra/reactor/inflater.js';
 export { compileReactor, instantiateSerial, loadReactor, type CompiledReactor, type ReactorInstance } from './infra/reactor/instance.js';
 export { fileReaderSync, RunDirectory, TABLE_BYTES, type BlobReader } from './infra/reactor/run-directory.js';

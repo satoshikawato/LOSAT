@@ -95,7 +95,7 @@ pub(super) fn bx_two_hit<S: BxScoring>(
     scoring: S,
     query: &[u8],
     subject: &[u8],
-    s_left_off: usize,
+    s_left_off: i32,
     s_right_off: usize,
     q_right_off: usize,
     dropoff: i32,
@@ -184,7 +184,7 @@ pub struct Diagonals {
     window: i32,
     /// The offset of a table with a negative `window` (a search strategy's: the command line takes
     /// `-window_size` from 0), NCBI's `Int4` widened to 64 bits where its sum would overflow
-    /// (`finish_subject_wide`); it is `window` as a new table's. The loops of `window >= 0` never
+    /// (`finish_chunk_wide`); it is `window` as a new table's. The loops of `window >= 0` never
     /// read it.
     wide_offset: i64,
     /// `-db_soft_mask` and `-db_hard_mask`: the worker's reader of the stored masks
@@ -250,14 +250,23 @@ impl Diagonals {
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
+    /// [`Diagonals::finish_chunk`] after a subject of `length` letters.
     pub fn finish_subject(&mut self, length: usize) -> Result<()> {
+        self.finish_chunk(i32::try_from(length)?)
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+    /// `Blast_ExtendWordExit` after a subject, or a hard chunk of a `-db_hard_mask` sequence
+    /// (`search_db_masked.rs`), whose length is NCBI's `Int4` (`core::subject_split::HardChunk::
+    /// length`: negative between overlapping masks): the table cleared where the offset reached
+    /// INT4_MAX / 4, else the offset moved by the length and the window. The one owner of that
+    /// update.
+    pub(crate) fn finish_chunk(&mut self, length: i32) -> Result<()> {
         if self.offset >= i32::MAX / 4 {
-            self.offset = self.window;
-            self.entries.fill(DiagStruct::clear(self.window));
+            self.clear();
         } else {
             self.offset = self
                 .offset
-                .checked_add(i32::try_from(length)?)
+                .checked_add(length)
                 .and_then(|v| v.checked_add(self.window))
                 .ok_or_else(|| anyhow::anyhow!("BLASTX diagonal offset exceeds Int4"))?;
         }
@@ -266,28 +275,81 @@ impl Diagonals {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
-    /// [`Self::finish_subject`] of a table with a negative window (`word_finder_over`, the one
-    /// route of those searches). The offset starts at the window and moves by the subject's length
-    /// plus the window, which is less than the length: it falls over a run of short subjects, and
-    /// NCBI's `Int4` sum overflows (undefined) for a window near `INT_MIN` or after enough of
-    /// them; here it is a 64-bit one, and the entries are cleared at NCBI's threshold. `offset`
-    /// follows as the `Int4` that NCBI's sum gives where it is defined.
-    fn finish_subject_wide(&mut self, length: usize) {
+    /// [`Self::finish_chunk`] of a table with a negative window (`word_finder_over`, the one
+    /// route of those searches, and a `-db_hard_mask` chunk that holds no word,
+    /// `search_db_masked.rs`), after a subject or chunk of `length` letters (NCBI's `Int4`,
+    /// negative for a chunk between overlapping masks). The offset starts at the window and moves
+    /// by the length plus the window, which is less than the length: it falls over a run of short
+    /// subjects, and NCBI's `Int4` sum overflows (undefined) for a window near `INT_MIN` or after
+    /// enough of them; here it is a 64-bit one, and the entries are cleared at NCBI's threshold
+    /// (`DiagStruct::clear`: `-window` truncated to 31 bits, 0 for `INT_MIN`). `offset` follows as
+    /// the `Int4` that NCBI's sum gives where it is defined.
+    pub(crate) fn finish_chunk_wide(&mut self, length: i64) {
         if self.wide_offset >= i64::from(i32::MAX / 4) {
             self.wide_offset = i64::from(self.window);
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:101-103
-            // The entry's `last_hit` is `-window`, truncated to 31 bits (0 for `INT_MIN`).
-            let mut cleared = DiagStruct::default();
-            cleared.set_flag(0);
-            cleared.set_last_hit(self.window.wrapping_neg());
-            self.entries.fill(cleared);
+            self.entries.fill(DiagStruct::clear(self.window));
         } else {
             self.wide_offset = self
                 .wide_offset
-                .saturating_add(i64::try_from(length).unwrap_or(i64::MAX))
+                .saturating_add(length)
                 .saturating_add(i64::from(self.window));
         }
         self.offset = self.wide_offset as i32;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
+    /// Clears the table and sets the offset to the window (`s_BlastDiagClear`): where the offset
+    /// reached INT4_MAX / 4 (`finish_chunk`), and in a `-db_hard_mask` search between two
+    /// sequences where moving the offset to keep them apart would take it there
+    /// (`search_db_masked.rs`, `common::hard_chunk_walk::DiagonalWalk::start`,
+    /// `DiagonalWalk::after`).
+    pub(crate) fn clear(&mut self) {
+        self.offset = self.window;
+        self.entries.fill(DiagStruct::clear(self.window));
+    }
+    /// The diagonal offset of the next subject.
+    pub(crate) fn offset(&self) -> i32 {
+        self.offset
+    }
+    /// The entries, the mask of a diagonal's index and the diagonal offset, which the two-hit test
+    /// of a hard chunk's one word reads (`common::hard_chunk_scan::OneWord::test`).
+    pub(crate) fn table(&mut self) -> (&mut [DiagStruct], i32, i32) {
+        let (mask, offset) = (self.entries.len() as i32 - 1, self.offset);
+        (self.entries.as_mut_slice(), mask, offset)
+    }
+}
+
+// The search with `-db_hard_mask` moves the table between its sequences
+// (`common::hard_chunk_walk::TableStart::apply`, `TableEnd::apply`; `search_db_masked.rs`).
+impl crate::algorithm::common::hard_chunk_walk::HardTable for Diagonals {
+    type Error = anyhow::Error;
+
+    fn ncbi_table(
+        &mut self,
+        start: crate::algorithm::common::hard_chunk_walk::NcbiStart,
+        window: i32,
+    ) {
+        debug_assert_eq!(window, self.window);
+        self.offset = start.offset;
+        let entry = if start.cleared {
+            DiagStruct::clear(self.window)
+        } else {
+            DiagStruct::default()
+        };
+        self.entries.fill(entry);
+    }
+
+    fn clear_table(&mut self, window: i32) {
+        debug_assert_eq!(window, self.window);
+        self.clear();
+    }
+
+    fn move_offset(&mut self, by: i32) -> Result<()> {
+        self.offset = self
+            .offset
+            .checked_add(by)
+            .ok_or_else(|| anyhow::anyhow!("BLASTX diagonal offset exceeds Int4"))?;
+        Ok(())
     }
 }
 
@@ -986,7 +1048,7 @@ pub(super) fn word_finder_over<S: BxScoring>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:214-235
     // The one-hit word finder runs for every window up to 0: a negative one comes only from a
     // search strategy (the command line takes `-window_size` from 0), and its table is read and
-    // moved on in 64 bits (`Diagonals::finish_subject_wide`).
+    // moved on in 64 bits (`Diagonals::finish_chunk_wide`).
     let one_hit = options.window_size <= 0;
     let wide = options.window_size < 0;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:742
@@ -1059,15 +1121,21 @@ pub(super) fn word_finder_over<S: BxScoring>(
                 }
                 context = context_of(q);
                 let p = &parameters[context];
-                if q - diff < batch.contexts[context].offset as i32 {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-510, 566-573
+                // The scan's query offset is unsigned: the context test subtracts the distance in
+                // unsigned arithmetic, and a distance past the query's start (an entry of an
+                // earlier hard chunk of the sequence, series NP, M4b-3b) passes it.
+                if (q.wrapping_sub(diff) as u32) < batch.contexts[context].offset as u32 {
                     entry.set_last_hit(s.wrapping_add(diagonals.offset));
                     continue;
                 }
+                // The first hit's end is signed: negative where it lies before a hard chunk's
+                // start.
                 let Some(result) = bx_two_hit(
                     scoring,
                     query,
                     subject,
-                    (previous + word) as usize,
+                    previous + word,
                     s as usize,
                     q as usize,
                     p.word_xdrop,
@@ -1101,10 +1169,20 @@ pub(super) fn word_finder_over<S: BxScoring>(
     };
     scan(&mut each);
     if wide {
-        diagonals.finish_subject_wide(subject.len().saturating_sub(1));
+        diagonals
+            .finish_chunk_wide(i64::try_from(subject.len().saturating_sub(1)).unwrap_or(i64::MAX));
     } else {
         diagonals.finish_subject(subject.len().saturating_sub(1))?;
     }
+    sort_initial_hits(&mut hits);
+    Ok(hits)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234-235
+/// The order of a subject's initial hits for its gapped stage (by score, then the subject's start,
+/// the length and the query's start): the reference word finder's (`word_finder`) and a hard
+/// chunk's one word's (`search_db_masked.rs`).
+pub(crate) fn sort_initial_hits(hits: &mut [InitHsp]) {
     hits.sort_by(|a, b| {
         b.score
             .cmp(&a.score)
@@ -1112,7 +1190,6 @@ pub(super) fn word_finder_over<S: BxScoring>(
             .then(b.length.cmp(&a.length))
             .then(a.q_start.cmp(&b.q_start))
     });
-    Ok(hits)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107

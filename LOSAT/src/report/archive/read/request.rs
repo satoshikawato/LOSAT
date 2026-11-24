@@ -132,12 +132,15 @@ impl Request {
     /// The request of a search strategy (`-import_search_strategy`): `CImportStrategy` over the
     /// `Blast4-request` the program read. A body that is not a `queue-search` stops it (an error
     /// archive's `get-request-info` too); its import never asks for `ident` (NCBI's exports
-    /// write none; `E.*.ident` of line F2's probes: ignored).
-    pub(crate) fn from_strategy(request: Value) -> Result<Request, NcbiException> {
+    /// write none; `E.*.ident` of line F2's probes: ignored). A search with an element stated as
+    /// `NULL` in a list is refused (`Stop::NullElement`).
+    pub(crate) fn from_strategy(request: Value) -> Result<Request, Stop> {
         match Request::read(request, Reader::Strategy) {
             Ok(request) => Ok(request.expect("a strategy's request is a search")),
-            Err(Stop::Exception(exception)) => Err(exception),
-            Err(stop) => unreachable!("a strategy's import stops only with an exception: {stop:?}"),
+            Err(stop @ (Stop::Exception(_) | Stop::NullElement)) => Err(stop),
+            Err(stop) => unreachable!(
+                "a strategy's import stops only with an exception or a NULL element: {stop:?}"
+            ),
         }
     }
 
@@ -172,6 +175,9 @@ impl Request {
             });
         }
         let ty = named::BLAST4_QUEUE_SEARCH_REQUEST;
+        if V::new(ty, &search).holds_null_element() {
+            return Err(Stop::NullElement);
+        }
         let mut text = |name: &str| {
             let mut value = take(&mut search, ty, name).expect("a mandatory string");
             take_str(&mut value)

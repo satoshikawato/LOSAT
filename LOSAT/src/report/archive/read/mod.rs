@@ -70,6 +70,15 @@ pub(crate) enum Stop {
     /// NCBI's code reads memory its input does not decide (an element past the end of a
     /// `vector`, `front()` of an empty `list`): where.
     Undefined(&'static str),
+    /// An element stated as `NULL` in a list of `CRef<>`s (`V::holds_null_element`: the reader
+    /// keeps it as the empty reference NCBI's list holds), which NCBI's code dereferences where
+    /// it reads that list and LOSAT's does not: refused, as the import refuses the reader's posts
+    /// (`import::no_posts`). The archive refuses such an element in the stored messages and the
+    /// results too, before it makes anything of them (`Archive::from_value`): NCBI's
+    /// blast_formatter dereferences one in the messages, the algorithm options and the
+    /// alignments (`CCoreException::eNullPtr`, whose report prints its stack's addresses, exit
+    /// status 255: NCBI 2.17.0, line RG item F3, agent C8, 2026-11-24).
+    NullElement,
 }
 
 /// The severity of a stored message (`EDiagSev`, the `code` of a `Blast4-error`).
@@ -138,25 +147,37 @@ impl<R: Read> ArchiveReader<R> {
 impl Archive {
     /// The archive of a `Blast4-archive` value: its messages, then what `LoadFromArchive` makes
     /// of the request (none for an error archive, `IsErrMsgArchive`) and what blast_formatter
-    /// reads of the results.
+    /// reads of the results. An element stated as `NULL` in a list of the messages, of the
+    /// search or of the results of a search is refused where LOSAT would first read that list
+    /// (`Stop::NullElement`): the messages before any is posted, the search after the checks of
+    /// its body and `ident`, the results after the request.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1700-1705
     pub(crate) fn from_value(mut value: Value) -> Archive {
         let ty = named::BLAST4_ARCHIVE;
         let messages = value
             .member(member_index(ty, "messages"))
-            .map(|list| messages(V::new(member_type(ty, "messages"), list)))
-            .unwrap_or_default();
+            .map(|list| V::new(member_type(ty, "messages"), list));
+        if messages.is_some_and(|list| list.holds_null_element()) {
+            return Archive {
+                messages: Vec::new(),
+                search: Err(Stop::NullElement),
+            };
+        }
+        let messages = messages.map(messages_of).unwrap_or_default();
         let request = value
             .take_member(member_index(ty, "request"))
             .expect("the mandatory request");
         let results = value
             .take_member(member_index(ty, "results"))
             .expect("the mandatory results");
-        let search = Request::from_value(request).map(|request| {
-            request.map(|request| Search {
+        let search = Request::from_value(request).and_then(|request| match request {
+            Some(_) if V::new(member_type(ty, "results"), &results).holds_null_element() => {
+                Err(Stop::NullElement)
+            }
+            request => Ok(request.map(|request| Search {
                 request,
                 results: Results::from_value(results),
-            })
+            })),
         });
         Archive { messages, search }
     }
@@ -172,7 +193,7 @@ pub(crate) fn member_type(ty: u16, name: &str) -> u16 {
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/remote_blast.cpp:1667-1698
 // (`code` is mandatory, so it is always set; `EDiagSev` is Info 0, Warning 1, Error 2,
 // Critical 3, Fatal 4, Trace 5, corelib/ncbidiag.hpp.)
-fn messages(list: V<'_>) -> Vec<Message> {
+fn messages_of(list: V<'_>) -> Vec<Message> {
     list.items()
         .filter_map(|error| {
             let text = error.get("message")?.str();

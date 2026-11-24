@@ -27,6 +27,9 @@ enum Step<'a> {
     EndMember,
     EndSequence,
     Element,
+    /// An element of a list of `CRef<>`s of the type (the list's element type) that holds no
+    /// object (`Encoder::null_element`).
+    NullElement(u16),
     EndList,
     EndVariant,
     EndNamed,
@@ -58,6 +61,7 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
             Step::EndMember => enc.end_member(),
             Step::EndSequence => enc.end_sequence(),
             Step::Element => enc.element(),
+            Step::NullElement(element) => enc.null_element(type_info(element).name()),
             Step::EndList => enc.end_list(),
             Step::EndVariant => enc.end_variant(),
             Step::EndNamed => enc.end_named(),
@@ -67,17 +71,87 @@ fn write_until<E: Encoder>(enc: &mut E, ty: u16, value: &Value, stop: impl Fn(&E
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/member.cpp:1094-1103
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:919-933
 // NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
-/// A delayed member of the type `ty` read from ASN.1 binary (`bytes`): NCBI's stream of another
-/// format reads the buffer first (`CDelayBuffer::Update`, a binary stream over the bytes) and
-/// writes the value read. (The binary stream copies a buffer of its own format; no document that
-/// LOSAT writes in ASN.1 binary holds a value of a PSSM file.) The read posts a message or fails
-/// where NCBI's skip did not (a VisibleString byte replaced, a number past its storage), which
-/// NCBI reports while it writes: LOSAT does not write such a member (`Encoder::unread_delayed`).
-fn write_updated<E: Encoder>(enc: &mut E, ty: u16, bytes: &[u8]) {
-    match super::read::read_ber_value(bytes, ty) {
-        (Ok(value), posts) if posts.is_empty() => write_value(enc, ty, &value),
-        _ => enc.unread_delayed(),
+/// A delayed member of the type `ty` that the reader kept as the `bytes` of `encoding`
+/// (`Value::Delayed`): a stream of that format copies them (`WriteClassMember` of the buffer,
+/// `Encoder::data_format`, `Encoder::delayed`); a stream of another format reads them first
+/// (`CDelayBuffer::Update`: `read::read_delayed`, a stream of their format under the frames of
+/// the member) and writes the value read. That read posts where NCBI's skip did not: a
+/// VisibleString byte replaced by `#` (803.7), which NCBI posts before it writes the member
+/// (`Encoder::delayed_posts`), then writes the `#`. A read that fails (a number past its
+/// storage: NCBI's exception from inside its writer, after the bytes it had written) or posts
+/// another message is not written (`Encoder::unread_delayed`).
+fn write_delayed<E: Encoder>(enc: &mut E, ty: u16, encoding: Encoding, bytes: &[u8]) {
+    if enc.data_format() == Some(encoding) {
+        enc.delayed(bytes);
+        return;
+    }
+    let (class, member) = super::delayed_member(ty);
+    let (value, posts) = super::read::read_delayed(encoding, bytes, class, member);
+    let Ok(value) = value else {
+        enc.unread_delayed();
+        return;
+    };
+    if !posts.is_empty() {
+        let replaced: Option<Vec<_>> = posts
+            .into_iter()
+            .map(|post| match post {
+                super::read::Post::BadChar(replaced) => Some(replaced),
+                _ => None,
+            })
+            .collect();
+        let Some(replaced) = replaced else {
+            enc.unread_delayed();
+            return;
+        };
+        enc.delayed_posts(&replaced);
+    }
+    write_value(enc, ty, &value);
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:1094-1103
+// NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
+/// What a write of `value`, a value of the type `ty`, by a stream of the format `written` leaves
+/// of it: NCBI's writer reads each delay buffer of another format into the object
+/// (`CDelayBuffer::Update` parses it in place, `write_delayed`), so every later write of the
+/// object, in any format, writes the values read; a buffer of `written`'s format stays, which a
+/// later stream of that format copies. A buffer whose read fails stays too (NCBI's writer stops
+/// with its exception there, before any later write). What the read posts is the first write's
+/// (`Encoder::delayed_posts`), not kept. The values read are walked too: a delayed member inside
+/// them is a buffer of their format.
+pub(crate) fn update_delayed(ty: u16, value: &mut Value, written: Encoding) {
+    let mut todo = vec![(ty, value)];
+    while let Some((ty, value)) = todo.pop() {
+        if let Value::Delayed { encoding, bytes } = &*value {
+            if *encoding == written {
+                continue;
+            }
+            let (class, member) = super::delayed_member(ty);
+            let (read, _) = super::read::read_delayed(*encoding, bytes, class, member);
+            let Ok(read) = read else {
+                continue;
+            };
+            *value = read;
+            todo.push((ty, value));
+            continue;
+        }
+        match (&type_info(ty).kind, value) {
+            (Kind::Alias(target), value) => todo.push((*target, value)),
+            (Kind::Sequence(span), Value::Sequence(set)) => {
+                let members = span.members();
+                for (position, value) in set.iter_mut() {
+                    todo.push((members[usize::from(*position)].ty, value));
+                }
+            }
+            (Kind::Choice(span), Value::Choice(index, value)) => {
+                todo.push((span.members()[usize::from(*index)].ty, &mut **value));
+            }
+            (Kind::List { element, .. }, Value::List(items)) => {
+                todo.extend(items.iter_mut().map(|item| (*element, item)));
+            }
+            _ => {}
+        }
     }
 }
 
@@ -136,10 +210,7 @@ fn open<'a, E: Encoder>(enc: &mut E, ty: u16, value: &'a Value, todo: &mut Vec<S
     // `AsnTextEncoder::delayed`): the delay buffer is written in place of the member's value,
     // without its type.
     if let Value::Delayed { encoding, bytes } = value {
-        match encoding {
-            Encoding::Text => enc.delayed(bytes),
-            Encoding::Binary => write_updated(enc, ty, bytes),
-        }
+        write_delayed(enc, ty, *encoding, bytes);
         return;
     }
     // A named type that is not a SEQUENCE or a CHOICE (an alias, a SEQUENCE OF or SET OF, an
@@ -178,13 +249,13 @@ fn open<'a, E: Encoder>(enc: &mut E, ty: u16, value: &'a Value, todo: &mut Vec<S
             if named {
                 enc.begin_named(info.name());
             }
-            if let Kind::List { element, set } = kind {
+            if let Kind::List { element, set, refs } = kind {
                 enc.begin_list(*set);
                 if named {
                     todo.push(Step::EndNamed);
                 }
                 todo.push(Step::EndList);
-                write_elements(enc, *element, value, todo);
+                write_elements(enc, *element, *refs, value, todo);
                 return;
             }
             write_leaf(enc, kind, value);
@@ -195,17 +266,24 @@ fn open<'a, E: Encoder>(enc: &mut E, ty: u16, value: &'a Value, todo: &mut Vec<S
     }
 }
 
-/// The elements of a SEQUENCE OF or SET OF value of `element`s: the numbers of a list of INTEGER
-/// or REAL at once, the other values left to `todo`.
+/// The elements of a SEQUENCE OF or SET OF value of `element`s (of `CRef<>`s, `refs`): the
+/// numbers of a list of INTEGER or REAL at once, the other values left to `todo`. An element of
+/// `CRef<>`s that the reader kept empty (`Value::Null`) is NCBI's throw
+/// (`Encoder::null_element`).
 fn write_elements<'a, E: Encoder>(
     enc: &mut E,
     element: u16,
+    refs: bool,
     value: &'a Value,
     todo: &mut Vec<Step<'a>>,
 ) {
     match value {
         Value::List(items) => {
             for item in items.iter().rev() {
+                if refs && matches!(item, Value::Null) {
+                    todo.push(Step::NullElement(element));
+                    continue;
+                }
                 todo.push(Step::Value(element, item));
                 todo.push(Step::Element);
             }

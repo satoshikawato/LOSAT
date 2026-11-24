@@ -6,6 +6,7 @@
 //! `gnl|BL_ORD_ID|n` read without a file, and the answers of a database built without
 //! `-parse_seqids`.
 
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::io::{BufWriter, Write};
 
@@ -17,7 +18,7 @@ use crate::seqdb::isam::{seqdb_simplify_accession, SimplifyError};
 use crate::seqdb::lookup::{IdLookup, ID_OVERFLOWS};
 use crate::seqdb::tax_files::NO_ACCESSION_INFO;
 use crate::seqdb::taxdb::{SourceNames, TaxCache};
-use crate::seqdb::{MaskRanges, SeqDb, SeqDbError, SeqLocation, SeqType};
+use crate::seqdb::{MaskBlock, MaskRanges, SeqDb, SeqDbError, SeqLocation, SeqType};
 use crate::seqid::accguide::parse_flags::{ANY_LOCAL, DEFAULT, PARTIAL_OK, RAW_TEXT};
 use crate::seqid::label::{content, fasta};
 use crate::seqid::parse::seq_id_from_text;
@@ -120,6 +121,8 @@ pub(super) struct Source<'a> {
     taxdb: TaxdbRun,
     /// What `tax_info` looked up, as NCBI's volume keeps it (`seqdb::taxdb::TaxCache`).
     source_names: TaxCache,
+    /// The buffers of `masks`, kept from one sequence to the next (`SeqDb::mask_ranges_in`).
+    mask_block: RefCell<MaskBlock>,
 }
 
 impl<'a> Source<'a> {
@@ -130,6 +133,7 @@ impl<'a> Source<'a> {
             dbtype_protein,
             taxdb: TaxdbRun::sequential(),
             source_names: TaxCache::default(),
+            mask_block: RefCell::default(),
         }
     }
 
@@ -281,7 +285,11 @@ impl<'a> Source<'a> {
     /// `GetMaskData` with `oid` and `algo`: the stored ranges of the sequence, or the refusal of a
     /// volume that has masks but not this algorithm (line NP's M/DECISIONS 9).
     pub fn masks(&self, oid: u32, algo: i32) -> Result<Vec<(u32, u32)>, Stop> {
-        match self.db.mask_ranges_at(self.at(oid)?, algo)? {
+        let at = self.at(oid)?;
+        match self
+            .db
+            .mask_ranges_in(at, algo, &mut self.mask_block.borrow_mut())?
+        {
             MaskRanges::Ranges(ranges) => Ok(ranges),
             MaskRanges::AlgorithmNotInVolume { volume } => Err(Stop::refused(format!(
                 "filtering algorithm {algo} in {}, a volume of an alias or a list of names with \
@@ -496,13 +504,11 @@ impl Formatter {
 /// `CSeqDB::kOidNotFound` (seqdb.cpp:53).
 pub(super) const OID_NOT_FOUND: &str = "OID not found";
 
-// NCBI reference (598d8ae6): c++/include/corelib/ncbiobj.hpp:965-975
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1002-1013
-/// The exception of NCBI's `CRef` read of no object (`CObject::ThrowNullPointerException`), whose
+/// The exception of NCBI's `CRef` read of no object (`ncbi_exception::NULL_POINTER`), whose
 /// message `x_ProcessSearchRequest` posts: a read of the null set of a stored header of no bytes
 /// ([`Source::null_set`], `GetBioseq` of a target).
 pub(super) fn null_pointer() -> Stop {
-    Stop::Ncbi("Attempt to access NULL pointer.".to_string())
+    Stop::Ncbi(crate::ncbi_exception::NULL_POINTER.to_string())
 }
 
 /// `NStr::StringToNumeric<Int8>` of `text` with `fConvErr_NoThrow` and `errno` clear: the number of
@@ -795,11 +801,16 @@ fn init_search_request(
             .ok()
             .and_then(|id| i32::try_from(id).ok());
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2261-2267
+        // An unknown name is the remapper's error "Cannot find string algorithm id in algorithm
+        // map."; a database with GI masks gives the names table of its GI-mask reader instead
+        // (`MaskAlgorithms::id_of`).
         let id = match id {
             Some(id) => id,
-            None => source.db.mask_algorithms()?.id_of(value).ok_or_else(|| {
-                Stop::Ncbi("Cannot find string algorithm id in algorithm map.".to_string())
-            })?,
+            None => source
+                .db
+                .mask_algorithms()?
+                .id_of(value)
+                .map_err(Stop::Ncbi)?,
         };
         if !is_mask_algo_id_valid(source, id, diag)? {
             return Err(Stop::Ncbi(

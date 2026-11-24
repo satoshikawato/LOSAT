@@ -386,7 +386,7 @@ fn parse_tblastx_args(
     let mut args = tblastx::TblastxArgs {
         query,
         subject: Some(subject),
-        // A database search is not part of LOSAT Web yet (DB-7).
+        // The frozen web ABI v1 (plan TD-1) has no database search.
         db: None,
         // The Web ABI searches a subject, not a database: no taxid list (line DI-8).
         db_filter: Default::default(),
@@ -584,6 +584,7 @@ fn parse_blastp_args(
         app: blastp::args::BlastpApp::Blastp,
         taxdb_setting: None,
         matrix_search: None,
+        write_verification: None,
         inclusion_ethresh: None,
         gap_trigger: None,
         sum_stats: false,

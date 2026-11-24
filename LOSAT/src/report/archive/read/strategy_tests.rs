@@ -236,6 +236,52 @@ fn every_ncbi_strategy_file_builds_the_setters_it_records() {
     );
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:62-75
+/// An element stated as `NULL` in a list of the search (an algorithm option, a query's id, a
+/// descriptor) is read as NCBI's reader reads it, the empty reference of its list, and the request
+/// refuses it before the import reads any list (`Stop::NullElement`); a body other than a
+/// search keeps `CImportStrategy`'s exception, which comes first.
+#[test]
+fn a_null_element_of_a_strategy_list_is_refused() {
+    let text = std::fs::read(fixtures("strategy").join("blastp.db.batches.ss")).unwrap();
+    let text = String::from_utf8(text).unwrap();
+    let read = |text: &str| {
+        let (value, posts) = read_document(text.as_bytes(), named::BLAST4_REQUEST, Names::STRATEGY);
+        assert!(posts.is_empty(), "{posts:?}");
+        value.unwrap()
+    };
+    assert!(Request::from_strategy(read(&text)).is_ok());
+    for (at, null) in [
+        ("    algorithm-options {\n", "      NULL,\n"),
+        ("          id {\n", "            NULL,\n"),
+        ("          descr {\n", "            NULL,\n"),
+    ] {
+        assert!(text.contains(at), "{at}");
+        let crafted = text.replacen(at, &format!("{at}{null}"), 1);
+        let value = read(&crafted);
+        assert!(
+            V::new(named::BLAST4_REQUEST, &value).holds_null_element(),
+            "{at}"
+        );
+        let stop = Request::from_strategy(value).unwrap_err();
+        assert!(matches!(stop, super::Stop::NullElement), "{at}: {stop:?}");
+    }
+    let other = r#"Blast4-request ::= {
+  body get-sequences {
+    database { name "nr", type protein },
+    seq-ids { NULL, local str "x" }
+  }
+}
+"#;
+    let value = read(other);
+    assert!(V::new(named::BLAST4_REQUEST, &value).holds_null_element());
+    let stop = Request::from_strategy(value).unwrap_err();
+    let super::Stop::Exception(exception) = stop else {
+        panic!("{stop:?}");
+    };
+    assert_eq!(exception.get_msg(), b"No body in CBlast4_request");
+}
+
 /// The crafted files of survey section 2.2 (`tests/fixtures/strategy_crafted`, the files NCBI
 /// read): those NCBI's text reader refuses, those its builder refuses (NCBI's stderr less its
 /// warnings), and those it builds, with the value each crafted change sets.

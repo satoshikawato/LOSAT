@@ -27,13 +27,15 @@ use crate::report::blast_xml::{
     XmlQuery, XmlRun, XmlStats, XmlSubjects,
 };
 use crate::report::query_warnings::QueryWarnings;
-use crate::report::serial::seqalign::seqalign_evalue;
+use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue};
 
 /// What the BLASTN document needs besides the final hit lists.
 pub(crate) struct BlastnXml<'a> {
     pub run: XmlRun<'a>,
     /// The queries of this call and their searched lengths.
     pub queries: &'a [FastaRecord],
+    /// The records whose letters the rows read (`pairwise::QueryRecords`).
+    pub query_records: super::pairwise::QueryRecords<'a>,
     pub searched_lengths: &'a [usize],
     /// By query: the statistics (`XmlStats::NONE` for a query without a valid context).
     pub stats: Vec<XmlStats>,
@@ -166,7 +168,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                 let hit = XmlHit::of(subject, xml.subjects.length(s_idx));
                 // NCBI's messages about the taxonomy database: opening and the volume's lookup
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time.
-                posts.hit(sink.position(), lists[range.start].oid, |texts| {
+                posts.hit(sink.position(), &hit, lists[range.start].oid, |texts| {
                     if posting {
                         taxdb_printer.at_names(s_idx, subject, texts)
                     } else {
@@ -175,9 +177,18 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                 })?;
                 sink.hit(&hit, |hsps| {
                     for hsp in lists[range].iter().flat_map(|hsp_list| &hsp_list.hsps) {
+                        let identities = read_num_ident(hsp.num_ident as i64, None);
+                        if hsps.unaligned([XmlHsp::unaligned(
+                            hsp.raw_score,
+                            hsp.bit_score,
+                            seqalign_evalue(hsp.e_value),
+                            identities,
+                        )])? {
+                            continue;
+                        }
                         xml_rows_into(
                             hsp,
-                            xml.queries,
+                            xml.query_records,
                             xml.letters,
                             &mut query_row,
                             &mut subject_row,
@@ -196,9 +207,16 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                             hit_frame: if minus { -1 } else { 1 },
                             qrow: &query_row,
                             srow: &subject_row,
+                            // NCBI reference (598d8ae6):
+                            // c++/src/algo/blast/format/blastxml_format.cpp:225-235
+                            // (blastxml2_format.cpp:212-222 the same.) An HSP without an edit
+                            // script (`-ungapped`) is a Dense-diag: no gaps, one segment over
+                            // the row (`count_hsp` of no script), whatever `-` its query row
+                            // shows past the query's record (`pairwise::context_letters`).
                             ops: hsp.gap_info.as_deref(),
                             query_first: hsp.q_start as i32 - 1,
                             query_step: 1,
+                            alignment_identities: identities,
                         })?;
                     }
                     Ok(())

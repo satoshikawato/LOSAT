@@ -41,7 +41,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-line_length` | `80` | Letters per line in FASTA. |
 | `-target_only` | off | Write only the definition line of the entry you asked for. |
 | `-get_dups` | off | Also write sequences with duplicate accessions. |
-| `-mask_sequence_with` | none | Write masked letters in lower case, using the numeric id of a masking algorithm. |
+| `-mask_sequence_with` | none | Write masked letters in lower case, using the numeric id of a masking algorithm (or, on a database with GI-indexed masks, its name). |
 | `-tax_info` | off | Print the taxonomy information in the database. |
 | `-list` | none | List the databases in a directory. |
 | `-show_blastdb_search_path` | off | Print the directories searched for databases. |
@@ -70,7 +70,7 @@ For every option: `losat blastdbcmd -help`.
 | `%L`, `%C` | Common name; common names of the leaf nodes. |
 | `%B`, `%K` | BLAST name; super kingdom. |
 | `%e`, `%P` | Membership integer; PIG. |
-| `%m<id>` | Masking data of algorithm `<id>`, as `N-M` ranges separated by `;`, or `none`. |
+| `%m<id>` | Masking data of algorithm `<id>`, as `N-M` ranges separated by `;`, or `none`. A database built with `makeblastdb -gi_mask` has the ids 0, 1, ... of its GI-indexed masks. |
 
 The names (`%S`, `%L`, `%C`, `%N`, `%B`, `%K`) and `-tax_info` names need NCBI's taxonomy database files; without them LOSAT prints `N/A`, as NCBI does (see [BLAST databases](../databases.md)).
 

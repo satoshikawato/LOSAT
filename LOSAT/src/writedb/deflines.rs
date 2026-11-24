@@ -281,6 +281,13 @@ pub(crate) enum BioseqDeflinesError {
     /// (NCBI's serial error is not reproduced), or a string with bytes that NCBI's reader
     /// replaces by '#', reporting each.
     BinaryHeader(String),
+    /// A descriptor stated as `NULL` (`Seqdesc::Empty`, the empty `CRef<CSeqdesc>` of NCBI's
+    /// reader) that NCBI's loop over the descriptors dereferences (`x_GetBioseqBinaryHeader`
+    /// before the binary lines, `x_BuildDeflinesFromBioseq` without them, makeprofiledb's taxid
+    /// loop before the first `org`, `first_org_taxid`): `CObject::ThrowNullPointerException`'s
+    /// `CCoreException`, "Attempt to access NULL pointer." (makeprofiledb 2.17.0, probe D3c-3c
+    /// `probeB`).
+    NullDescriptor,
 }
 
 /// The definition lines of a Bioseq (`ExtractBioseqDeflines`), and whether they are its binary
@@ -301,11 +308,22 @@ pub(crate) struct BioseqDeflines {
 /// `CWriteDB::ExtractBioseqDeflines` with `parse_ids`, and `long_ids` and `scan` false, of a
 /// Bioseq with descriptors (`descr`) and the ids `ids`, without the serialization (the writer
 /// posts its diagnostics: `WriteDb::post_extracted_deflines`, for the lines that are not binary).
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:592-616
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1001-1012
+// A descriptor stated as NULL throws where a loop over the descriptors reaches it: the binary
+// lines' loop before it finds them (it ends there), then, without binary lines, the loop of
+// `x_BuildDeflinesFromBioseq` over all of them, which runs before the ids are looked at (its test
+// of the ids is always true), so a Bioseq without ids throws there too (makeprofiledb 2.17.0, row
+// NE27 of `tests/fixtures/makeprofiledb`).
 pub(crate) fn bioseq_deflines(
     ids: &[ParsedSeqId],
     descr: &[Seqdesc],
 ) -> Result<BioseqDeflines, BioseqDeflinesError> {
-    if let Some(header) = binary_header(descr) {
+    let header = binary_header(descr)?;
+    if header.is_none() && descr.contains(&Seqdesc::Empty) {
+        return Err(BioseqDeflinesError::NullDescriptor);
+    }
+    if let Some(header) = header {
         // The one decoder of `Blast-def-line-set` records (a volume's `.phr`).
         let set = crate::seqid::ber::decode_full_set(header)
             .map_err(|error| BioseqDeflinesError::BinaryHeader(error.to_string()))?;
@@ -329,7 +347,7 @@ pub(crate) fn bioseq_deflines(
         .rev()
         .find_map(|descriptor| match descriptor {
             Seqdesc::Title(title) => Some(title.clone()),
-            Seqdesc::Other(_) => None,
+            Seqdesc::Other(_) | Seqdesc::Empty => None,
         })
         .unwrap_or_default();
     let set = deflines_of_bioseq(ids.to_vec(), title, &descr_taxids(descr))
@@ -410,13 +428,21 @@ pub(crate) fn descr_taxids(descr: &[Seqdesc]) -> Vec<i32> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/Org_ref.cpp:71-90
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1417-1433
 /// `GetOrg().GetTaxId()` of the first `org` descriptor of `descr` (the first `taxon` tag whose tag
-/// is an `id`, 0 without one); `None` without an `org` descriptor.
-pub(crate) fn first_org_taxid(descr: &[Seqdesc]) -> Option<i32> {
-    let org = descr
-        .iter()
-        .find_map(|descriptor| seqdesc_variant(descriptor, "org"))?;
-    Some(org_taxids(org).next().unwrap_or(0))
+/// is an `id`, 0 without one); `None` without an `org` descriptor. makeprofiledb's loop
+/// dereferences each descriptor until that one: a descriptor stated as `NULL` before it is
+/// `NullDescriptor`.
+pub(crate) fn first_org_taxid(descr: &[Seqdesc]) -> Result<Option<i32>, BioseqDeflinesError> {
+    for descriptor in descr {
+        if matches!(descriptor, Seqdesc::Empty) {
+            return Err(BioseqDeflinesError::NullDescriptor);
+        }
+        if let Some(org) = seqdesc_variant(descriptor, "org") {
+            return Ok(Some(org_taxids(org).next().unwrap_or(0)));
+        }
+    }
+    Ok(None)
 }
 
 /// `kAsnDeflineObjLabel`.
@@ -425,11 +451,15 @@ const ASN_DEFLINE_OBJ_LABEL: &[u8] = b"ASN1_BlastDefLine";
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:441-489
 /// `x_GetBioseqBinaryHeader`: the binary definition lines of `descr`, the first octet string of
 /// the first user object of type `ASN1_BlastDefLine` whose first field has that label and octet
-/// strings (`oss`); `None` when that string is missing or empty.
-fn binary_header(descr: &[Seqdesc]) -> Option<&[u8]> {
+/// strings (`oss`); `None` when that string is missing or empty. A descriptor stated as `NULL`
+/// before that object (or anywhere without one) is `NullDescriptor`.
+fn binary_header(descr: &[Seqdesc]) -> Result<Option<&[u8]>, BioseqDeflinesError> {
     let field_data = members(named::USER_FIELD)[member_index(named::USER_FIELD, "data")].ty;
     let oss = member_index(field_data, "oss");
     for descriptor in descr {
+        if matches!(descriptor, Seqdesc::Empty) {
+            return Err(BioseqDeflinesError::NullDescriptor);
+        }
         let Some(object) = seqdesc_variant(descriptor, "user") else {
             continue;
         };
@@ -452,17 +482,17 @@ fn binary_header(descr: &[Seqdesc]) -> Option<&[u8]> {
             field.member(member_index(named::USER_FIELD, "data"))
         {
             if usize::from(*index) == oss {
-                return match data.as_ref() {
+                return Ok(match data.as_ref() {
                     Value::List(strings) => match strings.first() {
                         Some(Value::Octets(bytes)) if !bytes.is_empty() => Some(bytes),
                         _ => None,
                     },
                     _ => None,
-                };
+                });
             }
         }
     }
-    None
+    Ok(None)
 }
 
 #[cfg(test)]

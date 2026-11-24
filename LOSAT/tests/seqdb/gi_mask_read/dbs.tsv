@@ -1,0 +1,17 @@
+m01	alias	nucl.fa dust_nucl.asnb dust10_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	400	-mask_data	dust_nucl.asnb,dust10_nucl.asnb	-gi_mask	-gi_mask_name	m1,m2
+m10	-	nucl.fa dust_nucl.asnb dust10_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	400	-blastdb_version	4	-mask_data	dust_nucl.asnb,dust10_nucl.asnb	-gi_mask	-gi_mask_name	m1,m2
+m09	-	prot.fa seg_prot.asnb	-in	prot.fa	-dbtype	prot	-parse_seqids	-out	db	-title	pt	-max_file_sz	200	-mask_data	seg_prot.asnb	-gi_mask	-gi_mask_name	pm1
+m03	-	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	400	-blastdb_version	4	-gi_mask
+m06	-	nucl.fa conv_other.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	400	-blastdb_version	4	-mask_data	conv_other.asnb	-gi_mask	-gi_mask_name	oth
+m06n	-	nucl.fa conv_other.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	400	-blastdb_version	4	-mask_data	conv_other.asnb	-gi_mask
+m07	-	gimax.fa dust_gimax.asnb	-in	gimax.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-blastdb_version	4	-max_file_sz	100	-mask_data	dust_gimax.asnb	-gi_mask	-gi_mask_name	gx
+g01	-	dupgi.fa acc_dup.asnt	-in	dupgi.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-blastdb_version	4	-max_file_sz	200	-mask_data	acc_dup.asnt	-gi_mask	-gi_mask_name	ad
+g02	-	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	400	-blastdb_version	4	-mask_data	dust_nucl.asnb	-gi_mask	-gi_mask_name	{R}/g02/abs_gm
+d10	-	nucl.fa dust10_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-blastdb_version	4	-max_file_sz	10	-mask_data	dust10_nucl.asnb	-gi_mask	-gi_mask_name	m
+d20	-	nucl.fa dust10_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-blastdb_version	4	-max_file_sz	20	-mask_data	dust10_nucl.asnb	-gi_mask	-gi_mask_name	m
+sp	-	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-max_file_sz	400	-blastdb_version	4	-mask_data	dust_nucl.asnb	-gi_mask	-gi_mask_name	a b
+sv5	losat-sv	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-mask_data	dust_nucl.asnb	-gi_mask	-gi_mask_name	gm1
+sv4	losat-sv	nucl.fa dust_nucl.asnb	-in	nucl.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-blastdb_version	4	-mask_data	dust_nucl.asnb	-gi_mask	-gi_mask_name	gm1
+svp	losat-sv	prot.fa seg_prot.asnb	-in	prot.fa	-dbtype	prot	-parse_seqids	-out	db	-title	pt	-mask_data	seg_prot.asnb	-gi_mask	-gi_mask_name	pm1
+big	losat-sv	big.fa dust_big.asnb	-in	big.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-blastdb_version	4	-mask_data	dust_big.asnb	-gi_mask	-gi_mask_name	big
+wide	losat-sv	wide.fa wide.asnt	-in	wide.fa	-dbtype	nucl	-parse_seqids	-out	db	-title	t	-blastdb_version	4	-mask_data	wide.asnt	-gi_mask	-gi_mask_name	wd

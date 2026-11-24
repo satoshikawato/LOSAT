@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use super::bitmagic::{self, BitVector, Fail};
 use super::range::{Handle, HandleRangeMap, LiveHandles, Mode, Range};
 use super::view::V;
-use super::{Event, Indexer, Refusal, Stop};
+use super::{Event, Indexer, RefElement, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
 use crate::utils::lower_bound::lower_bound_by;
 
@@ -408,7 +408,7 @@ impl Indexer<'_> {
         };
         let mut sorted_max: u32 = 0;
         for column in table.field("columns").items() {
-            let column = Column(column);
+            let column = Column(column.deref()?);
             if column.field_name() == Some(b"Seq-table location") {
                 if info.table_loc.is_some() {
                     self.post(
@@ -568,7 +568,7 @@ impl Indexer<'_> {
     pub(super) fn index_table(&mut self, info: &TableInfo<'_>) -> Result<(), Stop> {
         if !info.is_feat {
             if let Some(loc) = info.table_loc {
-                let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles);
+                let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles)?;
                 self.map_location(&map, Event::TableLocation, loc)?;
                 self.handles.end_object();
             }
@@ -608,7 +608,7 @@ impl Indexer<'_> {
                     let Some(loc) = self.column_seq_loc(column, row)? else {
                         return Err(self.null_pointer());
                     };
-                    let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles);
+                    let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles)?;
                     self.map_location(&map, Event::Row, loc)?;
                     // `key.m_Handle` takes each handle of a non-empty range (mapped).
                     if map.map.iter().any(|(_, hr)| !hr.overlapping().is_empty()) {
@@ -804,11 +804,12 @@ impl Indexer<'_> {
                     ),
                 )));
             }
+            // An element stated as `NULL` is the row's empty reference, as a row without a value.
             if let Some(element) = usize::try_from(index)
                 .ok()
                 .and_then(|index| list.item(index))
             {
-                return Ok(Some(element));
+                return Ok((!element.is_null()).then_some(element));
             }
         }
         match column.default() {

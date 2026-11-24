@@ -216,8 +216,8 @@ fn translated_kappa_seg_bytes_match_ncbi_mask_calls() {
     assert_eq!(compared, 7);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1172-1208;
-// core/blast_kappa.c:1488-1552,1684-1704
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1181-1211;
+// core/blast_kappa.c:1474-1553,1684-1704
 #[test]
 fn translated_get_range_order_and_seg_match_ncbi_saved_calls() {
     fn decode(hex: &str) -> Vec<u8> {
@@ -440,8 +440,8 @@ fn translated_get_range_order_and_seg_match_ncbi_saved_calls() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1146,1172-1269;
-// core/blast_kappa.c:1475-1552,1896-1957
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1135-1138,1198-1211,1236-1270;
+// core/blast_kappa.c:1474-1553,1898-1950
 #[test]
 fn translated_redo_core_uses_ncbi_hard_seg_mode2_inputs() {
     fn trace_alignment(row: &str) -> Box<BlastCompoAlignment> {
@@ -771,7 +771,7 @@ fn test_blast_redo_one_match_keeps_distinct_alignments_per_query_index() {
         eff_search_space: 1.0,
         words: None,
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2939-2955
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3555-3567
     let matching_residues = vec![1u8; 100];
     let matching_seq = BlastCompoMatchingSequence::new(0, &matching_residues);
     let params = BlastRedoAlignParams {

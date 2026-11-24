@@ -310,7 +310,7 @@ fn test_greedy_traceback_ncbi_regression_cases() {
     ) in cases
     {
         let mut scratch = GreedyAlignScratch::new();
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:479-490
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:479-490,903-914
         // Reuse the same scratch for the existing frozen cases and edits.
         for _ in 0..2 {
             let result = greedy_gapped_alignment_with_traceback(

@@ -42,14 +42,14 @@ mod x_restricted_gap;
 // No NCBI counterpart: the summary line `main` prints at exit; it changes no value NCBI computes.
 pub use x_restricted_gap::print_summary as x_restricted_gap_print_summary;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:399-414
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:416-419
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1748-1770
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1902-1945
 #[derive(Clone, Copy)]
 enum BlastpScoreMatrix<'a> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:737-957
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:866
     Blosum62,
     Standard(ScoringMatrix),
     Adjusted(&'a AdjustedProteinMatrix),
@@ -72,7 +72,7 @@ fn blastp_standard_score_impl<const BLOSUM62: bool>(
 }
 
 impl BlastpScoreMatrix<'_> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:737-957
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:866
     #[inline]
     fn standard(matrix: ScoringMatrix) -> Self {
         if matrix == ScoringMatrix::Blosum62 {
@@ -84,7 +84,7 @@ impl BlastpScoreMatrix<'_> {
 
     #[inline]
     fn score(self, query_residue: u8, subject_residue: u8) -> i32 {
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:830-831
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:866
         //
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3410-3426
         match self {
@@ -122,9 +122,9 @@ fn blastp_score_row_for_query<const BLOSUM62: bool>(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:859
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:866
 //
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1099
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:1115,1180
 #[inline(always)]
 fn blastp_score_from_row<const BLOSUM62: bool>(
     score_matrix: BlastpScoreMatrix<'_>,
@@ -250,7 +250,7 @@ impl GapAlignScratch {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4077-4081
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4071-4077
 #[derive(Debug, Clone)]
 pub(crate) struct BlastpGapAlignResult {
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:85-88
@@ -281,7 +281,7 @@ pub(crate) struct BlastpPreliminaryHsp {
     pub s_idx: u32,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4209-4319
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4208-4350
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BlastpScoreOnlyGappedAlignment {
     pub query_start: i32,
@@ -363,7 +363,7 @@ fn gap_dp_ensure_cells(dp_mem: &mut Vec<BlastGapDp>, dp_mem_alloc: usize, n: usi
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:128-139
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:127-140
 fn gap_reset_traceback_state(scratch: &mut GapAlignScratch) {
     scratch.trace_rows_used = 0;
 }
@@ -537,7 +537,7 @@ pub(crate) fn gapped_start_int4(
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:340-377
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4162-4191
 pub(crate) fn adjust_subject_range(
     subject_offset: usize,
     subject_length: usize,
@@ -1037,7 +1037,7 @@ fn align_ex_protein_score_only_impl<const BLOSUM62: bool, const REVERSE: bool>(
         return (0, 0, 0);
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:737-957
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:735-962
     let gap_open_extend = gap_open + gap_extend;
     let mut x_dropoff = x_drop;
     if x_dropoff < gap_open_extend {
@@ -1078,7 +1078,7 @@ fn align_ex_protein_score_only_impl<const BLOSUM62: bool, const REVERSE: bool>(
 
     for a_index in 1..=len1 {
         let qc = blastp_query_residue::<REVERSE>(query, query_base, len1, a_index);
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:841-849
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:840-843
         let matrix_row = blastp_score_row_for_query::<BLOSUM62>(score_matrix, qc);
         let mut score_val = GAP_MININT;
         let mut score_gap_row = GAP_MININT;
@@ -1469,7 +1469,7 @@ fn restricted_gapped_align_protein_impl<const BLOSUM62: bool, const REVERSE: boo
     (a_offset, b_offset, best_score)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:364-733
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:373-733
 fn align_ex_protein(
     q_seq: &[u8],
     s_seq: &[u8],
@@ -2122,7 +2122,7 @@ fn gapped_alignment_with_traceback(
 
     let mut fence_hit = false;
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4599-4611
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4609-4615
     let (left_q, left_s, mut score_left, left_edit_ops) = align_ex_protein(
         query,
         subject,
@@ -2145,7 +2145,7 @@ fn gapped_alignment_with_traceback(
     let mut subject_start =
         raw_s_start - i32::try_from(left_s).expect("NCBI subject extent fits Int4") + 1;
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4629-4642
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4638-4647
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4620-4647
     let (mut query_stop, mut subject_stop, mut score_right, right_edit_ops) =
         if !fence_hit && q_start < query.len() && s_start < subject_length {
@@ -2409,7 +2409,7 @@ fn refresh_blastp_hit_statistics(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:439-477
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:440-642
 //
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:399-414
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:416
 #[cfg(test)]
 pub(crate) fn reevaluate_blastp_hit_with_traceback(
     hit: &mut Hit,

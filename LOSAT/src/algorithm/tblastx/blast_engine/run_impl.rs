@@ -297,7 +297,7 @@ fn tblastx_scan_interiors(
     interiors
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-310
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:281-308
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:83-123
 fn clip_tblastx_seq_ranges_for_scan_interior(
@@ -2683,7 +2683,7 @@ fn write_tblastx_outputs(
                             .expect("a Seq-annot writes its posts to the diagnostics"),
                     )?
                 }
-                // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198
+                // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-199
                 // One BLAST archive per query batch (`archive`), from the Seq-aligns of outfmt 8.
                 report::TblastxOutputFormat::Archive => {
                     let handle = run

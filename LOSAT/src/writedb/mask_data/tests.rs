@@ -439,7 +439,7 @@ pub(super) fn bioseq(local_id: usize, length: usize) -> crate::writedb::bioseq::
         length: length as u64,
         seq_data: Some(crate::writedb::bioseq::SeqData::Ncbieaa(vec![b'A'; length])),
         parsed: None,
-        past_seq_pos: None,
+        delta_fix: None,
     }
 }
 

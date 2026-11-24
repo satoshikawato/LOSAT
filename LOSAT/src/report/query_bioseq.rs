@@ -15,7 +15,7 @@
 //! query whose Bioseq the scope finds ([`QueryBioseq`], the record as NCBI's scope holds it: a
 //! Bioseq of those ids without a Blast-def-line, as a `-subject` record read under
 //! `-parse_deflines`, `ParsedSubject::of_record`). The programs fill it where they check the
-//! reported sequences against the batch's scope (`common::database::note_query_bioseqs`), and the
+//! reported sequences against the batch's scope (`note_or_refuse`), and the
 //! reports that read the sequence's Bioseq ask it by the query and the ordinal id
 //! ([`SeenFrom::of`]); runs without such a sequence keep it empty and ask nothing else.
 //!
@@ -211,10 +211,10 @@ impl QueryBioseqs {
     }
 }
 
-/// The holder of a key that two queries of a span hold ([`holders_of`]).
+/// The holder of a key that two queries of a span hold (`holders_of`).
 const AMBIGUOUS: usize = usize::MAX;
 
-/// The searched queries of `span` by the scope keys of their ids (`scope_keys`; [`AMBIGUOUS`]
+/// The searched queries of `span` by the scope keys of their ids (`scope_keys`; `AMBIGUOUS`
 /// for a key of two queries), `record(h)` the run's searched query `h` (`None` past the run's
 /// last).
 fn holders_of<'r>(
@@ -266,7 +266,7 @@ impl<'a> SeenFrom<'a> {
     }
 
     /// The subject index by which a check of the rows of the call's query `query` takes the
-    /// subject `index` of the database sequence `ordinal` (`None`: not a database's): [`SEEN_ROW`]
+    /// subject `index` of the database sequence `ordinal` (`None`: not a database's): `SEEN_ROW`
     /// where the scope finds a query for it, whose lookups do not fail, else `index`.
     #[inline]
     pub fn row(&self, query: usize, ordinal: Option<u32>, index: usize) -> usize {
@@ -314,8 +314,8 @@ pub(crate) fn tabular_shows(
         || (translated && spec.has_any(&[SubjectFrame, Frames])))
 }
 
-/// What [`note_or_refuse`] reads of a run besides the sequence: whether its reports show NCBI's
-/// bytes for a sequence that the scope finds as a query (`shows`, [`tabular_shows`] of every
+/// What `note_or_refuse` reads of a run besides the sequence: whether its reports show NCBI's
+/// bytes for a sequence that the scope finds as a query (`shows`, `tabular_shows` of every
 /// report, and no text that the taxonomy database writes at a load,
 /// `common::database::TaxdbRun::loads_write_texts`), the queries the caller has (`known`, ends
 /// `usize::MAX` where they reach the run's last searched query) and `record(h)` of each, and
@@ -345,7 +345,7 @@ fn no_record(_: usize) -> Option<QueryRecordRef<'static>> {
 /// `common::database::refuse_id_of_a_query` of the reported database sequence `subject` (`oid`
 /// its OID, `ordinal` its ordinal id) of the run's searched query `query`, unless the scope of the
 /// query (`scopes`) finds a query of its batch for it by its own Seq-align id and the run's
-/// reports show NCBI's bytes for such a sequence (`run.shows`, [`SeenRun`]): that query is then
+/// reports show NCBI's bytes for such a sequence (`run.shows`, `SeenRun`): that query is then
 /// noted in `seen` ([`QueryBioseqs::note`]) and the reports take its Bioseq for the sequence.
 /// LOSAT keeps its refusal where the sequence's load posts the warning of a UTF8String header
 /// (`ParsedSubject::scope_utf8_read`: NCBI loads nothing of a sequence that its scope finds as a
@@ -383,3 +383,7 @@ pub(crate) fn note_or_refuse(
     }
     crate::algorithm::common::database::refuse_id_of_a_query(subject, oid, scope, program)
 }
+
+#[cfg(test)]
+#[path = "query_bioseq_tests.rs"]
+mod tests;

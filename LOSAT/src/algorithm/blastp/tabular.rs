@@ -148,9 +148,9 @@ impl<'a> SubjectValues<'a> {
     ) -> Self {
         let [id, accession, accession_version] = bioseq.tabular_ids();
         SubjectValues {
-            id,
-            accession,
-            accession_version,
+            id: id.as_slice(),
+            accession: accession.as_slice(),
+            accession_version: accession_version.as_slice(),
             gi: bioseq.gi(),
             all_ids: if all_deflines {
                 bioseq.all_ids().to_vec()

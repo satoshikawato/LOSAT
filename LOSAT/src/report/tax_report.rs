@@ -366,12 +366,12 @@ pub trait TaxSubjects {
 /// (`report::query_bioseq`, `seen(subject)`): such a subject's one line is the query record's
 /// (`QueryBioseq::tax_deflines`), its read loads nothing and does not throw; its Seq-align id,
 /// which `same` compares, and its name in LOSAT's refusals are its own.
-struct SeenSubjects<'s, 'q> {
+struct SeenSubjects<'s> {
     inner: &'s dyn TaxSubjects,
-    seen: &'s dyn Fn(usize) -> Option<&'q crate::report::query_bioseq::QueryBioseq>,
+    seen: &'s dyn Fn(usize) -> Option<&'s crate::report::query_bioseq::QueryBioseq>,
 }
 
-impl TaxSubjects for SeenSubjects<'_, '_> {
+impl TaxSubjects for SeenSubjects<'_> {
     fn deflines(&self, subject: usize) -> &[TaxDefline] {
         match (self.seen)(subject) {
             Some(bioseq) => bioseq.tax_deflines(),

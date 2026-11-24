@@ -212,6 +212,7 @@ pub(crate) fn write_phi_round_report(
                 &mut place,
                 // psiblast refuses `-html` (`ncbi_app::args::refusal`): the plain table.
                 None,
+                None,
             )?,
             None => write_empty_table(writer, report.num_descriptions)?,
         }

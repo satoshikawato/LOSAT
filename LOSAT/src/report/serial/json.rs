@@ -256,6 +256,11 @@ impl Encoder for JsonEncoder<'_> {
     fn null(&mut self) {
         self.unwritten("a NULL value");
     }
+    fn null_element(&mut self) {
+        if self.error.is_none() {
+            self.error = Some(SerialError::NullElement);
+        }
+    }
     fn utf8_str(&mut self, _value: &[u8]) {
         self.unwritten("a UTF8String");
     }

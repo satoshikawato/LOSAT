@@ -420,6 +420,16 @@ export class SearchDraft {
   }
 
   /**
+   * Selects a WindowMasker counts file in BLASTN's repeats row ("Use in BLASTN" on a WindowMasker
+   * counts output): switches to BLASTN, chooses "Counts file", and attaches `file`.
+   */
+  useCounts(file: File): void {
+    this.setProgram('blastn');
+    this.setRepeats('file');
+    this.setFile(WINDOW_MASKER_FLAG, file);
+  }
+
+  /**
    * Clears the values of some fields of the program ("Restore default search parameters"):
    * the engine's defaults apply to them again, and a chosen file is let go.
    */

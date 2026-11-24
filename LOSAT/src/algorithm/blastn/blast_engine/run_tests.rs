@@ -2055,11 +2055,13 @@ fn a_traceback_start_far_outside_its_context_aligns_on_a_long_subject() {
     );
 }
 
-// The report refuses a batch whose final hit lists keep an HSP outside its query context
-// (`post_process_hits_and_write`): one test, `BlastnHsp::outside_query_context`, for a start
-// below 0 and for an end past the context's length. The drops before it compare NCBI's signed
-// offsets: an HSP left of its context sorts before one at offset 0 with the same score and
-// subject range.
+// An HSP outside its query context (`BlastnHsp::internal_q_offset_0`: a start below 0 or an
+// end past the context's length) reaches the reports; the search fails or refuses a batch
+// where one has a Seq-align query start below 0 (`BlastnHsp::seqalign_query_start`,
+// `left_of_query_refusal`: a plus-strand start left of the context, or a minus-strand
+// end past it), and the reports show one past the query's end (remaining-gaps X1b-p). The
+// drops before it compare NCBI's signed offsets: an HSP left of its context sorts before one
+// at offset 0 with the same score and subject range.
 #[test]
 fn an_hsp_outside_its_context_sorts_by_ncbis_offsets() {
     let hsp = |offset: i32, end: i32| BlastnHsp {
@@ -2088,12 +2090,27 @@ fn an_hsp_outside_its_context_sorts_by_ncbis_offsets() {
         num_positives: (end - offset) as usize,
     };
     let left = hsp(-13, -1);
-    assert!(left.outside_query_context());
-    assert!(hsp(-1, 11).outside_query_context());
-    assert!(hsp(90, 101).outside_query_context());
-    assert!(hsp(100, 112).outside_query_context());
-    assert!(!hsp(0, 12).outside_query_context());
-    assert!(!hsp(88, 100).outside_query_context());
+    assert_eq!(left.seqalign_query_start(), -13);
+    assert_eq!(hsp(100, 112).seqalign_query_start(), 100);
+    let mut minus = hsp(-12, -2);
+    minus.query_frame = -1;
+    assert_eq!(minus.seqalign_query_start(), 102);
+    // `starts_left_of_record` is `record_query_start(..) < 0`, tested first as X1b-o tested an
+    // HSP outside its context: inside it (and on its right) no start is below 0.
+    assert!(left.outside_query_context() && left.starts_left_of_record(0, false));
+    assert!(left.starts_left_of_record(12, false) && left.starts_left_of_record(12, true));
+    assert!(!left.starts_left_of_record(13, true));
+    assert!(minus.outside_query_context() && !minus.starts_left_of_record(0, true));
+    for inside in [hsp(0, 12), hsp(88, 100)] {
+        assert!(!inside.outside_query_context());
+        assert!(!inside.starts_left_of_record(0, false) && !inside.starts_left_of_record(0, true));
+    }
+    assert!(hsp(-1, 11).outside_query_context() && hsp(100, 112).outside_query_context());
+    assert!(!hsp(100, 112).starts_left_of_record(0, false));
+    (minus.internal_q_offset_0, minus.internal_q_end_0) = (95, 104);
+    assert_eq!(minus.seqalign_query_start(), -4);
+    assert!(minus.starts_left_of_record(0, false) && minus.starts_left_of_record(3, true));
+    assert!(!minus.starts_left_of_record(4, true) && minus.starts_left_of_record(4, false));
     assert_eq!(
         crate::algorithm::blastn::hsp::score_compare_hsps(&left, &hsp(0, 12)),
         std::cmp::Ordering::Less

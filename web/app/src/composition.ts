@@ -2,7 +2,7 @@
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import { VERIFICATION_TABLE } from 'virtual:losat-verification';
 import { sha256Hex, WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
-import type { EngineGateway } from 'losat/ports';
+import type { EngineGateway, ToolEngine } from 'losat/ports';
 import { Attention } from './application/attention';
 import { Availability } from './application/availability';
 import { Coordinator } from './application/coordinator';
@@ -10,6 +10,7 @@ import { SearchDraft } from './application/draft';
 import { CountsLoader } from './application/counts';
 import { ExampleLoader } from './application/examples';
 import { ResultsBrowser } from './application/results';
+import { ToolDraft } from './application/tool-draft';
 import type { Downloader } from './ports/download';
 import { BrowserAccessionFetcher } from './infra/browser/accession-fetcher';
 import { browserCountsDeletions } from './infra/browser/counts-deletions';
@@ -25,6 +26,8 @@ export interface App {
   readonly coordinator: Coordinator;
   /** The job being edited on the search screen. */
   readonly draft: SearchDraft;
+  /** The WindowMasker job being edited on the WindowMasker tab. */
+  readonly toolDraft: ToolDraft;
   /** The Example sets that load into the draft (line WF-2). */
   readonly examples: ExampleLoader;
   /** The WindowMasker counts of the taxonomy IDs, downloaded when the user asks (line WW2). */
@@ -56,7 +59,7 @@ export function createApp(options: AppOptions = {}): App {
   let dataWorkerEnd: (error: Error) => void = () => undefined;
   const dataWorkerEnded = new Promise<Error>((resolve) => (dataWorkerEnd = resolve));
   const data = startDataWorker((error) => dataWorkerEnd(error));
-  const engine: EngineGateway =
+  const engine: EngineGateway & ToolEngine =
     ENGINE_ASSETS === null
       ? new FakeEngine({ phaseDelayMs: 50 })
       : new WasmEngine({
@@ -81,7 +84,13 @@ export function createApp(options: AppOptions = {}): App {
     fetcher: new BrowserAccessionFetcher(),
     now: () => performance.now(),
   });
-  const availability = new Availability({ draft, dataWorkerEnded });
+  const toolDraft = new ToolDraft({
+    engine,
+    data,
+    enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
+    isBusy: () => coordinator.isBusy(),
+  });
+  const availability = new Availability({ draft, toolDraft, dataWorkerEnded });
   const examples = new ExampleLoader({
     downloader: new BrowserFileDownloader({ inflater: data }),
     store: data,
@@ -99,6 +108,7 @@ export function createApp(options: AppOptions = {}): App {
   const results = new ResultsBrowser({
     data,
     describe: (program) => engine.describe(program),
+    describeTool: (tool) => engine.describeTool(tool),
     runs: coordinator.state,
     verification: VERIFICATION_TABLE,
   });
@@ -106,9 +116,10 @@ export function createApp(options: AppOptions = {}): App {
     page: browserPage,
     runs: coordinator.state,
     draft: draft.state,
+    toolDraft: toolDraft.state,
     probe: () => data.storageInfo(),
     checkStored: () => data.checkStoredResults(),
     now: () => Date.now(),
   });
-  return { coordinator, draft, examples, counts, results, attention, availability, usesFakeEngine: ENGINE_ASSETS === null };
+  return { coordinator, draft, toolDraft, examples, counts, results, attention, availability, usesFakeEngine: ENGINE_ASSETS === null };
 }

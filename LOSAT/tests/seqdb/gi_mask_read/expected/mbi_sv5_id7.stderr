@@ -1,0 +1,12 @@
+Error: (CSequenceIStream_Exception::database parameter error) unrecognized filter algorithm id
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+0            dust                                    window=64; level=20; linker=1           
+
+Error: (106.16) Application's execution failed (CSequenceIStream_Exception::database parameter error) unrecognized filter algorithm id
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+0            dust                                    window=64; level=20; linker=1           
+

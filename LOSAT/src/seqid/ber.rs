@@ -1080,13 +1080,28 @@ impl<'a> Reader<'a> {
 pub(crate) fn fix_visible_chars(value: &[u8]) -> Vec<u8> {
     value
         .iter()
-        .map(|&c| if (b' '..=b'~').contains(&c) { c } else { b'#' })
+        .map(|&c| if visible_char(c) { c } else { b'#' })
         .collect()
 }
 
-/// The number of bytes of a stored VisibleString that `fix_visible_chars` replaces.
+/// Whether `c` is a byte of ' ' ..= '~', which `fix_visible_chars` keeps.
+fn visible_char(c: u8) -> bool {
+    (b' '..=b'~').contains(&c)
+}
+
+/// The number of bytes of a stored VisibleString that `fix_visible_chars` replaces. Each piece
+/// of at most 255 bytes is counted in a `u8`, which cannot pass 255 there, so the count takes
+/// as many bytes per step as the vector registers hold; a `usize` count per byte took 4.
 pub(crate) fn replaced_bytes(value: &[u8]) -> usize {
-    value.iter().filter(|c| !(b' '..=b'~').contains(c)).count()
+    value
+        .chunks(usize::from(u8::MAX))
+        .map(|piece| {
+            let replaced = piece
+                .iter()
+                .fold(0u8, |n, &c| n + u8::from(!visible_char(c)));
+            usize::from(replaced)
+        })
+        .sum()
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:955-1000

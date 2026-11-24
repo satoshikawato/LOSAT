@@ -241,6 +241,10 @@ use std::ops::RangeInclusive;
 /// `LOSAT_X_BXKAPPAFIT` (BLASTX's batch end making no more composition-redo workers than it has
 /// matches instead of one per thread, `blastx/runtime.rs`) joined the set in the pull request that
 /// added it, after it was verified, timed and its memory measured with it on and off.
+/// `LOSAT_X_BXREDOFLOW` (BLASTX's composition redo making its matches ahead as a flow instead of
+/// in fork-join batches, `blastx/runtime/kappa_batch.rs`) joined the set in the pull request that
+/// added it, after it was verified and timed with it on and off (workstation, 2026-11-24; the
+/// numbers in `docs/agents/diagnostics.md`).
 /// `LOSAT_X_PAIRPARGATE` (TBLASTX's unit path only for the query batches where it is expected to
 /// be faster than the reference frame loop, `tblastx/x_pair_par.rs`) and `LOSAT_X_TBXLUT` (the
 /// reference loop's full lookup table filled in place from per-cell counts,
@@ -358,6 +362,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXKAONCE",
     "LOSAT_X_BXKAPPAFIT",
     "LOSAT_X_BXPOOLN1",
+    "LOSAT_X_BXREDOFLOW",
     "LOSAT_X_BXSCANBYTE",
     "LOSAT_X_BXSUBJFLOW",
     "LOSAT_X_BXTASKRES",
@@ -366,6 +371,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXW4CAP",
     "LOSAT_X_CHAINRUN",
     "LOSAT_X_CLUTPAIRS",
+    "LOSAT_X_CSRQSKEEP",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
     "LOSAT_X_DCQSAHEAD",

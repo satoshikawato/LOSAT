@@ -5,6 +5,9 @@ export const browserDownloader: Downloader = {
   save(fileName, bytes, mimeType) {
     downloadBlob(fileName, new Blob([bytes as BlobPart], { type: mimeType }));
   },
+  saveBlob(fileName, blob) {
+    downloadBlob(fileName, blob);
+  },
 };
 
 /** The File System Access API's folder picker, which only Chromium and Edge have (not on Android). */

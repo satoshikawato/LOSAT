@@ -55,6 +55,8 @@ mod entry_names;
 mod export_search_strategy;
 #[path = "../function_size_limit.rs"]
 mod function_size_limit;
+#[path = "../gi_mask_read.rs"]
+mod gi_mask_read;
 #[path = "../library_api.rs"]
 mod library_api;
 #[path = "../library_examples.rs"]

@@ -231,8 +231,8 @@ pub struct TblastnArgs {
     /// otherwise (`in_pssm::PssmReader::write_verification`). Not a public option.
     #[arg(skip)]
     pub write_verification: Option<crate::blastinput::ncbi_environment::WriteVerification>,
-    /// The run's search strategy export (`-export_search_strategy`), made by `run`
-    /// (`strategy::StrategyExport::for_run`).
+    /// The run's search strategy export (`-export_search_strategy`), made by `run` and by LOSAT
+    /// Web's `web_adapter::give_strategy` (`strategy::StrategyExport::for_args`).
     #[arg(skip)]
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath` of `taxdb.bti`), asked

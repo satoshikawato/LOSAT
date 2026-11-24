@@ -2,9 +2,8 @@
 //! and writes to the standard output only what NCBI BLAST+ 2.17.0 writes before the same step (nothing for all of
 //! them here). NCBI runs the commands of the first group to their end (the rows of
 //! `tests/db_search_manifest/deltablast.tsv` freeze its bytes for the cases that LOSAT writes); with those of the
-//! second group (PS13a fix round 1) NCBI crashes or stops with a C++ exception, or (`-num_iterations 0`) searches
-//! the later rounds of a batch's first query only. The refusal of a Seq-id that is not local or general is a unit
-//! test of `rps_search::cdd_input`.
+//! second group (PS13a fix round 1) NCBI crashes or stops with a C++ exception. The refusal of a Seq-id that is
+//! not local or general is a unit test of `rps_search::cdd_input`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -121,7 +120,7 @@ fn a_subject_set_larger_than_max_target_seqs_is_refused_before_any_output() {
     assert_refused(&run, "subject set", "-max_target_seqs");
 }
 
-// --- PS13a fix round 1: NCBI 2.17.0 probes of `PR/ps13/fix1_probe` (x2, xs, it0m, none1) ---
+// --- PS13a fix round 1: NCBI 2.17.0 probes of `PR/ps13/fix1_probe` (x2, xs, none1) ---
 
 #[test]
 fn a_query_of_x_with_other_queries_in_a_one_round_batch_is_refused() {
@@ -136,17 +135,6 @@ fn a_query_of_x_with_other_queries_in_a_one_round_batch_is_refused() {
             "no Karlin-Altschul parameters",
         );
     }
-}
-
-#[test]
-fn num_iterations_0_with_a_batch_of_several_queries_is_refused_before_any_output() {
-    let mut args = RPS.to_vec();
-    args.extend_from_slice(&["-num_iterations", "0", "-outfmt", "7"]);
-    assert_refused(
-        &run_query("multi.faa", &args),
-        "it0m",
-        "-num_iterations 0 with a query batch of several queries",
-    );
 }
 
 struct TempDir(PathBuf);

@@ -72,6 +72,16 @@ pub(super) struct CddQuery<'a> {
     pub(super) alone: bool,
 }
 
+/// The domain search's results of a query (`DeltaRun::cdd_domains`), which its PSSM is made of
+/// (`DeltaRun::cdd_pssm`): the query's letters as the domain search's set-up leaves them in the
+/// query block that the PSSM engine reads, and the domain hits, `None` for a query whose letters
+/// give no Karlin-Altschul parameters (the search has no Seq-align set for it).
+pub(super) struct CddDomains {
+    side: Arc<DomainSide>,
+    letters: Vec<u8>,
+    hits: Option<Vec<Hit>>,
+}
+
 /// The PSSM of a query's conserved domains and the query of the PSSM's Bioseq, which every later
 /// round reads: the record's letters with the lower case of `-lcase_masking` as X
 /// (`CCddInputData`'s query, the domain search's query block). NCBI's later rounds start from that
@@ -184,19 +194,16 @@ impl DeltaRun {
         })
     }
 
-    /// The PSSM of the query's conserved domains (`CDeltaBlast::Run` before its round 1): the
-    /// domain search, `CCddInputData` and the PSSM engine, with the PSSM's files as the options
-    /// ask (`request`).
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:93-150
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn cdd_pssm(
+    /// The domain search of the query (`CDeltaBlast::x_FindDomainHits`, which searches every
+    /// query of the batch before the first query's PSSM): its hits, which its PSSM is made of
+    /// (`cdd_pssm`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:89-90
+    pub(super) fn cdd_domains(
         &self,
-        args: &ResolvedBlastpArgs,
-        request: &PssmRequest,
         query: &CddQuery<'_>,
         pool: &crate::utils::threading::SearchPool<'_>,
         diagnostics: &mut (dyn std::io::Write + Send),
-    ) -> Result<CddPssm> {
+    ) -> Result<CddDomains> {
         let side = self.side(&mut *diagnostics)?;
         // The query's letters as the domain search's set-up leaves them in the query block that
         // the PSSM engine reads: with `-lcase_masking` its lower case is hard-masked.
@@ -213,22 +220,52 @@ impl DeltaRun {
                 crate::algorithm::blastp::encoding::encode_protein_sequence(query.record.seq());
             encoded.aa_seq[1..=encoded.aa_len].to_vec()
         };
+        // A query whose letters give no Karlin-Altschul parameters has no Seq-align set in the
+        // domain search's results (its PSSM's error, `cdd_pssm`).
+        let hits = if query_ungapped_block(side.args.scoring.matrix, &letters).is_none() {
+            None
+        } else {
+            let lists = side.search(query.record, pool, diagnostics)?;
+            Some(side.hits(&lists)?)
+        };
+        Ok(CddDomains {
+            side,
+            letters,
+            hits,
+        })
+    }
+
+    /// The PSSM of the query's conserved domains, from its domain search's results (`domains`,
+    /// `cdd_domains`), made right before the query's round 1 (`CDeltaBlast::Run`, after the search
+    /// of the query before): `CCddInputData` and the PSSM engine, with the PSSM's files as the
+    /// options ask (`request`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:93-150
+    pub(super) fn cdd_pssm(
+        &self,
+        args: &ResolvedBlastpArgs,
+        request: &PssmRequest,
+        query: &CddQuery<'_>,
+        domains: CddDomains,
+    ) -> Result<CddPssm> {
+        let CddDomains {
+            side,
+            letters,
+            hits,
+        } = domains;
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/cdd_pssm_input.cpp:95-97
         // A query whose letters give no Karlin-Altschul parameters has no Seq-align set in the
         // domain search's results, which `CCddInputData` refuses (`NULL alignments`, exit 3; NCBI
         // 2.17.0 probes `x1`, `x1_it2`, `x2_it2`, `xs_it2` of PS13a's fix round 1) where the query is
         // alone in its batch. In a batch of several queries NCBI's deltablast crashes there
         // (exit 139, probes `x2`, `xs`, `sxs`).
-        if query_ungapped_block(side.args.scoring.matrix, &letters).is_none() {
+        let Some(hits) = hits else {
             if query.alone {
                 return Err(engine_error("NULL alignments"));
             }
             bail!(
                 "a query whose letters give no Karlin-Altschul parameters read together with other queries (with one round or -num_iterations 0 queries are read together up to 10000 letters; NCBI BLAST+'s deltablast crashes there) is not supported by LOSAT's DELTABLAST"
             );
-        }
-        let lists = side.search(query.record, pool, diagnostics)?;
-        let hits = side.hits(&lists)?;
+        };
         let hits = cdd_input::included_hits(hits, self.options.domain_inclusion_ethresh);
         let hits = cdd_input::remove_multiple_cd_hits(hits)
             .map_err(|refusal| anyhow!(refusal.message()))?;

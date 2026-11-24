@@ -256,11 +256,6 @@ impl IterationState {
     }
 }
 
-/// A step of a round between its search and its report (`PsiRoundIo::before_report`), given the
-/// run's diagnostic stream.
-pub(crate) type BeforeReport =
-    Box<dyn FnOnce(&mut (dyn std::io::Write + Send)) -> Result<()> + Send>;
-
 /// What the round driver hands one round's search (`BlastpReports::psi_round`), and what the
 /// search hands back (`outcome`, filled by `blast_engine::psi_round::round_outcome` from the
 /// round's Seq-aligns before the formatter's cut).
@@ -277,14 +272,11 @@ pub(crate) struct PsiRoundIo {
     /// (no "Results from round" line, no `# Iteration:` line), whose PSSM files and next PSSM
     /// the round driver still makes.
     pub(crate) silent: bool,
-    /// deltablast round 1 of `-subject`, a result of a subject after the first (`CPsiBl2Seq`
-    /// makes one result for each subject; the round's inclusion set and next PSSM are made of the
-    /// first, `(*results)[0]`): this call reports its subject only.
+    /// deltablast's round 1, a result after the batch's first (`CDeltaBlast::Run` makes the
+    /// results of the batch's queries one after another, and `CPsiBl2Seq`'s search of `-subject`
+    /// one for each subject; the round's inclusion set and next PSSM are made of the first,
+    /// `(*results)[0]`): this call reports its query and subject only.
     pub(crate) extra_result: bool,
-    /// What the round does between its search and its report, before its subjects' titles are read:
-    /// deltablast's round 1 writes the PSSM files of the domains' PSSM there
-    /// (`deltablast_app.cpp:353`, `:405`). Taken by the first call that reaches it.
-    pub(crate) before_report: std::sync::Mutex<Option<BeforeReport>>,
     /// deltablast: the letters of the next PSSM's query, the query of the domains' PSSM (the
     /// record's with the lower case of `-lcase_masking` as X, `delta_hooks::CddPssm`); `None` for
     /// psiblast (the record's).

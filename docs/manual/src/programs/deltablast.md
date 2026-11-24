@@ -22,7 +22,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 
 Round 1 searches the PSSM of the conserved domains that the domain database finds in your query. A domain counts when its E-value is below `-domain_inclusion_ethresh` (default 0.05). A query without domain hits starts from the scoring matrix's scores.
 
-`-num_iterations N` sets the largest number of rounds (default 1). `0` runs until the search converges. After round 1, the rounds are those of `psiblast`: LOSAT builds a PSSM from the alignments with an E-value below `-inclusion_ethresh` (default 0.002) and uses it in the next round.
+`-num_iterations N` sets the largest number of rounds (default 1). `0` runs until the search converges. After round 1, the rounds are those of `psiblast`: LOSAT builds a PSSM from the alignments with an E-value below `-inclusion_ethresh` (default 0.002) and uses it in the next round. With `-num_iterations 0`, queries are read together up to 10,000 letters, as with one round: each of them gets round 1, and the first of them goes on to the later rounds, as in NCBI BLAST+.
 
 The PSSM files are written as in `psiblast`; the PSSM of round 1 is the PSSM of the domains:
 
@@ -85,7 +85,7 @@ Also refused:
 - `-use_sw_tback`.
 - A domain database of several volumes.
 - A `-subject` file with more records than `-max_target_seqs`.
-- Some runs of several queries, where NCBI crashes or runs only the first of them through the later rounds.
+- Some runs of several queries, where NCBI crashes.
 
 See [What LOSAT refuses](../refusals.md#deltablast) for the full list.
 

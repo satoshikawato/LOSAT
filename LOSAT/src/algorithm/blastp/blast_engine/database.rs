@@ -1080,6 +1080,25 @@ impl<'a> CallTitles<'a> {
         self.utf8.read()
     }
 
+    /// The reads' record of that read, which a call held between its search and its prefetch keeps
+    /// (`SearchedCall`; `held_again` makes the reads again of it).
+    pub(super) fn into_held(self) -> shared::CallUtf8 {
+        self.utf8
+    }
+
+    /// The reads of a call whose titles were read before (`into_held`).
+    pub(super) fn held_again(
+        database: Option<&'a BlastpDatabase>,
+        batches: &'a [crate::blastinput::seq_range::RangedBatch],
+        utf8: shared::CallUtf8,
+    ) -> Self {
+        Self {
+            database,
+            batches,
+            utf8,
+        }
+    }
+
     /// NCBI's warning of that read in the first query of the batch whose Seq-aligns read it, with
     /// the posts that follow the reader's messages of the batch (`query_warnings::query_posts`),
     /// where the run has not posted it (a load of the model of the loads may have,
@@ -1504,6 +1523,52 @@ pub(super) struct ListedTitles<'a> {
     /// where a VisibleString is expected (`shared::HeaderReader::first_utf8`): NCBI posts its
     /// warning there, once per process (`shared::Utf8Read::post`).
     pub(super) utf8: Option<shared::Utf8Read>,
+}
+
+/// `ListedTitles` without its borrows of the listed subjects and of the database's OIDs
+/// (`ListedTitles::held`), which a call holds between its search and its reports
+/// (`SearchedCall`): `listed` borrows them again.
+pub(super) struct HeldTitles {
+    shown: ListedShown,
+    replaced_title_bytes: Vec<bool>,
+    sources: Vec<crate::report::defline::SourceTaxname>,
+    parsed: Vec<Option<Arc<ParsedSubject>>>,
+    program: &'static str,
+    utf8: Option<shared::Utf8Read>,
+}
+
+impl ListedTitles<'_> {
+    /// The titles without their borrows (`HeldTitles`).
+    pub(super) fn held(self) -> HeldTitles {
+        HeldTitles {
+            shown: self.shown,
+            replaced_title_bytes: self.replaced_title_bytes,
+            sources: self.sources,
+            parsed: self.parsed,
+            program: self.program,
+            utf8: self.utf8,
+        }
+    }
+}
+
+impl HeldTitles {
+    /// The titles of the subjects `listed` of `database`, which they were read of.
+    pub(super) fn listed<'a>(
+        self,
+        listed: &'a ListedSubjects,
+        database: &'a BlastpDatabase,
+    ) -> ListedTitles<'a> {
+        ListedTitles {
+            listed,
+            oids: database.oid_map(),
+            shown: self.shown,
+            replaced_title_bytes: self.replaced_title_bytes,
+            sources: self.sources,
+            parsed: self.parsed,
+            program: self.program,
+            utf8: self.utf8,
+        }
+    }
 }
 
 /// The reported subjects with parsed Seq-ids of `ListedSubjects::read_titles`, by rank.

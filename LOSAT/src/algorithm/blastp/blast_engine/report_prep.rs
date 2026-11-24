@@ -1170,30 +1170,28 @@ pub(super) struct ReportSetup<'a> {
 }
 
 /// The residues that the reports read of a database's listed subjects, read from the database
-/// again after the redo (`ListedSubjects::x_read_shown`); nothing for a subject set.
-/// `x_listed_lean` is LOSAT_X_BPLISTEDLEAN's switch (`x_bp_listed_lean`), which `run_call` reads
-/// once for this read and the read of the titles after it.
+/// again after the redo (`ListedSubjects::x_read_shown`); nothing for a subject set. The values
+/// are `search_call`'s of the same names (`requested_formats` the formats it reports).
+/// `x_listed_lean` is LOSAT_X_BPLISTEDLEAN's switch (`x_bp_listed_lean`), which `search_call`
+/// reads once for this read and the read of the titles after it.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1110-1113
 /// NCBI loads the subjects of the Seq-aligns into the formatter's scope, from which its reports
 /// read them. It loads them there when it prefetches (blast_app_util.cpp:764-772), after its read
 /// of `PRE_FETCH_SEQS_LIMIT`, and otherwise when a report reads each subject; LOSAT reads them
 /// here for every format.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn read_shown_residues(
-    setup: &ReportSetup<'_>,
+    args: &ResolvedBlastpArgs,
+    reports: &BlastpReports<'_>,
+    query_records: &[FastaRecord],
+    database: Option<&database::BlastpDatabase>,
+    requested_formats: &[BlastpReport],
     outputs: &ReportOutputs<'_>,
     listed_subjects: &mut Option<database::ListedSubjects>,
     hit_lists: &[Option<BlastpHitList>],
     x_listed_lean: bool,
 ) -> Result<()> {
-    let ReportSetup {
-        args,
-        reports,
-        query_records,
-        database,
-        requested_formats,
-        ..
-    } = *setup;
     // The residues that the reports read, read from the
     // database again after the redo (`ListedSubjects::x_read_shown`): every listed subject's for
     // the records; where every report is tabular rows of the default fields or Seq-aligns, which
@@ -1294,11 +1292,28 @@ pub(super) fn refuse_prefetch_environment(
     Ok(())
 }
 
+/// The titles of a database's listed subjects read as records (`ListedShown::Records`), by rank,
+/// which `shown_of` gives the reports: made once for a call by its prefetch (`prefetch_call`,
+/// `CallPrefetch::record_titles`), `None` for the other subjects.
+pub(super) fn shown_record_titles(
+    listed_titles: &Option<database::ListedTitles<'_>>,
+) -> Option<Vec<Arc<[u8]>>> {
+    match listed_titles.as_ref().map(|titles| &titles.shown) {
+        Some(database::ListedShown::Records(records)) => Some(
+            records
+                .iter()
+                .map(|record| Arc::from(record.title()))
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
 /// The records, the titles and the letters of the subjects that the reports show
-/// (`ShownSubjects`): a database's listed subjects' (`listed_titles`; with LOSAT_X_BPLISTEDLEAN
-/// their titles by rank and their stored residues, `subjects`), or else the subject set's
-/// (`set_records`, `set_titles`: `run_call`'s `subject_records` and `subject_titles` before the
-/// returned ones shadow them).
+/// (`ShownSubjects`): a database's listed subjects' (`listed_titles`, the titles of its records
+/// `record_titles`, from `shown_record_titles`; with LOSAT_X_BPLISTEDLEAN their titles by rank and
+/// their stored residues, `subjects`), or else the subject set's (`set_records`, `set_titles`:
+/// the call's `subject_records` and `subject_titles` before the returned ones shadow them).
 ///
 /// No NCBI counterpart: how LOSAT's reports reach the subjects' letters and titles; NCBI's
 /// formatter reads them from its scope.
@@ -1308,34 +1323,20 @@ pub(super) fn shown_of<'a>(
     subjects: &'a [EncodedProtein],
     set_records: &'a [FastaRecord],
     set_titles: &'a [Arc<[u8]>],
-) -> (
-    &'a [FastaRecord],
-    std::borrow::Cow<'a, [Arc<[u8]>]>,
-    ShownSubjects<'a>,
-) {
+    record_titles: Option<&'a [Arc<[u8]>]>,
+) -> (&'a [FastaRecord], &'a [Arc<[u8]>], ShownSubjects<'a>) {
     match listed_titles.as_ref().map(|titles| &titles.shown) {
         // A database's subjects have no records with the switch: every reader of a listed
         // subject takes `shown_subjects`, the titles by rank or the stored residues.
-        Some(database::ListedShown::Lean(titles)) => (
-            &[],
-            std::borrow::Cow::Borrowed(&titles[..]),
-            ShownSubjects::Listed { subjects, titles },
-        ),
+        Some(database::ListedShown::Lean(titles)) => {
+            (&[], &titles[..], ShownSubjects::Listed { subjects, titles })
+        }
         Some(database::ListedShown::Records(records)) => (
             records,
-            std::borrow::Cow::Owned(
-                records
-                    .iter()
-                    .map(|record| Arc::from(record.title()))
-                    .collect(),
-            ),
+            record_titles.unwrap_or_default(),
             ShownSubjects::Records(records),
         ),
-        None => (
-            set_records,
-            std::borrow::Cow::Borrowed(set_titles),
-            ShownSubjects::Records(set_records),
-        ),
+        None => (set_records, set_titles, ShownSubjects::Records(set_records)),
     }
 }
 

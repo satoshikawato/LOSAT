@@ -251,8 +251,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-gilist`, `-negative_gilist` | Refused: out of scope (GI lists), as in `psiblast`. |
 | A domain database (`-rpsdb`) of several volumes | Refused before anything is written. NCBI searches it. |
 | `-subject` with more records than `-max_target_seqs` | Refused before anything is written. NCBI's first search keeps only the best subjects of the whole set, which LOSAT does not do yet. |
-| `-num_iterations 0` with several queries that NCBI reads together (with one round, and with `-num_iterations 0`, NCBI reads queries together up to 10,000 letters; with 2 or more rounds, one query at a time) | Refused before anything is written. NCBI runs the rounds after the first for the first of those queries only. |
-| A query whose letters give no Karlin-Altschul parameters (a query of `X` alone, for example) read together with other queries in a one-round run | Refused. NCBI crashes. Such a query alone, or with 2 or more rounds, gets NCBI's error (`LOSAT engine error: NULL alignments`, exit status 3), as in NCBI. |
+| A query whose letters give no Karlin-Altschul parameters (a query of `X` alone, for example) read together with other queries (with one round, and with `-num_iterations 0`, NCBI reads queries together up to 10,000 letters; with 2 or more rounds, one query at a time) | Refused. NCBI crashes. Such a query alone, or with 2 or more rounds, gets NCBI's error (`LOSAT engine error: NULL alignments`, exit status 3), as in NCBI. |
 | `-save_pssm_after_last_round` with one round, when the first of the queries read together has no alignments | Refused, after the PSSM files that NCBI writes before it. NCBI stops with a null pointer exception. |
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#deltablast).

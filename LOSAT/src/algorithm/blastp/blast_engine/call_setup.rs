@@ -22,6 +22,7 @@
 //! modules `database`, `psi_round`, `pssm_hooks`, `rps_hooks`, `x_ih_pool`,
 //! `x_lookup_ahead`, `x_soft_subject` and `x_subject_meta`.
 
+use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -70,12 +71,13 @@ use crate::stats::{
 };
 use crate::utils::threading::SearchPool;
 
-/// What `query_frames_of`, `call_subjects` and `call_lookup` read of `run_call`: each field is
-/// `run_call`'s value of the same name, by reference where it is not `Copy` (`subject_records`
+/// What `query_frames_of`, `call_subjects` and `call_lookup` read of `search_call`: each field is
+/// `search_call`'s value of the same name, by reference where it is not `Copy` (`subject_records`
 /// are those of a FASTA subject set, none for a database; `x_block_inputs` are a query block's
 /// subjects, query frames and subject scan ranges, LOSAT_X_BPQBLOCK). `'a` is the lifetime of
-/// what the query frames and the subjects borrow; `'s` that of `run_call`'s own values (`args`,
-/// `prelim`), whose borrow ends with the last call.
+/// what the query frames and the subjects borrow, which the search hands on (`SearchedCall`); `'s`
+/// that of what the search reads only (`args`, `prelim`, `ranges`, `reports`), whose borrow ends
+/// with the last call.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:132-134
 pub(super) struct CallSetup<'s, 'a> {
@@ -96,8 +98,8 @@ pub(super) struct CallSetup<'s, 'a> {
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     pub(super) blastp_num_threads: usize,
-    pub(super) ranges: &'s BlastpRanges<'a>,
-    pub(super) reports: &'s BlastpReports<'a>,
+    pub(super) ranges: &'s BlastpRanges<'s>,
+    pub(super) reports: &'s BlastpReports<'s>,
 }
 
 /// The reports that the call's output formats ask for, in the formats' order (`BlastpReport`:
@@ -202,10 +204,11 @@ pub(super) fn query_meta(query_records: &[FastaRecord]) -> BlastpQueryMeta {
     }
 }
 
-/// The call's query frames (encoded, with SEG where it applies), in `x_owned_frames` where the
-/// call makes them: a query block's from the search of all queries (LOSAT_X_BPQBLOCK), those
-/// built ahead of the block (LOSAT_X_BPLKPAHEAD, taken from `x_prebuilt`), psiblast's later
-/// rounds' (`psi_round`), or the queries' own.
+/// The call's query frames (encoded, with SEG where it applies), owned where the call makes them
+/// (so that a call held between its search and its reports keeps them, `SearchedCall`): a query
+/// block's from the search of all queries (LOSAT_X_BPQBLOCK, borrowed), those built ahead of the
+/// block (LOSAT_X_BPLKPAHEAD, taken from `x_prebuilt`), psiblast's later rounds' (`psi_round`), or
+/// the queries' own.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:149-152
 ///
@@ -215,8 +218,7 @@ pub(super) fn query_meta(query_records: &[FastaRecord]) -> BlastpQueryMeta {
 pub(super) fn query_frames_of<'a>(
     setup: &CallSetup<'_, 'a>,
     x_prebuilt: &mut Option<XAheadLookup>,
-    x_owned_frames: &'a mut Vec<Vec<QueryFrame>>,
-) -> &'a [Vec<QueryFrame>] {
+) -> Cow<'a, [Vec<QueryFrame>]> {
     let CallSetup {
         args,
         query_records,
@@ -226,24 +228,17 @@ pub(super) fn query_frames_of<'a>(
     match (x_block_inputs, x_prebuilt.as_mut()) {
         // EXPERIMENT (LOSAT_X_BPQBLOCK): a block of the preliminary stage takes its frames from the
         // search of all queries (its records, encoded with the same parameters).
-        (Some((_, frames, _)), _) => frames,
-        (None, Some(prebuilt)) => {
-            *x_owned_frames = prebuilt.take_query_frames();
-            x_owned_frames
-        }
+        (Some((_, frames, _)), _) => Cow::Borrowed(frames),
+        (None, Some(prebuilt)) => Cow::Owned(prebuilt.take_query_frames()),
         // psiblast's later rounds: the query as the rounds before left it
         // (`psi_round::RoundQuery`).
         (None, None) if psi_round::searched_other_letters(args) => {
-            *x_owned_frames = psi_round::round_query_frames(args);
-            x_owned_frames
+            Cow::Owned(psi_round::round_query_frames(args))
         }
         // Diagnostic (LOSAT_TIMING): this call's encoding and SEG go to the common line
         // (utils/xtiming.rs); frames built ahead (LOSAT_X_BPLKPAHEAD) are not marked. No NCBI
         // counterpart.
-        (None, None) => {
-            *x_owned_frames = blastp_query_frames_marked(args, query_records, true);
-            x_owned_frames
-        }
+        (None, None) => Cow::Owned(blastp_query_frames_marked(args, query_records, true)),
     }
 }
 
@@ -253,21 +248,18 @@ pub(super) fn query_frames_of<'a>(
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/api/setup_factory.hpp:337-338
 pub(super) struct BlastpCallSubjects<'a> {
-    pub(super) subjects: &'a [EncodedProtein],
+    pub(super) subjects: Cow<'a, [EncodedProtein]>,
     pub(super) x_meta: Option<&'a XSubjectMeta>,
     pub(super) subject_titles: std::borrow::Cow<'a, [Arc<[u8]>]>,
 }
 
-/// The subjects of a FASTA subject set encoded once, in `x_owned_subjects` where the call encodes
-/// them (none for a database, whose sequences are read in blocks; the block search's encoded
-/// once for all blocks, LOSAT_X_BPQBLOCK), the block search's subject IDs and titles, and the
-/// subjects' titles (none for a call of the preliminary stage only).
+/// The subjects of a FASTA subject set encoded once, owned where the call encodes them (none for a
+/// database, whose sequences are read in blocks; the block search's encoded once for all blocks,
+/// LOSAT_X_BPQBLOCK, borrowed), the block search's subject IDs and titles, and the subjects'
+/// titles (none for a call of the preliminary stage only).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_query_factory.cpp:101-102
-pub(super) fn call_subjects<'a>(
-    setup: &CallSetup<'_, 'a>,
-    x_owned_subjects: &'a mut Vec<EncodedProtein>,
-) -> Result<BlastpCallSubjects<'a>> {
+pub(super) fn call_subjects<'a>(setup: &CallSetup<'_, 'a>) -> Result<BlastpCallSubjects<'a>> {
     let CallSetup {
         args,
         subject_records,
@@ -285,11 +277,11 @@ pub(super) fn call_subjects<'a>(
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search encodes the subjects once
     // (`x_query_blocks::XBlockSubjects`), and so does the search of all queries whose preliminary
     // stage runs in blocks (`PrelimOnly::Block`); the same values.
-    let subjects: &[EncodedProtein] = if let Some(encoded) = x_block_inputs
+    let subjects: Cow<'a, [EncodedProtein]> = if let Some(encoded) = x_block_inputs
         .map(|(subjects, _, _)| subjects)
         .or_else(|| x_query_blocks::x_block_subjects(blastp_parallel_pool, subject_records))
     {
-        encoded
+        Cow::Borrowed(encoded)
     } else {
         #[cfg(all(
             feature = "parallel",
@@ -307,11 +299,12 @@ pub(super) fn call_subjects<'a>(
         ))]
         let prepared_subjects =
             prepare_blastp_subjects_preserving_order(subject_records, args.num_threads)?;
-        *x_owned_subjects = prepared_subjects
-            .into_iter()
-            .map(|prepared_subject| prepared_subject.encoded)
-            .collect();
-        x_owned_subjects
+        Cow::Owned(
+            prepared_subjects
+                .into_iter()
+                .map(|prepared_subject| prepared_subject.encoded)
+                .collect(),
+        )
     };
     // The subjects' titles by subject index, as the reports write them. EXPERIMENT
     // (LOSAT_X_BPQBLOCK): the block search's titles and tabular IDs, made once for all blocks

@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.101
+- Version: 1.103
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -651,7 +651,7 @@
   of 2026-11-24 that brought 1.93, line RG item D1c-1c, then 1.96 at the merge of dev
   of 2026-11-24 that brought 1.94, line NP item M4c-2, then 1.98 at the merge of dev
   of 2026-11-24 that brought 1.96, line NP item M4b-3b (1.95) and line DBID item pfoff-4 (1.96));
-  1.101 2026-11-25 (a Seq-align id whose lookup throws on the id itself, a string tag of `PIG` or
+  1.103 2026-11-25 (a Seq-align id whose lookup throws on the id itself, a string tag of `PIG` or
   `BL_ORD_ID` (`gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) or a `ti` tag that is
   not a number, is written as NCBI writes it with the prefetch on or off: NCBI's prefetch of the
   batch catches the exception, writes `Error pre-fetching sequence data` and ends its loads, and
@@ -661,7 +661,8 @@
   `saccver` (NCBI's null pointer exception, with addresses of its binary), outfmt 17, a holder that
   NCBI's scope or data loader gives for the id, and a weak match of another sequence that a report
   of such a batch reads; line DBID item pfoff-7, Owner-delegated, standing instruction 2026-09-29,
-  restated 2026-10-07; numbered after 1.100)
+  restated 2026-10-07; numbered after 1.102 on origin/dev (line RG
+  item KC-11d's 1.100, exception 30's 1.101, psiblast line item PS10e's 1.102); first 1.101)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:

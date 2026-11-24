@@ -91,10 +91,6 @@ fn run_body(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    let registry = match &settings.blastdb {
-        Ok(value) => value.as_deref(),
-        Err(reason) => return diag.refuse(&refusal(reason)),
-    };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1179-1180
     let mut out_file = match args.output_file("out", out) {
         Ok(out) => out,
@@ -115,22 +111,22 @@ fn run_body(
     // (`metadata::metadata`): a failed write drops the later ones, and a closed pipe ends the
     // program where SIGPIPE ends NCBI's (`files::Ostream`).
     let mut out = Ostream::new(&mut out_file);
-    let path = match SearchPath::from_environment(registry) {
-        Ok(path) => path,
-        Err(error) => return database_error(diag, error),
-    };
+    let path = SearchPath::from_environment(settings.blastdb.as_deref());
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1181-1184
     if args.given("show_blastdb_search_path") {
         // NCBI inserts the path and ends the line with a flush, so the line goes out in one
         // write.
-        let _ = out.write_all(format!("{}\n", path.as_str()).as_bytes());
+        let _ = out.write_all(&[path.as_bytes(), b"\n"].concat());
         let _ = out.flush();
         return 0;
     }
     if args.given("list") {
         return list::list(args, &path, diag, &mut out);
     }
-    let name = args.value("db").unwrap_or("nr");
+    // The database's name is the bytes of NCBI's `std::string`.
+    let name = args
+        .bytes("db")
+        .unwrap_or(std::borrow::Cow::Borrowed(b"nr"));
     let dbtype = args.value("dbtype").unwrap_or("guess");
     let selected = ["info", "metadata", "tax_info"]
         .into_iter()
@@ -153,7 +149,7 @@ fn run_body(
             }
             Ok(())
         };
-        let (db, _) = match open_database(name, dbtype, &path, &restrict) {
+        let (db, _) = match open_database(&name, dbtype, &path, &restrict) {
             Ok(opened) => opened,
             Err(error) => return database_error(diag, error),
         };
@@ -168,13 +164,13 @@ fn run_body(
             dbtype_protein,
         );
     }
-    let (db, volumes) = match open_database(name, dbtype, &path, &|_| Ok(())) {
+    let (db, volumes) = match open_database(&name, dbtype, &path, &|_| Ok(())) {
         Ok(opened) => opened,
         Err(error) => return database_error(diag, error),
     };
     if !args.given("info") {
         if args.given("metadata") {
-            return metadata::metadata(&db, name, args, &path, diag, out_file);
+            return metadata::metadata(&db, &name, args, &path, diag, out_file);
         }
         if args.given("tax_info") {
             return taxonomy::tax_info(&db, args, diag, &mut out);
@@ -186,7 +182,8 @@ fn run_body(
     // (`SeqDb::date`), with U+FFFD for bytes that are not UTF-8.
     if db.date().contains('\u{fffd}') {
         return diag.refuse(&refusal(&format!(
-            "{name}: the date of the database is not UTF-8 text"
+            "{}: the date of the database is not UTF-8 text",
+            String::from_utf8_lossy(&name)
         )));
     }
     let exact = if args.given("exact_length") {
@@ -247,11 +244,11 @@ fn output_refusal(reason: &str) -> String {
 /// error is the one reported; a refusal of LOSAT's is reported at once, since NCBI may open that
 /// protein database.
 fn open_database(
-    name: &str,
+    name: &[u8],
     dbtype: &str,
     path: &SearchPath,
     prepare: &dyn Fn(&mut SeqDb) -> Result<(), SeqDbError>,
-) -> Result<(SeqDb, Vec<String>), SeqDbError> {
+) -> Result<(SeqDb, Vec<Vec<u8>>), SeqDbError> {
     let types: &[SeqType] = match dbtype {
         "prot" => &[SeqType::Protein],
         "nucl" => &[SeqType::Nucleotide],
@@ -330,10 +327,12 @@ fn write_info_head(out: &mut Vec<u8>, db: &SeqDb, exact: Option<(u64, u32)>) {
 }
 
 /// The text of `-info` after the filtering algorithms: the `Volumes:` are `volumes`.
-fn write_info_volumes(out: &mut Vec<u8>, volumes: &[String]) {
+fn write_info_volumes(out: &mut Vec<u8>, volumes: &[Vec<u8>]) {
     out.extend_from_slice(b"\nVolumes:\n");
     for volume in volumes {
-        let _ = writeln!(out, "\t{volume}");
+        out.push(b'\t');
+        out.extend_from_slice(volume);
+        out.push(b'\n');
     }
 }
 

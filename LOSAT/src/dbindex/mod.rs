@@ -64,7 +64,7 @@ pub(crate) struct Options {
     /// `max_index_size`: the volume size in megabytes.
     pub(crate) max_index_size: u64,
     /// `stat_file_name`; `None` for the empty name.
-    pub(crate) stat_file_name: Option<String>,
+    pub(crate) stat_file_name: Option<Vec<u8>>,
 }
 
 impl Options {
@@ -122,7 +122,7 @@ pub(crate) fn test_volume(name: &str, fasta: &str, options: &Options) -> std::pa
         std::thread::current().id()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    let base = dir.join(name).to_string_lossy().into_owned();
+    let base = crate::utils::os_bytes::path_bytes(&dir.join(name)).into_owned();
     let mut input = stream::FastaStream::new(
         Box::new(std::io::Cursor::new(fasta.as_bytes().to_vec())),
         false,
@@ -139,7 +139,7 @@ pub(crate) fn test_volume(name: &str, fasta: &str, options: &Options) -> std::pa
         &mut |_| {},
     );
     assert!(made.is_ok(), "the test index was not made");
-    std::path::PathBuf::from(path)
+    crate::utils::os_bytes::path_from_bytes(path)
 }
 
 /// Letters `A`, `C`, `G`, `T` from a fixed generator (the tests' sequences).

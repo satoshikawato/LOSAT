@@ -225,7 +225,8 @@ fn bdb_error(error: BdbError) -> StreamError {
 /// an `int`) or by the text of `-db_mask` (the `string` constructor).
 pub(crate) enum Filter<'a> {
     None,
-    Name(&'a str),
+    /// The bytes of `-db_mask`.
+    Name(&'a [u8]),
 }
 
 impl BlastDbStream {
@@ -236,9 +237,9 @@ impl BlastDbStream {
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:48-57
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:62-96
     pub(crate) fn open(
-        dbname: &str,
+        dbname: &[u8],
         filter: Filter<'_>,
-        registry: Result<Option<&str>, &str>,
+        registry: Option<&[u8]>,
         titles: bool,
     ) -> Result<Self, StreamError> {
         let mut reader =
@@ -254,7 +255,7 @@ impl BlastDbStream {
         };
         stream.filter = match filter {
             Filter::None => None,
-            Filter::Name(name) => match crate::ncbi_str::string_to_int(name.as_bytes(), 0).ok() {
+            Filter::Name(name) => match crate::ncbi_str::string_to_int(name, 0).ok() {
                 Some(id) => Some(stream.checked_id(id)?),
                 None => Some(stream.named_id(name)?),
             },
@@ -263,7 +264,7 @@ impl BlastDbStream {
     }
 
     /// `FindVolumePaths` (with `paths` and true) of the database opened as `dbname`.
-    pub(crate) fn volume_paths(&self, dbname: &str) -> Result<Vec<String>, StreamError> {
+    pub(crate) fn volume_paths(&self, dbname: &[u8]) -> Result<Vec<Vec<u8>>, StreamError> {
         self.reader.volume_paths(dbname).map_err(bdb_error)
     }
 
@@ -310,12 +311,17 @@ impl BlastDbStream {
     /// again as a `CSequenceIStream_Exception`.
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:78-94
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2261-2266
-    fn named_id(&self, name: &str) -> Result<i32, StreamError> {
+    fn named_id(&self, name: &[u8]) -> Result<i32, StreamError> {
+        // The descriptions are text (`MaskAlgorithms`): a name that is not UTF-8 matches none.
         let found = self
             .reader
             .db()
             .mask_algorithms()
-            .map(|algorithms| algorithms.id_of(name))
+            .map(|algorithms| {
+                std::str::from_utf8(name)
+                    .ok()
+                    .and_then(|name| algorithms.id_of(name))
+            })
             .map_err(|error| bdb_error(self.reader.database_error(error)))?;
         if let Some(id) = found {
             return Ok(id);

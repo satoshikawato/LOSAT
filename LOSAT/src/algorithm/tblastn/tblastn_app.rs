@@ -821,8 +821,7 @@ fn subject_taxonomy(
         .iter()
         .filter_map(|format| super::tabular::tabular_spec(format.outfmt))
         .collect();
-    let taxonomy =
-        crate::algorithm::common::database::subject_taxonomy(setting, "TBLASTN", &specs)?;
+    let taxonomy = crate::algorithm::common::database::subject_taxonomy(setting, &specs);
     args.subject_taxdb = taxonomy.taxdb;
     args.tabular_taxdb = taxonomy.found;
     Ok(())

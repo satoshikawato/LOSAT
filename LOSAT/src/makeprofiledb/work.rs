@@ -155,7 +155,8 @@ struct Params<'a> {
     log_file: Option<OpenedFile>,
     /// The list of profile files (`m_InPssmList`), read whole.
     in_list: Vec<u8>,
-    title: String,
+    /// `-title` (its bytes; `-in` without it).
+    title: Vec<u8>,
     word_default_score_threshold: f64,
     out_db_name: String,
     max_smp_files_per_vol: i32,
@@ -207,7 +208,8 @@ fn init<'a>(
         None
     };
     let in_name = args
-        .as_string("in")
+        .os_value("in")
+        .ok_or_else(|| crate::ncbi_app::args::no_value("in"))
         .map_err(|error| diag.init_arg_exception(error))?;
     let mut in_file = files::open_input_file("in", in_name, input)
         .map_err(|error| diag.init_arg_exception(error))?;
@@ -217,19 +219,27 @@ fn init<'a>(
     let mut in_list = Vec::new();
     if let Err(error) = in_file.read_to_end(&mut in_list) {
         return Err(diag.refuse(&unsupported(&format!(
-            "an -in list that cannot be read (`{in_name}': {error}; NCBI's makeprofiledb reads \
-             it without end)"
+            "an -in list that cannot be read (`{}': {error}; NCBI's makeprofiledb reads it \
+             without end)",
+            in_name.to_string_lossy()
         ))));
     }
     drop(in_file);
-    let in_string = in_name.to_string();
+    let in_bytes = crate::utils::os_bytes::os_str_bytes(in_name);
     let title = args
-        .value("title")
-        .map_or_else(|| in_string.clone(), str::to_string);
+        .bytes("title")
+        .map_or_else(|| in_bytes.to_vec(), std::borrow::Cow::into_owned);
     let word_default_score_threshold = args.double("threshold").expect("a default");
     let out_db_name = args
-        .value("out")
-        .map_or_else(|| in_string.clone(), str::to_string);
+        .bytes("out")
+        .map_or_else(|| in_bytes.to_vec(), std::borrow::Cow::into_owned);
+    // The database writer names its files by text (`writedb::WriteDb`).
+    let Ok(out_db_name) = String::from_utf8(out_db_name) else {
+        return Err(diag.refuse(&unsupported(
+            "a database name (-out, or -in without -out) that is not UTF-8 (NCBI's makeprofiledb \
+             writes the files of its bytes)",
+        )));
+    };
     let max_smp_files_per_vol = args.integer("max_smp_vol").expect("a default");
     let create_index_file = args.boolean("index").expect("a default");
     let matrix = args.value("matrix").expect("a default").to_string();
@@ -246,7 +256,7 @@ fn init<'a>(
     };
     let (taxids, user_taxids) = if let Some(taxid) = args.integer("taxid") {
         (TaxIdSet::with_global(taxid), true)
-    } else if let Some(name) = args.value("taxid_map") {
+    } else if let Some(name) = args.os_value("taxid_map") {
         let file = files::open_input_file("taxid_map", name, input)
             .map_err(|error| diag.init_arg_exception(error))?;
         let mut taxids = TaxIdSet::default();
@@ -270,8 +280,9 @@ fn init<'a>(
             }
             Err(TaxIdMapError::BlankLine(line)) => {
                 return Err(diag.refuse(&unsupported(&format!(
-                    "a -taxid_map line of white space only (line {line} of `{name}'; NCBI's \
-                     makeprofiledb crashes on it)"
+                    "a -taxid_map line of white space only (line {line} of `{}'; NCBI's \
+                     makeprofiledb crashes on it)",
+                    name.to_string_lossy()
                 ))))
             }
         }
@@ -543,7 +554,9 @@ fn create_alias_file(params: &Params<'_>, built: &Built, diag: &mut Diag) -> Res
     let fname = format!("{}.pal", params.out_db_name);
     let mut text = format!("#\n# Alias file created {}\n#\n", now.log_time()).into_bytes();
     if !params.title.is_empty() {
-        text.extend_from_slice(format!("TITLE {}\n", params.title).as_bytes());
+        text.extend_from_slice(b"TITLE ");
+        text.extend_from_slice(&params.title);
+        text.push(b'\n');
     }
     text.extend_from_slice(b"DBLIST ");
     for name in &built.vol_names {
@@ -558,10 +571,10 @@ fn create_alias_file(params: &Params<'_>, built: &Built, diag: &mut Diag) -> Res
     let _ = std::fs::write(&fname, &text);
     let totals = std::env::current_dir()
         .ok()
-        .and_then(|cwd| crate::seqdb::alias::SearchPath::new(&cwd, None, None).ok())
+        .map(|cwd| crate::seqdb::alias::SearchPath::new(&cwd, None, None))
         .and_then(|search| {
             crate::seqdb::SeqDb::open_in(
-                &params.out_db_name,
+                params.out_db_name.as_bytes(),
                 crate::seqdb::SeqType::Protein,
                 &search,
             )
@@ -704,7 +717,7 @@ fn make_vol(
     let mut output_db = WriteDb::new(
         &db_name,
         true,
-        params.title.as_bytes(),
+        &params.title,
         now.index_date().as_bytes(),
         MAX_FILE_SIZE,
         params.db_ver,

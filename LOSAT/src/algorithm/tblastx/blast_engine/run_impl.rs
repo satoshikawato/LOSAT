@@ -1390,7 +1390,6 @@ fn subject_taxonomy(
 ) -> Result<()> {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        "TBLASTX",
         outputs
             .formats
             .iter()
@@ -1398,7 +1397,7 @@ fn subject_taxonomy(
                 report::TblastxOutputFormat::CustomTabular(spec) => Some(spec),
                 _ => None,
             }),
-    )?;
+    );
     args.subject_taxdb = taxonomy.taxdb;
     args.tabular_taxdb = taxonomy.found;
     Ok(())

@@ -345,22 +345,24 @@ pub struct StringIsam {
 impl StringIsam {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbisam.cpp:1173-1210
     /// `CSeqDBIsam::x_MakeFilenames` (`file_ext_char` is `s`): `<dbname>.ps?` or `.ns?`, the index
-    /// file ending in `i` and the data file in `d`.
-    pub fn file_names(dbname: &str, protein: bool) -> Result<(PathBuf, PathBuf), SeqDbError> {
-        if dbname.is_empty() {
+    /// file ending in `i` and the data file in `d`. The volume's path `dbname` is the bytes of
+    /// NCBI's `std::string`.
+    pub fn file_names(dbname: &Path, protein: bool) -> Result<(PathBuf, PathBuf), SeqDbError> {
+        if dbname.as_os_str().is_empty() {
             return Err(SeqDbError::NotFound(
                 "Error: argument not valid".to_string().into(),
             ));
         }
-        let mut index = format!("{dbname}.{}s", if protein { 'p' } else { 'n' });
+        let mut index = dbname.as_os_str().to_os_string();
+        index.push(if protein { ".ps" } else { ".ns" });
         let mut data = index.clone();
-        index.push('i');
-        data.push('d');
+        index.push("i");
+        data.push("d");
         Ok((PathBuf::from(index), PathBuf::from(data)))
     }
 
     /// `CSeqDBIsam::IndexExists` for the string index ([`index_exists`]: two regular files).
-    pub fn index_exists(dbname: &str, protein: bool) -> bool {
+    pub fn index_exists(dbname: &Path, protein: bool) -> bool {
         match Self::file_names(dbname, protein) {
             Ok((index, data)) => index_exists(&index, &data),
             Err(_) => false,
@@ -368,14 +370,14 @@ impl StringIsam {
     }
 
     /// The string index of the volume `dbname` (its path without extension).
-    pub fn open_volume(dbname: &str, protein: bool) -> Result<Self, SeqDbError> {
+    pub fn open_volume(dbname: &Path, protein: bool) -> Result<Self, SeqDbError> {
         let (index, data) = Self::file_names(dbname, protein)?;
         Self::open(&index, &data)
     }
 
     /// `x_OpenStrFile`: the string index of the volume `dbname` (its path without extension, a
     /// volume with sequences), `None` where it has none ([`open_if_exists`]).
-    pub fn open_existing(dbname: &str, protein: bool) -> Result<Option<Self>, SeqDbError> {
+    pub fn open_existing(dbname: &Path, protein: bool) -> Result<Option<Self>, SeqDbError> {
         let (index, data) = Self::file_names(dbname, protein)?;
         open_if_exists(&index, &data)?
             .map(|(index, data)| Self::from_files(index, data))

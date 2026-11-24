@@ -233,29 +233,29 @@ fn file_length(path: impl AsRef<Path>) -> Option<i64> {
 /// file's name is the bytes of the volume's header (`lmdb_file_names`), which need not be
 /// UTF-8; NCBI finds, counts and lists the files of such a name (line LIB-B).
 pub(crate) fn db_files_metadata(
-    volumes: &[String],
-    alias_files: &[String],
+    volumes: &[Vec<u8>],
+    alias_files: &[Vec<u8>],
     lmdbs: &[std::path::PathBuf],
     is_protein: bool,
-    user_path: &str,
+    user_path: &[u8],
 ) -> (i64, i64, Vec<Vec<u8>>) {
-    use crate::utils::os_bytes::{path_bytes, path_from_bytes};
+    use crate::utils::os_bytes::{path_bytes, path_from_bytes, path_of_bytes};
     let mut db_files = Vec::new();
     let mut disk_bytes = 0i64;
     let mut cached_bytes = 0i64;
-    let listed = |name: &[u8]| [user_path.as_bytes(), file_name(name)].concat();
+    let listed = |name: &[u8]| [user_path, file_name(name)].concat();
     for alias in alias_files {
-        if let Some(length) = file_length(alias) {
-            db_files.push(listed(alias.as_bytes()));
+        if let Some(length) = file_length(path_of_bytes(alias)) {
+            db_files.push(listed(alias));
             disk_bytes += length;
         }
     }
     let mol = if is_protein { 'p' } else { 'n' };
     for path in volumes {
         for ext in VOLUME_EXTENSIONS {
-            let file = format!("{path}.{mol}{ext}");
-            if let Some(length) = file_length(&file) {
-                db_files.push(listed(file.as_bytes()));
+            let file = [path.as_slice(), format!(".{mol}{ext}").as_bytes()].concat();
+            if let Some(length) = file_length(path_of_bytes(&file)) {
+                db_files.push(listed(&file));
                 disk_bytes += length;
                 if ext == "in" || ext == "sq" {
                     cached_bytes += length;
@@ -292,10 +292,11 @@ pub(crate) fn db_files_metadata(
 /// empty without the option. makeblastdb 2.17.0 writes the value before each name of `files`
 /// (`x`, `/data/blast/`, a quote, a backslash, a tab, UTF-8, escaped as the JSON of every
 /// string), and an empty value adds nothing (line RG item D3a probes `P_*`).
-pub(crate) fn metadata_user_path(prefix: Option<&str>) -> String {
-    let mut user_path = prefix.unwrap_or("").to_string();
-    if !user_path.is_empty() && !user_path.ends_with(std::path::MAIN_SEPARATOR) {
-        user_path.push(std::path::MAIN_SEPARATOR);
+pub(crate) fn metadata_user_path(prefix: Option<&[u8]>) -> Vec<u8> {
+    let mut user_path = prefix.unwrap_or_default().to_vec();
+    let separator = std::path::MAIN_SEPARATOR as u8;
+    if !user_path.is_empty() && user_path.last() != Some(&separator) {
+        user_path.push(separator);
     }
     user_path
 }

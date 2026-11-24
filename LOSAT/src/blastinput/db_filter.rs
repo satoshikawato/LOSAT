@@ -184,10 +184,7 @@ impl DbFilterArgs {
         if self.seqid_list().is_none() && self.list().is_none() {
             return Ok(None);
         }
-        // The registry's errors are the database's: `open_search_database` reports them.
-        let registry = settings.blastdb.clone().unwrap_or(None);
-        let path = SearchPath::from_environment(registry.as_deref())
-            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let path = SearchPath::from_environment(settings.blastdb.as_deref());
         if let Some((value, negative)) = self.seqid_list() {
             return self.resolve_seqid_list(value, negative, &path, warnings);
         }
@@ -195,10 +192,10 @@ impl DbFilterArgs {
             return Ok(None);
         };
         let ids: Vec<Vec<u8>> = if is_file {
-            let Some(file) = path.resolve_file(value) else {
+            let Some(file) = path.resolve_file(value.as_bytes()) else {
                 return Err(options_error(&format!("File is not acessible: {value}")));
             };
-            let bytes = std::fs::read(&file)
+            let bytes = std::fs::read(crate::utils::os_bytes::path_of_bytes(&file))
                 .map_err(|_| options_error(&format!("File is not acessible: {value}")))?;
             stream_lines(&bytes)
         } else {
@@ -213,8 +210,8 @@ impl DbFilterArgs {
             None
         } else {
             match path
-                .resolve_file(TAXONOMY_FILE)
-                .map(|file| DbFile::open(file.as_ref()))
+                .resolve_file(TAXONOMY_FILE.as_bytes())
+                .map(|file| DbFile::open(&crate::utils::os_bytes::path_of_bytes(&file)))
             {
                 Some(Ok(file)) => Some(file),
                 _ => {
@@ -287,8 +284,8 @@ impl DbFilterArgs {
         warnings: &mut dyn Write,
     ) -> Result<Option<DbList>> {
         let bytes = path
-            .resolve_file(value)
-            .and_then(|file| std::fs::read(&file).ok())
+            .resolve_file(value.as_bytes())
+            .and_then(|file| std::fs::read(crate::utils::os_bytes::path_of_bytes(&file)).ok())
             .ok_or_else(|| NativeError::exception(&missing_seqidlist_exception()))?;
         let mut cerr = Vec::new();
         let file = seqidlist::read_si_list(&bytes, &mut cerr).map_err(|text| NativeError {

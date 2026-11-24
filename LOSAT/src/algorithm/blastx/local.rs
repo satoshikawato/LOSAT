@@ -247,9 +247,8 @@ pub(super) fn subject_taxonomy(
 ) -> Result<()> {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        "BLASTX",
         resolved.iter().filter_map(|options| options.tabular),
-    )?;
+    );
     for options in resolved {
         options.taxdb_found = taxonomy.found.unwrap_or(false);
         options.subject_taxdb = taxonomy.taxdb.clone();

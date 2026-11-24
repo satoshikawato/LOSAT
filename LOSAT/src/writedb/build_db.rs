@@ -427,29 +427,30 @@ pub(crate) fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, Wr
     } else {
         SeqType::Nucleotide
     };
-    let (db_files, alias_files) = match crate::seqdb::alias::find_volume_paths(dbpath, seqtype) {
-        Ok(found) => found,
-        Err(SeqDbError::Unsupported { path, message }) => {
-            return Err(WriteDbError::Other(format!(
-                "an existing database is in the way and LOSAT cannot list its files ({}: \
+    let (db_files, alias_files) =
+        match crate::seqdb::alias::find_volume_paths(dbpath.as_bytes(), seqtype) {
+            Ok(found) => found,
+            Err(SeqDbError::Unsupported { path, message }) => {
+                return Err(WriteDbError::Other(format!(
+                    "an existing database is in the way and LOSAT cannot list its files ({}: \
                  {message}); remove it before building {dbpath}",
-                path.display()
-            )));
-        }
-        Err(_) => (Vec::new(), Vec::new()),
-    };
+                    path.display()
+                )));
+            }
+            Err(_) => (Vec::new(), Vec::new()),
+        };
 
     // `Remove` of a `CFile` is `CDirEntry::Remove` with `eRecursive` (`super::dir_entry`): a
     // directory of the name is removed with its contents, a symbolic link is removed and its
     // target kept.
     let mut num_files_removed = 0;
-    let mut remove = |name: &str| {
-        let removed = dir_entry::remove(Path::new(name));
+    let mut remove = |name: &[u8]| {
+        let removed = dir_entry::remove(&crate::utils::os_bytes::path_of_bytes(name));
         num_files_removed += u32::from(removed);
         removed
     };
     for lmdb in LMDB_EXTENSIONS {
-        if !remove(&format!("{dbpath}.{letter}{lmdb}")) {
+        if !remove(format!("{dbpath}.{letter}{lmdb}").as_bytes()) {
             let mut index = 0u32;
             // The removals of the volume files are not counted by NCBI.
             while dir_entry::remove(Path::new(&format!(
@@ -463,7 +464,9 @@ pub(crate) fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, Wr
     }
     for file in &db_files {
         for extension in VOLUME_EXTENSIONS {
-            remove(&format!("{file}.{letter}{extension}"));
+            let mut name = file.clone();
+            name.extend_from_slice(format!(".{letter}{extension}").as_bytes());
+            remove(&name);
         }
     }
     for file in &alias_files {

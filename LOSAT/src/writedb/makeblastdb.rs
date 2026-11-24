@@ -659,7 +659,7 @@ fn verify_input_files(names: &[&str], err: &mut dyn Write) -> Result<(), MakedbE
 #[allow(clippy::too_many_arguments)]
 fn build_database_with_log(
     args: &MakedbArgs,
-    registry_blastdb: Option<&str>,
+    registry_blastdb: Option<&[u8]>,
     now: Option<&LocalTime>,
     platform: Platform,
     stdin: &mut dyn Read,
@@ -781,7 +781,7 @@ fn build_database_with_log(
         *end_messages = destructor_messages(&db, error.as_ref());
         return error.map_or(Ok(()), Err);
     }
-    let user_path = metadata_user_path(args.metadata_output_prefix.as_deref());
+    let user_path = metadata_user_path(args.metadata_output_prefix.as_deref().map(str::as_bytes));
     if blastdb_input {
         // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:665-668
         // The seed of `-randomize` is the seconds of the clock (`time` with a null pointer), which
@@ -833,7 +833,7 @@ fn build_database_with_log(
 fn input_database_title(
     input: &str,
     is_protein: bool,
-    registry_blastdb: Option<&str>,
+    registry_blastdb: Option<&[u8]>,
 ) -> Result<Vec<u8>, MakedbError> {
     let names = split_quoted(input);
     if names.len() > 1 {
@@ -845,8 +845,8 @@ fn input_database_title(
              title of the first database of none (no defined result)",
         ));
     };
-    let search = SearchPath::from_environment(registry_blastdb).map_err(input_error)?;
-    let db = SeqDb::open_in(name, seq_type(is_protein), &search).map_err(input_error)?;
+    let search = SearchPath::from_environment(registry_blastdb);
+    let db = SeqDb::open_in(name.as_bytes(), seq_type(is_protein), &search).map_err(input_error)?;
     Ok(db.title().to_vec())
 }
 
@@ -876,16 +876,16 @@ fn seq_type(is_protein: bool) -> SeqType {
 fn copy_input_databases(
     db: &mut BuildDatabase<'_>,
     names: &[&str],
-    user_path: &str,
+    user_path: &[u8],
     is_protein: bool,
-    registry_blastdb: Option<&str>,
+    registry_blastdb: Option<&[u8]>,
     randomize: Option<u32>,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
     let seqtype = seq_type(is_protein);
-    let search = SearchPath::from_environment(registry_blastdb).map_err(input_error)?;
+    let search = SearchPath::from_environment(registry_blastdb);
     for &name in names {
-        match SeqDb::open_in(name, seqtype, &search) {
+        match SeqDb::open_in(name.as_bytes(), seqtype, &search) {
             Ok(_) => {}
             Err(error) if error.ncbi_message().is_some() => {
                 let _ = writeln!(
@@ -901,7 +901,8 @@ fn copy_input_databases(
             "No valid input FASTA file or BLAST db is found.",
         ));
     }
-    let input = SeqDb::open_in(&combine_and_quote(names), seqtype, &search).map_err(input_error)?;
+    let input = SeqDb::open_in(combine_and_quote(names).as_bytes(), seqtype, &search)
+        .map_err(input_error)?;
     let leafs = {
         let mut warn = warn_to(err);
         scan_leaf_tax_ids(&input, &mut warn, db.utf8_once())
@@ -962,9 +963,9 @@ fn add_input_and_close(
     db: &mut BuildDatabase<'_>,
     names: &[&str],
     from_stdin: Option<Option<bool>>,
-    user_path: &str,
+    user_path: &[u8],
     is_protein: bool,
-    registry_blastdb: Option<&str>,
+    registry_blastdb: Option<&[u8]>,
     stdin: &mut dyn Read,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
@@ -1071,19 +1072,18 @@ fn add_input_and_close(
 /// database and writes its metadata file.
 fn open_new_database(
     db: &BuildDatabase<'_>,
-    user_path: &str,
+    user_path: &[u8],
     is_protein: bool,
-    registry_blastdb: Option<&str>,
+    registry_blastdb: Option<&[u8]>,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
     let new_db = db.output_dbname();
     let seqtype = seq_type(is_protein);
     // `CSeqDB` names its search path in the message of a database that is not there: the
     // current directory, `BLASTDB` and the registry entry `[BLAST] BLASTDB` (`registry_blastdb`,
-    // of the application settings that the callers of `run_with` read before the build; a value
-    // that LOSAT does not read is left out).
-    let search = SearchPath::from_environment(registry_blastdb).map_err(MakedbError::Database)?;
-    let located = match SeqDb::locate_one_name_metadata(new_db, seqtype, &search) {
+    // of the application settings that the callers of `run_with` read before the build).
+    let search = SearchPath::from_environment(registry_blastdb);
+    let located = match SeqDb::locate_one_name_metadata(new_db.as_bytes(), seqtype, &search) {
         Ok(located) => located,
         Err(error) => return Err(MakedbError::Database(error)),
     };
@@ -1215,10 +1215,10 @@ impl Write for CoutLog<'_> {
     }
 }
 
-/// The registry entry `[BLAST] BLASTDB` of `settings` that `run_with` takes: `None` when the
-/// registry has no such entry or LOSAT does not read its value (`ApplicationSettings::blastdb`).
-pub(crate) fn registry_blastdb(settings: &ApplicationSettings) -> Option<&str> {
-    settings.blastdb.as_ref().ok().and_then(Option::as_deref)
+/// The registry entry `[BLAST] BLASTDB` of `settings` that `run_with` takes (its bytes): `None`
+/// when the registry has no such entry (`ApplicationSettings::blastdb`).
+pub(crate) fn registry_blastdb(settings: &ApplicationSettings) -> Option<&[u8]> {
+    settings.blastdb.as_deref()
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:843-871
@@ -1254,7 +1254,7 @@ pub(crate) fn registry_blastdb(settings: &ApplicationSettings) -> Option<&str> {
 /// messages go where makeblastdb sends them instead of `out` and `err`.
 pub(crate) fn run_with(
     args: &MakedbArgs,
-    registry_blastdb: Option<&str>,
+    registry_blastdb: Option<&[u8]>,
     now: Option<&LocalTime>,
     platform: Platform,
     stdin: &mut dyn Read,

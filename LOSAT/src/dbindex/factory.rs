@@ -809,7 +809,7 @@ impl OffsetData {
         let mut stats = options
             .stat_file_name
             .as_deref()
-            .and_then(|name| File::create(name).ok())
+            .and_then(|name| File::create(crate::utils::os_bytes::path_of_bytes(name)).ok())
             .map(BufWriter::new);
         write_word(os, self.total)?;
         let mut tot: Word = 0;
@@ -866,7 +866,7 @@ impl From<StreamError> for Stop {
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1797-1803
 pub(crate) fn make_index(
     input: &mut dyn SequenceStream,
-    oname: &str,
+    oname: &[u8],
     start: SeqNum,
     stop: &mut SeqNum,
     options: &Options,
@@ -942,7 +942,7 @@ pub(crate) fn make_index(
     }
     // NCBI opens the volume as a binary output stream without exceptions: a file that does not
     // open, or a write that fails, is not reported.
-    if let Ok(file) = File::create(oname) {
+    if let Ok(file) = File::create(crate::utils::os_bytes::path_of_bytes(oname)) {
         let mut os = BufWriter::with_capacity(1 << 20, file);
         let header = Header::of(
             options.legacy,
@@ -960,7 +960,8 @@ pub(crate) fn make_index(
         let _ = offset_data.save(&mut std::io::sink(), options);
     }
     if options.idmap {
-        if let Ok(file) = File::create(format!("{oname}.map")) {
+        let map = [oname, b".map"].concat();
+        if let Ok(file) = File::create(crate::utils::os_bytes::path_of_bytes(&map)) {
             let mut maps = BufWriter::new(file);
             for id in &idmap {
                 let _ = maps.write_all(id);

@@ -49,8 +49,8 @@ impl FormatSpec {
     /// `%b`, `%d` and `%m`, whose algorithms are `mask_algos`); `Err` is the message of NCBI's
     /// exception. A `%` that ends the text reads the string's terminating NUL as its
     /// specifier, as NCBI's loop does.
-    pub fn parse(spec: &str, mask_algos: Vec<i32>) -> Result<Self, String> {
-        let bytes = spec.as_bytes();
+    pub fn parse(spec: &[u8], mask_algos: Vec<i32>) -> Result<Self, String> {
+        let bytes = spec;
         let mut types = Vec::new();
         let mut separators = Vec::new();
         let mut sp = Vec::new();
@@ -107,7 +107,7 @@ impl FormatSpec {
         source: &Source,
         oid: u32,
         config: &Config,
-        target: Option<&str>,
+        target: Option<&[u8]>,
         out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
         let mut seq = Vec::new();
@@ -322,7 +322,7 @@ fn x_get_seq(source: &Source, oid: u32, config: &Config) -> Result<Vec<u8>, Stop
 /// the line's end.
 fn write_asn_deflines(
     set: &DeflineSet,
-    target: Option<&str>,
+    target: Option<&[u8]>,
     out: &mut Output<'_, '_>,
 ) -> Result<(), Stop> {
     match target {
@@ -355,7 +355,10 @@ impl AsnTextDocument for DeflineDocument<'_> {
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:800-819
 /// The definition line of `-target_only` for the `%` formats: the first whose Seq-id
 /// matches the target (`CSeq_id::Match`) or whose GI is the target's number.
-fn extract_target_defline<'a>(set: &'a DeflineSet, target: &str) -> Result<&'a BlastDefline, Stop> {
+fn extract_target_defline<'a>(
+    set: &'a DeflineSet,
+    target: &[u8],
+) -> Result<&'a BlastDefline, Stop> {
     let target_id = parse_target(target)?;
     let number = numeric_target(target);
     for defline in &set.deflines {
@@ -367,7 +370,9 @@ fn extract_target_defline<'a>(set: &'a DeflineSet, target: &str) -> Result<&'a B
             }
         }
     }
-    Err(Stop::Ncbi(format!("Failed to find target id {target}")))
+    Err(Stop::NcbiBytes(
+        [b"Failed to find target id ".as_slice(), target].concat(),
+    ))
 }
 
 /// The strings of `CBlastDeflineUtil::ExtractDataFromBlastDefline` (`results`), those the

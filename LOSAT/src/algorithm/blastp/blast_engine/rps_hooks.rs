@@ -64,24 +64,22 @@ pub(super) fn check_freq_ratio_file(
     let Some(name) = args.db.as_deref() else {
         return Ok(());
     };
-    let registry = match &settings.blastdb {
-        Ok(value) => value.as_deref(),
-        Err(reason) => bail!("{reason} is not supported by LOSAT's RPSBLAST"),
-    };
-    let path = crate::seqdb::SearchPath::from_environment(registry).map_err(|_| {
-        crate::blastinput::app::engine_error("Cannot retrieve path to RPS database")
-    })?;
+    let path = crate::seqdb::SearchPath::from_environment(settings.blastdb.as_deref());
     let mut failed: Vec<&str> = Vec::new();
     for db in name.split(' ').filter(|db| !db.is_empty()) {
-        let volumes =
-            crate::seqdb::SeqDb::volume_and_alias_paths(db, crate::seqdb::SeqType::Protein, &path)
-                .ok()
-                .map(|(volumes, _)| volumes)
-                .filter(|volumes| !volumes.is_empty())
-                .ok_or_else(|| {
-                    crate::blastinput::app::engine_error("Cannot retrieve path to RPS database")
-                })?;
-        if !std::path::Path::new(&format!("{}.freq", volumes[0])).exists() {
+        let volumes = crate::seqdb::SeqDb::volume_and_alias_paths(
+            db.as_bytes(),
+            crate::seqdb::SeqType::Protein,
+            &path,
+        )
+        .ok()
+        .map(|(volumes, _)| volumes)
+        .filter(|volumes| !volumes.is_empty())
+        .ok_or_else(|| {
+            crate::blastinput::app::engine_error("Cannot retrieve path to RPS database")
+        })?;
+        let freq = [volumes[0].as_slice(), b".freq"].concat();
+        if !crate::utils::os_bytes::path_of_bytes(&freq).exists() {
             failed.push(db);
         }
     }

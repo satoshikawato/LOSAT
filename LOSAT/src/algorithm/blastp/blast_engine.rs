@@ -4762,12 +4762,11 @@ fn subject_taxonomy(
 ) -> Result<()> {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        args.app.name(),
         outputs
             .formats
             .iter()
             .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt, args.app)),
-    )?;
+    );
     resolved.subject_taxdb = taxonomy.taxdb;
     resolved.subject_taxdb_found = taxonomy.found.unwrap_or(false);
     Ok(())

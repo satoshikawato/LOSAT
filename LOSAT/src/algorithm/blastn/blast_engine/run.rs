@@ -6561,11 +6561,10 @@ fn subject_taxonomy(
 ) -> Result<()> {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        "BLASTN",
         output_formats
             .iter()
             .filter_map(|format| format.tabular_spec()),
-    )?;
+    );
     args.subject_taxdb = taxonomy.taxdb;
     args.tabular_taxdb = taxonomy.found;
     Ok(())
@@ -7102,7 +7101,6 @@ pub(crate) fn repeat_search_hits(
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> std::result::Result<Vec<Arc<Vec<PairwiseHit>>>, super::super::repeat_filter::RepeatError> {
     use super::super::repeat_filter::RepeatError;
-    use crate::algorithm::common::database::DatabaseOpenError;
     // The search's `CSeqDB`, without a list, meets the errors of the alias files' counts where it
     // opens the database (`common::database::restrict_database`).
     let opened = crate::algorithm::common::database::open_search_database(
@@ -7112,8 +7110,7 @@ pub(crate) fn repeat_search_hits(
     );
     let failed = match opened {
         Ok(database) => database.check_alias_values().err(),
-        Err(DatabaseOpenError::Reader(error)) => Some(error),
-        Err(DatabaseOpenError::Registry(_)) => None,
+        Err(error) => Some(error),
     };
     if let Some(error) = failed {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-639

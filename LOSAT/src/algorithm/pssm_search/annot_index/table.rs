@@ -681,7 +681,7 @@ impl Indexer<'_> {
 
 impl TableInfo<'_> {
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:972-1005
-    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_interval.cpp:125-128
+    // NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_interval.hpp:125-128
     fn is_sorted(&self, sorted_max: u32) -> bool {
         if self.product.is_set {
             return false;

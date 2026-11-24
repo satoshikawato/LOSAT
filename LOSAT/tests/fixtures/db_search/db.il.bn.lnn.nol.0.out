@@ -1,0 +1,83 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: lnn
+           3 sequences; 1,350 total letters
+
+
+
+Query= qn
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NM_100002.1 n1                                                        765     0.0  
+
+
+>NM_100002.1 n1
+Length=450
+
+ Score = 765 bits (414),  Expect = 0.0
+ Identities = 438/450 (97%), Gaps = 0/450 (0%)
+ Strand=Plus/Plus
+
+Query  1    TGGACCATTCCGTATTGTTGTCCGGCTGGTCAGTCTTCTATTAATCTGCCGACCAAAACC  60
+            |||||||||||||||||||| |||||||||||||||||||||||||||||||||||| ||
+Sbjct  1    TGGACCATTCCGTATTGTTGACCGGCTGGTCAGTCTTCTATTAATCTGCCGACCAAACCC  60
+
+Query  61   TCTCTGATGTTTCCGACCAATTATCAGTATATTGTGAAATGGATTTCTCATTATCCGAAA  120
+            |||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||
+Sbjct  61   TCTCTGATGTTTCCGACCAATTATCAGTATATTGAGAAATGGATTTCTCATTATCCGAAA  120
+
+Query  121  TGTGAACGTAATCGTGGTGGTGTGCTGCCGAAAGGTGTGTGGTTTCAGTGGCATCGTGAT  180
+            ||||||||||| |||||||||||||||||||||||||||||||||||| |||||||||||
+Sbjct  121  TGTGAACGTAAACGTGGTGGTGTGCTGCCGAAAGGTGTGTGGTTTCAGAGGCATCGTGAT  180
+
+Query  181  TGGATGATGCAGTTTCGTTATTGGAATAATCAGGCTCCGCATCAGGGTTTTAAACAGGAA  240
+            ||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||
+Sbjct  181  TGGATGATGCAGTTTCGTTATTGGACTAATCAGGCTCCGCATCAGGGTTTTAAACAGGAA  240
+
+Query  241  CTGGAACCGGGTTCTCTGCATCGTATTGGTCCGTTTGGTTTTTGGTCTATGGATGAATAT  300
+            || |||||||||||||||||||||||||||||||||||| ||||||||||||||||||||
+Sbjct  241  CTTGAACCGGGTTCTCTGCATCGTATTGGTCCGTTTGGTATTTGGTCTATGGATGAATAT  300
+
+Query  301  CAGAAAGATATTCTGGATGAACCGATTCATTGGCGTCATAATTATGGTTGGCAGTGTATT  360
+            |||||||||||||||| |||||||||||||||||||||||||||||||||||| ||||||
+Sbjct  301  CAGAAAGATATTCTGGCTGAACCGATTCATTGGCGTCATAATTATGGTTGGCATTGTATT  360
+
+Query  361  TCTATGGATTATCAGCAGAAAGCTTCTATTATGATTCGTGCTCATGTGGTGCAGATTCCG  420
+            |||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||
+Sbjct  361  TCTATGGATTATCAGCAGAAAGCTTCTATTCTGATTCGTGCTCATGTGGTGCAGATTCCG  420
+
+Query  421  TGGTGGTATTGTCCGTGGACCTGGTTTTAT  450
+            ||||||| ||||||||||||||||||||||
+Sbjct  421  TGGTGGTCTTGTCCGTGGACCTGGTTTTAT  450
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 575532
+
+
+  Database: lnn
+    Posted date:  Nov 23, 2026  6:40 PM
+  Number of letters in database: 1,350
+  Number of sequences in database:  3
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

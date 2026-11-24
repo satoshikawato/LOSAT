@@ -37,6 +37,8 @@
 //! `BuildDatabase` and `WriteDb` as a FASTA input; with `-randomize`, in the order of NCBI's
 //! shuffle (`crate::utils::std_shuffle`).
 
+pub(crate) mod alias_file;
+pub(crate) mod binary_list;
 pub mod bioseq;
 pub mod build_db;
 pub(crate) mod column;
@@ -64,6 +66,7 @@ pub(crate) mod ofstream;
 pub(crate) mod oid_list;
 pub mod platform;
 pub(crate) mod raw_source;
+pub(crate) mod seqidlist_writer;
 pub mod taxid_set;
 pub mod time;
 pub mod volume;

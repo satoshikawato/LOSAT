@@ -30,6 +30,17 @@ pub(crate) trait PssmRows: Sync {
     /// then reads past `past_end`'s row too).
     #[inline(always)]
     fn past_end_continues(&self, _end: i32, _subject_left: bool) {}
+    /// Whether the gapped alignment reports the letters it reads in `row`, a row this PSSM gave
+    /// (`letters_read`): rpstblastn's row after the rows without composition-based statistics,
+    /// which NCBI's alignment reads cell by cell and whose letters can lie past the `.rps` file's
+    /// last page (`rps_search::profile::MappedRows`). `false` for every other PSSM.
+    #[inline(always)]
+    fn reads_by_letter(&self, _row: &[i32; BLASTAA_SIZE]) -> bool {
+        false
+    }
+    /// The letters (columns) that the alignment read in `row`, a row of `reads_by_letter`.
+    #[inline(always)]
+    fn letters_read(&self, _row: &[i32; BLASTAA_SIZE], _letters: impl Iterator<Item = u8>) {}
 }
 
 /// The PSSM of a query: `rows[position][residue]`, as NCBI's `psi_matrix->pssm->data`.

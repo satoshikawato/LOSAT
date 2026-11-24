@@ -145,7 +145,7 @@ fn search_records(
         options.query_range = query_range;
     }
     // The taxonomy database of the reports, where the command line asks (`native::run`).
-    subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref())?;
+    subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref());
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:213-217
     // Records of an input read to its end; an end that reads past them (blank lines, a reader
     // error) is met in the first batch (`reader_batches`).
@@ -241,17 +241,15 @@ fn search_records(
 pub(super) fn subject_taxonomy(
     resolved: &mut [ResolvedOptions],
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
-) -> Result<()> {
+) {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        "BLASTX",
         resolved.iter().filter_map(|options| options.tabular),
-    )?;
+    );
     for options in resolved {
         options.taxdb_found = taxonomy.found.unwrap_or(false);
         options.subject_taxdb = taxonomy.taxdb.clone();
     }
-    Ok(())
 }
 
 /// A `-db` search's part of `report_batches`.

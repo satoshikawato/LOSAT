@@ -213,7 +213,7 @@ impl InitHSP {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1498
 //
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1633-1688
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1350
 struct BlastpSubjectResult {
     subject_index: usize,
     // The lists with the compact element (`x_prelim_compact.rs`).
@@ -283,7 +283,7 @@ struct BlastpSubjectScratch {
     offset_pairs: Vec<OffsetPair>,
     diag_array: Vec<DiagStruct>,
     diag_offset: i32,
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:253-267
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:216-227
     init_hsps: Vec<InitHSP>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
     chaining_nodes: Vec<BlastpInitHspNode>,
@@ -503,7 +503,7 @@ impl BlastpSubjectScratch {
                     .expect("NCBI BLAST diagonal array size must fit in usize")
             ],
             diag_offset: window,
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:253-267
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:223-224
             init_hsps: x_ih_pool::own_array(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
             chaining_nodes: Vec::new(),
@@ -1834,7 +1834,7 @@ impl BlastpOffsetPairScanMode {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:86-93
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:111-114
 #[inline(always)]
 fn blastp_visit_scanned_offset_pairs<F>(offset_pairs: &[OffsetPair], hits: i32, visit: &mut F)
 where
@@ -3734,7 +3734,7 @@ fn build_restricted_align_array_into(
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign_priv.h:153-156
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign_priv.h:145-150
 struct BlastpInitHspNode {
     init_index: usize,
     best_score: i32,
@@ -3963,7 +3963,7 @@ fn blastp_trace_init_hsp_overlaps_target(target: BlastpTraceHspTarget, init_hsp:
         && s_end <= target.s_end
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1329-1356
 fn preliminary_score_compare(
     a: &BlastpPreliminaryHsp,
     b: &BlastpPreliminaryHsp,
@@ -4805,7 +4805,7 @@ fn open_search_database(
                 settings,
             )),
             outputs,
-        )?;
+        );
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -4835,18 +4835,16 @@ fn subject_taxonomy(
     resolved: &mut ResolvedBlastpArgs,
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
     outputs: &ReportOutputs<'_>,
-) -> Result<()> {
+) {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        args.app.name(),
         outputs
             .formats
             .iter()
             .filter_map(|format| super::tabular::custom_tabular_spec(format.outfmt, args.app)),
-    )?;
+    );
     resolved.subject_taxdb = taxonomy.taxdb;
     resolved.subject_taxdb_found = taxonomy.found.unwrap_or(false);
-    Ok(())
 }
 
 /// The part of `run` after the files are opened: NCBI's processing of the options,
@@ -5294,7 +5292,7 @@ fn run_local_formats(
     outputs.open_out()?;
     let mut resolved = resolve_for_formats(&args, outputs)?;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
-    subject_taxonomy(&args, &mut resolved, args.taxdb_setting.as_ref(), outputs)?;
+    subject_taxonomy(&args, &mut resolved, args.taxdb_setting.as_ref(), outputs);
     let xinclude = xinclude_format(&args, outputs)?;
     let scope = pssm_check_scope(&args);
     let args = resolved;
@@ -6626,10 +6624,10 @@ fn search(
                         XBlockReport::Tabular | XBlockReport::Pairwise | XBlockReport::Xml
                     ) && database.is_some_and(|database| database.taxdb_found())
                 };
-                // Outfmt 13 to 16 ask for the same refusal of NCBI's taxonomy cache at the first
-                // batch that reports a subject with a positive taxid (`read_reported_taxonomy`),
-                // which can be in a later block too: the search of all queries, which refuses
-                // before any byte.
+                // Outfmt 13 to 16 follow the same slot of NCBI's taxonomy cache through the loads
+                // of every batch (`read_reported_taxonomy`, `XmlBatchLoads`), whose refusal can
+                // come at a later block too: the search of all queries, which refuses before any
+                // byte.
                 let titles_allowed = |x_kind: XBlockReport| match (database, x_kind) {
                     (Some(database), _)
                         if (x_prefetch_taxids(x_kind)
@@ -7533,7 +7531,7 @@ fn x_each_batch_on<T: Send>(
 /// The words a block of the standard table may always hold: 2^22 (16 MiB of `Int4` offsets).
 const X_AA_BLOCK_WORDS_FLOOR: u64 = 1 << 22;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:283-358 (BlastAaLookupFinalize:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:346-357 (BlastAaLookupFinalize:
 // a cell of at most AA_HITS_PER_CELL offsets keeps them in the backbone, a cell of more puts all of
 // its offsets in the overflow array)
 // EXPERIMENT (LOSAT_X_BPQBLOCK), item SC8b: the blocks of the standard table (`AaLookupTable`) closed
@@ -7971,7 +7969,7 @@ fn preliminary_search_error(
     query_batch_skipped: &[bool],
     first_batch: bool,
     database_name: &str,
-    text: &str,
+    text: &[u8],
 ) -> anyhow::Error {
     if !(first_batch || query_batch_skipped.first() == Some(&false)) {
         return unsearched_batches_then_engine_error(
@@ -8421,7 +8419,7 @@ fn unsearched_batches_then_engine_error(
     query_batches: &[seq_range::RangedBatch],
     query_batch_skipped: &[bool],
     database_name: &str,
-    text: &str,
+    text: &[u8],
 ) -> anyhow::Error {
     let first_searched = query_batches
         .iter()
@@ -8441,7 +8439,8 @@ fn unsearched_batches_then_engine_error(
             format!("the database {database_name}")
         };
         return anyhow::anyhow!(
-            "a search of {searched} that fails with NCBI BLAST+'s error \"{text}\" after a first query batch that NCBI BLAST+ does not search is not supported by LOSAT's {}",
+            "a search of {searched} that fails with NCBI BLAST+'s error \"{}\" after a first query batch that NCBI BLAST+ does not search is not supported by LOSAT's {}",
+            String::from_utf8_lossy(text),
             args.app.name()
         );
     };
@@ -9680,7 +9679,7 @@ fn run_call(
                 &query_batch_skipped,
                 first_batch,
                 database_name,
-                text,
+                text.as_bytes(),
             )
         };
     // An ungapped search's failures before the search of its first query batch
@@ -10796,6 +10795,7 @@ fn run_call(
         subject_stitles: &subject_stitles,
         hit_lists: &hit_lists,
         hit_loads: &prefetched.hit_loads,
+        xml2_loads: &prefetched.xml2_loads,
         engine_counts: &engine_counts,
         pairwise_hits: &pairwise_hits,
         psiblast_hits_found: &psiblast_hits_found,

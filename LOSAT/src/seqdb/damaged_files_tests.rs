@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 use super::alias::SearchPath;
 use super::volume::SequenceBlock;
 use super::{SeqDb, SeqDbError, SeqType};
+use crate::utils::test_dir::TempDir;
 
 /// Seeded rounds of damage per target file, after the cuts.
 const ROUNDS: usize = 1000;
@@ -63,48 +64,26 @@ impl Rng {
     }
 }
 
-/// A directory of its own for each test (memory `parallel-test-shared-file-race`), removed at
-/// the end.
-pub(super) struct TempDir(pub(super) PathBuf);
-
-impl TempDir {
-    pub(super) fn new(tag: &str) -> Self {
-        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let dir = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-damaged-{tag}-{}-{}",
-            crate::utils::test_dir::process_id(),
-            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
-    }
-
-    /// Copies every file of `from` whose name starts with one of `stems` followed by a dot.
-    pub(super) fn copy_fixtures(&self, from: &Path, stems: &[&str]) {
-        let mut copied = 0;
-        for entry in std::fs::read_dir(from).unwrap() {
-            let entry = entry.unwrap();
-            let name = entry.file_name().into_string().unwrap();
-            if stems.iter().any(|stem| {
-                name.strip_prefix(stem)
-                    .is_some_and(|rest| rest.starts_with('.'))
-            }) {
-                std::fs::copy(entry.path(), self.0.join(&name)).unwrap();
-                copied += 1;
-            }
+/// Copies every file of `from` whose name starts with one of `stems` followed by a dot.
+pub(super) fn copy_fixtures(dir: &Path, from: &Path, stems: &[&str]) {
+    let mut copied = 0;
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().into_string().unwrap();
+        if stems.iter().any(|stem| {
+            name.strip_prefix(stem)
+                .is_some_and(|rest| rest.starts_with('.'))
+        }) {
+            std::fs::copy(entry.path(), dir.join(&name)).unwrap();
+            copied += 1;
         }
-        assert!(copied > 0, "no fixture files for {stems:?}");
     }
-
-    pub(super) fn name(&self, stem: &str) -> String {
-        self.0.join(stem).to_str().unwrap().to_string()
-    }
+    assert!(copied > 0, "no fixture files for {stems:?}");
 }
 
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
+/// The path of `stem` in `dir`, as the text the database reader takes.
+pub(super) fn name(dir: &Path, stem: &str) -> String {
+    dir.join(stem).to_str().unwrap().to_string()
 }
 
 /// How a seeded round damages a file.
@@ -245,9 +224,13 @@ impl Tally {
 /// searches and of `blastdbcmd`.
 fn exercise(dir: &Path, name: &str, seqtype: SeqType, masks: bool, tally: &mut Tally) {
     // `blastdbcmd -info` and the metadata read the alias files again, without the volumes.
-    let path = SearchPath::new(dir, None, None).unwrap();
-    tally.check(SeqDb::info_volumes(name, seqtype, &path));
-    tally.check(SeqDb::volume_and_alias_paths(name, seqtype, &path));
+    let path = SearchPath::new(dir, None, None);
+    tally.check(SeqDb::info_volumes(name.as_bytes(), seqtype, &path));
+    tally.check(SeqDb::volume_and_alias_paths(
+        name.as_bytes(),
+        seqtype,
+        &path,
+    ));
     let Some(db) = tally.check(SeqDb::open(name, seqtype)) else {
         return;
     };
@@ -395,15 +378,15 @@ fn read_letters(block: &SequenceBlock, seqtype: SeqType, tally: &mut Tally) {
 /// reads the database `open` after each damage. Fails listing every case that panicked and
 /// every target whose damage did not reach the reader.
 fn sweep(tag: &str, stems: &[&str], open: &str, seqtype: SeqType, masks: bool, targets: &[&str]) {
-    let dir = TempDir::new(tag);
-    dir.copy_fixtures(&fixture_dir(), stems);
-    let name = dir.name(open);
+    let dir = TempDir::unique(&format!("damaged-{tag}"));
+    copy_fixtures(&dir, &fixture_dir(), stems);
+    let name = name(&dir, open);
     let mut intact = Tally::default();
-    exercise(&dir.0, &name, seqtype, masks, &mut intact);
+    exercise(&dir, &name, seqtype, masks, &mut intact);
     assert_eq!(intact.opened, 1, "{tag}: the intact copy must open");
     let mut problems = Vec::new();
     for target in targets {
-        let path = dir.0.join(target);
+        let path = dir.join(target);
         let orig = std::fs::read(&path).unwrap();
         let mut rng = Rng::seeded(&format!("{tag}/{target}"));
         let mut tally = Tally::default();
@@ -412,7 +395,7 @@ fn sweep(tag: &str, stems: &[&str], open: &str, seqtype: SeqType, masks: bool, t
             std::fs::write(&path, &case.bytes).unwrap();
             let (opened, errors) = (tally.opened, tally.errors);
             let outcome = catch_unwind(AssertUnwindSafe(|| {
-                exercise(&dir.0, &name, seqtype, masks, &mut tally)
+                exercise(&dir, &name, seqtype, masks, &mut tally)
             }));
             if case.round.is_some() {
                 seeded_opened += usize::from(tally.opened > opened);
@@ -544,9 +527,9 @@ fn index_bytes() -> Vec<u8> {
 #[test]
 fn a_mapped_index_header_reads_zeros_to_the_end_of_the_page() {
     use super::index::IndexFile;
-    let dir = TempDir::new("mappedheader");
+    let dir = TempDir::unique("damaged-mappedheader");
     let read = |bytes: &[u8]| {
-        let path = dir.0.join("db.pin");
+        let path = dir.join("db.pin");
         std::fs::write(&path, bytes).unwrap();
         IndexFile::read_mapped_header(&super::file::DbFile::open(&path).unwrap(), SeqType::Protein)
     };

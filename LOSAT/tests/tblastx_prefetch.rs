@@ -7,7 +7,7 @@
 //! architectural effect, so the report, and the counts the probes of `LOSAT_TIMING` and
 //! `LOSAT_X_STATS` take, do not depend on it.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-516
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-511
 //! NCBI's loop over a batch's hits issues no hint; the switch only adds one, so the property under
 //! test is that nothing the search reports depends on it. That reports equal NCBI's is the business
 //! of the fixture comparisons, which run on the default paths. The input (150,000 bases of MelaMJNV

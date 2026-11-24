@@ -775,7 +775,8 @@ fn blastx_reads_its_query_before_the_search_as_the_search_does() {
 // rejection row `db.of1.bp.selfseg3.reject`) in the search that reports the query, before its
 // first byte (line RG T3a review 2 D3): a run of many queries takes the block search, which refuses
 // in the query's block, after the reports of the blocks before (NCBI's own bytes before its abort
-// depend on its buffers, so no prefix is NCBI's); the search of all queries refuses before any byte.
+// depend on its buffers, so no prefix is NCBI's); the search of all queries refuses before any byte
+// of a report, after the prolog that BLASTP writes before its first batch (line RG item T4b-f).
 // `BATCH_SIZE=1` and `LOSAT_X_BPQBLOCK=1` make each query a block of its own.
 #[test]
 fn blastp_query_anchored_abort_is_refused_in_the_block_that_reports_it() {
@@ -810,7 +811,11 @@ fn blastp_query_anchored_abort_is_refused_in_the_block_that_reports_it() {
     for threads in ["1", "4"] {
         let (status, stdout, stderr) = run("0", threads);
         assert_eq!(status, 1, "n{threads}: {stderr}");
-        assert!(stdout.is_empty(), "n{threads}: {stdout}");
+        assert!(
+            stdout.starts_with(concat!("BLASTP (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
+                && !stdout.contains("Query="),
+            "n{threads}: {stdout}"
+        );
         assert!(stderr.contains(refusal), "n{threads}: {stderr}");
         let (status, stdout, stderr) = run("1", threads);
         assert_eq!(status, 1, "blocks n{threads}: {stderr}");

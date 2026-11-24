@@ -204,7 +204,14 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         ),
         "unsupported error should name program, option, and reason: {stderr}"
     );
-    assert!(output.stdout.is_empty(), "nothing is written: {stderr}");
+    // The refusal comes where NCBI starts the search, after the outfmt 0 prolog that BLASTP writes
+    // before its first batch (line RG item T4b-f): the prolog and no report.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with(concat!("BLASTP (LOSAT ", env!("CARGO_PKG_VERSION"), ")\n"))
+            && !stdout.contains("Query="),
+        "only the prolog is written: {stdout}"
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2073-2074 (cited at

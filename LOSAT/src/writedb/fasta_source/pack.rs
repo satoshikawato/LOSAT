@@ -72,10 +72,10 @@ const WIDE_CODING: Coding = Coding::Ncbi4na;
 /// arrangement) is NCBI4na, not NCBI2na.
 const STEP_NEW_WIDE: u8 = 1;
 /// A boundary's bit: the narrow arrangement that ends here continues the wide one that
-/// ended at the boundary before (`m_EndingNarrow = m_EndingWide`).
+/// ended at the boundary before (`m_EndingNarrow` takes a copy of `m_EndingWide`).
 const STEP_NARROW_FROM_WIDE: u8 = 2;
 /// A boundary's bit: the wide arrangement that ends here continues the narrow one
-/// (`m_EndingWide = m_EndingNarrow`), so it continues what that one continues.
+/// (`m_EndingWide` takes a copy of `m_EndingNarrow`), so it continues what that one continues.
 const STEP_WIDE_FROM_NARROW: u8 = 4;
 
 /// `CSeqConvert_imp::CPacker` for IUPACna. NCBI keeps the codings of its two arrangements

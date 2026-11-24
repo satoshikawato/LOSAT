@@ -57,20 +57,20 @@ fn negative_window_shortens_the_table_and_starts_the_offset_at_the_window() {
 #[test]
 fn negative_window_offset_moves_by_length_plus_window_and_clears_at_the_threshold() {
     let mut d = Diagonals::new(500, -40).unwrap();
-    d.finish_subject_wide(100);
+    d.finish_chunk_wide(100);
     assert_eq!((d.wide_offset, d.offset), (20, 20));
-    d.finish_subject_wide(10);
+    d.finish_chunk_wide(10);
     assert_eq!((d.wide_offset, d.offset), (-10, -10));
-    d.finish_subject_wide(0);
+    d.finish_chunk_wide(0);
     assert_eq!((d.wide_offset, d.offset), (-50, -50));
     d.wide_offset = i64::from(i32::MAX / 4) - 1;
-    d.finish_subject_wide(100);
+    d.finish_chunk_wide(100);
     assert_eq!(d.wide_offset, i64::from(i32::MAX / 4) - 1 + 100 - 40);
     let mut entry = DiagStruct::default();
     entry.set_last_hit(7);
     entry.set_flag(1);
     d.entries[3] = entry;
-    d.finish_subject_wide(100);
+    d.finish_chunk_wide(100);
     assert_eq!((d.wide_offset, d.offset), (-40, -40));
     assert!(d
         .entries
@@ -84,14 +84,86 @@ fn negative_window_offset_moves_by_length_plus_window_and_clears_at_the_threshol
 #[test]
 fn negative_window_offset_is_widened_where_the_int4_sum_overflows() {
     let mut d = Diagonals::new(10, i32::MIN).unwrap();
-    d.finish_subject_wide(0);
+    d.finish_chunk_wide(0);
     assert_eq!(d.wide_offset, 2 * i64::from(i32::MIN));
     assert_eq!(d.offset, 0);
-    d.finish_subject_wide(7);
+    d.finish_chunk_wide(7);
     assert_eq!(d.wide_offset, 3 * i64::from(i32::MIN) + 7);
     d.wide_offset = i64::from(i32::MAX / 4);
     d.entries[0].set_flag(1);
-    d.finish_subject_wide(1);
+    d.finish_chunk_wide(1);
     assert_eq!((d.wide_offset, d.offset), (i64::from(i32::MIN), i32::MIN));
     assert!(d.entries.iter().all(|x| x.last_hit() == 0 && x.flag() == 0));
+}
+
+/// BLASTX's table as the `-db_hard_mask` search moves it between sequences
+/// (`search_db_masked.rs`: `TableStart::apply`, `TableEnd::apply`): NCBI's table at its one-thread
+/// offset, the clear before the move, the moves after a sequence, and the move past Int4 an error.
+#[test]
+fn hard_mask_starts_and_ends_move_the_table() {
+    use crate::algorithm::common::hard_chunk_walk::{HardTable, NcbiStart, TableEnd, TableStart};
+    let window = 40;
+    let mut d = Diagonals::new(500, window).unwrap();
+    let mut written = DiagStruct::default();
+    written.set_last_hit(5000);
+    written.set_flag(1);
+    d.entries.fill(written);
+    d.offset = 5000;
+    TableStart::Keep.apply(&mut d, window).unwrap();
+    assert_eq!((d.offset, d.entries[3]), (5000, written));
+    TableStart::Move {
+        clear: false,
+        by: 70,
+    }
+    .apply(&mut d, window)
+    .unwrap();
+    assert_eq!((d.offset, d.entries[3]), (5070, written));
+    TableStart::Move {
+        clear: true,
+        by: 70,
+    }
+    .apply(&mut d, window)
+    .unwrap();
+    assert_eq!(d.offset, window + 70);
+    assert!(d
+        .entries
+        .iter()
+        .all(|&entry| entry == DiagStruct::clear(window)));
+    TableEnd::Move(98).apply(&mut d, window).unwrap();
+    assert_eq!(d.offset, window + 168);
+    d.entries.fill(written);
+    TableEnd::Clear.apply(&mut d, window).unwrap();
+    assert_eq!(d.offset, window);
+    assert!(d
+        .entries
+        .iter()
+        .all(|&entry| entry == DiagStruct::clear(window)));
+    for (start, entry) in [
+        (
+            NcbiStart {
+                offset: -98,
+                cleared: false,
+            },
+            DiagStruct::default(),
+        ),
+        (
+            NcbiStart {
+                offset: 5,
+                cleared: true,
+            },
+            DiagStruct::clear(window),
+        ),
+    ] {
+        d.entries.fill(written);
+        TableStart::New(start).apply(&mut d, window).unwrap();
+        assert_eq!(d.offset, start.offset);
+        assert!(d.entries.iter().all(|&e| e == entry), "{start:?}");
+        d.entries.fill(written);
+        d.ncbi_table(start, window);
+        assert_eq!(d.offset, start.offset);
+        assert!(d.entries.iter().all(|&e| e == entry), "{start:?}");
+    }
+    d.offset = i32::MAX - 10;
+    let error = TableEnd::Move(98).apply(&mut d, window).unwrap_err();
+    assert_eq!(error.to_string(), "BLASTX diagonal offset exceeds Int4");
 }

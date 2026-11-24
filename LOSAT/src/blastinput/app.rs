@@ -78,6 +78,14 @@ pub(crate) fn hsp_filtering_error(
     .then_some("HSP Filtering options invalid")
 }
 
+/// NCBI's engine error of a traceback that fails (`engine_error`): the traceback's own setup of a
+/// split batch whose chunks found nothing (`blastp::protein_query_split::UnmetChecks`), a failed
+/// Smith-Waterman redo of a batch (`sw_batch_failed_error`). The one text of BLASTP's, psiblast's
+/// and TBLASTN's error there.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:251-252
+pub const TRACEBACK_FAILED: &str = "Traceback failed";
+
 /// An error that NCBI raises as a `CBlastException` that is neither an option nor a
 /// memory error (exit 3).
 ///

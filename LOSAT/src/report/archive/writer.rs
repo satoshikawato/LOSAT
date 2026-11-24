@@ -90,14 +90,27 @@ impl RequestInputs<'_> {
     /// those of the PSSM's own text document (`pssm::asn_text_with_karlin`: one owner of what the
     /// ASN.1 text stream replaces): an `-in_pssm` file's are visible ASCII (NCBI's reader replaces
     /// any other byte before the request is made), a title that `-in_msa` takes from a defline
-    /// need not be. The PSSM is only ever a strategy file's (ASN.1 text) here.
+    /// need not be. A PSSM with a list element stated as `NULL` (`-in_pssm`) is written through
+    /// `Traced` in every stream, which throws there as NCBI's does (`encoder::NullElement`).
     pub fn written_as_is(&self, encoding: ArchiveEncoding) -> bool {
         let (queries, pssm_as_is) = match self.queries {
             RequestQueries::Bioseqs(queries) => (queries, true),
             RequestQueries::Pssm(pssm) => (
                 &[][..],
-                encoding != ArchiveEncoding::Text
-                    || crate::report::serial::pssm::asn_text_with_karlin(pssm, None).is_ok(),
+                !super::pssm_holds_null_element(pssm)
+                    && match encoding {
+                        ArchiveEncoding::Text => {
+                            crate::report::serial::pssm::asn_text_with_karlin(pssm, None).is_ok()
+                        }
+                        // A UTF8String's control byte (NCBI's text reader replaced those of the
+                        // VisibleStrings), which NCBI's XML stream replaces and posts; in both
+                        // streams a delayed member of another format whose read posts a replaced
+                        // byte (`Encoder::delayed_posts`, written through `Traced`).
+                        ArchiveEncoding::Xml | ArchiveEncoding::Binary => {
+                            super::pssm_written_as_is(encoding, pssm)
+                        }
+                        ArchiveEncoding::Nothing => true,
+                    },
             ),
         };
         pssm_as_is
@@ -233,10 +246,13 @@ impl<E: Encoder> ArchiveOut<'_, Traced<E>> {
         }
         self.finish()
     }
+}
 
-    /// `finish_collecting` of a document whose stream threw (`encoder::NullElement`, the
-    /// application `application`): `collect` gets the bytes replaced before the throw, the sink the
-    /// bytes that NCBI's stream flushed, then NCBI's error ends the request
+impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> ArchiveOut<'_, Traced<E, P>> {
+    /// `finish` of a document whose stream threw (`encoder::NullElement`, the application
+    /// `application`): the sink gets the bytes that NCBI's stream flushed (with a post function,
+    /// each replaced byte posted after the bytes NCBI had written before it), `collect` the bytes
+    /// replaced before the throw that no post function posted, then NCBI's error ends the request
     /// (`cli::NativeError::null_element`).
     fn finish_thrown(
         mut self,
@@ -244,18 +260,28 @@ impl<E: Encoder> ArchiveOut<'_, Traced<E>> {
         application: &str,
         thrown: &crate::report::serial::encoder::NullElement,
     ) -> Result<()> {
-        let replaced = self.enc.take_replaced_chars();
-        if !replaced.is_empty() {
-            collect(&replaced)?;
-        }
         if self.io_error.is_none() {
             if let Err(error) = self.enc.flush_to(self.sink, true) {
                 self.io_error = Some(error);
             }
         }
+        let replaced = self.enc.take_replaced_chars();
+        if !replaced.is_empty() {
+            collect(&replaced)?;
+        }
         match self.io_error {
             Some(error) => Err(error.into()),
             None => Err(crate::cli::NativeError::null_element(application, thrown).into()),
+        }
+    }
+
+    /// `finish` of an archive written through `Traced` with a post function, or `finish_thrown`
+    /// where its stream threw: then the error is NCBI's (`cli::NativeError`), which no other
+    /// error of `finish` is.
+    fn finish_archive(mut self, application: &str) -> Result<()> {
+        match self.enc.take_thrown() {
+            Some(null_element) => self.finish_thrown(|_| Ok(()), application, &null_element),
+            None => self.finish(),
         }
     }
 }
@@ -749,7 +775,8 @@ pub fn write_archive<A: AlignSource>(
         database_params: &params,
         messages: &messages,
     };
-    match (encoding, as_is) {
+    let application = request.application;
+    let written = match (encoding, as_is) {
         (ArchiveEncoding::Nothing, _) => Ok(()),
         (ArchiveEncoding::Xml, true) => write
             .to(XmlEncoder::archive(&mut buf), sink, aligns)?
@@ -760,7 +787,7 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 aligns,
             )?
-            .finish(),
+            .finish_archive(application),
         (ArchiveEncoding::Text, true) => write
             .to(AsnTextEncoder::new(&mut buf), sink, aligns)?
             .finish(),
@@ -770,7 +797,7 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 aligns,
             )?
-            .finish(),
+            .finish_archive(application),
         (ArchiveEncoding::Binary, true) => write
             .to(AsnBinaryEncoder::new(&mut buf), sink, aligns)?
             .finish(),
@@ -780,8 +807,21 @@ pub fn write_archive<A: AlignSource>(
                 sink,
                 aligns,
             )?
-            .finish(),
+            .finish_archive(application),
+    };
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:265-276
+    // NCBI's stream threw inside `WriteArchive` (`finish_archive`'s error is NCBI's then), so the
+    // handler's `ResetMessages` after it is not reached: the messages the archive was given stay
+    // for the error archive (`PrintErrorArchive` of the application's `CATCH_ALL`). No byte is
+    // replaced while such an archive is written before the throw: the PSSM's strings were
+    // replaced when NCBI read it, and what the archive writes before its queries is LOSAT's own
+    // (D3c-3c review R8, probe `review/p5`).
+    if matches!(&written, Err(error) if error.is::<crate::cli::NativeError>()) {
+        for (severity, text) in &messages {
+            handle.post(*severity, text);
+        }
     }
+    written
 }
 
 /// What `write_search_archive` writes besides the encoder and the Seq-aligns.

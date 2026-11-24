@@ -407,7 +407,9 @@ impl XOneHitBuffers {
 /// which never straddles a node's middle: two of them split `[p, p]` the same way. The search
 /// stops where that first node would be made (`BlastIntervalTree::try_add_hsp`). Ranges in order
 /// inside the tree's bounds never make such a node, and only this word finder's HSPs are out of
-/// order or leave the bounds, so the other searches keep `add_hsp`.
+/// order or leave the bounds, so the other searches keep `add_hsp`. NCBI stops there in the search
+/// of a query batch, after it has printed the reports of the batches before: the refusal comes
+/// after them (`blastinput::app::ErrorAfterBatchReports`).
 #[cold]
 #[inline(never)]
 fn x_add_one_hit_hsp(
@@ -416,9 +418,11 @@ fn x_add_one_hit_hsp(
     context_offset: i32,
 ) -> Result<()> {
     if !tree.try_add_hsp(hsp, context_offset) {
-        bail!(
-            "TBLASTN -window_size 0: two one-hit alignments of negative length whose gapped starts lie at the end of their subject chunk or past it (alignments past the chunk, or of score 0 and no letters) make NCBI BLAST+ split a node of its interval tree without end (it does not finish the search there), which LOSAT does not support"
-        );
+        return Err(anyhow::Error::new(
+            crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+                "TBLASTN -window_size 0: two one-hit alignments of negative length whose gapped starts lie at the end of their subject chunk or past it (alignments past the chunk, or of score 0 and no letters) make NCBI BLAST+ split a node of its interval tree without end (it does not finish the search there), which LOSAT does not support"
+            )),
+        ));
     }
     Ok(())
 }
@@ -592,12 +596,15 @@ pub(super) fn x_gapped_subject_start(
 /// (`TbnScore::GAPPED_START_PAST_FRAME`). NCBI's preliminary gapped alignment then reads the
 /// subject back from that start: the byte after the NULLB, which the buffer allocates and never
 /// sets, or memory past the buffer. Exception 3 covers the window's letters, not this alignment's.
+/// NCBI reads there in the search, after its prolog: the refusal comes after it
+/// (`blastinput::app::ErrorAfterBatchReports`, as every refusal of a step where NCBI's search
+/// crashes).
 #[cold]
 #[inline(never)]
 fn x_gapped_start_past_translation() -> anyhow::Error {
-    anyhow::anyhow!(
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
         "TBLASTN -in_pssm with -window_size 0: the gapped start of a one-hit alignment of negative length lies past the end of the subject's translation (NCBI BLAST+ reads past its buffer there), which LOSAT does not support"
-    )
+    )))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4609 and :569-575,
@@ -611,12 +618,14 @@ fn x_gapped_start_past_translation() -> anyhow::Error {
 /// (PD-LOSAT-NCBI-DEFECTS, rule 3). An HSP dropped before its traceback (below the cutoff,
 /// purged, contained, or cut by the hit list) leaves the search to go on, as does a start on the
 /// NULLB (defined: the fence, then the whole frame's NULLB, scored with the PSSM's '-' column).
+/// NCBI reads there in the search, after its prolog: the refusal comes after it
+/// (`blastinput::app::ErrorAfterBatchReports`).
 #[cold]
 #[inline(never)]
 fn x_traceback_start_past_frame() -> anyhow::Error {
-    anyhow::anyhow!(
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
         "TBLASTN -in_pssm with -window_size 0: the traceback of a one-hit alignment of negative length starts after the NULLB after its frame (NCBI BLAST+ reads a byte its translation does not set there), which LOSAT does not support"
-    )
+    )))
 }
 
 /// The refusal of `x_traceback_start_past_frame` for a gapped start at letter `s_start` of the window
@@ -2213,14 +2222,19 @@ pub(super) fn window_index(position: i32, base: isize) -> Option<usize> {
 // query at `-comp_based_stats` 0 to 3, `-in_pssm`): no result is defined (PD-LOSAT-NCBI-DEFECTS
 // 1.46, rule 3). A subject that leaves no HSP to that point (cut by a cutoff, the redo's purge or
 // the hit list; at the default word size 3, any of 9 or 10 bases in the probes; with `-word_size 2`
-// they reach it too) lets the search go on, in NCBI and LOSAT alike.
+// they reach it too) lets the search go on, in NCBI and LOSAT alike. NCBI dies in the search of a
+// query batch, after it has printed the reports of the batches before (tblastn_app.cpp:275-302):
+// the refusal comes after them (`blastinput::app::ErrorAfterBatchReports`, line RG item
+// X-short-bat).
 /// The refusal of a read of the translation of a frame of a subject of fewer than 12 bases
 /// (`TargetTranslation::get`): NCBI BLAST+ never makes that translation and reads from address 1
 /// on (NULL + 1). The message is TBLASTX's too (`core::blast_hits::x_untranslated_frame_refusal`).
 #[cold]
 #[inline(never)]
 fn x_traceback_of_an_untranslated_frame() -> anyhow::Error {
-    crate::core::blast_hits::x_untranslated_frame_refusal("TBLASTN", "the traceback")
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(
+        crate::core::blast_hits::x_untranslated_frame_refusal("TBLASTN", "the traceback"),
+    ))
 }
 
 pub(super) struct TargetTranslation<'a> {

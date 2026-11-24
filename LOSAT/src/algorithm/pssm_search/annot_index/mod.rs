@@ -44,11 +44,18 @@ pub(crate) struct AnnotOutcome {
     pub(crate) abort: Option<Abort>,
 }
 
-/// `CATCH_ALL`'s report and exit status of an exception of the object manager.
+/// What ends the run as the query joins NCBI's scope: `CATCH_ALL`'s report and exit status of an
+/// exception of the object manager, or LOSAT's refusal of what NCBI does not do the same way on
+/// every run (`Refusal`), which stops the run at the same place, after what NCBI writes before
+/// (psiblast's prolog of its format; tblastn writes nothing before), in LOSAT's words.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Abort {
-    pub(crate) exit: i32,
-    pub(crate) message: Vec<u8>,
+pub(crate) enum Abort {
+    Native {
+        exit: i32,
+        message: Vec<u8>,
+    },
+    /// LOSAT's refusal: its whole text (`in_pssm::PssmReader::refuse`).
+    Refused(String),
 }
 
 impl Abort {
@@ -57,9 +64,32 @@ impl Abort {
     /// (`cli::catch_all_text`, which the run applies once the stream is failed; the text kept is
     /// that line feed).
     pub(crate) fn of(error: crate::cli::NativeError, muted: bool) -> Abort {
-        Abort {
+        Abort::Native {
             exit: error.exit,
             message: if muted { b"\n".to_vec() } else { error.message },
+        }
+    }
+
+    /// The error that ends the run (`PsiSearch::annot_abort`).
+    pub(crate) fn error(&self) -> anyhow::Error {
+        match self {
+            Abort::Native { exit, message } => crate::cli::NativeError {
+                exit: *exit,
+                message: message.clone(),
+            }
+            .into(),
+            Abort::Refused(text) => anyhow::anyhow!("{text}"),
+        }
+    }
+}
+
+impl AnnotOutcome {
+    /// The outcome of LOSAT's refusal `text` of the query's entry (`Refusal`, `index_entry`):
+    /// NCBI's messages before the point it refuses are not written, as its own are not.
+    pub(crate) fn refused(text: String) -> AnnotOutcome {
+        AnnotOutcome {
+            abort: Some(Abort::Refused(text)),
+            ..AnnotOutcome::default()
         }
     }
 }
@@ -266,7 +296,7 @@ pub(crate) fn index_entry(
             return Ok(AnnotOutcome {
                 posts: ix.posts,
                 muted: ix.muted,
-                abort: Some(Abort {
+                abort: Some(Abort::Native {
                     exit: silent.exit,
                     message: silent.message,
                 }),

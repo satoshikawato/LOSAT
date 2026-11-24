@@ -461,7 +461,7 @@ impl Batches<'_> {
                 };
             }
             // BLASTX's messages show the record's own id; its prefetch's stop asks whether the
-            // call comes after others (`local::DatabaseReports::unrecorded_calls`).
+            // call comes after others (`common::database::TaxdbRun::note_calls_before`).
             Commands::Blastx(args) => {
                 args.first_query_ordinal = range.start;
                 args.scope_refusal = scope_refusal;

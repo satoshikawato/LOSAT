@@ -393,6 +393,7 @@ impl PsiblastArgs {
             app: BlastpApp::Psiblast,
             taxdb_setting: None,
             matrix_search: None,
+            write_verification: None,
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
             scope_refusal: self.scope_refusal.clone(),

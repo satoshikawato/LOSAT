@@ -90,6 +90,38 @@ pub(crate) fn seqalign_evalue(evalue: f64) -> f64 {
         evalue
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203, 1490-1496
+/// The `num_ident` score of an HSP's Seq-align (`s_AddScoresToSeqAlign`), from the engine's
+/// identities `num_ident` of a search of `program_type` (`RunRecord::program_type`): the count,
+/// none where it is below 0, and none for psiblast's (`ProgramType::PsiBlast`, every round) count
+/// of 0, which NCBI sets to -1 before it adds the scores of a gapped HSP (psiblast's searches are
+/// gapped; PSI-TBLASTN's keep their 0). The one owner of that rule: the Seq-annot formats and the
+/// archive write the score (`write_seq_align_gapped`), BLAST XML's `catch` reads it back
+/// (`read_num_ident`).
+pub(crate) fn seq_align_num_ident(
+    num_ident: i64,
+    program_type: Option<crate::report::record::ProgramType>,
+) -> Option<i32> {
+    let psiblast = program_type == Some(crate::report::record::ProgramType::PsiBlast);
+    if num_ident < 0 || (psiblast && num_ident == 0) {
+        None
+    } else {
+        Some(i32::try_from(num_ident).unwrap_or(i32::MAX))
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:810-849
+/// The `num_ident` of an HSP's Seq-align as `GetAlnScores` reads it back (BLAST XML's `catch` of
+/// an HSP whose subject's lookup throws, `blast_xml::XmlHsp::alignment_identities`): the score
+/// that the Seq-align has (`seq_align_num_ident`), or -1 where it has none.
+pub(crate) fn read_num_ident(
+    num_ident: i64,
+    program_type: Option<crate::report::record::ProgramType>,
+) -> i32 {
+    seq_align_num_ident(num_ident, program_type).unwrap_or(-1)
+}
+
 pub(crate) const GAP_VALUE: i32 = -1;
 const BLAST_ALIGNMENT_DIM: i32 = 2;
 
@@ -1609,19 +1641,12 @@ fn write_seq_align_gapped<E: Encoder>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1252-1260
     enc.member("score", 2);
     enc.begin_list(true);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1490-1496
-    // psiblast's Seq-aligns (`eBlastTypePsiBlast`, every round) leave out a `num_ident` of 0.
-    let psiblast_no_identity = HspRecord {
-        num_ident: -1,
+    // psiblast's Seq-aligns leave out a `num_ident` of 0 (`seq_align_num_ident`).
+    let hsp = HspRecord {
+        num_ident: seq_align_num_ident(i64::from(hsp.num_ident), run.program_type).unwrap_or(-1),
         ..*hsp
     };
-    let hsp = match run.program_type {
-        Some(crate::report::record::ProgramType::PsiBlast) if hsp.num_ident == 0 => {
-            &psiblast_no_identity
-        }
-        _ => hsp,
-    };
-    write_score_list(enc, hsp, coverage_query_length(run, query.searched_length));
+    write_score_list(enc, &hsp, coverage_query_length(run, query.searched_length));
     enc.end_list();
     enc.end_member();
     enc.member("segs", 3);

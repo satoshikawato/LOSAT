@@ -46,8 +46,10 @@
 //! stack passes on; the `std::exception`s of a reserve; and LOSAT's refusals of what its readers do
 //! not take.
 
+use super::read_xml::{XmlInput, XmlStyle, MISSING_VALUE};
+use super::Encoding;
 use super::{resolved, EnumValue, Kind, Member, Storage, Value, DELAYED};
-use crate::ncbi_exception::{NcbiException, Severity};
+use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
 use crate::report::serial::asn_ber_reader::BerReader;
 use crate::report::serial::asn_input::{
     throw_error, utf8_tag_message, EnumItems, Fail, Input, Items, Names, StringKind, StringPost,
@@ -56,9 +58,9 @@ use crate::report::serial::asn_input::{
 use crate::report::serial::asn_text_reader::{AsnSource, PointerType, SliceSource};
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep, StreamPosition};
 use crate::report::serial::object_frame::{
-    frame_info, frame_name, text_frame_site, FrameKind, CLASS_NOT_FOUND, EXPECTED_MEMBER,
-    GET_REGISTERED_OBJECT, HANDLE_EOF, READ_INT2, READ_POINTER_FRAME_END,
-    READ_POINTER_INCOMPATIBLE, SKIP_FILE_HEADER, SKIP_POINTER_FRAME_END,
+    frame_info, frame_name, FrameKind, CLASS_NOT_FOUND, EXPECTED_MEMBER, GET_REGISTERED_OBJECT,
+    HANDLE_EOF, READ_INT2, READ_POINTER_FRAME_END, READ_POINTER_INCOMPATIBLE, SKIP_FILE_HEADER,
+    SKIP_POINTER_FRAME_END,
 };
 
 /// The text of the byte block's post ([`Post::UnendedByteBlock`]).
@@ -188,6 +190,10 @@ impl EnumItems for EnumType {
     fn has_value(&self, value: i32) -> bool {
         self.values.iter().any(|named| named.value == value)
     }
+
+    fn type_name(&self) -> &'static str {
+        super::read_xml::enum_type_name(self.values)
+    }
 }
 
 /// The type of a frame that names none (a member, variant or element frame, and an array frame,
@@ -240,7 +246,7 @@ impl Frame {
     fn type_name(&self) -> Option<&'static str> {
         match self.kind {
             FrameKind::Array => Some(""),
-            FrameKind::Named | FrameKind::Class | FrameKind::Choice => {
+            FrameKind::Named | FrameKind::NamedType | FrameKind::Class | FrameKind::Choice => {
                 Some(super::type_info(self.ty).name())
             }
             FrameKind::ClassMember | FrameKind::ChoiceVariant | FrameKind::ArrayElement => None,
@@ -257,15 +263,16 @@ impl Frame {
         frame_info(self.kind, self.type_name(), self.member_name())
     }
 
-    /// The source file, line and function of the `END_OBJECT_FRAME` that leaves this frame
-    /// (`object_frame::text_frame_site`, `READ_POINTER_FRAME_END`, `SKIP_POINTER_FRAME_END`). The
-    /// binary stream's primitives throw no `CException` but a `CSerialException` (and the end of
-    /// the input), so only the text stream's frames are ever named by their lines.
-    fn site(&self) -> (&'static str, u32, &'static str) {
+    /// The source file, line and function of the `END_OBJECT_FRAME` that leaves this frame in
+    /// the stream `I` (`Input::frame_site`: `object_frame::text_frame_site` for the text and
+    /// binary streams; `READ_POINTER_FRAME_END`, `SKIP_POINTER_FRAME_END`). The binary stream's
+    /// primitives throw no `CException` but a `CSerialException` (and the end of the input), so
+    /// only the text and XML streams' frames are ever named by their lines.
+    fn site<I: Input>(&self) -> (&'static str, u32, &'static str) {
         match (self.pointer, self.skip) {
             (true, false) => READ_POINTER_FRAME_END,
             (true, true) => SKIP_POINTER_FRAME_END,
-            (false, skip) => text_frame_site(self.kind, skip),
+            (false, skip) => I::frame_site(self.kind, skip),
         }
     }
 }
@@ -283,18 +290,46 @@ pub(crate) fn read_ber_document(bytes: &[u8], root: u16, names: Names) -> Read<V
     ObjectStream::binary(SliceSource::new(bytes), names).read_object(root)
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
-/// The value of the type `ty` that a delayed member read from ASN.1 binary holds
-/// (`CDelayBuffer::Update`: a new binary stream over the bytes kept, `Value::Delayed`), which a
-/// writer reads before it writes it (`write`).
+/// [`read_document`] of the ASN.1 binary value of the type `ty` at the start of `bytes` (no file
+/// header), as the tests make the value of a delayed member read from binary.
+#[cfg(test)]
 pub(super) fn read_ber_value(bytes: &[u8], ty: u16) -> Read<Value> {
-    let mut reader = TypedReader::new(
-        BerReader::new(SliceSource::new(bytes), Names::DELAYED),
-        Names::DELAYED,
-    );
+    ObjectStream::binary(SliceSource::new(bytes), Names::DELAYED).read_object(ty)
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/delaybuf.cpp:63-84
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:489-499
+/// The value of the delayed member `member` of the SEQUENCE `class` from the bytes that the
+/// reader kept of it in `encoding` (`Value::Delayed`), as NCBI's `CDelayBuffer::Update` reads
+/// them before a stream of another format writes the member (`write`): a new stream of that
+/// format over the bytes (its line or byte count starts at them), under a class frame of `class`
+/// and a member frame of `member` (`UpdateDelayedBuffer`), with what it posts.
+pub(super) fn read_delayed(
+    encoding: Encoding,
+    bytes: &[u8],
+    class: u16,
+    member: &'static Member,
+) -> Read<Value> {
+    let src = SliceSource::new(bytes);
+    match encoding {
+        Encoding::Text => update(TextInput::new(src, Names::DELAYED), class, member),
+        Encoding::Binary => update(BerReader::new(src, Names::DELAYED), class, member),
+        Encoding::Xml => update(
+            XmlInput::new(src, XmlStyle::Asn, Names::DELAYED),
+            class,
+            member,
+        ),
+    }
+}
+
+/// [`read_delayed`] of the stream `inp`.
+fn update<I: Input>(inp: I, class: u16, member: &'static Member) -> Read<Value> {
+    let mut reader = TypedReader::new(inp, Names::DELAYED);
     // The read that kept the bytes met their UTF8String tags (and posted for the first).
     reader.utf8_once = Utf8TagOnce::POSTED;
-    let value = reader.read_value(ty, false);
+    reader.start_object();
+    let value = reader.delayed_member(class, member);
+    reader.inp.drain_posts(&mut reader.posts);
     (value.map_err(ReadError::from), reader.posts)
 }
 
@@ -339,12 +374,23 @@ impl<S: AsnSource> ObjectStream<BerReader<S>> {
     }
 }
 
+impl<S: AsnSource> ObjectStream<XmlInput<S>> {
+    /// Objects in NCBI's XML of the `style` from `src`, which LOSAT's messages call by `names`.
+    pub(crate) fn xml(src: S, style: XmlStyle, names: Names) -> Self {
+        ObjectStream {
+            reader: TypedReader::new(XmlInput::new(src, style, names), names),
+            failed: false,
+        }
+    }
+}
+
 impl<I: Input> ObjectStream<I> {
     /// The next object, as the root type `root`, with the messages posted while it was read.
     pub(crate) fn read_object(&mut self, root: u16) -> Read<Value> {
         let reader = &mut self.reader;
         reader.start_object();
         let value = reader.document(root, |r| r.read_value(root, false));
+        reader.inp.drain_posts(&mut reader.posts);
         self.failed |= value.is_err();
         (
             value.map_err(ReadError::from),
@@ -364,6 +410,7 @@ impl<I: Input> ObjectStream<I> {
         reader.max_depth = TYPED_MAX_DEPTH;
         let value = reader.document(root, read).map_err(ReadError::from);
         reader.max_depth = usize::MAX;
+        reader.inp.drain_posts(&mut reader.posts);
         self.failed |= value.is_err();
         (value, std::mem::take(&mut reader.posts))
     }
@@ -444,6 +491,9 @@ enum Open {
     /// The value of `:Type` in `ReadPointer`'s named frame: the frame's end and
     /// `ReadOtherPointerEnd` follow it.
     Pointer,
+    /// The value in the named frames of `count` named types (`ReadNamedType`, the XML stream's:
+    /// `Input::NAMED_TYPES`), whose ends follow it.
+    Named { count: u8 },
 }
 
 /// What the reader does next: read a value of a type (`skip`), or give a value read to the one
@@ -475,17 +525,33 @@ const READ_WITH_SET_FLAG_MEMBER: (&str, u32, &str) = (
     "ncbi::CMemberInfoFunctions::ReadWithSetFlagMember",
 );
 
+/// `ReadWithSetFlagMember`'s rethrow of a missing value (`eMissingValue`, the XML stream's
+/// ENUMERATED without its attribute) of a mandatory member.
+const MISSING_VALUE_MEMBER: ThrowSite = ThrowSite {
+    file: "src/serial/member.cpp",
+    line: 748,
+    kind: "CSerialException::eFormatError",
+    function: Some("ncbi::CMemberInfoFunctions::ReadWithSetFlagMember"),
+};
+
 /// What reading the value of the SEQUENCE member `member` makes of `fail` that leaves it: a
 /// member with a set flag (one not held by `CRef<>`, `Member::is_ref`, and not delayed) is read
 /// in `ReadWithSetFlagMember`, which rethrows a `CSerialException` with `error while reading
-/// <member>`; the others pass `fail` on. The one owner of that rule and its rethrow, for the
-/// generic read (`TypedReader::unwind_values`) and the typed reads (`typed`); a skip does not
-/// call it.
+/// <member>` (a missing value of a mandatory member: `missing value <member>`,
+/// `TypedReader::missing_value`); the others pass `fail` on. The one owner of that rule and its
+/// rethrow, for the generic read (`TypedReader::unwind_values`) and the typed reads (`typed`); a
+/// skip does not call it.
 #[cold]
 #[inline(never)]
 pub(super) fn set_flag_error(fail: Fail, member: &Member) -> Fail {
     match fail {
         Fail::Serial(e) if !member.is_ref() && member.flags & DELAYED == 0 => {
+            if e.kind() == MISSING_VALUE {
+                return Fail::serial(e.rethrow(
+                    MISSING_VALUE_MEMBER,
+                    format!("missing value {}", member.name()),
+                ));
+            }
             let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
             let message = format!("error while reading {}", member.name());
             Fail::serial(e.rethrow_same(file, line, function, message))
@@ -540,7 +606,7 @@ impl<I: Input> TypedReader<I> {
             member: None,
             num_rows: None,
         });
-        self.inp.set_stack_depth(self.frames.len());
+        self.inp.frame_pushed(kind, ty, self.frames.len());
         Ok(())
     }
 
@@ -548,7 +614,7 @@ impl<I: Input> TypedReader<I> {
     #[inline(always)]
     fn pop_frame(&mut self) -> Frame {
         let frame = self.frames.pop().expect("a frame to leave");
-        self.inp.set_stack_depth(self.frames.len());
+        self.inp.frame_popped(self.frames.len());
         frame
     }
 
@@ -557,7 +623,7 @@ impl<I: Input> TypedReader<I> {
     fn drop_frame(&mut self) {
         let left = self.frames.pop();
         debug_assert!(left.is_some(), "a frame to leave");
-        self.inp.set_stack_depth(self.frames.len());
+        self.inp.frame_popped(self.frames.len());
     }
 
     // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:189-214 (cited at
@@ -606,7 +672,7 @@ impl<I: Input> TypedReader<I> {
                 format!("{}: {}", self.inp.position(), frame.info()),
             )),
             Fail::Exception(e) => {
-                let (file, line, function) = frame.site();
+                let (file, line, function) = frame.site::<I>();
                 Fail::exception(e.rethrow_same(file, line, function, frame.info()))
             }
             other => other,
@@ -630,6 +696,7 @@ impl<I: Input> TypedReader<I> {
         if let Some(top) = self.frames.last_mut() {
             top.member = Some(member);
         }
+        self.inp.frame_member(member);
     }
 
     /// `GetPosition()` of the stream.
@@ -660,6 +727,20 @@ impl<I: Input> TypedReader<I> {
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:882-901
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:959-969
+    /// The delayed member `member` of the SEQUENCE `class` in its frames (`read_delayed`).
+    fn delayed_member(&mut self, class: u16, member: &'static Member) -> R<Value> {
+        self.push(FrameKind::Class, class, false)?;
+        let value = self.delayed_member_frame(member);
+        self.pop(value)
+    }
+
+    fn delayed_member_frame(&mut self, member: &'static Member) -> R<Value> {
+        self.push(FrameKind::ClassMember, NO_TYPE, false)?;
+        self.set_member(member);
+        let value = self.read_value(member.ty, false);
+        self.pop(value)
+    }
+
     /// `stream >> object` of the root type `root`: `SkipFileHeader`, then `Read` (here `read`),
     /// each in a named frame of its own.
     fn document<T>(&mut self, root: u16, read: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
@@ -885,7 +966,8 @@ impl<I: Input> TypedReader<I> {
     /// of NCBI's classes that a read runs. The values inside it are read in turn from the list of
     /// the values being read (`open`), as NCBI's functions recurse; an error leaves NCBI's frames
     /// from the innermost out (`unwind`), as it passes `END_OBJECT_FRAME` of each, and the
-    /// `ReadWithSetFlagMember` of each member it leaves.
+    /// `ReadWithSetFlagMember` of each member it leaves, which takes a missing value
+    /// (`missing_value`).
     pub(crate) fn read_value(&mut self, ty: u16, skip: bool) -> R<Value> {
         let (open, frames) = (self.open.len(), self.frames.len());
         let mut step = self.start(ty, skip);
@@ -897,9 +979,72 @@ impl<I: Input> TypedReader<I> {
                     let held = self.open.pop().expect("a value being read");
                     self.resume(held, value)
                 }
+                Err(error) if I::MISSING_VALUES && is_missing_value(&error) => {
+                    match self.missing_value_member(open) {
+                        Some(at) => self.missing_value(at),
+                        None => return Err(self.unwind_values(open, frames, error)),
+                    }
+                }
                 Err(error) => return Err(self.unwind_values(open, frames, error)),
             };
         }
+    }
+
+    /// The position in `open` (from `floor`) of the member that takes a missing value: the
+    /// innermost SEQUENCE member being read with a set flag (`ReadWithSetFlagMember`: read, not
+    /// skipped or delayed, not held by `CRef<>`; `SkipSimpleMember`, `ReadLongMember` and
+    /// `ReadSimpleMember` let it pass), when it is OPTIONAL or DEFAULT. A mandatory one rethrows
+    /// it (`set_flag_error`) as any error leaves it.
+    #[cold]
+    #[inline(never)]
+    fn missing_value_member(&self, floor: usize) -> Option<usize> {
+        let at = self.open[floor..].iter().rposition(|held| match held {
+            Open::Sequence {
+                members,
+                skip: false,
+                reading,
+                ..
+            } => {
+                let member = &members[*reading];
+                !member.is_ref() && member.flags & DELAYED == 0
+            }
+            _ => false,
+        })?;
+        let Open::Sequence {
+            members, reading, ..
+        } = &self.open[floor + at]
+        else {
+            unreachable!("a SEQUENCE member")
+        };
+        members[*reading].optional().then_some(floor + at)
+    }
+
+    /// `ReadWithSetFlagMember`'s missing value in the OPTIONAL or DEFAULT member being read at
+    /// `at` (`missing_value_member`): the values and frames inside the member are left (an error
+    /// that passes no `CException` handler: the frames add nothing), the member is not set, and
+    /// the class reads on (`EndClassMember`, the next member). What the stream had read stays
+    /// read: the ENUMERATED's tag ended as self-closed (`ReadEnum`), the tags around it open.
+    // NCBI reference (598d8ae6): c++/src/serial/member.cpp:714-756
+    #[cold]
+    #[inline(never)]
+    fn missing_value(&mut self, at: usize) -> R<Step> {
+        self.open.truncate(at + 1);
+        let Some(Open::Sequence {
+            ty,
+            members,
+            skip,
+            values,
+            reading,
+            depth,
+        }) = self.open.pop()
+        else {
+            unreachable!("the member's SEQUENCE")
+        };
+        while self.frames.len() > depth {
+            self.drop_frame();
+        }
+        self.inp.end_member()?;
+        self.next_member(ty, members, skip, values, reading + 1)
     }
 
     /// The values above `open` and the frames above `frames` left by `fail`: each SEQUENCE member
@@ -932,6 +1077,12 @@ impl<I: Input> TypedReader<I> {
     fn start(&mut self, ty: u16, skip: bool) -> R<Step> {
         let info = resolved(ty);
         let target = alias_target(ty);
+        if I::NAMED_TYPES {
+            let count = self.begin_names(ty, skip)?;
+            if count > 0 {
+                self.open.push(Open::Named { count });
+            }
+        }
         self.open.push(Open::Value { target, skip });
         let value = match info.kind {
             Kind::Choice(_) if target == super::table::named::SEQ_ID && !skip => {
@@ -950,10 +1101,15 @@ impl<I: Input> TypedReader<I> {
             Kind::Enumerated { integer, values } => {
                 Value::Enum(self.enum_number(values.values(), integer, skip)?)
             }
-            // `SkipBool` and `SkipNull` read what `ReadBool` and `ReadNull` read.
+            // `SkipBool` reads what `ReadBool` reads (and `SkipNull` what `ReadNull` reads, but
+            // in XML: `Input::skip_null`).
             Kind::Boolean => Value::Bool(self.inp.read_bool()?),
             Kind::Null => {
-                self.inp.read_null()?;
+                if skip {
+                    self.inp.skip_null()?;
+                } else {
+                    self.inp.read_null()?;
+                }
                 Value::Null
             }
             Kind::Real => self.real(skip)?,
@@ -970,6 +1126,8 @@ impl<I: Input> TypedReader<I> {
                 if skip {
                     return Ok(Step::Done(value));
                 }
+                // What the stream posted comes before what the hook posts.
+                self.inp.drain_posts(&mut self.posts);
                 super::hooks::post_read(target, value, &mut self.posts).map(Step::Done)
             }
             Open::Sequence {
@@ -1009,6 +1167,7 @@ impl<I: Input> TypedReader<I> {
                 skip,
                 mut values,
             } => {
+                self.inp.end_element()?;
                 if !skip {
                     values.push(value);
                 }
@@ -1022,7 +1181,58 @@ impl<I: Input> TypedReader<I> {
                 self.end_pointer(Ok(()))?;
                 Ok(Step::Done(value))
             }
+            Open::Named { count } => self.end_names(count, Ok(value)).map(Step::Done),
         }
+    }
+
+    /// `ReadNamedType` / `SkipNamedType` of the stream `I` (`Input::NAMED_TYPES`): a frame of its
+    /// own (`FrameKind::NamedType`) and `BeginNamedType` for each named type of the alias chain
+    /// from `ty` that is neither a SEQUENCE, a CHOICE nor an ENUMERATED (those have tags of their
+    /// own: `BeginClass`, `BeginChoice`, `ReadEnum`), outermost first; the number of them. An
+    /// error leaves the frames pushed here.
+    // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2041-2052
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1302-1313
+    // (An alias (`CAliasTypeInfo`) reads its aliased type through `ReadNamedType`, a named
+    // implicit class (`Seq-descr`) its list through `ReadImplicitMember`, classinfo.cpp:289-306;
+    // a named string, number or OCTET STRING is an alias of the anonymous type: each is one such
+    // frame.)
+    pub(super) fn begin_names(&mut self, mut ty: u16, skip: bool) -> R<u8> {
+        let mut count = 0;
+        loop {
+            let info = super::type_info(ty);
+            if !info.name().is_empty()
+                && !matches!(
+                    info.kind,
+                    Kind::Sequence(_) | Kind::Choice(_) | Kind::Enumerated { .. }
+                )
+            {
+                if let Err(fail) = self.push(FrameKind::NamedType, ty, skip) {
+                    return Err(self.unwind(self.frames.len() - usize::from(count), fail));
+                }
+                count += 1;
+                if let Err(fail) = self.inp.begin_named() {
+                    return Err(self.unwind(self.frames.len() - usize::from(count), fail));
+                }
+            }
+            match info.kind {
+                Kind::Alias(next) => ty = next,
+                _ => return Ok(count),
+            }
+        }
+    }
+
+    /// `EndNamedType` and `END_OBJECT_FRAME` of the `count` named frames of `begin_names`, the
+    /// innermost first, after the value inside them was read (`result`).
+    pub(super) fn end_names<T>(&mut self, count: u8, mut result: R<T>) -> R<T> {
+        for _ in 0..count {
+            if result.is_ok() {
+                if let Err(fail) = self.inp.end_named() {
+                    result = Err(fail);
+                }
+            }
+            result = self.pop(result);
+        }
+        result
     }
 
     /// `ReadClassSequential` / `SkipClassSequential` (`start`: the class frame, `BeginClass`, the
@@ -1117,25 +1327,48 @@ impl<I: Input> TypedReader<I> {
 
     /// `ReadContainer` / `SkipContainer` of a SEQUENCE OF or (`set`) SET OF.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1245-1274
+    // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1860-1875 (the XML stream's
+    // `ReadContainer`: no array frame for a container without a name, `Input::ARRAY_FRAMES`)
+    // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:1921-1979 (its
+    // `ReadContainerContents`: an element frame only for an element type that will have no name,
+    // `Input::element_frame`)
     fn start_list(&mut self, element: u16, set: bool, refs: bool, skip: bool) -> R<Step> {
-        self.push(FrameKind::Array, NO_TYPE, skip)?;
+        if I::ARRAY_FRAMES {
+            self.push(FrameKind::Array, NO_TYPE, skip)?;
+        }
         self.inp.begin_container(set)?;
-        self.push(FrameKind::ArrayElement, NO_TYPE, skip)?;
+        if I::element_frame(element) {
+            self.push(FrameKind::ArrayElement, NO_TYPE, skip)?;
+        }
         let numbers = match resolved(element).kind {
             // The elements of an INTEGER or REAL list are read as the numbers themselves (no
             // `Value` each: a PSSM holds thousands); they have no hook.
             Kind::Integer(storage @ (Storage::Int2 | Storage::Int4)) => {
                 // `integer` checked the storage's range.
-                Value::Int4s(self.integers(storage, skip, |value| value as i32)?)
+                Value::Int4s(self.integers(element, storage, skip, |value| value as i32)?)
             }
-            Kind::Integer(storage) => Value::Ints(self.integers(storage, skip, |value| value)?),
-            Kind::Real => Value::Reals(self.reals(skip)?),
+            Kind::Integer(storage) => {
+                Value::Ints(self.integers(element, storage, skip, |value| value)?)
+            }
+            Kind::Real => Value::Reals(self.reals(element, skip)?),
             _ => return self.next_element(element, refs, skip, Vec::new()),
         };
-        self.drop_frame();
-        self.inp.end_container()?;
-        self.drop_frame();
+        self.end_list(element)?;
         Ok(Step::Done(numbers))
+    }
+
+    /// The element frame left, the container's end, the array frame left (the frames of
+    /// `start_list`).
+    #[inline(always)]
+    fn end_list(&mut self, element: u16) -> R<()> {
+        if I::element_frame(element) {
+            self.drop_frame();
+        }
+        self.inp.end_container()?;
+        if I::ARRAY_FRAMES {
+            self.drop_frame();
+        }
+        Ok(())
     }
 
     /// The next element of a SEQUENCE OF or SET OF of values (of `CRef<>`s, `refs`: each with the
@@ -1160,6 +1393,7 @@ impl<I: Input> TypedReader<I> {
                 if !skip {
                     values.push(Value::Null);
                 }
+                self.inp.end_element()?;
                 continue;
             }
             self.open.push(Open::List {
@@ -1173,30 +1407,54 @@ impl<I: Input> TypedReader<I> {
             }
             return Ok(Step::Read(element, skip));
         }
-        self.drop_frame();
-        self.inp.end_container()?;
-        self.drop_frame();
+        self.end_list(element)?;
         Ok(Step::Done(Value::List(values)))
     }
 
-    /// The elements of an INTEGER list, each `store`d as the list keeps it.
-    fn integers<T>(&mut self, storage: Storage, skip: bool, store: impl Fn(i64) -> T) -> R<Vec<T>> {
+    /// The elements of an INTEGER list of the type `element`, each `store`d as the list keeps
+    /// it. Not inlined, as `reals`: the loop over a PSSM's scores keeps its own registers, which
+    /// the walk of `start` around it would share (line RG-F3, PR 2: callgrind of `-in_pssm` text).
+    #[inline(never)]
+    fn integers<T>(
+        &mut self,
+        element: u16,
+        storage: Storage,
+        skip: bool,
+        store: impl Fn(i64) -> T,
+    ) -> R<Vec<T>> {
         let mut values = Vec::new();
         while self.inp.begin_element()? {
-            if let Some(value) = self.integer_number(storage, skip)? {
+            let number = if I::NAMED_TYPES {
+                let count = self.begin_names(element, skip)?;
+                let number = self.integer_number(storage, skip);
+                self.end_names(count, number)?
+            } else {
+                self.integer_number(storage, skip)?
+            };
+            if let Some(value) = number {
                 values.push(store(value));
             }
+            self.inp.end_element()?;
         }
         Ok(values)
     }
 
-    /// The elements of a REAL list.
-    fn reals(&mut self, skip: bool) -> R<Vec<f64>> {
+    /// The elements of a REAL list of the type `element` (not inlined, as `integers`).
+    #[inline(never)]
+    fn reals(&mut self, element: u16, skip: bool) -> R<Vec<f64>> {
         let mut values = Vec::new();
         while self.inp.begin_element()? {
-            if let Some(value) = self.real_number(skip)? {
+            let number = if I::NAMED_TYPES {
+                let count = self.begin_names(element, skip)?;
+                let number = self.real_number(skip);
+                self.end_names(count, number)?
+            } else {
+                self.real_number(skip)?
+            };
+            if let Some(value) = number {
                 values.push(value);
             }
+            self.inp.end_element()?;
         }
         Ok(values)
     }
@@ -1331,6 +1589,7 @@ impl<I: Input> TypedReader<I> {
         }
         let value = self.inp.read_octets();
         if matches!(value, Err(Fail::OutOfMemory | Fail::Std(_))) {
+            self.inp.drain_posts(&mut self.posts);
             self.posts.push(Post::UnendedByteBlock);
         }
         Ok(Value::Octets(value?))
@@ -1360,6 +1619,11 @@ fn enum_error(fail: Fail, skip: bool) -> Fail {
         Fail::Exception(e) => Fail::exception(rethrow(e)),
         other => other,
     }
+}
+
+/// Whether `fail` is the `eMissingValue` of the XML stream (`read_xml::MISSING_VALUE`).
+pub(super) fn is_missing_value(fail: &Fail) -> bool {
+    matches!(fail, Fail::Serial(e) if e.kind() == MISSING_VALUE)
 }
 
 /// The type `ty` refers to after its aliases (the index of `resolved(ty)`): the type of its frames

@@ -26,22 +26,21 @@ use std::sync::Arc;
 
 use super::{
     blastp_adjust_hsp_offsets_and_get_query_data, blastp_advance_preliminary_hit_index,
-    blastp_context_idx_for_query_offset_with_bounds, blastp_diag_coord,
-    blastp_for_each_offset_pair, blastp_for_each_offset_pair_of,
-    blastp_get_ungapped_hsp_context_with_bounds, blastp_restricted_align_enabled,
-    blastp_save_init_hsp, blastp_timing_start, blastp_trace_init_hsp_overlaps_target,
-    build_restricted_align_array_into, chain_blastp_init_hsps, extend_preliminary_blastp_hit,
-    ncbi_qsort_init_hsps_by_score, ncbi_qsort_preliminary_hits,
-    preliminary_hits_is_sorted_by_score_ncbi, preliminary_score_compare, preliminary_tree_hsp,
-    prepare_preliminary_hits_for_kappa_in_place, rebuild_preliminary_interval_tree_from_list,
-    remove_preliminary_hits_for_query, should_retry_exact_preliminary_gapped_alignment,
-    split_preliminary_hits_by_query_into, x_bp_tree_max_cells,
-    x_build_compact_preliminary_hsp_list, x_hits_flat, x_ih_pool, x_outlined, x_soft_subject,
-    BlastpContextLookupBounds, BlastpOffsetPairScanMode, BlastpPrelimValues, BlastpRuntimeLookup,
-    BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, BlastpTiming, InitHSP,
-    BLASTP_RESTRICTED_MULT,
+    blastp_context_idx_for_query_offset_with_bounds, blastp_for_each_offset_pair,
+    blastp_for_each_offset_pair_of, blastp_get_ungapped_hsp_context_with_bounds,
+    blastp_restricted_align_enabled, blastp_save_init_hsp, blastp_timing_start,
+    blastp_trace_init_hsp_overlaps_target, build_restricted_align_array_into,
+    chain_blastp_init_hsps, extend_preliminary_blastp_hit, ncbi_qsort_init_hsps_by_score,
+    ncbi_qsort_preliminary_hits, preliminary_hits_is_sorted_by_score_ncbi,
+    preliminary_score_compare, preliminary_tree_hsp, prepare_preliminary_hits_for_kappa_in_place,
+    rebuild_preliminary_interval_tree_from_list, remove_preliminary_hits_for_query,
+    should_retry_exact_preliminary_gapped_alignment, split_preliminary_hits_by_query_into,
+    x_bp_tree_max_cells, x_build_compact_preliminary_hsp_list, x_hits_flat, x_ih_pool, x_outlined,
+    x_soft_subject, BlastpContextLookupBounds, BlastpOffsetPairScanMode, BlastpPrelimValues,
+    BlastpRuntimeLookup, BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, BlastpTiming,
+    InitHSP, BLASTP_RESTRICTED_MULT,
 };
-use crate::algorithm::blastn::interval_tree::{IndexMethod, TreeHsp};
+use crate::algorithm::blastn::interval_tree::TreeHsp;
 use crate::algorithm::blastp;
 use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::extension::{
@@ -53,6 +52,8 @@ use crate::algorithm::blastp::hsp::{reap_hsplist_by_evalue, update_best_evalue};
 use crate::algorithm::blastp::kappa::{blastp_trace_hsp_target, blastp_trace_matches_pair};
 use crate::algorithm::blastp::x_seed_fused::XContextTable;
 use crate::algorithm::blastp::x_ungapped_sent::XSentQuery;
+use crate::algorithm::common::diag_entry::{DiagRing, DiagTable};
+use crate::algorithm::common::query_batch_tables::QueryBatchTables;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{X_BLASTP, X_BLASTP_MATRIX};
@@ -96,15 +97,22 @@ pub(super) struct BlastpPrelimKernel<'a> {
     pub(super) x_trace_query_base: u32,
     pub(super) timing_enabled: bool,
     pub(super) timing: &'a Option<Arc<BlastpTiming>>,
+    /// Set where the interval tree insertion of an HSP of a whole subject never ends (its HSPs lie
+    /// inside the tree's bounds and are in order, so never): the call then stops with an error, as
+    /// BLASTX's search does (`blastx::search::subject_hits_with`).
+    pub(super) tree_without_end: &'a std::sync::atomic::AtomicBool,
 }
 
 /// One subject with letters as `search_subject` hands it to its gapped half (`gapped_subject`): the
-/// subject and its preliminary statistics, with the two values that `search_subject` made of them,
-/// the subject's letters after the sentinel byte and the word cutoffs (one producer each).
+/// subject and its preliminary statistics, with the values that `search_subject` made of them,
+/// the subject's letters after the sentinel byte, its length (NCBI's `subject->length`) and the
+/// word cutoffs (one producer each). A hard chunk shorter than the word (`one_word_gapped`) has the
+/// stored letters of its one word and the chunk's length.
 #[derive(Clone, Copy)]
 struct ScannedSubject<'a> {
     subject: BlastpSubjectRef<'a>,
     subject_sequence: &'a [u8],
+    subject_length: i32,
     values: &'a BlastpPrelimValues<'a>,
     word_cutoff_scores: &'a [i32],
 }
@@ -179,6 +187,7 @@ impl BlastpPrelimKernel<'_> {
                 values,
                 scan_ranges,
                 chunk,
+                None,
             );
         }
     }
@@ -187,7 +196,11 @@ impl BlastpPrelimKernel<'_> {
     /// subject, or with `-db_soft_mask` a database sequence's; `None`: every word), and, with
     /// `chunk`, for one hard chunk of a sequence with `-db_hard_mask` (`db_masked.rs`): the chunk's
     /// HSPs are left in the scratch's HSP list (`gapped_subject`), sorted by score, for the merge
-    /// of the sequence's chunks. One body for every caller (no code placement in NCBI): the
+    /// of the sequence's chunks. With `tables` (a `-db_hard_mask` sequence that `db_masked.rs`
+    /// keeps apart, `common::hard_chunk_walk::DiagonalWalk::apart`) the scan reads those tables,
+    /// NCBI's of each query batch, at their offset (the reference scan over `scan_ranges`, or the
+    /// whole subject), and their offset moves past the subject in place of the scratch's, whose
+    /// table it does not touch. One body for every caller (no code placement in NCBI): the
     /// masked kernels call it as the default path does, so that the functions it calls keep one
     /// call site each and stay inlined into it. The four macros name the method's locals (their
     /// hygiene), so they are defined after them.
@@ -202,6 +215,7 @@ impl BlastpPrelimKernel<'_> {
         values: &BlastpPrelimValues<'_>,
         scan_ranges: Option<&[(i32, i32)]>,
         chunk: bool,
+        mut tables: Option<&mut QueryBatchTables>,
     ) {
         // `run_call`'s values as its former kernel closure read them: a reference or a `Copy` value
         // each.
@@ -246,11 +260,17 @@ impl BlastpPrelimKernel<'_> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:223-224
         let mut init_hsps = std::mem::take(&mut scratch.init_hsps);
         init_hsps.clear();
-        let subject_diag_offset = scratch.diag_offset;
+        let subject_diag_offset = match &tables {
+            Some(tables) => tables.offset,
+            None => scratch.diag_offset,
+        };
 
         let scan_ungapped_start = blastp_timing_start(timing_enabled);
-        // The scan ranges (`-lcase_masking`, `-db_soft_mask`).
+        // The scan ranges (`-lcase_masking`, `-db_soft_mask`), and those of a search on `tables`
+        // (the whole subject where the caller gives none).
         let x_soft = scan_ranges;
+        let x_whole = [(0, subject.aa_len as i32)];
+        let x_tables_ranges = x_soft.unwrap_or(&x_whole[..]);
         // The subject scan and the two-hit test in one loop (a search with a window).
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-505,509
         // Dispatch point: the two-hit test reads the lookup cells in place
@@ -271,6 +291,11 @@ impl BlastpPrelimKernel<'_> {
                                    diff: i32,
                                    diag_entry: &mut DiagStruct| {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,566-573
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-510
+                    // The scan's query offset is unsigned, so the context test compares the
+                    // offset less the distance in unsigned arithmetic: a distance past the
+                    // query's start (an entry of an earlier hard chunk of the sequence, series NP,
+                    // M4b-3b) passes it.
                     let (ctx_idx, frame_base) = x_context_table
                         .get_with_start(query_offset)
                         .unwrap_or_else(|| {
@@ -281,19 +306,20 @@ impl BlastpPrelimKernel<'_> {
                             );
                             (idx, contexts[idx].frame_base)
                         });
-                    if query_offset - diff < frame_base {
+                    if (query_offset.wrapping_sub(diff) as u32) < frame_base as u32 {
                         diag_entry.set_last_hit(subject_offset + subject_diag_offset);
                         return;
                     }
                     let x_drop = x_dropoff_per_context[ctx_idx];
                     let cutoff = word_cutoff_scores[ctx_idx];
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1109-1112
+                    // The first hit's end is signed: negative where that hit lies before the hard
+                    // chunk's start (series NP, M4b-3b).
                     let Some(ungapped_hit) = $extend(
                         $($lead,)?
                         concatenated_query.as_slice(),
                         subject_raw,
-                        usize::try_from(last_hit + word_size)
-                            .expect("NCBI BLAST two-hit seed boundary must be non-negative"),
+                        last_hit + word_size,
                         usize::try_from(subject_offset)
                             .expect("NCBI BLAST two-hit subject offset must be non-negative"),
                         usize::try_from(query_offset)
@@ -326,19 +352,19 @@ impl BlastpPrelimKernel<'_> {
                 }
             };
         }
-        // The one-hit test of a hit (`-window_size 0`) with the extension `$extend` (and its
-        // leading arguments): `extend_one_hit_blosum62` for BLOSUM62, the reference
-        // `extend_one_hit_of` of the search's matrix for another one (item SC2b).
+        // The one-hit test of a hit (`-window_size 0`) on the diagonal table `$table`
+        // (`common::diag_entry::DiagTable`: the scratch's ring, or `tables`) with the extension
+        // `$extend` (and its leading arguments): `extend_one_hit_blosum62` for BLOSUM62, the
+        // reference `extend_one_hit_of` of the search's matrix for another one (item SC2b).
         macro_rules! x_one_hit_of {
-            ($extend:path $(, $lead:expr)?) => {
+            ($table:ident, $extend:path $(, $lead:expr)?) => {
                 |pair: OffsetPair| {
                     let query_offset =
                         i32::try_from(pair.q_off).expect("NCBI BLAST query offset must fit in Int4");
                     let subject_offset =
                         i32::try_from(pair.s_off).expect("NCBI BLAST subject offset must fit in Int4");
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:776-778
-                    let diag_coord = blastp_diag_coord(subject_offset - query_offset, diag_mask);
-                    let diag_entry = &mut scratch.diag_array[diag_coord];
+                    let diag_entry = $table.one_hit_entry(query_offset, subject_offset);
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:777-782,787-800,802
                     let diff = subject_offset - (diag_entry.last_hit() - subject_diag_offset);
                     if diff < 0 {
@@ -386,7 +412,21 @@ impl BlastpPrelimKernel<'_> {
                 }
             };
         }
-        // The one-hit scan of the search's table with the test `$one_hit` (`x_one_hit_of!`).
+        // The one-hit scan of the search's table with the test `$one_hit` (`x_one_hit_of!`); the
+        // reference scan of `x_tables_ranges` with `tables`.
+        macro_rules! x_one_hit_ranges {
+            ($one_hit:ident, $ranges:expr) => {
+                x_soft_subject::x_for_each_hit(
+                    &lookup,
+                    subject_sequence,
+                    subject.aa_len,
+                    $ranges,
+                    &mut scratch.offset_pairs,
+                    false,
+                    &mut |pair, _| $one_hit(pair),
+                )
+            };
+        }
         macro_rules! x_one_hit_scan {
             ($one_hit:ident, $for_each_offset_pair:ident) => {
                 if let Some(ranges) = x_soft {
@@ -425,7 +465,7 @@ impl BlastpPrelimKernel<'_> {
                  diff: i32,
                  diag_entry: &mut DiagStruct| {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,566-573
-                    // (as in the closure above)
+                    // (as in the closure above, the unsigned test included)
                     let (ctx_idx, frame_base) = x_context_table
                         .get_with_start(query_offset)
                         .unwrap_or_else(|| {
@@ -436,14 +476,13 @@ impl BlastpPrelimKernel<'_> {
                             );
                             (idx, contexts[idx].frame_base)
                         });
-                    if query_offset - diff < frame_base {
+                    if (query_offset.wrapping_sub(diff) as u32) < frame_base as u32 {
                         diag_entry.set_last_hit(subject_offset + subject_diag_offset);
                         return;
                     }
                     let x_drop = x_dropoff_per_context[ctx_idx];
                     let cutoff = word_cutoff_scores[ctx_idx];
-                    let s_left_off = usize::try_from(last_hit + word_size)
-                        .expect("NCBI BLAST two-hit seed boundary must be non-negative");
+                    let s_left_off = last_hit + word_size;
                     let s_right_off = usize::try_from(subject_offset)
                         .expect("NCBI BLAST two-hit subject offset must be non-negative");
                     let q_right_off = usize::try_from(query_offset)
@@ -502,15 +541,30 @@ impl BlastpPrelimKernel<'_> {
                     blastp::x_ungapped_fast::matrix_table(args.scoring.matrix),
                 );
                 let x_candidate = x_candidate_of!(extend_two_hit_table, x_of);
-                if let Some(ranges) = x_soft {
+                if let Some(tables) = tables.as_deref_mut() {
+                    x_soft_subject::x_scan_two_hit_ranges(
+                        lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        x_tables_ranges,
+                        &mut scratch.offset_pairs,
+                        tables,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate,
+                    );
+                } else if let Some(ranges) = x_soft {
                     x_soft_subject::x_scan_two_hit_ranges(
                         lookup,
                         subject_sequence,
                         subject.aa_len,
                         ranges,
                         &mut scratch.offset_pairs,
-                        &mut scratch.diag_array,
-                        diag_mask,
+                        &mut DiagRing {
+                            entries: &mut scratch.diag_array,
+                            mask: diag_mask,
+                        },
                         subject_diag_offset,
                         window,
                         word_size,
@@ -654,15 +708,30 @@ impl BlastpPrelimKernel<'_> {
                 }
                 _ => None,
             };
-            if let Some(ranges) = x_soft {
+            if let Some(tables) = tables.as_deref_mut() {
+                x_soft_subject::x_scan_two_hit_ranges(
+                    lookup,
+                    subject_sequence,
+                    subject.aa_len,
+                    x_tables_ranges,
+                    &mut scratch.offset_pairs,
+                    tables,
+                    subject_diag_offset,
+                    window,
+                    word_size,
+                    x_candidate,
+                );
+            } else if let Some(ranges) = x_soft {
                 x_soft_subject::x_scan_two_hit_ranges(
                     lookup,
                     subject_sequence,
                     subject.aa_len,
                     ranges,
                     &mut scratch.offset_pairs,
-                    &mut scratch.diag_array,
-                    diag_mask,
+                    &mut DiagRing {
+                        entries: &mut scratch.diag_array,
+                        mask: diag_mask,
+                    },
                     subject_diag_offset,
                     window,
                     word_size,
@@ -748,19 +817,42 @@ impl BlastpPrelimKernel<'_> {
                 }
             }
         } else if args.scoring.matrix != ScoringMatrix::Blosum62 {
-            x_outlined(|| {
-                let mut x_one_hit = x_one_hit_of!(extend_one_hit_of, args.scoring.matrix);
-                x_one_hit_scan!(x_one_hit, blastp_for_each_offset_pair_of);
+            x_outlined(|| match tables.as_deref_mut() {
+                Some(x_tables) => {
+                    let mut x_one_hit =
+                        x_one_hit_of!(x_tables, extend_one_hit_of, args.scoring.matrix);
+                    x_one_hit_ranges!(x_one_hit, x_tables_ranges);
+                }
+                None => {
+                    let mut x_ring = DiagRing {
+                        entries: &mut scratch.diag_array,
+                        mask: diag_mask,
+                    };
+                    let mut x_one_hit =
+                        x_one_hit_of!(x_ring, extend_one_hit_of, args.scoring.matrix);
+                    x_one_hit_scan!(x_one_hit, blastp_for_each_offset_pair_of);
+                }
             });
+        } else if let Some(x_tables) = tables.as_deref_mut() {
+            // A sequence kept apart on `tables`: the reference scan of its ranges.
+            let mut x_one_hit = x_one_hit_of!(x_tables, extend_one_hit_blosum62);
+            x_one_hit_ranges!(x_one_hit, x_tables_ranges);
         } else {
             // One-hit search (`-window_size 0`): the buffer of offset pairs, as NCBI's
             // `s_BlastAaWordFinder_OneHit`.
-            let mut x_one_hit = x_one_hit_of!(extend_one_hit_blosum62);
+            let mut x_ring = DiagRing {
+                entries: &mut scratch.diag_array,
+                mask: diag_mask,
+            };
+            let mut x_one_hit = x_one_hit_of!(x_ring, extend_one_hit_blosum62);
             x_one_hit_scan!(x_one_hit, blastp_for_each_offset_pair);
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:168-173
-        scratch.finish_subject(subject.aa_len, window);
+        match tables {
+            Some(tables) => tables.finish_chunk(subject.aa_len as i32, window),
+            None => scratch.finish_subject(subject.aa_len, window),
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
         let interval_tree = &mut scratch.preliminary_interval_tree;
         interval_tree.reset_with_bounds_cells(
@@ -784,13 +876,20 @@ impl BlastpPrelimKernel<'_> {
         let scanned = ScannedSubject {
             subject,
             subject_sequence,
+            subject_length: subject.aa_len as i32,
             values,
             word_cutoff_scores,
         };
         if args.ungapped {
             self.ungapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
         } else {
-            self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
+            let ends =
+                self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
+            // The HSPs of a subject's letters lie inside the tree's bounds and are in order.
+            if !ends {
+                self.tree_without_end
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
         }
     }
 
@@ -832,7 +931,6 @@ impl BlastpPrelimKernel<'_> {
             concatenated_query,
             lookup,
             x_dropoff_per_context,
-            window,
             word_size,
             diag_mask,
             total_query_span,
@@ -854,6 +952,10 @@ impl BlastpPrelimKernel<'_> {
         init_hsps.clear();
         let diag_offset = scratch.neg_offset;
         let matrix = args.scoring.matrix;
+        let mut ring = DiagRing {
+            entries: &mut scratch.diag_array,
+            mask: diag_mask,
+        };
 
         let scan_ungapped_start = blastp_timing_start(timing_enabled);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:772-802
@@ -862,8 +964,7 @@ impl BlastpPrelimKernel<'_> {
                 i32::try_from(pair.q_off).expect("NCBI BLAST query offset must fit in Int4");
             let subject_offset =
                 i32::try_from(pair.s_off).expect("NCBI BLAST subject offset must fit in Int4");
-            let diag_coord = blastp_diag_coord(subject_offset - query_offset, diag_mask);
-            let diag_entry = &mut scratch.diag_array[diag_coord];
+            let diag_entry = ring.one_hit_entry(query_offset, subject_offset);
             if neg_window_diff(subject_offset, diag_entry.last_hit(), diag_offset) < 0 {
                 return;
             }
@@ -934,16 +1035,7 @@ impl BlastpPrelimKernel<'_> {
             );
         }
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-172
-        let (next_offset, cleared) = neg_window_exit(diag_offset, window, subject.aa_len);
-        if cleared {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-106
-            for diag in &mut scratch.diag_array {
-                *diag = DiagStruct::default();
-                diag.set_last_hit(neg_window_cleared_last_hit(window));
-            }
-        }
-        scratch.neg_offset = next_offset;
+        self.neg_window_exit_of(scratch, subject.aa_len as i64);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3830-3831
         let interval_tree = &mut scratch.preliminary_interval_tree;
         interval_tree.reset_with_bounds_cells(
@@ -963,14 +1055,120 @@ impl BlastpPrelimKernel<'_> {
         let scanned = ScannedSubject {
             subject,
             subject_sequence,
+            subject_length: subject.aa_len as i32,
             values,
             word_cutoff_scores,
         };
         if args.ungapped {
             self.ungapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
         } else {
-            self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
+            let ends =
+                self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, chunk);
+            // The HSPs of a subject's letters lie inside the tree's bounds and are in order.
+            if !ends {
+                self.tree_without_end
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-500, 560-562
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4745-4776
+    // A hard chunk shorter than the word goes through the word finder and its ungapped hits
+    // become its HSP list, as for any chunk.
+    /// The HSPs of a hard chunk shorter than the word in an ungapped search (`-ungapped`,
+    /// `db_masked.rs`): the seeds `init_hsps` that its one word saved
+    /// (`common::hard_chunk_scan::OneWord`) become the chunk's HSPs as in `ungapped_subject`, left
+    /// in the
+    /// scratch's HSP list, sorted by score, for the merge of the sequence's chunks (`values` and
+    /// `subject_result` as `search_subject_in`'s; the list of hits goes back to the scratch).
+    #[cold]
+    #[inline(never)]
+    pub(super) fn one_word_hsps(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        subject_result: &mut BlastpSubjectResult,
+        values: &BlastpPrelimValues<'_>,
+        init_hsps: Vec<InitHSP>,
+    ) {
+        // The subject of a chunk's HSPs is not read: they stay in the scratch for the merge.
+        let scanned = ScannedSubject {
+            subject: BlastpSubjectRef {
+                aa_seq: &[0, 0],
+                aa_len: 0,
+            },
+            subject_sequence: &[0],
+            subject_length: 0,
+            values,
+            word_cutoff_scores: values.word_cutoff_scores,
+        };
+        self.ungapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, true);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:493-545
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3820-3831
+    // A hard chunk shorter than the word goes through the gapped stage as any chunk: its interval
+    // tree ends one past the chunk's length (`Int4`, negative between overlapping masks) and its
+    // extensions take that length, over the stored letters of its one word.
+    /// The HSPs of a hard chunk shorter than the word in a gapped search (`db_masked.rs`): the
+    /// seeds `init_hsps` that its one word saved (`common::hard_chunk_scan::OneWord`) through the
+    /// gapped
+    /// stage (`gapped_subject`) on the subject of the stored letters `letters` (the word's and the
+    /// sentinel after them) and of the chunk's length `length`, left in the scratch's HSP list,
+    /// sorted by score, for the merge of the sequence's chunks (`values` and `subject_result` as
+    /// `search_subject_in`'s). `false` where NCBI's insertion of an HSP into the tree never ends
+    /// (`BlastIntervalTree::try_add_hsp`; LOSAT's refusal,
+    /// `common::hard_chunk_scan::short_chunk_tree_refusal`).
+    #[cold]
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn one_word_gapped(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        subject_result: &mut BlastpSubjectResult,
+        values: &BlastpPrelimValues<'_>,
+        init_hsps: Vec<InitHSP>,
+        letters: &[u8],
+        length: i32,
+    ) -> bool {
+        scratch.preliminary_interval_tree.reset_with_bounds_cells(
+            0,
+            self.total_query_span,
+            0,
+            length.saturating_add(1),
+            x_bp_tree_max_cells(),
+        );
+        // The subject's own letters are not read: the chunk's HSPs stay in the scratch.
+        let scanned = ScannedSubject {
+            subject: BlastpSubjectRef {
+                aa_seq: &[0, 0],
+                aa_len: 0,
+            },
+            subject_sequence: letters,
+            subject_length: length,
+            values,
+            word_cutoff_scores: values.word_cutoff_scores,
+        };
+        self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, true)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-172
+    /// `Blast_ExtendWordExit` of a negative window after a subject or hard chunk of `length` letters
+    /// (NCBI's `Int4`: negative for a chunk between overlapping masks): the scratch's diagonal
+    /// offset moved on, or the table cleared (`neg_window_exit`).
+    pub(super) fn neg_window_exit_of(&self, scratch: &mut BlastpSubjectScratch, length: i64) {
+        let window = self.window;
+        let (next_offset, cleared) = neg_window_exit(scratch.neg_offset, window, length);
+        if cleared {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-106
+            for diag in &mut scratch.diag_array {
+                *diag = DiagStruct::default();
+                diag.set_last_hit(neg_window_cleared_last_hit(window));
+            }
+        }
+        scratch.neg_offset = next_offset;
     }
 
     /// The ungapped half of the kernel for one subject with letters (`-ungapped`, in place of
@@ -1160,6 +1358,10 @@ impl BlastpPrelimKernel<'_> {
     /// the scratch here), and the subject's HSP lists go into `subject_result`. The arrays that the method
     /// takes of the scratch (the restricted alignment's flags, the HSP list and its counts per query,
     /// the lists per query) go back to it before the method returns; no statement leaves it early.
+    /// Returns `false` where NCBI's insertion of an HSP into the interval tree never ends
+    /// (`BlastIntervalTree::try_add_hsp`: an HSP of a hard chunk shorter than the word out of the
+    /// tree's bounds, `one_word_gapped`), after which the stage stops; a whole subject's HSPs lie
+    /// inside its bounds.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3664-3666
     fn gapped_subject(
@@ -1170,7 +1372,7 @@ impl BlastpPrelimKernel<'_> {
         subject_result: &mut BlastpSubjectResult,
         mut init_hsps: Vec<InitHSP>,
         chunk: bool,
-    ) {
+    ) -> bool {
         // `run_call`'s values as its former kernel closure read them: a reference or a `Copy` value
         // each.
         let Self {
@@ -1191,10 +1393,12 @@ impl BlastpPrelimKernel<'_> {
         let ScannedSubject {
             subject,
             subject_sequence,
+            subject_length,
             values,
             word_cutoff_scores,
         } = scanned;
         let hit_cutoff_scores = values.hit_cutoff_scores;
+        let mut ends = true;
         let interval_tree = &mut scratch.preliminary_interval_tree;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234-235
         ncbi_qsort_init_hsps_by_score(&mut init_hsps);
@@ -1344,6 +1548,7 @@ impl BlastpPrelimKernel<'_> {
                 ctx,
                 query_sequence,
                 subject_sequence,
+                subject_length,
                 args.scoring.matrix,
                 args.scoring.gap_open,
                 args.scoring.gap_extend,
@@ -1395,7 +1600,7 @@ impl BlastpPrelimKernel<'_> {
                     // With no accepted HSP for this query, NCBI's rebuild
                     // would copy every existing non-query HSP back into the
                     // tree. The current tree already contains exactly that set.
-                    (0, 0)
+                    (0, Some(0))
                 } else {
                     let removed_hsps = remove_preliminary_hits_for_query(
                         &mut preliminary_hsp_list,
@@ -1415,6 +1620,10 @@ impl BlastpPrelimKernel<'_> {
                         contexts,
                     );
                     (removed_hsps, rebuild_nodes)
+                };
+                let Some(rebuild_nodes) = rebuild_nodes else {
+                    ends = false;
+                    break;
                 };
                 if let Some(timing) = timing.as_ref() {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3975-3977,4007-4008
@@ -1483,11 +1692,15 @@ impl BlastpPrelimKernel<'_> {
                 );
                 continue;
             }
-            interval_tree.add_hsp(
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:510-795 (cited at
+            // `BlastIntervalTree::try_add_hsp`)
+            if !interval_tree.try_add_hsp(
                 preliminary_tree_hsp(&preliminary_hsp, ctx.frame_base),
                 ctx.frame_base,
-                IndexMethod::QueryAndSubject,
-            );
+            ) {
+                ends = false;
+                break;
+            }
             preliminary_hsp_list.push(preliminary_hsp);
             if let Some(count) = preliminary_hsp_counts_by_query.get_mut(query_index) {
                 *count += 1;
@@ -1536,6 +1749,7 @@ impl BlastpPrelimKernel<'_> {
         scratch.preliminary_hsp_counts_by_query = preliminary_hsp_counts_by_query;
         scratch.preliminary_hsp_counts_by_query.clear();
         scratch.preliminary_hsp_list = preliminary_hsp_list;
+        ends
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:586-591
@@ -1684,18 +1898,15 @@ fn neg_window_last_hit(s_last_off: i32, word_size: i32, diag_offset: i64) -> i32
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-172
-/// The diagonal offset after a subject of `subject_length` letters (`Blast_ExtendWordExit`) and
+/// The diagonal offset after a subject or chunk of `length` letters (`Blast_ExtendWordExit`) and
 /// whether the table is cleared: from an offset of a quarter of `INT4_MAX` or more it goes back to `window`
 /// with every entry cleared, else it moves on by the length plus `window` (64-bit, so that a very
 /// negative window does not wrap).
-fn neg_window_exit(diag_offset: i64, window: i32, subject_length: usize) -> (i64, bool) {
+fn neg_window_exit(diag_offset: i64, window: i32, length: i64) -> (i64, bool) {
     if diag_offset >= i64::from(i32::MAX / 4) {
         (i64::from(window), true)
     } else {
-        (
-            diag_offset + subject_length as i64 + i64::from(window),
-            false,
-        )
+        (diag_offset + length + i64::from(window), false)
     }
 }
 

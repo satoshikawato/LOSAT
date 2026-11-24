@@ -158,20 +158,23 @@ fn shadow() -> bool {
 }
 
 /// No NCBI counterpart: whether the subject loop runs as a flow, and with how many subjects per
-/// task (fewer inside the capped batch flow, `x_bx_mem::flow_subjects_per_task`). Not without a
-/// pool, with one task only, or when a diagonal offset could pass 2^30 (module comment).
+/// task (fewer inside the capped batch flow and for a reader batch searched whole, `whole`: the
+/// threads it is left, `x_bx_mem::flow_subjects_per_task`). Not without a pool, with one task
+/// only, or when a diagonal offset could pass 2^30 (module comment).
 pub(super) fn chosen(
     pool: &crate::utils::threading::SearchPool<'_>,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
+    whole: Option<usize>,
 ) -> Option<usize> {
-    // Dispatch point (LOSAT_X_BXCAPFILL, in the strict set): inside the capped batch flow, tasks of
-    // fewer subjects (x_bx_mem::flow_subjects_per_task).
+    // Dispatch point (LOSAT_X_BXCAPFILL, in the strict set): inside the capped batch flow, and for
+    // a reader batch searched whole, tasks of fewer subjects (x_bx_mem::flow_subjects_per_task).
     let k = super::x_bx_mem::flow_subjects_per_task(
         pool,
         options,
         subjects.len(),
         subjects_per_task()?,
+        whole,
     );
     let own = fits(k, pool, options, subjects);
     crate::utils::xreach::x_reach!("LOSAT_X_BXSUBJFLOW", own);
@@ -227,7 +230,8 @@ pub(super) fn chunks_in_order(
 /// EXPERIMENT (LOSAT_X_BXCHUNKCROSS, in the strict set: on unless `=0`): `Some(k)` where the chunk
 /// loop of `search::search_core` would search `chunks` (two or more) one after another, each with
 /// the subject flow in tasks of `k` (`chosen`): they then run as one flow (`run_chunks`). No
-/// condition of its own.
+/// condition of its own. A batch of several chunks is one query (NCBI splits no batch of several
+/// queries), never a reader batch of several places (`x_bx_mem::whole_batch_threads`).
 pub(super) fn crosses_chunks(
     pool: &crate::utils::threading::SearchPool<'_>,
     options: &ResolvedOptions,
@@ -238,7 +242,7 @@ pub(super) fn crosses_chunks(
     if chunks < 2 || !*ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXCHUNKCROSS")) {
         return None;
     }
-    let k = chosen(pool, options, subjects);
+    let k = chosen(pool, options, subjects, None);
     crate::utils::xreach::x_reach!("LOSAT_X_BXCHUNKCROSS", k.is_some());
     k
 }
@@ -341,8 +345,10 @@ fn x_shadow_check(kept: &[(usize, SubjectComputation)], failed_at: Option<usize>
 /// The subject loop of one query chunk: every subject of `subjects` in oid order, with the sink
 /// calls of the waves' replay loop (`subject_start`, `containment`, `preliminary_purge`,
 /// `subject`); `diagonals` is the owner's table, `helper_tables` one table per helper (its own, or
-/// with `LOSAT_X_BXDIAGKEEP` the one its thread keeps, `x_bx_mem::XScratch`); `capped` = the chunk's
-/// batch is one of the capped batch flow (`x_bx_mem::in_capped_batch`).
+/// with `LOSAT_X_BXDIAGKEEP` the one its thread keeps, `x_bx_mem::XScratch`); `leaving` = the
+/// helpers leave once every task is claimed: the chunk's batch is one of the capped batch flow
+/// (`x_bx_mem::in_capped_batch`) or a reader batch searched whole
+/// (`x_bx_mem::whole_batch_threads`), which other units may search beside it.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     k: usize,
@@ -355,7 +361,7 @@ pub(super) fn run(
     helper_tables: Vec<super::x_bx_mem::XScratch<'_>>,
     xdrop: i32,
     x_containment: bool,
-    capped: bool,
+    leaving: bool,
     sink: &mut impl PreliminarySink,
 ) -> Result<()> {
     let bounds = XTasks::new(k, subjects);
@@ -394,9 +400,10 @@ pub(super) fn run(
     };
     // Four tasks per thread ahead of the owner: a helper always finds one while the owner hands a
     // task to the sink, and the tasks held at once stay few (only subjects with hits are kept).
-    // Inside the capped batch flow (LOSAT_X_BXUNITCAP), the helpers leave once every task is
-    // claimed: the other batches searched at the time want the threads (x_bx_mem.rs).
-    let ahead = if capped {
+    // Inside the capped batch flow (LOSAT_X_BXUNITCAP) and for a reader batch searched whole, the
+    // helpers leave once every task is claimed: the other batches searched at the time want the
+    // threads (x_bx_mem.rs).
+    let ahead = if leaving {
         crate::utils::xahead::Ahead::x_new_leaving(4 * (helper_tables.len() + 1))
     } else {
         crate::utils::xahead::Ahead::new(4 * (helper_tables.len() + 1))

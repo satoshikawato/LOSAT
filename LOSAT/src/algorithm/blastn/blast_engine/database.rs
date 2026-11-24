@@ -1648,9 +1648,11 @@ pub(super) fn fetch_excluded(database: &BlastnDatabase) -> Option<shared::FetchE
 }
 
 /// LOSAT's refusal of a search whose fetch with `check_oid_exclusion` cannot read the header
-/// of a subject (`shared::FetchExcluded::refusal`), where NCBI's search fails.
+/// of a subject (`shared::FetchExcluded::refusal`), where NCBI's search of the batch fails: after the
+/// reports of the batches before, which NCBI's batch loop has printed (`super::after_batch_reports`;
+/// for the first batch, the prologs), as TBLASTN's and TBLASTX's (line RG item X-short-bat-2).
 pub(super) fn fetch_refusal(failed: (u32, crate::seqdb::SeqDbError)) -> anyhow::Error {
-    shared::FetchExcluded::refusal(failed, PROGRAM)
+    super::after_batch_reports(shared::FetchExcluded::refusal(failed, PROGRAM))
 }
 
 impl BlastnDatabase {

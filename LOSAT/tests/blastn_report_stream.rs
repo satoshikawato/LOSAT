@@ -1225,10 +1225,11 @@ fn a_refused_subject_id_comes_after_the_batches_before(dir: &TempDir, query: &Pa
 }
 
 /// Where the switch must not act, it does not, and the bytes are the off path's: a search space
-/// that could overflow (a `-dbsize` near 2^63); scoring options without Karlin-Altschul values; a
-/// negative `CHUNK_SIZE` (whose refusal comes where a batch is split); and the debug output
-/// (`LOSAT_DEBUG_COORDS`). A subject whose tabular id LOSAT refuses streams, its refusal after
-/// the rows of the batches before.
+/// that could overflow (a `-dbsize` near 2^63); scoring options without Karlin-Altschul values; and
+/// the debug output (`LOSAT_DEBUG_COORDS`). A subject whose tabular id LOSAT refuses streams, its
+/// refusal after the rows of the batches before, and so does a negative `CHUNK_SIZE`, whose
+/// refusal comes where a batch is split, after the reports of the batches before in both paths
+/// (line RG item X-short-bat-2).
 #[test]
 fn where_the_switch_must_not_act_the_counters_name_why() {
     let dir = TempDir::new("off");
@@ -1265,9 +1266,9 @@ fn where_the_switch_must_not_act_the_counters_name_why() {
     assert_eq!(off.status, Some(3), "NCBI's Karlin-Altschul error");
     assert_eq!((batches, reason.as_str()), (0, "scoring"));
     let chunks = [("CHUNK_SIZE", "-5"), ("OVERLAP_CHUNK_SIZE", "-10")];
-    let (off, (batches, reason)) = same_two("CHUNK_SIZE", &plain, 4, &chunks, None);
+    let (off, (_, reason)) = same_two("CHUNK_SIZE", &plain, 4, &chunks, None);
     assert_ne!(off.status, Some(0), "LOSAT's refusal");
-    assert_eq!((batches, reason.as_str()), (0, "chunk_size"));
+    assert_eq!(reason, "none", "a negative CHUNK_SIZE streams");
     let (off, (batches, reason)) =
         same_two("debug", &plain, 1, &[("LOSAT_DEBUG_COORDS", "1")], None);
     assert!(!off.report.is_empty());

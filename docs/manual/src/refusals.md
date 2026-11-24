@@ -106,6 +106,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-db_hard_mask` on a database whose masks overlap or are stored out of order | Refused. |
 | `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused. |
 | `-window_masker_taxid` with a counts file whose unit size is 17 to 251 | Refused. NCBI's result is undefined. |
+| `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` (see [Environment](environment.md)) that split a query batch with a piece left without a query (also a negative chunk size above a negative overlap whose first piece covers the batch), where NCBI BLAST+ stops, or a negative pair whose pieces leave gaps between them (NCBI BLAST+ searches on and loses the hits there) | Refused after the output of the query batches before: at the stop, before the database's errors that NCBI BLAST+ meets later, and for the gaps where the search of the batch's first piece with searchable query letters would read the subjects, after that piece's setup. With no subject to search, or no such piece, the batch is reported as NCBI BLAST+ reports it. A piece that NCBI would split again is searched once (see [Differences from NCBI BLAST+](differences.md#query-chunks-that-ncbi-would-split-again)). |
 
 The message for `-reward 0` with the default penalty of `-task megablast` is:
 
@@ -148,7 +149,8 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-query_gencode 32` | NCBI's argument error (exit status 1). Code 32 is not one of NCBI's codes. |
 | `-matrix IDENTITY` with the compressed lookup table (word size 5 to 7; 5 is the default of `-task blastx-fast`), or a name that begins with `IDENTITY` | Refused. NCBI aborts. |
 | An `-evalue` that is not finite (`+inf`, `1e999`, `-nan`) | Refused. |
-| `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
+| `-threshold` with the compressed lookup table | Refused, as in `blastp`. LOSAT writes the results of the query batches before and then stops with the error (exit status 1). |
+| `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` (see [Environment](environment.md)) that split a query batch where NCBI BLAST+ stops (a piece it would split again, or one left without a query: every negative chunk size above a negative overlap leaves one), or an overlap that is not a multiple of 3 (NCBI BLAST+ searches pieces out of the query's reading frames) | Refused after the output of the query batches before, the stops before the database's errors that NCBI BLAST+ meets later. The overlap that is not a multiple of 3 is refused only where the batch has subjects to search whose sequences can be read; otherwise the batch is reported, or fails, as in NCBI BLAST+. |
 | A gapped X-drop so large that NCBI's alignment kernels overflow | Refused, as in `blastp`. |
 | `-query_loc` or `-subject_loc` with `-outfmt` 5, 8, 9 and 11 to 16 | Refused. Formats 0, 6, 7, 10 and 20 work. |
 | A protein subject of more than 5,000,000 residues, from `-subject` or from a database | Refused. NCBI searches it in overlapping parts, which LOSAT does not do yet. |

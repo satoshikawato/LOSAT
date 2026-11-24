@@ -48,7 +48,7 @@
 //!   report call whose rows look a name up (`common::database::tabular_names`), as they go to the
 //!   first such row of the one call.
 //! - the errors: an error of NCBI's that a batch meets (a reader error, an `eEOF` batch, a batch
-//!   of queries without letters, `ErrorAfterInvalidBatches`, a header file that cannot be read)
+//!   of queries without letters, `after_batch_reports`, a header file that cannot be read)
 //!   comes after the reports of the batches before, without the epilog, in both: here they were
 //!   written when the loop took them, so the error paths write only what follows them (the
 //!   batch's title and reader warnings). An error that LOSAT raises where NCBI would not stop
@@ -85,14 +85,16 @@
 //!   never streamed (`Off::Xml`, any number of batches). The refusals of the options and the
 //!   query lengths that a later batch could meet keep the reports after the loop: scoring options
 //!   without Karlin-Altschul values, large greedy gap costs or matrix-only scoring with the
-//!   greedy extension (`search_query_batch`, in `context_statistics`), a negative
-//!   `CHUNK_SIZE` (`search_query_chunks`), a search space that could overflow (`SearchSpace`) and
-//!   an ungapped cutoff of a query too long (`UngappedCutoff`). With one batch (the first batch takes
-//!   every query record) nothing can come after it, so none of these checks is made and no
-//!   subject value is made ahead (the one call makes them as without the switch). LOSAT's
-//!   internal invariant errors and panics are not argued; a write error of the output stops the
-//!   run where it happens (at the end without the switch); a `-db` file that changes or fails
-//!   after the preliminary stage has read it is not argued either.
+//!   greedy extension (`search_query_batch`, in `context_statistics`), a search space that could
+//!   overflow (`SearchSpace`) and an ungapped cutoff of a query too long (`UngappedCutoff`). The
+//!   refusals of a split batch's query chunks (`search_query_chunks`) and of the fetch under a
+//!   negative seqid list come after the reports of the batches before in both paths
+//!   (`after_batch_reports`, line RG item X-short-bat-2), so a negative `CHUNK_SIZE` streams.
+//!   With one batch (the first batch takes every query record) nothing can come after it, so none
+//!   of these checks is made and no subject value is made ahead (the one call makes them as
+//!   without the switch). LOSAT's internal invariant errors and panics are not argued; a write
+//!   error of the output stops the run where it happens (at the end without the switch); a `-db`
+//!   file that changes or fails after the preliminary stage has read it is not argued either.
 //! - what the report path writes to standard error (the query warnings) keeps its bytes and its
 //!   place before each query's report; `-verbose` and the debug and trace output, which a batch
 //!   writes while it is searched and the reports write again, keep the reports at the end
@@ -181,8 +183,6 @@ pub(super) enum Off {
     /// `-outfmt 5` (BLAST XML), 15 and 16 (the XML2 / JSON documents), which are written after
     /// the loop (the module doc has the reason).
     Xml,
-    /// A negative `CHUNK_SIZE`.
-    ChunkSize,
     /// An ungapped (`-ungapped`) or matrix-only search with a query of 2^30 letters or more, which
     /// LOSAT refuses in the batch that holds it (the word cutoff's doubled length overflows NCBI's `Int4`): a
     /// later batch's refusal would come after the first batch's reports.
@@ -199,7 +199,6 @@ impl Off {
             Off::Debug => "debug",
             Off::Xml => "xml",
             Off::Scoring => "scoring",
-            Off::ChunkSize => "chunk_size",
             Off::UngappedCutoff => "ungapped_cutoff",
             Off::SearchSpace => "search_space",
         }
@@ -496,9 +495,6 @@ fn check(
         || check_greedy_matrix_only(args, args.ungapped).is_err()
     {
         return Err(Off::Scoring);
-    }
-    if batching.split.negative_chunk_size() {
-        return Err(Off::ChunkSize);
     }
     // The word cutoff of an ungapped search and of matrix-only scoring
     // (`batch_setup::batch_cutoffs`).

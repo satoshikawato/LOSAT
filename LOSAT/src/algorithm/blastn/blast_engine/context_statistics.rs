@@ -19,7 +19,7 @@
 use super::{
     context_lengths, database, database_search_error, prolog_with_report, reborrow_outputs,
     write_format_prolog, write_pairwise_prologs, BatchOutputs, BatchStage, BlastnArgs,
-    ContextKarlin, ErrorAfterInvalidBatches, KarlinParams, NuclScoringSpec, QueryBatching,
+    after_batch_reports, ContextKarlin, KarlinParams, NuclScoringSpec, QueryBatching,
     QueryContext, SequenceData, ShownSubjects, SubjectSource, FIRST_BATCH_OUTPUTS,
 };
 use crate::algorithm::blastn::scoring::{
@@ -172,7 +172,7 @@ fn karlin_blocks<const UNGAPPED: bool>(
             // with a valid query would have raised the error), and NCBI has written their
             // reports (`run_in_pool`).
             if !first_batch {
-                return Err(ErrorAfterInvalidBatches(karlin_error(&message, empty_queries)).into());
+                return Err(after_batch_reports(karlin_error(&message, empty_queries)));
             }
             // The prolog of a file sink (the others were written before the search).
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
@@ -221,7 +221,7 @@ pub(super) fn setup_failure(
     shown: &ShownSubjects,
 ) -> anyhow::Error {
     if !first_batch {
-        return ErrorAfterInvalidBatches(error).into();
+        return after_batch_reports(error);
     }
     let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
     match write_pairwise_prologs(outputs, output_formats, intro, shown, false) {

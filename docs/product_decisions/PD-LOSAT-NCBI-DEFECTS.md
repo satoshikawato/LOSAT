@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.98
+- Version: 1.99
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -650,7 +650,20 @@
   merge of dev of 2026-11-24 that brought 1.92, line NP item O4b2-4, then 1.95 at the merge of dev
   of 2026-11-24 that brought 1.93, line RG item D1c-1c, then 1.96 at the merge of dev
   of 2026-11-24 that brought 1.94, line NP item M4c-2, then 1.98 at the merge of dev
-  of 2026-11-24 that brought 1.96, line NP item M4b-3b (1.95) and line DBID item pfoff-4 (1.96))
+  of 2026-11-24 that brought 1.96, line NP item M4b-3b (1.95) and line DBID item pfoff-4 (1.96));
+  1.99 2026-11-24 (BLASTN and BLASTX, line RG item X-short-bat-2: their rejections inside the search
+  of a query batch come after the reports of the query batches before, in NCBI's order: a query
+  chunk without a query (in BLASTN also a negative `CHUNK_SIZE` whose first range covers the batch,
+  in BLASTX every negative pair that splits a batch) and, in BLASTX, a chunk split again, at NCBI's
+  split, before the errors of the database that NCBI meets in a chunk's setup; BLASTN's rejection
+  of a negative pair whose chunks leave gaps (version 1.1) at TBLASTN's step of 1.97, where the
+  search of the batch's first chunk with a valid context would read subjects in hand whose
+  sequences can be read; BLASTX's rejection of an overlap that is not a multiple of 3 only with
+  such subjects (a batch without them is reported, or fails, as NCBI's is); the fetch rejections
+  under a negative seqid list of 1.93 and BLASTX's rejection of the compressed-lookup thresholds
+  that exhaust NCBI's overflow banks (decision D3, LOSAT's rejection with exit status 1, no
+  longer reported as an engine error) after the same reports; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.98)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -887,9 +900,17 @@ Explicit rejections (rule 3):
   status 0), in BLASTP, psiblast and TBLASTN. A refused batch of two queries with one id that NCBI splits
   gives NCBI's error where its chunks reach the setup's failure, and the refusal where a chunk
   stops first.
+  BLASTX (version 1.99, line RG item X-short-bat-2, rows `db.xs.blastx.bat.*`) refuses a chunk
+  split again and a chunk without a query at NCBI's split, after the reports of the query batches
+  before and before the database's errors of a chunk's setup; every negative pair that splits a
+  BLASTX batch leaves such chunks (BLASTX evens the chunk size to a multiple of 3 and does not
+  adjust it again, so chunk 0 covers the batch). Its rejection of an overlap that is not a
+  multiple of 3, whose chunks NCBI searches out of the query's reading frames, comes after the same
+  reports, only where the batch has subjects in hand whose sequences can be read.
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.87 at the first query batch NCBI searches), compressed-lookup thresholds that
-  exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
+  exhaust its overflow bank (in BLASTX, TBLASTN's form since version 1.99: after the reports of the
+  query batches before, exit status 1). (`-max_target_seqs` values that make NCBI's preliminary hit
   list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
 
@@ -2363,13 +2384,23 @@ file would differ, and NCBI's programs still could not open the database).
   rejection (a setting without a practical use; reproducing it would need NCBI's wrapped
   `size_t` arithmetic through the chunk ranges, masks and merge). Where such a pair does
   not split the batch (for example `-1` above `-2147483648`), NCBI searches as without the
-  variables and so does LOSAT (fixtures `env.negative_pair_*`).
+  variables and so does LOSAT (fixtures `env.negative_pair_*`). Since version 1.99 the rejection
+  comes after the reports of the query batches before (line RG item X-short-bat-2, rows
+  `db.xs.blastn.bat.*`): a pair whose first range covers the batch leaves the chunks after it
+  without a query, where NCBI's split stops (the next item); a pair whose chunks all hold a query
+  and leave gaps is refused where the search of the batch's first chunk with a valid context would
+  read subjects in hand whose sequences can be read, after that chunk's setup and the reads of the
+  database that fail before it (TBLASTN's step of 1.97); a batch without such subjects is reported
+  as NCBI reports it.
 
 - A `CHUNK_SIZE`/`OVERLAP_CHUNK_SIZE` pair whose chunk ranges leave a chunk without a
   query (an overlap close to or above the chunk size): NCBI's `CQuerySplitter::Split`
   (`split_query_cxx.cpp:872-880`) or the chunk's search stops with a null-pointer
   `CCoreException`; LOSAT rejects "a query chunk without a query" (round-3 audit: 27
-  oracle cases, the reason holds in all).
+  oracle cases, the reason holds in all). Since version 1.99 the rejection comes where
+  `CQuerySplitter::Split` stops, after the reports of the query batches before and before the
+  setup of any chunk and its read of the database, also with no subject in hand (rows
+  `db.xs.blastn.bat.empty.*`, `db.xs.blastn.bat.ord.empty.*`).
 
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb

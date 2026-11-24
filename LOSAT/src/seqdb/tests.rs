@@ -1725,13 +1725,15 @@ fn masklist_names_the_gi_masks_of_a_database_of_one_name() {
             "{passed_over}"
         );
     }
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// A `MASKLIST` name that is not UTF-8 is LOSAT's refusal where the masks are asked for, not at
-/// the opening: the database's sequences read (review N8 of line NP item M4c-2).
+/// A `MASKLIST` name that is not UTF-8 is its bytes, as NCBI's `std::string` is: the name finds
+/// its id, and NCBI's names table keeps its bytes, padded to 40 bytes (item K10a of line RG; the
+/// files of such a name: `tests/non_utf8_names`, `K10_bd_gimask_*`).
 #[test]
-fn a_masklist_name_not_utf8_is_refused_where_the_masks_are_read() {
-    let dir = temp_dir("masklist-utf8");
+fn a_masklist_name_not_utf8_is_read_by_its_bytes() {
+    let dir = temp_dir("masklist-bytes");
     copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
     std::fs::write(
         dir.join("gm.pal"),
@@ -1741,14 +1743,28 @@ fn a_masklist_name_not_utf8_is_refused_where_the_masks_are_read() {
     let name = dir.join("gm").to_str().unwrap().to_string();
     let db = SeqDb::open(&name, SeqType::Protein).unwrap();
     assert_eq!(db.num_seqs(), 10);
-    for _ in 0..2 {
-        let error = db.mask_algorithms().unwrap_err();
-        assert!(
-            matches!(&error, SeqDbError::Unsupported { message, .. }
-                if message == "a MASKLIST name is not valid UTF-8"),
-            "{error}"
-        );
-    }
+    let algorithms = db.mask_algorithms().unwrap();
+    assert_eq!(algorithms.ids(), vec![0, 1]);
+    assert_eq!(algorithms.id_of(b"\xff"), Ok(1));
+    let table = [
+        b"\nAvailable filtering algorithm(s):\n\nAlgorithm ID  Algorithm name".as_slice(),
+        &[b' '; 26],
+        b"\n    0         a",
+        &[b' '; 39],
+        b"\n    1         \xff",
+        &[b' '; 39],
+        b"\n",
+    ]
+    .concat();
+    assert_eq!(
+        algorithms.id_of(b"dust"),
+        Err([
+            b"Filtering algorithm dust does not exist.\n".as_slice(),
+            &table
+        ]
+        .concat())
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]

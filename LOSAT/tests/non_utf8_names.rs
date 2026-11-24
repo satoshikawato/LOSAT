@@ -6,7 +6,7 @@
 //! exception report quotes (`R4`); and the values of dustmasker, segmasker, windowmasker,
 //! makembindex, makeprofiledb, convert2blastmask and blastdbcmd (`K10_*`, line RG item K10a: names
 //! of files and databases, `BLASTDB` of the environment and of `.ncbirc`, and words that name a
-//! format, an algorithm, an entry or a range). NCBI BLAST+ 2.17.0 keeps such a name's bytes (`std::string`) where it opens, lists and writes it; LOSAT wrote U+FFFD, found
+//! format, an algorithm, an entry or a range; the names of an alias file's `MASKLIST`). NCBI BLAST+ 2.17.0 keeps such a name's bytes (`std::string`) where it opens, lists and writes it; LOSAT wrote U+FFFD, found
 //! nothing or failed before. The expected bytes are NCBI's, frozen by `non_utf8_names/make_fixtures.py`
 //! (`non_utf8_names/README.md`) from the cases of `non_utf8_names/cases.tsv`, which this test runs
 //! the same way: `{D}` in them is the case's directory, and the time of makeblastdb's line
@@ -251,6 +251,6 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
             ));
         }
     }
-    assert_eq!(ran, 82, "the cases of cases.tsv");
+    assert_eq!(ran, 90, "the cases of cases.tsv");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }

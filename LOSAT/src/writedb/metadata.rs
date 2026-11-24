@@ -674,13 +674,14 @@ const SERIAL_IO_ERROR: &str = "CSerialException::eIoError";
 /// `err`; `Some(message)` for the `eFlush` exception that ends makeblastdb ("BLAST failed to
 /// write output: message").
 pub(crate) fn write_metadata_file(
-    new_db: &str,
+    new_db: &[u8],
     is_protein: bool,
     metadata: &DbMetadata,
     err: &mut dyn Write,
 ) -> Option<&'static str> {
-    let name = format!("{new_db}.{}", if is_protein { "pjs" } else { "njs" });
-    let mut out = OfStream::create(Path::new(&name));
+    let extension: &[u8] = if is_protein { b".pjs" } else { b".njs" };
+    let name = [new_db, extension].concat();
+    let mut out = OfStream::create(&crate::utils::os_bytes::path_of_bytes(&name));
     write_metadata(&mut out, metadata, "makeblastdb", err)
 }
 

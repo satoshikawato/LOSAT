@@ -449,7 +449,7 @@ fn run_inner(
             Some(&crate::algorithm::common::database::TaxdbSetting::of(
                 &settings,
             )),
-        )?,
+        ),
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).

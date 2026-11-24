@@ -295,12 +295,14 @@ pub(super) fn index_exists(index: &Path, data: &Path) -> bool {
 pub(super) fn open_files(index: &Path, data: &Path) -> Result<(DbFile, DbFile), SeqDbError> {
     let message = || {
         SeqDbError::NotFound(
-            format!(
-                "Error: Could not open input file ({}/{})",
-                index.display(),
-                data.display()
-            )
-            .into(),
+            [
+                b"Error: Could not open input file (".as_slice(),
+                &crate::utils::os_bytes::path_bytes(index),
+                b"/",
+                &crate::utils::os_bytes::path_bytes(data),
+                b")",
+            ]
+            .concat(),
         )
     };
     let index_file = DbFile::open(index).map_err(|_| message())?;

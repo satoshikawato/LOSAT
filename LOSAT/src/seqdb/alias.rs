@@ -126,9 +126,8 @@ pub(super) struct AliasTree {
     /// Volume paths without extension, sorted as NCBI opens them.
     pub volumes: Vec<Vec<u8>>,
     /// The names of the GI-indexed masks that NCBI's reader uses for the database
-    /// (`gi_mask_list`), or LOSAT's refusal of a name, met where the masks are asked for; `None`
-    /// where it uses the mask columns of the volumes.
-    pub gi_masks: Option<Result<Vec<String>, SeqDbError>>,
+    /// (`gi_mask_list`), their bytes; `None` where it uses the mask columns of the volumes.
+    pub gi_masks: Option<Vec<Vec<u8>>>,
 }
 
 /// Alias keys that LOSAT recognises and does not support: they select
@@ -614,11 +613,9 @@ fn read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
 /// The names of the GI-indexed masks that NCBI's reader uses for the top node `root` of the
 /// database given as `names` names (`CSeqDBAliasFile::GetMaskList` when `HasGiMask`): one name,
 /// whose alias file (the root's one subnode) has `MASKLIST`, whose value is split as a list of
-/// database names is. `None` otherwise. A name that is not UTF-8 is LOSAT's refusal (the names
-/// are paths and the text of the names table), which the reader keeps for where the masks are
-/// asked for (`SeqDb::mask_algorithms`): NCBI reads the names only there, so a search or a
-/// retrieval without masks reads the database (review N8 of line NP item M4c-2, 2026-11-24).
-fn gi_mask_list(root: &AliasNode, names: usize) -> Option<Result<Vec<String>, SeqDbError>> {
+/// database names is. `None` otherwise. Each name is its bytes (NCBI's `std::string`: the
+/// file names of the mask and its line of the names table; item K10a of line RG, 2026-11-24).
+fn gi_mask_list(root: &AliasNode, names: usize) -> Option<Vec<Vec<u8>>> {
     let [subnode] = root.subnodes.as_slice() else {
         return None;
     };
@@ -626,19 +623,12 @@ fn gi_mask_list(root: &AliasNode, names: usize) -> Option<Result<Vec<String>, Se
         return None;
     }
     let value = subnode.value("MASKLIST")?;
-    let mut list = Vec::new();
-    for name in split_quoted(value, false) {
-        let Ok(name) = std::str::from_utf8(name) else {
-            return Some(Err(SeqDbError::Unsupported {
-                path: crate::utils::os_bytes::path_from_bytes(
-                    subnode.this_name.clone().unwrap_or_default(),
-                ),
-                message: "a MASKLIST name is not valid UTF-8".to_string(),
-            }));
-        };
-        list.push(name.to_string());
-    }
-    Some(Ok(list))
+    Some(
+        split_quoted(value, false)
+            .into_iter()
+            .map(<[u8]>::to_vec)
+            .collect(),
+    )
 }
 
 struct Resolver<'a> {

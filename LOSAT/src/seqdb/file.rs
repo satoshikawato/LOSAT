@@ -67,7 +67,12 @@ impl DbFile {
     pub fn open(path: &Path) -> Result<Self, SeqDbError> {
         if !super::alias::exists(path) {
             return Err(SeqDbError::NotFound(
-                format!("Error: File ({}) not found.", path.display()).into(),
+                [
+                    b"Error: File (".as_slice(),
+                    &crate::utils::os_bytes::path_bytes(path),
+                    b") not found.",
+                ]
+                .concat(),
             ));
         }
         let file = File::open(path).map_err(|source| SeqDbError::Open {

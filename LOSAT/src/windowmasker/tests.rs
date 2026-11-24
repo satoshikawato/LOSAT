@@ -509,3 +509,47 @@ fn a_run_of_losat_web_writes_the_files_of_the_command_line() {
         )
     );
 }
+
+/// The checks of LOSAT Web (`check_in`, `app::check`) read the values as the command line does in
+/// each mode, list and file names that are not UTF-8 included: a name read as text fails here in a
+/// debug build (`Args::value`'s check; review F1 of item K10a of line RG). A given list is read by
+/// the run before `-infmt seqids` is refused, so the check passes it; without one the check refuses.
+#[cfg(unix)]
+#[test]
+fn the_checks_of_each_mode_read_names_by_their_bytes() {
+    use std::os::unix::ffi::OsStringExt;
+    let check = |line: &[&str], names: &[(&str, &[u8])]| {
+        let mut words: Vec<OsString> = line.iter().map(OsString::from).collect();
+        for (key, value) in names {
+            words.push(OsString::from(key));
+            words.push(OsString::from_vec(value.to_vec()));
+        }
+        let mut err = Vec::new();
+        let status = check_in(&words, &crate::report::run_files::RunFiles::Disk, &mut err);
+        (status, String::from_utf8_lossy(&err).into_owned())
+    };
+    let name: &[u8] = b"l\xe9";
+    for list in ["-ids", "-exclude_ids"] {
+        for line in [
+            &["-mk_counts", "-in", "missing.fa"][..],
+            &["-mk_counts", "-in", "missing.fa", "-infmt", "seqids"][..],
+            &["-ustat", "missing.counts", "-in", "missing.fa"][..],
+        ] {
+            assert_eq!(check(line, &[(list, name)]).0, 0, "{line:?} {list}");
+        }
+    }
+    assert_ne!(
+        check(
+            &["-mk_counts", "-in", "missing.fa", "-infmt", "seqids"],
+            &[]
+        )
+        .0,
+        0
+    );
+    assert_eq!(check(&["-mk_counts"], &[("-in", name)]).0, 0);
+    assert_eq!(check(&["-convert", "-out", "o"], &[("-in", name)]).0, 0);
+    assert_eq!(
+        check(&["-in", "missing.fa"], &[("-ustat", name), ("-meta", name)]).0,
+        0
+    );
+}

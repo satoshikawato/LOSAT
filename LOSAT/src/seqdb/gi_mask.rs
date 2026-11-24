@@ -377,10 +377,11 @@ impl GiMaskFiles {
     // (`CSeqDBException::eMemoryMappingFailure`, seqdbatlas.hpp:709-719), so "Could not open
     // gi-mask data file(s)." is never thrown (survey D8). The data files of an earlier algorithm
     // stay in NCBI's vectors, but `[vol]` is opened again, so each algorithm reads its own files.
-    /// `x_Open` of the mask `name`: its index, offset and data files.
-    fn open(name: &str, search: &SearchPath) -> Result<Self, SeqDbError> {
-        let index_path = search.resolve_file(format!("{name}.{}", EXTENSIONS[0]).as_bytes());
-        let offset_path = search.resolve_file(format!("{name}.{}", EXTENSIONS[1]).as_bytes());
+    /// `x_Open` of the mask `name` (its bytes): its index, offset and data files.
+    fn open(name: &[u8], search: &SearchPath) -> Result<Self, SeqDbError> {
+        let file_name = |extension: &str| [name, b".", extension.as_bytes()].concat();
+        let index_path = search.resolve_file(&file_name(EXTENSIONS[0]));
+        let offset_path = search.resolve_file(&file_name(EXTENSIONS[1]));
         let (Some(index_path), Some(offset_path)) = (index_path, offset_path) else {
             return Err(SeqDbError::NotFound(
                 b"Could not open gi-mask index files.".to_vec(),
@@ -392,11 +393,11 @@ impl GiMaskFiles {
         let mut data = Vec::new();
         for vol in 0..fields.num_vols.max(0) {
             let file = if fields.num_vols == 1 {
-                format!("{name}.{}", EXTENSIONS[2])
+                file_name(EXTENSIONS[2])
             } else {
-                format!("{name}.{}{}.{}", vol / 10, vol % 10, EXTENSIONS[2])
+                file_name(&format!("{}{}.{}", vol / 10, vol % 10, EXTENSIONS[2]))
             };
-            let Some(path) = search.resolve_file(file.as_bytes()) else {
+            let Some(path) = search.resolve_file(&file) else {
                 return Err(SeqDbError::MemoryMap(super::oid_list::not_a_file(b"")));
             };
             data.push(DbFile::open(&path_of_bytes(&path))?);
@@ -579,7 +580,7 @@ impl GiIndex {
 /// name of `MASKLIST`, with ids 0 to N-1 in its order.
 #[derive(Debug)]
 pub struct GiMasks {
-    names: Vec<String>,
+    names: Vec<Vec<u8>>,
     search: SearchPath,
     seqtype: SeqType,
     /// The files of each algorithm, opened on first use (a failed opening is tried again, as
@@ -593,7 +594,7 @@ impl GiMasks {
     /// The masks `names` (`MASKLIST`) of a database of `volumes` volumes of `seqtype`, whose
     /// files are looked for along `search`. Nothing is read here.
     pub(super) fn new(
-        names: Vec<String>,
+        names: Vec<Vec<u8>>,
         search: SearchPath,
         seqtype: SeqType,
         volumes: usize,
@@ -616,16 +617,20 @@ impl GiMasks {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgimask.hpp:130-143
-    fn available_names(&self) -> String {
+    /// The names are their bytes, each padded to 40 bytes (`setw` of a `std::string`).
+    fn available_names(&self) -> Vec<u8> {
         let mut out = String::from("\nAvailable filtering algorithm(s):\n\n");
         push_padded(&mut out, "Algorithm ID", 14);
         push_padded(&mut out, "Algorithm name", 40);
         out.push('\n');
+        let mut out = out.into_bytes();
         for (id, name) in self.names.iter().enumerate() {
-            out.push_str("    ");
-            push_padded(&mut out, &id.to_string(), 10);
-            push_padded(&mut out, name, 40);
-            out.push('\n');
+            let mut row = String::from("    ");
+            push_padded(&mut row, &id.to_string(), 10);
+            out.extend_from_slice(row.as_bytes());
+            out.extend_from_slice(name);
+            out.resize(out.len() + 40usize.saturating_sub(name.len()), b' ');
+            out.push(b'\n');
         }
         out
     }
@@ -634,13 +639,13 @@ impl GiMasks {
     /// `GetAlgorithmId`: the id of the mask `name`, or the text of NCBI's exception.
     /// The name is its bytes (NCBI's `std::string`), and so is the name in the text.
     pub fn algorithm_id(&self, name: &[u8]) -> Result<i32, Vec<u8>> {
-        match self.names.iter().position(|known| known.as_bytes() == name) {
+        match self.names.iter().position(|known| known == name) {
             Some(id) => Ok(id as i32),
             None => Err([
                 b"Filtering algorithm ".as_slice(),
                 name,
                 b" does not exist.\n",
-                self.available_names().as_bytes(),
+                &self.available_names(),
             ]
             .concat()),
         }
@@ -653,9 +658,12 @@ impl GiMasks {
     /// [`SeqDbError::ncbi_message`]).
     pub(super) fn open(&self, id: i32) -> Result<Arc<GiMaskFiles>, SeqDbError> {
         let Some(at) = usize::try_from(id).ok().filter(|&at| at < self.names.len()) else {
+            // The text of `Range` is a `String`, so a name that is not UTF-8 reads as U+FFFD here.
+            // No program shows it: blastdbcmd, the search programs and makembindex check the id
+            // against `ids` before they ask for its masks.
             return Err(SeqDbError::Range(format!(
                 "Filtering algorithm ID {id} does not exist.\n{}",
-                self.available_names()
+                String::from_utf8_lossy(&self.available_names())
             )));
         };
         if let Some(files) = self.opened[at].get() {

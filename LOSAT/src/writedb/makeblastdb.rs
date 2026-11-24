@@ -1083,7 +1083,7 @@ fn open_new_database(
     // current directory, `BLASTDB` and the registry entry `[BLAST] BLASTDB` (`registry_blastdb`,
     // of the application settings that the callers of `run_with` read before the build).
     let search = SearchPath::from_environment(registry_blastdb);
-    let located = match SeqDb::locate_one_name_metadata(new_db.as_bytes(), seqtype, &search) {
+    let located = match SeqDb::locate_one_name_metadata(new_db, seqtype, &search) {
         Ok(located) => located,
         Err(error) => return Err(MakedbError::Database(error)),
     };
@@ -1098,7 +1098,10 @@ fn open_new_database(
     // Without `-taxid` and `-taxid_map` every OID has tax id 0, so
     // `number-of-taxids` is not set. `GetDBTaxIds` reads the taxids of the tax id files,
     // which are the ones the writer gave them (`WriteDb::db_tax_ids`).
-    let dbname = match new_db.rfind(std::path::MAIN_SEPARATOR) {
+    let dbname = match new_db
+        .iter()
+        .rposition(|&byte| byte == std::path::MAIN_SEPARATOR as u8)
+    {
         Some(off) => &new_db[off + 1..],
         None => new_db,
     };
@@ -1114,7 +1117,7 @@ fn open_new_database(
     .map_err(|exception| MakedbError::Build(WriteDbError::Exception(exception)))?;
     // The name of a database makeblastdb built is not empty (`build_lmdb_file_name`'s error).
     let lmdb: Vec<std::path::PathBuf> = version5
-        .then(|| build_lmdb_file_name(new_db.as_bytes(), is_protein).ok())
+        .then(|| build_lmdb_file_name(new_db, is_protein).ok())
         .flatten()
         .map(crate::utils::os_bytes::path_from_bytes)
         .into_iter()
@@ -1127,7 +1130,7 @@ fn open_new_database(
         user_path,
     );
     let metadata = DbMetadata {
-        dbname: dbname.as_bytes().to_vec(),
+        dbname: dbname.to_vec(),
         dbtype: if is_protein { "Protein" } else { "Nucleotide" },
         db_version: if version5 { 5 } else { 4 },
         description: located.title,

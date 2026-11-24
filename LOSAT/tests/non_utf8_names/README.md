@@ -31,4 +31,9 @@ now NCBI's bytes too. On the same day every case got `expected/<case>.files`, th
 files and directories its run made (one per line in byte order, a byte outside printable ASCII or
 the backslash as `\xHH`), which the test compares too; the earlier cases' standard output, error and
 exit status came out the same again, but for the time of `R4`'s makeblastdb line and the build path
-in its exception message (kept as frozen on 2026-11-20).
+in its exception message (kept as frozen on 2026-11-20). The `K10_*_gimask_*` cases (frozen the same day) read
+GI-indexed masks whose alias file's `MASKLIST` names them with the byte 0xE9 (the database and the
+mask files of `LOSAT/tests/seqdb/gi_mask_read/db/sv4`, the masks copied under that name):
+blastdbcmd `-info`, `%m0`, `-mask_sequence_with` by that name and by an unknown one (NCBI's table of
+names keeps the byte), a `MASKLIST` name without files, makembindex `-show_filters` and `-db_mask`,
+and blastn `-db_soft_mask`.

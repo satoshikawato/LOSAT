@@ -4799,7 +4799,7 @@ fn open_search_database(
                 settings,
             )),
             outputs,
-        )?;
+        );
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -4829,7 +4829,7 @@ fn subject_taxonomy(
     resolved: &mut ResolvedBlastpArgs,
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
     outputs: &ReportOutputs<'_>,
-) -> Result<()> {
+) {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
         outputs
@@ -4839,7 +4839,6 @@ fn subject_taxonomy(
     );
     resolved.subject_taxdb = taxonomy.taxdb;
     resolved.subject_taxdb_found = taxonomy.found.unwrap_or(false);
-    Ok(())
 }
 
 /// The part of `run` after the files are opened: NCBI's processing of the options,
@@ -5287,7 +5286,7 @@ fn run_local_formats(
     outputs.open_out()?;
     let mut resolved = resolve_for_formats(&args, outputs)?;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
-    subject_taxonomy(&args, &mut resolved, args.taxdb_setting.as_ref(), outputs)?;
+    subject_taxonomy(&args, &mut resolved, args.taxdb_setting.as_ref(), outputs);
     let xinclude = xinclude_format(&args, outputs)?;
     let scope = pssm_check_scope(&args);
     let args = resolved;

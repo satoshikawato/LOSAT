@@ -5,14 +5,11 @@
 
 use super::*;
 
-fn temp_dir(tag: &str) -> PathBuf {
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
+fn temp_dir(tag: &str) -> crate::utils::test_dir::TempDir {
+    crate::utils::test_dir::TempDir::new(&format!(
         "losat-gi-mask-{tag}-{}",
         crate::utils::test_dir::process_id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+    ))
 }
 
 fn fixture(name: &str) -> PathBuf {
@@ -72,7 +69,7 @@ fn every_gi_of_ncbi_files_finds_its_record() {
     ] {
         let dir = fixture(name);
         let search = SearchPath::new(&dir, None, None);
-        let files = GiMaskFiles::open("big", &search).unwrap();
+        let files = GiMaskFiles::open(b"big", &search).unwrap();
         assert_eq!(files.data.len(), volumes, "{name}");
         let index = std::fs::read(dir.join("big.gmi")).unwrap();
         let num_gis = be(&index, 24) as usize;
@@ -143,7 +140,7 @@ fn damaged_index_files() {
             std::fs::copy(fixture("big1100").join(from), dir.join(to)).unwrap();
         }
         std::fs::write(dir.join("x.gni"), index).unwrap();
-        GiMaskFiles::open("x", &search).map(|_| ()).unwrap_err()
+        GiMaskFiles::open(b"x", &search).map(|_| ()).unwrap_err()
     };
     let mut version = good.clone();
     version[3] = 2;
@@ -165,7 +162,7 @@ fn damaged_index_files() {
     std::fs::remove_file(dir.join("x.gno")).unwrap();
     std::fs::write(dir.join("x.gni"), &good).unwrap();
     assert_eq!(
-        GiMaskFiles::open("x", &search)
+        GiMaskFiles::open(b"x", &search)
             .map(|_| ())
             .unwrap_err()
             .ncbi_message()
@@ -189,7 +186,7 @@ fn missing_data_volume_is_the_memory_map_error() {
         std::fs::copy(fixture("bigmax").join(file), dir.join(file)).unwrap();
     }
     let search = SearchPath::new(&dir, None, None);
-    let error = GiMaskFiles::open("big", &search).map(|_| ()).unwrap_err();
+    let error = GiMaskFiles::open(b"big", &search).map(|_| ()).unwrap_err();
     assert!(
         matches!(&error, SeqDbError::MemoryMap(text) if text == b"To be memory mapped the file must exist: ''"),
         "{error}"

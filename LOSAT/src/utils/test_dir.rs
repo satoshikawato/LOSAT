@@ -50,3 +50,37 @@ pub(crate) fn process_id() -> u32 {
         })
     }
 }
+
+/// A directory of a test's files, `<temp_dir>/<name>`: made empty when it is made, and removed
+/// with what it holds when it is dropped, at the end of the test that holds it, passed or failed.
+#[derive(Debug)]
+pub(crate) struct TempDir(std::path::PathBuf);
+
+impl TempDir {
+    pub(crate) fn new(name: &str) -> Self {
+        let dir = temp_dir().join(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Self(dir)
+    }
+}
+
+impl std::ops::Deref for TempDir {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl AsRef<std::path::Path> for TempDir {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}

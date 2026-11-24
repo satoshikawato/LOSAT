@@ -232,7 +232,7 @@ pub(crate) fn open_input_file<'a>(
     value: &OsStr,
     stdin: &'a mut Cin<'_>,
 ) -> Result<InputFile<'a>, ArgException> {
-    let bytes = value.as_encoded_bytes();
+    let bytes: &[u8] = &crate::utils::os_bytes::os_str_bytes(value);
     let source = if value == "-" {
         Source::Stdin(stdin)
     } else if value.is_empty() {
@@ -267,7 +267,7 @@ pub(crate) fn read_input_file(
     let mut file = open_input_file(name, value, stdin).map_err(|error| error.message().to_vec())?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(|_| {
-        not_accessible(name, value.as_encoded_bytes())
+        not_accessible(name, &crate::utils::os_bytes::os_str_bytes(value))
             .message()
             .to_vec()
     })?;
@@ -461,7 +461,7 @@ pub(crate) fn open_output_file<'a>(
     if value == "-" {
         return Ok(OutputFile::Stdout(stdout));
     }
-    let bytes = value.as_encoded_bytes();
+    let bytes: &[u8] = &crate::utils::os_bytes::os_str_bytes(value);
     if value.is_empty() {
         return Err(not_accessible(name, bytes));
     }

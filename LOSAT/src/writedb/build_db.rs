@@ -46,7 +46,7 @@ pub struct BuildDatabase<'a> {
     is_protein: bool,
     log: &'a mut dyn Write,
     output_db: WriteDb,
-    output_dbname: String,
+    output_dbname: Vec<u8>,
     /// `m_ParseIDs` (`-parse_seqids`).
     parse_ids: bool,
     /// `m_Taxids` (`SetTaxids`).
@@ -537,9 +537,9 @@ impl<'a> BuildDatabase<'a> {
         indices: Indices,
     ) -> Result<Self, WriteDbError> {
         create_directories(dbname.as_bytes())?;
-        // makeblastdb's names are text (`-out` of clap): the name is read back as text.
-        let output_dbname =
-            String::from_utf8_lossy(&create_absolute_path(dbname.as_bytes())).into_owned();
+        // The name is the bytes of NCBI's `std::string`: the current directory's bytes joined with
+        // `-out`, in the log line, the deletion and the files.
+        let output_dbname = create_absolute_path(dbname.as_bytes());
         let mol_type = if is_protein { "Protein" } else { "Nucleotide" };
         let _ = write!(
             log,
@@ -547,7 +547,9 @@ impl<'a> BuildDatabase<'a> {
             now.log_time()
         );
         endl(log);
-        let _ = write!(log, "New DB name:   {output_dbname}");
+        let _ = log
+            .write_all(b"New DB name:   ")
+            .and_then(|()| log.write_all(&output_dbname));
         endl(log);
         // The label and the title are two insertions, then the line's end, as NCBI writes them.
         let _ = log
@@ -556,11 +558,9 @@ impl<'a> BuildDatabase<'a> {
         endl(log);
         let _ = write!(log, "Sequence type: {mol_type}");
         endl(log);
-        if delete_blast_db(output_dbname.as_bytes(), is_protein)? {
-            let _ = write!(
-                log,
-                "Deleted existing {mol_type} BLAST database named {output_dbname}"
-            );
+        if delete_blast_db(&output_dbname, is_protein)? {
+            let _ = write!(log, "Deleted existing {mol_type} BLAST database named ")
+                .and_then(|()| log.write_all(&output_dbname));
             endl(log);
         }
         let _ = write!(log, "Keep MBits: T");
@@ -569,7 +569,7 @@ impl<'a> BuildDatabase<'a> {
         // The limit of 1000*1000*1000 that the constructor sets is replaced
         // by makeblastdb before a sequence is added.
         let output_db = WriteDb::new(
-            output_dbname.as_bytes(),
+            &output_dbname,
             is_protein,
             title,
             now.index_date().as_bytes(),
@@ -689,7 +689,7 @@ impl<'a> BuildDatabase<'a> {
     }
 
     /// `GetOutputDbName`: the absolute name of the database.
-    pub fn output_dbname(&self) -> &str {
+    pub fn output_dbname(&self) -> &[u8] {
         &self.output_dbname
     }
 

@@ -106,7 +106,7 @@ fn metadata(volumes: usize, pad: usize) -> DbMetadata {
 /// messages and the exception that ends makeblastdb.
 fn written(path: &str, metadata: &DbMetadata) -> (Option<Vec<u8>>, String, Option<&'static str>) {
     let mut err = Vec::new();
-    let escaped = write_metadata_file(path, true, metadata, &mut err);
+    let escaped = write_metadata_file(path.as_bytes(), true, metadata, &mut err);
     let pjs = format!("{path}.pjs");
     let text = std::fs::metadata(&pjs)
         .is_ok_and(|meta| meta.is_file())

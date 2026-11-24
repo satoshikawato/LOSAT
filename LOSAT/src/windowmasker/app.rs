@@ -67,7 +67,7 @@ pub(super) fn check(
         exclusive_id_lists(args).and_then(|()| {
             let lists = ["ids", "exclude_ids"]
                 .iter()
-                .any(|name| !args.value(name).unwrap_or_default().is_empty());
+                .any(|name| !args.os_value(name).unwrap_or_default().is_empty());
             if lists {
                 // `id_lists` reads the list before `mk_counts` refuses -infmt seqids.
                 Ok(())

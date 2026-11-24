@@ -1073,7 +1073,7 @@ fn equal_descriptions_in_a_volume_are_refused() {
     );
     let db = open_masked(&name).unwrap();
     let error = db.mask_algorithms().unwrap_err();
-    let message = format_message(&error);
+    let message = String::from_utf8(error.ncbi_message().unwrap()).unwrap();
     assert!(
         message.starts_with("Error: volume (")
             && message.ends_with(") mask data has duplicates value (6:b:same:y)"),
@@ -1083,7 +1083,10 @@ fn equal_descriptions_in_a_volume_are_refused() {
 
     let (_dir, name) = made_column(&[("1", "10:"), ("2", "10:")], &eight_empty_blobs());
     let db = open_masked(&name).unwrap();
-    assert!(format_message(&db.mask_algorithms().unwrap_err()).ends_with("duplicates value (10:)"));
+    let error = db.mask_algorithms().unwrap_err();
+    assert!(String::from_utf8(error.ncbi_message().unwrap())
+        .unwrap()
+        .ends_with("duplicates value (10:)"));
 }
 
 #[test]

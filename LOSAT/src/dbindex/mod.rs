@@ -113,15 +113,19 @@ pub(crate) fn min_offset(stride: u64) -> u64 {
 pub(crate) const MAX_STRIDE: u64 = 1 << 15;
 
 /// The index volume `<dir>/<name>.00.idx` of the FASTA text `fasta`, made with `options` by
-/// LOSAT's writer (the tests of `volume` and `search`).
+/// LOSAT's writer (the tests of `volume` and `search`), and its directory, removed when the
+/// test drops it.
 #[cfg(test)]
-pub(crate) fn test_volume(name: &str, fasta: &str, options: &Options) -> std::path::PathBuf {
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
+pub(crate) fn test_volume(
+    name: &str,
+    fasta: &str,
+    options: &Options,
+) -> (crate::utils::test_dir::TempDir, std::path::PathBuf) {
+    let dir = crate::utils::test_dir::TempDir::new(&format!(
         "losat-dbindex-{name}-{}-{:?}",
         crate::utils::test_dir::process_id(),
         std::thread::current().id()
     ));
-    std::fs::create_dir_all(&dir).unwrap();
     let base = crate::utils::os_bytes::path_bytes(&dir.join(name)).into_owned();
     let mut input = stream::FastaStream::new(
         Box::new(std::io::Cursor::new(fasta.as_bytes().to_vec())),
@@ -139,7 +143,7 @@ pub(crate) fn test_volume(name: &str, fasta: &str, options: &Options) -> std::pa
         &mut |_| {},
     );
     assert!(made.is_ok(), "the test index was not made");
-    crate::utils::os_bytes::path_from_bytes(path)
+    (dir, crate::utils::os_bytes::path_from_bytes(path))
 }
 
 /// Letters `A`, `C`, `G`, `T` from a fixed generator (the tests' sequences).

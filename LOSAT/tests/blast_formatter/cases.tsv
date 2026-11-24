@@ -1,9 +1,10 @@
 # name<TAB>arguments (shell words, run in this directory; "< file" = stdin). NCBI BLAST+ 2.17.0 blast_formatter (ws, env_blast, the conda build), 2026-11-20, ad-RG-F3-1 (line RG item F3), every row under unshare -rn: no row reaches NCBI's servers.
 # in/bn.asn: blastn -query in/q.fa -subject in/s.fa -outfmt 11 -out in/bn.asn (NCBI BLAST+ 2.17.0, same day); in/q.fa and in/s.fa by remaining-gaps-20261112/F/f3 (impl_b.md). conf/malformed.ini is that of tests/convert2blastmask. Run without LOSAT_, NCBI_ and BLAST variables but NCBI_CONFIG_PATH (this directory) and BLAST_USAGE_REPORT=false (NCBI only).
-# Not frozen: -version and the full versions (LOSAT prints its own, NCBI's forms with LOSAT's package; tests/ncbi_toolkit_version.rs), -xmlhelp (LOSAT's XML is NCBI's without -rid, which LOSAT refuses at the run; tests/ncbi_toolkit_help.rs, against NCBI's frozen XML src/ncbi_xmlhelp/blast_formatter.xml), -rid with a value (NCBI asks its servers; LOSAT refuses it, src/blast_formatter/run_tests.rs), an unreadable -archive (git keeps no file mode that hides a file from its owner; NCBI's text is that of a missing file, probe P3.124), a standard output that cannot be written (NCBI's runtime aborts: src/blast_formatter/archive_tests.rs and the test blast_formatter_standard_output_failure_aborts of tests/masker_fixtures.rs, from probes of agent C6, 2026-11-23), and of the output formats other than 8, 9 and 12 only NCBI's own checks (of13_no_out, of17_blastp_sam) and one refusal by name (refused_of6) for the rest.
+# Not frozen: -version and the full versions (LOSAT prints its own, NCBI's forms with LOSAT's package; tests/ncbi_toolkit_version.rs), -xmlhelp (LOSAT's XML is NCBI's without -rid, which LOSAT refuses at the run; tests/ncbi_toolkit_help.rs, against NCBI's frozen XML src/ncbi_xmlhelp/blast_formatter.xml), -rid with a value (NCBI asks its servers; LOSAT refuses it, src/blast_formatter/run_tests.rs), an unreadable -archive (git keeps no file mode that hides a file from its owner; NCBI's text is that of a missing file, probe P3.124), a standard output that cannot be written (NCBI's runtime aborts: src/blast_formatter/archive_tests.rs and the test blast_formatter_standard_output_failure_aborts of tests/masker_fixtures.rs, from probes of agent C6, 2026-11-23), and of the output formats other than 6 to 10, 12 and 20 only NCBI's own checks (of13_no_out, of17_blastp_sam) and one refusal by name (refused_of5) for the rest.
 # Rows from of8_db on (line RG item F3 PR 1, agent C5 of ad-RG-F3-5, 2026-11-23): NCBI BLAST+ 2.17.0, the official release build on the local machine (ws was down), by remaining-gaps-20261112/F/f3/tools/fixC.py, every NCBI run under unshare -rn. Their archives were written by NCBI's own programs: in/db.asn, in/batch.asn (BATCH_SIZE=1), in/warn.asn (-max_target_seqs 1, BATCH_SIZE=1) and in/pd.asn (-parse_deflines) by blastn -query in/q2.fa -db in/db/s3 -outfmt 11 (in/db/s3: makeblastdb -blastdb_version 4 of in/s3.fa, which holds in/s.fa, a copy with a change every 40 letters and its second half; in/q2.fa holds in/q.fa and a part of in/s.fa); in/err.asn (blastn -task blastn -reward 1 -penalty -2 -gapopen 0 -gapextend 0: an error object); in/ps.asn (psiblast -query in/ps.faa -db ../db_search/paja -num_iterations 2; in/ps.faa = residues 251-290 of tests/fasta/psiblast/tk.faa); in/rps.asn and in/rtn.asn (rpsblast -query in/rps.faa = tests/fasta/psiblast/tk.faa, rpstblastn -query in/rtn.fna = the second record of tests/fasta/rps/nq4.fna, -db in/rps/rps_mini, the files of tests/db_search/rps/rps_mini that a protein database open reads); in/soft.asn (blastn -db_soft_mask 11 on a dustmasker-masked database made elsewhere; in/m/db is the same sequence without its mask) and in/nodb.asn (a database that is not here). Made from them by fixC.py: in/garbage.asn (in/db.asn and a line), in/cut2.asn (in/batch.asn cut in its second object), in/empty.asn, in/fatal.asn (in/warn.asn with its first message's severity 4). @OUT@ is a new directory of each run; the files a run leaves there follow its standard output in ncbi/<name>.out. refused/<name>.err is LOSAT's refusal by name; ncbi/<name>.* keeps NCBI's bytes (refused_fatal_message's trace names the local binary).
 # Rows from of8_delta on (line RG item F3 PR 1, agent C6 of ad-RG-F3-5, 2026-11-23): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC6.py, every NCBI run under unshare -rn. in/delta.asn and in/phi.asn: the first object of in/ps.asn with its service changed to delta_blast and phi (review of PR 1, F3/review/c_tmp/scripts); in/tax_both.asn and in/tx5_both.asn: in/db.asn with a taxid list and a negative taxid list, on in/db/s3 and on in/txdb/t (makeblastdb -in in/s3.fa -dbtype nucl -taxid 9606 -blastdb_version 5, in the review); in/bad1.asn and in/bad2.asn: in/batch.asn with a byte 0x07 in a query title of its first and of its second object (the line of the post counts over the file). in/real_pinf.asn and in/real_nan.asn (tools/fixC6b.py): in/bn.asn with its first e-value PLUS-INFINITY and NOT-A-NUMBER; refused_real_12 is LOSAT's refusal by name of such a value (NCBI stops at it in JSON); NCBI writes it in ASN.1 binary, as LOSAT does since line RG-F3's PR 2 (row real_pinf_9, named refused_real_9 until agent C9 of ad-RG-F3-10, 2026-11-24; NCBI's bytes unchanged).
 # Rows from opt_bho09_8 on (line RG item F3 PR 1, agent C7 of ad-RG-F3-5, 2026-11-24): NCBI BLAST+ 2.17.0, the official release build on the local machine, by remaining-gaps-20261112/F/f3/tools/fixC7.py, every NCBI run under unshare -rn. in/opt_<name>.asn is in/bn.asn with one option of its search added or changed to a value that a search program's option check refuses (BestHitOverhang 0.9, BestHitScoreEdge -1, Culling 1 with best hit, Culling -1, MaxHspsPerSubject -1, PercentIdentity 150, QueryCovHspPerc 150, WordSize 3 and -1, an e-value of 0, HitlistSize 0): blast_formatter builds the options of each object without checking them, and only the hit list size changes what it writes.
+# Rows from of6_db on (line RG item F3 PR 3a, agent E1 of ad-RG-F3-10, 2026-11-25): NCBI BLAST+ 2.17.0 on ws (blast_formatter: env_blast, the conda build, as the first rows; the archives by the official release's search programs), by remaining-gaps-20261112/F/f3/tools/fixE1.py and fixE1b.py (rows of20_prefetch_abc, of7_deltablast_all, refused_tabular_locations), every NCBI run under unshare -rn (refused_tabular_locations under unshare -rnu with the host name rgff3-probe, as NCBI's request names the machine). New inputs: in/s3pd.fa, in/qgnl.fa, in/bp_s.faa, in/qacc.fa (made by fixE1.py and fixE1b.py from in/s3.fa, in/q.fa, in/ps.faa); in/bn_ungapped.asn, dcmb.asn, bnt.asn, bnspd.asn, pdq.asn, bp_db.asn, bp_ungapped.asn, bp_subject.asn, bp_subject_pd.asn, pdq_acc.asn (NCBI's blastn/blastp -outfmt 11; pdq_acc.asn with -parse_deflines holds its query as a seq-loc-list); in/mix_n_p.asn (db.asn then bp_db.asn), in/ps_step_str.asn (ps.asn with its second Web_StepNumber a string).
 noargs	
 h	-h
 help	-help
@@ -86,7 +87,6 @@ of8_out_no_dir	-archive in/db.asn -outfmt 8 -out no_such_dir/o.txt
 of8_mask_algorithm	-archive in/soft.asn -outfmt 8
 of13_no_out	-archive in/db.asn -outfmt 13
 of17_blastp_sam	-archive in/ps.asn -outfmt 17
-refused_of6	-archive in/db.asn -outfmt 6
 refused_database	-archive in/nodb.asn -outfmt 8
 refused_fatal_message	-archive in/fatal.asn -outfmt 8
 of8_delta	-archive in/delta.asn -outfmt 8
@@ -127,3 +127,74 @@ opt_hitlist0_8	-archive in/opt_hitlist0.asn -outfmt 8
 opt_evalue0_8	-archive in/opt_evalue0.asn -outfmt 8
 opt_cull_besthit_12	-archive in/opt_cull_besthit.asn -outfmt 12
 opt_hitlist0_9	-archive in/opt_hitlist0.asn -outfmt 9
+of6_db	-archive in/db.asn -outfmt 6
+of6_subject	-archive in/bn.asn -outfmt 6
+of7_db	-archive in/db.asn -outfmt 7
+of7_subject	-archive in/bn.asn -outfmt 7
+of10_db	-archive in/db.asn -outfmt 10
+of10_subject	-archive in/bn.asn -outfmt 10
+of20_db	-archive in/db.asn -outfmt 20
+of20_subject	-archive in/bn.asn -outfmt 20
+of6_db_all	-archive in/db.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_db_all	-archive in/db.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of10_subject_all	-archive in/bn.asn -outfmt '10 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of20_subject_all	-archive in/bn.asn -outfmt '20 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_db_cov	-archive in/db.asn -outfmt '7 qseqid sseqid evalue bitscore qcovs qcovhsp qcovus'
+of10_db_delim	-archive in/db.asn -outfmt '10 delim=@ qacc sacc score'
+of20_db_pident	-archive in/db.asn -outfmt '20 qseqid sseqid pident'
+of6_db_custom	-archive in/db.asn -outfmt '6 std qlen slen staxids sscinames stitle qcovs'
+of6_db_tax	-archive in/db.asn -outfmt '6 qaccver saccver staxid ssciname scomname sblastname sskingdom staxids sscinames scomnames sblastnames sskingdoms'
+of7_db_tax	-archive in/db.asn -outfmt '7 qaccver saccver staxid ssciname scomname sblastname sskingdom staxids sscinames scomnames sblastnames sskingdoms'
+of6_db_mts1	-archive in/db.asn -outfmt 6 -max_target_seqs 1
+of7_db_pd	-archive in/db.asn -outfmt 7 -parse_deflines
+of6_db_out	-archive in/db.asn -outfmt 6 -out @OUT@/o.txt
+of6_subject_pd	-archive in/bn.asn -outfmt 6 -parse_deflines
+of7_batch	-archive in/batch.asn -outfmt 7
+of6_batch_all	-archive in/batch.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_psiblast	-archive in/ps.asn -outfmt 6
+of7_psiblast	-archive in/ps.asn -outfmt 7
+of6_psiblast_all	-archive in/ps.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_psiblast_step_string	-archive in/ps_step_str.asn -outfmt 7
+of6_rpsblast	-archive in/rps.asn -outfmt 6
+of7_rpsblast_positives	-archive in/rps.asn -outfmt '7 std positive ppos'
+of6_rpsblast_all	-archive in/rps.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_pd_archive_only	-archive in/pd.asn -outfmt 6
+of6_messages_mts2	-archive in/warn.asn -outfmt 6 -max_target_seqs 2
+of6_error_object	-archive in/err.asn -outfmt 6
+of6_cut_in_object_2	-archive in/cut2.asn -outfmt 6
+of6_trailing_garbage	-archive in/garbage.asn -outfmt 6
+of6_real_pinf	-archive in/real_pinf.asn -outfmt '6 std score'
+of7_real_nan	-archive in/real_nan.asn -outfmt 7
+of6_taxids_both	-archive in/tax_both.asn -outfmt '6 std staxids'
+of6_mask_algorithm	-archive in/soft.asn -outfmt 6
+of6_hitlist0	-archive in/opt_hitlist0.asn -outfmt 6
+of7_hitlist0	-archive in/opt_hitlist0.asn -outfmt 7
+of6_evalue0	-archive in/opt_evalue0.asn -outfmt 6
+bl2seq_legacy_6	BL2SEQ_LEGACY=1 -archive in/bn.asn -outfmt 6
+prefetch_abc_6	PRE_FETCH_SEQS_LIMIT=abc -archive in/db.asn -outfmt 6
+prefetch_0_6	PRE_FETCH_SEQS_LIMIT=0 -archive in/db.asn -outfmt '6 std qseq sseq'
+prefetch_max_6	PRE_FETCH_SEQS_LIMIT=2147483647 -archive in/db.asn -outfmt '6 std sseq'
+of6_ungapped	-archive in/bn_ungapped.asn -outfmt 6
+of7_ungapped_all	-archive in/bn_ungapped.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_dc_megablast	-archive in/dcmb.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_blastn_task	-archive in/bnt.asn -outfmt 7
+of6_bnspd	-archive in/bnspd.asn -outfmt '6 std sallseqid stitle'
+of6_bnspd_pd	-archive in/bnspd.asn -outfmt '6 std sallseqid stitle' -parse_deflines
+of6_blastp_db	-archive in/bp_db.asn -outfmt 6
+of7_blastp_db_all	-archive in/bp_db.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_blastp_ungapped	-archive in/bp_ungapped.asn -outfmt 7
+of6_blastp_subject	-archive in/bp_subject.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of7_blastp_subject_pd	-archive in/bp_subject_pd.asn -outfmt 7
+of6_blastp_subject_pd_pd	-archive in/bp_subject_pd.asn -outfmt '6 std sallseqid' -parse_deflines
+of6_mix_n_p	-archive in/mix_n_p.asn -outfmt 6
+of7_mix_n_p_all	-archive in/mix_n_p.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_phi	-archive in/phi.asn -outfmt 6
+of7_phi_all	-archive in/phi.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of20_prefetch_abc	PRE_FETCH_SEQS_LIMIT=abc -archive in/bn.asn -outfmt 20
+of7_deltablast_all	-archive in/delta.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+refused_of5	-archive in/db.asn -outfmt 5
+refused_tabular_rpstblastn	-archive in/rtn.asn -outfmt 6
+of6_deltablast	-archive in/delta.asn -outfmt 6
+of6_pd_general_query	-archive in/pdq.asn -outfmt 6
+refused_tabular_bl2seq_legacy_7	BL2SEQ_LEGACY=1 -archive in/bn.asn -outfmt 7
+refused_tabular_locations	-archive in/pdq_acc.asn -outfmt 6

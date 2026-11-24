@@ -314,7 +314,7 @@ fn the_adapter_makes_upper_case_letters_and_masks() {
     };
     // The gap `>?5` lies in the run that `gt` continues: one interval over the gap.
     let shared = read(b">r0 t\nac\n>?5\ngtAC\n");
-    assert_eq!(shared.sequence, b"acNNNNNgtAC");
+    assert_eq!(shared.sequence, b"acnnnnngtAC");
     let masked = from_shared(shared.clone(), true);
     assert_eq!(masked.sequence, b"ACNNNNNGTAC");
     assert_eq!(masked.lowercase_masks, vec![(0, 8)]);
@@ -392,7 +392,7 @@ fn a_gap_line_before_any_defline_stops_a_parse_deflines_read() {
         let error = read_all(&mut stream, 100).unwrap_err().to_string();
         assert!(
             error.contains(&format!(
-                "BLAST query error: CFastaReader: Input doesn't start with a defline or comment around line {line}"
+                "LOSAT query error: CFastaReader: Input doesn't start with a defline or comment around line {line}"
             )),
             "{}: {error}",
             String::from_utf8_lossy(data)

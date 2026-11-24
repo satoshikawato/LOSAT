@@ -424,7 +424,7 @@ fn next_record<R: Read>(
 /// read bytes in memory (`FastaInputSource::from_bytes`), without the data loaders. A reader error
 /// is the reader's message as it is (ABI v1 is frozen).
 #[cfg_attr(
-    not(target_arch = "wasm32"),
+    all(not(target_arch = "wasm32"), not(test)),
     expect(
         dead_code,
         reason = "called only by the web ABI (`web::run_pair`, wasm32)"

@@ -1,7 +1,7 @@
 //! Existing reactor ABI adapter; the search, batching and reports use BLASTX owners.
-use super::{
-    args::BlastxArgs, input, input_source, native, query_setup::BATCH_SIZE, report, runtime,
-};
+#[cfg(feature = "parallel")]
+use super::input;
+use super::{args::BlastxArgs, input_source, native, query_setup::BATCH_SIZE, report, runtime};
 use crate::api::local_blast::OutputSink;
 use anyhow::{bail, Result};
 use std::{cell::RefCell, io::Write, path::Path};

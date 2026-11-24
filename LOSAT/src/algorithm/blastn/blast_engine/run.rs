@@ -9475,20 +9475,14 @@ fn x_debug_output(args: &BlastnArgs) -> bool {
         || crate::utils::threading::diagnostics_enabled()
 }
 
-/// Whether the outfmt 0 prolog of `sink` is written before the search, as NCBI writes it
-/// (`write_pairwise_prologs`). A file sink is created when its report is written
-/// (`OutputSink::open`), so its prolog stays at the start of the report.
-fn prolog_before_search(sink: &OutputSink<'_>) -> bool {
-    !matches!(sink, OutputSink::File(_))
-}
-
 /// Whether the prolog of `format` comes with its reports (or, for a run that stops before any
 /// report, from `write_pairwise_prologs`) and not before the search: the outfmt 0 prolog of a
-/// file sink (`prolog_before_search`), and the start of the XML2 and JSON documents of outfmt
-/// 16 and 15 for every sink. NCBI writes that start before the search too (`PrintProlog`), but
-/// LOSAT's refusals of the reports (a title that NCBI crashes on, `names::Refusal`, DECISIONS
-/// 20 as K4h left it) come after the search and before the first byte, so the start is written
-/// with the first report, or by the path of an NCBI error that stops the run before one.
+/// file sink (`OutputSink::prolog_before_search`), and the start of the XML2 and JSON documents
+/// of outfmt 16 and 15 for every sink. NCBI writes that start before the search too
+/// (`PrintProlog`), but LOSAT's refusals of the reports (a title that NCBI crashes on,
+/// `names::Refusal`, DECISIONS 20 as K4h left it) come after the search and before the first
+/// byte, so the start is written with the first report, or by the path of an NCBI error that
+/// stops the run before one.
 ///
 /// Outfmt 20's line of the field names comes with the first report too (or from
 /// `write_pairwise_prologs` for a run that stops before one), after LOSAT's refusals of the
@@ -9496,7 +9490,7 @@ fn prolog_before_search(sink: &OutputSink<'_>) -> bool {
 /// can refuse never writes, comes before the search (`tabular::write_tabular_prolog_warning`).
 fn prolog_with_report(format: &FormatOutput<'_>, output_format: BlastnOutputFormat) -> bool {
     match output_format {
-        BlastnOutputFormat::Pairwise(_) => !prolog_before_search(&format.sink),
+        BlastnOutputFormat::Pairwise(_) => !format.sink.prolog_before_search(),
         BlastnOutputFormat::Xml2(_) => true,
         BlastnOutputFormat::CustomTabular(spec) => {
             spec.kind == crate::report::tabular::TabularKind::CsvWithHeader
@@ -9539,7 +9533,7 @@ fn write_pairwise_prologs(
             )?;
         }
         let writes_prolog = match output_format {
-            BlastnOutputFormat::Pairwise(_) => prolog_before_search(&format.sink) == before_search,
+            BlastnOutputFormat::Pairwise(_) => format.sink.prolog_before_search() == before_search,
             BlastnOutputFormat::Xml2(_) => !before_search,
             BlastnOutputFormat::CustomTabular(_) => {
                 !before_search && prolog_with_report(format, output_format)
@@ -10026,7 +10020,7 @@ fn write_reports_untimed(
             .iter()
             .zip(output_formats)
             .any(|(format, &output_format)| {
-                output_format.is_pairwise() && !prolog_before_search(&format.sink)
+                output_format.is_pairwise() && !format.sink.prolog_before_search()
             }),
         queries_before: written.queries,
         subject_cache: written.subjects,

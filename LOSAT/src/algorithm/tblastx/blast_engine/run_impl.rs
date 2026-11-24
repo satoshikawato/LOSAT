@@ -1980,13 +1980,6 @@ fn tblastx_database_name(args: &TblastxArgs) -> String {
     )
 }
 
-/// Whether the outfmt 0 prolog of `sink` is written before the search, as NCBI writes it
-/// (`write_pairwise_prologs`). A file sink is created when its report is written
-/// (`OutputSink::open`), so its prolog stays at the start of the report.
-fn prolog_before_search(sink: &OutputSink<'_>) -> bool {
-    !matches!(sink, OutputSink::File(_))
-}
-
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:173-178
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
 /// Writes and flushes the outfmt 0 prolog of every outfmt 0 sink whose prolog comes before
@@ -2000,7 +1993,7 @@ fn write_pairwise_prologs(
 ) -> Result<()> {
     for format in outputs.formats.iter_mut() {
         if report::output_format(format.outfmt).is_pairwise()
-            && prolog_before_search(&format.sink) == before_search
+            && format.sink.prolog_before_search() == before_search
         {
             let flush = crate::report::pairwise::flushes_after_prolog(
                 args.html_links.is_some(),
@@ -2438,7 +2431,7 @@ fn write_tblastx_outputs(
             }
         });
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
-        let prolog = !prolog_before_search(&format.sink);
+        let prolog = !format.sink.prolog_before_search();
         // The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
         let side_sink = format.sink.side_files().cloned();
         // The format's report, whose error goes to its refusal (below).

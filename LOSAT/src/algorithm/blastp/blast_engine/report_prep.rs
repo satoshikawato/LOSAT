@@ -1267,12 +1267,13 @@ pub(super) fn refuse_prefetch_environment(
     // before they choose the archive, rpsblast's and blastp's write the archive without it.
     let archive_alone = outputs.only_archive() && args.app != BlastpApp::Psiblast;
     if let Err(error) = crate::blastinput::app::check_prefetch_environment(archive_alone) {
-        // NCBI wrote the first batch's search strategy request before its search (`CallRequests`).
+        // The prologs of the first report, then the first batch's search strategy request, which
+        // NCBI wrote before its search (`CallRequests`).
+        if reports.x_prolog {
+            write_pairwise_prologs(args, subject_source, subject_label, outputs, false)?;
+        }
         if let Some(call) = reports.call_requests {
             call.end_at(call.first_batch_end())?;
-        }
-        if reports.x_prolog {
-            write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
         }
         if let Some(first_batch_messages) = reports.reader_warnings.first() {
             outputs.diagnostics.write_all(first_batch_messages)?;

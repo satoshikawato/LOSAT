@@ -129,7 +129,8 @@ refuse to start when LOSAT/.ncbirc exists (NCBI's application and formatter woul
   `-num_iterations 1`), or a search of the same database and
   output format whose first N bytes are the prolog that LOSAT writes before it refuses the report (line RG
   item T3c: the same search with a description table, which NCBI ends with an exception at an HSP of length
-  0, or without a hit). `freeze` runs nothing for such a row and writes the sha256 and size of those bytes
+  0, or without a hit; item T4b-f: the refusals after the prolog that BLASTP, PSIBLAST, RPSBLAST and TBLASTN
+  write before their first batch, rows `db.pro.*` and `db.id.pro.*` with a query without hits). `freeze` runs nothing for such a row and writes the sha256 and size of those bytes
   into its stdout columns, `check` reads them from ROW_ID's frozen stdout (`frozen_id`, `expected_stdout`),
   and the row keeps its own rc and stderr (LOSAT's). Where NCBI ends a row by a signal (a crash), its stdout
   stops where the crash cuts it, which its heap and the environment move (the same official 2.17.0 binary
@@ -1331,8 +1332,9 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         # A refusal follows no byte in either path (the library holds its output where the command
         # line holds it, BLASTX's XML documents through `blast_xml::documents_may_refuse`); the rows
         # whose refusal comes after NCBI's reports are psiblast's PSSM file and rounds rows, which the
-        # library skips, and the refusals at a later query batch (`ncbi-near:`), which the library
-        # writes as the command line does.
+        # library skips, and the refusals at a later query batch or after the prolog that BLASTP, PSIBLAST,
+        # RPSBLAST and TBLASTN write before their first batch (`ncbi-near:`, line RG item T4b-f), which the
+        # library writes as the command line does.
         if row["stdout_bytes"]:
             out = expected_stdout(row)
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):

@@ -105,6 +105,16 @@ impl OutputSink<'_> {
         )
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
+    /// Whether the outfmt 0 to 4 prolog of this sink is written before the search, where NCBI
+    /// writes it (`PrintProlog`, before the batch loop and its first search strategy request), by
+    /// every program's writer of the prologs before the search. A file sink is created when its
+    /// report is written (`open`), so its prolog stays at the start of the report and comes with
+    /// it.
+    pub(crate) fn prolog_before_search(&self) -> bool {
+        !matches!(self, OutputSink::File(_))
+    }
+
     /// The same sink, borrowed for a view of the outputs (`ViewParts::view`).
     fn reborrow(&mut self) -> OutputSink<'_> {
         match self {

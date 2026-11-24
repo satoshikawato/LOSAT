@@ -6161,6 +6161,9 @@ fn search(
     if let Some(observer) = outputs.observer.as_deref_mut() {
         observer.queries_begin();
     }
+    // The outfmt 0 to 4 prolog, before the first batch is read and its request written
+    // (`write_pairwise_prologs`), as in every program.
+    write_pairwise_prologs(&args, subject_source, subject_label, outputs, true)?;
     // Under `-parse_deflines`, the scopes of the batches' queries (`QueryScopes`); with
     // `-in_pssm`, of the PSSM's query when the reports show its ids (`PsiSearch::query_record`).
     let believed_queries = crate::blastinput::query_batch::believed_queries(
@@ -6855,12 +6858,12 @@ fn search(
                 let (input_start, searched_start) = batches.start_of(failure.query);
                 // The failed batch's search strategy request, which NCBI writes before its
                 // search: after the requests of the batches before, which their search again
-                // releases with it (`NextRequest`), or alone, before any output.
+                // releases with it (`NextRequest`), or alone, after the prologs.
                 let span = batches.searched_span(failure.query);
                 let failed_end = span.end;
                 if searched_start == 0 {
+                    write_pairwise_prologs(&args, subject_source, subject_label, outputs, false)?;
                     write_alone(span)?;
-                    write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
                     break (searched_start, failed_end);
                 }
                 // The first search looked the taxonomy up for the batches before (their
@@ -6903,22 +6906,17 @@ fn search(
         })?;
     } else if batches.stop.is_some() {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253
-        // The first batch fails after the outfmt 0 prolog. A batch whose set-up fails (every query
-        // without letters) has its search strategy request: NCBI made its query factory before
-        // the search (`QueryBatches::stop_batch`); it is written before the prolog.
+        // The first batch fails after the prologs (those of the first report here). A batch whose
+        // set-up fails (every query without letters) has its search strategy request: NCBI made
+        // its query factory before the search (`QueryBatches::stop_batch`).
+        write_pairwise_prologs(&args, subject_source, subject_label, outputs, false)?;
         if let Some(span) = batches.stop_batch.clone() {
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 340
             // NCBI's stream that throws while it writes the request (an empty descriptor of a
             // PSSM query, `encoder::NullElement`) ends the run after the prolog (NCBI BLAST+
             // 2.17.0, probe D3c-3b `probe5` `t_dn1.strat0`).
-            if let Err(error) = write_alone(span) {
-                if error.is::<crate::cli::NativeError>() {
-                    write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
-                }
-                return Err(error);
-            }
+            write_alone(span)?;
         }
-        write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
     } else {
         // A reader at the end of its input reads no batch (its `End()` is true): the reports of
         // no query (an empty pipe, or `-query -` after `-subject -`).
@@ -7028,6 +7026,16 @@ fn x_query_block_plan(
         || batches.searched_done != queries.len()
         || batches.input_done != queries.len()
     {
+        return None;
+    }
+    // An outfmt 0 to 4 report to a file sink, whose prolog comes with its report and not before
+    // the search (`OutputSink::prolog_before_search`): the blocks write each sink as a writer
+    // (`XBlockSink`), which no longer tells that the first block's report starts with it.
+    if outputs.formats.iter().any(|format| {
+        !format.sink.prolog_before_search()
+            && crate::blastinput::app::parse_formatting_string(format.outfmt)
+                .is_ok_and(|choice| blastp_pairwise_view_of(args.app, choice.number).is_some())
+    }) {
         return None;
     }
     // Several outputs, the hit records or an observer. Each
@@ -7664,16 +7672,26 @@ fn blastp_scan_mode_definition(tag: &str) -> String {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:506, 340
+// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:191-199
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-/// Writes and flushes the prolog of every outfmt 0 to 4, 15, 16 and 20 format (`PrintProlog`;
-/// 1 to 4 where BLASTP writes them, `blastp_pairwise_view_of`), for a run that stops at its
-/// first query batch (outfmt 20's line of the field names; its formatter's warning came before
-/// the search, `search`).
+/// Writes the prologs of the formats (`PrintProlog`). `before_search`: the outfmt 0 to 4 prolog
+/// (1 to 4 where BLASTP writes them, `blastp_pairwise_view_of`) of every sink whose prolog comes
+/// before the search (`OutputSink::prolog_before_search`), where NCBI writes it in blastp,
+/// psiblast and rpsblast: before the first query batch and its search strategy request, so that
+/// the prolog's error (a malformed `./.ncbirc` under `-html`) and a failed write end the run
+/// there, before LOSAT's refusal of a strategy file on the report stream; flushed as every
+/// program's (`pairwise::flushes_after_prolog`). Otherwise, for a run that stops at its first
+/// query batch, the prologs that come with the first report, written and flushed: those of the
+/// file sinks of outfmt 0 to 4, the start of the XML2 and JSON documents, and outfmt 20's line of
+/// the field names (its formatter's warning came before the search, `search`).
 fn write_pairwise_prologs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
+    before_search: bool,
 ) -> Result<()> {
     let (num_sequences, total_letters) = subject_source.shown_totals();
     let pairwise_database = subject_source
@@ -7682,6 +7700,14 @@ fn write_pairwise_prologs(
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
         if blastp_pairwise_view_of(args.app, number).is_some() {
+            if format.sink.prolog_before_search() != before_search {
+                continue;
+            }
+            let flush = !before_search
+                || crate::report::pairwise::flushes_after_prolog(
+                    args.html.is_some(),
+                    !format.sink.is_writer(),
+                );
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_blastp_pairwise_prolog(
                 &mut writer,
@@ -7699,7 +7725,11 @@ fn write_pairwise_prologs(
                     (links, posts as &mut dyn Write)
                 }),
             )?;
-            writer.flush()?;
+            if flush {
+                writer.flush()?;
+            }
+        } else if before_search {
+            // The other formats' prologs come with the first report.
         } else if let Some(kind) = blastp_xml2_kind(format.outfmt) {
             // The XML2 and JSON documents start with their prolog too.
             let mut writer = format.sink.open()?;
@@ -7718,8 +7748,9 @@ fn write_pairwise_prologs(
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-259,294-295
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1322-1325
-/// The reports of a run without a query batch: the outfmt 0 prolog and epilog, the outfmt
-/// 7 count of 0 queries, nothing for outfmt 6.
+/// The reports of a run without a query batch: the outfmt 0 epilog (and the prolog of a file
+/// sink, which the search did not write before, `write_pairwise_prologs`), the outfmt 7 count of
+/// 0 queries, nothing for outfmt 6.
 fn write_reports_without_queries(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -7788,6 +7819,8 @@ fn write_reports_without_queries(
             Some(_) => OutputFormat::Pairwise,
             None => blastp_text_format(format.outfmt).map_err(anyhow::Error::msg)?,
         };
+        // The search wrote the prolog before (`write_pairwise_prologs`) unless the sink is a file.
+        let prolog = !format.sink.prolog_before_search();
         let mut writer = format.sink.open()?;
         match outfmt {
             OutputFormat::Pairwise => {
@@ -7864,7 +7897,7 @@ fn write_reports_without_queries(
                     pairwise_database.as_ref(),
                     None,
                     Some(&mut warnings),
-                    true,
+                    prolog,
                     true,
                     None,
                     &crate::report::db_subject::HitLoads::default(),
@@ -7927,8 +7960,13 @@ fn preliminary_search_error(
         );
     }
     let written = (|| -> Result<()> {
+        // The prologs of the first report (EXPERIMENT (LOSAT_X_BPQBLOCK): a block after the first
+        // of the block search follows those that the first block wrote).
+        if reports.x_prolog {
+            write_pairwise_prologs(args, subject_source, subject_label, outputs, false)?;
+        }
         // The failed batch's search strategy request: the call's first, whose search fails; it is
-        // written before the prolog, and NCBI's posts of the bytes replaced in it after the
+        // written after the prologs, and NCBI's posts of the bytes replaced in it after the
         // batch's reader messages.
         if let (Some(call), Some(batch)) = (
             reports.call_requests,
@@ -7937,11 +7975,6 @@ fn preliminary_search_error(
                 .find(|batch| !batch.searched.is_empty()),
         ) {
             call.end_at(batch.searched.end)?;
-        }
-        // EXPERIMENT (LOSAT_X_BPQBLOCK): a block after the first of the block search follows
-        // the prolog that the first block wrote.
-        if reports.x_prolog {
-            write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
         }
         if let Some(first_batch_messages) = reports.reader_warnings.first() {
             outputs.diagnostics.write_all(first_batch_messages)?;

@@ -743,13 +743,23 @@ fn out_is_created_only_where_ncbi_reaches_it() {
 /// error (`cli::native_error_of`), not LOSAT's refusal (line RG F1w review 2, S-b: the held prolog
 /// was dropped and stdout was empty). NCBI's bytes are `html_rcbad/<program>.out`: NCBI BLAST+
 /// 2.17.0's run of the same argv with `-export_search_strategy -` in a folder with that `.ncbirc`
-/// (the same bytes without the option). BLASTP and TBLASTN write their prolog after the request
-/// point, so their refusal still comes first (line T4's `-html` prolog; the handoff
-/// `F/f1w/handoff_T4_html_order.md` of line RG's records).
+/// (the same bytes without the option). BLASTP and TBLASTN write it there too, before their first
+/// batch, as NCBI does (line RG item T4b-f: they wrote it with the first report, after LOSAT's
+/// refusal; the handoff `F/f1w/handoff_T4_html_order.md` of line RG's records).
 #[test]
 fn a_malformed_ncbirc_ends_an_html_run_with_ncbis_prolog() {
     let folder = engine().join("tests/db_search/html/rc/bad");
     for (program, query, subject) in [
+        (
+            "blastp",
+            "tests/fasta/html/pq_spec.faa",
+            "tests/fasta/html/ps_spec.faa",
+        ),
+        (
+            "tblastn",
+            "tests/fasta/outfmt11/arch_tbn_q.faa",
+            "tests/fasta/outfmt11/arch_tbn_s.fna",
+        ),
         (
             "blastx",
             "tests/fasta/outfmt11/arch_bx_q.fna",

@@ -1389,10 +1389,21 @@ fn run_local_formats(
     )
 }
 
-/// The outfmt 0 prologs of a run that fails in its first query batch: NCBI writes the prolog
-/// (`formatter.PrintProlog()`) before it reads the first batch. `subject_path` names a
-/// FASTA subject set of `num_subjects` records (`subject_letters`); a database search shows
-/// its `Database:` lines (`database`).
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270-280
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
+/// The prologs of the formats (`formatter.PrintProlog()`). `before_search`: the outfmt 0 to 4
+/// prolog of every sink whose prolog comes before the search
+/// (`OutputSink::prolog_before_search`), where NCBI writes it: before it reads the first query
+/// batch and writes its search strategy request, so that the prolog's error (a malformed
+/// `./.ncbirc` under `-html`) and a failed write end the run there, before LOSAT's refusal of a
+/// strategy file on the report stream; flushed as every program's
+/// (`pairwise::flushes_after_prolog`). Otherwise, for a run that fails in its first query batch,
+/// the prologs that come with the first report, written and flushed: those of the file sinks of
+/// outfmt 0 to 4, the start of the XML2 and JSON documents, and outfmt 20's line of the field
+/// names with its formatter's warning. `subject_path` names a FASTA subject set of
+/// `num_subjects` records (`subject_letters`); a database search shows its `Database:` lines
+/// (`database`).
+#[allow(clippy::too_many_arguments)]
 fn write_first_batch_prologs(
     outputs: &mut ReportOutputs<'_>,
     subject_path: Option<&std::path::Path>,
@@ -1404,6 +1415,7 @@ fn write_first_batch_prologs(
     program: &str,
     // The run's `-html` data (`ResolvedTblastnArgs::html`; `None`: the plain report).
     html: Option<&crate::report::html_ids::HtmlLinks>,
+    before_search: bool,
 ) -> Result<()> {
     let name = subject_path.map_or_else(Vec::new, crate::report::pairwise::subject_set_name);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
@@ -1415,6 +1427,14 @@ fn write_first_batch_prologs(
     for format in outputs.formats.iter_mut() {
         if (0..=4).contains(&crate::blastinput::app::parse_formatting_string(format.outfmt)?.number)
         {
+            if format.sink.prolog_before_search() != before_search {
+                continue;
+            }
+            let flush = !before_search
+                || crate::report::pairwise::flushes_after_prolog(
+                    html.is_some(),
+                    !format.sink.is_writer(),
+                );
             let mut writer = format.sink.open()?;
             crate::report::pairwise::write_tblastn_pairwise_prolog(
                 &mut writer,
@@ -1432,7 +1452,11 @@ fn write_first_batch_prologs(
                     (links, posts as &mut dyn Write)
                 }),
             )?;
-            writer.flush()?;
+            if flush {
+                writer.flush()?;
+            }
+        } else if before_search {
+            // The other formats' prologs come with the first report.
         } else if let Some(kind) = super::stage_e_report::xml2_kind(format.outfmt) {
             // The XML2 and JSON documents start with their prolog too.
             let mut writer = format.sink.open()?;
@@ -1652,6 +1676,25 @@ fn search(
                 .context("TBLASTN subject file missing")?,
         ),
     };
+    // The program line of outfmt 0 (`PSITBLASTN` with `-in_pssm`).
+    let program = if pssm.is_some() {
+        super::in_pssm::PROGRAM
+    } else {
+        "TBLASTN"
+    };
+    // The outfmt 0 to 4 prolog, before the first batch is read and its request written
+    // (`write_first_batch_prologs`), as in every program.
+    write_first_batch_prologs(
+        outputs,
+        subject_path.map(|path| path.as_path()),
+        subjects.len(),
+        subject_letters,
+        pairwise_database.as_ref(),
+        args.tabular_taxdb.unwrap_or(false),
+        program,
+        resolved.html.as_deref(),
+        true,
+    )?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-278
     // NCBI reads the query batches one at a time after the outfmt 0 prolog. The run stops at
     // the first batch that NCBI fails (a reader error, a batch without a query, a batch of
@@ -1679,8 +1722,9 @@ fn search(
             subject_letters,
             pairwise_database.as_ref(),
             args.tabular_taxdb.unwrap_or(false),
-            super::in_pssm::PROGRAM,
+            program,
             resolved.html.as_deref(),
+            false,
         )?;
         // The request of the one PSSM query, which NCBI wrote before its constructor failed.
         if let (true, Some(strategy)) = (stop.after_request(), args.strategy.as_ref()) {
@@ -1779,9 +1823,22 @@ fn search(
         )
     });
     if batches.searched_done == 0 && batches.stop.is_some() {
-        // A first batch whose set-up fails has its search strategy request, written before the
-        // prolog (NCBI's posts of the bytes replaced in it follow the batch's reader messages,
-        // before its error, below).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
+        // The first batch fails after the prologs (`formatter.PrintProlog()`; those of the first
+        // report here). A first batch whose set-up fails has its search strategy request (NCBI's
+        // posts of the bytes replaced in it follow the batch's reader messages, before its error,
+        // below).
+        write_first_batch_prologs(
+            outputs,
+            subject_path.map(|path| path.as_path()),
+            subjects.len(),
+            subject_letters,
+            pairwise_database.as_ref(),
+            args.tabular_taxdb.unwrap_or(false),
+            program,
+            resolved.html.as_deref(),
+            false,
+        )?;
         if let (Some(strategy), Some(requests), Some(span)) = (
             args.strategy.as_ref(),
             requests.as_ref(),
@@ -1794,18 +1851,6 @@ fn search(
                 query_input.placements.get(span.start),
             )?;
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-        // The first batch fails after the outfmt 0 prolog (`formatter.PrintProlog()`).
-        write_first_batch_prologs(
-            outputs,
-            subject_path.map(|path| path.as_path()),
-            subjects.len(),
-            subject_letters,
-            pairwise_database.as_ref(),
-            args.tabular_taxdb.unwrap_or(false),
-            "TBLASTN",
-            resolved.html.as_deref(),
-        )?;
     } else {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1426
         // `-db`: the database's sequences, checked once for every batch (`XDbStream::new`)
@@ -2801,7 +2846,7 @@ fn search(
     }
     // A batch whose set-up fails (every query without letters) has its search strategy request:
     // NCBI made its query factory before the search (`QueryBatches::stop_batch`), after the
-    // batches above (a first batch's was written before the prolog).
+    // batches above (a first batch's was written after the prologs).
     if let (Some(strategy), Some(requests), Some(span)) = (
         args.strategy.as_ref(),
         requests.as_ref(),

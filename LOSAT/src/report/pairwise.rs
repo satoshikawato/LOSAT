@@ -2229,8 +2229,9 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
 /// Whether a report's writer is flushed after its prolog, before the search (`write_prolog`):
 /// `html`, the report is `-html`; `own_buffer`, the writer is a buffer that its sink opened for
 /// the prolog alone (`OutputSink::open` of a library call's `Stdout` or `File` sink), flushed so
-/// that its write errors show. A plain report keeps dev's flush points (the writers of blastn,
-/// blastx and tblastx flush there; blastp and tblastn write the prolog with the first report). An
+/// that its write errors show. A plain report flushes there in every program (blastp's driver and
+/// tblastn too since line RG item T4b-f, which writes their prolog before the search, where NCBI
+/// writes it: their write failure now shows there, as NCBI's at its prolog's first flush). An
 /// `-html` report does not flush there: NCBI's `PrintProlog` flushes `cout` with the `NcbiEndl`
 /// pair after the version line and writes the references and the database lines after it without
 /// a flush, so its `cout` keeps those bytes until a post on `cerr` (tied to `cout`:
@@ -2963,28 +2964,16 @@ pub fn write_blastp_pairwise_window<W: Write>(
     let writer = &mut buffered;
 
     if prolog && query_range.start == 0 {
-        write_prolog(
+        write_blastp_pairwise_prolog(
             writer,
-            blastp_family_program(&config.program),
             &report.version,
-            false,
-            false,
-            false,
-            false,
+            &config.program,
+            &report.database_name,
+            report.database_num_sequences,
+            report.database_total_letters,
+            database,
             html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
         )?;
-        // The prolog ends with one blank line; each query's preamble starts with two
-        // (blast_format.cpp:1491), after the query's warnings.
-        match database {
-            Some(database) => write_blast_database_header(writer, database)?,
-            None => write_blastp_database_header_spacing(
-                writer,
-                &report.database_name,
-                report.database_num_sequences,
-                report.database_total_letters,
-                1,
-            )?,
-        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
@@ -5346,7 +5335,8 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
 /// subject index (`Query=`, the description table and the alignment headings; `subject_sources`
 /// the sources from which NCBI makes an empty stored title, `stored_source`); the
 /// `query_name` of `queries` is not read. `program` is the program line's name (`TBLASTN`, or
-/// `PSITBLASTN` with `-in_pssm`).
+/// `PSITBLASTN` with `-in_pssm`). The report starts with the prolog when `prolog` is set (false
+/// where the caller wrote it before the search, as NCBI does).
 pub fn write_tblastn_pairwise_report<W: Write>(
     program: &str,
     hits: &[PairwiseHit],
@@ -5363,6 +5353,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     database: Option<&PairwiseDatabase>,
     probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    prolog: bool,
     epilog: bool,
     anchored: Option<&dyn super::query_anchored::ReportSequences>,
     // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
@@ -5383,27 +5374,17 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     }
     let mut writer = io::BufWriter::new(writer);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:372-424:
-    write_prolog(
-        &mut writer,
-        program,
-        &report.version,
-        false,
-        false,
-        true,
-        false,
-        html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
-    )?;
-    // The prolog ends with one blank line; each query's preamble starts with two
-    // (blast_format.cpp:1491), after the query's warnings.
-    match database {
-        Some(database) => write_blast_database_header(&mut writer, database)?,
-        None => write_blastp_database_header_spacing(
+    if prolog {
+        write_tblastn_pairwise_prolog(
             &mut writer,
+            program,
+            &report.version,
             &report.database_name,
             report.database_num_sequences,
             report.database_total_letters,
-            1,
-        )?,
+            database,
+            html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
+        )?;
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411

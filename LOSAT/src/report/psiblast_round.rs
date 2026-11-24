@@ -11,11 +11,10 @@
 //! of a round serially (no `LOSAT_X_PAIRWISEPAR` pieces).
 
 use super::{
-    blastp_family_program, database_description_label, write_alignment,
-    write_blast_database_header, write_blastp_database_header_spacing,
+    database_description_label, write_alignment, write_blastp_pairwise_prolog,
     write_blastp_query_footer_spacing, write_blastp_query_header,
     write_database_subject_alignments_part, write_description_table, write_hsp_info,
-    write_no_hits_found, write_prolog, write_spaces, write_subject_alignments_part,
+    write_no_hits_found, write_spaces, write_subject_alignments_part,
     write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery, BlastpPairwiseReport,
     DatabaseHeading, PairwiseConfig, PairwiseDatabase, PairwiseHit,
 };
@@ -79,26 +78,16 @@ pub(crate) fn write_psiblast_round_report(
     let mut buffered = io::BufWriter::new(RoundWriter(writer));
     let writer = &mut buffered;
     if prolog && query_range.start == 0 {
-        write_prolog(
+        write_blastp_pairwise_prolog(
             writer,
-            blastp_family_program(&config.program),
             &report.version,
-            false,
-            false,
-            false,
-            false,
+            &config.program,
+            &report.database_name,
+            report.database_num_sequences,
+            report.database_total_letters,
+            database,
             super::html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
         )?;
-        match database {
-            Some(database) => write_blast_database_header(writer, database)?,
-            None => write_blastp_database_header_spacing(
-                writer,
-                &report.database_name,
-                report.database_num_sequences,
-                report.database_total_letters,
-                1,
-            )?,
-        }
     }
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); query_range.len()];
     for (hsp_index, hit) in hits.iter().enumerate() {

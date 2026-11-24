@@ -32,7 +32,7 @@ import {
   type StartResult,
   type ValidationResult,
 } from 'losat/ports';
-import { buildArgv, optionValue } from '../domain/argv';
+import { buildArgv, optionValue, runTask } from '../domain/argv';
 import { countsName, parseTaxid, type CountsOrigin } from '../domain/counts';
 import { inputFileName, outputFileName, outputMediaType, printedFileName, printedFileType, runFileName, runOutputs } from '../domain/output-format';
 import { isTerminal, type ConffileSnapshot, type InputPart, type InputSnapshot, type RunRecord, type RunSnapshot, type RunStatus } from '../domain/run';
@@ -40,7 +40,6 @@ import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '
 import type { Downloader } from '../ports/download';
 import { failureText } from './availability';
 import { registryName, unreadableConffile } from './conffile';
-import { taskOf } from './results';
 import { Store } from './store';
 
 /**
@@ -436,7 +435,7 @@ export class Coordinator {
     if (asked === undefined) descriptions.set(program, (asked = this.deps.engine.describe(program).catch(() => undefined)));
     // Without the engine's default task the name has none; the file is still saved.
     const description = await asked;
-    return description === undefined ? optionValue(argv, '-task') : taskOf(argv, description).task;
+    return runTask(argv, description?.parameters ?? []);
   }
 
   /** Opens one output of a run that kept its outputs without reading it (a binary one, which is not shown): rejects as `readOutput` when it cannot be read. */

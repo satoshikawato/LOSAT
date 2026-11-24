@@ -90,7 +90,7 @@ export interface KnownDefault {
 
 /**
  * The default of a field: the value that the engine resolves for the task (`describe`), the
- * value that a set -matrix or -word_size gives it, or else the clap default, or else the value
+ * value that a set -matrix or -word_size gives it, or else NCBI's default (`describe`'s `default`), or else the value
  * of NCBI's page of an option read with others (a section's `together`, which the argv writes
  * when another of them is written); undefined when unknown (two of the options that change it
  * are set, one of them at a value that the engine's table does not hold, or an option that
@@ -130,8 +130,16 @@ function togetherValue(program: ProgramDescriptor, flag: string): string | undef
   return undefined;
 }
 
-/** An option's default for a task alone: the engine's resolved value, or else the clap default. */
-function taskDefault(option: EngineOption, task: string): string | undefined {
+/**
+ * An option's default for a task alone, which the search form and the results read: the value that
+ * the engine resolves for the task (`describe`'s `defaults`), or else NCBI's default (`describe`'s
+ * `default`). The engine's value comes first: NCBI's default is the same for every task, while the
+ * engine resolves each task's own (BLASTN's -evalue: 10, blastn-short's 1000).
+ */
+export function taskDefault(
+  option: { readonly defaultValue?: string; readonly resolvedDefault?: Pick<ResolvedDefault, 'byTask'> },
+  task: string,
+): string | undefined {
   return option.resolvedDefault?.byTask[task] ?? option.defaultValue;
 }
 

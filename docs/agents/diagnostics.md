@@ -4400,7 +4400,7 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_DCLATEST=1` (BLASTN `-task dc-megablast`, and megablast given template options, wherever
   `LOSAT_X_PAIRPARDISC`'s stage of the diagonal hash runs: a query block over 8000 letters, a subject searched
   by its owner, masked or not, two threads or more or one with `LOSAT_X_BNDCONE`, with or without
-  `LOSAT_X_PAIRPARFOLD`'s partitions, except a chunk whose scan ranges step back; in the strict set from the pull request that added it, 2026-11-23: `LOSAT_X_DCLATEST=0` turns
+  `LOSAT_X_PAIRPARFOLD`'s partitions, except a chunk whose scan ranges step back; in the strict set from the pull request that added it, 2026-11-24: `LOSAT_X_DCLATEST=0` turns
   it off) folds the stage's seeds into a map of each diagonal's latest insert (`blast_engine/x_dc_latest.rs`,
   argument in its header) instead of NCBI's diagonal hash (512 buckets of chains whose stale cells later
   inserts of the bucket take over). A seed reads its own diagonal only (`scan_range` is 0 in the scope),
@@ -4445,7 +4445,16 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT/tests/blastn_dc_latest.rs` the reports with `=0`'s at 1 and 4 threads, windows 40, 24, 12 and 4, a
   masked subject and `-ungapped`, and on the database edge1 at 1 thread, gapped and `-ungapped`: unmasked
   (every subject on the maps) and with `-db_soft_mask 11` (s5's chunk to the chains, `back=1`).
-  Evidence: EVIDENCE-TODO.
+  Evidence (2026-11-24, line FD, workstation node 1, 16 cores, memory bound to the node; dev 3d8c77b16, its merge
+  880e5e2ea and the merge with `=0` in one run, rotated, medians; reports identical in every arm): dc-megablast of
+  31,168 D. melanogaster cDNAs against 3 Mb of its genome (`-subject`, outfmt 6) at one thread 10.779 s against 12.736
+  s (x0.846, cycles x0.844), at 16 threads 1.098 s against 1.197 s (x0.917), at 8 threads 1.883 s against 2.064 s
+  (x0.912); 5,000 of the cDNAs at 16 threads 0.230 s against 0.247 s (x0.931); MG1655 against AP027131 x0.981 at one
+  thread and x1.000 at 16. VmHWM sampled every 2 ms over 8 rounds: +0.47 % (121,082 against 120,514 KiB) at 16 threads,
+  +0.17 % at 8, -0.28 % for the 5,000 cDNAs, -0.02 % for MG1655 at 16; max RSS at one thread +0.47 %. `=0` took x0.986 to
+  x0.997 of dev's time (its chains fold is dev's code: the same instructions). The first form of the map lost most of
+  this to blocked store-to-load forwards of the stash's 16-byte result returned through memory (`ld_blocks.store_forward`
+  211 M against 20 M at one thread); `find_stash` now returns the stash's index.
 - `LOSAT_X_DCQSAHEAD=1` (BLASTN `-task dc-megablast` and megablast given template options, where `LOSAT_X_DCSEEDLEAN`
   builds a table laid out as CSR (`LOSAT_X_DCCSR`) on a pool of two threads or more; in the strict set from the pull
   request that added it, 2026-11-23: `LOSAT_X_DCQSAHEAD=0` turns it off) brings in the line of `qs` that each entry

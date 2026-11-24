@@ -36,8 +36,39 @@ fn one_domain(columns: Vec<CdColumn>) -> PsiCdMsa {
     }
 }
 
+/// The scores of NCBI BLAST+ 2.17.0's PSSM of the query ACDEF without domain hits
+/// (`deltablast -query q_acdef.faa -db dbs -rpsdb deltatest -out_pssm p.asn`, the file's
+/// `finalData scores`, probe `acdef` of PS13a's fix round 2a, `PR/ps13/fix2_probe/`): one row of
+/// the 28 NCBIstdaa letters for each query position.
+const ACDEF_SCORES: [[i32; BLASTAA_SIZE]; 5] = [
+    [
+        -32768, 4, -2, 0, -2, -1, -2, 0, -2, -1, -1, -2, -1, -2, -1, -1, -2, 1, 0, 0, -3, -1, -2,
+        -1, -1, -4, -1, -2,
+    ],
+    [
+        -32768, 0, -3, 10, -4, -4, -3, -3, -3, -1, -3, -1, -2, -3, -3, -3, -4, -1, -1, -1, -3, -1,
+        -3, -4, -1, -4, -1, -1,
+    ],
+    [
+        -32768, -2, 5, -4, 6, 2, -4, -1, -1, -3, -1, -4, -3, 1, -2, 0, -2, 0, -1, -4, -5, -1, -3,
+        1, -1, -4, -1, -4,
+    ],
+    [
+        -32768, -1, 1, -4, 2, 5, -4, -2, 0, -4, 1, -3, -2, 0, -1, 2, 0, 0, -1, -3, -3, -1, -2, 5,
+        -1, -4, -1, -3,
+    ],
+    [
+        -32768, -2, -4, -3, -4, -4, 7, -3, -1, 0, -3, 0, 0, -3, -4, -4, -3, -3, -2, -1, 1, -1, 3,
+        -4, -1, -4, -1, 0,
+    ],
+];
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi.c:385-414
+// A query without domain hits has frequency ratios of zero, so its PSSM takes the matrix's scores
+// of its letters, which the scaling to the query's ungapped Lambda then changes (A against L is
+// -1 in BLOSUM62, -2 in the PSSM): NCBI's scores, not the matrix's.
 #[test]
-fn a_query_without_domains_keeps_the_matrix_scores() {
+fn a_query_without_domains_gets_the_matrix_scores_scaled_as_ncbi() {
     let sbp = blosum62();
     let msa = PsiCdMsa {
         query: QUERY.to_vec(),
@@ -45,9 +76,14 @@ fn a_query_without_domains_keeps_the_matrix_scores() {
         columns: Vec::new(),
     };
     let pssm = create_pssm_from_cdd(&msa, 0, &sbp).unwrap();
-    for (row, &letter) in pssm.scores.iter().zip(&QUERY) {
-        assert_eq!(*row, sbp.matrix[letter as usize]);
+    assert_eq!(pssm.scores.len(), ACDEF_SCORES.len());
+    for (position, (row, expected)) in pssm.scores.iter().zip(&ACDEF_SCORES).enumerate() {
+        assert_eq!(&row[..], &expected[..], "position {position}");
     }
+    assert_ne!(pssm.scores[0], sbp.matrix[QUERY[0] as usize]);
+    // The file's lambdaUngapped and kappaUngapped (15 digits).
+    assert!((pssm.ungapped.lambda - 0.320004687599798).abs() < 1e-14);
+    assert!((pssm.ungapped.k - 0.146268722049472).abs() < 1e-14);
     let ratios = pssm.diagnostics.frequency_ratios.unwrap();
     assert!(ratios.iter().flatten().all(|&ratio| ratio == 0.0));
 }

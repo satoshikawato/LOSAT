@@ -2216,6 +2216,26 @@ impl BlastpReport {
                 ))
     }
 
+    /// Whether the call's reports `formats` of `app` show NCBI's bytes for a subject that the
+    /// scope finds as a query of its batch (`report::query_bioseq`): blastp's tables that read no
+    /// letter of the found Bioseq and its organism report (`query_bioseq::tabular_shows`), the
+    /// Seq-annots and the archive (which write the Seq-align id alone). The other formats, and
+    /// psiblast's rounds (which read the letters for the next PSSM), keep LOSAT's refusal.
+    fn shows_query_bioseqs(formats: &[BlastpReport], app: BlastpApp) -> bool {
+        use crate::report::query_bioseq::tabular_shows;
+        app == BlastpApp::Blastp
+            && formats.iter().all(|format| match *format {
+                BlastpReport::Seqalign(_) | BlastpReport::Archive => true,
+                BlastpReport::CustomTabular(spec) => {
+                    tabular_shows(Some(spec), crate::blastinput::app::Program::Blastp)
+                }
+                BlastpReport::Text(OutputFormat::Tabular | OutputFormat::TabularWithComments) => {
+                    tabular_shows(None, crate::blastinput::app::Program::Blastp)
+                }
+                _ => false,
+            })
+    }
+
     /// Whether the report is tabular (outfmt 6, 7, 10 and 20), which reads the tabular subject
     /// IDs (`report::tabular::writes_rows`: not the organism report).
     fn is_tabular(self) -> bool {
@@ -2574,16 +2594,27 @@ fn check_tabular_lookups(
         ) {
             continue;
         }
+        // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
         let checked = crate::report::tabular::check_failed_lookups(
             spec,
-            hit_lists.iter().flatten().map(|hit_list| {
-                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                hit_list.hsplist_array[..count]
-                    .iter()
-                    .filter_map(|hsp_list| hsp_list.hsps.first())
-                    .map(|hsp| hsp.s_idx as usize)
-            }),
+            hit_lists
+                .iter()
+                .enumerate()
+                .filter_map(|(q_idx, hit_list)| Some((q_idx, hit_list.as_ref()?)))
+                .map(|(q_idx, hit_list)| {
+                    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                    hit_list.hsplist_array[..count]
+                        .iter()
+                        .filter_map(|hsp_list| hsp_list.hsps.first())
+                        .map(move |hsp| match listed_titles {
+                            Some(titles) => titles.seen_row(q_idx, hsp.s_idx as usize),
+                            None => hsp.s_idx as usize,
+                        })
+                }),
             |s_idx| {
+                if s_idx == crate::report::query_bioseq::SEEN_ROW {
+                    return None;
+                }
                 crate::algorithm::common::tabular::subject_lookup_failure(
                     spec,
                     subject_ids,
@@ -10369,14 +10400,34 @@ fn run_call(
         &query_batches,
         report_prep::prefetch_format(args.app, &requested_formats),
     );
-    let listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
+    let mut listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
     report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
     if let (Some(titles), Some(scopes), true) = (
-        listed_titles.as_ref(),
+        listed_titles.as_mut(),
         reports.query_scopes,
         BlastpReport::resolve_subjects(&requested_formats, args.app),
     ) {
-        titles.refuse_ids_of_queries(&hit_lists, scopes)?;
+        let record = |query: usize| {
+            let record = query_records.get(query.checked_sub(scopes.first())?)?;
+            Some(crate::report::query_bioseq::QueryRecordRef {
+                believed: record.believed()?,
+                title: &record.title,
+                length: record.seq().len(),
+            })
+        };
+        let run = crate::report::query_bioseq::SeenRun {
+            shows: BlastpReport::shows_query_bioseqs(&requested_formats, args.app)
+                && ranges.query_input.range_length.is_none()
+                && database.is_some_and(|database| !database.loads_write_texts()),
+            known: scopes.first()..if reports.last_call {
+                usize::MAX
+            } else {
+                scopes.first() + query_records.len()
+            },
+            record: &record,
+            protein: true,
+        };
+        titles.refuse_ids_of_queries(&hit_lists, scopes, &run)?;
     }
     let (subject_records, subject_titles, shown_subjects) =
         report_prep::shown_of(&listed_titles, subjects, subject_records, &subject_titles);

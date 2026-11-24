@@ -3886,6 +3886,8 @@ fn run_batch_loop(
                             .collect::<Vec<_>>(),
                         prefetch_format,
                     ),
+                    &mut Default::default(),
+                    &crate::report::query_bioseq::SeenRun::REFUSED,
                     "TBLASTX",
                 )?;
             }

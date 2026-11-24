@@ -11,6 +11,7 @@ pub(crate) mod html_ids;
 pub mod outfmt6;
 pub mod pairwise;
 pub(crate) mod query_anchored;
+pub mod query_bioseq;
 pub mod query_warnings;
 pub mod record;
 pub(crate) mod reference;

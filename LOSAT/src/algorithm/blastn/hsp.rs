@@ -227,6 +227,23 @@ impl BlastnOutputFormat {
         }
     }
 
+    /// Whether the report shows NCBI's bytes for a reported sequence that the scope finds as a
+    /// query of its batch (`report::query_bioseq`): a table that reads no letter of the found
+    /// Bioseq and the organism report (`query_bioseq::tabular_shows`), the Seq-annots and the
+    /// archive (which write the Seq-align id alone).
+    pub(crate) fn shows_query_bioseqs(self) -> bool {
+        use crate::report::query_bioseq::tabular_shows;
+        let program = crate::blastinput::app::Program::Blastn;
+        match self {
+            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Archive => true,
+            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments => {
+                tabular_shows(None, program)
+            }
+            BlastnOutputFormat::CustomTabular(spec) => tabular_shows(Some(spec), program),
+            _ => false,
+        }
+    }
+
     /// Whether the format is a table whose fields read the sequence that NCBI's formatter finds
     /// by a subject's Seq-align id (`report::tabular::reads_subject`: the default fields do).
     pub(crate) fn tabular_reads_subject(self) -> bool {

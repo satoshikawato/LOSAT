@@ -4860,6 +4860,9 @@ struct BlastnReportInputs<'a> {
     /// What the XML2 and JSON reports of a database search do at each subject's `Hit`, by rank
     /// (`database::ReportedSubjects::loads`; every subject loaded for a subject set).
     database_loads: &'a crate::report::db_subject::HitLoads,
+    /// The query Bioseqs that NCBI's scope finds for the reported sequences of a database search
+    /// (`report::query_bioseq`), by the report's query and the ordinal id.
+    database_seen: crate::report::query_bioseq::SeenFrom<'a>,
     /// The sources from which NCBI makes the empty stored titles of the other reported sequences
     /// of a database search, by rank (`database::ReportedSubjects::sources`; empty without them
     /// and for a subject set).
@@ -5239,16 +5242,28 @@ fn check_tabular_lookups(
         ) {
             continue;
         }
+        // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
         let checked = crate::report::tabular::check_failed_lookups(
             spec,
-            hit_lists.iter().flatten().map(|hit_list| {
-                hit_list
-                    .hsplist_array
-                    .iter()
-                    .filter_map(|hsp_list| hsp_list.hsps.first())
-                    .map(|hsp| hsp.s_idx as usize)
-            }),
+            hit_lists
+                .iter()
+                .enumerate()
+                .filter_map(|(q_idx, hit_list)| Some((q_idx, hit_list.as_ref()?)))
+                .map(|(q_idx, hit_list)| {
+                    hit_list
+                        .hsplist_array
+                        .iter()
+                        .filter_map(|hsp_list| hsp_list.hsps.first())
+                        .map(move |hsp| {
+                            let s_idx = hsp.s_idx as usize;
+                            let ordinal = database.and_then(|(ordinals, _)| ordinals.get(s_idx));
+                            report.database_seen.row(q_idx, ordinal.copied(), s_idx)
+                        })
+                }),
             |s_idx| {
+                if s_idx == crate::report::query_bioseq::SEEN_ROW {
+                    return None;
+                }
                 crate::algorithm::common::tabular::subject_lookup_failure(
                     spec,
                     subject_ids,
@@ -5923,7 +5938,16 @@ fn post_process_hits_and_write(
                     &mut writer,
                     format_warnings.as_mut(),
                 )?;
-            } else if let Some(spec) = output_format.tabular_spec() {
+            } else if let Some(spec) = output_format.tabular_spec().or_else(|| {
+                // A run whose reported sequences the scope finds as queries writes the default
+                // 6 and 7 with the shared writer too, which takes such a row's values from the
+                // query's Bioseq (`TabularSubjects::values_for`).
+                report.database_seen.any().then(|| {
+                    crate::report::tabular::TabularSpec::std(
+                        output_format == BlastnOutputFormat::TabularWithComments,
+                    )
+                })
+            }) {
                 // The tabular reports with a field list or a delimiter, and outfmt 10 and 20
                 // (`algorithm::blastn::tabular`); never the default 6 and 7 below.
                 write_custom_tabular(
@@ -6073,6 +6097,7 @@ fn write_custom_tabular(
             lengths: &lengths,
             taxonomy: &taxonomy,
             loads: report.database_loads,
+            seen: report.database_seen,
         },
         _ => TabularSubjects::Records {
             ids: subject_ids,
@@ -8211,6 +8236,9 @@ fn run_in_pool(
         _ => scopes,
     })
     .map(|scopes| scopes.with_refusal(args.scope_refusal.clone()));
+    // The query Bioseqs that NCBI's scope finds for reported sequences (`report::query_bioseq`),
+    // noted at each batch's refusal of a sequence with the id of a query of its scope (below).
+    let mut query_bioseqs = crate::report::query_bioseq::QueryBioseqs::default();
     let intro = blastn_intro(&args);
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:258-261
     // NCBI writes the outfmt 0 prolog before it reads the first query batch, and its stream
@@ -8255,6 +8283,7 @@ fn run_in_pool(
                 source,
                 shown: &shown,
                 titles: &titles,
+                seen: &query_bioseqs,
             },
             &ReportRanges {
                 queries: query_input,
@@ -8433,6 +8462,7 @@ fn run_in_pool(
                             source,
                             shown: &shown,
                             titles: &titles,
+                            seen: &query_bioseqs,
                         },
                         &report_ranges,
                         outputs,
@@ -8543,6 +8573,7 @@ fn run_in_pool(
                         source,
                         shown: &shown,
                         titles: &titles,
+                        seen: &query_bioseqs,
                     },
                     &report_ranges,
                     outputs,
@@ -8813,6 +8844,7 @@ fn run_in_pool(
                                 source,
                                 shown: &shown,
                                 titles: &titles,
+                                seen: &query_bioseqs,
                             },
                             &report_ranges,
                             outputs,
@@ -8967,6 +8999,7 @@ fn run_in_pool(
                     source,
                     shown: &shown,
                     titles: &titles,
+                    seen: &query_bioseqs,
                 },
                 &report_ranges,
                 outputs,
@@ -8991,6 +9024,30 @@ fn run_in_pool(
         // NCBI's own errors of the batch (the prefetch's above): the warnings of the batches read
         // so far, as for a refusal of a title (above).
         if let (SubjectSource::Database(database), Some(scopes)) = (source, query_scopes.as_ref()) {
+            let searched = batch_records.searched();
+            let record = |query: usize| {
+                let record = searched.get(query.checked_sub(start)?)?;
+                Some(crate::report::query_bioseq::QueryRecordRef {
+                    believed: record.believed()?,
+                    title: &record.title,
+                    length: record.seq().len(),
+                })
+            };
+            let run = crate::report::query_bioseq::SeenRun {
+                shows: output_formats
+                    .iter()
+                    .all(|format| format.shows_query_bioseqs())
+                    && !query_input.placements.ranged()
+                    && !database.loads_write_texts(),
+                // The batch's searched queries: the scope's span (`QueryScopes::span_of`).
+                known: start..if scopes.span_of(start).end == usize::MAX {
+                    usize::MAX
+                } else {
+                    start + searched.len()
+                },
+                record: &record,
+                protein: false,
+            };
             let refused = crate::algorithm::common::database::refuse_reported_ids_of_queries(
                 &titles,
                 batch_hit_lists
@@ -9007,6 +9064,8 @@ fn run_in_pool(
                 database.oid_map(),
                 scopes,
                 database::parsed_shown(&output_formats),
+                &mut query_bioseqs,
+                &run,
                 "BLASTN",
             );
             if let Err(error) = refused {
@@ -9391,6 +9450,7 @@ fn run_in_pool(
                         source,
                         shown: &shown,
                         titles: &titles,
+                        seen: &query_bioseqs,
                     },
                     &batch_ranges,
                     outputs,
@@ -9444,6 +9504,7 @@ fn run_in_pool(
                 source,
                 shown: &shown,
                 titles: &titles,
+                seen: &query_bioseqs,
             },
             &report_ranges,
             outputs,
@@ -9478,6 +9539,7 @@ fn run_in_pool(
                 source,
                 shown: &shown,
                 titles: &titles,
+                seen: &query_bioseqs,
             },
             &report_ranges,
             outputs,
@@ -9738,6 +9800,9 @@ struct ReportSubjects<'a> {
     source: SubjectSource<'a>,
     shown: &'a ShownSubjects,
     titles: &'a database::DatabaseTitles,
+    /// The query Bioseqs that NCBI's scope finds for reported sequences, by the run's searched
+    /// query (`report::query_bioseq`).
+    seen: &'a crate::report::query_bioseq::QueryBioseqs,
 }
 
 /// Writes the reports of `query_records` (the queries of the batches searched), with
@@ -10085,6 +10150,7 @@ fn write_reports_untimed(
         database_loads: reported
             .as_ref()
             .map_or(&every_loaded, |reported| &reported.loads),
+        database_seen: subjects.seen.numbered_from(written.queries),
         finished_hit_lists: reported.is_some(),
         epilog,
         show_gis: args.show_gis,

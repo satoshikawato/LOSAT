@@ -2176,6 +2176,8 @@ fn search(
                     database.oid_map(),
                     scopes,
                     super::database::parsed_shown(&outputs.formats),
+                    &mut Default::default(),
+                    &crate::report::query_bioseq::SeenRun::REFUSED,
                     "TBLASTN",
                 )?;
             }

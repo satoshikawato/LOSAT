@@ -930,6 +930,7 @@ fn write_blastx_tax_report(
         names,
         program,
         options.is_html,
+        None,
     )?;
     let mut q_idx = 0;
     for batch in batches {

@@ -3812,15 +3812,20 @@ pub(crate) fn refuse_query_ids_of_anchored_reports<'s>(
 /// `refuse_id_of_a_query` of each reported sequence of `reported` (a searched query, by its index
 /// in `scopes`, and a sequence that its report names, by ordinal id; `oids` the database's OIDs)
 /// whose header `titles` holds with parsed Seq-ids, with the scope of that query, where the
-/// reports `shown` resolve the sequences' Seq-align ids (`ParsedShown::resolves_subject`). A
-/// program calls it for each query batch after it reads the batch's titles: its cache of the
-/// titles keeps those of the batches before.
+/// reports `shown` resolve the sequences' Seq-align ids (`ParsedShown::resolves_subject`), unless
+/// the scope finds a query of its batch for the sequence and the reports show NCBI's bytes for it:
+/// that query is noted in `seen` (`report::query_bioseq::note_or_refuse` with `run`). A program
+/// calls it for each query batch after it reads the batch's titles: its cache of the titles keeps
+/// those of the batches before.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn refuse_reported_ids_of_queries(
     titles: &std::collections::BTreeMap<u32, ReportedHeader>,
     reported: impl IntoIterator<Item = (usize, u32)>,
     oids: crate::seqdb::OidMap<'_>,
     scopes: &crate::blastinput::query_batch::QueryScopes,
     shown: ParsedShown,
+    seen: &mut crate::report::query_bioseq::QueryBioseqs,
+    run: &crate::report::query_bioseq::SeenRun<'_, '_>,
     program: &str,
 ) -> Result<()> {
     if !shown.resolves_subject() {
@@ -3828,10 +3833,14 @@ pub(crate) fn refuse_reported_ids_of_queries(
     }
     for (query, ordinal) in reported {
         if let Some(ReportedHeader::Parsed(subject)) = titles.get(&ordinal) {
-            refuse_id_of_a_query(
+            crate::report::query_bioseq::note_or_refuse(
+                seen,
                 subject,
                 || oids.oid(ordinal),
-                scopes.of_query(query),
+                query,
+                ordinal,
+                scopes,
+                run,
                 program,
             )?;
         }
@@ -5914,6 +5923,15 @@ impl TaxdbRun {
                     )
                 })
         })
+    }
+
+    /// Whether a load of a sequence with a positive taxid can write a text or throw in this run
+    /// ([`PrefetchTexts`] of a damaged taxonomy database, [`TaxdbRun::load_throws`]): where NCBI's
+    /// scope finds a query for a reported sequence it loads nothing of that sequence, which LOSAT's
+    /// loads do not follow, so such a run keeps LOSAT's refusal of it
+    /// (`report::query_bioseq::note_or_refuse`).
+    pub(crate) fn loads_write_texts(&self, db: &SeqDb) -> bool {
+        self.prefetch_texts(db) != PrefetchTexts::default() || self.load_throws(db)
     }
 
     /// [`PrefetchTexts`] of the run, read once ([`PrefetchTexts::of`]): none without `taxdb.bti`

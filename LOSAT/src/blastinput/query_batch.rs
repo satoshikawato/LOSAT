@@ -1168,6 +1168,23 @@ impl QueryScopes {
         &self.scopes[after.saturating_sub(1)]
     }
 
+    /// The searched queries of the scope of the searched query `query` (`of_query`): those of its
+    /// batch, from the batch's first to the next batch's first (the last batch's to no end), or
+    /// every query with `whole_run` or one scope of the run (`QueryScopeSpan::Run`). The owner of
+    /// the query Bioseqs that the scope finds walks them (`report::query_bioseq::QueryBioseqs`).
+    pub(crate) fn span_of(&self, query: usize) -> std::ops::Range<usize> {
+        if self.whole_run.is_some() {
+            return 0..usize::MAX;
+        }
+        let after = self.starts.partition_point(|&start| start <= query);
+        let start = after
+            .checked_sub(1)
+            .and_then(|batch| self.starts.get(batch))
+            .copied()
+            .unwrap_or(0);
+        start..self.starts.get(after).copied().unwrap_or(usize::MAX)
+    }
+
     /// The scopes of the searched queries from `first`, as one call that searches them numbers
     /// them (`of_query` of its index).
     pub(crate) fn numbered_from(&self, first: usize) -> QueryScopesFrom<'_> {
@@ -1194,6 +1211,11 @@ impl<'a> QueryScopesFrom<'a> {
     /// The run's scopes, whose queries are the run's (`QueryScopes::xml_failing_query`).
     pub(crate) fn run(&self) -> &'a QueryScopes {
         self.scopes
+    }
+
+    /// The run's searched query of the call's first query.
+    pub(crate) fn first(&self) -> usize {
+        self.first
     }
 }
 

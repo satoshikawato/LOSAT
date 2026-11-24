@@ -94,6 +94,10 @@ pub(crate) enum TabularSubjects<'a> {
         /// key here): a subject whose load throws writes its rows as NCBI's `catch` leaves them
         /// (`report::tabular::SubjectLookup::Throws`).
         loads: &'a crate::report::db_subject::HitLoads,
+        /// The queries whose Bioseqs NCBI's scope finds for reported sequences, by the call's
+        /// query and the ordinal id (`report::query_bioseq`): such a row shows the query's
+        /// (`TabularSubjects::values_for`).
+        seen: crate::report::query_bioseq::SeenFrom<'a>,
     },
 }
 
@@ -219,6 +223,36 @@ impl<'a> SubjectValues<'a> {
             length: 0,
             taxonomy: Cow::Owned(TabularTaxonomy::default()),
             failed: Some(FailedValues::thrown(subject, exception)),
+            index,
+        }
+    }
+}
+
+impl<'a> SubjectValues<'a> {
+    /// The values of the query Bioseq `bioseq` that NCBI's scope finds for the reported sequence
+    /// of subject index `index` (`report::query_bioseq::QueryBioseq`): the query's ids (its one
+    /// line for `sall*` where `all_deflines`), no title (`N/A`), the query record's length, no
+    /// taxonomy, as a `-subject` record of those ids.
+    pub(crate) fn of_query_bioseq(
+        bioseq: &'a crate::report::query_bioseq::QueryBioseq,
+        all_deflines: bool,
+        index: usize,
+    ) -> Self {
+        let [id, accession, accession_version] = bioseq.tabular_ids();
+        SubjectValues {
+            id: Cow::Borrowed(id),
+            accession: Cow::Borrowed(accession),
+            accession_version: Cow::Borrowed(accession_version),
+            gi: bioseq.gi(),
+            all_ids: if all_deflines {
+                bioseq.all_ids().to_vec()
+            } else {
+                Vec::new()
+            },
+            titles: None,
+            length: bioseq.length(),
+            taxonomy: Cow::Owned(bioseq.taxonomy()),
+            failed: None,
             index,
         }
     }
@@ -390,6 +424,44 @@ impl<'a> TabularSubjects<'a> {
         }
     }
 
+    /// The query Bioseq that NCBI's scope finds for subject `s_idx` in the report of the call's
+    /// query `q_idx` (`report::query_bioseq::SeenFrom::of`; none for a subject set).
+    pub(crate) fn seen_at(
+        &self,
+        q_idx: usize,
+        s_idx: usize,
+    ) -> Option<&'a crate::report::query_bioseq::QueryBioseq> {
+        match *self {
+            TabularSubjects::Records { .. } => None,
+            TabularSubjects::Database { ordinals, seen, .. } => {
+                if !seen.any() {
+                    return None;
+                }
+                seen.of(q_idx, *ordinals.get(s_idx)?)
+            }
+        }
+    }
+
+    /// `values` of subject `s_idx` in the report of the call's query `q_idx`: the values of the
+    /// query Bioseq that NCBI's scope finds for it there (`seen_at`,
+    /// `SubjectValues::of_query_bioseq`), else its own.
+    pub(crate) fn values_for(
+        &self,
+        q_idx: usize,
+        s_idx: usize,
+        spec: &TabularSpec,
+        program: &str,
+    ) -> Result<SubjectValues<'a>> {
+        match self.seen_at(q_idx, s_idx) {
+            Some(bioseq) => Ok(SubjectValues::of_query_bioseq(
+                bioseq,
+                spec.needs().all_deflines,
+                s_idx,
+            )),
+            None => self.values(s_idx, spec, program),
+        }
+    }
+
     /// The values of subject `s_idx` that the fields of `spec` show; `program` names the program
     /// in LOSAT's refusal of a sequence with parsed Seq-ids whose ids it does not write as NCBI.
     pub(crate) fn values(
@@ -492,6 +564,7 @@ impl<'a> TabularSubjects<'a> {
                 lengths,
                 taxonomy,
                 loads,
+                seen: _,
             } => {
                 if let (Some(exception), Some(subject)) = (
                     loads.thrown(s_idx),
@@ -679,6 +752,7 @@ pub(crate) fn write_tax_report(
     html: bool,
 ) -> Result<()> {
     use crate::report::tax_report::{report_batch, write_report};
+    let seen = |q_idx: usize, s_idx: usize| subjects.seen_at(q_idx, s_idx);
     let report = report_batch(
         queries,
         subjects.parsed(),
@@ -688,6 +762,7 @@ pub(crate) fn write_tax_report(
         names,
         program,
         html,
+        Some(&seen),
     )?;
     write_report(writer, warnings, queries, &report)?;
     Ok(())

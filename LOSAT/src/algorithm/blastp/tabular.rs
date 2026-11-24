@@ -118,6 +118,10 @@ pub(super) enum TabularSubjects<'a> {
         /// subject whose load throws writes its rows as NCBI's `catch` leaves them
         /// (`report::tabular::SubjectLookup::Throws`).
         loads: &'a crate::report::db_subject::HitLoads,
+        /// The queries whose Bioseqs NCBI's scope finds for reported sequences, by the call's
+        /// query and the ordinal id (`report::query_bioseq`): such a row shows the query's
+        /// (`TabularSubjects::values_for`).
+        seen: crate::report::query_bioseq::SeenFrom<'a>,
     },
 }
 
@@ -136,6 +140,30 @@ struct SubjectValues<'a> {
 }
 
 impl<'a> SubjectValues<'a> {
+    /// The values of the query Bioseq `bioseq` that NCBI's scope finds for a reported sequence
+    /// (`common::tabular::SubjectValues::of_query_bioseq`).
+    fn of_query_bioseq(
+        bioseq: &'a crate::report::query_bioseq::QueryBioseq,
+        all_deflines: bool,
+    ) -> Self {
+        let [id, accession, accession_version] = bioseq.tabular_ids();
+        SubjectValues {
+            id,
+            accession,
+            accession_version,
+            gi: bioseq.gi(),
+            all_ids: if all_deflines {
+                bioseq.all_ids().to_vec()
+            } else {
+                Vec::new()
+            },
+            titles: None,
+            length: bioseq.length(),
+            taxonomy: Cow::Owned(bioseq.taxonomy()),
+            failed: None,
+        }
+    }
+
     /// The values of the database sequence `subject` whose load throws with `exception`
     /// (`common::tabular::SubjectValues::thrown`): its rows print none of its own values, and
     /// NCBI reads none of its ids, titles or taxonomy.
@@ -194,6 +222,42 @@ impl SubjectValues<'_> {
 }
 
 impl<'a> TabularSubjects<'a> {
+    /// The query Bioseq that NCBI's scope finds for subject `s_idx` in the report of the call's
+    /// query `q_idx` (`report::query_bioseq::SeenFrom::of`; none for a subject set).
+    pub(super) fn seen_at(
+        &self,
+        q_idx: usize,
+        s_idx: usize,
+    ) -> Option<&'a crate::report::query_bioseq::QueryBioseq> {
+        match *self {
+            TabularSubjects::Records { .. } => None,
+            TabularSubjects::Database { ordinals, seen, .. } => {
+                if !seen.any() {
+                    return None;
+                }
+                seen.of(q_idx, *ordinals.get(s_idx)?)
+            }
+        }
+    }
+
+    /// `values` of subject `s_idx` in the report of the call's query `q_idx`: the values of the
+    /// query Bioseq that NCBI's scope finds for it there (`seen_at`), else its own.
+    fn values_for(
+        &self,
+        q_idx: usize,
+        s_idx: usize,
+        spec: &TabularSpec,
+        app: BlastpApp,
+    ) -> Result<SubjectValues<'a>> {
+        match self.seen_at(q_idx, s_idx) {
+            Some(bioseq) => Ok(SubjectValues::of_query_bioseq(
+                bioseq,
+                spec.needs().all_deflines,
+            )),
+            None => self.values(s_idx, spec, app),
+        }
+    }
+
     /// The values of subject `s_idx` that the fields of `spec` show.
     fn values(
         &self,
@@ -578,6 +642,7 @@ pub(super) fn write_blastp_tax_report(
         TabularSubjects::Records { .. } => None,
         TabularSubjects::Database { loads, .. } => Some(*loads),
     };
+    let seen = |q_idx: usize, s_idx: usize| tab.subjects.seen_at(q_idx, s_idx);
     let report = report_batch(
         &queries,
         parsed,
@@ -587,6 +652,7 @@ pub(super) fn write_blastp_tax_report(
         tab.names,
         tab.app.name(),
         html,
+        Some(&seen),
     )?;
     write_report(writer, warnings, &queries, &report)?;
     Ok(())
@@ -630,10 +696,11 @@ fn write_tabular_rows<const RPS: bool>(
     // The refusals of `sall*` (`ParsedSubject::all_tabular_ids`) come before the first byte;
     // those of the other ids are made with them (`tabular_subject_ids`).
     if needs.all_deflines {
-        for hit_list in hit_lists.iter().flatten() {
-            for hsp_list in reported(hit_list) {
+        for (q_idx, hit_list) in hit_lists.iter().enumerate() {
+            for hsp_list in hit_list.iter().flat_map(reported) {
                 if let Some(first) = hsp_list.hsps.first() {
-                    tab.subjects.values(first.s_idx as usize, spec, tab.app)?;
+                    tab.subjects
+                        .values_for(q_idx, first.s_idx as usize, spec, tab.app)?;
                 }
             }
         }
@@ -726,7 +793,7 @@ fn write_tabular_rows<const RPS: bool>(
                 continue;
             };
             let s_idx = first.s_idx as usize;
-            let values = tab.subjects.values(s_idx, spec, tab.app)?;
+            let values = tab.subjects.values_for(q_idx, s_idx, spec, tab.app)?;
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:595-605
             // The HSPs of one subject are one group of `InsertSubjectScores` (a hit list holds a
             // subject once); `qcovus` is blastn's only (blast_format.cpp:818-820).
@@ -749,7 +816,7 @@ fn write_tabular_rows<const RPS: bool>(
             // (`TabularRows::last_found`), made again from its index.
             let kept_values = match table_rows.last_found() {
                 Some(kept) if table.fails(&subject) => {
-                    Some(tab.subjects.values(kept, spec, tab.app)?)
+                    Some(tab.subjects.values_for(q_idx, kept, spec, tab.app)?)
                 }
                 _ => None,
             };

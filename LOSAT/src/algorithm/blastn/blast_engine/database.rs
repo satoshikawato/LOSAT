@@ -1682,6 +1682,12 @@ pub(super) fn fetch_refusal(failed: (u32, crate::seqdb::SeqDbError)) -> anyhow::
 }
 
 impl BlastnDatabase {
+    /// Whether a load of a sequence with a positive taxid can write a text or throw in this run
+    /// (`shared::TaxdbRun::loads_write_texts`).
+    pub(super) fn loads_write_texts(&self) -> bool {
+        self.taxdb.loads_write_texts(&self.db)
+    }
+
     /// The titles of the sequences that the final hit lists `hit_lists` of a query batch name,
     /// read where NCBI makes the batch's Seq-aligns ([`read_titles`], into the titles of `reads`),
     /// after those of no Seq-align leave the lists ([`drop_unaligned`]) and after the batch's

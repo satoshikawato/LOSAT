@@ -225,6 +225,7 @@ pub(super) fn write_tblastn_tabular(
             lengths: &lengths,
             taxonomy: &tab.inputs.taxonomy,
             loads: &reported.loads,
+            seen: Default::default(),
         },
     };
     let names = tab.inputs.names.as_ref();

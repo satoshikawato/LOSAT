@@ -139,9 +139,10 @@ impl MappedFile {
 /// One reader's view of a [`MappedFile`] (a [`GiMaskReader`]'s, kept from one sequence to the
 /// next): the chunk it read last, kept, so that the numbers it reads next from that chunk are
 /// read in place, with no lookup of the chunk and no error to return. The binary searches of a
-/// run of sequences read the index from one chunk (an index of up to 16,384 pages; a few for a
-/// larger one), the pages of the offset file from one chunk per 16 pages of 512 GIs, and the
-/// `.nog` from one chunk per 16,384 sequences. A number across a chunk's end, or outside the
+/// run of sequences read the index's keys from one chunk (where the header and the keys, 4
+/// bytes a page, fit in 64 KiB: about 16,000 pages, 8 million GIs; a few chunks for a larger
+/// index), the pages of the offset file from one chunk per 16 pages of 512 GIs, and the `.nog`
+/// from one chunk per 16,384 sequences. A number across a chunk's end, or outside the
 /// file, is read by [`MappedFile::read_at`], with its error. Before (review round of M4c-2,
 /// 2026-11-24), each number looked its chunk up and returned its own `Result`: 44 % of a masked
 /// search's cycles on a database of 1,000,000 sequences.

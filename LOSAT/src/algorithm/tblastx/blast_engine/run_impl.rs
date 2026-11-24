@@ -4513,7 +4513,10 @@ impl BatchReports<'_> {
                     )
                 }) =>
             {
-                database.read_taxids(shown.reported, (&hits, done.searched.len(), &done.spans))?
+                database.read_taxids(
+                    shown.reported,
+                    (&hits, done.searched.len(), &done.spans, prefetch_format),
+                )?
             }
             _ => Default::default(),
         };

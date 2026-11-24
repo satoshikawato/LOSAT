@@ -297,13 +297,18 @@ impl TblastxDatabase {
     /// query's report, which NCBI never loads, so that the taxonomy database's one-time texts go
     /// with the next `Hit` that it loads; review 1 of DBID pfoff-1, H1).
     ///
-    /// `(ordered, queries, spans)`: the reported hits in report order (subjects by rank) of
-    /// `queries` queries and the queries of each batch, for NCBI's loads by batch
+    /// `(ordered, queries, spans, format)`: the reported hits in report order (subjects by rank) of
+    /// `queries` queries, the queries of each batch and the run's first format, for NCBI's loads by batch
     /// (`shared::XmlBatchLoads`, `batches_prefetch`; asked only where they decide the texts).
     pub(crate) fn read_taxids(
         &self,
         reported: &ReportedSubjects,
-        (ordered, queries, spans): (&[TblastxHsp], usize, &[std::ops::Range<usize>]),
+        (ordered, queries, spans, format): (
+            &[TblastxHsp],
+            usize,
+            &[std::ops::Range<usize>],
+            shared::PrefetchFormat,
+        ),
     ) -> Result<XmlTaxa> {
         let ranks: std::collections::BTreeSet<usize> = (0..reported.ordinals.len())
             .filter(|rank| reported.loads.loaded(*rank))
@@ -313,7 +318,7 @@ impl TblastxDatabase {
             shared::XmlBatchLoads::of(
                 queries,
                 spans,
-                &batches_prefetch(ordered, queries, spans),
+                &batches_prefetch(format, ordered, queries, spans),
                 &reported.loads,
                 |query| {
                     let mut seen = std::collections::HashSet::new();

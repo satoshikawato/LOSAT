@@ -534,7 +534,7 @@ impl BlastnDatabase {
         parsed: &[Option<Arc<ParsedSubject>>],
         hit_lists: &[Option<BlastnHitList>],
         loads: &HitLoads,
-        (spans, gapped): (&[std::ops::Range<usize>], bool),
+        (spans, gapped, format): (&[std::ops::Range<usize>], bool, shared::PrefetchFormat),
     ) -> Result<(
         Vec<i32>,
         Vec<crate::report::blast_xml::HitTaxonomy>,
@@ -554,7 +554,7 @@ impl BlastnDatabase {
             shared::XmlBatchLoads::of(
                 hit_lists.len(),
                 spans,
-                &batches_prefetch(hit_lists, 0, spans, gapped),
+                &batches_prefetch(format, hit_lists, 0, spans, gapped),
                 loads,
                 |query| {
                     hit_lists[query]

@@ -18,8 +18,8 @@
 //! 100-199), step back, and its chunk goes to the chains (`x_pair_seed_disc.rs`
 //! `latest_ranges_ascend`, counted as `back=` on the `[TIMING] x_dc_latest:` line), the other four
 //! take the maps.
-//! That those bytes equal NCBI's is the business of the fixture suites (the soft-masked search's
-//! `=0` report equals NCBI BLAST+ 2.17.0's, gapped and `-ungapped`, checked 2026-11-23).
+//! This test compares the default with `=0` only and runs no NCBI BLAST+. That the `=0` bytes
+//! equal NCBI's is the business of the fixture suites.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

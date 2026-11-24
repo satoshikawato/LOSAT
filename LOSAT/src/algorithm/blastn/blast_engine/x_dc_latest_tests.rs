@@ -166,6 +166,37 @@ fn begin_empties_the_map_only_where_a_level_may_be_live() {
     assert_eq!(map.entries, 0);
 }
 
+// A map that was never begun is a valid empty map (`find` and `put` index unchecked): it finds
+// nothing, takes inserts, grows with them, and `begin` then makes it its first size.
+#[test]
+fn a_map_never_begun_is_a_valid_empty_map() {
+    let seeds = LvSeeds::new(true, 16, 40);
+    let mut map = DiagLatest::default();
+    assert!(map.bits < MIN_BITS);
+    assert_eq!(map.buckets.len(), 1 << map.bits);
+    let s = 1_000i32;
+    let bound = seeds.bound(s as usize);
+    let found = map.find(12_345, s);
+    assert_eq!((found.level, found.saved, found.at), (0, false, MISS));
+    map.put(found, 12_345, 1_500, true, s, bound);
+    let found = map.find(12_345, s);
+    assert_eq!((found.level, found.saved), (1_500, true));
+    // enough live diagonals to fill the two buckets and the stash: the map grows
+    for (k, &diag) in crowded(120).iter().enumerate() {
+        let found = map.find(diag, s);
+        map.put(found, diag, 2_000 + k as i32, false, s, bound);
+    }
+    assert!(map.bits > 1);
+    let found = map.find(12_345, s);
+    assert_eq!((found.level, found.saved), (1_500, true));
+    // `begin` on it gives the first size of a new map, keeping the entries (live at the next
+    // stage's first position or not, as for any map)
+    let mut fresh = DiagLatest::default();
+    fresh.begin(seeds.bound(40));
+    assert_eq!(fresh.bits, MIN_BITS);
+    assert_eq!(fresh.buckets.len(), 1 << MIN_BITS);
+}
+
 // The stash: diagonals crowding one home bucket go there once its slots are taken by live
 // entries; each is found while live, a dead one's place is taken again, and past the bucket's
 // `stash_until` the stash is not read. The map grows while it has fewer than two buckets per
@@ -194,6 +225,7 @@ fn crowded_diagonals_go_to_the_stash_and_the_map_grows_with_its_entries() {
     // all 200 live: 7 in the home slots at most, the rest in the stash, and the buckets doubled
     // while fewer than twice the entries
     assert!(map.stash.len() >= 200 - SLOTS as usize);
+    assert!(map.bits > MIN_BITS, "the map did not grow");
     assert!(map.buckets.len() >= 2 * STASH);
     assert!(
         map.buckets.len() <= 4 * map.entries,

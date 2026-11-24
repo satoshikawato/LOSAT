@@ -1151,6 +1151,96 @@ fn plain_table(window: usize, offset: i32) -> DiagHashTable {
     h
 }
 
+/// `fold_two_hit_t::<PT, LEAN, MEMO, TRACK>` (the chains' own fold) against `fold_two_hit_on` on
+/// `Chains` of the same constants, from equal tables: the hits, the table (with its level bounds
+/// and memo), the counts, and what a partition's fold writes to `out`.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn copies_agree_in<const PT: bool, const LEAN: bool, const MEMO: bool, const TRACK: bool>(
+    x: &Inputs<'_>,
+    seeds: &[Seed],
+    w: usize,
+    offset: i32,
+    levels: bool,
+    at: &str,
+) {
+    let table = || {
+        let mut h = plain_table(w, offset);
+        if levels {
+            h.x_lv_start();
+        }
+        if MEMO {
+            h.x_lv2_start();
+        }
+        h
+    };
+    let pos: Vec<u32> = (0..seeds.len() as u32).collect();
+    let at = format!("{at}: PT {PT} LEAN {LEAN} MEMO {MEMO} TRACK {TRACK} levels {levels}");
+    let (mut own, mut own_hits, mut own_out) =
+        (table(), Vec::new(), part::PartOut::of_test_strip(TRACK));
+    let mut own_counts = FoldCounts::default();
+    fold_two_hit_t::<PT, LEAN, MEMO, TRACK>(
+        x,
+        seeds,
+        &mut own,
+        &mut own_hits,
+        None,
+        &mut 0,
+        &mut own_counts,
+        &mut own_out,
+        if PT { &pos } else { &[] },
+    );
+    let (mut hash, mut hits, mut out) = (table(), Vec::new(), part::PartOut::of_test_strip(TRACK));
+    let mut counts = FoldCounts::default();
+    fold_two_hit_on::<PT, LEAN, _>(
+        x,
+        seeds,
+        &mut Chains::<PT, LEAN, MEMO, TRACK>::new(x, &mut hash),
+        &mut hits,
+        None,
+        &mut 0,
+        &mut counts,
+        &mut out,
+        if PT { &pos } else { &[] },
+    );
+    assert_eq!(hit_keys(&own_hits), hit_keys(&hits), "{at}: hits");
+    assert!(hash_state(&own) == hash_state(&hash), "{at}: table");
+    assert_eq!(own.max_level, hash.max_level, "{at}: level bounds");
+    assert_eq!(own.x_last, hash.x_last, "{at}: memo");
+    assert_eq!(
+        (own_counts.seeds, own_counts.skipped),
+        (counts.seeds, counts.skipped),
+        "{at}: counts"
+    );
+    assert_eq!(own_out.recorded(), out.recorded(), "{at}: out");
+}
+
+/// `copies_agree_in` for every instance the production folds use: `fold_two_hit` (PT either,
+/// LEAN either, MEMO either, TRACK on) and the partitions' lists (`seed_stage_lists`: PT, LEAN
+/// either, MEMO either, TRACK off); a table with level bounds where it has a memo, with and
+/// without them where it has none.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn copies_agree_in_every_instance(x: &Inputs<'_>, seeds: &[Seed], w: usize, offset: i32, at: &str) {
+    macro_rules! each {
+        ($pt:literal, $track:literal) => {
+            for levels in [false, true] {
+                copies_agree_in::<$pt, false, false, $track>(x, seeds, w, offset, levels, at);
+                copies_agree_in::<$pt, true, false, $track>(x, seeds, w, offset, levels, at);
+            }
+            copies_agree_in::<$pt, false, true, $track>(x, seeds, w, offset, true, at);
+            copies_agree_in::<$pt, true, true, $track>(x, seeds, w, offset, true, at);
+        };
+    }
+    each!(false, true);
+    each!(true, true);
+    each!(true, false);
+}
+
 // EXPERIMENT (LOSAT_X_DCLATEST): seed by seed, the fold on the map of the latest inserts makes the
 // decisions (rejected, two-hit branch) and the inserts of the fold on the chains, and gives its
 // hits (and that fold on the chains gives the hits and the table of `fold_two_hit_t`, the chains'
@@ -1244,6 +1334,8 @@ fn the_fold_on_the_map_makes_the_decisions_of_the_chains() {
                             hash_state(&own) == hash_state(&hash),
                             "{at}: fold_two_hit_t's table"
                         );
+                        // and so in every instance of the production folds
+                        copies_agree_in_every_instance(&xw, &seeds, w, diag_offset as i32, &at);
                         let mut map = DiagLatest::default();
                         map.begin(lv.bound(diag_offset as usize));
                         let (mut map_reads, mut map_inserts, mut map_hits) =

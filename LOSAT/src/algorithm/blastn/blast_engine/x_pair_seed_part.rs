@@ -43,10 +43,14 @@
 //! fold it only in the cases `seed_stage_home` lists; the argument below needs only that each
 //! partition folds its strips in order with one folder at a time, which both ways keep.
 //!
-//! Every stage copies the stage's table into every partition's table (`rebuild`), so the
-//! partition tables never carry anything from one stage to the next; only their allocations
-//! (and those of the strip and merge buffers) stay in the subject scratch (`PartScratch`, a
-//! field of `run.rs` `SubjectScratch`).
+//! Every stage on the chains copies the stage's table into every partition's table
+//! (`rebuild`), so the partition tables never carry anything from one stage to the next; only
+//! their allocations (and those of the strip and merge buffers) stay in the subject scratch
+//! (`PartScratch`, a field of `run.rs` `SubjectScratch`). With LOSAT_X_DCLATEST the strips stage
+//! folds on the maps instead and copies no table (`rebuild` calls `DiagLatest::begin` on each
+//! partition's map): the maps (`PartState::latest`) carry their entries from stage to stage,
+//! all dead at the next stage's start (module comment (vii) of `x_dc_latest.rs`), and are emptied
+//! after the offset's clear.
 //!
 //! Why the output is the same:
 //! - A seed's fold reads and writes the table only through its own diagonal's bucket: the
@@ -174,6 +178,35 @@ pub(super) struct PartOut {
     latest: bool,
     pub(super) ungapped_ns: u64,
     pub(super) ungapped_calls: u64,
+}
+
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+impl PartOut {
+    /// Tests of the folds with partitions (`PT`): an `out` as a partition's has it, for the
+    /// stage of strip 3 whose folds record their buckets (`track`) or not (`all_dirty`).
+    pub(super) fn of_test_strip(track: bool) -> Self {
+        PartOut {
+            strip: 3,
+            touched: vec![false; DIAGHASH_NUM_BUCKETS],
+            all_dirty: !track,
+            ..PartOut::default()
+        }
+    }
+
+    /// Everything a fold wrote here: the keys of its hits and of its appending inserts, the
+    /// buckets it changed, and its count of ungapped extensions.
+    pub(super) fn recorded(&self) -> (Vec<u64>, Vec<(u64, u32)>, Vec<u16>, u64) {
+        (
+            self.hit_keys.clone(),
+            self.appends.clone(),
+            self.dirty.clone(),
+            self.ungapped_calls,
+        )
+    }
 }
 
 impl PartOut {

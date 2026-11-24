@@ -94,9 +94,11 @@
 //!   the reference fold inserted between the stages, which the map never sees; and the map's
 //!   inserts never reach the chains, whose cells of the chunk are dead at the next chunk too).
 //!   `begin` checks this at each stage's start with `top`, an upper bound of the levels the map
-//!   holds, and empties the map where it fails, which happens only after the offset was cleared
-//!   (at a quarter of the largest Int4), where NCBI empties its table: there the old levels lie above the new
-//!   offset and would reject seeds.
+//!   holds, and empties the map where it fails. That happens only after the offset was cleared
+//!   (at a quarter of the largest Int4, where NCBI empties its table: there the old levels lie
+//!   above the new offset and would reject seeds), because the map and `diag_hash` share one
+//!   `SubjectScratch` and are made together: the clear that empties `diag_hash` is the one that
+//!   leaves the map's levels above the new offset, and no other event moves the offset back.
 //!
 //! The layout: buckets of one cache line, `Bucket`, with 7 slots each (the diagonals, the levels,
 //! and in the eighth lanes the bucket's `stash_until` and its slots' `hit_saved` bits); a home
@@ -131,6 +133,9 @@ const NO_LEVEL: i32 = i32::MIN;
 const STASH: usize = 32;
 /// The buckets of a new map, as a power of two (64 buckets, 4 KiB).
 const MIN_BITS: u32 = 6;
+/// The buckets of a map that was never begun (`Default`), as a power of two: the smallest table
+/// `home` can index (2 buckets, 128 bytes).
+const UNBEGUN_BITS: u32 = 1;
 /// How many seeds ahead the fold brings in a seed's home bucket.
 pub(super) const AHEAD: usize = 8;
 
@@ -207,12 +212,17 @@ pub(super) struct DiagLatest {
     last_s: i32,
 }
 
+// A map made without `begin` is a valid empty map of `UNBEGUN_BITS`, not an empty Vec: `find` and
+// `put` index the buckets unchecked (the per-seed path has no room for a test), and an empty
+// Vec with `bits` 0 would make `home` shift a u32 by 32 and index past the end. Here `home`
+// and the Vec agree from the start, whoever calls first; `begin` makes the map its first
+// `MIN_BITS` buckets (while `bits` is below that), which costs the per-seed path nothing.
 impl Default for DiagLatest {
     fn default() -> Self {
         DiagLatest {
-            buckets: Vec::new(),
-            bits: 0,
-            shift: 32,
+            buckets: vec![EMPTY; 1 << UNBEGUN_BITS],
+            bits: UNBEGUN_BITS,
+            shift: 32 - UNBEGUN_BITS,
             stash: Vec::new(),
             entries: 0,
             top: i32::MIN,
@@ -318,7 +328,7 @@ impl DiagLatest {
     /// (`LvSeeds::bound` of the stage's hash offset): a new map gets its buckets; a map whose
     /// levels may not all lie below `bound0` is emptied ((vii): only after the offset's clear).
     pub(super) fn begin(&mut self, bound0: i32) {
-        if self.buckets.is_empty() {
+        if self.bits < MIN_BITS {
             self.alloc(MIN_BITS);
         } else if bound0 == i32::MIN || self.top >= bound0 {
             self.clear();
@@ -371,7 +381,7 @@ impl DiagLatest {
     pub(super) fn find(&self, diag: i32, s: i32) -> Found {
         let b = self.home(diag);
         debug_assert!(b < self.buckets.len());
-        // SAFETY: `home` is below 2^bits, the number of buckets (`begin` made them).
+        // SAFETY: `home` is below 2^bits, the number of buckets (`Default`, `alloc` made them).
         let bucket = unsafe { self.buckets.get_unchecked(b) };
         let found = eq_mask(&bucket.diag, diag) & SLOT_MASK;
         if found != 0 {

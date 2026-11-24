@@ -21,6 +21,7 @@
 
 mod hooks;
 pub(crate) mod read;
+pub(crate) mod read_xml;
 pub(crate) mod seq_id;
 mod typed;
 pub(crate) mod write;
@@ -34,6 +35,8 @@ mod read_ber_tests;
 mod read_pointer_tests;
 #[cfg(test)]
 mod read_tests;
+#[cfg(test)]
+mod read_xml_tests;
 #[cfg(test)]
 mod write_tests;
 
@@ -277,6 +280,23 @@ pub(crate) fn resolved(mut ty: u16) -> &'static TypeInfo {
             _ => return type_info(ty),
         }
     }
+}
+
+/// The SEQUENCE and its member that NCBI reads into a delay buffer (`DELAYED`) whose type is
+/// `ty` (`Auth-list.names`, the one of the table).
+pub(crate) fn delayed_member(ty: u16) -> (u16, &'static Member) {
+    table::TYPES
+        .iter()
+        .enumerate()
+        .find_map(|(class, info)| match info.kind {
+            Kind::Sequence(span) => span
+                .members()
+                .iter()
+                .find(|member| member.flags & DELAYED != 0 && member.ty == ty)
+                .map(|member| (class as u16, member)),
+            _ => None,
+        })
+        .expect("a delayed member of the table")
 }
 
 /// The members or variants of the SEQUENCE or CHOICE `ty`.

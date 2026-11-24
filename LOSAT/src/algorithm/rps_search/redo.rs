@@ -22,6 +22,7 @@
 use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
+use super::profile::ProfileRead;
 use super::traceback::{sort_by_score, swap_roles, RpsTraceScratch, RpsTraceback, RpsTraced};
 use super::RPS_K_MULT;
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
@@ -139,18 +140,18 @@ impl RpsTraceback<'_> {
         };
         for list in lists {
             let oid = list.oid as usize;
-            let start = self.offsets[oid] as usize;
-            let length = (self.offsets[oid + 1] - self.offsets[oid] - 1) as usize;
             k_mark = Some(list.oid);
             if list.hsps.is_empty() {
                 continue;
             }
-            let consensus = &self.consensus.letters()?[start..start + length];
-            redo.files
-                .freq_ratios(start, length, &mut scratch.freq_bytes, &mut scratch.ratios)
-                .map_err(|error| {
-                    anyhow::anyhow!("a profile database whose .freq file cannot be read ({error}) is not supported by LOSAT's {program}")
-                })?;
+            // The profile as NCBI's traceback reads it (`TracebackProfile`): `L_pin` (its `.pin`
+            // length) the redo's query length, its `.psq` letters the redo's query, `L_pin`
+            // frequency-ratio rows from its offset (read A), then its composition (read B).
+            let profile = self.letters.profile(list.oid, self.offsets, program)?;
+            let length = profile.length();
+            let consensus = profile.letters();
+            profile.freq_rows(redo.files, &mut scratch.freq_bytes, &mut scratch.ratios)?;
+            profile.composition()?;
             let Some(info) = PosMatrixInfo::new(
                 consensus,
                 &scratch.ratios,
@@ -181,6 +182,8 @@ impl RpsTraceback<'_> {
             matrix.rows.clear();
             matrix.rows.resize(length, [0; 28]);
             let k = RPS_K_MULT * self.karlin_k[oid];
+            // The redo's reads of the profile (reads C and D, `RedoRun::with_profile_reads`).
+            let reads = profile.trace_reads(ProfileRead::Start);
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2380-2383
             // `options->gap_x_dropoff_final` is the search's final X-drop in bits
             // (`-xdrop_gap_final`; `RpsRun::gapped_x_drops` has checked the conversion).
@@ -198,7 +201,8 @@ impl RpsTraceback<'_> {
                 matrix,
                 std::mem::take(&mut scratch.gap),
             )
-            .with_bound_check();
+            .with_bound_check()
+            .with_profile_reads(&reads);
             if !context_0_valid {
                 run = run.without_valid_context();
             }
@@ -239,6 +243,8 @@ impl RpsTraceback<'_> {
             };
             let exceeded = run.bound_exceeded();
             let (matrix, gap) = run.into_buffers();
+            // The first read of the redo that left NCBI's data (reads C and D).
+            profile.check()?;
             // The bound of every matrix the adjustments built (`RedoRun::with_bound_check`).
             if let Some(bound) = exceeded {
                 anyhow::bail!(

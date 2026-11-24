@@ -18,7 +18,7 @@ use crate::algorithm::rps_search::engine::{
     batch_gapped_k, RpsFrame, RpsQuery, RpsRun, RpsSearch, RpsWorkers,
 };
 use crate::algorithm::rps_search::volumes::{
-    mask_unsupported_letters, merge_volume, report_ordinal_ids, shift_ordinal_ids, Consensus,
+    mask_unsupported_letters, merge_volume, report_ordinal_ids, shift_ordinal_ids, ProfileLetters,
     RpsUnits, RpsVolumeError, RpsVolumeSet, RpsVolumeSetup,
 };
 use crate::algorithm::tblastx::lookup::{
@@ -553,7 +553,7 @@ pub(super) fn rps_search(
         for (number, batch) in engine
             .search_volume(
                 &files,
-                &Consensus::new(&setup, volume, &files),
+                &ProfileLetters::new(&setup, volume, starts[index]),
                 pool,
                 &workers,
             )?
@@ -681,7 +681,7 @@ pub(super) fn request_space(
 /// The run's error when the query batch `batch` of `run.batches` fails (`rps_search`). NCBI reads,
 /// writes the search strategy request of, searches and reports one batch before it reads the next,
 /// so an error of its own in a batch's search (a profile volume's sequence file that the batch's
-/// traceback reads, `Consensus`: `BLAST Database error`, exit status 2) ends the run after the
+/// traceback reads, `ProfileLetters`: `BLAST Database error`, exit status 2) ends the run after the
 /// reports of the batches before it (without the epilog) and after that batch's reader messages
 /// and request. That is the error of a header file that a batch reaches (`HeaderReadError`, named
 /// by the batch's first query), whose batches before blastp's driver searches again and reports

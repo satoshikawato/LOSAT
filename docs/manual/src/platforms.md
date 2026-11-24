@@ -76,6 +76,8 @@ node LOSAT/tests/run_losat_wasi_threads.js losat-threads.wasm blastn -query quer
 
 Both archives contain a file called `losat.wasm`. Rename them, or keep them in separate folders, as the two examples above suggest. The runner takes the module first, then the arguments of `losat`. It passes the environment, including `TZ`, sets `PWD` to the current directory, and gives the module `/`. Node.js prints a warning that WASI is experimental; this is Node's message and does not change the output.
 
+Where NCBI BLAST+ aborts, `losat` aborts too (for example when a tabular report cannot be written). WASI has no signals, so the module stops with a trap there. The runners end that trap as the native `losat` ends: with the abort signal (exit status 134 in a shell), after the module's own messages. Other hosts report the trap in their own way.
+
 ### Other WASI hosts
 
 Any host that implements WASI preview 1 can run `losat.wasm`, if it gives the module the working directory and the files (see above). LOSAT is tested with Node.js, through the runners in `LOSAT/tests` described above; other hosts are not part of the tests. The threaded module needs a host that supports shared memory and WASI threads; use the Node.js runner unless your host documents that support.

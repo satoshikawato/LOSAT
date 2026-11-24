@@ -110,6 +110,15 @@ impl BlastpApp {
             BlastpApp::Rpsblast => "RPSBLAST",
         }
     }
+
+    /// The application's name in NCBI's posts (`[psiblast]`).
+    pub fn post_name(self) -> &'static str {
+        match self {
+            BlastpApp::Blastp => "blastp",
+            BlastpApp::Psiblast => "psiblast",
+            BlastpApp::Rpsblast => "rpsblast",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

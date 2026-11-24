@@ -528,6 +528,12 @@ def classify(ncbi: subprocess.CompletedProcess, ours: subprocess.CompletedProces
     return f"DIFF exit {ncbi.returncode}/{ours.returncode}"
 
 
+# Optional NCBI-side substitution, empty here: {case: (word, near_word, label)}. A later layer fills it
+# for a case whose NCBI result is compared at another argument value (NCBI's run replaces `word` with
+# `near_word`); a `same` result is then reported as `label`.
+NCBI_NEAR: dict[str, tuple[str, str, str]] = {}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--bin-dir", type=Path, required=True)
@@ -567,7 +573,9 @@ def main() -> int:
                 Path(f"{out_fifo}.read").unlink(missing_ok=True)
                 os.mkfifo(out_fifo)
                 reader = subprocess.Popen(["sh", "-c", f"cat '{out_fifo}' > '{out_fifo}.read'"])
-            words = [*command, *(str(out) if word == "{OUT}" else word for word in argv)]
+            near = NCBI_NEAR.get(name) if label == "ncbi" else None
+            words = [*command, *(str(out) if word == "{OUT}" else near[1] if near and word == near[0] else word
+                                 for word in argv)]
             try:
                 if stdin_file:
                     with open(ENGINE / stdin_file, "rb") as handle:
@@ -602,6 +610,8 @@ def main() -> int:
             runs.append(run)
         ncbi, ours = runs
         result = "timeout" if -9 in (ncbi.returncode, ours.returncode) else classify(ncbi, ours)
+        if result == "same" and name in NCBI_NEAR:
+            result = NCBI_NEAR[name][2]
         if result != expect:
             unexpected.append(name)
         first = ours.stderr.decode(errors="replace").strip().splitlines()

@@ -135,8 +135,9 @@
 //!   places let one batch be searched at a time where a batch takes all of them: q200k against
 //!   `ov_atha` with `-use_sw_tback` and `BATCH_SIZE` 40000 (4 places a batch) took 1.095 / 1.068
 //!   / 1.009 times the wall of the split's units at 4 / 8 / 16 threads, its threads idle at the
-//!   end of each batch's redo (fix round 8; ws node 1, 5 rounds). It is left the threads of its
-//!   places (`whole_batch_threads`:
+//!   end of each batch's redo; given back at the end of the scan, 1.018 / 1.016 / 0.949 times
+//!   (fix round 8; ws node 1, 5 rounds, CPU time equal, max RSS 39.0 / 59.0 / 80.8 MB against the
+//!   split's 60.0 / 78.6 / 81.2). It is left the threads of its places (`whole_batch_threads`:
 //!   one per place without the cap, a unit's share under it, at most all of them). These threads
 //!   take its subjects as the flow's tasks, `LOSAT_X_BXCAPFILL`'s f tasks for each of them, and
 //!   no more threads than have f tasks (`flow_subjects_per_task`, `flow_threads`: each holds a

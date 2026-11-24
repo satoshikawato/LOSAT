@@ -9620,7 +9620,7 @@ struct SearchedCall<'a> {
     x_meta: Option<&'a x_subject_meta::XSubjectMeta>,
     subject_titles: std::borrow::Cow<'a, [Arc<[u8]>]>,
     gapped_params: KarlinParams,
-    gapped_gumbel: Option<crate::stats::gumbel::BlastGumbelBlk>,
+    gapped_gumbel: Option<BlastGumbelBlk>,
     contexts: Vec<QueryContext>,
     query_batches: Vec<seq_range::RangedBatch>,
     query_valid: Vec<bool>,
@@ -9652,7 +9652,7 @@ struct SearchedCall<'a> {
 struct CallPrefetch<'a> {
     record_titles: Option<Vec<Arc<[u8]>>>,
     report_contexts: Option<Vec<QueryContext>>,
-    engine_counts: EngineCounts,
+    engine_counts: super::seqalign::EngineCounts,
     psi_found_before: Option<psi_round::FoundBefore>,
     psiblast_hits_found: Option<Vec<usize>>,
     psiblast_pssms: Option<crate::algorithm::psiblast::pssm::PssmFiles>,
@@ -9666,7 +9666,7 @@ struct CallPrefetch<'a> {
     query_warning_lines: Vec<Vec<u8>>,
     kept: Option<Vec<Vec<u8>>>,
     prefetched: report_prep::ReportedPrefetch,
-    subject_start_exception: Option<crate::cli::NcbiException>,
+    subject_start_exception: Option<crate::ncbi_exception::NcbiException>,
     subject_accessions: Vec<Option<[Arc<[u8]>; 2]>>,
     records_parsed: Vec<Option<Arc<crate::report::db_subject::ParsedSubject>>>,
     subject_ids: std::borrow::Cow<'a, [crate::algorithm::common::tabular::SubjectId]>,
@@ -9687,7 +9687,7 @@ struct CallRows<'r> {
     query_records: &'r [FastaRecord],
     ranges: &'r BlastpRanges<'r>,
     hit_lists: &'r [Option<BlastpHitList>],
-    engine_counts: &'r EngineCounts,
+    engine_counts: &'r super::seqalign::EngineCounts,
     report_contexts: &'r [QueryContext],
     subjects: &'r [EncodedProtein],
     shown_subjects: ShownSubjects<'r>,
@@ -10874,7 +10874,7 @@ fn prefetch_call<'a>(
         &mut psiblast_pssms,
     )
     .map_err(|error| database::HeaderReadError::after_reads(error, reads.utf8()))?;
-    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:365-366
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:364-365,490-491
     // deltablast's prefetch of the batch comes before its reports: its posts are written here
     // (`posts_as_made`), the others' with their batch's first report.
     if posts_as_made(&args) {

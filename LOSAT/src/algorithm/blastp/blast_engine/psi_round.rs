@@ -776,6 +776,9 @@ fn search_delta_batch(
         }
         cdd_queries.push(cdd.query);
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:353,405
+    // `SavePssmToFile` of the batch's first PSSM: after the searches of the batch
+    // (`CDeltaBlast::Run` has returned), before its prefetch.
     if let Some(first) = first_pssm.as_ref() {
         write_round_pssm(args, files, first, outputs)?;
     }
@@ -1188,7 +1191,7 @@ fn run_queries(
                         first_outcome.expect("a round searches at least one result")
                     }
                 };
-                // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:503-516
+                // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:507-516
                 // deltablast's later rounds are the batch's first query's (`(*results)[0]`): the
                 // other queries of the batch end with round 1.
                 if !group_first {

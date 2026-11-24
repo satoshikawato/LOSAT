@@ -8,6 +8,8 @@
 
 #[path = "../run_local_tblastn.rs"]
 mod run_local_tblastn;
+#[path = "../tblastn_batch_refusal.rs"]
+mod tblastn_batch_refusal;
 #[path = "../tblastn_batch_rule.rs"]
 mod tblastn_batch_rule;
 #[path = "../tblastn_culling.rs"]

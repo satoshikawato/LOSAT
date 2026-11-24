@@ -301,7 +301,7 @@ fn a_nest_of_any_depth_is_written_without_recursion() {
         fn real(&mut self, _: f64) {}
         fn octets(&mut self, _: &[u8]) {}
         fn null(&mut self) {}
-        fn null_element(&mut self) {}
+        fn null_element(&mut self, _: &str) {}
         fn utf8_str(&mut self, _: &[u8]) {}
         fn delayed(&mut self, _: &[u8]) {}
         fn unread_delayed(&mut self) {}

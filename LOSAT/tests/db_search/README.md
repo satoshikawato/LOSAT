@@ -158,6 +158,24 @@ FASTA files:
   the same words and their reverse complements (`m11`, `m12`, frame -1) at 9, 11 and 12 bases, and `h11`/`h12`
   (`ATGCATTATTT`, M H Y in frame +1) for the PSSM `x2d_d50.asn.gz`, whose motif rows 18-20 score M H Y +25 each. `xs_long32_s.fna` is
   `w11` followed by 21 A, searched in `-subject_loc` 1-11 and 1-12 (NCBI measures the range).
+  `xsb_*` (rows `db.xs.tblastn.bat.*`, line RG item X-short-bat): two query batches (`BATCH_SIZE=1`) whose second
+  is refused there. `xsb_qa.faa` is `qa` (31 residues); `xsb_s.fna` is `pa`, its back-translation (93 bases), then
+  `w11`: `qa` hits only `pa`. `xsb_q.faa` is `qa` then `q` (`MHYWWW`), `xsb_k.faa` is `qk` (`SRPP`, which hits only
+  `w12` of `xs_w12w11`) then `q`, and `xsb_ql.faa` is `qa` then `ql` (`qa` ten times, 310 residues, which
+  `CHUNK_SIZE=100 OVERLAP_CHUNK_SIZE=80` split into chunks that NCBI would split again, and
+  `CHUNK_SIZE=-100 OVERLAP_CHUNK_SIZE=-200` into a first wrapped chunk that covers it and chunks without a query, at
+  which NCBI's `CQuerySplitter::Split` stops first), and `xsb_qg.faa` is `qa` then `qg` (`qa` eight times, 248
+  residues, which `CHUNK_SIZE=-100 OVERLAP_CHUNK_SIZE=-200` split into 2 chunks with gaps between them, row
+  `db.xs.tblastn.bat.gap.6`). `xsb_qk.faa` is `qk` alone, row `db.xs.tblastn.bat.qk.6`, whose report is what NCBI writes
+  before it crashes in row `db.xs.tblastn.bat.db.6`, as row `db.xs.tblastn.bat.qa.6` (`.qa.7`) is for rows `.6` (`.7`).
+  Rows `db.xs.tblastn.bat.nosub.7` and `.nosubneg.7` search
+  `xsb_ql.faa` in `taxfilter/tfn` with `-negative_seqidlist seqidlist/sl_tfn_all.txt` (every id: no subject left),
+  where NCBI still splits `ql`'s batch and stops; `xsb_l.faa` is `ql` alone, one batch, for rows
+  `db.xs.tblastn.bat.min1*.6` on `aliaskeys/n_min1` (`MIN_SEQ_LENGTH 1`), where the setup of the first chunk that NCBI
+  searches fails (`The average subject length is too short`) unless a chunk stop comes first, and
+  `db.xs.tblastn.bat.e0.6` on `aliaskeys/e_nF` (volumes without an OID), whose setup fails to read the length of OID 0
+  (`Database memory map file error`), and `db.xs.tblastn.bat.nosq.6` on `arch_tbn_snucl_nonsq` (no sequence file), whose
+  search fails to read the first sequence of chunk 0 (the same error).
 
 - `x2f_c0384_q.fna` / `x2f_c0384_s.faa`, `x2f_c0326_q.fna` / `x2f_c0326_s.faa`: two random pairs of the line RG
   X2f survey (cases c0384 and c0326), rows `db.x2f.*`: with `-window_size 0` and a low `-threshold`, BLASTX's
@@ -1826,6 +1844,11 @@ Rows `db.archtitle.*.nosq.*` search databases without their sequence file:
   and `.nhr` are copies of `arch_tbn_snucl.nin` and `.nhr` (TBLASTN, BLASTN, TBLASTX). NCBI reads the sequence file first in
   the preliminary search of the first query batch with a valid context and fails that batch (`BLAST engine error: Database
   memory map file error`, exit 3); the batches before it are written.
+- `aliaskeys/p_nopsq_short.pal` (line RG item X-bpgap, fix round 6) is an alias over `arch_sprot_nopsq` with statistics of
+  2 letters in 3 sequences (`STATS_TOTLEN 2`, `STATS_NSEQ 3`): without the Gumbel block (`-searchsp`, `OLD_FSC`, an
+  ungapped search) the setup's average subject length (0) fails before the search's read of the missing sequence file,
+  and with it the read fails (rows `db.x4.chunk.avgdup.nps.*`). `../fasta/x4/chunk_gapvalid_tk.faa` is
+  `chunk_gapvalid.faa` then `chunk_tk.faa` (row `db.x4.chunk.neg.gapvalid.tk.nopsq.7`).
 - The queries `tests/fixtures/fasta_input/batch_title_unsearched.{prot.faa,nuc.fa}` and `batch_title_unsearched_next.*`
   hold `u1` and `u2`, 30 X (protein) or 90 N (nucleotide) only, which have no valid context, then the sequences of q2
   and q3 of `batch_title_first` as `q3` and `q4`; `café` is in the title of `u1` or of `q3`. With `BATCH_SIZE` 60 (180)

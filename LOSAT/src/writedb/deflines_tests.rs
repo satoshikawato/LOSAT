@@ -141,8 +141,10 @@ fn large_gis_skip_the_sequence_and_log_the_last_gi() {
 }
 
 // makeprofiledb's query with a descriptor stated as NULL (`Seqdesc::Empty`, line RG item D3c-3b's
-// reader): NCBI's `x_GetBioseqBinaryHeader` dereferences each descriptor, so the definition lines
-// are refused before any is made, wherever the empty one stands.
+// reader): NCBI's `x_GetBioseqBinaryHeader` dereferences each descriptor until it finds the binary
+// lines, so without them the definition lines stop at the empty one wherever it stands
+// (makeprofiledb 2.17.0, probe D3c-3c `probeB` B01-B03), and so does the taxid loop before the
+// first `org` (`first_org_taxid`).
 #[test]
 fn a_descriptor_stated_as_null_makes_no_definition_lines() {
     for descr in [
@@ -155,5 +157,11 @@ fn a_descriptor_stated_as_null_makes_no_definition_lines() {
             Err(BioseqDeflinesError::NullDescriptor),
             "{descr:?}"
         );
+        assert_eq!(
+            first_org_taxid(&descr),
+            Err(BioseqDeflinesError::NullDescriptor),
+            "{descr:?}"
+        );
     }
+    assert_eq!(first_org_taxid(&[Seqdesc::Title(b"t".to_vec())]), Ok(None));
 }

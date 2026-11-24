@@ -79,6 +79,9 @@ pub(super) struct PrelimRun<'a> {
     pub(super) query_batches: &'a [RangedBatch],
     pub(super) query_batch_skipped: &'a [bool],
     pub(super) query_chunk: bool,
+    /// Whether a batch's search reads the database (`split_steps::CallSteps::Search`): none does
+    /// where every searched batch is split into chunks without a valid context.
+    pub(super) reads: bool,
     /// rpsblast: whether the engine counts each HSP's identities again for the reports
     /// (`rps_hooks::RpsSearchRun::recount_identities`), decided from the reports that the call's
     /// formats are (`call_setup::requested_reports`): none is a custom table.
@@ -255,6 +258,7 @@ where
         query_batches,
         query_batch_skipped,
         query_chunk,
+        reads,
         rps_recount_identities,
         database,
         subjects,
@@ -427,11 +431,13 @@ where
             },
             None => error,
         })?;
-    } else if database.is_some() && !contexts.iter().any(|ctx| ctx.is_valid) {
+    } else if database.is_some() && (!reads || !contexts.iter().any(|ctx| ctx.is_valid)) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
         // No query of the call has Karlin-Altschul parameters: NCBI searches none of its
         // batches and reads no sequence of the database (a sequence file that cannot be read
-        // fails no batch: NCBI 2.17.0 blastp, an all-X query, exit 0; line PS DECISIONS 30).
+        // fails no batch: NCBI 2.17.0 blastp, an all-X query, exit 0; line PS DECISIONS 30). Nor
+        // does a call whose searched batches are all split into chunks without a valid context
+        // (`reads`; NCBI 2.17.0 probe `g6_gapvalid_nopsq` of line RG item X-bpgap: exit 0).
     } else if let Some(blocks) = x_blocks.as_deref() {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the preliminary stage in blocks of whole batches, NCBI's

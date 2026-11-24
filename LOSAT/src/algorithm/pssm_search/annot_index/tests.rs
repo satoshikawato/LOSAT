@@ -24,6 +24,16 @@ fn index(annots: &[&str]) -> Result<AnnotOutcome, Refusal> {
     index_annots("psiblast", &values, &[])
 }
 
+impl Abort {
+    /// The `CATCH_ALL` report of NCBI's end (`Abort::Native`); no other end is expected.
+    fn message(&self) -> Vec<u8> {
+        match self {
+            Abort::Native { message, .. } => message.clone(),
+            Abort::Refused(text) => panic!("refused: {text}"),
+        }
+    }
+}
+
 /// The messages of an index that goes on.
 fn posts(annots: &[&str]) -> String {
     let outcome = index(annots).unwrap();
@@ -161,7 +171,7 @@ fn exceptions_stop_the_run_with_their_report() {
     let partial = "{ header { field-id partial }, data bit '80'H }";
     assert_eq!(
         abort(&table(1, &format!("{partial}, {partial}"))),
-        Abort {
+        Abort::Native {
             exit: 255,
             message: report(
                 TABLE,
@@ -175,7 +185,7 @@ fn exceptions_stop_the_run_with_their_report() {
         "{{ header {{ field-id location }}, data loc {{ int {{ from 0, to 4, id {Q1} }} }} }}"
     );
     assert_eq!(
-        abort(&table(1, &format!("{loc}, {loc}"))).message,
+        abort(&table(1, &format!("{loc}, {loc}"))).message(),
         report(
             TABLE,
             355,
@@ -188,7 +198,7 @@ fn exceptions_stop_the_run_with_their_report() {
             1,
             &format!("{loc}, {{ header {{ field-id location-id }}, data id {{ {Q1} }} }}")
         ))
-        .message,
+        .message(),
         report(
             TABLE,
             466,
@@ -197,7 +207,7 @@ fn exceptions_stop_the_run_with_their_report() {
         )
     );
     assert_eq!(
-        abort(&table(1, "{ header { field-id location }, data int2 { -32768 } }")).message,
+        abort(&table(1, "{ header { field-id location }, data int2 { -32768 } }")).message(),
         report(
             "src/objects/seq/../seqtable/SeqTable_multi_data_.cpp",
             207,
@@ -206,7 +216,7 @@ fn exceptions_stop_the_run_with_their_report() {
         )
     );
     assert_eq!(
-        abort(&table(1, &format!("{{ header {{ field-id location-id }}, data id {{ {Q1} }} }}, {{ header {{ field-id location-from }}, data int8 {{ 4294967296 }} }}"))).message,
+        abort(&table(1, &format!("{{ header {{ field-id location-id }}, data id {{ {Q1} }} }}, {{ header {{ field-id location-from }}, data int8 {{ 4294967296 }} }}"))).message(),
         report(
             "src/objects/seq/../seqtable/SeqTable_multi_data.cpp",
             441,
@@ -215,7 +225,7 @@ fn exceptions_stop_the_run_with_their_report() {
         )
     );
     assert_eq!(
-        abort(&table(1, &format!("{{ header {{ field-id location-id }}, data id {{ {Q1} }} }}, {{ header {{ field-name \"disabled\" }}, default int 2 }}"))).message,
+        abort(&table(1, &format!("{{ header {{ field-id location-id }}, data id {{ {Q1} }} }}, {{ header {{ field-name \"disabled\" }}, default int 2 }}"))).message(),
         report(
             "src/objects/seq/../seqtable/SeqTable_single_data.cpp",
             58,
@@ -224,7 +234,7 @@ fn exceptions_stop_the_run_with_their_report() {
         )
     );
     assert_eq!(
-        abort("{ data align { { type global, dim 2, segs std { { dim 2, loc { feat local id 1, int { from 0, to 5, id local id 2 } } } } } } }").message,
+        abort("{ data align { { type global, dim 2, segs std { { dim 2, loc { feat local id 1, int { from 0, to 5, id local id 2 } } } } } } }").message(),
         report(
             "src/objects/seq/../seqloc/Seq_loc.cpp",
             1552,
@@ -234,7 +244,7 @@ fn exceptions_stop_the_run_with_their_report() {
     );
     assert_eq!(
         abort(&format!("{{ data align {{ {{ type global, dim 2, segs std {{ {{ dim -1, loc {{ int {{ from 0, to 5, id {Q1} }} }} }} }} }} }} }}")),
-        Abort {
+        Abort::Native {
             exit: 255,
             message: b"Error: vector::_M_default_append\n".to_vec()
         }
@@ -288,7 +298,7 @@ fn the_failed_stream_keeps_the_headers() {
     .unwrap();
     assert_eq!(
         outcome.abort,
-        Some(Abort {
+        Some(Abort::Native {
             exit: 255,
             message: b"\n".to_vec()
         })
@@ -302,7 +312,7 @@ fn the_failed_stream_keeps_the_headers() {
         ),
     ])
     .unwrap();
-    assert_eq!(outcome.abort.unwrap().message, b"\n");
+    assert_eq!(outcome.abort.unwrap().message(), b"\n");
 }
 
 // The values of a table's rows: a sparse bit set (t87), an int-delta column (t52), a sorted table
@@ -339,7 +349,7 @@ fn an_empty_region_after_the_failed_stream_writes_the_object() {
         let outcome = index(annots).unwrap();
         assert_eq!(
             outcome.abort,
-            Some(Abort {
+            Some(Abort::Native {
                 exit: 0,
                 message: Vec::new()
             })
@@ -649,7 +659,7 @@ fn a_bit_bvector_decodes_only_for_a_value() {
 /// `CATCH_ALL`'s report of BitMagic's `std::logic_error`: NCBI's text in LOSAT's words
 /// (`crate::wording::losat_text`).
 fn bm_invalid() -> Abort {
-    Abort {
+    Abort::Native {
         exit: 255,
         message: crate::wording::losat_text("Error: BM::Invalid serialization format\n")
             .into_owned()
@@ -690,7 +700,7 @@ fn bitmagic_exceptions_and_refusals() {
         assert_eq!(index(&[&annot]).unwrap().abort, Some(bm_invalid()), "{case}");
         assert_eq!(
             index(&[&failing_feature(), &annot]).unwrap().abort,
-            Some(Abort {
+            Some(Abort::Native {
                 exit: 255,
                 message: b"\n".to_vec()
             }),
@@ -905,7 +915,7 @@ fn elements_stated_as_null_are_dereferenced_where_ncbi_reads_them() {
     assert_eq!(String::from_utf8(outcome.posts.text()).unwrap(), FAILED);
     assert_eq!(
         outcome.abort,
-        Some(Abort {
+        Some(Abort::Native {
             exit: 255,
             message: b"\n".to_vec()
         })

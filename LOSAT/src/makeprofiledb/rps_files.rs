@@ -95,12 +95,14 @@ pub(super) struct RpsVolume {
 /// number, the number of profiles and the place of their offsets (0 to `num_seqs`, which the
 /// close replaces); the parameters start as the command line's.
 pub(super) fn open_volume(
-    name: &str,
+    name: &[u8],
     num_seqs: usize,
     params: VolumeParams,
 ) -> Result<RpsVolume, RpsError> {
     let open = |extension: &str, message: &'static str| {
-        File::create(format!("{name}.{extension}")).map_err(|_| RpsError::SeqDb(message))
+        let path = [name, b".", extension.as_bytes()].concat();
+        File::create(crate::utils::os_bytes::path_of_bytes(&path))
+            .map_err(|_| RpsError::SeqDb(message))
     };
     let pssm = open("rps", "Failed to open output .rps file ")?;
     let lookup_file = open("loo", "Failed to open output .loo file")?;

@@ -585,7 +585,7 @@ pub fn scope_keys(id: &ParsedSeqId, keys: &mut Vec<u64>) {
 // packed key of an accession, `ParseAcc` at 825-880, holds its prefix without case, its digits
 // and its version, not the alternative)
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.hpp:767-768 (`CSeq_id_Local_Tree`),
-// 919-925 (`CSeq_id_General_Tree`) and 998-1008 (`CSeq_id_Patent_Tree`)
+// 920-925 (`CSeq_id_General_Tree`) and 999-1008 (`CSeq_id_Patent_Tree`)
 // NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:3467-3481 (the PDB tree's key;
 // `CSeq_id_PDB_Info::Normalize` upper-cases the molecule after its first letter and sets
 // `chain_id` from `chain`, then the tree compares the normalized ids, `Equals`)

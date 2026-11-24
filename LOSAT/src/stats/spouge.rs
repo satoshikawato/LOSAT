@@ -552,7 +552,7 @@ fn spouge_stoe_at(
 // bound (its cast of the double, `ncbi_int4_from_double`: `INT_MIN` past `Int4`, then 2), with the
 // doubling of the upper bound (`b *= 2`) and the bisection's sum (`a + b`) in 64 bits where NCBI's
 // `Int4` arithmetic overflows (signed overflow, undefined behaviour: NCBI BLAST+ 2.17.0 never ends
-// there or goes on with a wrapped cutoff; PD-LOSAT-NCBI-DEFECTS approved exception 30, the Owner's
+// there or goes on with a wrapped cutoff; PD-LOSAT-NCBI-DEFECTS approved exception 31, the Owner's
 // answer Q-PS7c-SPOUGE=B of 2026-11-24). A search inside `Int4` takes NCBI's steps and gives NCBI's
 // score. The lower bound `a` is a score whose e-value is above `evalue`, and no step lowers it:
 // once it passes 2^31 - 1 the cutoff is above every `Int4` score and the search ends with

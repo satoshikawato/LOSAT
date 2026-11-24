@@ -425,7 +425,7 @@ where
                     query_batch_skipped,
                     query_chunk,
                     database.name(),
-                    read_error.0,
+                    read_error.0.as_bytes(),
                 ),
                 Err(other) => other,
             },
@@ -503,7 +503,7 @@ where
                         query_batch_skipped,
                         query_chunk,
                         database.map_or("", |database| database.name()),
-                        read_error.0,
+                        read_error.0.as_bytes(),
                     ),
                     Err(other) => other,
                 });
@@ -588,7 +588,7 @@ where
                         query_batch_skipped,
                         query_chunk,
                         database.name(),
-                        read_error.0,
+                        read_error.0.as_bytes(),
                     ),
                     Err(other) => other,
                 }

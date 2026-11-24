@@ -619,7 +619,7 @@ fn unbounded_etos(
     Some(a)
 }
 
-// Line PS item PS7c, fix round 1 (review B1; PD-LOSAT-NCBI-DEFECTS approved exception 30, the
+// Line PS item PS7c, fix round 1 (review B1; PD-LOSAT-NCBI-DEFECTS approved exception 31, the
 // Owner's answer Q-PS7c-SPOUGE=B of 2026-11-24): the search for the hit-saving cutoff is NCBI's in
 // integers that do not overflow. Where that cutoff is at most 2^31 - 1, `blast_spouge_etos` gives
 // it, also where NCBI's `Int4` doubling or bisection would overflow (2e-9 to 7e-9 here); where it is
@@ -670,7 +670,7 @@ fn the_cutoff_search_is_ncbi_s_without_the_int4_overflow() {
 // bisection score. Where NCBI's bisection adds past `Int4` (psiblast's 5e-9 to 7e-9: 733,828,724 +
 // 1,467,657,448 at 6e-9, which NCBI wraps to the cutoff -1,046,740,562; tblastn's 4e-9 and 5e-9:
 // 876,829,330 + 1,753,658,660 at 4e-9, wrapped to -832,239,653) LOSAT's is the bisection's in 64
-// bits, the widened cutoff of PD-LOSAT-NCBI-DEFECTS approved exception 30 (rows
+// bits, the widened cutoff of PD-LOSAT-NCBI-DEFECTS approved exception 31 (rows
 // db.ps7c.ps.lambda_6e-9 and db.ps7c.tbn.lambda_4e-9, where NCBI's wrapped cutoff and LOSAT's both
 // report no hit). Where NCBI's doubling passes `Int4` (1e-9 and 1e-300, where NCBI never ends; -0.5,
 // where NCBI wraps the bound to `INT_MIN` and returns 2^30) the cutoff is above 2^31 - 1 (about

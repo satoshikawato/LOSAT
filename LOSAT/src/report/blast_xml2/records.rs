@@ -37,9 +37,9 @@ pub fn reports_held(subject_search: bool, iterative: bool) -> bool {
     subject_search || iterative
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:174-185
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:180-183
 // The Seq-id of a subject's Seq-loc is the `BestRank` best of its ids
-// (blast_fasta_input.cpp:458-466).
+// (blast_fasta_input.cpp:462-463).
 /// The `subjects` strings of the records `records` (their ids under `-parse_deflines`): the bare id
 /// of each record's best id; `None` for records read without the option.
 pub fn subject_names<'a>(

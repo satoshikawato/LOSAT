@@ -55,7 +55,7 @@
 
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:51-55
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
 /// A cell of the two-hit diagonal table (`search_init::XDiagCells`): `u32`, NCBI's `DiagStruct` in
 /// its four bytes (`LOSAT_X_TBNDIAGPACK`: last_hit in bits 0-30, flag in bit 31; the table's
 /// values fit 31 bits without a sign, `search_init::x_packs`), or `(last_hit, flag)`.

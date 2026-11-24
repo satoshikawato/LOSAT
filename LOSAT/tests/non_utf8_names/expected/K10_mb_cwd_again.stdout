@@ -1,0 +1,12 @@
+
+
+Building a new DB, current time: 11/24/2026 22:54:34
+New DB name:   {D}/dé/db
+New DB title:  ../q.fa
+Sequence type: Nucleotide
+Deleted existing Nucleotide BLAST database named {D}/dé/db
+Keep MBits: T
+Maximum file size: 3000000000B
+Adding sequences from FASTA; added 1 sequences in 0.000242949 seconds.
+
+

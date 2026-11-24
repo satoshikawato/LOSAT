@@ -13,7 +13,6 @@ use std::collections::BTreeSet;
 use std::io::Write;
 
 use anyhow::Result;
-use clap::Args;
 
 use crate::blastinput::app::options_error;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -29,59 +28,47 @@ use crate::seqdb::{seqidlist, DbList, SearchPath, SeqidList, TaxidList};
 // programs' `-subject_loc`) with `-subject_loc` are NCBI's argument reader's (`cli::reader`:
 // its usage, `Incompatible with argument`, exit status 1).
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2245-2259
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2283-2289
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2302-2318
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2282-2289
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2302-2319
 /// The list options of a search program's command line.
-#[derive(Args, Debug, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DbFilterArgs {
     /// `-seqidlist`: a file of Seq-ids (text, or binary from `blastdb_aliastool`).
-    #[arg(
-        long = "seqidlist",
-        value_name = "filename",
-        help = "Restrict search of database to list of SeqIDs"
-    )]
     pub seqidlist: Option<String>,
     /// `-negative_seqidlist`: a file of Seq-ids to leave out.
-    #[arg(
-        long = "negative_seqidlist",
-        value_name = "filename",
-        help = "Restrict search of database to everything except the specified SeqIDs"
-    )]
     pub negative_seqidlist: Option<String>,
     /// `-taxids`: taxids separated by commas.
-    #[arg(
-        long = "taxids",
-        value_name = "taxids",
-        help = "Restrict search of database to include only the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')"
-    )]
     pub taxids: Option<String>,
     /// `-taxidlist`: a file of taxids, one per line.
-    #[arg(
-        long = "taxidlist",
-        value_name = "filename",
-        help = "Restrict search of database to include only the specified taxonomy IDs and their descendants"
-    )]
     pub taxidlist: Option<String>,
     /// `-negative_taxids`: taxids separated by commas.
-    #[arg(
-        long = "negative_taxids",
-        value_name = "taxids",
-        help = "Restrict search of database to everything except the specified taxonomy IDs and their descendants (multiple IDs delimited by ',')"
-    )]
     pub negative_taxids: Option<String>,
     /// `-negative_taxidlist`: a file of taxids, one per line.
-    #[arg(
-        long = "negative_taxidlist",
-        value_name = "filename",
-        help = "Restrict search of database to everything except the specified taxonomy IDs and their descendants"
-    )]
     pub negative_taxidlist: Option<String>,
     /// `-no_taxid_expansion`: the taxids alone, without their descendants.
-    #[arg(
-        long = "no_taxid_expansion",
-        help = "Do not expand the taxonomy IDs provided to their descendant taxonomy IDs "
-    )]
     pub no_taxid_expansion: bool,
+}
+
+impl DbFilterArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, the arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(DbFilterArgs {
+            seqidlist: args.given_option("seqidlist")?,
+            negative_seqidlist: args.given_option("negative_seqidlist")?,
+            taxids: args.given_option("taxids")?,
+            taxidlist: args.given_option("taxidlist")?,
+            negative_taxids: args.given_option("negative_taxids")?,
+            negative_taxidlist: args.given_option("negative_taxidlist")?,
+            no_taxid_expansion: args.flag("no_taxid_expansion"),
+        })
+    }
 }
 
 /// The names of the options of `DbFilterArgs`, for the `-subject_loc` exclusions of LOSAT Web's
@@ -183,10 +170,7 @@ impl DbFilterArgs {
         if self.seqid_list().is_none() && self.list().is_none() {
             return Ok(None);
         }
-        // The registry's errors are the database's: `open_search_database` reports them.
-        let registry = settings.blastdb.clone().unwrap_or(None);
-        let path = SearchPath::from_environment(registry.as_deref())
-            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let path = SearchPath::from_environment(settings.blastdb.as_deref());
         if let Some((value, negative)) = self.seqid_list() {
             return self.resolve_seqid_list(value, negative, &path, warnings);
         }
@@ -194,10 +178,10 @@ impl DbFilterArgs {
             return Ok(None);
         };
         let ids: Vec<Vec<u8>> = if is_file {
-            let Some(file) = path.resolve_file(value) else {
+            let Some(file) = path.resolve_file(value.as_bytes()) else {
                 return Err(options_error(&format!("File is not acessible: {value}")));
             };
-            let bytes = std::fs::read(&file)
+            let bytes = std::fs::read(crate::utils::os_bytes::path_of_bytes(&file))
                 .map_err(|_| options_error(&format!("File is not acessible: {value}")))?;
             stream_lines(&bytes)
         } else {
@@ -212,8 +196,8 @@ impl DbFilterArgs {
             None
         } else {
             match path
-                .resolve_file(TAXONOMY_FILE)
-                .map(|file| DbFile::open(file.as_ref()))
+                .resolve_file(TAXONOMY_FILE.as_bytes())
+                .map(|file| DbFile::open(&crate::utils::os_bytes::path_of_bytes(&file)))
             {
                 Some(Ok(file)) => Some(file),
                 _ => {
@@ -271,7 +255,7 @@ impl DbFilterArgs {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1667-1692
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:254-258
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:254-257,265-276,290-291
     // The file is looked for on the database search path (`SeqDB_ResolveDbPath`). A file
     // that is not there resolves to the empty name, whose memory map throws a
     // `CFileException` (not a database error): the search program reports it as
@@ -286,12 +270,13 @@ impl DbFilterArgs {
         path: &SearchPath,
         warnings: &mut dyn Write,
     ) -> Result<Option<DbList>> {
-        let bytes = seqidlist::read_resolved(value, path).map_err(|error| {
-            match error.ncbi_exception() {
-                Some(exception) => anyhow::Error::from(NativeError::exception(exception)),
-                None => anyhow::Error::msg(error.to_string()),
-            }
-        })?;
+        let bytes =
+            seqidlist::read_resolved(value.as_bytes(), path).map_err(|error| {
+                match error.ncbi_exception() {
+                    Some(exception) => anyhow::Error::from(NativeError::exception(exception)),
+                    None => anyhow::Error::msg(error.to_string()),
+                }
+            })?;
         let mut cerr = Vec::new();
         let file = seqidlist::read_si_list(&bytes, &mut cerr).map_err(|text| NativeError {
             exit: 2,

@@ -741,10 +741,17 @@ fn later_round_report_contexts<'a>(
     std::borrow::Cow::Owned(contexts)
 }
 
-/// `NcbiEndl`, "Search has CONVERGED!" and `NcbiEndl` written to `out_stream` for every report that is not
-/// structured (psiblast's outfmt 0, 6, 7, 10 and 20).
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:525-528
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:556-558
+/// The line `Search has CONVERGED!` between two `NcbiEndl`s, for every report that is not
+/// structured (psiblast's outfmt 0, 6, 7, 10 and 20), on the report's one stream: the
+/// application writes it after the query's rounds, outside the formatter's regions (`Site::Report`:
+/// no `CBlastTabularInfo` lives there, so a failed write there is the application's "BLAST failed
+/// to write output", exit 6), each `NcbiEndl` a line feed and a flush (`ostream::ncbi_endl`). The
+/// next query's report starts in the format's region again (`Site::of_format`).
 fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
     use crate::blastinput::app::ReportFormat;
+    use crate::report::ostream::{ncbi_endl, ReportWrite, Site};
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
         if matches!(
@@ -757,8 +764,12 @@ fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
                     | ReportFormat::CommaSeparatedValuesWithHeader
             )
         ) {
-            let mut writer = format.sink.open()?;
-            writer.write_all(b"\nSearch has CONVERGED!\n")?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
+            writer.site(Site::Report)?;
+            ncbi_endl(&mut writer)?;
+            writer.write_all(b"Search has CONVERGED!")?;
+            ncbi_endl(&mut writer)?;
+            writer.site(Site::of_format(number))?;
             writer.flush()?;
         }
     }
@@ -787,7 +798,7 @@ fn write_round_epilogs(
     };
     for format in outputs.formats.iter_mut() {
         if let Some(spec) = super::super::tabular::custom_tabular_spec(format.outfmt, args.app) {
-            let mut writer = format.sink.open()?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             super::super::tabular::write_tabular_round_epilog(
                 spec,
                 taxdb_found,
@@ -840,9 +851,9 @@ fn write_round_epilogs(
             num_descriptions: args.num_descriptions,
             num_alignments: args.num_alignments,
         };
-        let mut writer = format.sink.open()?;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
         crate::report::pairwise::psiblast_round::write_psiblast_epilog(
-            &mut *writer,
+            &mut writer,
             &report,
             pairwise_database.as_ref(),
         )?;

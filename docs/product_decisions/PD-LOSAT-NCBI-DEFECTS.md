@@ -3635,7 +3635,7 @@ hits into the list that NCBI frees.
     passes which volume (NCBI's `-num_threads 4` search of the fixture row `m_mixed1_t4` crashed, exit
     status 139, in 8 of 8 runs, where its `-num_threads 1` search completes). LOSAT searches each index
     volume that a search reaches with that search's query, the first search and the later ones alike
-    (`mb_index_seeds::IndexSeeds`), as NCBI's first search does: no seed is lost, no search is
+    (`mb_index_seeds::IndexSeeds`), as NCBI's first search does: no seed is lost, no such search is
     refused, and the result does not depend on `-num_threads`. A first search, and an index of every
     volume, keep NCBI's result. Evidence: the rows `batch NAME` of
     `LOSAT/tests/blastn_mb_index/cases.tsv` (`m_mixed1`, `m_mixed1_t4`, `m_mixed2`, `m_mixed1_win` of

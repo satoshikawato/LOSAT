@@ -61,10 +61,8 @@ struct Case {
     /// The row whose NCBI files this row is compared with (itself, or that of `batch NAME` or
     /// `plain NAME`), or the name of its `exception24` files (`expect NAME`).
     ncbi: String,
-    /// A `plain NAME` row.
+    /// A `plain NAME` row (else a `batch NAME` row, when `ncbi` is another row).
     plain: bool,
-    /// A `batch NAME` row.
-    batch: bool,
     /// The directory of the files that the row is compared with: `ncbi`, or `exception24` for
     /// an `expect NAME` row.
     files: &'static str,
@@ -99,7 +97,6 @@ fn cases() -> Vec<Case> {
                 .map(|text| text.to_string()),
             ncbi: batch.or(plain).or(expect).unwrap_or(fields[0]).to_string(),
             plain: plain.is_some(),
-            batch: batch.is_some(),
             files: if expect.is_some() {
                 "exception24"
             } else {
@@ -148,13 +145,20 @@ fn cases() -> Vec<Case> {
             .iter()
             .find(|row| row.name == case.ncbi)
             .unwrap_or_else(|| panic!("{}: no row {}", case.name, case.ncbi));
+        // A `plain` row is a search with `-db_hard_mask` (approved exception 24), or a one-hit
+        // search in query chunks (`CHUNK_SIZE`, approved exception 30), where NCBI's search without
+        // the index is LOSAT's output.
+        let chunked_one_hit = case.variables.iter().any(|(name, _)| name == "CHUNK_SIZE")
+            && !case.words.iter().any(|word| word == "-window_size");
         let same = if case.plain {
             row.ncbi == row.name
+                && row.refusal.is_none()
                 && without_index(&row.setup) == without_index(&case.setup)
                 && case
                     .words
                     .windows(2)
                     .any(|pair| pair == ["-use_index", "true"])
+                && (case.words.iter().any(|word| word == "-db_hard_mask") || chunked_one_hit)
                 && !row.words.iter().any(|word| word == "-use_index")
                 && row.variables == case.variables
         } else {
@@ -171,8 +175,8 @@ fn cases() -> Vec<Case> {
             let mut variables = row.variables.clone();
             variables.sort();
             row.ncbi == row.name
+                && row.refusal.is_none()
                 && row.setup == case.setup
-                && case.batch
                 && variables == one_batch(&case.variables)
                 && !case.variables.iter().any(|(name, _)| name == "CHUNK_SIZE")
         };
@@ -502,14 +506,12 @@ fn the_two_hit_index_search_adds_the_index_s_pairs() {
 #[test]
 fn ncbi_loses_seeds_after_the_first_search() {
     let read = |path: String| fs::read_to_string(fixtures().join("ncbi").join(path)).unwrap();
-    for (row, whole, lost, status) in [
-        ("m_part_b1", "m_part_b1_1b", "\tsbj3\t", "0"),
-        ("m_part_c2000", "m_part_c2000_n", "\tsbj3\t", "0"),
-        ("m_mixed1", "m_mixed1_1b", "\tAP027131.1\t", "0"),
-        ("m_mixed1_win", "m_mixed1_win_1b", "\tAP027131.1\t", "0"),
-        ("m_part_two", "m_part_two_1b", "\t", "134"),
-        ("m_part_c1200", "m_part_c1200_n", "\t", "134"),
-        ("m_mixed2", "m_mixed2_1b", "\t", "139"),
+    // Rows that lose the hits of a volume.
+    for (row, whole, lost) in [
+        ("m_part_b1", "m_part_b1_1b", "\tsbj3\t"),
+        ("m_part_c2000", "m_part_c2000_n", "\tsbj3\t"),
+        ("m_mixed1", "m_mixed1_1b", "\tAP027131.1\t"),
+        ("m_mixed1_win", "m_mixed1_win_1b", "\tAP027131.1\t"),
     ] {
         let ncbi = read(format!("{row}.out"));
         let whole_rows = read(format!("{whole}.out"));
@@ -532,7 +534,28 @@ fn ncbi_loses_seeds_after_the_first_search() {
             missing.iter().all(|line| line.contains(lost)),
             "{row}: {missing:?}"
         );
+        assert_eq!(read(format!("{row}.rc")).trim(), "0", "{row}");
+    }
+    // Rows that crash: a beginning of the whole list, then the crash (`double free detected` for
+    // exit status 134).
+    for (row, whole, status) in [
+        ("m_part_two", "m_part_two_1b", "134"),
+        ("m_part_c1200", "m_part_c1200_n", "134"),
+        ("m_mixed2", "m_mixed2_1b", "139"),
+    ] {
+        let ncbi = read(format!("{row}.out"));
+        let whole_rows = read(format!("{whole}.out"));
+        assert!(
+            ncbi.len() < whole_rows.len() && whole_rows.starts_with(&ncbi),
+            "{row}"
+        );
         assert_eq!(read(format!("{row}.rc")).trim(), status, "{row}");
+        if status == "134" {
+            assert!(
+                read(format!("{row}.err")).contains("double free detected"),
+                "{row}"
+            );
+        }
     }
 }
 

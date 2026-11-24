@@ -1102,8 +1102,10 @@ not warn; `zunf.s1`, `zunf.r3` do the same where Y's kept definition line is `lc
 `BLASTDB=tests/seqdb/taxdb/bad_magic` and the prefetch off: NCBI's PSSM read loads the Bioseq and writes the taxonomy
 database's text after the report; a refusal until review 3 of the line). Two `losat-rejection` rows (rc 1, with the `pssm`
 files kind: no PSSM file is written): `wk5.pf0.reject` (the prefetch off, a weakly matching sequence C that NCBI's scope has
-read before: NCBI reads C's letters) and `ah4.reject` (another sequence that also holds A's id: NCBI's result depends on its
-reads and memory layout).
+read before: NCBI reads C's letters) and `ah4.reject` (another sequence that also holds A's id), which line DBID hr-1
+freezes as NCBI's output `ah4` (Z holds `emb|AAA00001.1|` on its second line, not the line its Bioseq is loaded by, and the
+data loader's `m_Ids` takes exact handles: NCBI warns for A, the same in five runs with other environments and malloc
+settings; `prd2.pah` likewise).
 
 Review 2 of pssmread (rows `db.id.prd2.*`; databases from `ids/prd_*.faa` and `ids/prdn_*.fna` by `make_ids.py
 --pssmread-only`, read through `ids/prd_xg.pal`, `prd_tw.pal`, `prd_tu.pal`, `prd_pah.pal`, `prdn_u.nal` and
@@ -1118,8 +1120,9 @@ the reader's filter does not keep for A's `gb|AAA00001.1|` (`s_SeqDB_SeqIdIn` st
 `Failed to retrieve sequence` and no taxonomy text; `tu.bad.s1` and `tu.lastoff.r1`: A `lcl|777 ^A gi|777` (unfetchable by
 its own ids) after Y (`gi|777|gb|YYY00001.1|`, 20 letters, taxid 99990): the prefetch reads Y and looks its taxid up, and
 the PSSM warns `Failed to retrieve sequence gi|777`; `tu.bad.pf0` (the same with the prefetch off: the PSSM's read loads Y
-first, so NCBI writes the text, then the warning; a refusal until review 3); one `losat-rejection` row, `pah.reject` (C
-`gi|888|gb|CCC00001.1| ^A gi|777` also holds A's `gi|777`: the refusal names database sequence 2). BLASTN (megablast) and TBLASTX with the
+first, so NCBI writes the text, then the warning; a refusal until review 3); `pah` (C
+`gi|888|gb|CCC00001.1| ^A gi|777` also holds A's `gi|777`: NCBI warns `Failed to retrieve sequence gi|777`; a refusal that
+named database sequence 2 until line DBID hr-1). BLASTN (megablast) and TBLASTX with the
 minus-strand query `ids/prdn_qrc.fna` (the prefetch asks the length of a minus-strand Seq-align's subject): `bn.u.rc`,
 `tx.u.rc` (A `lcl|777 ^A gi|777` after Y `gi|777|gb|YYY00001.1|`: the scope gets Y's Bioseq, no warning) and `bn.z.rc`,
 `tx.z.rc` (A `gi|777` after Y `lcl|777 ^A gi|777`, whose kept line `lcl|777` does not hold the id: `Error pre-fetching

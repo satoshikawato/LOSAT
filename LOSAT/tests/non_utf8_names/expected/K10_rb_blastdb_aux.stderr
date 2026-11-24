@@ -1,0 +1,3 @@
+Warning: [rpsblast] cdd contain(s) no freq ratios needed for composition-based statistics.
+RPSBLAST will be run without composition-based statistics.
+BLAST engine error: Cannot open RPS-BLAST auxiliary file: {D}/dé/cdd.aux

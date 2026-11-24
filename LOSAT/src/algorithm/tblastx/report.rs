@@ -1162,7 +1162,7 @@ pub(crate) fn write_outfmt7_query_header<W: Write>(
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn write_tabular<W: Write>(
+pub(crate) fn write_tabular<W: crate::report::ostream::ReportWrite>(
     hits: &[TblastxHsp],
     writer: &mut W,
     comments: bool,
@@ -1238,6 +1238,8 @@ pub(crate) fn write_tabular<W: Write>(
                 probe.end(hsp_index);
             }
         }
+        // `~CBlastTabularInfo` of the query's report flushes the stream.
+        writer.ncbi_flush()?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2238
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1322-1325
@@ -1247,6 +1249,8 @@ pub(crate) fn write_tabular<W: Write>(
             "# BLAST processed {} queries",
             queries_before + query_titles.len()
         )?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -1406,25 +1410,39 @@ impl TblastxOutputFormat {
     /// the call's first report, the taxonomy database's messages of that prefetch go with the
     /// query warnings.
     pub(crate) fn prefetches_subjects(self) -> bool {
-        crate::algorithm::common::database::prefetches_subjects(match self {
-            // `s_IsPrefetchFormat` takes 1 to 4 as 0 (DECISIONS T3-4).
-            Self::Pairwise(view) => Some(view.outfmt()),
-            Self::Xml => Some(5),
-            Self::Tabular => Some(6),
-            Self::TabularWithComments => Some(7),
-            // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and 20):
-            // they read the subjects as 6 and 7 do, and show no taxonomy name that the prefetch
-            // would look up (`report::tabular` writes `N/A`; a name of the taxonomy database is
-            // LOSAT's refusal, `tabular`).
-            Self::CustomTabular(spec) => Some(match spec.kind {
-                crate::report::tabular::TabularKind::Commented => 7,
-                _ => 6,
-            }),
-            Self::Seqalign(serial) => Some(serial.outfmt()),
-            // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
-            // (`TaxdbPrinter`).
-            Self::Archive | Self::Xml2(_) | Self::Unsupported => None,
-        })
+        // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
+        // (`TaxdbPrinter`).
+        crate::algorithm::common::database::prefetches_subjects(Some(self.prefetch_format()))
+    }
+
+    /// The format as the first format of a TBLASTX run that NCBI's prefetch of each query batch
+    /// asks (`common::database::PrefetchFormat`, the one owner of whether a batch prefetches).
+    pub(crate) fn prefetch_format(self) -> crate::algorithm::common::database::PrefetchFormat {
+        use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, END_VALUE, JSON, XML};
+        crate::algorithm::common::database::PrefetchFormat::of(
+            match self {
+                // `s_IsPrefetchFormat` takes 1 to 4 as 0 (DECISIONS T3-4).
+                Self::Pairwise(view) => view.outfmt(),
+                Self::Xml => XML,
+                Self::Tabular => 6,
+                Self::TabularWithComments => 7,
+                // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (6, 7, 10 and
+                // 20): they read the subjects as 6 and 7 do, and show no taxonomy name that the
+                // prefetch would look up (`report::tabular` writes `N/A`; a name of the taxonomy
+                // database is LOSAT's refusal, `tabular`).
+                Self::CustomTabular(spec) => match spec.kind {
+                    crate::report::tabular::TabularKind::Commented => 7,
+                    _ => 6,
+                },
+                Self::Seqalign(serial) => serial.outfmt(),
+                // The XML2 and JSON documents prefetch as each of 13 to 16 does.
+                Self::Xml2(_) => JSON,
+                Self::Archive => ARCHIVE_FORMAT,
+                // Refused before the search: no report, no prefetch.
+                Self::Unsupported => END_VALUE,
+            },
+            crate::report::archive::options::RequestKind::Tblastx,
+        )
     }
 }
 

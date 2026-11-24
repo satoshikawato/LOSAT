@@ -371,7 +371,6 @@ fn the_pairwise_reads_are_those_of_the_writers_rows() {
                         descriptions,
                         alignments,
                     },
-                    html: false,
                 };
                 assert_eq!(
                     pairwise_read_order(&hit_lists, reading, |_| None),
@@ -806,7 +805,7 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
         None,
         hit_list(vec![(middle, 1e-9), (first_volume_ordinal, 1e-3)], 1),
     ];
-    read_titles(&database, &batch, Default::default(), &mut titles).unwrap();
+    read_titles(&database, &batch, (Default::default(), false), &mut titles).unwrap();
     assert_eq!(titles.keys().copied().collect::<Vec<_>>(), [middle]);
     assert_eq!(
         titles[&middle].stored().title,
@@ -819,7 +818,7 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
         hit_list(vec![(middle, 1e-9)], 1),
         hit_list(vec![(last, 1e-9), (first_volume_ordinal, 1e-5)], 2),
     ];
-    let error = read_titles(&database, &batch, Default::default(), &mut titles)
+    let error = read_titles(&database, &batch, (Default::default(), false), &mut titles)
         .expect_err("a missing header file")
         .downcast::<HeaderReadError>()
         .expect("NCBI's error, with the query that reached it");
@@ -857,7 +856,13 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         hit_list(vec![(5, 1e-9), (11, 1e-5)], 2),
     ];
     let mut titles = DatabaseTitles::new();
-    read_titles(&database, &hit_lists, Default::default(), &mut titles).unwrap();
+    read_titles(
+        &database,
+        &hit_lists,
+        (Default::default(), false),
+        &mut titles,
+    )
+    .unwrap();
     // A list left without HSPs (its HSPs had score 0) is not reported.
     hit_lists[2].as_mut().unwrap().hsplist_array[1].hsps.clear();
     let reported = reported_subjects(
@@ -865,7 +870,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         &titles,
         &mut hit_lists,
         true,
-        ParsedShown::default(),
+        (ParsedShown::default(), prefetch_format(&[])),
         (crate::report::db_subject::FormatThrow::Unread, None),
         &[],
         0,
@@ -922,7 +927,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         &titles,
         &mut hit_lists,
         false,
-        ParsedShown::default(),
+        (ParsedShown::default(), prefetch_format(&[])),
         (crate::report::db_subject::FormatThrow::Unread, None),
         &[],
         0,
@@ -955,13 +960,13 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
     let database = BlastnDatabase::open(&name, &ApplicationSettings::default()).unwrap();
     let mut titles = DatabaseTitles::new();
     let mut clean = vec![hit_list(vec![(0, 1e-9)], 1)];
-    read_titles(&database, &clean, Default::default(), &mut titles).unwrap();
+    read_titles(&database, &clean, (Default::default(), false), &mut titles).unwrap();
     reported_subjects(
         &database,
         &titles,
         &mut clean,
         false,
-        ParsedShown::default(),
+        (ParsedShown::default(), prefetch_format(&[])),
         (crate::report::db_subject::FormatThrow::Unread, None),
         &[],
         0,
@@ -970,14 +975,14 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
     )
     .unwrap();
     let mut bad = vec![hit_list(vec![(1, 1e-9)], 1)];
-    read_titles(&database, &bad, Default::default(), &mut titles).unwrap();
+    read_titles(&database, &bad, (Default::default(), false), &mut titles).unwrap();
     assert_eq!(titles[&1].stored().title, b"n02 l#ngth 41");
     let error = reported_subjects(
         &database,
         &titles,
         &mut bad,
         false,
-        ParsedShown::default(),
+        (ParsedShown::default(), prefetch_format(&[])),
         (crate::report::db_subject::FormatThrow::Unread, None),
         &[],
         0,
@@ -1042,10 +1047,14 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
     use crate::seqdb::alias::SearchPath;
     let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
-    let search =
-        SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+    let search = SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None);
     let path = tests.join("db_search").join(name);
-    let mut db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+    let mut db = SeqDb::open_in(
+        path.to_str().unwrap().as_bytes(),
+        SeqType::Nucleotide,
+        &search,
+    )
+    .unwrap();
     db.read_name_records(path.to_str().unwrap(), false).unwrap();
     let parsed_seqids = db.has_parsed_seqids().unwrap();
     BlastnDatabase {
@@ -1056,6 +1065,7 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
         db,
         name: name.to_string(),
         taxdb: shared::TaxdbRun::default(),
+        loaded_before_batch: Default::default(),
         parsed_seqids,
     }
 }

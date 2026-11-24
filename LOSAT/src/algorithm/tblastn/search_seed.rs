@@ -249,11 +249,14 @@ fn x_build_compressed(
             )
         })?
         .map_err(|()| {
-            anyhow::anyhow!(
+            // NCBI builds the table of each query batch in its search (`CLocalBlast`), after it
+            // has printed the reports of the batches before: the refusal of its heap's corruption
+            // comes after them (`blastinput::app::ErrorAfterBatchReports`).
+            anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
                 "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's TBLASTN: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
                 f64::from(threshold) / 100.0,
                 word_length
-            )
+            )))
         })
 }
 
@@ -961,8 +964,8 @@ pub(super) fn x_scan_unit_of<const CLAMP: bool>(
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:496-501
         let mut end = right - lookup.word_length;
         if range_index == 0 && end < left {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:762-765 and
-            // c++/src/algo/blast/core/masksubj.inl:58-59
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:762-769 and
+            // c++/src/algo/blast/core/masksubj.inl:50-57
             // The one-hit word finder's loop does not start on a first range shorter than a
             // word, so `scansub`, which would step to the next ranges, is never called: the unit
             // has no hit.

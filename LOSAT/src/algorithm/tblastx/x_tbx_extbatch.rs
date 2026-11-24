@@ -511,7 +511,7 @@ impl<M: TbxScore> XPairPar<M> {
         init_hsps: &mut S,
         len: usize,
     ) -> (u64, u64) {
-        self.scan_unit_batched_hits::<S, PF, false, 0>(unit, inp, scratch, init_hsps, len)
+        self.scan_unit_batched_hits::<S, PF, false, false, 0>(unit, inp, scratch, init_hsps, len)
     }
 
     // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
@@ -526,6 +526,7 @@ impl<M: TbxScore> XPairPar<M> {
         S: XInitSink,
         const PF: bool,
         const BF: bool,
+        const STEP: bool,
         const SENT: usize,
     >(
         &self,
@@ -538,10 +539,10 @@ impl<M: TbxScore> XPairPar<M> {
         // EXPERIMENT (LOSAT_X_TBXUNITMASK): the masked table where the rule holds (x_pair_par.rs
         // module doc), as in `scan_unit_hits`.
         match self.x_unit_mask(unit, inp.window) {
-            None => self.scan_unit_batched_cells::<S, XUnmasked, PF, BF, SENT>(
+            None => self.scan_unit_batched_cells::<S, XUnmasked, PF, BF, STEP, SENT>(
                 unit, inp, scratch, init_hsps, len, 0,
             ),
-            Some(mask) => self.scan_unit_batched_masked::<S, PF, BF, SENT>(
+            Some(mask) => self.scan_unit_batched_masked::<S, PF, BF, STEP, SENT>(
                 unit, inp, scratch, init_hsps, len, mask,
             ),
         }
@@ -551,7 +552,13 @@ impl<M: TbxScore> XPairPar<M> {
     // `scan_unit_masked`.
     /// `scan_unit_batched_cells` with `XMasked`.
     #[inline(never)]
-    fn scan_unit_batched_masked<S: XInitSink, const PF: bool, const BF: bool, const SENT: usize>(
+    fn scan_unit_batched_masked<
+        S: XInitSink,
+        const PF: bool,
+        const BF: bool,
+        const STEP: bool,
+        const SENT: usize,
+    >(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -560,7 +567,7 @@ impl<M: TbxScore> XPairPar<M> {
         len: usize,
         mask: u32,
     ) -> (u64, u64) {
-        self.scan_unit_batched_cells::<S, XMasked, PF, BF, SENT>(
+        self.scan_unit_batched_cells::<S, XMasked, PF, BF, STEP, SENT>(
             unit, inp, scratch, init_hsps, len, mask,
         )
     }
@@ -575,6 +582,7 @@ impl<M: TbxScore> XPairPar<M> {
         C: XCells,
         const PF: bool,
         const BF: bool,
+        const STEP: bool,
         const SENT: usize,
     >(
         &self,
@@ -691,7 +699,7 @@ impl<M: TbxScore> XPairPar<M> {
                     // SAFETY: as in `scan_unit_hits`; every candidate's cell is a cell of this
                     // unit's table.
                     unsafe {
-                        x_tbx_hitbf::x_hits_bf::<C, PF>(
+                        x_tbx_hitbf::x_hits_bf::<C, PF, STEP>(
                             diag_ptr,
                             offset_pairs_ptr,
                             hits as usize,

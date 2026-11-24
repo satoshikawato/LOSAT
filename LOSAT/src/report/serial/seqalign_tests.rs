@@ -954,6 +954,8 @@ impl std::io::Write for Combined {
     }
 }
 
+impl crate::report::ostream::ReportWrite for Combined {}
+
 /// The documents of `blastp_db_documents` written by `write_query_to` with the database title
 /// `title`: the report alone, the posts alone, and both in one stream.
 fn blastp_db_documents_posted(format: SerialFormat, title: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
@@ -989,7 +991,8 @@ fn blastp_db_documents_posted(format: SerialFormat, title: &[u8]) -> (Vec<u8>, V
             &BP_Q1_HSP2,
         ),
     ];
-    let write = |writer: &mut dyn std::io::Write, diagnostics: &mut dyn std::io::Write| {
+    let write = |writer: &mut dyn crate::report::ostream::ReportWrite,
+                 diagnostics: &mut dyn std::io::Write| {
         let mut buf = Vec::new();
         for id in ["Query_1", "Query_2"] {
             super::write_query_to(
@@ -1259,6 +1262,86 @@ fn replaced_bytes_of_a_long_string_share_it() {
     assert!(lines.windows(2).all(|pair| pair[0] <= pair[1]));
     let text_lines = buf.iter().filter(|&&byte| byte == b'\n').count() as u64;
     assert!(lines[9_999] <= text_lines);
+}
+
+/// NCBI's insertions of a Seq-annot into the report's stream (`document_pieces`, the writes of its
+/// object stream's buffer) cover the document, and for JSON the model of the stream's calls
+/// (`Traced`) and the one taken back from the bytes (`out_buffer::json_pieces`, which the side
+/// files and outfmt 15 use) give the same pieces, over a document of several buffers.
+#[test]
+fn the_pieces_of_a_seq_annot_cover_it_and_both_json_models_agree() {
+    let run = RunRecord {
+        program: Program::Blastp,
+        db_title: Some(b"a database"),
+        gapped: true,
+        program_type: None,
+    };
+    let subjects: Vec<_> = (0..40)
+        .map(|i| {
+            subject(
+                SeqId::BlOrdId(crate::seqdb::Oid::of_unrestricted(i)),
+                137 + i as i32,
+            )
+        })
+        .collect();
+    let hsps: Vec<_> = (0..40)
+        .map(|i| {
+            hsp(
+                i,
+                (i as i32, i as i32),
+                (0, 0),
+                652,
+                5.30325651018409e-94,
+                255.758355778158,
+                (125, 130, 2),
+                &BP_Q1_HSP2,
+            )
+        })
+        .collect();
+    let query = query("Query_1", 140);
+    for format in [
+        SerialFormat::AsnText,
+        SerialFormat::AsnBinary,
+        SerialFormat::Json,
+    ] {
+        let mut bytes = Vec::new();
+        assert!(super::write_query(format, &run, &query, &subjects, &hsps, &mut bytes).unwrap());
+        let pieces = super::seqalign::query_pieces(format, &run, &query, &subjects, &hsps);
+        assert!(pieces.len() > 2, "{format:?} {}", bytes.len());
+        assert_eq!(pieces.iter().sum::<usize>(), bytes.len(), "{format:?}");
+        if format == SerialFormat::AsnText {
+            // The separator after the document is a write of its own (`WriteSeparator`).
+            assert_eq!(pieces.last(), Some(&1));
+        }
+        if format == SerialFormat::Json {
+            assert_eq!(
+                crate::report::serial::out_buffer::json_pieces(&bytes),
+                pieces
+            );
+        }
+    }
+}
+
+// Line DBID pfoff-4: BLAST XML's `catch` of an HSP whose subject's lookup throws writes the
+// Seq-align's identities as `GetAlnScores` reads them: the count, or -1 where the Seq-align has
+// no `num_ident` (a count below 0; psiblast's 0, which NCBI sets to -1 first), the one rule of
+// the Seq-annot formats too (`seq_align_num_ident`).
+#[test]
+fn the_identities_of_a_seq_align_as_ncbi_reads_them() {
+    use super::seqalign::{read_num_ident, seq_align_num_ident};
+    use crate::report::record::ProgramType;
+    let psiblast = Some(ProgramType::PsiBlast);
+    assert_eq!(read_num_ident(66, None), 66);
+    assert_eq!(read_num_ident(0, None), 0);
+    assert_eq!(read_num_ident(-1, None), -1);
+    assert_eq!(read_num_ident(0, psiblast), -1);
+    assert_eq!(read_num_ident(5, psiblast), 5);
+    assert_eq!(read_num_ident(0, Some(ProgramType::PsiTblastn)), 0);
+    assert_eq!(read_num_ident(i64::from(i32::MAX) + 1, None), i32::MAX);
+    // The score the Seq-annot formats write: none where XML's `catch` reads -1.
+    assert_eq!(seq_align_num_ident(0, psiblast), None);
+    assert_eq!(seq_align_num_ident(0, Some(ProgramType::RpsBlast)), Some(0));
+    assert_eq!(seq_align_num_ident(-1, None), None);
 }
 
 /// A PSSM search's Seq-annot names its program type (`Blast Type`: psiblast 10, psitblastn 11,

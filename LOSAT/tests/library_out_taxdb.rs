@@ -134,9 +134,12 @@ fn both(dir: &Path, words: &[OsString], envs: &[(&str, OsString)]) -> Output {
 
 /// NCBI BLAST+ 2.17.0 (`tests/fixtures/subject_taxdb`): the plural names warn once per formatter
 /// unless `taxdb.bti` is on the search path (outfmt 20 once more, for its line of field names); the
-/// singular names look nothing up for subjects without a taxid, so a `BLASTDB` setting that LOSAT
-/// cannot read refuses nothing. The library's searches of records look `taxdb.bti` up as the
-/// command line does (they wrote the warning whatever the path held before line RG item E1w-2b).
+/// singular names look nothing up for subjects without a taxid. A `BLASTDB` setting that is not
+/// UTF-8 is a directory of those bytes, where no `taxdb.bti` is: the plural names warn as without
+/// a setting (NCBI BLAST+ 2.17.0 with `NCBI_CONFIG__BLAST__BLASTDB` of the bytes `x\xffy`, the
+/// six programs: the bytes of `<program>.plur.none.*`; line RG item K10a). The library's searches
+/// of records look `taxdb.bti` up as the command line does (they wrote the warning whatever the
+/// path held before line RG item E1w-2b).
 #[test]
 fn subject_taxonomy_is_ncbis_in_the_command_line_and_the_library() {
     let dir = scratch("taxdb");
@@ -177,8 +180,8 @@ fn subject_taxonomy_is_ncbis_in_the_command_line_and_the_library() {
                 );
             }
         }
-        // The plural names with a setting that LOSAT cannot read: the command line's refusal, the
-        // library's too (its error is the text after the command line's `Error: `, `api`).
+        // The plural names with a setting that is not UTF-8: NCBI's output without a setting, in
+        // the command line and the library.
         let words = words(&[
             program,
             "-query",
@@ -189,16 +192,15 @@ fn subject_taxonomy_is_ncbis_in_the_command_line_and_the_library() {
             "6 qseqid sseqid sscinames",
         ]);
         let envs = [("NCBI_CONFIG__BLAST__BLASTDB", unreadable.clone())];
-        let cli = run_binary_in(Path::new(BIN), &dir, &words, &envs);
-        let library = run_binary_in(&example_binary("library_command_line"), &dir, &words, &envs);
-        assert_eq!(cli.status.code(), Some(1), "{program}: {cli:?}");
+        let cli = both(&dir, &words, &envs);
+        assert_eq!(cli.status.code(), Some(0), "{program}: {cli:?}");
         assert_eq!(
+            (text(&cli.stdout), text(&cli.stderr)),
             (
-                library.status.code(),
-                format!("Error: {}", text(&library.stderr))
+                fs::read_to_string(fixtures.join(format!("{program}.plur.none.out"))).unwrap(),
+                fs::read_to_string(fixtures.join(format!("{program}.plur.none.err"))).unwrap()
             ),
-            (Some(1), text(&cli.stderr)),
-            "{program}: the library"
+            "{program}: plural names, a setting that is not UTF-8"
         );
     }
     let _ = fs::remove_dir_all(&dir);

@@ -525,6 +525,7 @@ fn make_blastp_args() -> BlastpArgs {
         app: BlastpApp::Blastp,
         taxdb_setting: None,
         matrix_search: None,
+        write_verification: None,
         inclusion_ethresh: None,
         gap_trigger: None,
         sum_stats: false,
@@ -803,7 +804,7 @@ fn test_blastp_diag_last_hit_after_one_hit_matches_ncbi_formula() {
     assert_eq!(11 - (5 - 1) + 19, 26);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-521
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:521-530
 #[test]
 fn test_blastp_flagged_diag_branch_matches_ncbi_skip_vs_reset_order() {
     let mut skip_diag = DiagStruct::default();
@@ -829,7 +830,7 @@ fn test_blastp_flagged_diag_branch_matches_ncbi_skip_vs_reset_order() {
     assert_eq!(reset_diag.last_hit(), 90);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:581-588
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:596-606
 #[test]
 fn test_blastp_two_hit_diag_update_matches_ncbi_flag_and_last_hit_updates() {
     let mut right_extended_diag = DiagStruct::default();
@@ -921,7 +922,7 @@ fn test_one_hit_caller_passes_ncbi_payload_directly_to_blastp_save_init_hsp() {
     assert_eq!(init_hsps[0].ungapped_data.length, 5);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-583
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-591
 #[test]
 fn test_two_hit_caller_preserves_second_hit_seed_and_length_when_right_extension_occurs() {
     let query = vec![
@@ -964,7 +965,7 @@ fn test_two_hit_caller_preserves_second_hit_seed_and_length_when_right_extension
     assert_eq!(init_hsps[0].ungapped_data.length, 6);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-583
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-591
 #[test]
 fn test_two_hit_caller_preserves_second_hit_seed_and_length_when_left_stops_early() {
     let query = vec![
@@ -1060,9 +1061,9 @@ fn test_blastp_for_each_offset_pair_preserves_scan_emission_order() {
     assert_eq!(emitted, expected);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:102-128
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:111-128
 //
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-505
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:510-511
 #[test]
 fn test_blastp_for_each_offset_pair_preserves_absolute_query_offsets_across_queries() {
     let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
@@ -1903,10 +1904,13 @@ fn test_rebuild_preliminary_interval_tree_drops_only_retried_query_hsps() {
     let mut preliminary_hsp_list = vec![query0_hsp, query1_hsp];
     let mut interval_tree = BlastIntervalTree::new(0, 2000, 0, 200);
 
-    rebuild_preliminary_interval_tree_from_list(
-        &mut interval_tree,
-        &preliminary_hsp_list,
-        &contexts,
+    assert_eq!(
+        rebuild_preliminary_interval_tree_from_list(
+            &mut interval_tree,
+            &preliminary_hsp_list,
+            &contexts,
+        ),
+        Some(2)
     );
 
     let query0_contained = TreeHsp {
@@ -1938,10 +1942,13 @@ fn test_rebuild_preliminary_interval_tree_drops_only_retried_query_hsps() {
     preliminary_hsp_list[0].q_idx = 99;
     preliminary_hsp_list[1].q_idx = 77;
     remove_preliminary_hits_for_query(&mut preliminary_hsp_list, 0, &contexts);
-    rebuild_preliminary_interval_tree_from_list(
-        &mut interval_tree,
-        &preliminary_hsp_list,
-        &contexts,
+    assert_eq!(
+        rebuild_preliminary_interval_tree_from_list(
+            &mut interval_tree,
+            &preliminary_hsp_list,
+            &contexts,
+        ),
+        Some(1)
     );
 
     assert!(!interval_tree.contains_hsp(&query0_contained, contexts[0].frame_base, 0));
@@ -1979,7 +1986,7 @@ fn test_invalid_blastp_context_uses_ncbi_placeholder_cutoffs() {
         is_valid: false,
         ..make_query_context(0, 0)
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3577-3622
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3532-3533
     let scoring = crate::config::ProteinScoringSpec {
         matrix: ScoringMatrix::Blosum62,
         gap_open: 11,
@@ -2895,4 +2902,79 @@ fn the_rows_read_each_residue_by_the_operations() {
         stored_gap_columns(&residues, STORED_GAP, &hit, RowSide::Subject),
         [1]
     );
+}
+
+/// BLASTP's table as the `-db_hard_mask` search moves it between sequences (`db_masked.rs`:
+/// `TableStart::apply`, `TableEnd::apply`): NCBI's table at its one-thread offset (entries 0, or
+/// the window less than 0 after a clear), the clear (offset the window) before the move, and the
+/// moves after a sequence.
+#[test]
+fn hard_mask_starts_and_ends_move_the_table() {
+    use crate::algorithm::common::hard_chunk_walk::{HardTable, NcbiStart, TableEnd, TableStart};
+    let window = 40;
+    let mut scratch = BlastpSubjectScratch::new(16, 64, window, 21);
+    let mut written = DiagStruct::default();
+    written.set_last_hit(5000);
+    written.set_flag(1);
+    scratch.diag_array.fill(written);
+    scratch.diag_offset = 5000;
+    let Ok(()) = TableStart::Keep.apply(&mut scratch, window);
+    assert_eq!(
+        (scratch.diag_offset, scratch.diag_array[3]),
+        (5000, written)
+    );
+    let Ok(()) = TableStart::Move {
+        clear: false,
+        by: 70,
+    }
+    .apply(&mut scratch, window);
+    assert_eq!(
+        (scratch.diag_offset, scratch.diag_array[3]),
+        (5070, written)
+    );
+    let Ok(()) = TableStart::Move {
+        clear: true,
+        by: 70,
+    }
+    .apply(&mut scratch, window);
+    assert_eq!(scratch.diag_offset, window + 70);
+    assert!(scratch
+        .diag_array
+        .iter()
+        .all(|&entry| entry == DiagStruct::clear(window)));
+    let Ok(()) = TableEnd::Move(98).apply(&mut scratch, window);
+    assert_eq!(scratch.diag_offset, window + 168);
+    scratch.diag_array.fill(written);
+    let Ok(()) = TableEnd::Clear.apply(&mut scratch, window);
+    assert_eq!(scratch.diag_offset, window);
+    assert!(scratch
+        .diag_array
+        .iter()
+        .all(|&entry| entry == DiagStruct::clear(window)));
+    for (start, entry) in [
+        (
+            NcbiStart {
+                offset: -98,
+                cleared: false,
+            },
+            DiagStruct::default(),
+        ),
+        (
+            NcbiStart {
+                offset: 5,
+                cleared: true,
+            },
+            DiagStruct::clear(window),
+        ),
+    ] {
+        scratch.diag_array.fill(written);
+        let Ok(()) = TableStart::New(start).apply(&mut scratch, window);
+        assert_eq!(scratch.diag_offset, start.offset);
+        assert!(scratch.diag_array.iter().all(|&e| e == entry), "{start:?}");
+        // The plain sequence's start (`db_masked::plain_on_ncbi_table`) makes the same table.
+        scratch.diag_array.fill(written);
+        scratch.ncbi_table(start, window);
+        assert_eq!(scratch.diag_offset, start.offset);
+        assert!(scratch.diag_array.iter().all(|&e| e == entry), "{start:?}");
+    }
 }

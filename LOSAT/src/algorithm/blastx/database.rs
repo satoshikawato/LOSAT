@@ -602,7 +602,8 @@ impl ReportedSubjects {
     /// The batch's prefetch stops the run where it reads a subject whose lookup fails on a file
     /// with NCBI's exception (`prefetched`, `shared::batch_prefetch`).
     /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
-    /// one by one (`shared::ParsedShown::one_by_one`). `cut`: the formatter's cut of each query's
+    /// one by one (`shared::ParsedShown::one_by_one`); they load them so too after a prefetch that
+    /// fails at a subject whose lookup throws on the id (`shared::BatchPrefetch::loads_one_by_one`). `cut`: the formatter's cut of each query's
     /// lists to the hit list size where RPSTBLASTN merges several volumes
     /// (`ResolvedOptions::shown_lists`; `usize::MAX` for every other search), which counts
     /// following lists whose Seq-align ids match as one subject (`BatchResults::shown`, which
@@ -709,6 +710,13 @@ impl ReportedSubjects {
             .iter()
             .flat_map(|batch| (0..batch.queries.len()).map(move |qidx| batch.cut_lists(qidx, cut)))
             .collect();
+        // A batch whose prefetch fails at a subject whose lookup throws on the id: its reports
+        // load the subjects one by one after it (`shared::BatchPrefetch::loads_one_by_one`), each
+        // other subject taken as loaded by the prefetch (`ReportRead::prefetch_fails`).
+        let prefetch_fails = prefetched
+            && !one_by_one
+            && shared::BatchPrefetch::prefetch_fails_among(parsed.values().map(|s| Some(&**s)));
+        let one_by_one = one_by_one || prefetch_fails;
         // A pairwise report's reads (`pairwise_read_order`), of the lists that the formatter's cut
         // keeps (`BatchResults::cut_lists`).
         let (after, pairwise_reading, batch) = after;
@@ -741,6 +749,7 @@ impl ReportedSubjects {
         let read = crate::report::db_subject::ReportRead {
             one_by_one,
             batch: Some(batch),
+            prefetch_fails,
         };
         let loads = HitLoads::of(
             database.taxdb.loads_before(read.batch),

@@ -1419,7 +1419,10 @@ fn the_pssm_refuses_reads_that_losat_does_not_make_as_ncbi() {
     assert_eq!(read(&other), Ok(()));
     for found in [
         FoundInstead::Nothing,
-        FoundInstead::ThrowsOnId("Error: ... is not a valid ordinal id".into()),
+        FoundInstead::ThrowsOnId(crate::ncbi_exception::NcbiException::new(
+            crate::seqdb::isam::OBJECT_ID_GET_ID,
+            "Error: ... is not a valid ordinal id",
+        )),
         FoundInstead::OtherTaxids(DbSequence::of_unrestricted(2)),
     ] {
         assert_eq!(read(&subject.clone().found_instead(Some(found))), Ok(()));
@@ -1541,7 +1544,12 @@ fn the_prefetch_of_an_unshown_subject_reads_what_the_lookup_finds() {
         prefetched(Some(FoundInstead::Failed(LookupFailure::ncbi("no accession info")))),
         Prefetched::Failed(reason) if reason.contains("prefetch stops with a BLAST Database error")
     ));
-    let throws = Some(FoundInstead::ThrowsOnId("Invalid choice selection".into()));
+    let throws = Some(FoundInstead::ThrowsOnId(
+        crate::ncbi_exception::NcbiException::new(
+            crate::seqdb::isam::OBJECT_ID_GET_ID,
+            "Invalid choice selection",
+        ),
+    ));
     assert!(matches!(
         prefetched(throws.clone()),
         Prefetched::Failed(reason) if reason.contains("writes Error pre-fetching sequence data")
@@ -3118,6 +3126,7 @@ fn a_failed_lookup_is_held_by_the_loader_for_the_run_and_by_the_scope_for_its_ba
             ReportRead {
                 one_by_one: true,
                 batch: Some(batch),
+                prefetch_fails: false,
             },
             ReportKeys::Entries(keys.iter().map(|&key| Some(key)).collect()),
         )

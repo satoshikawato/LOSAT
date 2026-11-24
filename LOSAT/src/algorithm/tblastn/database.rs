@@ -1107,9 +1107,25 @@ pub(super) fn reported_subjects(
     // `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read them one by
     // one; `shared::BatchPrefetch`, `shared::BatchReads::shown`).
     let format = prefetch_format(formats);
-    let prefetch = shared::BatchPrefetch::of(format, hitlists.len(), 0, batches, |span| {
-        seq_aligns_of(&hitlists[span], gapped)
-    });
+    let titled = |ordinal: usize| match titles.get(&u32::try_from(ordinal).ok()?) {
+        Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
+        _ => None,
+    };
+    let prefetch = shared::BatchPrefetch::of(
+        format,
+        hitlists.len(),
+        0,
+        batches,
+        |span| seq_aligns_of(&hitlists[span], gapped),
+        |span| {
+            shared::BatchPrefetch::prefetch_fails_among(
+                hitlists[span]
+                    .iter()
+                    .flat_map(KappaResultHitList::lists)
+                    .map(|list| titled(usize::try_from(list.oid).ok()?)),
+            )
+        },
+    );
     let reads = prefetch.reads(hitlists.iter().enumerate().flat_map(|(query, hitlist)| {
         hitlist
             .lists()
@@ -1117,17 +1133,13 @@ pub(super) fn reported_subjects(
             .map(move |list| (query, list.oid as u32))
     }));
     // What the reports do at each subject's `Hit`, by ordinal id (the one answer, `hit_loads`).
-    let titled = |ordinal: usize| match titles.get(&u32::try_from(ordinal).ok()?) {
-        Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
-        _ => None,
-    };
     let after = after_throw(formats, call);
     // A pairwise report's reads, of the subjects' lengths (`pairwise_read_order`), where its
     // batch reads them one by one.
     let pairwise_keys = |query: usize| -> Result<Option<crate::report::db_subject::PairwiseReads>> {
         let Some(reading) = pairwise
             .filter(|_| after.run().is_some_and(|run| run.after.is_pairwise()))
-            .filter(|_| prefetch.reads_one_by_one(query))
+            .filter(|_| prefetch.loads_one_by_one(query))
         else {
             return Ok(None);
         };
@@ -1284,8 +1296,8 @@ pub(super) fn reported_subjects(
 
 /// What the XML2 and JSON reports of `hitlists` (the final hit lists by query, in the order of the
 /// reports; the subjects named by `key`, an ordinal id or a rank) do at each subject's `Hit`
-/// (`HitLoads::of`, the one answer): `prefetch` tells by query whether its batch reads one by one
-/// (`BatchPrefetch::reads_one_by_one`), `parsed` gives the subject with parsed Seq-ids of a key;
+/// (`HitLoads::of`, the one answer): `prefetch` tells by query whether its batch loads one by one
+/// (`BatchPrefetch::report_read`), `parsed` gives the subject with parsed Seq-ids of a key;
 /// the `Hit`s are those that `blast_xml::prepare`'s reports make (the lists with HSPs), or a
 /// pairwise report's reads (`pairwise_reads[query]`, where given). TBLASTN keeps no record of its
 /// loads: the reports are the call's first loads, after `before`, those of the calls before

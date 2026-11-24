@@ -412,7 +412,7 @@ fn a_seq_align_id_of_any_kind_is_left_to_the_lookup() {
         (
             "ids/pshare_v5",
             2,
-            Some("whose lookup in the database fails".to_string()),
+            Some("whose lookup in the database throws on the id itself".to_string()),
         ),
     ] {
         let db = db_search(name, None, &cwd);
@@ -454,7 +454,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
         (
             "ids/pshare_v5",
             2,
-            Err("whose lookup in the database fails"),
+            Err("whose lookup in the database throws on the id itself"),
         ),
         // An id that the lookup finds nowhere, and one that it finds first on sequence 5,
         // none of whose ids compares equal: nothing is read.
@@ -486,7 +486,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
         );
         assert_eq!(
             subject.prefetch_fails(),
-            want == Err("whose lookup in the database fails"),
+            want == Err("whose lookup in the database throws on the id itself"),
             "{name} {ordinal}"
         );
     }
@@ -1928,7 +1928,10 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
         (**parsed[stop].as_ref().unwrap())
             .clone()
             .found_instead(Some(crate::report::db_subject::FoundInstead::ThrowsOnId(
-                "Invalid choice selection".into(),
+                crate::ncbi_exception::NcbiException::new(
+                    crate::seqdb::isam::OBJECT_ID_GET_ID,
+                    "Invalid choice selection",
+                ),
             ))),
     ));
     assert!(throws.as_ref().unwrap().prefetch_fails());
@@ -2011,10 +2014,20 @@ fn a_weak_match_is_refused_where_ncbi_may_read_the_reported_sequences_one_by_one
                     .is_ok(),
                 "{name} {ordinal}"
             );
+            // With the prefetch on, only a batch whose prefetch fails loads one by one, where
+            // LOSAT has not looked for the weak matches (`WeakMatch::Unsought`, line DBID
+            // pfoff-7).
             match (
                 subject.fetched(false, true, crate::report::db_subject::HitLoad::Loaded),
                 want.filter(|_| prefetch_off),
             ) {
+                (Err(error), None) if !prefetch_off => assert!(
+                    error.contains("LOSAT does not look those sequences up"),
+                    "{name} {ordinal}: {error}"
+                ),
+                (Ok(()), None) if !prefetch_off => {
+                    assert!(want.is_none(), "{name} {ordinal}: a weak match not sought")
+                }
                 (Ok(()), None) => {}
                 (Err(error), Some(Some(other))) => assert!(
                     error.contains(&format!("match an id of database sequence {other} weakly")),
@@ -3089,7 +3102,10 @@ fn a_prefetch_with_a_failed_lookup_refuses_its_loads_of_the_cache_slot() {
         parsed[1]
             .clone()
             .found_instead(Some(crate::report::db_subject::FoundInstead::ThrowsOnId(
-                "Invalid choice selection".into(),
+                crate::ncbi_exception::NcbiException::new(
+                    crate::seqdb::isam::OBJECT_ID_GET_ID,
+                    "Invalid choice selection",
+                ),
             )));
     assert!(throws.prefetch_fails());
     let run = TaxdbRun::default();

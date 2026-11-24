@@ -778,8 +778,8 @@ pub(crate) struct ReportedSubjects {
 
 /// What the XML2 and JSON reports of the reported hits `ordered` (in report order, subjects named
 /// by ordinal id) do at each subject's `Hit` (`HitLoads::of`, the one answer, by ordinal id):
-/// `prefetch` tells by the hits' query index whether its batch reads one by one
-/// (`BatchPrefetch::reads_one_by_one`), `after` what the formats do after a subject whose lookup
+/// `prefetch` tells by the hits' query index whether its batch loads one by one
+/// (`BatchPrefetch::report_read`), `after` what the formats do after a subject whose lookup
 /// throws (`FormatThrow::of_outfmts`), `identities` the engine's identities of a hit
 /// (`hit_identities`), which tell whether a row of `nident` alone reads its subject; the `Hit`s
 /// are those that `blast_xml` makes (the HSPs of each query, a subject's following each other),
@@ -859,8 +859,8 @@ pub(crate) fn hit_identities(
 
 /// What the formats of the run, `outfmts` as `-outfmt` gives them, do after a subject whose lookup
 /// throws where its batch's prefetch is off (`FormatThrow::of_outfmts`, for `hit_loads` and the
-/// run's `RunLoads`): the stop of a batch's prefetch (`batch_prefetch_stop`) and the reports
-/// (`reported_subjects`) ask it of the run's formats alike (review 2 of line DBID pfoff-1, N-M2),
+/// run's `RunLoads`): the reports (`reported_subjects`) ask it of the run's formats alike (review 2
+/// of line DBID pfoff-1, N-M2),
 /// with the call's refusal over the `-outfmt` values of its other searches, `others`
 /// (`FormatThrow::of_search`, `ReportOutputs::other_outfmts`); `html`: the run has `-html` links
 /// (`TblastxArgs::html_links`, which the writer's `PairwiseConfig::html` gets too).
@@ -930,6 +930,7 @@ pub(crate) fn report_loads(
     let read = crate::report::db_subject::ReportRead {
         one_by_one: true,
         batch: Some(batch),
+        prefetch_fails: false,
     };
     run.loads(
         database.taxdb.calls_before(),
@@ -978,20 +979,29 @@ pub(crate) fn prefetch_format(
 /// Whether the batch of each query of the reported hits `ordered` (in report order, by query of
 /// `queries` queries, numbered from 0) of a run of the first format `format` prefetches
 /// (`shared::BatchPrefetch::of`): `spans` are the
-/// queries of each batch, whose Seq-aligns `seq_aligns_of` counts. The one producer of the
-/// prefetch that the reports' loads read (`hit_loads`), for both of its readers: the stop of a
-/// later batch, of the batches before it (`batch_prefetch_stop`), and the reports
-/// (`reported_subjects`), so the two cannot disagree on what the batches before loaded (review 2
-/// of line DBID pfoff-1, N-M2).
+/// queries of each batch, whose Seq-aligns `seq_aligns_of` counts and whose prefetch fails where
+/// one of their subjects' lookup throws on the id (`titles`). The one producer of the prefetch
+/// that the reports' loads read (`hit_loads`; `reported_subjects`).
 fn batches_prefetch(
     format: shared::PrefetchFormat,
-    ordered: &[TblastxHsp],
+    (ordered, titles): (&[TblastxHsp], &DatabaseTitles),
     queries: usize,
     spans: &[std::ops::Range<usize>],
 ) -> shared::BatchPrefetch {
-    shared::BatchPrefetch::of(format, queries, 0, spans, |span| {
-        seq_aligns_of(query_hits(ordered, span))
-    })
+    shared::BatchPrefetch::of(
+        format,
+        queries,
+        0,
+        spans,
+        |span| seq_aligns_of(query_hits(ordered, span)),
+        |span| {
+            shared::BatchPrefetch::prefetch_fails_among(
+                query_hits(ordered, span)
+                    .iter()
+                    .map(|hsp| titled_parsed(titles, hsp.hit.s_idx as usize)),
+            )
+        },
+    )
 }
 
 /// The reported database sequences of `ordered` (the reported hits of all query batches in
@@ -1027,7 +1037,7 @@ pub(crate) fn reported_subjects(
     let mut ordinals: Vec<u32> = ordered.iter().map(|hsp| hsp.hit.s_idx).collect();
     ordinals.sort_unstable();
     ordinals.dedup();
-    let prefetch = batches_prefetch(format, ordered, queries, spans);
+    let prefetch = batches_prefetch(format, (ordered, titles), queries, spans);
     // What the batches read of each subject (`prefetch`: a batch whose Seq-aligns outnumber a
     // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read them
     // one by one; `shared::BatchReads::shown`); where the prefetch fails, the batch writes

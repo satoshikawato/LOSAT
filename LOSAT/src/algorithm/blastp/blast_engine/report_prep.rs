@@ -730,7 +730,6 @@ pub(super) fn prefetch_reported_subjects(
                             database,
                             &ranks[batch.searched.clone()].concat(),
                             prefetch_taxids,
-                            !prefetch_only,
                         )?;
                         titles.batch_prefetch(
                             database,
@@ -1459,6 +1458,15 @@ pub(super) fn report_values(
                     .unlisted
                     .get(span)
                     .map_or(0, |counts| counts.iter().sum())
+        },
+        // The prefetch reads the subjects of the batch's results before the cut, as the count.
+        |span| {
+            listed_titles.as_ref().is_some_and(|titles| {
+                crate::algorithm::common::database::BatchPrefetch::prefetch_fails_among(
+                    database::ListedTitles::reported_ranks(&hit_lists[span])
+                        .map(|rank| titles.parsed_subject(rank)),
+                )
+            })
         },
     );
     // The numbers of HSPs of psiblast's lists before the formatter's cut (`# N hits found` of

@@ -161,7 +161,8 @@ fn the_lookups_throw_where_ncbis_throw() {
     for db in ["PIG", "BL_ORD_ID"] {
         let thrown = find_id(&[7001], &[], &[], &general(db, text("abc"))).unwrap_err();
         assert_eq!(thrown.get_msg(), GET_ID);
-        assert!(!thrown.places_known());
+        // The place that NCBI's report names (`isam::OBJECT_ID_GET_ID`, line DBID pfoff-7).
+        assert!(thrown.places_known());
         let thrown = negative_find_id(&[b"x".to_vec()], &general(db, text("abc"))).unwrap_err();
         assert_eq!(thrown.get_msg(), GET_ID);
         assert_eq!(

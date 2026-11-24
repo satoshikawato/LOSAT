@@ -1726,21 +1726,33 @@ pub(super) fn seq_aligns_of(hit_lists: &[Option<BlastnHitList>], gapped: bool) -
 // results against `PRE_FETCH_SEQS_LIMIT`)
 /// Whether the batch of each query of `hit_lists` (final hit lists by query) prefetches
 /// (`shared::BatchPrefetch::of`): `batches` are the queries of each batch, numbered from `first`
-/// (the query of `hit_lists[0]`), and `seq_aligns_of` counts a batch's Seq-aligns (`gapped`). The
-/// one producer of the prefetch that the reports' loads read (`hit_loads`), for both of its
-/// readers: the stop of a later batch, of the batches before it
-/// (`BlastnDatabase::batch_prefetch_stop`), and the reports (`reported_subjects`), so the two
-/// cannot disagree on what the batches before loaded (review 2 of line DBID pfoff-1, N-M2).
+/// (the query of `hit_lists[0]`), `seq_aligns_of` counts a batch's Seq-aligns (`gapped`), and a
+/// batch's prefetch fails where one of its subjects' lookup throws on the id (`titles`). The one
+/// producer of the prefetch that the reports' loads read (`hit_loads`; `reported_subjects`).
 fn batches_prefetch(
     format: shared::PrefetchFormat,
-    hit_lists: &[Option<BlastnHitList>],
+    (hit_lists, titles): (&[Option<BlastnHitList>], &DatabaseTitles),
     first: usize,
     batches: &[std::ops::Range<usize>],
     gapped: bool,
 ) -> shared::BatchPrefetch {
-    shared::BatchPrefetch::of(format, hit_lists.len(), first, batches, |span| {
-        seq_aligns_of(&hit_lists[span], gapped)
-    })
+    shared::BatchPrefetch::of(
+        format,
+        hit_lists.len(),
+        first,
+        batches,
+        |span| seq_aligns_of(&hit_lists[span], gapped),
+        |span| {
+            shared::BatchPrefetch::prefetch_fails_among(
+                hit_lists[span]
+                    .iter()
+                    .flatten()
+                    .flat_map(|hit_list| hit_list.hsplist_array.iter())
+                    .filter(|hsp_list| !hsp_list.hsps.is_empty())
+                    .map(|hsp_list| titled_parsed(titles, hsp_list.oid as usize)),
+            )
+        },
+    )
 }
 
 /// The database sequences that the reports show, by rank (`reported_subjects`).
@@ -1854,6 +1866,7 @@ fn report_loads(
     let read = crate::report::db_subject::ReportRead {
         one_by_one: true,
         batch: before.batch(),
+        prefetch_fails: false,
     };
     run.loads(
         before,
@@ -2027,8 +2040,8 @@ pub(super) fn reports_unchanged_by_load_throws(output_formats: &[BlastnOutputFor
 
 /// What the reports of `hit_lists` (final hit lists by query, in the order of the reports; the
 /// subjects named by `key`, an ordinal id or a rank) do at each subject's `Hit` (`HitLoads::of`,
-/// the one answer): `prefetch` tells by query whether its batch reads one by one
-/// (`BatchPrefetch::reads_one_by_one`), `parsed` gives the subject with parsed Seq-ids of a
+/// the one answer): `prefetch` tells by query whether its batch loads one by one
+/// (`BatchPrefetch::report_read`), `parsed` gives the subject with parsed Seq-ids of a
 /// key; the `Hit`s are those that `blast_xml::write_blastn_xml` makes, or the pairwise reports'
 /// reads (`pairwise`: how they read them, `pairwise_keys`), after the loads `before`
 /// (`HitLoads::of`).
@@ -2136,7 +2149,7 @@ pub(super) fn reported_subjects(
     // positive `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read
     // them one by one; `shared::BatchReads::shown`); where the prefetch fails, the batch writes
     // NCBI's warning (`BlastnDatabase::batch_prefetch`).
-    let prefetch = batches_prefetch(format, hit_lists, first_query, batches, gapped);
+    let prefetch = batches_prefetch(format, (hit_lists, titles), first_query, batches, gapped);
     let reads = prefetch.reads(
         hit_lists
             .iter()

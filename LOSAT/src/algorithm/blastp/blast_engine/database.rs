@@ -2050,11 +2050,10 @@ impl ListedTitles<'_> {
     /// The subjects of ranks `ranks` of psiblast's traceback hit lists as NCBI's prefetch reads
     /// them by their Seq-align ids (`shared::prefetch_reads`), for `batch_prefetch`:
     /// those it finds as themselves, and one whose lookup throws on its id
-    /// (`ParsedSubject::prefetch_fails`: the batch's prefetch fails there); one that it finds
-    /// nowhere is left out (the prefetch reads nothing for it). Such a failure is refused where
-    /// the reports read the subjects they show (`reads`): the prefetch then leaves those after
-    /// it unloaded, which NCBI's formatters read one by one (its scope can match an id of a
-    /// sequence read before weakly, as with the prefetch off). One whose lookup fails on a file
+    /// (`ParsedSubject::prefetch_fails`: the batch's prefetch fails there, and its reports load
+    /// the subjects one by one after it, `shared::BatchPrefetch::loads_one_by_one`, line DBID
+    /// pfoff-7); one that it finds nowhere is left out (the prefetch reads nothing for it). One
+    /// whose lookup fails on a file
     /// with NCBI's exception (`ParsedSubject::prefetch_stops`) is kept: the batch's prefetch stops
     /// there (`shared::batch_prefetch`). A lookup that fails on a file with LOSAT's error and
     /// another sequence that NCBI can read for one and whose definition lines do not hold its
@@ -2070,15 +2069,48 @@ impl ListedTitles<'_> {
         database: &BlastpDatabase,
         ranks: &[usize],
         taxids: bool,
-        reads: bool,
     ) -> Result<Vec<usize>> {
+        // A failing prefetch may have loaded each other subject of the batch, beyond the cut too,
+        // before its failure (`ReportRead::prefetch_fails`): where one of them holds an id that
+        // NCBI's scope takes for the Seq-align id that throws, its reports write that one's
+        // record for it (the walk of the reports' loads sees the shown subjects alone).
+        let loaded: std::collections::HashSet<u32> = ranks
+            .iter()
+            .filter(|&&rank| {
+                self.parsed_subject(rank)
+                    .is_none_or(|subject| subject.lookup_throws().is_none())
+            })
+            .map(|&rank| self.listed.ordinals[rank])
+            .collect();
+        let any = !loaded.is_empty();
         let mut kept = Vec::with_capacity(ranks.len());
         for &rank in ranks {
             let Some(subject) = self.parsed_subject(rank) else {
                 kept.push(rank);
                 continue;
             };
-            if (subject.prefetch_fails() && !reads) || subject.prefetch_stops().is_some() {
+            if subject.prefetch_fails() {
+                let prefetched =
+                    |holder: crate::seqdb::DbSequence| loaded.contains(&holder.ordinal());
+                if let Some(holder) = subject.held_before((prefetched, any), (prefetched, any)) {
+                    let reason = subject
+                        .fetched(
+                            false,
+                            false,
+                            crate::report::db_subject::HitLoad::Held(holder),
+                        )
+                        .err()
+                        .unwrap_or_default();
+                    return Err(shared::parsed_refusal(
+                        self.oids.oid(self.listed.ordinals[rank]),
+                        &format!(
+                            "{reason}, and is in psiblast's traceback hit list, whose batch's prefetch fails at it after it may have loaded that sequence (NCBI BLAST+ 2.17.0 prefetches the list also beyond -max_target_seqs, where no report shows it)"
+                        ),
+                        self.program,
+                    ));
+                }
+            }
+            if subject.prefetch_fails() || subject.prefetch_stops().is_some() {
                 kept.push(rank);
                 continue;
             }
@@ -2236,9 +2268,10 @@ impl ListedTitles<'_> {
                 };
                 let ordinal = self.listed.ordinals[rank];
                 // A lookup that fails on a file with NCBI's exception (a list of version 5
-                // databases with and without the accession table): the read catches it, so the
-                // PSSM reads no letters (`Failed to retrieve sequence`) and loads nothing.
-                if subject.prefetch_stops().is_some() {
+                // databases with and without the accession table), or that throws on the id
+                // itself (`gnl|PIG|abc`, line DBID pfoff-7): the read catches it, so the PSSM
+                // reads no letters (`Failed to retrieve sequence`) and loads nothing.
+                if subject.prefetch_stops().is_some() || subject.prefetch_fails() {
                     reads.read.insert(rank, None);
                     if any_loads {
                         reads.other_blobs.insert(rank, None);
@@ -2394,6 +2427,7 @@ impl ListedTitles<'_> {
                     ReportRead {
                         one_by_one: true,
                         batch: read.batch,
+                        prefetch_fails: false,
                     },
                     ReportKeys::Entries(order.iter().map(|&(rank, _)| Some(rank)).collect()),
                 )],

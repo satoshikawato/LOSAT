@@ -365,10 +365,11 @@ pub(crate) fn database_error(error: SeqDbError, program: &str) -> anyhow::Error 
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
 // `CATCH_ALL` writes an exception that is not a `CSeqDBException` with `what()`, which names the
-// place of each throw: one thrown by the code NCBI's `datatool` generates (`ThrowSite::generated`,
-// the `CObject_id::GetId` of a `BL_ORD_ID` or `PIG` id with a string tag under an id list, line
-// RG D1c-1) names a place LOSAT does not have, and LOSAT refuses it with its text, as segmasker
-// does (`segmasker::work::database_failure`).
+// place of each throw: one thrown by the code NCBI's `datatool` generates (`ThrowSite::generated`)
+// names a place LOSAT does not have, and LOSAT refuses it with its text, as segmasker does
+// (`segmasker::work::database_failure`); the `CObject_id::GetId` of a `BL_ORD_ID` or `PIG` id with
+// a string tag (under an id list, line RG D1c-1; a Seq-align id, line DBID pfoff-7) has the place
+// that NCBI's report names (`seqdb::isam::OBJECT_ID_GET_ID`).
 /// The exception of NCBI's that a search program reports as NCBI's does
 /// (`SeqDbError::ncbi_exception` whose places LOSAT knows), the one test of [`database_error_of`]
 /// and `header_read_error`.
@@ -2305,9 +2306,17 @@ pub(crate) fn prefetch_always_off(format: PrefetchFormat) -> bool {
 /// reads them so in outfmt 8, 9 and 11: review 5 of line DBID pfoff-4, H2 and H3). That matters for a call whose
 /// reports read nothing of the subjects ([`ParsedShown::prefetched`], refused by
 /// [`check_prefetched_parsed`]) and for the weak matches of NCBI's scope, which only such
-/// reads make ([`ParsedShown::one_by_one`]).
+/// reads make ([`ParsedShown::one_by_one`]). A batch whose prefetch runs and fails at a subject
+/// whose lookup throws on the id (`ParsedSubject::prefetch_fails`, [`batch_prefetch`]'s warning)
+/// leaves its later loads to its reports, which load its subjects one by one too
+/// ([`BatchPrefetch::loads_one_by_one`]; line DBID pfoff-7).
 #[derive(Debug)]
-pub(crate) struct BatchPrefetch(Batches, BatchStarts);
+pub(crate) struct BatchPrefetch(Batches, BatchStarts, BatchFails);
+
+/// Whether the prefetch of the batch of each query of a call runs and fails at a subject whose
+/// lookup throws on the id ([`BatchPrefetch`]).
+#[derive(Debug)]
+struct BatchFails(Vec<bool>);
 
 /// The query batch of each query of a call ([`BatchPrefetch::report_read`]): the first query of
 /// its batch, as the call's batch ranges number it; `None` for a query of no batch range.
@@ -2331,14 +2340,17 @@ impl BatchPrefetch {
     /// first format `format`: `batches`, the ranges of the queries of each batch numbered from
     /// `first` (the call's first query; ranges before it are the batches written before), or the
     /// whole call as one batch where `batches` is empty; `seq_aligns` counts the Seq-aligns of the
-    /// hit lists of a range of the call ([`subject_seq_aligns`]). A query of no range is taken
-    /// both as prefetched and as read one by one.
+    /// hit lists of a range of the call ([`subject_seq_aligns`]), and `fails` tells whether the
+    /// prefetch of a range would fail at one of its reported subjects whose lookup throws on the
+    /// id ([`BatchPrefetch::prefetch_fails_among`]), asked of the ranges that prefetch. A query of no range is
+    /// taken both as prefetched and as read one by one.
     pub(crate) fn of(
         format: PrefetchFormat,
         queries: usize,
         first: usize,
         batches: &[std::ops::Range<usize>],
         seq_aligns: impl Fn(std::ops::Range<usize>) -> usize,
+        fails: impl Fn(std::ops::Range<usize>) -> bool,
     ) -> Self {
         Self::at(
             prefetch_seqs_limit(),
@@ -2346,7 +2358,7 @@ impl BatchPrefetch {
             queries,
             first,
             batches,
-            seq_aligns,
+            (seq_aligns, fails),
         )
     }
 
@@ -2357,7 +2369,10 @@ impl BatchPrefetch {
         queries: usize,
         first: usize,
         batches: &[std::ops::Range<usize>],
-        seq_aligns: impl Fn(std::ops::Range<usize>) -> usize,
+        (seq_aligns, fails): (
+            impl Fn(std::ops::Range<usize>) -> usize,
+            impl Fn(std::ops::Range<usize>) -> bool,
+        ),
     ) -> Self {
         let whole = [first..first + queries];
         let batches = if batches.is_empty() {
@@ -2375,21 +2390,36 @@ impl BatchPrefetch {
         }
         let starts = BatchStarts(starts);
         // No batch's count decides where every count gives the same answer.
-        if !format.runs_at(limit, 0) {
-            return Self(Batches::None, starts);
-        }
-        if format.runs_at(limit, usize::MAX) {
-            return Self(Batches::Every, starts);
-        }
-        let mut on = vec![None; queries];
-        for batch in batches {
-            let span = span(batch);
-            if !span.is_empty() {
-                let prefetches = format.runs_at(limit, seq_aligns(span.clone()));
-                on[span].fill(Some(prefetches));
+        let every = if !format.runs_at(limit, 0) {
+            Batches::None
+        } else if format.runs_at(limit, usize::MAX) {
+            Batches::Every
+        } else {
+            let mut on = vec![None; queries];
+            for batch in batches {
+                let span = span(batch);
+                if !span.is_empty() {
+                    let prefetches = format.runs_at(limit, seq_aligns(span.clone()));
+                    on[span].fill(Some(prefetches));
+                }
+            }
+            Batches::Each(on)
+        };
+        // The batches that prefetch and whose prefetch fails.
+        let mut failing = vec![false; queries];
+        if !matches!(every, Batches::None) {
+            for batch in batches {
+                let span = span(batch);
+                let prefetches = match &every {
+                    Batches::Each(on) => on.get(span.start).copied().flatten() == Some(true),
+                    Batches::Every | Batches::None => true,
+                };
+                if !span.is_empty() && prefetches && fails(span.clone()) {
+                    failing[span].fill(true);
+                }
             }
         }
-        Self(Batches::Each(on), starts)
+        Self(every, starts, BatchFails(failing))
     }
 
     /// Whether the batch of the call's query `query` prefetches; `None` for a query of no batch.
@@ -2401,16 +2431,37 @@ impl BatchPrefetch {
         }
     }
 
-    /// Whether the batch of the call's query `query` may read the query's subjects one by one:
-    /// its prefetch is off, or the query is of no batch (taken both ways, as in
-    /// [`BatchPrefetch::reads`]).
+    /// Whether the batch of the call's query `query` may read the query's subjects one by one
+    /// with its prefetch off: its prefetch is off, or the query is of no batch (taken both ways,
+    /// as in [`BatchPrefetch::reads`]). The reads whose taxonomy texts the reports write: the
+    /// prefetch of a batch whose prefetch fails wrote the texts of its loads, or was refused
+    /// ([`batch_prefetch`]); where the loads throw or match weakly, [`loads_one_by_one`].
+    ///
+    /// [`loads_one_by_one`]: BatchPrefetch::loads_one_by_one
     pub(crate) fn reads_one_by_one(&self, query: usize) -> bool {
         self.batch_of(query) != Some(true)
     }
 
+    /// Whether the batch of the call's query `query` prefetches and its prefetch fails at a
+    /// subject whose lookup throws on the id.
+    fn prefetch_fails(&self, query: usize) -> bool {
+        self.2 .0.get(query).copied().unwrap_or(false)
+    }
+
+    /// Whether the reports of the batch of the call's query `query` may load the query's subjects
+    /// one by one ([`BatchPrefetch::reads_one_by_one`]), also after a prefetch that fails at a
+    /// subject whose lookup throws on the id (NCBI's prefetch catches it and ends its loads): the
+    /// one answer of where a subject's load throws (`ParsedSubject::lookup_throws`) and where
+    /// NCBI's scope can match an id weakly ([`BatchPrefetch::report_read`], the pairwise reports'
+    /// reads, [`BatchPrefetch::reads`]).
+    pub(crate) fn loads_one_by_one(&self, query: usize) -> bool {
+        self.reads_one_by_one(query) || self.prefetch_fails(query)
+    }
+
     /// How the report of the call's query `query` reads its subjects, for the walk of the
     /// reports' loads (`report::db_subject::HitLoads::of`): one by one or not
-    /// ([`BatchPrefetch::reads_one_by_one`]), in the scope of its query batch, named by the batch's
+    /// ([`BatchPrefetch::loads_one_by_one`]), after a prefetch that fails or not
+    /// (`ReportRead::prefetch_fails`), in the scope of its query batch, named by the batch's
     /// first query as the call's batch ranges number it plus `base` (the number of the call's
     /// first batch range in the run's record, `TaxdbRun::loads_before`; `None` for a query of no
     /// batch range).
@@ -2420,7 +2471,7 @@ impl BatchPrefetch {
         base: usize,
     ) -> crate::report::db_subject::ReportRead {
         crate::report::db_subject::ReportRead {
-            one_by_one: self.reads_one_by_one(query),
+            one_by_one: self.loads_one_by_one(query),
             batch: self
                 .1
                  .0
@@ -2428,26 +2479,27 @@ impl BatchPrefetch {
                 .copied()
                 .flatten()
                 .map(|start| start + base),
+            prefetch_fails: self.prefetch_fails(query),
         }
     }
 
     /// What the batches read of the subjects of `reported`, the (query of the call, ordinal id)
     /// of each reported subject of each query: the subjects that a batch whose prefetch is on
-    /// reports, and those that a batch whose prefetch is off reports (`BatchReads::shown`). The
-    /// subjects are listed only where a positive limit counts the batches' Seq-aligns.
+    /// reports, and those that a batch whose reports load them one by one reports (its prefetch
+    /// is off or fails, [`BatchPrefetch::loads_one_by_one`]; `BatchReads::shown`). The subjects are
+    /// listed only where a positive limit counts the batches' Seq-aligns or a prefetch fails.
     pub(crate) fn reads(&self, reported: impl IntoIterator<Item = (usize, u32)>) -> BatchReads {
         let each = match &self.0 {
-            Batches::Every => return BatchReads(BatchesRead::Every),
+            Batches::Every if !self.2 .0.contains(&true) => return BatchReads(BatchesRead::Every),
             Batches::None => return BatchReads(BatchesRead::None),
-            Batches::Each(_) => {
+            Batches::Every | Batches::Each(_) => {
                 let mut on = std::collections::HashSet::new();
                 let mut off = std::collections::HashSet::new();
                 for (query, ordinal) in reported {
-                    let prefetches = self.batch_of(query);
-                    if prefetches != Some(false) {
+                    if self.batch_of(query) != Some(false) {
                         on.insert(ordinal);
                     }
-                    if prefetches != Some(true) {
+                    if self.loads_one_by_one(query) {
                         off.insert(ordinal);
                     }
                 }
@@ -2455,6 +2507,18 @@ impl BatchPrefetch {
             }
         };
         BatchReads(each)
+    }
+
+    /// Whether the prefetch of a batch whose reported subjects are `subjects` fails at one whose
+    /// lookup throws on the id ([`batch_prefetch`]'s warning; `ParsedSubject::prefetch_fails`):
+    /// the `fails` of [`BatchPrefetch::of`] of each program.
+    pub(crate) fn prefetch_fails_among<'s>(
+        subjects: impl IntoIterator<Item = Option<&'s crate::report::db_subject::ParsedSubject>>,
+    ) -> bool {
+        subjects
+            .into_iter()
+            .flatten()
+            .any(crate::report::db_subject::ParsedSubject::prefetch_fails)
     }
 }
 
@@ -2619,6 +2683,18 @@ impl<'r, 'd> CaseHolders<'r, 'd> {
             })
             .map(|(oid, _)| oid)
     }
+}
+
+/// Whether ids of other sequences can match the Seq-align id `id` weakly (a text id with weak
+/// keys, `seqid::id_scope::weak_keys`), the test of [`HeaderReader::weak_matches`] before any
+/// lookup.
+fn has_weak_keys(id: &crate::seqid::ParsedSeqId) -> bool {
+    if id.textseq().is_none() {
+        return false;
+    }
+    let mut keys = Vec::new();
+    crate::seqid::id_scope::weak_keys(id, &mut keys);
+    !keys.is_empty()
 }
 
 /// What [`HeaderReader::weak_matches`] finds for a Seq-align id.
@@ -2947,9 +3023,15 @@ impl<'a> HeaderReader<'a> {
         let first = match found {
             Ok(_) if giim => return ScopeFinding::default(),
             Ok(first) => first,
+            // A lookup that throws on the id (`SeqidLookup::throws_on_id`) loads nothing where the
+            // formatters load the subject one by one, as one that fails on a file: the holders
+            // that NCBI's scope may give for it without the lookup are listed alike.
             Err(error) => {
                 return match lookup.throws_on_id(id) {
-                    Some(message) => ScopeFinding::of(FoundInstead::ThrowsOnId(message)),
+                    Some(exception) => ScopeFinding {
+                        holders: self.failed_holders(subject, ordinal),
+                        ..ScopeFinding::of(FoundInstead::ThrowsOnId(exception))
+                    },
                     None => failed(error),
                 }
             }
@@ -3065,6 +3147,9 @@ impl<'a> HeaderReader<'a> {
         }
         // A failed lookup of the weak candidates (LOSAT's own, of the name alone) leaves them
         // unknown where the batch reads one by one (review 1 of line DBID weakbatch, L1).
+        // In a run whose batches prefetch, a Seq-align id with weak keys is read one by one only
+        // in a batch whose prefetch fails (`BatchPrefetch::loads_one_by_one`), where its weak
+        // matches are not looked for (`WeakMatch::Unsought`).
         let weak = if self.prefetch_off {
             self.weakly_held(lookup, subject, ordinal, &oids)
                 .unwrap_or_else(|error| {
@@ -3074,7 +3159,8 @@ impl<'a> HeaderReader<'a> {
                     )))
                 })
         } else {
-            None
+            has_weak_keys(subject.alignment_id())
+                .then_some(crate::report::db_subject::WeakMatch::Unsought)
         };
         let found = given.or_else(|| {
             title_apart
@@ -3143,7 +3229,15 @@ impl<'a> HeaderReader<'a> {
             Err(error) => return unknown(error),
         };
         let id = subject.alignment_id();
-        let listed = indexed.seqid_to_oids(id, true).and_then(|oids| {
+        // A Seq-align id whose lookup throws on the id: the sequences under the keys that
+        // makeblastdb writes for it (`SeqidLookup::thrown_id_oids`), which `holders` below keeps
+        // to those whose lines hold it.
+        let oids = if indexed.throws_on_id(id).is_some() {
+            indexed.thrown_id_oids(id)
+        } else {
+            indexed.seqid_to_oids(id, true)
+        };
+        let listed = oids.and_then(|oids| {
             let weak = self.weak_matches(indexed, subject, &oids)?;
             Ok((self.case_holders(indexed, subject)?, oids, weak))
         });

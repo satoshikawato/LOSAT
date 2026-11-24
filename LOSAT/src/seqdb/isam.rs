@@ -117,7 +117,7 @@
 //!   `CSeqIdException` (a `ti` tag that is not a number, a string tag of `BL_ORD_ID` or `PIG`)
 //!   are [`SimplifyError::Exception`] with NCBI's exception (`ncbi_str::string_to_int8`'s, or
 //!   `CObject_id::GetId()`'s `CInvalidChoiceSelection`, thrown in code that NCBI's `datatool`
-//!   generates: `ThrowSite::generated`).
+//!   generates, at the place that BLAST+ 2.17.0's report of it names: `OBJECT_ID_GET_ID`).
 //! - The functions assume the C locale (`tolower`, `toupper`, `isdigit`, `atoi`).
 
 use std::path::{Path, PathBuf};
@@ -1545,14 +1545,29 @@ impl std::fmt::Display for SimplifyError {
 
 impl std::error::Error for SimplifyError {}
 
+// NCBI reference (598d8ae6): c++/src/serial/datatool/choicestr.cpp:887-893 (cited at
+// `ThrowSite::generated`: the generated `C<type>_Base::ThrowInvalidSelection`)
+/// The place of `CObject_id::GetId()`'s throw in the file that NCBI's `datatool` generates for
+/// the CHOICE, as BLAST+ 2.17.0's `what()` of it names it: `src/objects/general/Object_id_.cpp`,
+/// line 96, no function (`Error: NCBI C++ Exception:` of a search whose Seq-align id is
+/// `gnl|PIG|abc`, exit status 255; probe t7 of line DBID pfoff-7,
+/// `blastdb-ids-20261021/R/pf7/t7`).
+pub(crate) const OBJECT_ID_GET_ID: ThrowSite = ThrowSite {
+    file: "src/objects/general/Object_id_.cpp",
+    line: 96,
+    kind: "CInvalidChoiceSelection::eFail",
+    function: None,
+};
+
 // NCBI reference (598d8ae6): c++/src/serial/exception.cpp:122-150
 /// `CObject_id::GetId()`: a string tag is NCBI's `CInvalidChoiceSelection` (probe D11 of line
-/// BDC), thrown by the code that NCBI's `datatool` generates for the CHOICE.
+/// BDC), thrown by the code that NCBI's `datatool` generates for the CHOICE
+/// ([`OBJECT_ID_GET_ID`]).
 fn object_id_id(tag: &ObjectId) -> Result<i64, SimplifyError> {
     match tag {
         ObjectId::Id(n) => Ok(i64::from(*n)),
         ObjectId::Str(_) => Err(SimplifyError::Exception(NcbiException::new(
-            ThrowSite::generated("CInvalidChoiceSelection::eFail"),
+            OBJECT_ID_GET_ID,
             "CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str",
         ))),
     }

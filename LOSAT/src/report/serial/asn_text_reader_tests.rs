@@ -88,7 +88,7 @@ fn value<S: AsnSource>(
                 note(r, log, format!("string {}", show(&text)));
             }
             1 => {
-                let text = r.string(&Frame::ROOT, &mut noted)?;
+                let text = r.string(&Frame::ROOT, &mut Noted)?;
                 note(r, log, format!("visible {}", show(&text)));
             }
             n => {
@@ -198,16 +198,20 @@ fn skip_value<S: AsnSource>(r: &mut Reader<S>) -> Result<()> {
 }
 
 thread_local! {
-    /// The posts that the strings of this thread's walk gave (`noted`).
+    /// The posts that the strings of this thread's walk gave (`Noted`).
     static NOTED: std::cell::RefCell<Vec<ReplacedChar>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Where a walk's strings give their posts (`Reader::string`): they are kept for `replaced`.
-fn noted(post: ReplacedChar) {
-    NOTED.with(|noted| noted.borrow_mut().push(post));
+struct Noted;
+
+impl ReplacedSink for Noted {
+    fn replaced(&mut self, replaced: ReplacedChar) {
+        NOTED.with(|noted| noted.borrow_mut().push(replaced));
+    }
 }
 
-/// The posts that the strings read so far gave (`noted`): the trace, the byte, its position and
+/// The posts that the strings read so far gave (`Noted`): the trace, the byte, its position and
 /// the piece of each.
 fn replaced() -> String {
     let posts: Vec<String> = NOTED.with(|noted| {
@@ -407,7 +411,7 @@ fn apply<S: AsnSource>(
         "int8" => format!("int8 {}", r.int8()?),
         "string" => format!("string {}", show(&r.utf8_string()?)),
         "visible" => {
-            let text = in_frames(levels, &Frame::ROOT, |at| r.string(at, &mut noted))?;
+            let text = in_frames(levels, &Frame::ROOT, |at| r.string(at, &mut Noted))?;
             format!("visible {}", show(&text))
         }
         "id" => match r.member_or_tag()? {
@@ -534,7 +538,7 @@ fn literal_walk<S: AsnSource>(src: S, ops: &'static str) -> Vec<String> {
 /// NCBI's: `GetInt4` and `GetUint4` take the byte after a sign, the byte that is no digit and the
 /// digit that overflows before they throw), and the readers of members, variants, enumerated values, pointer
 /// types, type names and lists. Each step is `what was read @position:line`; the last also shows
-/// the posts that the strings gave (`noted`: trace, byte, position, piece). Since item
+/// the posts that the strings gave (`Noted`: trace, byte, position, piece). Since item
 /// 9(a) of line RG-KB (a VisibleString of a hand grammar reads a byte outside 0x20..0x7E as `#`
 /// with its post, where it was refused, and a UTF8String is read by `visible_string`, which leaves
 /// the position of an unended string at the start of its last run) the walks of those strings and

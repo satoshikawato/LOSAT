@@ -385,9 +385,11 @@ fn the_mask_reader_and_the_text_reader_build_the_same_seq_id() {
         let shown = String::from_utf8_lossy(&data).into_owned();
         let from_mask = seq_id_from_text(&data).unwrap_or_else(|fail| panic!("{shown}: {fail:?}"));
         let mut reader = TextReader::new(SliceSource::new(&data), "Seq-id", "test reader");
+        let mut posts: Vec<crate::report::serial::asn_types::read::Post> = Vec::new();
         let from_text = reader
-            .seq_id(&Frame::ROOT, &mut |post| panic!("{shown}: {post:?}"))
+            .seq_id(&Frame::ROOT, &mut posts)
             .unwrap_or_else(|error| panic!("{shown}: {error}"));
+        assert!(posts.is_empty(), "{shown}: {posts:?}");
         assert_eq!(from_mask, from_text, "{shown}");
         assert_eq!(from_mask, id, "{shown}");
         alternatives.insert(id.alternative());

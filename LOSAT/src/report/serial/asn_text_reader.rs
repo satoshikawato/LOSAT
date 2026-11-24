@@ -501,21 +501,28 @@ pub(crate) struct Reader<S: AsnSource> {
     pub(crate) root: &'static str,
 }
 
-/// The post of a byte that a VisibleString of a hand grammar (rpsbproc's archive reader,
-/// `rpsbproc::archive`, with its Seq-ids, `seqid::asn_text`) held by the frame `at` read as `#`
+/// Where the VisibleStrings of a hand grammar (rpsbproc's archive reader, `rpsbproc::archive`,
+/// with its Seq-ids, `seqid::asn_text`) post a byte that they read as `#`, when they read it
+/// (`Reader::string`): a reader's post sink (`asn_types::read::PostSink`, which gives each to
+/// where all its posts go).
+pub(crate) trait ReplacedSink {
+    fn replaced(&mut self, replaced: ReplacedChar);
+}
+
+/// The post of a byte that a VisibleString of a hand grammar held by the frame `at` read as `#`
 /// (`Reader::string`): its line, the byte and the piece that holds it, with the stack trace of
-/// `at` below the document's type `root`, given to `post` when it is made, as NCBI posts it.
+/// `at` below the document's type `root`, given to `posts` when it is made, as NCBI posts it.
 #[cold]
 #[inline(never)]
-fn post_replaced(
-    post: &mut dyn FnMut(ReplacedChar),
+fn post_replaced<K: ReplacedSink + ?Sized>(
+    posts: &mut K,
     root: &'static str,
     at: &Frame<'_>,
     line: usize,
     byte: u8,
     piece: &[u8],
 ) {
-    post(ReplacedChar {
+    posts.replaced(ReplacedChar {
         trace: object_stack_trace(root, at.steps()),
         byte,
         position: StreamPosition::Line(line as u64),
@@ -1544,22 +1551,22 @@ impl<S: AsnSource> Reader<S> {
 
     /// A VisibleString of a hand grammar (and a StringStore, which the text stream reads as one)
     /// held by the frame `at`: `visible_string`, each byte outside 0x20..0x7E read as `#` and
-    /// given to `post` with the stack trace of `at` as it is read (`post_replaced`), as NCBI's
+    /// given to `posts` with the stack trace of `at` as it is read (`post_replaced`), as NCBI's
     /// `ReadString` of the type posts it.
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:988-991
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897 (cited at
     // `report::serial::encoder::ReplacedChar`)
-    pub(crate) fn string(
+    pub(crate) fn string<K: ReplacedSink + ?Sized>(
         &mut self,
         at: &Frame<'_>,
-        post: &mut dyn FnMut(ReplacedChar),
+        posts: &mut K,
     ) -> Result<Vec<u8>> {
         let mut out = Vec::new();
         self.visible_string(
             &mut out,
             true,
             false,
-            &mut move |root, line, byte, piece| post_replaced(post, root, at, line, byte, piece),
+            &mut move |root, line, byte, piece| post_replaced(posts, root, at, line, byte, piece),
         )?;
         Ok(out)
     }

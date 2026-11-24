@@ -37,9 +37,8 @@ use crate::report::serial::asn_input::{Input, Names, TextInput};
 use crate::report::serial::asn_text_reader::{
     AsnTextError, AsnTextErrorKind, Frame, Reader, Result, StreamSource,
 };
-use crate::report::serial::asn_types::read::{ObjectStream, Post, PostSink, ReadError};
+use crate::report::serial::asn_types::read::{ObjectStream, PostSink, ReadError};
 use crate::report::serial::asn_types::{self, table::named};
-use crate::report::serial::encoder::ReplacedChar;
 use crate::report::serial::pssm::{SEQ_INST_MOL, SEQ_INST_REPR};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 
@@ -577,28 +576,24 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
 
     /// The reader and where its posts go, for a value whose strings post as they are read.
     #[inline]
-    fn reader_and_posts(
-        &mut self,
-    ) -> (&mut Reader<StreamSource<R>>, impl FnMut(ReplacedChar) + '_) {
+    fn reader_and_posts(&mut self) -> (&mut Reader<StreamSource<R>>, &mut P) {
         let ArchiveStream { objects, posts, .. } = self;
-        (&mut objects.input_mut().r, move |replaced| {
-            posts.post(Post::BadChar(replaced))
-        })
+        (&mut objects.input_mut().r, posts)
     }
 
     fn string(&mut self, at: &Frame<'_>) -> Result<Vec<u8>> {
-        let (r, mut post) = self.reader_and_posts();
-        r.string(at, &mut post)
+        let (r, posts) = self.reader_and_posts();
+        r.string(at, posts)
     }
 
     fn seq_id(&mut self, at: &Frame<'_>) -> Result<ParsedSeqId> {
-        let (r, mut post) = self.reader_and_posts();
-        r.seq_id(at, &mut post)
+        let (r, posts) = self.reader_and_posts();
+        r.seq_id(at, posts)
     }
 
     fn object_id(&mut self, at: &Frame<'_>) -> Result<ObjectId> {
-        let (r, mut post) = self.reader_and_posts();
-        r.object_id(at, &mut post)
+        let (r, posts) = self.reader_and_posts();
+        r.object_id(at, posts)
     }
 
     /// `ReadFileHeader` and the type check of the root reader, then the object. Each object is
@@ -1178,8 +1173,8 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
                     self.object_id(at)?;
                 }
                 1 => {
-                    let (r, mut post) = self.reader_and_posts();
-                    r.dbtag(at, &mut post)?;
+                    let (r, posts) = self.reader_and_posts();
+                    r.dbtag(at, posts)?;
                 }
                 2 => {
                     self.r().int4()?;
@@ -1191,8 +1186,8 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
                     self.string(at)?;
                 }
                 5 => {
-                    let (r, mut post) = self.reader_and_posts();
-                    r.date(at, &mut post)?;
+                    let (r, posts) = self.reader_and_posts();
+                    r.date(at, posts)?;
                 }
                 6 => {
                     let mut ignored = Query::default();

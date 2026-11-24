@@ -38,7 +38,7 @@ use crate::report::serial::asn_input::{
     read_with_set_flag_member, throw_error, utf8_tag_message, EnumItems, Fail, Input, Items, Names,
     StringKind, StringPost, TextInput, Utf8TagOnce, R,
 };
-use crate::report::serial::asn_text_reader::{AsnSource, SliceSource};
+use crate::report::serial::asn_text_reader::{AsnSource, ReplacedSink, SliceSource};
 use crate::report::serial::encoder::{object_stack_trace, ReplacedChar, StackStep};
 use crate::report::serial::object_frame::{
     frame_info, frame_name, text_frame_site, FrameKind, EXPECTED_MEMBER, HANDLE_EOF, READ_INT2,
@@ -114,6 +114,13 @@ impl PostSink for Vec<Post> {
 impl<T: PostSink + ?Sized> PostSink for &mut T {
     fn post(&mut self, post: Post) {
         (**self).post(post);
+    }
+}
+
+/// A hand grammar's string posts where the reader's other posts go.
+impl<P: PostSink + ?Sized> ReplacedSink for P {
+    fn replaced(&mut self, replaced: ReplacedChar) {
+        self.post(Post::BadChar(replaced));
     }
 }
 

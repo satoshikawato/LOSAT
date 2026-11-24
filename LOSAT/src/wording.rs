@@ -173,15 +173,7 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
     let position = NCBI_POSITION.as_bytes();
     let version = NCBI_VERSION.as_bytes();
     let title = RPSBPROC_TITLE.as_bytes();
-    if !(contains(text, footer)
-        || contains(text, header)
-        || contains(text, position)
-        || contains(text, b"::")
-        || contains(text, version)
-        || contains(text, b" error:")
-        || contains(text, title)
-        || contains(text, XMLHELP_PROGRAM))
-    {
+    if !maps(text) {
         return Cow::Borrowed(text);
     }
     let mut out = Vec::with_capacity(text.len());
@@ -306,6 +298,38 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
     } else {
         Cow::Borrowed(text)
     }
+}
+
+/// The texts that [`losat_bytes`] maps or that its rules start from: a text that holds none of
+/// them is LOSAT's as it is.
+const MAPPED: [&[u8]; 8] = [
+    NCBI_USER_MANUAL_FOOTER.as_bytes(),
+    NCBI_EXCEPTION_HEADER.as_bytes(),
+    NCBI_POSITION.as_bytes(),
+    b"::",
+    NCBI_VERSION.as_bytes(),
+    b" error:",
+    RPSBPROC_TITLE.as_bytes(),
+    XMLHELP_PROGRAM,
+];
+
+/// The bytes that start a text of [`MAPPED`].
+const MAPPED_FIRST: [bool; 256] = {
+    let mut first = [false; 256];
+    let mut i = 0;
+    while i < MAPPED.len() {
+        first[MAPPED[i][0] as usize] = true;
+        i += 1;
+    }
+    first
+};
+
+/// Whether `text` holds a text of [`MAPPED`]: one pass over its bytes, the texts compared only
+/// where a byte starts one (a post of many quoted bytes is read once, not once per text).
+fn maps(text: &[u8]) -> bool {
+    text.iter().enumerate().any(|(i, &b)| {
+        MAPPED_FIRST[b as usize] && MAPPED.iter().any(|mapped| text[i..].starts_with(mapped))
+    })
 }
 
 /// The member of an ASN.1 text archive that holds a message (`Blast4-error.message`).

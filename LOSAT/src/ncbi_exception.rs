@@ -551,7 +551,10 @@ pub(crate) fn post_line_in(
     line.push(b'\n');
     // LOSAT's words: an exception's class and code (`id`) and NCBI's exception reports are left
     // out (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
-    crate::wording::losat_bytes(&line).into_owned()
+    match crate::wording::losat_bytes(&line) {
+        std::borrow::Cow::Owned(mapped) => mapped,
+        std::borrow::Cow::Borrowed(_) => line,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:676-697

@@ -3,6 +3,7 @@
 //! as the end of its input (PS16a probe 3: `arch/bad/`).
 
 use super::*;
+use crate::report::serial::asn_types::read::Post;
 
 const ONE: &[u8] = include_bytes!("../../tests/fixtures/rpsbproc/arch/one.asn");
 

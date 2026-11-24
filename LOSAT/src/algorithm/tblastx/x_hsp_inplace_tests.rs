@@ -576,8 +576,8 @@ fn int4_linking_keeps_hsps_of_length_zero_or_less_that_change_nothing() {
             let kept = actual.iter().filter(|hit| hit.is_int4_inverted()).count();
             assert_eq!(kept, inverted_count, "{label}");
             actual.retain(|hit| !hit.is_int4_inverted());
-            // The dropped HSPs score below the others, so they come last in the score sort
-            // and every other HSP keeps its list position (`link_id`).
+            // The HSPs of length 0 or less score below the others, so they come last in the
+            // score sort and every other HSP keeps its list position (`link_id`).
             let expected = default_linking(base.clone(), &linking, parallel);
             assert_same_list(&label, &actual, &expected);
         }
@@ -609,7 +609,7 @@ fn int4_linking_lets_every_hsp_out_once() {
             hit.set_int4_ends(q as i32 + length, s + length);
             hits.push(hit);
         }
-        crate::algorithm::tblastx::blast_gapalign::sort_ungapped_hits_by_score_ncbi(&mut hits);
+        crate::algorithm::tblastx::blast_gapalign::sort_ungapped_hits_by_score_int4(&mut hits);
         let linking = LinkingParams {
             subject_len_nucl: 300_000,
             gap_decay_rate: 0.5,

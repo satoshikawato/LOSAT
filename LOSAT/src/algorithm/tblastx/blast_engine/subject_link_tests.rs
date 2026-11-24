@@ -168,12 +168,14 @@ fn the_sort_after_the_first_link_of_a_one_hit_list_reads_int4_ends() {
     };
     let times = super::super::x_search_timing::XSearchTimes::new(false);
     let list = || {
-        let mut hits = vec![hit(0, 30, 2, -2), hit(0, 30, 2, 5)];
+        let mut hits = vec![hit(0, 30, 2, -2), hit(0, 30, 2, 5), hit(0, 30, 3, 1)];
         for h in &mut hits {
             h.s_aa_start = 2;
             h.s_aa_end = 7;
             h.e_value = 1.0;
         }
+        // Above the threshold: the reap removes this HSP of length 0 or less.
+        hits[2].e_value = 100.0;
         hits
     };
     let sorted = |window| {
@@ -186,4 +188,63 @@ fn the_sort_after_the_first_link_of_a_one_hit_list_reads_int4_ends() {
     assert_eq!(sorted(0), [5, -2]);
     // The two-hit word finder's list keeps the `u32` comparator (its ends are never below 0).
     assert_eq!(sorted(40), [-2, 5]);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1353 (cited at
+// `sort_and_reap_after_first_link`): on ends of 0 or more the `Int4` comparator orders as the
+// `u32` one, so a one-hit list without an HSP of length 0 or less sorts as before.
+#[test]
+fn the_int4_sort_is_the_u32_sort_on_lists_of_positive_lengths() {
+    let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+    let mut next = |n: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % n
+    };
+    for _ in 0..200 {
+        let hits: Vec<UngappedHit> = (0..1 + next(40))
+            .map(|order| {
+                let q_start = next(6) as u32;
+                let mut h = hit(next(2) as u32, 20 + next(4) as i32, q_start, 0);
+                let s_start = next(6) as u32;
+                h.set_int4_ends(q_start as i32 + 1 + next(3) as i32, s_start as i32 + 2);
+                h.s_aa_start = s_start;
+                h.hsp_list_order = order as u32;
+                h
+            })
+            .collect();
+        assert!(hits.iter().all(|h| !h.is_int4_inverted()));
+        let (mut by_int4, mut by_u32) = (hits.clone(), hits);
+        sort_ungapped_hits_by_score_int4(&mut by_int4);
+        sort_ungapped_hits_by_score_ncbi(&mut by_u32);
+        let orders =
+            |list: &[UngappedHit]| list.iter().map(|h| h.hsp_list_order).collect::<Vec<_>>();
+        assert_eq!(orders(&by_int4), orders(&by_u32));
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:955-974 (an HSP alone in its
+// chain takes the chain's E-value): an HSP of length 0 or less alone in the list gets the E-value
+// of an HSP of length 1 or more alone in it, with the same score and context, so the reap reads
+// NCBI's value for it.
+#[test]
+fn a_lone_hsp_of_length_zero_or_less_gets_the_evalue_of_a_lone_positive_one() {
+    let contexts = [context(0.3176, 0.134), context(0.267, 0.041)];
+    let eff_searchsp = [1_000_000, 2_500_000];
+    let linking =
+        subject_linking_params(true, 100, 3000, 3000, 20, &contexts[0].karlin_params).unwrap();
+    for linking_params in [None, Some(&linking)] {
+        let link = link_args(&contexts, linking_params, &eff_searchsp);
+        let inverted = first_link_subject_hits(&link, vec![hit(1, 35, 10, 8)], 0);
+        let positive = first_link_subject_hits(&link, vec![hit(1, 35, 10, 20)], 0);
+        assert!(inverted[0].is_int4_inverted() && !positive[0].is_int4_inverted());
+        assert_eq!(
+            inverted[0].e_value.to_bits(),
+            positive[0].e_value.to_bits(),
+            "sum statistics {}",
+            linking_params.is_some()
+        );
+        assert!(inverted[0].e_value.is_finite() && inverted[0].e_value > 0.0);
+    }
 }

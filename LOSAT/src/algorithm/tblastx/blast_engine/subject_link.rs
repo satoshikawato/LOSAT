@@ -389,6 +389,9 @@ pub(super) fn sort_and_reap_after_first_link(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687,699 (in
 /// `Blast_HSPReevaluateWithAmbiguitiesUngapped`) and :452-453 (in `s_UpdateReevaluatedHSP`)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1480-1497 and
+/// c++/src/algo/blast/core/blast_hits.c:2651-2665 (the fetch of the subject, first in
+/// `Blast_HSPListReevaluateUngapped`)
 /// NCBI's re-evaluation reads no letter of such an HSP and scores it 0, below every context's
 /// cutoff (at least 1). Up to here such an HSP is in NCBI's list, at NCBI's place: the first
 /// linking call (`link_subject_hits_int4`) and the sort after it
@@ -396,11 +399,10 @@ pub(super) fn sort_and_reap_after_first_link(
 /// E-value, the linking call's (without sum statistics its own, `evalues_without_linking`;
 /// nothing sorts that list before the re-evaluation, and the `u32` and `Int4` comparators of the
 /// frame loop's sorts agree on HSPs of length 1 or more). So the HSPs kept are NCBI's, in the order
-/// of NCBI's list. They are removed after the fetch of the subject, which
-/// NCBI makes for a list that still holds them (`SubjectEmit::reevaluation_fetch_keeps`, the
-/// frames of its letters; blast_engine.c:1480-1497, blast_hits.c:2651-2665), and before the
-/// refusal of a subject of fewer than 12 bases, whose frame NCBI reads only for an HSP of length 1
-/// or more.
+/// of NCBI's list. They are removed after the fetch of the subject, which NCBI makes for a list
+/// that still holds them (`SubjectEmit::reevaluation_fetch_keeps`, the frames of its letters),
+/// and before the refusal of a subject of fewer than 12 bases, whose frame NCBI reads only for an
+/// HSP of length 1 or more.
 #[inline]
 pub(super) fn drop_unread_int4_inverted(window: i32, hits: &mut Vec<UngappedHit>) {
     if window == 0 {

@@ -754,6 +754,8 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
 // (`Blast_HSPListReevaluateUngapped`, called at blast_engine.c:1492-1497)
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687,699 (in
 // `Blast_HSPReevaluateWithAmbiguitiesUngapped`) and :452-453 (in `s_UpdateReevaluatedHSP`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1480-1497 and
+// c++/src/algo/blast/core/blast_hits.c:2651-2665 (the re-evaluation's fetch of the subject)
 // The first linking call of a subject whose list from the one-hit word finder (`-window_size 0`)
 // holds an HSP of length 0 or less (`UngappedHit::is_int4_inverted`), with its ends as NCBI's
 // `Int4` (`chaining.rs`, the impl of `UngappedHit`). The list is first sorted by score with the
@@ -767,8 +769,7 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
 // (`x_hsp_inplace::link_in_place_int4`): the incremental kernel assumes HSPs whose end is after
 // their start (`linking_incr.rs`), while the literal port computes with `Int4` coordinates as NCBI
 // does. NCBI then sorts by score, reaps by the preliminary E-value and re-evaluates, whose fetch
-// of the subject comes first for every list that still holds an HSP (blast_engine.c:1480-1497,
-// blast_hits.c:2651-2665), and which scores an HSP of length 0 or less 0 (its loop does not run),
+// of the subject comes first for every list that still holds an HSP, and which scores an HSP of length 0 or less 0 (its loop does not run),
 // below every context's cutoff (at least 1), and deletes it. So those HSPs stay in the list with
 // the E-values this call gives them, through the sort and the reap, up to that fetch; they leave
 // after it (`subject_link::drop_unread_int4_inverted`). This path runs only for such a subject;

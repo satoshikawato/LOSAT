@@ -142,10 +142,12 @@ fn the_runs_are_the_chains_with_the_fills_presence_vector_and_counters() {
 // EXPERIMENT (LOSAT_X_CSRQSKEEP): CSRs built one after another through one batch loop's keep, as
 // the loop's batches build them: each gives its `offsets` and its `qs` back when it is dropped;
 // the next build takes the kept `qs` when it has room for its words (the same buffer), else
-// allocates its own, with more room, which the keep takes back instead; each CSR is the fresh
-// build's. The last one is dropped after the keep is closed (`close_qs`, as the loop's last
-// batch does) and frees its own `qs`; `release` leaves no `qs` kept. With the switch off
-// (`take_qs` gives `None`) no `qs` is kept.
+// allocates its own, with more room; each CSR is the fresh build's. Here the only build with more
+// words than the kept `qs` has room for is the last one: the keep is closed once it is built
+// (`close_qs`, as the loop does once its last tables are built), so it frees its own `qs` when it
+// is dropped, and the keep holds none after `release`. (A kept `qs` that a build with more room
+// replaces: `a_kept_qs_goes_to_a_build_it_has_room_for` in `x_mb_lut_keep_tests.rs`.) With the
+// switch off (`take_qs` gives `None`) no `qs` is kept.
 #[test]
 fn csrs_through_the_keep_share_its_qs() {
     use super::super::x_mb_lut_keep::Keep;
@@ -182,7 +184,7 @@ fn csrs_through_the_keep_share_its_qs() {
         }
         let (ptr, room) = (csr.x_qs_ptr(), csr.qs.capacity());
         if round == 2 {
-            // The loop's last batch: the keep takes no `qs` back.
+            // The loop's last batch: closed once its table is built, the keep takes no `qs` back.
             keep.close_qs();
             drop(csr);
             assert!(

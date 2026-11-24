@@ -69,6 +69,17 @@ impl Xml2Kind {
         }
     }
 
+    /// The `-outfmt` format of the document form (the inverse of `of`).
+    pub fn report_format(self) -> crate::blastinput::app::ReportFormat {
+        use crate::blastinput::app::ReportFormat;
+        match self {
+            Self::Single16 => ReportFormat::Xml2S,
+            Self::Single15 => ReportFormat::JsonS,
+            Self::Files14 => ReportFormat::Xml2,
+            Self::Files13 => ReportFormat::Json,
+        }
+    }
+
     /// Whether the document is written as side files with a master file (outfmt 13 and 14).
     pub fn is_files(self) -> bool {
         matches!(self, Self::Files14 | Self::Files13)

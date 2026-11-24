@@ -646,3 +646,23 @@ blastp.db.pd.join3c.f5	blastp	-	-query tests/fasta/strategy/order_pdjoin3c.faa -
 blastn.sub.pd.joinpdb.f16	blastn	-	-query tests/fasta/strategy/order_pdjoin_pdb.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -outfmt 16	ncbi	0	-	-
 blastn.sub.pd.joinpdb.b1.f15	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_pdjoin_pdb.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -outfmt 15	ncbi	0	-	-
 blastn.db.pd.joinpdb.f5	blastn	-	-query tests/fasta/strategy/order_pdjoin_pdb.fna -db tests/db_search/arch_snucl -parse_deflines -outfmt 5	ncbi	0	-	-
+blastp.sub.qlocrev.fx	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt x -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.qlocrev.fx.plain	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt x	ncbi	1	-	-
+blastp.sub.qlocrev.f99	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt 99 -export_search_strategy {ss}	ncbi	3	-	-
+blastp.sub.qlocrev.f99.plain	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt 99	ncbi	255	-	-
+blastn.sub.qlocrev.fx	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -query_loc 10-5 -outfmt x -export_search_strategy {ss}	ncbi	3	-	-
+blastn.sub.qlocrev.fx.plain	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -query_loc 10-5 -outfmt x	ncbi	1	-	-
+blastn.sub.qlocrev.f99	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -query_loc 10-5 -outfmt 99 -export_search_strategy {ss}	ncbi	3	-	-
+blastn.sub.qlocrev.f99.plain	blastn	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_s.fna -query_loc 10-5 -outfmt 99	ncbi	255	-	-
+blastx.sub.qlocrev.fx	blastx	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt x -export_search_strategy {ss}	ncbi	3	-	-
+blastx.sub.qlocrev.fx.plain	blastx	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt x	ncbi	1	-	-
+blastx.sub.qlocrev.f99	blastx	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt 99 -export_search_strategy {ss}	ncbi	3	-	-
+blastx.sub.qlocrev.f99.plain	blastx	-	-query tests/fasta/outfmt11/arch_q.fna -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt 99	ncbi	255	-	-
+tblastn.sub.qlocrev.fx	tblastn	-	-query tests/fasta/outfmt11/arch_tbn_q.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -query_loc 10-5 -outfmt x -export_search_strategy {ss}	ncbi	3	-	-
+tblastn.sub.qlocrev.fx.plain	tblastn	-	-query tests/fasta/outfmt11/arch_tbn_q.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -query_loc 10-5 -outfmt x	ncbi	1	-	-
+tblastn.sub.qlocrev.f99	tblastn	-	-query tests/fasta/outfmt11/arch_tbn_q.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -query_loc 10-5 -outfmt 99 -export_search_strategy {ss}	ncbi	3	-	-
+tblastn.sub.qlocrev.f99.plain	tblastn	-	-query tests/fasta/outfmt11/arch_tbn_q.faa -subject tests/fasta/outfmt11/arch_tbn_s.fna -query_loc 10-5 -outfmt 99	ncbi	255	-	-
+tblastx.sub.qlocrev.fx	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -query_loc 10-5 -outfmt x -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.qlocrev.fx.plain	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -query_loc 10-5 -outfmt x	ncbi	1	-	-
+tblastx.sub.qlocrev.f99	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -query_loc 10-5 -outfmt 99 -export_search_strategy {ss}	ncbi	3	-	-
+tblastx.sub.qlocrev.f99.plain	tblastx	-	-query tests/fasta/outfmt11/arch_tbx_q.fna -subject tests/fasta/outfmt11/arch_tbx_s.fna -query_loc 10-5 -outfmt 99	ncbi	255	-	-

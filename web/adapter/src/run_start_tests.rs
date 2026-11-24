@@ -562,7 +562,7 @@ fn a_dry_run_ends_after_the_start_and_the_arguments() {
 fn the_start_json_tells_the_files_and_the_dry_run() {
     assert_eq!(
         start_json(&["blastn", "-outfmt", "6"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     assert_eq!(
         start_json(&[
@@ -575,12 +575,24 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "-dryrun"
         ])
         .unwrap(),
-        r#"{"conffile":"c.ini","log_file":"x.log","dry_run":true,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":"c.ini","log_file":"x.log","strategy_file":null,"dry_run":true,"register_inputs":false,"prints":null,"database":false}"#
+    );
+    // The name of the search strategy file, under which a run gives it (line RG item F1w).
+    assert_eq!(
+        start_json(&[
+            "blastp",
+            "-export_search_strategy",
+            "out/s.asn",
+            "-logfile",
+            "run.log"
+        ])
+        .unwrap(),
+        r#"{"conffile":null,"log_file":"run.log","strategy_file":"out/s.asn","dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     // After `--` nothing is the start's.
     assert_eq!(
         start_json(&["blastp", "--", "-dryrun"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     // A run that prints the command line's text (line WQA's D14, 2026-11-20): a version word, read
     // before the arguments and the configuration (no `-conffile` to register, not a dry run), or a
@@ -596,20 +608,20 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "v.log"
         ])
         .unwrap(),
-        r#"{"conffile":null,"log_file":"v.log","dry_run":false,"register_inputs":false,"prints":"version","database":false}"#
+        r#"{"conffile":null,"log_file":"v.log","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"version","database":false}"#
     );
     assert_eq!(
         start_json(&["tblastn", "-conffile", "c.ini", "-dryrun", "-h"]).unwrap(),
-        r#"{"conffile":"c.ini","log_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
+        r#"{"conffile":"c.ini","log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
     );
     assert_eq!(
         start_json(&["blastx", "-parse_deflines", "-xmlhelp"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
+        r#"{"conffile":null,"log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
     );
     // The words before a help word are read first: an error there is the run's.
     assert_eq!(
         start_json(&["blastp", "-evalue", "x", "-help"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     assert_eq!(
         start_json(&["psiblast"]).unwrap_err(),

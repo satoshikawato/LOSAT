@@ -946,7 +946,9 @@ fn a_later_read_of_an_lmdb_or_lookup_file_is_losats_own_error() {
                 std::fs::copy(&path, dir.join(&name)).unwrap();
             }
         }
-        let file = dir.join(format!("tx.{ext}"));
+        // The file under the name the reader opens it by, its links followed
+        // (`crate::utils::test_dir::ncbi_dir`).
+        let file = crate::utils::test_dir::ncbi_dir(&dir).join(format!("tx.{ext}"));
         let short = dir.join("short");
         std::fs::write(&short, &std::fs::read(&file).unwrap()[..keep]).unwrap();
         crate::seqdb::file::refused_reads::refuse(&file, &short);

@@ -635,6 +635,7 @@ fn one_hsp_named(
                     taxonomy,
                     descriptions: &[],
                     defline_thrown: false,
+                    lookup_throws: None,
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {
@@ -652,6 +653,7 @@ fn one_hsp_named(
                         ops: None,
                         query_first: 2,
                         query_step: 1,
+                        alignment_identities: 0,
                     })
                 },
             )
@@ -791,6 +793,7 @@ fn blastn_document(kind: Xml2Kind, minus: bool) -> String {
                     taxonomy: crate::report::blast_xml::records::UNNAMED,
                     descriptions: &[],
                     defline_thrown: false,
+                    lookup_throws: None,
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {
@@ -808,6 +811,7 @@ fn blastn_document(kind: Xml2Kind, minus: bool) -> String {
                         ops: None,
                         query_first: 2,
                         query_step: 1,
+                        alignment_identities: 0,
                     })
                 },
             )
@@ -1321,6 +1325,7 @@ fn many_hits_16(
                         taxonomy: crate::report::blast_xml::records::UNNAMED,
                         descriptions: &[],
                         defline_thrown: false,
+                        lookup_throws: None,
                     },
                     |hsps| {
                         hsps.hsp(&XmlHsp {
@@ -1338,6 +1343,7 @@ fn many_hits_16(
                             ops: None,
                             query_first: 2,
                             query_step: 1,
+                            alignment_identities: 0,
                         })
                     },
                 )?;

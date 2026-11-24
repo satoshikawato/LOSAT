@@ -1,0 +1,3 @@
+Error: (802.4) [tblastx] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+BLAST failed to write output
+Error: (802.5) [tblastx] CObjectOStream: error at byte 357: stack is empty: write fault

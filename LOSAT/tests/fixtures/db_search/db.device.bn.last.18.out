@@ -1,0 +1,45 @@
+
+                                          Tax BLAST report                                          
+
+Query= q_a 1500 of a
+
+Length=1500
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                          Tax BLAST report                                          
+
+Query= q_c_amb 1400 across the ambiguity codes, 4 percent substitutions
+
+Length=1400
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                          Tax BLAST report                                          
+
+Query= q_d_minus reverse complement of d, 12 percent substitutions
+
+Length=2000
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                          Tax BLAST report                                          
+
+Query= q_e_p diverged
+
+Length=1600
+
+                                           Organism Report                                           
+Accession...  Description... Score... E-value... 
+
+                                          Tax BLAST report                                          
+
+Query= q_nohit random
+
+Length=900
+
+                                           Organism Report                                           
+Accession...  Description... Score... E-value... 

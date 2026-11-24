@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.103
+- Version: 1.104
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -692,15 +692,25 @@
   X-short-bat's 1.97 and X-bpgap's 1.98, then 1.101 at the merge of dev that brought line RG items
   X-short-tbx-link's 1.99 and KC-11d's 1.100, then 1.102 at the merge of dev that brought line RG
   item D5c's 1.101);
-  1.103 2026-11-24 (BLASTP, line RG item X-short-bat-2: the rejection of a compressed lookup table
+  1.103 2026-11-24 (a `MASKLIST` name that is not UTF-8 is read by its bytes, as NCBI's
+  `std::string` is: the rejection of 1.94 is withdrawn, and blastdbcmd, the search programs,
+  makeblastdb's copy and makembindex read such GI-indexed masks as NCBI's do; line RG item K10a,
+  round 2 of its review, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.102;
+  first 1.97, then 1.99 at the merge of dev of 2026-11-24 that brought 1.97 and 1.98, then 1.100 at
+  the merge of dev of 2026-11-24 that brought 1.99, line RG item X-short-tbx-link, then 1.101 at the
+  merge of dev of 2026-11-25 that brought 1.100, line RG item KC-11d, then 1.102 at the merge of
+  dev of 2026-11-25 that brought 1.101, line RG item D5c, then 1.103 at the merge of
+  dev of 2026-11-25 that brought 1.102, psiblast line item PS10e);
+  1.104 2026-11-24 (BLASTP, line RG item X-short-bat-2: the rejection of a compressed lookup table
   whose neighbouring words fill NCBI's overflow banks (decision D3) comes in the search of the query
   batch whose table fills them (of a split batch, its chunk's table), after the reports of the
   query batches before, as TBLASTN's of 1.97 (it came before the run's first byte); the three
   builders of the table name the first of NCBI's tables that fills them; Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07; numbered after 1.102; first 1.99, then 1.100 at
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.103; first 1.99, then 1.100 at
   the merge of dev of 2026-11-24 that brought 1.99, line RG item X-short-tbx-link, then 1.103 at
   the merge of dev of 2026-11-25 that brought 1.100 to 1.102, line RG items KC-11d and D5c and
-  psiblast line item PS10e)
+  psiblast line item PS10e, then 1.104 at the merge of dev of 2026-11-25 that brought 1.103, line
+  RG item K10a)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -939,7 +949,7 @@ Explicit rejections (rule 3):
   stops first.
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.87 at the first query batch NCBI searches), compressed-lookup thresholds that
-  exhaust its overflow bank (in BLASTP since version 1.103, as in TBLASTN since 1.97, in the query
+  exhaust its overflow bank (in BLASTP since version 1.104, as in TBLASTN since 1.97, in the query
   batch whose table exhausts it, after the reports of the batches before). (`-max_target_seqs` values that make NCBI's preliminary hit
   list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
@@ -2327,8 +2337,9 @@ file would differ, and NCBI's programs still could not open the database).
   one-thread bytes, and with one thread every run of each program (20 of 20), as with mask columns
   at any thread count (60 of 60), gave the same bytes. LOSAT writes NCBI's `-num_threads 1` output
   at every thread count in all five, as every `-db` search does (PD-LOSAT-DATABASE-SEARCH, DB-3).
-  The explicit rejections of an empty `.nog`, of a `.nog` entry past its mapping and of a
-  `MASKLIST` name that is not UTF-8 are in the rule-3 list. Fixtures
+  The explicit rejections of an empty `.nog` and of a `.nog` entry past its mapping are in the
+  rule-3 list; a `MASKLIST` name that is not UTF-8 is read by its bytes since version 1.103
+  (`LOSAT/tests/non_utf8_names`, cases `K10_*_gimask_*`). Fixtures
   `LOSAT/tests/seqdb/gi_mask_read` (`make_gi_mask_read_fixtures.py`, NCBI BLAST+ 2.17.0: the rows
   `bdc_wide_*` of a data file past 64 KiB, `bdc_sv4n*` and `bn_sv4n*` of the `.nog` cut or edited,
   `mbi_*` of makembindex), tests `LOSAT/tests/gi_mask_read.rs` (each search row again with
@@ -3690,8 +3701,8 @@ file would differ, and NCBI's programs still could not open the database).
     past `int` are written as NCBI writes them (rule 2: rows RL01 to RL04, RL06 and RL07).
   - A volume whose offsets or positions pass 2^31, or whose word table passes `Int4` bytes: NCBI's
     counters of them are `Int4`, and the files hold 32-bit fields, so no valid file can be defined.
-- The readers of GI-indexed masks, a damaged `.nog` or a `MASKLIST` name that is not UTF-8
-  (version 1.94, 2026-11-24, line NP item M4c-2, review S4 and N8; Owner-delegated, standing
+- The readers of GI-indexed masks, a damaged `.nog` (version 1.94, 2026-11-24, line NP item
+  M4c-2, review S4 and N8; the rejection of a `MASKLIST` name that is not UTF-8 withdrawn in 1.103; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; the outcomes of a `.nog` cut short that NCBI
   reaches and LOSAT reproduces, rule 2, are in the list above). An empty `.nog` is mapped as a
   null pointer: NCBI's blastdbcmd and blastn crash with SIGSEGV where a sequence's GI is read
@@ -3700,14 +3711,8 @@ file would differ, and NCBI's programs still could not open the database).
   the file's mapping reads whatever memory follows it: in the probe a `.nog` cut to 100 bytes for
   1,100 sequences, NCBI's blastdbcmd completed, the 84 sequences past the page taking GIs that
   matched no mask, which depends on its memory map; LOSAT refuses it ("depend on its memory map").
-  A `MASKLIST` name that is not UTF-8 (the names are paths and the text of the names table) is
-  refused where the masks are read (`-info`, `%m`, `-mask_sequence_with`, `-db_soft_mask`,
-  `-db_hard_mask`, the copy, `-db_mask`); a search or a retrieval without masks reads the
-  database, as NCBI's reader reads the names only there. Rejected: reproducing the bytes past the
-  page (a model of NCBI's memory map) and the refusal of the name at the opening (it refused
-  searches NCBI completes). Tests: `LOSAT/src/seqdb/gi_mask_tests.rs`
-  (`the_nog_reads_as_ncbi_s_mapping_of_it`), `LOSAT/src/seqdb/tests.rs`
-  (`a_masklist_name_not_utf8_is_refused_where_the_masks_are_read`).
+  Rejected: reproducing the bytes past the page (a model of NCBI's memory map). Tests:
+  `LOSAT/src/seqdb/gi_mask_tests.rs` (`the_nog_reads_as_ncbi_s_mapping_of_it`).
 
 - BLASTP and BLASTX `-db_hard_mask` on a database whose masks overlap, nest or are stored out of
   order (version 1.95, 2026-11-22, line NP item M4b-3b, Owner-delegated, standing instruction

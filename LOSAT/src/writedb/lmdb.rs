@@ -116,14 +116,10 @@ fn lmdb_error(e: LmdbError) -> WriteDbError {
 /// `GetFileNameFromExistingLMDBFile`: the LMDB file name with its last two letters replaced.
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:763-788
 pub(crate) fn lmdb_file_name(lmdb_filename: &Path, suffix: &str) -> PathBuf {
-    let mut s = lmdb_filename
-        .as_os_str()
-        .to_owned()
-        .into_string()
-        .unwrap_or_default();
-    s.truncate(s.len().saturating_sub(2));
-    s.push_str(suffix);
-    PathBuf::from(s)
+    let mut name = crate::utils::os_bytes::path_bytes(lmdb_filename).into_owned();
+    name.truncate(name.len().saturating_sub(2));
+    name.extend_from_slice(suffix.as_bytes());
+    crate::utils::os_bytes::path_from_bytes(name)
 }
 
 /// The bytes up to the first NUL (`strlen` of `id.c_str()`).
@@ -458,7 +454,7 @@ impl WriteDbLmdb {
     /// name) and the number of OIDs in each.
     pub(crate) fn insert_volumes_info(
         &mut self,
-        vol_names: &[String],
+        vol_names: &[&[u8]],
         vol_num_oids: &[u32],
     ) -> Result<(), WriteDbError> {
         self.increase_env_map_size_volumes(vol_names)?;
@@ -472,7 +468,7 @@ impl WriteDbLmdb {
 
     fn insert_volumes_info0(
         &mut self,
-        vol_names: &[String],
+        vol_names: &[&[u8]],
         vol_num_oids: &[u32],
     ) -> Result<(), WriteDbError> {
         let volinfo = self
@@ -487,7 +483,7 @@ impl WriteDbLmdb {
             let key = (i as u32).to_le_bytes();
             if !self
                 .env
-                .put(volname, &key, c_str(name.as_bytes()), 0)
+                .put(volname, &key, c_str(name), 0)
                 .map_err(lmdb_error)?
             {
                 return Err(WriteDbError::Other("VolNames error ".to_string()));
@@ -518,7 +514,7 @@ impl WriteDbLmdb {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:198-225
-    fn increase_env_map_size_volumes(&mut self, vol_names: &[String]) -> Result<(), WriteDbError> {
+    fn increase_env_map_size_volumes(&mut self, vol_names: &[&[u8]]) -> Result<(), WriteDbError> {
         let front = vol_names.first().map_or(0, |n| n.len()) as u64;
         let vol_name_size = (front + 24) * vol_names.len() as u64;
         let vol_info_size = 24 * vol_names.len() as u64;

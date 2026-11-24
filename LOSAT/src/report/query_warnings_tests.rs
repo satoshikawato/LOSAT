@@ -156,6 +156,8 @@ impl Write for Log {
     }
 }
 
+impl crate::report::ostream::ReportWrite for Log {}
+
 #[test]
 fn the_texts_of_the_reads_follow_the_report_up_to_each_read() {
     let reads: Vec<QueryReads> = vec![
@@ -576,8 +578,9 @@ fn a_query_without_texts_reads_nothing() {
 }
 
 // Line RG T4a2 fix round 3 (review e S1, N1): a `-html` report's post flushes the report written so
-// far where the post goes to the standard error (NCBI's `cerr`, tied to `cout`); the posts go to the
-// caller's sink of them where it sets one, else to the diagnostics.
+// far first (LOSAT's flush, as every post's: the command line's diagnostics then tie `cout` where the
+// post goes to the standard error, `ostream::cerr_post`); the posts go to the caller's sink of them
+// where it sets one, else to the diagnostics.
 #[test]
 fn a_html_post_flushes_the_report_first_where_it_goes_to_the_standard_error() {
     /// A report that records its bytes and how many of them its last flush wrote.

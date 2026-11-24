@@ -13,7 +13,7 @@ fn fasta() -> String {
 fn a_legacy_volume_reads_with_its_fixed_stride_and_hint() {
     let mut options = Options::default_options();
     options.hkey_width = 8;
-    let path = test_volume("legacy", &fasta(), &options);
+    let (_dir, path) = test_volume("legacy", &fasta(), &options);
     let volume = IndexVolume::open(&path).unwrap();
     assert_eq!(
         (volume.hkey_width, volume.stride, volume.ws_hint),
@@ -36,7 +36,7 @@ fn a_volume_of_the_other_format_reads_its_stride_and_hint() {
     options.hkey_width = 9;
     options.stride = 3;
     options.ws_hint = 16;
-    let path = test_volume("new", &fasta(), &options);
+    let (_dir, path) = test_volume("new", &fasta(), &options);
     let volume = IndexVolume::open(&path).unwrap();
     assert_eq!(
         (volume.hkey_width, volume.stride, volume.ws_hint),
@@ -49,7 +49,7 @@ fn a_volume_of_the_other_format_reads_its_stride_and_hint() {
 fn a_volume_outside_its_sections_is_refused() {
     let mut options = Options::default_options();
     options.hkey_width = 8;
-    let path = test_volume("bad", &fasta(), &options);
+    let (_dir, path) = test_volume("bad", &fasta(), &options);
     let bytes = std::fs::read(&path).unwrap();
     let write = |name: &str, bytes: &[u8]| {
         let bad = path.with_file_name(name);

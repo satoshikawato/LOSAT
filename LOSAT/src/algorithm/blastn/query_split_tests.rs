@@ -355,6 +355,42 @@ fn a_negative_chunk_size_splits_only_a_long_enough_batch() {
     assert!(!SplitSizes::new(false, Some(3000), Some(-10)).negative_chunk_size());
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:149,166-170
+// The chunk ranges in `size_t`, where a debug build's `usize` subtraction panicked: -100
+// over -200 make 310 bases 3 chunks, the first covering the batch and the others keeping
+// NCBI's empty bounds, and 248 bases 2 chunks of 25 with a gap of 200 between them; 100 over
+// 95 make 31 bases 6 chunks of 85, below the overlap, the first covering the batch.
+#[test]
+fn the_chunk_ranges_wrap_as_ncbis_size_t() {
+    let ranges = |lengths: &[usize], sizes| -> Vec<Vec<(usize, usize)>> {
+        split_query_batch(lengths, sizes, QueryStrand::Both)
+            .unwrap()
+            .iter()
+            .map(|chunk| {
+                chunk
+                    .queries
+                    .iter()
+                    .map(|part| (part.from, part.to))
+                    .collect()
+            })
+            .collect()
+    };
+    let negative = SplitSizes::new(false, Some(-100), Some(-200));
+    assert_eq!(
+        ranges(&[310], negative),
+        vec![vec![(0, 310)], vec![], vec![]]
+    );
+    assert_eq!(
+        ranges(&[248], negative),
+        vec![vec![(0, 25)], vec![(225, 248)]]
+    );
+    let close = SplitSizes::new(false, Some(100), Some(95));
+    assert_eq!(
+        ranges(&[31], close),
+        vec![vec![(0, 31)], vec![], vec![], vec![], vec![], vec![]]
+    );
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:392-410,604-626
 // A strand that is not searched has no chunk context and the offset INT4_MAX; the other
 // strand's offsets are those of the split with both strands.

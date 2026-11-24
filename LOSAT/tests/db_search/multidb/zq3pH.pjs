@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "zq3pH",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "zq3pH",
+  "number-of-letters": 140,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-23T20:50:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49783,
+  "bytes-to-cache": 238,
+  "files": [
+    "zq3pH.pdb",
+    "zq3pH.phr",
+    "zq3pH.pin",
+    "zq3pH.pnd",
+    "zq3pH.pni",
+    "zq3pH.pog",
+    "zq3pH.pos",
+    "zq3pH.pot",
+    "zq3pH.psq",
+    "zq3pH.ptf",
+    "zq3pH.pto"
+  ]
+}

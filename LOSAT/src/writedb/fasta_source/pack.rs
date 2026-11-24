@@ -217,15 +217,14 @@ pub(super) fn pack_iupacna(src: &[u8]) -> Vec<Segment> {
 }
 
 /// The NCBI2na code of the unambiguous IUPACna letters (`CIupacnaTo2na`'s rows `A`: 0,
-/// `C`: 1, `G`: 2, `T` and `U`: 3; the table has the code shifted to each of the four
-/// places of a byte). Only these letters reach an NCBI2na segment.
+/// `C`: 1, `G`: 2, `T` and `U`: 3, every other row 0; the table has the code shifted to each
+/// of the four places of a byte). Only these letters reach an NCBI2na segment. Written
+/// without a branch, so that a loop over residues computes the codes of many at once.
 pub(crate) const fn ncbi2na_code(residue: u8) -> u8 {
-    match residue {
-        b'C' => 1,
-        b'G' => 2,
-        b'T' | b'U' => 3,
-        _ => 0,
-    }
+    let c = (residue == b'C') as u8;
+    let g = (residue == b'G') as u8;
+    let t = ((residue == b'T') | (residue == b'U')) as u8;
+    c | (g << 1) | (t * 3)
 }
 
 /// The NCBI4na code of the IUPACna letters (`CIupacnaTo4na`'s rows: the table has the
@@ -254,16 +253,6 @@ pub(crate) const fn ncbi4na_code(residue: u8) -> u8 {
     }
 }
 
-const NCBI2NA_CODES: [u8; 256] = {
-    let mut table = [0; 256];
-    let mut index = 0;
-    while index < 256 {
-        table[index] = ncbi2na_code(index as u8);
-        index += 1;
-    }
-    table
-};
-
 const NCBI4NA_CODES: [u8; 256] = {
     let mut table = [0; 256];
     let mut index = 0;
@@ -275,24 +264,38 @@ const NCBI4NA_CODES: [u8; 256] = {
 };
 
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:257-289
+/// The codes of a block of residues are computed first (one loop without a branch) and then
+/// packed four to a byte by one product each ([`pack_four_codes`]); the block on the stack keeps
+/// the memory as it was (LOSAT's speed).
 pub(crate) fn iupacna_to_ncbi2na(src: &[u8]) -> Vec<u8> {
+    const BLOCK: usize = 256;
     let mut dst = Vec::with_capacity(src.len().div_ceil(4));
-    let mut chunks = src.chunks_exact(4);
-    dst.extend((&mut chunks).map(|four| {
-        NCBI2NA_CODES[four[0] as usize] << 6
-            | NCBI2NA_CODES[four[1] as usize] << 4
-            | NCBI2NA_CODES[four[2] as usize] << 2
-            | NCBI2NA_CODES[four[3] as usize]
-    }));
-    let rest = chunks.remainder();
-    if !rest.is_empty() {
-        let mut byte = 0;
-        for (i, &residue) in rest.iter().enumerate() {
-            byte |= NCBI2NA_CODES[residue as usize] << (6 - 2 * i);
+    let mut codes = [0u8; BLOCK];
+    for block in src.chunks(BLOCK) {
+        let codes = &mut codes[..block.len()];
+        for (code, &residue) in codes.iter_mut().zip(block) {
+            *code = ncbi2na_code(residue);
         }
-        dst.push(byte);
+        let (fours, rest) = codes.as_chunks::<4>();
+        dst.extend(fours.iter().map(|&four| pack_four_codes(four)));
+        if !rest.is_empty() {
+            let mut byte = 0;
+            for (i, &code) in rest.iter().enumerate() {
+                byte |= code << (6 - 2 * i);
+            }
+            dst.push(byte);
+        }
     }
     dst
+}
+
+/// The byte of four NCBI2na codes (each 0 to 3), the first in the high bits:
+/// `c0 << 6 | c1 << 4 | c2 << 2 | c3`. With the codes as the bytes of a little-endian word `w`
+/// (code `k` at bit `8 k`), the product `w * (2^30 + 2^20 + 2^10 + 1)` puts code `k` at bit
+/// `30 - 2 k` (bits 24 to 31); the other terms put code `k` at bit `8 k + 30 - 10 j` for `j != k`,
+/// below 22 or above 33, where two bits each never carry into bits 24 to 31.
+fn pack_four_codes(four: [u8; 4]) -> u8 {
+    ((u64::from(u32::from_le_bytes(four)) * 0x4010_0401) >> 24) as u8
 }
 
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:313-339

@@ -227,3 +227,43 @@ fn the_scan_of_the_best_coding_is_the_table() {
         );
     }
 }
+
+/// `ncbi2na_code` is `CIupacnaTo2na`'s row for every byte, and `iupacna_to_ncbi2na` packs the
+/// codes four to a byte, the first in the high bits, for every length across its blocks and every
+/// residue at every place of a byte.
+#[test]
+fn ncbi2na_codes_and_their_bytes() {
+    let row = |residue: u8| match residue {
+        b'C' => 1,
+        b'G' => 2,
+        b'T' | b'U' => 3,
+        _ => 0,
+    };
+    for byte in 0..=u8::MAX {
+        assert_eq!(ncbi2na_code(byte), row(byte), "{byte:#04x}");
+    }
+    let packed = |src: &[u8]| {
+        src.chunks(4)
+            .map(|four| {
+                four.iter().enumerate().fold(0u8, |byte, (i, &residue)| {
+                    byte | row(residue) << (6 - 2 * i)
+                })
+            })
+            .collect::<Vec<u8>>()
+    };
+    for byte in 0..=u8::MAX {
+        for at in 0..4 {
+            let mut src = b"ACGT".to_vec();
+            src[at] = byte;
+            assert_eq!(iupacna_to_ncbi2na(&src), packed(&src), "{byte:#04x} {at}");
+        }
+    }
+    let src: Vec<u8> = (0..1100usize).map(|i| b"ACGTUGCAAT"[i * 7 % 10]).collect();
+    for len in (0..=600).chain([1023, 1024, 1025, 1100]) {
+        assert_eq!(
+            iupacna_to_ncbi2na(&src[..len]),
+            packed(&src[..len]),
+            "{len}"
+        );
+    }
+}

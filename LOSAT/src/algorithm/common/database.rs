@@ -1250,15 +1250,19 @@ impl ReportedHeader {
     }
 }
 
-/// Whether the sequences of a database search keep a definition line under its list
-/// (`SeqDb::line_read`), each read once: the one check of NCBI's two places that drop a
-/// sequence without a line, the fetches with `check_oid_exclusion` (`FetchExcluded`) and the
-/// Seq-aligns (`SeqAligned`), with whether NCBI's read of the record there takes a UTF8String
-/// for a VisibleString (its warning, `seqdb::Utf8Reads`). A header that cannot be read as
-/// NCBI's header read adjusts it is not kept in the cache: each place decides what its error
-/// does.
+/// Whether the sequences of a database search keep a definition line with a Seq-id
+/// (`SeqDb::line_read`): the one check of NCBI's two places that drop a sequence without one,
+/// the fetches with `check_oid_exclusion` (`FetchExcluded`) and the Seq-aligns (`SeqAligned`),
+/// with whether NCBI's read of the record there takes a UTF8String for a VisibleString (its
+/// warning, `seqdb::Utf8Reads`). Under a list (`SeqDb::drops_lineless_hits`) each header is
+/// decoded once and kept in the cache; without one the check walks the record to its first
+/// Seq-id at each ask (`seqdb::header::holds_a_seqid`) and keeps nothing. A header that cannot
+/// be read as NCBI's header read adjusts it is not kept in the cache: each place decides what
+/// its error does.
 struct LineCheck<'a> {
     db: &'a SeqDb,
+    /// `SeqDb::drops_lineless_hits`: whether the reads decode the header (and the cache keeps it).
+    filters: bool,
     kept: std::sync::Mutex<std::collections::HashMap<u32, LineRead>>,
 }
 
@@ -1274,13 +1278,18 @@ impl<'a> LineCheck<'a> {
     fn new(db: &'a SeqDb) -> Self {
         LineCheck {
             db,
+            filters: db.drops_lineless_hits(),
             kept: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
-    /// What the read of `ordinal`'s header finds (read at its first check; the lock is not held
-    /// while the header is read and decoded), or the reader's error.
+    /// What the read of `ordinal`'s header finds (under a list read at its first check; the lock
+    /// is not held while the header is read and decoded), or the reader's error.
     fn read(&self, ordinal: u32) -> Result<LineRead, SeqDbError> {
+        if !self.filters {
+            let (kept, utf8) = self.db.line_read(ordinal)?;
+            return Ok(LineRead { kept, utf8 });
+        }
         let cached = self
             .kept
             .lock()
@@ -1754,7 +1763,8 @@ impl std::error::Error for FetchRefusal {}
 
 /// NCBI's Seq-aligns of the final hit lists of a database search (line DBID item lineless):
 /// a hit on a sequence that the database's list keeps without any of its definition
-/// lines gets none (`SeqDb::keeps_line`, blast_seqalign.cpp:1582-1586), so it leaves every
+/// lines, or whose lines hold no Seq-id (an edited header, without a list too; line RG
+/// D1c-1c-b), gets none (`SeqDb::keeps_line`, blast_seqalign.cpp:1582-1586), so it leaves every
 /// report, the prefetch, the taxonomy lookups and psiblast's PSSM, while it was searched, took
 /// its place in the hit list before the cut to `-max_target_seqs` and counts in the
 /// statistics. Each program drops such hit lists right after that cut, before the reads of
@@ -1772,18 +1782,16 @@ pub(crate) struct SeqAligned<'a> {
 }
 
 impl<'a> SeqAligned<'a> {
-    /// The check of `db`'s hits; `None` where no hit is dropped here: no list removes
-    /// lines, or the search's fetches have excluded the sequences without a line before
-    /// (`fetched`, the caller's: the search fetches its subjects with `check_oid_exclusion`, a
-    /// gapped search or an ungapped one of a nucleotide database; and the database's list is
-    /// negative, `SeqDb::excludes_lineless_at_fetch`).
+    /// The check of `db`'s hits; `None` where no hit is dropped here: the search's fetches have
+    /// excluded the sequences without a line before (`fetched`, the caller's: the search fetches
+    /// its subjects with `check_oid_exclusion`, a gapped search or an ungapped one of a nucleotide
+    /// database; and the database's list is negative, `SeqDb::excludes_lineless_at_fetch`, which
+    /// erases every line without a Seq-id).
     pub(crate) fn of(db: &'a SeqDb, fetched: bool) -> Option<Self> {
-        (db.drops_lineless_hits() && !(fetched && db.excludes_lineless_at_fetch())).then(|| {
-            SeqAligned {
-                check: LineCheck::new(db),
-                utf8: None,
-                failed: false,
-            }
+        (!(fetched && db.excludes_lineless_at_fetch())).then(|| SeqAligned {
+            check: LineCheck::new(db),
+            utf8: None,
+            failed: false,
         })
     }
 
@@ -4367,25 +4375,27 @@ pub(crate) fn reports_may_refuse(
             Ok(self)
         }
     }
-    let lineless_dropped = db.drops_lineless_hits();
     let check = |kept: &mut Kept,
                  headers: &HeaderReader<'_>,
                  ordinal: u32,
                  header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>|
      -> std::result::Result<(), ReportRefusal> {
-        // A sequence left without a line gets no Seq-align (`SeqAligned`): none of its hits is
-        // reported, so it cannot make a report refuse (an error of its header comes below). The
-        // header read here is the filtered one: a sequence with a line is kept without asking
-        // again (review 1 of line RG D1c-1b, F2). A set of no line and a read that failed ask
-        // `SeqDb::keeps_line` (a volume that filters no line keeps a record of none, and a seqid
-        // list's read of a sequence it leaves no line fails; review 2 of D1c-1b, G3).
-        if lineless_dropped
-            && match &header {
-                Ok(crate::seqdb::SequenceHeader::Ordinal(lines)) if !lines.is_empty() => false,
-                Ok(crate::seqdb::SequenceHeader::Parsed(set)) if !set.deflines.is_empty() => false,
-                _ => matches!(db.keeps_line(ordinal), Ok(false)),
+        // A sequence left without a line with a Seq-id gets no Seq-align (`SeqAligned`): none of
+        // its hits is reported, so it cannot make a report refuse (an error of its header comes
+        // below). The header read here is the filtered one: a sequence with a line that holds a
+        // Seq-id is kept without asking again (review 1 of line RG D1c-1b, F2; an ordinal line
+        // holds its `BL_ORD_ID`). A set of no such line and a read that failed ask
+        // `SeqDb::keeps_line` (an empty record is kept, and a seqid list's read of a sequence it
+        // leaves no line fails; review 2 of D1c-1b, G3).
+        if match &header {
+            Ok(crate::seqdb::SequenceHeader::Ordinal(lines)) if !lines.is_empty() => false,
+            Ok(crate::seqdb::SequenceHeader::Parsed(set))
+                if set.deflines.iter().any(|defline| !defline.ids.is_empty()) =>
+            {
+                false
             }
-        {
+            _ => matches!(db.keeps_line(ordinal), Ok(false)),
+        } {
             return Ok(());
         }
         match reported_header(headers, header, ordinal, 0, program) {

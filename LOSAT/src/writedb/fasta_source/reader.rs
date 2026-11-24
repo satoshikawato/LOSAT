@@ -558,6 +558,29 @@ impl Alphabet {
     }
 }
 
+/// The bytes that `extend_upper` converts at once.
+const UPPER_BLOCK: usize = 32;
+
+/// Appends `run` to `out` in upper case (`to_ascii_uppercase` of every byte, as the switch stores
+/// a residue). The bytes are copied whole, then converted a block of `UPPER_BLOCK` at a time, the
+/// last block ending at the end of the run and overlapping the one before it (a byte converted
+/// twice is the same byte); a run shorter than a block is converted a byte at a time. A loop over
+/// the whole run left most of a 60-byte line to its scalar remainder (LOSAT's speed).
+fn extend_upper(out: &mut Vec<u8>, run: &[u8]) {
+    let start = out.len();
+    out.extend_from_slice(run);
+    let added = &mut out[start..];
+    let len = added.len();
+    if len < UPPER_BLOCK {
+        added.make_ascii_uppercase();
+        return;
+    }
+    for block in added.as_chunks_mut::<UPPER_BLOCK>().0 {
+        block.make_ascii_uppercase();
+    }
+    added[len - UPPER_BLOCK..].as_chunks_mut::<UPPER_BLOCK>().0[0].make_ascii_uppercase();
+}
+
 /// The state of the record being read (`ReadOneSeq` resets it).
 struct RecordState {
     flags: ReaderFlags,
@@ -1079,8 +1102,7 @@ impl RecordState {
                     if MASKS {
                         self.mask_run(&s[pos..pos + run]);
                     }
-                    self.seq_data
-                        .extend(s[pos..pos + run].iter().map(u8::to_ascii_uppercase));
+                    extend_upper(&mut self.seq_data, &s[pos..pos + run]);
                     pos += run - 1;
                 }
             }

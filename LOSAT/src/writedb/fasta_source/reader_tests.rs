@@ -83,6 +83,31 @@ fn residue_runs_match_the_byte_by_byte_scan() {
     }
 }
 
+/// `extend_upper` appends what the byte-by-byte map appends, for every byte at every place of runs
+/// of every length up to 100 and across blocks, after bytes already stored.
+#[test]
+fn extend_upper_is_the_byte_by_byte_map() {
+    let stored = b"MKV".to_vec();
+    let mut lengths: Vec<usize> = (0..=100).collect();
+    lengths.extend([127, 128, 129, 300]);
+    for len in lengths {
+        for byte in 0..=u8::MAX {
+            for at in [0, 1, 31, 32, 33, len / 2, len.saturating_sub(1)] {
+                let mut run = b"acgtACGTnN*-".repeat(len / 12 + 1);
+                run.truncate(len);
+                if at < len {
+                    run[at] = byte;
+                }
+                let mut expected = stored.clone();
+                expected.extend(run.iter().map(u8::to_ascii_uppercase));
+                let mut out = stored.clone();
+                extend_upper(&mut out, &run);
+                assert_eq!(out, expected, "{byte:#04x} {len} {at}");
+            }
+        }
+    }
+}
+
 /// `data_line_counts` gives the counts of `CheckDataLine`'s loop, one byte at a time with its
 /// stop at `;`, for every byte at every place and on random lines of up to 70 bytes.
 #[test]

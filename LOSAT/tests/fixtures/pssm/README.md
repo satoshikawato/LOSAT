@@ -67,3 +67,5 @@ delayed member `names`), and the BER files are `ps9_ber_base.asnb` with one memb
 BLAST+ 2.17.0 Linux build, `-num_threads 1`, an address limit of 8 GiB) are in `remaining-gaps-20261112/D/d3/c3b/probe/`.
 The `losat-rejection` rows are LOSAT's refusals of a value of another type than the declared one and of an element stated
 as `NULL` outside a skip (`docs/manual/src/refusals-edge-cases.md`).
+
+`ps15b2_tk_other_stdaa.asn.gz`: `ps4_tk_paja.asn.gz` with its query's Seq-inst molecule `aa` changed to `other` (the first `mol aa,`; ncbistdaa letters), gzipped; the PSSM query of rows `db.ps15b2.p.othr.crash.*`, `.open.*`, `.prow.*`, `.loop.*` and `.freed.*` (line PS, PS15b-2 fix 1).

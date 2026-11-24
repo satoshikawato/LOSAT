@@ -1805,6 +1805,7 @@ impl ListedTitles<'_> {
         database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
         loads: &HitLoads,
+        batches: &Option<Vec<shared::XmlBatchLoads>>,
     ) -> Result<(
         Vec<i32>,
         Vec<HitTaxonomy>,
@@ -1819,6 +1820,7 @@ impl ListedTitles<'_> {
             &self.listed.ordinals,
             &reported,
             &self.parsed,
+            &|| batches.clone(),
             self.program,
         )
     }

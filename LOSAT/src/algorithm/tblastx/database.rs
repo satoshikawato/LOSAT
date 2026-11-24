@@ -288,16 +288,42 @@ impl TblastxDatabase {
     /// (`ReportedSubjects::loads`: not the subject of a `Hit` that throws, nor those after it in a
     /// query's report, which NCBI never loads, so that the taxonomy database's one-time texts go
     /// with the next `Hit` that it loads; review 1 of DBID pfoff-1, H1).
-    pub(crate) fn read_taxids(&self, reported: &ReportedSubjects) -> Result<XmlTaxa> {
+    ///
+    /// `(ordered, queries, spans)`: the reported hits in report order (subjects by rank) of
+    /// `queries` queries and the queries of each batch, for NCBI's loads by batch
+    /// (`shared::XmlBatchLoads`, `batches_prefetch`; asked only where they decide the texts).
+    pub(crate) fn read_taxids(
+        &self,
+        reported: &ReportedSubjects,
+        (ordered, queries, spans): (&[TblastxHsp], usize, &[std::ops::Range<usize>]),
+    ) -> Result<XmlTaxa> {
         let ranks: std::collections::BTreeSet<usize> = (0..reported.ordinals.len())
             .filter(|rank| reported.loads.loaded(*rank))
             .collect();
+        // Each query's `Hit`s: its hits' subjects, each once, in order.
+        let batches = || {
+            shared::XmlBatchLoads::of(
+                queries,
+                spans,
+                &batches_prefetch(ordered, queries, spans),
+                &reported.loads,
+                |query| {
+                    let mut seen = std::collections::HashSet::new();
+                    query_hits(ordered, query..query + 1)
+                        .iter()
+                        .map(|hsp| hsp.hit.s_idx as usize)
+                        .filter(|&rank| seen.insert(rank))
+                        .collect()
+                },
+            )
+        };
         let (taxids, taxonomy, parsed_taxonomy, notes) = shared::read_reported_taxonomy(
             &self.db,
             &self.taxdb,
             &reported.ordinals,
             &ranks,
             &reported.parsed,
+            &batches,
             PROGRAM,
         )?;
         Ok(XmlTaxa {

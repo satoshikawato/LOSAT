@@ -179,7 +179,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                 // at the first `Hit` that needs them, the lookup of the `Hit` every time.
                 posts.hit(sink.position(), s_idx as u32, |texts| {
                     if posting {
-                        taxdb_printer.at_names(s_idx, subject, texts)
+                        taxdb_printer.at_names((q_idx, s_idx), subject, texts)
                     } else {
                         Ok(())
                     }

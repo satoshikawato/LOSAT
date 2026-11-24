@@ -542,14 +542,16 @@ fn blastp_xml2_cache(query: &Path, taxdb: &str, outfmt: &str) -> (bool, Vec<u8>,
     (output.status.success(), output.stdout, stderr, searches)
 }
 
-/// Line DBID L1d review 1 Low 1: outfmt 13 to 16 ask for the refusal of NCBI's taxonomy cache
-/// (a volume of `nz_reppo` holds 99990, the damaged last entry of `offset_last_past_end`, and 150
-/// of its cache slot) at the first batch that reports a subject with a positive taxid, which can
-/// be in a later block: such a run takes the search of all queries, which refuses before any
-/// byte. `qx` (no hits) then `qN` (a1, 99990) make two blocks; with a healthy taxonomy database
-/// the run searches them block by block.
+/// Line DBID L1d review 1 Low 1: the XML2 and JSON reports (outfmt 13 to 16) on a volume that
+/// holds 99990, the damaged last entry of `offset_last_past_end`, and 150 of its slot of NCBI's
+/// taxonomy cache (`nz_reppo`) follow that slot through the loads of every batch, and may be
+/// refused at a batch whose prefetch NCBI orders by addresses, which can be in a later block:
+/// such a run takes the search of all queries. `qx` (no hits) then `qN` (a1, 99990) make two
+/// blocks; with a healthy taxonomy database the run searches them block by block. Since line NP
+/// item O4b2-6 the damaged one writes NCBI BLAST+ 2.17.0's two offset errors (its ordinal ids
+/// fix the order of the loads) instead of a refusal.
 #[test]
-fn an_xml2_run_that_the_taxonomy_cache_refuses_takes_the_search_of_all_queries() {
+fn an_xml2_run_on_the_taxonomy_cache_slot_takes_the_search_of_all_queries() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let dir = std::env::temp_dir().join(format!("losat-bpqblock-xml2cache-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -567,15 +569,18 @@ fn an_xml2_run_that_the_taxonomy_cache_refuses_takes_the_search_of_all_queries()
     assert!(ok, "{stderr}");
     assert_eq!(searches, 2, "the healthy taxonomy database: two blocks");
     for outfmt in ["15", "16"] {
-        let (ok, stdout, stderr, _) = blastp_xml2_cache(&query, "offset_last_past_end", outfmt);
-        assert!(!ok, "outfmt {outfmt}: refused");
-        assert!(
-            stdout.is_empty(),
-            "outfmt {outfmt}: {} bytes before the refusal",
-            stdout.len()
+        let (ok, stdout, stderr, searches) =
+            blastp_xml2_cache(&query, "offset_last_past_end", outfmt);
+        assert!(ok, "outfmt {outfmt}: {stderr}");
+        assert_eq!(searches, 1, "outfmt {outfmt}: the search of all queries");
+        assert!(!stdout.is_empty(), "outfmt {outfmt}");
+        assert_eq!(
+            stderr.matches("Offset error at end of taxdb file.").count(),
+            2,
+            "outfmt {outfmt}: {stderr}"
         );
         assert!(
-            stderr.contains("256-slot taxonomy cache"),
+            !stderr.contains("256-slot taxonomy cache"),
             "outfmt {outfmt}: {stderr}"
         );
     }

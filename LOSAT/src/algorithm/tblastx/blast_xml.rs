@@ -360,7 +360,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 // (nothing for the other formats).
                 posts.hit(sink.position(), s_idx, |texts| {
                     if posting {
-                        taxdb_printer.at_names(s_idx as usize, subject, texts)
+                        taxdb_printer.at_names((q_idx, s_idx as usize), subject, texts)
                     } else {
                         Ok(())
                     }

@@ -1963,6 +1963,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                     &[other],
                     &std::collections::BTreeSet::from([0]),
                     &[None::<&crate::report::db_subject::ParsedSubject>],
+                    &|| None,
                     "BLASTN",
                 )
                 .unwrap();
@@ -2822,7 +2823,8 @@ fn the_xml2_lookups_ask_for_the_cache_refusal_where_a_subject_has_a_taxid() {
             .collect();
         let ordinals: Vec<u32> = (0..db.num_seqs()).collect();
         let reported: std::collections::BTreeSet<usize> = ranks.iter().copied().collect();
-        read_reported_taxonomy(db, run, &ordinals, &reported, &parsed, "BLASTN").map(|_| ())
+        read_reported_taxonomy(db, run, &ordinals, &reported, &parsed, &|| None, "BLASTN")
+            .map(|_| ())
     };
     let db = open("offset_last_past_end");
     for ranks in [&[0][..], &[1], &[3, 2], &[0, 1, 2, 3]] {
@@ -2855,7 +2857,15 @@ fn the_xml2_lookups_ask_for_the_cache_refusal_where_a_subject_has_a_taxid() {
         let reported: std::collections::BTreeSet<usize> = ranks.iter().copied().collect();
         let run = TaxdbRun::default();
         let no_parsed: &[Option<&crate::report::db_subject::ParsedSubject>] = &[];
-        let result = read_reported_taxonomy(&db, &run, &ordinals, &reported, no_parsed, "BLASTN");
+        let result = read_reported_taxonomy(
+            &db,
+            &run,
+            &ordinals,
+            &reported,
+            no_parsed,
+            &|| None,
+            "BLASTN",
+        );
         assert_eq!(result.is_err(), refused, "{ranks:?}");
         if let Err(error) = result {
             assert!(error.is::<TaxonomyRefusal>(), "{ranks:?} {error:#}");

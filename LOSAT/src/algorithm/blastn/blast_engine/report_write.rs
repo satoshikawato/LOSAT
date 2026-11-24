@@ -339,6 +339,7 @@ pub(super) fn write_structured_xml(
             report.database_parsed,
             hit_lists,
             report.database_loads,
+            (report.batch_spans, !report.ungapped),
         )?,
         _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
     };

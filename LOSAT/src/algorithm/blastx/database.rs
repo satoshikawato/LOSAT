@@ -922,6 +922,7 @@ impl ReportedSubjects {
                 &reported.ordinals,
                 &shown,
                 &reported.parsed,
+                &|| xml_batch_loads(batches, one_by_one),
                 database.program,
             )
             .map_err(super::blast_xml::XmlRefusal::of_taxonomy)?;
@@ -1495,3 +1496,32 @@ impl ReportedSubjects {
 #[cfg(test)]
 #[path = "database_tests.rs"]
 mod tests;
+
+/// NCBI's loads of the subjects of the XML2 and JSON reports of one query batch, `batches` (its
+/// results, subjects by rank; `shared::XmlBatchLoads`): its prefetch, or where it is off
+/// (`one_by_one`) each `Hit`'s read, the subjects of each query's HSP lists in order, its queries
+/// numbered as the writer numbers them (`BatchResults::query_ordinal`). `None` where the results
+/// do not follow each other.
+fn xml_batch_loads(
+    batches: &[BatchResults],
+    one_by_one: bool,
+) -> Option<Vec<shared::XmlBatchLoads>> {
+    let first = batches.first().map_or(0, |batch| batch.query_ordinal);
+    let mut hits: Vec<Vec<usize>> = Vec::new();
+    for batch in batches {
+        if batch.query_ordinal != first + hits.len() {
+            return None;
+        }
+        hits.extend(
+            batch
+                .queries
+                .iter()
+                .map(|lists| lists.iter().map(|list| list.oid).collect()),
+        );
+    }
+    Some(vec![shared::XmlBatchLoads {
+        first,
+        prefetch: !one_by_one,
+        hits,
+    }])
+}

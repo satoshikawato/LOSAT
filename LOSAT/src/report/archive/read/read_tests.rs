@@ -135,6 +135,17 @@ fn has_placeholder(text: &[u8]) -> bool {
     between(b'@', b'@', u8::is_ascii_uppercase) || between(b'{', b'}', u8::is_ascii_lowercase)
 }
 
+/// Whether the text holds an archive that its writer cut: NCBI's object stream threw in the middle
+/// of the archive (an element stated as `NULL` in a list of a PSSM query, the `db.ptr.*` rows of
+/// line RG item D3c-3c) and the program wrote its error archive right after the cut, so a second
+/// archive header follows a byte that is not a line break.
+fn cut_by_its_writer(text: &[u8]) -> bool {
+    const HEADER: &[u8] = b"Blast4-archive ::=";
+    text.windows(HEADER.len())
+        .enumerate()
+        .any(|(at, window)| at > 0 && window == HEADER && text[at - 1] != b'\n')
+}
+
 /// The text without the line breaks inside its strings (a doubled quote toggles twice).
 fn unwrapped(text: &[u8]) -> Vec<u8> {
     let mut inside = false;
@@ -153,16 +164,18 @@ fn unwrapped(text: &[u8]) -> Vec<u8> {
 /// header: NCBI's `-outfmt 11` output and the files that LOSAT's tests freeze as NCBI's) is read
 /// whole, object by object, and its values written back are its bytes. Left out: the malformed
 /// archives of rpsbproc's tests (`fixtures/rpsbproc/arch/bad`) and of blast_formatter's (`BROKEN`),
-/// rpsbproc's copies edited by hand (`EDITED`), and the `.merged` files of `archive_replaced` (a
-/// run's stdout and stderr in one file, with NCBI's messages inside the archive's text). An archive
-/// whose paths the tests replaced by a placeholder (`has_placeholder`) is compared without the line
-/// breaks inside its strings: NCBI broke those lines where the real path put them.
+/// rpsbproc's copies edited by hand (`EDITED`), the `.merged` files of `archive_replaced` (a run's
+/// stdout and stderr in one file, with NCBI's messages inside the archive's text), and the archives
+/// that their writer cut (`cut_by_its_writer`), whose first object must end with the reader's
+/// error. An archive whose paths the tests replaced by a placeholder (`has_placeholder`) is
+/// compared without the line breaks inside its strings: NCBI broke those lines where the real path
+/// put them.
 #[test]
 fn every_archive_of_the_fixtures_is_written_back_as_read() {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let bad = tests.join("fixtures/rpsbproc/arch/bad");
     let mut todo = vec![tests];
-    let (mut files, mut objects) = (0, 0);
+    let (mut files, mut objects, mut cut) = (0, 0, 0);
     let mut failures = Vec::new();
     while let Some(dir) = todo.pop() {
         for entry in std::fs::read_dir(&dir).expect("a directory") {
@@ -188,6 +201,14 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
             }
             let text = std::fs::read(&path).expect("a file");
             if !text.starts_with(b"Blast4-archive ::=") {
+                continue;
+            }
+            if cut_by_its_writer(&text) {
+                let mut stream = text_stream(&text[..], b"", Names::ARCHIVE);
+                if stream.read_object(named::BLAST4_ARCHIVE).0.is_ok() {
+                    failures.push(format!("{}: a cut archive read whole", path.display()));
+                }
+                cut += 1;
                 continue;
             }
             files += 1;
@@ -246,8 +267,8 @@ fn every_archive_of_the_fixtures_is_written_back_as_read() {
         &failures[..failures.len().min(10)]
     );
     assert!(
-        files >= 10 && objects >= files,
-        "{files} archives, {objects} objects"
+        files >= 10 && objects >= files && cut >= 10,
+        "{files} archives, {objects} objects, {cut} cut"
     );
 }
 

@@ -199,11 +199,14 @@ pub enum WeakMatch {
     /// The lookup of the sequences that could match weakly failed, with this message (LOSAT's
     /// lookup of the name alone; NCBI's scope makes none).
     Failed(String),
-    /// A Seq-align id with weak keys whose matches LOSAT did not look for, in a run whose every
-    /// batch prefetches (`common::database::HeaderReader::found_instead`): its reports read one by
-    /// one only in a batch whose prefetch fails at a Seq-align id whose lookup throws on the id
-    /// (`common::database::BatchPrefetch::loads_one_by_one`), where NCBI's scope may match it
-    /// weakly to a sequence that the prefetch loaded before the failure.
+    /// A Seq-align id with weak keys whose matches the reader of its header did not look for, in
+    /// a run whose every batch prefetches (`common::database::HeaderReader::found_instead`): its
+    /// reports read one by one only in a batch whose prefetch fails at a Seq-align id whose lookup
+    /// throws on the id (`common::database::BatchPrefetch::loads_one_by_one`), where NCBI's scope
+    /// may match it weakly to a sequence loaded before (by that prefetch too). Every reader of what
+    /// the scope shows for the subject one by one looks them up first
+    /// (`common::database::weak_sought`, as with the prefetch off; review 1 of line DBID pf7, M1),
+    /// so `fetched` never meets it there; it refuses it where a caller did not.
     Unsought,
 }
 
@@ -837,6 +840,13 @@ impl ParsedSubject {
         self
     }
 
+    /// Whether the reader of the subject's header did not look for its weak matches
+    /// (`WeakMatch::Unsought`), which `common::database::weak_sought` looks for where a report
+    /// may load it one by one.
+    pub fn weak_unsought(&self) -> bool {
+        self.weak_match == Some(WeakMatch::Unsought)
+    }
+
     /// The subject with `holder`, another sequence that holds an id NCBI's scope takes for the
     /// Seq-align id where the lookup gives a third sequence first or none (`pssm_read`).
     pub fn also_held(mut self, holder: Option<DbSequence>) -> Self {
@@ -1206,7 +1216,7 @@ impl ParsedSubject {
                 id()
             )),
             Some(WeakMatch::Unsought) => Err(format!(
-                "has the Seq-align id {}, which ids of other sequences can match weakly (an accession with a version for one without, a name with or without an accession, a pir or prf accession as a name), in a batch whose prefetch ends at another subject's Seq-align id whose lookup throws on the id itself (NCBI BLAST+ 2.17.0 writes Error pre-fetching sequence data, then reads the reported sequences one by one): NCBI BLAST+ 2.17.0 can write the names and letters of such a sequence that the prefetch loaded before for it, and LOSAT does not look those sequences up in a run whose batches prefetch",
+                "has the Seq-align id {}, which ids of other sequences can match weakly (an accession with a version for one without, a name with or without an accession, a pir or prf accession as a name), in a batch whose prefetch ends at another subject's Seq-align id whose lookup throws on the id itself (NCBI BLAST+ 2.17.0 writes Error pre-fetching sequence data, then reads the reported sequences one by one): NCBI BLAST+ 2.17.0 can write the names and letters of such a sequence read before for it, and LOSAT did not look those sequences up",
                 id()
             )),
         }
@@ -3099,6 +3109,9 @@ pub struct HitLoads {
     /// (`HitLoad::Held`).
     held: std::collections::HashMap<usize, Option<DbSequence>>,
     unread: std::collections::HashSet<usize>,
+    /// The subjects that a batch's failed prefetch may have loaded (`ReportRead::prefetch_fails`)
+    /// and that no report reaches: loaded, but read by no report (`HitLoads::reached`).
+    prefetched_only: std::collections::HashSet<usize>,
     /// Why the run's formats refuse a lookup that throws (`FormatThrow::Refused`).
     refused: Option<ThrowRefusal>,
     /// The number of the reports given that NCBI's run reaches, where a report's load ended it
@@ -3109,7 +3122,7 @@ pub struct HitLoads {
 impl HitLoads {
     /// The loads of the query reports `reports`, in the order of the reports: whether the
     /// query's batch has its prefetch off, so that its report loads each subject where it reaches
-    /// it (`one_by_one`, `common::database::BatchPrefetch::reads_one_by_one`), and the subject key
+    /// it (`one_by_one`, `common::database::BatchPrefetch::loads_one_by_one`), and the subject key
     /// of each of its HSP lists (or HSPs) in the report's order (`None` for an entry that shows
     /// nothing). The entries make `Hit`s as the XML writers make them (`blast_xml::hit_ranges`: a
     /// copy of one record that follows another joins its `Hit`, `joins_as_copy`; the entries of
@@ -3206,9 +3219,12 @@ impl HitLoads {
             .map(|(read, keys)| (read.into(), keys.into()))
             .collect();
         // The subjects of the reports of each batch whose prefetch fails, which that prefetch may
-        // have loaded before its failure (`ReportRead::prefetch_fails`).
+        // have loaded before its failure (`ReportRead::prefetch_fails`), and those of them noted
+        // (`prefetched`): loaded for the holders and the run's record, but read only where a
+        // report reaches them (review 1 of line DBID pf7, H1).
         let mut failed_prefetches: std::collections::HashMap<Option<usize>, Vec<usize>> =
             Default::default();
+        let mut prefetched = std::collections::HashSet::new();
         for (read, keys) in reports.iter().filter(|(read, _)| read.prefetch_fails) {
             let subjects = failed_prefetches.entry(read.batch).or_default();
             match keys {
@@ -3228,14 +3244,14 @@ impl HitLoads {
             seen.enter(read.batch);
             // The batch's prefetch, which the run reaches, may have loaded every subject of the
             // batch whose load does not throw before it failed.
-            if let Some(prefetched) = failed_prefetches
+            if let Some(keys) = failed_prefetches
                 .remove(&read.batch)
                 .filter(|_| read.prefetch_fails && !ended.get())
             {
-                let keys = prefetched.into_iter().filter(|&key| {
+                let keys = keys.into_iter().filter(|&key| {
                     parsed(key).is_none_or(|subject| subject.lookup_throws().is_none())
                 });
-                note_loads(seen, &mut loaded, keys, &parsed);
+                note_loads(seen, &mut prefetched, keys, &parsed);
             }
             let subjects = match keys {
                 ReportKeys::Pairwise(reads) => {
@@ -3327,14 +3343,16 @@ impl HitLoads {
         if ended.get() {
             loads.reached.get_or_insert(given);
         }
-        loads.unread = passed
+        let (prefetched_only, unread) = passed
             .into_iter()
             .filter(|key| {
                 !loaded.contains(key)
                     && !loads.throws.contains_key(key)
                     && !loads.held.contains_key(key)
             })
-            .collect();
+            .partition(|key| prefetched.contains(key));
+        loads.prefetched_only = prefetched_only;
+        loads.unread = unread;
         loads
     }
 
@@ -3467,6 +3485,7 @@ impl HitLoads {
                 .filter_map(|(old, holder)| Some((key(old)?, holder)))
                 .collect(),
             unread: self.unread.into_iter().filter_map(&key).collect(),
+            prefetched_only: self.prefetched_only.into_iter().filter_map(&key).collect(),
             refused: self.refused,
             reached: self.reached,
         }
@@ -3491,9 +3510,12 @@ impl HitLoads {
     /// a subject that NCBI's scope gives another sequence for without the lookup
     /// (`HitLoad::Held`), which reads nothing new and which `ParsedSubject::fetched` refuses with
     /// the words of that sequence (the reads of the taxonomy texts, which BLASTN and TBLASTX
-    /// make before they ask `fetched`, would refuse it with the words of its failing lookup).
+    /// make before they ask `fetched`, would refuse it with the words of its failing lookup); nor
+    /// a subject that only a batch's failed prefetch may have loaded, which no report reaches
+    /// ([`HitLoads::reached`]): no row, `Hit` or name of it is written, so none looks it up.
     pub fn loaded(&self, key: usize) -> bool {
         matches!(self.load(key), HitLoad::Loaded | HitLoad::Refused(_))
+            && !self.prefetched_only.contains(&key)
     }
 
     /// Whether NCBI's run reaches the report `report` of those given (counted from 0): false for
@@ -3514,8 +3536,11 @@ impl HitLoads {
     /// though nothing of the subject is loaded (`loaded`: no taxonomy text, no definition line).
     /// A subject that NCBI's scope gives a sequence loaded before for (`HitLoad::Held`, where no
     /// lookup is made) is reached too: `ParsedSubject::fetched` refuses it, so no read is written.
+    /// A subject that a batch's failed prefetch may have loaded is loaded (`load`), but reached
+    /// only where a report reaches it: one shown only after a `Hit` that threw is read by no
+    /// report, and its texts are the prefetch's or none (review 1 of line DBID pf7, H1).
     pub fn reached(&self, key: usize) -> bool {
-        self.load(key) != HitLoad::Unread
+        self.load(key) != HitLoad::Unread && !self.prefetched_only.contains(&key)
     }
 
     /// The exception that the `Hit` of the subject `key` throws (`HitLoad::Throws`).

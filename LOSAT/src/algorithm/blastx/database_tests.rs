@@ -208,9 +208,13 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
             false,
             crate::report::tabular::PrintedIds::default(),
             false,
-            false,
+            crate::report::db_subject::ReportRead {
+                one_by_one: false,
+                batch: Some(0),
+                prefetch_fails: false,
+            },
             usize::MAX,
-            (crate::report::db_subject::FormatThrow::Unread, None, 0),
+            (crate::report::db_subject::FormatThrow::Unread, None),
         )
         .unwrap();
         let scope = crate::blastinput::query_batch::QueryScope::default;
@@ -290,9 +294,13 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
             false,
             crate::report::tabular::PrintedIds::default(),
             false,
-            false,
+            crate::report::db_subject::ReportRead {
+                one_by_one: false,
+                batch: Some(0),
+                prefetch_fails: false,
+            },
             usize::MAX,
-            (crate::report::db_subject::FormatThrow::Unread, None, 0),
+            (crate::report::db_subject::FormatThrow::Unread, None),
         )
         .unwrap();
         for hsp in batches

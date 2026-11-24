@@ -450,6 +450,15 @@ pub(crate) struct BatchTitles {
     pub(crate) utf8: Option<shared::Utf8Read>,
 }
 
+impl BatchTitles {
+    /// The reported sequences with parsed Seq-ids, whose lookups decide whether the batch's
+    /// prefetch fails (`shared::BatchPrefetch::prefetch_fails_among`, asked by
+    /// `native::BatchPrefetch::report_read`).
+    pub(crate) fn parsed_subjects(&self) -> impl Iterator<Item = &ParsedSubject> {
+        self.parsed.values().map(Arc::as_ref)
+    }
+}
+
 /// What one query's pairwise report (outfmt 0 to 4) of the hit lists `lists` reads, by the key
 /// that `lists` names the subjects by, an ordinal id or a rank (`QueryGroup::read_order` of the
 /// rows' hits as the writer reads them, `reading`: each list's HSPs that the reports show in the
@@ -601,22 +610,24 @@ impl ReportedSubjects {
     /// refuses what it cannot read as NCBI does (`shared::check_prefetched_parsed`).
     /// The batch's prefetch stops the run where it reads a subject whose lookup fails on a file
     /// with NCBI's exception (`prefetched`, `shared::batch_prefetch`).
-    /// `one_by_one`: whether the batch's prefetch is off, so that its reports read the subjects
-    /// one by one (`shared::ParsedShown::one_by_one`); they load them so too after a prefetch that
-    /// fails at a subject whose lookup throws on the id (`shared::BatchPrefetch::loads_one_by_one`). `cut`: the formatter's cut of each query's
+    /// `read`: how the batch's reports read the subjects (`native::BatchPrefetch::report_read`, the
+    /// answer of `shared::BatchPrefetch`): one by one where its prefetch is off, or fails (at an
+    /// unranged row before it loads anything, or at a subject whose lookup throws on the id,
+    /// `ReportRead::prefetch_fails`: after the subjects that it may have loaded,
+    /// `shared::BatchPrefetch::loads_one_by_one`), in the scope of the batch that it numbers (its
+    /// first query in the run). `cut`: the formatter's cut of each query's
     /// lists to the hit list size where RPSTBLASTN merges several volumes
     /// (`ResolvedOptions::shown_lists`; `usize::MAX` for every other search), which counts
     /// following lists whose Seq-align ids match as one subject (`BatchResults::shown`, which
     /// every report that NCBI cuts reads, `ResolvedOptions::shown_lists`: BLAST XML, XML2 and
     /// JSON too, whose `Hit`s `HitLoads` reads from the same lists, `BatchResults::cut_lists`).
     /// `after`: what the reports do after a subject whose lookup throws (the run's answer,
-    /// `FormatThrow::of_formats`, or a refusal with its reason), for `HitLoads::of` (where `one_by_one`, which subjects throw
-    /// and which no report loads; the refusals, the names, the tables' rows, the taxonomy reads
-    /// and the run's record of the loads, `note_loaded`, take that one answer), with how a
-    /// pairwise report reads the subjects (`pairwise_read_order`) and the batch's number in the
-    /// run (its first query's): the batch's reports come after the loads of the record (the
-    /// batches before and the calls before, `TaxdbRun::loads_before`), in the batch's scope
-    /// (`HitLoads::of`).
+    /// `FormatThrow::of_formats`, or a refusal with its reason), for `HitLoads::of` (where `read`
+    /// is one by one, which subjects throw and which no report loads; the refusals, the names, the
+    /// tables' rows, the taxonomy reads and the run's record of the loads, `note_loaded`, take that
+    /// one answer), with how a pairwise report reads the subjects (`pairwise_read_order`): the
+    /// batch's reports come after the loads of the record (the batches before and the calls
+    /// before, `TaxdbRun::loads_before`), in the batch's scope (`HitLoads::of`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_batch(
         database: &BlastxDatabase,
@@ -633,12 +644,11 @@ impl ReportedSubjects {
         taxonomy: bool,
         words: crate::report::tabular::PrintedIds,
         prefetched: bool,
-        one_by_one: bool,
+        read: crate::report::db_subject::ReportRead,
         cut: usize,
         after: (
             crate::report::db_subject::FormatThrow,
             Option<crate::report::pairwise::PairwiseReading>,
-            usize,
         ),
     ) -> Result<Self> {
         let BatchTitles {
@@ -710,16 +720,10 @@ impl ReportedSubjects {
             .iter()
             .flat_map(|batch| (0..batch.queries.len()).map(move |qidx| batch.cut_lists(qidx, cut)))
             .collect();
-        // A batch whose prefetch fails at a subject whose lookup throws on the id: its reports
-        // load the subjects one by one after it (`shared::BatchPrefetch::loads_one_by_one`), each
-        // other subject taken as loaded by the prefetch (`ReportRead::prefetch_fails`).
-        let prefetch_fails = prefetched
-            && !one_by_one
-            && shared::BatchPrefetch::prefetch_fails_among(parsed.values().map(|s| Some(&**s)));
-        let one_by_one = one_by_one || prefetch_fails;
+        let one_by_one = read.one_by_one;
         // A pairwise report's reads (`pairwise_read_order`), of the lists that the formatter's cut
         // keeps (`BatchResults::cut_lists`).
-        let (after, pairwise_reading, batch) = after;
+        let (after, pairwise_reading) = after;
         let pairwise_reading = pairwise_reading
             .filter(|_| one_by_one && after.run().is_some_and(|run| run.after.is_pairwise()));
         let mut pairwise_reads = Vec::new();
@@ -746,11 +750,6 @@ impl ReportedSubjects {
         }
         let mut pairwise_reads = pairwise_reads.into_iter();
         // The reports of one query batch, in its scope.
-        let read = crate::report::db_subject::ReportRead {
-            one_by_one,
-            batch: Some(batch),
-            prefetch_fails,
-        };
         let loads = HitLoads::of(
             database.taxdb.loads_before(read.batch),
             after,
@@ -798,7 +797,10 @@ impl ReportedSubjects {
                 // write its Seq-align id alone.
                 let reads = tabular_reads || pairwise || structured || taxids || taxonomy;
                 if reports && reads {
-                    subject
+                    let sought = shared::weak_sought(&database.db, subject, ordinal, one_by_one);
+                    sought
+                        .as_ref()
+                        .unwrap_or(subject)
                         .fetched(taxonomy, one_by_one, loads.load(oid))
                         .map_err(|reason| {
                             shared::parsed_refusal(
@@ -1056,8 +1058,10 @@ impl ReportedSubjects {
             })
     }
 
-    /// NCBI's messages about the taxonomy database where `PRE_FETCH_SEQS_LIMIT` turns the
-    /// prefetch of the query batch whose hit lists are `batches` off (`shared::prefetch_off`):
+    /// NCBI's messages about the taxonomy database where the reports of the query batch whose hit
+    /// lists are `batches` load one by one (`shared::BatchPrefetch::loads_one_by_one`: its
+    /// prefetch is off, `shared::prefetch_off`, or failed, after its posts: the reports read the
+    /// subjects that they reach, `HitLoads::reached`):
     /// each query's report fetches the sequences it shows, where the first format's rows read
     /// their Bioseqs (`rows`, `TabularSpec::subject_fetch`, by the engine's identities of each
     /// shown HSP), after the query's own warnings. The messages are kept by query for the

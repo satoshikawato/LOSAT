@@ -1000,6 +1000,35 @@ pub(crate) fn write_html_post<R: Write + ?Sized>(
     posts.flush()
 }
 
+/// The run's diagnostics (`posts`) as a writer that flushes the report written so far (`report`)
+/// before each write ([`write_html_post`]): the posts that a program writes to its diagnostics
+/// between the report's bytes without a writer's place for them (BLASTX's reads of a batch's
+/// titles and its prefetch, before the batch's reports), which NCBI posts to `cerr`, tied to
+/// `cout`: after the report written before, the prolog that `-html` keeps in `cout`'s buffer too
+/// (`pairwise::flushes_after_prolog`; review 1 of line DBID pf7, H2).
+pub(crate) struct PostsAfterReport<'w> {
+    report: &'w mut dyn Write,
+    posts: &'w mut dyn Write,
+}
+
+impl<'w> PostsAfterReport<'w> {
+    /// The diagnostics `posts` after the report `report`.
+    pub(crate) fn new(report: &'w mut dyn Write, posts: &'w mut dyn Write) -> Self {
+        Self { report, posts }
+    }
+}
+
+impl Write for PostsAfterReport<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        write_html_post(self.report, self.posts, buf)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.posts.flush()
+    }
+}
+
 impl Drop for QueryWarnings<'_> {
     /// The texts of the reads that the report did not place (a writer that stopped early, or a
     /// read no writer marks) are written when the warnings end, so that standard error keeps

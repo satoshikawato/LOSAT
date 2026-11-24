@@ -1728,8 +1728,9 @@ pub(super) fn seq_aligns_of(hit_lists: &[Option<BlastnHitList>], gapped: bool) -
 /// (`shared::BatchPrefetch::of`): `batches` are the queries of each batch, numbered from `first`
 /// (the query of `hit_lists[0]`), `seq_aligns_of` counts a batch's Seq-aligns (`gapped`), and a
 /// batch's prefetch fails where one of its subjects' lookup throws on the id (`titles`). The one
-/// producer of the prefetch that the reports' loads read (`hit_loads`; `reported_subjects`).
-fn batches_prefetch(
+/// producer of the prefetch that the reports' loads read (`hit_loads`; `reported_subjects`; the
+/// run loop's reads of a batch, one batch with `batches` empty).
+pub(super) fn batches_prefetch(
     format: shared::PrefetchFormat,
     (hit_lists, titles): (&[Option<BlastnHitList>], &DatabaseTitles),
     first: usize,
@@ -1847,17 +1848,19 @@ fn pairwise_keys<'p>(
     ))
 }
 
-/// What the reports of `hit_lists` load where their batch's prefetch is off (`RunLoads::loads` of
-/// those reports alone, by ordinal id, after the reports before them in the run, `run`): the
-/// subjects of its reads one by one (`DatabaseTitles`' texts of a batch whose prefetch is off),
-/// not one whose load throws, nor one that no report reaches after it. `pairwise`: how a
-/// pairwise report reads them (`pairwise_keys`); `before`: the loads of the run's record and of
-/// the calls before (`RunLoads::loads`), whose last report is of the batch that `before` names
+/// What the reports of `hit_lists` load where their batch's reports load one by one
+/// (`RunLoads::loads` of those reports alone, by ordinal id, after the reports before them in the
+/// run, `run`): the subjects of its reads one by one (`DatabaseTitles`' texts of a batch whose
+/// prefetch is off or fails, `prefetch_fails`: after the failed prefetch, which may have loaded
+/// the batch's other subjects, `ReportRead::prefetch_fails`), not one whose load throws, nor one
+/// that no report reaches after it. `pairwise`: how a pairwise report reads them
+/// (`pairwise_keys`); `before`: the loads of the run's record and of the calls before
+/// (`RunLoads::loads`), whose last report is of the batch that `before` names
 /// (`TaxdbRun::loads_before`), in whose scope these reports read.
 fn report_loads(
     run: &crate::report::db_subject::RunLoads,
     titles: &DatabaseTitles,
-    hit_lists: &[Option<BlastnHitList>],
+    (hit_lists, prefetch_fails): (&[Option<BlastnHitList>], bool),
     (pairwise, before): (
         Option<crate::report::pairwise::PairwiseReading>,
         crate::report::db_subject::LoadsBefore,
@@ -1866,7 +1869,7 @@ fn report_loads(
     let read = crate::report::db_subject::ReportRead {
         one_by_one: true,
         batch: before.batch(),
-        prefetch_fails: false,
+        prefetch_fails,
     };
     run.loads(
         before,
@@ -1947,16 +1950,17 @@ impl QueryFetches<'_> {
     }
 
     /// The fetches of each query of the batch whose final hit lists are `batch` (the query of
-    /// `batch[0]` is the run's `first`) where its prefetch is off: each query's report loads the
-    /// subjects that it shows (`report_loads`, after the reports before it in the run), where
-    /// the first format reads them (`fetches`), with the taxonomy texts of each first read
-    /// placed by subject in `query_reads` (`places`) or returned for the query's warnings; then
-    /// its rows may open the taxonomy database (`rows_open`).
+    /// `batch[0]` is the run's `first`) where its reports load one by one, its prefetch off or
+    /// failed (`prefetch_fails`, after its posts): each query's report loads the subjects that it
+    /// shows (`report_loads`, after the reports before it in the run), where the first format
+    /// reads them (`fetches`), with the taxonomy texts of each first read placed by subject in
+    /// `query_reads` (`places`) or returned for the query's warnings; then its rows may open the
+    /// taxonomy database (`rows_open`).
     pub(super) fn batch(
         &self,
         batch: &[Option<BlastnHitList>],
         first: usize,
-        fetches: bool,
+        (fetches, prefetch_fails): (bool, bool),
         query_reads: &mut [crate::report::query_warnings::QueryReads],
     ) -> Result<Vec<Vec<u8>>> {
         batch
@@ -1966,7 +1970,12 @@ impl QueryFetches<'_> {
                 let shown = std::slice::from_ref(hit_list);
                 // The loop records a batch after its texts here (`note_loaded`).
                 let before = self.database.taxdb.loads_before(Some(first));
-                let loads = report_loads(self.run, self.titles, shown, (self.pairwise, before));
+                let loads = report_loads(
+                    self.run,
+                    self.titles,
+                    (shown, prefetch_fails),
+                    (self.pairwise, before),
+                );
                 let mut messages = Vec::new();
                 if fetches && seq_aligns_of(shown, self.gapped) > 0 {
                     if self.places {

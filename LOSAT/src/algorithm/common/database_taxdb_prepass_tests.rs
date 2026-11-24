@@ -2014,20 +2014,35 @@ fn a_weak_match_is_refused_where_ncbi_may_read_the_reported_sequences_one_by_one
                     .is_ok(),
                 "{name} {ordinal}"
             );
-            // With the prefetch on, only a batch whose prefetch fails loads one by one, where
-            // LOSAT has not looked for the weak matches (`WeakMatch::Unsought`, line DBID
-            // pfoff-7).
+            // With the prefetch on, only a batch whose prefetch fails loads one by one: the
+            // reader has not looked for the weak matches (`WeakMatch::Unsought`, line DBID
+            // pfoff-7), which a report that reads the subject one by one looks for then
+            // (`weak_sought`), as with the prefetch off (review 1 of line DBID pf7, M1); without
+            // that, the subject is refused.
+            if !prefetch_off && subject.weak_unsought() {
+                let unsought = subject
+                    .fetched(false, true, crate::report::db_subject::HitLoad::Loaded)
+                    .unwrap_err();
+                assert!(
+                    unsought.contains("LOSAT did not look those sequences up"),
+                    "{name} {ordinal}: {unsought}"
+                );
+            }
+            let sought = weak_sought(&db, &subject, ordinal, true);
+            assert_eq!(
+                sought.is_some(),
+                subject.weak_unsought(),
+                "{name} {ordinal}"
+            );
+            assert!(!sought.as_ref().is_some_and(|s| s.weak_unsought()));
             match (
-                subject.fetched(false, true, crate::report::db_subject::HitLoad::Loaded),
-                want.filter(|_| prefetch_off),
-            ) {
-                (Err(error), None) if !prefetch_off => assert!(
-                    error.contains("LOSAT does not look those sequences up"),
-                    "{name} {ordinal}: {error}"
+                sought.as_ref().unwrap_or(&subject).fetched(
+                    false,
+                    true,
+                    crate::report::db_subject::HitLoad::Loaded,
                 ),
-                (Ok(()), None) if !prefetch_off => {
-                    assert!(want.is_none(), "{name} {ordinal}: a weak match not sought")
-                }
+                want,
+            ) {
                 (Ok(()), None) => {}
                 (Err(error), Some(Some(other))) => assert!(
                     error.contains(&format!("match an id of database sequence {other} weakly")),

@@ -384,7 +384,7 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
     // not asked.
     let second = |span: std::ops::Range<usize>| span.start == 2;
     let failing = BatchPrefetch::at(None, table, 5, 0, &[0..2, 2..5], (sum, second));
-    assert!(!failing.reads_one_by_one(3) && failing.loads_one_by_one(3));
+    assert!(failing.prefetches(3) && failing.loads_one_by_one(3));
     assert!(!failing.loads_one_by_one(1));
     assert_eq!(
         (

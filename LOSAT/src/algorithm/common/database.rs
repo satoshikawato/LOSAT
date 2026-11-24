@@ -2431,15 +2431,11 @@ impl BatchPrefetch {
         }
     }
 
-    /// Whether the batch of the call's query `query` may read the query's subjects one by one
-    /// with its prefetch off: its prefetch is off, or the query is of no batch (taken both ways,
-    /// as in [`BatchPrefetch::reads`]). The reads whose taxonomy texts the reports write: the
-    /// prefetch of a batch whose prefetch fails wrote the texts of its loads, or was refused
-    /// ([`batch_prefetch`]); where the loads throw or match weakly, [`loads_one_by_one`].
-    ///
-    /// [`loads_one_by_one`]: BatchPrefetch::loads_one_by_one
-    pub(crate) fn reads_one_by_one(&self, query: usize) -> bool {
-        self.batch_of(query) != Some(true)
+    /// Whether the prefetch of the batch of the call's query `query` runs (it may fail: a lookup
+    /// that throws on the id ends its loads, one that fails on a file stops the run there,
+    /// [`batch_prefetch`]); not for a query of no batch.
+    pub(crate) fn prefetches(&self, query: usize) -> bool {
+        self.batch_of(query) == Some(true)
     }
 
     /// Whether the batch of the call's query `query` prefetches and its prefetch fails at a
@@ -2455,13 +2451,16 @@ impl BatchPrefetch {
     }
 
     /// Whether the reports of the batch of the call's query `query` may load the query's subjects
-    /// one by one ([`BatchPrefetch::reads_one_by_one`]), also after a prefetch that fails at a
-    /// subject whose lookup throws on the id (NCBI's prefetch catches it and ends its loads): the
-    /// one answer of where a subject's load throws (`ParsedSubject::lookup_throws`) and where
-    /// NCBI's scope can match an id weakly ([`BatchPrefetch::report_read`], the pairwise reports'
-    /// reads, [`BatchPrefetch::reads`]).
+    /// one by one: its prefetch is off, or the query is of no batch (taken both ways, as in
+    /// [`BatchPrefetch::reads`]), or its prefetch fails at a subject whose lookup throws on the id
+    /// (NCBI's prefetch catches it and ends its loads; the reports load the subjects it did not).
+    /// The one answer of every reader of the reports' loads (review 1 of line DBID pf7, H1 and
+    /// M2): where a subject's load throws (`ParsedSubject::lookup_throws`), where NCBI's scope can
+    /// match an id weakly ([`BatchPrefetch::report_read`], [`BatchPrefetch::reads`]), the texts of
+    /// the reports' reads (each program's report model, after the batch's prefetch where it runs:
+    /// the loads that a failed prefetch never made write theirs there) and psiblast's PSSM reads.
     pub(crate) fn loads_one_by_one(&self, query: usize) -> bool {
-        self.reads_one_by_one(query) || self.prefetch_fails(query)
+        !self.prefetches(query) || self.prefetch_fails(query)
     }
 
     /// How the report of the call's query `query` reads its subjects, for the walk of the
@@ -3154,8 +3153,9 @@ impl<'a> HeaderReader<'a> {
         // A failed lookup of the weak candidates (LOSAT's own, of the name alone) leaves them
         // unknown where the batch reads one by one (review 1 of line DBID weakbatch, L1).
         // In a run whose batches prefetch, a Seq-align id with weak keys is read one by one only
-        // in a batch whose prefetch fails (`BatchPrefetch::loads_one_by_one`), where its weak
-        // matches are not looked for (`WeakMatch::Unsought`).
+        // in a batch whose prefetch fails (`BatchPrefetch::loads_one_by_one`): its weak matches
+        // are looked for there, where a report that reads its Bioseq asks (`WeakMatch::Unsought`,
+        // `weak_sought`; review 1 of line DBID pf7, M1), not for every subject of the run.
         let weak = if self.prefetch_off {
             self.weakly_held(lookup, subject, ordinal, &oids)
                 .unwrap_or_else(|error| {
@@ -3335,6 +3335,30 @@ impl<'a> HeaderReader<'a> {
             variants,
             keys,
             handle,
+        })
+    }
+
+    /// The weak matches of the Seq-align id of `subject` (the sequence `ordinal`) as
+    /// `found_instead` looks for them where a batch's prefetch may be off (`weakly_held`, among
+    /// every holder that NCBI's lookup gives for the id; a lookup that fails leaves them unknown,
+    /// `WeakMatch::Failed`), for a subject whose reader did not look for them
+    /// (`WeakMatch::Unsought`, [`weak_sought`]).
+    fn sought_weak_match(
+        &self,
+        subject: &crate::report::db_subject::ParsedSubject,
+        ordinal: u32,
+    ) -> Option<crate::report::db_subject::WeakMatch> {
+        let sought = self.db.seqid_lookup().and_then(|lookup| {
+            // LOSAT's own scan, as `found_instead`'s of every holder: it notes no warning.
+            let holders = lookup.seqid_to_oids(subject.alignment_id(), true);
+            let _ = lookup.take_utf8();
+            self.weakly_held(&lookup, subject, ordinal, &holders?)
+        });
+        sought.unwrap_or_else(|error| {
+            // Written only in LOSAT's own refusal text (`db_subject`).
+            Some(crate::report::db_subject::WeakMatch::Failed(error_words(
+                &error,
+            )))
         })
     }
 
@@ -4236,6 +4260,26 @@ impl ParsedShown {
     }
 }
 
+/// `subject` (the sequence `ordinal` of `db`) with the weak matches of its Seq-align id looked
+/// for, where a report that may load it one by one (`one_by_one`) asks what NCBI's scope can show
+/// for it (`ParsedSubject::fetched`, `ParsedSubject::pssm_read`) and its header's reader did not
+/// look for them (`ParsedSubject::weak_unsought`: a run whose batches prefetch, where it is read
+/// one by one only in a batch whose prefetch fails at a Seq-align id whose lookup throws on the
+/// id): as where the batch's prefetch is off (`HeaderReader::weakly_held`, the one model of the
+/// scope's weak matches; review 1 of line DBID pf7, M1). `None` where nothing is to look for: the
+/// caller asks `subject` itself.
+pub(crate) fn weak_sought(
+    db: &SeqDb,
+    subject: &crate::report::db_subject::ParsedSubject,
+    ordinal: u32,
+    one_by_one: bool,
+) -> Option<crate::report::db_subject::ParsedSubject> {
+    (one_by_one && subject.weak_unsought()).then(|| {
+        let weak = HeaderReader::new(db, true).sought_weak_match(subject, ordinal);
+        subject.clone().weak_match(weak)
+    })
+}
+
 /// LOSAT's refusals of the reported database sequence `ordinal` with parsed Seq-ids `subject` in
 /// the reports `shown` (`protein` for a protein database; `taxdb_found`: `SeqDb::taxdb_found`),
 /// as BLASTX's (`blastx::database::ReportedSubjects::for_batch`): a sequence that NCBI's
@@ -4258,7 +4302,10 @@ pub(crate) fn check_reported_parsed(
     program: &str,
 ) -> Result<()> {
     if shown.reads_bioseq() {
-        subject
+        let sought = weak_sought(db, subject, ordinal, shown.one_by_one);
+        sought
+            .as_ref()
+            .unwrap_or(subject)
             .fetched(shown.taxonomy, shown.one_by_one, load)
             .map_err(|reason| parsed_refusal(db.oid(ordinal), &reason, program))?;
     } else if shown.prefetched {

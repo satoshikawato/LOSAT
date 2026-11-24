@@ -97,4 +97,5 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   through a null row, SIGSEGV), `cover` that subject and letters 2-300 (another subject's block opens that row: NCBI
   answers), `t2a_s1` letters 1-121 with a `W` after letter 61 (a later pass finds no row of its HSP), `t2a` that
   subject and letters 101-192 with a `W` after letter 132 (with `-evalue 1e-10`, the two HSPs order their shared
-  segments in two ways).
+  segments in two ways), `tk195` letters 195-313 (at `-num_iterations 2`, round 2's four HSPs leave a segment's
+  start behind its row's end when NCBI orders the segments: NCBI reads past the row's end, `CObject is corrupted`).

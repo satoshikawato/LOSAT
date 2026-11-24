@@ -13,7 +13,7 @@ import { ResultsBrowser } from './application/results';
 import { ToolDraft } from './application/tool-draft';
 import type { Downloader } from './ports/download';
 import { BrowserAccessionFetcher } from './infra/browser/accession-fetcher';
-import { browserCountsDeletions } from './infra/browser/counts-deletions';
+import { browserCountsChanges } from './infra/browser/counts-changes';
 import { BrowserCountsDownloader } from './infra/browser/counts-downloader';
 import { browserExampleDeletions } from './infra/browser/example-deletions';
 import { BrowserFileDownloader } from './infra/browser/example-downloader';
@@ -103,7 +103,7 @@ export function createApp(options: AppOptions = {}): App {
     downloader: new BrowserCountsDownloader({ store: data }),
     store: data,
     draft,
-    deletions: browserCountsDeletions(),
+    changes: browserCountsChanges(),
   });
   const results = new ResultsBrowser({
     data,

@@ -34,10 +34,33 @@ export function parseTaxid(text: string): number | undefined {
   return value === 0 || value < INT32_MIN || value > INT32_MAX ? undefined : value;
 }
 
-/** What the run records of the counts that it read for a taxonomy ID (RunRecord.windowMasker.origin). */
-export interface CountsOrigin {
-  readonly taxid: number;
-  readonly url: string;
-  /** The Last-Modified of the file when it was downloaded, as the site sent it; '' when it sent none. */
-  readonly lastModified: string;
+/** One input file recorded in the metadata of a counts file made in this browser. */
+export interface CountsMadeInput {
+  readonly name: string;
+  readonly size: number;
 }
+
+/** Provenance stored under `made` in meta.json for counts made in this browser's WindowMasker tab. */
+export interface CountsMadeMeta {
+  readonly run: number;
+  readonly argv: readonly string[];
+  readonly inputs: readonly CountsMadeInput[];
+  readonly engineBuild: string;
+  /** When the counts were made, in milliseconds since the epoch. */
+  readonly madeAt: number;
+}
+
+/** What the run records of the counts that it read for a taxonomy ID (RunRecord.windowMasker.origin). */
+export type CountsOrigin =
+  | {
+      readonly kind: 'downloaded';
+      readonly taxid: number;
+      readonly url: string;
+      /** The Last-Modified of the file when it was downloaded, as the site sent it; '' when it sent none. */
+      readonly lastModified: string;
+    }
+  | {
+      readonly kind: 'made';
+      readonly taxid: number;
+      readonly made: CountsMadeMeta;
+    };

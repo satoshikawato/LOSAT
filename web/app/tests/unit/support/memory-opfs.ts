@@ -72,6 +72,12 @@ class DirectoryHandle {
   async removeEntry(name: string): Promise<void> {
     if (!this.children.delete(name)) throw notFound();
   }
+
+  async *entries(): AsyncIterableIterator<[string, FileHandle | DirectoryHandle]> {
+    for (const [name, child] of this.children.entries()) {
+      yield [name, child instanceof DirectoryHandle ? child : new FileHandle(name, child)];
+    }
+  }
 }
 
 /** The tree (`root`) and the locks of one origin. */

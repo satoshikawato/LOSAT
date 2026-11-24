@@ -10,7 +10,7 @@ import { CountsLoader } from '../../src/application/counts';
 import { Coordinator, isToolRun, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { SearchDraft } from '../../src/application/draft';
 import { buildArgv } from '../../src/domain/argv';
-import { COUNTS_HOST, countsName, countsUrl, parseTaxid } from '../../src/domain/counts';
+import { COUNTS_FILE, COUNTS_HOST, countsName, countsUrl, parseTaxid, type CountsMadeMeta, type CountsOrigin } from '../../src/domain/counts';
 import { changedFields, formControlOf, formParameters, setFields, type EngineOption } from '../../src/domain/parameters';
 import { programById } from '../../src/domain/programs';
 import { BrowserCountsDownloader } from '../../src/infra/browser/counts-downloader';
@@ -18,11 +18,11 @@ import { OpfsCountsStore } from '../../src/infra/data/counts-store';
 import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { warmUp } from '../../../packages/losat/src/infra/engine-worker/warm-up';
-import { FakeCountsDeletionChannel, FakeCountsDownloader, MemoryCountsStore, type FakeCountsFile } from '../../src/infra/fake/fake-counts';
+import { FakeCountsChangeChannel, FakeCountsDownloader, MemoryCountsStore, type FakeCountsFile } from '../../src/infra/fake/fake-counts';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeAccessionFetcher } from '../../src/infra/fake/fake-fetcher';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
-import { COUNTS_BUSY, COUNTS_CHANGED, type CountsStore } from '../../src/ports/counts';
+import { COUNTS_BUSY, COUNTS_CHANGED, COUNTS_EXISTS, type CountsCopy, type CountsStore } from '../../src/ports/counts';
 import type { DownloadProgress } from '../../src/ports/example';
 import { MemoryOpfs } from './support/memory-opfs';
 import { NodeInflater } from './support/node-inflater';
@@ -129,7 +129,15 @@ function draftSetup() {
 }
 
 const counts = new File([COUNTS.bytes], 'wmasker.obinary', { lastModified: 1_760_000_000_000 });
-const origin = { taxid: HUMAN, url: countsUrl(HUMAN), lastModified: LAST_MODIFIED };
+const origin: CountsOrigin = { kind: 'downloaded', taxid: HUMAN, url: countsUrl(HUMAN), lastModified: LAST_MODIFIED };
+const MADE_AT = Date.UTC(2026, 10, 22, 9, 0, 0);
+const madeMeta = (run = 4): CountsMadeMeta => ({
+  run,
+  argv: ['windowmasker', '-mk_counts', '-in', 'genome.fa', '-out', 'wmasker.obinary', '-sformat', 'obinary'],
+  inputs: [{ name: 'genome.fa', size: 12345 }],
+  engineBuild: 'build-1',
+  madeAt: MADE_AT,
+});
 
 describe('the draft and the counts of a taxonomy ID', () => {
   async function ready() {
@@ -306,7 +314,7 @@ describe('BrowserCountsDownloader', () => {
     expect(s.calls).toEqual([{ url: countsUrl(HUMAN), headers: {} }]);
     expect(progress[0]).toEqual({ bytes: 0, total: 5000 });
     expect(progress.at(-1)).toEqual({ bytes: 5000, total: 5000 });
-    const saved = await store.readCounts(HUMAN, countsUrl(HUMAN));
+    const saved = await store.readCounts(HUMAN);
     expect(new Uint8Array(await saved!.file!.arrayBuffer())).toEqual(COUNTS.bytes);
   });
 
@@ -322,14 +330,14 @@ describe('BrowserCountsDownloader', () => {
     const { downloader, store } = make(s.fetchImpl);
     const first = await run(downloader);
     expect(first.result).toMatchObject({ ok: false, reason: 'unreachable', detail: 'network error' });
-    const partial = (await store.readCounts(HUMAN, countsUrl(HUMAN)))!;
+    const partial = (await store.readCounts(HUMAN))!;
     expect(partial.copy).toMatchObject({ complete: false, savedBytes: 2500, size: 5000 });
     expect(partial.file).toBeUndefined();
     const second = await run(downloader, request(partial.copy));
     expect(s.calls[1]!.headers).toEqual({ Range: 'bytes=2500-' });
     expect(second.progress[0]).toEqual({ bytes: 2500, total: 5000 });
     expect(second.result).toMatchObject({ ok: true, kept: true });
-    const saved = await store.readCounts(HUMAN, countsUrl(HUMAN));
+    const saved = await store.readCounts(HUMAN);
     expect(new Uint8Array(await saved!.file!.arrayBuffer())).toEqual(COUNTS.bytes);
   });
 
@@ -343,7 +351,7 @@ describe('BrowserCountsDownloader', () => {
       if (p.bytes >= 2000) controller.abort(new DOMException('cancelled', 'AbortError'));
     }, controller.signal);
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
-    const partial = (await store.readCounts(HUMAN, countsUrl(HUMAN)))!;
+    const partial = (await store.readCounts(HUMAN))!;
     expect(partial.copy.complete).toBe(false);
     expect(partial.copy.savedBytes).toBeGreaterThanOrEqual(2000);
     expect(partial.copy.savedBytes).toBeLessThan(5000);
@@ -353,14 +361,14 @@ describe('BrowserCountsDownloader', () => {
     const s = site({ cutAt: 2500 });
     const { downloader, store } = make(s.fetchImpl);
     await run(downloader);
-    const partial = (await store.readCounts(HUMAN, countsUrl(HUMAN)))!.copy;
+    const partial = (await store.readCounts(HUMAN))!.copy;
     const changed: FakeCountsFile = { bytes: bytesOf(6000, 7), lastModified: 'Fri, 02 Oct 2026 08:00:00 GMT' };
     s.state.file = changed;
     const { result, progress } = await run(downloader, request(partial));
     expect(s.calls.map((c) => c.headers['Range'])).toEqual([undefined, 'bytes=2500-', undefined]);
     expect(progress[0]).toEqual({ bytes: 0, total: 6000 });
     expect(result).toMatchObject({ ok: true, copy: { size: 6000, lastModified: changed.lastModified } });
-    const saved = await store.readCounts(HUMAN, countsUrl(HUMAN));
+    const saved = await store.readCounts(HUMAN);
     expect(new Uint8Array(await saved!.file!.arrayBuffer())).toEqual(changed.bytes);
   });
 
@@ -368,12 +376,12 @@ describe('BrowserCountsDownloader', () => {
     const s = site({ cutAt: 2500, ignoreRange: true });
     const { downloader, store } = make(s.fetchImpl);
     await run(downloader);
-    const partial = (await store.readCounts(HUMAN, countsUrl(HUMAN)))!.copy;
+    const partial = (await store.readCounts(HUMAN))!.copy;
     const { result } = await run(downloader, request(partial));
     // One more request only: the whole file answered the Range.
     expect(s.calls).toHaveLength(2);
     expect(result).toMatchObject({ ok: true, copy: { savedBytes: 5000 } });
-    const saved = await store.readCounts(HUMAN, countsUrl(HUMAN));
+    const saved = await store.readCounts(HUMAN);
     expect(new Uint8Array(await saved!.file!.arrayBuffer())).toEqual(COUNTS.bytes);
   });
 
@@ -386,7 +394,7 @@ describe('BrowserCountsDownloader', () => {
       return new Response(response.body, { status: response.status, headers });
     });
     await run(downloader);
-    const partial = (await store.readCounts(HUMAN, countsUrl(HUMAN)))!.copy;
+    const partial = (await store.readCounts(HUMAN))!.copy;
     const { result } = await run(downloader, request(partial));
     expect(result).toMatchObject({ ok: true, copy: { savedBytes: 5000 } });
     // The ranged answer was dropped for the file from its start.
@@ -406,13 +414,13 @@ describe('BrowserCountsDownloader', () => {
     const s = site({ cutAt: 2500 });
     const { downloader, store } = make(s.fetchImpl);
     await run(downloader);
-    const partial = (await store.readCounts(HUMAN, countsUrl(HUMAN)))!.copy;
+    const partial = (await store.readCounts(HUMAN))!.copy;
     s.state.status = 500;
     const asked = s.calls.length;
     expect((await run(downloader, request(partial))).result).toMatchObject({ ok: false, reason: 'refused', status: 500 });
     // One request: a refused continue is not followed by a download from the first byte.
     expect(s.calls.length - asked).toBe(1);
-    expect((await store.readCounts(HUMAN, countsUrl(HUMAN)))!.copy.savedBytes).toBe(2500);
+    expect((await store.readCounts(HUMAN))!.copy.savedBytes).toBe(2500);
   });
 
   it('stops when Cancel comes while the store opens the copy, and lets go of it', async () => {
@@ -428,7 +436,7 @@ describe('BrowserCountsDownloader', () => {
     const s = site();
     const { downloader } = make(s.fetchImpl, store);
     await expect(downloader.download(request(), () => undefined, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
-    expect((await store.readCounts(HUMAN, countsUrl(HUMAN)))!.copy).toMatchObject({ complete: false, savedBytes: 0 });
+    expect((await store.readCounts(HUMAN))!.copy).toMatchObject({ complete: false, savedBytes: 0 });
     // The copy is not held: the next download writes it.
     expect((await run(make(site().fetchImpl, store).downloader)).result).toMatchObject({ ok: true, copy: { complete: true } });
   });
@@ -439,12 +447,12 @@ describe('BrowserCountsDownloader', () => {
     const token = (await store.beginCounts(HUMAN, { url: countsUrl(HUMAN), lastModified: LAST_MODIFIED, size: 5000, from: 0 }))!;
     await store.appendCounts(token, COUNTS.bytes.slice());
     await store.closeCounts(token);
-    const whole = (await store.readCounts(HUMAN, countsUrl(HUMAN)))!.copy;
+    const whole = (await store.readCounts(HUMAN))!.copy;
     expect(whole).toMatchObject({ complete: false, savedBytes: 5000 });
     const { result } = await run(downloader, request(whole));
     expect(s.calls.map((c) => c.headers['Range'])).toEqual(['bytes=4999-']);
     expect(result).toMatchObject({ ok: true, copy: { complete: true, size: 5000 } });
-    const saved = await store.readCounts(HUMAN, countsUrl(HUMAN));
+    const saved = await store.readCounts(HUMAN);
     expect(new Uint8Array(await saved!.file!.arrayBuffer())).toEqual(COUNTS.bytes);
   });
 
@@ -477,7 +485,8 @@ describe('BrowserCountsDownloader', () => {
     const store = new MemoryCountsStore();
     const appended: number[] = [];
     const spy: CountsStore = {
-      readCounts: (t, u) => store.readCounts(t, u),
+      readCounts: (t) => store.readCounts(t),
+      listCounts: () => store.listCounts(),
       beginCounts: (t, st) => store.beginCounts(t, st),
       appendCounts: (token, bytes) => (appended.push(bytes.length), store.appendCounts(token, bytes)),
       finishCounts: (token) => store.finishCounts(token),
@@ -495,7 +504,7 @@ describe('BrowserCountsDownloader', () => {
 // --- the loader ---------------------------------------------------------------------------------
 
 describe('CountsLoader', () => {
-  function setup(options: { files?: Record<number, FakeCountsFile>; persistent?: boolean; channel?: FakeCountsDeletionChannel } = {}) {
+  function setup(options: { files?: Record<number, FakeCountsFile>; persistent?: boolean; channel?: FakeCountsChangeChannel } = {}) {
     const store = new MemoryCountsStore({ persistent: options.persistent ?? true, now: () => Date.UTC(2026, 10, 12) });
     const downloader = new FakeCountsDownloader(store, options.files ?? { [HUMAN]: COUNTS });
     const saved: Array<[number, unknown]> = [];
@@ -507,7 +516,7 @@ describe('CountsLoader', () => {
         else draftState.set(taxid, entry);
       },
     };
-    const loader = new CountsLoader({ downloader, store, draft, ...(options.channel === undefined ? {} : { deletions: options.channel.tab() }) });
+    const loader = new CountsLoader({ downloader, store, draft, ...(options.channel === undefined ? {} : { changes: options.channel.tab() }) });
     return { loader, store, downloader, draftState };
   }
 
@@ -525,7 +534,7 @@ describe('CountsLoader', () => {
     await loader.idle();
     expect(loader.state.get().load).toBeUndefined();
     expect(loader.state.get().saved[HUMAN]).toMatchObject({ complete: true, size: 5000 });
-    expect(draftState.get(HUMAN)).toMatchObject({ origin: { taxid: HUMAN, url: countsUrl(HUMAN), lastModified: LAST_MODIFIED } });
+    expect(draftState.get(HUMAN)).toMatchObject({ origin: { kind: 'downloaded', taxid: HUMAN, url: countsUrl(HUMAN), lastModified: LAST_MODIFIED } });
     // A new tab (a new loader over the same storage) finds it and sends nothing.
     const again = new CountsLoader({ downloader, store, draft: { setCounts: () => undefined } });
     again.refresh(HUMAN);
@@ -536,6 +545,94 @@ describe('CountsLoader', () => {
     again.download(HUMAN);
     await again.idle();
     expect(downloader.requests).toHaveLength(1);
+  });
+
+  it('still counts a downloaded copy only if its URL matches countsUrl(taxid)', async () => {
+    const { loader, store, draftState } = setup();
+    const token = (await store.beginCounts(HUMAN, { url: 'https://example.org/other.obinary', lastModified: LAST_MODIFIED, size: 5000, from: 0 }))!;
+    await store.appendCounts(token, COUNTS.bytes.slice());
+    await store.finishCounts(token);
+    loader.refresh(HUMAN);
+    loader.refreshList();
+    await loader.idle();
+    expect(loader.state.get().saved[HUMAN]).toBeNull();
+    expect(loader.state.get().list).toEqual([]);
+    expect(draftState.has(HUMAN)).toBe(false);
+  });
+
+  it('saves a made copy in 8 MiB parts, hands it to setCounts, and lists it without sending any request', async () => {
+    const { loader, downloader, draftState, store } = setup();
+    const appended: number[] = [];
+    const origAppend = store.appendCounts.bind(store);
+    store.appendCounts = (token, bytes) => {
+      appended.push(bytes.length);
+      return origAppend(token, bytes);
+    };
+    const madeBytes = bytesOf(18 * 1024 * 1024 + 5, 9);
+    const madeFile = new File([madeBytes], 'custom.obinary');
+    const meta = madeMeta(4);
+    const result = await loader.saveMade(562, madeFile, meta);
+    expect(result).toMatchObject({ ok: true, kept: true, copy: { taxid: 562, url: '', lastModified: '', size: madeBytes.length, complete: true, made: meta } });
+    expect(appended).toEqual([8 * 1024 * 1024, 8 * 1024 * 1024, 2 * 1024 * 1024 + 5]);
+    expect(downloader.requests).toEqual([]);
+    expect(draftState.get(562)).toMatchObject({ origin: { kind: 'made', taxid: 562, made: meta } });
+    expect(loader.state.get().list).toMatchObject([{ taxid: 562, name: COUNTS_FILE, size: madeBytes.length, origin: 'made', date: '2026-11-22' }]);
+  });
+
+  it('asks for Replace over a download, a partial download or a made copy, and overwrites when Replace is confirmed', async () => {
+    const { loader, store, draftState } = setup();
+    // 1. Replace a complete download.
+    loader.download(HUMAN);
+    await loader.idle();
+    const firstMade = new File([bytesOf(1234, 2)], 'first.obinary');
+    const ask1 = await loader.saveMade(HUMAN, firstMade, madeMeta(2));
+    expect(ask1).toMatchObject({ ok: false, reason: 'exists', existing: { taxid: HUMAN, url: countsUrl(HUMAN), complete: true } });
+    // Existing download was untouched.
+    expect((await store.readCounts(HUMAN))!.origin).toBe('downloaded');
+    const rep1 = await loader.saveMade(HUMAN, firstMade, madeMeta(2), { replace: true });
+    expect(rep1).toMatchObject({ ok: true, kept: true, copy: { taxid: HUMAN, made: madeMeta(2) } });
+    expect(draftState.get(HUMAN)).toMatchObject({ origin: { kind: 'made', taxid: HUMAN, made: madeMeta(2) } });
+
+    // 2. Replace a made copy with another made copy.
+    const secondMade = new File([bytesOf(2345, 5)], 'second.obinary');
+    const ask2 = await loader.saveMade(HUMAN, secondMade, madeMeta(5));
+    expect(ask2).toMatchObject({ ok: false, reason: 'exists', existing: { taxid: HUMAN, made: madeMeta(2) } });
+    const rep2 = await loader.saveMade(HUMAN, secondMade, madeMeta(5), { replace: true });
+    expect(rep2).toMatchObject({ ok: true, copy: { size: 2345, made: madeMeta(5) } });
+
+    // 3. Replace a partial download.
+    await loader.delete(HUMAN);
+    const partialTok = (await store.beginCounts(HUMAN, { url: countsUrl(HUMAN), lastModified: LAST_MODIFIED, size: 5000, from: 0 }))!;
+    await store.appendCounts(partialTok, COUNTS.bytes.slice(0, 1000));
+    await store.closeCounts(partialTok);
+    const ask3 = await loader.saveMade(HUMAN, secondMade, madeMeta(6));
+    expect(ask3).toMatchObject({ ok: false, reason: 'exists', existing: { complete: false, savedBytes: 1000, url: countsUrl(HUMAN) } });
+    const rep3 = await loader.saveMade(HUMAN, secondMade, madeMeta(6), { replace: true });
+    expect(rep3).toMatchObject({ ok: true, copy: { complete: true, size: 2345, made: madeMeta(6) } });
+  });
+
+  it('refuses a save in place while another tab is downloading the same ID', async () => {
+    const { loader, store } = setup();
+    const lock = (await store.beginCounts(HUMAN, { url: countsUrl(HUMAN), lastModified: LAST_MODIFIED, size: 5000, from: 0 }))!;
+    const res = await loader.saveMade(HUMAN, new File([bytesOf(50)], 'x.obinary'), madeMeta(3));
+    expect(res).toEqual({ ok: false, reason: 'busy', message: 'Another tab is downloading the counts for 9606.' });
+    await store.closeCounts(lock);
+  });
+
+  it('holds a made copy in this tab when the browser keeps nothing, and supports Replace and Delete', async () => {
+    const { loader, draftState } = setup({ persistent: false });
+    const first = new File([bytesOf(400, 1)], 'a.obinary');
+    const saved = await loader.saveMade(562, first, madeMeta(1));
+    expect(saved).toMatchObject({ ok: true, kept: false, copy: { taxid: 562, size: 400, made: madeMeta(1) } });
+    expect(loader.state.get().inTab).toEqual({ 562: true });
+    expect(loader.state.get().list).toMatchObject([{ taxid: 562, origin: 'made', size: 400 }]);
+    expect(draftState.has(562)).toBe(true);
+    expect(await loader.saveMade(562, new File([bytesOf(500, 2)], 'b.obinary'), madeMeta(2))).toMatchObject({ ok: false, reason: 'exists' });
+    expect(await loader.saveMade(562, new File([bytesOf(500, 2)], 'b.obinary'), madeMeta(2), { replace: true })).toMatchObject({ ok: true, kept: false, copy: { size: 500 } });
+    await loader.delete(562);
+    expect(loader.state.get().inTab).toEqual({});
+    expect(loader.state.get().list).toEqual([]);
+    expect(draftState.has(562)).toBe(false);
   });
 
   it('says the site has no counts for an ID (404), and names a failure that may pass', async () => {
@@ -594,8 +691,8 @@ describe('CountsLoader', () => {
     expect(draftState.has(HUMAN)).toBe(false);
   });
 
-  it('tells the other tabs of a deletion, which let go of the file', async () => {
-    const channel = new FakeCountsDeletionChannel();
+  it('tells the other tabs on save, Replace and Delete, so they read that ID again', async () => {
+    const channel = new FakeCountsChangeChannel();
     const one = setup({ channel });
     const store = one.store;
     const otherDraft = new Map<number, unknown>();
@@ -603,16 +700,29 @@ describe('CountsLoader', () => {
       downloader: one.downloader,
       store,
       draft: { setCounts: (t, e) => (e === undefined ? otherDraft.delete(t) : otherDraft.set(t, e)) },
-      deletions: channel.tab(),
+      changes: channel.tab(),
     });
-    one.loader.download(HUMAN);
-    await one.loader.idle();
-    other.refresh(HUMAN);
+    // Save a made copy in tab 1 -> tab 2 reads it and hands it to its draft and list.
+    await one.loader.saveMade(562, new File([bytesOf(300, 1)], 'a.obinary'), madeMeta(1));
     await other.idle();
-    expect(otherDraft.has(HUMAN)).toBe(true);
-    await one.loader.delete(HUMAN);
-    expect(otherDraft.has(HUMAN)).toBe(false);
-    expect(other.state.get().saved[HUMAN]).toBeNull();
+    expect(other.state.get().saved[562]).toMatchObject({ complete: true, size: 300, made: madeMeta(1) });
+    expect(otherDraft.get(562)).toMatchObject({ origin: { kind: 'made', taxid: 562, made: madeMeta(1) } });
+    expect(other.state.get().list).toMatchObject([{ taxid: 562, size: 300, origin: 'made' }]);
+
+    // Replace in tab 1 -> tab 2 reads the replacement.
+    await one.loader.saveMade(562, new File([bytesOf(450, 2)], 'b.obinary'), madeMeta(2), { replace: true });
+    await other.idle();
+    expect(other.state.get().saved[562]).toMatchObject({ complete: true, size: 450, made: madeMeta(2) });
+    expect(otherDraft.get(562)).toMatchObject({ origin: { kind: 'made', taxid: 562, made: madeMeta(2) } });
+    expect(other.state.get().list).toMatchObject([{ taxid: 562, size: 450, origin: 'made' }]);
+
+    // Delete in tab 1 -> tab 2 drops it from draft, saved and list.
+    await one.loader.delete(562);
+    expect(otherDraft.has(562)).toBe(false);
+    await other.idle();
+    expect(otherDraft.has(562)).toBe(false);
+    expect(other.state.get().saved[562]).toBeNull();
+    expect(other.state.get().list).toEqual([]);
   });
 });
 
@@ -623,7 +733,7 @@ describe('OpfsCountsStore', () => {
     const opfs = new MemoryOpfs();
     const root = opfs.root as unknown as FileSystemDirectoryHandle;
     let tokens = 0;
-    const store = new OpfsCountsStore(root, opfs, () => `t${++tokens}`);
+    const store = new OpfsCountsStore(root, opfs, () => `t${++tokens}`, () => Date.UTC(2026, 10, 22));
     return { opfs, store };
   }
   const start = (from = 0) => ({ url: countsUrl(HUMAN), lastModified: LAST_MODIFIED, size: 5000, from });
@@ -634,15 +744,130 @@ describe('OpfsCountsStore', () => {
     await store.appendCounts(token, COUNTS.bytes.slice(0, 3000));
     const meta = () => JSON.parse(new TextDecoder().decode(opfs.read(['9606', 'meta.json'])));
     expect(meta()).toMatchObject({ taxid: HUMAN, url: countsUrl(HUMAN), lastModified: LAST_MODIFIED, size: 5000, savedBytes: 3000, complete: false });
-    expect(await store.readCounts(HUMAN, countsUrl(HUMAN))).toMatchObject({ copy: { savedBytes: 3000, complete: false } });
+    expect(meta().made).toBeUndefined();
+    expect(await store.readCounts(HUMAN)).toMatchObject({ origin: 'downloaded', copy: { savedBytes: 3000, complete: false } });
     await store.appendCounts(token, COUNTS.bytes.slice(3000));
     const saved = await store.finishCounts(token);
+    expect(saved.origin).toBe('downloaded');
     expect(saved.copy).toMatchObject({ savedBytes: 5000, complete: true });
     expect(new Uint8Array(await saved.file!.arrayBuffer())).toEqual(COUNTS.bytes);
     expect(opfs.read(['9606', 'wmasker.obinary'])).toEqual(COUNTS.bytes);
     expect(meta().complete).toBe(true);
-    // Another URL is another copy.
-    expect(await store.readCounts(HUMAN, 'https://example.org/x')).toBeUndefined();
+  });
+
+  it('reads a WW2 meta.json (without made) as a download without rewriting it', async () => {
+    const { opfs, store } = await make();
+    const dir = await opfs.root.getDirectoryHandle('9606', { create: true });
+    const legacyMeta = JSON.stringify({
+      taxid: HUMAN,
+      url: countsUrl(HUMAN),
+      lastModified: LAST_MODIFIED,
+      size: 5000,
+      savedBytes: 5000,
+      complete: true,
+      savedAt: Date.UTC(2026, 9, 15),
+    });
+    const metaHandle = await (await dir.getFileHandle('meta.json', { create: true })).createSyncAccessHandle();
+    metaHandle.write(new TextEncoder().encode(legacyMeta), { at: 0 });
+    metaHandle.close();
+    const dataHandle = await (await dir.getFileHandle('wmasker.obinary', { create: true })).createSyncAccessHandle();
+    dataHandle.write(COUNTS.bytes, { at: 0 });
+    dataHandle.close();
+
+    const saved = await store.readCounts(HUMAN);
+    expect(saved).toMatchObject({ origin: 'downloaded', copy: { taxid: HUMAN, url: countsUrl(HUMAN), lastModified: LAST_MODIFIED, complete: true } });
+    expect(saved!.copy.made).toBeUndefined();
+    expect(new TextDecoder().decode(opfs.read(['9606', 'meta.json']))).toBe(legacyMeta);
+  });
+
+  it('writes a made copy with empty url/lastModified and made metadata, which an older dev reader sees as a different URL', async () => {
+    const { opfs, store } = await make();
+    const meta = madeMeta(4);
+    const bytes = bytesOf(2048, 11);
+    const token = (await store.beginCounts(562, { made: meta, size: bytes.length, from: 0 }))!;
+    await store.appendCounts(token, bytes.slice(0, 1000));
+    await store.appendCounts(token, bytes.slice(1000));
+    const saved = await store.finishCounts(token);
+    expect(saved.origin).toBe('made');
+    expect(saved.copy).toMatchObject({ taxid: 562, url: '', lastModified: '', size: bytes.length, savedBytes: bytes.length, complete: true, made: meta });
+    expect(new Uint8Array(await saved.file!.arrayBuffer())).toEqual(bytes);
+
+    // Older-release compatibility (§4.1): the previous WW2 reader checked `copy.url !== countsUrl(taxid)`,
+    // so it rejects the made copy as "a different URL" (offers Download, never takes it for NCBI's file).
+    const rawMeta = JSON.parse(new TextDecoder().decode(opfs.read(['562', 'meta.json']))) as CountsCopy;
+    const oldDevReader = (copy: CountsCopy, expectedUrl: string) => (copy.url !== expectedUrl ? undefined : copy);
+    expect(rawMeta.url).toBe('');
+    expect(rawMeta.lastModified).toBe('');
+    expect(oldDevReader(rawMeta, countsUrl(562))).toBeUndefined();
+  });
+
+  it('replaces a download, a partial download, or a made copy, and refuses with COUNTS_EXISTS when replace is false', async () => {
+    const { store } = await make();
+    const dl = (await store.beginCounts(HUMAN, start()))!;
+    await store.appendCounts(dl, COUNTS.bytes.slice(0, 1000));
+    await store.closeCounts(dl);
+    // Partial download triggers COUNTS_EXISTS when replace is false.
+    await expect(store.beginCounts(HUMAN, { made: madeMeta(1), size: 100, from: 0, replace: false })).rejects.toMatchObject({ name: COUNTS_EXISTS });
+    // Replace partial download with a made copy.
+    const m1 = (await store.beginCounts(HUMAN, { made: madeMeta(1), size: 100, from: 0, replace: true }))!;
+    await store.appendCounts(m1, bytesOf(100, 1));
+    await store.finishCounts(m1);
+    expect((await store.readCounts(HUMAN))!.origin).toBe('made');
+    // Replace made copy with another made copy.
+    await expect(store.beginCounts(HUMAN, { made: madeMeta(2), size: 200, from: 0, replace: false })).rejects.toMatchObject({ name: COUNTS_EXISTS });
+    const m2 = (await store.beginCounts(HUMAN, { made: madeMeta(2), size: 200, from: 0, replace: true }))!;
+    await store.appendCounts(m2, bytesOf(200, 2));
+    const saved = await store.finishCounts(m2);
+    expect(saved.copy).toMatchObject({ size: 200, made: madeMeta(2) });
+    // Complete download replaced by made copy.
+    const dl2 = (await store.beginCounts(562, { url: countsUrl(562), lastModified: LAST_MODIFIED, size: 5000, from: 0 }))!;
+    await store.appendCounts(dl2, COUNTS.bytes);
+    await store.finishCounts(dl2);
+    await expect(store.beginCounts(562, { made: madeMeta(3), size: 300, from: 0, replace: false })).rejects.toMatchObject({ name: COUNTS_EXISTS });
+    const m3 = (await store.beginCounts(562, { made: madeMeta(3), size: 300, from: 0, replace: true }))!;
+    await store.appendCounts(m3, bytesOf(300, 3));
+    expect((await store.finishCounts(m3)).copy).toMatchObject({ size: 300, made: madeMeta(3) });
+  });
+
+  it('deletes an interrupted made copy on next read, while leaving an active write untouched', async () => {
+    const { opfs, store } = await make();
+    const token = (await store.beginCounts(562, { made: madeMeta(4), size: 1000, from: 0 }))!;
+    await store.appendCounts(token, bytesOf(400, 3));
+    // While the write holds the lock, readCounts returns undefined without removing the directory.
+    expect(await store.readCounts(562)).toBeUndefined();
+    expect(opfs.has(['562'])).toBe(true);
+    // Once the lock is gone without finishCounts (interrupted), the next read deletes it.
+    await store.closeCounts(token);
+    expect(await store.readCounts(562)).toBeUndefined();
+    expect(opfs.has(['562'])).toBe(false);
+  });
+
+  it('lists every complete copy (downloaded and made) and skips partials and interrupted made copies', async () => {
+    const { opfs, store } = await make();
+    // Complete download for 9606.
+    const d1 = (await store.beginCounts(HUMAN, start()))!;
+    await store.appendCounts(d1, COUNTS.bytes);
+    await store.finishCounts(d1);
+    // Complete made copy for 562.
+    const m1 = (await store.beginCounts(562, { made: madeMeta(4), size: 700, from: 0 }))!;
+    await store.appendCounts(m1, bytesOf(700, 5));
+    await store.finishCounts(m1);
+    // Partial download for 7227 (omitted from list, stays on disk).
+    const p1 = (await store.beginCounts(7227, { url: countsUrl(7227), lastModified: LAST_MODIFIED, size: 5000, from: 0 }))!;
+    await store.appendCounts(p1, COUNTS.bytes.slice(0, 1000));
+    await store.closeCounts(p1);
+    // Interrupted made copy for 10090 (omitted and cleaned up).
+    const b1 = (await store.beginCounts(10090, { made: madeMeta(5), size: 800, from: 0 }))!;
+    await store.appendCounts(b1, bytesOf(100, 6));
+    await store.closeCounts(b1);
+
+    const list = await store.listCounts();
+    expect(list.map(({ taxid, name, size, origin, date }) => ({ taxid, name, size, origin, date }))).toEqual([
+      { taxid: 562, name: COUNTS_FILE, size: 700, origin: 'made', date: '2026-11-22' },
+      { taxid: HUMAN, name: COUNTS_FILE, size: 5000, origin: 'downloaded', date: '2026-10-01' },
+    ]);
+    expect(opfs.has(['7227'])).toBe(true);
+    expect(opfs.has(['10090'])).toBe(false);
   });
 
   it('continues a saved part at its byte (or before it), and refuses a part that is not the one asked for', async () => {
@@ -664,7 +889,7 @@ describe('OpfsCountsStore', () => {
     await store.appendCounts(token, COUNTS.bytes);
     await store.finishCounts(token);
     const again = (await store.beginCounts(HUMAN, { ...start(), size: 6000 }))!;
-    expect(await store.readCounts(HUMAN, countsUrl(HUMAN))).toMatchObject({ copy: { savedBytes: 0, size: 6000, complete: false } });
+    expect(await store.readCounts(HUMAN)).toMatchObject({ copy: { savedBytes: 0, size: 6000, complete: false } });
     await store.closeCounts(again);
   });
 
@@ -689,7 +914,7 @@ describe('OpfsCountsStore', () => {
     await store.appendCounts(b, COUNTS.bytes.slice(0, 5));
     await store.closeCounts(b);
     await store.deleteCounts(HUMAN);
-    expect(await store.readCounts(HUMAN, countsUrl(HUMAN))).toBeUndefined();
+    expect(await store.readCounts(HUMAN)).toBeUndefined();
     expect(opfs.has(['9606'])).toBe(false);
     await store.deleteCounts(562);
     expect(opfs.has(['562'])).toBe(false);
@@ -703,6 +928,6 @@ describe('OpfsCountsStore', () => {
     await store.appendCounts(token, COUNTS.bytes.slice(0, 100));
     await store.closeCounts(token);
     opfs.write(['9606', 'wmasker.obinary'], new Uint8Array(10));
-    expect(await store.readCounts(HUMAN, countsUrl(HUMAN))).toBeUndefined();
+    expect(await store.readCounts(HUMAN)).toBeUndefined();
   });
 });

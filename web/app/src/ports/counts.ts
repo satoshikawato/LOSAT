@@ -5,13 +5,17 @@
 // src/infra/data/counts-store.ts): the file of a human is 724 MB, and is never held in memory.
 // A download that stops (Cancel, a cut connection, a closed tab) leaves the bytes saved so far, and
 // "Continue" asks for the rest with a Range. Tests use src/infra/fake/fake-counts.ts.
+import type { CountsMadeMeta } from '../domain/counts';
 import type { DownloadProgress } from './example';
 
-/** What a saved file of counts records about its download (meta.json). */
+/** Whether a saved copy of counts came from NCBI's site or from this browser's WindowMasker tab. */
+export type SavedCountsOrigin = 'downloaded' | 'made';
+
+/** What a saved file of counts records about itself (meta.json). */
 export interface CountsCopy {
   readonly taxid: number;
   readonly url: string;
-  /** The Last-Modified of the first answer, as the site sent it ('' when it sent none). */
+  /** The Last-Modified of the first answer, as the site sent it ('' when it sent none or for a made copy). */
   readonly lastModified: string;
   /** The size of the whole file. */
   readonly size: number;
@@ -21,40 +25,72 @@ export interface CountsCopy {
   readonly complete: boolean;
   /** When the last part was saved, in milliseconds since the epoch. */
   readonly savedAt: number;
+  /** Present when the counts were made in this browser's WindowMasker tab; absent for an NCBI download. */
+  readonly made?: CountsMadeMeta;
 }
 
 export interface SavedCounts {
   readonly copy: CountsCopy;
+  readonly origin: SavedCountsOrigin;
   /** The kept file, read from the browser's storage, not from memory; only when the copy is complete. */
   readonly file?: File;
 }
 
-/** What a part is appended to: a new file, or the saved part of the same file. */
-export interface CountsStart {
-  readonly url: string;
-  readonly lastModified: string;
+/** One complete saved counts file listed for the WindowMasker tab's pickers (`listCounts`). */
+export interface SavedCountsEntry {
+  readonly taxid: number;
+  /** The file name under windowmasker/<taxid>/ (wmasker.obinary). */
+  readonly name: string;
   readonly size: number;
-  /** 0 begins the file again; otherwise the bytes already saved (the saved part is checked against it). */
-  readonly from: number;
+  readonly origin: SavedCountsOrigin;
+  /** ISO date (yyyy-mm-dd) of the copy: Last-Modified for a download, madeAt for a made copy, or savedAt. */
+  readonly date: string;
+  readonly copy: CountsCopy;
 }
+
+/** What a part is appended to: a new or continued download, or a copy made in this browser written whole. */
+export type CountsStart =
+  | {
+      readonly url: string;
+      readonly lastModified: string;
+      readonly size: number;
+      /** 0 begins the file again; otherwise the bytes already saved (the saved part is checked against it). */
+      readonly from: number;
+      readonly made?: undefined;
+    }
+  | {
+      readonly made: CountsMadeMeta;
+      readonly size: number;
+      /** A made copy is always written whole from byte 0. */
+      readonly from: 0;
+      /** When false, refuses with COUNTS_EXISTS if a complete or partial copy is already stored for the ID. */
+      readonly replace?: boolean;
+    };
 
 /** The name of the error that `beginCounts` rejects with when another tab writes the same file. */
 export const COUNTS_BUSY = 'CountsBusyError';
 /** The name of the error that `beginCounts` rejects with when the saved part is not the one asked to continue. */
 export const COUNTS_CHANGED = 'CountsChangedError';
+/** The name of the error that `beginCounts` rejects with when `replace` is false and a copy is already stored. */
+export const COUNTS_EXISTS = 'CountsExistsError';
 
 /**
- * Counts kept across sessions and tabs, so that a file is downloaded once. A file is written by
- * one tab at a time (a Web Lock held from `beginCounts` to `finishCounts` or `closeCounts`, or until
- * the tab ends). Without storage that lasts (no OPFS or no Web Locks), nothing is kept.
+ * Counts kept across sessions and tabs, so that a file is downloaded or made once. A file is written
+ * by one tab at a time (a Web Lock held from `beginCounts` to `finishCounts` or `closeCounts`, or
+ * until the tab ends). Without storage that lasts (no OPFS or no Web Locks), nothing is kept.
  */
 export interface CountsStore {
-  /** The saved copy of the taxonomy ID (complete or partial), if one was downloaded from `url`. */
-  readCounts(taxid: number, url: string): Promise<SavedCounts | undefined>;
+  /**
+   * The saved copy of the taxonomy ID (complete or partial download, or complete made copy) and its
+   * origin. An interrupted made copy (`complete: false`) is removed when read.
+   */
+  readCounts(taxid: number): Promise<SavedCounts | undefined>;
+  /** Every complete copy kept in this browser, ordered by taxonomy ID. */
+  listCounts(): Promise<readonly SavedCountsEntry[]>;
   /**
    * Begins writing the file and returns the token of the writing; undefined when this browser
-   * keeps nothing across sessions. Rejects with COUNTS_BUSY or COUNTS_CHANGED, or with the
-   * storage's refusal.
+   * keeps nothing across sessions. Rejects with COUNTS_BUSY, COUNTS_CHANGED or COUNTS_EXISTS, or
+   * with the storage's refusal.
    */
   beginCounts(taxid: number, start: CountsStart): Promise<string | undefined>;
   /** Appends the next bytes of the file to the writing; rejects when the storage refuses (it is then full). */
@@ -94,11 +130,11 @@ export interface CountsDownloader {
 }
 
 /**
- * Deletions of saved counts between the tabs of the site: a tab that deletes a file says so (the
- * message carries only the taxonomy ID), and the others let go of the file they hold.
+ * Changes to saved counts between the tabs of the site: a tab that saves, replaces or deletes a
+ * file says so (the message carries only the taxonomy ID), and the others read that ID again.
  */
-export interface CountsDeletions {
+export interface CountsChanges {
   announce(taxid: number): void;
-  /** Calls `listener` with each taxonomy ID that another tab deleted; returns the function that stops it. */
+  /** Calls `listener` with each taxonomy ID that another tab changed; returns the function that stops it. */
   subscribe(listener: (taxid: number) => void): () => void;
 }

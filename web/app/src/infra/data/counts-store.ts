@@ -9,7 +9,19 @@
 // `losat-web:windowmasker:<taxid>` from `beginCounts` to its end (or the tab's), so two tabs never
 // write one file. It writes with synchronous access handles, which exist only in dedicated
 // workers: it runs in the Data worker.
-import { COUNTS_BUSY, COUNTS_CHANGED, type CountsCopy, type CountsStart, type CountsStore, type SavedCounts } from '../../ports/counts';
+import { COUNTS_FILE, parseTaxid, type CountsMadeMeta } from '../../domain/counts';
+import { dateOf } from '../../domain/download-sentences';
+import {
+  COUNTS_BUSY,
+  COUNTS_CHANGED,
+  COUNTS_EXISTS,
+  type CountsCopy,
+  type CountsStart,
+  type CountsStore,
+  type SavedCounts,
+  type SavedCountsEntry,
+  type SavedCountsOrigin,
+} from '../../ports/counts';
 import { isStorageFull, StorageFullError } from './block-store';
 import { ignoreNotFound, openSyncHandle, readText, removeEntry, writeAt, writeFile, type SyncAccessHandle } from './opfs-files';
 import type { SessionLocks } from './session';
@@ -19,8 +31,12 @@ export const COUNTS_DIRECTORY = 'windowmasker';
 /** Lock name prefix; shared by every release. */
 export const COUNTS_LOCK_PREFIX = 'losat-web:windowmasker:';
 
-const DATA_NAME = 'wmasker.obinary';
+const DATA_NAME = COUNTS_FILE;
 const META_NAME = 'meta.json';
+
+type IterableDirectoryHandle = FileSystemDirectoryHandle & {
+  entries?: () => AsyncIterableIterator<[string, FileSystemHandle]>;
+};
 
 /** A file being written: the handle, the next byte, and the lock to let go. */
 interface Writing {
@@ -39,9 +55,10 @@ export class OpfsCountsStore implements CountsStore {
     private readonly root: FileSystemDirectoryHandle,
     private readonly locks: SessionLocks,
     private readonly newToken: () => string = () => crypto.randomUUID(),
+    private readonly now: () => number = () => Date.now(),
   ) {}
 
-  async readCounts(taxid: number, url: string): Promise<SavedCounts | undefined> {
+  async readCounts(taxid: number): Promise<SavedCounts | undefined> {
     let directory: FileSystemDirectoryHandle;
     try {
       directory = await this.root.getDirectoryHandle(String(taxid));
@@ -49,8 +66,34 @@ export class OpfsCountsStore implements CountsStore {
       ignoreNotFound(error);
       return undefined;
     }
-    const copy = await readCopy(directory, taxid);
-    if (copy === undefined || copy.url !== url) return undefined;
+    let copy = await readCopy(directory, taxid);
+    if (copy === undefined) return undefined;
+    // An interrupted made copy cannot be continued: delete it once no writer holds the ID's lock.
+    if (copy.made !== undefined && !copy.complete) {
+      let release: (() => void) | undefined;
+      try {
+        release = await this.acquire(taxid, true);
+      } catch (error) {
+        if ((error as { name?: unknown }).name === COUNTS_BUSY) return undefined;
+        throw error;
+      }
+      try {
+        try {
+          directory = await this.root.getDirectoryHandle(String(taxid));
+        } catch (error) {
+          ignoreNotFound(error);
+          return undefined;
+        }
+        copy = await readCopy(directory, taxid);
+        if (copy === undefined) return undefined;
+        if (copy.made !== undefined && !copy.complete) {
+          await removeEntry(this.root, String(taxid));
+          return undefined;
+        }
+      } finally {
+        release();
+      }
+    }
     let file: File;
     try {
       file = await (await directory.getFileHandle(DATA_NAME)).getFile();
@@ -61,7 +104,27 @@ export class OpfsCountsStore implements CountsStore {
     // The file may hold more than the meta file says (a part written, the meta not yet): the
     // meta file's bytes count. It never holds less.
     if (file.size < copy.savedBytes) return undefined;
-    return copy.complete ? (file.size === copy.size ? { copy, file } : undefined) : { copy };
+    const origin: SavedCountsOrigin = copy.made === undefined ? 'downloaded' : 'made';
+    return copy.complete ? (file.size === copy.size ? { copy, origin, file } : undefined) : { copy, origin };
+  }
+
+  async listCounts(): Promise<readonly SavedCountsEntry[]> {
+    const iterable = this.root as IterableDirectoryHandle;
+    if (typeof iterable.entries !== 'function') return [];
+    const taxids: number[] = [];
+    for await (const [name, handle] of iterable.entries()) {
+      if (handle.kind !== 'directory') continue;
+      const taxid = parseTaxid(name);
+      if (taxid !== undefined && String(taxid) === name) taxids.push(taxid);
+    }
+    taxids.sort((a, b) => a - b);
+    const entries: SavedCountsEntry[] = [];
+    for (const taxid of taxids) {
+      const saved = await this.readCounts(taxid);
+      if (saved?.file === undefined) continue;
+      entries.push(entryOf(saved.copy, saved.origin));
+    }
+    return entries;
   }
 
   async beginCounts(taxid: number, start: CountsStart): Promise<string> {
@@ -69,11 +132,22 @@ export class OpfsCountsStore implements CountsStore {
     let handle: SyncAccessHandle | undefined;
     try {
       const directory = await this.root.getDirectoryHandle(String(taxid), { create: true });
-      if (start.from > 0) {
+      if (start.made !== undefined) {
+        if (start.from !== 0) throw named(COUNTS_CHANGED, 'a made copy cannot be continued');
+        if (start.replace === false) {
+          const existing = await readCopy(directory, taxid);
+          if (existing !== undefined && (existing.complete || (existing.made === undefined && existing.savedBytes > 0))) {
+            throw named(COUNTS_EXISTS, 'counts are already saved for this taxonomy ID');
+          }
+        }
+        // Meta first: a copy that is begun again is never read as the whole file of before.
+        await writeMeta(directory, metaOf(taxid, start, 0, false, this.now()));
+      } else if (start.from > 0) {
         const copy = await readCopy(directory, taxid);
         if (
           copy === undefined ||
           copy.complete ||
+          copy.made !== undefined ||
           copy.url !== start.url ||
           copy.lastModified !== start.lastModified ||
           copy.size !== start.size ||
@@ -83,7 +157,7 @@ export class OpfsCountsStore implements CountsStore {
         }
       } else {
         // Meta first: a copy that is begun again is never read as the whole file of before.
-        await writeMeta(directory, metaOf(taxid, start, 0, false));
+        await writeMeta(directory, metaOf(taxid, start, 0, false, this.now()));
       }
       handle = await openSyncHandle(directory, DATA_NAME);
       handle.truncate(start.from);
@@ -103,7 +177,7 @@ export class OpfsCountsStore implements CountsStore {
       writeAt(writing.handle, bytes, writing.offset);
       writing.handle.flush();
       writing.offset += bytes.length;
-      await writeMeta(writing.directory, metaOf(writing.taxid, writing.start, writing.offset, false));
+      await writeMeta(writing.directory, metaOf(writing.taxid, writing.start, writing.offset, false, this.now()));
     } catch (error) {
       throw refusal(error);
     }
@@ -113,12 +187,12 @@ export class OpfsCountsStore implements CountsStore {
     const writing = this.writing(token);
     try {
       if (writing.offset !== writing.start.size) throw new Error('the file is not whole');
-      await writeMeta(writing.directory, metaOf(writing.taxid, writing.start, writing.offset, true));
+      await writeMeta(writing.directory, metaOf(writing.taxid, writing.start, writing.offset, true, this.now()));
     } catch (error) {
       throw refusal(error);
     }
     this.end(token, writing);
-    const saved = await this.readCounts(writing.taxid, writing.start.url);
+    const saved = await this.readCounts(writing.taxid);
     if (saved?.file === undefined) throw new Error('the saved file cannot be read');
     return saved;
   }
@@ -180,12 +254,48 @@ export async function opfsCountsStore(locks: SessionLocks): Promise<OpfsCountsSt
   return new OpfsCountsStore(root, locks);
 }
 
-function metaOf(taxid: number, start: CountsStart, savedBytes: number, complete: boolean): CountsCopy {
-  return { taxid, url: start.url, lastModified: start.lastModified, size: start.size, savedBytes, complete, savedAt: Date.now() };
+/** Builds the `listCounts` summary of one complete saved copy. */
+export function entryOf(copy: CountsCopy, origin: SavedCountsOrigin): SavedCountsEntry {
+  const date =
+    copy.made !== undefined ? isoDate(copy.made.madeAt) : (dateOf(copy.lastModified) ?? isoDate(copy.savedAt));
+  return { taxid: copy.taxid, name: DATA_NAME, size: copy.size, origin, date, copy };
+}
+
+function isoDate(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+function metaOf(taxid: number, start: CountsStart, savedBytes: number, complete: boolean, savedAt: number): CountsCopy {
+  if (start.made !== undefined) {
+    return { taxid, url: '', lastModified: '', size: start.size, savedBytes, complete, savedAt, made: start.made };
+  }
+  return { taxid, url: start.url, lastModified: start.lastModified, size: start.size, savedBytes, complete, savedAt };
 }
 
 function writeMeta(directory: FileSystemDirectoryHandle, copy: CountsCopy): Promise<void> {
   return writeFile(directory, META_NAME, new Blob([JSON.stringify(copy)]));
+}
+
+const whole = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+function isMadeMeta(value: unknown): value is CountsMadeMeta {
+  if (value === null || typeof value !== 'object') return false;
+  const made = value as Partial<CountsMadeMeta>;
+  return (
+    whole(made.run) &&
+    Array.isArray(made.argv) &&
+    made.argv.every((word) => typeof word === 'string') &&
+    Array.isArray(made.inputs) &&
+    made.inputs.every(
+      (input) =>
+        input !== null &&
+        typeof input === 'object' &&
+        typeof (input as { name?: unknown }).name === 'string' &&
+        whole((input as { size?: unknown }).size),
+    ) &&
+    typeof made.engineBuild === 'string' &&
+    whole(made.madeAt)
+  );
 }
 
 async function readCopy(directory: FileSystemDirectoryHandle, taxid: number): Promise<CountsCopy | undefined> {
@@ -193,17 +303,22 @@ async function readCopy(directory: FileSystemDirectoryHandle, taxid: number): Pr
   if (text === undefined) return undefined;
   try {
     const copy = JSON.parse(text) as CountsCopy;
-    const whole = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-    return copy.taxid === taxid &&
-      typeof copy.url === 'string' &&
-      typeof copy.lastModified === 'string' &&
-      whole(copy.size) &&
-      whole(copy.savedBytes) &&
-      copy.savedBytes <= copy.size &&
-      typeof copy.complete === 'boolean' &&
-      (!copy.complete || copy.savedBytes === copy.size)
-      ? copy
-      : undefined;
+    if (
+      copy.taxid !== taxid ||
+      typeof copy.url !== 'string' ||
+      typeof copy.lastModified !== 'string' ||
+      !whole(copy.size) ||
+      !whole(copy.savedBytes) ||
+      copy.savedBytes > copy.size ||
+      typeof copy.complete !== 'boolean' ||
+      (copy.complete && copy.savedBytes !== copy.size)
+    ) {
+      return undefined;
+    }
+    if ('made' in copy && copy.made !== undefined) {
+      if (!isMadeMeta(copy.made) || copy.url !== '' || copy.lastModified !== '') return undefined;
+    }
+    return copy;
   } catch {
     return undefined;
   }

@@ -131,6 +131,7 @@ const counts = started.then(async (session): Promise<CountsStore> => {
   }
   return {
     readCounts: async () => undefined,
+    listCounts: async () => [],
     beginCounts: async () => undefined,
     appendCounts: async () => undefined,
     finishCounts: () => Promise.reject(new Error('this browser keeps no counts')),

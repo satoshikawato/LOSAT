@@ -430,6 +430,16 @@ export class SearchDraft {
   }
 
   /**
+   * Selects a taxonomy ID in BLASTN's repeats row ("Use in BLASTN" after saving WindowMasker
+   * counts for that ID): switches to BLASTN, chooses "Taxonomy ID", and fills `taxid`.
+   */
+  useTaxid(taxid: number): void {
+    this.setProgram('blastn');
+    this.setRepeats('taxid');
+    this.setTaxid(String(taxid));
+  }
+
+  /**
    * Clears the values of some fields of the program ("Restore default search parameters"):
    * the engine's defaults apply to them again, and a chosen file is let go.
    */

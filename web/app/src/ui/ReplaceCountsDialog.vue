@@ -57,10 +57,15 @@ function syncOpen(open: boolean): void {
 
 watch(
   () => props.open,
-  async (open) => {
-    await nextTick();
-    syncOpen(open);
+  (open) => {
+    if (!open) {
+      // Close synchronously so the page is no longer inert before the parent restores focus.
+      syncOpen(false);
+    } else {
+      void nextTick(() => syncOpen(props.open));
+    }
   },
+  { flush: 'sync' },
 );
 
 onMounted(() => syncOpen(props.open));

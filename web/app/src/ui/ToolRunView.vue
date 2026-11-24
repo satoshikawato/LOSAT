@@ -5,7 +5,7 @@
 // binary outputs show "Binary, <size>". Download streams the full OPFS-backed File.
 // Made counts files (`-out` of `-mk_counts` / `-convert`) offer "Use in BLASTN" and
 // "Mask with these counts".
-import { computed, nextTick, ref, useId, watch } from 'vue';
+import { computed, nextTick, ref, shallowRef, useId, watch } from 'vue';
 import type { CountsLoader } from '../application/counts';
 import type { Coordinator, SessionCountsEntry, ToolRunView } from '../application/coordinator';
 import { parseTaxid, type CountsMadeMeta } from '../domain/counts';
@@ -105,7 +105,7 @@ const saveError = ref<string | undefined>();
 const saveStatus = ref<string | undefined>();
 const savedByTab = ref<Readonly<Record<string, number>>>({});
 const saveButton = ref<HTMLButtonElement | null>(null);
-const pendingReplace = ref<
+const pendingReplace = shallowRef<
   | {
       readonly taxid: number;
       readonly existing: CountsCopy;
@@ -121,11 +121,18 @@ let readToken = 0;
 const activeSavedTaxid = computed(() => {
   const key = activeTab.value?.key;
   if (key === undefined) return undefined;
-  const taxid = savedByTab.value[key];
+  const taxid = savedByTab.value[`${props.run.snapshot.runId}:${key}`];
   if (taxid === undefined) return undefined;
   const copy = countsState?.value.saved[taxid];
   return copy?.complete === true ? taxid : undefined;
 });
+
+watch(
+  () => props.run.snapshot.runId,
+  () => {
+    saveTaxidText.value = '';
+  },
+);
 
 watch(
   [() => props.run.snapshot.runId, () => activeTab.value?.key],
@@ -262,7 +269,7 @@ async function cancelReplace(): Promise<void> {
 }
 
 function finishSave(tabKey: string, taxid: number, kept: boolean): void {
-  savedByTab.value = { ...savedByTab.value, [tabKey]: taxid };
+  savedByTab.value = { ...savedByTab.value, [`${props.run.snapshot.runId}:${tabKey}`]: taxid };
   const text = kept
     ? `Saved for taxonomy ID ${taxid}.`
     : `Kept in this tab only for taxonomy ID ${taxid}.`;

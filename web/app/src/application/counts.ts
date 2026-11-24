@@ -164,13 +164,21 @@ export class CountsLoader {
   }
 
   private async writeMade(taxid: number, file: File, made: CountsMadeMeta, replace: boolean): Promise<SaveCountsResult> {
+    // Plain structured-cloneable copy so reactive UI wrappers never reach Worker.postMessage.
+    const plainMade: CountsMadeMeta = {
+      run: made.run,
+      argv: [...made.argv],
+      inputs: made.inputs.map((entry) => ({ name: entry.name, size: entry.size })),
+      engineBuild: made.engineBuild,
+      madeAt: made.madeAt,
+    };
     await this.deleting.get(taxid);
     const local = this.local.get(taxid);
     if (local !== undefined && !replace) {
       return { ok: false, reason: 'exists', existing: local.copy };
     }
     const begin = (allowReplace: boolean) =>
-      this.deps.store.beginCounts(taxid, { made, size: file.size, from: 0, replace: allowReplace });
+      this.deps.store.beginCounts(taxid, { made: plainMade, size: file.size, from: 0, replace: allowReplace });
 
     let token: string | undefined;
     try {
@@ -207,8 +215,8 @@ export class CountsLoader {
         size: file.size,
         savedBytes: file.size,
         complete: true,
-        savedAt: made.madeAt,
-        made,
+        savedAt: plainMade.madeAt,
+        made: plainMade,
       };
       this.local.set(taxid, { copy, file });
       this.holdInTab(taxid, true);

@@ -15,14 +15,14 @@ use crate::seqdb::taxdb::SourceNames;
 use crate::seqid::accguide::parse_flags::ANY_RAW;
 use crate::seqid::{DeflineSet, ParsedSeqId};
 
-use super::retrieve::{parse_target_with, Output, Source, Stop};
+use super::retrieve::{parse_target_with, HeaderSet, Output, Source, Stop};
 
 /// What NCBI's two `GetBioseq` calls of one `Write` of `oid`, `config` and `target` read of the
 /// sequence `oid` (`with`): the first `GetBioseq` of `oid`, then `GetBioseq` of `oid`, `gi` and
 /// `seqid` for a `-target_only` target or `GetBioseq` of `oid` again.
-pub(super) struct DbBioseq {
+pub(super) struct DbBioseq<'s> {
     /// `GetHdr` of `oid`: every definition line the database keeps.
-    pub set: DeflineSet,
+    pub set: HeaderSet<'s>,
     /// The user object's header (`x_GetFilteredBinaryHeader`), read for `%b` alone.
     pub header: Vec<u8>,
     /// The lines of the Bioseq's ids and title for a target: the first that holds it.
@@ -33,7 +33,7 @@ pub(super) struct DbBioseq {
     pub length: u32,
 }
 
-impl DbBioseq {
+impl DbBioseq<'_> {
     /// The definition lines of the Bioseq's ids (the first line's) and title: the target's line,
     /// or every line.
     pub fn shown(&self) -> &DeflineSet {
@@ -57,7 +57,7 @@ impl DbBioseq {
         target: Option<&str>,
         target_id: fn(&str) -> Result<ParsedSeqId, Stop>,
         out: &mut Output<'a, 'b>,
-        write: impl FnOnce(&DbBioseq, &mut Output<'a, 'b>) -> Result<(), Stop>,
+        write: impl FnOnce(&DbBioseq<'_>, &mut Output<'a, 'b>) -> Result<(), Stop>,
     ) -> Result<(), Stop> {
         let read = if with_header {
             source.deflines_with_header(oid)?

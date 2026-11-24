@@ -8,7 +8,7 @@ use super::column::{self, Column, MASK_DATA_TITLE};
 use super::file::DbFile;
 use super::filter::{DeflineList, DeflineRule};
 use super::header::{
-    decode_defline_taxids, decode_deflines_as, decode_full, holds_a_seqid, Defline,
+    decode_defline_taxids, decode_deflines_as, decode_full, decode_full_in, holds_a_seqid, Defline,
 };
 use super::index::IndexFile;
 use super::{SeqDbError, SeqType, XDbIdxRead};
@@ -582,32 +582,30 @@ impl Volume {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
-    /// `defline_set`, `None` for a stored header of no bytes, which NCBI's read gives as no set
-    /// (`x_GetHdrAsn1`), where `defline_set` gives a set of no lines (`SeqDb::header_set_at`).
-    pub fn header_set(&self, oid: u32) -> Result<Option<crate::seqid::DeflineSet>, SeqDbError> {
-        self.with_header_record(oid, |record, path| {
-            if record.is_empty() {
-                return Ok(None);
-            }
-            self.decode_kept_set(oid, record, path).map(Some)
-        })
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2202-2212
-    /// `defline_set` and the stored record it was decoded from, `None` in place of the record
-    /// when the definition-line rule dropped a line of it (`x_GetFilteredHeader`'s `changed`,
-    /// `SeqDb::defline_set_with_header_at`). `None` for a stored header of no bytes, as
-    /// [`Volume::header_set`].
-    pub fn defline_set_with_record(
+    /// `defline_set` written over `set`, whose buffers are kept (`header::decode_full_in`):
+    /// `None` for a stored header of no bytes, which NCBI's read gives as no set
+    /// (`x_GetHdrAsn1`), where `defline_set` gives a set of no lines (`SeqDb::header_set_in`);
+    /// else whether the definition-line rule dropped a line of the record
+    /// (`x_GetFilteredHeader`'s `changed`). With `record`, the stored record the set was decoded
+    /// from is written there where no line was dropped (`SeqDb::defline_set_with_header_in`).
+    pub fn header_set_in(
         &self,
         oid: u32,
-    ) -> Result<Option<(crate::seqid::DeflineSet, Option<Vec<u8>>)>, SeqDbError> {
-        self.with_header_record(oid, |record, path| {
-            if record.is_empty() {
+        set: &mut crate::seqid::DeflineSet,
+        record: Option<&mut Vec<u8>>,
+    ) -> Result<Option<bool>, SeqDbError> {
+        self.with_header_record(oid, |stored, path| {
+            if stored.is_empty() {
+                set.deflines.clear();
+                set.utf8 = false;
                 return Ok(None);
             }
-            let (set, dropped) = self.decode_kept_set_dropped(oid, record, path)?;
-            Ok(Some((set, (!dropped).then(|| record.to_vec()))))
+            let dropped = self.decode_kept_set_in(oid, stored, path, set)?;
+            if let Some(record) = record.filter(|_| !dropped) {
+                record.clear();
+                record.extend_from_slice(stored);
+            }
+            Ok(Some(dropped))
         })
     }
 
@@ -919,25 +917,27 @@ impl Volume {
         record: &[u8],
         path: &Path,
     ) -> Result<crate::seqid::DeflineSet, SeqDbError> {
-        self.decode_kept_set_dropped(oid, record, path)
-            .map(|(set, _)| set)
+        let mut set = crate::seqid::DeflineSet::default();
+        self.decode_kept_set_in(oid, record, path, &mut set)?;
+        Ok(set)
     }
 
-    /// `decode_kept_set` and whether the rule dropped a line of the record.
-    fn decode_kept_set_dropped(
+    /// `decode_kept_set` written over `set`, whose buffers are kept; whether the rule dropped a
+    /// line of the record.
+    fn decode_kept_set_in(
         &self,
         oid: u32,
         record: &[u8],
         path: &Path,
-    ) -> Result<(crate::seqid::DeflineSet, bool), SeqDbError> {
-        let mut set = decode_full(record, path)?;
+        set: &mut crate::seqid::DeflineSet,
+    ) -> Result<bool, SeqDbError> {
+        decode_full_in(record, path, set)?;
         let stored_lines = set.deflines.len();
         if self.filters_lines() {
-            let keep = self.line_mask(oid, &set)?;
+            let keep = self.line_mask(oid, set)?;
             set.retain_lines(&keep);
         }
-        let dropped = set.deflines.len() != stored_lines;
-        Ok((set, dropped))
+        Ok(set.deflines.len() != stored_lines)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2218

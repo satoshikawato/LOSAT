@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { sha256Hex } from 'losat';
 import type { InputRole, RegistryFile } from 'losat/domain';
 import type { EnginePrepareHint, StartResult, ValidationResult } from 'losat/ports';
-import { Coordinator, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
+import { Coordinator, isToolRun, type EnqueueAllResult, type RunView, type SearchRequest } from '../../src/application/coordinator';
 import { registryName } from '../../src/application/conffile';
 import { cannotFollow, noSequenceOf, queryEndBefore, SearchDraft, type DraftSource } from '../../src/application/draft';
 import { fastaParser, programById } from '../../src/domain/programs';
@@ -703,6 +703,7 @@ describe('SearchDraft gives the data layer back the sources it no longer shows (
     expect(dropped).toEqual([subject, query]);
     expect(held()).toEqual({ sources: [], revisionSources: [] });
     const run = coordinator.state.get().runs[0]!;
+    if (run.snapshot.kind === 'tool') throw new Error('expected search run');
     expect(new TextDecoder().decode(run.snapshot.subject.bytes)).toBe('>s\nACGTACGT\n');
     expect(run.snapshot.subject.records).toEqual([{ id: 's', length: 8 }]);
     await completed(coordinator, run.snapshot.runId);
@@ -1673,7 +1674,7 @@ describe('SearchDraft submit', () => {
     expect(draft.state.get().title).toBe(' Two plasmids ');
     await draft.submit();
     expect(requests[0]!.map((r) => r.title)).toEqual([' Two plasmids ', ' Two plasmids ']);
-    expect(coordinator.state.get().runs.map((run) => run.snapshot.title)).toEqual(['Two plasmids', 'Two plasmids']);
+    expect(coordinator.state.get().runs.map((run) => (run.snapshot.kind === 'tool' ? undefined : run.snapshot.title))).toEqual(['Two plasmids', 'Two plasmids']);
     expect(coordinator.state.get().runs[0]!.snapshot.argv).not.toContain('Two plasmids');
     // An empty title is no title.
     draft.setTitle('   ');
@@ -1924,7 +1925,7 @@ describe('SearchDraft submit', () => {
     draft.setMode('query', 'separate');
     const result = await draft.submit();
     expect(result.ok).toBe(true);
-    const runs = coordinator.state.get().runs;
+    const runs = coordinator.state.get().runs.filter((run): run is RunView => !isToolRun(run));
     expect(runs.map((run) => run.snapshot.group?.position)).toEqual([1, 2]);
     expect(runs[0]!.snapshot.group?.groupId).toBe(runs[1]!.snapshot.group?.groupId);
     expect(runs[0]!.snapshot.subject.bytes).toBe(runs[1]!.snapshot.subject.bytes);

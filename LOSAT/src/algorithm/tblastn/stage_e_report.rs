@@ -50,6 +50,9 @@ pub(super) enum ShownSubjects<'a> {
         /// (`XDbStream::read_stage`), and the reports count the stored letters
         /// (`recounts_shown_counts`).
         hard_masked: bool,
+        /// The query Bioseqs that NCBI's scope finds for the reported sequences
+        /// (`report::query_bioseq`), by the run's searched query and the ordinal id.
+        seen: crate::report::query_bioseq::SeenFrom<'a>,
     },
 }
 
@@ -163,6 +166,21 @@ pub(super) fn format_number(outfmt: &str) -> i32 {
 pub(super) fn xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind> {
     use crate::blastinput::app::ReportFormat;
     crate::report::blast_xml2::Xml2Kind::of(ReportFormat::from_number(format_number(outfmt))?)
+}
+
+/// Whether the report of a checked `-outfmt` value shows NCBI's bytes for a reported sequence
+/// that the scope finds as a query of its batch (`report::query_bioseq`): a table that reads no
+/// letter of the found Bioseq and the organism report (`query_bioseq::tabular_shows`), the
+/// Seq-annots and the archive (which write the Seq-align id alone).
+pub(super) fn shows_query_bioseqs(outfmt: &str) -> bool {
+    match format_number(outfmt) {
+        8 | 9 | 11 | 12 => true,
+        6 | 7 | 10 | 18 | 20 => crate::report::query_bioseq::tabular_shows(
+            super::tabular::tabular_spec(outfmt).as_ref(),
+            crate::blastinput::app::Program::Tblastn,
+        ),
+        _ => false,
+    }
 }
 
 /// Whether a checked `-outfmt` value is a format of the structured XML family that takes the
@@ -508,16 +526,26 @@ pub(super) fn render(
             parsed,
             loads,
         ) {
+            // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
+            let row = |q_idx: usize, s_idx: usize| match shown {
+                ShownSubjects::Database { reported, seen, .. } => {
+                    seen.row(q_idx, reported.ordinals.get(s_idx).copied(), s_idx)
+                }
+                ShownSubjects::Fasta { .. } => s_idx,
+            };
             let checked = crate::report::tabular::check_failed_lookups(
                 spec.as_ref(),
-                hitlists.iter().map(|hitlist| {
+                hitlists.iter().enumerate().map(|(q_idx, hitlist)| {
                     hitlist
                         .lists()
                         .iter()
                         .filter(|list| !list.hsps.hsps.is_empty())
-                        .map(|list| list.oid as usize)
+                        .map(move |list| row(q_idx, list.oid as usize))
                 }),
                 |s_idx| {
+                    if s_idx == crate::report::query_bioseq::SEEN_ROW {
+                        return None;
+                    }
                     crate::algorithm::common::tabular::subject_lookup_failure(
                         spec.as_ref(),
                         &subject_ids,

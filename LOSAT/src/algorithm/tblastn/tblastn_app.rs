@@ -1907,6 +1907,10 @@ fn search(
         // pipe, or `-query -` after `-subject -`).
         let searched_done = batches.searched_done;
         let queries = &searched_queries[..searched_done];
+        // The query Bioseqs that NCBI's scope finds for reported sequences
+        // (`report::query_bioseq`), noted at each batch's refusal of a sequence with the id of a
+        // query of its scope (below).
+        let mut query_bioseqs = crate::report::query_bioseq::QueryBioseqs::default();
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the BLAST
         // XML report data of the first result NCBI formats: the matrix of its formatting table,
         // found by the name as typed)
@@ -2163,6 +2167,24 @@ fn search(
             // NCBI's own errors of the batch: the reports would show it (the prefetch's error
             // above comes first).
             if let (Some(database), Some(scopes)) = (database, batches.query_scopes.as_ref()) {
+                // The batch's searched queries (`range`), the scope's span.
+                let record = |query: usize| {
+                    let record = queries.get(query).filter(|_| query < range.end)?;
+                    Some(crate::report::query_bioseq::QueryRecordRef {
+                        believed: record.believed()?,
+                        title: &record.title,
+                        length: record.seq().len(),
+                    })
+                };
+                let run = crate::report::query_bioseq::SeenRun {
+                    shows: outputs.formats.iter().all(|format| {
+                        super::stage_e_report::shows_query_bioseqs(format.outfmt)
+                    }) && resolved.query_range.is_none()
+                        && !database.loads_write_texts(),
+                    known: range.start..usize::MAX,
+                    record: &record,
+                    protein: true,
+                };
                 crate::algorithm::common::database::refuse_reported_ids_of_queries(
                     &titles,
                     batch_results
@@ -2176,8 +2198,8 @@ fn search(
                     database.oid_map(),
                     scopes,
                     super::database::parsed_shown(&outputs.formats),
-                    &mut Default::default(),
-                    &crate::report::query_bioseq::SeenRun::REFUSED,
+                    &mut query_bioseqs,
+                    &run,
                     "TBLASTN",
                 )?;
             }
@@ -2740,6 +2762,7 @@ fn search(
                     reported,
                     oids: database.oid_map(),
                     hard_masked,
+                    seen: query_bioseqs.numbered_from(0),
                 },
             ),
             _ => (

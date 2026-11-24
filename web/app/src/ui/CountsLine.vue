@@ -52,6 +52,10 @@ const sentence = computed(() => {
       return `Downloading ${formatBytes(now.bytes)}${now.total === undefined ? '' : ` of ${formatBytes(now.total)}`} from ${COUNTS_HOST}…`;
   }
   if (saved.value) {
+    if (saved.value.made !== undefined) {
+      const date = new Date(saved.value.made.madeAt).toISOString().slice(0, 10);
+      return `${state.value.inTab[props.taxid] ? 'Made in this tab only' : 'Made in this browser'} (${date}, ${formatBytes(saved.value.size)})`;
+    }
     const date = dateOf(saved.value.lastModified) ?? `saved ${new Date(saved.value.savedAt).toISOString().slice(0, 10)}`;
     // A browser that keeps nothing across sessions: the file is this tab's.
     return `${state.value.inTab[props.taxid] ? 'Kept in this tab only' : 'Saved in this browser'} (${date}, ${formatBytes(saved.value.size)})`;

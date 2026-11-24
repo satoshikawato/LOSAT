@@ -10,6 +10,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
 import { isToolRun, type AnyRunView, type Coordinator, type RunView, type SessionCountsEntry } from '../application/coordinator';
+import type { CountsLoader } from '../application/counts';
 import { OutputSaver } from '../application/outputs';
 import { keptOutputsWritten, noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
@@ -43,11 +44,12 @@ import VerificationBadge from './VerificationBadge.vue';
 
 export type ResultsView = 'hits' | 'dotplot' | 'details' | 'outputs';
 
-const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly AnyRunView[] }>();
+const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly AnyRunView[]; counts?: CountsLoader | undefined }>();
 /** "Run a search" of the empty results page, or tool output actions ("Use in BLASTN", "Mask with these counts"). */
 const emit = defineEmits<{
   search: [];
   'use-in-blastn': [file: File];
+  'use-taxid-in-blastn': [taxid: number];
   'mask-with-counts': [entry: SessionCountsEntry];
 }>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
@@ -412,8 +414,10 @@ async function toAlignments(id: HspId): Promise<void> {
         :key="state.toolRun.snapshot.runId"
         :coordinator="coordinator"
         :run="state.toolRun"
+        :counts="counts"
         :takes-value="state.grammar?.takesValue"
         @use-in-blastn="emit('use-in-blastn', $event)"
+        @use-taxid-in-blastn="emit('use-taxid-in-blastn', $event)"
         @mask-with-counts="emit('mask-with-counts', $event)"
       />
 

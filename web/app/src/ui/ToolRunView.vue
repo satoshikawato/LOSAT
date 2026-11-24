@@ -5,28 +5,38 @@
 // binary outputs show "Binary, <size>". Download streams the full OPFS-backed File.
 // Made counts files (`-out` of `-mk_counts` / `-convert`) offer "Use in BLASTN" and
 // "Mask with these counts".
-import { computed, ref, useId, watch } from 'vue';
+import { computed, nextTick, ref, useId, watch } from 'vue';
+import type { CountsLoader } from '../application/counts';
 import type { Coordinator, SessionCountsEntry, ToolRunView } from '../application/coordinator';
+import { parseTaxid, type CountsMadeMeta } from '../domain/counts';
 import type { ToolFileOrigin, ToolOutputEntry } from '../domain/run';
 import { toolCommandWords } from '../domain/tool-argv';
 import { decodeUtf8Preview, windowMaskerStageById } from '../domain/tools';
+import type { CountsCopy } from '../ports/counts';
+import { announce } from './announcer';
 import CommandText from './CommandText.vue';
 import { formatBytes, formatDateTime, formatDuration } from './format';
 import OutputText from './OutputText.vue';
+import ReplaceCountsDialog from './ReplaceCountsDialog.vue';
 import TabList from './TabList.vue';
+import { useStore } from './useStore';
 
 const PREVIEW_BYTES = 512 * 1024;
 
 const props = defineProps<{
   coordinator: Coordinator;
   run: ToolRunView;
+  counts?: CountsLoader | undefined;
   takesValue?: ((flag: string) => boolean) | undefined;
 }>();
 
 const emit = defineEmits<{
   'use-in-blastn': [file: File];
+  'use-taxid-in-blastn': [taxid: number];
   'mask-with-counts': [entry: SessionCountsEntry];
 }>();
+
+const countsState = props.counts === undefined ? undefined : useStore(props.counts.state);
 
 const ids = useId();
 const section = ref<'outputs' | 'details'>('outputs');
@@ -86,12 +96,41 @@ const preview = ref<
 >({ state: 'loading' });
 
 const actionError = ref<string | undefined>();
+const saveTaxidText = ref('');
+const saving = ref(false);
+const saveError = ref<string | undefined>();
+const saveStatus = ref<string | undefined>();
+const savedByTab = ref<Readonly<Record<string, number>>>({});
+const saveButton = ref<HTMLButtonElement | null>(null);
+const pendingReplace = ref<
+  | {
+      readonly taxid: number;
+      readonly existing: CountsCopy;
+      readonly file: File;
+      readonly made: CountsMadeMeta;
+      readonly tabKey: string;
+      readonly newFileName: string;
+    }
+  | undefined
+>();
 let readToken = 0;
+
+const activeSavedTaxid = computed(() => {
+  const key = activeTab.value?.key;
+  if (key === undefined) return undefined;
+  const taxid = savedByTab.value[key];
+  if (taxid === undefined) return undefined;
+  const copy = countsState?.value.saved[taxid];
+  return copy?.complete === true ? taxid : undefined;
+});
 
 watch(
   [() => props.run.snapshot.runId, () => activeTab.value?.key],
   async ([runId, key]) => {
     actionError.value = undefined;
+    saveError.value = undefined;
+    saveStatus.value = undefined;
+    pendingReplace.value = undefined;
     const token = ++readToken;
     if (key === undefined) {
       preview.value = { state: 'text', text: '', shownBytes: 0, totalSize: 0, truncated: false };
@@ -131,6 +170,11 @@ async function downloadActive(): Promise<void> {
 }
 
 async function useInBlastn(): Promise<void> {
+  const savedTaxid = activeSavedTaxid.value;
+  if (savedTaxid !== undefined) {
+    emit('use-taxid-in-blastn', savedTaxid);
+    return;
+  }
   const tab = activeTab.value;
   if (tab === undefined) return;
   actionError.value = undefined;
@@ -140,6 +184,87 @@ async function useInBlastn(): Promise<void> {
   } catch (error) {
     setActionError(error);
   }
+}
+
+async function saveForTaxid(): Promise<void> {
+  const tab = activeTab.value;
+  const counts = props.counts;
+  if (tab === undefined || counts === undefined || saving.value) return;
+  saveError.value = undefined;
+  saveStatus.value = undefined;
+  const taxid = parseTaxid(saveTaxidText.value);
+  if (taxid === undefined) {
+    saveError.value = 'Enter a taxonomy ID.';
+    return;
+  }
+  saving.value = true;
+  try {
+    const file = await props.coordinator.getToolOutputFile(props.run.snapshot.runId, tab.key, tab.entry.name);
+    const made: CountsMadeMeta = {
+      run: props.run.snapshot.number,
+      argv: props.run.snapshot.argv,
+      inputs: props.run.snapshot.directory.map((entry) => ({ name: entry.name, size: entry.size })),
+      engineBuild: props.run.record.engineBuild ?? '',
+      madeAt: props.run.record.endedAt ?? Date.now(),
+    };
+    const result = await counts.saveMade(taxid, file, made, { replace: false });
+    if (result.ok) {
+      finishSave(tab.key, taxid, result.kept);
+      return;
+    }
+    if (result.reason === 'exists') {
+      pendingReplace.value = { taxid, existing: result.existing, file, made, tabKey: tab.key, newFileName: tab.entry.name };
+      return;
+    }
+    saveError.value = result.message;
+    announce(result.message, 'alert');
+  } catch (error) {
+    saveError.value = error instanceof Error ? error.message : String(error);
+    announce(saveError.value, 'alert');
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function confirmReplace(): Promise<void> {
+  const pending = pendingReplace.value;
+  const counts = props.counts;
+  pendingReplace.value = undefined;
+  if (pending === undefined || counts === undefined) return;
+  saving.value = true;
+  saveError.value = undefined;
+  saveStatus.value = undefined;
+  try {
+    const result = await counts.saveMade(pending.taxid, pending.file, pending.made, { replace: true });
+    if (result.ok) {
+      finishSave(pending.tabKey, pending.taxid, result.kept);
+    } else if (result.reason !== 'exists') {
+      saveError.value = result.message;
+      announce(result.message, 'alert');
+    }
+  } catch (error) {
+    saveError.value = error instanceof Error ? error.message : String(error);
+    announce(saveError.value, 'alert');
+  } finally {
+    saving.value = false;
+    await nextTick();
+    saveButton.value?.focus();
+  }
+}
+
+async function cancelReplace(): Promise<void> {
+  pendingReplace.value = undefined;
+  await nextTick();
+  saveButton.value?.focus();
+}
+
+function finishSave(tabKey: string, taxid: number, kept: boolean): void {
+  savedByTab.value = { ...savedByTab.value, [tabKey]: taxid };
+  const text = kept
+    ? `Saved for taxonomy ID ${taxid}.`
+    : `Kept in this tab only for taxonomy ID ${taxid}.`;
+  saveStatus.value = text;
+  announce(text);
 }
 
 function maskWithCounts(): void {
@@ -173,6 +298,8 @@ function originText(origin: ToolFileOrigin): string {
       return `combined from ${origin.parts.join(', ')}`;
     case 'made':
       return `made by run ${origin.runNumber}`;
+    case 'saved':
+      return `saved for taxonomy ID ${origin.taxid}`;
   }
 }
 </script>
@@ -245,8 +372,47 @@ function originText(origin: ToolFileOrigin): string {
               <button type="button" data-testid="tool-mask-with-counts" @click="maskWithCounts">
                 Mask with these counts
               </button>
+              <span v-if="counts" class="tool-save-taxid" data-testid="tool-save-taxid">
+                <label :for="`${ids}-save-taxid`">Save for taxonomy ID</label>
+                <input
+                  :id="`${ids}-save-taxid`"
+                  v-model="saveTaxidText"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="9606"
+                  size="10"
+                  data-testid="tool-save-taxid-input"
+                  @keydown.enter.prevent="saveForTaxid"
+                />
+                <button
+                  ref="saveButton"
+                  type="button"
+                  :disabled="saving"
+                  data-testid="tool-save-taxid-button"
+                  @click="saveForTaxid"
+                >
+                  {{ saving ? 'Saving…' : 'Save' }}
+                </button>
+              </span>
             </template>
           </div>
+          <p v-if="saveError" class="results-message error" role="alert" data-testid="tool-save-error">
+            {{ saveError }}
+          </p>
+          <p v-if="saveStatus" class="muted small" data-testid="tool-save-status">
+            {{ saveStatus }}
+          </p>
+          <ReplaceCountsDialog
+            :open="pendingReplace !== undefined"
+            :taxid="pendingReplace?.taxid ?? 0"
+            :existing="pendingReplace?.existing"
+            :new-file-name="pendingReplace?.newFileName ?? ''"
+            :run-number="run.snapshot.number"
+            @confirm="confirmReplace"
+            @cancel="cancelReplace"
+          />
         </div>
       </template>
     </div>

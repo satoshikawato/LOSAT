@@ -334,6 +334,71 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     expect(draft.state.get().values.blastn['-window_masker_db']).toBe('wmasker.ascii');
     expect(draft.state.get().files.blastn['-window_masker_db']).toBe(counts);
   });
+
+  it('SearchDraft.useTaxid switches to BLASTN with -window_masker_taxid set', () => {
+    const { data } = makeData();
+    const draft = new SearchDraft({
+      engine: new FakeEngine(),
+      data,
+      enqueueAll: async () => ({ ok: true, runIds: ['r1'] }),
+      fetcher: { fetch: async () => ({ ok: false, reason: 'not-found' }) },
+      now: () => 0,
+      debounceMs: 0,
+    });
+    draft.setProgram('blastp');
+    draft.useTaxid(562);
+    expect(draft.state.get().program).toBe('blastn');
+    expect(draft.state.get().values.blastn['-window_masker_taxid']).toBe('562');
+    expect(draft.state.get().values.blastn['-window_masker_db']).toBe('');
+  });
+
+  it('resolves saved taxonomy-ID counts for -ustat and -in under windowmasker/<taxid>/wmasker.obinary', async () => {
+    const { coordinator, data } = makeCoordinator(new FakeEngine());
+    const savedCounts = new File([new Uint8Array([1, 2, 3, 4])], 'wmasker.obinary');
+    const submitted: ToolRequest[][] = [];
+    const draft = new ToolDraft({
+      engine: new FakeEngine(),
+      data,
+      enqueueToolAll: async (requests) => {
+        submitted.push([...requests]);
+        return coordinator.enqueueToolAll(requests);
+      },
+      readSavedCounts: async (taxid) => (taxid === 562 ? savedCounts : undefined),
+      debounceMs: 0,
+    });
+    draft.ensureLoaded();
+    await sleep(20);
+
+    // Mask stage with saved counts for 562.
+    draft.setStage('mask');
+    draft.setUstatSaved(562, savedCounts.size);
+    draft.setFastaPaste('>q\nACGTACGT\n');
+    expect(draft.previewArgv()).toContain('windowmasker/562/wmasker.obinary');
+    expect((await draft.submit()).ok).toBe(true);
+    const maskReq = submitted[0]![0]!;
+    expect(maskReq.argv).toEqual(['windowmasker', '-ustat', 'windowmasker/562/wmasker.obinary', '-in', 'input.fa']);
+    expect(maskReq.directory.find((d) => d.name === 'windowmasker/562/wmasker.obinary')).toEqual({
+      name: 'windowmasker/562/wmasker.obinary',
+      file: savedCounts,
+      origin: { kind: 'saved', taxid: 562 },
+    });
+
+    // Convert stage with saved counts for 562.
+    draft.setStage('convert');
+    draft.setConvertSaved(562, savedCounts.size);
+    expect((await draft.submit()).ok).toBe(true);
+    const convReq = submitted[1]![0]!;
+    expect(convReq.argv).toEqual(['windowmasker', '-convert', '-in', 'windowmasker/562/wmasker.obinary', '-out', 'wmasker.ascii']);
+    expect(convReq.directory).toEqual([
+      { name: 'windowmasker/562/wmasker.obinary', file: savedCounts, origin: { kind: 'saved', taxid: 562 } },
+    ]);
+
+    // Missing saved counts reports a clear error.
+    draft.setConvertSaved(9999, 10);
+    const missing = await draft.submit();
+    expect(missing.ok).toBe(false);
+    expect(missing.ok ? '' : missing.message).toContain('9999');
+  });
 });
 
 describe('Coordinator single queue and DataService tool storage', () => {

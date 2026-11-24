@@ -1,7 +1,7 @@
 // Composition root: the only module that chooses implementations for the ports.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import { VERIFICATION_TABLE } from 'virtual:losat-verification';
-import { sha256Hex, WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
+import { engineBuildName, sha256Hex, WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
 import type { EngineGateway, ToolEngine } from 'losat/ports';
 import { Attention } from './application/attention';
 import { Availability } from './application/availability';
@@ -68,6 +68,10 @@ export function createApp(options: AppOptions = {}): App {
           ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
           ...(options.onRuntimeEnd === undefined ? {} : { onRuntimeEnd: options.onRuntimeEnd }),
         });
+  const toolRuntime =
+    ENGINE_ASSETS === null
+      ? { path: 'fake' as const, engineBuild: 'fake-engine' }
+      : { path: 'serial' as const, engineBuild: engineBuildName('serial', ENGINE_ASSETS.serial) };
   const coordinator = new Coordinator({
     engine,
     data,
@@ -76,6 +80,7 @@ export function createApp(options: AppOptions = {}): App {
     newRunId: () => crypto.randomUUID(),
     digest: sha256Hex,
     dataWorkerEnded,
+    toolRuntime,
   });
   const draft = new SearchDraft({
     engine,
@@ -84,11 +89,18 @@ export function createApp(options: AppOptions = {}): App {
     fetcher: new BrowserAccessionFetcher(),
     now: () => performance.now(),
   });
+  const counts = new CountsLoader({
+    downloader: new BrowserCountsDownloader({ store: data }),
+    store: data,
+    draft,
+    changes: browserCountsChanges(),
+  });
   const toolDraft = new ToolDraft({
     engine,
     data,
     enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
     isBusy: () => coordinator.isBusy(),
+    readSavedCounts: async (taxid) => (await counts.readSavedFile(taxid))?.file,
   });
   const availability = new Availability({ draft, toolDraft, dataWorkerEnded });
   const examples = new ExampleLoader({
@@ -98,12 +110,6 @@ export function createApp(options: AppOptions = {}): App {
     availability,
     deletions: browserExampleDeletions(),
     saver: browserFileSaver,
-  });
-  const counts = new CountsLoader({
-    downloader: new BrowserCountsDownloader({ store: data }),
-    store: data,
-    draft,
-    changes: browserCountsChanges(),
   });
   const results = new ResultsBrowser({
     data,

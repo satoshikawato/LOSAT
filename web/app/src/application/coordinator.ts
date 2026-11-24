@@ -166,6 +166,8 @@ export interface CoordinatorDeps {
   readonly digest: (bytes: Uint8Array) => Promise<string>;
   /** Settles when the Data worker could not start or ended, with the error of its calls from then on. */
   readonly dataWorkerEnded?: Promise<Error>;
+  /** Runtime path and build identifier recorded on completed/failed tool runs. */
+  readonly toolRuntime?: { readonly path: 'serial' | 'fake'; readonly engineBuild: string };
 }
 
 /** Whether a request was queued, or why not (a refusal of its argv is the validation's). */
@@ -899,6 +901,9 @@ export class Coordinator {
           stdout,
           stderr,
           files: Object.freeze(files),
+          ...(this.deps.toolRuntime === undefined
+            ? {}
+            : { runtimePath: this.deps.toolRuntime.path, engineBuild: this.deps.toolRuntime.engineBuild }),
           ...(result.status === 0 ? {} : { error: `Exit status ${result.status}` }),
         },
       });

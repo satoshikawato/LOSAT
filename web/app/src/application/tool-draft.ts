@@ -6,6 +6,7 @@
 import type { DirectoryFile, ToolDescription } from 'losat/domain';
 import { isUnavailable, type ToolEngine, type ToolValidation } from 'losat/ports';
 import { splitOptions } from '../domain/argv';
+import { countsName } from '../domain/counts';
 import type { FieldValue, FormValues } from '../domain/parameters';
 import { buildWindowMaskerArgv, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
 import {
@@ -55,6 +56,7 @@ export type ToolCountsChoice =
       readonly name: string;
       readonly size: number;
     }
+  | { readonly kind: 'saved'; readonly taxid: number; readonly name: string; readonly size: number }
   | { readonly kind: 'file'; readonly file: File; readonly name: string; readonly size: number };
 
 export interface ToolDraftState {
@@ -84,6 +86,8 @@ export interface ToolDraftDeps {
   readonly engine: Pick<ToolEngine, 'describeTool' | 'validateTool'>;
   readonly data: Pick<DataGateway, 'inflateToSessionFile' | 'dropSessionFile' | 'getToolOutputFile'>;
   readonly enqueueToolAll: (requests: readonly ToolRequest[]) => Promise<EnqueueAllResult>;
+  /** Reads a counts file saved in this browser for a taxonomy ID (OPFS-backed File). */
+  readonly readSavedCounts?: (taxid: number) => Promise<File | undefined>;
   /** True while the Engine worker is running another job (so `validateTool` would wait behind it). */
   readonly isBusy?: () => boolean;
   readonly debounceMs?: number;
@@ -287,6 +291,14 @@ export class ToolDraft {
     this.scheduleValidation();
   }
 
+  setUstatSaved(taxid: number, size: number): void {
+    this.set({
+      ustatSource: savedCountsChoice(taxid, size),
+      message: undefined,
+    });
+    this.scheduleValidation();
+  }
+
   setUstatFile(file: File | undefined): void {
     this.set({
       ustatSource: fileCountsChoice(file),
@@ -303,6 +315,14 @@ export class ToolDraft {
   setConvertSession(runId: string, runNumber: number, key: string, name: string, size: number): void {
     this.set({
       convertSource: sessionCountsChoice(runId, runNumber, key, name, size),
+      message: undefined,
+    });
+    this.scheduleValidation();
+  }
+
+  setConvertSaved(taxid: number, size: number): void {
+    this.set({
+      convertSource: savedCountsChoice(taxid, size),
       message: undefined,
     });
     this.scheduleValidation();
@@ -606,6 +626,13 @@ export class ToolDraft {
     if (choice.kind === 'file') {
       return { name: choice.name, file: choice.file, origin: { kind: 'picked' } };
     }
+    if (choice.kind === 'saved') {
+      const file = await this.deps.readSavedCounts?.(choice.taxid);
+      if (file === undefined) {
+        throw new Error(`The saved counts for taxonomy ID ${choice.taxid} are no longer available.`);
+      }
+      return { name: choice.name, file, origin: { kind: 'saved', taxid: choice.taxid } };
+    }
     const file = await this.deps.data.getToolOutputFile(choice.runId, choice.key, choice.name);
     return { name: choice.name, file, origin: { kind: 'made', runNumber: choice.runNumber } };
   }
@@ -787,6 +814,10 @@ function errorMessage(error: unknown): string {
 
 function sessionCountsChoice(runId: string, runNumber: number, key: string, name: string, size: number): ToolCountsChoice {
   return { kind: 'session', runId, runNumber, key, name, size };
+}
+
+function savedCountsChoice(taxid: number, size: number): ToolCountsChoice {
+  return { kind: 'saved', taxid, name: countsName(taxid), size };
 }
 
 function fileCountsChoice(file: File | undefined): ToolCountsChoice {

@@ -374,20 +374,20 @@ impl Write for Writes {
 fn write_log_head(log: &mut dyn Write, title: &[u8]) {
     let (time, name) = ("T", "/d/x");
     let _ = write!(log, "\n\nBuilding a new DB, current time: {time}");
-    super::super::build_db::endl(log);
+    let _ = super::super::build_db::endl(log);
     let _ = write!(log, "New DB name:   {name}");
-    super::super::build_db::endl(log);
+    let _ = super::super::build_db::endl(log);
     let _ = log
         .write_all(b"New DB title:  ")
         .and_then(|()| log.write_all(title));
-    super::super::build_db::endl(log);
+    let _ = super::super::build_db::endl(log);
     let _ = write!(log, "Keep MBits: T");
-    super::super::build_db::endl(log);
-    super::super::build_db::endl(log);
+    let _ = super::super::build_db::endl(log);
+    let _ = super::super::build_db::endl(log);
 }
 
 /// The log on standard output (a pipe or a file) as NCBI's `cout`, over `device`.
-fn cout_log(device: &mut Writes) -> CoutLog<'_> {
+fn cout_log(device: &mut dyn Write) -> CoutLog<'_> {
     let stream = crate::cli::NcbiStdio::Cout {
         block: 4096,
         lines: false,
@@ -421,6 +421,61 @@ fn each_line_of_the_log_reaches_standard_output_in_one_write() {
             b"\n",
         ];
         assert_eq!(device.writes, lines);
+    }
+}
+
+/// A write of the log that finds the pipe closed ends the build at the end of its line
+/// (`build_db::endl`), and so does every later line, as SIGPIPE ends NCBI's process at that
+/// line's flush; a write that fails otherwise (`EAGAIN`) loses its line and ends nothing
+/// (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+#[cfg(not(windows))]
+#[test]
+fn a_closed_pipe_ends_the_log_at_its_line() {
+    /// A device whose pipe is closed from the write `closed_at` (from 1) on.
+    struct Closed {
+        count: usize,
+        closed_at: usize,
+    }
+    impl Write for Closed {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.count += 1;
+            if self.count >= self.closed_at {
+                return Err(std::io::ErrorKind::BrokenPipe.into());
+            }
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let lines = ["a", "b", "c"];
+    for closed_at in 1..=lines.len() {
+        let mut device = Closed {
+            count: 0,
+            closed_at,
+        };
+        let mut log = cout_log(&mut device);
+        let ends: Vec<bool> = lines
+            .iter()
+            .map(|line| {
+                let _ = log.write_all(line.as_bytes());
+                super::super::build_db::endl(&mut log).is_err_and(|error| error.is_closed_pipe())
+            })
+            .collect();
+        // Each line reaches the device in one write, at its flush.
+        let expected: Vec<bool> = (1..=lines.len()).map(|line| line >= closed_at).collect();
+        assert_eq!(ends, expected, "closed at write {closed_at}");
+    }
+    let mut device = Writes {
+        writes: Vec::new(),
+        fail: vec![2],
+        count: 0,
+    };
+    let mut log = cout_log(&mut device);
+    for line in lines {
+        let _ = log.write_all(line.as_bytes());
+        assert!(super::super::build_db::endl(&mut log).is_ok(), "{line}");
     }
 }
 

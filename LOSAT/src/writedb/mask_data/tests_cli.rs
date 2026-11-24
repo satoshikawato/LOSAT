@@ -34,7 +34,7 @@ use crate::seqdb::{SeqDb, SeqType};
 use crate::writedb::makeblastdb::run_with;
 use crate::writedb::tests::{
     files_named, log_with_markers, parse_makedb_words, replace_bytes, seqdb_fixtures, stored_date,
-    time_of, TempDir, LINUX,
+    time_of, ClosedAfter, TempDir, LINUX,
 };
 
 /// What a run of the command left on its two streams, with the directory of the input files cut
@@ -477,6 +477,63 @@ fn errors_of_makeblastdb_come_before_the_refusal_of_masks_ordered_by_address() {
         }
     }
     assert_eq!((compared, refused), (8, 2));
+}
+
+/// The build `tie` of `tests/seqdb/mask_order`, which LOSAT refuses at its end, with its log on a
+/// pipe whose reader closes after the line "Adding sequences from FASTA": the first line of
+/// `EndBuild` ends the build with exit status 0 and no message (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+/// exception 10), and its files are removed as the refusal removes them, so that no database whose
+/// masks are in LOSAT's order is left.
+#[cfg(not(windows))]
+#[test]
+fn a_refused_build_that_meets_a_closed_pipe_leaves_no_database() {
+    let dir = seqdb_fixtures().join("mask_order");
+    for version in ["5", "4"] {
+        let tmp = TempDir::new("mask-order-closed");
+        let words: Vec<String> = [
+            "-in",
+            &in_words(&[dir.join("in.fna")]),
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-title",
+            "in.fna",
+            "-mask_data",
+            &mask_words(&dir, "tie.asnt"),
+            "-out",
+            &tmp.base("db"),
+            "-blastdb_version",
+            version,
+        ]
+        .map(str::to_string)
+        .to_vec();
+        let args = parse_makedb_words(&words);
+        // Up to "Adding sequences from FASTA": the head of the log, "Keep MBits", "Maximum file
+        // size", "Mask file".
+        let mut log = ClosedAfter::new(8);
+        let mut err = Vec::new();
+        let status = run_with(
+            &args,
+            None,
+            Some(&time_of("Oct 20, 2026  1:00 PM")),
+            LINUX,
+            &mut std::io::empty(),
+            &mut log,
+            &mut err,
+        );
+        assert_eq!(status, 0, "v{version}");
+        assert_eq!(String::from_utf8_lossy(&err), "", "v{version}");
+        assert!(log.log.ends_with(b" seconds.\n"), "v{version}");
+        let left: String = files_named(&tmp.0, "db.")
+            .iter()
+            .map(|file| format!("{file}\n"))
+            .collect();
+        let expected = read(
+            &dir.join("expected"),
+            &format!("oob_later_sequence.v{version}.files"),
+        );
+        assert_eq!(left, expected, "v{version}: files left");
+    }
 }
 
 #[test]

@@ -112,6 +112,8 @@ pub(super) struct ReportView<'a> {
     /// What the XML2 and JSON reports do at each subject's `Hit`, by rank
     /// (`ListedTitles::hit_loads`, from `report_prep::prefetch_reported_subjects`).
     pub(super) hit_loads: &'a crate::report::db_subject::HitLoads,
+    /// The XML2 and JSON reports' loads by batch (`report_prep::ReportedPrefetch::xml2_loads`).
+    pub(super) xml2_loads: &'a Option<Vec<crate::algorithm::common::database::XmlBatchLoads>>,
     pub(super) engine_counts: &'a EngineCounts,
     pub(super) pairwise_hits: &'a Option<Arc<Vec<PairwiseHit>>>,
     pub(super) psiblast_hits_found: &'a Option<Vec<usize>>,
@@ -548,7 +550,7 @@ pub(super) fn write_xml(
         crate::algorithm::common::database::TaxdbNotes,
     ) = match (xml2_kind, listed_titles.as_ref(), database) {
         (Some(_), Some(titles), Some(database)) => {
-            titles.read_taxids(database, hit_lists, hit_loads)?
+            titles.read_taxids(database, hit_lists, hit_loads, view.xml2_loads)?
         }
         _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
     };

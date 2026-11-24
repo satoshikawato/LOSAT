@@ -2203,6 +2203,99 @@ fn with_range_lends_the_bytes_and_errors_of_read_range() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// Reads in OID order (`file::in_order_reads`) give every range the bytes and the errors of the
+/// file's own read, through a window of the file: ranges forward, back, across the end of a
+/// window, at the end of the file, longer than a window, and outside the file. The window serves
+/// a read inside it (a change of the file after the window was read is not seen), a file not
+/// opened `read_in_order` is read as before, and the windows go with the last guard.
+#[test]
+fn in_order_reads_give_the_files_bytes_and_errors_from_a_window() {
+    let dir = temp_dir("in-order");
+    let path = dir.join("long");
+    let bytes: Vec<u8> = (0..40_000u32).map(|i| (i * 7 % 251) as u8).collect();
+    std::fs::write(&path, &bytes).unwrap();
+    let plain = file::DbFile::open(&path).unwrap();
+    let ordered = file::DbFile::open(&path).unwrap().read_in_order();
+    let ranges = [
+        (0, 345),
+        (345, 700),
+        (16_000, 16_500),
+        (100, 108),
+        (39_990, 40_000),
+        (40_000, 40_000),
+        (20_000, 20_000),
+        (1_000, 30_000),
+        (39_000, 40_001),
+        (9, 3),
+        (16_383, 16_385),
+    ];
+    {
+        let _in_order = file::in_order_reads();
+        let _nested = file::in_order_reads();
+        for (start, end) in ranges {
+            let read = |file: &file::DbFile| {
+                (
+                    file.read_range(start, end).map_err(|e| e.to_string()),
+                    file.with_range(start, end, <[u8]>::to_vec)
+                        .map_err(|e| e.to_string()),
+                )
+            };
+            assert_eq!(read(&ordered), read(&plain), "{start}..{end}");
+        }
+        let mut word = [0u8; 4];
+        ordered.read_exact_at(&mut word, 39_996).unwrap();
+        assert_eq!(word[..], bytes[39_996..]);
+    }
+    let changed = |at: usize| {
+        let mut now = bytes.clone();
+        now[at..at + 4].copy_from_slice(b"XXXX");
+        std::fs::write(&path, &now).unwrap();
+    };
+    {
+        let _in_order = file::in_order_reads();
+        assert_eq!(
+            ordered.read_range(2_000, 2_010).unwrap(),
+            bytes[2_000..2_010]
+        );
+        changed(2_100);
+        // Inside the window of the read before: the bytes the window took.
+        assert_eq!(
+            ordered.read_range(2_100, 2_104).unwrap(),
+            bytes[2_100..2_104]
+        );
+        // A file not opened `read_in_order`, and a range past the window, read the file.
+        assert_eq!(plain.read_range(2_100, 2_104).unwrap(), b"XXXX");
+        changed(30_000);
+        assert_eq!(ordered.read_range(30_000, 30_004).unwrap(), b"XXXX");
+    }
+    changed(2_100);
+    // The guard is gone: the read goes to the file.
+    assert_eq!(ordered.read_range(2_100, 2_104).unwrap(), b"XXXX");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A window that cannot be read (here the file is shorter than its length when it was opened, so
+/// the window passes its end) leaves the read to the file: a range the file still holds is read.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_in_order_window_that_cannot_be_read_leaves_the_read_to_the_file() {
+    let dir = temp_dir("in-order-short");
+    let path = dir.join("short");
+    let bytes: Vec<u8> = (0..1_000u32).map(|i| (i % 256) as u8).collect();
+    std::fs::write(&path, &bytes).unwrap();
+    let handle = std::fs::File::open(&path).unwrap();
+    let file = file::DbFile::with_handle(&path, handle, 30_000)
+        .unwrap()
+        .read_in_order();
+    let _in_order = file::in_order_reads();
+    assert_eq!(file.read_range(10, 20).unwrap(), bytes[10..20]);
+    assert!(matches!(
+        file.read_range(990, 1_010),
+        Err(SeqDbError::Read { .. })
+    ));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn header_members_lengths_and_bytes() {
     let path = Path::new("test.phr");

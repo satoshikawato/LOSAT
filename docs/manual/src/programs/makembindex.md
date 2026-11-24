@@ -68,6 +68,8 @@ None in the files or the messages of a normal run.
 - A value that is not UTF-8 of any option but `-out` and `-logfile`, after NCBI's own argument errors and `-dryrun` (NCBI reads the bytes).
 - The database cases that `dustmasker` refuses, such as a definition line with bytes NCBI reads as `#` or a tax id with an empty `taxdb.btd`.
 - A database sequence without letters, which only a damaged database has: NCBI's `makembindex` stops with a null-pointer report.
+- A nucleotide FASTA record that NCBI packs into a piece of 4,294,967,293 bases or more (such as 4,294,967,293 letters of `A`, `C`, `G` and `T` in a row), where NCBI crashes. Other records of 4,294,967,296 letters or more are read as NCBI reads them.
+- With `-old_style_index true`, a FASTA record of 4,294,914,101 letters or more (modulo 2^32): the end of its last chunk wraps at 32 bits and NCBI reads past the end of the sequence.
 
 See [What LOSAT refuses](../refusals.md).
 

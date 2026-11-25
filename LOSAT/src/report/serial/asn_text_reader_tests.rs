@@ -920,22 +920,25 @@ fn long_single_line_visible_string_stays_bounded_and_matches_slice() {
     }
     text.push(b'"');
 
-    for skip in [false, true] {
-        let mut slice_out = Vec::new();
-        let mut slice_posts = Vec::new();
-        let mut rs = Reader::new(SliceSource::new(&text), "text", "test");
-        rs.visible_string(&mut slice_out, true, skip, &mut |_, line, byte, piece| {
-            slice_posts.push((line, byte, piece.to_vec()));
-        })
-        .unwrap();
+    fn run_visible<S: AsnSource>(
+        src: S,
+        skip: bool,
+    ) -> (Result<()>, Vec<u8>, Vec<(usize, u8, Vec<u8>)>, Reader<S>) {
+        let mut out = Vec::new();
+        let mut posts = Vec::new();
+        let mut r = Reader::new(src, "text", "test");
+        let res = r.visible_string(&mut out, true, skip, &mut |_, line, byte, piece| {
+            posts.push((line, byte, piece.to_vec()));
+        });
+        (res, out, posts, r)
+    }
 
-        let mut stream_out = Vec::new();
-        let mut stream_posts = Vec::new();
-        let mut r = Reader::new(StreamSource::new(text.as_slice(), &[]), "text", "test");
-        r.visible_string(&mut stream_out, true, skip, &mut |_, line, byte, piece| {
-            stream_posts.push((line, byte, piece.to_vec()));
-        })
-        .unwrap();
+    for skip in [false, true] {
+        let (s_res, slice_out, slice_posts, _) = run_visible(SliceSource::new(&text), skip);
+        s_res.unwrap();
+        let (t_res, stream_out, stream_posts, r) =
+            run_visible(StreamSource::new(text.as_slice(), &[]), skip);
+        t_res.unwrap();
 
         assert_eq!(stream_out, slice_out);
         assert_eq!(stream_posts, slice_posts);
@@ -949,26 +952,10 @@ fn long_single_line_visible_string_stays_bounded_and_matches_slice() {
 
     // Unended long single-line string: both sources report identical posts, error, and position.
     let unended = &text[..text.len() - 1];
-    let mut slice_out = Vec::new();
-    let mut slice_posts = Vec::new();
-    let mut rs = Reader::new(SliceSource::new(unended), "text", "test");
-    let err_slice = rs
-        .visible_string(&mut slice_out, true, false, &mut |_, line, byte, piece| {
-            slice_posts.push((line, byte, piece.to_vec()));
-        })
-        .unwrap_err();
-
-    let mut stream_out = Vec::new();
-    let mut stream_posts = Vec::new();
-    let mut r = Reader::new(StreamSource::new(unended, &[]), "text", "test");
-    let err_stream = r
-        .visible_string(&mut stream_out, true, false, &mut |_, line, byte, piece| {
-            stream_posts.push((line, byte, piece.to_vec()));
-        })
-        .unwrap_err();
-
+    let (s_res, slice_out, slice_posts, rs) = run_visible(SliceSource::new(unended), false);
+    let (t_res, stream_out, stream_posts, r) = run_visible(StreamSource::new(unended, &[]), false);
     assert_eq!(stream_out, slice_out);
     assert_eq!(stream_posts, slice_posts);
-    assert_eq!(err_stream, err_slice);
+    assert_eq!(t_res.unwrap_err(), s_res.unwrap_err());
     assert_eq!(r.pos, rs.pos);
 }

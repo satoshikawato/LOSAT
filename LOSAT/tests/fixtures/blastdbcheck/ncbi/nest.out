@@ -1,0 +1,15 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing first 1 and last 1 OIDs.
+
+Testing 3 volume(s).
+ <RUN>/cases/nest/p5
+ <RUN>/cases/nest/pmv.00
+ <RUN>/cases/nest/pmv.01
+ Result=SUCCESS. No errors reported for 3 volume(s).
+Testing 2 alias(es).
+ <RUN>/cases/nest/pmv.pal
+ <RUN>/cases/nest/top.pal
+ Result=SUCCESS. No errors reported for 2 alias(es).

@@ -149,6 +149,7 @@ fn entry_program_description(name: &str) -> &'static str {
         "makembindex" => "Create a BLAST database index.",
         "makeprofiledb" => "Application to create databases for rpsblast, cobalt and deltablast",
         "blastdb_aliastool" => "Application to create BLAST database aliases",
+        "blastdbcheck" => "BLAST database integrity and validity checking application",
         _ => "",
     }
 }
@@ -412,8 +413,7 @@ fn usage_name(argv: &[OsString]) -> &str {
 // NCBI keeps the bytes of an option's value.
 /// LOSAT's refusal of the value of `-name` that is not UTF-8 in `program` (its name in LOSAT's
 /// refusals, `MAKEBLASTDB`): NCBI's arguments keep the value's bytes. The one text of it, for the
-/// programs on `cli::reader` (`reader::refusal_after_read`) and of blastdb_aliastool
-/// (`ncbi_app::args::Args::text_values_refusal`).
+/// programs on `cli::reader` (`reader::refusal_after_read`).
 pub(crate) fn non_utf8_value_refusal(program: &str, name: &str) -> String {
     format!(
         "the value of -{name} is not UTF-8; NCBI BLAST+ reads the bytes of an option's value, \

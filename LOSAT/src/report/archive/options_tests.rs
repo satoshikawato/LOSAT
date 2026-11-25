@@ -236,7 +236,12 @@ fn the_applications_lists_are_their_handles_and_classes() {
         assert_eq!(service(kind, "blastp"), named, "{kind:?}");
         assert_eq!(kind.application(), application, "{kind:?}");
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
+}
+
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blastsetup_unit_test.cpp:225-238 SubjectIsNucleotide
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
+#[test]
+fn subject_is_nucleotide_follows_ncbi_program_types() {
     for (kind, nucleotide) in [
         (RequestKind::Blastn, true),
         (RequestKind::Blastp, false),

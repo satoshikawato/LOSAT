@@ -4773,6 +4773,9 @@ struct SamTarget<'a> {
 /// final hit list.
 struct BlastnReportInputs<'a> {
     queries: &'a [FastaRecord],
+    /// Under `-parse_deflines`, the scopes of the call's queries, which say how the XML family
+    /// formats show each result (`BatchResults::query_scopes`); `None` otherwise.
+    query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'a>>,
     /// The records whose letters the rows read (`queries`, and with `-query_loc` their input
     /// records, whole).
     query_records: crate::algorithm::blastn::pairwise::QueryRecords<'a>,
@@ -8266,6 +8269,7 @@ fn run_in_pool(
                 context_karlin: &[],
                 query_eff_searchsp: &[],
                 batches: &[],
+                query_scopes: None,
             },
             true,
             None,
@@ -8441,6 +8445,7 @@ fn run_in_pool(
                             context_karlin: &context_karlin,
                             query_eff_searchsp: &query_eff_searchsp,
                             batches: &batch_spans,
+                            query_scopes: query_scopes.as_ref(),
                         },
                     )
                 };
@@ -8551,6 +8556,7 @@ fn run_in_pool(
                         context_karlin: &context_karlin,
                         query_eff_searchsp: &query_eff_searchsp,
                         batches: &batch_spans,
+                        query_scopes: query_scopes.as_ref(),
                     },
                 )?;
                 batch_title_warnings.write(&mut *outputs.diagnostics, archive)?;
@@ -8821,6 +8827,7 @@ fn run_in_pool(
                                 context_karlin: &context_karlin,
                                 query_eff_searchsp: &query_eff_searchsp,
                                 batches: &batch_spans,
+                                query_scopes: query_scopes.as_ref(),
                             },
                             false,
                             None,
@@ -8976,6 +8983,7 @@ fn run_in_pool(
                     context_karlin: &context_karlin,
                     query_eff_searchsp: &query_eff_searchsp,
                     batches: &batch_spans,
+                    query_scopes: query_scopes.as_ref(),
                 },
             )?;
             warnings[start].write(&mut *outputs.diagnostics, archive)?;
@@ -9153,11 +9161,15 @@ fn run_in_pool(
                     // before (`shared::XmlCuts`), asked only where the batch's prefetch stops, by
                     // the record of their loads (`LoadedBefore`: a cut report loads nothing) and
                     // the texts that the cut reports left (`shared::XmlReportsBefore`).
+                    // The record that the report shows (`query_batch::xml_shown_of`).
+                    let shown_scopes = query_scopes.as_ref().map(|s| s.numbered_from(0));
                     let xml_cut = |query: usize| {
+                        let shown =
+                            crate::blastinput::query_batch::xml_shown_of(shown_scopes, query);
                         queries
                             .before(&kept, start)
                             .searched
-                            .get(query)
+                            .get(shown)
                             .is_some_and(|record| {
                                 crate::report::blast_xml::names::iteration_cut_before_hits(
                                     record.local_id.as_bytes(),
@@ -9401,6 +9413,7 @@ fn run_in_pool(
                         context_karlin: &batch_karlin,
                         query_eff_searchsp: &batch_searchsp,
                         batches: &[],
+                        query_scopes: None,
                     },
                     false,
                     written,
@@ -9454,6 +9467,7 @@ fn run_in_pool(
                 context_karlin: &context_karlin,
                 query_eff_searchsp: &query_eff_searchsp,
                 batches: &batch_spans,
+                query_scopes: query_scopes.as_ref(),
             },
             true,
             Some(parallel_pool),
@@ -9488,6 +9502,7 @@ fn run_in_pool(
                 context_karlin: &[],
                 query_eff_searchsp: &[],
                 batches: &[],
+                query_scopes: None,
             },
             true,
             written,
@@ -9680,6 +9695,10 @@ struct BatchResults<'a> {
     /// batch's prefetch counts its own Seq-aligns, `common::database::BatchPrefetch`); empty
     /// when the call is one batch.
     batches: &'a [std::ops::Range<usize>],
+    /// Under `-parse_deflines`, the run's scopes of the queries (numbered from the run's first),
+    /// how NCBI's XML family formats show each query's result (`QueryScopesFrom::xml_show`);
+    /// `None` for the reports that write no XML document of the queries.
+    query_scopes: Option<&'a crate::blastinput::query_batch::QueryScopes>,
 }
 
 /// Writes what NCBI has written when a query batch fails, before its error: the reports of
@@ -10109,6 +10128,9 @@ fn write_reports_untimed(
         },
         archive: args.archive.as_ref(),
         batch_spans: results.batches,
+        query_scopes: results
+            .query_scopes
+            .map(|scopes| scopes.numbered_from(written.queries)),
         both_strands: args.strand == "both",
         minus_strand: QueryStrand::from_option(&args.strand) == QueryStrand::Minus,
         tabular_taxdb_found: subjects.shown.tabular_taxdb_found,

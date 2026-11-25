@@ -183,33 +183,28 @@ fn memb_bit_and_masklist_match_frozen_ncbi_oracle() {
 }
 
 #[test]
-fn memb_bit_past_32_refuses_memberships_but_keeps_deterministic_paths() {
+fn memb_bit_past_32_refuses_memberships() {
     let root = TempDir::new("gt32");
     let db_dir = root.0.join("db");
     copy_tree(&fixtures().join("db"), &db_dir);
-    std::fs::write(db_dir.join("mb_33.pal"), "DBLIST pm5\nMEMB_BIT 33\n").unwrap();
-
-    let run_mb33 = |extra: &[&str]| {
-        let mut args: Vec<String> = ["blastdbcmd", "-db", "mb_33", "-dbtype", "prot"]
-            .into_iter()
-            .map(str::to_string)
-            .collect();
-        args.extend(extra.iter().map(|s| (*s).to_string()));
-        run_losat(&root.0, &db_dir, &args, &[])
-    };
-
-    // -info does not read filtered headers: deterministic, matches NCBI.
-    let (rc, out, err) = run_mb33(&["-info"]);
-    assert_eq!(rc, 0, "info stderr: {}", String::from_utf8_lossy(&err));
-    assert!(String::from_utf8_lossy(&out).contains("6 sequences;"));
-
-    // Entry without memberships (NP_000002.1): shift value is unused, deterministically erased.
-    let (rc, out, err) = run_mb33(&["-entry", "NP_000002.1", "-outfmt", "%o|%a"]);
-    assert_eq!(rc, 0, "nomemb stderr: {}", String::from_utf8_lossy(&err));
-    assert_eq!(out, b"");
 
     // Entry with memberships (P00001.1): refused explicitly (C++ shift UB).
-    let (rc, _out, err) = run_mb33(&["-entry", "P00001.1", "-outfmt", "%o|%a"]);
+    // Deterministic paths (`-info` and entries without memberships) are frozen in `cases.tsv`.
+    let args: Vec<String> = [
+        "blastdbcmd",
+        "-db",
+        "mb_33",
+        "-dbtype",
+        "prot",
+        "-entry",
+        "P00001.1",
+        "-outfmt",
+        "%o|%a",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+    let (rc, _out, err) = run_losat(&root.0, &db_dir, &args, &[]);
     assert_eq!(rc, 1);
     let err_str = String::from_utf8_lossy(&err);
     assert!(

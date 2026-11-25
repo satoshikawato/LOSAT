@@ -788,7 +788,7 @@ fn every_list_tests_each_line_as_ncbis() {
         utf8: false,
     };
     assert_eq!(
-        line_mask(Some(&rule), &[], &set),
+        line_mask(Some(&rule), &[], &set, None),
         Ok(Some(vec![false, true]))
     );
     // A taxid test that passes no line erases every line, as NCBI's read does (a header whose
@@ -798,7 +798,7 @@ fn every_list_tests_each_line_as_ncbis() {
         utf8: false,
     };
     assert_eq!(
-        line_mask(Some(&rule), &[], &none),
+        line_mask(Some(&rule), &[], &none, None),
         Ok(Some(vec![false, false]))
     );
     // NCBI's id test runs under any list (`x_HaveIdFilter`): a line without a Seq-id passes
@@ -809,7 +809,7 @@ fn every_list_tests_each_line_as_ncbis() {
         utf8: false,
     };
     assert_eq!(
-        line_mask(Some(&rule), &[], &bare),
+        line_mask(Some(&rule), &[], &bare, None),
         Ok(Some(vec![false, true]))
     );
     for empty in [
@@ -822,12 +822,15 @@ fn every_list_tests_each_line_as_ncbis() {
         DeflineRule::NegativePigs,
     ] {
         assert_eq!(
-            line_mask(Some(&empty), &[], &bare),
+            line_mask(Some(&empty), &[], &bare, None),
             Ok(Some(vec![false, true])),
             "{empty:?}"
         );
     }
-    assert_eq!(line_mask(None, &[], &bare), Ok(Some(vec![true, true])));
+    assert_eq!(
+        line_mask(None, &[], &bare, None),
+        Ok(Some(vec![true, true]))
+    );
     // A sequence of lines without Seq-ids keeps none: a seqid list's reads refuse it, a taxid
     // list's give no line (both drop its hits, `SeqDb::keeps_line`).
     let lineless = DeflineSet {
@@ -835,11 +838,11 @@ fn every_list_tests_each_line_as_ncbis() {
         utf8: false,
     };
     assert_eq!(
-        line_mask(Some(&DeflineRule::Seqids(Vec::new())), &[], &lineless),
+        line_mask(Some(&DeflineRule::Seqids(Vec::new())), &[], &lineless, None),
         Ok(None)
     );
     assert_eq!(
-        line_mask(Some(&rule), &[], &lineless),
+        line_mask(Some(&rule), &[], &lineless, None),
         Ok(Some(vec![false]))
     );
     let mut lines = vec![1, 2, 3];
@@ -1062,11 +1065,11 @@ fn the_id_tests_of_a_line_alternate_as_ncbis() {
         deflines: vec![line(general("ti", "abc")), line(general("PIG", "abc"))],
         utf8: false,
     };
-    let thrown = line_mask(Some(&rule), &[alias], &set).unwrap_err();
+    let thrown = line_mask(Some(&rule), &[alias], &set, None).unwrap_err();
     assert!(thrown
         .get_msg()
         .starts_with(b"Cannot convert string 'abc' to Int8"));
-    let thrown = line_mask(Some(&rule), &[], &set).unwrap_err();
+    let thrown = line_mask(Some(&rule), &[], &set, None).unwrap_err();
     assert!(thrown.get_msg().starts_with(b"CObject_id::GetId()"));
 }
 
@@ -1115,7 +1118,7 @@ fn memb_bit_short_circuits_id_lookups_and_user_passed_any() {
         utf8: false,
     };
     assert_eq!(
-        line_mask_with_memb(
+        line_mask(
             Some(&rule),
             &[Arc::clone(&alias)],
             &set,
@@ -1124,7 +1127,7 @@ fn memb_bit_short_circuits_id_lookups_and_user_passed_any() {
         Ok(Some(vec![false, false]))
     );
     assert_eq!(
-        line_mask_with_memb(Some(&rule), &[], &set, Some(&[false, true])),
+        line_mask(Some(&rule), &[], &set, Some(&[false, true])),
         Ok(Some(vec![false, true]))
     );
     // Line 0 matches `rule` but fails MEMB_BIT; line 1 passes MEMB_BIT but fails `rule`:
@@ -1134,7 +1137,7 @@ fn memb_bit_short_circuits_id_lookups_and_user_passed_any() {
         utf8: false,
     };
     assert_eq!(
-        line_mask_with_memb(Some(&rule), &[], &set2, Some(&[false, true])),
+        line_mask(Some(&rule), &[], &set2, Some(&[false, true])),
         Ok(None)
     );
 }

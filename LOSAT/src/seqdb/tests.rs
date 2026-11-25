@@ -1811,9 +1811,10 @@ fn a_masklist_name_not_utf8_is_read_by_its_bytes() {
 }
 
 #[test]
-fn every_filtering_alias_key_is_rejected() {
+fn alias_filter_keys_open_or_refuse_as_ncbi() {
     let dir = temp_dir("keys");
     copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    copy_database("prot_v5", &["pin", "psq", "phr", "pdb"], &dir);
     let name = dir.join("keyed").to_str().unwrap().to_string();
     // The id lists are read: a missing file is NCBI's memory map error, and a version 4
     // database reads no TAXIDLIST (it still makes NCBI scan the totals).
@@ -1837,6 +1838,19 @@ fn every_filtering_alias_key_is_rejected() {
     )
     .unwrap();
     assert_eq!(SeqDb::open(&name, SeqType::Protein).unwrap().num_seqs(), 10);
+    // Version 5 SEQIDLIST and TAXIDLIST remain refused explicitly.
+    for key in ["SEQIDLIST", "TAXIDLIST"] {
+        std::fs::write(
+            dir.join("keyed.pal"),
+            format!("TITLE t\nDBLIST prot_v5\n{key} 1\n"),
+        )
+        .unwrap();
+        let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
+        assert!(
+            matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains(key)),
+            "v5 {key}: {error}"
+        );
+    }
     // MASKLIST is read (the GI-indexed masks, `gi_mask_list`); MEMB_BIT is read and enables
     // definition-line filtering (`drops_lineless_hits`) when non-zero.
     for (bit, drops) in [(1, true), (0, false)] {

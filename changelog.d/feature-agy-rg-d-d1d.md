@@ -1,9 +1,8 @@
-- BLAST database alias files: read `MEMB_BIT` across `blastdbcmd`, `blastdbcheck`, and every search
-  program (`blastp`, `blastn`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`),
-  matching NCBI BLAST+ 2.17.0: parses via `NStr::StringToUInt` between `SEQIDLIST` and `TAXIDLIST`,
-  applies per volume in `x_ComputeFilters` with NCBI's `MEMB_BIT error: conflicting bit found.`
-  (including `seqdbvol.hpp:881` in `blastdbcheck -verbosity 3/4`), filters `Blast-def-line.memberships`
-  (first entry) before id lists and `OID_MASK_TYPE`, suppresses the top iteration range when combined
-  with `FIRST_OID`/`LAST_OID`, and refuses values above 32 where a definition line carries membership
-  bits (C++ 32-bit shift undefined behaviour). Also calls `build_oid_list` in `SeqDb::read_gi_mask_block`
-  so `MASKLIST` reads report deferred alias OID-list errors as NCBI's `x_GetSeqGI` does.
+- BLAST database alias files with `MEMB_BIT` are now read as NCBI BLAST+ 2.17.0 reads them in
+  `blastdbcmd`, `blastdbcheck` and the search programs (`blastp`, `blastn`, `blastx`, `tblastn`,
+  `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`): definition lines whose first membership bitmask
+  lacks the bit are hidden, a value of `0` disables filtering, and conflicting bits on the same
+  volume stop with NCBI's error. `MEMB_BIT` above 32 is refused where a definition line carries
+  membership bits, and an RPS profile left without definition lines in a multi-volume database is
+  refused where it would be reported. A database with GI-indexed masks (`MASKLIST`) now reports an
+  alias file's OID list error at its first mask read, as NCBI does.

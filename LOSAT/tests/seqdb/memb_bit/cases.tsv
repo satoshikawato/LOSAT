@@ -10,6 +10,17 @@ bdc_mb1_fasta	db	blastdbcmd	-db	mb_1	-dbtype	prot	-entry	all
 bdc_mb1_ctrla	db	blastdbcmd	-db	mb_1	-dbtype	prot	-entry	all	-ctrl_a
 bdc_mb1_target	db	blastdbcmd	-db	mb_1	-dbtype	prot	-entry	P00001.1	-target_only	-outfmt	%o|%a|%t
 bdc_mb1_info	db	blastdbcmd	-db	mb_1	-dbtype	prot	-info
+bdc_mb33_info	db	blastdbcmd	-db	mb_33	-dbtype	prot	-info
+bdc_mb33_nomemb	db	blastdbcmd	-db	mb_33	-dbtype	prot	-entry	NP_000002.1	-outfmt	%o|%a
+bdc_mb1_nomemb_oat	db	blastdbcmd	-db	mb_1	-dbtype	prot	-entry	NP_000002.1	-outfmt	%o|%a|%t
+bdc_mb1_nomemb_fasta	db	blastdbcmd	-db	mb_1	-dbtype	prot	-entry	NP_000002.1
+bdc_mb1_nomemb_ol	db	blastdbcmd	-db	mb_1	-dbtype	prot	-entry	NP_000002.1	-outfmt	%o %l
+bdc_mb1_drop_gi	db	blastdbcmd	-db	mb_1	-dbtype	prot	-entry	1002	-outfmt	%o|%a|%t
+bdc_mb1_drop_gi_to	db	blastdbcmd	-db	mb_1	-dbtype	prot	-entry	1002	-target_only	-outfmt	%o|%a|%t
+bdc_mb1_drop_gi_to_fa	db	blastdbcmd	-db	mb_1	-dbtype	prot	-entry	1002	-target_only
+bdc_mb2_drop_sp	db	blastdbcmd	-db	mb_2	-dbtype	prot	-entry	P00001.1	-outfmt	%o|%a|%t
+bdc_mb2_drop_sp_to	db	blastdbcmd	-db	mb_2	-dbtype	prot	-entry	P00001.1	-target_only	-outfmt	%o|%a|%t
+bdc_mb2_drop_sp_to_fa	db	blastdbcmd	-db	mb_2	-dbtype	prot	-entry	P00001.1	-target_only
 bdc_mb_abc	db	blastdbcmd	-db	mb_abc	-dbtype	prot	-info
 bdc_mb_neg1	db	blastdbcmd	-db	mb_neg1	-dbtype	prot	-info
 bdc_mb_empty	db	blastdbcmd	-db	mb_empty	-dbtype	prot	-info

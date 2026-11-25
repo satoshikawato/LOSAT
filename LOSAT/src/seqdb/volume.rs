@@ -990,7 +990,7 @@ impl Volume {
     // (review 2 G1 of line RG D1c-1b).
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2023-2034
     // The search's list and the alias files' lists attached to the volume test each line's
-    // Seq-ids as NCBI's filtered header read does (`filter::line_mask_with_memb`): an exception of
+    // Seq-ids as NCBI's filtered header read does (`filter::line_mask`): an exception of
     // NCBI's lookups (a `ti` id whose string tag is no number, a `BL_ORD_ID` or `PIG` id with a
     // string tag) ends the read with NCBI's exception (`SeqDbError::Ncbi`). Lines that `memb_kept`
     // already rejected are skipped before any list lookup or taxid test.
@@ -1034,7 +1034,7 @@ impl Volume {
             set
         };
         let lists = alias.map_or(&[][..], |lines| lines.lists.as_slice());
-        super::filter::line_mask_with_memb(
+        super::filter::line_mask(
             user.map(|line_rule| &*line_rule.rule),
             lists,
             set,

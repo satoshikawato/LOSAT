@@ -497,25 +497,13 @@ impl DeflineRule {
 // Seq-ids or whose taxids in the header are not those of the lookup files (makeblastdb writes
 // both from the same lines and gives each line a taxid, 0 where none is known; review 2 of line
 // RG D1c, R2): the hits leave the reports the same way (`SeqDb::drops_lineless_hits`).
-/// Which of the definition lines of `set` NCBI's filtered header read keeps, in order, under
-/// the search's list rule `rule` and the alias files' lists `lists` attached to the volume
-/// (none: empty): `None` when a seqid rule passes no line; NCBI's exception of a lookup.
-#[cfg(test)]
-pub(crate) fn line_mask(
-    rule: Option<&DeflineRule>,
-    lists: &[Arc<super::id_list::AliasIdList>],
-    set: &DeflineSet,
-) -> Result<Option<Vec<bool>>, NcbiException> {
-    line_mask_with_memb(rule, lists, set, None)
-}
-
 /// Which of the definition lines of `set` NCBI's filtered header read keeps, in order, after
 /// `MEMB_BIT` (`memb_kept`) under the search's list rule `rule` and the alias files' lists
 /// `lists` attached to the volume (none: empty): a line whose `memb_kept` entry is `false` is
 /// dropped before its Seq-ids or taxids are tested (`seqdbvol.cpp:2008-2050`), so no lookup
 /// exception runs on it and it does not count toward `user_passed_any`. Returns `None` when a
 /// seqid rule passes no line, or NCBI's exception of a lookup.
-pub(crate) fn line_mask_with_memb(
+pub(crate) fn line_mask(
     rule: Option<&DeflineRule>,
     lists: &[Arc<super::id_list::AliasIdList>],
     set: &DeflineSet,

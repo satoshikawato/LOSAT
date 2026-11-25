@@ -225,16 +225,17 @@ fn check_range(file: &DbFile, start: i64, end: i64, what: &str) -> Result<(), Se
     if start < end && end as u64 <= file.len() && end >= 0 {
         return Ok(());
     }
+    const SEQDBFILE_HPP: &str = "include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp";
     let assert = if start >= end {
         super::SeqDbAssert {
             cond: "start < end",
-            file: "include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp",
+            file: SEQDBFILE_HPP,
             line: 128,
         }
     } else {
         super::SeqDbAssert {
             cond: "m_Length >= end",
-            file: "include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp",
+            file: SEQDBFILE_HPP,
             line: 129,
         }
     };

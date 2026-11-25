@@ -554,26 +554,31 @@ impl<'a> Reader<'a> {
     }
 
     #[inline(always)]
-    fn push_frame(&mut self, frame: Frame) {
+    fn with_posts(&mut self, f: impl FnOnce(&mut PostCollector)) {
         if let Some(collector) = self.posts.as_mut() {
-            collector.stack.push(frame);
+            f(collector);
         }
+    }
+
+    #[inline(always)]
+    fn push_frame(&mut self, frame: Frame) {
+        self.with_posts(|c| c.stack.push(frame));
     }
 
     #[inline(always)]
     fn pop_frame(&mut self) {
-        if let Some(collector) = self.posts.as_mut() {
-            collector.stack.pop();
-        }
+        self.with_posts(|c| {
+            c.stack.pop();
+        });
     }
 
     #[inline(always)]
     fn set_top_frame(&mut self, frame: Frame) {
-        if let Some(collector) = self.posts.as_mut() {
-            if let Some(top) = collector.stack.last_mut() {
+        self.with_posts(|c| {
+            if let Some(top) = c.stack.last_mut() {
                 *top = frame;
             }
-        }
+        });
     }
 
     /// Whether the reader read a UTF8String where a VisibleString is expected, which NCBI's

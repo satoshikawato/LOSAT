@@ -459,42 +459,31 @@ fn must_refuse(name: &str) -> bool {
 /// `PD-LOSAT-NCBI-DEFECTS`): exact arithmetic avoids NCBI's signed overflow false error, keeping
 /// all non-overflow warnings (`a_ov2` `.msk` extension warning) and returning exit status 0.
 fn expected_widened(name: &str) -> Run {
-    let (out, rc): (&[u8], i32) = match name {
-        "a_ov1" => (
-            concat!(
-                "Writing messages to <stdout> at verbosity (Detailed)\n",
-                "ISAM testing is ENABLED.\n",
-                "Legacy testing is DISABLED.\n",
-                "TaxID testing is DISABLED.\n",
-                "Testing every 100-th OID.\n",
-                "\n",
-                "Testing 1 volume(s).\n",
-                " <RUN>/cases/a/p5\n",
-                " Result=SUCCESS. No errors reported for 1 volume(s).\n",
-                "Testing 1 alias(es).\n",
-                " <RUN>/cases/a/ov1.pal\n",
-                " Result=SUCCESS. No errors reported for 1 alias(es).\n",
-            )
-            .as_bytes(),
-            0,
-        ),
+    let alias_ok = |alias: &str, warn: &str| -> Vec<u8> {
+        format!(
+            "Writing messages to <stdout> at verbosity (Detailed)\n\
+             ISAM testing is ENABLED.\n\
+             Legacy testing is DISABLED.\n\
+             TaxID testing is DISABLED.\n\
+             Testing every 100-th OID.\n\
+             \n\
+             Testing 1 volume(s).\n\
+              <RUN>/cases/a/p5\n\
+              Result=SUCCESS. No errors reported for 1 volume(s).\n\
+             Testing 1 alias(es).\n\
+              <RUN>/cases/a/{alias}\n\
+             {warn}\
+              Result=SUCCESS. No errors reported for 1 alias(es).\n"
+        )
+        .into_bytes()
+    };
+    let (out, rc): (Vec<u8>, i32) = match name {
+        "a_ov1" => (alias_ok("ov1.pal", ""), 0),
         "a_ov2" => (
-            concat!(
-                "Writing messages to <stdout> at verbosity (Detailed)\n",
-                "ISAM testing is ENABLED.\n",
-                "Legacy testing is DISABLED.\n",
-                "TaxID testing is DISABLED.\n",
-                "Testing every 100-th OID.\n",
-                "\n",
-                "Testing 1 volume(s).\n",
-                " <RUN>/cases/a/p5\n",
-                " Result=SUCCESS. No errors reported for 1 volume(s).\n",
-                "Testing 1 alias(es).\n",
-                " <RUN>/cases/a/ov2.pal\n",
+            alias_ok(
+                "ov2.pal",
                 "  <RUN>/cases/a/ov2.pal / AliasFileTest:   [WARNING] oidlist file gi.gil does not have .msk extension\n",
-                " Result=SUCCESS. No errors reported for 1 alias(es).\n",
-            )
-            .as_bytes(),
+            ),
             0,
         ),
         "ends_intmin" => (
@@ -517,12 +506,13 @@ fn expected_widened(name: &str) -> Run {
                 "\n",
                 "Total errors: 1\n",
             )
-            .as_bytes(),
+            .as_bytes()
+            .to_vec(),
             1,
         ),
         _ => panic!("unexpected approved widened row {name}"),
     };
-    (out.to_vec(), Vec::new(), rc, String::new())
+    (out, Vec::new(), rc, String::new())
 }
 
 #[test]
@@ -640,6 +630,17 @@ fn zero_page_cross_program_parity() {
     .unwrap();
     let q_prot_s = q_prot.to_str().unwrap();
     let q_nucl_s = q_nucl.to_str().unwrap();
+    let blastp_args = ["-query", q_prot_s, "-db", "p4", "-outfmt", "6"];
+    let prot_all_args = [
+        "-db", "p4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %l %t",
+    ];
+    let run_ok = |dir: &Path, sub: &str, args: &[&str]| -> Vec<u8> {
+        let (out, err, rc) = run_prog(dir, sub, args);
+        assert_eq!((rc, err.as_slice()), (0, b"".as_slice()));
+        out
+    };
+    let run_bp = |dir: &Path| run_prog(dir, "blastp", &blastp_args);
+    let run_bp_ok = |dir: &Path| run_ok(dir, "blastp", &blastp_args);
 
     // 1. p4_pin_10: blastdbcmd -info sees 0 sequences; blastp exits 3 with memory map error.
     let d = root.join("p4_pin10");
@@ -650,18 +651,13 @@ fn zero_page_cross_program_parity() {
         .unwrap()
         .set_len(10)
         .unwrap();
-    let (out, err, rc) = run_prog(&d, "blastdbcmd", &["-db", "p4", "-dbtype", "prot", "-info"]);
-    assert_eq!((rc, err.as_slice()), (0, b"".as_slice()));
+    let out = run_ok(&d, "blastdbcmd", &["-db", "p4", "-dbtype", "prot", "-info"]);
     assert!(
         text(&out).contains("\t0 sequences; 0 total residues\n"),
         "{}",
         text(&out)
     );
-    let (out, err, rc) = run_prog(
-        &d,
-        "blastp",
-        &["-query", q_prot_s, "-db", "p4", "-outfmt", "6"],
-    );
+    let (out, err, rc) = run_bp(&d);
     assert_eq!((rc, out.as_slice()), (3, b"".as_slice()));
     assert_eq!(err, b"LOSAT engine error: Database memory map file error\n");
 
@@ -675,14 +671,7 @@ fn zero_page_cross_program_parity() {
         .unwrap()
         .set_len(pin_len - 8)
         .unwrap();
-    let (out, err, rc) = run_prog(
-        &d,
-        "blastdbcmd",
-        &[
-            "-db", "p4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %l %t",
-        ],
-    );
-    assert_eq!((rc, err.as_slice()), (0, b"".as_slice()));
+    let out = run_ok(&d, "blastdbcmd", &prot_all_args);
     assert_eq!(
         text(&out),
         concat!(
@@ -697,12 +686,7 @@ fn zero_page_cross_program_parity() {
             "8 -1 local protein\n",
         )
     );
-    let (out, err, rc) = run_prog(
-        &d,
-        "blastp",
-        &["-query", q_prot_s, "-db", "p4", "-outfmt", "6"],
-    );
-    assert_eq!((rc, err.as_slice()), (0, b"".as_slice()));
+    let out = run_bp_ok(&d);
     assert_eq!(
         text(&out),
         "q\tXP_000104.1\t100.000\t40\t0\t0\t1\t40\t1\t40\t2.85e-28\t82.8\n\
@@ -719,12 +703,7 @@ fn zero_page_cross_program_parity() {
         .unwrap()
         .set_len(psq_len / 2)
         .unwrap();
-    let (out, err, rc) = run_prog(
-        &d,
-        "blastp",
-        &["-query", q_prot_s, "-db", "p4", "-outfmt", "6"],
-    );
-    assert_eq!((rc, err.as_slice()), (0, b"".as_slice()));
+    let out = run_bp_ok(&d);
     assert_eq!(
         text(&out),
         "q\tXP_000104.1\t100.000\t31\t0\t0\t1\t31\t1\t31\t2.62e-21\t65.1\n\
@@ -742,13 +721,7 @@ fn zero_page_cross_program_parity() {
         .unwrap()
         .set_len(phr_len / 2)
         .unwrap();
-    let (out, err, rc) = run_prog(
-        &d,
-        "blastdbcmd",
-        &[
-            "-db", "p4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %l %t",
-        ],
-    );
+    let (out, err, rc) = run_prog(&d, "blastdbcmd", &prot_all_args);
     assert_eq!(rc, 1);
     assert_eq!(
         text(&out),
@@ -766,11 +739,7 @@ fn zero_page_cross_program_parity() {
         err_s.ends_with("Error: [blastdbcmd] byte 25: member seqid expected\n"),
         "{err_s}"
     );
-    let (out, err, rc) = run_prog(
-        &d,
-        "blastp",
-        &["-query", q_prot_s, "-db", "p4", "-outfmt", "6"],
-    );
+    let (out, err, rc) = run_bp(&d);
     assert_eq!((rc, out.as_slice()), (255, b"".as_slice()));
     assert_eq!(
         text(&err),
@@ -787,27 +756,23 @@ fn zero_page_cross_program_parity() {
         .unwrap()
         .set_len(nsq_len / 2)
         .unwrap();
-    let (out, err, rc) = run_prog(
+    let out = run_ok(
         &d,
         "blastdbcmd",
         &[
             "-db", "n4", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o %l %t",
         ],
     );
-    assert_eq!((rc, err.as_slice()), (0, b"".as_slice()));
     assert_eq!(
         text(&out),
         "0 120 n one\n1 90 n two predicted\n2 148 n three\n3 80 n four\n"
     );
-    let (out, err, rc) = run_prog(
+    let out = run_ok(
         &d,
         "blastn",
         &["-query", q_nucl_s, "-db", "n4", "-outfmt", "6"],
     );
-    assert_eq!(
-        (rc, out.as_slice(), err.as_slice()),
-        (0, b"".as_slice(), b"".as_slice())
-    );
+    assert!(out.is_empty(), "{}", text(&out));
 
     let _ = fs::remove_dir_all(&root);
 }

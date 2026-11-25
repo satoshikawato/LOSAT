@@ -292,6 +292,11 @@ impl Volume {
             .ok_or_else(|| self.index.sequence_changed(oid, 2))
     }
 
+    fn protein_seq_bounds(&self, oid: u32) -> Result<(u64, u64), SeqDbError> {
+        self.check_range(oid, oid.saturating_add(1))?;
+        self.index.sequence_range(oid)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
     /// The signed 32-bit length of protein `oid` (volume-relative) as NCBI's `GetSeqLengthProt`
     /// returns it: `end_offset - 1 - start_offset` in 32-bit signed arithmetic (negative for
@@ -301,8 +306,7 @@ impl Volume {
             self.index.seqtype == SeqType::Protein,
             "protein length of a nucleotide volume"
         );
-        self.check_range(oid, oid.saturating_add(1))?;
-        let (start, end) = self.index.sequence_range(oid)?;
+        let (start, end) = self.protein_seq_bounds(oid)?;
         Ok((end as i32).wrapping_sub(1).wrapping_sub(start as i32))
     }
 
@@ -316,9 +320,9 @@ impl Volume {
             self.index.seqtype == SeqType::Protein,
             "protein sequence length of a nucleotide volume"
         );
-        self.check_range(oid, oid.saturating_add(1))?;
+        let bounds = self.protein_seq_bounds(oid)?;
+        let (start, end) = bounds;
         let file = self.seq_file()?;
-        let (start, end) = self.index.sequence_range(oid)?;
         if file.is_empty() {
             return Err(SeqDbError::NcbiCrashes {
                 path: file.path().to_path_buf(),

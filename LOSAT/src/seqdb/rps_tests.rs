@@ -527,49 +527,47 @@ fn cdd_header_readers_match_ncbi_exceptions_zero_page_and_refusals() {
         base.with_extension("pin"),
     )
     .unwrap();
-    // Missing `.aux` fails at rps_aux.cpp:186.
-    let err = read_cdd_rps_header(b"c", &sp, "BLASTDBCHECK").unwrap_err();
-    let RpsHeaderError::Ncbi(exc) = err else {
-        panic!("expected Ncbi error for missing .aux, got {err:?}");
+    let read_rps = || read_cdd_rps_header(b"c", &sp, "BLASTDBCHECK");
+    let assert_ncbi = |res: RpsHeaderResult, parts: &[&str]| {
+        let RpsHeaderError::Ncbi(exc) = res.unwrap_err() else {
+            panic!("expected Ncbi error for {parts:?}");
+        };
+        let text = String::from_utf8(exc.ncbi_what()).unwrap();
+        for part in parts {
+            assert!(text.contains(part), "missing {part:?} in:\n{text}");
+        }
     };
-    let text = String::from_utf8(exc.ncbi_what()).unwrap();
-    assert!(text.contains("rps_aux.cpp\", line 186"), "{text}");
-    assert!(
-        text.contains("Cannot open RPS-BLAST auxiliary file: "),
-        "{text}"
+    const PROFILE_FILE_PREFIX: &str = "RPS BLAST profile file (";
+
+    // Missing `.aux` fails at rps_aux.cpp:186.
+    assert_ncbi(
+        read_rps(),
+        &[
+            "rps_aux.cpp\", line 186",
+            "Cannot open RPS-BLAST auxiliary file: ",
+        ],
     );
 
     // Empty `.aux` is accepted by `read_cdd_rps_header`; missing `.loo` chains mmap error.
     std::fs::write(base.with_extension("aux"), b"").unwrap();
-    let err = read_cdd_rps_header(b"c", &sp, "BLASTDBCHECK").unwrap_err();
-    let RpsHeaderError::Ncbi(exc) = err else {
-        panic!("expected Ncbi error for missing .loo, got {err:?}");
-    };
-    let text = String::from_utf8(exc.ncbi_what()).unwrap();
-    assert!(text.contains("ncbifile.cpp\", line 5754"), "{text}");
-    assert!(text.contains("rps_aux.cpp\", line 259"), "{text}");
+    assert_ncbi(
+        read_rps(),
+        &["ncbifile.cpp\", line 5754", "rps_aux.cpp\", line 259"],
+    );
 
     // 0-byte `.loo` is refused (NCBI crashes dereferencing NULL mmap).
     std::fs::write(base.with_extension("loo"), b"").unwrap();
-    assert!(matches!(
-        read_cdd_rps_header(b"c", &sp, "BLASTDBCHECK"),
-        Err(RpsHeaderError::Refused(_))
-    ));
+    assert!(matches!(read_rps(), Err(RpsHeaderError::Refused(_))));
 
     // 2-byte `.loo` reads zeros from the first 4 KiB page and fails magic check.
     std::fs::write(base.with_extension("loo"), b"\x01\x02").unwrap();
-    let err = read_cdd_rps_header(b"c", &sp, "BLASTDBCHECK").unwrap_err();
-    let RpsHeaderError::Ncbi(exc) = err else {
-        panic!("expected Ncbi error for bad .loo magic, got {err:?}");
-    };
-    let text = String::from_utf8(exc.ncbi_what()).unwrap();
-    assert!(text.contains("rps_aux.cpp\", line 298"), "{text}");
-    assert!(
-        text.contains("RPS BLAST profile file (")
-            && text.contains(
-                ".loo) is either corrupt or constructed for an incompatible architecture"
-            ),
-        "{text}"
+    assert_ncbi(
+        read_rps(),
+        &[
+            "rps_aux.cpp\", line 298",
+            PROFILE_FILE_PREFIX,
+            ".loo) is either corrupt or constructed for an incompatible architecture",
+        ],
     );
 
     // Valid `.loo` + valid `.rps` (2 profiles, offsets [10, 20]).
@@ -580,37 +578,28 @@ fn cdd_header_readers_match_ncbi_exceptions_zero_page_and_refusals() {
     rps.extend_from_slice(&20i32.to_le_bytes());
     std::fs::write(base.with_extension("loo"), RPS_MAGIC_NUM.to_le_bytes()).unwrap();
     std::fs::write(base.with_extension("rps"), &rps).unwrap();
-    let hdr = read_cdd_rps_header(b"c", &sp, "BLASTDBCHECK").unwrap();
+    let hdr = read_rps().unwrap();
     assert_eq!(hdr.magic, RPS_MAGIC_NUM);
     assert_eq!(hdr.num_profiles, 2);
     assert_eq!(hdr.offsets, vec![10, 20]);
 
     // Missing `.freq` rethrows at rps_aux.cpp:601; bad `.wcounts` magic uses profile-file message.
-    let err = read_cdd_freqs_header(b"c", &sp, CddFreqsKind::Freq, 2, "BLASTDBCHECK").unwrap_err();
-    let RpsHeaderError::Ncbi(exc) = err else {
-        panic!("expected Ncbi error for missing .freq, got {err:?}");
-    };
-    let text = String::from_utf8(exc.ncbi_what()).unwrap();
-    assert!(text.contains("rps_aux.cpp\", line 601"), "{text}");
-    assert!(
-        text.contains("contains no frequency ratios needed for composition-based statistics"),
-        "{text}"
+    assert_ncbi(
+        read_cdd_freqs_header(b"c", &sp, CddFreqsKind::Freq, 2, "BLASTDBCHECK"),
+        &[
+            "rps_aux.cpp\", line 601",
+            "contains no frequency ratios needed for composition-based statistics",
+        ],
     );
 
     std::fs::write(base.with_extension("wcounts"), b"\x01\x02").unwrap();
-    let err =
-        read_cdd_freqs_header(b"c", &sp, CddFreqsKind::Wcounts, 2, "BLASTDBCHECK").unwrap_err();
-    let RpsHeaderError::Ncbi(exc) = err else {
-        panic!("expected Ncbi error for bad .wcounts magic, got {err:?}");
-    };
-    let text = String::from_utf8(exc.ncbi_what()).unwrap();
-    assert!(text.contains("rps_aux.cpp\", line 395"), "{text}");
-    assert!(
-        text.contains("RPS BLAST profile file (")
-            && text.contains(
-                ".wcounts) is either corrupt or constructed for an incompatible architecture"
-            ),
-        "{text}"
+    assert_ncbi(
+        read_cdd_freqs_header(b"c", &sp, CddFreqsKind::Wcounts, 2, "BLASTDBCHECK"),
+        &[
+            "rps_aux.cpp\", line 395",
+            PROFILE_FILE_PREFIX,
+            ".wcounts) is either corrupt or constructed for an incompatible architecture",
+        ],
     );
 
     // Valid `.obsr` with magic 28 reads num_profiles without reading offsets.

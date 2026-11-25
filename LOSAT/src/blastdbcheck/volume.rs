@@ -237,24 +237,36 @@ impl<'a> Volume<'a, '_> {
         prefix: &[u8],
         state: &mut CddDelta,
     ) -> Result<u32, Stop> {
+        let log_hdr_err = |log: &mut Log<'_>,
+                           state: &mut CddDelta,
+                           err: RpsHeaderError,
+                           parts: &[&[u8]]|
+         -> Result<(), Stop> {
+            match err {
+                RpsHeaderError::Ncbi(exception) => {
+                    log.line(BRIEF, parts)?;
+                    log.what(prefix, Some(&exception.what()), &|| String::new())?;
+                    state.num_failures += 1;
+                    Ok(())
+                }
+                RpsHeaderError::Refused(reason) => Err(Stop::Refused(reason)),
+            }
+        };
         match read_cdd_rps_header(self.name, self.path, PROGRAM) {
             Ok(header) => {
                 state.magic_number = header.magic;
                 state.num_profiles = header.num_profiles;
                 state.offsets.extend_from_slice(&header.offsets);
             }
-            Err(RpsHeaderError::Ncbi(exception)) => {
-                log.line(
-                    BRIEF,
-                    &[
-                        prefix,
-                        b"  [ERROR] caught exception while reading rps header ",
-                    ],
-                )?;
-                log.what(prefix, Some(&exception.what()), &|| String::new())?;
-                state.num_failures += 1;
-            }
-            Err(RpsHeaderError::Refused(reason)) => return Err(Stop::Refused(reason)),
+            Err(err) => log_hdr_err(
+                log,
+                state,
+                err,
+                &[
+                    prefix,
+                    b"  [ERROR] caught exception while reading rps header ",
+                ],
+            )?,
         }
         if state.num_failures != 0 {
             return Ok(state.num_failures);
@@ -311,20 +323,17 @@ impl<'a> Volume<'a, '_> {
                         }
                     }
                 }
-                Err(RpsHeaderError::Ncbi(exception)) => {
-                    log.line(
-                        BRIEF,
-                        &[
-                            prefix,
-                            b"  [ERROR] caught exception while reading ",
-                            ext,
-                            b" freqs header ",
-                        ],
-                    )?;
-                    log.what(prefix, Some(&exception.what()), &|| String::new())?;
-                    state.num_failures += 1;
-                }
-                Err(RpsHeaderError::Refused(reason)) => return Err(Stop::Refused(reason)),
+                Err(err) => log_hdr_err(
+                    log,
+                    state,
+                    err,
+                    &[
+                        prefix,
+                        b"  [ERROR] caught exception while reading ",
+                        ext,
+                        b" freqs header ",
+                    ],
+                )?,
             }
         }
         Ok(state.num_failures)
@@ -575,25 +584,21 @@ impl<'a> Volume<'a, '_> {
                 unknown: String::new(),
             }));
         };
-        let set = match self.header_set(at, oid) {
-            Ok(set) => {
-                if let Some(set) = &set {
-                    if has_replaced_bytes(set) {
-                        let posts = self.db.header_replaced_char_posts_at(at);
-                        self.diag.post_replaced(&posts);
-                    }
-                }
-                set
-            }
-            Err(error) => {
-                // NCBI's `CObjectIStreamAsnBinary::FixVisibleChars` posts `Error: (803.7)` while
-                // reading strings before a later BER error (such as `ExpectedMember`) throws.
-                if matches!(error, SeqDbError::Ncbi(_)) {
-                    let posts = self.db.header_replaced_char_posts_at(at);
-                    self.diag.post_replaced(&posts);
-                }
-                return Failure::of("headers", &error).map(Some);
-            }
+        let header = self.header_set(at, oid);
+        // NCBI's `CObjectIStreamAsnBinary::FixVisibleChars` posts `Error: (803.7)` while
+        // reading strings, both on valid headers and before a later BER error throws.
+        let need_posts = match &header {
+            Ok(set) => set.as_ref().is_some_and(has_replaced_bytes),
+            Err(SeqDbError::Ncbi(_)) => true,
+            Err(_) => false,
+        };
+        if need_posts {
+            let posts = self.db.header_replaced_char_posts_at(at);
+            self.diag.post_replaced(&posts);
+        }
+        let set = match header {
+            Ok(set) => set,
+            Err(error) => return Failure::of("headers", &error).map(Some),
         };
         // Sequence: `GetSequence`, which maps the sequence's bytes. For a protein with
         // non-ascending offsets, NCBI's `x_GetSequence` returns a negative length (which passes

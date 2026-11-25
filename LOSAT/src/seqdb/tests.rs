@@ -1380,10 +1380,8 @@ fn index_file_errors() {
     );
     // A 0-byte index cannot be mapped; a 3-byte index reads zeros from its first 4 KiB page and
     // fails the version check; 20 bytes and len-1 read zero-filled fields inside the 4 KiB page.
-    assert!(
-        message(IndexFile::parse(&bytes[..0], SeqType::Protein, &path))
-            .starts_with("index file ends inside a field")
-    );
+    let field_eof = "index file ends inside a field";
+    assert!(message(IndexFile::parse(&bytes[..0], SeqType::Protein, &path)).starts_with(field_eof));
     assert_eq!(
         message(IndexFile::parse(&bytes[..3], SeqType::Protein, &path)),
         "Error: Not a valid version 4 or 5 database."
@@ -1397,10 +1395,7 @@ fn index_file_errors() {
     // num_oids is right after version (4), seqtype (4), title (4+39), date (4+22) -> offset 77.
     let num_oids_at = 4 + 4 + (4 + index.title.len()) + (4 + index.date.len());
     past_page[num_oids_at..num_oids_at + 4].copy_from_slice(&2000u32.to_be_bytes());
-    assert!(
-        message(IndexFile::parse(&past_page, SeqType::Protein, &path))
-            .starts_with("index file ends inside a field")
-    );
+    assert!(message(IndexFile::parse(&past_page, SeqType::Protein, &path)).starts_with(field_eof));
     // Offsets that go backwards are accepted by CSeqDBIdxFile and returned as stored.
     let mut backwards = bytes.clone();
     let last = backwards.len() - 4;

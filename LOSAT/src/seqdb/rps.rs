@@ -1009,12 +1009,14 @@ const RPS_FREQ_MAGIC_SITE: ThrowSite = ThrowSite {
     function: Some("BLAST::ncbi::blast::CRpsFreqRatiosFile::CRpsFreqRatiosFile"),
 };
 
+const RPS_INIT_FN: Option<&str> = Some("BLAST::ncbi::blast::CBlastRPSInfo::x_Init");
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:526-529
 const RPS_INIT_PATH_SITE: ThrowSite = ThrowSite {
     file: RPS_AUX_CPP,
     line: 527,
     kind: BLAST_INVALID,
-    function: Some("BLAST::ncbi::blast::CBlastRPSInfo::x_Init"),
+    function: RPS_INIT_FN,
 };
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:599-602
@@ -1022,8 +1024,10 @@ const RPS_INIT_FREQ_SITE: ThrowSite = ThrowSite {
     file: RPS_AUX_CPP,
     line: 601,
     kind: BLAST_INVALID,
-    function: Some("BLAST::ncbi::blast::CBlastRPSInfo::x_Init"),
+    function: RPS_INIT_FN,
 };
+
+pub(crate) type RpsHeaderResult = Result<RpsProfileHeader, RpsHeaderError>;
 
 /// Which DELTA-BLAST frequency file header `read_cdd_freqs_header` reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1114,29 +1118,37 @@ fn read_mapped_rps_header(
     freq_ratios: bool,
     offsets_to_read: Option<Option<i32>>,
     program: &str,
-) -> Result<RpsProfileHeader, RpsHeaderError> {
+) -> RpsHeaderResult {
     use std::io::Read;
+    let refused = |msg: String| RpsHeaderError::Refused(msg);
+    let mmap_err = |inner: NcbiException| {
+        RpsHeaderError::Ncbi(inner.rethrow(RPS_MMAP_SITE, mmap_fail_message(volume_path, ext)))
+    };
     if cfg!(target_endian = "big") {
-        return Err(RpsHeaderError::Refused(format!(
+        return Err(refused(format!(
             "a profile database (its files are little endian) on a big-endian platform is not supported by LOSAT's {program}"
         )));
     }
     let full_bytes = [volume_path, ext.as_bytes()].concat();
     let full_path = path_from_bytes(full_bytes.clone());
+    let read_err = |source: std::io::Error| {
+        refused(format!(
+            "{}: read failed ({source}), which is not supported by LOSAT's {program}",
+            full_path.display()
+        ))
+    };
     if !super::alias::exists(&full_path) {
         let inner = NcbiException::new(
             NCBIFILE_MMAP_MISSING,
             super::oid_list::not_a_file(&full_bytes),
         );
-        return Err(RpsHeaderError::Ncbi(
-            inner.rethrow(RPS_MMAP_SITE, mmap_fail_message(volume_path, ext)),
-        ));
+        return Err(mmap_err(inner));
     }
     let mut file = match std::fs::File::open(&full_path) {
         Ok(file) => file,
         Err(source) => {
             let Some(strerror) = crate::utils::os_error_text::ncbi_strerror(&source) else {
-                return Err(RpsHeaderError::Refused(format!(
+                return Err(refused(format!(
                     "{}: cannot be opened ({source}), which is not supported by LOSAT's {program}",
                     full_path.display()
                 )));
@@ -1151,22 +1163,20 @@ fn read_mapped_rps_header(
                 ]
                 .concat(),
             );
-            return Err(RpsHeaderError::Ncbi(
-                inner.rethrow(RPS_MMAP_SITE, mmap_fail_message(volume_path, ext)),
-            ));
+            return Err(mmap_err(inner));
         }
     };
     let file_len = file
         .metadata()
         .map_err(|source| {
-            RpsHeaderError::Refused(format!(
+            refused(format!(
                 "{}: metadata failed ({source}), which is not supported by LOSAT's {program}",
                 full_path.display()
             ))
         })?
         .len();
     if file_len == 0 {
-        return Err(RpsHeaderError::Refused(format!(
+        return Err(refused(format!(
             "a profile database whose {ext} file has zero length (NCBI crashes on it) is not supported by LOSAT's {program}"
         )));
     }
@@ -1174,18 +1184,14 @@ fn read_mapped_rps_header(
     // Read the first 8 bytes (magic + num_profiles), zero-filled inside the first 4 KiB page.
     let head_read = file_len.min(8) as usize;
     let mut head = [0u8; 8];
-    file.read_exact(&mut head[..head_read]).map_err(|source| {
-        RpsHeaderError::Refused(format!(
-            "{}: read failed ({source}), which is not supported by LOSAT's {program}",
-            full_path.display()
-        ))
-    })?;
+    file.read_exact(&mut head[..head_read]).map_err(read_err)?;
     let magic = i32::from_le_bytes([head[0], head[1], head[2], head[3]]);
     if magic != RPS_MAGIC_NUM && magic != RPS_MAGIC_NUM_28 {
-        return Err(RpsHeaderError::Ncbi(NcbiException::new(
+        let exc = NcbiException::new(
             magic_site,
             magic_error_message(volume_path, ext, freq_ratios),
-        )));
+        );
+        return Err(RpsHeaderError::Ncbi(exc));
     }
     let Some(offset_spec) = offsets_to_read else {
         return Ok(RpsProfileHeader {
@@ -1203,7 +1209,7 @@ fn read_mapped_rps_header(
         .checked_mul(4)
         .and_then(|bytes| bytes.checked_add(8));
     if end_bytes.is_none_or(|end| end > mapped_len) {
-        return Err(RpsHeaderError::Refused(format!(
+        return Err(refused(format!(
             "a profile database whose {ext} file header passes its mapped 4 KiB page (NCBI reads past its mapping) is not supported by LOSAT's {program}"
         )));
     }
@@ -1213,12 +1219,7 @@ fn read_mapped_rps_header(
         let held_bytes = file_len.saturating_sub(8).min(want_bytes as u64) as usize;
         let mut raw = vec![0u8; want_bytes];
         if held_bytes > 0 {
-            file.read_exact(&mut raw[..held_bytes]).map_err(|source| {
-                RpsHeaderError::Refused(format!(
-                    "{}: read failed ({source}), which is not supported by LOSAT's {program}",
-                    full_path.display()
-                ))
-            })?;
+            file.read_exact(&mut raw[..held_bytes]).map_err(read_err)?;
         }
         for chunk in raw.chunks_exact(4) {
             offsets.push(i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
@@ -1239,7 +1240,7 @@ pub(crate) fn read_cdd_rps_header(
     db_name: &[u8],
     search_path: &SearchPath,
     program: &str,
-) -> Result<RpsProfileHeader, RpsHeaderError> {
+) -> RpsHeaderResult {
     let volume_path = resolve_rps_volume(db_name, search_path, program)?;
     let aux_path = path_from_bytes([volume_path.as_slice(), b".aux"].concat());
     if std::fs::File::open(&aux_path).is_err() {
@@ -1276,15 +1277,15 @@ pub(crate) fn read_cdd_freqs_header(
     kind: CddFreqsKind,
     expected_profiles: i32,
     program: &str,
-) -> Result<RpsProfileHeader, RpsHeaderError> {
-    let volume_path = resolve_rps_volume(db_name, search_path, program)?;
+) -> RpsHeaderResult {
+    let base_path = resolve_rps_volume(db_name, search_path, program)?;
     let (magic_site, freq_ratios, offsets_to_read) = match kind {
         CddFreqsKind::Freq => (RPS_FREQ_MAGIC_SITE, true, Some(Some(expected_profiles))),
         CddFreqsKind::Wcounts => (RPS_WCOUNTS_MAGIC_SITE, false, Some(Some(expected_profiles))),
         CddFreqsKind::Obsr => (RPS_OBSR_MAGIC_SITE, false, Some(Some(0))),
     };
     let result = read_mapped_rps_header(
-        &volume_path,
+        &base_path,
         kind.ext(),
         magic_site,
         freq_ratios,

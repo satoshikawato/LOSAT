@@ -147,6 +147,8 @@ mod outfmt5_tblastx;
 mod pairwise_par;
 #[path = "../parse_deflines_subject.rs"]
 mod parse_deflines_subject;
+#[path = "../protein_db_32bit_lengths.rs"]
+mod protein_db_32bit_lengths;
 #[path = "../redo_contain_idx.rs"]
 mod redo_contain_idx;
 #[path = "../report_counts_cli.rs"]

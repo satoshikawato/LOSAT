@@ -1001,6 +1001,17 @@ impl<'a> BuildDatabase<'a> {
 
         let mut count = 0u64;
         while let Some(raw) = source.next()? {
+            if raw.negative_length {
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:969-988
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:139-149
+                // A negative 32-bit protein length produces a non-empty `CTempString`, so
+                // `x_EditHeaders` runs and `CWriteDB_Impl::AddSequence` publishes the prior
+                // sequence before `std::string::assign` throws `basic_string::_M_create`.
+                let mut headers = raw.deflines;
+                self.edit_raw_headers(&mut headers);
+                self.output_db.add_raw_negative_length()?;
+                unreachable!("add_raw_negative_length always returns an error");
+            }
             if raw.sequence.is_empty() {
                 return Err(raw_data_error(970, "Error in raw data: no sequence").into());
             }

@@ -3425,11 +3425,21 @@ impl<'a> HeaderReader<'a> {
         } else {
             return RecordCopy::Differs;
         };
+        let protein = self.db.seqtype() == SeqType::Protein;
+        if protein {
+            let (Ok(len_a), Ok(len_b)) =
+                (self.db.protein_length_i32(a), self.db.protein_length_i32(b))
+            else {
+                return RecordCopy::Differs;
+            };
+            if len_a < 1 || len_b < 1 {
+                return RecordCopy::Differs;
+            }
+        }
         let (Ok(block_a), Ok(block_b)) = (self.db.read_sequence(a), self.db.read_sequence(b))
         else {
             return RecordCopy::Differs;
         };
-        let protein = self.db.seqtype() == SeqType::Protein;
         let same_letters = if protein {
             block_a.protein(0) == block_b.protein(0)
         } else {
@@ -4824,11 +4834,15 @@ pub(crate) fn x_check_protein_stores(
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, PROTEIN_STORE_BLOCK_BYTES) {
         let block = db
-            .read_block(range)
+            .read_protein_search_block(range)
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
             let with_sentinels = block.protein_with_sentinels(i);
             let ordinal = range.first_ordinal + i as u32;
+            if with_sentinels.len() == 2 {
+                each(ordinal, 0);
+                continue;
+            }
             check_protein_sequence(with_sentinels, || db.oid(ordinal), program)?;
             each(ordinal, with_sentinels.len() - 2);
         }

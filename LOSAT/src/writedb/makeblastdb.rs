@@ -168,6 +168,7 @@ impl MakedbError {
                 WriteDbError::Exception(_)
                 | WriteDbError::Other(_)
                 | WriteDbError::InvalidArgument(_)
+                | WriteDbError::LengthError(_)
                 | WriteDbError::Io { .. },
             ) => 255,
             MakedbError::Build(WriteDbError::OutOfMemory) => 4,

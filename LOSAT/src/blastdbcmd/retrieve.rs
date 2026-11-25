@@ -167,16 +167,30 @@ impl<'a> Source<'a> {
             .map_err(|_| Stop::Ncbi(OID_NOT_FOUND.to_string()))
     }
 
-    /// `GetSeqLength` of `oid`.
-    pub fn length(&self, oid: u32) -> Result<u32, Stop> {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+    /// `GetSeqLength` of `oid`: signed 32-bit `int` for proteins (wrapping `>= 2^31` to negative
+    /// as in NCBI's `GetSeqLengthProt`), widened unsigned 32-bit for nucleotides.
+    pub fn length(&self, oid: u32) -> Result<i64, Stop> {
         let at = self.at(oid)?;
         if self.protein {
-            Ok(self.db.protein_length_at(at)?)
+            Ok(i64::from(self.db.protein_length_i32_at(at)?))
         } else {
             let length = self.db.nucleotide_length_at(at)?;
             u32::try_from(length)
+                .map(i64::from)
                 .map_err(|_| Stop::refused(format!("sequence {oid} is longer than 32 bits")))
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1804
+    /// Validates the protein `.psq` open and range for a sequence whose signed 32-bit length is
+    /// below 1, matching `GetBioseq`'s `x_GetSequence` call before it returns an empty Bioseq.
+    pub(super) fn check_non_positive_protein_range(&self, oid: u32) -> Result<(), Stop> {
+        if self.protein {
+            self.db.check_protein_range_at(self.at(oid)?)?;
+        }
+        Ok(())
     }
 
     /// `GetHdr` of `oid`: the definition lines with their Seq-ids; `None`, NCBI's null set, for a
@@ -237,21 +251,54 @@ impl<'a> Source<'a> {
     /// The `Seq-data` of `GetBioseq` of `oid`: the stored NCBIstdaa of a protein, the stored 2-bit
     /// bytes or NCBI4na of a nucleotide (`SequenceBlock::nucleotide_seq_data`).
     pub fn seq_data(&self, oid: u32) -> Result<DbSeqData, Stop> {
-        let block = self.db.read_sequence_at(self.at(oid)?)?;
+        let at = self.at(oid)?;
         if self.protein {
+            if self.db.protein_length_i32_at(at)? < 1 {
+                self.db.check_protein_range_at(at)?;
+                return Ok(DbSeqData::Ncbistdaa(Vec::new()));
+            }
+            let block = self.db.read_sequence_at(at)?;
             return Ok(DbSeqData::Ncbistdaa(block.protein(0).to_vec()));
         }
+        let block = self.db.read_sequence_at(at)?;
         Ok(match block.nucleotide_seq_data(0)? {
             (true, bytes) => DbSeqData::Ncbi2na(bytes),
             (false, bytes) => DbSeqData::Ncbi4na(bytes),
         })
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1619-1635
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1153-1158
     /// The letters of `GetSequenceAsString` of `oid`, with `range` when one is given (`-outfmt %s`,
     /// `%h`): iupacaa with the byte 255 for a gap or stop, or the IUPAC letters of a nucleotide.
     pub fn string_letters(&self, oid: u32, range: Option<(u32, u32)>) -> Result<Vec<u8>, Stop> {
+        let no_seq = || Stop::Ncbi("Error: could not get sequence or range.".to_string());
         if self.protein {
-            let block = self.db.read_sequence_at(self.at(oid)?)?;
+            let at = self.at(oid)?;
+            let base_length = self.db.protein_length_i32_at(at)?;
+            if base_length < 1 {
+                self.db.check_protein_range_at(at)?;
+                if let Some((from, to)) = range {
+                    let begin = from as i32;
+                    let end = to.wrapping_add(1) as i32;
+                    if end > base_length {
+                        return Err(Stop::Ncbi(
+                            "Error: region beyond sequence range.".to_string(),
+                        ));
+                    }
+                    if i64::from(end) - i64::from(begin) < 1 {
+                        return Err(no_seq());
+                    }
+                    return Err(Stop::refused(format!(
+                        "range {}-{} on protein OID {oid} with signed length {base_length} \
+                         (NCBI reads before the sequence mapping)",
+                        u64::from(from) + 1,
+                        u64::from(to) + 1
+                    )));
+                }
+                return Err(no_seq());
+            }
+            let block = self.db.read_sequence_at(at)?;
             Ok(protein_string_letters(slice(block.protein(0), range)))
         } else {
             self.nucleotide_letters(oid, range)
@@ -261,7 +308,12 @@ impl<'a> Source<'a> {
     /// The letters of the FASTA path (`CSeqVector` in `Ncbieaa` or `Iupacna`).
     pub fn fasta_letters(&self, oid: u32, range: Option<(u32, u32)>) -> Result<Vec<u8>, Stop> {
         if self.protein {
-            let block = self.db.read_sequence_at(self.at(oid)?)?;
+            let at = self.at(oid)?;
+            if self.db.protein_length_i32_at(at)? < 1 {
+                self.db.check_protein_range_at(at)?;
+                return Ok(Vec::new());
+            }
+            let block = self.db.read_sequence_at(at)?;
             Ok(protein_fasta_letters(slice(block.protein(0), range)))
         } else {
             self.nucleotide_letters(oid, range)

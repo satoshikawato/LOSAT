@@ -53,7 +53,8 @@ impl ListedSubjects {
             .map(|&ordinal| {
                 database
                     .db
-                    .protein_length(ordinal)
+                    .protein_length_i32(ordinal)
+                    .map(|len| len.max(0) as u32)
                     .map_err(|error| database_error(error, database.program))
             })
             .collect::<Result<Vec<u32>>>()?;

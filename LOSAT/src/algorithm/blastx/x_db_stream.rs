@@ -171,6 +171,12 @@ impl<'a> XStreamDb<'a> {
         let first = part.first_ordinal();
         for i in 0..part.len() {
             let with_sentinels = part.protein_with_sentinels(i);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+            // Proteins with NCBI 32-bit length <= 0 (`0` or `>= 2^31`) are skipped by NCBI and
+            // represented as `[0, 0]` by `read_protein_search_block`.
+            if with_sentinels.len() == 2 {
+                continue;
+            }
             let ordinal = first + i as u32;
             check_protein_sequence(with_sentinels, || self.db.oid(ordinal), PROGRAM)
                 .map_err(XReadError)?;
@@ -290,7 +296,10 @@ impl<'a> XStreamDb<'a> {
             .ok()
             .and_then(|first| self.db.next_block(first, self.block_bytes))
             .ok_or_else(|| anyhow!("BLASTX database ordinal id {ordinal} is past the database"))?;
-        let part = self.db.read_block(range).map_err(read_error)?;
+        let part = self
+            .db
+            .read_protein_search_block(range)
+            .map_err(read_error)?;
         self.x_check(&part)?;
         Ok(XBlock {
             first: ordinal,
@@ -308,7 +317,10 @@ impl<'a> XStreamDb<'a> {
             let range = self.db.x_block_range(at, end32).ok_or_else(|| {
                 anyhow!("BLASTX database ordinal ids {first}..{end} are past the database")
             })?;
-            let part = self.db.read_block(range).map_err(read_error)?;
+            let part = self
+                .db
+                .read_protein_search_block(range)
+                .map_err(read_error)?;
             self.x_check(&part)?;
             parts.push(part);
             at = range.end_ordinal();
@@ -317,11 +329,14 @@ impl<'a> XStreamDb<'a> {
     }
 
     /// The lengths of the sequences from `oid` on, at most `LENGTH_WINDOW` of them (to the end of
-    /// `oid`'s volume), from the index.
+    /// `oid`'s volume), from the index (`0` for proteins skipped by NCBI with length `<= 0`).
     fn read_lengths(&self, oid: usize) -> Result<Vec<u32>> {
         let first = u32::try_from(oid)?;
         let end = first.saturating_add(LENGTH_WINDOW as u32);
-        self.db.x_protein_lengths(first, end).map_err(read_error)
+        self.db
+            .x_protein_lengths_i32(first, end)
+            .map(|lengths| lengths.into_iter().map(|len| len.max(0) as u32).collect())
+            .map_err(read_error)
     }
 
     /// EXPERIMENT (LOSAT_X_BXTASKRES): `read_lengths`, for the bounds of the subject flow's tasks
@@ -357,7 +372,7 @@ impl<'a> XStreamDb<'a> {
     fn read_one(&self, oid: usize) -> Result<Vec<u8>> {
         let block = self
             .db
-            .read_sequence(u32::try_from(oid)?)
+            .read_protein_search_sequence(u32::try_from(oid)?)
             .map_err(read_error)?;
         self.x_check(&block)?;
         Ok(block.protein(0).to_vec())

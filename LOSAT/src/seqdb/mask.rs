@@ -881,13 +881,18 @@ impl SeqDb {
                 let length_bounds = bounds
                     .get_or_insert_with(|| {
                         if protein {
-                            // A protein's length is exact in its index (series NP, M4b).
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+                            // A protein whose NCBI 32-bit length is not positive (`0` or `>= 2^31`)
+                            // is skipped by the search (`s_SeqDbGetSequence` returns error).
                             volume
-                                .x_protein_lengths(run.first, run.end)
+                                .x_protein_lengths_i32(run.first, run.end)
                                 .map(|lengths| {
                                     lengths
                                         .into_iter()
-                                        .map(|length| Some((length as usize, length as usize)))
+                                        .map(|length| {
+                                            (length > 0)
+                                                .then_some((length as usize, length as usize))
+                                        })
                                         .collect()
                                 })
                                 .unwrap_or_default()
@@ -900,10 +905,18 @@ impl SeqDb {
                     .get((vol_oid - run.first) as usize)
                     .copied()
                     .flatten();
+                if protein && length_bounds.is_none() {
+                    if let Ok(len) = self.protein_length_i32(seq_ordinal) {
+                        if len <= 0 {
+                            continue;
+                        }
+                    }
+                }
                 let length = || {
                     if protein {
-                        self.protein_length(seq_ordinal)
+                        self.protein_length_i32(seq_ordinal)
                             .ok()
+                            .filter(|&length| length > 0)
                             .map(|length| length as usize)
                     } else {
                         self.nucleotide_length(seq_ordinal).ok()
@@ -953,7 +966,7 @@ impl SeqDb {
         {
             self.read_mask_block(run, algo_id, &mut block);
             let volume = &self.volumes[run.volume];
-            let lengths = volume.x_protein_lengths(run.first, run.end).ok();
+            let lengths = volume.x_protein_lengths_i32(run.first, run.end).ok();
             for vol_oid in run.first..run.end {
                 let seq_ordinal = run.first_ordinal + (vol_oid - run.first);
                 let masks = match block.ranges(vol_oid) {
@@ -967,13 +980,20 @@ impl SeqDb {
                     .as_ref()
                     .and_then(|lengths| lengths.get((vol_oid - run.first) as usize));
                 let length = match indexed {
-                    Some(&length) => length as usize,
-                    None => match self.protein_length(seq_ordinal) {
-                        Ok(length) => length as usize,
+                    Some(&length) => length,
+                    None => match self.protein_length_i32(seq_ordinal) {
+                        Ok(length) => length,
                         Err(_) => return None,
                     },
                 };
-                if let Some(found) = visit(seq_ordinal, length, masks) {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+                // `s_SeqDbGetSequence` returns an error for proteins whose NCBI 32-bit length is
+                // not positive (`0` or `>= 2^31`), so the search skips them without reading masks
+                // or advancing the diagonal offset.
+                if length <= 0 {
+                    continue;
+                }
+                if let Some(found) = visit(seq_ordinal, length as usize, masks) {
                     return Some((
                         self.volume_starts[run.volume] + vol_oid,
                         volume.base().to_path_buf(),

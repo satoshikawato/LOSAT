@@ -197,6 +197,12 @@ pub(crate) fn evaluate_ungapped(
     subject_length: i32,
     prepared: Option<LinkCutoffs>,
 ) -> Result<LinkedHspList> {
+    if input.is_empty() {
+        return Ok(LinkedHspList {
+            hsps: Vec::new(),
+            best_evalue: 0.0,
+        });
+    }
     if let Some(link) = link_parameters(options) {
         if link.longest_intron <= 0 {
             return Ok(link_even(

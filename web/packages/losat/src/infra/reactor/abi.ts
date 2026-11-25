@@ -340,8 +340,9 @@ export class ReactorAbi {
 
   /**
    * The verdict on an argv: the CLI's error text, or whether its run reads the inputs with NCBI's
-   * data loaders on and with `-parse_deflines` on (the *validation* JSON, ABI v2 §9, version 14),
-   * which `register` and `scanBegin` then take.
+   * data loaders on and, when the argv parses, with `-parse_deflines` on (the *validation* JSON,
+   * ABI v2 §9, version 14), which `register` and `scanBegin` then take. When the argv does not
+   * parse, `parse_deflines` is omitted so the host keeps its previous setting.
    */
   validate(argv: readonly string[]): ValidationResult {
     const status = this.call(this.exports.losat_web2_validate, [encoder.encode(argv.join('\0'))]);
@@ -350,15 +351,20 @@ export class ReactorAbi {
     const known =
       status < 0 && this.responses.length === 0
         ? undefined
-        : (this.response() as { data_loaders: boolean; parse_deflines: boolean });
+        : (this.response() as { data_loaders: boolean; parse_deflines?: boolean });
     if (status < 0) {
       return {
         ok: false,
         message: this.lastError(),
-        ...(known === undefined ? {} : { dataLoaders: known.data_loaders, parseDeflines: known.parse_deflines }),
+        ...(known === undefined
+          ? {}
+          : {
+              dataLoaders: known.data_loaders,
+              ...(known.parse_deflines === undefined ? {} : { parseDeflines: known.parse_deflines }),
+            }),
       };
     }
-    return { ok: true, dataLoaders: known!.data_loaders, parseDeflines: known!.parse_deflines };
+    return { ok: true, dataLoaders: known!.data_loaders, parseDeflines: known!.parse_deflines ?? false };
   }
 
   /**
@@ -370,9 +376,11 @@ export class ReactorAbi {
     return status < 0 ? { ok: false, message: this.lastError() } : { ok: true };
   }
 
-  /** Reads `bytes` with the engine's reader of `program`'s input of `role`, NCBI's data loaders on or off (ABI v2 §4, version 8). */
-  register(program: string, role: number, dataLoaders: boolean, bytes: Uint8Array): RegisteredInput {
-    const handle = this.check(this.call(this.exports.losat_web2_register, [encoder.encode(program), role, dataLoaders ? 1 : 0, bytes]));
+  /** Reads `bytes` with the engine's reader of `program`'s input of `role`, NCBI's data loaders and `-parse_deflines` on or off (ABI v2 §4, version 14). */
+  register(program: string, role: number, dataLoaders: boolean, parseDeflines: boolean, bytes: Uint8Array): RegisteredInput {
+    const handle = this.check(
+      this.call(this.exports.losat_web2_register, [encoder.encode(program), role, dataLoaders ? 1 : 0, parseDeflines ? 1 : 0, bytes]),
+    );
     try {
       return { ...registeredInput(this.response() as RecordsResponse), handle };
     } catch (error) {

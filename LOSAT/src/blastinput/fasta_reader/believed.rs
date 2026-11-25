@@ -407,7 +407,7 @@ pub(crate) fn named_molecule(ids: &[ParsedSeqId]) -> Option<bool> {
 }
 
 /// `CFastaReader::xSetSeqMol` for a defline read under `-parse_deflines`: parses the defline's
-/// first word with [`parse_believed_defline`] and returns [`named_molecule`] of its ids, or
+/// first word with `parse_believed_defline` and returns `named_molecule` of its ids, or
 /// `None` when the defline does not parse or names neither molecule.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:547-562

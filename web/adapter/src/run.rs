@@ -619,12 +619,14 @@ pub fn data_loaders(words: &[&str]) -> Result<bool, String> {
 }
 
 /// The reader settings that *validation* reports for an argv (docs/web/abi_v2.md §9): whether the
-/// run reads its inputs with NCBI's data loaders on (`[BLAST] DATA_LOADERS` of its registry) and
-/// whether it parses Seq-ids from deflines (`-parse_deflines`, matching [`inputs_together`]).
+/// run reads its inputs with NCBI's data loaders on (`[BLAST] DATA_LOADERS` of its registry) and,
+/// when the argv parses (`parse_printing` succeeds or a version word stops start), whether it
+/// parses Seq-ids from deflines (`-parse_deflines`, matching [`inputs_together`]); `None` when the
+/// argv does not parse so the host keeps its previous `-parse_deflines` setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Validation {
     pub data_loaders: bool,
-    pub parse_deflines: bool,
+    pub parse_deflines: Option<bool>,
 }
 
 /// `validate`: the application start (`start`: its errors are the command line's first), then
@@ -658,7 +660,17 @@ pub fn validate_with(
     use losat::web_adapter::{parse_optional_range, RangeRole};
     let no_files = RunFiles::Receiver(Arc::new(NoFiles));
     let started = start(words, &no_files, &mut std::io::sink()).map_err(|(message, _)| message)?;
-    let parse_deflines = inputs_together(words);
+    let parse_deflines = if started.version().is_some() {
+        Some(false)
+    } else {
+        match parse_printing(words, None) {
+            Ok(Parsed::Prints(_)) => Some(false),
+            Ok(Parsed::Command(_, command)) => {
+                Some(!started.dry_run() && losat::web_adapter::parse_deflines_of(&command))
+            }
+            Err(_) => None,
+        }
+    };
     if let Ok(settings) = started.settings() {
         known(Validation {
             data_loaders: settings.data_loaders,
@@ -673,13 +685,13 @@ pub fn validate_with(
                 data_loaders: started
                     .settings()
                     .is_ok_and(|settings| settings.data_loaders),
-                parse_deflines: false,
+                parse_deflines: Some(false),
             })
         }
         Next::Ends => {
             return Ok(Validation {
                 data_loaders: started.settings()?.data_loaders,
-                parse_deflines: false,
+                parse_deflines: Some(false),
             })
         }
     };
@@ -2540,7 +2552,7 @@ mod tests {
                     with(base, pair),
                     Ok(Validation {
                         data_loaders: true,
-                        parse_deflines: false,
+                        parse_deflines: Some(false),
                     }),
                     "{base:?} {pair:?}"
                 );
@@ -2655,7 +2667,7 @@ mod tests {
                 validate(&words),
                 Ok(Validation {
                     data_loaders: true,
-                    parse_deflines: true
+                    parse_deflines: Some(true)
                 })
             );
             assert!(inputs_together(&words), "{program}");
@@ -2667,7 +2679,7 @@ mod tests {
                 validate(&dry),
                 Ok(Validation {
                     data_loaders: true,
-                    parse_deflines: false
+                    parse_deflines: Some(false)
                 })
             );
             assert!(!inputs_together(&dry), "{program}");
@@ -2678,7 +2690,7 @@ mod tests {
                 validate(&words[..5]),
                 Ok(Validation {
                     data_loaders: true,
-                    parse_deflines: false
+                    parse_deflines: Some(false)
                 })
             );
             assert!(!inputs_together(&words[..5]), "{program}");
@@ -2952,7 +2964,7 @@ mod tests {
         bad.extend_from_slice(b">bad\nMKVL%%%%\n");
         let line = bad.iter().filter(|&&b| b == b'\n').count();
         let cli = ncbi_in_losat_words(&format!("BLAST query error: CFastaReader: Near line {line}, there's a line that doesn't look like plausible data, but it's not marked as defline or comment."));
-        let (handle, response) = crate::store::register("blastp", 0, true, &bad).unwrap();
+        let (handle, response) = crate::store::register("blastp", 0, true, false, &bad).unwrap();
         crate::store::release(handle).unwrap();
         assert!(
             response.contains(r#"{"index":10,"id":"q11","length":1100}],"reader_error":""#),
@@ -3026,7 +3038,7 @@ mod tests {
         let bytes = std::fs::read(dir.join(query)).unwrap();
         // The query is read with the data loaders of the argv, as the host reads it (abi_v2.md §9).
         let loaders = data_loaders(&words)?;
-        let (handle, _) = crate::store::register(words[0], 0, loaders, &bytes)?;
+        let (handle, _) = crate::store::register(words[0], 0, loaders, false, &bytes)?;
         crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
         let program = Program::parse(words[0]).unwrap();
         let result = crate::store::with_inputs(
@@ -3107,8 +3119,8 @@ mod tests {
         let words = ["blastp", "-db", "d", "-query", "q"];
         // Test protein: N-terminal part of E. coli AsnA (RefSeq NP_418200.1).
         let protein = b">q\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ\n";
-        let (query, _) = crate::store::register("blastp", 0, true, protein).unwrap();
-        let (subject, _) = crate::store::register("blastp", 1, true, protein).unwrap();
+        let (query, _) = crate::store::register("blastp", 0, true, false, protein).unwrap();
+        let (subject, _) = crate::store::register("blastp", 1, true, false, protein).unwrap();
         let refused = crate::store::with_inputs(
             Program::Blastp,
             query,
@@ -3190,9 +3202,9 @@ mod tests {
         assert_eq!(data_loaders(&on), Ok(true));
         let seq_id = b"2HHB\nMKTAYIAKQR\n";
         // The host registers the query with the data loaders of each argv's `validate`.
-        let (query, response) = crate::store::register("blastp", 0, false, seq_id).unwrap();
+        let (query, response) = crate::store::register("blastp", 0, false, false, seq_id).unwrap();
         assert!(response.contains(r#""length":13"#), "{response}");
-        let error = crate::store::register("blastp", 0, true, seq_id).unwrap_err();
+        let error = crate::store::register("blastp", 0, true, false, seq_id).unwrap_err();
         assert!(
             error.contains("the first line of the query (\"2HHB\")"),
             "{error}"
@@ -3278,8 +3290,8 @@ mod tests {
         // batch warning after the engine prefix (as on the CLI; under WebAssembly its search path
         // names `/work::`, abi_v2.md §3).
         let dna = b">q\nACGTACGTACGTACGTACGTACGTACGTACGT\n";
-        let (q_nuc, _) = crate::store::register("blastn", 0, true, dna).unwrap();
-        let (s_nuc, _) = crate::store::register("blastn", 1, true, dna).unwrap();
+        let (q_nuc, _) = crate::store::register("blastn", 0, true, false, dna).unwrap();
+        let (s_nuc, _) = crate::store::register("blastn", 1, true, false, dna).unwrap();
         let missing_repeats = crate::store::with_inputs(
             Program::Blastn,
             q_nuc,
@@ -3635,7 +3647,7 @@ mod tests {
                     validate(&words),
                     Ok(Validation {
                         data_loaders: true,
-                        parse_deflines: false,
+                        parse_deflines: Some(false),
                     }),
                     "{program} {outfmt:?}"
                 );
@@ -3664,7 +3676,7 @@ mod tests {
                     validate(&words),
                     Ok(Validation {
                         data_loaders: true,
-                        parse_deflines: false,
+                        parse_deflines: Some(false),
                     }),
                     "{program} {outfmt:?}"
                 );
@@ -3796,9 +3808,9 @@ mod tests {
             let (query, subject, _) = crate::store::register_inputs(words, query, subject)?;
             (query, subject)
         } else {
-            let (query, _) = crate::store::register(words[0], 0, true, query)?;
-            let (subject, _) =
-                crate::store::register(words[0], 1, true, subject).inspect_err(|_| {
+            let (query, _) = crate::store::register(words[0], 0, true, false, query)?;
+            let (subject, _) = crate::store::register(words[0], 1, true, false, subject)
+                .inspect_err(|_| {
                     crate::store::release(query).unwrap();
                 })?;
             (query, subject)
@@ -5058,8 +5070,9 @@ mod tests {
     #[test]
     fn the_store_keeps_the_deflines_that_the_title_does_not_give() {
         let fasta: &[u8] = b">a one\r\nACGT\n>b\twith tab\nGG\n>  c\nTT\n>d \nAA\n>e\r\nCC\n";
-        let (handle, _) = crate::store::register("blastn", 0, true, fasta).unwrap();
-        let (subject, _) = crate::store::register("blastn", 1, true, b">s\nACGTACGT\n").unwrap();
+        let (handle, _) = crate::store::register("blastn", 0, true, false, fasta).unwrap();
+        let (subject, _) =
+            crate::store::register("blastn", 1, true, false, b">s\nACGTACGT\n").unwrap();
         let sources = |whole: bool| {
             crate::store::with_inputs(
                 Program::Blastn,
@@ -5110,9 +5123,9 @@ mod tests {
                 vec![b">a ".to_vec(), b"".to_vec()],
             ),
         ] {
-            let (handle, _) = crate::store::register("blastn", 0, true, fasta).unwrap();
+            let (handle, _) = crate::store::register("blastn", 0, true, false, fasta).unwrap();
             let (subject, _) =
-                crate::store::register("blastn", 1, true, b">s\nACGTACGT\n").unwrap();
+                crate::store::register("blastn", 1, true, false, b">s\nACGTACGT\n").unwrap();
             let defline = |whole: bool| {
                 crate::store::with_inputs(
                     Program::Blastn,

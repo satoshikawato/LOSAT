@@ -533,7 +533,7 @@ function fakeAbi(
       },
     }),
     memoryBytes: () => 1,
-    register: (_program: string, role: number, _dataLoaders: boolean, bytes: Uint8Array) => {
+    register: (_program: string, role: number, _dataLoaders: boolean, _parseDeflines: boolean, bytes: Uint8Array) => {
       calls.push(`register ${role === ROLE_QUERY ? 'query' : 'subject'}`);
       return { handle: ++handle, records: [{ id: role === ROLE_SUBJECT ? 's' : 'q', length: bytes.length }] };
     },
@@ -1098,8 +1098,8 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
 
   /** The streams of a TBLASTX run of `words` on the inputs of the adapter's tests (run_start_tests.rs). */
   function run(abi: ReactorAbi, words: readonly string[], subject = fasta('arch_tbx_s.fna')) {
-    const q = abi.register('tblastx', ROLE_QUERY, true, fasta('arch_tbx_q.fna'));
-    const s = abi.register('tblastx', ROLE_SUBJECT, true, subject);
+    const q = abi.register('tblastx', ROLE_QUERY, true, false, fasta('arch_tbx_q.fna'));
+    const s = abi.register('tblastx', ROLE_SUBJECT, true, false, subject);
     const streams = new Map<number, Uint8Array[]>();
     let error: unknown;
     try {

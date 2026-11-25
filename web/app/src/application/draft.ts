@@ -288,6 +288,11 @@ export class SearchDraft {
   private readonly sourceRevisions = new Map<string, Set<string>>();
   /** The latest request of each asynchronous task; older results are dropped. */
   private readonly generations = new Map<string, number>();
+  /**
+   * Defline byte offsets (`header_offset`) of excluded records carried across a `-parse_deflines`
+   * rescan (`reindex(..., fresh = true)`), keyed by `${role}:${key}` (Finding 4 option (a)).
+   */
+  private readonly preservedExclusions = new Map<string, ReadonlySet<number>>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly workers = new Map<string, () => void>();
   private readonly pending = new Set<Promise<unknown>>();
@@ -534,6 +539,7 @@ export class SearchDraft {
     };
     // A newer text supersedes an index of the older one that is still running.
     this.nextGeneration(`${role}:${PASTE_KEY}`);
+    this.preservedExclusions.delete(`${role}:${PASTE_KEY}`);
     this.cancelTask(`check:${role}:${PASTE_KEY}`);
     this.updateRole(role, (draft) => ({
       ...draft,
@@ -823,6 +829,7 @@ export class SearchDraft {
   /** Removes a source; the paste box keeps its text. */
   private dropSource(role: InputRole, key: string): void {
     this.cancelTask(`${role}:${key}`);
+    this.preservedExclusions.delete(`${role}:${key}`);
     if (key === PASTE_KEY) this.cancelTask(`paste:${role}`);
     this.updateRole(role, (draft) => ({ ...draft, sources: draft.sources.filter((source) => source.key !== key) }));
     this.set({ message: undefined });
@@ -1387,10 +1394,29 @@ export class SearchDraft {
     }
   }
 
-  /** Reads a source again with `parser`; settles once it is read (or once its table of that kind is back). When `fresh` is true, cached tables are discarded and the source is rescanned. */
+  /** Reads a source again with `parser`; settles once it is read (or once its table of that kind is back). When `fresh` is true, cached tables are discarded and the source is rescanned, preserving exclusions by record `header_offset`. */
   private reindex(role: InputRole, key: string, parser: FastaParserKind, fresh = false): Promise<void> {
     const source = this.role(role).sources.find((s) => s.key === key);
     if (source === undefined) return Promise.resolve();
+    const task = `${role}:${key}`;
+    if (fresh) {
+      if (source.base !== undefined) {
+        if (source.excluded.length > 0) {
+          this.preservedExclusions.set(
+            task,
+            new Set(
+              source.excluded
+                .map((index) => source.base!.records[index]?.header_offset)
+                .filter((offset): offset is number => offset !== undefined),
+            ),
+          );
+        } else {
+          this.preservedExclusions.delete(task);
+        }
+      }
+    } else {
+      this.preservedExclusions.delete(task);
+    }
     // A pending index of the pasted text would read it again after this one (and drop the exclusions made since).
     if (key === PASTE_KEY) this.cancelTask(`paste:${role}`);
     // The table of the kind that the source leaves is kept, with its exclusions, for a program that reads it again,
@@ -1413,7 +1439,7 @@ export class SearchDraft {
     });
     if (kept !== undefined) {
       // An index of the kind that was left, still running, must not replace this table.
-      this.nextGeneration(`${role}:${key}`);
+      this.nextGeneration(task);
       this.scheduleCheck(role, key, 0);
       return Promise.resolve();
     }
@@ -1452,6 +1478,12 @@ export class SearchDraft {
       if (!current()) return;
       if (this.readAgain(role, key, file, parser, reader, { ref, sourceId, head, lead })) return;
       const added = ref;
+      const keep = this.preservedExclusions.get(task);
+      this.preservedExclusions.delete(task);
+      const excluded =
+        keep === undefined
+          ? []
+          : base.records.filter((record) => keep.has(record.header_offset)).map((record) => record.index);
       this.updateSource(role, key, (source) => ({
         ...source,
         // A file named .gz is inflated by addSource: the card shows its plain name and inflated size.
@@ -1459,7 +1491,7 @@ export class SearchDraft {
         sourceId: id,
         status: 'ready',
         base,
-        excluded: [],
+        excluded,
         check: { state: 'pending' },
         indexMs: this.deps.now() - started,
         ...(head === undefined ? {} : { head }),

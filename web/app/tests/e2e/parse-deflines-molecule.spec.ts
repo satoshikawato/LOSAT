@@ -127,3 +127,34 @@ test('blastn -parse_deflines rescans an sp| nucleotide subject and matches nativ
     f6: 's1.bn.subjx.f6.out',
   });
 });
+
+test('blastn -parse_deflines accepts an sp| subject with protein letters and junk line and matches native CLI', async ({ page }) => {
+  const query = { name: 'bnq.fa', bytes: pdMol('bnq.fa') };
+  const subject = { name: 's_sp_junk_bn.fa', bytes: pdMol('s_sp_junk_bn.fa') };
+  await program(page, 'blastn');
+  await task(page, 'blastn');
+  await openFiles(page, 'query', [{ name: query.name, text: query.bytes }]);
+  await openFiles(page, 'subject', [{ name: subject.name, text: subject.bytes }]);
+  // Without -parse_deflines, the subject's E-only line is dropped and line 3 fails CheckDataLine.
+  await expect(page.getByTestId('subject-source-0-check')).toHaveAttribute('data-check', 'refused', { timeout: 30_000 });
+  await openParameters(page);
+  await page.getByTestId('param-extra').fill('-parse_deflines');
+  await expect(page.getByTestId('argv-validation')).toHaveAttribute('data-state', 'ok');
+  await expect(page.getByTestId('subject-source-0-summary')).toHaveText('1 record · 6 nt', { timeout: 30_000 });
+  await expect(page.getByTestId('subject-source-0-check')).toHaveAttribute('data-check', 'ok', { timeout: 30_000 });
+  await submit(page);
+  await waitStatus(page, 1, 'completed');
+  const { outputs, warnings } = await storedOutputs(page, 1);
+  const names = inputNames((await page.getByTestId('run-argv').textContent()) ?? '');
+  expect(names).toEqual({ query: query.name, subject: subject.name });
+  if (NATIVE === undefined) {
+    test.info().annotations.push({ type: 'skip', description: `The bytes of the outputs: ${NO_NATIVE_REASON}` });
+    return;
+  }
+  for (const format of [0, 6, 7] as const) {
+    const cli = nativeRun(['blastn', '-task', 'blastn', '-parse_deflines'], query, subject, format);
+    expect(cli.status, `-outfmt ${format}: ${cli.stderr.toString('utf8')}`).toBe(0);
+    expect(outputs[format].equals(cli.stdout), `native -outfmt ${format}`).toBe(true);
+    expect(warnings, `native -outfmt ${format} warnings`).toBe(cli.stderr.toString('utf8'));
+  }
+});

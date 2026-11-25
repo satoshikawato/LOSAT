@@ -398,7 +398,7 @@ describe('ReactorAbi', () => {
 
   it('releases a registered handle whose response cannot be read', () => {
     const { abi, released } = fakeReactor('{"handle": 7, "records": [', 4);
-    expect(() => abi.register('blastn', 1, true, new Uint8Array([62, 115]))).toThrow(SyntaxError);
+    expect(() => abi.register('blastn', 1, true, false, new Uint8Array([62, 115]))).toThrow(SyntaxError);
     expect(released).toEqual([7]);
   });
 
@@ -561,7 +561,7 @@ describe.skipIf(reactors === undefined)('responses of more than 1 MiB from the s
     })());
     expect(scan.records).toHaveLength(25_000);
     expect(scan.records[24_999]).toMatchObject({ id: 'record_24999', length: 32 });
-    const registered = instance.abi.register('blastn', 1, true, fasta);
+    const registered = instance.abi.register('blastn', 1, true, false, fasta);
     expect(registered.records).toHaveLength(25_000);
     expect(registered.records[24_999]).toEqual({ id: 'record_24999', length: 32 });
     instance.abi.release(registered.handle);
@@ -707,8 +707,8 @@ describe.skipIf(reactors === undefined)('the warm-up on the serial reactor', () 
   const open = async () => (await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource))).abi;
   // Streams 0, 6 and 7 (the three output formats) of one search on an instance.
   const search = (abi: ReactorAbi, argv: readonly string[], query: Uint8Array, subject: Uint8Array) => {
-    const q = abi.register(argv[0]!, 0, true, query).handle;
-    const s = abi.register(argv[0]!, 1, true, subject).handle;
+    const q = abi.register(argv[0]!, 0, true, false, query).handle;
+    const s = abi.register(argv[0]!, 1, true, false, subject).handle;
     const out: Record<number, string> = { 0: '', 6: '', 7: '' };
     const decoder = new TextDecoder();
     abi.run(argv, q, s, (stream, bytes) => {

@@ -45,6 +45,9 @@ pub struct Registered {
     /// too; read with them off, such a line is data, which a run with them on refuses
     /// (`with_inputs`).
     pub data_loaders: bool,
+    /// Whether the reader read the records with `-parse_deflines` on: a handle from `register`
+    /// with `parse_deflines` on is used by the form's input check and refused by a plain run.
+    pub parse_deflines: bool,
 }
 
 #[derive(Default)]
@@ -213,11 +216,12 @@ pub fn register(
     program: &str,
     role: u32,
     data_loaders: bool,
+    parse_deflines: bool,
     bytes: &[u8],
 ) -> Result<(u32, String), String> {
     let program = Program::parse(program)?;
     let role_name = role_name(role)?;
-    let config = reader_config(program, role, data_loaders);
+    let config = reader_config(program, role, data_loaders).with_parse_deflines(parse_deflines);
     // The reader's refusal, in its words: the reader refuses there too, after it held what it read
     // of the record (a record of 2^31 letters does not fit in the browser).
     let scanned = scan::scan_ncbi(bytes, config).map_err(|error| error.message().to_string())?;
@@ -236,8 +240,13 @@ pub fn register(
         (records, QueryEnd::Input)
     };
     check_scan(role_name, &scanned, &records, &end)?;
-    let deflines =
-        read_deflines(bytes, config, &scanned.records, &records).map_err(reader_error)?;
+    let deflines = read_deflines(
+        bytes,
+        config.with_archive_unknown(),
+        &scanned.records,
+        &records,
+    )
+    .map_err(reader_error)?;
     let mut response = String::new();
     let mut store = store().lock().expect("input store");
     let handle = store.next_handle()?;
@@ -259,6 +268,7 @@ pub fn register(
             deflines,
             run: None,
             data_loaders,
+            parse_deflines,
         },
     );
     Ok((handle, response))
@@ -492,6 +502,7 @@ pub fn register_inputs(
                 deflines: Vec::new(),
                 run: Some(run.clone()),
                 data_loaders,
+                parse_deflines,
             },
         );
     }
@@ -609,6 +620,11 @@ pub fn with_inputs<R>(
         if data_loaders == Some(true) && !entry.data_loaders {
             return Err(format!(
                 "{name} handle {handle} was read with the data loaders off (DATA_LOADERS=none), which this run has on"
+            ));
+        }
+        if entry.parse_deflines && entry.run.is_none() && !crate::run::inputs_together(words) {
+            return Err(format!(
+                "{name} handle {handle} was read with -parse_deflines, which this run does not have"
             ));
         }
     }
@@ -743,7 +759,7 @@ mod tests {
 
     /// The `records` of a *register* response.
     fn records(program: &str, role: u32, bytes: &[u8]) -> String {
-        let (_, response) = register(program, role, true, bytes).unwrap();
+        let (_, response) = register(program, role, true, false, bytes).unwrap();
         let at = response.find("\"records\":").unwrap();
         response[at..].to_string()
     }
@@ -821,7 +837,7 @@ mod tests {
             ("eol_mixed_lf_crlf_cr.q.prot.faa", "tblastn", ROLE_QUERY),
         ] {
             let bytes = std::fs::read(format!("{fixtures}/{name}")).unwrap();
-            let (handle, _) = register(program, role, true, &bytes)
+            let (handle, _) = register(program, role, true, false, &bytes)
                 .unwrap_or_else(|error| panic!("{name}: {error}"));
             release(handle).unwrap();
         }
@@ -855,19 +871,20 @@ mod tests {
     // that may be a Seq-id is data, as the CLI reads it (D16).
     #[test]
     fn register_refuses_what_the_cli_refuses_in_its_words() {
-        let seq_id = register("tblastx", ROLE_QUERY, true, b"AB123456\nACGT\n").unwrap_err();
+        let seq_id = register("tblastx", ROLE_QUERY, true, false, b"AB123456\nACGT\n").unwrap_err();
         assert_eq!(
             seq_id,
             "the first line of the query (\"AB123456\") is not a defline and may be a sequence identifier that NCBI BLAST+ fetches through a data loader (from GenBank or a BLAST database), which is not supported by LOSAT's TBLASTX (start the query with a '>' defline, or set DATA_LOADERS=none in the [BLAST] section of .ncbirc)"
         );
-        let subject = register("blastp", ROLE_SUBJECT, true, b"2HHB\nMKTAYIAKQR\n").unwrap_err();
+        let subject =
+            register("blastp", ROLE_SUBJECT, true, false, b"2HHB\nMKTAYIAKQR\n").unwrap_err();
         assert!(
             subject.contains("the first line of the subject (\"2HHB\")")
                 && subject.contains("LOSAT's BLASTP"),
             "{subject}"
         );
         let (handle, response) =
-            register("blastp", ROLE_SUBJECT, false, b"2HHB\nMKTAYIAKQR\n").unwrap();
+            register("blastp", ROLE_SUBJECT, false, false, b"2HHB\nMKTAYIAKQR\n").unwrap();
         assert!(
             response.ends_with(r#""records":[{"index":0,"id":"","length":13}]}"#),
             "{response}"
@@ -878,10 +895,10 @@ mod tests {
         let cli = ncbi_in_losat_words("BLAST query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.");
         let bad = b">p\nMKV\n>q\n1234567890123456789012345\n>r\nMKV\n";
         assert_eq!(
-            register("blastp", ROLE_SUBJECT, true, bad).unwrap_err(),
+            register("blastp", ROLE_SUBJECT, true, false, bad).unwrap_err(),
             cli
         );
-        let (handle, response) = register("blastp", ROLE_QUERY, true, bad).unwrap();
+        let (handle, response) = register("blastp", ROLE_QUERY, true, false, bad).unwrap();
         assert_eq!(
             &response[response.find("\"records\":").unwrap()..],
             format!(r#""records":[{{"index":0,"id":"p","length":3}}],"reader_error":"{cli}"}}"#)
@@ -891,10 +908,11 @@ mod tests {
         // a subject's fails `register`, a query's is its first record's error.
         let data = ncbi_in_losat_words("BLAST query error: CFastaReader: Near line 1, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.");
         assert_eq!(
-            register("blastn", ROLE_SUBJECT, false, b"NM_000518.5\n").unwrap_err(),
+            register("blastn", ROLE_SUBJECT, false, false, b"NM_000518.5\n").unwrap_err(),
             data
         );
-        let (handle, response) = register("blastn", ROLE_QUERY, false, b"NM_000518.5\n").unwrap();
+        let (handle, response) =
+            register("blastn", ROLE_QUERY, false, false, b"NM_000518.5\n").unwrap();
         assert!(
             response.ends_with(&format!(r#""records":[],"reader_error":"{data}"}}"#)),
             "{response}"
@@ -936,8 +954,8 @@ mod tests {
         );
         release(query_handle).unwrap();
         release(subject_handle).unwrap();
-        let (query_handle, _) = register("blastp", ROLE_QUERY, false, query).unwrap();
-        let (subject_handle, _) = register("blastp", ROLE_SUBJECT, false, subject).unwrap();
+        let (query_handle, _) = register("blastp", ROLE_QUERY, false, false, query).unwrap();
+        let (subject_handle, _) = register("blastp", ROLE_SUBJECT, false, false, subject).unwrap();
         let plain = ["blastp", "-query", "q", "-subject", "s"];
         let refused = with_inputs(
             Program::Blastp,
@@ -1017,8 +1035,9 @@ mod tests {
             error.contains("are not the inputs that register_inputs read for this argv"),
             "{error}"
         );
-        let (plain_query, _) = register("blastp", ROLE_QUERY, true, query_bytes).unwrap();
-        let (plain_subject, _) = register("blastp", ROLE_SUBJECT, true, subject_bytes).unwrap();
+        let (plain_query, _) = register("blastp", ROLE_QUERY, true, false, query_bytes).unwrap();
+        let (plain_subject, _) =
+            register("blastp", ROLE_SUBJECT, true, false, subject_bytes).unwrap();
         let mixed = with_inputs(
             Program::Blastp,
             plain_query,
@@ -1304,11 +1323,112 @@ mod tests {
         release(sh).unwrap();
     }
 
+    // Finding 2 (line RG-XT item X7-5 round R2): `register` with `parse_deflines` gives the same
+    // refusal, reader_error and record lengths as `register_inputs`, while `parse_deflines = false`
+    // keeps the plain reading; handles registered with `parse_deflines = true` are refused by a
+    // plain run.
+    #[test]
+    fn register_with_parse_deflines_matches_register_inputs() {
+        let sp_junk = b">sp|P99987.1|NAME_J\nEEEEEE\n%%%%%%\n";
+        let sp_p53 =
+            b">sp|P99995.1|X\nMEEPQSDPSVEPPLSQETFSDLWKLLPENNVLSPLPSQAMDDLMLSPDDIEQWFTEDPGP\n";
+        let ti_junk = b">gnl|TI|12400\nEEEEEE\n%%%%%%\n";
+        let bn = ["blastn", "-query", "q", "-subject", "s", "-parse_deflines"];
+        let bp = ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"];
+        let nq = b">q\nACGTACGTACGTACGTACGT\n";
+        let pq = b">p\nMKVLAAGIVAMKVLAAGIVA\n";
+
+        let reg_ok = |prog: &str, role: u32, pd: bool, bytes: &[u8]| -> String {
+            let (h, resp) = register(prog, role, true, pd, bytes).unwrap();
+            release(h).unwrap();
+            resp
+        };
+        let run_ok = |words: &[&str], q: &[u8], s: &[u8]| -> String {
+            let (qh, sh, resp) = register_inputs(words, q, s).unwrap();
+            release(qh).unwrap();
+            release(sh).unwrap();
+            resp
+        };
+
+        // Rows 1 & 2: blastn -subject and -query sp_junk — read (length 6, no reader_error) with
+        // parse_deflines; without it subject is refused and query ends with reader_error.
+        for (role, q, s) in [
+            (ROLE_SUBJECT, &nq[..], &sp_junk[..]),
+            (ROLE_QUERY, &sp_junk[..], &nq[..]),
+        ] {
+            let check_resp = reg_ok("blastn", role, true, sp_junk);
+            let run_resp = run_ok(&bn, q, s);
+            for resp in [&check_resp, &run_resp] {
+                assert!(
+                    resp.contains(r#""id":"sp|P99987.1|NAME_J","length":6"#)
+                        && !resp.contains("reader_error"),
+                    "role={role}: {resp}"
+                );
+            }
+        }
+        let plain_subj_err = register("blastn", ROLE_SUBJECT, true, false, sp_junk).unwrap_err();
+        assert!(plain_subj_err.contains("Near line 3"), "{plain_subj_err}");
+        let plain_query_resp = reg_ok("blastn", ROLE_QUERY, false, sp_junk);
+        assert!(
+            plain_query_resp.contains(r#""records":[]"#)
+                && plain_query_resp.contains("Near line 3"),
+            "{plain_query_resp}"
+        );
+
+        // Row 3: blastn -subject sp_p53 — length 60 with parse_deflines, length 28 without.
+        let p53_check = reg_ok("blastn", ROLE_SUBJECT, true, sp_p53);
+        let p53_run = run_ok(&bn, nq, sp_p53);
+        assert!(p53_check.contains(r#""length":60"#), "{p53_check}");
+        assert!(p53_run.contains(r#""length":60"#), "{p53_run}");
+        let p53_plain = reg_ok("blastn", ROLE_SUBJECT, false, sp_p53);
+        assert!(p53_plain.contains(r#""length":28"#), "{p53_plain}");
+
+        // Row 4: blastp -subject and -query ti_junk — Near line 3 with parse_deflines, length 6
+        // without.
+        let ti_subj_err = register("blastp", ROLE_SUBJECT, true, true, ti_junk).unwrap_err();
+        let ti_run_err = register_inputs(&bp, pq, ti_junk).unwrap_err();
+        assert_eq!(ti_subj_err, ti_run_err);
+        assert!(ti_subj_err.contains("Near line 3"), "{ti_subj_err}");
+        let ti_query_pd = reg_ok("blastp", ROLE_QUERY, true, ti_junk);
+        assert!(
+            ti_query_pd.contains(r#""records":[]"#) && ti_query_pd.contains("Near line 3"),
+            "{ti_query_pd}"
+        );
+        for role in [ROLE_SUBJECT, ROLE_QUERY] {
+            let ti_plain = reg_ok("blastp", role, false, ti_junk);
+            assert!(
+                ti_plain.contains(r#""length":6"#) && !ti_plain.contains("reader_error"),
+                "role={role}: {ti_plain}"
+            );
+        }
+
+        // A ranged Seq-id (`>x:10-40`) under `-parse_deflines` is accepted by `register` (the
+        // archive-only refusal applies only when outfmt 11 is requested).
+        let (h, resp) =
+            register("blastn", ROLE_SUBJECT, true, true, b">x:10-40\nACGTACGT\n").unwrap();
+        assert!(resp.contains(r#""length":8"#), "{resp}");
+        // A handle registered with `parse_deflines = true` cannot enter a plain run.
+        let (qh, _) = register("blastn", ROLE_QUERY, true, false, nq).unwrap();
+        let plain_words = ["blastn", "-query", "q", "-subject", "s"];
+        let refused = with_inputs(
+            Program::Blastn,
+            qh,
+            h,
+            &plain_words,
+            Some(true),
+            |_, _, _| (),
+        )
+        .unwrap_err();
+        assert!(refused.contains("read with -parse_deflines"), "{refused}");
+        release(qh).unwrap();
+        release(h).unwrap();
+    }
+
     // Another program's handle cannot bring a record to a run.
     #[test]
     fn a_handle_belongs_to_its_program() {
-        let (query, _) = register("blastp", ROLE_QUERY, true, b">q t\nACXGT\n").unwrap();
-        let (subject, _) = register("blastn", ROLE_SUBJECT, true, b">s\nACGT\n").unwrap();
+        let (query, _) = register("blastp", ROLE_QUERY, true, false, b">q t\nACXGT\n").unwrap();
+        let (subject, _) = register("blastn", ROLE_SUBJECT, true, false, b">s\nACGT\n").unwrap();
         let words = ["blastn", "-query", "q", "-subject", "s"];
         let error = with_inputs(
             Program::Blastn,

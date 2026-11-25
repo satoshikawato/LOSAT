@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { FRAME_BEGIN, FRAME_BYTES, FRAME_END, FRAME_TRUNCATE, ownedFrame, parseToolFrame, type ToolFrame } from '../src/domain/tool-frames.ts';
 import { RunCancelledError, type EngineGateway, type EngineRunRequest, type ToolFileSink } from '../src/ports/engine.ts';
 import { ABI_VERSION, EngineCallError, ReactorAbi, type AbiExports } from '../src/infra/reactor/abi.ts';
+import { ReactorInputChecker } from '../src/infra/reactor/checker.ts';
 import { ABI_EXPORTS } from '../src/infra/reactor/artifact.ts';
 import { compileReactor, instantiateSerial } from '../src/infra/reactor/instance.ts';
 import { RunDirectory } from '../src/infra/reactor/run-directory.ts';
@@ -463,7 +464,7 @@ describe('ReactorAbi.tool and validateTool', () => {
     });
   });
 
-  it('reads data_loaders and parse_deflines from validate and passes FastaReader.parseDeflines to scan_begin', () => {
+  it('reads data_loaders and optional parse_deflines from validate and passes FastaReader.parseDeflines to scan_begin and register', async () => {
     const valid = fakeEngine({
       validate: (emit) => {
         emit(2, encode('{"data_loaders":true,"parse_deflines":true}'));
@@ -484,9 +485,24 @@ describe('ReactorAbi.tool and validateTool', () => {
       dataLoaders: false,
       parseDeflines: true,
     });
+    // Finding 3: when parse_deflines is omitted from *validation* (unparseable argv), validate
+    // omits parseDeflines so the host keeps its previous value.
+    const unparsed = fakeEngine({
+      validate: (emit) => {
+        emit(2, encode('{"data_loaders":true}'));
+        return -1;
+      },
+      error: 'Value is missing',
+    });
+    const unparsedResult = unparsed.abi.validate(['blastp', '-parse_deflines', '-evalue']);
+    expect(unparsedResult).toEqual({ ok: false, message: 'Value is missing', dataLoaders: true });
+    expect('parseDeflines' in unparsedResult).toBe(false);
+
     const scanCalls: Array<readonly [string, number, number, number]> = [];
+    const registerCalls: Array<readonly [string, number, number, number, number]> = [];
     const memory = new WebAssembly.Memory({ initial: 2 });
     let next = 4096;
+    const ref: { abi?: ReactorAbi } = {};
     const abi = new ReactorAbi({
       memory,
       losat_web2_abi_version: () => ABI_VERSION,
@@ -503,12 +519,39 @@ describe('ReactorAbi.tool and validateTool', () => {
         scanCalls.push([program, role, dataLoaders, parseDeflines]);
         return scanCalls.length;
       },
+      losat_web2_register: (ptr: number, len: number, role: number, dataLoaders: number, parseDeflines: number, _bPtr: number, bLen: number) => {
+        const program = text(new Uint8Array(memory.buffer, ptr, len).slice());
+        registerCalls.push([program, role, dataLoaders, parseDeflines, bLen]);
+        const resp = encode('{"handle":1,"records":[{"id":"s","length":6}]}');
+        const outPtr = next;
+        next += resp.length;
+        new Uint8Array(memory.buffer, outPtr, resp.length).set(resp);
+        ref.abi!.emit(2, outPtr, resp.length);
+        return registerCalls.length;
+      },
+      losat_web2_release: () => 0,
     } as unknown as AbiExports);
+    ref.abi = abi;
     expect(abi.scanBegin({ program: 'blastp', role: 'subject', dataLoaders: true, parseDeflines: false })).toBe(1);
     expect(abi.scanBegin({ program: 'blastn', role: 'query', dataLoaders: false, parseDeflines: true })).toBe(2);
     expect(scanCalls).toEqual([
       ['blastp', 1, 1, 0],
       ['blastn', 0, 0, 1],
+    ]);
+    // Finding 2: ReactorInputChecker passes reader.parseDeflines through abi.register.
+    const checker = new ReactorInputChecker(async () => abi);
+    const bytes = encode('>s\nACGTAC\n');
+    expect(await checker.check({ program: 'blastn', role: 'subject', dataLoaders: true, parseDeflines: false }, bytes)).toEqual({
+      ok: true,
+      records: [{ id: 's', length: 6 }],
+    });
+    expect(await checker.check({ program: 'blastn', role: 'subject', dataLoaders: false, parseDeflines: true }, bytes)).toEqual({
+      ok: true,
+      records: [{ id: 's', length: 6 }],
+    });
+    expect(registerCalls).toEqual([
+      ['blastn', 1, 1, 0, bytes.length],
+      ['blastn', 1, 0, 1, bytes.length],
     ]);
   });
 });

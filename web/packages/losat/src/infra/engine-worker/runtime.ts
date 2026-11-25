@@ -331,7 +331,7 @@ export class EngineRuntime {
       let handles: readonly [number, number] = [0, 0];
       let subjectRetained = false;
       if (!prints) {
-        const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, dataLoaders, request.query.bytes);
+        const registered = together?.query ?? abi.register(request.program, ROLE_QUERY, dataLoaders, false, request.query.bytes);
         query = registered.handle;
         const queryMismatch = recordMismatch(request.query.records, registered.records);
         if (queryMismatch !== undefined) throw new InputMismatchError('query', queryMismatch);
@@ -542,7 +542,7 @@ export class EngineRuntime {
     const abi = loaded.instance.abi;
     if (this.retains(loaded, given, dataLoaders)) return loaded.retained!;
     this.releaseRetained(loaded);
-    const registered = abi.register(program, ROLE_SUBJECT, dataLoaders, given.bytes);
+    const registered = abi.register(program, ROLE_SUBJECT, dataLoaders, false, given.bytes);
     loaded.retained = { key: given.key, dataLoaders, handle: registered.handle, records: registered.records };
     return loaded.retained;
   }

@@ -651,6 +651,81 @@ describe('SearchDraft inputs', () => {
       await draft.idle();
       expect(inflight).toEqual(['subject|false', 'query|true', 'subject|true']);
     });
+
+    it('keeps parseDeflines and triggers no rescan when a mid-edit argv fails to parse (Finding 3)', async () => {
+      const { draft, data } = setup({
+        validate: (argv) => {
+          if (argv.includes('-evalue') && argv[argv.indexOf('-evalue') + 1] === undefined) {
+            return { ok: false, message: 'Argument "-evalue". Value is missing', dataLoaders: true };
+          }
+          return { ok: true, dataLoaders: true, parseDeflines: argv.includes('-parse_deflines') };
+        },
+      });
+      const scans: string[] = [];
+      const origIndex = data.indexSource.bind(data);
+      data.indexSource = async (id, reader) => {
+        scans.push(`${reader.role}|${reader.parseDeflines}`);
+        return origIndex(id, reader);
+      };
+      draft.setPaste('query', '>q1\nACGT\n>q2\nACGT\n>q3\nACGT\n');
+      draft.setExtra('-parse_deflines');
+      await draft.idle();
+      draft.setIncluded('query', sourceOf(draft, 'query').key, [0, 2], false);
+      expect([draft.state.get().parseDeflines, sourceOf(draft, 'query').excluded]).toEqual([true, [0, 2]]);
+      const scansBefore = scans.length;
+      // Typing an incomplete option makes validation omit parseDeflines: no rescan, exclusions stay.
+      draft.setExtra('-parse_deflines -evalue');
+      await draft.idle();
+      expect([draft.state.get().validation.state, draft.state.get().parseDeflines, scans.length, sourceOf(draft, 'query').excluded]).toEqual([
+        'invalid',
+        true,
+        scansBefore,
+        [0, 2],
+      ]);
+    });
+
+    it('preserves exclusions by record offset across -parse_deflines changes and drops gone records (Finding 4)', async () => {
+      const { draft, data } = setup({
+        validate: (argv) => ({ ok: true, dataLoaders: true, parseDeflines: argv.includes('-parse_deflines') }),
+      });
+      const baseIndex = data.indexSource.bind(data);
+      data.indexSource = async (sourceId, reader) => {
+        const rev = await baseIndex(sourceId, reader);
+        if (reader.role === 'subject' && reader.parseDeflines) {
+          // Simulate a subject where record 0 (`>sp|P99995.1|X`) changes length under -parse_deflines
+          // and record 3 disappears past a reader stop, while records 1 and 2 keep their offsets/lengths.
+          return {
+            ...rev,
+            records: rev.records.slice(0, 3).map((rec, i) => (i === 0 ? { ...rec, length: rec.length + 10 } : rec)),
+          };
+        }
+        return rev;
+      };
+      // Source without other-molecule records: 2 exclusions survive adding and removing -parse_deflines.
+      draft.setPaste('query', '>q1\nACGT\n>q2\nCCCC\n>q3\nGGGG\n');
+      // Source with an other-molecule record whose length changes and a trailing record that disappears.
+      draft.setPaste('subject', '>sp|P99995.1|X\nACGT\n>s1\nCCCC\n>s2\nGGGG\n>s3\nTTTT\n');
+      await draft.idle();
+      draft.setIncluded('query', sourceOf(draft, 'query').key, [0, 1], false);
+      draft.setIncluded('subject', sourceOf(draft, 'subject').key, [1, 3], false);
+      expect([sourceOf(draft, 'query').excluded, sourceOf(draft, 'subject').excluded]).toEqual([
+        [0, 1],
+        [1, 3],
+      ]);
+
+      for (const [extra, wantPd, wantSubj] of [
+        ['-parse_deflines', true, [1]],
+        ['', false, [1]],
+      ] as const) {
+        draft.setExtra(extra);
+        await draft.idle();
+        expect([draft.state.get().parseDeflines, sourceOf(draft, 'query').excluded, sourceOf(draft, 'subject').excluded]).toEqual([
+          wantPd,
+          [0, 1],
+          wantSubj,
+        ]);
+      }
+    });
   });
 
   it('reads a text pasted just before a program change once, with the new kind', async () => {

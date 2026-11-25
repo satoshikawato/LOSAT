@@ -151,7 +151,7 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
       expect(validation, row.id).toEqual({ ok: true, dataLoaders: true, parseDeflines: false });
       const started = abi.start(argv);
       expect(started.ok && started.start.database, row.id).toBe(true);
-      const query = abi.register(row.program, ROLE_QUERY, validation.ok && validation.dataLoaders, readFileSync(join(LOSAT, row.query)));
+      const query = abi.register(row.program, ROLE_QUERY, validation.ok && validation.dataLoaders, false, readFileSync(join(LOSAT, row.query)));
       const before = reader.bytes();
       reader.byFile.clear();
       let outfmt6: Uint8Array[] = [];
@@ -183,8 +183,8 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
     expect(repeatValidation, repeatSubject.id).toEqual({ ok: true, dataLoaders: true, parseDeflines: false });
     const repeatStarted = abi.start(repeatArgv);
     expect(repeatStarted.ok && !repeatStarted.start.database, repeatSubject.id).toBe(true);
-    const repeatQuery = abi.register('blastn', ROLE_QUERY, true, readFileSync(join(LOSAT, repeatQueryPath)));
-    const repeatTarget = abi.register('blastn', ROLE_SUBJECT, true, readFileSync(join(LOSAT, repeatSubjectPath)));
+    const repeatQuery = abi.register('blastn', ROLE_QUERY, true, false, readFileSync(join(LOSAT, repeatQueryPath)));
+    const repeatTarget = abi.register('blastn', ROLE_SUBJECT, true, false, readFileSync(join(LOSAT, repeatSubjectPath)));
     const repeatBefore = reader.bytes();
     reader.byFile.clear();
     let repeatOutfmt6: Uint8Array[] = [];
@@ -206,8 +206,8 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
     // A repeat database whose files are omitted from the directory: the CLI's batch warning, with `/work::` as its
     // search path (abi_v2.md §3; line RG item D4).
     directory.open([]);
-    const nucQuery = abi.register('blastn', ROLE_QUERY, true, new TextEncoder().encode('>q\nACGTACGTACGTACGTACGTACGTACGTACGT\n'));
-    const nucSubject = abi.register('blastn', ROLE_SUBJECT, true, new TextEncoder().encode('>s\nACGTACGTACGTACGTACGTACGTACGTACGT\n'));
+    const nucQuery = abi.register('blastn', ROLE_QUERY, true, false, new TextEncoder().encode('>q\nACGTACGTACGTACGTACGTACGTACGTACGT\n'));
+    const nucSubject = abi.register('blastn', ROLE_SUBJECT, true, false, new TextEncoder().encode('>s\nACGTACGTACGTACGTACGTACGTACGTACGT\n'));
     const missingRepeats = ['blastn', '-query', 'q.fna', '-subject', 's.fna', '-filtering_db', repeatDbName, '-num_threads', '1'];
     expect(() => abi.run(missingRepeats, nucQuery.handle, nucSubject.handle, () => undefined)).toThrow(
       `LOSAT engine error: Warning: No alias or index file found for nucleotide database [${repeatDbName}] in search path [/work::].`,
@@ -217,7 +217,7 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
     // A database that the directory does not hold: the CLI's message.
     directory.open([]);
     const argv = ['blastp', '-db', 'tests/db_search/paja', '-query', 'q.faa', '-num_threads', '1'];
-    const query = abi.register('blastp', ROLE_QUERY, true, new TextEncoder().encode('>q\nMKVLA\n'));
+    const query = abi.register('blastp', ROLE_QUERY, true, false, new TextEncoder().encode('>q\nMKVLA\n'));
     expect(() => abi.run(argv, query.handle, 0, () => undefined)).toThrow(/LOSAT database error: No alias or index file found for protein database \[tests\/db_search\/paja\]/);
     // With the database in the directory, the names that the CLI run from LOSAT/ does not find either: an absolute
     // name (the CLI's root holds no tests/) and `..` after a name that is no folder. The CLI's message, whose

@@ -196,8 +196,8 @@ const argv = ['blastp', '-query', 'query.faa', '-subject', 'subject.faa', '-num_
 // The verdict on the argv says whether its run reads the inputs with NCBI's data loaders on.
 const validation = abi.validate(argv);
 if (!validation.ok) throw new Error(validation.message);
-const query = abi.register('blastp', ROLE_QUERY, validation.dataLoaders, queryFasta);
-const subject = abi.register('blastp', ROLE_SUBJECT, validation.dataLoaders, subjectFasta);
+const query = abi.register('blastp', ROLE_QUERY, validation.dataLoaders, validation.parseDeflines, queryFasta);
+const subject = abi.register('blastp', ROLE_SUBJECT, validation.dataLoaders, validation.parseDeflines, subjectFasta);
 let outfmt6: Uint8Array[] = [];
 // -query and -subject name the inputs in the outputs; the sequences come from the handles.
 abi.run(argv, query.handle, subject.handle, (stream, bytes) => {

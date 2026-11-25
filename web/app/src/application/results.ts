@@ -678,7 +678,12 @@ export class ResultsBrowser {
       filtered.subjects.map((subject) => unfiltered.get(subject.sIdx)!),
       state.subjectSort,
       table,
-      (sIdx) => subjectRecords[sIdx]?.length ?? 0,
+      (sIdx) => {
+        const recordLength = subjectRecords[sIdx]?.length;
+        if (recordLength !== undefined) return recordLength;
+        const first = unfiltered.get(sIdx)?.rows[0];
+        return first === undefined ? 0 : (table.subjectLength[first] ?? 0);
+      },
     );
     const subjects = sorted.map((all) => this.subjectEntry(loaded, shown.get(all.sIdx)!, all, order.get(all.sIdx)!, state.hspSort));
     const selected = subjects.find((s) => s.sIdx === state.sIdx);
@@ -716,12 +721,13 @@ export class ResultsBrowser {
   ): SubjectEntry {
     const record: RecordKey | undefined = loaded.run.snapshot.subject.records[shown.sIdx];
     const first = all.rows[0]!;
+    const firstRow = this.row(first);
     return {
       sIdx: shown.sIdx,
-      recordId: record?.id ?? '',
-      length: record?.length ?? 0,
+      recordId: record?.id ?? firstRow.sseqid,
+      length: record?.length ?? loaded.index.table.subjectLength[first] ?? 0,
       order,
-      first: this.row(first),
+      first: firstRow,
       hspCount: all.rows.length,
       rows: sortHsps(shown.rows, hspSort, loaded.index.table),
       inOutfmt0: out0SubjectRange(loaded.index.table, first) !== undefined,

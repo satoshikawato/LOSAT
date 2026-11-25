@@ -33,6 +33,16 @@ pub(crate) struct TranslatedChunk {
     /// `DBSEQ_CHUNK_OVERLAP` ([`TranslatedChunk::new`] for a frame without hard ranges;
     /// `core::subject_split::HardChunk::overlap` for one with `-db_hard_mask`).
     pub overlap: usize,
+    /// The chunk's length as NCBI's `Int4` (`core::subject_split::HardChunk::length`): negative
+    /// for the inverted range between two masks that overlap in the order of their start, and
+    /// equal to `length` elsewhere.
+    pub ncbi_length: i32,
+    /// Whether NCBI reads the merge overlap past its list of hard ranges
+    /// (`core::subject_split::HardChunk::overlap_past_list`).
+    pub overlap_past_list: bool,
+    /// Whether this chunk took NCBI's "no chunking" branch (`core::subject_split::HardChunk::
+    /// full_range`: offset 0 and the next range starts at the frame's end).
+    pub full_range: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:578-584
@@ -49,6 +59,9 @@ impl TranslatedChunk {
             offset,
             length,
             overlap: if offset == 0 { 0 } else { DBSEQ_CHUNK_OVERLAP },
+            ncbi_length: length as i32,
+            overlap_past_list: false,
+            full_range: false,
         }
     }
 }
@@ -343,6 +356,9 @@ pub(crate) fn translated_db_mask_chunks(
                 offset: chunk.offset,
                 length: chunk.letters(),
                 overlap: chunk.overlap,
+                ncbi_length: chunk.length,
+                overlap_past_list: chunk.overlap_past_list,
+                full_range: chunk.full_range,
             },
             vec![(0, i32::try_from(right)?)],
         ));

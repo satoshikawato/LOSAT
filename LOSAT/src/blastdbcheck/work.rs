@@ -8,7 +8,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::io::Write;
 
 use crate::algorithm::common::database::losat_reader_error;
-use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::blastinput::ncbi_environment::{ApplicationSettings, ReadVerification};
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{Cin, OutputFile};
 use crate::ncbi_app::Diag;
@@ -16,7 +16,7 @@ use crate::ncbi_exception::NcbiException;
 use crate::seqdb::find::find_blast_dbs;
 use crate::seqdb::taxdb::LazyTaxDb;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
-use crate::writedb::convert::Random;
+use crate::utils::random_gen::NcbiRandom;
 use crate::writedb::time::LocalTime;
 
 use super::alias::alias_file_test;
@@ -222,7 +222,7 @@ fn check(
         })?;
         Ok(Test::Sample {
             n,
-            random: Random::new(seed),
+            random: NcbiRandom::new(seed),
         })
     };
     let mut chosen = args.flag("full");
@@ -273,6 +273,7 @@ fn check(
     };
     let walk = Walk {
         path: &path,
+        read_verification: &settings.read_verification,
         tests: &mut tests,
         diag,
     };
@@ -293,6 +294,7 @@ fn search_path(settings: &ApplicationSettings) -> SearchPath {
 /// The walk of the run's volumes and alias files with its tests.
 struct Walk<'r, 'd> {
     path: &'r SearchPath,
+    read_verification: &'r ReadVerification,
     tests: &'r mut Tests,
     diag: &'r mut Diag<'d>,
 }
@@ -444,8 +446,11 @@ impl Walk<'_, '_> {
             Some(SeqType::Nucleotide) => &[SeqType::Nucleotide],
             None => &[SeqType::Protein, SeqType::Nucleotide],
         };
-        let opened =
-            SeqDb::open_guessing(types, |seqtype| SeqDb::open_in(volume, seqtype, self.path));
+        let opened = SeqDb::open_guessing(types, |seqtype| {
+            let mut db = SeqDb::open_in(volume, seqtype, self.path)?;
+            db.refuse_unchecked_reads(self.read_verification);
+            Ok(db)
+        });
         match opened {
             Ok(db) => self.tests.run(log, &db, volume, seen, self.diag),
             Err(error) => {

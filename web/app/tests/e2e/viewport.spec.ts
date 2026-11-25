@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
+import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
 import { openParameters, openSearch, pickRun, program, waitStatus } from './support/search';
 import { test } from './support/test';
@@ -326,8 +327,10 @@ test('at 320, 390, 768, 850 and 900 px every visible "?" shares a line with its 
   await openBlastnParameters(page);
   await page.getByTestId('query-input').fill('NM_000001.1');
   await expect(page.getByTestId('query-fetch-row')).toBeVisible();
-  await page.getByTestId('param-extra').fill('-conffile test.ini');
-  await expect(page.getByTestId('param-conffile')).toBeVisible();
+  if (BUILD_HAS_ENGINE) {
+    await page.getByTestId('param-extra').fill('-conffile test.ini');
+    await expect(page.getByTestId('param-conffile')).toBeVisible();
+  }
   await checkAllTipsAtWidths(page, 'BLASTN WindowMasker unchecked');
 
   await page.getByTestId('param-window_masker_db').setChecked(true);

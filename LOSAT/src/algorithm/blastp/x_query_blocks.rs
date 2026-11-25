@@ -542,6 +542,11 @@ pub(crate) fn x_query_blocks(
 pub(crate) enum XBlockSink<'a> {
     Stdout(BufWriter<io::Stdout>),
     Writer(&'a mut (dyn Write + Send)),
+    /// The command line's report stream, which every block's output writes as NCBI's
+    /// (`OutputSink::Report`: its regions and flushes).
+    Report(&'a mut crate::report::ostream::ReportStream),
+    /// The `-out` file of `run_to_file`, written as the command line's (`OutputSink::Out`).
+    Out(&'a mut crate::api::local_blast::OutFile),
 }
 
 impl<'a> XBlockSink<'a> {
@@ -552,11 +557,30 @@ impl<'a> XBlockSink<'a> {
             OutputSink::Writer(writer) | OutputSink::Files(writer, _) => {
                 Self::Writer(&mut **writer)
             }
+<<<<<<< HEAD
             OutputSink::Out(out) => Self::Writer(&mut **out),
             OutputSink::Kept(kept) => Self::Writer(&mut **kept),
             // The block search runs inside its run (`ReportOutputs::run_records`), which gives it
             // every `File` sink as `Kept`.
             OutputSink::File(_) => unreachable!("a run sees a File sink as Kept (run_records)"),
+=======
+            OutputSink::Out(out) => Self::Out(out),
+            OutputSink::Report(stream) => Self::Report(stream),
+        }
+    }
+
+    /// The sink of one block's output of a format (`side`: the caller's receiver of the side
+    /// files of outfmt 13 and 14).
+    pub(crate) fn block_sink(
+        &mut self,
+        side: Option<&crate::report::blast_xml2::SideFileSink>,
+    ) -> OutputSink<'_> {
+        match (self, side) {
+            (Self::Report(stream), _) => OutputSink::Report(stream),
+            (Self::Out(out), _) => OutputSink::Out(out),
+            (output, Some(side)) => OutputSink::Files(output, side.clone()),
+            (output, None) => OutputSink::Writer(output),
+>>>>>>> origin/dev
         }
     }
 
@@ -564,7 +588,13 @@ impl<'a> XBlockSink<'a> {
         match self {
             Self::Stdout(stdout) => stdout,
             Self::Writer(writer) => &mut **writer,
+<<<<<<< HEAD
         }
+=======
+            Self::Report(stream) => &mut **stream,
+            Self::Out(out) => &mut **out,
+        })
+>>>>>>> origin/dev
     }
 }
 

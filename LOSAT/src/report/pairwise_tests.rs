@@ -48,24 +48,30 @@ fn subject_set_database_lines_print_totals_of_2_to_the_32_letters_or_more() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395 (cited at
 // `write_prolog`): the prolog's two `NcbiEndl`, each a newline and a flush.
-// Which programs' prologs flush after each of these two newlines (`write_prolog`'s
-// `endl_flushes`, each program's flushes of dev; review note N3 of line RG T4a1): the plain
-// prologs of blastx, rpstblastn, tblastn (also with `-in_pssm`), tblastx and the blastn tasks
-// other than megablast do; those of blastp's driver (blastp, psiblast, rpsblast) and of
-// megablast flush nowhere in the prolog. With `-html` every program's prolog flushes at both, as
-// NCBI's (line RG T4a2 review B4: blastp's `-html -out /dev/full` with `GETURL_DEBUG` wrote
-// `REGISTRY: .ncbirc` before NCBI's write error).
+// Every program's prolog makes NCBI's flush after each of these two newlines
+// (`ReportWrite::ncbi_flush`, line RG item T6a; line RG T4a1's review note N3 had kept each
+// program's flushes of dev): blastp's driver (blastp, psiblast, rpsblast), megablast and the
+// other blastn tasks, blastx, rpstblastn, tblastn (also with `-in_pssm`) and tblastx, the plain
+// prolog and the `-html` one (line RG T4a2 review B4: blastp's `-html -out /dev/full` with
+// `GETURL_DEBUG` wrote `REGISTRY: .ncbirc` before NCBI's write error).
 #[test]
-fn the_prologs_that_flush_after_their_two_newlines() {
-    /// Keeps what is written and the number of bytes written at each flush.
+fn every_prolog_flushes_after_its_two_newlines() {
+    /// Keeps what is written and the number of bytes written at each flush of NCBI's, and at
+    /// each of LOSAT's (`std::io::Write::flush`).
     #[derive(Default)]
-    struct Flushes(Vec<u8>, Vec<usize>);
+    struct Flushes(Vec<u8>, Vec<usize>, Vec<usize>);
     impl Write for Flushes {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
             self.0.extend_from_slice(bytes);
             Ok(bytes.len())
         }
         fn flush(&mut self) -> io::Result<()> {
+            self.2.push(self.0.len());
+            Ok(())
+        }
+    }
+    impl crate::report::ostream::ReportWrite for Flushes {
+        fn ncbi_flush(&mut self) -> io::Result<()> {
             self.1.push(self.0.len());
             Ok(())
         }
@@ -116,37 +122,31 @@ fn the_prologs_that_flush_after_their_two_newlines() {
             write_blastx_prolog(out, program, report, None, html)
         })
     };
-    let prologs: [(&str, Prolog<'_>, bool); 10] = [
-        ("blastp", blastp("blastp"), false),
-        ("psiblast", blastp("psiblast"), false),
-        ("rpsblast", blastp("rpsblast"), false),
-        ("megablast", blastn(true), false),
-        ("blastn", blastn(false), true),
+    let prologs: [(&str, Prolog<'_>); 10] = [
+        ("blastp", blastp("blastp")),
+        ("psiblast", blastp("psiblast")),
+        ("rpsblast", blastp("rpsblast")),
+        ("megablast", blastn(true)),
+        ("blastn", blastn(false)),
         (
             "tblastx",
             Box::new(|out: &mut Flushes, html: Html<'_>| {
                 write_tblastx_pairwise_prolog(out, version, b"d", 1, 10, None, html)
             }),
-            true,
         ),
-        ("tblastn", tblastn("TBLASTN"), true),
-        ("psitblastn", tblastn("PSITBLASTN"), true),
-        ("blastx", blastx("BLASTX"), true),
-        ("rpstblastn", blastx("RPSTBLASTN"), true),
+        ("tblastn", tblastn("TBLASTN")),
+        ("psitblastn", tblastn("PSITBLASTN")),
+        ("blastx", blastx("BLASTX")),
+        ("rpstblastn", blastx("RPSTBLASTN")),
     ];
     let links = html_links_with(None);
-    for (program, prolog, endl_flushes) in &prologs {
+    for (program, prolog) in &prologs {
         let mut out = Flushes::default();
         prolog(&mut out, None).unwrap();
-        // The version line, then the two newlines.
+        // The version line, then the two newlines, each flushed.
         let line = out.0.iter().position(|&byte| byte == b'\n').unwrap() + 1;
         assert_eq!(&out.0[line..line + 2], b"\n\n", "{program}");
-        let flushes = if *endl_flushes {
-            vec![line + 1, line + 2]
-        } else {
-            Vec::new()
-        };
-        assert_eq!(out.1, flushes, "{program}");
+        assert_eq!(out.1, vec![line + 1, line + 2], "{program}");
         // `-html`: the bold version line after the HTML head, then the two newlines, each flushed
         // (no `./.ncbirc`: the references post nothing and flush nowhere).
         let mut out = Flushes::default();
@@ -161,10 +161,13 @@ fn the_prologs_that_flush_after_their_two_newlines() {
         assert!(out.0[..line].ends_with(b"</b>\n"), "{program}");
         assert_eq!(&out.0[line..line + 2], b"\n\n", "{program}");
         assert_eq!(out.1, [line + 1, line + 2], "{program}");
+        assert!(out.2.is_empty(), "{program}");
         assert!(diagnostics.is_empty());
     }
-    // A reference that posts flushes the report written so far first (NCBI's `cerr` is tied to
-    // `cout`), so the posts follow the bytes before them.
+    // A reference that posts hands the report written so far to its stream first (LOSAT's flush,
+    // `query_warnings::write_html_post`), where NCBI's `cerr`, tied to `cout`, flushes it
+    // (`ostream::cerr_post`), so the posts follow the bytes before them; NCBI's own flushes are
+    // the `NcbiEndl` pair alone.
     let posting = html_links_with(Some(b"[BLASTFMTUTIL]\nPROTOCOL=https:\nPROTOCOL=https:\n"));
     let mut out = Flushes::default();
     let mut diagnostics = Vec::new();
@@ -174,7 +177,8 @@ fn the_prologs_that_flush_after_their_two_newlines() {
         "Warning: (110.8) [blastp] Found multiple [BLASTFMTUTIL] PROTOCOL settings; using the one from line 3\n"
             .repeat(2)
     );
-    assert_eq!(out.1.len(), 4);
+    assert_eq!(out.1.len(), 2);
+    assert_eq!(out.2.len(), 2);
 }
 
 /// `write_flatfile_wrapped_with` finds the break of a line without newlines or backspaces from the window's
@@ -257,7 +261,7 @@ fn a_null_matrix_name_stops_the_epilog_after_its_label() {
     let mut unnamed = Vec::new();
     let error = write_matrix_line(&mut unnamed, None).unwrap_err();
     assert_eq!(unnamed, b"Matrix: ");
-    assert!(crate::cli::BadbitInsertion::is(&anyhow::Error::from(error)));
+    assert!(crate::report::ostream::is_report_write_failure(&error));
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:642-649 (`s_SetFlags`,
@@ -1415,7 +1419,6 @@ Window for multiple hits: 40\n\
         false,
         false,
         false,
-        false,
         Some((&links, &mut Vec::new())),
     )
     .unwrap();
@@ -1428,7 +1431,6 @@ Window for multiple hits: 40\n\
         &mut plain,
         "blastp",
         crate::wording::REPORT_VERSION,
-        false,
         false,
         false,
         false,
@@ -1457,7 +1459,6 @@ Window for multiple hits: 40\n\
         false,
         false,
         true,
-        true,
         Some((&links, &mut Vec::new())),
     )
     .unwrap();
@@ -1485,7 +1486,6 @@ fn a_malformed_ncbirc_ends_the_html_prolog_after_the_version_line() {
         false,
         false,
         false,
-        false,
         Some((&links, &mut Vec::new())),
     )
     .unwrap_err();
@@ -1504,7 +1504,6 @@ fn a_malformed_ncbirc_ends_the_html_prolog_after_the_version_line() {
         &mut plain,
         "blastp",
         crate::wording::REPORT_VERSION,
-        false,
         false,
         false,
         false,

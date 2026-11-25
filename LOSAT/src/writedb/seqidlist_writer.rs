@@ -27,17 +27,17 @@ pub(crate) enum SeqidlistError {
 
 /// What the list says of the database `db` whose volume paths are `volumes` (`GetVolumeLength`,
 /// the base names of `FindVolumePaths` with true joined by spaces, `GetDate`).
-fn database_info(db: &SeqDb, volumes: &[String], info: &mut SeqidListInfo) {
+fn database_info(db: &SeqDb, volumes: &[Vec<u8>], info: &mut SeqidListInfo) {
     info.db_vol_length = db
         .volumes()
         .iter()
         .map(|volume| volume.index().volume_length)
         .sum();
-    let names: Vec<&str> = volumes
+    let names: Vec<&[u8]> = volumes
         .iter()
         .map(|volume| path_base_name(volume))
         .collect();
-    info.db_vol_names = names.join(" ").into_bytes();
+    info.db_vol_names = names.join(b" ".as_slice());
     info.db_create_date = db.date().as_bytes().to_vec();
 }
 
@@ -53,7 +53,7 @@ fn database_info(db: &SeqDb, volumes: &[String], info: &mut SeqidListInfo) {
 pub(crate) fn seqidlist_bytes(
     idlist: &[Vec<u8>],
     title: &[u8],
-    db: Option<(&SeqDb, &[String])>,
+    db: Option<(&SeqDb, &[Vec<u8>])>,
 ) -> Result<Vec<u8>, SeqidlistError> {
     let mut info = SeqidListInfo {
         title: title.to_vec(),

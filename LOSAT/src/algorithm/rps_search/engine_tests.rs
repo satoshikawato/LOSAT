@@ -390,22 +390,20 @@ fn hsp(
 }
 
 // tabular.cpp:973-1007 and showalign.cpp:2120-2135 (cited at `formatter_identities`): the
-// reports count the identities on the query as read and the profile's consensus, across the
+// reports count the identities on the query as read and the profile's `.psq` letters, across the
 // gaps of the edit script (after `swap_roles`: Del steps the profile, Ins the query).
 #[test]
 fn the_reports_identities_count_the_letters_as_read() {
     use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHspList};
     use crate::common::GapEditOp;
-    // Profile 1 starts at 6 of the concatenated consensus (profile 0 holds 5 letters + 1).
+    // The `.psq` letters of profiles 0 and 1 (`ProfileLetters::of`).
     let enc = |text: &str| -> Vec<u8> {
         text.bytes()
             .map(crate::utils::matrix::aa_char_to_ncbistdaa)
             .collect()
     };
-    let mut consensus = enc("AAAAA");
-    consensus.push(0);
-    consensus.extend(enc("MKTAYWWIAKQ"));
-    let offsets = [0, 6, 18];
+    let profiles = [enc("AAAAA"), enc("MKTAYWWIAKQ")];
+    let profile_letters = |oid: u32| -> anyhow::Result<&[u8]> { Ok(&profiles[oid as usize]) };
     // The query as read (its searched letters could have had X over KTAY, a lower-case run;
     // the traceback's count of 5 below is that of the masked letters).
     let letters = enc("GMKTAYIAKQ");
@@ -444,7 +442,7 @@ fn the_reports_identities_count_the_letters_as_read() {
         hsps: vec![aligned],
         best_evalue: 1e-5,
     });
-    formatter_identities(&mut hit_list, &query, &consensus, &offsets);
+    formatter_identities(&mut hit_list, &query, profile_letters).unwrap();
     let counted = &hit_list.hsplist_array[0].hsps[0];
     assert_eq!(counted.num_ident, 9);
     assert_eq!(counted.mismatch, 0);
@@ -462,7 +460,7 @@ fn the_reports_identities_count_the_letters_as_read() {
         hsps: vec![inserted],
         best_evalue: 1e-5,
     });
-    formatter_identities(&mut hit_list, &query, &consensus, &offsets);
+    formatter_identities(&mut hit_list, &query, profile_letters).unwrap();
     assert_eq!(hit_list.hsplist_array[0].hsps[0].num_ident, 5);
 }
 
@@ -595,7 +593,7 @@ fn encoded(text: &str) -> Vec<u8> {
     ignore = "needs threads: a build without the parallel feature has none"
 )]
 fn units_of_contexts_give_the_results_of_the_search_in_order() {
-    use crate::algorithm::rps_search::volumes::{Consensus, RpsVolumeSet, RpsVolumeSetup};
+    use crate::algorithm::rps_search::volumes::{ProfileLetters, RpsVolumeSet, RpsVolumeSetup};
     let (dir, db) = rps_mini("units");
     let volumes = RpsVolumeSet::of(&db);
     let volume = &volumes.volumes[0];
@@ -704,7 +702,7 @@ fn units_of_contexts_give_the_results_of_the_search_in_order() {
         options: &options,
         program: "RPSTBLASTN",
     };
-    let consensus = Consensus::new(&setup, volume, &files);
+    let consensus = ProfileLetters::new(&setup, volume, 0);
     let shown = |results: RpsVolumeResults| -> Vec<String> {
         assert!(results.late.is_none());
         results
@@ -764,7 +762,7 @@ fn units_of_contexts_give_the_results_of_the_search_in_order() {
 // fails; query 1's ungapped X-drop leaves 32 bits: refused at its cutoffs.
 #[test]
 fn a_batchs_cutoff_refusal_comes_before_its_search_errors() {
-    use crate::algorithm::rps_search::volumes::{Consensus, RpsVolumeSet, RpsVolumeSetup};
+    use crate::algorithm::rps_search::volumes::{ProfileLetters, RpsVolumeSet, RpsVolumeSetup};
     let proteins = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/rps/q40.faa"),
     )
@@ -810,7 +808,7 @@ fn a_batchs_cutoff_refusal_comes_before_its_search_errors() {
         let Ok(files) = setup.reopen(volume, false).unwrap() else {
             panic!("rps_mini opens");
         };
-        let consensus = Consensus::new(&setup, volume, &files);
+        let consensus = ProfileLetters::new(&setup, volume, 0);
         let results = run(lambda)
             .search_volume(
                 &files,

@@ -73,7 +73,7 @@ impl GiMaskData {
     /// first write, empty, in the byte order `le` (little-endian for the `.gnd` files).
     fn new(name: &str, extension: &'static str, index: u32, max_file_size: u64, le: bool) -> Self {
         Self {
-            file: WriteDbFile::lazy(name, extension, index, max_file_size),
+            file: WriteDbFile::lazy(name.as_bytes(), extension, index, max_file_size),
             data_length: 0,
             le,
             index,
@@ -238,12 +238,12 @@ impl GiMask {
                 GiMaskData::new(name, "gnd", 0, max_file_size, true),
             ],
             offset_files: [
-                WriteDbFile::lazy_unindexed(name, "gmo", max_file_size),
-                WriteDbFile::lazy_unindexed(name, "gno", max_file_size),
+                WriteDbFile::lazy_unindexed(name.as_bytes(), "gmo", max_file_size),
+                WriteDbFile::lazy_unindexed(name.as_bytes(), "gno", max_file_size),
             ],
             index_files: [
-                WriteDbFile::lazy_unindexed(name, "gmi", max_file_size),
-                WriteDbFile::lazy_unindexed(name, "gni", max_file_size),
+                WriteDbFile::lazy_unindexed(name.as_bytes(), "gmi", max_file_size),
+                WriteDbFile::lazy_unindexed(name.as_bytes(), "gni", max_file_size),
             ],
             desc: desc.to_vec(),
             dates,

@@ -735,10 +735,111 @@ fn write_error_document<E: Encoder>(out: &mut ArchiveOut<'_, E>, messages: &[Mes
 /// and NCBI's posts of the bytes that its stream replaced go to `diagnostics` (`post_replaced`)
 /// as NCBI writes them: each after the bytes of the document that NCBI's buffer had written to
 /// the output by then (`Traced::posting`; NCBI's `cerr` is tied to `cout`).
+///
+/// The archive is one object of NCBI's object stream on the report's stream
+/// (`ostream::Site::Serial`, `CBlastFormat::PrintArchive`: the archive inserted with `MSerial_AsnText`),
+/// then `~CObjectOStream`'s flush. LOSAT inserts it in large parts; where one fails at the device,
+/// NCBI's pieces of the archive (a second encoding of it through `Traced`, `archive_pieces`)
+/// decide NCBI's end.
 pub fn write_archive<A: AlignSource>(
     handle: &ArchiveHandle,
     batch: &BatchArchive<'_>,
     aligns: &mut A,
+    sink: &mut dyn crate::report::ostream::ReportWrite,
+    diagnostics: &mut dyn Write,
+) -> Result<()> {
+    use crate::report::ostream::Site;
+    let messages = handle.take_messages();
+    sink.site(Site::Serial { whole: true })?;
+    // The object and `Close`'s flush: where a device write of either fails, NCBI's pieces of the
+    // object decide NCBI's end (LOSAT writes the archive in pieces of its own).
+    let written = write_archive_object(handle, batch, aligns, &messages, sink, diagnostics)
+        .and_then(|()| sink.ncbi_flush().map_err(Into::into));
+    let undecided = written
+        .as_ref()
+        .err()
+        .and_then(|error| error.downcast_ref::<std::io::Error>())
+        .is_some_and(crate::report::ostream::is_undecided_report_write_failure);
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:265-276
+    // NCBI's exception leaves `WriteArchive` before the application's `ResetMessages` (a failed
+    // write of the device, or the throw of its stream at a `NULL` list element,
+    // `encoder::NullElement`): the archive's messages are saved still, in their order, for the
+    // error archive (`PrintErrorArchive` of the application's `CATCH_ALL`).
+    let failed = |error: anyhow::Error| {
+        handle.restore_messages(messages.clone());
+        error
+    };
+    if undecided {
+        let pieces = archive_pieces(handle, batch, aligns, &messages)?;
+        sink.resolve_object(&pieces)
+            .map_err(|error| failed(error.into()))?;
+    } else {
+        written.map_err(failed)?;
+    }
+    sink.site(Site::Report)?;
+    Ok(())
+}
+
+/// NCBI's insertions of the archive of `batch` into the report's stream (`Traced::pieces`): the
+/// writes of its object stream's buffer, from a second encoding of the archive (with the
+/// `messages` of the first), whose bytes are dropped.
+#[cold]
+#[inline(never)]
+fn archive_pieces<A: AlignSource>(
+    handle: &ArchiveHandle,
+    batch: &BatchArchive<'_>,
+    aligns: &mut A,
+    messages: &[Message],
+) -> Result<Vec<usize>> {
+    let sets = handle.request_sets(batch.searched_space);
+    let params = handle.options().database_params();
+    let write = SearchArchive {
+        request: handle.request(),
+        batch,
+        sets: &sets,
+        database_params: &params,
+        messages,
+    };
+    let mut buf = Vec::new();
+    let mut dropped = std::io::sink();
+    Ok(match handle.encoding() {
+        ArchiveEncoding::Nothing => Vec::new(),
+        ArchiveEncoding::Xml => write
+            .to(
+                Traced::xml(XmlEncoder::archive(&mut buf), 0),
+                &mut dropped,
+                aligns,
+            )?
+            .enc
+            .pieces()
+            .to_vec(),
+        ArchiveEncoding::Text => write
+            .to(
+                Traced::new(AsnTextEncoder::new(&mut buf), 0),
+                &mut dropped,
+                aligns,
+            )?
+            .enc
+            .pieces()
+            .to_vec(),
+        ArchiveEncoding::Binary => write
+            .to(
+                Traced::new(AsnBinaryEncoder::new(&mut buf), 0),
+                &mut dropped,
+                aligns,
+            )?
+            .enc
+            .pieces()
+            .to_vec(),
+    })
+}
+
+/// The archive of `write_archive`, written through the encoder of the handle's encoding.
+fn write_archive_object<A: AlignSource>(
+    handle: &ArchiveHandle,
+    batch: &BatchArchive<'_>,
+    aligns: &mut A,
+    messages: &[Message],
     sink: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
@@ -767,7 +868,6 @@ pub fn write_archive<A: AlignSource>(
     // signed overflow of `COStreamBuffer::PutInt8`), is written as its digits: PD-LOSAT-NCBI-DEFECTS
     // approved exception 17, Int8 -2^63 written as digits (the Owner's Q1 = A of 2026-11-17,
     // `big_int`).
-    let messages = handle.take_messages();
     let params = handle.options().database_params();
     let as_is = request_written_as_is(encoding, request, &batch.request, &sets, &params);
     let post = |replaced: &ReplacedChar| {
@@ -785,7 +885,7 @@ pub fn write_archive<A: AlignSource>(
         batch,
         sets: &sets,
         database_params: &params,
-        messages: &messages,
+        messages,
     };
     let application = request.application;
     let written = match (encoding, as_is) {
@@ -821,18 +921,6 @@ pub fn write_archive<A: AlignSource>(
             )?
             .finish_archive(application),
     };
-    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:265-276
-    // NCBI's stream threw inside `WriteArchive` (`finish_archive`'s error is NCBI's then), so the
-    // handler's `ResetMessages` after it is not reached: the messages the archive was given stay
-    // for the error archive (`PrintErrorArchive` of the application's `CATCH_ALL`). No byte is
-    // replaced while such an archive is written before the throw: the PSSM's strings were
-    // replaced when NCBI read it, and what the archive writes before its queries is LOSAT's own
-    // (D3c-3c review R8, probe `review/p5`).
-    if matches!(&written, Err(error) if error.is::<crate::cli::NativeError>()) {
-        for (severity, text) in &messages {
-            handle.post(*severity, text);
-        }
-    }
     written
 }
 
@@ -870,34 +958,95 @@ impl SearchArchive<'_> {
 /// Writes the error archive (`PrintErrorArchive`): the messages saved since the last
 /// archive and `messages` (the error lines). Nothing is written when the command line's
 /// `-outfmt` text is not the integer 11 (`writes_error_archive`).
+///
+/// The archive is one object on the report's stream (`ostream::Site::Serial`); written to a
+/// stream that failed in the run (NCBI's `PrintErrorArchive` after `CATCH_ALL`, the exception mask
+/// reset), its buffer's first write fails: NCBI's write fault, posted at that write's position
+/// (`error_archive_fault`), and nothing is written.
 pub fn write_error_archive(
     handle: &ArchiveHandle,
     error_lines: &[Message],
-    sink: &mut dyn Write,
+    sink: &mut dyn crate::report::ostream::ReportWrite,
 ) -> Result<()> {
+    use crate::report::ostream::Site;
     if !handle.error_archive_enabled() {
         return Ok(());
     }
     let mut messages = handle.take_messages();
     messages.extend(error_lines.iter().cloned());
+    sink.site(Site::Serial { whole: true })?;
+    let written = write_error_object(handle, &messages, sink);
+    sink.site(Site::Report)?;
+    match written {
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(crate::report::ostream::is_undecided_report_write_failure) =>
+        {
+            Ok(sink.write_fault(error_archive_fault(handle.encoding(), &messages))?)
+        }
+        written => written,
+    }
+}
+
+/// Where NCBI's buffer of the error archive of `messages` first writes to its output (the position
+/// of its write fault: `OutBuffer::first_write`, the bytes it had put into the buffer; for a small
+/// archive the document without the ASN.1 text's separator, which is a write of its own).
+#[cold]
+#[inline(never)]
+pub(super) fn error_archive_fault(encoding: ArchiveEncoding, messages: &[Message]) -> usize {
+    let mut buf = Vec::new();
+    let mut dropped = std::io::sink();
+    let first = match encoding {
+        ArchiveEncoding::Nothing => return 0,
+        ArchiveEncoding::Xml => {
+            let mut out =
+                ArchiveOut::new(Traced::xml(XmlEncoder::archive(&mut buf), 0), &mut dropped);
+            write_error_document(&mut out, messages);
+            out.enc.first_write()
+        }
+        ArchiveEncoding::Text => {
+            let mut out =
+                ArchiveOut::new(Traced::new(AsnTextEncoder::new(&mut buf), 0), &mut dropped);
+            write_error_document(&mut out, messages);
+            out.enc.first_write()
+        }
+        ArchiveEncoding::Binary => {
+            let mut out = ArchiveOut::new(
+                Traced::new(AsnBinaryEncoder::new(&mut buf), 0),
+                &mut dropped,
+            );
+            write_error_document(&mut out, messages);
+            out.enc.first_write()
+        }
+    };
+    first.unwrap_or(0) as usize
+}
+
+/// The error archive of `messages` written through the encoder of the handle's encoding.
+fn write_error_object(
+    handle: &ArchiveHandle,
+    messages: &[Message],
+    sink: &mut dyn Write,
+) -> Result<()> {
     match handle.encoding() {
         ArchiveEncoding::Nothing => Ok(()),
         ArchiveEncoding::Xml => {
             let mut buf = Vec::new();
             let mut out = ArchiveOut::new(XmlEncoder::archive(&mut buf), sink);
-            write_error_document(&mut out, &messages);
+            write_error_document(&mut out, messages);
             out.finish()
         }
         ArchiveEncoding::Text => {
             let mut buf = Vec::new();
             let mut out = ArchiveOut::new(AsnTextEncoder::new(&mut buf), sink);
-            write_error_document(&mut out, &messages);
+            write_error_document(&mut out, messages);
             out.finish()
         }
         ArchiveEncoding::Binary => {
             let mut buf = Vec::new();
             let mut out = ArchiveOut::new(AsnBinaryEncoder::new(&mut buf), sink);
-            write_error_document(&mut out, &messages);
+            write_error_document(&mut out, messages);
             out.finish()
         }
     }

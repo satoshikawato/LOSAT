@@ -56,6 +56,26 @@ pub(crate) fn path_from_bytes(bytes: impl Into<Vec<u8>>) -> PathBuf {
     PathBuf::from(os_string_from_bytes(bytes.into()))
 }
 
+/// [`path_from_bytes`] of borrowed bytes: on Unix the bytes themselves, borrowed (the database
+/// reader turns each name it looks for into a path at the system call, without a copy); elsewhere
+/// their text, `String::from_utf8_lossy`.
+#[cfg(unix)]
+pub(crate) fn path_of_bytes(bytes: &[u8]) -> Cow<'_, Path> {
+    use std::os::unix::ffi::OsStrExt;
+    Cow::Borrowed(Path::new(OsStr::from_bytes(bytes)))
+}
+
+/// [`path_from_bytes`] of borrowed bytes: on Unix the bytes themselves, borrowed (the database
+/// reader turns each name it looks for into a path at the system call, without a copy); elsewhere
+/// their text, `String::from_utf8_lossy`.
+#[cfg(not(unix))]
+pub(crate) fn path_of_bytes(bytes: &[u8]) -> Cow<'_, Path> {
+    match String::from_utf8_lossy(bytes) {
+        Cow::Borrowed(text) => Cow::Borrowed(Path::new(text)),
+        Cow::Owned(text) => Cow::Owned(PathBuf::from(text)),
+    }
+}
+
 #[cfg(all(test, unix))]
 #[path = "os_bytes_tests.rs"]
 mod tests;

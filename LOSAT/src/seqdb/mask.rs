@@ -328,14 +328,16 @@ impl ColumnAlgorithms {
 
             // Check for identical algorithm descriptions (should not happen.)
             if let Some(duplicate) = first_duplicate(&metadata) {
-                return Err(SeqDbError::Format {
-                    path: path.to_path_buf(),
-                    message: format!(
-                        "Error: volume ({}) mask data has duplicates value ({})",
-                        volume.base().display(),
-                        duplicate
-                    ),
-                });
+                return Err(SeqDbError::NotFound(
+                    [
+                        b"Error: volume (".as_slice(),
+                        &crate::utils::os_bytes::path_bytes(volume.base()),
+                        b") mask data has duplicates value (",
+                        duplicate.as_bytes(),
+                        b")",
+                    ]
+                    .concat(),
+                ));
             }
 
             for (key, description) in metadata {
@@ -405,13 +407,15 @@ impl MaskAlgorithms {
     /// four-item description; otherwise the whole description, for example `"30:"`), or the
     /// text of NCBI's exception: "Cannot find string algorithm id in algorithm map."; for GI
     /// masks the id of the `MASKLIST` name (`GiMasks::algorithm_id`, whose text lists them).
-    pub fn id_of(&self, name: &str) -> Result<i32, String> {
+    /// `name` is the bytes of NCBI's `std::string`; the descriptions are text, so a name that is
+    /// not UTF-8 matches none of them.
+    pub fn id_of(&self, name: &[u8]) -> Result<i32, Vec<u8>> {
         match &self.kind {
-            AlgorithmsKind::Columns(table) => table
-                .desc_to_id
-                .get(name)
+            AlgorithmsKind::Columns(table) => std::str::from_utf8(name)
+                .ok()
+                .and_then(|name| table.desc_to_id.get(name))
                 .copied()
-                .ok_or_else(|| "Cannot find string algorithm id in algorithm map.".to_string()),
+                .ok_or_else(|| b"Cannot find string algorithm id in algorithm map.".to_vec()),
             AlgorithmsKind::Gi(masks) => masks.algorithm_id(name),
         }
     }
@@ -608,14 +612,10 @@ fn read_ranges_into(
 impl SeqDb {
     /// The filtering algorithms of the database, built from the mask columns of its
     /// volumes the first time they are asked for (`x_BuildMaskAlgorithmList`). Empty for a
-    /// database without mask data. With GI masks, their table, or LOSAT's refusal of a
-    /// `MASKLIST` name (`alias::gi_mask_list`).
+    /// database without mask data. With GI masks, their table.
     pub fn mask_algorithms(&self) -> Result<&MaskAlgorithms, SeqDbError> {
         if let Some(table) = self.mask_algorithms.get() {
             return Ok(table);
-        }
-        if let Some(refusal) = &self.gi_mask_refusal {
-            return Err(refusal.duplicate());
         }
         let table = MaskAlgorithms::build(&self.volumes)?;
         Ok(self.mask_algorithms.get_or_init(|| table))

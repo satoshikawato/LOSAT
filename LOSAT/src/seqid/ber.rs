@@ -255,7 +255,7 @@ impl Frame {
 enum Failure {
     /// NCBI's `CSerialException` as it leaves the frames of NCBI's object stack: the exception
     /// with its backlogs (`NCBI_RETHROW_SAME`) and its frame stack (`m_FrameStack`, which
-    /// `AddFrameInfo` extends, `NcbiException::add_frame_info`, and `ReportExtra` prints as
+    /// `AddFrameInfo` extends, `NcbiException::add_frame_infos`, and `ReportExtra` prints as
     /// ` at <frames>`).
     Serial { exception: NcbiException },
     /// The record ends where NCBI's stream needs a byte (the `CEofException` of
@@ -302,7 +302,7 @@ impl BerError {
     fn left(self, frame: Frame) -> Self {
         let failure = match *self.0 {
             Failure::Serial { mut exception } => {
-                exception.add_frame_info(frame.name());
+                exception.add_frame_infos(&[frame.name()]);
                 Failure::Serial { exception }
             }
             Failure::Eof { pos } => match frame {

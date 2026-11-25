@@ -594,6 +594,8 @@ fn the_apps_masks_and_cuts() {
     assert!(!carries_query_masks(BlastpApp::Psiblast.program_type()));
     assert!(carries_query_masks(BlastpApp::Blastp.program_type()));
     assert!(carries_query_masks(BlastpApp::Rpsblast.program_type()));
+    // Formats 0, 5, 8, 11, 12, 13, 16 and 18: the organism report (18) cuts nothing in either
+    // app; psiblast's XML2 and JSON documents (13 to 16) cut before the PSSM (line PS, PS15b-2).
     for (app, cuts) in [
         (
             BlastpApp::Psiblast,
@@ -601,6 +603,10 @@ fn the_apps_masks_and_cuts() {
                 ListCut::AfterPssm,
                 ListCut::BeforePssm,
                 ListCut::AfterPssm,
+                ListCut::Uncut,
+                ListCut::AfterPssm,
+                ListCut::BeforePssm,
+                ListCut::BeforePssm,
                 ListCut::Uncut,
             ],
         ),
@@ -611,11 +617,15 @@ fn the_apps_masks_and_cuts() {
                 ListCut::AfterPssm,
                 ListCut::AfterPssm,
                 ListCut::Uncut,
+                ListCut::AfterPssm,
+                ListCut::AfterPssm,
+                ListCut::AfterPssm,
+                ListCut::Uncut,
             ],
         ),
-        (BlastpApp::Blastp, [ListCut::Uncut; 4]),
+        (BlastpApp::Blastp, [ListCut::Uncut; 8]),
     ] {
-        for (outfmt, cut) in [0, 5, 8, 11].into_iter().zip(cuts) {
+        for (outfmt, cut) in [0, 5, 8, 11, 12, 13, 16, 18].into_iter().zip(cuts) {
             assert_eq!(app.list_cut(outfmt), cut, "{app:?} -outfmt {outfmt}");
         }
     }

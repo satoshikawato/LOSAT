@@ -348,6 +348,15 @@ pub(super) type RunXml2 = Xml2Writer<RunSideFiles>;
 #[derive(Clone)]
 pub(super) struct HeldOutput(Rc<RefCell<HeldState>>);
 
+/// One diagnostics step held while `HeldOutput` buffers a BLAST XML, XML2 or JSON document:
+/// plain text written through `HeldStderr`, or a batch's search strategy `Posts` (`BatchTake`)
+/// released at that exact byte offset of the report so strategy writes and `803.7` posts
+/// interleave with the report in NCBI's order.
+enum HeldDiag {
+    Text(Vec<u8>),
+    Posts(crate::report::diag_log::Posts),
+}
+
 struct HeldState {
     inner: Box<dyn Write>,
     holding: bool,
@@ -355,8 +364,8 @@ struct HeldState {
     discarded: bool,
     side: Option<HeldSideFiles>,
     /// The run's standard error (`HeldOutput::stderr`), and what the run writes there while the
-    /// output is held: each text with the length of the held output before it.
-    stderr: Option<(Box<dyn Write>, Vec<(usize, Vec<u8>)>)>,
+    /// output is held: each item with the length of the held output before it (`HeldDiag`).
+    stderr: Option<(Box<dyn Write>, Vec<(usize, HeldDiag)>)>,
     /// The command line's report stream behind `inner` (`HeldOutput::with_report`), which takes
     /// NCBI's regions and flushes (`ostream::ReportWrite`).
     report: Option<crate::report::ostream::ReportHandle>,
@@ -411,18 +420,23 @@ impl HeldState {
             written => written,
         };
         let mut written = 0;
-        for (k, (at, text)) in texts.into_iter().enumerate() {
+        for (k, (at, item)) in texts.into_iter().enumerate() {
             let cuts_end = befores.partition_point(|&before| before <= k);
             caught(cursor.write_until(&mut target, &held, written, at, cuts_end))?;
             written = written.max(at);
             if cursor.skipping() {
                 continue;
             }
-            // NCBI's writes before the text are made, then the text, whose stream (tied) makes
-            // them first too; where they fail in a caught region, the region ends there and its
-            // texts are not written.
+            // NCBI's writes before the text are made, then the text or strategy request mark,
+            // whose stream makes them first too; where they fail in a caught region, the region
+            // ends there and its texts are not written.
             let flushed = target.inner.flush().and_then(|()| match stderr.as_mut() {
-                Some((stderr, _)) => stderr.write_all(&text).and_then(|()| stderr.flush()),
+                Some((stderr, _)) => match item {
+                    HeldDiag::Text(text) => stderr.write_all(&text).and_then(|()| stderr.flush()),
+                    HeldDiag::Posts(posts) => posts
+                        .write(&mut **stderr, None)
+                        .and_then(|()| stderr.flush()),
+                },
                 None => Ok(()),
             });
             match flushed {
@@ -523,6 +537,24 @@ impl HeldOutput {
         HeldStderr(Rc::clone(&self.0))
     }
 
+    /// Queues `posts` (a batch's search strategy request mark and any `803.7` posts) at the
+    /// current held output length while a single-stream document (`5`, `15`, `16`: no side files)
+    /// is held, so `release` interleaves the strategy writes with the report in NCBI's order.
+    /// Returns `true` when queued, `false` when the caller should write them immediately.
+    pub(super) fn push_posts(&self, posts: crate::report::diag_log::Posts) -> bool {
+        let mut state = self.0.borrow_mut();
+        if !state.holding || state.discarded || state.side.is_some() {
+            return false;
+        }
+        let at = state.held.len();
+        if let Some((_, texts)) = state.stderr.as_mut() {
+            texts.push((at, HeldDiag::Posts(posts)));
+            true
+        } else {
+            false
+        }
+    }
+
     /// Keeps everything written from now on in memory.
     pub(super) fn hold(&self) {
         let mut state = self.0.borrow_mut();
@@ -542,8 +574,10 @@ impl HeldOutput {
         }
         // What the run wrote to standard error in the meantime stays (before the refusal).
         if let Some((stderr, texts)) = state.stderr.as_mut() {
-            for (_, text) in std::mem::take(texts) {
-                let _ = stderr.write_all(&text);
+            for (_, item) in std::mem::take(texts) {
+                if let HeldDiag::Text(text) = item {
+                    let _ = stderr.write_all(&text);
+                }
             }
             let _ = stderr.flush();
         }
@@ -562,8 +596,10 @@ impl HeldOutput {
                 state.held.clear();
                 // What the run wrote to standard error in the meantime stays.
                 if let Some((stderr, texts)) = state.stderr.as_mut() {
-                    for (_, text) in std::mem::take(texts) {
-                        let _ = stderr.write_all(&text);
+                    for (_, item) in std::mem::take(texts) {
+                        if let HeldDiag::Text(text) = item {
+                            let _ = stderr.write_all(&text);
+                        }
                     }
                     let _ = stderr.flush();
                 }
@@ -587,7 +623,7 @@ impl Write for HeldStderr {
             return Ok(bytes.len());
         };
         if holding {
-            texts.push((at, bytes.to_vec()));
+            texts.push((at, HeldDiag::Text(bytes.to_vec())));
             Ok(bytes.len())
         } else {
             stderr.write(bytes)

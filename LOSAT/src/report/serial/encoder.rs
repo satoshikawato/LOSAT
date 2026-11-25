@@ -16,7 +16,7 @@
 //! variant's 0-based position in its ASN.1 SEQUENCE or CHOICE (absent OPTIONAL members still
 //! count), which only the binary encoder writes (its context tag `[tag]`).
 
-pub use super::out_buffer::Stream;
+pub use super::out_buffer::{BufferPiece, Stream};
 use super::out_buffer::{OutBuffer, Piece};
 
 /// An error that NCBI's object stream raises while it writes a value, which LOSAT reports
@@ -707,6 +707,12 @@ impl<E: Encoder, P> Traced<E, P> {
     /// buffer.
     pub fn pieces(&self) -> &[usize] {
         self.buffer.as_ref().map_or(&[], OutBuffer::pieces)
+    }
+
+    /// `pieces` with the bytes left behind in NCBI's buffer at each write
+    /// (`OutBuffer::buffer_pieces`): for `ostream::StrategyStream`.
+    pub fn buffer_pieces(&self) -> &[BufferPiece] {
+        self.buffer.as_ref().map_or(&[], OutBuffer::buffer_pieces)
     }
 
     /// The stream's position at the first of those writes (`OutBuffer::first_write`).

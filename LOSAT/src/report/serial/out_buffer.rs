@@ -96,6 +96,17 @@ pub(super) enum Piece {
     End,
 }
 
+/// One write of NCBI's object-stream output buffer (`COStreamBuffer::FlushBuffer`) to its
+/// underlying stream: `size` bytes written, leaving `leave` bytes in the buffer (`m_BackLimit`
+/// for an interior partial flush, `0` for `EndOfWrite` and the ASN.1 text separator).
+///
+/// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:880-898
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BufferPiece {
+    pub size: usize,
+    pub leave: usize,
+}
+
 /// NCBI's buffer of one document (each document has a stream of its own,
 /// `serialobject.cpp` `WriteObject`).
 #[derive(Clone, Debug)]
@@ -111,6 +122,8 @@ pub(super) struct OutBuffer {
     /// `count` bytes of `m_Buffer`), in order: NCBI's insertions of the document into the
     /// report's stream (`pieces`).
     pieces: Vec<usize>,
+    /// Each write of `pieces` together with the bytes left behind in the buffer (`leave`).
+    buffer_pieces: Vec<BufferPiece>,
     /// The stream's position at the first of them (`first_write`).
     first_write: Option<u64>,
 }
@@ -123,6 +136,7 @@ impl OutBuffer {
             used: 0,
             written: 0,
             pieces: Vec::new(),
+            buffer_pieces: Vec::new(),
             first_write: None,
         }
     }
@@ -131,6 +145,11 @@ impl OutBuffer {
     /// insertion of NCBI's into the output stream: the sizes, in order.
     pub(super) fn pieces(&self) -> &[usize] {
         &self.pieces
+    }
+
+    /// `pieces` with the bytes left behind in the buffer at each write (`BufferPiece`).
+    pub(super) fn buffer_pieces(&self) -> &[BufferPiece] {
+        &self.buffer_pieces
     }
 
     /// The bytes of the document that NCBI has written to its output.
@@ -143,6 +162,10 @@ impl OutBuffer {
         if self.used > 0 {
             self.note_first_write(self.used);
             self.pieces.push(self.used);
+            self.buffer_pieces.push(BufferPiece {
+                size: self.used,
+                leave: 0,
+            });
         }
         self.written += self.used as u64;
         self.used = 0;
@@ -172,6 +195,7 @@ impl OutBuffer {
         if count > 0 {
             self.note_first_write(self.used);
             self.pieces.push(count);
+            self.buffer_pieces.push(BufferPiece { size: count, leave });
         }
         self.written += count as u64;
         self.used = leave;
@@ -269,6 +293,10 @@ impl OutBuffer {
             self.json_markup(bytes);
             if self.used > 0 {
                 self.pieces.push(self.used);
+                self.buffer_pieces.push(BufferPiece {
+                    size: self.used,
+                    leave: 0,
+                });
             }
             self.written += self.used as u64;
             self.used = 0;
@@ -288,6 +316,10 @@ impl OutBuffer {
             if count > 0 {
                 self.note_first_write(count);
                 self.pieces.push(count);
+                self.buffer_pieces.push(BufferPiece {
+                    size: count,
+                    leave: 0,
+                });
             }
             self.written += count as u64;
             self.used = 0;

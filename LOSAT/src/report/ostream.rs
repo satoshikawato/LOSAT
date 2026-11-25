@@ -195,6 +195,34 @@ fn undecided_failure() -> std::io::Error {
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:893-896
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+/// The error of a failed piece write of `-export_search_strategy` (`CIOException::eWrite`):
+/// `StrategyStream` has posted `Error: (802.5) [<prog>] CObjectOStream: error at byte N: stack
+/// is empty: write fault` (and saved it for outfmt 11), and NCBI's `CATCH_ALL` swallows non-flush
+/// `CIOException`s and ends the run with exit status 0 (`cli::NativeError::silent_end`).
+#[derive(Debug)]
+struct StrategyWriteFault;
+
+impl std::fmt::Display for StrategyWriteFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("search strategy write fault")
+    }
+}
+
+impl std::error::Error for StrategyWriteFault {}
+
+/// Whether `error` is a failed piece write of `-export_search_strategy` (`StrategyWriteFault`).
+pub fn is_strategy_write_fault(error: &std::io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|inner| inner.is::<StrategyWriteFault>())
+}
+
+fn strategy_write_fault() -> std::io::Error {
+    std::io::Error::other(StrategyWriteFault)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:745-764
 /// The post of `BlastXML_FormatReport`'s catch of a failed insertion of an `Iteration` of
 /// `program` (`std::ios_base::failure` is no `CException`: no `what()` follows the label, which
@@ -2003,14 +2031,9 @@ fn side_file_failure(
     if let Some((k, end)) = failed_piece(buffer, 0, pieces, landed) {
         // `EndOfWrite`'s write leaves nothing in the object stream's buffer.
         let leave = if k + 1 == pieces.len() { 0 } else { back_limit };
-        let post = format!(
-            "Error: (802.5) [{program}] CObjectOStream: error at byte {}: stack is empty: \
-             write fault\n",
-            end as usize + leave
-        );
         return Err(crate::cli::NativeError {
             exit: 0,
-            message: post.into_bytes(),
+            message: write_fault_post(program, end as usize + leave),
         }
         .into());
     }
@@ -2019,19 +2042,48 @@ fn side_file_failure(
     // NCBI's chain, written in LOSAT's words (`crate::wording::losat_bytes`: without the
     // exceptions' classes and codes, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12) by the
     // run's standard error (`CliStderr`, tied to the report).
-    let position = end;
-    let chain = format!(
-        "Error: (802.5) [{program}] CObjectOStream: error at byte {position}: stack is empty: \
-         cannot close output stream\n\
-         Error: ({FLUSH_FAILED}) [{program}] COStreamBuffer::Flush: failed\n\
-         Error: ({SERIAL_IO_ERROR}) [{program}] byte {position}: cannot close output stream\n\
-         Error: (802.4) [{program}] Cannot close serializing output stream \
-         ({SERIAL_IO_ERROR}) byte {position}: cannot close output stream\n"
-    );
     let mut stderr = CliStderr::process();
-    stderr.write_all(&crate::wording::losat_bytes(chain.as_bytes()))?;
+    let chain: Vec<u8> = close_failure_posts(program, end)
+        .into_iter()
+        .flatten()
+        .collect();
+    stderr.write_all(&chain)?;
     stderr.flush()?;
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:893-896
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:367-402
+fn object_stream_error(program: &str, position: usize, detail: &str) -> String {
+    format!(
+        "Error: (802.5) [{program}] CObjectOStream: error at byte {position}: stack is empty: \
+         {detail}\n"
+    )
+}
+
+/// The single post of a failed piece write of an object stream on a file (`CIOException::eWrite`).
+fn write_fault_post(program: &str, position: usize) -> Vec<u8> {
+    object_stream_error(program, position, "write fault").into_bytes()
+}
+
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:899-907
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-354, :385-395
+/// The four posts of `~CObjectOStream::Close` whose flush of a file failed (`CIOException::eFlush`),
+/// in LOSAT's words (`crate::wording::losat_bytes`: without the exceptions' classes and codes,
+/// `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
+fn close_failure_posts(program: &str, position: usize) -> [Vec<u8>; 4] {
+    let lines = [
+        object_stream_error(program, position, "cannot close output stream"),
+        format!("Error: ({FLUSH_FAILED}) [{program}] COStreamBuffer::Flush: failed\n"),
+        format!(
+            "Error: ({SERIAL_IO_ERROR}) [{program}] byte {position}: cannot close output stream\n"
+        ),
+        format!(
+            "Error: (802.4) [{program}] Cannot close serializing output stream \
+             ({SERIAL_IO_ERROR}) byte {position}: cannot close output stream\n"
+        ),
+    ];
+    lines.map(|line| crate::wording::losat_bytes(line.as_bytes()).into_owned())
 }
 
 /// `GetType()::GetErrCodeString()` of the failed flush of a side file's object stream.
@@ -2039,6 +2091,171 @@ const FLUSH_FAILED: &str = "CIOException::eFlush";
 
 /// `GetType()::GetErrCodeString()` of the serial stream's error of a failed close.
 const SERIAL_IO_ERROR: &str = "CSerialException::eIoError";
+
+type StrategyArchive<'a> = Option<&'a crate::report::archive::ArchiveHandle>;
+
+/// Posts `text` as one `ERROR` diagnostic to `diagnostics` and, when `archive` is active
+/// (outfmt 11), saves it as one `code 2` message (`ArchiveHandle::write_post`).
+fn post_strategy_error(
+    diagnostics: &mut dyn std::io::Write,
+    archive: StrategyArchive<'_>,
+    text: &[u8],
+) -> std::io::Result<()> {
+    match archive {
+        Some(handle) => handle.write_post(diagnostics, crate::report::diag_log::ERROR, text),
+        None => diagnostics.write_all(text),
+    }?;
+    diagnostics.flush()
+}
+
+/// Emits every `803.7` post in `posts` whose offset is within `limit` (or all posts when `limit`
+/// is `None`), returning the number of posts emitted.
+fn emit_strategy_posts(
+    posts: &[(u64, Vec<u8>)],
+    limit: Option<u64>,
+    diagnostics: &mut dyn std::io::Write,
+    archive: StrategyArchive<'_>,
+) -> std::io::Result<usize> {
+    let mut emitted = 0;
+    for (written, text) in posts {
+        if limit.is_some_and(|bound| *written > bound) {
+            break;
+        }
+        post_strategy_error(diagnostics, archive, text)?;
+        emitted += 1;
+    }
+    Ok(emitted)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:635-651
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:880-918
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-402
+/// The `-export_search_strategy` file stream as NCBI's persistent `CNcbiOfstream` (no exception
+/// mask; file buffer `NcbiStdio::File` of 8,191 bytes) receives each query batch's `Blast4-request`
+/// from a fresh `CObjectOStreamAsn`.
+///
+/// Each request walks NCBI's `COStreamBuffer` pieces (`BufferPiece`):
+/// - `803.7` replaced-character posts arrive at the piece offset `COStreamBuffer` had written before
+///   each post (so posts before the 8,191-byte file buffer flushes land on `stderr` before the
+///   request bytes reach the OS descriptor).
+/// - A piece write that crosses the 8,191-byte threshold flushes to the OS descriptor; if that
+///   write fails (or the stream is already `bad` from an earlier request), `Close` posts the single
+///   `802.5 ... write fault` line at `pos + size + leave` and returns `StrategyWriteFault` (which
+///   ends the run silently with exit status 0 and writes the outfmt 11 error archive).
+/// - Bytes remaining in the file buffer at the end of the request are flushed in `~CObjectOStream::Close`;
+///   if that flush fails, `bad` is set, the 4-line `Close` failure chain is posted (as 4 `ERROR`
+///   messages for outfmt 11), and the run continues.
+pub struct StrategyStream {
+    device: Box<dyn std::io::Write + Send>,
+    bad: bool,
+    program: &'static str,
+}
+
+impl StrategyStream {
+    /// Creates a strategy stream over `device` for `program` (`ArchiveRequest::application`).
+    pub fn new(device: Box<dyn std::io::Write + Send>, program: &'static str) -> Self {
+        Self {
+            device,
+            bad: false,
+            program,
+        }
+    }
+
+    /// Marks the stream `bad`, posts `802.5 ... write fault` at `position`, and returns
+    /// `StrategyWriteFault`.
+    fn fail_write(
+        &mut self,
+        position: usize,
+        diagnostics: &mut dyn std::io::Write,
+        archive: StrategyArchive<'_>,
+    ) -> std::io::Result<()> {
+        self.bad = true;
+        let fault = write_fault_post(self.program, position);
+        post_strategy_error(diagnostics, archive, &fault)?;
+        Err(strategy_write_fault())
+    }
+
+    /// Writes one complete `Blast4-request` encoded as `bytes` with NCBI's `COStreamBuffer` writes
+    /// `pieces` and `803.7` posts `posts` (`(written_before_post, post_line)`).
+    pub fn write_object(
+        &mut self,
+        bytes: &[u8],
+        pieces: &[crate::report::serial::encoder::BufferPiece],
+        posts: &[(u64, Vec<u8>)],
+        diagnostics: &mut dyn std::io::Write,
+        archive: StrategyArchive<'_>,
+    ) -> std::io::Result<()> {
+        // NCBI's pending writes of the report before `SaveSearchStrategy` reach the report's
+        // descriptor first, while bytes still held in NCBI's report buffer stay buffered.
+        sync_report()?;
+        let mut buffer = NcbiBuffer::new(NcbiStdio::File);
+        let mut held = Vec::new();
+        let mut pos = 0usize;
+        let mut next_post = 0usize;
+        let mut landed = 0u64;
+        for &piece in pieces {
+            next_post +=
+                emit_strategy_posts(&posts[next_post..], Some(pos as u64), diagnostics, archive)?;
+            if piece.size == 0 {
+                continue;
+            }
+            let chunk = &bytes[pos..pos + piece.size];
+            let failed = if self.bad {
+                true
+            } else {
+                let before = buffer.held();
+                buffer.sputn(piece.size, &[]);
+                if buffer.held() < before + piece.size {
+                    let written = write_device2(&mut *self.device, &mut landed, &held, chunk)
+                        .and_then(|()| self.device.flush());
+                    held.clear();
+                    written.is_err()
+                } else {
+                    held.extend_from_slice(chunk);
+                    false
+                }
+            };
+            if failed {
+                return self.fail_write(pos + piece.size + piece.leave, diagnostics, archive);
+            }
+            pos += piece.size;
+        }
+        let _ = emit_strategy_posts(&posts[next_post..], None, diagnostics, archive)?;
+        if !held.is_empty() && !self.bad {
+            let flushed = write_device(&mut *self.device, &mut landed, &held)
+                .and_then(|()| self.device.flush());
+            if flushed.is_err() {
+                self.bad = true;
+                for line in close_failure_posts(self.program, pos) {
+                    post_strategy_error(diagnostics, archive, &line)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes the partial bytes flushed before a `NullElement` throw (`encoder::NullElement`).
+    pub fn write_partial(
+        &mut self,
+        bytes: &[u8],
+        posts: &[(u64, Vec<u8>)],
+        diagnostics: &mut dyn std::io::Write,
+        archive: StrategyArchive<'_>,
+    ) -> std::io::Result<()> {
+        sync_report()?;
+        let _ = emit_strategy_posts(posts, None, diagnostics, archive)?;
+        if !self.bad && !bytes.is_empty() {
+            let mut landed = 0u64;
+            if write_device(&mut *self.device, &mut landed, bytes)
+                .and_then(|()| self.device.flush())
+                .is_err()
+            {
+                self.bad = true;
+            }
+        }
+        Ok(())
+    }
+}
 
 /// `cerr.tie()`: before a write to standard error, the run's report on standard output writes
 /// what it holds (`ReportStream::standard_output`); a report in `-out` makes NCBI's writes so far

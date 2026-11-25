@@ -1215,6 +1215,16 @@ impl<'a> QueryWarnings<'a> {
     /// is flushed; a failed flush returns before them. Then the query's later lines go to the
     /// format's receiver (`with_later`), without a flush: they are no part of the diagnostics.
     pub fn before_query(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {
+        let result = self.before_query_inner(index, report);
+        if result.is_err() {
+            // A failed write (report failure or strategy write fault) ends NCBI's run before any
+            // later query's reads happen: keep `Drop` from dumping unread `ReadCursor` texts.
+            self.end_run();
+        }
+        result
+    }
+
+    fn before_query_inner(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {
         let placed = before_report(
             self.reads.as_mut(),
             self.before.get(index),

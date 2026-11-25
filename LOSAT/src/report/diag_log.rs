@@ -48,11 +48,15 @@ enum Post {
 struct RequestMark {
     export: crate::report::archive::strategy::StrategyExport,
     first: usize,
+    /// Whether the request carries `803.7` replaced-byte posts emitted while writing it.
+    has_posts: bool,
 }
 
 impl PartialEq for RequestMark {
     fn eq(&self, other: &Self) -> bool {
-        self.first == other.first && self.export.same(&other.export)
+        self.first == other.first
+            && self.has_posts == other.has_posts
+            && self.export.same(&other.export)
     }
 }
 
@@ -66,12 +70,20 @@ impl Posts {
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-282
     /// The place where NCBI writes the search strategy request of `export`'s batch whose first
-    /// query (the run's) is `first`: writing these posts there (`write`) marks the requests through
-    /// that batch as NCBI's (`StrategyExport::release_through`; those after the last place reached
-    /// are cut from the file when NCBI's error ends the run). It shows nothing on the diagnostics
-    /// (`has_text`).
-    pub fn request(export: crate::report::archive::strategy::StrategyExport, first: usize) -> Self {
-        Self(vec![Post::Request(RequestMark { export, first })])
+    /// query (the run's) is `first`: writing these posts there (`write`) releases the requests
+    /// through that batch to the strategy stream (`StrategyExport::release_through`), interleaving
+    /// any `803.7` posts with the stream's writes. `has_posts` records whether the request has
+    /// `803.7` posts (`has_text`).
+    pub fn request(
+        export: crate::report::archive::strategy::StrategyExport,
+        first: usize,
+        has_posts: bool,
+    ) -> Self {
+        Self(vec![Post::Request(RequestMark {
+            export,
+            first,
+            has_posts,
+        })])
     }
 
     /// The posts of `lines`, each line a warning.
@@ -208,12 +220,14 @@ impl Posts {
         self.0.is_empty()
     }
 
-    /// Whether a post shows text on the diagnostics (a request mark alone shows none, nor do a
-    /// later format's lines, `later`; loads, whose texts are made where they are written, count
-    /// as text unless none of them can make one: `placed` first where it decides).
+    /// Whether a post shows text on the diagnostics (a request mark without replaced-byte posts
+    /// shows none, nor do a later format's lines, `later`; loads, whose texts are made where they
+    /// are written, count as text unless none of them can make one: `placed` first where it
+    /// decides).
     pub fn has_text(&self) -> bool {
         self.0.iter().any(|post| match post {
-            Post::Request(_) | Post::Later(_) => false,
+            Post::Request(mark) => mark.has_posts,
+            Post::Later(_) => false,
             Post::Loads(reads) => reads
                 .iter()
                 .any(|read| !read.text.is_empty() || read.load.is_some()),
@@ -238,9 +252,10 @@ impl Posts {
 
     /// Writes the posts to `diagnostics`, the stream of the run's diagnostics: the lines as they
     /// are, and with the BLAST archive (`archive`, whose handle saves what that stream writes)
-    /// each whole post saved as one message (`ArchiveHandle::write_post`); a request mark marks its
-    /// search strategy requests reached (`request`); the loads' texts are made here (`placed`). A
-    /// later format's lines (`later`) are not the diagnostics': nothing of them is written.
+    /// each whole post saved as one message (`ArchiveHandle::write_post`); a request mark releases
+    /// its search strategy requests to the strategy stream (`request`); the loads' texts are made
+    /// here (`placed`). A later format's lines (`later`) are not the diagnostics': nothing of them
+    /// is written.
     pub fn write(
         &self,
         diagnostics: &mut dyn std::io::Write,
@@ -248,7 +263,10 @@ impl Posts {
     ) -> std::io::Result<()> {
         for post in &self.0 {
             match (post, archive) {
-                (Post::Request(mark), _) => mark.export.release_through(mark.first)?,
+                (Post::Request(mark), _) => {
+                    mark.export
+                        .release_through(mark.first, diagnostics, archive)?
+                }
                 (Post::Later(_), _) => {}
                 (Post::Loads(reads), _) => {
                     for read in reads {

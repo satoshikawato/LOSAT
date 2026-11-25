@@ -730,10 +730,10 @@ export class Coordinator {
       let revisionIds: readonly string[];
       if ('dataset' in input) {
         revisionIds = Object.freeze([...input.dataset.revisionIds]);
-        const key = JSON.stringify(revisionIds);
+        const key = JSON.stringify([revisionIds, reader.program, reader.role, reader.dataLoaders]);
         const cached = this.runInputs.get(key);
         if (cached === undefined) {
-          runInput = this.deps.data.buildRunInput(revisionIds);
+          runInput = this.deps.data.buildRunInput(revisionIds, reader);
           this.runInputs.set(key, runInput);
           made.runInputs.push(key);
           runInput.catch(() => this.runInputs.delete(key));
@@ -746,7 +746,7 @@ export class Coordinator {
         made.sources.push(source.sourceId);
         const revision = await this.deps.data.indexSource(source.sourceId, reader);
         revisionIds = Object.freeze([revision.revisionId]);
-        runInput = this.deps.data.buildRunInput(revisionIds);
+        runInput = this.deps.data.buildRunInput(revisionIds, reader);
       }
       const { bytes, sha256, records } = await runInput;
       // Pasted text is a file that LOSAT made, named by the run (`inputName`): the page offers it with the run (line WQA's D22, DECISIONS 44).

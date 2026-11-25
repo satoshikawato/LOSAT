@@ -48,7 +48,14 @@ import {
 import { MOST_LEFT_OUT_IDS } from '../domain/input-parts';
 import type { InputPart } from '../domain/run';
 import { buildArgv, PASTED_NAMES, splitOptions } from '../domain/argv';
-import { endsInput, includedRecords, type DatasetRecord, type DatasetRevision } from '../domain/dataset';
+import {
+  endsInput,
+  excludedIndicesFor,
+  includedRecords,
+  recordExclusionKey,
+  type DatasetRecord,
+  type DatasetRevision,
+} from '../domain/dataset';
 import { parseTaxid, type CountsOrigin } from '../domain/counts';
 import type { ExampleId } from '../domain/examples';
 import { inputLead, type InputLead } from '../domain/input-format';
@@ -90,10 +97,9 @@ export type SourceCheck =
    */
   | { readonly state: 'error'; readonly message: string; readonly unavailable?: true };
 
-/** A record table of a source and the records that runs leave out of it. */
+/** A cached record table of a source under one FASTA reader kind. */
 export interface SourceTable {
   readonly base: DatasetRevision;
-  readonly excluded: readonly number[];
   readonly indexMs?: number;
 }
 
@@ -119,14 +125,20 @@ export interface DraftSource {
   readonly unavailable?: true;
   /** The record table: the revision of the data layer that includes every record. */
   readonly base?: DatasetRevision;
-  /** Indices of the records that runs leave out, ascending. */
+  /** Indices of the records in `base` that runs leave out, ascending. */
   readonly excluded: readonly number[];
+  /**
+   * Exclusion keys (`recordExclusionKey`) of records left out of this source across FASTA reader
+   * kinds: a mode change preserves exclusions for records present under the new reader, while
+   * records newly parsed by the new reader enter as included (line WQA's D16, Owner Q2=B).
+   */
+  readonly excludedKeys: ReadonlySet<string>;
   /** The data layer's id of the source, once it is added (the other kind's index reads the same source). */
   readonly sourceId?: string;
   /**
-   * The record tables of the other FASTA reader kind (the one that `parser` is not), with the
-   * records left out of each: a program that reads the role with another kind puts the current
-   * table here, and another program that reads it with this kind takes it back.
+   * The record tables of the other FASTA reader kind (the one that `parser` is not): a program
+   * that reads the role with another kind puts the current table here, and another program that
+   * reads it with this kind takes it back with the source's current `excludedKeys` applied.
    */
   readonly tables?: Readonly<Partial<Record<FastaParserKind, SourceTable>>>;
   /** The first lines of the source, as text, for its preview. */
@@ -263,6 +275,7 @@ const HEAD_LINE_CHARS = 120;
 const RECORD_IN_MESSAGE = /\b(?:query|subject) record (\d+)\b/;
 
 const emptyRole = (): RoleDraft => ({ paste: '', sources: [], mode: 'combined' });
+const EMPTY_EXCLUDED_KEYS: ReadonlySet<string> = new Set();
 
 export class SearchDraft {
   readonly state: Store<DraftState>;
@@ -523,6 +536,7 @@ export class SearchDraft {
       status: 'indexing',
       parser: this.parserOf(role),
       excluded: [],
+      excludedKeys: EMPTY_EXCLUDED_KEYS,
     };
     // A newer text supersedes an index of the older one that is still running.
     this.nextGeneration(`${role}:${PASTE_KEY}`);
@@ -590,6 +604,7 @@ export class SearchDraft {
       status: 'indexing',
       parser,
       excluded: [],
+      excludedKeys: EMPTY_EXCLUDED_KEYS,
     };
     this.updateRole(role, (draft) => ({ ...draft, sources: [...draft.sources, source] }));
     this.track(this.index(role, key, file, parser));
@@ -831,12 +846,21 @@ export class SearchDraft {
   /** Includes or leaves out records of a source (by their index in its record table). */
   setIncluded(role: InputRole, key: string, indices: readonly number[], included: boolean): void {
     this.updateSource(role, key, (source) => {
-      const excluded = new Set(source.excluded);
+      if (source.base === undefined) return source;
+      const excludedKeys = new Set(source.excludedKeys);
       for (const index of indices) {
-        if (included) excluded.delete(index);
-        else excluded.add(index);
+        const record = source.base.records[index];
+        if (record === undefined) continue;
+        const recordKey = recordExclusionKey(record);
+        if (included) excludedKeys.delete(recordKey);
+        else excludedKeys.add(recordKey);
       }
-      return { ...source, excluded: [...excluded].sort((a, b) => a - b), check: { state: 'pending' } };
+      return {
+        ...source,
+        excludedKeys,
+        excluded: excludedIndicesFor(source.base.records, excludedKeys),
+        check: { state: 'pending' },
+      };
     });
     this.set({ message: undefined });
     this.scheduleCheck(role, key);
@@ -1376,15 +1400,23 @@ export class SearchDraft {
     if (source === undefined) return Promise.resolve();
     // A pending index of the pasted text would read it again after this one (and drop the exclusions made since).
     if (key === PASTE_KEY) this.cancelTask(`paste:${role}`);
-    // The table of the kind that the source leaves is kept, with its exclusions, for a program that reads it again.
+    // Cache the table of the kind the source leaves; exclusions belong to the source (`excludedKeys`)
+    // so they survive mode changes while newly parsed records enter as included (line WQA's D16, Owner Q2=B).
     const tables: Partial<Record<FastaParserKind, SourceTable>> = { ...source.tables };
     if (source.base !== undefined) {
-      tables[source.parser] = { base: source.base, excluded: source.excluded, ...(source.indexMs === undefined ? {} : { indexMs: source.indexMs }) };
+      tables[source.parser] = { base: source.base, ...(source.indexMs === undefined ? {} : { indexMs: source.indexMs }) };
     }
     const kept = tables[parser];
     delete tables[parser];
     this.updateSource(role, key, (s) => {
-      const next: DraftSource = { ...s, parser, tables, ...(kept === undefined ? { status: 'indexing', excluded: [] } : { status: 'ready', base: kept.base, excluded: kept.excluded }) };
+      const next: DraftSource = {
+        ...s,
+        parser,
+        tables,
+        ...(kept === undefined
+          ? { status: 'indexing', excluded: [] }
+          : { status: 'ready', base: kept.base, excluded: excludedIndicesFor(kept.base.records, s.excludedKeys) }),
+      };
       if (kept === undefined) delete (next as { base?: unknown }).base;
       delete (next as { check?: unknown }).check;
       delete (next as { error?: unknown }).error;
@@ -1397,6 +1429,7 @@ export class SearchDraft {
       // An index of the kind that was left, still running, must not replace this table.
       this.nextGeneration(`${role}:${key}`);
       this.scheduleCheck(role, key, 0);
+      this.recheckReaderErrors(role, key);
       return Promise.resolve();
     }
     const read = this.index(role, key, source.file, parser, source.sourceId);
@@ -1441,7 +1474,7 @@ export class SearchDraft {
         sourceId: id,
         status: 'ready',
         base,
-        excluded: [],
+        excluded: excludedIndicesFor(base.records, source.excludedKeys),
         check: { state: 'pending' },
         indexMs: this.deps.now() - started,
         ...(head === undefined ? {} : { head }),

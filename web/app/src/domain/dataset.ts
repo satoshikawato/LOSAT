@@ -59,6 +59,28 @@ export function recordKey(record: RecordKey): RecordKey {
   return { id: record.id, length: record.length };
 }
 
+/**
+ * Identifies one record of a source across FASTA reader kinds (nucleotide vs protein): its byte
+ * offset in the file and its ID (line WQA's D16, Owner Q2=B, 2026-11-20). The offset distinguishes
+ * duplicate IDs and untitled records within the same source while staying stable between readers.
+ */
+export function recordExclusionKey(record: Pick<DatasetRecord, 'header_offset' | 'id'>): string {
+  return `${record.header_offset}\0${record.id}`;
+}
+
+/**
+ * Ascending indices of the records in `records` whose exclusion key is in `excludedKeys`.
+ * Records not in `excludedKeys` (including records newly parsed by another reader) enter as
+ * included (line WQA's D16, Owner Q2=B).
+ */
+export function excludedIndicesFor(
+  records: ReadonlyArray<Pick<DatasetRecord, 'index' | 'header_offset' | 'id'>>,
+  excludedKeys: ReadonlySet<string>,
+): readonly number[] {
+  if (excludedKeys.size === 0) return [];
+  return records.filter((record) => excludedKeys.has(recordExclusionKey(record))).map((record) => record.index);
+}
+
 /** Sorts and deduplicates record indices; rejects an index that is not in the table. */
 export function normalizeExclusion(indices: readonly number[], recordCount: number): readonly number[] {
   for (const index of indices) {

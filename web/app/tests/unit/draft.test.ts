@@ -284,7 +284,9 @@ describe('SearchDraft inputs', () => {
     expect(sourceOf(draft, 'query').base!.records[0]!.length).toBe(4);
   });
 
-  it('keeps the records left out and the region of a source through a mode that reads it with the other kind (WA-IN-01)', async () => {
+  // Line WQA's D16 (Owner Q2=B): exclusions survive mode changes across reader kinds, while each
+  // reader keeps its own subrange (nucleotide vs protein coordinates).
+  it('keeps the records left out across a mode change, and keeps the region for each kind (D16, WA-IN-01)', async () => {
     const { draft, data } = setup();
     const added: string[] = [];
     const indexed: string[] = [];
@@ -313,8 +315,8 @@ describe('SearchDraft inputs', () => {
 
     draft.setProgram('blastp');
     await draft.idle();
-    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 2, excluded: [] });
-    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', parser: 2, excluded: [] });
+    expect(sourceOf(draft, 'query')).toMatchObject({ status: 'ready', parser: 2, excluded: [1, 2] });
+    expect(sourceOf(draft, 'subject')).toMatchObject({ status: 'ready', parser: 2, excluded: [1] });
     // The other kind's table is not the region's record.
     expect(draft.region('query')).toBeUndefined();
 
@@ -337,28 +339,89 @@ describe('SearchDraft inputs', () => {
     expect(sourceOf(draft, 'query').excluded).toEqual([1, 2]);
   });
 
-  it('keeps the exclusions of each kind apart, and takes them back when the exclusions of the other kind change', async () => {
+  // Line WQA's D16 (Owner Q2=B): exclusions edited after a mode switch persist when switching back,
+  // duplicate/untitled records stay distinct, newly parsed records enter as included, and
+  // clearing/replacing/removing sources leaves no stale exclusions.
+  it('persists exclusion changes across mode switches, admits only newly parsed records, and leaks nothing on replace (D16)', async () => {
     const { draft } = setup();
+    const excludedOf = (role: 'query' | 'subject', index = 0) => sourceOf(draft, role, index).excluded;
     draft.setPaste('query', '>a\nMKLV\n>b\nMKLV\n>c\nMKLV\n');
     await draft.idle();
     draft.setIncluded('query', 'paste', [0], false);
     draft.setProgram('blastp');
     await draft.idle();
+    expect(excludedOf('query')).toEqual([0]);
+    // Exclude c and re-include a under BLASTP: switching across all other modes keeps that selection.
+    draft.setIncluded('query', 'paste', [2], false);
+    draft.setIncluded('query', 'paste', [0], true);
+    await draft.idle();
+    for (const mode of ['blastn', 'tblastx', 'blastx', 'tblastn'] as const) {
+      draft.setProgram(mode);
+      await draft.idle();
+      expect(excludedOf('query')).toEqual([2]);
+    }
+
+    // Newly parsed records under another reader: under kind 1 (nucleotide), r1 has only protein-only
+    // letters before an invalid line, so kind 1 stops at r1 with readerError (only r0 parsed).
+    // Under kind 2 (protein), r1 stores 6 residues before that line, so r0, r1 and r2 are parsed.
+    draft.setProgram('blastn');
+    draft.setPaste('query', '>r0\nACGT\n>r1\nEFFILP\n@@@@@@\n>r2\nACGT\n');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').base!.records.map((r) => r.id)).toEqual(['r0']);
+    draft.setIncluded('query', 'paste', [0], false);
+    await draft.idle();
+    expect(excludedOf('query')).toEqual([0]);
+
+    draft.setProgram('blastp');
+    await draft.idle();
+    expect(sourceOf(draft, 'query').base!.records.map((r) => r.id)).toEqual(['r0', 'r1', 'r2']);
+    // r0 stays excluded; r1 and r2 are new to the protein reader and enter as included.
+    expect(excludedOf('query')).toEqual([0]);
+    // Exclude r2 in BLASTP, switch to BLASTN (r2 not in kind-1 table), then back to BLASTP: r2 stays excluded.
     draft.setIncluded('query', 'paste', [2], false);
     await draft.idle();
     draft.setProgram('blastn');
     await draft.idle();
-    expect(sourceOf(draft, 'query').excluded).toEqual([0]);
+    expect(excludedOf('query')).toEqual([0]);
     draft.setProgram('blastp');
     await draft.idle();
-    expect(sourceOf(draft, 'query').excluded).toEqual([2]);
-    draft.setIncluded('query', 'paste', [1], false);
+    expect(excludedOf('query')).toEqual([0, 2]);
+
+    // Duplicate IDs and untitled records: excluding only the first does not exclude the second.
+    const dupFasta = '>dup\nACGT\n>dup\nGGCC\n';
     draft.setProgram('blastn');
+    draft.setPaste('query', `${dupFasta}>\nACGT\n>\nTTAA\n`);
     await draft.idle();
-    expect(sourceOf(draft, 'query').excluded).toEqual([0]);
+    draft.setIncluded('query', 'paste', [0, 3], false);
     draft.setProgram('blastp');
     await draft.idle();
-    expect(sourceOf(draft, 'query').excluded).toEqual([1, 2]);
+    expect(excludedOf('query')).toEqual([0, 3]);
+
+    // Replacing paste, clearing paste, and removing/re-adding a file leak no stale exclusions.
+    draft.setPaste('query', dupFasta);
+    await draft.idle();
+    expect(excludedOf('query')).toEqual([]);
+    draft.setIncluded('query', 'paste', [0], false);
+    draft.setPaste('query', '');
+    await draft.idle();
+    draft.setPaste('query', dupFasta);
+    await draft.idle();
+    expect(excludedOf('query')).toHaveLength(0);
+
+    const sample = file('sample.fa', '>x\nACGT\n>y\nGGCC\n');
+    draft.addFiles('subject', [sample]);
+    await draft.idle();
+    const firstKey = sourceOf(draft, 'subject').key;
+    draft.setIncluded('subject', firstKey, [0], false);
+    // Adding a second file with identical content gets no exclusions from the first.
+    draft.addFiles('subject', [file('other.fa', '>x\nACGT\n>y\nGGCC\n')]);
+    await draft.idle();
+    expect([excludedOf('subject', 0), excludedOf('subject', 1)]).toEqual([[0], []]);
+    // Removing and re-adding the first file clears its exclusions.
+    draft.removeSource('subject', firstKey);
+    draft.addFiles('subject', [sample]);
+    await draft.idle();
+    expect(excludedOf('subject', 1)).toEqual([]);
   });
 
   it('does not let the read of a kind that was left replace the table that the way back restored', async () => {
@@ -376,7 +439,7 @@ describe('SearchDraft inputs', () => {
     expect(sourceOf(draft, 'query').base!.parser).toBe(1);
   });
 
-  it('keeps each source of a role through the round trip, and a source removed on the way stays removed', async () => {
+  it('keeps each source of a role and its exclusions through the round trip, and a source removed on the way stays removed', async () => {
     const { draft, requests } = setup();
     draft.setPaste('query', '>q\nACGT\n>r\nACGT\n');
     draft.addFiles('query', [file('a.fa', '>a1\nACGT\n>a2\nACGT\n'), file('b.fa', '>b1\nACGT\n>b2\nACGT\n>b3\nACGT\n')]);
@@ -391,7 +454,7 @@ describe('SearchDraft inputs', () => {
 
     draft.setProgram('blastp');
     await draft.idle();
-    expect(draft.state.get().query.sources.map((source) => source.excluded)).toEqual([[], [], []]);
+    expect(draft.state.get().query.sources.map((source) => source.excluded)).toEqual([[0], [1], [0, 2]]);
     draft.removeSource('query', a!.key);
     await draft.idle();
 

@@ -46,9 +46,12 @@ export interface DatasetStore {
   /**
    * The engine input made of the included records of the revisions, in order. A revision
    * that includes every record contributes its source unchanged; a newline is added after
-   * a source that does not end with one when another follows (plan §5.3).
+   * a source that does not end with one when another follows (plan §5.3; a CR-only stream
+   * keeps CR so NCBI's line reader stays in CR mode, line WQA's D17). When assembled from
+   * multiple sources or a record selection, `bytes` is scanned with `reader` (or the first
+   * revision's reader) so `records` agrees with what the engine and the CLI read from `bytes`.
    */
-  buildRunInput(revisionIds: readonly string[]): Promise<RunInput>;
+  buildRunInput(revisionIds: readonly string[], reader?: FastaReader): Promise<RunInput>;
   /**
    * The engine's reading of the run input of the revisions with the reader `reader` (its program,
    * role and data loaders; losat/ports: input-check.ts). Resolves with the engine's verdict;

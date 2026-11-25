@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.103
+- Version: 1.104
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -700,7 +700,14 @@
   the merge of dev of 2026-11-24 that brought 1.99, line RG item X-short-tbx-link, then 1.101 at the
   merge of dev of 2026-11-25 that brought 1.100, line RG item KC-11d, then 1.102 at the merge of
   dev of 2026-11-25 that brought 1.101, line RG item D5c, then 1.103 at the merge of
-  dev of 2026-11-25 that brought 1.102, psiblast line item PS10e)
+  dev of 2026-11-25 that brought 1.102, psiblast line item PS10e);
+  1.104 2026-11-25 (TBLASTN and TBLASTX `-db_soft_mask` with masks stored out of order on a frame of
+  more than 5,000,000 residues, line NP item M4b-T3: a TBLASTN gapped search gives NCBI's rows for
+  an initial alignment of at most 11 letters that starts before its chunk with its middle in the
+  chunk, and refuses only those on which NCBI crashes, rule 3 narrowed; NCBI's one-thread diagonal
+  offset and its clears taken from the database order for such sequences at every thread count,
+  rule 4; line NP decision 58, Q1 = B and Q2 = B, 2026-11-23; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.103)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3360,28 +3367,35 @@ file would differ, and NCBI's programs still could not open the database).
 
 - TBLASTN with `-db_soft_mask`, a gapped search of a chunk that saves an initial alignment starting
   before the chunk (version 1.89, 2026-11-23, line NP item M4b-T2, Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07). Masks stored out of order on a frame of more than
-  5,000,000 residues let the scan find words before the chunk (the rule-4 item of version 1.89); the
-  one-hit extension of such a word (`-window_size 0`), or a two-hit extension whose word lies wholly
-  before the chunk, gives an initial alignment that starts there. NCBI's gapped start reads the
-  subject at that start taken as `Uint4` (`blast_gapalign.c:3936-3942,3393-3439`), about 4 GiB past
-  the frame, where the alignment is longer than 11 letters and no gapped alignment found before
-  holds it: NCBI BLAST+ 2.17.0 ends with SIGSEGV (`-window_size 0`, with and without `-in_pssm`, on
-  both strands, at 1 and 2 threads, every run; gdb: `BlastGetStartForGappedAlignment` under
-  `BLAST_GetGappedScore`; the database `before` of `tests/tblastx_db_soft_lead.rs`). Otherwise
-  (11 letters or fewer, or held by a gapped alignment found before) its gapped alignment starts
-  before the chunk, a defined result. LOSAT refuses the search when the initial alignments of a
-  chunk include one that starts before it, before NCBI's containment test, so it also refuses those
-  defined results (exit 1, "TBLASTN: database sequence <OID>, frame <frame>: an initial alignment
-  of the chunk from residue <n> starts before the chunk (...), which LOSAT does not support"; one
-  producer, `search_gapped::x_gapped_start_before_chunk`; the manual's refusals page); dev read
-  past its slices or missed the words there. An initial alignment that starts in the chunk from a
-  word before it (a seed at the chunk's offset -1 or -2) is not refused: its gapped start is the
-  seed's `Uint4` moved as NCBI's (`blast_gapalign.c:3942-3945`), in the chunk. An ungapped search
-  (`-ungapped`) keeps these alignments as NCBI does (rule 4). The defined results are line NP's
-  item M4b-T3: LOSAT will give NCBI's bytes there and refuse only the inputs on which NCBI crashes
-  (line NP decision 58, Q1 = B, 2026-11-23, Owner-delegated, standing instruction 2026-09-29,
-  restated 2026-10-07).
+  instruction 2026-09-29, restated 2026-10-07; narrowed in version 1.104, line NP item M4b-T3).
+  Masks stored out of order on a frame of more than 5,000,000 residues let the scan find words
+  before the chunk (the rule-4 item of version 1.89); the one-hit extension of such a word
+  (`-window_size 0`), or a two-hit extension whose word lies wholly before the chunk, gives an
+  initial alignment that starts there. No gapped alignment found before holds it: those start in
+  the chunk (`blast_itree.c:822-831`). NCBI's gapped start of an alignment of at most 11 letters
+  (`HSP_MAX_WINDOW`) is its middle, read from no letter (`blast_gapalign.c:3401-3404`), and the
+  subject's start moves with it (`blast_gapalign.c:3942-3945`). Where that start lies in the
+  chunk, NCBI's preliminary gapped alignment runs from it on the chunk's letters and its traceback
+  on the frame: NCBI BLAST+ 2.17.0 gives the same rows every run, at 1 and 2 threads (probes of
+  2026-11-24: alignments of 11 letters from the chunk's offsets -1, -4 and -5, `-window_size 0`,
+  with and without `-in_pssm`), and LOSAT gives them (version 1.104, line NP item M4b-T3). Where
+  the alignment is longer than 11 letters (its length read as `Uint4`, so also a negative one),
+  NCBI reads the subject at the alignment's start taken as `Uint4`, about 4 GiB past the frame
+  (`blast_gapalign.c:3405-3413`; gdb: `BlastGetStartForGappedAlignment`), and where the middle lies
+  before the chunk, its right extension reads the subject from that start taken as `Uint4`
+  (`blast_gapalign.c:4300-4333`; gdb: `Blast_SemiGappedAlign`): NCBI BLAST+ 2.17.0 ends with
+  SIGSEGV every run (with and without `-in_pssm`, at 1 and 2 threads; the database `before` of
+  `tests/tblastx_db_soft_lead.rs` and the probes of 2026-11-24). LOSAT refuses exactly these (exit
+  1, "TBLASTN: database sequence <OID>, frame <frame>: an initial alignment of the chunk from
+  residue <n> starts before the chunk (...)"; one producer,
+  `search_gapped::x_gapped_start_before_chunk`; the manual's refusals page), on the initial
+  alignments of NCBI's one-thread search: where NCBI's thread clears its table inside the
+  sequence, the words before a later chunk are not extended and NCBI completes the search, and
+  LOSAT gives that result at every thread count (the rule-4 item; PD-LOSAT-DATABASE-SEARCH, DB-3).
+  Before version 1.104 LOSAT refused every such alignment. An initial alignment that starts in the
+  chunk from a word before it (a seed at the chunk's offset -1 or -2) is not refused: its gapped
+  start is the seed's `Uint4` moved as NCBI's (`blast_gapalign.c:3942-3945`), in the chunk. An
+  ungapped search (`-ungapped`) keeps these alignments as NCBI does (rule 4).
 
 - RPSBLAST and RPSTBLASTN over an alias file whose `FIRST_OID` and `LAST_OID` leave out profiles of
   its volumes (2026-11-17, line RG item D1a-4, Owner-delegated), or whose `OIDLIST` does (line RG
@@ -4597,11 +4611,24 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   table, as NCBI's thread runs them, on a table made for the subject (`tests/tblastx_db_soft_lead.rs`,
   NCBI's rows at 1 and 4 threads). Where NCBI's thread starts its table again between two chunks of
   such a frame (its offset past INT4_MAX / 4, `blast_extend.c:166-172`), NCBI's result depends on
-  the subjects that thread searched before; LOSAT gives the result without that restart for now.
-  Line NP's item M4b-T3 gives NCBI's `-num_threads 1` result there at any thread count, the
-  table's offset and its restart taken from the database order (line NP decision 58, Q2 = B,
-  2026-11-23, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07). The TBLASTN
-  gapped search of an initial alignment that starts before its chunk is refused (rule 3, above).
+  the subjects that thread searched before; LOSAT gives NCBI's `-num_threads 1` result there at
+  every thread count (PD-LOSAT-DATABASE-SEARCH, DB-3; version 1.104, line NP item M4b-T3, line NP
+  decision 58, Q2 = B, 2026-11-23, Owner-delegated, standing instruction 2026-09-29, restated
+  2026-10-07). At the first such sequence of a search it walks NCBI's one-thread offset over the
+  searched sequences in the database's order (`blast_engine.c:1377`, one table per thread: a
+  sequence of fewer than 3 × word + 2 bases is skipped, `blast_engine.c:1318-1331,1368-1369,1429`;
+  each of the six frames of every other one is cut into chunks of 5,000,000 residues, a chunk
+  without a range searched by no word finder, `blast_engine.c:478-483`; the exit of each chunk's
+  word finder moves the offset by the chunk's length and the window, or clears the table at
+  INT4_MAX / 4, `blast_extend.c:87-107,162-173`), and searches each such sequence's chunks in order
+  on a table at its offset whose entries are a new or a cleared table's (0, or the window below 0),
+  so that its clears fall where NCBI's do. The entries of the sequences before it are never within
+  reach of its hits. The probes of 2026-11-24 (databases of 284 Mbp in which the clear falls after
+  the first chunk of the long sequence's frame +1, or, one base shorter, after its second chunk)
+  gave rows at one thread that differ from NCBI's at 2 and 4 threads, and a gapped search that NCBI
+  completes at one thread and crashes on at 2 and 4; LOSAT gives the one-thread rows at 1, 2, 4 and
+  8 threads. The TBLASTN gapped search of an initial alignment that starts before its chunk is
+  refused only where NCBI crashes (rule 3, above).
 - psiblast and tblastn `-in_pssm`, the BitMagic data of a Seq-table of the PSSM query's
   annotations (version 1.58, 2026-11-20, line RG item Q-BM; the Owner decided on 2026-11-16
   (「推奨通り」, Q-BM) to port it): `bit-bvector` values and a `bit-set-bvector`'s sparse index are

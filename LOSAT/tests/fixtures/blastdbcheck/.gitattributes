@@ -1,0 +1,4 @@
+# Binary and raw-byte NCBI fixtures: no line-ending conversion.
+*.err -text
+*.out -text
+ncbi/d_p4_badchar.err -diff

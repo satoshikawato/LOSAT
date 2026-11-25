@@ -50,7 +50,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
 - The PSSM's scores replace the matrix, and its Karlin-Altschul values set the cutoffs, E-values and bit scores.
 - As in NCBI, `-comp_based_stats` has no effect, alignments are linked only with `-sum_stats true`, and `-task tblastn-fast` changes nothing. The word size is 2 to 4 and the matrix is one of the standard ones.
 - The subjects are translated with genetic code 1 whatever `-db_gencode` says. LOSAT still checks the value.
-- The report formats are 0 to 10 and 20. Formats 12 to 16 and 18 are not yet supported.
+- Every report format but 11 is written. A PSSM whose query has the molecule `other` is searched as a protein, as in NCBI; NCBI's alignment display cannot read its letters, so LOSAT writes what NCBI writes: the line `Sequence with id ... no longer exists in database...alignment skipped` for each alignment of `-outfmt 0`, empty query-anchored sections, BLAST XML that ends at the query's first alignment with NCBI's error, XML2 and JSON documents without the query's report and with NCBI's error (outfmt 15 and 16; outfmt 13 and 14 leave their files empty and exit with status 255), and tabular reports that stop at the first row whose fields read the query's letters (the default fields among them) with NCBI's exception and exit status 255.
 - Also refused with `-in_pssm`:
   - `-ungapped`;
   - `-use_sw_tback` on a search that finds an alignment, where NCBI fails, crashes, never finishes or writes rows that change from one run to the next (a search that finds nothing runs);
@@ -106,7 +106,7 @@ For every option: `losat tblastn -help`.
 | 18 | Organism report |
 | 20 | Comma-separated values with header lines |
 
-With `-in_pssm`, 0 to 10 and 20 work.
+With `-in_pssm`, every format but 11 works.
 
 Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore`. A custom list changes them, for example `-outfmt "6 qseqid sseqid pident sframe evalue"`; `delim=` sets the separator. [Output formats](../output-formats.md) describes each format.
 

@@ -130,6 +130,7 @@ pub(crate) fn xml2_run(run: &TblastxReportRun<'_>) -> Xml2Run {
         cbs: 0,
         query_gencode: Some(i32::from(run.args.query_gencode)),
         db_gencode: Some(i32::from(run.args.db_gencode)),
+        program_type: None,
     }
 }
 

@@ -1423,8 +1423,9 @@ pub(super) fn xml2_writer(
         cbs: i32::from(options.composition),
         query_gencode: Some(i32::from(options.query_gencode)),
         db_gencode: None,
+        program_type: options.program_type(),
     };
-    let delayed = params.target.holds_back();
+    let delayed = params.holds_back();
     Xml2Writer::with_document(Xml2Document::with_files(kind, delayed, files), params)
 }
 
@@ -1887,7 +1888,7 @@ pub(super) fn write_xml_epilog(
         Some(xml2) => {
             let finished = xml2.finish(&mut buf).map_err(|error| {
                 // The held report of a `-subject` run that fails (`CaughtException`): its
-                // message, then the end of the document.
+                // message, then the end of the document (`DocumentPosts::place_caught`).
                 match error.downcast::<CaughtException>() {
                     Ok(CaughtException(exception)) => Ok(crate::ncbi_exception::error_post_line(
                         None,
@@ -1906,9 +1907,10 @@ pub(super) fn write_xml_epilog(
             (finished, document.take_posts())
         }
     };
+    let mut posts = posts;
     let post = match finished {
         Ok(()) => None,
-        Err(Ok(post)) => Some(post),
+        Err(Ok(post)) => posts.place_caught(post),
         Err(Err(error)) => return Err(error),
     };
     if let Some(post) = post {

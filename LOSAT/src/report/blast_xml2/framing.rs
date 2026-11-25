@@ -594,6 +594,11 @@ impl<F: SideFiles> Xml2Document<F> {
                 return Ok(());
             }
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2230
+        // The held report's post comes before the document's end (`DocumentPosts::caught_at`).
+        if caught.is_some() {
+            self.posts.caught_at = Some(out.len());
+        }
         match self.kind {
             Xml2Kind::Single16 => out.extend_from_slice(TAIL16),
             Xml2Kind::Single15 => out.extend_from_slice(TAIL15),

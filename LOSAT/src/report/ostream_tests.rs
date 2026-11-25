@@ -1,4 +1,5 @@
 use super::*;
+use crate::report::serial::encoder::BufferPiece;
 
 /// A device that takes nothing (`/dev/full`), counting the bytes offered to it.
 struct Full(std::sync::Arc<std::sync::atomic::AtomicUsize>);
@@ -927,4 +928,179 @@ fn the_request_point_of_a_refused_strategy_file_makes_ncbis_writes_first() {
         lock(&took).as_slice(),
         b"BLASTN (LOSAT 0.2.0)\n\nReference: ..."
     );
+}
+
+#[test]
+fn strategy_stream_models_close_failure_and_subsequent_write_fault() {
+    use crate::report::archive::{ArchiveEncoding, ArchiveHandle, ArchiveRequest, OptionsHandle};
+
+    // Batch 1 (< 8,191 B) on a full device: `Close` flush fails, sets `bad`, posts the 4-line
+    // chain (4 ERROR messages in outfmt 11), and returns `Ok(())`.
+    let mut stream = StrategyStream::new(Box::new(FailAt(0)), "blastp");
+    let handle = ArchiveHandle::new(
+        ArchiveEncoding::Text,
+        ArchiveRequest {
+            program: "blastp",
+            application: "blastp",
+            service: "plain",
+            algorithm: Vec::new(),
+            database: None,
+            step_number: None,
+        },
+        OptionsHandle::default(),
+    );
+    let doc1 = vec![b'a'; 906];
+    let pieces1 = [BufferPiece::new(905, 0), BufferPiece::new(1, 0)];
+    let mut diag = Vec::new();
+    stream
+        .write_object(&doc1, &pieces1, &[], &mut diag, Some(&handle))
+        .unwrap();
+    let diag_text = String::from_utf8(diag.clone()).unwrap();
+    let lines: Vec<&str> = diag_text.lines().collect();
+    assert_eq!(lines.len(), 4, "{diag_text}");
+    assert!(lines[0].contains("error at byte 906: stack is empty: cannot close output stream"));
+    assert!(lines[1].contains("COStreamBuffer::Flush: failed"));
+    assert!(lines[2].contains("byte 906: cannot close output stream"));
+    assert!(lines[3].contains("Cannot close serializing output stream"));
+    assert!(!diag_text.contains("CIOException"));
+    assert!(!diag_text.contains("CSerialException"));
+    assert_eq!(handle.take_messages().len(), 4);
+
+    // Batch 2 on the already-bad stream: fails immediately on piece 0 with a single 802.5
+    // `write fault` at `size + leave = 975` (before the 1-byte separator) and `StrategyWriteFault`.
+    let doc2 = vec![b'b'; 976];
+    let pieces2 = [BufferPiece::new(975, 0), BufferPiece::new(1, 0)];
+    diag.clear();
+    let err = stream
+        .write_object(&doc2, &pieces2, &[], &mut diag, Some(&handle))
+        .unwrap_err();
+    assert!(is_strategy_write_fault(&err));
+    assert_eq!(
+        String::from_utf8(diag).unwrap(),
+        "Error: (802.5) [blastp] CObjectOStream: error at byte 975: stack is empty: write fault\n"
+    );
+    let msgs = handle.take_messages();
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(msgs[0].0, crate::report::diag_log::ERROR);
+    assert!(String::from_utf8_lossy(&msgs[0].1)
+        .contains("error at byte 975: stack is empty: write fault"));
+}
+
+fn full_asn_piece() -> BufferPiece {
+    BufferPiece::new(4016, 80)
+}
+
+#[test]
+fn strategy_stream_large_request_faults_at_piece_plus_back_limit() {
+    // 3 pieces of 4,016 B (leave = 80) + tail: pieces 0+1 = 8,032 B (< 8,191 B) stay buffered;
+    // piece 2 pushes past 8,191 B and triggers the device write, failing at 8,032 + 4,016 + 80 = 12,128.
+    let took = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut stream = StrategyStream::new(
+        Box::new(Limited {
+            took: took.clone(),
+            limit: 10_000,
+        }),
+        "tblastn",
+    );
+    let doc = vec![b'x'; 13_000];
+    let pieces = [
+        full_asn_piece(),
+        full_asn_piece(),
+        full_asn_piece(),
+        BufferPiece::new(951, 0),
+        BufferPiece::new(1, 0),
+    ];
+    let mut diag = Vec::new();
+    let err = stream
+        .write_object(&doc, &pieces, &[], &mut diag, None)
+        .unwrap_err();
+    assert!(is_strategy_write_fault(&err));
+    assert_eq!(lock(&took).len(), 10_000);
+    assert_eq!(
+        String::from_utf8(diag).unwrap(),
+        "Error: (802.5) [tblastn] CObjectOStream: error at byte 12128: stack is empty: write fault\n"
+    );
+}
+
+#[test]
+fn strategy_stream_byte_block_fault_posts_line_and_live_stack_trace() {
+    // When `FlushBuffer` with `false` fails inside a constructed `CObjectOStream::ByteBlock`
+    // (`ncbi2na`), `~ByteBlock()` unwinds into `Unended` while `CObjectOStreamAsn` is still alive,
+    // posting `line N: <stack>: write fault` instead of `byte P: stack is empty: write fault`.
+    let mut stream = StrategyStream::new(Box::new(FailAt(0)), "blastn");
+    let mut doc = b"line1\nline2\n".repeat(350);
+    doc.resize(13_000, b'A');
+    let trace =
+        "Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.inst.seq-data.ncbi2na";
+    let expected_line = 1 + doc[..12128].iter().filter(|&&b| b == b'\n').count();
+    let pieces = [
+        full_asn_piece(),
+        full_asn_piece(),
+        BufferPiece {
+            size: 4016,
+            leave: 80,
+            byte_block_trace: Some(trace.to_string()),
+        },
+        BufferPiece::new(951, 0),
+        BufferPiece::new(1, 0),
+    ];
+    let mut out_diag = Vec::new();
+    let err = stream
+        .write_object(&doc, &pieces, &[], &mut out_diag, None)
+        .unwrap_err();
+    assert!(is_strategy_write_fault(&err));
+    assert_eq!(
+        String::from_utf8(out_diag).unwrap(),
+        format!(
+            "Error: (802.5) [blastn] CObjectOStream: error at line {expected_line}: {trace}: write fault\n"
+        )
+    );
+}
+
+#[test]
+fn strategy_stream_interleaves_803_7_posts_around_8191_byte_flush() {
+    // Both device writes and diagnostics land in one shared buffer (modelling `2>&1` on one pipe).
+    #[derive(Clone)]
+    struct SharedBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for SharedBuf {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            lock(&self.0).extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let merged = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut stream = StrategyStream::new(Box::new(SharedBuf(merged.clone())), "blastp");
+    let mut diag = SharedBuf(merged.clone());
+    let mut doc = vec![b'A'; 4016];
+    doc.extend(std::iter::repeat_n(b'B', 4016));
+    doc.extend(std::iter::repeat_n(b'C', 4016));
+    doc.extend(b"TAIL\n");
+    let pieces = [
+        full_asn_piece(),
+        full_asn_piece(),
+        full_asn_piece(),
+        BufferPiece::new(4, 0),
+        BufferPiece::new(1, 0),
+    ];
+    let posts = vec![
+        (4016u64, b"[POST1]\n".to_vec()),
+        (12048u64, b"[POST2]\n".to_vec()),
+    ];
+    stream
+        .write_object(&doc, &pieces, &posts, &mut diag, None)
+        .unwrap();
+    let out = lock(&merged).clone();
+    // POST1 occurs at written=4016 while the 8,191 B file buffer still holds piece 0, so it lands
+    // BEFORE pieces 0+1+2 (12,048 B); POST2 occurs at written=12048 AFTER pieces 0+1+2 flushed
+    // and BEFORE `Close` flushes `TAIL\n`.
+    let mut expected = Vec::new();
+    expected.extend_from_slice(b"[POST1]\n");
+    expected.extend_from_slice(&doc[..12048]);
+    expected.extend_from_slice(b"[POST2]\n");
+    expected.extend_from_slice(&doc[12048..]);
+    assert_eq!(out, expected);
 }

@@ -1,8 +1,20 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { parseToolDescription } from 'losat/domain';
 import { describe, expect, it } from 'vitest';
 import { generateVerificationTable } from '../../build/verification';
-import { optionKey, RANGE_VALUE, type OptionGrammar } from '../../src/domain/verification';
+import {
+  FILE_VALUE,
+  NOT_SUPPORTED_LABEL,
+  optionKey,
+  RANGE_VALUE,
+  SUPPORTED_LABEL,
+  toolOptionGrammar,
+  toolOptionKey,
+  toolVerificationBadge,
+  type OptionGrammar,
+} from '../../src/domain/verification';
+import WINDOWMASKER_XMLHELP_DOC from '../../src/infra/fake/windowmasker-xmlhelp.json';
 
 const repository = resolve(import.meta.dirname, '../../../..');
 const describeJson = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<
@@ -101,6 +113,7 @@ describe('verification table', () => {
       'docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-blastp.tsv',
       'docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-tblastn.tsv',
       'docs/evidence/losat_web_e2e/run-20261004T163746Z/sweeps/after-tblastx.tsv',
+      'LOSAT/tests/windowmasker/cases.tsv',
     ]);
     for (const source of table.sources) {
       expect(source.sha256, source.path).toMatch(/^[0-9a-f]{64}$/);
@@ -120,5 +133,61 @@ describe('verification table', () => {
     if (out === undefined || out === '') return;
     mkdirSync(dirname(resolve(out)), { recursive: true });
     writeFileSync(out, `${JSON.stringify(table, null, 2)}\n`);
+  });
+
+  it('generates windowmasker option sets from cases.tsv and grades tool runs as Supported or Not yet supported', () => {
+    const wm = table.tools?.windowmasker;
+    expect(wm).toBeDefined();
+    expect(wm!.optionSets.length).toBeGreaterThan(100);
+    expect([...wm!.optionSets]).toEqual([...wm!.optionSets].sort());
+    for (const key of wm!.optionSets) {
+      expect(key).not.toMatch(/"-(in|out|logfile)"/);
+    }
+
+    const wmGrammar = toolOptionGrammar(parseToolDescription(WINDOWMASKER_XMLHELP_DOC.xml));
+    // File names (-in, -out, -logfile, -ustat value, -ids value) do not change the key.
+    expect(
+      toolOptionKey(['windowmasker', '-ustat', 'windowmasker/562/wmasker.obinary', '-in', 'a.fa', '-out', 'b.txt', '-logfile', 'run.log'], wmGrammar),
+    ).toBe(JSON.stringify([['-ustat', FILE_VALUE]]));
+    expect(toolOptionKey(['windowmasker', '-ustat', 'c.obinary', '-dust', 'true'], wmGrammar)).toBe(
+      toolOptionKey(['windowmasker', '-ustat', 'other.bin', '-dust', 'T'], wmGrammar),
+    );
+    expect(toolOptionKey(['windowmasker', '-convert', '-in', 'a.ascii', '-out', 'b.ascii', '-sformat', 'ascii'], wmGrammar)).toBe(
+      toolOptionKey(['windowmasker', '-convert', '-in', 'x.obinary'], wmGrammar),
+    );
+
+    // Frozen option sets -> Supported.
+    for (const argv of [
+      ['windowmasker', '-mk_counts', '-in', 'genome.fa', '-out', 'wmasker.ascii'],
+      ['windowmasker', '-mk_counts', '-in', 'genome.fa', '-out', 'wmasker.obinary', '-unit', '5', '-sformat', 'obinary'],
+      ['windowmasker', '-ustat', 'windowmasker/562/wmasker.obinary', '-in', 'seq.fa', '-outfmt', 'fasta', '-parse_seqids'],
+      ['windowmasker', '-ustat', 'counts.obinary', '-in', 'seq.fa', '-dust', 'true'],
+      ['windowmasker', '-convert', '-in', 'wmasker.ascii', '-out', 'wmasker.obinary', '-sformat', 'obinary'],
+    ]) {
+      const badge = toolVerificationBadge({ tool: 'windowmasker', argv, runtimePath: 'serial', grammar: wmGrammar }, table);
+      expect(badge.level, argv.join(' ')).toBe('certified');
+      expect(badge.label, argv.join(' ')).toBe(SUPPORTED_LABEL);
+      expect(badge.details.join(' ')).not.toMatch(/\b(verif|certif)/i);
+    }
+
+    // Option sets without an NCBI-frozen exit-0 row -> Not yet supported.
+    for (const argv of [
+      ['windowmasker', '-mk_counts', '-in', 'genome.fa', '-out', 'wmasker.ascii', '-unit', '11'],
+      ['windowmasker', '-ustat', 'counts.obinary', '-in', 'seq.fa', '-window', '999'],
+      ['windowmasker', '-mk_counts', '-in', 'genome.fa', '-conffile', 'app.ini'],
+      ['windowmasker', '-mk_counts', '-in', 'genome.fa', '-dryrun'],
+    ]) {
+      const badge = toolVerificationBadge({ tool: 'windowmasker', argv, runtimePath: 'serial', grammar: wmGrammar }, table);
+      expect(badge.level, argv.join(' ')).toBe('outside');
+      expect(badge.label, argv.join(' ')).toBe(NOT_SUPPORTED_LABEL);
+      expect(badge.details.join(' ')).not.toMatch(/\b(verif|certif)/i);
+    }
+
+    // Development build (FakeEngine) -> Development build badge.
+    const dev = toolVerificationBadge(
+      { tool: 'windowmasker', argv: ['windowmasker', '-mk_counts', '-in', 'a.fa', '-out', 'w.ascii'], runtimePath: 'fake', grammar: wmGrammar },
+      table,
+    );
+    expect(dev).toMatchObject({ level: 'development', label: 'Development build' });
   });
 });

@@ -658,25 +658,25 @@ fn search_delta_batch(
             )
         })
         .collect();
-    let cdd_query = |index: usize| super::delta_hooks::CddQuery {
-        record: &query_records[query_input.ordinal(batch_queries.start + index)],
-        id: &ids[index],
-        alone,
-    };
+    let cdd_queries: Vec<_> = (0..ids.len())
+        .map(|index| super::delta_hooks::CddQuery {
+            record: &query_records[query_input.ordinal(batch_queries.start + index)],
+            id: &ids[index],
+            alone,
+        })
+        .collect();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:89-90
-    // The domain search of every query of the batch comes before the first query's PSSM.
-    let mut domains = Vec::with_capacity(ids.len());
-    for index in 0..ids.len() {
-        domains.push(delta.cdd_domains(&cdd_query(index), pool, &mut *outputs.diagnostics)?);
-    }
+    // One domain search of every query of the batch (`x_FindDomainHits`) comes before the first
+    // query's PSSM.
+    let domains = delta.cdd_domains(&cdd_queries, pool, &mut *outputs.diagnostics)?;
     let results = RoundResults::of(args, 1, subject_source);
     let state = IterationState::new(plan.num_iterations);
     let mut held = Vec::with_capacity(ids.len() * results.count);
-    let mut cdd_queries = Vec::with_capacity(ids.len());
+    let mut cdd_queries_out = Vec::with_capacity(ids.len());
     let mut first_pssm = None;
     for (index, domains) in domains.into_iter().enumerate() {
         let query = batch_queries.start + index;
-        let cdd = delta.cdd_pssm(args, &plan.request, &cdd_query(index), domains)?;
+        let cdd = delta.cdd_pssm(args, &plan.request, &cdd_queries[index], domains)?;
         let mut current = cdd.pssm;
         // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:328-353
         // NCBI saves the batch's first PSSM only (`SavePssmToFile` of the first query's), its
@@ -774,7 +774,7 @@ fn search_delta_batch(
         if index == 0 {
             first_pssm = Some(current);
         }
-        cdd_queries.push(cdd.query);
+        cdd_queries_out.push(cdd.query);
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:353,405
     // `SavePssmToFile` of the batch's first PSSM: after the searches of the batch
@@ -820,7 +820,7 @@ fn search_delta_batch(
             }
         }
     }
-    let mut outcomes = Vec::with_capacity(cdd_queries.len());
+    let mut outcomes = Vec::with_capacity(cdd_queries_out.len());
     for (formatted, (call, searched, done)) in prefetched.into_iter().enumerate() {
         let formatted = *calls + formatted;
         let record = std::slice::from_ref(&searched_queries[call.query]);
@@ -869,7 +869,7 @@ fn search_delta_batch(
     *calls += ids.len() * results.count;
     Ok(outcomes
         .into_iter()
-        .zip(cdd_queries)
+        .zip(cdd_queries_out)
         .map(|(outcome, cdd_query)| RoundOne { outcome, cdd_query })
         .collect())
 }

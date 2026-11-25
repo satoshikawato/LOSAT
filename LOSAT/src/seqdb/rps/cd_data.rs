@@ -23,9 +23,11 @@ pub(crate) const CD_ALPHABET: usize = 28;
 /// NCBI reference (598d8ae6): c++/include/algo/blast/api/cdd_pssm_input.hpp:104-106
 const OBSERVATION_SCALE: f64 = 1000.0;
 
-/// One of the two files: its positioned reader and its profile count.
+/// One of the two files: its positioned reader, its length and its profile count.
 struct CdFile {
     source: FreqSource,
+    /// The file's length in bytes when it was opened.
+    len: u64,
     num_profiles: usize,
     /// The file's name in messages (`<volume path><extension>`).
     shown: String,
@@ -62,17 +64,15 @@ impl CdFile {
         }
         let num_profiles = i32::from_le_bytes([header[4], header[5], header[6], header[7]]);
         let num_profiles = usize::try_from(num_profiles).map_err(|_| too_short())?;
+        let len = source.len().map_err(|_| too_short())? as u64;
         let file = Self {
             source,
+            len,
             num_profiles,
             shown,
         };
         let offsets_end = 8 + 4 * (num_profiles as u64 + 1);
-        if file
-            .source
-            .len()
-            .map_or(true, |len| (len as u64) < offsets_end)
-        {
+        if file.len < offsets_end {
             return Err(too_short());
         }
         Ok(file)
@@ -111,16 +111,24 @@ impl CdFile {
         let mut bytes = vec![0u8; count * 4];
         self.source
             .read_at(&mut bytes, self.data_start() + from * 4)
-            .map_err(|_| {
-                RpsOpenError::Refused(format!(
-                    "a profile database whose {} is shorter than its profiles (NCBI BLAST+ reads past it) is not supported by LOSAT's {program}",
-                    self.shown
-                ))
-            })?;
+            .map_err(|_| self.shorter(program))?;
         Ok(bytes
             .chunks_exact(4)
             .map(|value| u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
             .collect())
+    }
+
+    /// The number of values of the data that the file holds from value index `from` on.
+    fn values_from(&self, from: u64) -> u64 {
+        ((self.len.saturating_sub(self.data_start())) / 4).saturating_sub(from)
+    }
+
+    /// LOSAT's refusal of a file shorter than the profiles that a read needs.
+    fn shorter(&self, program: &str) -> RpsOpenError {
+        RpsOpenError::Refused(format!(
+            "a profile database whose {} is shorter than its profiles (NCBI BLAST+ reads past it) is not supported by LOSAT's {program}",
+            self.shown
+        ))
     }
 }
 
@@ -152,7 +160,41 @@ impl CdProfileFiles {
         })
     }
 
-    /// The columns `from..to` of the profile `oid`.
+    /// The reads of one hit of the profile `oid` whose segments end at column `end` at most
+    /// (`CdHitData`).
+    pub(crate) fn hit(&self, oid: usize, end: usize) -> CdHitData<'_> {
+        CdHitData {
+            files: self,
+            oid,
+            end,
+            offsets: None,
+            counts: Vec::new(),
+            counts_from: 0,
+            observations: None,
+        }
+    }
+}
+
+/// The data of one hit's profile as its segments read it (`CdHitData::columns`, segment after
+/// segment): the profile's offsets in both files and its observations read once, and its counts
+/// from the first segment's column to the hit's end (`end`) in one read, so that a hit costs a
+/// few positioned reads, not four per segment. Each segment's checks and refusals come as they
+/// would from reads of its own columns alone, in the same order.
+pub(crate) struct CdHitData<'a> {
+    files: &'a CdProfileFiles,
+    oid: usize,
+    end: usize,
+    /// The profile's first and next row in `.wcounts`.
+    offsets: Option<(u64, u64)>,
+    /// The counts of the columns `counts_from..` (`CD_ALPHABET` per column).
+    counts: Vec<u32>,
+    counts_from: usize,
+    /// The profile's run-length pairs of `.obsr`.
+    observations: Option<Vec<u32>>,
+}
+
+impl CdHitData<'_> {
+    /// The columns `from..to` of the hit's profile.
     ///
     /// The counts of a column sum in `Uint4` (wrapping, as C's does) and each count divides by the
     /// sum; the observations come from the run-length pairs (a value and a number of columns)
@@ -161,29 +203,47 @@ impl CdProfileFiles {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/cdd_pssm_input.cpp:804-846
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/cdd_pssm_input.cpp:852-889
-    pub(crate) fn columns(
-        &self,
-        oid: usize,
-        from: usize,
-        to: usize,
-    ) -> Result<CdColumns, RpsOpenError> {
-        let program = self.program.as_str();
+    pub(crate) fn columns(&mut self, from: usize, to: usize) -> Result<CdColumns, RpsOpenError> {
+        let files = self.files;
+        let program = files.program.as_str();
         let beyond = |file: &str| {
             RpsOpenError::Refused(format!(
                 "a profile database whose {file} file holds fewer columns than a domain hit covers (NCBI BLAST+ reads past them) is not supported by LOSAT's {program}"
             ))
         };
-        let (first, next) = self.wcounts.profile_offsets(oid, program)?;
+        let (first, next) = match self.offsets {
+            Some(offsets) => offsets,
+            None => {
+                let offsets = files.wcounts.profile_offsets(self.oid, program)?;
+                self.offsets = Some(offsets);
+                offsets
+            }
+        };
         // The last row of a profile is a column of zero counts that the sequence does not have.
         let rows = next - first;
         if rows == 0 || to as u64 > rows - 1 {
             return Err(beyond(".wcounts"));
         }
-        let counts = self.wcounts.read_u32s(
-            (first + from as u64) * CD_ALPHABET as u64,
-            (to - from) * CD_ALPHABET,
-            program,
-        )?;
+        let held = self.counts.len() / CD_ALPHABET;
+        if from < self.counts_from || to > self.counts_from + held {
+            // The columns `from..to` as one read of them reads them: refused where the file ends
+            // before `to`; with them, the hit's later columns up to its end that the profile and
+            // the file hold.
+            let in_file = files.wcounts.values_from((first + from as u64) * CD_ALPHABET as u64)
+                / CD_ALPHABET as u64;
+            if (to - from) as u64 > in_file {
+                return Err(files.wcounts.shorter(program));
+            }
+            let last = (self.end.min((rows - 1) as usize).max(to) - from).min(in_file as usize);
+            self.counts = files.wcounts.read_u32s(
+                (first + from as u64) * CD_ALPHABET as u64,
+                last * CD_ALPHABET,
+                program,
+            )?;
+            self.counts_from = from;
+        }
+        let start = (from - self.counts_from) * CD_ALPHABET;
+        let counts = &self.counts[start..start + (to - from) * CD_ALPHABET];
         let mut wfreqs = Vec::with_capacity(to - from);
         for row in counts.chunks_exact(CD_ALPHABET) {
             let sum = row.iter().fold(0u32, |sum, &count| sum.wrapping_add(count));
@@ -199,12 +259,15 @@ impl CdProfileFiles {
             }
             wfreqs.push(freqs);
         }
-        let (first, next) = self.obsr.profile_offsets(oid, program)?;
-        let pairs = self.obsr.read_u32s(
-            first,
-            usize::try_from(next - first).unwrap_or(usize::MAX),
-            program,
-        )?;
+        if self.observations.is_none() {
+            let (first, next) = files.obsr.profile_offsets(self.oid, program)?;
+            self.observations = Some(files.obsr.read_u32s(
+                first,
+                usize::try_from(next - first).unwrap_or(usize::MAX),
+                program,
+            )?);
+        }
+        let pairs = self.observations.as_deref().unwrap_or_default();
         let mut iobsr = Vec::with_capacity(to - from);
         let mut start = 0usize;
         for pair in pairs.chunks_exact(2) {

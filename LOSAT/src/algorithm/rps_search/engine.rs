@@ -901,6 +901,20 @@ impl RpsWorkers {
         }
     }
 
+    /// The workers kept in `kept` where they are as many as `threads` (at least one), else new
+    /// ones put there: the scratch of a database's searches kept from search to search
+    /// (`RpsRunState`).
+    pub(crate) fn kept(kept: &mut Option<RpsWorkers>, threads: usize) -> &RpsWorkers {
+        let threads = threads.max(1);
+        if kept
+            .as_ref()
+            .is_none_or(|workers| workers.slots.len() != threads)
+        {
+            *kept = Some(Self::new(threads));
+        }
+        kept.as_ref().expect("set above")
+    }
+
     /// `work` on the scratch of the worker `slot` (its index in the run's pool; 0 without a
     /// pool), or on a scratch of its own where that one is not free (no task of a search waits
     /// for the pool, so a worker never holds its scratch twice) or the slot is not one of the
@@ -911,6 +925,22 @@ impl RpsWorkers {
             None => work(&mut RpsScratch::new(&self.pool)),
         }
     }
+}
+
+/// What the RPS searches of one database keep from search to search (series PR, item PS13a:
+/// deltablast's domain search searches each query batch of its run, `blast_engine::delta_hooks`):
+/// the set-up of the volumes, which checks each volume's files at its first search only
+/// (`RpsVolumeSetup::open`), and the workers' scratch (`RpsWorkers`, whose diagonal tables and
+/// buckets' blocks would otherwise be allocated and faulted in again for each search). A search's
+/// values depend on neither. The volumes' mappings are each search's own, as NCBI maps the files
+/// for each search (`CSetupFactory::CreateRpsStructures`): their pages leave the resident set when
+/// the search ends.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/setup_factory.cpp:72-83
+#[derive(Default)]
+pub(crate) struct RpsRunState {
+    pub(crate) setup: Option<super::volumes::RpsVolumeSetup>,
+    pub(crate) workers: Option<RpsWorkers>,
 }
 
 /// The gapped K that the outfmt 0 footer of each query prints: for the first query of a batch,

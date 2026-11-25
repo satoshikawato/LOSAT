@@ -105,6 +105,9 @@ pub(super) struct BlastpDatabase {
     /// rpsblast: the search units of the database and their statistics, built once per run where
     /// the database opens (`rps_hooks::with_units`); `None` for every other search.
     rps_units: Option<crate::algorithm::rps_search::volumes::RpsUnits>,
+    /// rpsblast: what the RPS searches of this database keep from search to search (its
+    /// volumes' set-up and the workers' scratch; `rps_hooks::rps_search`).
+    rps_state: std::sync::Mutex<crate::algorithm::rps_search::engine::RpsRunState>,
 }
 
 impl BlastpDatabase {
@@ -120,6 +123,16 @@ impl BlastpDatabase {
     /// rpsblast's search units (`with_rps_units`), `None` for every other search.
     pub(super) fn rps_units(&self) -> Option<&crate::algorithm::rps_search::volumes::RpsUnits> {
         self.rps_units.as_ref()
+    }
+
+    /// What the RPS searches of this database keep from search to search (`RpsRunState`), held
+    /// by one search at a time.
+    pub(super) fn rps_state(
+        &self,
+    ) -> std::sync::MutexGuard<'_, crate::algorithm::rps_search::engine::RpsRunState> {
+        self.rps_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// The taxonomy database's lookups back to a run's start (`shared::TaxdbRun::restart`), and the
@@ -174,6 +187,7 @@ impl BlastpDatabase {
             taxdb: shared::TaxdbRun::default(),
             program,
             rps_units: None,
+            rps_state: Default::default(),
         })
     }
 

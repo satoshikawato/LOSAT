@@ -10,6 +10,16 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
+/// The columns `from..to` of the profile `oid`, as a hit of one segment reads them.
+fn columns(
+    files: &CdProfileFiles,
+    oid: usize,
+    from: usize,
+    to: usize,
+) -> Result<CdColumns, RpsOpenError> {
+    files.hit(oid, to).columns(from, to)
+}
+
 fn words(values: &[u32]) -> Vec<u8> {
     values.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
@@ -68,20 +78,20 @@ fn the_columns_of_a_profile_are_its_counts_over_their_sums() {
     let dir = scratch("columns");
     let base = write_files(&dir);
     let files = CdProfileFiles::open(&base, "DELTABLAST").unwrap();
-    let columns = files.columns(0, 1, 3).unwrap();
-    assert_eq!(columns.wfreqs.len(), 2);
+    let got = columns(&files, 0, 1, 3).unwrap();
+    assert_eq!(got.wfreqs.len(), 2);
     // Row 1 of profile 0: one count of letter 1, one of letter 27: each 1/2.
-    assert_eq!(columns.wfreqs[0][1], 0.5);
-    assert_eq!(columns.wfreqs[0][27], 0.5);
-    assert_eq!(columns.wfreqs[1][2], 0.5);
+    assert_eq!(got.wfreqs[0][1], 0.5);
+    assert_eq!(got.wfreqs[0][27], 0.5);
+    assert_eq!(got.wfreqs[1][2], 0.5);
     // The runs: one column of 2.5, then columns of 4.
-    assert_eq!(columns.iobsr, vec![4.0, 4.0]);
-    let columns = files.columns(0, 0, 2).unwrap();
-    assert_eq!(columns.iobsr, vec![2.5, 4.0]);
-    let columns = files.columns(1, 0, 2).unwrap();
-    assert_eq!(columns.wfreqs[1][1], 1.0 / 3.0);
-    assert_eq!(columns.wfreqs[1][27], 2.0 / 3.0);
-    assert_eq!(columns.iobsr, vec![7.0, 7.0]);
+    assert_eq!(got.iobsr, vec![4.0, 4.0]);
+    let got = columns(&files, 0, 0, 2).unwrap();
+    assert_eq!(got.iobsr, vec![2.5, 4.0]);
+    let got = columns(&files, 1, 0, 2).unwrap();
+    assert_eq!(got.wfreqs[1][1], 1.0 / 3.0);
+    assert_eq!(got.wfreqs[1][27], 2.0 / 3.0);
+    assert_eq!(got.iobsr, vec![7.0, 7.0]);
 }
 
 #[test]
@@ -90,15 +100,50 @@ fn a_range_past_the_profile_is_refused() {
     let base = write_files(&dir);
     let files = CdProfileFiles::open(&base, "DELTABLAST").unwrap();
     // The profile has three columns (the fourth row is the column of zero counts).
-    assert!(files.columns(0, 0, 3).is_ok());
+    assert!(columns(&files, 0, 0, 3).is_ok());
     assert!(matches!(
-        files.columns(0, 0, 4),
+        columns(&files, 0, 0, 4),
         Err(RpsOpenError::Refused(_))
     ));
     assert!(matches!(
-        files.columns(2, 0, 1),
+        columns(&files, 2, 0, 1),
         Err(RpsOpenError::Refused(_))
     ));
+}
+
+#[test]
+fn the_segments_of_a_hit_read_the_columns_of_their_own_reads() {
+    let dir = scratch("hit");
+    let base = write_files(&dir);
+    let files = CdProfileFiles::open(&base, "DELTABLAST").unwrap();
+    let mut data = files.hit(0, 3);
+    for (from, to) in [(1, 3), (0, 1), (2, 3), (0, 3)] {
+        let hit = data.columns(from, to).unwrap();
+        let own = columns(&files, 0, from, to).unwrap();
+        assert_eq!(hit.wfreqs, own.wfreqs, "{from}..{to}");
+        assert_eq!(hit.iobsr, own.iobsr, "{from}..{to}");
+    }
+    // A segment past the profile is refused as its own read is, after the others.
+    assert!(matches!(data.columns(1, 4), Err(RpsOpenError::Refused(_))));
+}
+
+#[test]
+fn a_hit_in_a_file_cut_short_is_refused_where_its_segment_is() {
+    let dir = scratch("cut");
+    let base = write_files(&dir);
+    // `.wcounts` without its last two columns: profile 1 keeps its first column only.
+    let path = dir.join("cd.wcounts");
+    let bytes = std::fs::read(&path).unwrap();
+    std::fs::write(&path, &bytes[..bytes.len() - 2 * CD_ALPHABET * 4]).unwrap();
+    let files = CdProfileFiles::open(&base, "DELTABLAST").unwrap();
+    let mut data = files.hit(1, 2);
+    let first = data.columns(0, 1).unwrap();
+    assert_eq!(first.wfreqs, columns(&files, 1, 0, 1).unwrap().wfreqs);
+    let Err(RpsOpenError::Refused(text)) = data.columns(1, 2) else {
+        panic!("expected LOSAT's refusal");
+    };
+    assert!(text.contains("is shorter than its profiles"), "{text}");
+    assert!(matches!(columns(&files, 1, 1, 2), Err(RpsOpenError::Refused(_))));
 }
 
 #[test]

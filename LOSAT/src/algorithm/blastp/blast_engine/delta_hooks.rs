@@ -74,12 +74,13 @@ pub(super) struct CddQuery<'a> {
 
 /// The domain search's results of a query (`DeltaRun::cdd_domains`), which its PSSM is made of
 /// (`DeltaRun::cdd_pssm`): the query's letters as the domain search's set-up leaves them in the
-/// query block that the PSSM engine reads, and the domain hits, `None` for a query whose letters
-/// give no Karlin-Altschul parameters (the search has no Seq-align set for it).
+/// query block that the PSSM engine reads, whether they give Karlin-Altschul parameters, and the
+/// final hit list of the domain search (`None` for an invalid query or one without hits).
 pub(super) struct CddDomains {
     side: Arc<DomainSide>,
     letters: Vec<u8>,
-    hits: Option<Vec<Hit>>,
+    valid: bool,
+    list: Option<BlastpHitList>,
 }
 
 /// The PSSM of a query's conserved domains and the query of the PSSM's Bioseq, which every later
@@ -194,20 +195,54 @@ impl DeltaRun {
         })
     }
 
-    /// The domain search of the query (`CDeltaBlast::x_FindDomainHits`, which searches every
-    /// query of the batch before the first query's PSSM): its hits, which its PSSM is made of
-    /// (`cdd_pssm`).
+    /// The domain search of a query batch's queries (`CDeltaBlast::x_FindDomainHits`: one
+    /// `CLocalBlast` of the batch's query factory), before the first query's PSSM: each query's
+    /// letters and final hit list, which its PSSM is made of (`cdd_pssm`). A query whose letters
+    /// give no Karlin-Altschul parameters is not searched (the RPS engine searches no invalid
+    /// query, and the redo reads the batch's first valid query: the others' hits do not depend on
+    /// it) and fails at its own place (`cdd_pssm`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:89-90
     pub(super) fn cdd_domains(
         &self,
-        query: &CddQuery<'_>,
+        queries: &[CddQuery<'_>],
         pool: &crate::utils::threading::SearchPool<'_>,
         diagnostics: &mut (dyn std::io::Write + Send),
-    ) -> Result<CddDomains> {
+    ) -> Result<Vec<CddDomains>> {
         let side = self.side(&mut *diagnostics)?;
-        // The query's letters as the domain search's set-up leaves them in the query block that
-        // the PSSM engine reads: with `-lcase_masking` its lower case is hard-masked.
-        let letters = if self.lcase_masking {
+        let letters: Vec<Vec<u8>> = queries.iter().map(|query| self.letters(query)).collect();
+        let valid: Vec<bool> = letters
+            .iter()
+            .map(|letters| query_ungapped_block(side.args.scoring.matrix, letters).is_some())
+            .collect();
+        let searched: Vec<FastaRecord> = queries
+            .iter()
+            .zip(&valid)
+            .filter(|(_, valid)| **valid)
+            .map(|(query, _)| query.record.clone())
+            .collect();
+        let mut lists = if searched.is_empty() {
+            Vec::new()
+        } else {
+            side.search(&searched, pool, diagnostics)?
+        }
+        .into_iter();
+        let mut domains = Vec::with_capacity(queries.len());
+        for (letters, valid) in letters.into_iter().zip(valid) {
+            let list = if valid { lists.next().flatten() } else { None };
+            domains.push(CddDomains {
+                side: Arc::clone(&side),
+                letters,
+                valid,
+                list,
+            });
+        }
+        Ok(domains)
+    }
+
+    /// The query's letters as the domain search's set-up leaves them in the query block that the
+    /// PSSM engine reads: with `-lcase_masking` its lower case is hard-masked.
+    fn letters(&self, query: &CddQuery<'_>) -> Vec<u8> {
+        if self.lcase_masking {
             let frame = crate::algorithm::blastp::encoding::encode_protein_query_frame_lcase(
                 query.record.seq(),
                 None,
@@ -219,20 +254,7 @@ impl DeltaRun {
             let encoded =
                 crate::algorithm::blastp::encoding::encode_protein_sequence(query.record.seq());
             encoded.aa_seq[1..=encoded.aa_len].to_vec()
-        };
-        // A query whose letters give no Karlin-Altschul parameters has no Seq-align set in the
-        // domain search's results (its PSSM's error, `cdd_pssm`).
-        let hits = if query_ungapped_block(side.args.scoring.matrix, &letters).is_none() {
-            None
-        } else {
-            let lists = side.search(query.record, pool, diagnostics)?;
-            Some(side.hits(&lists)?)
-        };
-        Ok(CddDomains {
-            side,
-            letters,
-            hits,
-        })
+        }
     }
 
     /// The PSSM of the query's conserved domains, from its domain search's results (`domains`,
@@ -250,7 +272,8 @@ impl DeltaRun {
         let CddDomains {
             side,
             letters,
-            hits,
+            valid,
+            list,
         } = domains;
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/cdd_pssm_input.cpp:95-97
         // A query whose letters give no Karlin-Altschul parameters has no Seq-align set in the
@@ -258,14 +281,15 @@ impl DeltaRun {
         // 2.17.0 probes `x1`, `x1_it2`, `x2_it2`, `xs_it2` of PS13a's fix round 1) where the query is
         // alone in its batch. In a batch of several queries NCBI's deltablast crashes there
         // (exit 139, probes `x2`, `xs`, `sxs`).
-        let Some(hits) = hits else {
+        if !valid {
             if query.alone {
                 return Err(engine_error("NULL alignments"));
             }
             bail!(
                 "a query whose letters give no Karlin-Altschul parameters read together with other queries (with one round or -num_iterations 0 queries are read together up to 10000 letters; NCBI BLAST+'s deltablast crashes there) is not supported by LOSAT's DELTABLAST"
             );
-        };
+        }
+        let hits = side.hits(list.as_ref())?;
         let hits = cdd_input::included_hits(hits, self.options.domain_inclusion_ethresh);
         let hits = cdd_input::remove_multiple_cd_hits(hits)
             .map_err(|refusal| anyhow!(refusal.message()))?;
@@ -329,14 +353,14 @@ impl DeltaRun {
 
 impl DomainSide {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:195-215
-    /// The domain search of one query: the hit lists of the RPS engine, final.
+    /// The domain search of the queries `records`, one batch (`PrelimOnly::Domain`): the final
+    /// hit list of each query of the RPS engine.
     fn search(
         &self,
-        record: &FastaRecord,
+        records: &[FastaRecord],
         pool: &crate::utils::threading::SearchPool<'_>,
         diagnostics: &mut (dyn std::io::Write + Send),
     ) -> Result<Vec<Option<BlastpHitList>>> {
-        let records = std::slice::from_ref(record);
         let query_input = seq_range::QueryInput::whole(records);
         let mut outputs = ReportOutputs {
             formats: Vec::new(),
@@ -376,8 +400,8 @@ impl DomainSide {
     /// The Seq-aligns of the domain search (one for each HSP, in the lists' order) as `CHit`s: the
     /// domain's Seq-align id, the HSP's E-value as the Seq-align stores it, and its aligned runs
     /// (the gaps of either sequence are dropped).
-    fn hits(&self, lists: &[Option<BlastpHitList>]) -> Result<Vec<Hit>> {
-        let Some(list) = lists.first().and_then(Option::as_ref) else {
+    fn hits(&self, list: Option<&BlastpHitList>) -> Result<Vec<Hit>> {
+        let Some(list) = list else {
             return Ok(Vec::new());
         };
         let count = list.hsplist_count.min(list.hsplist_array.len());

@@ -48,15 +48,11 @@ enum Post {
 struct RequestMark {
     export: crate::report::archive::strategy::StrategyExport,
     first: usize,
-    /// Whether the request carries `803.7` replaced-byte posts emitted while writing it.
-    has_posts: bool,
 }
 
 impl PartialEq for RequestMark {
     fn eq(&self, other: &Self) -> bool {
-        self.first == other.first
-            && self.has_posts == other.has_posts
-            && self.export.same(&other.export)
+        self.first == other.first && self.export.same(&other.export)
     }
 }
 
@@ -72,18 +68,9 @@ impl Posts {
     /// The place where NCBI writes the search strategy request of `export`'s batch whose first
     /// query (the run's) is `first`: writing these posts there (`write`) releases the requests
     /// through that batch to the strategy stream (`StrategyExport::release_through`), interleaving
-    /// any `803.7` posts with the stream's writes. `has_posts` records whether the request has
-    /// `803.7` posts (`has_text`).
-    pub fn request(
-        export: crate::report::archive::strategy::StrategyExport,
-        first: usize,
-        has_posts: bool,
-    ) -> Self {
-        Self(vec![Post::Request(RequestMark {
-            export,
-            first,
-            has_posts,
-        })])
+    /// any `803.7` posts and write-failure diagnostics with the stream's writes.
+    pub fn request(export: crate::report::archive::strategy::StrategyExport, first: usize) -> Self {
+        Self(vec![Post::Request(RequestMark { export, first })])
     }
 
     /// The posts of `lines`, each line a warning.
@@ -220,14 +207,13 @@ impl Posts {
         self.0.is_empty()
     }
 
-    /// Whether a post shows text on the diagnostics (a request mark without replaced-byte posts
-    /// shows none, nor do a later format's lines, `later`; loads, whose texts are made where they
-    /// are written, count as text unless none of them can make one: `placed` first where it
-    /// decides).
+    /// Whether a post holds text on the diagnostics directly (a request mark's diagnostics are
+    /// emitted on release by its strategy sink, not held here; a later format's lines, `later`,
+    /// show none; loads, whose texts are made where they are written, count as text unless none of
+    /// them can make one: `placed` first where it decides).
     pub fn has_text(&self) -> bool {
         self.0.iter().any(|post| match post {
-            Post::Request(mark) => mark.has_posts,
-            Post::Later(_) => false,
+            Post::Request(_) | Post::Later(_) => false,
             Post::Loads(reads) => reads
                 .iter()
                 .any(|read| !read.text.is_empty() || read.load.is_some()),

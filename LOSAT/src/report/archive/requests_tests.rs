@@ -23,15 +23,7 @@ impl crate::report::archive::strategy::StrategySink for Sink {
         diagnostics: &mut dyn std::io::Write,
         archive: Option<&crate::report::archive::ArchiveHandle>,
     ) -> std::io::Result<()> {
-        for (_, text) in posts {
-            match archive {
-                Some(handle) => {
-                    handle.write_post(diagnostics, crate::report::diag_log::ERROR, text)?
-                }
-                None => diagnostics.write_all(text)?,
-            }
-            diagnostics.flush()?;
-        }
+        let _ = crate::report::ostream::emit_strategy_posts(posts, None, diagnostics, archive)?;
         self.0.lock().unwrap().extend_from_slice(bytes);
         Ok(())
     }
@@ -43,15 +35,7 @@ impl crate::report::archive::strategy::StrategySink for Sink {
         diagnostics: &mut dyn std::io::Write,
         archive: Option<&crate::report::archive::ArchiveHandle>,
     ) -> std::io::Result<()> {
-        for (_, text) in posts {
-            match archive {
-                Some(handle) => {
-                    handle.write_post(diagnostics, crate::report::diag_log::ERROR, text)?
-                }
-                None => diagnostics.write_all(text)?,
-            }
-            diagnostics.flush()?;
-        }
+        let _ = crate::report::ostream::emit_strategy_posts(posts, None, diagnostics, archive)?;
         self.0.lock().unwrap().extend_from_slice(bytes);
         Ok(())
     }

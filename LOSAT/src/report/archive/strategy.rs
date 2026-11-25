@@ -58,24 +58,12 @@ use super::options::OptionInputs;
 use super::writer::{encode_strategy_request, EncodedStrategyRequest, RequestInputs};
 use super::{ArchiveHandle, ArchiveRequest, HandleCarry, OptionsHandle, SearchedContext0};
 use crate::report::diag_log::{Posts, ERROR};
-use crate::report::ostream::StrategyStream;
+use crate::report::ostream::{emit_strategy_posts, StrategyStream};
 use crate::report::run_files::{FileReceiver, RunFileName, RunFiles, StrategyTarget as Target};
 use crate::report::serial::encoder::BufferPiece;
 
-/// Posts `text` as one `ERROR` diagnostic to `diagnostics` and, when `archive` is active
-/// (outfmt 11), saves it as one `code 2` message (`ArchiveHandle::write_post`).
-fn post_error(
-    diagnostics: &mut dyn Write,
-    archive: Option<&ArchiveHandle>,
-    text: &[u8],
-) -> std::io::Result<()> {
-    match archive {
-        Some(handle) => handle.write_post(diagnostics, ERROR, text),
-        None => diagnostics.write_all(text),
-    }?;
-    diagnostics.flush()
-}
-
+// No NCBI counterpart: Rust abstraction over `ostream::StrategyStream` (CLI disk/device sinks),
+// `ReceivedFile` (LOSAT Web in-memory sink), and `NoSink` (refused/null sinks).
 /// The stream of a strategy file: writes each encoded `Blast4-request` (with NCBI's object-stream
 /// `BufferPiece` writes and `803.7` posts) as NCBI's `CNcbiOfstream` writes it
 /// (`ostream::StrategyStream`), or into memory for LOSAT Web (`ReceivedFile`).
@@ -108,6 +96,8 @@ pub trait StrategySink: Send {
     }
 }
 
+// No NCBI counterpart: sink for refused targets (`-`) and LOSAT Web's `/dev/null` that discards
+// request bytes while still emitting any `803.7` diagnostics.
 /// The sink of a strategy target with no output file (`-`, refused before any request; or LOSAT
 /// Web's `/dev/null`, which drops bytes while still posting any `803.7` diagnostics).
 struct NoSink;
@@ -121,9 +111,7 @@ impl StrategySink for NoSink {
         diagnostics: &mut dyn Write,
         archive: Option<&ArchiveHandle>,
     ) -> std::io::Result<()> {
-        for (_, text) in posts {
-            post_error(diagnostics, archive, text)?;
-        }
+        let _ = emit_strategy_posts(posts, None, diagnostics, archive)?;
         Ok(())
     }
 
@@ -134,9 +122,7 @@ impl StrategySink for NoSink {
         diagnostics: &mut dyn Write,
         archive: Option<&ArchiveHandle>,
     ) -> std::io::Result<()> {
-        for (_, text) in posts {
-            post_error(diagnostics, archive, text)?;
-        }
+        let _ = emit_strategy_posts(posts, None, diagnostics, archive)?;
         Ok(())
     }
 }
@@ -200,9 +186,7 @@ impl StrategySink for ReceivedFile {
             !self.handed,
             "a write of the strategy file after its run ended"
         );
-        for (_, text) in posts {
-            post_error(diagnostics, archive, text)?;
-        }
+        let _ = emit_strategy_posts(posts, None, diagnostics, archive)?;
         self.bytes.extend_from_slice(bytes);
         Ok(())
     }
@@ -218,9 +202,7 @@ impl StrategySink for ReceivedFile {
             !self.handed,
             "a write of the strategy file after its run ended"
         );
-        for (_, text) in posts {
-            post_error(diagnostics, archive, text)?;
-        }
+        let _ = emit_strategy_posts(posts, None, diagnostics, archive)?;
         self.bytes.extend_from_slice(bytes);
         Ok(())
     }
@@ -247,6 +229,14 @@ impl Drop for ReceivedFile {
     }
 }
 
+// No NCBI counterpart: tracks a batch's pending `Posts` and whether its request carried `803.7`
+// diagnostics so `end_export` can detect untaken posts without storing a flag on `RequestMark`.
+struct PendingBatch {
+    first: usize,
+    has_posts: bool,
+    posts: Posts,
+}
+
 struct State {
     /// What the searches set in the options handle after the batches noted so far
     /// (`note_searched`).
@@ -260,14 +250,15 @@ struct State {
     stop: usize,
     /// The request mark of each batch encoded (`write_with`), by the run's first query of the
     /// batch, until the run takes it (`take_posts`) to release the request where the batch starts.
-    pending: Vec<(usize, Posts)>,
+    pending: Vec<PendingBatch>,
 }
 
 struct Shared {
     request: ArchiveRequest,
     /// The run's options handle, shared with the run's archive (`OptionsHandle`).
     options: OptionsHandle,
-    /// LOSAT's refusal of the file (`create_strategy_file`, `check_report_stream`).
+    /// LOSAT's refusal of the file (`create_strategy_file`, `create_strategy_file_in`,
+    /// `check_report_stream`).
     refusal: Option<String>,
     /// The run's report stream (`report::ostream::ReportStream::of_cli`), whose writes of NCBI's
     /// before its first request `check_report_stream` makes: only for a file that LOSAT refuses.
@@ -279,6 +270,8 @@ struct Shared {
     held: Mutex<HeldSink>,
 }
 
+// No NCBI counterpart: holds an encoded `Blast4-request` (or partial bytes before a `NullElement`
+// throw) until its batch's start is reached in report order; NCBI writes directly in its batch loop.
 /// One encoded request waiting in `HeldSink`.
 enum HeldRequest {
     Complete(EncodedStrategyRequest),
@@ -298,6 +291,7 @@ struct HeldSink {
 }
 
 impl HeldSink {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-288
     /// Writes the held requests whose batches' first queries pass `through`, in order.
     fn write_through(
         &mut self,
@@ -326,6 +320,7 @@ impl HeldSink {
 }
 
 impl Shared {
+    // No NCBI counterpart: acquires the panic-hook-aware mutex around `HeldSink::write_through`.
     /// `HeldSink::write_through` under the panic-hook-aware lock.
     fn write_held(
         &self,
@@ -371,6 +366,8 @@ enum StrategyTarget {
     Received(ReceivedFile),
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-798
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
 /// Creates (and empties) the strategy file where NCBI's `SetOptions` does: after the argument
 /// parser accepted the command line and before any option handler runs, so before the
 /// `-outfmt` text is read, the database list is resolved, and `-subject`, `-query` and `-out`
@@ -382,7 +379,7 @@ enum StrategyTarget {
 /// output interleaved into NCBI's report stream, reserved for its own follow-up): the refusal is
 /// recorded here and raised where NCBI makes its first request (`check_report_stream`), so every
 /// stop before that point ends as NCBI's.
-pub fn create_strategy_file(path: &Path, _out: Option<&Path>, label: &str) -> Result<StrategyFile> {
+pub fn create_strategy_file(path: &Path, label: &str) -> Result<StrategyFile> {
     if path.as_os_str() == "-" {
         return Ok(standard_output_refusal(label));
     }
@@ -404,7 +401,8 @@ fn standard_output_refusal(label: &str) -> StrategyFile {
     }
 }
 
-/// LOSAT's refusal of a strategy file that is the output's (`create_strategy_file`).
+/// LOSAT Web's refusal of a strategy file that is the output's (`create_strategy_file_in`,
+/// `Target::StandardOutput`).
 fn same_as_output(label: &str) -> String {
     format!(
         "an -export_search_strategy file that is also the output (-out or the standard output) is not supported by LOSAT's {label}: NCBI writes both through separate streams and the file's bytes follow the order of their flushes"
@@ -426,7 +424,7 @@ fn not_in_the_browser(path: &Path, what: &str) -> String {
 /// (`RunFiles::strategy_target`, the model of `-logfile`'s names), in the run's file in memory
 /// (`ReceivedFile`) under the name as typed, with the command line's error and refusals: NCBI's
 /// error at once for a name that the command line cannot open; `-` and the standard output
-/// (`/dev/stdout`) refused as the command line refuses them, at NCBI's first request; no file for
+/// (`/dev/stdout`) refused at NCBI's first request; no file for
 /// the null device (`/dev/null`, `/dev/stdin`). LOSAT Web refuses, at the same point, a name whose
 /// command line run writes where the run has no file: the standard error, a device whose writes
 /// fail or wait for a reader, a file of the system (procfs, a message queue), or the file of
@@ -436,12 +434,11 @@ fn not_in_the_browser(path: &Path, what: &str) -> String {
 pub fn create_strategy_file_in(
     files: &RunFiles,
     path: &Path,
-    out: Option<&Path>,
     label: &str,
     others: &[RunFileName<'_>],
 ) -> Result<StrategyFile> {
     let RunFiles::Receiver(receiver) = files else {
-        return create_strategy_file(path, out, label);
+        return create_strategy_file(path, label);
     };
     if path.as_os_str() == "-" {
         return Ok(standard_output_refusal(label));
@@ -483,9 +480,10 @@ pub fn create_strategy_file_in(
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:250-262 (the same order in
 // blastn_app.cpp:255-282, blastx_app.cpp:251-264, tblastn_app.cpp:267-280, tblastx_app.cpp:170-181,
 // psiblast_app.cpp:503-517 and :340, rpsblast_app.cpp:188-199, rpstblastn_app.cpp:185-196)
-/// LOSAT's refusal of the run's strategy file (`create_strategy_file`: the standard output, or
-/// the file of the output), raised where NCBI writes its first request: after its formatter and
-/// its prolog, once the first batch is read and before it is searched (`SaveSearchStrategy`).
+/// LOSAT's refusal of the run's strategy file (`create_strategy_file`: `-` on the command line;
+/// `create_strategy_file_in`: `-`, standard output, or non-run files in LOSAT Web), raised where
+/// NCBI writes its first request: after its formatter and its prolog, once the first batch is read
+/// and before it is searched (`SaveSearchStrategy`).
 /// Every stop of NCBI's before that point (an empty query, a database or option error, a query
 /// that cannot be read, a bad `BATCH_SIZE`, psiblast's `-in_pssm` with `-subject`, a device
 /// that fails at the prolog's flush) comes first with NCBI's own bytes, because the run's report
@@ -577,8 +575,7 @@ pub(crate) fn hitlist_size(outfmt: i32, counts: HitlistArgs) -> i32 {
 
 /// The strategy file of a run's `-export_search_strategy` argument (`path`), created where NCBI
 /// creates it (`create_strategy_file`), or `None` without the argument. A file name that is not
-/// UTF-8 is refused first (`check_utf8_file_name`). `out` is the `-out` argument; `label` names
-/// the program in a refusal.
+/// UTF-8 is refused first (`check_utf8_file_name`). `label` names the program in a refusal.
 ///
 /// With a strategy file NCBI skips its early reading of `-outfmt` (blast_args.cpp:3624-3627,
 /// cited at `create_strategy_file`'s callers): a value its parser refuses (`99`, `abc`) fails
@@ -586,12 +583,8 @@ pub(crate) fn hitlist_size(outfmt: i32, counts: HitlistArgs) -> i32 {
 /// `-query`, `-out` and `-query_loc` come first, in the order of the other arguments. The
 /// callers read the value with `app::early_format_choice`, which leaves it to their own
 /// formatting handler, and make `-out` where they always do (line RG F/d36 review 2c B1).
-pub fn open_strategy_file(
-    path: Option<&Path>,
-    out: Option<&Path>,
-    label: &str,
-) -> Result<Option<StrategyFile>> {
-    open_strategy_file_in(&RunFiles::Disk, path, out, label, &[])
+pub fn open_strategy_file(path: Option<&Path>, label: &str) -> Result<Option<StrategyFile>> {
+    open_strategy_file_in(&RunFiles::Disk, path, label, &[])
 }
 
 /// `open_strategy_file` of a run whose files go to `files` (`create_strategy_file_in`), whose
@@ -599,7 +592,6 @@ pub fn open_strategy_file(
 pub fn open_strategy_file_in(
     files: &RunFiles,
     path: Option<&Path>,
-    out: Option<&Path>,
     label: &str,
     others: &[RunFileName<'_>],
 ) -> Result<Option<StrategyFile>> {
@@ -607,7 +599,7 @@ pub fn open_strategy_file_in(
         return Ok(None);
     };
     crate::blastinput::input_files::check_utf8_file_name(path, "export_search_strategy", label)?;
-    create_strategy_file_in(files, path, out, label, others).map(Some)
+    create_strategy_file_in(files, path, label, others).map(Some)
 }
 
 /// The options handle of a run with the search strategy `strategy` (its archive's too,
@@ -743,13 +735,10 @@ impl StrategyExport {
     /// before the next batch's request, so a run that its reports end (an exception of the XML
     /// stream, a failed write) has the requests up to that batch; LOSAT may search several batches
     /// before their reports (BLASTP's calls, the XML documents that hold every report until the
-    /// run's end). So the run marks where it reaches each batch's start, with NCBI's posts of the
-    /// bytes that ASN.1 text replaced in the batch's request (`replaced_posts`): the request mark
-    /// that `take_posts` hands out with them (`Posts::write`, `release_through`); `end_run` cuts the
-    /// file back to the requests reached when NCBI's error ends the run. (Holding the requests'
-    /// bytes until then instead would keep every request of a BLASTN XML run in memory: 2.6 MB on a
-    /// run of 82 MB, review 1 of K4h gap 2; so only a sink that cannot be cut holds them,
-    /// `Shared::held`.)
+    /// run's end). Every sink therefore holds encoded requests in `Shared::held` and releases each
+    /// batch at its start mark (`take_posts` / `Posts::write` -> `release_through`), interleaving
+    /// `803.7` posts and write-failure diagnostics with NCBI's buffer flushes; `end_run` drops
+    /// unreached requests when NCBI's error ends the run.
     /// Returns false, calling nothing, when the request is not to be written (`takes`). The
     /// requests are made in the run's order, each starting where the one before ended, after
     /// the batch before was noted; anything else is LOSAT's internal error.
@@ -771,6 +760,7 @@ impl StrategyExport {
             );
             let shared = &self.0;
             let mut posts = Posts::new();
+            let mut has_posts = false;
             let mut made_one = false;
             let made = make(&mut |request| {
                 let sets = shared.options.request_sets(&state.carry);
@@ -785,6 +775,7 @@ impl StrategyExport {
                 )?;
                 state.next_query = queries.end;
                 made_one = true;
+                has_posts |= !encoded.posts.is_empty();
                 // NCBI's stream threw while it wrote this request (an element stated as `NULL` in a
                 // PSSM query, `encoder::NullElement`): NCBI's error ends the run there, after the
                 // bytes its stream flushed, so those partial bytes go to the sink now.
@@ -798,21 +789,25 @@ impl StrategyExport {
                     shared.write_held(|at| at <= queries.start, &mut std::io::sink(), None)?;
                     return Err(thrown.into());
                 }
-                let has_posts = !encoded.posts.is_empty();
-                posts.append(&Posts::request(self.clone(), queries.start, has_posts));
+                posts.append(&Posts::request(self.clone(), queries.start));
                 hook_lock(&shared.held)
                     .requests
                     .push_back((queries.start, HeldRequest::Complete(encoded)));
                 Ok(())
             });
             if made_one {
-                state.pending.push((queries.start, posts));
+                state.pending.push(PendingBatch {
+                    first: queries.start,
+                    has_posts: has_posts || posts.has_text(),
+                    posts,
+                });
             }
             made?;
             Ok(true)
         })
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:259-288
     /// The run reaches the start of the batch whose first query (the run's) is `first`
     /// (`Posts::write` of its request mark), after the reports of the batches before it: releases
     /// the encoded requests through `first` to the strategy stream, interleaving any `803.7`
@@ -853,8 +848,12 @@ impl StrategyExport {
     /// or before the error that stops the batch.
     pub fn take_posts(&self, before: usize) -> Vec<(usize, Posts)> {
         self.with_state(|state| {
-            let taken = state.pending.partition_point(|&(first, _)| first < before);
-            state.pending.drain(..taken).collect()
+            let taken = state.pending.partition_point(|batch| batch.first < before);
+            state
+                .pending
+                .drain(..taken)
+                .map(|batch| (batch.first, batch.posts))
+                .collect()
         })
     }
 
@@ -1077,8 +1076,8 @@ fn end_export(strategy: &StrategyExport, result: Result<()>) -> Result<()> {
         state
             .pending
             .iter()
-            .find(|(_, posts)| posts.has_text())
-            .map(|&(first, _)| first)
+            .find(|batch| batch.has_posts)
+            .map(|batch| batch.first)
     });
     match waiting {
         Some(first) => Err(anyhow::anyhow!(

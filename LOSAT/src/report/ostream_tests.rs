@@ -950,13 +950,7 @@ fn strategy_stream_models_close_failure_and_subsequent_write_fault() {
         OptionsHandle::default(),
     );
     let doc1 = vec![b'a'; 906];
-    let pieces1 = [
-        BufferPiece {
-            size: 905,
-            leave: 0,
-        },
-        BufferPiece { size: 1, leave: 0 },
-    ];
+    let pieces1 = [BufferPiece::new(905, 0), BufferPiece::new(1, 0)];
     let mut diag = Vec::new();
     stream
         .write_object(&doc1, &pieces1, &[], &mut diag, Some(&handle))
@@ -975,13 +969,7 @@ fn strategy_stream_models_close_failure_and_subsequent_write_fault() {
     // Batch 2 on the already-bad stream: fails immediately on piece 0 with a single 802.5
     // `write fault` at `size + leave = 975` (before the 1-byte separator) and `StrategyWriteFault`.
     let doc2 = vec![b'b'; 976];
-    let pieces2 = [
-        BufferPiece {
-            size: 975,
-            leave: 0,
-        },
-        BufferPiece { size: 1, leave: 0 },
-    ];
+    let pieces2 = [BufferPiece::new(975, 0), BufferPiece::new(1, 0)];
     diag.clear();
     let err = stream
         .write_object(&doc2, &pieces2, &[], &mut diag, Some(&handle))
@@ -1011,24 +999,13 @@ fn strategy_stream_large_request_faults_at_piece_plus_back_limit() {
         "tblastn",
     );
     let doc = vec![b'x'; 13_000];
+    let full = || BufferPiece::new(4016, 80);
     let pieces = [
-        BufferPiece {
-            size: 4016,
-            leave: 80,
-        },
-        BufferPiece {
-            size: 4016,
-            leave: 80,
-        },
-        BufferPiece {
-            size: 4016,
-            leave: 80,
-        },
-        BufferPiece {
-            size: 951,
-            leave: 0,
-        },
-        BufferPiece { size: 1, leave: 0 },
+        full(),
+        full(),
+        full(),
+        BufferPiece::new(951, 0),
+        BufferPiece::new(1, 0),
     ];
     let mut diag = Vec::new();
     let err = stream
@@ -1039,6 +1016,42 @@ fn strategy_stream_large_request_faults_at_piece_plus_back_limit() {
     assert_eq!(
         String::from_utf8(diag).unwrap(),
         "Error: (802.5) [tblastn] CObjectOStream: error at byte 12128: stack is empty: write fault\n"
+    );
+}
+
+#[test]
+fn strategy_stream_byte_block_fault_posts_line_and_live_stack_trace() {
+    // When `FlushBuffer` with `false` fails inside a constructed `CObjectOStream::ByteBlock`
+    // (`ncbi2na`), `~ByteBlock()` unwinds into `Unended` while `CObjectOStreamAsn` is still alive,
+    // posting `line N: <stack>: write fault` instead of `byte P: stack is empty: write fault`.
+    let mut stream = StrategyStream::new(Box::new(FailAt(0)), "blastn");
+    let mut doc = b"line1\nline2\n".repeat(350);
+    doc.resize(13_000, b'A');
+    let trace =
+        "Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.inst.seq-data.ncbi2na";
+    let expected_line = 1 + doc[..12128].iter().filter(|&&b| b == b'\n').count();
+    let full = || BufferPiece::new(4016, 80);
+    let pieces = [
+        full(),
+        full(),
+        BufferPiece {
+            size: 4016,
+            leave: 80,
+            byte_block_trace: Some(trace.to_string()),
+        },
+        BufferPiece::new(951, 0),
+        BufferPiece::new(1, 0),
+    ];
+    let mut diag = Vec::new();
+    let err = stream
+        .write_object(&doc, &pieces, &[], &mut diag, None)
+        .unwrap_err();
+    assert!(is_strategy_write_fault(&err));
+    assert_eq!(
+        String::from_utf8(diag).unwrap(),
+        format!(
+            "Error: (802.5) [blastn] CObjectOStream: error at line {expected_line}: {trace}: write fault\n"
+        )
     );
 }
 
@@ -1064,21 +1077,13 @@ fn strategy_stream_interleaves_803_7_posts_around_8191_byte_flush() {
     doc.extend(std::iter::repeat_n(b'B', 4016));
     doc.extend(std::iter::repeat_n(b'C', 4016));
     doc.extend(b"TAIL\n");
+    let full = || BufferPiece::new(4016, 80);
     let pieces = [
-        BufferPiece {
-            size: 4016,
-            leave: 80,
-        },
-        BufferPiece {
-            size: 4016,
-            leave: 80,
-        },
-        BufferPiece {
-            size: 4016,
-            leave: 80,
-        },
-        BufferPiece { size: 4, leave: 0 },
-        BufferPiece { size: 1, leave: 0 },
+        full(),
+        full(),
+        full(),
+        BufferPiece::new(4, 0),
+        BufferPiece::new(1, 0),
     ];
     let posts = vec![
         (4016u64, b"[POST1]\n".to_vec()),

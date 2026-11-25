@@ -323,7 +323,6 @@ impl TblastnArgs {
         // (`app::early_format_choice`).
         let strategy_file = crate::report::archive::strategy::open_strategy_file(
             args.export_search_strategy.as_deref(),
-            args.out.as_deref(),
             "TBLASTN",
         )?;
         let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;

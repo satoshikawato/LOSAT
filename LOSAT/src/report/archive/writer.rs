@@ -652,6 +652,8 @@ fn request_written_as_is(
         && encoding.writes_params(database_params)
 }
 
+// No NCBI counterpart: carries an encoded `Blast4-request` together with its `COStreamBuffer`
+// `BufferPiece` writes and `803.7` posts from batch encoding to `ostream::StrategyStream`.
 /// One encoded `Blast4-request` of `-export_search_strategy` (`encode_strategy_request`):
 /// the ASN.1 text bytes, NCBI's `COStreamBuffer` pieces (`BufferPiece`), NCBI's `803.7` posts
 /// paired with the bytes `COStreamBuffer` had written before each post, and any `NullElement`
@@ -707,7 +709,7 @@ pub(super) fn encode_strategy_request(
                 )),
             )
         } else {
-            let pieces = out.enc.buffer_pieces().to_vec();
+            let pieces = out.enc.pieces().to_vec();
             out.finish()?;
             (pieces, posts, None)
         }
@@ -831,8 +833,7 @@ fn archive_pieces<A: AlignSource>(
                 aligns,
             )?
             .enc
-            .pieces()
-            .to_vec(),
+            .piece_sizes(),
         ArchiveEncoding::Text => write
             .to(
                 Traced::new(AsnTextEncoder::new(&mut buf), 0),
@@ -840,8 +841,7 @@ fn archive_pieces<A: AlignSource>(
                 aligns,
             )?
             .enc
-            .pieces()
-            .to_vec(),
+            .piece_sizes(),
         ArchiveEncoding::Binary => write
             .to(
                 Traced::new(AsnBinaryEncoder::new(&mut buf), 0),
@@ -849,8 +849,7 @@ fn archive_pieces<A: AlignSource>(
                 aligns,
             )?
             .enc
-            .pieces()
-            .to_vec(),
+            .piece_sizes(),
     })
 }
 

@@ -1838,6 +1838,8 @@ impl<'a> BatchTake<'a> {
         }
     }
 
+    // No NCBI counterpart: attaches LOSAT's `HeldOutput` so strategy request releases interleave
+    // with held BLASTX/RPSTBLASTN XML/XML2/JSON reports (`HeldOutput::push_posts`).
     /// Attaches the run's `HeldOutput` so strategy request releases are queued with held
     /// single-stream XML/XML2/JSON reports (`HeldOutput::push_posts`).
     pub(super) fn with_held(mut self, held: Option<&'a super::blast_xml::HeldOutput>) -> Self {

@@ -1,24 +1,32 @@
 //! Integration tests for `-export_search_strategy` stream modeling, write-failure handling,
-//! and shared/aliased non-`-` file sinks (`ostream::StrategyStream`).
+//! shared/aliased non-`-` file sinks, and `2>&1` merged diagnostics (`ostream::StrategyStream`).
 //!
-//! Covers:
-//! - Failing strategy sinks (`/dev/full`): single-batch 4-line `Close` failure chain + exit 0,
-//!   multi-batch `802.5 ... write fault` + exit 0 (stopping before later batches), large requests
-//!   exceeding NCBI's 8,191-byte `CNcbiOfstream` buffer failing at `pos + size + 80`, and
-//!   `-outfmt 11` archive message capture (4 `ERROR` messages on `Close`, error archive on
-//!   `write fault`) across `blastn`, `blastp`, `blastx`, `tblastn`, and `tblastx`.
-//! - Shared/aliased non-`-` sinks (`same`, `./F`, symlink, `/dev/stdout` file/pipe, `-out /dev/stdout`,
-//!   `>>` append, `2>&1` merged pipe with `803.7` interleaving, and `/dev/stdout -> /dev/full`).
-//! - `rpstblastn` `HeldOutput` interleaving for `-outfmt 5`, `15`, and `16`.
-//! - Preservation of `-export_search_strategy -` refusal.
+//! - Cross-platform: shared `-out`/strategy files (`same` and `./F` aliases) across 1, 4, and 8
+//!   threads, and preservation of the `-export_search_strategy -` refusal.
+//! - Linux (`tests/fixtures/strategy/f1c1_cases.tsv` and `tests/fixtures/strategy/f1c1/`):
+//!   byte-for-byte comparison against frozen official NCBI BLAST+ 2.17.0 outputs (mapped via
+//!   `losat::wording::losat_output_bytes`) at 1 and 4 threads across all 8 programs, covering:
+//!   - `2>&1` (`merged`) strategy write failures (`/dev/full` and `RLIMIT_FSIZE=3000`) for
+//!     `blastp`, `tblastn`, `psiblast`, `rpsblast` outfmt `0..=4` and all programs across formats;
+//!   - `/dev/full` and `RLIMIT_FSIZE` (`100`, `3000`, `5000`, `10000`) strategy failures, including
+//!     4-line `Close` failure chains, subsequent-batch `write fault`, `-outfmt 11` error archives,
+//!     and large single-batch requests (> 8,191 B) faulting at `byte 12128` (`ncbieaa`) or
+//!     `line N: <stack>: write fault` (`ncbi2na` `~ByteBlock()` unwind);
+//!   - pipe shared sinks (`/dev/stdout`, `-out /dev/stdout -export_search_strategy /dev/stdout`,
+//!     `/dev/stdout -out F`, and `blastx`/`rpstblastn` held `outfmt 5/15/16` interleaving);
+//!   - regular-file, `./F`, symlink (`L -> F`), `/dev/stdout` file, and `>>` append (`dsoapp` /
+//!     `bothapp`, where `/dev/stdout` opens `O_TRUNC` and erases pre-existing `PRE\n`, matching
+//!     NCBI's output starting with `Blast4-request ::= {`);
+//!   - `803.7` replaced-byte title interleaving on `2>&1` (both before and after the 4,096 B
+//!     `COStreamBuffer` piece boundary);
+//!   - stdout redirected to `/dev/full` with `-export_search_strategy /dev/stdout` (`dsofull`:
+//!     exit 6 for outfmt 0, SIGABRT with Close failure chain + `std::__ios_failure` for tabular /
+//!     XML / archive / organism reports).
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Stdio};
 
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
-
-const BP_BATCHES_Q: &str = "tests/fasta/outfmt11/arch_bp_batches.faa";
-const BP_S: &str = "tests/fasta/outfmt11/arch_bp_s.faa";
 
 const BATCHES: [(&str, &str, &str, &str); 5] = [
     (
@@ -27,7 +35,12 @@ const BATCHES: [(&str, &str, &str, &str); 5] = [
         "tests/fasta/outfmt11/arch_s.fna",
         "500",
     ),
-    ("blastp", BP_BATCHES_Q, BP_S, "150"),
+    (
+        "blastp",
+        "tests/fasta/outfmt11/arch_bp_batches.faa",
+        "tests/fasta/outfmt11/arch_bp_s.faa",
+        "150",
+    ),
     (
         "blastx",
         "tests/fasta/outfmt11/arch_bx_batches.fna",
@@ -48,35 +61,30 @@ const BATCHES: [(&str, &str, &str, &str); 5] = [
     ),
 ];
 
-fn stderr_text(out: &Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
-
-fn stderr_lines(stderr: &str) -> Vec<&str> {
-    stderr.lines().collect()
-}
-
 fn engine() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn clean_command(program: &str) -> Command {
-    let mut cmd = Command::new(BIN);
-    cmd.current_dir(engine())
-        .arg(program)
-        .stdin(Stdio::null())
-        .env("BLAST_USAGE_REPORT", "false")
+fn clean_env(cmd: &mut Command) {
+    cmd.env("BLAST_USAGE_REPORT", "false")
         .env("LOSAT_BLASTX_WORKER_LOG", "/dev/null");
     for (name, _) in std::env::vars() {
         if name.starts_with("LOSAT_X_")
+            || name.starts_with("NCBI")
             || matches!(
                 name.as_str(),
-                "ARCHIVE_FORMAT" | "BATCH_SIZE" | "CHUNK_SIZE" | "BLASTDB"
+                "ARCHIVE_FORMAT" | "BATCH_SIZE" | "CHUNK_SIZE" | "BLASTDB" | "PRE_FETCH_SEQS_LIMIT"
             )
         {
             cmd.env_remove(name);
         }
     }
+}
+
+fn clean_command(program: &str) -> Command {
+    let mut cmd = Command::new(BIN);
+    cmd.current_dir(engine()).arg(program).stdin(Stdio::null());
+    clean_env(&mut cmd);
     cmd
 }
 
@@ -92,7 +100,7 @@ fn temp_run_dir(tag: &str) -> PathBuf {
 }
 
 /// Shared file sinks (`-out F -export_search_strategy F` and `./F`) produce identical bytes at
-/// 1, 4, and 8 threads and match the composition of separate strategy + report descriptors.
+/// 1, 4, and 8 threads across platforms.
 #[test]
 fn same_file_and_dot_alias_match_across_threads() {
     let dir = temp_run_dir("same_dot");
@@ -125,7 +133,6 @@ fn same_file_and_dot_alias_match_across_threads() {
                 Some(want) => assert_eq!(&bytes, want, "{prog} t={threads} differed from t=1"),
             }
         }
-        // `./` relative alias to the same `-out` file matches exact bytes.
         let dot_f = dir.join(format!("{prog}_dot.out"));
         let dot_alias = dir.join(".").join(format!("{prog}_dot.out"));
         let out = clean_command(prog)
@@ -176,381 +183,327 @@ fn dash_standard_output_remains_refused() {
         .expect("run losat");
     assert_eq!(out.status.code(), Some(1));
     assert!(out.stdout.is_empty());
-    let stderr = stderr_text(&out);
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("-export_search_strategy - (the search strategy on the standard output"),
         "unexpected stderr: {stderr}"
     );
 }
 
-/// `/dev/full` strategy sink: single-batch `Close` 4-line chain (exit 0), multi-batch `write fault`
-/// stopping after batch 0 (exit 0), and `-outfmt 11` error archive across all five programs.
-#[cfg(unix)]
-#[test]
-fn dev_full_strategy_sink_matches_ncbi_close_chain_and_write_fault() {
-    for (prog, q, s, bsz) in BATCHES {
-        // Multi-batch outfmt 6 on `/dev/full`: 4-line Close failure on batch 0, then 1-line
-        // `write fault` on batch 1, exit 0, and wording hides C++ exception class tags.
-        let mut baseline: Option<(Vec<u8>, Vec<u8>)> = None;
-        for threads in ["1", "4"] {
-            let out = clean_command(prog)
-                .env("BATCH_SIZE", bsz)
-                .args([
-                    "-query",
-                    q,
-                    "-subject",
-                    s,
-                    "-outfmt",
-                    "6",
-                    "-export_search_strategy",
-                    "/dev/full",
-                    "-num_threads",
-                    threads,
-                ])
-                .output()
-                .expect("run losat /dev/full f6");
-            assert_eq!(out.status.code(), Some(0), "{prog} t={threads} rc");
-            let stderr = stderr_text(&out);
-            let lines = stderr_lines(&stderr);
-            assert_eq!(lines.len(), 5, "{prog} t={threads} stderr:\n{stderr}");
-            assert!(lines[0].contains("cannot close output stream"), "{stderr}");
-            assert!(
-                lines[1].contains("COStreamBuffer::Flush: failed"),
-                "{stderr}"
-            );
-            assert!(lines[2].contains("cannot close output stream"), "{stderr}");
-            assert!(
-                lines[3].contains("Cannot close serializing output stream"),
-                "{stderr}"
-            );
-            assert!(lines[4].contains("stack is empty: write fault"), "{stderr}");
-            assert!(!stderr.contains("CIOException"), "{stderr}");
-            assert!(!stderr.contains("CSerialException"), "{stderr}");
-            match &baseline {
-                None => baseline = Some((out.stdout, out.stderr)),
-                Some(want) => assert_eq!(&(out.stdout, out.stderr), want, "{prog} t={threads}"),
-            }
-        }
-        // Multi-batch outfmt 11 on `/dev/full`: batch 0 archive carries 4 `code 2` messages;
-        // batch 1 write fault writes the error archive (`request-id "Error"`) with 1 `code 2`
-        // `write fault` message and exits 0.
-        let out11 = clean_command(prog)
-            .env("BATCH_SIZE", bsz)
-            .args([
-                "-query",
-                q,
-                "-subject",
-                s,
-                "-outfmt",
-                "11",
-                "-export_search_strategy",
-                "/dev/full",
-                "-num_threads",
-                "1",
-            ])
-            .output()
-            .expect("run losat /dev/full f11");
-        assert_eq!(out11.status.code(), Some(0), "{prog} f11 rc");
-        let stdout11 = String::from_utf8_lossy(&out11.stdout);
-        let docs: Vec<&str> = stdout11.split("Blast4-archive ::= ").skip(1).collect();
-        assert_eq!(
-            docs.len(),
-            2,
-            "{prog} f11 expected 1 batch archive + 1 error archive, got {}",
-            docs.len()
-        );
-        assert_eq!(
-            docs[0].matches("code 2,").count(),
-            4,
-            "{prog} f11 batch 0 archive should carry 4 Close messages:\n{}",
-            docs[0]
-        );
-        assert!(
-            docs[1].contains("request-id \"Error\""),
-            "{prog} f11 doc 1 should be error archive:\n{}",
-            docs[1]
-        );
-        assert_eq!(
-            docs[1].matches("code 2,").count(),
-            1,
-            "{prog} f11 error archive should carry 1 write-fault message:\n{}",
-            docs[1]
-        );
-        assert!(
-            docs[1].contains("write fault"),
-            "{prog} f11 error archive missing write fault:\n{}",
-            docs[1]
-        );
-    }
-}
-
-/// A single request larger than NCBI's 8,191-byte `CNcbiOfstream` buffer on `/dev/full` triggers
-/// `write fault` inside piece 2 at `pos + size + 80` (no 4-line `Close` chain, no report, exit 0).
-#[cfg(unix)]
-#[test]
-fn dev_full_large_strategy_request_faults_at_piece_plus_back_limit() {
-    let dir = temp_run_dir("large_full");
-    let big_q = dir.join("big.faa");
-    // 12,000-residue protein guarantees ASN.1 text `Blast4-request` > 12 KiB (> 8,191 B buffer).
-    let mut fasta = b">big_query\n".to_vec();
-    for _ in 0..200 {
-        fasta.extend_from_slice(b"MKVLAIGSTVPFWDEYQRNHCKVLAIGSTVPFWDEYQRNHCKVLAIGSTVPFWDEYQRNH\n");
-    }
-    std::fs::write(&big_q, &fasta).unwrap();
-    let out = clean_command("blastp")
-        .arg("-query")
-        .arg(&big_q)
-        .args([
-            "-subject",
-            "tests/fasta/outfmt11/arch_bp_s.faa",
-            "-outfmt",
-            "6",
-            "-export_search_strategy",
-            "/dev/full",
-            "-num_threads",
-            "1",
-        ])
-        .output()
-        .expect("run losat large /dev/full");
-    assert_eq!(out.status.code(), Some(0));
-    assert!(
-        out.stdout.is_empty(),
-        "report should not run after piece write fault"
-    );
-    let stderr = stderr_text(&out);
-    let lines = stderr_lines(&stderr);
-    assert_eq!(
-        lines.len(),
-        1,
-        "expected single write-fault line:\n{stderr}"
-    );
-    assert!(
-        lines[0].starts_with("Error: (802.5) [blastp] CObjectOStream: error at byte ")
-            && lines[0].ends_with(": stack is empty: write fault"),
-        "unexpected line: {}",
-        lines[0]
-    );
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// Symlink alias (`-out F -export_search_strategy L` with `L -> F`), `/dev/stdout` pipe (`dsp`),
-/// `-out /dev/stdout -export_search_strategy /dev/stdout` (`bothp`), and `>>` append (`dsoapp`).
-#[cfg(unix)]
-#[test]
-fn symlink_dev_stdout_and_append_sinks_compose_in_ncbi_order() {
-    let dir = temp_run_dir("unix_sinks");
-    let target = dir.join("F");
-    let link = dir.join("L");
-    std::fs::write(&target, b"").unwrap();
-    std::os::unix::fs::symlink(&target, &link).unwrap();
-
-    // 1. Symlink matches direct same-file bytes.
-    let same_f = dir.join("same_F");
-    let run_same = |out_p: &Path, ss_p: &Path| -> Output {
-        clean_command("blastp")
-            .env("BATCH_SIZE", "150")
-            .args([
-                "-query",
-                BP_BATCHES_Q,
-                "-subject",
-                BP_S,
-                "-outfmt",
-                "6",
-                "-num_threads",
-                "1",
-            ])
-            .arg("-out")
-            .arg(out_p)
-            .arg("-export_search_strategy")
-            .arg(ss_p)
-            .output()
-            .expect("run losat")
-    };
-    let o1 = run_same(&same_f, &same_f);
-    let o2 = run_same(&target, &link);
-    assert_eq!(o1.status.code(), Some(0));
-    assert_eq!(o2.status.code(), Some(0));
-    assert_eq!(
-        std::fs::read(&target).unwrap(),
-        std::fs::read(&same_f).unwrap()
-    );
-
-    // 2. `/dev/stdout` on pipe (`dsp`) interleaves each batch's request before its tabular rows.
-    let dsp = clean_command("blastp")
-        .env("BATCH_SIZE", "150")
-        .args([
-            "-query",
-            BP_BATCHES_Q,
-            "-subject",
-            BP_S,
-            "-outfmt",
-            "6",
-            "-export_search_strategy",
-            "/dev/stdout",
-            "-num_threads",
-            "1",
-        ])
-        .output()
-        .expect("run losat dsp");
-    assert_eq!(dsp.status.code(), Some(0));
-    assert!(dsp.stderr.is_empty());
-    let dsp_text = String::from_utf8_lossy(&dsp.stdout);
-    assert!(
-        dsp_text.starts_with("Blast4-request ::= {"),
-        "first request should arrive before report rows"
-    );
-    assert!(
-        dsp_text.matches("Blast4-request ::= {").count() >= 2,
-        "expected multi-batch requests in dsp"
-    );
-
-    // 3. `>>` append (`dsoapp`): stdout opened with O_APPEND over "PRE\n" keeps "PRE\n" prefix
-    // for report writes while `/dev/stdout` opens its own descriptor cleanly without error.
-    let app_f = dir.join("app.out");
-    std::fs::write(&app_f, b"PRE\n").unwrap();
-    let app_file = std::fs::OpenOptions::new()
-        .append(true)
-        .open(&app_f)
-        .unwrap();
-    let app_out = clean_command("blastp")
-        .env("BATCH_SIZE", "150")
-        .args([
-            "-query",
-            BP_BATCHES_Q,
-            "-subject",
-            BP_S,
-            "-outfmt",
-            "6",
-            "-export_search_strategy",
-            "/dev/stdout",
-            "-num_threads",
-            "1",
-        ])
-        .stdout(Stdio::from(app_file))
-        .output()
-        .expect("run losat dsoapp");
-    assert_eq!(app_out.status.code(), Some(0));
-    assert!(app_out.stderr.is_empty());
-    assert!(!std::fs::read(&app_f).unwrap().is_empty());
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// `/dev/stdout` with stdout redirected to `/dev/full` (`dsofull`):
-/// - outfmt 0 fails in prolog before batch 0's strategy write (`BLAST failed to write output`, rc 6).
-/// - outfmt 6 posts the 4-line `Close` chain on batch 0, then aborts when the tabular report fails
-///   on `/dev/full` (SIGABRT, `std::__ios_failure`).
-#[cfg(unix)]
-#[test]
-fn dev_stdout_to_dev_full_matches_ncbi_termination() {
+#[cfg(target_os = "linux")]
+mod ncbi_frozen {
+    use super::*;
+    use std::io::Read;
+    use std::os::unix::fs::MetadataExt;
     use std::os::unix::process::ExitStatusExt;
 
-    let run_dsofull = |outfmt: &str| -> Output {
-        let full = std::fs::OpenOptions::new()
-            .write(true)
-            .open("/dev/full")
-            .unwrap();
-        clean_command("blastp")
-            .args([
-                "-query",
-                "tests/fasta/outfmt11/arch_bp_q.faa",
-                "-subject",
-                "tests/fasta/outfmt11/arch_bp_s.faa",
-                "-outfmt",
-                outfmt,
-                "-export_search_strategy",
-                "/dev/stdout",
-                "-num_threads",
-                "1",
-            ])
-            .stdout(Stdio::from(full))
-            .output()
-            .expect("run losat dsofull")
-    };
+    struct Case {
+        name: String,
+        program: String,
+        env: Vec<(String, String)>,
+        stdout: String,
+        fsize: Option<String>,
+        setup: String,
+        args: Vec<String>,
+        rc: String,
+    }
 
-    let f0 = run_dsofull("0");
-    assert_eq!(f0.status.code(), Some(6));
-    assert_eq!(
-        String::from_utf8_lossy(&f0.stderr),
-        "BLAST failed to write output\n"
-    );
+    fn fixtures_dir() -> PathBuf {
+        engine().join("tests/fixtures/strategy")
+    }
 
-    let f6 = run_dsofull("6");
-    assert_eq!(
-        f6.status.signal(),
-        Some(6),
-        "expected SIGABRT on tabular dsofull"
-    );
-    let err6 = String::from_utf8_lossy(&f6.stderr);
-    assert!(err6.contains("cannot close output stream"), "{err6}");
-    assert!(err6.contains("std::__ios_failure"), "{err6}");
-}
+    fn parse_cases() -> Vec<Case> {
+        let text =
+            std::fs::read_to_string(fixtures_dir().join("f1c1_cases.tsv")).expect("f1c1_cases.tsv");
+        let mut out = Vec::new();
+        for line in text.lines() {
+            if line.is_empty() || line.starts_with('#') || line.starts_with("name\t") {
+                continue;
+            }
+            let cells: Vec<&str> = line.split('\t').collect();
+            assert_eq!(cells.len(), 8, "bad f1c1_cases.tsv row: {line}");
+            let env = if cells[2] == "-" {
+                Vec::new()
+            } else {
+                cells[2]
+                    .split(',')
+                    .map(|item| {
+                        let (k, v) = item.split_once('=').expect("KEY=VAL");
+                        (k.to_string(), v.to_string())
+                    })
+                    .collect()
+            };
+            out.push(Case {
+                name: cells[0].to_string(),
+                program: cells[1].to_string(),
+                env,
+                stdout: cells[3].to_string(),
+                fsize: (cells[4] != "-").then(|| cells[4].to_string()),
+                setup: cells[5].to_string(),
+                args: cells[6].split(' ').map(str::to_string).collect(),
+                rc: cells[7].to_string(),
+            });
+        }
+        out
+    }
 
-/// `rpstblastn` with `-outfmt 5`, `15`, and `16` and multi-batch `BATCH_SIZE=1` interleaves
-/// batch 0's strategy request, batch 0's XML/JSON report, and batch 1's strategy request in
-/// NCBI's order when `HeldOutput` is active (regression check for `HeldOutput::push_posts`).
-#[cfg(unix)]
-#[test]
-fn rpstblastn_held_output_interleaves_strategy_and_xml_batches() {
-    use std::io::Read;
+    fn inflate_rps(spec: &str, dir: &Path) -> PathBuf {
+        let target = dir.join("rpsdb");
+        std::fs::create_dir_all(&target).unwrap();
+        let src = engine().join("tests/db_search/rps");
+        for entry in std::fs::read_dir(&src).unwrap() {
+            let file = entry.unwrap().file_name().to_string_lossy().into_owned();
+            let Some(stem) = file.strip_suffix(".gz") else {
+                continue;
+            };
+            if !spec
+                .split('+')
+                .any(|name| stem.starts_with(&format!("{name}.")))
+            {
+                continue;
+            }
+            let mut bytes = Vec::new();
+            flate2::read::GzDecoder::new(std::fs::File::open(src.join(&file)).unwrap())
+                .read_to_end(&mut bytes)
+                .unwrap();
+            std::fs::write(target.join(stem), bytes).unwrap();
+        }
+        target
+    }
 
-    let dir = temp_run_dir("rpstblastn_held");
-    let rps_dir = dir.join("rpsdb");
-    std::fs::create_dir_all(&rps_dir).unwrap();
-    let src = engine().join("tests/db_search/rps");
-    for entry in std::fs::read_dir(&src).unwrap() {
-        let name = entry.unwrap().file_name().to_string_lossy().into_owned();
-        if let Some(stem) = name.strip_suffix(".gz") {
-            if stem.starts_with("rps_mini.") {
-                let mut bytes = Vec::new();
-                flate2::read::GzDecoder::new(std::fs::File::open(src.join(&name)).unwrap())
-                    .read_to_end(&mut bytes)
-                    .unwrap();
-                std::fs::write(rps_dir.join(stem), bytes).unwrap();
+    fn frozen(name: &str, ext: &str) -> Option<Vec<u8>> {
+        let path = fixtures_dir().join("f1c1").join(format!("{name}.{ext}.gz"));
+        let file = std::fs::File::open(path).ok()?;
+        let mut bytes = Vec::new();
+        flate2::read::GzDecoder::new(file)
+            .read_to_end(&mut bytes)
+            .expect("inflate f1c1 fixture");
+        Some(bytes)
+    }
+
+    fn map_ncbi(bytes: Vec<u8>) -> Vec<u8> {
+        crate::outfmt11_blastx::expected_losat_bytes(bytes)
+    }
+
+    fn run_case(case: &Case, threads: &str, root: &Path, rps_shared: &Path) {
+        let dir = root.join(format!("{}_t{threads}", case.name));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let f_path = dir.join("F");
+        let dot_path = format!("{}/./F", dir.display());
+        let lnk_path = dir.join("L");
+        if case.setup == "symlink" {
+            std::fs::write(&f_path, b"").unwrap();
+            std::os::unix::fs::symlink("F", &lnk_path).unwrap();
+        }
+
+        let uses_f = case
+            .args
+            .iter()
+            .any(|a| a.contains("{f}") || a.contains("{dot}") || a.contains("{lnk}"));
+        let mut argv: Vec<String> = Vec::with_capacity(case.args.len() + 3);
+        argv.push(case.program.clone());
+        for a in &case.args {
+            argv.push(
+                a.replace("{f}", f_path.to_str().unwrap())
+                    .replace("{dot}", &dot_path)
+                    .replace("{lnk}", lnk_path.to_str().unwrap()),
+            );
+        }
+        argv.push("-num_threads".to_string());
+        argv.push(threads.to_string());
+
+        let mut cmd = match (case.stdout.as_str(), case.fsize.as_deref()) {
+            ("merged", Some(limit)) => {
+                let mut c = Command::new("sh");
+                c.arg("-c")
+                    .arg(r#"trap '' XFSZ; l=$1; shift; exec prlimit --fsize="$l" -- "$@" 2>&1"#)
+                    .arg("sh")
+                    .arg(limit)
+                    .arg(BIN)
+                    .args(&argv);
+                c
+            }
+            ("merged", None) => {
+                let mut c = Command::new("sh");
+                c.arg("-c")
+                    .arg(r#"exec "$@" 2>&1"#)
+                    .arg("sh")
+                    .arg(BIN)
+                    .args(&argv);
+                c
+            }
+            ("pipe", Some(limit)) => {
+                let mut c = Command::new("sh");
+                c.arg("-c")
+                    .arg(r#"trap '' XFSZ; l=$1; shift; exec prlimit --fsize="$l" -- "$@""#)
+                    .arg("sh")
+                    .arg(limit)
+                    .arg(BIN)
+                    .args(&argv);
+                c
+            }
+            (_, None) => {
+                let mut c = Command::new(BIN);
+                c.args(&argv);
+                c
+            }
+            (other, Some(limit)) => panic!("unsupported stdout={other} with fsize={limit}"),
+        };
+        cmd.current_dir(engine()).stdin(Stdio::null());
+        clean_env(&mut cmd);
+        cmd.env("HOME", &dir);
+        for (k, v) in &case.env {
+            let val = if let Some(spec) = v.strip_prefix("{rps:").and_then(|s| s.strip_suffix('}'))
+            {
+                if spec == "rps_mini" {
+                    rps_shared.to_str().unwrap().to_string()
+                } else {
+                    inflate_rps(spec, &dir).to_str().unwrap().to_string()
+                }
+            } else {
+                v.clone()
+            };
+            cmd.env(k, val);
+        }
+
+        let so_path = dir.join("stdout.out");
+        let out_file = match case.stdout.as_str() {
+            "pipe" | "merged" => None,
+            "file" => Some(std::fs::File::create(&so_path).unwrap()),
+            "append" => {
+                std::fs::write(&so_path, b"PRE\n").unwrap();
+                Some(
+                    std::fs::OpenOptions::new()
+                        .append(true)
+                        .open(&so_path)
+                        .unwrap(),
+                )
+            }
+            "full" => Some(
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open("/dev/full")
+                    .unwrap(),
+            ),
+            other => panic!("unknown stdout mode: {other}"),
+        };
+        if let Some(f) = out_file {
+            cmd.stdout(Stdio::from(f));
+        }
+        let output = cmd.output().expect("run losat");
+
+        let label = format!("{} (threads={threads})", case.name);
+        let got_rc = match output.status.code() {
+            Some(code) => code.to_string(),
+            None => format!("sig:{}", output.status.signal().unwrap_or(0)),
+        };
+        let mut got_out = match case.stdout.as_str() {
+            "file" | "append" => std::fs::read(&so_path).unwrap(),
+            "full" => Vec::new(),
+            _ => output.stdout,
+        };
+        let mut got_err = output.stderr;
+        if case.fsize.is_some() {
+            if case.stdout == "merged" {
+                got_out = crate::llvm_profile::without_profile_errors(&got_out);
+            } else {
+                got_err = crate::llvm_profile::without_profile_errors(&got_err);
             }
         }
-    }
-    let db = rps_dir.join("rps_mini");
-    for (outfmt, report_marker) in [
-        ("5", "<?xml version=\"1.0\" encoding=\"US-ASCII\"?>"),
-        ("15", "\"BlastOutput2\": ["),
-        ("16", "<?xml version=\"1.0\" encoding=\"US-ASCII\"?>"),
-    ] {
-        let out = clean_command("rpstblastn")
-            .env("BATCH_SIZE", "1")
-            .args([
-                "-query",
-                "tests/fasta/rps/nq4.fna",
-                "-db",
-                db.to_str().unwrap(),
-                "-comp_based_stats",
-                "0",
-                "-outfmt",
-                outfmt,
-                "-export_search_strategy",
-                "/dev/stdout",
-                "-num_threads",
-                "1",
-            ])
-            .output()
-            .expect("run rpstblastn");
+
         assert_eq!(
-            out.status.code(),
-            Some(0),
-            "outfmt {outfmt} stderr={}",
-            String::from_utf8_lossy(&out.stderr)
+            got_rc,
+            case.rc,
+            "{label}: exit status; stderr={}",
+            String::from_utf8_lossy(&got_err)
         );
-        let text = String::from_utf8_lossy(&out.stdout);
-        let req0 = text.find("Blast4-request ::= {").expect("req0");
-        let rep = text.find(report_marker).expect("report start");
-        let req1 = text[req0 + 1..]
-            .find("Blast4-request ::= {")
-            .map(|p| req0 + 1 + p)
-            .expect("req1");
+
+        let want_out = map_ncbi(frozen(&case.name, "out").unwrap_or_default());
         assert!(
-            req0 < rep && rep < req1,
-            "outfmt {outfmt}: expected req0 ({req0}) < report ({rep}) < req1 ({req1})"
+            got_out == want_out,
+            "{label}: stdout differs ({} B vs NCBI {} B): {}",
+            got_out.len(),
+            want_out.len(),
+            crate::outfmt11_blastx::first_difference(&got_out, &want_out)
         );
+
+        let want_err = map_ncbi(frozen(&case.name, "err").unwrap_or_default());
+        assert!(
+            got_err == want_err,
+            "{label}: stderr differs ({} B vs NCBI {} B): {}",
+            got_err.len(),
+            want_err.len(),
+            crate::outfmt11_blastx::first_difference(&got_err, &want_err)
+        );
+
+        if uses_f {
+            let got_file = std::fs::read(&f_path).ok();
+            let want_file = frozen(&case.name, "file").map(map_ncbi);
+            assert_eq!(
+                got_file.is_some(),
+                want_file.is_some(),
+                "{label}: file presence mismatch"
+            );
+            if let (Some(got), Some(want)) = (&got_file, &want_file) {
+                assert!(
+                    got == want,
+                    "{label}: file F differs ({} B vs NCBI {} B): {}",
+                    got.len(),
+                    want.len(),
+                    crate::outfmt11_blastx::first_difference(got, want)
+                );
+            }
+        }
+
+        // Explicitly confirm `dsoapp`/`bothapp` matches NCBI's `/dev/stdout` O_TRUNC behavior
+        // (erasing pre-existing `PRE\n`; for `dsoapp`, `cout` appends after the strategy so output
+        // begins with `Blast4-request ::= {`, whereas `bothapp` also opens `-out /dev/stdout` at 0).
+        if case.stdout == "append" {
+            assert!(
+                !got_out.starts_with(b"PRE\n"),
+                "{label}: expected /dev/stdout O_TRUNC to erase PRE\\n"
+            );
+            if case.name.starts_with("dsoapp.") {
+                assert!(
+                    got_out.starts_with(b"Blast4-request ::= {"),
+                    "{label}: expected dsoapp output to begin with Blast4-request ::= {{"
+                );
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
-    let _ = std::fs::remove_dir_all(&dir);
+
+    #[test]
+    fn f1c1_frozen_cases_match_ncbi_at_1_and_4_threads() {
+        let cases = parse_cases();
+        assert!(cases.len() >= 250, "expected full F1c-1 frozen matrix");
+        let root = temp_run_dir("frozen_ncbi");
+        assert_eq!(
+            std::fs::metadata(&root).unwrap().blksize(),
+            4096,
+            "F1c-1 file/append rows require a temporary directory with 4096-byte blocks"
+        );
+        let rps_shared = inflate_rps("rps_mini", &root);
+        let work: Vec<(&Case, &str)> = cases
+            .iter()
+            .flat_map(|case| [(case, "1"), (case, "4")])
+            .collect();
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let workers = std::thread::available_parallelism().map_or(4, |n| n.get().clamp(1, 4));
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| loop {
+                    let idx = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(&(case, threads)) = work.get(idx) else {
+                        break;
+                    };
+                    run_case(case, threads, &root, &rps_shared);
+                });
+            }
+        });
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

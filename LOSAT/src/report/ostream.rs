@@ -212,6 +212,7 @@ impl std::fmt::Display for StrategyWriteFault {
 
 impl std::error::Error for StrategyWriteFault {}
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
 /// Whether `error` is a failed piece write of `-export_search_strategy` (`StrategyWriteFault`).
 pub fn is_strategy_write_fault(error: &std::io::Error) -> bool {
     error
@@ -219,6 +220,7 @@ pub fn is_strategy_write_fault(error: &std::io::Error) -> bool {
         .is_some_and(|inner| inner.is::<StrategyWriteFault>())
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
 fn strategy_write_fault() -> std::io::Error {
     std::io::Error::other(StrategyWriteFault)
 }
@@ -2061,6 +2063,8 @@ fn object_stream_error(program: &str, position: usize, detail: &str) -> String {
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:893-896
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:367-402
 /// The single post of a failed piece write of an object stream on a file (`CIOException::eWrite`).
 fn write_fault_post(program: &str, position: usize) -> Vec<u8> {
     object_stream_error(program, position, "write fault").into_bytes()
@@ -2094,9 +2098,11 @@ const SERIAL_IO_ERROR: &str = "CSerialException::eIoError";
 
 type StrategyArchive<'a> = Option<&'a crate::report::archive::ArchiveHandle>;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1172
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6493
 /// Posts `text` as one `ERROR` diagnostic to `diagnostics` and, when `archive` is active
 /// (outfmt 11), saves it as one `code 2` message (`ArchiveHandle::write_post`).
-fn post_strategy_error(
+pub(crate) fn post_strategy_error(
     diagnostics: &mut dyn std::io::Write,
     archive: StrategyArchive<'_>,
     text: &[u8],
@@ -2108,9 +2114,11 @@ fn post_strategy_error(
     diagnostics.flush()
 }
 
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1897
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:880-907
 /// Emits every `803.7` post in `posts` whose offset is within `limit` (or all posts when `limit`
 /// is `None`), returning the number of posts emitted.
-fn emit_strategy_posts(
+pub(crate) fn emit_strategy_posts(
     posts: &[(u64, Vec<u8>)],
     limit: Option<u64>,
     diagnostics: &mut dyn std::io::Write,
@@ -2152,6 +2160,7 @@ pub struct StrategyStream {
 }
 
 impl StrategyStream {
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:781-797
     /// Creates a strategy stream over `device` for `program` (`ArchiveRequest::application`).
     pub fn new(device: Box<dyn std::io::Write + Send>, program: &'static str) -> Self {
         Self {
@@ -2161,20 +2170,36 @@ impl StrategyStream {
         }
     }
 
-    /// Marks the stream `bad`, posts `802.5 ... write fault` at `position`, and returns
-    /// `StrategyWriteFault`.
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:893-896
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:367-402, :1138-1148
+    // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:100-103
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+    /// Marks the stream `bad`, posts `802.5 ... write fault` (either `line N: <trace>: write fault`
+    /// when `~ByteBlock()` unwinds while `CObjectOStreamAsn` is still alive, or `byte P: stack is
+    /// empty: write fault` from `~CObjectOStream::Close`), and returns `StrategyWriteFault`.
     fn fail_write(
         &mut self,
         position: usize,
+        unended: Option<(usize, &str)>,
         diagnostics: &mut dyn std::io::Write,
         archive: StrategyArchive<'_>,
     ) -> std::io::Result<()> {
         self.bad = true;
-        let fault = write_fault_post(self.program, position);
+        let fault = match unended {
+            Some((line, trace)) => format!(
+                "Error: (802.5) [{}] CObjectOStream: error at line {line}: {trace}: write fault\n",
+                self.program
+            )
+            .into_bytes(),
+            None => write_fault_post(self.program, position),
+        };
         post_strategy_error(diagnostics, archive, &fault)?;
         Err(strategy_write_fault())
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:635-651
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:880-918
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-402, :1138-1148
     /// Writes one complete `Blast4-request` encoded as `bytes` with NCBI's `COStreamBuffer` writes
     /// `pieces` and `803.7` posts `posts` (`(written_before_post, post_line)`).
     pub fn write_object(
@@ -2193,7 +2218,7 @@ impl StrategyStream {
         let mut pos = 0usize;
         let mut next_post = 0usize;
         let mut landed = 0u64;
-        for &piece in pieces {
+        for piece in pieces {
             next_post +=
                 emit_strategy_posts(&posts[next_post..], Some(pos as u64), diagnostics, archive)?;
             if piece.size == 0 {
@@ -2216,7 +2241,13 @@ impl StrategyStream {
                 }
             };
             if failed {
-                return self.fail_write(pos + piece.size + piece.leave, diagnostics, archive);
+                let byte_pos = pos + piece.size + piece.leave;
+                let unended = piece.byte_block_trace.as_deref().map(|trace| {
+                    let prefix = &bytes[..byte_pos.min(bytes.len())];
+                    let line = 1 + prefix.iter().filter(|&&b| b == b'\n').count();
+                    (line, trace)
+                });
+                return self.fail_write(byte_pos, unended, diagnostics, archive);
             }
             pos += piece.size;
         }
@@ -2234,6 +2265,8 @@ impl StrategyStream {
         Ok(())
     }
 
+    // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:578-605
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:338-355
     /// Writes the partial bytes flushed before a `NullElement` throw (`encoder::NullElement`).
     pub fn write_partial(
         &mut self,

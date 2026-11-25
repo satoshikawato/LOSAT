@@ -17,9 +17,7 @@ impl StrategySink for Sink {
         diagnostics: &mut dyn Write,
         archive: Option<&ArchiveHandle>,
     ) -> std::io::Result<()> {
-        for (_, text) in posts {
-            post_error(diagnostics, archive, text)?;
-        }
+        let _ = emit_strategy_posts(posts, None, diagnostics, archive)?;
         self.0.lock().unwrap().extend_from_slice(bytes);
         Ok(())
     }
@@ -31,9 +29,7 @@ impl StrategySink for Sink {
         diagnostics: &mut dyn Write,
         archive: Option<&ArchiveHandle>,
     ) -> std::io::Result<()> {
-        for (_, text) in posts {
-            post_error(diagnostics, archive, text)?;
-        }
+        let _ = emit_strategy_posts(posts, None, diagnostics, archive)?;
         self.0.lock().unwrap().extend_from_slice(bytes);
         Ok(())
     }
@@ -475,24 +471,15 @@ fn the_file_is_created_and_its_refusal_kept() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("s.asn");
     std::fs::write(&path, b"old").unwrap();
-    let made = create_strategy_file(&path, None, "BLASTP").unwrap();
+    let made = create_strategy_file(&path, "BLASTP").unwrap();
     assert!(matches!(made.target, StrategyTarget::Disk(_)) && made.refusal.is_none());
     assert_eq!(std::fs::read(&path).unwrap(), b"");
-    let dash = create_strategy_file(Path::new("-"), None, "BLASTP").unwrap();
+    let dash = create_strategy_file(Path::new("-"), "BLASTP").unwrap();
     assert!(matches!(dash.target, StrategyTarget::None));
     assert!(dash.refusal.as_deref().unwrap().contains("standard output"));
-    std::fs::write(&path, b"old").unwrap();
-    let same = create_strategy_file(&path, Some(&path), "BLASTP").unwrap();
-    assert!(matches!(same.target, StrategyTarget::Disk(_)) && same.refusal.is_none());
-    assert_eq!(std::fs::read(&path).unwrap(), b"");
-    let other = dir.join("o.txt");
-    assert!(create_strategy_file(&path, Some(&other), "BLASTP")
-        .unwrap()
-        .refusal
-        .is_none());
     // The refusal comes where the run asks for it, and before any request.
     let export = StrategyExport::for_run(
-        create_strategy_file(Path::new("-"), None, "BLASTP").unwrap(),
+        create_strategy_file(Path::new("-"), "BLASTP").unwrap(),
         OptionInputs::new(Program::Blastp, "blastp"),
         Some(6),
         HitlistArgs::default(),
@@ -504,7 +491,7 @@ fn the_file_is_created_and_its_refusal_kept() {
     assert!(export.write_with(0..1, |_| Ok(())).is_err());
     assert!(check_report_stream(None).is_ok());
     let missing = dir.join("no_such_dir").join("x");
-    let error = create_strategy_file(&missing, None, "BLASTP").unwrap_err();
+    let error = create_strategy_file(&missing, "BLASTP").unwrap_err();
     let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
     assert_eq!(native.exit, 1);
     assert_eq!(
@@ -515,16 +502,9 @@ fn the_file_is_created_and_its_refusal_kept() {
         )
         .as_bytes()
     );
-    // The null device as the strategy file and as `-out`: nothing written there is kept.
+    // The null device as the strategy file: nothing written there is kept.
     #[cfg(unix)]
-    drop(
-        create_strategy_file(
-            Path::new("/dev/null"),
-            Some(Path::new("/dev/null")),
-            "BLASTP",
-        )
-        .unwrap(),
-    );
+    drop(create_strategy_file(Path::new("/dev/null"), "BLASTP").unwrap());
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -554,7 +534,7 @@ fn an_exception_of_ncbis_from_a_writer_ends_the_run_as_ncbis_error() {
     assert_eq!(native.exit, 255);
     for error in [exception(), anyhow::anyhow!("a refusal of LOSAT's")] {
         let export = StrategyExport::for_run(
-            create_strategy_file(Path::new("-"), None, "BLASTX").unwrap(),
+            create_strategy_file(Path::new("-"), "BLASTX").unwrap(),
             OptionInputs::new(Program::Blastx, "blastx"),
             Some(0),
             HitlistArgs::default(),
@@ -594,7 +574,7 @@ impl Received {
 fn a_receiver_gets_the_file_when_the_export_ends() {
     let received = Arc::new(Received::default());
     let files = RunFiles::Receiver(received.clone());
-    let open = |name: &str| create_strategy_file_in(&files, Path::new(name), None, "BLASTP", &[]);
+    let open = |name: &str| create_strategy_file_in(&files, Path::new(name), "BLASTP", &[]);
     let export = |file| {
         StrategyExport::for_run(
             file,
@@ -653,7 +633,7 @@ fn a_receiver_gets_the_file_when_the_export_ends() {
     }
     let closed = RunFiles::Receiver(Arc::new(Closed));
     let lost = |result: Result<()>| {
-        let file = create_strategy_file_in(&closed, Path::new("s.asn"), None, "BLASTP", &[]);
+        let file = create_strategy_file_in(&closed, Path::new("s.asn"), "BLASTP", &[]);
         end_run(Some(&export(file.unwrap())), result)
             .unwrap_err()
             .to_string()
@@ -683,8 +663,7 @@ fn a_receiver_refuses_what_the_command_line_refuses_or_has_no_file_for() {
         option: "query",
         name: std::ffi::OsStr::new("q.fa"),
     }];
-    let open =
-        |name: &str| create_strategy_file_in(&files, Path::new(name), None, "BLASTX", &query);
+    let open = |name: &str| create_strategy_file_in(&files, Path::new(name), "BLASTX", &query);
     let error = open("/etc/s.asn").unwrap_err();
     let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
     assert_eq!(native.exit, 1);

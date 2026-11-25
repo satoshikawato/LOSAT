@@ -348,6 +348,9 @@ pub(super) type RunXml2 = Xml2Writer<RunSideFiles>;
 #[derive(Clone)]
 pub(super) struct HeldOutput(Rc<RefCell<HeldState>>);
 
+// No NCBI counterpart: NCBI writes BLAST XML, XML2 and JSON reports directly to its stream,
+// while LOSAT's `HeldOutput` buffers them until refusal checks finish and replays each batch's
+// strategy `Posts` at the held byte offset.
 /// One diagnostics step held while `HeldOutput` buffers a BLAST XML, XML2 or JSON document:
 /// plain text written through `HeldStderr`, or a batch's search strategy `Posts` (`BatchTake`)
 /// released at that exact byte offset of the report so strategy writes and `803.7` posts
@@ -449,6 +452,25 @@ impl HeldState {
         caught(cursor.write(&mut target, &held, written, held.len()))?;
         caught(target.inner.flush())
     }
+
+    // No NCBI counterpart: NCBI writes BLAST XML, XML2 and JSON directly; when LOSAT discards a
+    // held document on a refusal, queued stderr texts and strategy posts (including `803.7`
+    // replaced-byte diagnostics) are still emitted to stderr before the refusal.
+    fn drain_stderr_on_discard(&mut self) {
+        if let Some((stderr, texts)) = self.stderr.as_mut() {
+            for (_, item) in std::mem::take(texts) {
+                match item {
+                    HeldDiag::Text(text) => {
+                        let _ = stderr.write_all(&text);
+                    }
+                    HeldDiag::Posts(posts) => {
+                        let _ = posts.write(&mut **stderr, None);
+                    }
+                }
+            }
+            let _ = stderr.flush();
+        }
+    }
 }
 
 /// The held output's writer (`inner`) and its report stream (`report`), which takes NCBI's
@@ -537,6 +559,8 @@ impl HeldOutput {
         HeldStderr(Rc::clone(&self.0))
     }
 
+    // No NCBI counterpart: queues a batch's strategy `Posts` in `HeldOutput` so `release`
+    // interleaves strategy writes with the buffered report at NCBI's offset.
     /// Queues `posts` (a batch's search strategy request mark and any `803.7` posts) at the
     /// current held output length while a single-stream document (`5`, `15`, `16`: no side files)
     /// is held, so `release` interleaves the strategy writes with the report in NCBI's order.
@@ -573,14 +597,7 @@ impl HeldOutput {
             side.discard();
         }
         // What the run wrote to standard error in the meantime stays (before the refusal).
-        if let Some((stderr, texts)) = state.stderr.as_mut() {
-            for (_, item) in std::mem::take(texts) {
-                if let HeldDiag::Text(text) = item {
-                    let _ = stderr.write_all(&text);
-                }
-            }
-            let _ = stderr.flush();
-        }
+        state.drain_stderr_on_discard();
     }
 
     /// Writes what is held and passes the bytes on again: the side files first (in order), then
@@ -595,14 +612,7 @@ impl HeldOutput {
                 state.discarded = true;
                 state.held.clear();
                 // What the run wrote to standard error in the meantime stays.
-                if let Some((stderr, texts)) = state.stderr.as_mut() {
-                    for (_, item) in std::mem::take(texts) {
-                        if let HeldDiag::Text(text) = item {
-                            let _ = stderr.write_all(&text);
-                        }
-                    }
-                    let _ = stderr.flush();
-                }
+                state.drain_stderr_on_discard();
                 return Err(error);
             }
         }

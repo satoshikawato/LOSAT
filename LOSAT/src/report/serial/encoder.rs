@@ -703,16 +703,17 @@ impl<E: Encoder, P> Traced<E, P> {
     }
 
     /// The writes of NCBI's buffer of the document to its output so far (`OutBuffer::pieces`):
-    /// NCBI's insertions of it into the report's stream; none for a stream without a model of its
-    /// buffer.
-    pub fn pieces(&self) -> &[usize] {
+    /// NCBI's insertions of it into its output stream with the bytes left behind in the buffer;
+    /// none for a stream without a model of its buffer.
+    pub fn pieces(&self) -> &[BufferPiece] {
         self.buffer.as_ref().map_or(&[], OutBuffer::pieces)
     }
 
-    /// `pieces` with the bytes left behind in NCBI's buffer at each write
-    /// (`OutBuffer::buffer_pieces`): for `ostream::StrategyStream`.
-    pub fn buffer_pieces(&self) -> &[BufferPiece] {
-        self.buffer.as_ref().map_or(&[], OutBuffer::buffer_pieces)
+    /// The byte sizes of [`Self::pieces`], in order (`OutBuffer::piece_sizes`).
+    pub fn piece_sizes(&self) -> Vec<usize> {
+        self.buffer
+            .as_ref()
+            .map_or_else(Vec::new, OutBuffer::piece_sizes)
     }
 
     /// The stream's position at the first of those writes (`OutBuffer::first_write`).
@@ -828,6 +829,16 @@ impl<E: Encoder, P> Traced<E, P> {
         };
         let offsets: Vec<usize> = posts.iter().map(|&at| at - start).collect();
         buffer.put(piece, &held[start..], &offsets, &mut written);
+        let byte_block_from = buffer.byte_block_from();
+        let has_byte_block = byte_block_from < buffer.pieces().len();
+        if has_byte_block {
+            let trace = self.stack_trace();
+            if let Some(buffer) = self.buffer.as_mut() {
+                for bp in &mut buffer.pieces_mut()[byte_block_from..] {
+                    bp.byte_block_trace = Some(trace.clone());
+                }
+            }
+        }
         written
     }
 
@@ -879,8 +890,8 @@ impl<E: Encoder, P> Traced<E, P> {
         let ends: Vec<u64> = self
             .pieces()
             .iter()
-            .map(|&piece| {
-                end += piece as u64;
+            .map(|piece| {
+                end += piece.size as u64;
                 end
             })
             .filter(|&end| end > self.handed && end < target)

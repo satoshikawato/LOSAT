@@ -5,7 +5,8 @@ use super::{
     parameters::{effective_lengths, score_block},
     query_setup::{prepare_queries, PreparedQueryBatch},
     split::{
-        calculate_num_chunks, split_queries, validate_chunk_size, QuerySplitRefusal, DEFAULT_SIZES,
+        calculate_num_chunks, chunk_stops, out_of_frame, split_queries, validate_chunk_size,
+        QuerySplitRefusal, DEFAULT_SIZES,
     },
 };
 use crate::algorithm::blastn::query_split::SplitSizes;
@@ -143,19 +144,34 @@ fn chunk_ranges_follow_the_sizes_and_unsplittable_sizes_are_refused() {
     ] {
         assert_eq!(split(chunk_size, overlap).unwrap().len(), 1);
     }
-    // An overlap not divisible by 3; 2 x the overlap at least the chunk size; -1 above -4.
-    for (chunk_size, overlap) in [
-        (3000, 100),
-        (600, 300),
-        (10002, 5001),
-        (u64::MAX, u64::MAX - 3),
-    ] {
+    // 2 x the overlap at least the chunk size; -1 above -4 (chunks without a query): the stops
+    // before the chunks are set up, also through `chunk_stops`.
+    for (chunk_size, overlap) in [(600, 300), (10002, 5001), (u64::MAX, u64::MAX - 3)] {
+        let sizes = SplitSizes {
+            chunk_size,
+            overlap,
+        };
         let error = split(chunk_size, overlap).unwrap_err();
         assert!(
             error.is::<QuerySplitRefusal>(),
             "{chunk_size} {overlap}: {error}"
         );
+        let stop = chunk_stops(&records, &full, &o, sizes).unwrap_err();
+        assert_eq!(stop.to_string(), error.to_string());
     }
+    assert!(chunk_stops(&records, &full, &o, DEFAULT_SIZES).is_ok());
+    // An overlap not divisible by 3 is split as NCBI splits it, and `out_of_frame` refuses the
+    // chunks after the first; a multiple of 3 or one chunk is not refused.
+    let sizes = |overlap| SplitSizes {
+        chunk_size: 3000,
+        overlap,
+    };
+    let chunks = split(3000, 100).unwrap();
+    assert!(chunks.len() > 1);
+    let error = out_of_frame(&chunks, sizes(100), &o).expect("refused");
+    assert!(error.is::<QuerySplitRefusal>(), "{error}");
+    assert!(out_of_frame(&split(3000, 99).unwrap(), sizes(99), &o).is_none());
+    assert!(out_of_frame(&chunks[..1], sizes(100), &o).is_none());
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:776-785
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:846-847

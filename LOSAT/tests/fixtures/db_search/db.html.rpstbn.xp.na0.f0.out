@@ -1,0 +1,388 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>RPSTBLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+<b>Query=</b> stopq
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>19.2</a>    0.12 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>16.2</a>    1.1  
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>15.4</a>    2.1  
+
+
+
+Lambda      K        H        a         alpha
+   0.273    0.101    0.253    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 82388
+
+
+<b>Query=</b> YP_009220476.1 bt strand=+ flank=0
+
+Length=637
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>19.2</a>    0.14 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>15.4</a>    2.2  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>15.0</a>    2.5  
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.136    0.383    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 87584
+
+
+<b>Query=</b> YP_009220478.1 bt strand=- flank=0
+
+Length=905
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>18.5</a>    0.36 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>16.2</a>    1.8  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>15.8</a>    2.7  
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 127370
+
+
+<b>Query=</b> YP_009220482.1 bt strand=+ flank=1
+
+Length=624
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>18.1</a>    0.28 
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>17.7</a>    0.39 
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>16.9</a>    0.65 
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 85680
+
+
+<b>Query=</b> YP_009220483.1 bt strand=- flank=1
+
+Length=864
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>18.5</a>    0.29 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>18.5</a>    0.29 
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>15.8</a>    2.2  
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 121260
+
+
+<b>Query=</b> YP_009220649.1 bt strand=+ flank=2
+
+Length=712
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>20.8</a>    0.048
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>18.9</a>    0.21 
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>18.1</a>    0.31 
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 98384
+
+
+<b>Query=</b> YP_009220484.1 bt strand=- flank=2
+
+Length=718
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>19.2</a>    0.14 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>13.9</a>    7.0  
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>13.5</a>    9.7  
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 99330
+
+
+<b>Query=</b> YP_009220489.1 bt strand=+ flank=0
+
+Length=612
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>17.3</a>    0.55 
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>16.5</a>    0.80 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=3&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>15.4</a>    1.9  
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 84783
+
+
+<b>Query=</b> YP_009220491.1 bt strand=- flank=0
+
+Length=627
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>15.4</a>    1.9  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>14.2</a>    4.5  
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>13.5</a>    9.4  
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 86156
+
+
+<b>Query=</b> YP_009220493.1 bt strand=+ flank=1
+
+Length=884
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>16.9</a>    0.98 
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>15.0</a>    4.8  
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>14.6</a>    5.3  
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 124080
+
+
+<b>Query=</b> YP_009220496.1 bt strand=- flank=1
+
+Length=845
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>16.9</a>    0.91 
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>16.5</a>    1.3  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>16.5</a>    1.4  
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 117970
+
+
+<b>Query=</b> YP_009220497.1 bt strand=+ flank=2
+
+Length=909
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>18.9</a>    0.27 
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>18.5</a>    0.35 
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>17.3</a>    0.91 
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 128310
+
+
+<b>Query=</b> YP_009220507.1 bt strand=- flank=2
+
+Length=706
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>16.2</a>    1.3  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>16.2</a>    1.3  
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>15.0</a>    3.6  
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 97438
+
+
+<b>Query=</b> YP_009220508.1 bt strand=+ flank=0
+
+Length=585
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>16.2</a>    0.95 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>15.0</a>    2.3  
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>15.0</a>    2.7  
+
+
+
+Lambda      K        H        a         alpha
+   0.305    0.118    0.319    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 80472
+
+
+<b>Query=</b> YP_009220514.1 bt strand=- flank=0
+
+Length=472
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>16.9</a>    0.44 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>16.5</a>    0.57 
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>16.2</a>    0.90 
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 64020
+
+
+<b>Query=</b> YP_009220601.1 bt strand=+ flank=1
+
+Length=1018
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>349</a>     2e-124
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>24.3</a>    0.005 
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>16.9</a>    1.3   
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 143836
+
+
+  Database: rps_mini
+    Posted date:  Nov 21, 2026  5:54 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

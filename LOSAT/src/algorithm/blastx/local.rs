@@ -1497,7 +1497,12 @@ fn check_resolutions(
         choices.push(choice);
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
-    let html = app::html_links(args.html, Program::Blastx, args.database_name(), &outfmts)?;
+    let html = app::html_links(
+        args.html,
+        args.request_kind(),
+        args.database_name(),
+        &outfmts,
+    )?;
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(
         "blastx",
         &outfmts,

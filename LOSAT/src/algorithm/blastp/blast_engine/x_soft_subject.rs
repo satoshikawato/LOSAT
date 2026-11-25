@@ -307,7 +307,7 @@ pub(super) fn x_scan_two_hit_ranges<T, F>(
     word_size: i32,
     mut candidate: F,
 ) where
-    T: DiagTable,
+    T: DiagTable<Cell = DiagStruct>,
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
     x_for_each_hit(

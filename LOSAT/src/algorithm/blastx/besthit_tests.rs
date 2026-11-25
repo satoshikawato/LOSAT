@@ -37,6 +37,7 @@ fn hsp(context: usize, q_start: i32, q_end: i32, score: i32, evalue: f64) -> Hsp
         positive: 0,
         edit_script: Vec::new(),
         composition_method: 0,
+        query_left_out: 0,
     }
 }
 

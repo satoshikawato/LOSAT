@@ -622,6 +622,17 @@ pub(super) fn prefetch_reported_subjects(
                         .filter(|&rank| hit_loads.loaded(rank)),
                 )
             };
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513
+            // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:194
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+            // Multi-round psiblast keeps its scope across rounds of a query and resets it in
+            // `psi_round::run_queries` after all rounds finish.
+            let reset_batch_scope = || {
+                if reports.psi_round.is_none() {
+                    database.reset_scope();
+                }
+            };
             for batch in query_batches {
                 // No batch after the run's end is prefetched, nor read one by one.
                 if !hit_loads.reaches(batch.searched.start) {
@@ -701,6 +712,7 @@ pub(super) fn prefetch_reported_subjects(
                 if one_by_one {
                     let report_loads = prefetch_taxids || scope_loads;
                     if !report_loads && !pssm_loads {
+                        reset_batch_scope();
                         continue;
                     }
                     for query in batch.searched.clone() {
@@ -783,6 +795,7 @@ pub(super) fn prefetch_reported_subjects(
                         }
                     }
                 }
+                reset_batch_scope();
             }
         }
         // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-264

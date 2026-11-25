@@ -76,6 +76,21 @@ impl TblastnDatabase {
         self
     }
 
+    /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
+    /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
+    /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
+    pub(super) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+        self.taxdb.set_keeps_scope(keeps);
+        self.taxdb.set_separate_xml2(separate_xml2);
+        self
+    }
+
+    /// Mirrors `CBlastFormat::ResetScopeHistory` at the end of a query batch
+    /// (`shared::TaxdbRun::reset_scope`).
+    pub(super) fn reset_scope(&self) {
+        self.taxdb.reset_scope();
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:188-194
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`) with
     /// the command line's errors. The total length is NCBI's `Int8`, which the engine holds as
@@ -152,6 +167,11 @@ impl TblastnDatabase {
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(super) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
+    }
+
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(super) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
     }
 
     /// Whether the first query batch with a valid context fails with NCBI's `Database memory map
@@ -400,7 +420,7 @@ impl TblastnDatabase {
     }
 
     /// The stop of the prefetch of the batch of `queries` whose reported
-    /// subjects are `subjects` (`prefetch_stop`): NCBI's error (a `shared::HeaderReadError`), or
+    /// subjects are `subjects` (`prefetch_stop`): NCBI's error (a `ErrorAfterBatchReports`), or
     /// LOSAT's refusal (`shared::batch_prefetch`, after the batches before, `before`: the run's
     /// record of what NCBI's BLAST database data loader loaded for them, `LoadedBefore`).
     /// The outfmt 5 reports before the batch are the queries'
@@ -656,10 +676,12 @@ impl<'a> CallReads<'a> {
         );
         match read {
             Ok(_) => Ok(None),
-            Err(error) => match error.downcast::<shared::HeaderReadError>() {
-                Ok(failure) => Ok(Some(failure.error)),
-                Err(error) => Err(error),
-            },
+            Err(error) => {
+                match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
+                    Ok(failure) => Ok(Some(failure.error)),
+                    Err(error) => Err(error),
+                }
+            }
         }
     }
 
@@ -727,7 +749,7 @@ pub(super) fn drop_unaligned(
 /// Reads the definition lines of the sequences that the final hit lists `hitlists` of a
 /// query batch name (their subject index is the ordinal id), in NCBI's order (query by query,
 /// in hit-list order) into `titles` (`common::database::read_header`); `first_query` is the
-/// index of the batch's first query. A reader error of NCBI's own is a `HeaderReadError` (it
+/// index of the batch's first query. A reader error of NCBI's own is an `ErrorAfterBatchReports` (it
 /// fails the batch); LOSAT's refusals are errors of their own. The first read of a record with a
 /// UTF8String where a VisibleString is expected (`shared::HeaderReader::first_utf8`) is returned:
 /// NCBI posts its warning there. `one_by_one`: the reports may read the reported sequences one by

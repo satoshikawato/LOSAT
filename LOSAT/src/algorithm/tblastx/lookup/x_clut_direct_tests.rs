@@ -283,7 +283,7 @@ fn paired_cells_are_the_loops_cells() {
 fn flat_table(build: Option<XFlatBuild>) -> XFlatCompressedLookup {
     match build.expect("word size 5") {
         XFlatBuild::Table(table) => table,
-        XFlatBuild::Refused => panic!("refused"),
+        XFlatBuild::Refused(filled) => panic!("refused: {filled:?}"),
         XFlatBuild::TooLarge => panic!("too large"),
     }
 }
@@ -572,7 +572,7 @@ fn flat_tables_of_each_matrix_are_its_reference_tables() {
                 )
                 .expect("word size");
                 match (&reference, counted) {
-                    (Err(()), XFlatBuild::Refused) => refused_seen += 1,
+                    (Err(want), XFlatBuild::Refused(got)) if *want == got => refused_seen += 1,
                     (Ok(reference), XFlatBuild::Table(flat)) => {
                         x_assert_same_compressed_table(&flat, reference);
                         built_seen += 1;
@@ -713,7 +713,7 @@ fn flat_refusal_is_the_references_at_small_capacities() {
                 )
                 .expect("word size 5");
                 match (&reference, built) {
-                    (Err(()), XFlatBuild::Refused) => refused_seen += 1,
+                    (Err(want), XFlatBuild::Refused(got)) if *want == got => refused_seen += 1,
                     (Ok(reference), XFlatBuild::Table(flat)) => {
                         x_assert_same_compressed_table(&flat, reference);
                         built_seen += 1;
@@ -1337,7 +1337,7 @@ fn blastx_bucket_fill_in_parts_is_the_one_part_fill() {
 fn blastx_tables_built_in_parts_are_the_one_part_tables() {
     // The table's fields, and whether its offsets are `u16`.
     type Fields = ((i32, i32, i32, Vec<u32>, Vec<u32>, Vec<u32>, i32), bool);
-    fn fields(built: Option<Result<XBxCompressedLookup, ()>>) -> Fields {
+    fn fields(built: Option<Result<XBxCompressedLookup, BanksFilled>>) -> Fields {
         fn of<H: XQueryOffset>(
             table: &mut XFlatCompressedLookup<H>,
             poison: H,

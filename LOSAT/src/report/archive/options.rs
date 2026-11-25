@@ -33,6 +33,9 @@ pub enum ParamValue {
     Str(String),
     /// `integer-list`.
     IntegerList(Vec<i32>),
+    // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:512,529
+    /// `big-integer-list` (`Blast4-value` choice 12, `SEQUENCE OF BigInt`).
+    BigIntegerList(Vec<i64>),
 }
 
 /// A recorded parameter (`Blast4-parameter`).

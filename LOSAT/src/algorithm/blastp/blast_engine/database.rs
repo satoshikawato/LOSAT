@@ -31,9 +31,8 @@ use rayon::prelude::*;
 
 use crate::algorithm::blastp::hsp::BlastCompoHeap;
 use crate::algorithm::common::database as shared;
-pub(super) use crate::algorithm::common::database::{
-    HeaderReadError, PreliminaryReadError, Utf8Read,
-};
+pub(super) use crate::algorithm::common::database::{PreliminaryReadError, Utf8Read};
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 #[cfg(all(test, unix))]
@@ -150,6 +149,21 @@ impl BlastpDatabase {
         self
     }
 
+    /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
+    /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
+    /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
+    pub(super) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+        self.taxdb.set_keeps_scope(keeps);
+        self.taxdb.set_separate_xml2(separate_xml2);
+        self
+    }
+
+    /// Mirrors `CBlastFormat::ResetScopeHistory` at the end of a query batch (or of a query's
+    /// rounds in psiblast; `shared::TaxdbRun::reset_scope`).
+    pub(super) fn reset_scope(&self) {
+        self.taxdb.reset_scope();
+    }
+
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors, which name `program`.
     #[cfg(test)]
@@ -254,6 +268,11 @@ impl BlastpDatabase {
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(super) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
+    }
+
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(super) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
     }
 
     /// The number of sequences the statistics' setup reads (`DbStatistics::setup_count`), NCBI's
@@ -1027,7 +1046,7 @@ impl<'a> FetchNotes<'a> {
     /// failed (`redo_run::sw_batch_failed`) or did not end (`redo_run::sw_endless`) at the turn of
     /// the list after `before` of the kept lists of query `query` (`usize::MAX`: after the batch's
     /// last list), with `heaps` as the redo left them: NCBI posted its warning before its error,
-    /// its crash or its endless redo (`HeaderReadError::utf8`).
+    /// its crash or its endless redo (`ErrorAfterBatchReports::utf8`).
     pub(in crate::algorithm::blastp) fn fetched_before_failure(
         &self,
         heaps: &[BlastCompoHeap],
@@ -1084,17 +1103,16 @@ impl<'a> FetchNotes<'a> {
 /// LOSAT's refusal of a search whose redo or traceback fetches the sequence `ordinal`, whose
 /// header cannot be read (`shared::FetchExcluded::refusal_at`), from the list of query `query`:
 /// NCBI's search ends in that query's batch, after the reports of the batches before, so the
-/// refusal fails that batch (`HeaderReadError`, whose batches before are searched again and
+/// refusal fails that batch (`ErrorAfterBatchReports`, whose batches before are searched again and
 /// reported), as `-use_sw_tback`'s failed batch does (the Owner's form of 2026-11-16 for
 /// line RG's Q-X2c).
 #[cold]
 #[inline(never)]
 fn fetch_refused(database: &BlastpDatabase, query: usize, ordinal: u32) -> anyhow::Error {
-    HeaderReadError {
+    ErrorAfterBatchReports::of_batch(
         query,
-        error: shared::FetchExcluded::refusal_at(&database.db, ordinal, database.program),
-        utf8: None,
-    }
+        shared::FetchExcluded::refusal_at(&database.db, ordinal, database.program),
+    )
     .into()
 }
 
@@ -1131,7 +1149,7 @@ impl<'a> CallTitles<'a> {
     /// Seq-aligns of the call's batches, of a header with a UTF8String where a VisibleString is
     /// expected, the call's (`utf8`): its warning comes before anything the batch writes after its
     /// search (`header_read`), and before an error of the batch's prefetch
-    /// (`HeaderReadError::after_reads`).
+    /// (`ErrorAfterBatchReports::after_reads`).
     pub(super) fn titles<'l>(
         &self,
         listed: Option<&'l ListedSubjects>,
@@ -1332,7 +1350,7 @@ impl ListedSubjects {
     // title of the first definition line, the others appended as ` >id title`).
     /// Reads the definition lines of the subjects of the final hit lists (`hit_lists`,
     /// after the redo and before anything is dropped from them), in NCBI's order. A reader
-    /// error of NCBI's own is a `HeaderReadError` that names the query whose hit list
+    /// error of NCBI's own is an `ErrorAfterBatchReports` that names the query whose hit list
     /// reached it; LOSAT's refusals are errors of their own.
     pub(super) fn read_titles<'a>(
         &'a self,
@@ -3067,7 +3085,7 @@ impl ListedTitles<'_> {
 // would not fail after some rows. Past the preliminary stage (whose reader errors come in the
 // first block, which reads the whole database as every batch does), the failures of a database
 // search that depend on its hits are those of the definition lines of the reported subjects:
-// NCBI's reader error (`HeaderReadError`, the batch of the query that reaches it fails after the
+// NCBI's reader error (`ErrorAfterBatchReports`, the batch of the query that reaches it fails after the
 // reports of the batches before) and LOSAT's refusals (`ListedSubjects::read_titles` and
 // `ListedSubjects::x_read_titles_lean`,
 // `ListedTitles::check_reported_titles`, `ListedTitles::tabular_subject_ids`, and for outfmt 0
@@ -3250,7 +3268,7 @@ pub(super) fn x_titles_allow_blocks(
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search of outfmt 8, 9, 12 and 5.
 // These reports show no tabular id and no outfmt 0 title, so of the failures that
 // `x_titles_allow_blocks` rules out only those of the definition lines' reading remain: NCBI's
-// reader error (`HeaderReadError`), more than one definition line, and a stored title with a byte
+// reader error (`ErrorAfterBatchReports`), more than one definition line, and a stored title with a byte
 // outside ' ' ..= '~' (`ListedSubjects::read_titles`, `ListedTitles::check_reported_titles`;
 // outfmt 5's stream writes such a title as NCBI's does, so there the check only keeps such a
 // database off the block search). A new function, so that

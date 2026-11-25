@@ -1234,7 +1234,7 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
         Some(&spec("qseqid sallacc")),
         [vec![0], vec![1, 0]],
         |s_idx| (s_idx == 1).then_some(lineless),
-        |s_idx, failure| failed_database_subject(s_idx, None, failure),
+        describe_database_subject,
         "BLASTP",
         true,
     );
@@ -1245,6 +1245,10 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
              {LINELESS_ACCESSION_NULL_POINTER}, which is not supported by LOSAT's BLASTP"
         )
     );
+}
+
+fn describe_database_subject(s_idx: usize, failure: LookupFailure) -> String {
+    failed_database_subject(s_idx, None, failure)
 }
 
 // The refusal names the result set where NCBI stops; TBLASTN and TBLASTX write the reports of
@@ -1269,7 +1273,7 @@ fn a_failed_lookup_refusal_names_the_first_query_of_the_batch_it_stops() {
         Some(&spec),
         [vec![0], vec![], vec![0], vec![2, 1]],
         fail_subject_1,
-        |s_idx, failure| failed_database_subject(s_idx, None, failure),
+        describe_database_subject,
         "TBLASTN",
         true,
     )

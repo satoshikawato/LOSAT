@@ -3421,33 +3421,27 @@ fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
         .unwrap()
     };
 
-    for (protein, program) in [(true, "BLASTP"), (false, "BLASTN")] {
-        // Case 1: display id <= 65 (`NP_000001.1`), Seq-align id > 65 (`lcl|aaaa...`).
-        let long_align_throwing = make(
-            vec![long_local.clone(), gb("NP_000001", 1)],
-            Some(b"bad\x81"),
-            None,
-        );
-        assert!(long_align_throwing.description_start().len() <= 65);
-        assert!(long_align_throwing.description_line(protein).0.len() > 65);
-        let err = check_shown_parsed_subject(&long_align_throwing, protein, false, oid, program)
+    let assert_long_id = |subject: &ParsedSubject, protein: bool, taxdb: bool, program: &str| {
+        let err = check_shown_parsed_subject(subject, protein, taxdb, oid, program)
             .unwrap_err()
             .to_string();
         assert!(err.contains("longer than 65 bytes"), "{program}: {err}");
+    };
+    let long_align_ids = vec![long_local.clone(), gb("NP_000001", 1)];
+    let long_display_ids = vec![ParsedSeqId::Gi(777), gb(&long_acc, 1)];
 
-        let long_align_ok = make(
-            vec![long_local.clone(), gb("NP_000001", 1)],
-            Some(b"ok"),
-            None,
-        );
+    for (protein, program) in [(true, "BLASTP"), (false, "BLASTN")] {
+        // Case 1: display id <= 65 (`NP_000001.1`), Seq-align id > 65 (`lcl|aaaa...`).
+        let long_align_throwing = make(long_align_ids.clone(), Some(b"bad\x81"), None);
+        assert!(long_align_throwing.description_start().len() <= 65);
+        assert!(long_align_throwing.description_line(protein).0.len() > 65);
+        assert_long_id(&long_align_throwing, protein, false, program);
+
+        let long_align_ok = make(long_align_ids.clone(), Some(b"ok"), None);
         assert!(check_shown_parsed_subject(&long_align_ok, protein, false, oid, program).is_ok());
 
         // Case 2: display id > 65 (`XXXX...`), Seq-align id <= 65 (`gi|777`).
-        let long_display_throwing = make(
-            vec![ParsedSeqId::Gi(777), gb(&long_acc, 1)],
-            Some(b"bad\x81"),
-            None,
-        );
+        let long_display_throwing = make(long_display_ids.clone(), Some(b"bad\x81"), None);
         assert!(long_display_throwing.description_start().len() > 65);
         assert!(long_display_throwing.description_line(protein).0.len() <= 65);
         assert!(
@@ -3456,15 +3450,8 @@ fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
             "{program}: throwing title uses short Seq-align id"
         );
 
-        let long_display_ok = make(
-            vec![ParsedSeqId::Gi(777), gb(&long_acc, 1)],
-            Some(b"ok"),
-            None,
-        );
-        let err = check_shown_parsed_subject(&long_display_ok, protein, false, oid, program)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("longer than 65 bytes"), "{program}: {err}");
+        let long_display_ok = make(long_display_ids.clone(), Some(b"ok"), None);
+        assert_long_id(&long_display_ok, protein, false, program);
     }
 
     // Empty nucleotide title whose source name throws `UnknownEncoding`: same rule.
@@ -3473,8 +3460,5 @@ fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
             SourceTaxname::Named(std::sync::Arc::from(&b"bad\x81"[..]))
         });
     assert!(nucl_source_throwing.description_may_throw());
-    let err = check_shown_parsed_subject(&nucl_source_throwing, false, true, oid, "BLASTN")
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("longer than 65 bytes"), "{err}");
+    assert_long_id(&nucl_source_throwing, false, true, "BLASTN");
 }

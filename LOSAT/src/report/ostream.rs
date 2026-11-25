@@ -212,7 +212,7 @@ impl std::fmt::Display for StrategyWriteFault {
 
 impl std::error::Error for StrategyWriteFault {}
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247 (CIOException catch)
 /// Whether `error` is a failed piece write of `-export_search_strategy` (`StrategyWriteFault`).
 pub fn is_strategy_write_fault(error: &std::io::Error) -> bool {
     error
@@ -220,7 +220,7 @@ pub fn is_strategy_write_fault(error: &std::io::Error) -> bool {
         .is_some_and(|inner| inner.is::<StrategyWriteFault>())
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247 (silent exit 0)
 fn strategy_write_fault() -> std::io::Error {
     std::io::Error::other(StrategyWriteFault)
 }
@@ -2063,8 +2063,8 @@ fn object_stream_error(program: &str, position: usize, detail: &str) -> String {
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:893-896
-// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:367-402
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:894-897
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-402
 /// The single post of a failed piece write of an object stream on a file (`CIOException::eWrite`).
 fn write_fault_post(program: &str, position: usize) -> Vec<u8> {
     object_stream_error(program, position, "write fault").into_bytes()
@@ -2197,8 +2197,8 @@ impl StrategyStream {
         Err(strategy_write_fault())
     }
 
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:635-651
-    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:880-918
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:635-651 (SaveSearchStrategy)
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:880-918 (FlushBuffer and Flush)
     // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-402, :1138-1148
     /// Writes one complete `Blast4-request` encoded as `bytes` with NCBI's `COStreamBuffer` writes
     /// `pieces` and `803.7` posts `posts` (`(written_before_post, post_line)`).

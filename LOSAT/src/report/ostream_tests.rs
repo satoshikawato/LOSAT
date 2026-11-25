@@ -986,6 +986,10 @@ fn strategy_stream_models_close_failure_and_subsequent_write_fault() {
         .contains("error at byte 975: stack is empty: write fault"));
 }
 
+fn full_asn_piece() -> BufferPiece {
+    BufferPiece::new(4016, 80)
+}
+
 #[test]
 fn strategy_stream_large_request_faults_at_piece_plus_back_limit() {
     // 3 pieces of 4,016 B (leave = 80) + tail: pieces 0+1 = 8,032 B (< 8,191 B) stay buffered;
@@ -999,11 +1003,10 @@ fn strategy_stream_large_request_faults_at_piece_plus_back_limit() {
         "tblastn",
     );
     let doc = vec![b'x'; 13_000];
-    let full = || BufferPiece::new(4016, 80);
     let pieces = [
-        full(),
-        full(),
-        full(),
+        full_asn_piece(),
+        full_asn_piece(),
+        full_asn_piece(),
         BufferPiece::new(951, 0),
         BufferPiece::new(1, 0),
     ];
@@ -1030,10 +1033,9 @@ fn strategy_stream_byte_block_fault_posts_line_and_live_stack_trace() {
     let trace =
         "Blast4-request.body.queue-search.queries.bioseq-set.seq-set.E.seq.inst.seq-data.ncbi2na";
     let expected_line = 1 + doc[..12128].iter().filter(|&&b| b == b'\n').count();
-    let full = || BufferPiece::new(4016, 80);
     let pieces = [
-        full(),
-        full(),
+        full_asn_piece(),
+        full_asn_piece(),
         BufferPiece {
             size: 4016,
             leave: 80,
@@ -1042,13 +1044,13 @@ fn strategy_stream_byte_block_fault_posts_line_and_live_stack_trace() {
         BufferPiece::new(951, 0),
         BufferPiece::new(1, 0),
     ];
-    let mut diag = Vec::new();
+    let mut out_diag = Vec::new();
     let err = stream
-        .write_object(&doc, &pieces, &[], &mut diag, None)
+        .write_object(&doc, &pieces, &[], &mut out_diag, None)
         .unwrap_err();
     assert!(is_strategy_write_fault(&err));
     assert_eq!(
-        String::from_utf8(diag).unwrap(),
+        String::from_utf8(out_diag).unwrap(),
         format!(
             "Error: (802.5) [blastn] CObjectOStream: error at line {expected_line}: {trace}: write fault\n"
         )
@@ -1077,11 +1079,10 @@ fn strategy_stream_interleaves_803_7_posts_around_8191_byte_flush() {
     doc.extend(std::iter::repeat_n(b'B', 4016));
     doc.extend(std::iter::repeat_n(b'C', 4016));
     doc.extend(b"TAIL\n");
-    let full = || BufferPiece::new(4016, 80);
     let pieces = [
-        full(),
-        full(),
-        full(),
+        full_asn_piece(),
+        full_asn_piece(),
+        full_asn_piece(),
         BufferPiece::new(4, 0),
         BufferPiece::new(1, 0),
     ];

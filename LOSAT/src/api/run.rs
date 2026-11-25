@@ -151,7 +151,10 @@ pub struct HspRecord {
     /// The subject's length (`slen`) in the letters of the record or the database sequence,
     /// nucleotides for a translated subject: the whole record's, also with `-subject_loc`.
     pub subject_length: usize,
-    /// The alignment's columns, gaps included (`length`).
+    /// The alignment's columns, gaps included (`length`), inside the query row's aligned range as
+    /// the tables count them: the gaps before the query's first letter or after its last (a
+    /// Smith-Waterman alignment of `-use_sw_tback` may start with some) are left out, also of
+    /// `gap_open` and `gaps`.
     pub length: usize,
     /// The columns of identical letters (`nident`).
     pub num_ident: usize,
@@ -1262,6 +1265,9 @@ pub(super) fn records(
                     length(inputs.subject, s_idx),
                 ),
             };
+            // The counts of the table (`-outfmt 6`): a Smith-Waterman alignment's end gaps in the
+            // query's row are left out; `mismatch` stays.
+            let counts = record.query_range_lengths();
             HspRecord {
                 index,
                 q_idx,
@@ -1292,13 +1298,13 @@ pub(super) fn records(
                 query_length: query_range
                     .map_or_else(|| length(inputs.query, q_idx), |range| range.length()),
                 subject_length,
-                length: hit.length,
+                length: counts.length,
                 num_ident: hit.num_ident,
                 // BLASTN's hits have no positives: its reports show the identities.
                 num_positives: record.positives.unwrap_or(hit.num_ident),
                 mismatch: hit.mismatch,
-                gap_open: hit.gapopen,
-                gaps: record.gaps.unwrap_or_else(|| hit.gap_letters()),
+                gap_open: counts.gap_opens,
+                gaps: counts.gaps,
                 sum_n: record.sum_n,
                 comp_adjust_method: record.comp_adjust_method,
                 query_aligned: record.query_seq.clone(),

@@ -225,10 +225,14 @@ pub fn open_strategy_file(
     if files.filter.is_some() || files.repeats.is_some() {
         if let Some(filter) = files.filter {
             for (option, list) in [
+                ("gilist", &filter.gilist),
+                ("negative_gilist", &filter.negative_gilist),
                 ("seqidlist", &filter.seqidlist),
                 ("negative_seqidlist", &filter.negative_seqidlist),
                 ("taxidlist", &filter.taxidlist),
                 ("negative_taxidlist", &filter.negative_taxidlist),
+                ("ipglist", &filter.ipglist),
+                ("negative_ipglist", &filter.negative_ipglist),
             ] {
                 others.extend(list.as_deref().map(|name| RunFileName {
                     option,

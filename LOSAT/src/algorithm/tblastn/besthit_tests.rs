@@ -35,6 +35,7 @@ fn payload(num_ident: i32) -> KappaHspPayload {
         edit_script: Vec::new(),
         matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
         query_left_out: 0,
+        nullb: None,
     }
 }
 

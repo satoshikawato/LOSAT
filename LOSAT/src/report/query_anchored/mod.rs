@@ -763,7 +763,12 @@ pub(crate) fn write_section<W: Write + ?Sized>(
         // writes nothing more of the group.
         let rows = match prepare_rows(&map, line_length, hsps.query_bioseq, query_frame, sequences)
         {
-            Err(error) if aln_vec::UnknownGeneticCode::is(&error) => continue,
+            Err(error)
+                if aln_vec::UnknownGeneticCode::is(&error)
+                    || aln_vec::TranslateNaToAa::is(&error) =>
+            {
+                continue
+            }
             rows => rows?,
         };
         display_rows(writer, &map, view, line_length, rows, sequences)?;

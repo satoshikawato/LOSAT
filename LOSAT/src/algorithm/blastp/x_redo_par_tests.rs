@@ -2215,6 +2215,7 @@ fn an_excluded_list_after_a_failed_redo_clears_the_failure_unless_the_redo_ends_
     let mark = |query, position, best_evalue| FetchExcludedMatch {
         query,
         position,
+        ordinal: 0,
         best_evalue,
     };
     let run = |lists: &[Option<BlastpHitList>],
@@ -2400,6 +2401,7 @@ fn smith_waterman_windows_give_the_one_thread_heaps_and_error_on_random_searches
                 excluded.extend(places.into_iter().map(|position| FetchExcludedMatch {
                     query: q_idx,
                     position,
+                    ordinal: 0,
                     best_evalue: prelim[mark_rng.below(prelim.len())],
                 }));
             }
@@ -2822,6 +2824,7 @@ fn smith_waterman_jobs_equal_the_one_thread_call_on_the_window_start_heaps() {
                         &mut scratch.gap_scratch,
                         &mut scratch.range_cache,
                         false,
+                        None,
                         &mut sw_scratch,
                         None,
                         &mut |evalue, score| {

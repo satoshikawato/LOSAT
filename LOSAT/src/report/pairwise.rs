@@ -373,6 +373,22 @@ pub struct PairwiseHit {
     /// TBLASTX's rows translated by the display's tables count others. Every count is at least
     /// 0, so every Seq-align carries it.
     pub(crate) seqalign_num_ident: usize,
+    /// Report-time stop or per-HSP alignment skip for a TBLASTN `-in_pssm -window_size 0`
+    /// NULLB-start alignment (`None` for all ordinary HSPs).
+    pub(crate) nullb_stop: Option<PairwiseNullbStop>,
+}
+
+/// Report-time stop or per-HSP alignment skip for a TBLASTN `-in_pssm -window_size 0`
+/// NULLB-start alignment (`algorithm::tblastn::nullb_report`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PairwiseNullbStop {
+    /// `-subject`, positive frame, `rem in {1, 2}`, `k >= 2`: `CreateDensegFromStdseg` throws
+    /// `Std-seg segment lengths not accurate!` (`EmptyRowsStop::StdSegLengths`).
+    StdSegLengths,
+    /// Positive frame, `rem in {1, 2}`, `-db` or (`-subject` with `k == 1`): `CAlnVec::TranslateNAToAA`
+    /// throws inside outfmt 0's per-HSP `try` block, writing `alignment skipped` with this Seq-id
+    /// text without emitting the subject heading yet.
+    SkipTranslate(Arc<[u8]>),
 }
 
 impl PairwiseHit {
@@ -622,6 +638,7 @@ impl From<Hit> for PairwiseHit {
             query_stored_gaps: Vec::new(),
             query_case: Default::default(),
             seqalign_num_ident,
+            nullb_stop: None,
         }
     }
 }
@@ -1047,6 +1064,140 @@ fn write_subject_part<'h, W: Write>(
             write_hsp,
         ),
     }
+}
+
+/// Writes the HSPs `part` of a TBLASTN subject when at least one HSP skips alignment formatting
+/// due to `CAlnVec::TranslateNAToAA` (`PairwiseNullbStop::SkipTranslate`): each skipped HSP
+/// prints NCBI's `alignment skipped` line without emitting the subject heading, and the first
+/// non-skipped HSP prints the subject heading once before its alignment.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1948-1981
+#[allow(clippy::too_many_arguments)]
+fn write_tblastn_subject_with_skips<'h, W: Write>(
+    writer: &mut W,
+    mut probe: Option<&mut FormatProbe<'_>>,
+    group: &super::x_pairwise_par::QueryGroup<'_>,
+    s_idx: u32,
+    part: std::ops::Range<usize>,
+    html: Option<&super::html_ids::HtmlReport>,
+    records: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    heading_of: impl Fn(u32) -> SubjectHeading<'h>,
+    place: super::query_warnings::ReportHook<'_, W>,
+    mut write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
+) -> io::Result<()> {
+    let posts = std::cell::RefCell::new(Vec::new());
+    let html_heading = html.map(|report| HtmlHeading {
+        report,
+        s_idx,
+        rank: group.heading_rank(s_idx, |subject| heading_of(subject).starts(false)),
+        posts: &posts,
+    });
+    let (hits, indices) = (
+        &group.subject_hits[&s_idx],
+        &group.subject_hit_indices[&s_idx],
+    );
+    let first_ok = hits
+        .iter()
+        .position(|h| !matches!(h.nullb_stop, Some(PairwiseNullbStop::SkipTranslate(_))));
+    let heading = heading_of(s_idx);
+    let mut heading_skipped: Option<Vec<u8>> = None;
+    for i in part {
+        let hit = hits[i];
+        let hsp_index = indices[i];
+        if let Some(PairwiseNullbStop::SkipTranslate(id)) = &hit.nullb_stop {
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.begin(hsp_index);
+            }
+            write_skipped_alignment(writer, id)?;
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.end(hsp_index);
+            }
+            continue;
+        }
+        if Some(i) == first_ok {
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_begin(hsp_index);
+            }
+            heading_skipped = match heading {
+                SubjectHeading::Database(db_heading) => write_database_subject_heading(
+                    writer,
+                    db_heading,
+                    false,
+                    hit.subject_length,
+                    html_heading,
+                    &mut *place,
+                )?,
+                SubjectHeading::Record(title) => {
+                    let defline = super::defline::generate_defline(title, false, false);
+                    match html_heading {
+                        Some(html) => {
+                            let attempted: io::Result<Result<Vec<u8>, Vec<u8>>> = (|| {
+                                let mut lines = Vec::new();
+                                if let Err(error) = html.unparsed_start(&mut lines) {
+                                    return HtmlHeading::skips(error, || {
+                                        html.unparsed_skipped_id()
+                                    })
+                                    .map(Err);
+                                }
+                                Ok(match &defline {
+                                    Ok(defline) => {
+                                        super::db_subject::wrap_title(
+                                            &super::html::html_encode(&defline.text),
+                                            &mut lines,
+                                        );
+                                        lines.push(b'\n');
+                                        Ok(lines)
+                                    }
+                                    Err(_) => Err(html.unparsed_skipped_id()),
+                                })
+                            })(
+                            );
+                            place_heading_posts(html, true, writer, &mut *place)?;
+                            match attempted? {
+                                Ok(lines) => {
+                                    write_heading_lines(writer, &lines, hit.subject_length)?;
+                                    None
+                                }
+                                Err(id) => Some(id),
+                            }
+                        }
+                        None => match defline {
+                            Ok(defline) => {
+                                write_subject_header(
+                                    writer,
+                                    &defline.text,
+                                    None,
+                                    hit.subject_length,
+                                )?;
+                                None
+                            }
+                            Err(_) => Some(subject_skipped_id(records, None, s_idx)),
+                        },
+                    }
+                }
+            };
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_end(hsp_index);
+            }
+        }
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.begin(hsp_index);
+        }
+        match &heading_skipped {
+            None => write_hsp(writer, hit, hsp_index)?,
+            Some(id) => write_skipped_alignment(writer, id)?,
+        }
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.end(hsp_index);
+        }
+    }
+    Ok(())
 }
 
 /// The heading `lines` of a subject (each line ending with a newline), `Length=` when the length
@@ -3901,7 +4052,11 @@ fn write_description_table<W: Write>(
     let mut max_total = "Total".len();
     let mut max_sum_n = 1;
     for (index, (_, best, total, sum_n, _)) in rows.iter().enumerate() {
-        max_score = max_score.max(format_bitscore_ncbi(best.hit.bit_score).len());
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4293-4310
+        // `highest_bits` starts at 0.0, so a subject whose HSPs all had invalidated scores (-1.0)
+        // displays 0.0 in the description table.
+        let best_bit_score = best.hit.bit_score.max(0.0);
+        max_score = max_score.max(format_bitscore_ncbi(best_bit_score).len());
         max_evalue = max_evalue.max(format_evalue_ncbi(best.hit.e_value).len());
         max_sum_n = max_sum_n.max(sum_n.to_string().len());
         let total_len = format_total_bitscore_ncbi(*total).len();
@@ -3964,7 +4119,7 @@ fn write_description_table<W: Write>(
         // the lines before it are written (`QueryWarnings::subject_read`).
         place(super::query_warnings::ReportPlace::Load(*s_idx), writer)?;
         super::x_pairwise_par::end_here(end, index)?;
-        let bits = format_bitscore_ncbi(best.hit.bit_score);
+        let bits = format_bitscore_ncbi(best.hit.bit_score.max(0.0));
         match html {
             None => {
                 label_of(*s_idx).write_cut(writer)?;
@@ -5647,6 +5802,18 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         // subject index), as BLASTN's and TBLASTX's. It reads the ranges of every HSP of each
         // described subject first, as BLASTX's (`described_row_range`).
         let descriptions = group.described(self.report.num_descriptions);
+        let rows_throw = described_row_range(remaps, descriptions, grouped)
+            .map(EmptyRowsStop::RowRange)
+            .or_else(|| {
+                descriptions
+                    .iter()
+                    .any(|oid| {
+                        grouped[oid].iter().any(|hit| {
+                            matches!(hit.nullb_stop, Some(PairwiseNullbStop::StdSegLengths))
+                        })
+                    })
+                    .then_some(EmptyRowsStop::StdSegLengths)
+            });
         write_blastn_description_table(
             writer,
             descriptions,
@@ -5661,7 +5828,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             place,
             self.config.html_rows(),
             self.loads,
-            described_row_range(remaps, descriptions, grouped).map(EmptyRowsStop::RowRange),
+            rows_throw,
         )?;
         writeln!(writer)
     }
@@ -5690,29 +5857,69 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         // parsed Seq-ids.
         let (parsed, sources) = (self.parsed_subjects, self.subject_sources);
         let database = self.database.is_some();
-        write_subject_part(
-            writer,
-            probe,
-            group,
-            s_idx,
-            part,
-            false,
-            config.html.as_ref(),
-            parsed,
-            |subject| {
-                group_heading(
+        let hits = &group.subject_hits[&s_idx];
+        let stop = part
+            .clone()
+            .find(|&hsp| matches!(hits[hsp].nullb_stop, Some(PairwiseNullbStop::StdSegLengths)));
+        let written = part.start..stop.unwrap_or(part.end);
+        let has_skip = hits
+            .iter()
+            .any(|h| matches!(h.nullb_stop, Some(PairwiseNullbStop::SkipTranslate(_))));
+        if !written.is_empty() {
+            if has_skip {
+                write_tblastn_subject_with_skips(
+                    writer,
+                    probe,
                     group,
+                    s_idx,
+                    written,
+                    config.html.as_ref(),
                     parsed,
-                    sources,
-                    database,
-                    self.report.gapped,
-                    self.thrown(subject).is_some(),
-                    subject,
-                )
-            },
-            place,
-            write_hsp,
-        )
+                    |subject| {
+                        group_heading(
+                            group,
+                            parsed,
+                            sources,
+                            database,
+                            self.report.gapped,
+                            self.thrown(subject).is_some(),
+                            subject,
+                        )
+                    },
+                    place,
+                    write_hsp,
+                )?;
+            } else {
+                write_subject_part(
+                    writer,
+                    probe,
+                    group,
+                    s_idx,
+                    written,
+                    false,
+                    config.html.as_ref(),
+                    parsed,
+                    |subject| {
+                        group_heading(
+                            group,
+                            parsed,
+                            sources,
+                            database,
+                            self.report.gapped,
+                            self.thrown(subject).is_some(),
+                            subject,
+                        )
+                    },
+                    place,
+                    write_hsp,
+                )?;
+            }
+        }
+        if stop.is_some() {
+            writer.flush()?;
+            return Err(io::Error::other(EmptyRowsStop::StdSegLengths));
+        }
+        Ok(())
     }
 
     fn thrown(&self, s_idx: u32) -> Option<(&crate::ncbi_exception::NcbiException, bool)> {
@@ -5740,6 +5947,19 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         q_idx: usize,
         group: &super::x_pairwise_par::QueryGroup<'_>,
     ) -> io::Result<()> {
+        let stops = group
+            .subject_order
+            .iter()
+            .take(self.report.num_alignments)
+            .any(|s_idx| {
+                group.subject_hits[s_idx]
+                    .iter()
+                    .any(|hit| matches!(hit.nullb_stop, Some(PairwiseNullbStop::StdSegLengths)))
+            });
+        if stops {
+            writer.flush()?;
+            return Err(io::Error::other(EmptyRowsStop::StdSegLengths));
+        }
         write_anchored_section(writer, self.config, self.anchored, q_idx, |_| {
             section_hsps(
                 super::query_anchored::Hsps::of_translated_subjects(),

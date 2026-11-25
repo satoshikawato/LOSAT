@@ -78,6 +78,7 @@ fn hsp<'a>(
         num_positives,
         comp_adjust,
         ops,
+        std_seg_nullb: None,
     }
 }
 
@@ -580,6 +581,7 @@ fn blastp_ungapped_documents(format: SerialFormat, db_title: Option<&[u8]>) -> V
                     num_positives: positives,
                     comp_adjust: 0,
                     ops: &[],
+                    std_seg_nullb: None,
                 }
             },
         )
@@ -750,6 +752,7 @@ fn blastn_ungapped_dendiag_documents_equal_ncbi() {
                 num_positives: 0,
                 comp_adjust: 0,
                 ops: &[],
+                std_seg_nullb: None,
             },
         )
         .collect();

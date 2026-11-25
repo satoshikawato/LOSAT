@@ -170,6 +170,7 @@ pub(super) fn query_records<'a>(
                 num_positives: i32::try_from(hsp.positive)?,
                 comp_adjust: u8::try_from(hsp.composition_method)?,
                 ops: &hsp.edit_script,
+                std_seg_nullb: None,
             });
         }
     }

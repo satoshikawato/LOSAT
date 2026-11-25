@@ -119,6 +119,7 @@ pub(crate) fn query_records_of<'a>(
             num_positives: i32::try_from(num_positives)?,
             comp_adjust: 0,
             ops: &[],
+            std_seg_nullb: None,
         });
     }
     Ok(())

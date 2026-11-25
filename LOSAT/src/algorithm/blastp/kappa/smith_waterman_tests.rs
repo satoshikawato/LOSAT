@@ -192,6 +192,7 @@ fn run_from(
         &CALLBACKS,
         &mut workspace,
         &mut matrix,
+        None,
         cutoff_e,
         resume,
         &mut |query_index, _evalue, _score| {

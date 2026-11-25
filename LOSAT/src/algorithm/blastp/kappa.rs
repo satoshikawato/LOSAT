@@ -1523,6 +1523,7 @@ pub(crate) fn postprocess_preliminary_hits(
 // Out of line: the one-thread loop calls it where `-use_sw_tback` asks for it, and the X-drop
 // redo's function keeps its own body.
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn postprocess_preliminary_hits_smith_waterman(
     preliminary_hits: &[BlastpPreliminaryHsp],
     query_workspace: &BlastpKappaQueryWorkspace,
@@ -1537,6 +1538,7 @@ pub(crate) fn postprocess_preliminary_hits_smith_waterman(
     gap_scratch: &mut GapAlignScratch,
     subject_range_cache: &mut BlastpKappaSubjectRangeCache,
     engine_positives: bool,
+    unadjusted: Option<&AdjustedProteinMatrix>,
     sw_scratch: &mut smith_waterman::SwMatchScratch,
     resume: Option<&smith_waterman::SwMatchResume>,
     would_insert: &mut dyn FnMut(f64, i32) -> smith_waterman::SwHeapAnswer,
@@ -1568,6 +1570,7 @@ pub(crate) fn postprocess_preliminary_hits_smith_waterman(
                 &BLASTP_REDO_ALIGN_CALLBACKS,
                 composition_workspace,
                 matrix_state,
+                unadjusted,
                 expect_value,
                 resume,
                 &mut |_query_index, evalue, score| would_insert(evalue, score),

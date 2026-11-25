@@ -262,6 +262,7 @@ pub(crate) fn protein_row_segments(hit: &crate::common::Hit, segments: &mut Segm
         num_positives: hit.num_positives as i32,
         comp_adjust: 0,
         ops: hit.gap_info.as_deref().unwrap_or(&[]),
+        std_seg_nullb: None,
     };
     // A protein row's strand is unknown: the lengths are not read.
     collect_seq_align_data(&record, 0, 0, false, false, segments);
@@ -308,6 +309,7 @@ pub(crate) fn nucleotide_row_segments(
         num_positives: hit.num_positives as i32,
         comp_adjust: 0,
         ops: hit.gap_info.as_deref().unwrap_or(&[]),
+        std_seg_nullb: None,
     };
     collect_seq_align_data(&record, query_length, 0, false, false, segments);
     crate::report::query_anchored::HspStrands {
@@ -382,6 +384,7 @@ pub(crate) fn translated_row_segments(
         num_positives: hit.num_positives as i32,
         comp_adjust: 0,
         ops: hit.gap_info.as_deref().unwrap_or(&[]),
+        std_seg_nullb: None,
     };
     collect_seq_align_data(
         &record,
@@ -1105,11 +1108,13 @@ fn write_std_segs<E: Encoder>(
     segments: &Segments,
     translate: [bool; 2],
     offsets: [i32; 2],
+    last_seg_fuzz: Option<(u32, i32)>,
 ) {
     let numseg = segments.lens.len();
     let ids = [query_id, subject_id];
     enc.begin_list(false);
     for seg in 0..numseg {
+        let is_last = seg + 1 == numseg;
         begin_std_seg(enc, query_id, subject_id);
         for row in 0..2 {
             enc.element();
@@ -1118,18 +1123,41 @@ fn write_std_segs<E: Encoder>(
                 write_seq_loc_empty(enc, ids[row]);
             } else {
                 let len = segments.lens[seg];
-                let stop = if translate[row] {
+                let mut stop = if translate[row] {
                     start + CODON_LENGTH * len - 1
                 } else {
                     start + len - 1
                 };
-                write_seq_interval(
-                    enc,
-                    ids[row],
-                    start + offsets[row],
-                    stop + offsets[row],
-                    segments.strands[2 * seg + row],
-                );
+                if is_last && row == 0 {
+                    if let Some((_, query_to_sub)) = last_seg_fuzz {
+                        stop -= query_to_sub;
+                    }
+                }
+                let fuzz = if is_last && row == 1 {
+                    last_seg_fuzz.map(|(alt, _)| alt.wrapping_add(offsets[1] as u32))
+                } else {
+                    None
+                };
+                if start < 0 || fuzz.is_some() {
+                    write_seq_interval_pos(
+                        enc,
+                        ids[row],
+                        (
+                            start.wrapping_add(offsets[row]) as u32,
+                            stop.wrapping_add(offsets[row]) as u32,
+                        ),
+                        segments.strands[2 * seg + row],
+                        (None, fuzz),
+                    );
+                } else {
+                    write_seq_interval(
+                        enc,
+                        ids[row],
+                        start + offsets[row],
+                        stop + offsets[row],
+                        segments.strands[2 * seg + row],
+                    );
+                }
             }
         }
         end_std_seg_locs(enc);
@@ -1243,6 +1271,23 @@ pub(crate) fn std_seg_lengths_not_accurate() -> NcbiException {
             function: None,
         },
         "CreateDensegFromStdseg(): Std-seg segment lengths not accurate!",
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:895-900
+/// `CAlnVec::TranslateNAToAA(): NA size expected to be divisible by 3` (alnvec.cpp:898): thrown
+/// when a translated alignment extends past the end of its nucleotide sequence and the clamped
+/// slice length is not a multiple of 3 (TBLASTN `-in_pssm -window_size 0` NULLB-start alignment
+/// with `rem in {1, 2}`).
+pub(crate) fn translate_na_to_aa_exception() -> NcbiException {
+    NcbiException::new(
+        ThrowSite {
+            file: "src/objtools/alnmgr/alnvec.cpp",
+            line: 898,
+            kind: "CAlnException::eTranslateFailure",
+            function: Some("ncbi::objects::CAlnVec::TranslateNAToAA"),
+        },
+        "CAlnVec::TranslateNAToAA(): NA size expected to be divisible by 3",
     )
 }
 
@@ -1849,17 +1894,22 @@ fn write_seq_align_gapped<E: Encoder>(
     enc.member("dim", 1);
     enc.int(BLAST_ALIGNMENT_DIM);
     enc.end_member();
+    let nullb = hsp.std_seg_nullb;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1252-1260
-    enc.member("score", 2);
-    enc.begin_list(true);
-    // psiblast's Seq-aligns leave out a `num_ident` of 0 (`seq_align_num_ident`).
-    let hsp = HspRecord {
-        num_ident: seq_align_num_ident(i64::from(hsp.num_ident), run.program_type).unwrap_or(-1),
-        ..*hsp
-    };
-    write_score_list(enc, &hsp, coverage_query_length(run, query.searched_length));
-    enc.end_list();
-    enc.end_member();
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:3083-3094
+    if !nullb.is_some_and(|n| n.omit_scores) {
+        enc.member("score", 2);
+        enc.begin_list(true);
+        // psiblast's Seq-aligns leave out a `num_ident` of 0 (`seq_align_num_ident`).
+        let hsp = HspRecord {
+            num_ident: seq_align_num_ident(i64::from(hsp.num_ident), run.program_type)
+                .unwrap_or(-1),
+            ..*hsp
+        };
+        write_score_list(enc, &hsp, coverage_query_length(run, query.searched_length));
+        enc.end_list();
+        enc.end_member();
+    }
     enc.member("segs", 3);
     if translated {
         enc.variant("Seq-align_segs", "std", 2);
@@ -1870,6 +1920,7 @@ fn write_seq_align_gapped<E: Encoder>(
             segments,
             [translate1, translate2],
             [query.offset, subject.offset],
+            nullb.and_then(|n| n.last_seg_fuzz),
         );
     } else {
         enc.variant("Seq-align_segs", "denseg", 1);

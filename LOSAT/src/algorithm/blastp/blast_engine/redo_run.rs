@@ -234,6 +234,10 @@ pub(super) struct RedoInputs<'a, P> {
     pub(super) gapped_params: &'a KarlinParams,
     pub(super) gapped_gumbel: &'a Option<BlastGumbelBlk>,
     pub(super) kappa_query_batches: &'a [Range<usize>],
+    /// The call's query batches (`RangedBatch`), used by the OID-ordered CBS=0 Smith-Waterman redo.
+    pub(super) query_batches: &'a [RangedBatch],
+    /// Database ordinal ids by rank (`ListedSubjects::ordinals`), or `None` for `-subject`.
+    pub(super) ordinals: Option<&'a [u32]>,
     /// Each query's context of the E-value adjustment with a composition P-value
     /// (`kappa::evalue_adjust_contexts`).
     pub(super) evalue_adjust_contexts: &'a [kappa::EvalueAdjustContext],
@@ -269,6 +273,9 @@ pub(super) struct RedoInputs<'a, P> {
 /// threads. NCBI has one loop over the matches, which its threads split
 /// (`plan_redo_and_expand_lists`).
 pub(super) enum RedoPath {
+    /// `-comp_based_stats 0 -use_sw_tback` (item X4-c0): OID-ordered Smith-Waterman redo
+    /// (`x_sw_cbs0::run`).
+    SwCbs0,
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -314,6 +321,36 @@ pub(super) fn plan_redo_and_expand_lists<P>(
         ordinary_traceback,
         ..
     } = *redo;
+    // `-comp_based_stats 0 -use_sw_tback` (item X4-c0): NCBI runs `Blast_RedoAlignmentCore_MT`
+    // with the unadjusted matrix in `(ordinal ASC, query DESC)` order (`x_sw_cbs0::run`).
+    if !ordinary_traceback
+        && redo.args.use_sw_tback
+        && !redo.args.ungapped
+        && !redo.args.comp_based_stats.is_enabled()
+    {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        {
+            if x_redo_par::x_bp_redo_par() {
+                let par_on = blastp_should_parallelize_stage(
+                    "kappa-redo-par",
+                    redo.args.num_threads,
+                    redo.blastp_num_threads,
+                    redo.subjects.len(),
+                    x_redo_par::x_matches(preliminary_hit_lists, x_compact_hit_lists),
+                );
+                crate::utils::xreach::x_reach!("LOSAT_X_BPREDOPAR", par_on);
+            }
+            if kappa::x_bp_seg_win().is_some() {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPSEGWIN", false);
+            }
+        }
+        crate::utils::xreach::x_reach!("LOSAT_X_SEGSHARE", false);
+        crate::utils::xreach::x_reach!("LOSAT_X_NEWTONLANES", false);
+        return RedoPath::SwCbs0;
+    }
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -966,6 +1003,121 @@ where
     Ok(())
 }
 
+/// `-comp_based_stats 0 -use_sw_tback` (item X4-c0): runs NCBI's Smith-Waterman redo with the
+/// unadjusted matrix in `(ordinal ASC, query DESC)` order (`x_sw_cbs0::run`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1498
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
+pub(super) fn sw_cbs0_redo<P>(
+    redo: &RedoInputs<'_, P>,
+    preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    redone_matches: &mut [BlastCompoHeap],
+    x_prelim_freed: &mut usize,
+) -> Result<()>
+where
+    P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
+{
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let allow_parallel = x_redo_par::x_bp_redo_par()
+        && blastp_should_parallelize_stage(
+            "kappa-redo-par",
+            redo.args.num_threads,
+            redo.blastp_num_threads,
+            redo.subjects.len(),
+            x_redo_par::x_matches(preliminary_hit_lists, x_compact_hit_lists),
+        );
+    let search = crate::algorithm::blastp::x_sw_cbs0::SwCbs0Search {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        pool: redo.blastp_parallel_pool,
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        threads: redo.blastp_num_threads,
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        allow_parallel,
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        timing: redo.timing_enabled,
+        contexts: redo.contexts,
+        query_nomask: query_nomask_sequence,
+        search_spaces: redo.search_spaces,
+        subjects: redo.subjects,
+        ordinals: redo.ordinals,
+        query_batches: redo.query_batches,
+        evalue_adjust_contexts: redo.evalue_adjust_contexts,
+        matrix: redo.args.scoring.matrix,
+        gapped_params: redo.gapped_params,
+        gapped_gumbel: redo.gapped_gumbel.as_ref(),
+        evalue: redo.args.evalue,
+        build_redo_align_params: redo.build_redo_align_params,
+        engine_positives: redo.needs.seqalign,
+        fetch_excluded: redo.fetch_excluded,
+    };
+    crate::algorithm::blastp::x_sw_cbs0::run(
+        &search,
+        preliminary_hit_lists,
+        x_compact_hit_lists,
+        redone_matches,
+        redo.fetch_notes,
+        x_prelim_freed,
+    )
+}
+
+/// The error of the batch `batch` whose OID-ordered Smith-Waterman redo (`-comp_based_stats 0
+/// -use_sw_tback`, item X4-c0) failed at its last redone match (`sw_batch_failed`), or LOSAT's
+/// refusal where a fetch before it read an unreadable header.
+#[cold]
+#[inline(never)]
+pub(in crate::algorithm::blastp) fn sw_batch_failed_after_oid(
+    fetch_notes: &super::database::FetchNotes<'_>,
+    batch: std::ops::Range<usize>,
+    heaps: &[BlastCompoHeap],
+) -> anyhow::Error {
+    if let Some(refusal) = fetch_notes.refused_before_failure_oid(heaps, batch.clone(), None) {
+        return refusal;
+    }
+    sw_batch_failed(
+        batch.start,
+        &heaps[batch.start],
+        fetch_notes.fetched_before_failure_oid(heaps, batch, None),
+    )
+}
+
+/// The error of the batch `batch` whose OID-ordered Smith-Waterman redo (`-comp_based_stats 0
+/// -use_sw_tback`, item X4-c0) does not end at `(ordinal, q_idx)` (`sw_endless`), or LOSAT's
+/// refusal where a fetch before it read an unreadable header.
+#[cold]
+#[inline(never)]
+pub(in crate::algorithm::blastp) fn sw_endless_after_oid(
+    fetch_notes: &super::database::FetchNotes<'_>,
+    batch: std::ops::Range<usize>,
+    heaps: &[BlastCompoHeap],
+    ordinal: u32,
+    q_idx: usize,
+) -> anyhow::Error {
+    let stop = Some((ordinal, q_idx));
+    if let Some(refusal) = fetch_notes.refused_before_failure_oid(heaps, batch.clone(), stop) {
+        return refusal;
+    }
+    sw_endless(
+        batch.start,
+        fetch_notes.fetched_before_failure_oid(heaps, batch, stop),
+    )
+}
+
 /// The error of the batch `batch` whose Smith-Waterman redo failed at its last redone match
 /// (`sw_batch_failed`), the redo having taken the lists up to query `q_idx`'s with the heaps
 /// `heaps`: LOSAT's refusal instead where a fetch before it read a header that cannot be read,
@@ -1092,6 +1244,42 @@ pub(in crate::algorithm::blastp) fn sw_endless(
         error: crate::core::composition_adjustment::smith_waterman_match::sw_endless_error("blastp", "the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0"),
     }
     .into()
+}
+
+/// NCBI's failure of `-use_sw_tback` with a matrix that has no composition frequency ratios
+/// (`-matrix IDENTITY`, item X4-c0): `s_GetAlignParams` -> `s_MatrixInfoInit` fails at the first
+/// query batch with a valid context before reading any match (`Traceback failed`, exit 3), after
+/// any earlier invalid-only batches' reports and warnings (`ErrorAfterBatchReports`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:657-660,3346-3357
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/matrix_frequency_data.c:1396-1418
+pub(super) fn sw_matrix_check(
+    args: &ResolvedBlastpArgs,
+    query_batches: &[crate::blastinput::seq_range::RangedBatch],
+    query_batch_skipped: &[bool],
+) -> Result<()> {
+    if !args.use_sw_tback
+        || args.ungapped
+        || crate::core::composition_adjustment::adjust_scores::compo_matrix_data(
+            args.scoring.matrix,
+        )
+        .is_some()
+    {
+        return Ok(());
+    }
+    match query_batches
+        .iter()
+        .find(|batch| !batch.searched.is_empty() && !query_batch_skipped[batch.searched.start])
+    {
+        Some(batch) => Err(crate::blastinput::app::ErrorAfterBatchReports::of_batch(
+            batch.searched.start,
+            crate::core::composition_adjustment::smith_waterman_match::sw_batch_failed_error(
+                "blastp", false,
+            ),
+        )
+        .into()),
+        None => Ok(()),
+    }
 }
 
 /// LOSAT's refusal of `-use_sw_tback` with `-ungapped`, on which NCBI crashes at the traceback of
@@ -1380,6 +1568,7 @@ where
                     &mut kappa_gap_scratch,
                     &mut kappa_subject_range_cache,
                     needs.seqalign,
+                    None,
                     sw_scratch,
                     None,
                     &mut |evalue, score| {

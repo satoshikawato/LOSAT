@@ -1869,6 +1869,7 @@ fn multi_subject_stage_c_lists_enter_kappa_in_ncbi_stream_order() {
             edit_script: converted.edit_script,
             matrix_adjust_rule: converted.matrix_adjust_rule,
             query_left_out: 0,
+            nullb: None,
         };
         postredo_by_oid.insert(*oid as i32, (postredo, vec![report]));
         assert!(params.gapping_params.context.get().is_none());

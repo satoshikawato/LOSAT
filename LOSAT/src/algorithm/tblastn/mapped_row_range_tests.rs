@@ -95,6 +95,7 @@ pub(crate) fn run_subject_report(ops: Vec<GapEditOp>, outfmt: &str) -> SubjectRe
                 edit_script: ops,
                 matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
                 query_left_out: 0,
+                nullb: None,
             }],
         })
         .unwrap();

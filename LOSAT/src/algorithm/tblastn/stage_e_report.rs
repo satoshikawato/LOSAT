@@ -180,10 +180,11 @@ pub(super) fn reads_subject_letters(
     outputs: &ReportOutputs<'_>,
     pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
     hard_masked: bool,
+    has_nullb: bool,
 ) -> bool {
     formats_read_subject_letters(
         outputs.hits.is_some(),
-        recounts_shown_counts(pssm, hard_masked),
+        recounts_shown_counts(pssm, hard_masked) || has_nullb,
         outputs.formats.iter().map(|format| format.outfmt),
     )
 }
@@ -233,42 +234,6 @@ pub(super) fn xml_matrix_failure(
         !database,
         pssm,
     )
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4650-4653,
-// c++/src/algo/blast/api/blast_seqalign.cpp:181-182,201-204 and
-// c++/src/objects/seq/seq_align_mapper_base.cpp:1142-1151
-/// The refusal of a reported alignment whose traceback started on its frame's NULLB (TBLASTN
-/// `-in_pssm -window_size 0`, a PSSM whose '-' column scores above BLAST_SCORE_MIN): the only one
-/// whose edit script holds more query letters than its range, as NCBI's ends stop one letter
-/// before the start (the right extension did not run) while the left one holds the start's
-/// column, the NULLB. NCBI's Seq-align, made from the start and the edit script, places that
-/// column past the subject's last base: with `-db` the reports take their ends from it and read
-/// the subject past its end (C++ exceptions where the frame's last codon is not the subject's
-/// last), and with `-subject` the remapping onto the subject's location truncates it and drops
-/// every score of the alignment. LOSAT does not reproduce those reports yet (line RG item X2d-2).
-#[cold]
-#[inline(never)]
-fn x_refuse_a_column_of_the_nullb(hitlists: &[KappaResultHitList]) -> Result<()> {
-    for list in hitlists.iter().flat_map(KappaResultHitList::lists) {
-        for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
-            let query_letters: u64 = payload
-                .edit_script
-                .iter()
-                .map(|op| match *op {
-                    GapEditOp::Sub(n) | GapEditOp::Ins(n) => u64::from(n),
-                    GapEditOp::Del(_) => 0,
-                })
-                .sum();
-            let range = i64::from(linked.hsp.q_end) - i64::from(linked.hsp.q_start);
-            if i64::try_from(query_letters)? != range {
-                bail!(
-                    "TBLASTN -in_pssm with -window_size 0: a reported alignment of a one-hit traceback that starts on the NULLB after its frame (the PSSM's '-' column scores it) holds a column of that NULLB, which NCBI BLAST+ reports past the end of the subject; LOSAT does not support it yet"
-                );
-            }
-        }
-    }
-    Ok(())
 }
 
 /// The ranges of a search as the reports use them: where the searched letters of each
@@ -340,15 +305,18 @@ pub(super) fn render(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
     // Sorts each HSP list by E-value (`Blast_HSPListSortByEvalue`) during Seq-align conversion.
     // `-subject`'s Seq-loc mapper maps the HSPs then, once, before any format reads them.
+    let remaps = matches!(shown, ShownSubjects::Fasta { .. });
     for hitlist in hitlists.iter_mut() {
-        hitlist.put_in_report_order(matches!(shown, ShownSubjects::Fasta { .. }));
+        hitlist.put_in_report_order(remaps, |oid| subject_letters.length(oid));
     }
     // A PSSM query's Bioseq letters where they are not its record's, which the reports read; its
     // counts are the rows' where its reports read other letters than its search and a report
     // reads the subjects' letters (`reads_subject_letters`; the Seq-aligns keep the search's).
     let query_bioseq = pssm.and_then(|psi| psi.bioseq_letters.as_deref());
     let hard_masked = shown.hard_masked();
-    if recounts_shown_counts(pssm, hard_masked) && reads_subject_letters(outputs, pssm, hard_masked)
+    let has_nullb = pssm.is_some() && super::nullb_report::hitlists_have_nullb(hitlists);
+    if (recounts_shown_counts(pssm, hard_masked) || has_nullb)
+        && reads_subject_letters(outputs, pssm, hard_masked, has_nullb)
     {
         recount_shown_counts(
             query_records,
@@ -357,15 +325,10 @@ pub(super) fn render(
             hitlists,
             genetic_code,
             hard_masked,
+            has_nullb,
         )?;
     }
     let hitlists: &[KappaResultHitList] = hitlists;
-    // `-in_pssm` with `-window_size 0`: an alignment whose traceback started on its frame's NULLB
-    // (`search_gapped::x_traceback_start_past_frame`) is refused here, where NCBI reports it, and
-    // not where NCBI drops it after its traceback (the hit list, `-max_target_seqs`).
-    if pssm.is_some() {
-        x_refuse_a_column_of_the_nullb(hitlists)?;
-    }
     // BLAST XML (outfmt 5, and the XML2 and JSON documents of 15 and 16): its texts are made,
     // and a title that NCBI crashes on (`names::Refusal`) is refused, before any format writes
     // (`-out` is already created, empty, as NCBI's).
@@ -566,6 +529,7 @@ pub(super) fn render(
             query_records,
             subject_records,
             subject_letters,
+            shown,
             hitlists,
             scoring,
             genetic_code,
@@ -1058,6 +1022,22 @@ fn write_tabular(
                     hsp_index += 1;
                     continue;
                 }
+                if let Some(nullb) = payload.nullb {
+                    if nullb.std_seg_lengths_inaccurate {
+                        writer.flush()?;
+                        return Err(crate::cli::NativeError::exception(
+                            &crate::report::serial::seqalign::std_seg_lengths_not_accurate(),
+                        )
+                        .into());
+                    }
+                    if nullb.translate_na_failure {
+                        writer.flush()?;
+                        return Err(crate::cli::NativeError::exception(
+                            &crate::report::serial::seqalign::translate_na_to_aa_exception(),
+                        )
+                        .into());
+                    }
+                }
                 let hsp = &linked.hsp;
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1087-1105:
                 // Stage D's local subject coordinate conversion is 1-offset.
@@ -1244,6 +1224,7 @@ fn pairwise_hits(
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     subject_letters: SubjectLetters<'_>,
+    shown: &ShownSubjects<'_>,
     hitlists: &[KappaResultHitList],
     scoring: LocalStageDScoring,
     genetic_code: u8,
@@ -1302,35 +1283,66 @@ fn pairwise_hits(
                 // residue and reverse strand endpoints run in descending order.
                 let (s_start, s_end) = subject_endpoints(hsp, i32::try_from(subject_seq.len())?);
                 let query_letters = QueryLetters::new(query, query_bioseq);
-                let (qseq, sseq) = aligned_sequences(
-                    query_letters,
-                    subject_seq,
-                    &mut x_window,
-                    &code,
-                    &mut translation,
-                    hsp.frame,
-                    hsp.q_start,
-                    hsp.s_start,
-                    hsp.s_end,
-                    &payload.edit_script,
-                )?;
-                // The row holds its masks in lower case; the lists are left to the next row
-                // (`query_anchored::output_seq`), or copied under `-html`.
-                if html_masks.is_some() {
-                    row_masks.clear();
-                }
-                let qseq =
-                    query_row_masks(qseq, &report_masks, hsp.q_start, hsp.q_end, &mut row_masks)?;
-                if let Some(table) = html_masks.as_deref_mut() {
-                    table.push(row_masks.copy_rows());
-                }
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
-                let report_positives = crate::report::row_letters::display_positives(
-                    qseq.as_bytes(),
-                    sseq.as_bytes(),
-                    scoring.matrix,
-                    query_letters.case(),
-                );
+                let nullb_stop = match payload.nullb {
+                    Some(nullb) if nullb.std_seg_lengths_inaccurate => {
+                        Some(crate::report::pairwise::PairwiseNullbStop::StdSegLengths)
+                    }
+                    Some(nullb) if nullb.translate_na_failure => {
+                        let id: Vec<u8> = match (shown.parsed_subject(oid), shown.oid(oid)) {
+                            (Some(parsed), _) => parsed.skipped_id().to_vec(),
+                            (None, Some(db_oid)) => format!("BL_ORD_ID:{db_oid}").into_bytes(),
+                            (None, None) => format!("Subject_{}", oid + 1).into_bytes(),
+                        };
+                        Some(crate::report::pairwise::PairwiseNullbStop::SkipTranslate(
+                            Arc::from(id),
+                        ))
+                    }
+                    _ => None,
+                };
+                let (qseq, sseq, report_positives) = if nullb_stop.is_some() {
+                    if let Some(table) = html_masks.as_deref_mut() {
+                        row_masks.clear();
+                        table.push(row_masks.copy_rows());
+                    }
+                    (String::new(), String::new(), 0)
+                } else {
+                    let (qseq, sseq) = aligned_sequences(
+                        query_letters,
+                        subject_seq,
+                        &mut x_window,
+                        &code,
+                        &mut translation,
+                        hsp.frame,
+                        hsp.q_start,
+                        hsp.s_start,
+                        hsp.s_end,
+                        &payload.edit_script,
+                        payload.nullb,
+                    )?;
+                    // The row holds its masks in lower case; the lists are left to the next row
+                    // (`query_anchored::output_seq`), or copied under `-html`.
+                    if html_masks.is_some() {
+                        row_masks.clear();
+                    }
+                    let qseq = query_row_masks(
+                        qseq,
+                        &report_masks,
+                        hsp.q_start,
+                        hsp.q_end,
+                        &mut row_masks,
+                    )?;
+                    if let Some(table) = html_masks.as_deref_mut() {
+                        table.push(row_masks.copy_rows());
+                    }
+                    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
+                    let report_positives = crate::report::row_letters::display_positives(
+                        qseq.as_bytes(),
+                        sseq.as_bytes(),
+                        scoring.matrix,
+                        query_letters.case(),
+                    );
+                    (qseq, sseq, report_positives)
+                };
                 // The rows are read from the searched letters; the report prints record
                 // coordinates (`record_coordinates`).
                 let searched = (hsp.q_start + 1, hsp.q_end, s_start, s_end);
@@ -1409,12 +1421,14 @@ fn pairwise_hits(
                     // SEG-masked letter is a mismatch there and an identity in the rows
                     // (`report_num_ident`).
                     seqalign_num_ident: usize::try_from(payload.num_ident)?,
+                    nullb_stop,
                 });
                 // The model of the reads sorts by `hsp_scores` without the rows
                 // (`TblastnDatabase::subject_read_texts`): the row's values where the records'
                 // offsets move nothing.
                 debug_assert!(
-                    searched != (q_start, q_end, s_start, s_end)
+                    payload.nullb.is_some()
+                        || searched != (q_start, q_end, s_start, s_end)
                         || hsp_scores(linked, payload, subject_seq.len()).ok()
                             == hits.last().map(crate::report::hit_sort::HspScores::of),
                     "TBLASTN hsp_scores differs from its row"
@@ -1688,12 +1702,14 @@ fn recount_shown_counts(
     hitlists: &mut [KappaResultHitList],
     genetic_code: u8,
     hard_masked: bool,
+    has_nullb: bool,
 ) -> Result<()> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut x_window = Vec::new();
     for (query, hitlist) in query_records.iter().zip(hitlists.iter_mut()) {
         let letters = QueryLetters::new(query.seq(), query_bioseq);
-        if !hard_masked && !letters.shows_other_letters() {
+        let recount_all = hard_masked || letters.shows_other_letters();
+        if !recount_all && !has_nullb {
             continue;
         }
         for list in hitlist.lists_mut() {
@@ -1701,6 +1717,15 @@ fn recount_shown_counts(
             let subject_seq = subject_letters.nt(oid);
             let mut translation = TargetTranslation::of(subject_seq, &code);
             for (linked, payload) in list.hsps.hsps.iter().zip(list.payloads.iter_mut()) {
+                if !recount_all && payload.nullb.is_none() {
+                    continue;
+                }
+                if payload
+                    .nullb
+                    .is_some_and(|n| n.std_seg_lengths_inaccurate || n.translate_na_failure)
+                {
+                    continue;
+                }
                 let hsp = &linked.hsp;
                 let (qseq, sseq) = aligned_sequences(
                     letters,
@@ -1713,6 +1738,7 @@ fn recount_shown_counts(
                     hsp.s_start,
                     hsp.s_end,
                     &payload.edit_script,
+                    payload.nullb,
                 )?;
                 let ident = qseq
                     .bytes()
@@ -1750,7 +1776,22 @@ fn aligned_sequences(
     s_start: i32,
     s_end: i32,
     script: &[GapEditOp],
+    nullb: Option<super::nullb_report::NullbReport>,
 ) -> Result<(String, String)> {
+    if let Some(nullb) = nullb.filter(|n| n.trailing_nullb_dash || n.wrapped_minus_tail > 0) {
+        return super::nullb_report::aligned_sequences_nullb(
+            query,
+            subject,
+            window_buffer,
+            code,
+            target,
+            frame,
+            q_start,
+            s_start,
+            script,
+            nullb,
+        );
+    }
     ensure!(!script.is_empty(), "TBLASTN report HSP has no edit script");
     let (translated, _, base) = target.get(frame, s_start, s_end)?;
     let mut q = usize::try_from(q_start)?;
@@ -1860,6 +1901,7 @@ pub(super) fn aligned_sequences_into(
     s_start: i32,
     s_end: i32,
     script: &[GapEditOp],
+    nullb: Option<super::nullb_report::NullbReport>,
     query_string: &mut String,
     subject_string: &mut String,
 ) -> Result<()> {
@@ -1874,6 +1916,7 @@ pub(super) fn aligned_sequences_into(
         s_start,
         s_end,
         script,
+        nullb,
     )?;
     Ok(())
 }

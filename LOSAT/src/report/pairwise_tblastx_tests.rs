@@ -171,6 +171,7 @@ fn tblastx_hit(sum_n: i32) -> PairwiseHit {
         query_stored_gaps: Vec::new(),
         query_case: Default::default(),
         seqalign_num_ident: 60,
+        nullb_stop: None,
     }
 }
 

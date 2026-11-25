@@ -1378,6 +1378,7 @@ fn excluded_lists_leave_marks_of_their_places() {
     let mark = |query, position, best_evalue| FetchExcludedMatch {
         query,
         position,
+        ordinal: 0,
         best_evalue,
     };
     assert_eq!(listed.fetch_excluded, [mark(0, 2, 0.04), mark(2, 0, 1e-9)]);

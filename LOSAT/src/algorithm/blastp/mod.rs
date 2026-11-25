@@ -46,6 +46,9 @@ mod x_redo_fit;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_redo_par;
+// BLASTP `-comp_based_stats 0 -use_sw_tback` (item X4-c0): Smith-Waterman redo without
+// composition-based statistics in NCBI's OID stream order.
+mod x_sw_cbs0;
 // The redo of a `-db` search reads each match's subject from the database.
 pub(crate) mod x_redo_subjects;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:102-3691

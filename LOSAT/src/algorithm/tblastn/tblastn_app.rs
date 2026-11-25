@@ -2400,6 +2400,7 @@ fn search(
         // `-db`: the reported sequences by rank, with their records and lengths, and their packed
         // subjects where a report reads their letters; the database's other sequences are dropped
         // before the reports.
+        let has_nullb = pssm.is_some() && super::nullb_report::hitlists_have_nullb(&results);
         let reported = match database {
             Some(database) => Some(
                 super::database::reported_subjects(
@@ -2411,6 +2412,7 @@ fn search(
                         outputs,
                         pssm.as_deref(),
                         hard_masked,
+                        has_nullb,
                     ),
                     &outputs.formats,
                     (outputs.other_outfmts, resolved.html.is_some()),

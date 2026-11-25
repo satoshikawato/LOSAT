@@ -71,7 +71,7 @@ use super::super::lookup::{x_dc_csr, x_mb_lut_keep};
 use super::super::pairwise::{pairwise_hits, pairwise_windows, DisplayMasks, Rows as PairwiseRows};
 use super::super::query_split::{
     masked_before_part, restrict_masks, restrict_masks_with_letter_before, split_query_batch,
-    splits, ChunkStep, QueryChunk, SplitBatchSteps, SplitSizes,
+    splits, ChunkQuery, ChunkStep, QueryChunk, SplitBatchSteps, SplitSizes,
 };
 use super::super::repeat_filter::MasksOutside;
 use super::super::scoring::{
@@ -8011,6 +8011,17 @@ struct QueryBatch {
     fetched_utf8: Option<crate::seqdb::SeqLocation>,
 }
 
+/// Whether a `BatchStage::Search` call runs only the batch's set-up (`refused_batch_setup_error`),
+/// and if so whether NCBI splits the refused batch (`Split`: skip whole-batch subject checks and
+/// sequence-file reads so the chunk loop checks them in NCBI's order; `Whole`: run them as for a
+/// non-split batch).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SetupOnly {
+    No,
+    Whole,
+    Split,
+}
+
 /// Which of NCBI's stages `search_query_batch` runs for its queries.
 #[derive(Clone, Copy)]
 enum BatchStage<'a> {
@@ -8040,7 +8051,7 @@ enum BatchStage<'a> {
         lower_case_before: &'a [bool],
         masks_outside: &'a [MasksOutside],
         last: bool,
-        setup_only: bool,
+        setup_only: SetupOnly,
     },
     /// The preliminary search of one query chunk of a split batch
     /// (`SplitQuery_CreateChunkData`), with the masks of its query parts and the search
@@ -8735,7 +8746,7 @@ fn run_in_pool(
                     lower_case_before: &lower_case_before,
                     masks_outside: &masks_outside,
                     last,
-                    setup_only: false,
+                    setup_only: SetupOnly::No,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -8756,7 +8767,7 @@ fn run_in_pool(
                     lower_case_before: &lower_case_before,
                     masks_outside: &masks_outside,
                     last,
-                    setup_only: false,
+                    setup_only: SetupOnly::No,
                 },
                 &mut warnings[start],
                 x_lut_keep.as_ref(),
@@ -10294,11 +10305,67 @@ fn unwrap_batch_report_error(error: anyhow::Error) -> anyhow::Error {
     }
 }
 
+/// Restricts the batch's masks to the query parts of one chunk (`chunk_parts`, each mapped to its
+/// index in `query_masks`, `query_offsets`, `lower_case_before` and `masks_outside`), computes
+/// `parts_outside` for `-filtering_db`, and delegates to `chunk_query_masks`. Shared by
+/// `search_query_chunks` and `refused_batch_setup_error` so both paths apply identical chunk
+/// masking.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:876-880
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:171-180
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/repeats_filter_cxx.cpp:236-306
+#[allow(clippy::too_many_arguments)]
+fn chunk_part_masks<'a>(
+    args: &BlastnArgs,
+    parts: &[FastaRecord],
+    chunk_parts: impl IntoIterator<Item = (&'a ChunkQuery, usize)>,
+    query_masks: &[Vec<MaskedInterval>],
+    query_offsets: &[usize],
+    lower_case_before: &[bool],
+    masks_outside: &[MasksOutside],
+    parallel_pool: &crate::utils::threading::SearchPool<'_>,
+) -> Result<Vec<Vec<MaskedInterval>>> {
+    if parts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut restricted: Vec<Vec<MaskedInterval>> = Vec::with_capacity(parts.len());
+    // With `-filtering_db` the masks that the chunk keeps before a part's letters join the part's
+    // masks when it combines the part's repeat hits with them (`query_split::masked_before_part`).
+    let mut parts_outside: Vec<MasksOutside> = if args.repeat_filter.is_some() {
+        Vec::with_capacity(parts.len())
+    } else {
+        Vec::new()
+    };
+    for (part, slot) in chunk_parts {
+        // A query whose letter before its `-query_loc` interval is masked in the batch's masks
+        // restricts that letter too: a lower-case letter (`lower_case_before`), or with
+        // `-filtering_db` one that the batch's repeat masks joined (`masks_outside`, bit 0).
+        let (masks, offset) = (&query_masks[slot], query_offsets[slot]);
+        let letter_before = lower_case_before.get(slot) == Some(&true)
+            || masks_outside
+                .get(slot)
+                .is_some_and(|outside| outside.before & 1 != 0);
+        restricted.push(if letter_before {
+            restrict_masks_with_letter_before(masks, part, offset)
+        } else {
+            restrict_masks(masks, part, offset)
+        });
+        if args.repeat_filter.is_some() {
+            let before = masks_outside.get(slot).map_or(0, |outside| outside.before);
+            parts_outside.push(MasksOutside::before_part(masked_before_part(
+                masks, before, part, offset,
+            )));
+        }
+    }
+    chunk_query_masks(args, parts, restricted, &mut parts_outside, parallel_pool)
+        .map_err(|error| mask_rejection(args, error))
+}
+
 /// NCBI's error of the set-up of the records of a refused batch that are first in their scope
 /// (`first_in_scope`, of the batch's searched records `batch`, numbered from `start` in the run),
-/// which ends before the search (`setup_only`), or `None` where the set-up succeeds or a split
-/// batch stops at an empty chunk (`CQuerySplitter::Split`): the refusal then comes
-/// (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20).
+/// which ends before the search (`setup_only`), or `None` where the set-up succeeds, no chosen
+/// record has a valid context, or a split batch stops at an empty chunk (`CQuerySplitter::Split`):
+/// the refusal then comes (`query_batch::refused_batch_error`; line WQA D10 round 5, 2026-11-20).
 #[allow(clippy::too_many_arguments)]
 fn refused_batch_setup_error(
     args: &BlastnArgs,
@@ -10318,128 +10385,26 @@ fn refused_batch_setup_error(
     query_keep: &mut Vec<u8>,
 ) -> Option<anyhow::Error> {
     let chosen: Vec<usize> = first_in_scope.collect();
-    let batch_lengths: Vec<usize> = batch.iter().map(|record| record.seq().len()).collect();
-    if !args.ungapped {
-        if let Some(chunks) = split_query_batch(
-            &batch_lengths,
-            batching.split,
-            QueryStrand::from_option(&args.strand),
-        ) {
-            let read_fails = context_statistics::split_read_fails(subjects);
-            let setup_checks = context_statistics::gap_align_setup_checks(args, subjects, false);
-            let Ok(steps) = SplitBatchSteps::new(
-                "BLASTN",
-                &chunks,
-                batching.split,
-                read_fails,
-                setup_checks,
-                &after_batch_reports,
-            ) else {
-                return None;
-            };
-            let mut steps = steps.without_resplit_stop();
-            let intro = blastn_intro(args);
-            let shown = ShownSubjects::new(args, subjects);
-            for chunk in &chunks {
-                let parts: Vec<FastaRecord> = chunk
-                    .queries
-                    .iter()
-                    .filter(|part| chosen.contains(&(start + part.query)))
-                    .map(|part| batch[part.query].cut(part.from, part.to))
-                    .collect();
-                if parts.is_empty() {
-                    if let Err(error) = run_chunk_split_steps(
-                        chunk,
-                        &mut steps,
-                        false,
-                        true,
-                        subjects,
-                        first_batch,
-                        reborrow_outputs(&mut outputs),
-                        intro,
-                        &shown,
-                    ) {
-                        match error.downcast::<SetUpOnly>() {
-                            Ok(SetUpOnly(true)) => return None,
-                            Ok(SetUpOnly(false)) => continue,
-                            Err(error) => return Some(unwrap_batch_report_error(error)),
-                        }
-                    }
-                    continue;
-                }
-                let restricted: Vec<Vec<MaskedInterval>> = chunk
-                    .queries
-                    .iter()
-                    .filter(|part| chosen.contains(&(start + part.query)))
-                    .map(|part| {
-                        let Some(masks) = window_masker_masks.map(|m| &m[part.query]) else {
-                            return Vec::new();
-                        };
-                        let offset = query_offsets[start + part.query];
-                        let letter_before = lower_case_before.get(part.query) == Some(&true)
-                            || masks_outside
-                                .get(part.query)
-                                .is_some_and(|outside| outside.before & 1 != 0);
-                        if letter_before {
-                            restrict_masks_with_letter_before(masks, part, offset)
-                        } else {
-                            restrict_masks(masks, part, offset)
-                        }
-                    })
-                    .collect();
-                let mut parts_outside = Vec::new();
-                let part_masks = match chunk_query_masks(
-                    args,
-                    &parts,
-                    restricted,
-                    &mut parts_outside,
-                    parallel_pool,
-                ) {
-                    Ok(masks) => masks,
-                    Err(error) => return Some(mask_rejection(args, error)),
-                };
-                let zero_spaces = vec![0i64; 2 * parts.len()];
-                let set_up = search_query_batch_inner::<false>(
-                    args,
-                    x_query_drop::BatchQueries::Shared(&parts),
-                    subjects,
-                    reborrow_outputs(&mut outputs),
-                    parallel_pool,
-                    batching,
-                    first_batch,
-                    BatchStage::ChunkPrelim {
-                        query_masks: &part_masks,
-                        batch_eff_searchsp: &zero_spaces,
-                        x_last: true,
-                        setup_only: true,
-                    },
-                    posts,
-                    None,
-                    query_keep,
-                    Some((chunk, &mut steps)),
-                );
-                if let Err(error) = set_up {
-                    match error.downcast::<SetUpOnly>() {
-                        Ok(SetUpOnly(true)) => return None,
-                        Ok(SetUpOnly(false)) => continue,
-                        Err(error) => return Some(unwrap_batch_report_error(error)),
-                    }
-                }
-            }
-            return None;
-        }
-    }
     let records: Vec<FastaRecord> = chosen
         .iter()
         .map(|&query| batch[query - start].clone())
         .collect();
     let offsets: Vec<usize> = chosen.iter().map(|&query| query_offsets[query]).collect();
-    let masks: Option<Vec<Vec<MaskedInterval>>> = window_masker_masks.map(|masks| {
-        chosen
+    // Compute the batch's masks for the chosen records once so both the batch validity check and
+    // (when split) each chunk's restricted masks share them (`window_masker_masks` holds
+    // WindowMasker or `-filtering_db` masks; otherwise DUST and `-lcase_masking`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:518-530
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/dust_filter.cpp:92-128
+    let chosen_masks: Vec<Vec<MaskedInterval>> = match window_masker_masks {
+        Some(masks) => chosen
             .iter()
             .map(|&query| masks[query - start].clone())
-            .collect()
-    });
+            .collect(),
+        None => match query_masks(args, records.as_slice(), &mut [], parallel_pool) {
+            Ok((masks, _)) => masks,
+            Err(error) => return Some(mask_rejection(args, error)),
+        },
+    };
     let letter_before: Vec<bool> = if lower_case_before.is_empty() {
         Vec::new()
     } else {
@@ -10456,13 +10421,27 @@ fn refused_batch_setup_error(
             .map(|&query| masks_outside[query - start])
             .collect()
     };
+    let batch_lengths: Vec<usize> = batch.iter().map(|record| record.seq().len()).collect();
+    let chunks = (!args.ungapped)
+        .then(|| {
+            split_query_batch(
+                &batch_lengths,
+                batching.split,
+                QueryStrand::from_option(&args.strand),
+            )
+        })
+        .flatten();
     let stage = BatchStage::Search {
         query_offsets: &offsets,
-        query_masks: masks.as_deref(),
+        query_masks: Some(&chosen_masks),
         lower_case_before: &letter_before,
         masks_outside: &outside,
         last: true,
-        setup_only: true,
+        setup_only: if chunks.is_some() {
+            SetupOnly::Split
+        } else {
+            SetupOnly::Whole
+        },
     };
     let queries = x_query_drop::BatchQueries::Shared(&records);
     let set_up = if args.ungapped {
@@ -10470,7 +10449,7 @@ fn refused_batch_setup_error(
             args,
             queries,
             subjects,
-            outputs,
+            reborrow_outputs(&mut outputs),
             parallel_pool,
             batching,
             first_batch,
@@ -10484,7 +10463,7 @@ fn refused_batch_setup_error(
             args,
             queries,
             subjects,
-            outputs,
+            reborrow_outputs(&mut outputs),
             parallel_pool,
             batching,
             first_batch,
@@ -10494,7 +10473,87 @@ fn refused_batch_setup_error(
             query_keep,
         )
     };
-    set_up.err().map(unwrap_batch_report_error)
+    let any_valid_context = match set_up {
+        Ok(_) => unreachable!("setup_only always ends with SetUpOnly or an error"),
+        Err(error) => match error.downcast::<SetUpOnly>() {
+            Ok(SetUpOnly(valid)) => valid,
+            Err(error) => return Some(unwrap_batch_report_error(error)),
+        },
+    };
+    let chunks = chunks?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:232-236
+    // Enter the chunk loop only when the chosen records have a valid context, matching the normal
+    // split path (`search_query_batch_inner`).
+    if !any_valid_context {
+        return None;
+    }
+    let read_fails = context_statistics::split_read_fails(subjects);
+    let setup_checks = context_statistics::gap_align_setup_checks(args, subjects, false);
+    let steps = SplitBatchSteps::new(
+        "BLASTN",
+        &chunks,
+        batching.split,
+        read_fails,
+        setup_checks,
+        &after_batch_reports,
+    )
+    .ok()?;
+    let mut steps = steps.without_resplit_stop();
+    let mut chosen_slot: Vec<Option<usize>> = vec![None; batch.len()];
+    for (slot, &query) in chosen.iter().enumerate() {
+        chosen_slot[query - start] = Some(slot);
+    }
+    for chunk in &chunks {
+        let mut parts: Vec<FastaRecord> = Vec::new();
+        let mut chunk_parts: Vec<(&ChunkQuery, usize)> = Vec::new();
+        for part in &chunk.queries {
+            if let Some(slot) = chosen_slot[part.query] {
+                parts.push(batch[part.query].cut(part.from, part.to));
+                chunk_parts.push((part, slot));
+            }
+        }
+        let part_masks = match chunk_part_masks(
+            args,
+            &parts,
+            chunk_parts,
+            &chosen_masks,
+            &offsets,
+            &letter_before,
+            &outside,
+            parallel_pool,
+        ) {
+            Ok(masks) => masks,
+            Err(error) => return Some(error),
+        };
+        let zero_spaces = vec![0i64; 2 * parts.len()];
+        let set_up = search_query_batch_inner::<false>(
+            args,
+            x_query_drop::BatchQueries::Shared(&parts),
+            subjects,
+            reborrow_outputs(&mut outputs),
+            parallel_pool,
+            batching,
+            first_batch,
+            BatchStage::ChunkPrelim {
+                query_masks: &part_masks,
+                batch_eff_searchsp: &zero_spaces,
+                x_last: true,
+                setup_only: true,
+            },
+            posts,
+            None,
+            query_keep,
+            Some((chunk, &mut steps)),
+        );
+        if let Err(error) = set_up {
+            match error.downcast::<SetUpOnly>() {
+                Ok(SetUpOnly(true)) => return None,
+                Ok(SetUpOnly(false)) => continue,
+                Err(error) => return Some(unwrap_batch_report_error(error)),
+            }
+        }
+    }
+    None
 }
 
 /// Applies `SplitBatchSteps` (`before_read` and `before_search`) to one BLASTN query chunk after
@@ -10822,14 +10881,29 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
     // Whether NCBI searches the batch chunk by chunk when it has a valid context (a gapped
     // search, `search_query_chunks`): each chunk's set-up then checks the subjects
     // (`ContextInputs::split`).
-    let split = matches!(stage, BatchStage::Search { .. })
-        && !UNGAPPED
-        && splits(
-            batching.split,
-            (0..letters.count())
-                .map(|index| letters.length(index))
-                .sum(),
-        );
+    let split = match stage {
+        BatchStage::Search {
+            setup_only: SetupOnly::Split,
+            ..
+        } => true,
+        BatchStage::Search {
+            setup_only: SetupOnly::Whole,
+            ..
+        } => false,
+        BatchStage::Search {
+            setup_only: SetupOnly::No,
+            ..
+        } => {
+            !UNGAPPED
+                && splits(
+                    batching.split,
+                    (0..letters.count())
+                        .map(|index| letters.length(index))
+                        .sum(),
+                )
+        }
+        BatchStage::ChunkPrelim { .. } => false,
+    };
     // The Karlin-Altschul blocks of the batch's contexts, the checks of the set-up and the
     // effective search spaces (`context_statistics::context_statistics`).
     let context_statistics::ContextStatistics {
@@ -10889,7 +10963,7 @@ fn search_query_batch_inner<const UNGAPPED: bool>(
     } else if matches!(
         stage,
         BatchStage::Search {
-            setup_only: true,
+            setup_only: SetupOnly::Whole | SetupOnly::Split,
             ..
         }
     ) {
@@ -11515,56 +11589,22 @@ fn search_query_chunks(
             .iter()
             .map(|part| queries.cut(part.query, part.from, part.to))
             .collect();
-        // A query whose letter before its `-query_loc` interval is masked in the batch's masks
-        // restricts that letter too: a lower-case letter (`lower_case_before`), or with
-        // `-filtering_db` one that the batch's repeat masks joined (`masks_outside`, bit 0).
-        let restricted = chunk
-            .queries
-            .iter()
-            .map(|part| {
-                let (masks, offset) = (&query_masks[part.query], query_offsets[part.query]);
-                let letter_before = lower_case_before.get(part.query) == Some(&true)
-                    || masks_outside
-                        .get(part.query)
-                        .is_some_and(|outside| outside.before & 1 != 0);
-                if letter_before {
-                    restrict_masks_with_letter_before(masks, part, offset)
-                } else {
-                    restrict_masks(masks, part, offset)
-                }
-            })
-            .collect();
         // The chunk's query source loads the registry of `-window_masker_taxid` before it
         // makes the masks (`WindowMasker::load_posts`): after the posts of the batch's set-up and
         // of the chunks before, and before every error of the chunk's search.
         if let Some(window_masker) = &args.window_masker {
             posts.append(window_masker.load_posts(false));
         }
-        // With `-filtering_db` the masks that the chunk keeps before a part's letters join the
-        // part's masks when it combines the part's repeat hits with them
-        // (`query_split::masked_before_part`).
-        let mut parts_outside: Vec<MasksOutside> = if args.repeat_filter.is_some() {
-            chunk
-                .queries
-                .iter()
-                .map(|part| {
-                    let before = masks_outside
-                        .get(part.query)
-                        .map_or(0, |outside| outside.before);
-                    MasksOutside::before_part(masked_before_part(
-                        &query_masks[part.query],
-                        before,
-                        part,
-                        query_offsets[part.query],
-                    ))
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let part_masks =
-            chunk_query_masks(args, &parts, restricted, &mut parts_outside, parallel_pool)
-                .map_err(|error| mask_rejection(args, error))?;
+        let part_masks = chunk_part_masks(
+            args,
+            &parts,
+            chunk.queries.iter().map(|part| (part, part.query)),
+            query_masks,
+            query_offsets,
+            lower_case_before,
+            masks_outside,
+            parallel_pool,
+        )?;
         let batch = search_query_batch_inner::<false>(
             args,
             x_query_drop::BatchQueries::Shared(&parts),

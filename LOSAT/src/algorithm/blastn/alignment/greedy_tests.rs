@@ -884,9 +884,14 @@ fn affine_greedy_handles_gap_costs_above_32767_and_up_to_int_max() {
 
     // Dense 32-bit overflow guard: gap costs <= 32767 with huge max_dist or x_drop
     // detect i32 overflow and fall back to sparse without panic.
+    // For 1/-2 32767/32767: doubled gap_extend = 65535, so 30_000 * 65535 = 1.97e9 fits i32
+    // while 33_000 * 65535 = 2.16e9 overflows i32::MAX.
     assert!(!greedy_sparse::dense_affine_overflows(1000, 54, 1, 2, 5, 2));
-    assert!(greedy_sparse::dense_affine_overflows(
+    assert!(!greedy_sparse::dense_affine_overflows(
         30_000, 54, 1, 2, 32_767, 32_767
+    ));
+    assert!(greedy_sparse::dense_affine_overflows(
+        33_000, 54, 1, 2, 32_767, 32_767
     ));
     assert!(greedy_sparse::dense_affine_overflows(
         1000,

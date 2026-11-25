@@ -1,0 +1,6 @@
+# TBLASTN 2.17.0+
+# Query: mix2_u the glob1 ORF of multidb/nnp
+# Database: tests/db_search/multidb/na tests/db_search/multidb/nnp
+# Fields: query id, subject length, evalue
+# 1 hits found
+mix2_u	1043	

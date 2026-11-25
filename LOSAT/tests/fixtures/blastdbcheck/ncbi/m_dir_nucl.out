@@ -1,0 +1,13 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+By default, testing 200 randomly sampled OIDs.
+
+Finding database volumes.
+Testing 2 volume(s).
+ <RUN>/in/n4
+ <RUN>/in/n5
+ Result=SUCCESS. No errors reported for 2 volumes.
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).

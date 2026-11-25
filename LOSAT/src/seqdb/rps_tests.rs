@@ -1,14 +1,8 @@
 use super::*;
 
 /// A temporary directory of this test (tests of one binary run in parallel).
-fn scratch(name: &str) -> PathBuf {
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-rps-{name}-{}",
-        crate::utils::test_dir::process_id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn scratch(name: &str) -> crate::utils::test_dir::TempDir {
+    crate::utils::test_dir::TempDir::unique(&format!("rps-{name}"))
 }
 
 fn words(values: &[i32]) -> Vec<u8> {
@@ -74,7 +68,6 @@ fn a_volume_of_28_columns_is_viewed_in_place() {
     assert_eq!(files.cells().unwrap()[9], [4, 2, 4, 0]);
     assert_eq!(files.overflow().unwrap(), &[99, 3, 5, 6]);
     assert_eq!(files.pv()[0], (1 << 5) | (1 << 9));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // Review C of line RG D1a-4 (SF2 c): NCBI's row after the rows (`rps_pssm[num_pssm_rows]`,
@@ -128,7 +121,6 @@ fn the_row_after_the_rows_reads_the_files_bytes_then_its_last_pages_zeros() {
     assert_eq!(row[..10], [Some(0); 10]);
     assert_eq!(row[10..], [None; 18]);
     drop(files);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -142,7 +134,6 @@ fn a_volume_of_26_columns_reads_the_next_rows_first_columns() {
     // Letters 26 and 27 read the next row's columns 0 and 1 (stride 26).
     assert_eq!((rows[2][26], rows[2][27]), (300, 301));
     assert_eq!((rows[6][26], rows[6][27]), (0, 0));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A `.freq` file of `columns` columns for the two profiles of `write_volume` (rows 0 to
@@ -191,7 +182,6 @@ fn the_freq_rows_have_the_rps_alphabets_stride() {
     assert_eq!(ratios[0][0], f64::from(flat[52]) / 1e9);
     assert_eq!(ratios[0][25], f64::from(flat[77]) / 1e9);
     assert_eq!((ratios[0][26], ratios[0][27]), (0.0, 0.0));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -203,7 +193,6 @@ fn the_score_bound_of_a_profile_sums_its_rows_positive_maxima() {
     // 0..=3 (the last is its sentinel row), profile 1 rows 4..=6.
     let bounds = files.profile_score_bounds(&base).unwrap();
     assert_eq!(bounds, vec![27 + 127 + 227 + 327, 427 + 527 + 627]);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -238,7 +227,6 @@ fn a_missing_or_bad_freq_file_is_ncbis_error_and_a_short_one_is_refused() {
         files.open_freq(&base, "RPSBLAST", None),
         Err(RpsOpenError::Refused(_))
     ));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -268,7 +256,6 @@ fn ncbis_errors_come_in_ncbis_file_order() {
             format!("Cannot open RPS-BLAST auxiliary file: {shown}.aux").into_bytes()
         ))
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -336,7 +323,6 @@ fn inconsistent_files_are_refused() {
         RpsVolumeFiles::open(&base, &[3, 2]),
         Err(RpsOpenError::Refused(_))
     ));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // D6 of PS12s: the files of a volume checked once in the run open again without LOSAT's check of
@@ -368,7 +354,6 @@ fn files_checked_in_the_run_open_without_the_check_of_the_hits() {
         RpsVolumeFiles::open_checked(&base, &[3, 2], "RPSBLAST", false),
         Err(RpsVolumeFault::Files(RpsOpenError::Ncbi(_)))
     ));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A volume of two profiles of 140,000 and 100 letters (140,102 rows: 69 buckets, so two groups
@@ -503,7 +488,6 @@ fn cells_not_in_groups_of_buckets_are_regrouped_stably() {
     let files = RpsVolumeFiles::open(&base, &lengths).unwrap();
     assert!(!files.is_regrouped());
     assert_eq!(files.cells().unwrap()[9][1], 10);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // The sort of one cell: stable, so a group's hits keep the order they had, and idempotent on

@@ -67,6 +67,12 @@ import { Store } from './store';
 
 export type InputMode = 'combined' | 'separate';
 
+/** Result of pressing Run LOSAT on a draft: the queued run IDs, or the refusal message shown to the user. */
+export type SubmitResult = (
+  | { readonly ok: true }
+  | { readonly ok: false; readonly message: string }
+) & { readonly runIds?: readonly string[] };
+
 /** The engine's verdict on a source (losat/ports: input-check.ts). */
 export type SourceCheck =
   | { readonly state: 'pending' }
@@ -427,6 +433,16 @@ export class SearchDraft {
     this.setProgram('blastn');
     this.setRepeats('file');
     this.setFile(WINDOW_MASKER_FLAG, file);
+  }
+
+  /**
+   * Selects a taxonomy ID in BLASTN's repeats row ("Use in BLASTN" after saving WindowMasker
+   * counts for that ID): switches to BLASTN, chooses "Taxonomy ID", and fills `taxid`.
+   */
+  useTaxid(taxid: number): void {
+    this.setProgram('blastn');
+    this.setRepeats('taxid');
+    this.setTaxid(String(taxid));
   }
 
   /**
@@ -923,18 +939,21 @@ export class SearchDraft {
   // --- submit -----------------------------------------------------------------------------
 
   /** Freezes the draft into runs (one, or a group of separate searches) and starts them. */
-  async submit(): Promise<EnqueueAllResult> {
+  async submit(): Promise<SubmitResult> {
     if (this.state.get().submitting) return { ok: false, message: 'The search is being started already.' };
     this.set({ submitting: true, message: undefined });
     try {
-      let result: EnqueueAllResult;
+      let result: SubmitResult;
       try {
         result = await this.prepareAndEnqueue();
       } catch (error) {
         result = { ok: false, message: isUnavailable(error) ? failureText(error) : `The search could not be started: ${messageOf(error)}` };
       }
       // A started search shows itself: the page moves to the run (stop-describing-ui rule 6).
-      if (!result.ok) this.set({ message: { kind: 'error', text: result.message } });
+      if (!result.ok) {
+        this.set({ message: { kind: 'error', text: result.message } });
+        return { ok: false, message: result.message };
+      }
       return result;
     } finally {
       this.refs.release('submit');
@@ -966,7 +985,7 @@ export class SearchDraft {
     await this.race.idle();
   }
 
-  private async prepareAndEnqueue(): Promise<EnqueueAllResult> {
+  private async prepareAndEnqueue(): Promise<SubmitResult> {
     // Run never fetches, nor waits for a fetch that is running (fetchAccessions). A run that prints the command line's
     // help or version reads no input (the engine's start says so, `prints`; line WQA's D14, 2026-11-20): it is read once the
     // validation of the draft's argv has answered (not `idle`, which waits for a fetch too), so that a word typed just before
@@ -1067,7 +1086,7 @@ export class SearchDraft {
    * The one run of an argv that prints the command line's help or version (`printsText`): without inputs (the
    * coordinator gives it none), with the registry file of its -conffile, which the command line reads before the help.
    */
-  private enqueuePrinting(): Promise<EnqueueAllResult> {
+  private enqueuePrinting(): Promise<SubmitResult> {
     const { program, threads, title } = this.state.get();
     let extra: readonly string[];
     try {

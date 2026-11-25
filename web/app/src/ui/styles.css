@@ -1317,8 +1317,14 @@ textarea {
   gap: 4px 8px;
 }
 
-.parameter-form .param-inline[data-kind='file'] .param-hint {
-  flex: 1 1 24em;
+.parameter-form .param-inline[data-kind='file'] .param-hint-line {
+  flex: 1 0 100%;
+  min-width: 0;
+}
+
+.parameter-form .param-inline[data-kind='file'] .param-hint-line .help-tip {
+  margin-left: 6px;
+  vertical-align: middle;
 }
 
 .file-pick {
@@ -2597,4 +2603,50 @@ pre.range-text {
 
 .wm-file-item .link {
   margin-left: auto;
+}
+
+.tool-save-taxid {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-save-taxid input[type='text'] {
+  width: 8em;
+}
+
+.replace-dialog {
+  max-width: min(32rem, calc(100vw - 24px));
+  padding: 16px 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--group);
+  color: var(--fg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.22);
+}
+
+.replace-dialog::backdrop {
+  background: rgb(0 0 0 / 0.35);
+}
+
+.replace-dialog h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.replace-dialog p {
+  margin: 0 0 14px;
+  overflow-wrap: anywhere;
+}
+
+.replace-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.replace-dialog-actions .primary-action {
+  width: auto;
 }

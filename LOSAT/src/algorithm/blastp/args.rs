@@ -110,6 +110,15 @@ impl BlastpApp {
             BlastpApp::Rpsblast => "RPSBLAST",
         }
     }
+
+    /// The application's name in NCBI's posts (`[psiblast]`).
+    pub fn post_name(self) -> &'static str {
+        match self {
+            BlastpApp::Blastp => "blastp",
+            BlastpApp::Psiblast => "psiblast",
+            BlastpApp::Rpsblast => "rpsblast",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,7 +150,7 @@ impl BlastpCompBasedStats {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:838-886
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub fn parse_comp_based_stats(value: &str) -> Result<BlastpCompBasedStats, String> {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {

@@ -664,10 +664,25 @@ fn the_grammar_names_are_the_tables() {
     let names =
         |ty: u16| -> Vec<&str> { asn_types::members(ty).iter().map(|m| m.name()).collect() };
     assert_eq!(names(named::BLAST4_REQUEST_BODY), REQUEST_BODY);
+    assert_eq!(names(named::BLAST4_QUERIES), BLAST4_QUERIES);
+    assert_eq!(names(named::BLAST4_SUBJECT), BLAST4_SUBJECT);
     assert_eq!(names(named::BLAST4_VALUE), BLAST4_VALUE);
+    assert_eq!(
+        names(named::BLAST4_GET_SEARCH_RESULTS_REPLY),
+        BLAST4_GET_SEARCH_RESULTS_REPLY
+    );
+    assert_eq!(names(named::SEQ_INTERVAL), SEQ_INTERVAL);
+    assert_eq!(names(named::SEQ_POINT), SEQ_POINT);
+    assert_eq!(names(named::BIOSEQ_SET), BIOSEQ_SET);
+    assert_eq!(names(named::BIOSEQ), BIOSEQ);
     assert_eq!(names(named::SEQDESC), SEQDESC);
+    assert_eq!(names(named::SEQ_INST), SEQ_INST);
     assert_eq!(names(named::SEQ_DATA), SEQ_DATA);
+    assert_eq!(names(named::SEQ_EXT), SEQ_EXT);
+    assert_eq!(names(named::DELTA_SEQ), DELTA_SEQ);
+    assert_eq!(names(named::SEQ_LITERAL), SEQ_LITERAL);
     assert_eq!(names(named::SEQ_LOC), SEQ_LOC);
+    assert_eq!(names(named::SEQ_ALIGN), SEQ_ALIGN);
     assert_eq!(names(seq_align_segs()), SEQ_ALIGN_SEGS);
     let member = |ty: u16, name: &str| asn_types::members(ty)[asn_types::member_index(ty, name)].ty;
     let values = |ty: u16| -> Vec<(&str, i32)> {

@@ -545,6 +545,9 @@ pub(crate) struct TypedReader<I: Input, P: PostSink = Vec<Post>> {
     utf8_once: Utf8TagOnce,
     /// What LOSAT's messages call the document, the reader and NCBI's part that allocates.
     names: Names,
+    /// The root type of the document being read (`document`), which scopes [`super::class_named`]
+    /// to the classes that NCBI's reader builds for that root (`NO_TYPE` outside a document read).
+    root: u16,
     /// The deepest nesting of frames the reader follows (`TYPED_MAX_DEPTH` in a typed read).
     max_depth: usize,
 }
@@ -663,6 +666,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
             open: Vec::new(),
             utf8_once: Utf8TagOnce::default(),
             names,
+            root: NO_TYPE,
             max_depth: usize::MAX,
         }
     }
@@ -673,6 +677,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         self.inp.new_object();
         self.frames.clear();
         self.open.clear();
+        self.root = NO_TYPE;
     }
 
     /// The refusal of a frame past `max_depth`.
@@ -816,6 +821,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     /// `stream >> object` of the root type `root`: `SkipFileHeader`, then `Read` (here `read`),
     /// each in a named frame of its own.
     fn document<T>(&mut self, root: u16, read: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
+        self.root = root;
         self.push(FrameKind::Named, root, false)?;
         let header = self.file_header(super::type_info(root).name());
         self.pop(header)?;
@@ -953,6 +959,8 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1173-1219
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1341-1361
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:435-445
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:127,192
     /// `:name`, a value of the class `name`, where a `declared` belongs. NCBI's `MapType` finds
     /// the class when its process has built its type information, and throws "class not found"
     /// otherwise; found, the value is read as that class, and the read throws "incompatible member
@@ -960,12 +968,15 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     /// psiblast's and tblastn's PSSM reader report with a message of their own
     /// (`Names::own_serial_message`; NCBI 2.17.0 rc 1 for `:Object-id`, `:Pssm`, `:No-such-type`
     /// where params belongs and `:Bioseq` where the query belongs, text and binary, probe
-    /// D3c-3b): there the value is read as the table's class of that name, if any, and the read
-    /// ends with the error. A class outside the table is one that the PSSM's read never builds,
-    /// and nothing before the read builds it: "class not found" (NCBI 2.17.0 with a number that is
-    /// not one inside `:Blast4-cutoff`, `:Seq-submit`, `:Hit`; probe D3c-3b probe9). What NCBI
-    /// does only when it knows the class (a message posted while the value is read, an error of
-    /// another kind inside it: `:Object-id id x` is its exception report, exit status 255, in
+    /// D3c-3b): there the value is read as the class of that name reachable from the current
+    /// read's root (`class_named`), if any, and the read ends with the error. A class that the
+    /// root does not reach is one that the PSSM's read never builds, and nothing before the read
+    /// builds it (psiblast and tblastn read `-in_pssm` during `SetOptions` before opening any
+    /// database): "class not found" (NCBI 2.17.0 with a number that is not one inside
+    /// `:Blast4-cutoff`, `:Seq-submit`, `:Hit`, `:Blast-db-mask-info`, `:Blast-mask-list`,
+    /// `:Blast-def-line-set`, `:Blast-def-line`; probe D3c-3b probe9 and PR #1633 R2 probe). What
+    /// NCBI does only when it knows the class (a message posted while the value is read, an error
+    /// of another kind inside it: `:Object-id id x` is its exception report, exit status 255, in
     /// probe9), a value of another class inside it, a skip (`SkipPointer` skips a class it knows
     /// and stops at another) and the other streams (makeblastdb prints the exception's own text)
     /// are LOSAT's refusal.
@@ -975,7 +986,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         if skip || !self.names.own_serial_message || self.posts.other.is_some() {
             return self.other_type_refusal(name, declared);
         }
-        let Some(class) = super::class_named(name) else {
+        let Some(class) = super::class_named(self.root, name) else {
             return Fail::serial(NcbiException::new(
                 CLASS_NOT_FOUND,
                 format!("class not found: {}", String::from_utf8_lossy(name)),

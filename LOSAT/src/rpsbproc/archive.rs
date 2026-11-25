@@ -469,6 +469,42 @@ const SEQ_ALIGN_SEGS: [&str; 7] = [
     "dendiag", "denseg", "std", "packed", "disc", "spliced", "sparse",
 ];
 
+// NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:138-142,499-503
+const BLAST4_QUERIES: [&str; 3] = ["pssm", "seq-loc-list", "bioseq-set"];
+const BLAST4_SUBJECT: [&str; 3] = ["database", "sequences", "seq-loc-list"];
+
+// NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:287-299
+const BLAST4_GET_SEARCH_RESULTS_REPLY: [&str; 7] = [
+    "alignments",
+    "phi-alignments",
+    "masks",
+    "ka-blocks",
+    "search-stats",
+    "pssm",
+    "simple-results",
+];
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:93-107
+const SEQ_INTERVAL: [&str; 6] = ["from", "to", "strand", "id", "fuzz-from", "fuzz-to"];
+const SEQ_POINT: [&str; 4] = ["point", "strand", "id", "fuzz"];
+
+// NCBI reference (598d8ae6): c++/src/objects/seqset/seqset.asn:22-60
+const BIOSEQ_SET: [&str; 9] = [
+    "id", "coll", "level", "class", "release", "date", "descr", "seq-set", "annot",
+];
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:36-40,262-324
+const BIOSEQ: [&str; 4] = ["id", "descr", "inst", "annot"];
+const SEQ_INST: [&str; 9] = [
+    "repr", "mol", "length", "fuzz", "topology", "strand", "seq-data", "ext", "hist",
+];
+const SEQ_EXT: [&str; 4] = ["seg", "ref", "map", "delta"];
+const DELTA_SEQ: [&str; 2] = ["loc", "literal"];
+const SEQ_LITERAL: [&str; 3] = ["length", "fuzz", "seq-data"];
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:22-51
+const SEQ_ALIGN: [&str; 7] = ["type", "dim", "score", "segs", "bounds", "id", "ext"];
+
 /// The type of `Seq-align.segs` (a CHOICE without a name of its own) in the type table.
 fn seq_align_segs() -> u16 {
     let members = asn_types::members(named::SEQ_ALIGN);
@@ -674,8 +710,7 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
                 0 => program = Some(self.string(at)?),
                 1 => service = Some(self.string(at)?),
                 2 => {
-                    const QUERIES: [&str; 3] = ["pssm", "seq-loc-list", "bioseq-set"];
-                    let variant = self.r().choice(at, &QUERIES)?;
+                    let variant = self.r().choice(at, &BLAST4_QUERIES)?;
                     queries = Some(if variant.index() == 2 {
                         Queries::BioseqSet(self.bioseq_set(&variant)?)
                     } else {
@@ -684,13 +719,12 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
                     });
                 }
                 3 => {
-                    const SUBJECT: [&str; 3] = ["database", "sequences", "seq-loc-list"];
-                    let variant = self.r().choice(at, &SUBJECT)?;
+                    let variant = self.r().choice(at, &BLAST4_SUBJECT)?;
                     subject = Some(if variant.index() == 0 {
                         Subject::Database(self.string(&variant)?)
                     } else {
                         self.typed_member(named::BLAST4_SUBJECT, &variant)?;
-                        Subject::Other(SUBJECT[variant.index()])
+                        Subject::Other(BLAST4_SUBJECT[variant.index()])
                     });
                 }
                 4 => {
@@ -792,17 +826,10 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:287-299
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:433-438,454-457
     fn results(&mut self, at: &Frame<'_>) -> Result<Results> {
-        const NAMES: [&str; 7] = [
-            "alignments",
-            "phi-alignments",
-            "masks",
-            "ka-blocks",
-            "search-stats",
-            "pssm",
-            "simple-results",
-        ];
         let mut results = Results::default();
-        let mut members = self.r().begin_members(at, &NAMES)?;
+        let mut members = self
+            .r()
+            .begin_members(at, &BLAST4_GET_SEARCH_RESULTS_REPLY)?;
         while let Some(index) = self.r().next_member(&mut members)? {
             let at = members.at();
             match index {
@@ -908,8 +935,7 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
 
     /// A `Seq-interval`.
     fn interval(&mut self, at: &Frame<'_>) -> Result<Interval> {
-        const NAMES: [&str; 6] = ["from", "to", "strand", "id", "fuzz-from", "fuzz-to"];
-        let mut members = self.r().begin_members(at, &NAMES)?;
+        let mut members = self.r().begin_members(at, &SEQ_INTERVAL)?;
         let (mut from, mut to, mut strand, mut id) = (None, None, None, None);
         while let Some(index) = self.r().next_member(&mut members)? {
             match index {
@@ -1108,8 +1134,7 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
                 (StdLoc::Int { from, to, strand }, keep(id))
             }
             "pnt" => {
-                const NAMES: [&str; 4] = ["point", "strand", "id", "fuzz"];
-                let mut members = self.r().begin_members(&variant, &NAMES)?;
+                let mut members = self.r().begin_members(&variant, &SEQ_POINT)?;
                 let (mut point, mut strand, mut id) = (None, None, None);
                 while let Some(index) = self.r().next_member(&mut members)? {
                     match index {
@@ -1156,10 +1181,7 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
     /// A `Bioseq-set`: its `seq-set`.
     // NCBI reference (598d8ae6): c++/src/objects/seqset/seqset.asn:22-60
     fn bioseq_set(&mut self, at: &Frame<'_>) -> Result<Vec<SeqEntry>> {
-        const NAMES: [&str; 9] = [
-            "id", "coll", "level", "class", "release", "date", "descr", "seq-set", "annot",
-        ];
-        let mut members = self.r().begin_members(at, &NAMES)?;
+        let mut members = self.r().begin_members(at, &BIOSEQ_SET)?;
         let mut entries = None;
         while let Some(index) = self.r().next_member(&mut members)? {
             let at = members.at();
@@ -1212,9 +1234,7 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
     // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:36-40
     fn bioseq(&mut self, at: &Frame<'_>) -> Result<Query> {
         let mut query = Query::default();
-        let mut members = self
-            .r()
-            .begin_members(at, &["id", "descr", "inst", "annot"])?;
+        let mut members = self.r().begin_members(at, &BIOSEQ)?;
         let (mut ids, mut inst) = (false, false);
         while let Some(index) = self.r().next_member(&mut members)? {
             let at = members.at();
@@ -1401,10 +1421,7 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
     // NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:262-297
     // `length` is `TSeqPos` (unsigned) in NCBI's class.
     fn seq_inst(&mut self, at: &Frame<'_>, query: &mut Query) -> Result<()> {
-        const NAMES: [&str; 9] = [
-            "repr", "mol", "length", "fuzz", "topology", "strand", "seq-data", "ext", "hist",
-        ];
-        let mut members = self.r().begin_members(at, &NAMES)?;
+        let mut members = self.r().begin_members(at, &SEQ_INST)?;
         let (mut repr, mut mol) = (false, false);
         while let Some(index) = self.r().next_member(&mut members)? {
             match index {
@@ -1457,21 +1474,18 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
     // seq.def:13-14).
     // NCBI reference (RpsbProc 0.5.1, 2025-05-13): RpsbProc/src/common/biodata_core.cpp:151,193-194
     fn seq_ext(&mut self, at: &Frame<'_>, query: &mut Query) -> Result<()> {
-        const NAMES: [&str; 4] = ["seg", "ref", "map", "delta"];
-        let variant = self.r().choice(at, &NAMES)?;
+        let variant = self.r().choice(at, &SEQ_EXT)?;
         if variant.index() != 3 {
             return self.typed_member(named::SEQ_EXT, &variant);
         }
         let mut items = self.r().begin_list(&variant)?;
         while self.r().next_item(&mut items)? {
-            let item = self.r().choice(items.at(), &["loc", "literal"])?;
+            let item = self.r().choice(items.at(), &DELTA_SEQ)?;
             if item.index() == 0 {
                 self.typed_member(named::DELTA_SEQ, &item)?;
                 continue;
             }
-            let mut members = self
-                .r()
-                .begin_members(&item, &["length", "fuzz", "seq-data"])?;
+            let mut members = self.r().begin_members(&item, &SEQ_LITERAL)?;
             let mut length = false;
             while let Some(index) = self.r().next_member(&mut members)? {
                 match index {
@@ -1508,7 +1522,6 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
 
     // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:22-51
     fn seq_align(&mut self, at: &Frame<'_>) -> Result<Align> {
-        const NAMES: [&str; 7] = ["type", "dim", "score", "segs", "bounds", "id", "ext"];
         let mut align = Align {
             segs: Segs::Other("dendiag"),
             score: None,
@@ -1518,7 +1531,7 @@ impl<R: Read, P: PostSink> ArchiveStream<R, P> {
             score_of_other_type: None,
         };
         let (mut kind, mut segs) = (false, false);
-        let mut members = self.r().begin_members(at, &NAMES)?;
+        let mut members = self.r().begin_members(at, &SEQ_ALIGN)?;
         while let Some(index) = self.r().next_member(&mut members)? {
             let at = members.at();
             match index {

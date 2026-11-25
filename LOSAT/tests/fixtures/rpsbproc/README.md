@@ -334,7 +334,8 @@ NCBI's rpsbproc reads the archive with the toolkit's typed reader. In a VisibleS
 0x20..0x7E is read as `#`, and NCBI posts `Error: (803.7) <stack path>`, `Bad char [0x<HEX>] in string at line <N>` and
 the piece of the string being read. The posts come before the session, because the object is read whole first. A
 UTF8String, such as a DefLine's title, keeps its bytes and posts nothing. The archives in `root/` are copies of
-`q_tab_utf8.asn` with such bytes, made by a script of the task folder. NCBI's binary and Bioconda's 0.5.1 gave the
+`q_tab_utf8.asn` with such bytes, made by `K/kb/i9a/mkin.py`, `K/kb/i9a/agent1/tools/mkin2.py`, and
+`K/kb/i9a/review/mkrev6.py` of the task folder. NCBI's binary and Bioconda's 0.5.1 gave the
 same bytes (2026-11-24), run as above:
 
 - `vis_all.asn` (`vis_all.doms`, `vis_all.full`) puts such bytes in these places:

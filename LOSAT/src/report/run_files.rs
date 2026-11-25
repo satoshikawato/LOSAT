@@ -133,6 +133,22 @@ impl RunFiles {
         }
     }
 
+    /// Like [`RunFiles::log_target`], also enforcing the command-line / library self-reference
+    /// refusal on [`RunFiles::Disk`] before opening or creating `-logfile` (line WQA D23,
+    /// `Q-D23=A`): refuses any `-logfile` pointing to an input file read by `start.program()`
+    /// with `words` and `start` (`report::log_inputs::check_disk_logfile`).
+    pub(crate) fn log_target_for<S: AsRef<OsStr>>(
+        &self,
+        words: &[S],
+        start: &crate::blastinput::ncbi_environment::ApplicationStart,
+        name: Option<&OsStr>,
+    ) -> Result<(DiagTarget, Option<Vec<u8>>), String> {
+        if matches!(self, RunFiles::Disk) {
+            crate::report::log_inputs::check_disk_logfile(start.program(), words, start, name)?;
+        }
+        self.log_target(name)
+    }
+
     /// The host file name of the `-logfile` value `name` (what a `Receiver` names the stream 8
     /// entry if the file is made: `run.log` for `./run.log` and ` run.log`, `logs` for `logs/`,
     /// `/tmp/run.log` outside the working directory, `/dev/stdout` for a search's `/dev/stdout`),
@@ -295,6 +311,7 @@ impl OpenFiles {
     /// `Receiver`, is an opening of the run's file of that path that appends to it
     /// (`DiagTarget::Stream`), or `ToolLog::Stdout` for `/dev/stdout`. `Err` with LOSAT's refusal
     /// reason when the name is a file of the run's directory.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn log_target(&self, name: Option<&OsStr>) -> Result<ToolLog, String> {
         match &self.0 {
             None => Ok(ToolLog::Target(diag_target(name))),
@@ -312,6 +329,20 @@ impl OpenFiles {
                 || ToolLog::Stdout,
             ),
         }
+    }
+
+    /// Like [`OpenFiles::log_target`], also enforcing the `Disk` self-reference refusal before
+    /// opening or creating `-logfile` (`report::log_inputs::check_disk_logfile`, line WQA D23).
+    pub(crate) fn log_target_for<S: AsRef<OsStr>>(
+        &self,
+        words: &[S],
+        start: &crate::blastinput::ncbi_environment::ApplicationStart,
+        name: Option<&OsStr>,
+    ) -> Result<ToolLog, String> {
+        if self.0.is_none() {
+            crate::report::log_inputs::check_disk_logfile(start.program(), words, start, name)?;
+        }
+        self.log_target(name)
     }
 
     /// The output file `name` that a tool opens by name for writing (NCBI's `CNcbiOfstream` of the

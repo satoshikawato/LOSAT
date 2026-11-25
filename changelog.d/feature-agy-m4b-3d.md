@@ -1,0 +1,1 @@
+- `blastp` and `blastx` `-db_hard_mask` now merge alignments across overlapping subject chunks (`Blast_HSPListsMerge`) using one shared helper, removing the `LongRange` (> 5,000,000-residue hard ranges) and `PartsOutOfOrder` (out-of-order masks whose parts overlap) refusals and matching NCBI BLAST+ 2.17.0 (line NP, M4b-3d).

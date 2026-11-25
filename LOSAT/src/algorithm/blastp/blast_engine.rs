@@ -9515,7 +9515,13 @@ fn ungapped_setup_failure(
             }));
         }
     }
-    if args.ungapped && query_valid.iter().any(|valid| *valid) {
+    if args.ungapped
+        && !args
+            .db_mask_resolved
+            .as_ref()
+            .is_some_and(|mask| mask.is_hard())
+        && query_valid.iter().any(|valid| *valid)
+    {
         let longest = match subject_source {
             BlastpSubjectSource::Fasta(records) => records
                 .iter()

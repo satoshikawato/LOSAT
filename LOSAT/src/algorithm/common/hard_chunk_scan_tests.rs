@@ -203,6 +203,17 @@ fn short_chunk_refusals_name_the_oid_and_pass_as_is() {
         text.contains("which LOSAT's BLASTP does not do yet"),
         "{text}"
     );
+    let error = chunk_merge_undefined_refusal(17, "BLASTX");
+    assert!(error.is::<ShortChunkSeedRefusal>());
+    let text = error.to_string();
+    assert!(
+        text.starts_with(
+            "-db_hard_mask: the sequence of OID 17 has alignments across a chunk overlap whose \
+             merged score calculation is undefined in NCBI BLAST+"
+        ),
+        "{text}"
+    );
+    assert!(text.ends_with("LOSAT's BLASTX does not search such a database with -db_hard_mask"));
 }
 
 /// NCBI's merge after a chunk runs its joins where an HSP of the joined list ends past the

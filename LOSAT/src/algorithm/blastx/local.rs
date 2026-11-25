@@ -1314,12 +1314,17 @@ fn search_database(
     };
     // The database's sequences, read in blocks where they are searched; the empty database's error
     // belongs to the first batch with a valid context (`native::run_inner`).
-    let (longest, unreadable) = match database.x_open_stream() {
+    let allow_long = resolved
+        .first()
+        .and_then(|options| options.db_mask.as_ref())
+        .is_some_and(|mask| mask.is_hard());
+    let (longest, unreadable) = match database.x_open_stream_with_long(allow_long) {
         Ok(longest) => (Some(longest), None),
         Err(error) => (None, Some(error)),
     };
-    let stream =
-        longest.map(|longest| super::x_db_stream::XStreamDb::new(database.x_seqdb(), longest));
+    let stream = longest.map(|longest| {
+        super::x_db_stream::XStreamDb::new_with_long(database.x_seqdb(), longest, allow_long)
+    });
     let unreadable = std::cell::RefCell::new(unreadable);
     let search_subjects = match &stream {
         Some(stream) => Subjects::Stream(super::x_db_stream::XStream {

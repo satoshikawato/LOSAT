@@ -265,8 +265,11 @@ fn x_search_core(
             "BLASTX preliminary requires a protein subject"
         );
         // The refusal of a database sequence (`database::too_long`): the `-subject` record is
-        // named by its number in the file (`Subject_N`).
-        if longest_subject > super::database::MAX_DBSEQ_LEN {
+        // named by its number in the file (`Subject_N`). With `-db_hard_mask`, the hard-chunk loop
+        // splits and merges subjects longer than `MAX_DBSEQ_LEN`.
+        if longest_subject > super::database::MAX_DBSEQ_LEN
+            && !options.db_mask.as_ref().is_some_and(|mask| mask.is_hard())
+        {
             return Err(match &subjects {
                 Subjects::Fasta(records) => {
                     let (index, length) = records

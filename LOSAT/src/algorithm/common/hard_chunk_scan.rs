@@ -7,11 +7,11 @@
 //!   (the chunk's ungapped hits, from the stored letters past the chunk), which then go through
 //!   the chunk's gapped stage, or are its HSPs in an ungapped search, as any chunk's seeds;
 //! - [`merge_joins`]: whether NCBI's merge of a chunk's HSPs into the sequence's list joins
-//!   them, which only such a chunk's HSPs can meet;
-//! - [`short_chunk_tree_refusal`] and [`short_chunk_merge_refusal`]: LOSAT's refusals of a
-//!   sequence where NCBI's gapped stage of such a chunk never ends, and where its merge would
-//!   join such a chunk's HSPs with another's across an overlap read past the list (or in BLASTP
-//!   and BLASTX, not yet ported).
+//!   them (used by TBLASTN and TBLASTX where the merge overlap is read past the list of ranges);
+//! - [`short_chunk_tree_refusal`], [`short_chunk_merge_refusal`], and
+//!   [`chunk_merge_undefined_refusal`]: LOSAT's refusals of a sequence where NCBI's gapped stage
+//!   of such a chunk never ends, where TBLASTN/TBLASTX's merge would join across an overlap read
+//!   past the list, or where an ungapped one-hit chunk merge divides by zero.
 
 use super::diag_entry::{
     batch_context_distance, x_test_hit, DiagCell, DiagRing, DiagStruct, DiagTable,
@@ -303,10 +303,10 @@ pub(crate) fn short_chunk_tree_refusal(
 // After each chunk with HSPs NCBI merges them into the sequence's list with the subject split at
 // the chunk's offset: the joined list's HSPs that end past the offset and the chunk's that start
 // before the offset plus the overlap (0 where the chunk starts at the left of the range after its
-// own, else 100; after the last range NCBI reads it past its list) go to its loop of joins, which
-// LOSAT's protein programs do not port (with `HardMaskShape::LongRange` and
-// `HardMaskShape::PartsOutOfOrder`, item M4b-3d of series NP). Where no HSP of one side is there,
-// the merge appends the chunk's HSPs, which LOSAT does.
+// own, else 100; after the last range NCBI reads it past its list) go to its loop of joins.
+// BLASTP and BLASTX perform this merge directly (`core::blast_hits::merge_subject_chunk_hsps`,
+// item M4b-3d of series NP); TBLASTN and TBLASTX call `merge_joins` when the overlap is read past
+// the list of ranges (`overlap_past_list`).
 /// Whether NCBI's merge of the HSPs of hard chunk `chunk` into a sequence's list runs its loop of
 /// joins: an HSP of the list ends past the chunk's offset (`earlier_ends`, the ends of the list's
 /// HSPs in the sequence) and one of the chunk's starts before its offset plus the overlap
@@ -329,7 +329,7 @@ pub(crate) fn merge_joins(
 
 /// LOSAT's refusal (in `program`'s name) of the database sequence of OID `oid`, where the HSPs of a
 /// part shorter than the word after overlapping masks meet those of another part in NCBI's merge
-/// across their overlap ([`merge_joins`]), which LOSAT does not do yet.
+/// across an overlap read past its list of ranges ([`merge_joins`]).
 pub(crate) fn short_chunk_merge_refusal(
     oid: impl std::fmt::Display,
     program: &str,
@@ -339,6 +339,27 @@ pub(crate) fn short_chunk_merge_refusal(
          overlapping masks, whose alignments from the one word that NCBI BLAST+ 2.17.0 reads past \
          that part meet those of another part in its merge across their overlap, which LOSAT's \
          {program} does not do yet; LOSAT's {program} does not search such a database with \
+         -db_hard_mask"
+    ))
+    .into()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1513-1515, 1526
+// Merging two one-hit ungapped HSPs whose query lengths sum to 0 divides by zero (`score_density`)
+// or converts an out-of-range float to `Int4`, which is undefined behavior in NCBI BLAST+.
+/// LOSAT's refusal (in `program`'s name) of the database sequence of OID `oid`, where merging two
+/// one-hit ungapped alignments across a hard-chunk overlap produces a zero query-length sum or an
+/// out-of-range scaled score (`core::blast_hits::ChunkMergeUndefined`).
+#[cold]
+#[inline(never)]
+pub(crate) fn chunk_merge_undefined_refusal(
+    oid: impl std::fmt::Display,
+    program: &str,
+) -> anyhow::Error {
+    ShortChunkSeedRefusal(format!(
+        "-db_hard_mask: the sequence of OID {oid} has alignments across a chunk overlap whose \
+         merged score calculation is undefined in NCBI BLAST+ (zero query-length sum or \
+         out-of-range scaled score); LOSAT's {program} does not search such a database with \
          -db_hard_mask"
     ))
     .into()

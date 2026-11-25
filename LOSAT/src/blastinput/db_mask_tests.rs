@@ -908,20 +908,10 @@ fn protein_shapes_of_the_hard_masks() {
             length: 100
         })
     );
-    // A hard range longer than NCBI's chunks.
+    // A hard range longer than NCBI's chunks (MAX_DBSEQ_LEN): searched in overlapping chunks and
+    // merged across their overlap (series NP, M4b-3d).
     let long = crate::core::subject_split::MAX_DBSEQ_LEN + 100;
-    let shape = of(&[(10, 20)], long, protein);
-    assert_eq!(
-        shape,
-        Some(HardMaskShape::LongRange {
-            left: 20,
-            right: long as i32
-        })
-    );
-    assert!(shape
-        .unwrap()
-        .text()
-        .contains("longer than the 5,000,000 letters"));
+    assert_eq!(of(&[(10, 20)], long, protein), None);
     // At exactly MAX_DBSEQ_LEN letters the range is one chunk.
     assert_eq!(
         of(
@@ -934,13 +924,13 @@ fn protein_shapes_of_the_hard_masks() {
 }
 
 /// `HardMaskShape::of_scan` of the protein programs on masks that overlap or nest, or are out of
-/// the order of their start (series NP, M4b-3b; the masks of probe 2 of M/m4b3b/NOTES_M4B3B.md, a
-/// sequence of 240 letters, word 3): searched also where the walk of the chunks' diagonal offsets
-/// leaves the sequence (each sequence on its own, PD-LOSAT-NCBI-DEFECTS exception 29: the search's
-/// `DiagonalWalk::start`), `WordPastEnd` where a short chunk's one word read past the sentinel can
-/// change a result; `PartsOutOfOrder` where a chunk that can hold
-/// alignments starts before the end of an earlier one, `Inverted` for a mask that ends before it
-/// starts; in BLASTN `Unsorted` for every overlap, as before.
+/// the order of their start (series NP, M4b-3b/M4b-3d; the masks of probe 2 of
+/// M/m4b3b/NOTES_M4B3B.md, a sequence of 240 letters, word 3): searched also where the walk of
+/// the chunks' diagonal offsets leaves the sequence (each sequence on its own,
+/// PD-LOSAT-NCBI-DEFECTS exception 29: the search's `DiagonalWalk::start`), `WordPastEnd` where a
+/// short chunk's one word read past the sentinel can change a result, and `Inverted` for a mask
+/// that ends before it starts; overlapping out-of-order parts are searched and merged across
+/// their overlap; in BLASTN `Unsorted` for every overlap, as before.
 #[test]
 fn protein_shapes_of_overlapping_masks() {
     let two_hit = HardScan::Protein {
@@ -1004,27 +994,11 @@ fn protein_shapes_of_overlapping_masks() {
     let short = [(50, 100), (102, 200), (60, 101)];
     assert_eq!(of(&short, 300, two_hit), None);
     assert_eq!(of(&short, 300, one_hit), None);
-    // A chunk that can hold alignments before the end of an earlier one: the part after
-    // [100, 130) starts before the end of the part before [250, 280) (the chunk between them is
-    // inverted, so the masks name both); an empty mask at 0 after a mask, whose chunk then starts
-    // at 0.
-    let parts = |before, mask| Some(HardMaskShape::PartsOutOfOrder { before, mask });
-    let shape = of(&[(250, 280), (100, 130)], 300, two_hit);
-    assert_eq!(shape, parts((250, 280), (100, 130)));
-    assert_eq!(
-        shape.unwrap().text(),
-        "has masks out of order ([100, 130) after [250, 280)): its part after [100, 130) starts \
-         before the end of its part before [250, 280), and NCBI BLAST+ 2.17.0 joins the two parts' \
-         alignments by a merge across that overlap, which LOSAT does not do yet"
-    );
-    assert_eq!(
-        of(&[(250, 280), (100, 130)], 300, one_hit),
-        parts((250, 280), (100, 130))
-    );
-    assert_eq!(
-        of(&[(50, 60), (0, 0), (100, 300)], 300, two_hit),
-        parts((50, 60), (0, 0))
-    );
+    // A chunk that can hold alignments before the end of an earlier one: searched and merged
+    // across their overlap (`Blast_HSPListsMerge`, series NP, M4b-3d).
+    assert_eq!(of(&[(250, 280), (100, 130)], 300, two_hit), None);
+    assert_eq!(of(&[(250, 280), (100, 130)], 300, one_hit), None);
+    assert_eq!(of(&[(50, 60), (0, 0), (100, 300)], 300, two_hit), None);
     // A mask that ends before it starts.
     let inverted = of(&[(50, 40)], 300, one_hit);
     assert_eq!(
@@ -1151,7 +1125,7 @@ fn protein_shapes_of_random_masks() {
         HardMaskShape::of_scan(masks, Some((length, length)), &|| None, scan, None).unwrap()
     };
     let (mut cases, mut refused) = (0, 0);
-    let (mut out_of_order, mut searched, mut parts) = (0, 0, 0);
+    let (mut out_of_order, mut searched) = (0, 0);
     for _ in 0..20_000 {
         let window = [0, 1, 40, 100][next(4) as usize];
         let scan = HardScan::Protein {
@@ -1196,13 +1170,12 @@ fn protein_shapes_of_random_masks() {
         if masks.windows(2).any(|pair| pair[1].0 < pair[0].0) {
             out_of_order += 1;
             searched += usize::from(found.is_none());
-            parts += usize::from(matches!(found, Some(HardMaskShape::PartsOutOfOrder { .. })));
         }
     }
     assert!(cases == 20_000 && refused > 50, "{cases} {refused}");
     assert!(
-        out_of_order > 1_000 && searched > 500 && parts > 100,
-        "{out_of_order} {searched} {parts}"
+        out_of_order > 1_000 && searched > 500,
+        "{out_of_order} {searched}"
     );
 }
 

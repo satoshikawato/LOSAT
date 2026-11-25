@@ -319,11 +319,6 @@ impl DiagonalWalk {
         }
     }
 
-    /// The letters of a word.
-    pub(crate) fn word(&self) -> i32 {
-        i32::try_from(self.word).unwrap_or(i32::MAX)
-    }
-
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 87-107, 110-155
     /// The sequence starts on the table of [`TableStart::New`]: every entry is the one that no
     /// sequence wrote since NCBI's thread made its table (0 without the flag: the `calloc` of
@@ -432,10 +427,7 @@ impl DiagonalWalk {
     ///   chunk below the chunk after the clear would meet the cleared entries; NCBI's one-thread
     ///   search has no clear inside it, else it is `ncbi`). From the cleared offset its chunks
     ///   lie within the walk's extent of the window, which reaches INT4_MAX / 4 (536,870,911
-    ///   positions) only for a protein whose chunks move the offset that far: each chunk moves it
-    ///   by its letters plus the window, and the chunks with words are disjoint parts of the
-    ///   sequence (else `HardMaskShape::PartsOutOfOrder`), so it takes more than 536 million
-    ///   letters or about 12 million masks (at the window 40 and the word 3).
+    ///   positions) only for a protein whose chunks move the offset that far.
     /// - A sequence with no margin below its start whose walk does not read back and has no clear
     ///   inside keeps its offset ([`TableStart::Keep`]).
     pub(crate) fn start(

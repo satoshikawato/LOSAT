@@ -237,8 +237,7 @@ impl IdLookup<'_> {
         // short or garbage index, another version or type, a data file of another length).
         let string_isam = || {
             opened(&self.isams.strings[at], || {
-                let name = volume.base().to_string_lossy();
-                let Some(isam) = StringIsam::open_existing(&name, protein)? else {
+                let Some(isam) = StringIsam::open_existing(volume.base(), protein)? else {
                     return Ok(None);
                 };
                 if !isam.is_initialized() {
@@ -523,7 +522,7 @@ impl SeqDb {
             if volume.num_oids() == 0 {
                 return false;
             }
-            StringIsam::file_names(&volume.base().to_string_lossy(), protein).map_or(true, fails)
+            StringIsam::file_names(volume.base(), protein).map_or(true, fails)
                 || fails(NumericIsam::pig_file_names(volume.base(), self.seqtype))
         })
     }

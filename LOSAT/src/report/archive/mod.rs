@@ -654,6 +654,11 @@ impl ArchiveHandle {
         self.with_state(|state| state.log.take())
     }
 
+    /// The messages of an archive whose write failed, saved again (`DiagLog::restore`).
+    pub fn restore_messages(&self, messages: Vec<Message>) {
+        self.with_state(|state| state.log.restore(messages));
+    }
+
     /// What the next archive's request holds of the options handle beyond the command line's
     /// options, after its batch (`OptionsHandle::request_sets`): its `EffectiveSearchSpace` option
     /// is the batch's own value when the batch was searched (`searched`, its context 0; kept for
@@ -913,6 +918,22 @@ pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Mess
         OPTIONS_ERROR.as_bytes(),
         QUERY_OPTIONS_ERROR.as_bytes(),
     ];
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
+    // The report stream's failure (`ostream::ReportStream::finish`): NCBI's handler saves the
+    // posts of the exception's region (802.4 of `~CObjectOStream`) and that post, one message
+    // each (`CBlastAppDiagHandler::Post`, blast_aux.cpp:1155-1170).
+    if native.exit == 6 && native.message.ends_with(b"BLAST failed to write output\n") {
+        return Some(
+            native
+                .message
+                .split(|&byte| byte == b'\n')
+                .filter_map(|line| {
+                    let text = crate::report::diag_log::sanitize(line);
+                    (!text.is_empty()).then_some((ERROR, text))
+                })
+                .collect(),
+        );
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:260-263
     // `CATCH_ALL`'s two reports of an exception, a `CException`'s and a `std::exception`'s
     // (`NativeError::exception`, `NativeError::std_exception`: exit status 255, `Error: `): the
@@ -1003,7 +1024,7 @@ pub fn write_error_archive_after_post(
     handle: &ArchiveHandle,
     error: &anyhow::Error,
     lines: &[Message],
-    sink: &mut dyn Write,
+    sink: &mut dyn crate::report::ostream::ReportWrite,
 ) -> anyhow::Result<()> {
     if handle.error_archive_enabled() {
         let _ = sink.flush();

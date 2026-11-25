@@ -147,18 +147,16 @@ const MEMORY_MAP_MISSING: ThrowSite = ThrowSite {
 /// `path`. `Err`: NCBI's exception of the memory map ([`SeqDbError::Ncbi`]: of the empty name when
 /// there is no such file, or of the file that does not open), else the reader's error of a file
 /// that does not read without a system text for NCBI's message.
-pub(crate) fn read_resolved(name: &str, path: &SearchPath) -> Result<Vec<u8>, SeqDbError> {
+pub(crate) fn read_resolved(name: &[u8], path: &SearchPath) -> Result<Vec<u8>, SeqDbError> {
     let Some(file) = path.resolve_file(name) else {
         return Err(SeqDbError::Ncbi(NcbiException::new(
             MEMORY_MAP_MISSING,
             "To be memory mapped the file must exist: ''",
         )));
     };
+    let file = crate::utils::os_bytes::path_from_bytes(file);
     std::fs::read(&file).map_err(|source| {
-        let error = SeqDbError::Open {
-            path: std::path::PathBuf::from(&file),
-            source,
-        };
+        let error = SeqDbError::Open { path: file, source };
         match error.memory_file_exception() {
             Some(exception) => SeqDbError::Ncbi(exception),
             None => error,

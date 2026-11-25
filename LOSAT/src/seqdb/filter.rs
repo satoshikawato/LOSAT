@@ -1055,16 +1055,7 @@ fn lookup_file_error(error: SeqDbError) -> SeqDbError {
 }
 
 fn missing_file(path: &Path) -> SeqDbError {
-    SeqDbError::NotFound(
-        [
-            b"File ".as_slice(),
-            &crate::utils::os_bytes::path_bytes(path)[..],
-            b" not found. If you renamed any BLAST database files, please use original file \
-         names, and makeblastdb to rename the database. If you deleted any BLAST database files, \
-         you need to recreate the database.",
-        ]
-        .concat(),
-    )
+    super::missing_lmdb_file(path)
 }
 
 /// A lookup file names an OID the database does not have.
@@ -1953,13 +1944,16 @@ impl SeqDb {
         }
         let string_isam = |at: usize| -> Result<isam::StringIsam, SeqDbError> {
             let base = self.volumes[at].base();
-            let name = base.to_string_lossy();
-            if !isam::StringIsam::index_exists(&name, protein) {
+            if !isam::StringIsam::index_exists(base, protein) {
                 return Err(SeqDbError::NotFound(
-                    format!("SI list specified but no ISAM file found for SI in {name}").into(),
+                    [
+                        b"SI list specified but no ISAM file found for SI in ".as_slice(),
+                        &crate::utils::os_bytes::path_bytes(base),
+                    ]
+                    .concat(),
                 ));
             }
-            isam::StringIsam::open_volume(&name, protein)
+            isam::StringIsam::open_volume(base, protein)
         };
         let num_oids = self.volume_starts[self.volumes.len()];
         let word_count = (num_oids as usize).div_ceil(64);

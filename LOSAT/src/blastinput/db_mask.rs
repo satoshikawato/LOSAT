@@ -32,22 +32,29 @@ use crate::seqdb::{MaskAlgorithm, NameMaskError, SeqDb, SeqDbError};
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2226-2229,2367-2382
 // NCBI's argument reader reports the exclusions (`cli::reader`).
 /// The two options of a program whose database arguments support masking (BLASTN).
-#[derive(clap::Args, Debug, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DbMaskArgs {
     /// `-db_soft_mask`.
-    #[arg(
-        long = "db_soft_mask",
-        value_name = "filtering_algorithm",
-        help = "Filtering algorithm ID to apply to the BLAST database as soft masking"
-    )]
     pub db_soft_mask: Option<String>,
     /// `-db_hard_mask` (refused for the masks of `HardMaskShape`: `ResolvedMask::check_losat_limits`).
-    #[arg(
-        long = "db_hard_mask",
-        value_name = "filtering_algorithm",
-        help = "Filtering algorithm ID to apply to the BLAST database as hard masking"
-    )]
     pub db_hard_mask: Option<String>,
+}
+
+impl DbMaskArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, the arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(DbMaskArgs {
+            db_soft_mask: args.given_option("db_soft_mask")?,
+            db_hard_mask: args.given_option("db_hard_mask")?,
+        })
+    }
 }
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:234-239
@@ -188,7 +195,7 @@ impl DbMaskOption {
             FilteringAlgorithm::Id(id) => (Some(*id), None),
             FilteringAlgorithm::Name(name) => {
                 let id = match db.mask_algorithms() {
-                    Ok(algorithms) => algorithms.id_of(name).ok(),
+                    Ok(algorithms) => algorithms.id_of(name.as_bytes()).ok(),
                     // NCBI catches its `CSeqDBException` and answers -1.
                     Err(error) if error.ncbi_message().is_some() => None,
                     Err(error) => {
@@ -348,11 +355,12 @@ impl ResolvedMask {
 
 /// The walk of a BLASTP or BLASTX search of `db` with `-db_hard_mask` (the filtering algorithm
 /// `algo_id`, the word `word`, the window `window`; `zero_words` as in `HardScan::Protein`) over
-/// every sequence that it searches, in the order of the search (`SeqDb::searched_protein_masks`):
+/// every sequence that it searches, in the order of the search (`SeqDb::searched_sequences`):
 /// NCBI's one-thread offsets (`NcbiWalk`) with the sequences that the search starts on a new
 /// table and whether a sequence is kept apart (`HardStarts::keeps_apart`), and the first sequence
 /// whose masks LOSAT refuses (`HardMaskShape::of_scan`, at the place that the walk gives it),
-/// after which the table is not complete (the search does not run).
+/// after which the table is not complete (the search does not run). A sequence whose masks or
+/// length cannot be read ends the walk without a finding (the search meets that read error first).
 fn protein_walk(
     db: &SeqDb,
     algo_id: i32,
@@ -369,28 +377,40 @@ fn protein_walk(
     let mut starts = HardStarts::default();
     let mut plan = crate::algorithm::common::db_mask_search::SubjectPlan::default();
     let mut chunks = Vec::new();
-    let found = db.searched_protein_masks(algo_id, |ordinal, length, masks| {
-        if masks.is_empty() {
-            if let Some(start) = walk.plain(length) {
-                starts.push(ordinal, start);
+    let found = db
+        .searched_sequences(algo_id, |ordinal, length, masks| {
+            let masks = masks.read()?;
+            if masks.is_empty() {
+                if let Some(start) = walk.plain(length) {
+                    starts.push(ordinal, start);
+                }
+                return Ok(None);
             }
-            return None;
-        }
-        // The search's chunker (`db_mask_search::SubjectPlan`), so that the walk and the search
-        // read the same chunks.
-        plan.start_hard(masks, length);
-        plan.hard_chunks(&mut chunks);
-        let (start, reads_back) = walk.masked(length, &chunks);
-        if let Some(start) = start {
-            starts.push(ordinal, start);
-        } else if reads_back {
-            starts.push_reads_back();
-        }
-        // The length is exact: never read.
-        HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan, start)
-            .ok()
-            .flatten()
-    });
+            // The search's chunker (`db_mask_search::SubjectPlan`), so that the walk and the search
+            // read the same chunks.
+            plan.start_hard(masks, length);
+            plan.hard_chunks(&mut chunks);
+            let (start, reads_back) = walk.masked(length, &chunks);
+            if let Some(start) = start {
+                starts.push(ordinal, start);
+            } else if reads_back {
+                starts.push_reads_back();
+            }
+            // The length is exact: never read.
+            Ok(
+                HardMaskShape::of_scan(
+                    masks,
+                    Some((length, length)),
+                    &|| Some(length),
+                    scan,
+                    start,
+                )
+                .ok()
+                .flatten(),
+            )
+        })
+        .ok()
+        .flatten();
     (starts, found)
 }
 

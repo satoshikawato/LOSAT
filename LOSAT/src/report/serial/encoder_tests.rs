@@ -44,6 +44,7 @@ fn null_element(stream: Stream, position: StreamPosition, extra: &[&str]) -> Nul
         // neither for an element of a named type (`Seq-id`).
         Stream::AsnText | Stream::AsnBinary => 2,
         Stream::Xml => 0,
+        Stream::Json => unreachable!("the JSON stream writes no NULL element"),
     };
     NullElement {
         stream,

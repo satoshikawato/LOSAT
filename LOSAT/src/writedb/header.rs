@@ -329,6 +329,15 @@ impl SetWriter<'_> {
     }
 }
 
+/// A `NULL` `Seq-id` element met while BER-encoding a `Blast-def-line-set`
+/// ([`encode_defline_set_checked`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NullSeqIdWriteError {
+    /// Byte position in the BER output stream where the `NULL` element would have been written
+    /// (`CObjectOStream::GetStreamPos`).
+    pub(crate) byte: usize,
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:887-893
 // The writing of blastdb.asn:32-47 (cited in `seqid::ber`): SEQUENCE OF Blast-def-line,
 // each a SEQUENCE of the members that are set, in order; `title` is a VisibleString,
@@ -338,27 +347,63 @@ impl SetWriter<'_> {
 /// (`-parse_seqids`): `set` as makeblastdb serializes it. Bytes of the strings that a
 /// VisibleString cannot hold are written as `#` and appended to `bad`.
 pub fn encode_defline_set(set: &DeflineSet, bad: &mut Vec<BadChar>) -> Vec<u8> {
+    encode_defline_set_checked(set, &[], bad).expect("no NULL Seq-id")
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:1232-1256
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:373-384,522-557
+// When a `Blast-def-line.seqid` list holds a `NULL` element (`null_seqids`: sorted
+// `(defline_index, slot_index)` pairs), `CObjectOStreamAsnBinary::WriteContainer` stops at the
+// exact byte offset before that element with `fUnassigned` (`CUnassignedMember::eWrite`).
+/// [`encode_defline_set`], stopping at the first `NULL` `Seq-id` in `null_seqids` and returning
+/// its byte position in the BER stream.
+pub(crate) fn encode_defline_set_checked(
+    set: &DeflineSet,
+    null_seqids: &[(usize, usize)],
+    bad: &mut Vec<BadChar>,
+) -> Result<Vec<u8>, NullSeqIdWriteError> {
     let mut w = SetWriter {
         out: Vec::with_capacity(64),
         path: vec!["Blast-def-line-set"],
         bad,
     };
     w.open(TAG_SEQUENCE);
-    for defline in &set.deflines {
+    for (defline_idx, defline) in set.deflines.iter().enumerate() {
         w.path.push("E");
         w.open(TAG_SEQUENCE);
         if let Some(title) = &defline.title {
             w.string_member(DEFLINE_TITLE, "title", title);
         }
-        w.context(DEFLINE_SEQID, "seqid", |w| {
-            w.open(TAG_SEQUENCE);
+        w.path.push("seqid");
+        w.open(TAG_CONTEXT_CONSTRUCTED | DEFLINE_SEQID);
+        w.open(TAG_SEQUENCE);
+        if null_seqids.is_empty() {
             for id in &defline.ids {
                 w.path.push("E");
                 w.seq_id(id);
                 w.path.pop();
             }
-            w.close();
-        });
+        } else {
+            let line_nulls = null_seqids
+                .iter()
+                .filter(|&&(d, _)| d == defline_idx)
+                .count();
+            let total_slots = defline.ids.len() + line_nulls;
+            let mut ids = defline.ids.iter();
+            for slot in 0..total_slots {
+                if null_seqids.contains(&(defline_idx, slot)) {
+                    return Err(NullSeqIdWriteError { byte: w.out.len() });
+                }
+                if let Some(id) = ids.next() {
+                    w.path.push("E");
+                    w.seq_id(id);
+                    w.path.pop();
+                }
+            }
+        }
+        w.close();
+        w.close();
+        w.path.pop();
         if let Some(taxid) = defline.taxid {
             w.int_member(DEFLINE_TAXID, "taxid", taxid);
         }
@@ -375,7 +420,7 @@ pub fn encode_defline_set(set: &DeflineSet, bad: &mut Vec<BadChar>) -> Vec<u8> {
         w.path.pop();
     }
     w.close();
-    w.out
+    Ok(w.out)
 }
 
 #[cfg(test)]

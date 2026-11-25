@@ -1,8 +1,8 @@
 //! NCBI's application (`CNcbiApplication::AppMain`, c++/src/corelib/ncbiapp.cpp) for the programs
-//! that LOSAT reads with NCBI's argument reader rather than clap's: `losat blastdbcmd`, `losat
-//! dustmasker`, `losat segmasker`, `losat convert2blastmask`, `losat makembindex` and `losat
-//! windowmasker`. Each program is a `Tool` (its name, version, frozen `-help` text; its argument
-//! XML is NCBI's) and a body, its `Run`; `run_with` does what NCBI's application does around it,
+//! that NCBI's application starts and runs: `losat blastdbcmd`, `losat dustmasker`, `losat
+//! segmasker`, `losat convert2blastmask`, `losat makembindex` and `losat windowmasker`. Each
+//! program is a `Tool` (its name, version, frozen `-help` text; its argument XML is NCBI's) and
+//! a body, its `Run`; `run_with` does what NCBI's application does around it,
 //! in NCBI's order: the diagnostics of `-logfile`, the words taken before the reader (`-version`,
 //! `-conffile`, `-dryrun`), the configuration load, the arguments (`args`, NCBI's
 //! `CArgDescriptions`), the usage and the report of an argument error, and LOSAT's refusals of
@@ -435,8 +435,8 @@ pub(crate) fn run(
         words,
         (&mut std::io::stdin(), &mut out, &mut err),
         body,
-        // The command line's `-xmlhelp`: NCBI's XML without the arguments that LOSAT refuses
-        // (of the programs of `ncbi_app`, makeprofiledb's `-binary` at its run, `ncbi_xmlhelp_tests`).
+        // The command line's `-xmlhelp`: NCBI's XML without any refused arguments (none of the
+        // `ncbi_app` programs refuses an argument by name or at the run, `ncbi_xmlhelp_tests`).
         (start, Some(crate::cli::xml_help_text)),
         &RunFiles::Disk,
     );
@@ -471,8 +471,8 @@ pub(crate) type Body = fn(
 /// run with exit status 2: g_reg probes `o2`, `inibad_null`), then the arguments (`read`, which
 /// writes what NCBI writes for a help word and an argument error); `-xmlhelp`, whose XML only the
 /// command line writes, is refused where the reader takes it. `-dryrun` ends the run with exit
-/// status 0 after the arguments and the settings. A value that is not UTF-8 is refused where the
-/// body would start (`Args::text_values_refusal`). Then `body` runs.
+/// status 0 after the arguments and the settings. Then `body` runs, which reads each value that
+/// is not ASCII by its bytes (`Args::bytes`).
 pub(crate) fn run_with(
     tool: &'static Tool,
     words: &[OsString],
@@ -601,11 +601,6 @@ fn run_app(
             ),
             None => 0,
         };
-    }
-    // The programs read their values as text (`Args::value`): one that is not UTF-8 is refused
-    // where NCBI's `Run` starts, after the reader's errors and `-dryrun`, which runs no body.
-    if let Some(refusal) = args.text_values_refusal(tool) {
-        return diag.refuse(&refusal);
     }
     body(
         &args.with_files(&files),

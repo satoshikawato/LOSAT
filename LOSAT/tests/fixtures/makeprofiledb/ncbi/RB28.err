@@ -1,0 +1,2 @@
+Error: (802.5) CObjectOStream: error at byte 15: Blast-def-line-set.E.seqid.E: cannot write unassigned member NULL element while writing container 
+Error: ERROR: byte 15: cannot write unassigned member NULL element while writing container 

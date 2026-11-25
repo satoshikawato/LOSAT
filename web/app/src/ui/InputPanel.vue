@@ -229,8 +229,10 @@ function onDrop(event: DragEvent): void {
               </select>
             </label>
           </template>
-          <span class="hint" :data-testid="`${role}-fetch-note`">{{ fetchNote }}</span>
-          <HelpTip :id="`${role}-fetch`" label="About fetching accessions" :text="fetchHelp" />
+          <span class="hint-line">
+            <span class="hint" :data-testid="`${role}-fetch-note`">{{ fetchNote }}</span>
+            <HelpTip :id="`${role}-fetch`" label="About fetching accessions" :text="fetchHelp" />
+          </span>
         </div>
         <ul v-if="groups.length > 0" ref="fetchGroupList" class="fetch-groups" :data-testid="`${role}-fetch-groups`">
           <li v-for="(group, index) in groups" :key="groupKey(group)" :data-testid="`${role}-fetch-group-${index}`">

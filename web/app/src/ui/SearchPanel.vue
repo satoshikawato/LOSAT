@@ -224,20 +224,22 @@ defineExpose({ focusRepeats });
         <!-- The screen wake lock, on unless turned off; the choice is shown on handheld devices, whose
              screens turn off by themselves and end the search (docs/web/ncbi_ui_mapping.md §4, DW-41). -->
         <template v-if="attentionState.wakeLock !== 'unsupported' && attentionState.handheld">
-          <label class="flag-label" :data-wake-lock="attentionState.wakeLock">
-            <input
-              type="checkbox"
-              :checked="attentionState.keepAwake"
-              data-testid="keep-awake"
-              @change="attention.setKeepAwake(($event.target as HTMLInputElement).checked)"
+          <span class="control-tip">
+            <label class="flag-label" :data-wake-lock="attentionState.wakeLock">
+              <input
+                type="checkbox"
+                :checked="attentionState.keepAwake"
+                data-testid="keep-awake"
+                @change="attention.setKeepAwake(($event.target as HTMLInputElement).checked)"
+              />
+              Keep searching while you're away
+            </label>
+            <HelpTip
+              id="keep-awake"
+              label="About keeping the search going"
+              text="Keeps the screen on until the search ends. A phone or tablet ends the search when its screen turns off; switching to another app can end it too."
             />
-            Keep searching while you're away
-          </label>
-          <HelpTip
-            id="keep-awake"
-            label="About keeping the search going"
-            text="Keeps the screen on until the search ends. A phone or tablet ends the search when its screen turns off; switching to another app can end it too."
-          />
+          </span>
           <span v-if="attentionState.wakeLock === 'failed'" class="warning" data-testid="wake-lock-failed">
             The browser did not keep the screen on: {{ attentionState.wakeLockError }}
           </span>

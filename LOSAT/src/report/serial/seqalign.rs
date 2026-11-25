@@ -33,6 +33,8 @@ use std::io::Write;
 
 use crate::blastinput::app::Program;
 use crate::common::GapEditOp;
+use crate::report::archive::options::RequestKind;
+use crate::report::ostream::{ReportWrite, Site};
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryNames, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::seqid::SeqId;
@@ -642,14 +644,6 @@ fn blast_type(run: &RunRecord<'_>) -> (&'static str, i32) {
     }
 }
 
-/// `Blast_SubjectIsNucleotide` of the program.
-fn subject_is_nucleotide(program: Program) -> bool {
-    matches!(
-        program,
-        Program::Blastn | Program::Tblastn | Program::Tblastx
-    )
-}
-
 /// The value of a `User-field`'s `data` that BLAST sets.
 enum UserData {
     Bool(bool),
@@ -725,7 +719,7 @@ fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
             enc,
             b"Blast Database Title",
             title,
-            UserData::Bool(subject_is_nucleotide(run.program)),
+            UserData::Bool(RequestKind::from(run.program).subject_is_nucleotide()),
         ),
     }
     enc.end_list();
@@ -1805,6 +1799,11 @@ pub fn write_query(
 /// `diagnostics`; a document without one is written as before.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:268-279
+///
+/// Each document is one object of NCBI's object stream on the report's stream
+/// (`ostream::Site::Serial`): its bytes, then `~CObjectOStream`'s flush. The plain document is
+/// inserted whole; where its device write fails, NCBI's pieces of it (`document_pieces`) decide
+/// NCBI's end.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_query_to(
     format: SerialFormat,
@@ -1813,25 +1812,83 @@ pub(crate) fn write_query_to(
     subjects: &[SubjectRecord<'_>],
     hsps: &[HspRecord<'_>],
     buf: &mut Vec<u8>,
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
     diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
     buf.clear();
+    let document = QueryDocument {
+        run,
+        query,
+        subjects,
+        hsps,
+    };
     match write_query(format, run, query, subjects, hsps, buf) {
-        Ok(true) => writer.write_all(buf)?,
+        Ok(true) => {
+            writer.site(Site::Serial { whole: true })?;
+            match writer.write_all(buf).and_then(|()| writer.ncbi_flush()) {
+                Err(error) if crate::report::ostream::is_undecided_report_write_failure(&error) => {
+                    writer.resolve_object(&document_pieces(format, &document))?;
+                }
+                written => written?,
+            }
+            writer.site(Site::Report)?;
+        }
         Ok(false) => {}
         Err(SeqAlignError::Serial(SerialError::NonVisibleChar(byte))) => {
-            let document = QueryDocument {
-                run,
-                query,
-                subjects,
-                hsps,
-            };
+            writer.site(Site::Serial { whole: false })?;
             write_query_posting(format, byte, &document, buf, writer, diagnostics)?;
+            writer.ncbi_flush()?;
+            writer.site(Site::Report)?;
         }
         Err(error) => return Err(error.into()),
     }
     Ok(())
+}
+
+/// `document_pieces` of one query's document (for the tests).
+#[cfg(test)]
+pub(super) fn query_pieces(
+    format: SerialFormat,
+    run: &RunRecord<'_>,
+    query: &QueryRecord<'_>,
+    subjects: &[SubjectRecord<'_>],
+    hsps: &[HspRecord<'_>],
+) -> Vec<usize> {
+    document_pieces(
+        format,
+        &QueryDocument {
+            run,
+            query,
+            subjects,
+            hsps,
+        },
+    )
+}
+
+/// NCBI's insertions of `document` into the report's stream (`Traced::pieces`): the writes of
+/// its object stream's buffer, from a second encoding of it; none for a stream without a model of
+/// its buffer.
+#[cold]
+#[inline(never)]
+fn document_pieces(format: SerialFormat, document: &QueryDocument<'_, '_>) -> Vec<usize> {
+    fn pieces<E: Encoder>(mut enc: Traced<E>, document: &QueryDocument<'_, '_>) -> Vec<usize> {
+        write_seq_annot(
+            &mut enc,
+            document.run,
+            document.query,
+            document.subjects,
+            document.hsps,
+        );
+        enc.piece_sizes()
+    }
+    let mut bytes = Vec::new();
+    match format {
+        SerialFormat::AsnText => pieces(Traced::new(AsnTextEncoder::new(&mut bytes), 0), document),
+        SerialFormat::AsnBinary => {
+            pieces(Traced::new(AsnBinaryEncoder::new(&mut bytes), 0), document)
+        }
+        SerialFormat::Json => pieces(Traced::new(JsonEncoder::new(&mut bytes), 0), document),
+    }
 }
 
 /// The records of one query's Seq-annot.
@@ -1863,12 +1920,11 @@ fn write_query_posting(
     byte: u8,
     document: &QueryDocument<'_, '_>,
     buf: &mut Vec<u8>,
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
     diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
     buf.clear();
-    let prefix =
-        crate::report::archive::options::RequestKind::from(document.run.program).application();
+    let prefix = RequestKind::from(document.run.program).application();
     let post = |replaced: &ReplacedChar| {
         diagnostics.write_all(&replaced.post(Some(prefix)))?;
         diagnostics.flush()
@@ -1893,7 +1949,7 @@ fn write_query_posting(
 fn write_traced<E: Encoder>(
     mut enc: E,
     document: &QueryDocument<'_, '_>,
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
 ) -> anyhow::Result<()> {
     write_seq_annot(
         &mut enc,
@@ -1919,7 +1975,7 @@ pub(crate) fn write_hit_list_seqaligns<'a, L>(
     run: &RunRecord<'_>,
     hit_lists: &'a [Option<L>],
     queries: &QueryNames<'_>,
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
     warnings: &mut QueryWarnings<'_>,
     mut records: impl FnMut(usize, &'a L, &mut Vec<SubjectRecord<'a>>, &mut Vec<HspRecord<'a>>),
 ) -> anyhow::Result<()> {

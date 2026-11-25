@@ -9,9 +9,8 @@ use super::{
     database::{BlastxDatabase, ReportedSubjects},
     input::FastaRecord,
     native::{
-        archive_error, database_search_error, engine, input_error, options_error, output_error,
-        report_error, reported_batch, run_query_batches, write_empty_subject_warnings,
-        ReportedAsks,
+        archive_error, database_search_error, engine, input_error, options_error, report_error,
+        reported_batch, run_query_batches, write_empty_subject_warnings, ReportedAsks,
     },
     query_setup::BATCH_SIZE,
     report::{self, LocalReport, RecordsParsed, ShownSubjects},
@@ -741,11 +740,9 @@ fn write_run(
         if let Some(document) = &mut documents[index] {
             let mut start = Vec::new();
             document.document_mut().start(&mut start);
-            writer.write_all(&start).map_err(output_error)?;
+            writer.write_all(&start)?;
         }
-        if crate::report::pairwise::flushes_after_prolog(options.html.is_some(), false) {
-            writer.flush().map_err(output_error)?;
-        }
+        writer.flush()?;
     }
     // NCBI: a batch size of 0 makes the first batch empty, and its query factory refuses it.
     if batch_size == 0 {
@@ -1005,7 +1002,7 @@ fn write_run(
                     &mut shared,
                 )
                 .map_err(archive_error)
-                .and_then(|()| writer.flush().map_err(output_error));
+                .and_then(|()| writer.flush().map_err(Into::into));
                 // An error of the format's report of the batch fails the call, or this format
                 // alone (`FormatRefusal`), which writes nothing in the later batches. The
                 // archive, as the first format, takes the place of the warnings' writer.
@@ -1041,7 +1038,7 @@ fn write_run(
                 }),
             )
             .map_err(report_error)
-            .and_then(|()| writer.flush().map_err(output_error));
+            .and_then(|()| writer.flush().map_err(Into::into));
             // An error of the format's report of the batch fails the call, or this format alone
             // (`FormatRefusal`), which writes nothing in the later batches.
             let written = refusal.check(rendered)?;
@@ -1126,7 +1123,7 @@ fn write_run(
             xml_matrix,
         )
         .map_err(report_error)
-        .and_then(|()| writer.flush().map_err(output_error));
+        .and_then(|()| writer.flush().map_err(Into::into));
         // An error of the format's epilog fails the call, or this format alone (`FormatRefusal`).
         refusal.check(ended)?;
     }
@@ -1500,7 +1497,12 @@ fn check_resolutions(
         choices.push(choice);
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
-    let html = app::html_links(args.html, Program::Blastx, args.database_name(), &outfmts)?;
+    let html = app::html_links(
+        args.html,
+        args.request_kind(),
+        args.database_name(),
+        &outfmts,
+    )?;
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(
         "blastx",
         &outfmts,

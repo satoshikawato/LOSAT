@@ -11,6 +11,7 @@ use super::data_size::uint8_to_string_data_size;
 use super::format_guess::appears_fasta;
 use super::mask_data::process::{process_mask_data, MaskDataOptions};
 use super::metadata::{db_files_metadata, metadata_user_path, write_metadata_file, DbMetadata};
+use super::ofstream::StreamBuf;
 use super::platform::Platform;
 use super::raw_source::{scan_leaf_tax_ids, RawCopyError, RawSeqDbSource};
 use super::taxid_set::{TaxIdMapError, TaxIdSet};
@@ -18,7 +19,9 @@ use super::time::LocalTime;
 use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
-use crate::blastinput::ncbi_environment::{diag_target, ApplicationSettings, DiagStream};
+use crate::blastinput::ncbi_environment::{
+    diag_target, ApplicationSettings, DiagStream, ReadVerification,
+};
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::date::iso8601_date_time_exception;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
@@ -167,9 +170,11 @@ impl MakedbError {
                 WriteDbError::Exception(_)
                 | WriteDbError::Other(_)
                 | WriteDbError::InvalidArgument(_)
+                | WriteDbError::LengthError(_)
                 | WriteDbError::Io { .. },
             ) => 255,
             MakedbError::Build(WriteDbError::OutOfMemory) => 4,
+            MakedbError::Build(WriteDbError::ClosedPipe) => 0,
             MakedbError::Output(_) => 6,
             MakedbError::Database(error) if !is_refusal(error) => 2,
             MakedbError::Build(WriteDbError::Database(_)) => 2,
@@ -189,6 +194,11 @@ impl MakedbError {
 }
 
 impl MakedbError {
+    /// Whether the run ended at a closed pipe ([`WriteDbError::ClosedPipe`]).
+    fn is_closed_pipe(&self) -> bool {
+        matches!(self, MakedbError::Build(error) if error.is_closed_pipe())
+    }
+
     /// The message makeblastdb prints for the error (without the line feed that ends it), as
     /// bytes ([`WriteDbError::message`]).
     pub fn message(&self) -> Vec<u8> {
@@ -267,6 +277,9 @@ fn unsupported(message: impl Into<String>) -> MakedbError {
 fn input_error(error: SeqDbError) -> MakedbError {
     match error {
         SeqDbError::Ncbi(exception) => MakedbError::Build(WriteDbError::Exception(exception)),
+        SeqDbError::Setting(refused) => {
+            unsupported(format!("{refused} is not supported by LOSAT's makeblastdb"))
+        }
         error if error.ncbi_message().is_some() => MakedbError::Database(error),
         error => unsupported(format!(
             "{error}; this database is not supported as input by LOSAT's makeblastdb"
@@ -670,7 +683,7 @@ fn verify_input_files(names: &[&str], err: &mut dyn Write) -> Result<(), MakedbE
 #[allow(clippy::too_many_arguments)]
 fn build_database_with_log(
     args: &MakedbArgs,
-    registry_blastdb: Option<&[u8]>,
+    settings: &ApplicationSettings,
     now: Option<&LocalTime>,
     platform: Platform,
     stdin: &mut dyn Read,
@@ -679,6 +692,7 @@ fn build_database_with_log(
     logfile_error: Option<MakedbError>,
     end_messages: &mut Vec<Vec<u8>>,
 ) -> Result<(), MakedbError> {
+    let registry_blastdb = registry_blastdb(settings);
     let version = db_version(args)?;
     let is_protein = args.dbtype == "prot";
     let blastdb_input = args.input_type == "blastdb";
@@ -767,7 +781,7 @@ fn build_database_with_log(
         "Maximum file size: {}",
         uint8_to_string_data_size(max_file_size)
     );
-    endl(db.log());
+    endl(db.log())?;
     db.set_max_file_size(max_file_size);
     let (taxids, stdin_map) = read_taxids(args, stdin, err)?;
     if let Some(taxids) = taxids {
@@ -788,7 +802,7 @@ fn build_database_with_log(
         process_mask_data(&mut db, &mask_options, &mut warn)
     };
     if let Err(error) = masked {
-        let error = error.into_makedb_error();
+        let error = error.into_makedb_error(&settings.read_verification);
         *end_messages = destructor_messages(&db, error.as_ref());
         return error.map_or(Ok(()), Err);
     }
@@ -807,11 +821,15 @@ fn build_database_with_log(
             &user_path,
             is_protein,
             registry_blastdb,
+            &settings.read_verification,
             randomize,
             err,
         );
         *end_messages = destructor_messages(&db, result.as_ref().err());
-        if result.as_ref().is_err_and(|error| !is_losat_error(error)) {
+        if result
+            .as_ref()
+            .is_err_and(|error| !is_losat_error(error) && !error.is_closed_pipe())
+        {
             end_messages.extend(db.close_at_destruction());
         }
         return result;
@@ -882,7 +900,8 @@ fn seq_type(is_protein: bool) -> SeqType {
 // open, and `build_database_with_log` closes it after the messages, as makeblastdb's
 // destructors do. LOSAT's refusals and its own errors end the build and remove its files.
 /// `x_ProcessInputData` for `-input_type blastdb`, then `EndBuild` and the metadata file
-/// (`open_new_database`); `randomize` is the seed of `-randomize`.
+/// (`open_new_database`); `read_verification` is the run's `SERIAL_VERIFY_DATA_READ`
+/// (`ApplicationSettings::read_verification`), `randomize` the seed of `-randomize`.
 #[allow(clippy::too_many_arguments)]
 fn copy_input_databases(
     db: &mut BuildDatabase<'_>,
@@ -890,6 +909,7 @@ fn copy_input_databases(
     user_path: &[u8],
     is_protein: bool,
     registry_blastdb: Option<&[u8]>,
+    read_verification: &ReadVerification,
     randomize: Option<u32>,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
@@ -912,13 +932,17 @@ fn copy_input_databases(
             "No valid input FASTA file or BLAST db is found.",
         ));
     }
-    let input = SeqDb::open_in(combine_and_quote(names).as_bytes(), seqtype, &search)
+    let mut input = SeqDb::open_in(combine_and_quote(names).as_bytes(), seqtype, &search)
         .map_err(input_error)?;
+    // The definition lines are read as the copy reaches them: a record that fails NCBI's check
+    // of a mandatory member under a `SERIAL_VERIFY_DATA_READ` that turns it off is refused there
+    // (`SeqDb::refuse_unchecked_reads`, `input_error`).
+    input.refuse_unchecked_reads(read_verification);
     let leafs = {
         let mut warn = warn_to(err);
         scan_leaf_tax_ids(&input, &mut warn, db.utf8_once())
     };
-    db.set_leaf_tax_ids(leafs.map_err(raw_copy_error)?);
+    db.set_leaf_tax_ids(leafs.map_err(raw_copy_error)?)?;
     let mut source = RawSeqDbSource::new(&input, db, randomize).map_err(raw_copy_error)?;
     let copied = {
         let mut warn = warn_to(err);
@@ -928,7 +952,12 @@ fn copy_input_databases(
         let error = raw_copy_error(error);
         if is_losat_error(&error) {
             let mut warn = warn_to(err);
-            let _ = db.end_build(true, &mut warn);
+            // A closed pipe at the log of that `EndBuild` ends the run there (`endl`).
+            if let Err(stop) = db.end_build(true, &mut warn) {
+                if stop.is_closed_pipe() {
+                    return Err(stop.into());
+                }
+            }
         }
         return Err(error);
     }
@@ -1200,7 +1229,7 @@ pub fn run(args: &MakedbArgs, settings: &ApplicationSettings) -> i32 {
     let now = LocalTime::now();
     let status = run_with(
         args,
-        registry_blastdb(settings),
+        settings,
         now.as_ref(),
         Platform::host(),
         &mut stdin.lock(),
@@ -1213,19 +1242,31 @@ pub fn run(args: &MakedbArgs, settings: &ApplicationSettings) -> i32 {
 }
 
 /// makeblastdb's log on NCBI's `cout`: a write is an insertion, a flush is the stream's flush
-/// (the end of each line, `build_db::endl`). The stream's state is not reported: NCBI's
-/// makeblastdb does not read it.
+/// (the end of each line, `build_db::endl`). The stream's state is not reported (NCBI's
+/// makeblastdb does not read it), but for a write that found the pipe closed where SIGPIPE ends
+/// NCBI's process (`StreamBuf::closed_pipe`): from that write on, every write and flush returns
+/// the error of a closed pipe, and the build ends at the end of the line (`build_db::endl`).
 struct CoutLog<'a>(super::cout::Cout<'a>);
+
+impl CoutLog<'_> {
+    /// The error of a closed pipe once a write found one.
+    fn closed_pipe(&self) -> std::io::Result<()> {
+        if self.0.rdbuf().closed_pipe() {
+            return Err(std::io::ErrorKind::BrokenPipe.into());
+        }
+        Ok(())
+    }
+}
 
 impl Write for CoutLog<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.0.insert(buf);
-        Ok(buf.len())
+        self.closed_pipe().map(|()| buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.0.flush();
-        Ok(())
+        self.closed_pipe()
     }
 }
 
@@ -1262,13 +1303,14 @@ pub(crate) fn registry_blastdb(settings: &ApplicationSettings) -> Option<&[u8]> 
 // nothing, exit status 1). LOSAT reads `-logfile` as an option of makeblastdb
 // only, not anywhere in the command line as NCBI's application does (for example
 // as the value of `-title`).
-/// One run with the registry entry `[BLAST] BLASTDB` of the application settings
-/// (`registry_blastdb`) and the given time, platform and streams: the build, then the error
-/// message and the exit code of a failed build. With `-logfile` the log and the
-/// messages go where makeblastdb sends them instead of `out` and `err`.
+/// One run with the application settings `settings` (the registry entry `[BLAST] BLASTDB`,
+/// `registry_blastdb`, and the checks of NCBI's reads, `ApplicationSettings::read_verification`)
+/// and the given time, platform and streams: the build, then the error message and the exit code
+/// of a failed build. With `-logfile` the log and the messages go where makeblastdb sends them
+/// instead of `out` and `err`.
 pub(crate) fn run_with(
     args: &MakedbArgs,
-    registry_blastdb: Option<&[u8]>,
+    settings: &ApplicationSettings,
     now: Option<&LocalTime>,
     platform: Platform,
     stdin: &mut dyn Read,
@@ -1280,7 +1322,7 @@ pub(crate) fn run_with(
         None | Some("-") => {
             let result = build_database_with_log(
                 args,
-                registry_blastdb,
+                settings,
                 now,
                 platform,
                 stdin,
@@ -1306,7 +1348,7 @@ pub(crate) fn run_with(
         Some(mut log) => {
             let result = build_database_with_log(
                 args,
-                registry_blastdb,
+                settings,
                 now,
                 platform,
                 stdin,
@@ -1323,7 +1365,7 @@ pub(crate) fn run_with(
             ));
             let result = build_database_with_log(
                 args,
-                registry_blastdb,
+                settings,
                 now,
                 platform,
                 stdin,
@@ -1359,10 +1401,13 @@ fn log_of(name: &str) -> Option<std::fs::File> {
 }
 
 /// The error message and the exit code of a build, then the messages of
-/// `~CBuildDatabase` (`end_messages`).
+/// `~CBuildDatabase` (`end_messages`); nothing after a closed pipe.
 fn finish(result: Result<(), MakedbError>, end_messages: &[Vec<u8>], err: &mut dyn Write) -> i32 {
     let status = match result {
         Ok(()) => 0,
+        // A closed pipe ends the run where SIGPIPE ends NCBI's process: no message, and none of
+        // `~CBuildDatabase`'s (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+        Err(error) if error.is_closed_pipe() => return error.exit_code(),
         Err(error) => {
             let _ = err.write_all(&[error.message().as_slice(), b"\n"].concat());
             error.exit_code()

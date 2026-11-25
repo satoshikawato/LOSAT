@@ -269,7 +269,7 @@ impl TblastnArgs {
     /// returned instead of written to standard output. The `query` and `subject` of `self` are
     /// only the names the report shows for the inputs; `out` is `None`. The diagnostics go to
     /// standard error, as the command line's.
-    #[cfg(any(target_arch = "wasm32", test))]
+    #[cfg(any(losat_web_abi_v1, test))]
     pub(crate) fn run_in_memory(
         self,
         settings: crate::blastinput::ncbi_environment::ApplicationSettings,
@@ -307,9 +307,11 @@ impl TblastnArgs {
         use crate::blastinput::seq_range;
         let mut args = self;
         args.id_scope = args.parse_deflines.then(Default::default);
-        // The run's `SERIAL_VERIFY_DATA_WRITE`, which `-in_pssm`'s reader reads
-        // (`TblastnArgs::write_verification`).
+        // The run's `SERIAL_VERIFY_DATA_WRITE`, `SERIAL_VERIFY_DATA_READ` and
+        // `SERIAL_VERIFY_DATA_GET`, which `-in_pssm`'s reader reads
+        // (`TblastnArgs::write_verification`, `read_verification`).
         args.write_verification = settings.write_verification.clone();
+        args.read_verification = settings.read_verification.clone();
         // NCBI's score block looks for the file of an ungapped search's `-matrix` that its tables
         // do not have when it sets up a batch (`TblastnArgs::find_matrix_file`); the search
         // refuses it there (`args::check_search_limits`).
@@ -323,7 +325,6 @@ impl TblastnArgs {
         // (`app::early_format_choice`).
         let strategy_file = crate::report::archive::strategy::open_strategy_file(
             args.export_search_strategy.as_deref(),
-            args.out.as_deref(),
             "TBLASTN",
         )?;
         let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
@@ -511,13 +512,7 @@ impl TblastnArgs {
             }
             RunIo::Memory { query, .. } => Input::Bytes(query),
         };
-        // The organism report's `-out` file is written as NCBI's buffer writes it.
-        let tax_report = format == Some(app::ReportFormat::TaxFormat);
-        let mut stream = report_stream(&args, &io, tax_report)?;
-        // Outfmt 0 to 4: the pairwise report (`report::pairwise::PairwiseView`).
-        let pairwise = format
-            .and_then(crate::report::pairwise::PairwiseView::of)
-            .is_some();
+        let mut stream = report_stream(&args, &io)?;
         // The format as the reports read it: the number and the custom fields, or the value as
         // given when it has a delimiter, which `normalized` drops and the custom tabular report
         // reads (`tabular::tabular_spec`, which parses it again as NCBI does).
@@ -529,7 +524,7 @@ impl TblastnArgs {
         let strategy = args.strategy.clone();
         let result = {
             let mut outputs =
-                ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
+                ReportOutputs::single(&outfmt, OutputSink::Report(&mut stream), &mut *diagnostics);
             search_cli(
                 args,
                 list,
@@ -544,6 +539,8 @@ impl TblastnArgs {
         };
         // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
         let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
+        // `~CBlastFormat` and `CATCH_ALL`: a failed report ends the run as NCBI's does.
+        let result = stream.finish(result);
         // NCBI writes an error archive after the archives of the batches before when the
         // application stops with one of its own errors, and when the run ends with messages that
         // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status).
@@ -574,10 +571,7 @@ impl TblastnArgs {
                 }
             }
         }
-        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-        // The outfmt 0 formatter's stream throws when a write fails; for outfmt 6/7 NCBI
-        // aborts and LOSAT reports the error (`cli::ReportStream::finish`).
-        stream.finish(result, pairwise || tax_report)
+        result
     }
 }
 
@@ -588,7 +582,7 @@ enum RunIo<'a> {
     Files,
     /// Web ABI v1 (`run_in_memory`): the call's bytes, and the report kept in memory.
     #[cfg_attr(
-        not(any(target_arch = "wasm32", test)),
+        not(any(losat_web_abi_v1, test)),
         expect(
             dead_code,
             reason = "made only by `run_in_memory`, for the web ABI (wasm32) and tests"
@@ -684,9 +678,9 @@ fn write_run_error_archive(
     let Some(lines) = super::archive::error_lines(error, true) else {
         return;
     };
-    if let Ok(mut report) = report_stream(args, io, false) {
+    if let Ok(mut report) = report_stream(args, io) {
         let _ = write_error_archive(io, handle, error, &lines, &mut report);
-        let _ = std::io::Write::flush(&mut report);
+        let _ = report.finish(Ok(()));
     }
 }
 
@@ -710,30 +704,26 @@ fn write_error_archive(
 
 /// The report stream of a run: the `-out` file (created) or standard output, or the report
 /// in memory (`RunIo::Memory`).
-fn report_stream(
-    args: &TblastnArgs,
-    io: &RunIo<'_>,
-    tax_report: bool,
-) -> Result<crate::cli::ReportStream> {
+fn report_stream(args: &TblastnArgs, io: &RunIo<'_>) -> Result<crate::cli::ReportStream> {
     Ok(match io {
         RunIo::Files => crate::cli::ReportStream::of_cli(
             open_out_file(args)?,
-            tax_report,
+            "tblastn",
+            &args.outfmt,
             args.strategy.as_ref(),
         ),
-        RunIo::Memory { report, .. } => crate::cli::ReportStream {
-            inner: Box::new(MemoryReport(report.clone())),
-            failed: false,
-        },
+        RunIo::Memory { report, .. } => {
+            crate::cli::ReportStream::memory(Box::new(MemoryReport(report.clone())), "tblastn")
+        }
     })
 }
 
 /// The `-out` file, created (`-`: standard output).
-fn open_out_file(args: &TblastnArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
+fn open_out_file(args: &TblastnArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some("TBLASTN")).map(std::io::BufWriter::new))
+        .map(|path| crate::cli::create_out_file(path, Some("TBLASTN")))
         .transpose()
 }
 
@@ -1246,6 +1236,7 @@ pub fn run_local_database(
     // The file of an unknown `-matrix`, as the command line's `run_io` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;
     args.write_verification = settings.write_verification.clone();
+    args.read_verification = settings.read_verification.clone();
     report_formats(outputs, &args)?;
     let archive_requested = outputs
         .formats
@@ -1453,7 +1444,7 @@ fn write_first_batch_prologs(
     for format in outputs.formats.iter_mut() {
         if (0..=4).contains(&crate::blastinput::app::parse_formatting_string(format.outfmt)?.number)
         {
-            let mut writer = format.sink.open()?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             crate::report::pairwise::write_tblastn_pairwise_prolog(
                 &mut writer,
                 program,
@@ -1637,10 +1628,19 @@ fn search(
     } else {
         0
     };
-    // LOSAT's refusals of the masked search (`-db_hard_mask`; series NP, M4b PR 2) come where NCBI
-    // starts the search, after its checks.
+    // LOSAT's refusals of the masked search (`-db_hard_mask`; series NP, M4b PR 2 and M4b-3c part
+    // 2) come where NCBI starts the search, after its checks.
     if let (Some(database), Some(mask)) = (database, resolved.db_mask.as_ref()) {
-        database.check_mask_limits(mask, usize::try_from(resolved.word_size)?)?;
+        let zero_words = searched_queries
+            .iter()
+            .any(|record| record.seq().contains(&b'-'))
+            || pssm.as_deref().is_some_and(|psi| {
+                psi.pssm
+                    .rows
+                    .iter()
+                    .any(|row| row[0] > crate::utils::matrix::BLAST_SCORE_MIN)
+            });
+        database.check_mask_limits(mask, resolved.word_size, resolved.window_size, zero_words)?;
     }
     app::check_search_environment("TBLASTN", database.is_none())?;
     let subjects = subject_records;
@@ -2016,6 +2016,20 @@ fn search(
             Err(error) if fails_one_batch(&error) => None,
             Err(error) => return Err(error),
         };
+        // NCBI's prolog comes before the first batch's request (`StrategyExport::refused`).
+        let refused = crate::report::archive::strategy::StrategyExport::refused;
+        if searched_done > 0 && args.strategy.as_ref().is_some_and(refused) {
+            write_first_batch_prologs(
+                outputs,
+                subject_path.map(|path| path.as_path()),
+                subjects.len(),
+                subject_letters,
+                pairwise_database.as_ref(),
+                args.tabular_taxdb.unwrap_or(false),
+                pssm.as_ref().map_or("TBLASTN", |_| super::in_pssm::PROGRAM),
+                resolved.html.as_deref(),
+            )?;
+        }
         for range in query_input
             .batches(batch_size)
             .into_iter()

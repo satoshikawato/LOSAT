@@ -5,10 +5,15 @@ fn split_names_keeps_empty_pieces_of_a_text_with_names() {
     // NCBI 2.17.0: `-dblist 'in/p4  in/q4'` writes `DBLIST "in/p4" "" "in/q4" ` (probe D08 of
     // row RG-D2a) and `-dblist ' in/p4'` writes `DBLIST "" "in/p4" ` (D17); `-vdblist ''` writes
     // nothing (V04).
-    assert_eq!(split_names("in/p4  in/q4"), ["in/p4", "", "in/q4"]);
-    assert_eq!(split_names(" in/p4"), ["", "in/p4"]);
-    assert_eq!(split_names("a "), ["a", ""]);
-    assert!(split_names("").is_empty());
+    assert_eq!(
+        split_names(b"in/p4  in/q4"),
+        [b"in/p4".as_slice(), b"", b"in/q4"]
+    );
+    assert_eq!(split_names(b" in/p4"), [b"".as_slice(), b"in/p4"]);
+    assert_eq!(split_names(b"a "), [b"a".as_slice(), b""]);
+    assert!(split_names(b"").is_empty());
+    // NCBI 2.17.0 (case K10d_dblist_two of tests/non_utf8_names): the names keep their bytes.
+    assert_eq!(split_names(b"q4 d\xe9/p4"), [b"q4".as_slice(), b"d\xe9/p4"]);
 }
 
 #[test]

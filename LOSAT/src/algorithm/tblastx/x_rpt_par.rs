@@ -48,7 +48,7 @@
 //! windows hold at most `CHUNK` x `WINDOW_CHUNKS` x threads rows formatted (~13 MB at 16
 //! threads for rows of ~100 bytes).
 
-use std::io::{self, Write};
+use std::io;
 use std::sync::{Arc, OnceLock};
 
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -99,7 +99,7 @@ pub(crate) fn pool<'p, 'q>(pool: &'p SearchPool<'q>) -> Option<&'p SearchPool<'q
 /// `report::write_tabular` without a format observer or a subject whose load throws or whose id
 /// fails, with the rows of each query formatted on `pool` (item 3).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn write_tabular<W: Write>(
+pub(crate) fn write_tabular<W: crate::report::ostream::ReportWrite>(
     pool: &SearchPool<'_>,
     hits: &[TblastxHsp],
     writer: &mut W,
@@ -146,6 +146,8 @@ pub(crate) fn write_tabular<W: Write>(
                 }
                 report::write_tabular_row(writer, hsp, query_ids, subject_ids, &config)?;
             }
+            // `~CBlastTabularInfo` of the query's report flushes the stream.
+            writer.ncbi_flush()?;
             continue;
         }
         for window in query_hits.chunks(CHUNK * WINDOW_CHUNKS * pool.threads()) {
@@ -165,6 +167,7 @@ pub(crate) fn write_tabular<W: Write>(
                 )?;
             }
         }
+        writer.ncbi_flush()?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2238
     // The same last line as `report::write_tabular`.
@@ -174,6 +177,7 @@ pub(crate) fn write_tabular<W: Write>(
             "# BLAST processed {} queries",
             queries_before + query_titles.len()
         )?;
+        writer.ncbi_flush()?;
     }
     Ok(())
 }

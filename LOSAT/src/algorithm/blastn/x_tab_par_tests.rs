@@ -1,5 +1,6 @@
 use super::super::hsp::{BlastnHsp, BlastnHspList};
 use super::*;
+use std::io::Write;
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
 struct Rng(u64);
@@ -136,6 +137,8 @@ struct Side {
     log: Arc<std::sync::Mutex<Vec<Event>>>,
     sink: bool,
 }
+
+impl crate::report::ostream::ReportWrite for Side {}
 
 impl Write for Side {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {

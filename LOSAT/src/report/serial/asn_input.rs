@@ -142,13 +142,30 @@ pub(crate) struct Names {
 }
 
 impl Names {
-    /// The PSSM file of `-in_pssm`.
+    /// The PSSM file of `-in_pssm` (psiblast and tblastn).
     pub(crate) const PSSM: Names = Names {
         document: "PSSM",
         reader: "PSSM reader",
         input: "input",
         allocator: "NCBI's reader",
         own_serial_message: true,
+    };
+    /// A profile file of makeprofiledb (`-in`, ASN.1 text or `-binary`). makeprofiledb prints the
+    /// exception's own text, so `:OtherType` depends on the types its process has met before.
+    pub(crate) const PROFILE: Names = Names {
+        document: "profile",
+        reader: "PSSM reader",
+        input: "file",
+        allocator: "makeprofiledb",
+        own_serial_message: false,
+    };
+    /// Binary definition lines (`ASN1_BlastDefLine` user object) of makeprofiledb.
+    pub(crate) const BINARY_DEFLINES: Names = Names {
+        document: "binary definition lines",
+        reader: "binary definition lines reader",
+        input: "binary header",
+        allocator: "makeprofiledb",
+        own_serial_message: false,
     };
     /// A mask data file of makeblastdb's `-mask_data`.
     pub(crate) const MASK: Names = Names {

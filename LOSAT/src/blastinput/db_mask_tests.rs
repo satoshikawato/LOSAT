@@ -1294,7 +1294,7 @@ fn translated_overlapping_masks_narrowed_and_walked() {
     assert!(translated_walked(&[(120, 183), (180, 240)]));
     assert!(translated_walked(&[(120, 600), (180, 300)]));
 
-    // Refusal messages for the two new shapes.
+    // Refusal message for `NoChunkingWithOverlaps`.
     let no_chunking = HardMaskShape::NoChunkingWithOverlaps {
         frame: 2,
         start: 3,
@@ -1306,8 +1306,4 @@ fn translated_overlapping_masks_narrowed_and_walked() {
          end at the mask [3, 717), which NCBI BLAST+ 2.17.0 searches as the whole frame past the \
          later masks"
     );
-    let reaches = HardMaskShape::ReachesOtherEntries;
-    assert!(reaches
-        .text()
-        .contains("reach the table of diagonals of the sequences searched"));
 }

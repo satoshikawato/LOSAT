@@ -26,6 +26,10 @@ with query `q.faa` for `tblastn` and `qx.fna` for `tblastx`):
 - `tblastx.nest.xw0.1a.6.out`: `tblastx` on `nest` (`-evalue 1000 -window_size 0`)
 - `tblastn.fb.w0.1a.6.out`: `tblastn` on `fb` (`-window_size 0 -evalue 1000`)
 - `tblastx.fb.xw0.1a.6.out`: `tblastx` on `fb` (`-evalue 1000 -window_size 0`)
+- `tblastn.lk.w0.1a.6.out`: `tblastn` on `lk` (`-window_size 0 -evalue 1000`; `lkA` reference)
+- `tblastn.f2b.w0.1a.6.out`: `tblastn` on `f2b` (`-window_size 0 -evalue 1000`; `lkB` reference on unwritten entries at offset -588)
+- `tblastx.lk.xw0.1a.6.out`: `tblastx` on `lk` (`-evalue 1000 -window_size 0`; `lkA` reference)
+- `tblastx.f2b.xw0.1a.6.out`: `tblastx` on `f2b` (`-evalue 1000 -window_size 0`; `lkB` reference on unwritten entries at offset -588)
 
 ## Layouts
 
@@ -40,9 +44,10 @@ unless noted as bases:
 - `g3`: masks `[40, 60)`, `[55, 80)`, `[75, 90)`; `WWW` at 60 and 80 (two consecutive inverted
   ranges; NCBI `tblastn` two-hit gapped search splits its interval tree without end).
 - `uns`: masks out of start order `[100, 120)`, `[40, 60)` (refused before the search).
-- `lk`: `A` with masks `[40, 200)`, `[60, 238)` (chunks of 40, -140, and 2 residues per plus
-  frame) followed by `B` with mask `[230, 235)` (`B`'s hits reach `A`'s entries on NCBI's table
-  of diagonals; refused before the search).
+- `lk`: `lkA` with masks `[40, 200)`, `[60, 238)` (chunks of 40, -140, and 2 residues per plus
+  frame) followed by `lkB` with mask `[230, 235)` (`lkB` is searched on a table of its own at
+  NCBI's one-thread offset -588 on unwritten entries without `lkA`'s entries, approved exception
+  29).
 - `fb`: `F` (722 bases) with masks `[3, 717)`, `[6, 717)` in bases (chunks of 1, -237, and 1
   residues per frame, storing no entries at `-window_size 0` while moving NCBI's one-thread offset
   to -1410) followed by `B` (`B` meets only entries that no sequence wrote).

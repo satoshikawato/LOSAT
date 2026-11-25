@@ -481,8 +481,10 @@ pub(crate) fn translated_walked(masks: &[(u32, u32)]) -> bool {
 /// M4b-3c part 2): runs only when the first pass of `ResolvedMask::check_losat_limits` finds a
 /// walked sequence (`translated_walked`). Walks every searched sequence in database order with
 /// exact nucleotide lengths (`SeqDb::searched_sequences`), checks the first-pass shapes and the
-/// walk's refusals in order (`of_scan`, `WordPastEnd`, `NoChunkingWithOverlaps`,
-/// `ReachesOtherEntries`), and records the `HardStarts` for every walked or New sequence.
+/// walk's refusals in order (`of_scan`, `WordPastEnd`, `NoChunkingWithOverlaps`), and records the
+/// `HardStarts` for every walked or New sequence (approved exception 29: a sequence whose hits
+/// would reach another sequence's entries runs on a table of its own at NCBI's offset where it
+/// meets unwritten entries, else apart at `window + below_start`).
 fn translated_walk(
     db: &SeqDb,
     algo_id: i32,
@@ -556,9 +558,6 @@ fn translated_walk(
                     start,
                     end,
                 }));
-            }
-            if step.reaches_written {
-                return Ok(Some(HardMaskShape::ReachesOtherEntries));
             }
             if let Some(start) = step.ncbi {
                 starts.push(ordinal, start);
@@ -649,9 +648,10 @@ pub enum HardScan {
     /// sequence run in order on one table); masks that end before they start or start before the
     /// start of an earlier mask stay refused (`HardMaskShape::Unsorted`), as do a mask ending past
     /// the sequence (`HardMaskShape::PastEnd`), a one word past a frame's sentinel when
-    /// `zero_words` is true (`HardMaskShape::WordPastEnd`), a walked sequence with a frame taking
-    /// NCBI's no-chunking branch (`HardMaskShape::NoChunkingWithOverlaps`), and a sequence whose
-    /// word hits reach entries written by earlier sequences (`HardMaskShape::ReachesOtherEntries`).
+    /// `zero_words` is true (`HardMaskShape::WordPastEnd`), and a walked sequence with a frame
+    /// taking NCBI's no-chunking branch (`HardMaskShape::NoChunkingWithOverlaps`). A sequence whose
+    /// hits would reach entries written by earlier sequences is searched on a table of its own
+    /// (PD-LOSAT-NCBI-DEFECTS approved exception 29).
     /// For masks apart, `TailMask` read per frame (exception 21) and an empty first part before the
     /// no-chunking branch (exception 27) are searched as before. Both engines join the chunks of a
     /// frame longer than `MAX_DBSEQ_LEN` across their overlap, as for an unmasked subject (no
@@ -762,10 +762,6 @@ pub enum HardMaskShape {
     /// branch (`HardChunk::full_range`), which scans the whole frame past the later masks
     /// (exceptions 21 and 27 define a result only for masks apart).
     NoChunkingWithOverlaps { frame: i8, start: u32, end: u32 },
-    /// A translated sequence (`HardScan::Translated`) whose word hits after overlapping masks
-    /// reach diagonal entries written by earlier sequences in NCBI BLAST+ 2.17.0's one-thread
-    /// search, so its rows depend on the sequences that its thread searched before it.
-    ReachesOtherEntries,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:264-268 (cited at
@@ -1162,12 +1158,6 @@ impl HardMaskShape {
                  to the frame's end at the mask [{start}, {end}), which NCBI BLAST+ 2.17.0 \
                  searches as the whole frame past the later masks"
             ),
-            HardMaskShape::ReachesOtherEntries => {
-                "has word hits that, after overlapping masks, reach the table of diagonals of the \
-                 sequences searched before it in NCBI BLAST+ 2.17.0's search, whose rows for it \
-                 then depend on the sequences that its thread searched before"
-                    .to_string()
-            }
         }
     }
 }

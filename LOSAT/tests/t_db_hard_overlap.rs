@@ -3,9 +3,12 @@
 //!
 //! 1. Masks overlapping or nesting in start order (`s2`, `nest`, `fb`) match NCBI BLAST+ 2.17.0's
 //!    `-num_threads 1` output byte for byte at both 1 and 4 threads with empty stderr.
-//! 2. Refusals (exit status 1, empty stdout): NCBI's endless gapped interval-tree split (`g3`
-//!    tblastn default), masks stored out of start order (`uns`), and a sequence whose word hits
-//!    reach entries left by sequences searched before it (`lk`).
+//! 2. Sequences whose word hits reach another sequence's diagonal entries (`lk`) are searched
+//!    independently at every thread count (PD-LOSAT-NCBI-DEFECTS approved exception 29): `lkA`
+//!    matches NCBI's `lk` rows and `lkB` matches NCBI's `f2b` rows (at NCBI's one-thread offset
+//!    on unwritten entries, without `lkA`'s entries).
+//! 3. Refusals (exit status 1, empty stdout): NCBI's endless gapped interval-tree split (`g3`
+//!    tblastn default) and masks stored out of start order (`uns`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276,804-855 and
 //! c++/src/algo/blast/core/aa_ungapped.c:495-614
@@ -150,9 +153,66 @@ fn check_refusal_case(
     }
 }
 
-/// Searches `s2`, `nest`, and `fb` against frozen NCBI BLAST+ 2.17.0 `-num_threads 1` outputs
-/// and checks refusals on `g3` (interval tree), `uns` (out of start order), and `lk` (reaches
-/// earlier sequence entries), at 1 and 4 threads.
+fn subject_rows(bytes: &[u8], subject: &str) -> Vec<String> {
+    std::str::from_utf8(bytes)
+        .expect("utf-8 tabular output")
+        .lines()
+        .filter(|line| line.split('\t').nth(1) == Some(subject))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn check_lk_b_case(
+    dir: &Path,
+    program: &str,
+    extra: &[&str],
+    lk_ref_file: &str,
+    f2b_ref_file: &str,
+    failed: &mut Vec<String>,
+) {
+    let want_a = subject_rows(
+        &std::fs::read(fixture_dir().join(lk_ref_file)).unwrap(),
+        "lkA",
+    );
+    let want_b = subject_rows(
+        &std::fs::read(fixture_dir().join(f2b_ref_file)).unwrap(),
+        "lkB",
+    );
+    let mut first_stdout: Option<Vec<u8>> = None;
+    for threads in [1, 4] {
+        let out = run_search(dir, program, "lk", extra, threads);
+        if !out.status.success() || !out.stderr.is_empty() {
+            failed.push(format!(
+                "lk {program} at {threads} threads: status={} stderr={}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr),
+            ));
+            continue;
+        }
+        if let Some(prev) = &first_stdout {
+            if prev != &out.stdout {
+                failed.push(format!("lk {program}: stdout differs at {threads} threads"));
+            }
+        } else {
+            let got_a = subject_rows(&out.stdout, "lkA");
+            let got_b = subject_rows(&out.stdout, "lkB");
+            if got_a != want_a || got_b != want_b {
+                failed.push(format!(
+                    "lk {program} per-sequence mismatch: A {} vs {}, B {} vs {}",
+                    got_a.len(),
+                    want_a.len(),
+                    got_b.len(),
+                    want_b.len()
+                ));
+            }
+            first_stdout = Some(out.stdout);
+        }
+    }
+}
+
+/// Searches `s2`, `nest`, and `fb` against frozen NCBI BLAST+ 2.17.0 `-num_threads 1` outputs,
+/// checks independent per-sequence rows on `lk` (approved exception 29), and checks refusals on
+/// `g3` (interval tree) and `uns` (out of start order), at 1 and 4 threads.
 #[test]
 fn overlapping_hard_masks_match_ncbi_and_refuse_defects() {
     let dir = std::env::temp_dir().join(format!("losat-t-db-hard-overlap-{}", std::process::id()));
@@ -193,13 +253,27 @@ fn overlapping_hard_masks_match_ncbi_and_refuse_defects() {
         check_ncbi_case(&dir, program, db, extra, expected, &mut failed);
     }
 
-    const REACH_MSG: &str = "reach the table of diagonals of the sequences searched";
+    check_lk_b_case(
+        &dir,
+        "tblastn",
+        w0_args,
+        "tblastn.lk.w0.1a.6.out",
+        "tblastn.f2b.w0.1a.6.out",
+        &mut failed,
+    );
+    check_lk_b_case(
+        &dir,
+        "tblastx",
+        xw0_args,
+        "tblastx.lk.xw0.1a.6.out",
+        "tblastx.f2b.xw0.1a.6.out",
+        &mut failed,
+    );
+
     let refusals: &[(&str, &str, &[&str], &str)] = &[
         ("tblastn", "g3", &[], "splits the tree's nodes without end"),
         ("tblastn", "uns", &[], "has masks out of order"),
         ("tblastx", "uns", xdef_args, "has masks out of order"),
-        ("tblastn", "lk", w0_args, REACH_MSG),
-        ("tblastx", "lk", xw0_args, REACH_MSG),
     ];
     for &(program, db, extra, fragment) in refusals {
         check_refusal_case(&dir, program, db, extra, fragment, &mut failed);

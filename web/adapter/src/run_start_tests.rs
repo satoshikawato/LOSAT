@@ -599,6 +599,315 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
         refusal("blastn", "wm/d19.obinary")
     );
     crate::files::release(wm_handle).unwrap();
+
+    // Outside-cwd registered files (line WQA D19 round R1): every registered input whose resolved
+    // path `-logfile` opens is refused at both `validate` and `run`.
+    let outside_base = |q: &'static str, s: &'static str, log: &'static str| {
+        vec![
+            "tblastx",
+            "-query",
+            q,
+            "-subject",
+            s,
+            "-max_target_seqs",
+            "1",
+            "-num_threads",
+            "1",
+            "-logfile",
+            log,
+        ]
+    };
+    let assert_refused = |label: &str, program: &str, words: &[&str], named: &str| {
+        let want = refusal(program, named);
+        assert_eq!(validate(words).unwrap_err(), want, "{label}: validate");
+        assert_eq!(run_of(words).0.unwrap_err(), want, "{label}: run");
+    };
+    for (label, words, named) in [
+        (
+            "abs query",
+            outside_base("/tmp/q.fa", "s.fa", "/tmp/q.fa"),
+            "/tmp/q.fa",
+        ),
+        (
+            "up query",
+            outside_base("../q.fa", "s.fa", "../q.fa"),
+            "../q.fa",
+        ),
+        (
+            "up query normalized",
+            outside_base("../q.fa", "s.fa", "./../q.fa"),
+            "./../q.fa",
+        ),
+        (
+            "proc cwd up query",
+            outside_base("/proc/self/cwd/../q.fa", "s.fa", "../q.fa"),
+            "../q.fa",
+        ),
+        (
+            "abs subject",
+            outside_base("q.fa", "/tmp/s.fa", "/tmp/s.fa"),
+            "/tmp/s.fa",
+        ),
+        (
+            "home query",
+            outside_base("/home/me/q.fa", "s.fa", "/home/me/q.fa"),
+            "/home/me/q.fa",
+        ),
+        (
+            "tmp dotdot query",
+            outside_base("/tmp/q.fa", "s.fa", "/tmp/x/../q.fa"),
+            "/tmp/x/../q.fa",
+        ),
+        (
+            "data query",
+            outside_base("/data/q.fa", "s.fa", "/data/q.fa"),
+            "/data/q.fa",
+        ),
+    ] {
+        assert_refused(label, "tblastx", &words, named);
+    }
+    // Absolute registered `-conffile` (kind 2).
+    let _abs_conf = Registered::new("/tmp/d19_r1_abs.ini", b"[BLAST]\n");
+    let abs_conf_words = [
+        "tblastx",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+        "-conffile",
+        "/tmp/d19_r1_abs.ini",
+        "-logfile",
+        "/tmp/d19_r1_abs.ini",
+    ];
+    assert_refused(
+        "abs conffile",
+        "tblastx",
+        &abs_conf_words,
+        "/tmp/d19_r1_abs.ini",
+    );
+    // Absolute registered `-window_masker_db` (kind 1).
+    let kind_wm = crate::files::KIND_WINDOW_MASKER_COUNTS;
+    let abs_wm_handle =
+        crate::files::begin(kind_wm, "/tmp/d19_r1_abs.obinary", counts_bytes.len()).unwrap();
+    crate::files::chunk(abs_wm_handle, &counts_bytes).unwrap();
+    crate::files::end(abs_wm_handle).unwrap();
+    let abs_wm_words = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-window_masker_db",
+        "/tmp/d19_r1_abs.obinary",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "/tmp/d19_r1_abs.obinary",
+    ];
+    assert_refused(
+        "abs wmdb",
+        "blastn",
+        &abs_wm_words,
+        "/tmp/d19_r1_abs.obinary",
+    );
+    crate::files::release(abs_wm_handle).unwrap();
+    // Controls that must keep their present result:
+    // - `/tmp/run.log` with `-query /tmp/q.fa` and `../run.log` with `-query ../q.fa` make files;
+    // - `/data/run.log` with `-query /data/q.fa` stays on stream 3 (`/data` is outside
+    //   `user_makes`);
+    // - `/proc/self/cwd/../q.fa` with `-query ../q.fa` stays on stream 3 because NCBI's
+    //   `CDirEntry::ConvertToOSPath` lexically normalizes it to `/proc/self/q.fa` without
+    //   following symlinks, which fails to open in procfs.
+    for (q, log, want_file, want_diag) in [
+        ("/tmp/q.fa", "/tmp/run.log", Some("/tmp/run.log"), ""),
+        ("../q.fa", "../run.log", Some("../run.log"), ""),
+        ("/data/q.fa", "/data/run.log", None, warning),
+        ("../q.fa", "/proc/self/cwd/../q.fa", None, warning),
+    ] {
+        let ctrl = outside_base(q, "s.fa", log);
+        validate(&ctrl).unwrap();
+        let (res, streams) = run_of(&ctrl);
+        res.unwrap();
+        assert_eq!(
+            stream_text(&streams, STREAM_DIAGNOSTICS),
+            want_diag,
+            "{log}"
+        );
+        assert_eq!(
+            run_files(&streams),
+            want_file.map(|name| vec![(name.to_string(), warning.to_string())]),
+            "{log}"
+        );
+    }
+}
+
+/// `registered_run_files` uses one reader regardless of whether the argv parses (line WQA D19
+/// round R1): the same argv with and without an unknown option and with `-h` yields the same
+/// registered names for blastn (with `-window_masker_taxid`), tblastx, and psiblast.
+#[test]
+fn registered_run_files_uses_one_reader_regardless_of_parse() {
+    let counts_bytes = std::fs::read(format!(
+        "{}/../../LOSAT/tests/winmask/counts/mg1655_u9.obinary",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    let taxid_path = format!("{}/9606/wmasker.obinary", crate::files::WINDOW_MASKER_PATH);
+    let handle = crate::files::begin(
+        crate::files::KIND_WINDOW_MASKER_COUNTS,
+        &taxid_path,
+        counts_bytes.len(),
+    )
+    .unwrap();
+    crate::files::chunk(handle, &counts_bytes).unwrap();
+    crate::files::end(handle).unwrap();
+    let registry = crate::files::registry_files();
+
+    let blastn_base = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-window_masker_taxid",
+        "9606",
+    ];
+    let blastn_bad = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-window_masker_taxid",
+        "9606",
+        "-no_such_option",
+    ];
+    let blastn_help = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-window_masker_taxid",
+        "9606",
+        "-h",
+    ];
+    let want_blastn = vec![
+        b"q.fa".to_vec(),
+        b"s.fa".to_vec(),
+        taxid_path.as_bytes().to_vec(),
+    ];
+    assert_eq!(registered_run_files(&blastn_base, &registry), want_blastn);
+    assert_eq!(registered_run_files(&blastn_bad, &registry), want_blastn);
+    assert_eq!(registered_run_files(&blastn_help, &registry), want_blastn);
+
+    let tblastx_base = ["tblastx", "-query", "q.fa", "-subject", "s.fa"];
+    let tblastx_bad = [
+        "tblastx",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-no_such_option",
+    ];
+    let tblastx_help = ["tblastx", "-query", "q.fa", "-subject", "s.fa", "-h"];
+    let want_tblastx = vec![b"q.fa".to_vec(), b"s.fa".to_vec()];
+    assert_eq!(registered_run_files(&tblastx_base, &registry), want_tblastx);
+    assert_eq!(registered_run_files(&tblastx_bad, &registry), want_tblastx);
+    assert_eq!(registered_run_files(&tblastx_help, &registry), want_tblastx);
+
+    let psiblast_base = ["psiblast", "-query", "q.fa", "-subject", "s.fa"];
+    let psiblast_bad = [
+        "psiblast",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-no_such_option",
+    ];
+    let psiblast_help = ["psiblast", "-query", "q.fa", "-subject", "s.fa", "-h"];
+    let want_psiblast: Vec<Vec<u8>> = Vec::new();
+    assert_eq!(
+        registered_run_files(&psiblast_base, &registry),
+        want_psiblast
+    );
+    assert_eq!(
+        registered_run_files(&psiblast_bad, &registry),
+        want_psiblast
+    );
+    assert_eq!(
+        registered_run_files(&psiblast_help, &registry),
+        want_psiblast
+    );
+
+    crate::files::release(handle).unwrap();
+}
+
+/// `-logfile out/x.asn -export_search_strategy out/x.asn` without folder `out` (line WQA D19 round
+/// R1): `-logfile` stays on stderr (`Unopened`), so `-export_search_strategy out/x.asn` is not
+/// refused as the file of `-logfile` and writes the strategy file on stream 8; with folder `out`
+/// present, `-logfile` opens `out/x.asn` and the strategy is refused.
+#[test]
+fn strategy_target_sees_runs_files_for_logfile() {
+    let words = [
+        "tblastx",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "out/x.asn",
+        "-export_search_strategy",
+        "out/x.asn",
+    ];
+    validate(&words).unwrap();
+    let (res, streams) = run_of(&words);
+    res.unwrap();
+    let diag = stream_text(&streams, STREAM_DIAGNOSTICS);
+    assert_eq!(
+        diag,
+        "Warning: [tblastx] Examining 5 or more matches is recommended\n"
+    );
+    let files = run_files(&streams).expect("strategy file on stream 8");
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].0, "out/x.asn");
+    assert!(files[0].1.contains("Blast4-request"), "{}", files[0].1);
+
+    // With folder `out` present via a registered `-conffile out/d19_r1_strat.ini`, `-logfile
+    // out/x.asn` opens a file, so `-export_search_strategy out/x.asn` is refused.
+    let _conf = Registered::new("out/d19_r1_strat.ini", b"[BLAST]\n");
+    let with_folder = [
+        "tblastx",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+        "-conffile",
+        "out/d19_r1_strat.ini",
+        "-logfile",
+        "out/x.asn",
+        "-export_search_strategy",
+        "out/x.asn",
+    ];
+    validate(&with_folder).unwrap();
+    let (res, _streams) = run_of(&with_folder);
+    assert_eq!(
+        res.unwrap_err(),
+        "-export_search_strategy out/x.asn (the file of -logfile too, whose bytes the command \
+         line's strategy file replaces or mixes with its own) is not supported in the browser; \
+         give a file name of the run's own"
+    );
 }
 
 /// NCBI's error for an argv without `-subject` and `-db`, which the command line raises after

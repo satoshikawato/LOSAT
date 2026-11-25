@@ -496,6 +496,11 @@ fn registered_run_files(
     use losat::web_adapter::{preparse, Preparsed, RegistryFiles as _};
     use std::path::Path;
 
+    let (program_name, arguments) = words.split_first().unwrap_or((&"", &[]));
+    let Ok(program) = Program::parse(program_name) else {
+        return Vec::new();
+    };
+
     fn push_input(names: &mut Vec<Vec<u8>>, value: &str) {
         if !value.is_empty() && value != "-" {
             names.push(value.as_bytes().to_vec());
@@ -508,106 +513,71 @@ fn registered_run_files(
     }
     fn push_taxid(names: &mut Vec<Vec<u8>>, value: &str) {
         if let Ok(taxid) = value.parse::<i32>() {
-            let path = format!(
-                "{}/{taxid}/wmasker.obinary",
-                crate::files::WINDOW_MASKER_PATH
-            );
-            push_counts(names, &path);
+            if taxid != 0 {
+                let path = format!(
+                    "{}/{taxid}/wmasker.obinary",
+                    crate::files::WINDOW_MASKER_PATH
+                );
+                push_counts(names, &path);
+            }
         }
     }
 
+    // The command line opens `-logfile` before it reads the arguments, so the run's input files do
+    // not depend on whether the argv parses. Read `-query`, `-subject`, and (for BLASTN)
+    // `-window_masker_db` / `-window_masker_taxid` through one scan for every argv.
     let mut names: Vec<Vec<u8>> = Vec::new();
-    if let Ok((_, command)) = parse_words(words) {
-        let (query, subject, wm_db, wm_taxid) = match &command {
-            Commands::Blastp(a) => (Some(a.query.as_path()), a.subject.as_deref(), None, None),
-            Commands::Tblastn(a) => (Some(a.query.as_path()), a.subject.as_deref(), None, None),
-            Commands::Blastn(a) => (
-                Some(a.query.as_path()),
-                a.subject.as_deref(),
-                a.window_masker_db.as_deref(),
-                a.window_masker_taxid,
-            ),
-            Commands::Tblastx(a) => (Some(a.query.as_path()), a.subject.as_deref(), None, None),
-            Commands::Blastx(a) => (Some(a.query.as_path()), a.subject.as_deref(), None, None),
-            Commands::Psiblast(_)
-            | Commands::Rpsblast(_)
-            | Commands::Rpstblastn(_)
-            | Commands::Makedb(_)
-            | Commands::Rpsbproc(_) => (None, None, None, None),
-        };
-        if let Some(q) = query.and_then(Path::to_str) {
-            push_input(&mut names, q);
+    let is_blastn = program == Program::Blastn;
+    let mut at = 0;
+    while at < arguments.len() {
+        let word = arguments[at];
+        if word == "--" {
+            break;
         }
-        if let Some(s) = subject.and_then(Path::to_str) {
-            push_input(&mut names, s);
+        enum ValueKind {
+            Input,
+            Counts,
+            Taxid,
         }
-        if let Some(db) = wm_db {
-            push_counts(&mut names, db);
-        }
-        if let Some(taxid) = wm_taxid {
-            let path = format!(
-                "{}/{taxid}/wmasker.obinary",
-                crate::files::WINDOW_MASKER_PATH
-            );
-            push_counts(&mut names, &path);
-        }
-    } else {
-        // An argv that prints (`-version`, `-h`) or fails argument parsing still runs in the
-        // command line's directory holding its `-query`, `-subject` and registered counts files.
-        let program = words.first().copied().unwrap_or("");
-        let arguments = words.get(1..).unwrap_or(&[]);
-        let mut at = 0;
-        while at < arguments.len() {
-            let word = arguments[at];
-            if word == "--" {
-                break;
-            }
-            enum ValueKind {
-                Input,
-                Counts,
-                Taxid,
-            }
-            let kind = match word {
-                "-logfile" | "-conffile" => {
-                    at += 1;
-                    None
-                }
-                "-query" | "-subject" => Some(ValueKind::Input),
-                "-window_masker_db" if program == "blastn" => Some(ValueKind::Counts),
-                "-window_masker_taxid" if program == "blastn" => Some(ValueKind::Taxid),
-                _ => {
-                    if let Some(value) = word
-                        .strip_prefix("-query=")
-                        .or_else(|| word.strip_prefix("-subject="))
-                    {
-                        push_input(&mut names, value);
-                    } else if program == "blastn" {
-                        if let Some(value) = word.strip_prefix("-window_masker_db=") {
-                            push_counts(&mut names, value);
-                        } else if let Some(value) = word.strip_prefix("-window_masker_taxid=") {
-                            push_taxid(&mut names, value);
-                        }
-                    }
-                    None
-                }
-            };
-            if let Some(kind) = kind {
+        let kind = match word {
+            "-logfile" | "-conffile" => {
                 at += 1;
-                if let Some(&value) = arguments.get(at) {
-                    match kind {
-                        ValueKind::Input => push_input(&mut names, value),
-                        ValueKind::Counts => push_counts(&mut names, value),
-                        ValueKind::Taxid => push_taxid(&mut names, value),
+                None
+            }
+            "-query" | "-subject" => Some(ValueKind::Input),
+            "-window_masker_db" if is_blastn => Some(ValueKind::Counts),
+            "-window_masker_taxid" if is_blastn => Some(ValueKind::Taxid),
+            _ => {
+                if let Some(value) = word
+                    .strip_prefix("-query=")
+                    .or_else(|| word.strip_prefix("-subject="))
+                {
+                    push_input(&mut names, value);
+                } else if is_blastn {
+                    if let Some(value) = word.strip_prefix("-window_masker_db=") {
+                        push_counts(&mut names, value);
+                    } else if let Some(value) = word.strip_prefix("-window_masker_taxid=") {
+                        push_taxid(&mut names, value);
                     }
                 }
+                None
             }
+        };
+        if let Some(kind) = kind {
             at += 1;
+            if let Some(&value) = arguments.get(at) {
+                match kind {
+                    ValueKind::Input => push_input(&mut names, value),
+                    ValueKind::Counts => push_counts(&mut names, value),
+                    ValueKind::Taxid => push_taxid(&mut names, value),
+                }
+            }
         }
+        at += 1;
     }
     if registry.is_file(Path::new(".ncbirc")) {
         names.push(b".ncbirc".to_vec());
     }
-    let (program, arguments) = words.split_first().unwrap_or((&"", &[]));
     if let Preparsed::Words { conffile, .. } = preparse(arguments) {
         match conffile {
             Some(name) => {
@@ -615,13 +585,12 @@ fn registered_run_files(
                     names.push(name.as_encoded_bytes().to_vec());
                 }
             }
-            None if !program.is_empty() => {
-                let ini = format!("{program}.ini");
+            None => {
+                let ini = format!("{program_name}.ini");
                 if registry.is_file(Path::new(&ini)) {
                     names.push(ini.into_bytes());
                 }
             }
-            None => {}
         }
     }
     names

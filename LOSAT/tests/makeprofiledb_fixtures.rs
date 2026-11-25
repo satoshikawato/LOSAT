@@ -902,11 +902,13 @@ fn makeprofiledb_delta_defers_wcounts_creation_until_wrapup() {
     assert_eq!(got_files, want_d05.3);
     let _ = fs::remove_dir_all(&dir);
 
-    // Case (b) cross-platform: a non-empty directory at `db.wcounts` blocks `File::create` in
-    // `x_WrapUpDelta` after Pass 2 finishes, leaving the v4 protein DB on disk with exit 2.
+    // Case (b) cross-platform: pre-create `db.wcounts` (removed by `s_DeleteMakeprofileDb`,
+    // which then skips numbered `.00.wcounts`) and a directory at `db.00.wcounts` so
+    // `File::create` fails in `x_WrapUpDelta` after Pass 2 finishes, leaving the v4 protein DB on
+    // disk with exit 2.
     let dir = reset_fixture_dir("delta-wrapup-open-fail");
-    fs::create_dir_all(dir.join("db.wcounts")).unwrap();
-    fs::write(dir.join("db.wcounts/keep"), b"x").unwrap();
+    fs::write(dir.join("db.wcounts"), b"dummy").unwrap();
+    fs::create_dir_all(dir.join("db.00.wcounts")).unwrap();
     let fail_out = run_makeprofiledb_in(
         &dir,
         None,
@@ -915,8 +917,10 @@ fn makeprofiledb_delta_defers_wcounts_creation_until_wrapup() {
             "delta",
             "-blastdb_version",
             "4",
+            "-max_smp_vol",
+            "2",
             "-in",
-            "in/l_D36.lst",
+            "in/l_D01.lst",
             "-out",
             "db",
         ],
@@ -928,10 +932,16 @@ fn makeprofiledb_delta_defers_wcounts_creation_until_wrapup() {
         "Error: ERROR: Failed to open output .wcounts file\n"
     );
     for ext in [".pin", ".phr", ".psq", ".psd", ".psi", ".pog"] {
-        assert!(dir.join(format!("db{ext}")).is_file(), "missing db{ext}");
+        assert!(
+            dir.join(format!("db.00{ext}")).is_file(),
+            "missing db.00{ext}"
+        );
     }
     for ext in [".rps", ".loo", ".aux", ".freq", ".obsr"] {
-        assert!(!dir.join(format!("db{ext}")).exists(), "unexpected db{ext}");
+        assert!(
+            !dir.join(format!("db.00{ext}")).exists(),
+            "unexpected db.00{ext}"
+        );
     }
     let _ = fs::remove_dir_all(&dir);
 }

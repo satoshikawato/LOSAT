@@ -1,0 +1,15 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing first 1 and last 1 OIDs.
+Testing CDD files' headers for DELTA-BLAST
+
+Testing 1 volume(s).
+ <RUN>/cases/c_obsr28/db
+  <RUN>/cases/c_obsr28/db / CDD_Headers:   [ERROR] Bad magic number of the  .obsr file
+ Result=FAILURE. 1 errors reported in 1 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 1

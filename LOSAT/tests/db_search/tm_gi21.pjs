@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "tm_gi21",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm gi21",
+  "number-of-letters": 2730,
+  "number-of-sequences": 21,
+  "last-updated": "2026-11-25T12:55:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 41549,
+  "bytes-to-cache": 3008,
+  "files": [
+    "tm_gi21.pdb",
+    "tm_gi21.phr",
+    "tm_gi21.pin",
+    "tm_gi21.pnd",
+    "tm_gi21.pni",
+    "tm_gi21.pog",
+    "tm_gi21.pot",
+    "tm_gi21.psq",
+    "tm_gi21.ptf",
+    "tm_gi21.pto"
+  ]
+}

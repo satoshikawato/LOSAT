@@ -979,9 +979,9 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
     ];
     let error = read_titles(&database, &batch, (Default::default(), false), &mut titles)
         .expect_err("a missing header file")
-        .downcast::<HeaderReadError>()
+        .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
         .expect("NCBI's error, with the query that reached it");
-    assert_eq!(error.query, 1);
+    assert_eq!(error.query, Some(1));
     let native = error
         .error
         .downcast_ref::<NativeError>()

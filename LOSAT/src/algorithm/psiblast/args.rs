@@ -187,7 +187,7 @@ impl PsiblastArgs {
             query: args.option_or_default("query")?,
             subject: args.given_option("subject")?,
             db: args.given_option("db")?,
-            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args(args)?,
+            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args_with_ipg(args)?,
             dbsize: args.given_option("dbsize")?,
             show_gis: args.flag("show_gis"),
             parse_deflines: args.flag("parse_deflines"),

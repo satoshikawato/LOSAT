@@ -1,9 +1,11 @@
-//! The numeric id list files of the alias files' `GILIST` and `TILIST` keys, read as NCBI's
-//! `SeqDB_ReadMemoryGiList` and `SeqDB_ReadMemoryTiList` read them: a binary list (its first byte 0xFF: a marker word, the big-endian count, then one
-//! big-endian id per word) or a text list (decimal numbers, each ended by a space, a line feed or
-//! a carriage return). The one owner of their layout, and of the lists the alias files attach to
-//! the volumes they reach for NCBI's filtered header read (`AliasIdList`), and of NCBI's lookups of
-//! a Seq-id in a list (`find_id`, `negative_find_id`).
+//! The numeric id list files of the alias files' `GILIST` and `TILIST` keys and of the search
+//! programs' `-gilist`, `-negative_gilist`, `-ipglist` and `-negative_ipglist`, read as NCBI's
+//! `SeqDB_ReadMemoryGiList`, `SeqDB_ReadMemoryPigList` and `SeqDB_ReadMemoryTiList` read them: a
+//! binary list (its first byte 0xFF: a marker word, the big-endian count, then one big-endian id
+//! per word) or a text list (decimal numbers, each ended by a space, a line feed or a carriage
+//! return). The one owner of their layout, and of the lists the alias files attach to the volumes
+//! they reach for NCBI's filtered header read (`AliasIdList`), and of NCBI's lookups of a Seq-id
+//! in a list (`find_id`, `negative_find_id`).
 
 use crate::ncbi_exception::NcbiException;
 use crate::seqid::model::ObjectId;
@@ -117,16 +119,20 @@ pub(crate) fn find_id(
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1564-1610
 // The kind of the id decides which of the list's ids are asked (`match_type`): a gi only the
 // GIs, a `ti` general id only the TIs (its tag is converted only then), any other id only the
-// Seq-id strings. LOSAT's negative lists hold Seq-id strings alone.
-/// `CSeqDBNegativeList::FindId` of a negative list of the Seq-id strings `sis` (sorted):
-/// `(found, match_type)`; NCBI's exception of the simplification of the Seq-id
+// Seq-id strings. LOSAT's negative lists hold GIs or Seq-id strings alone.
+/// `CSeqDBNegativeList::FindId` of a negative list of the sorted GIs `gis` and sorted Seq-id
+/// strings `sis`: `(found, match_type)`; NCBI's exception of the simplification of the Seq-id
 /// ([`find_si_forms`]).
 pub(crate) fn negative_find_id(
+    gis: &[i64],
     sis: &[Vec<u8>],
     id: &ParsedSeqId,
 ) -> Result<(bool, bool), NcbiException> {
     match id {
-        ParsedSeqId::Gi(_) => Ok((false, false)),
+        ParsedSeqId::Gi(gi) => {
+            let match_type = !gis.is_empty();
+            Ok((match_type && gis.binary_search(gi).is_ok(), match_type))
+        }
         ParsedSeqId::General(dbtag) if dbtag.db == b"ti" => Ok((false, false)),
         _ => {
             let match_type = !sis.is_empty();
@@ -277,15 +283,30 @@ fn read_text<T: Copy + Default + PartialEq>(
 /// The GIs of a GI list file (`SeqDB_ReadMemoryGiList`), in file order; NCBI's
 /// `CSeqDBException` text for a file that is not one.
 pub(crate) fn read_gi_list(bytes: &[u8]) -> Result<Vec<u32>, String> {
+    read_u32_list(bytes, "GI")
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1005-1078
+// Same binary and text layout as a GI list, with `IPG` in NCBI's error texts (`Uint4`, `TPig`).
+/// The PIGs of an IPG list file (`SeqDB_ReadMemoryPigList`), in file order; NCBI's
+/// `CSeqDBException` text for a file that is not one.
+pub(crate) fn read_pig_list(bytes: &[u8]) -> Result<Vec<u32>, String> {
+    read_u32_list(bytes, "IPG")
+}
+
+/// Shared 32-bit binary and text reader of GI and IPG lists (`read_gi_list`, `read_pig_list`).
+fn read_u32_list(bytes: &[u8], list_type: &str) -> Result<Vec<u32>, String> {
     if binary_kind(bytes)?.is_some() {
         let words = bytes.len() / 4;
-        let num_gis = words - 2;
-        if word(bytes, 0) != GI_LIST_MAGIC as u32 || word(bytes, 1) as usize != num_gis {
-            return Err("Specified file is not a valid binary GI file.".to_string());
+        let num_ids = words - 2;
+        if word(bytes, 0) != GI_LIST_MAGIC as u32 || word(bytes, 1) as usize != num_ids {
+            return Err(format!(
+                "Specified file is not a valid binary {list_type} file."
+            ));
         }
         return Ok((2..words).map(|at| word(bytes, at)).collect());
     }
-    read_text(bytes, "GI", |elem: u32, digit| {
+    read_text(bytes, list_type, |elem: u32, digit| {
         elem.wrapping_mul(10).wrapping_add(u32::from(digit))
     })
 }

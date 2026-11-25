@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use super::file::DbFile;
 use super::isam;
+use super::isam_num;
 use super::lmdb_read::{Db, Env, ReadError};
 use super::seqidlist::{self, SeqidListFile};
 use super::{tax_files, SeqDb, SeqDbError, SeqType};
@@ -47,12 +48,34 @@ pub struct SeqidList {
     pub file: SeqidListFile,
 }
 
+/// The GI list of a search as read from its file (`CSeqDBFileGiList` with `fname` and `eGiList`,
+/// `id_list::read_gi_list`): `-gilist` gives a positive list, `-negative_gilist` a negative one.
+/// A file without a GI is no list at all (`CSearchDatabase::x_InitializeDb` opens the database
+/// without one); [`SeqDb::restrict`] is not called for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GiList {
+    pub negative: bool,
+    pub gis: Vec<u32>,
+}
+
+/// The IPG (PIG) list of a search as read from its file (`CSeqDBFileGiList` with `fname` and
+/// `ePigList`, `id_list::read_pig_list`): `-ipglist` gives a positive list, `-negative_ipglist`
+/// a negative one. A file without a PIG is no list at all (`CSearchDatabase::x_InitializeDb` opens
+/// the database without one); [`SeqDb::restrict`] is not called for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PigList {
+    pub negative: bool,
+    pub pigs: Vec<u32>,
+}
+
 /// The list a search restricts its database to: NCBI reads one of them
 /// (`CBlastDatabaseArgs::ExtractAlgorithmOptions`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DbList {
     Taxids(TaxidList),
     Seqids(SeqidList),
+    Gis(GiList),
+    Pigs(PigList),
 }
 
 /// A warning NCBI writes while it applies the list, to be written as it is.
@@ -378,14 +401,29 @@ pub(crate) enum DeflineRule {
     /// A negative seqid list (sorted, unique, as looked up): the lines with a Seq-id that is
     /// not a gi or a ti and not in it (`CSeqDBNegativeList::FindId`).
     NegativeSeqids(Vec<Vec<u8>>),
+    /// A positive GI list (sorted): the lines with a GI in it (`CSeqDBGiList::FindId`).
+    Gis(Vec<i64>),
+    /// A negative GI list (sorted, unique): the lines with a GI not in it
+    /// (`CSeqDBNegativeList::FindId`).
+    NegativeGis(Vec<i64>),
+    /// A positive IPG list: holds no Seq-id filter (`HasIdFilters` false), so every line with at
+    /// least one Seq-id passes while a line without a Seq-id is erased (`x_HaveIdFilter` true).
+    Pigs,
+    /// A negative IPG list: holds no Seq-id filter (`HasIdFilters` false), so every line with at
+    /// least one Seq-id passes while a line without a Seq-id is erased (`x_HaveIdFilter` true).
+    NegativePigs,
 }
 
 impl DeflineRule {
-    /// Whether the rule reads the Seq-ids of a line (a seqid list), not only its taxids.
+    /// Whether the rule reads the Seq-ids of a line (a seqid or GI list), not only its taxids or
+    /// PIGs.
     pub(crate) fn reads_seqids(&self) -> bool {
         matches!(
             self,
-            DeflineRule::Seqids(_) | DeflineRule::NegativeSeqids(_)
+            DeflineRule::Seqids(_)
+                | DeflineRule::NegativeSeqids(_)
+                | DeflineRule::Gis(_)
+                | DeflineRule::NegativeGis(_)
         )
     }
 
@@ -400,7 +438,14 @@ impl DeflineRule {
                 Some(super::id_list::find_id(&[], &[], list, id))
             }
             DeflineRule::NegativeSeqids(list) if !list.is_empty() => Some(
-                super::id_list::negative_find_id(list, id)
+                super::id_list::negative_find_id(&[], list, id)
+                    .map(|(found, match_type)| !found && match_type),
+            ),
+            DeflineRule::Gis(list) if !list.is_empty() => {
+                Some(super::id_list::find_id(list, &[], &[], id))
+            }
+            DeflineRule::NegativeGis(list) if !list.is_empty() => Some(
+                super::id_list::negative_find_id(list, &[], id)
                     .map(|(found, match_type)| !found && match_type),
             ),
             _ => None,
@@ -409,8 +454,8 @@ impl DeflineRule {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2036-2049
     /// The taxid test of a line whose ids passed (`s_IncludeDefline_Taxid`,
-    /// `s_IncludeDefline_NegativeTaxid`): true for a seqid list and for a list without taxids
-    /// (NCBI tests the taxids only where `GetNumTaxIds` is above 0).
+    /// `s_IncludeDefline_NegativeTaxid`): true for a seqid, GI or IPG list and for a list without
+    /// taxids (NCBI tests the taxids only where `GetNumTaxIds` is above 0).
     fn keeps(&self, defline: &BlastDefline) -> bool {
         match self {
             DeflineRule::Taxids(found) | DeflineRule::NegativeTaxids(found) if found.is_empty() => {
@@ -424,7 +469,12 @@ impl DeflineRule {
             DeflineRule::NegativeTaxids(found) => {
                 defline.tax_ids().iter().any(|taxid| !found.contains(taxid))
             }
-            DeflineRule::Seqids(_) | DeflineRule::NegativeSeqids(_) => true,
+            DeflineRule::Seqids(_)
+            | DeflineRule::NegativeSeqids(_)
+            | DeflineRule::Gis(_)
+            | DeflineRule::NegativeGis(_)
+            | DeflineRule::Pigs
+            | DeflineRule::NegativePigs => true,
         }
     }
 }
@@ -494,7 +544,7 @@ pub(crate) fn no_line_kept(oid: u32) -> String {
 
 /// What NCBI's `CSeqDBGiListSet` holds of the seqid list `list` with `ids` Seq-ids after its
 /// processing ([`super::alias::UserList`]): a negative list is none.
-fn user_seqids(list: &SeqidList, ids: usize) -> super::alias::UserList {
+fn user_seqids(list: &SeqidList, ids: usize) -> super::alias::UserList<'static> {
     if list.negative {
         super::alias::UserList::None
     } else {
@@ -1675,8 +1725,9 @@ impl SeqDb {
         Ok(warning)
     }
 
-    /// Restricts the database to `list` ([`SeqDb::restrict_taxids`], [`SeqDb::restrict_seqids`]);
-    /// the warnings NCBI writes go to `warnings`, before an error too.
+    /// Restricts the database to `list` ([`SeqDb::restrict_taxids`], [`SeqDb::restrict_seqids`],
+    /// [`SeqDb::restrict_gis`], [`SeqDb::restrict_pigs`]); the warnings NCBI writes go to
+    /// `warnings`, before an error too.
     pub fn restrict(
         &mut self,
         list: &DbList,
@@ -1685,6 +1736,8 @@ impl SeqDb {
         self.positive_list = match list {
             DbList::Taxids(list) => matches!(list, TaxidList::Positive(_)),
             DbList::Seqids(list) => !list.negative,
+            DbList::Gis(list) => !list.negative,
+            DbList::Pigs(list) => !list.negative,
         };
         match list {
             DbList::Taxids(list) => {
@@ -1692,7 +1745,177 @@ impl SeqDb {
                 Ok(())
             }
             DbList::Seqids(list) => self.restrict_seqids(list, warnings),
+            DbList::Gis(list) => self.restrict_gis(list),
+            DbList::Pigs(list) => self.restrict_pigs(list),
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2501-2551
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2553-2580
+    /// Opens the numeric ISAM of `kind` (`what`: `"GI"` or `"IPG"`) for volume `at`, or returns
+    /// NCBI's missing-ISAM or batch-mode error (`seqdbvol.cpp:2504-2538`, `2558-2568`).
+    fn numeric_isam(
+        &self,
+        at: usize,
+        kind: isam_num::ListIsam,
+        what: &str,
+    ) -> Result<isam_num::NumericIsam, SeqDbError> {
+        let base = self.volumes[at].base();
+        match isam_num::NumericIsam::open_for_list(
+            base,
+            self.seqtype,
+            kind,
+            self.volumes[at].num_oids(),
+        )? {
+            Some(isam_num::Opened::Ready(isam)) => Ok(isam),
+            Some(isam_num::Opened::Uninitialized) => Err(isam::batch_mode_error()),
+            None => Err(SeqDbError::NotFound(
+                [
+                    format!("{what} list specified but no ISAM file found for {what} in ")
+                        .as_bytes(),
+                    &crate::utils::os_bytes::path_bytes(base),
+                ]
+                .concat(),
+            )),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:265-301
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:345-347
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2504-2514,2558-2568
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:305-321,375-402
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/uniform_search.cpp:259-264
+    // Positive GI lists translate volumes largest-first (preserving order on ties) via the GI
+    // ISAM and sort the list in place (`InsureOrder`, keeping duplicates); negative GI lists wrap
+    // a sorted unique copy in `CSeqDBIdSet`, scan every volume's GI ISAM in volume order, and
+    // keep the original file order on `m_NegativeGiList` for archives and search strategies.
+    /// Restricts the database to the OIDs of a GI list (`-gilist`, `-negative_gilist`).
+    pub fn restrict_gis(&mut self, list: &GiList) -> Result<(), SeqDbError> {
+        let num_oids = self.volume_starts[self.volumes.len()];
+        let word_count = (num_oids as usize).div_ceil(64);
+        if list.negative {
+            self.list_gis = list.gis.iter().map(|&gi| i64::from(gi)).collect();
+            let mut sorted = self.list_gis.clone();
+            sorted.sort_unstable();
+            sorted.dedup();
+            let mut out = isam::NegativeOids::new();
+            if !sorted.is_empty() {
+                for at in 0..self.volumes.len() {
+                    self.numeric_isam(at, isam_num::ListIsam::Gi, "GI")?
+                        .negative_scan(
+                            self.volume_starts[at],
+                            self.volume_starts[at + 1],
+                            &sorted,
+                            &mut out,
+                        )?;
+                }
+            }
+            let mut words = vec![u64::MAX; word_count];
+            let max = out.num_oids().min(num_oids);
+            for oid in 0..num_oids {
+                if oid >= max || !out.get_oid_status(oid) {
+                    words[(oid / 64) as usize] &= !(1u64 << (oid % 64));
+                }
+            }
+            return self.apply_filter(
+                Some(words),
+                num_oids,
+                Some(DeflineRule::NegativeGis(sorted)),
+                super::alias::UserList::None,
+            );
+        }
+        let mut entries: Vec<isam_num::NumOid> = list
+            .gis
+            .iter()
+            .map(|&gi| isam_num::NumOid {
+                key: i64::from(gi),
+                oid: None,
+            })
+            .collect();
+        entries.sort_by_key(|entry| entry.key);
+        self.list_gis = entries.iter().map(|entry| entry.key).collect();
+        if !entries.is_empty() {
+            let mut order: Vec<usize> = (0..self.volumes.len()).collect();
+            order.sort_by_key(|&at| std::cmp::Reverse(self.volumes[at].num_oids()));
+            for at in order {
+                self.numeric_isam(at, isam_num::ListIsam::Gi, "GI")?
+                    .ids_to_oids(self.volume_starts[at], &mut entries)?;
+            }
+        }
+        let mut words = vec![0u64; word_count];
+        for oid in entries.iter().filter_map(|entry| entry.oid) {
+            if oid < num_oids {
+                words[(oid / 64) as usize] |= 1u64 << (oid % 64);
+            }
+        }
+        let gis = self.list_gis.clone();
+        self.apply_filter(
+            Some(words),
+            num_oids,
+            Some(DeflineRule::Gis(gis)),
+            super::alias::UserList::PositiveGis(&entries),
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:265-301,349-376
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2528-2538
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:305-321,365-374
+    // Positive IPG lists translate volumes largest-first via the PIG ISAM (`.ppi`/`.ppd`).
+    // Negative IPG lists translate a temporary positive PIG list across volumes in volume order
+    // and clear only the resolved OIDs, leaving OIDs without a PIG included.
+    /// Restricts the database to the OIDs of an IPG (PIG) list (`-ipglist`, `-negative_ipglist`).
+    pub fn restrict_pigs(&mut self, list: &PigList) -> Result<(), SeqDbError> {
+        let num_oids = self.volume_starts[self.volumes.len()];
+        let word_count = (num_oids as usize).div_ceil(64);
+        let mut entries: Vec<isam_num::NumOid> = list
+            .pigs
+            .iter()
+            .map(|&pig| isam_num::NumOid {
+                key: i64::from(pig),
+                oid: None,
+            })
+            .collect();
+        entries.sort_by_key(|entry| entry.key);
+        if list.negative {
+            if !entries.is_empty() {
+                for at in 0..self.volumes.len() {
+                    self.numeric_isam(at, isam_num::ListIsam::Pig, "IPG")?
+                        .ids_to_oids(self.volume_starts[at], &mut entries)?;
+                }
+            }
+            let mut words = vec![u64::MAX; word_count];
+            for oid in entries.iter().filter_map(|entry| entry.oid) {
+                if oid < num_oids {
+                    words[(oid / 64) as usize] &= !(1u64 << (oid % 64));
+                }
+            }
+            return self.apply_filter(
+                Some(words),
+                num_oids,
+                Some(DeflineRule::NegativePigs),
+                super::alias::UserList::None,
+            );
+        }
+        if !entries.is_empty() {
+            let mut order: Vec<usize> = (0..self.volumes.len()).collect();
+            order.sort_by_key(|&at| std::cmp::Reverse(self.volumes[at].num_oids()));
+            for at in order {
+                self.numeric_isam(at, isam_num::ListIsam::Pig, "IPG")?
+                    .ids_to_oids(self.volume_starts[at], &mut entries)?;
+            }
+        }
+        let mut words = vec![0u64; word_count];
+        for oid in entries.iter().filter_map(|entry| entry.oid) {
+            if oid < num_oids {
+                words[(oid / 64) as usize] |= 1u64 << (oid % 64);
+            }
+        }
+        self.apply_filter(
+            Some(words),
+            num_oids,
+            Some(DeflineRule::Pigs),
+            super::alias::UserList::PositivePigs,
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:235-240
@@ -1840,12 +2063,13 @@ impl SeqDb {
     // protein subject of an ungapped search is fetched by none of them and reaches the
     // Seq-align (`drops_lineless_hits`).
     /// Whether NCBI's fetches with `check_oid_exclusion` exclude the sequences that keep no
-    /// line (`keeps_line`): the database's rule is a negative seqid list
-    /// (`algorithm::common::database::FetchExcluded`).
+    /// line (`keeps_line`): the database's rule fills NCBI's `CSeqDBIdSet` (`x_InitIdSet`: a
+    /// negative seqid list, a positive GI list, or a negative GI list;
+    /// `algorithm::common::database::FetchExcluded`).
     pub fn excludes_lineless_at_fetch(&self) -> bool {
         self.volumes
             .iter()
-            .any(|volume| volume.has_negative_seqid_list())
+            .any(|volume| volume.has_fetch_exclusion_list())
     }
 
     /// Whether NCBI turns a hit on `ordinal` into a Seq-align: false where the database's list
@@ -2042,7 +2266,7 @@ impl SeqDb {
         words: Option<Vec<u64>>,
         num_oids: u32,
         rule: Option<DeflineRule>,
-        user: super::alias::UserList,
+        user: super::alias::UserList<'_>,
     ) -> Result<(), SeqDbError> {
         if user != super::alias::UserList::None {
             self.translate_alias_lists(user);

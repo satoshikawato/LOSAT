@@ -22,7 +22,8 @@
 //!   (`write_seq_align_dendiag`, `BLASTUngappedHspListToSeqAlign` / `x_UngappedHSPToDenseDiag`).
 //!
 //! A `-subject` search's Seq-aligns go through NCBI's mapper of `s_RemapToSubjectLoc`
-//! (`remap_strands` for a Dense-seg, `std_seg_kept` for Std-segs).
+//! (`remap_strands` for a Dense-seg; for Std-segs `mapped_script`, which BLASTX and TBLASTN apply
+//! to their report records once, so that every format reads the mapped HSP).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:676-707
 //! `PruneSeqalign` keeps the Seq-aligns of the first `m_HitlistSize` subjects, which is the
@@ -33,6 +34,7 @@ use std::io::Write;
 
 use crate::blastinput::app::Program;
 use crate::common::GapEditOp;
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::archive::options::RequestKind;
 use crate::report::ostream::{ReportWrite, Site};
 use crate::report::query_warnings::QueryWarnings;
@@ -247,6 +249,7 @@ pub(crate) fn protein_row_segments(hit: &crate::common::Hit, segments: &mut Segm
         subject: 0,
         q_offset: hit.q_start as i32 - 1,
         q_end: hit.q_end as i32,
+        q_left_out: 0,
         s_offset: hit.s_start as i32 - 1,
         s_end: hit.s_end as i32,
         q_frame: 0,
@@ -320,6 +323,7 @@ pub(crate) fn nucleotide_row_segments(
         subject: 0,
         q_offset,
         q_end,
+        q_left_out: 0,
         s_offset: s_low as i32 - 1,
         s_end: s_high as i32,
         q_frame: if minus { -1 } else { 1 },
@@ -393,6 +397,7 @@ pub(crate) fn translated_row_segments(
         subject: 0,
         q_offset,
         q_end,
+        q_left_out: 0,
         s_offset,
         s_end,
         q_frame,
@@ -414,11 +419,39 @@ pub(crate) fn translated_row_segments(
         subject.is_some(),
         segments,
     );
+    dense_seg_strands(segments);
+    // A query row that starts with a gap (`-db`'s; `-subject`'s mapping drops such a first
+    // segment, `mapped_script`) gives its first Std-seg an empty query interval, whose frame is
+    // the record's length's (`HspStrands::master_frame`).
+    let leading_gap = query.is_some() && row_end_gaps(record.ops, AlignRow::Query).leading > 0;
     crate::report::query_anchored::HspStrands {
         query_minus: q_frame < 0,
         subject_minus: s_frame < 0,
-        query_frame: q_frame,
+        query_frame: crate::report::query_anchored::HspStrands::master_frame(
+            q_frame,
+            leading_gap,
+            query_length as usize,
+        ),
         no_widths: false,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:820-842
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:937-942
+/// The strands of the Dense-seg that `CreateDensegFromStdseg` makes of the Std-segs `segments`
+/// (`collect_seq_align_data`): each row takes, in every segment, the strand of its first
+/// segment with one; a first segment's gap row has none (`Strand::Unknown`, the Std-seg's empty
+/// location), so a Smith-Waterman alignment of `-use_sw_tback` that starts with a gap in a minus
+/// row is shown on the minus strand. Each X-drop row has one strand already.
+fn dense_seg_strands(segments: &mut Segments) {
+    for row in 0..2 {
+        let mut row_strands = segments.strands.iter().skip(row).step_by(2);
+        let Some(&strand) = row_strands.find(|&&strand| strand != Strand::Unknown) else {
+            continue;
+        };
+        for known in segments.strands.iter_mut().skip(row).step_by(2) {
+            *known = strand;
+        }
     }
 }
 
@@ -841,7 +874,7 @@ fn write_score_list<E: Encoder>(enc: &mut E, hsp: &HspRecord<'_>, query_length: 
         write_score_real(
             enc,
             "hsp_percent_coverage",
-            query_coverage(hsp.q_offset, hsp.q_end, query_length),
+            query_coverage(hsp.q_offset, hsp.q_end + hsp.q_left_out, query_length),
         );
     }
 }
@@ -1009,22 +1042,86 @@ fn end_std_seg_locs<E: Encoder>(enc: &mut E) {
 
 /// Whether the Std-seg of segment `seg` (of `numseg`, `gap` telling whether a segment has a
 /// gap row) is kept by the mapper of `s_RemapToSubjectLoc` (a `-subject` search; see
-/// `remap_strands`), which rebuilds the Std-segs and leaves out a first and a last segment
-/// with fewer than two aligned rows. An X-drop edit script starts and ends with a substitution,
-/// so this keeps its every segment; a Smith-Waterman alignment of `-use_sw_tback` can start with
-/// a gap (line PS item PS12d), whose first segment the mapper leaves out.
+/// `remap_strands`), which rebuilds the Std-segs and leaves out the first and the last segment
+/// when it has fewer than two aligned rows (once each: a segment that becomes first or last
+/// stays). An X-drop edit script starts and ends with a substitution, so this keeps its every
+/// segment; a Smith-Waterman alignment of `-use_sw_tback` can start with a gap (line PS item
+/// PS12d, line RG item X4b-gap), whose first segment the mapper leaves out.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1568-1580
 fn std_seg_kept(seg: usize, numseg: usize, gap: impl Fn(usize) -> bool) -> bool {
     (seg != 0 || !gap(0)) && (seg + 1 != numseg || !gap(seg))
 }
 
+/// What `-subject`'s Seq-loc mapper keeps of a gapped translated HSP whose edit script is `ops`
+/// (one Std-seg per operation, `collect_seq_align_data`; `std_seg_kept`): the operations `kept`,
+/// and the letters of the operations it leaves out before them (`start`) and after them (`end`),
+/// each `[query, subject]` in the rows' letters (a `Del` has the subject's, an `Ins` the
+/// query's). The mapped HSP starts `start` letters later in each row and ends `end` letters
+/// earlier; its scores are the HSP's, its coverage too (`MappedScript::query_left_out`). BLASTX
+/// and TBLASTN apply it once to the records of a `-subject` report
+/// (`algorithm::blastx::runtime::BatchResults::put_in_report_order`,
+/// `algorithm::tblastn::stage_d_results::KappaResultHitList::put_in_report_order`, which refuse
+/// a second mapping), so that every format, the Seq-aligns (`write_std_segs`) among them, reads
+/// the mapped HSP. An empty script (an ungapped HSP) keeps everything.
+pub(crate) fn mapped_script(ops: &[GapEditOp]) -> MappedScript {
+    let numseg = ops.len();
+    let gap = |seg: usize| !ops[seg].is_sub();
+    let first = usize::from(numseg > 0 && !std_seg_kept(0, numseg, gap));
+    let last = if numseg > first && !std_seg_kept(numseg - 1, numseg, gap) {
+        numseg - 1
+    } else {
+        numseg
+    };
+    let letters = |dropped: &[GapEditOp]| {
+        dropped.iter().fold([0u32; 2], |[q, s], op| match *op {
+            GapEditOp::Sub(n) => [q + n, s + n],
+            GapEditOp::Ins(n) => [q + n, s],
+            GapEditOp::Del(n) => [q, s + n],
+        })
+    };
+    MappedScript {
+        kept: first..last,
+        start: letters(&ops[..first]),
+        end: letters(&ops[last..]),
+    }
+}
+
+/// The part of an edit script that `-subject`'s Seq-loc mapper keeps (`mapped_script`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MappedScript {
+    /// The kept operations' indices.
+    pub(crate) kept: std::ops::Range<usize>,
+    /// The `[query, subject]` letters of the operations left out before `kept`.
+    pub(crate) start: [u32; 2],
+    /// The `[query, subject]` letters of the operations left out after `kept`.
+    pub(crate) end: [u32; 2],
+}
+
+impl MappedScript {
+    /// Whether the mapper leaves out an operation.
+    pub(crate) fn drops(&self, ops: &[GapEditOp]) -> bool {
+        self.kept != (0..ops.len())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1221-1225
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:184-189
+    /// The query letters that the mapper leaves out (of an end `Ins`), which the HSP's
+    /// `hsp_percent_coverage` (`query_coverage`, the tables' `qcovhsp`) still counts: NCBI
+    /// computes that score on the BlastHSP before `s_RemapToSubjectLoc`, whose mapper keeps the
+    /// Seq-align's scores (`HspRecord::q_left_out`).
+    pub(crate) fn query_left_out(&self) -> u32 {
+        self.start[0] + self.end[0]
+    }
+}
+
 /// The Std-segs of an HSP of a gapped translated search (`segs std`), one per segment, with
 /// the remap of the query row (`RemapToQueryLoc`, `CStd_seg::OffsetRow`: the `-query_loc`
 /// start added to an interval's ends) and of the subject row (`s_RemapToSubjectLoc` of a
-/// `-subject` search, `remapped`: the `-subject_loc` start, on the plus strand that LOSAT's
+/// `-subject` search: the `-subject_loc` start of `offsets`, on the plus strand that LOSAT's
 /// ranges have; the mapper keeps each interval's strand, `CMappingRange::Map_Strand` with
-/// the strand set, and `std_seg_kept`).
+/// the strand set). The records of a `-subject` report come mapped (`mapped_script`, which
+/// leaves out the end segments that the mapper drops): every segment is written.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:306-368
 /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Std_seg.cpp:170-189
@@ -1036,18 +1133,11 @@ fn write_std_segs<E: Encoder>(
     segments: &Segments,
     translate: [bool; 2],
     offsets: [i32; 2],
-    remapped: bool,
 ) {
     let numseg = segments.lens.len();
-    let gap = |seg: usize| {
-        segments.starts[2 * seg] == GAP_VALUE || segments.starts[2 * seg + 1] == GAP_VALUE
-    };
     let ids = [query_id, subject_id];
     enc.begin_list(false);
     for seg in 0..numseg {
-        if remapped && !std_seg_kept(seg, numseg, gap) {
-            continue;
-        }
         begin_std_seg(enc, query_id, subject_id);
         for row in 0..2 {
             enc.element();
@@ -1120,7 +1210,7 @@ pub(crate) enum AlignRow {
 
 /// Why `CSeq_align::GetSeqRange` throws on a row of a translated search's Seq-align (`segs std`,
 /// one Std-seg per segment of an HSP's edit script, `write_std_segs`): the exceptions of
-/// `Seq_align.cpp`, which `algorithm::blastx::empty_rows::row_range_exception` makes.
+/// `Seq_align.cpp`, which `row_range_exception` makes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RowRangeError {
     /// `Row is empty` (Seq_align.cpp:227): no segment has a location of letters in the row, the
@@ -1133,6 +1223,55 @@ pub(crate) enum RowRangeError {
     /// Smith-Waterman redo (`-use_sw_tback`), which `ALIGN_EX` runs from the Smith-Waterman start;
     /// an X-drop alignment starts with a substitution. A gap at the row's end is read as any.
     SeqidsNotConsistent,
+}
+
+/// The `__FILE__` of `Seq_align.cpp` in BLAST+'s build (the `seq` library compiles it from
+/// `src/objects/seq`), as NCBI's reports name it.
+const SEQ_ALIGN_CPP: &str = "src/objects/seq/../seqalign/Seq_align.cpp";
+
+/// `CSeq_align::GetSeqRange`'s exception `error` (`RowRangeError`) where a formatter asks for the
+/// range of such a row: `Row is empty` (Seq_align.cpp:227; the deflines of outfmt 0, `qcovs`, BLAST
+/// XML with `-db`), `Row seqids not consistent. Cannot determine range.` (Seq_align.cpp:186; the
+/// same readers of a row that starts with a gap, and the prefetch).
+pub(crate) fn row_range_exception(error: RowRangeError) -> NcbiException {
+    let (line, kind, message) = match error {
+        RowRangeError::Empty => (
+            227,
+            "CSeqalignException::eInvalidAlignment",
+            "CSeq_align::GetSeqRange(): Row is empty",
+        ),
+        RowRangeError::SeqidsNotConsistent => (
+            186,
+            "CSeqalignException::eInvalidRowNumber",
+            "CSeq_align::GetSeqRange(): Row seqids not consistent. Cannot determine range.",
+        ),
+    };
+    NcbiException::new(
+        ThrowSite {
+            file: SEQ_ALIGN_CPP,
+            line,
+            kind,
+            function: None,
+        },
+        message,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:788-803
+/// `CreateDensegFromStdseg(): Std-seg segment lengths not accurate!` (Seq_align.cpp:801): the
+/// Std-seg of `-subject` that the Seq-loc mapper rewrote, a query row of one
+/// nucleotide and an empty subject row (0 is neither 3 nor a third of 1, nor 1), where a formatter
+/// makes a Dense-seg of it (the tabular rows' alignment block, BLAST XML).
+pub(crate) fn std_seg_lengths_not_accurate() -> NcbiException {
+    NcbiException::new(
+        ThrowSite {
+            file: SEQ_ALIGN_CPP,
+            line: 801,
+            kind: "CSeqalignException::eInvalidInputAlignment",
+            function: None,
+        },
+        "CreateDensegFromStdseg(): Std-seg segment lengths not accurate!",
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
@@ -1157,14 +1296,145 @@ pub(crate) fn std_seg_row_range(
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-230
+/// What `CSeq_align::GetSeqRange` of `row` finds on a reported (already `-subject`-mapped,
+/// `mapped_script`) Std-seg from `offset` to `end` with edit script `ops`: an empty row
+/// (`RowRangeError::Empty`) unless `empty_query_rewritten` holds for `AlignRow::Query`
+/// (`-subject`'s Seq-loc mapper rewrote the empty query row into a non-empty nucleotide,
+/// `mapper_rewrites_empty_rows`), and any leading gap left in the reported script
+/// (`RowRangeError::SeqidsNotConsistent`, for `-db` and `-subject` alike). The one owner of
+/// what the formatters read on a reported Std-seg row (`report::pairwise::seen_row_range`,
+/// `blastx::empty_rows::{reported_row_range, reported_rows_range}`, `tblastn::blast_xml`,
+/// `tblastn::tabular`).
+#[inline]
+pub(crate) fn reported_std_seg_row_range(
+    offset: i64,
+    end: i64,
+    ops: &[GapEditOp],
+    row: AlignRow,
+    empty_query_rewritten: bool,
+) -> Option<RowRangeError> {
+    let error = std_seg_row_range(offset, end, ops, row)?;
+    match (error, row) {
+        (RowRangeError::Empty, AlignRow::Query) if empty_query_rewritten => None,
+        _ => Some(error),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2907-2930
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243-245
+/// What a formatter that reads the query row's range of a reported Std-seg and then the
+/// subject's finds (`reported_std_seg_row_range`), query first: the description table of
+/// outfmt 0 to 4 (`s_ProcessAlignSet`) and BLAST XML (`s_SeqAlignToXMLHsp`).
+#[inline]
+pub(crate) fn reported_std_seg_rows_range(
+    offset: i64,
+    end: i64,
+    ops: &[GapEditOp],
+    empty_query_rewritten: bool,
+) -> Option<RowRangeError> {
+    reported_std_seg_row_range(offset, end, ops, AlignRow::Query, empty_query_rewritten).or_else(
+        || reported_std_seg_row_range(offset, end, ops, AlignRow::Subject, empty_query_rewritten),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
 /// `std_seg_row_range` of a gapped HSP whose edit script is `ops` (never of length 0): the row that
-/// the script starts with a gap in (`RowRangeError::SeqidsNotConsistent`).
+/// the script starts with a gap in (`RowRangeError::SeqidsNotConsistent`, `row_end_gaps`).
 #[inline]
 pub(crate) fn gapped_row_range(ops: &[GapEditOp], row: AlignRow) -> Option<RowRangeError> {
-    match (ops.first(), row) {
-        (Some(GapEditOp::Ins(_)), AlignRow::Subject)
-        | (Some(GapEditOp::Del(_)), AlignRow::Query) => Some(RowRangeError::SeqidsNotConsistent),
-        _ => None,
+    (row_end_gaps(ops, row).leading > 0).then_some(RowRangeError::SeqidsNotConsistent)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:969-995
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1100-1122
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2576-2613
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:279-297
+/// The end gaps of the row `row` of an HSP whose edit script is `ops`: the gap operations of the
+/// row (a `Del` in the query's, an `Ins` in the subject's) before the script's first operation
+/// with a letter of the row and after its last, the columns outside the row's aligned range
+/// (`CAlnMap::GetSeqAlnRange`). NCBI's readers of an alignment see them so:
+/// - the tables' `length`, `gaps` and `gapopen` (`GetAlignLengths`) and outfmt 0's `Gaps`
+///   (`x_GetNumGaps`) count the columns inside the query row's range only (`RowEndGaps::columns`
+///   and `RowEndGaps::opens` of `AlignRow::Query` come off the alignment's counts);
+/// - the rows' strings (`GetWholeAlnSeqString`) show them as the end character, a space (outfmt 0,
+///   the tables' `qseq`/`sseq`/`btop`, BLAST XML and the XML2 and JSON documents);
+/// - a Std-seg row that starts with one has no Seq-id there (`gapped_row_range`).
+///
+/// Only a Smith-Waterman alignment of `-use_sw_tback` has them (`ALIGN_EX` from the
+/// Smith-Waterman start may start with a gap); an X-drop alignment starts and ends with a
+/// substitution. A script without a letter of the row (never made) has none.
+pub(crate) fn row_end_gaps(ops: &[GapEditOp], row: AlignRow) -> RowEndGaps {
+    let has_letter = |op: &GapEditOp| {
+        !matches!(
+            (op, row),
+            (GapEditOp::Del(_), AlignRow::Query) | (GapEditOp::Ins(_), AlignRow::Subject)
+        )
+    };
+    let (Some(first), Some(last)) = (
+        ops.iter().position(has_letter),
+        ops.iter().rposition(has_letter),
+    ) else {
+        return RowEndGaps::default();
+    };
+    let columns = |gaps: &[GapEditOp]| gaps.iter().map(|op| op.num() as usize).sum();
+    RowEndGaps {
+        leading: columns(&ops[..first]),
+        trailing: columns(&ops[last + 1..]),
+        opens: first + (ops.len() - 1 - last),
+    }
+}
+
+/// The columns, gap letters and gap openings of an alignment (`length`, `gaps` and `gapopen` of
+/// NCBI's tables).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AlignLengths {
+    pub(crate) length: usize,
+    pub(crate) gaps: usize,
+    pub(crate) gap_opens: usize,
+}
+
+impl AlignLengths {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1100-1122
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:960-968
+    /// The counts of the whole alignment of an HSP whose edit script is `ops` as NCBI's tables
+    /// count them (`GetAlignLengths` over the query row's aligned range): the query row's end
+    /// gaps (`row_end_gaps`, a Smith-Waterman alignment of `-use_sw_tback`) come off the three.
+    /// The one count of every table writer (`report::tabular::TabularHsp::within_query_range`, the
+    /// default fields of BLASTP and TBLASTN), of outfmt 0's `Gaps` and of the library's
+    /// `HspRecord` (`report::pairwise::PairwiseHit::query_range_lengths`); an X-drop alignment
+    /// has no end gaps.
+    pub(crate) fn within_query_range(self, ops: &[GapEditOp]) -> Self {
+        let end_gaps = row_end_gaps(ops, AlignRow::Query);
+        Self {
+            length: self.length.saturating_sub(end_gaps.columns()),
+            gaps: self.gaps.saturating_sub(end_gaps.columns()),
+            gap_opens: self.gap_opens.saturating_sub(end_gaps.opens),
+        }
+    }
+}
+
+/// The end gaps of a row of an alignment (`row_end_gaps`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RowEndGaps {
+    /// The columns before the row's first letter.
+    pub(crate) leading: usize,
+    /// The columns after the row's last letter.
+    pub(crate) trailing: usize,
+    /// The gap operations among them (each one gap opening).
+    pub(crate) opens: usize,
+}
+
+impl RowEndGaps {
+    /// The columns of the end gaps.
+    pub(crate) fn columns(self) -> usize {
+        self.leading + self.trailing
+    }
+
+    /// The columns of the row of `len` columns between its end gaps (`lo..hi`).
+    pub(crate) fn span(self, len: usize) -> (usize, usize) {
+        let lo = self.leading.min(len);
+        (lo, len.saturating_sub(self.trailing).max(lo))
     }
 }
 
@@ -1642,7 +1912,6 @@ fn write_seq_align_gapped<E: Encoder>(
             segments,
             [translate1, translate2],
             [query.offset, subject.offset],
-            run.remaps_subjects(),
         );
     } else {
         enc.variant("Seq-align_segs", "denseg", 1);

@@ -76,7 +76,7 @@ A `-db` name with a directory (`../data/swissprot`, `/data/blast/nt`) is looked 
 BLASTDB=/data/blast
 ```
 
-The same search path finds the `taxdb` files, the files named by `-seqidlist` and `-taxidlist`, and `taxonomy4blast.sqlite3`. A database that is not found stops the search with NCBI's message, naming the search path.
+The same search path finds the `taxdb` files, the files named by `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist` and `-negative_taxidlist`, and `taxonomy4blast.sqlite3`. A database that is not found stops the search with NCBI's message, naming the search path.
 
 ## Taxonomy
 
@@ -121,8 +121,7 @@ A database of the wrong molecule type is reported as not found, with NCBI's mess
 ## Search options that use the database
 
 - `-dbsize` and `-searchsp` set the database size used for statistics (with `-db` and `-subject`).
-- `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist` and `-no_taxid_expansion` select sequences, with `-db`.
-- `-gilist`, `-negative_gilist`, `-ipglist` and `-negative_ipglist` need NCBI's GI and IPG databases and are not provided.
+- `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist`, `-gilist`, `-negative_gilist` and `-no_taxid_expansion` select sequences, with `-db`. On protein databases (`blastp`, `blastx`, `psiblast`), `-ipglist` and `-negative_ipglist` select or exclude sequences using the local PIG index (`.ppi`/`.ppd`).
 
 ## Differences from NCBI BLAST+
 

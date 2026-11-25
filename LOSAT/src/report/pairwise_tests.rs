@@ -660,7 +660,6 @@ fn alignment_rows_of_one_column_step_one_letter() {
             &hit,
             "ACDeF",
             "ACDEW",
-            [&[], &[]],
             Default::default(),
             None,
             &config,
@@ -710,7 +709,6 @@ fn alignment_rows_of_one_column_step_one_letter() {
         &hit,
         "MQ",
         "MQ",
-        [&[], &[]],
         Default::default(),
         None,
         &config,
@@ -863,7 +861,6 @@ fn a_translated_row_ends_where_ncbi_s_wrapped_screen_ends() {
                 &blastp.hit,
                 "MRKVL",
                 "MRKVL",
-                [&[], &[]],
                 Default::default(),
                 None,
                 &PairwiseConfig {
@@ -914,7 +911,6 @@ fn the_writer_s_estimate_of_an_hsp_holds_at_every_line_length() {
             &hit,
             &letters,
             &letters,
-            [&[], &[]],
             Default::default(),
             None,
             &PairwiseConfig {
@@ -1555,7 +1551,6 @@ fn html_rows_put_each_mask_of_the_rows_list_in_a_span() {
             &hit,
             &query,
             &subject,
-            [&[], &[]],
             Default::default(),
             masks,
             &config,
@@ -1677,4 +1672,40 @@ fn later_part_html_posts_wait_for_first_shown_hsp_with_class_n() {
     assert!(split_posts[1].0 > 0);
     let prefix = std::str::from_utf8(&split_out[..split_posts[1].0]).unwrap();
     assert_eq!(prefix.lines().count(), 3);
+}
+
+/// The `Gaps =` of an HSP's header, the tables' counts and the library's `HspRecord` count the
+/// columns inside the query row's aligned range (`PairwiseHit::query_range_lengths`, NCBI's
+/// `x_GetNumGaps` and `GetAlignLengths`): a Smith-Waterman alignment's end gaps in the query's
+/// row are left out, the subject row's and an X-drop script's inner gaps stay.
+#[test]
+fn header_gaps_leave_out_the_query_rows_end_gaps() {
+    use crate::common::GapEditOp::{Del, Ins, Sub};
+    use crate::report::serial::seqalign::AlignLengths;
+    let counts = |length: usize, gapopen: usize, ops: Vec<crate::common::GapEditOp>| {
+        let AlignLengths {
+            length,
+            gaps,
+            gap_opens,
+        } = PairwiseHit::from(Hit {
+            length,
+            mismatch: 5,
+            gapopen,
+            gap_info: Some(ops),
+            ..make_hit()
+        })
+        .query_range_lengths();
+        (length, gaps, gap_opens)
+    };
+    // 95 identities and 5 mismatches in each: the rest of `length` are gap columns.
+    assert_eq!(counts(195, 1, vec![Del(95), Sub(100)]), (100, 0, 0));
+    assert_eq!(
+        counts(105, 2, vec![Sub(60), Ins(2), Sub(40), Del(3)]),
+        (102, 2, 1)
+    );
+    assert_eq!(counts(104, 1, vec![Ins(4), Sub(100)]), (104, 4, 1));
+    assert_eq!(counts(103, 1, vec![Sub(50), Del(3), Sub(50)]), (103, 3, 1));
+    let plain = PairwiseHit::from(make_hit());
+    assert_eq!(plain.query_range_lengths().gaps, 0);
+    assert_eq!(plain.query_range_lengths().length, plain.hit.length);
 }

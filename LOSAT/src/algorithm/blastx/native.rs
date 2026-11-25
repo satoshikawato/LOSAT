@@ -386,6 +386,8 @@ fn run_inner(
     // options are processed and before the query is read, as NCBI's `InitializeSubject`.
     let database = match args.database_name() {
         Some(name) => {
+            let (keeps_scope, separate_xml2) =
+                crate::report::db_subject::FormatThrow::scope_flags(Some(&args.outfmt));
             let database = BlastxDatabase::open_restricted(
                 name,
                 &settings,
@@ -395,7 +397,8 @@ fn run_inner(
                 program.upper,
             )?
             .showing_gis(args.show_gis)
-            .after_calls(args.first_query_ordinal > 0);
+            .after_calls(args.first_query_ordinal > 0)
+            .keeping_scope(keeps_scope, separate_xml2);
             // RPSTBLASTN: each batch's `EffectiveSearchSpace` option is its last search unit's
             // own (`BatchResults::request_space`), and its units read `-dbsize` themselves
             // (`rps_search::volumes::RpsUnits`): no program of RPS-BLAST takes a list.
@@ -1578,6 +1581,10 @@ pub(super) fn reported_batch(
     if let Some(spec) = options.tabular {
         reported.read_tabular(database, spec, results, options.gapped)?;
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:191
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+    database.reset_scope();
     Ok(reported)
 }
 

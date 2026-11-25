@@ -407,24 +407,28 @@ export class ResultsBrowser {
 
   private describeToolGrammar(token: number, tool: string): void {
     const fallback: ToolOptionGrammar = { takesValue: toolTakesValue(undefined) };
-    const apply = (grammar: ToolOptionGrammar): void => {
+    const apply = (grammar: ToolOptionGrammar, fromDescribe: boolean): void => {
       if (token !== this.loadToken) return;
       const run = this.state.get().toolRun;
-      const toolBadge = run !== undefined && this.state.get().phase === 'ready' ? this.computeToolBadge(run, grammar) : undefined;
+      // Only a grammar built from the engine's -xmlhelp (`toolOptionGrammar`) knows which options
+      // take values and their defaults; the fallback is for CommandText only and gives no badge.
+      const toolBadge =
+        fromDescribe && run !== undefined && this.state.get().phase === 'ready'
+          ? this.computeToolBadge(run, grammar)
+          : undefined;
       this.set({ grammar, toolBadge });
     };
     if (this.deps.describeTool === undefined) {
-      this.toolGrammars.set(tool, fallback);
-      apply(fallback);
+      apply(fallback, false);
       return;
     }
     this.deps.describeTool(tool).then(
       (description) => {
         const grammar = toolOptionGrammar(description);
         this.toolGrammars.set(tool, grammar);
-        apply(grammar);
+        apply(grammar, true);
       },
-      () => apply(fallback),
+      () => apply(fallback, false),
     );
   }
 

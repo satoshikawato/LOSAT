@@ -1464,15 +1464,24 @@ fn diagonals_negative_exit_and_pairs_with_entry_above_hit() {
             cells[index] = value;
         }
     };
-    let run_bf = |two_hit: &mut XTwoHit<'_>, pairs: &[BlastOffsetPair], hits: &mut Vec<InitHsp>| {
+    let run_bf = |mode: u8,
+                  two_hit: &mut XTwoHit<'_>,
+                  pairs: &[BlastOffsetPair],
+                  hits: &mut Vec<InitHsp>| {
         if let Some(mat_table) = two_hit.x_ungap_matrix() {
             two_hit.x_pairs_bf_of(mat_table, 1, 0, &subject, pairs, hits);
+        } else if mode == 1 {
+            two_hit.x_pairs_bf_walks(XBlosum62Walks, 1, 0, &subject, pairs, hits);
         } else {
             two_hit.x_pairs_bf(1, 0, &subject, pairs, hits);
         }
     };
 
-    for matrix in [ScoringMatrix::Blosum62, ScoringMatrix::Blosum45] {
+    for (mode, matrix) in [
+        (0, ScoringMatrix::Blosum62),
+        (1, ScoringMatrix::Blosum62),
+        (2, ScoringMatrix::Blosum45),
+    ] {
         let mut two_hit = XTwoHit::x_with_layout(
             false,
             None,
@@ -1492,7 +1501,7 @@ fn diagonals_negative_exit_and_pairs_with_entry_above_hit() {
             s_off: 5,
         }];
         let mut hits = Vec::new();
-        run_bf(&mut two_hit, &pair, &mut hits);
+        run_bf(mode, &mut two_hit, &pair, &mut hits);
         assert!(hits.is_empty(), "negative diff must be skipped without hit");
         assert_eq!(
             two_hit.x_cell(idx),
@@ -1502,10 +1511,10 @@ fn diagonals_negative_exit_and_pairs_with_entry_above_hit() {
 
         // Flagged entry above s + offset stays flagged; at or below s + offset clears flag.
         set_cell(&mut two_hit, idx, (60, true));
-        run_bf(&mut two_hit, &pair, &mut hits);
+        run_bf(mode, &mut two_hit, &pair, &mut hits);
         assert_eq!(two_hit.x_cell(idx), (60, true));
         set_cell(&mut two_hit, idx, (45, true));
-        run_bf(&mut two_hit, &pair, &mut hits);
+        run_bf(mode, &mut two_hit, &pair, &mut hits);
         assert_eq!(two_hit.x_cell(idx), (45, false));
 
         // 3. Non-negative s with negative s_left_off and no x_around extends normally, and diff
@@ -1514,11 +1523,11 @@ fn diagonals_negative_exit_and_pairs_with_entry_above_hit() {
         set_cell(&mut two_hit, 0, (30, false));
         let pair_neg_left = [BlastOffsetPair { q_off: 0, s_off: 0 }];
         hits.clear();
-        run_bf(&mut two_hit, &pair_neg_left, &mut hits);
+        run_bf(mode, &mut two_hit, &pair_neg_left, &mut hits);
         assert_eq!(
             hits.len(),
             1,
-            "{matrix:?}: s >= 0 with s_left_off < 0 must still extend without x_around"
+            "mode {mode} ({matrix:?}): s >= 0 with s_left_off < 0 must still extend without x_around"
         );
     }
 

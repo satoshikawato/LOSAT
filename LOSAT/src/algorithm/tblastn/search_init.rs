@@ -145,7 +145,7 @@ impl crate::algorithm::common::hard_chunk_walk::HardTable for Diagonals {
             XDiagCells::Packed(_) => {
                 debug_assert!(
                     false,
-                    "packed diagonal table never runs a soft-mask lead subject"
+                    "packed diagonal table never runs a soft-mask lead or overlapping hard-mask subject"
                 );
             }
         }
@@ -1155,7 +1155,12 @@ impl<'a> XTwoHit<'a> {
                     score: result.ungapped_data.score,
                 });
             }
-            cell.set_last_hit(result.s_last_off - (word_size_i32 - 1) + diagonals.offset);
+            cell.set_last_hit(
+                result
+                    .s_last_off
+                    .wrapping_sub(word_size_i32 - 1)
+                    .wrapping_add(diagonals.offset),
+            );
         }
         Ok(())
     }

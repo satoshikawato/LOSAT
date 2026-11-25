@@ -1,5 +1,6 @@
-//! `losat makembindex` whose standard output (or `-stat` output) is a pipe that its reader has
-//! closed, against NCBI BLAST+ 2.17.0 makembindex (probes of 2026-11-25 for line RG item KD).
+//! `losat makembindex` whose standard output, `-stat` output, or index output is a pipe that its
+//! reader has closed, against NCBI BLAST+ 2.17.0 makembindex (probes of 2026-11-25 for line RG
+//! item KD).
 //!
 //! Normal index builds write progress to standard error and write nothing to standard output, so a
 //! closed standard-output pipe completes normally in both NCBI and LOSAT. `-show_filters`, `-h`,
@@ -9,20 +10,24 @@
 //! each non-empty word count line to its file: when that file is a closed pipe (such as `-stat
 //! /dev/stdout` with standard output closed, or a pipe whose reader closes mid-run), NCBI 2.17.0
 //! is ended by SIGPIPE at that line, leaving the current `.NN.idx` incomplete with no `done`, no
-//! `.map`, no `.shd`, and no later volumes; LOSAT stops at the same point with exit status 0 and
-//! no message. Non-pipe write failures (`/dev/full`) and volumes with no indexed words finish with
-//! exit status 0 in both.
+//! `.map`, no `.shd`, and no later volumes; LOSAT flushes `-stat` at each 8 KiB `.NN.idx` block
+//! boundary, so it stops in the same 8 KiB block with exit status 0 and no message, leaving the
+//! same incomplete `.NN.idx` bytes (header plus complete 8 KiB blocks, for both regular files and
+//! named pipes) and files as NCBI. Named-pipe index outputs (`.NN.idx`, `.map`, `.shd`) also stop
+//! at once with exit status 0 and no message. Non-pipe write failures (`/dev/full`) and volumes
+//! with no indexed words finish with exit status 0 in both.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/mkindex_app.cpp:236-240
 //! (`-show_filters` to standard output), c++/src/algo/blast/dbindex/dbindex_factory.cpp:1408-1436
-//! (`-stat` flushed per line).
+//! (`-stat` flushed per line), c++/src/algo/blast/dbindex/dbindex_factory.cpp:1604-1634
+//! (`SaveHeader` flushed before 8 KiB index stream blocks).
 
 // A closed pipe ends NCBI's process by SIGPIPE outside Windows only; on Windows its write fails
 // without a signal and the run goes on (exception 10).
 #![cfg(unix)]
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -479,22 +484,84 @@ fn stat_on_a_closed_pipe_stops_at_once() {
     assert_eq!(old_partial.len() as u64, HEADER_LEN);
     assert_eq!(old_partial, full_old_head);
 
-    // Exact 8 KiB block boundary for the first non-empty 8-mer (-legacy false -stride 1 -ws_hint 8):
-    // nmer 2045 leaves 44 bytes (8188 bytes written before -stat); nmer 2046 and 2047 both leave
-    // 44 + 8192 = 8236 bytes, matching NCBI 2.17.0 byte-for-byte.
-    for (first_nmer, expected_len) in [
-        (2045usize, HEADER_LEN),
-        (2046, HEADER_LEN + STREAM_BLOCK),
-        (2047, HEADER_LEN + STREAM_BLOCK),
-    ] {
-        let bdir = TempDir::new(&format!("stat-boundary-{first_nmer}"));
-        let mut seq = String::with_capacity(18);
-        for shift in (0..8).rev() {
+    // Exact 8 KiB block boundary across hash widths, legacy/non-legacy headers, and the post-loop
+    // flush branch: nmer `k` sits in block `(k + 2) / 2048`, matching NCBI 2.17.0 byte-for-byte.
+    let boundary_cases: &[(&str, usize, usize, &[&str], &str, u64)] = &[
+        (
+            "n8-leg0-2045",
+            8,
+            2045,
+            &["-legacy", "false", "-stride", "1", "-ws_hint", "8"],
+            "TTTTTTTTTT",
+            HEADER_LEN,
+        ),
+        (
+            "n8-leg0-2046",
+            8,
+            2046,
+            &["-legacy", "false", "-stride", "1", "-ws_hint", "8"],
+            "TTTTTTTTTT",
+            HEADER_LEN + STREAM_BLOCK,
+        ),
+        (
+            "n8-leg0-2047",
+            8,
+            2047,
+            &["-legacy", "false", "-stride", "1", "-ws_hint", "8"],
+            "TTTTTTTTTT",
+            HEADER_LEN + STREAM_BLOCK,
+        ),
+        (
+            "n8-leg0-6141",
+            8,
+            6141,
+            &["-legacy", "false", "-stride", "1", "-ws_hint", "8"],
+            "TTTTTTTTTT",
+            HEADER_LEN + 2 * STREAM_BLOCK,
+        ),
+        (
+            "n8-leg0-6142",
+            8,
+            6142,
+            &["-legacy", "false", "-stride", "1", "-ws_hint", "8"],
+            "TTTTTTTTTT",
+            HEADER_LEN + 3 * STREAM_BLOCK,
+        ),
+        (
+            "n8-leg1-2046",
+            8,
+            2046,
+            &[],
+            "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+            HEADER_LEN + 31 * STREAM_BLOCK,
+        ),
+        (
+            "n9-leg1-100000",
+            9,
+            100_000,
+            &[],
+            "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+            HEADER_LEN + 8 * STREAM_BLOCK,
+        ),
+        (
+            "n9-leg0-last",
+            9,
+            (1usize << 18) - 2,
+            &["-legacy", "false", "-stride", "1", "-ws_hint", "9"],
+            "",
+            HEADER_LEN + 128 * STREAM_BLOCK,
+        ),
+    ];
+    for &(tag, width, first_nmer, extra, tail, expected_len) in boundary_cases {
+        let bdir = TempDir::new(&format!("stat-boundary-{tag}"));
+        let mut seq = String::with_capacity(width + tail.len());
+        for shift in (0..width).rev() {
             seq.push(b"ACGT"[(first_nmer >> (2 * shift)) & 3] as char);
         }
-        seq.push_str("TTTTTTTTTT");
+        seq.push_str(tail);
         fs::write(bdir.0.join("in.fa"), format!(">s0\n{seq}\n")).unwrap();
-        let common = [
+        let width_str = width.to_string();
+        let mut common = vec![
             "-old_style_index",
             "true",
             "-iformat",
@@ -502,42 +569,34 @@ fn stat_on_a_closed_pipe_stops_at_once() {
             "-input",
             "in.fa",
             "-nmer",
-            "8",
-            "-legacy",
-            "false",
-            "-stride",
-            "1",
-            "-ws_hint",
-            "8",
+            &width_str,
         ];
-        let mut full_args = common.to_vec();
+        common.extend_from_slice(extra);
+        let mut full_args = common.clone();
         full_args.extend(["-output", "ref"]);
         assert_eq!(
             makembindex(&bdir.0, &full_args, Stdio::null())
                 .status
                 .code(),
-            Some(0)
+            Some(0),
+            "{tag}"
         );
         let ref_bytes = fs::read(bdir.0.join("ref.00.idx")).unwrap();
-        let mut closed_args = common.to_vec();
+        let mut closed_args = common;
         closed_args.extend(["-output", "idx", "-stat", "/dev/stdout"]);
         let out = makembindex(&bdir.0, &closed_args, closed_pipe());
-        assert_eq!(out.status.code(), Some(0), "nmer={first_nmer}");
-        assert_eq!(
-            stderr_text(&out),
-            "creating idx.00.idx...",
-            "nmer={first_nmer}"
-        );
+        assert_eq!(out.status.code(), Some(0), "{tag}");
+        assert_eq!(stderr_text(&out), "creating idx.00.idx...", "{tag}");
         let part_bytes = fs::read(bdir.0.join("idx.00.idx")).unwrap();
         assert_eq!(
             part_bytes.len() as u64,
             expected_len,
-            "nmer={first_nmer} expected {expected_len} bytes"
+            "{tag} expected {expected_len} bytes"
         );
         assert_eq!(
             part_bytes,
             ref_bytes[..expected_len as usize],
-            "nmer={first_nmer} bytes mismatch"
+            "{tag} bytes mismatch"
         );
     }
 
@@ -782,4 +841,148 @@ fn volume_and_idmap_named_fifos_stop_at_once() {
         "idx.00.idx.map",
         &["idx.00.idx", "idx.00.idx.map"],
     );
+}
+
+#[test]
+fn volume_fifo_matches_ncbi_partial_bytes_and_stat_progress() {
+    let big = pseudo_fasta(1, 250_000);
+
+    // Case A (timing-independent): `.00.idx` is a named FIFO whose reader reads everything to EOF,
+    // while `-stat /dev/stdout` is a closed pipe. Because the volume stream writes in 8 KiB blocks
+    // and discards the trailing incomplete block on error, the reader receives only the 44-byte
+    // header, matching NCBI 2.17.0 byte-for-byte (not 44 + 8188 bytes).
+    let dir_a = TempDir::new("fifo-case-a");
+    fs::write(dir_a.0.join("big.fa"), &big).unwrap();
+    let full = makembindex(
+        &dir_a.0,
+        &[
+            "-old_style_index",
+            "true",
+            "-iformat",
+            "fasta",
+            "-input",
+            "big.fa",
+            "-output",
+            "ref",
+            "-nmer",
+            "8",
+        ],
+        Stdio::null(),
+    );
+    assert_eq!(full.status.code(), Some(0));
+    let expected_header =
+        fs::read(dir_a.0.join("ref.00.idx")).unwrap()[..HEADER_LEN as usize].to_vec();
+    fs::remove_file(dir_a.0.join("ref.00.idx")).unwrap();
+
+    let fifo_a = dir_a.0.join("idx.00.idx");
+    assert!(Command::new("mkfifo")
+        .arg(&fifo_a)
+        .status()
+        .expect("mkfifo")
+        .success());
+    let opened_a = Arc::new(AtomicBool::new(false));
+    let opened_a_flag = Arc::clone(&opened_a);
+    let fifo_a_path = fifo_a.clone();
+    let reader_a = thread::spawn(move || {
+        let mut got = Vec::new();
+        if let Ok(mut file) = File::open(&fifo_a_path) {
+            opened_a_flag.store(true, Ordering::SeqCst);
+            file.read_to_end(&mut got).unwrap();
+        }
+        got
+    });
+    let out_a = makembindex(
+        &dir_a.0,
+        &[
+            "-old_style_index",
+            "true",
+            "-iformat",
+            "fasta",
+            "-input",
+            "big.fa",
+            "-output",
+            "idx",
+            "-nmer",
+            "8",
+            "-stat",
+            "/dev/stdout",
+        ],
+        closed_pipe(),
+    );
+    if !opened_a.load(Ordering::SeqCst) {
+        let _ = OpenOptions::new().write(true).open(&fifo_a);
+    }
+    let got_a = reader_a.join().unwrap();
+    assert!(opened_a.load(Ordering::SeqCst), "case A FIFO not opened");
+    assert_eq!(out_a.status.code(), Some(0));
+    assert_eq!(stderr_text(&out_a), "creating idx.00.idx...");
+    assert_eq!(index_files(&dir_a.0), ["idx.00.idx"]);
+    assert_eq!(got_a.len() as u64, HEADER_LEN);
+    assert_eq!(got_a, expected_header);
+
+    // Case B (Linux): `.00.idx` is a named FIFO whose reader reads the 44-byte header, waits
+    // briefly so the writer fills the 64 KiB pipe with 8 KiB blocks, then closes, while `-stat`
+    // writes to a regular file. Writing `.00.idx` in 8 KiB blocks ensures the failing FIFO write
+    // happens before `-stat` runs ahead to the end of the hash table (NCBI stops at nmer 0x47fd).
+    #[cfg(target_os = "linux")]
+    {
+        let dir_b = TempDir::new("fifo-case-b");
+        fs::write(dir_b.0.join("big.fa"), &big).unwrap();
+        let fifo_b = dir_b.0.join("idx.00.idx");
+        assert!(Command::new("mkfifo")
+            .arg(&fifo_b)
+            .status()
+            .expect("mkfifo")
+            .success());
+        let opened_b = Arc::new(AtomicBool::new(false));
+        let opened_b_flag = Arc::clone(&opened_b);
+        let fifo_b_path = fifo_b.clone();
+        let reader_b = thread::spawn(move || {
+            if let Ok(mut file) = File::open(&fifo_b_path) {
+                opened_b_flag.store(true, Ordering::SeqCst);
+                let mut header = [0u8; HEADER_LEN as usize];
+                file.read_exact(&mut header).unwrap();
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+        });
+        let out_b = makembindex(
+            &dir_b.0,
+            &[
+                "-old_style_index",
+                "true",
+                "-iformat",
+                "fasta",
+                "-input",
+                "big.fa",
+                "-output",
+                "idx",
+                "-nmer",
+                "8",
+                "-stat",
+                "stat.txt",
+            ],
+            Stdio::null(),
+        );
+        finish_fifo_closer(&fifo_b, &opened_b, reader_b);
+        assert!(opened_b.load(Ordering::SeqCst), "case B FIFO not opened");
+        assert_eq!(out_b.status.code(), Some(0));
+        assert_eq!(stderr_text(&out_b), "creating idx.00.idx...");
+        assert_eq!(index_files(&dir_b.0), ["idx.00.idx"]);
+        let stat_text = fs::read_to_string(dir_b.0.join("stat.txt")).unwrap();
+        let last_line = stat_text
+            .lines()
+            .last()
+            .expect("expected non-empty stat.txt");
+        let last_nmer_hex = last_line
+            .split_whitespace()
+            .next()
+            .expect("expected hex nmer");
+        let last_nmer = u32::from_str_radix(last_nmer_hex, 16)
+            .unwrap_or_else(|e| panic!("invalid hex nmer {last_nmer_hex:?}: {e}"));
+        assert!(
+            last_nmer < 0x4800,
+            "expected -stat to stop before 0x4800 when .00.idx FIFO closes, got 0x{last_nmer:x} ({} lines)",
+            stat_text.lines().count()
+        );
+    }
 }

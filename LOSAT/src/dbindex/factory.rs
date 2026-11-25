@@ -21,7 +21,7 @@ use crate::ncbi_app::files::{ends_like_sigpipe, Ostream};
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1537
 const MEGABYTE: u64 = 1024 * 1024;
 
-/// Block size in bytes that NCBI's binary `CNcbiOfstream` writes to a regular index volume after
+/// Block size in bytes that NCBI's binary `CNcbiOfstream` writes to an index volume after
 /// `SaveHeader` flushes the 44-byte header (`dbindex_factory.cpp:1633`).
 const INDEX_STREAM_BLOCK: u64 = 8192;
 
@@ -881,6 +881,7 @@ impl OffsetData {
                 self.save_list(nmer, os, &mut later)?;
             }
         }
+        os.flush()?;
         Ok(())
     }
 }
@@ -991,10 +992,11 @@ pub(crate) fn make_index(
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1604-1634
     // NCBI opens the volume as a binary output stream without exceptions: a file that does not
     // open, or a non-pipe write failure, is not reported (`Ostream` drops the remaining writes).
-    // `SaveHeader` flushes the header to the stream before `OffsetData::Save`, and the subsequent
-    // writes reach a regular file in 8 KiB blocks; on a closed pipe (`Stop::ClosedPipe`), cutting
-    // a regular volume back to the header plus complete 8 KiB blocks matches what NCBI's
-    // SIGPIPE-ended process leaves on disk.
+    // `SaveHeader` flushes the header to the stream before `OffsetData::Save`, and NCBI's file
+    // buffer writes the words after the header in 8 KiB blocks. Buffering at `INDEX_STREAM_BLOCK`
+    // and discarding the trailing incomplete block on error (`into_parts`) matches both regular
+    // files and named pipes when a closed pipe (`Stop::ClosedPipe`) ends NCBI's process by
+    // SIGPIPE.
     let outcome = if let Ok(mut file) = File::create(crate::utils::os_bytes::path_of_bytes(oname)) {
         let header = Header::of(
             options.legacy,
@@ -1005,29 +1007,23 @@ pub(crate) fn make_index(
         );
         let mut head = Vec::with_capacity(super::format::HEADER_SIZE);
         let _ = header.write(&mut head);
-        let outcome = {
-            let mut stream = Ostream::new(&mut file);
-            stream
-                .write_all(&head)
-                .and_then(|()| stream.flush())
-                .and_then(|()| {
-                    let mut os = BufWriter::with_capacity(1 << 20, &mut stream);
-                    offset_data
-                        .save(&mut os, options)
-                        .and_then(|()| subject_map.save(&mut os))
-                        .and_then(|()| os.flush())
-                })
-        };
-        if matches!(&outcome, Err(error) if ends_like_sigpipe(error)) {
-            if let Ok(meta) = file.metadata() {
-                let head_len = head.len() as u64;
-                if meta.is_file() && meta.len() >= head_len {
-                    let blocks = (meta.len() - head_len) / INDEX_STREAM_BLOCK * INDEX_STREAM_BLOCK;
-                    let _ = file.set_len(head_len + blocks);
+        let mut stream = Ostream::new(&mut file);
+        stream
+            .write_all(&head)
+            .and_then(|()| stream.flush())
+            .and_then(|()| {
+                let mut os = BufWriter::with_capacity(INDEX_STREAM_BLOCK as usize, &mut stream);
+                let saved = offset_data
+                    .save(&mut os, options)
+                    .and_then(|()| subject_map.save(&mut os))
+                    .and_then(|()| os.flush());
+                if saved.is_err() {
+                    // Discard the trailing incomplete block rather than flushing it on drop, so
+                    // both regular files and named pipes match NCBI's SIGPIPE-ended process.
+                    let _ = os.into_parts();
                 }
-            }
-        }
-        outcome
+                saved
+            })
     } else {
         offset_data.save(&mut std::io::sink(), options)
     };

@@ -1006,3 +1006,38 @@ fn a_misspelt_key_read_by_its_bytes_is_caught() {
     let args = parse_words("blastdb_aliastool", &["-gi_file_in", "x.txt"]).unwrap();
     let _ = args.bytes("taxid_list");
 }
+
+#[test]
+fn scan_argv_skips_option_values_starting_with_dash() {
+    let mut seen = Vec::new();
+    scan_argv(
+        "tblastx",
+        &[
+            "-export_search_strategy",
+            "-query",
+            "-query",
+            "q.fa",
+            "-subject=s.fa",
+            "-no_such_option",
+            "-h",
+            "-logfile",
+            "q.fa",
+            "--",
+            "-query",
+            "ignored.fa",
+        ],
+        |name, val| {
+            seen.push((name, val.map(|v| v.to_string_lossy().into_owned())));
+        },
+    );
+    assert_eq!(
+        seen,
+        vec![
+            ("export_search_strategy", Some("-query".to_string())),
+            ("query", Some("q.fa".to_string())),
+            ("subject", Some("s.fa".to_string())),
+            ("h", None),
+            ("logfile", Some("q.fa".to_string())),
+        ]
+    );
+}

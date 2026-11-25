@@ -59,3 +59,33 @@ fn a_std_seg_is_refused_by_name() {
     let read = read_set(&[V::new(named::SEQ_ALIGN, &align)], false);
     assert!(matches!(read[0].dense_seg(), Err(ReadStop::Unsupported(_))));
 }
+
+#[test]
+fn a_gi_score_name_converts_as_ncbis_replace_and_int8() {
+    assert_eq!(gi_of_name(b"gi:5"), Some(5));
+    assert_eq!(gi_of_name(b"gi:+5"), Some(5));
+    assert_eq!(gi_of_name(b"gi:-0012"), Some(-12));
+    // Every `gi:` goes, also one that a removal makes.
+    assert_eq!(gi_of_name(b"gi:1gi:2"), Some(12));
+    assert_eq!(gi_of_name(b"gi:gi:7"), Some(7));
+    assert_eq!(gi_of_name(b"gi:9223372036854775807"), Some(i64::MAX));
+    assert_eq!(gi_of_name(b"gi:-9223372036854775808"), Some(i64::MIN));
+    assert_eq!(gi_of_name(b"gi:9223372036854775808"), None);
+    assert_eq!(gi_of_name(b"gi:"), None);
+    assert_eq!(gi_of_name(b"gi: 5"), None);
+    assert_eq!(gi_of_name(b"gi:-"), None);
+    assert_eq!(gi_of_name(b"gi:+-5"), None);
+}
+
+#[test]
+fn a_reversed_dense_seg_takes_its_last_segments_strands() {
+    let text = "Seq-align ::= { type partial, dim 2, segs denseg { dim 2, numseg 2, ids { local str \
+        \"q1\", local str \"s1\" }, starts { 0, 100, 60, 160 }, lens { 60, 60 }, strands { minus, \
+        plus, plus, minus } } }";
+    let align = value(text);
+    let read = read_set(&[V::new(named::SEQ_ALIGN, &align)], false);
+    let ds = read[0].dense_seg().unwrap();
+    assert!(ds.first_minus);
+    assert_eq!(ds.strands, [Strand::Minus, Strand::Plus]);
+    assert_eq!(ds.pair_strands(), [Strand::Plus, Strand::Minus]);
+}

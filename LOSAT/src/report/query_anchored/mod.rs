@@ -355,23 +355,15 @@ impl HspAlnVec {
                 "an HSP's segments are not a Dense-seg of two rows",
             ));
         }
-        let ds = &mut self.ds;
-        ds.lens.clear();
-        ds.lens.extend(lens.iter().map(|&len| len as u32));
-        ds.starts.clear();
-        ds.starts.extend_from_slice(starts);
-        ds.widths.clear();
-        if widths != [1, 1] {
-            ds.widths.extend(widths);
-        }
-        let (mut query, mut subject) = (strands[0], strands[1]);
-        if query == Strand::Minus && widths[0] != 3 {
-            ds.reverse();
-            (query, subject) = (query.reversed(), subject.reversed());
-        }
-        ds.plus.clear();
-        ds.plus
-            .extend([query != Strand::Minus, subject != Strand::Minus]);
+        let first = [strands[0], strands[1]];
+        let reverse = first[0] == Strand::Minus && widths[0] != 3;
+        self.ds.set_pair(
+            starts,
+            lens.iter().map(|&len| len as u32),
+            first,
+            widths,
+            reverse,
+        );
         let map = AlnMap::new_in(&self.ds, &mut self.map).map_err(pairwise_internal)?;
         for (row, data) in self.rows.iter_mut().enumerate() {
             let screens = &mut data.screens;
@@ -419,15 +411,45 @@ impl HspAlnVec {
 }
 
 impl Denseg {
-    /// The Dense-seg of two rows, the sequences `keys`: the segments' `starts` (two per segment,
-    /// row 0's then row 1's, -1 for a gap) and `lens`, each row's strand (`strands`, the first
-    /// segment's, which `CAlnMap` reads: `IsPositiveStrand` is any strand but minus), reversed by
-    /// `CDense_seg::Reverse` where `reverse` (the caller's rule: the tabular formats reverse a
-    /// Dense-seg that is not translated and whose first strand is minus, tabular.cpp:943-952),
-    /// without widths. The archive path's Dense-seg (`report::tabular_seqalign`);
-    /// `HspAlnVec::set` keeps its own vectors.
+    /// Sets this Dense-seg of two rows (its ids kept, its vectors reused) to the segments'
+    /// `starts` (two per segment, row 0's then row 1's, -1 for a gap) and `lens`, the rows'
+    /// widths `widths` (none where `[1, 1]`) and each row's strand (`strands`, the segment's that
+    /// `CAlnMap` reads: `IsPositiveStrand` is any strand but minus), reversed by
+    /// `CDense_seg::Reverse` where `reverse` (the caller's rule: the pairwise report reverses an
+    /// HSP whose query strand is minus and is not translated, `HspAlnVec::set`; the tabular
+    /// formats a Dense-seg that is not translated and whose first strand is minus,
+    /// tabular.cpp:943-952, `pair`). The one builder of both paths' Dense-segs.
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:643-680
+    pub(crate) fn set_pair(
+        &mut self,
+        starts: &[i32],
+        lens: impl IntoIterator<Item = u32>,
+        strands: [crate::report::serial::seqalign::Strand; 2],
+        widths: [u32; 2],
+        reverse: bool,
+    ) {
+        use crate::report::serial::seqalign::Strand;
+        self.lens.clear();
+        self.lens.extend(lens);
+        self.starts.clear();
+        self.starts.extend_from_slice(starts);
+        self.widths.clear();
+        if widths != [1, 1] {
+            self.widths.extend(widths);
+        }
+        let mut strands = strands;
+        if reverse {
+            self.reverse();
+            strands = strands.map(Strand::reversed);
+        }
+        self.plus.clear();
+        self.plus
+            .extend([strands[0] != Strand::Minus, strands[1] != Strand::Minus]);
+    }
+
+    /// The Dense-seg of two rows, the sequences `keys`, without widths (`set_pair`): the
+    /// archive path's (`report::tabular_seqalign`).
     pub(crate) fn pair(
         keys: [SeqKey; 2],
         starts: &[i32],
@@ -437,25 +459,17 @@ impl Denseg {
     ) -> Self {
         let mut ds = Denseg {
             ids: keys.to_vec(),
-            lens: lens.to_vec(),
-            starts: starts.to_vec(),
+            lens: Vec::new(),
+            starts: Vec::new(),
             plus: Vec::new(),
             widths: Vec::new(),
         };
-        let mut strands = strands;
-        if reverse {
-            ds.reverse();
-            strands = strands.map(crate::report::serial::seqalign::Strand::reversed);
-        }
-        ds.plus = strands
-            .iter()
-            .map(|&strand| strand != crate::report::serial::seqalign::Strand::Minus)
-            .collect();
+        ds.set_pair(starts, lens.iter().copied(), strands, [1, 1], reverse);
         ds
     }
 
     /// `CDense_seg::Reverse`: the segments in the other order, each row on the other strand
-    /// (here the rows' strands are the caller's, `HspAlnVec::set`).
+    /// (here the rows' strands are the caller's, `set_pair`).
     ///
     /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:661-680
     fn reverse(&mut self) {

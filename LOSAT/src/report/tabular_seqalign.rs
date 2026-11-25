@@ -66,46 +66,67 @@ const QUERY_FIELDS: [TabularField; 5] = [
     QueryCovHsp,
 ];
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:749-1096
-/// The row of `align` (`SetFields`), its letters from `sequences` (the query row's and the
-/// subject row's, `SeqKey::Query` and `SeqKey::Subject(0)`), which are read only where
-/// `reads_letters`. The scores that a printed field needs are refused where the Seq-align has
-/// none (NCBI prints its -1, which BLAST's archives never hold); so is a count of identities
-/// that BLASTN prints from the Seq-align without one.
-pub(crate) fn hsp<'r>(
-    align: &ReadAlign<'_>,
-    ctx: &RowContext<'_>,
-    sequences: &dyn Sequences,
-    buffers: &'r mut RowBuffers,
-) -> Result<TabularHsp<'r>, ReadStop> {
-    let spec = ctx.spec;
-    let mut num_ident: i64 = -1;
-    let (mut score, mut bit_score, mut evalue) = (0i32, 0.0f64, 0.0f64);
+/// What a row reads of its Seq-align's scores (`GetAlnScores`, `SetFields`' first block): each
+/// -1 where the Seq-align has none, as NCBI prints it (an e-value of -1 prints `0.0`); 0 where no
+/// field reads them.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RowScores {
+    score: i32,
+    bit_score: f64,
+    evalue: f64,
+    num_ident: i64,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:756-773
+/// The scores of `align` that the fields of `spec` read (`GetAlnScores` where one of them prints
+/// a score or a count of identities).
+pub(crate) fn row_scores(align: &ReadAlign<'_>, spec: &TabularSpec) -> Result<RowScores, ReadStop> {
+    let mut out = RowScores {
+        score: 0,
+        bit_score: 0.0,
+        evalue: 0.0,
+        num_ident: -1,
+    };
     if spec.has_any(&SCORE_FIELDS) {
         let scores = align.scores()?;
-        let missing = (spec.has(Score) && scores.score == -1)
-            || (spec.has(BitScore) && scores.bit_score == -1.0)
-            || (spec.has(Evalue) && scores.evalue == -1.0);
-        if missing {
-            return Err(ReadStop::Unsupported(
-                "a Seq-align without the score, bit score or e-value that a field prints",
-            ));
-        }
-        score = i32::try_from(scores.score)
+        out.score = i32::try_from(scores.score)
             .map_err(|_| ReadStop::Unsupported("a score past the int range"))?;
-        bit_score = scores.bit_score;
-        evalue = scores.evalue;
-        num_ident = scores.num_ident;
+        out.bit_score = scores.bit_score;
+        out.evalue = scores.evalue;
+        out.num_ident = scores.num_ident;
     }
-    let counts = spec.opens_counts(&usize::try_from(num_ident).unwrap_or(0));
+    Ok(out)
+}
+
+/// What a row reads of its Seq-align after its scores and ids and before its letters
+/// (`row_plan`): the query's coverage and, where the counts' block opens, the Dense-seg.
+#[derive(Debug)]
+pub(crate) struct RowPlan {
+    scores: RowScores,
+    qcovhsp: i32,
+    /// The Dense-seg of the counts' block (`None` where it does not open).
+    ds: Option<PairDenseg>,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:776-905
+/// The plan of the row of `align` whose scores are `scores`: the query block's coverage
+/// (`x_SetQueryCovSeqalign`) and whether the counts' block opens (`opens_counts`), whose
+/// Dense-seg it reads. A BLASTN row (`no_fetch`) that prints a count of identities that the
+/// Seq-align does not hold (`nident`, `pident`, `mismatch` from NCBI's -1) is refused: the shared
+/// writer counts identities without a sign.
+pub(crate) fn row_plan(
+    align: &ReadAlign<'_>,
+    scores: RowScores,
+    ctx: &RowContext<'_>,
+) -> Result<RowPlan, ReadStop> {
+    let spec = ctx.spec;
+    let counts = spec.opens_counts(&usize::try_from(scores.num_ident).unwrap_or(0));
     let query_block = spec.has_any(&QUERY_FIELDS);
     if !counts && !query_block {
-        return Ok(TabularHsp {
-            evalue,
-            bit_score,
-            score,
-            num_ident: usize::try_from(num_ident).unwrap_or(0),
-            ..empty_hsp()
+        return Ok(RowPlan {
+            scores,
+            qcovhsp: 0,
+            ds: None,
         });
     }
     // The coverage of the query block (`x_SetQueryCovSeqalign`) reads the Seq-align's range
@@ -116,23 +137,78 @@ pub(crate) fn hsp<'r>(
     } else {
         0
     };
+    if counts
+        && scores.num_ident < 0
+        && !reads_letters(spec, ctx.no_fetch)
+        && spec.has_any(&[NumIdentical, Mismatches, PercentIdentical])
+    {
+        return Err(ReadStop::Unsupported(
+            "a BLASTN Seq-align without the count of identities that nident, pident or mismatch \
+             prints",
+        ));
+    }
+    Ok(RowPlan {
+        scores,
+        qcovhsp,
+        ds: counts.then_some(ds),
+    })
+}
+
+impl RowPlan {
+    /// The subject letters that the row reads: from the first to the last letter of row 1's
+    /// segments (inclusive, plus strand, whatever their strands), `None` where it reads none
+    /// (`reads_letters`).
+    pub(crate) fn subject_range(&self, ctx: &RowContext<'_>) -> Option<(u32, u32)> {
+        let ds = self.ds.as_ref().filter(|_| reads_letters(ctx.spec, ctx.no_fetch))?;
+        let mut range: Option<(u32, u32)> = None;
+        for (seg, &len) in ds.lens.iter().enumerate() {
+            let Ok(start) = u32::try_from(ds.starts[seg * 2 + 1]) else {
+                continue;
+            };
+            let last = start.saturating_add(len.saturating_sub(1));
+            range = Some(match range {
+                Some((from, to)) => (from.min(start), to.max(last)),
+                None => (start, last),
+            });
+        }
+        range
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:906-1096
+/// The row of the plan `plan` (`SetFields`' counts' block), its letters from `sequences` (the
+/// query row's and the subject row's, `SeqKey::Query` and `SeqKey::Subject(0)`), which are read
+/// only where `reads_letters`.
+pub(crate) fn row_hsp<'r>(
+    plan: &RowPlan,
+    ctx: &RowContext<'_>,
+    sequences: &dyn Sequences,
+    buffers: &'r mut RowBuffers,
+) -> Result<TabularHsp<'r>, ReadStop> {
+    let spec = ctx.spec;
+    let RowScores {
+        score,
+        bit_score,
+        evalue,
+        num_ident,
+    } = plan.scores;
     let mut hsp = TabularHsp {
         evalue,
         bit_score,
         score,
         num_ident: usize::try_from(num_ident).unwrap_or(0),
-        qcovhsp,
+        qcovhsp: plan.qcovhsp,
         ..empty_hsp()
     };
-    if !counts {
+    let Some(ds) = &plan.ds else {
         return Ok(hsp);
-    }
+    };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:943-952
     let denseg = Denseg::pair(
         [SeqKey::Query, SeqKey::Subject(0)],
         &ds.starts,
         &ds.lens,
-        ds.strands,
+        ds.pair_strands(),
         ds.first_minus,
     );
     let RowBuffers {
@@ -165,10 +241,6 @@ pub(crate) fn hsp<'r>(
         };
         row(0, query)?;
         row(1, subject)?;
-    } else if spec.has(NumIdentical) && num_ident < 0 {
-        return Err(ReadStop::Unsupported(
-            "a BLASTN Seq-align without the count of identities that nident prints",
-        ));
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1029-1060
     // (not translated: the query as it is, the subject swapped where its strand, or the
@@ -265,49 +337,52 @@ pub(crate) type SubjectScores = Vec<(i32, i32)>;
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:572-660
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:707-735
 /// `InsertSubjectScores` over the pruned Seq-aligns `aligns` of a query of length
-/// `query_length`, then `x_SetQueryCovSubject` and `x_SetQueryCovUniqSubject` of each row: the
-/// coverages that the rows print. `qcovs` is computed where `spec_text` (the format's field
-/// list as typed) holds `qcovs`, `qcovus` where it holds `qcovus` and the program is BLASTN
-/// (`blastn`), each unless the first Seq-align has its score; per group of adjacent Seq-aligns
-/// whose subject ids match, set on the group's first where it is not 0. A row's coverage is its
+/// `query_length`, then `x_SetQueryCovSubject` and `x_SetQueryCovUniqSubject` of each row that
+/// prints them (`spec`): the coverages that the rows print. `qcovs` is computed where `spec_text`
+/// (the format's field list as typed) holds `qcovs`, `qcovus` where it holds `qcovus` and the
+/// program is BLASTN (`blastn`), each unless the first Seq-align has its score, and none where
+/// the query's length as an `int` is not above 0; per group of adjacent Seq-aligns whose subject
+/// ids match, set on the group's first where its covered length (an `int`) is not 0
+/// (`report::tabular::coverage_percent`, the search programs' rule). A row's coverage is its
 /// Seq-align's score, else `N/A` where its subject's FASTA id is not that of the last row with a
-/// score, else that row's.
+/// score, else that row's. A score is read only where a field prints it, as NCBI reads it.
 pub(crate) fn subject_scores(
     aligns: &[ReadAlign<'_>],
     query_length: Option<i64>,
+    spec: &TabularSpec,
     spec_text: &str,
     blastn: bool,
 ) -> Result<SubjectScores, ReadStop> {
     let names = ["seq_percent_coverage", "uniq_seq_percent_coverage"];
-    let mut set: Vec<[Option<i32>; 2]> = aligns
-        .iter()
-        .map(|align| -> Result<_, ReadStop> {
-            let mut scores = [None, None];
-            for (score, name) in scores.iter_mut().zip(names) {
-                *score = match align.named_int(name)? {
-                    Some(value) => Some(
-                        i32::try_from(value)
-                            .map_err(|_| ReadStop::Unsupported("a coverage past the int range"))?,
-                    ),
-                    None => None,
-                };
-            }
-            Ok(scores)
-        })
-        .collect::<Result<_, _>>()?;
+    let printed = [spec.has(QueryCovSubject), spec.has(QueryCovUniqSubject)];
+    if !printed.iter().any(|&kind| kind) {
+        return Ok(vec![(-1, -1); aligns.len()]);
+    }
+    let named = |align: &ReadAlign<'_>, kind: usize| -> Result<Option<i32>, ReadStop> {
+        match align.named_int(names[kind])? {
+            Some(value) => Ok(Some(i32::try_from(value).map_err(|_| {
+                ReadStop::Unsupported("a coverage past the int range")
+            })?)),
+            None => Ok(None),
+        }
+    };
     let mut compute = [
         spec_text.contains("qcovs"),
         spec_text.contains("qcovus") && blastn,
     ];
-    if let Some(first) = set.first() {
-        for (kind, score) in compute.iter_mut().zip(first) {
-            *kind &= score.is_none();
+    // `InsertSubjectScores` reads both scores of the first Seq-align once it runs.
+    if let (true, Some(first)) = (compute.iter().any(|&kind| kind), aligns.first()) {
+        let held = [named(first, 0)?.is_some(), named(first, 1)?.is_some()];
+        for (flag, held) in compute.iter_mut().zip(held) {
+            *flag &= !held;
         }
     }
-    let query_length = query_length.unwrap_or(0);
-    if compute.iter().any(|&kind| kind) && query_length > 0 {
-        let query_length = i32::try_from(query_length)
-            .map_err(|_| ReadStop::Unsupported("a query whose length is past 2^31"))?;
+    // `query_len`, an `int` of the Bioseq's length: the scores are computed above 0 only.
+    let query_length = query_length
+        .and_then(|length| i32::try_from(length).ok())
+        .filter(|&length| length > 0);
+    let mut inserted: Vec<[Option<i32>; 2]> = vec![[None, None]; aligns.len()];
+    if let (true, Some(query_length)) = (compute.iter().any(|&kind| kind), query_length) {
         let mut left = 0;
         while left < aligns.len() {
             let id = aligns[left].seq_id(1)?;
@@ -316,25 +391,22 @@ pub(crate) fn subject_scores(
                 right += 1;
             }
             let group = &aligns[left..right];
-            let covered = [
-                if compute[0] {
-                    master_coverage(group)?
-                } else {
-                    0
-                },
-                if compute[1] {
-                    u64::from(uniq_seq_coverage(group)?)
-                } else {
-                    0
-                },
-            ];
             for kind in 0..2 {
-                if compute[kind] && covered[kind] != 0 {
-                    let covered = i32::try_from(covered[kind])
-                        .map_err(|_| ReadStop::Unsupported("a coverage past 2^31 letters"))?;
-                    set[left][kind] = Some(int_of(
-                        crate::report::serial::seqalign::query_coverage(0, covered, query_length),
-                    )?);
+                if !compute[kind] {
+                    continue;
+                }
+                // `GetMasterCoverage` and `GetUniqSeqCoverage` give an `int`, at most the
+                // query's length (the `TSeqPos` range of a query gap is empty, range.hpp:158-166).
+                let covered = if kind == 0 {
+                    master_coverage(group)? as i32
+                } else {
+                    uniq_seq_coverage(group)? as i32
+                };
+                if covered != 0 {
+                    inserted[left][kind] = Some(crate::report::tabular::coverage_percent(
+                        covered as usize,
+                        query_length as usize,
+                    ));
                 }
             }
             left = right;
@@ -343,12 +415,21 @@ pub(crate) fn subject_scores(
     // The rows' state (`m_QueryCovSubject`, `m_QueryCovUniqSubject`): `N/A` and -1 at first.
     let mut kept: [(Vec<u8>, i32); 2] = [(b"N/A".to_vec(), -1), (b"N/A".to_vec(), -1)];
     let mut out = Vec::with_capacity(aligns.len());
-    for (align, scores) in aligns.iter().zip(&set) {
-        let mut fasta = Vec::new();
+    let mut fasta = Vec::new();
+    for (align, inserted) in aligns.iter().zip(&inserted) {
+        fasta.clear();
         crate::seqid::label::fasta(align.seq_id(1)?, &mut fasta);
-        for (state, score) in kept.iter_mut().zip(scores) {
+        for kind in 0..2 {
+            if !printed[kind] {
+                continue;
+            }
+            let score = match inserted[kind] {
+                Some(value) => Some(value),
+                None => named(align, kind)?,
+            };
+            let state = &mut kept[kind];
             match score {
-                Some(value) => *state = (fasta.clone(), *value),
+                Some(value) => *state = (fasta.clone(), value),
                 None if state.0 != fasta => *state = (b"N/A".to_vec(), -1),
                 None => {}
             }
@@ -433,17 +514,22 @@ pub(crate) fn uniq_seq_coverage(group: &[ReadAlign<'_>]) -> Result<u32, ReadStop
 }
 
 /// The letters of a row's query and subject, plus strand, as `CSeqVector` gives them in
-/// `ncbieaa` or IUPAC (`Sequences` of one row).
+/// `ncbieaa` or IUPAC (`Sequences` of one row): the whole query, and the subject's letters from
+/// `subject_from` on (the row's range of the subject, `RowPlan::subject_range`).
 pub(crate) struct RowLetters<'a> {
     pub(crate) query: &'a [u8],
     pub(crate) subject: &'a [u8],
+    pub(crate) subject_from: u32,
 }
 
 impl Sequences for RowLetters<'_> {
     fn letters(&self, seq: SeqKey, from: u32, to: u32, out: &mut Vec<u8>) {
-        let letters = match seq {
-            SeqKey::Query => self.query,
-            SeqKey::Subject(_) => self.subject,
+        let (letters, offset) = match seq {
+            SeqKey::Query => (self.query, 0),
+            SeqKey::Subject(_) => (self.subject, self.subject_from),
+        };
+        let (Some(from), Some(to)) = (from.checked_sub(offset), to.checked_sub(offset)) else {
+            return;
         };
         let end = (to as usize + 1).min(letters.len());
         if let Some(range) = letters.get(from as usize..end) {

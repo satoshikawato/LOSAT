@@ -16,7 +16,7 @@ use std::io::{self, Write};
 use crate::blastinput::app::{FormatChoice, ReportFormat};
 use crate::config::ScoringMatrix;
 use crate::report::outfmt6::{
-    format_bitscore_ncbi, format_evalue_ncbi_tabular, format_percent_identity_ncbi,
+    format_percent_identity_ncbi, write_bitscore_ncbi, write_evalue_ncbi_tabular,
     write_outfmt7_query_line,
 };
 use crate::report::pairwise::end_gap_span;
@@ -2112,8 +2112,8 @@ impl<'a> TabularWriter<'a> {
                 SubjectAllGis => out.extend_from_slice(list(1)),
                 SubjectAllAccessions => out.extend_from_slice(list(2)),
                 SubjectLength => push_num(out, if subject_set { subject.length } else { 0 }),
-                Evalue => out.extend_from_slice(format_evalue_ncbi_tabular(hsp.evalue).as_bytes()),
-                BitScore => out.extend_from_slice(format_bitscore_ncbi(hsp.bit_score).as_bytes()),
+                Evalue => write_evalue_ncbi_tabular(out, hsp.evalue).expect("a Vec takes every byte"),
+                BitScore => write_bitscore_ncbi(out, hsp.bit_score).expect("a Vec takes every byte"),
                 Score => push_num(out, hsp.score),
                 PercentIdentical => out.extend_from_slice(b"0.000"),
                 PercentPositives => out.extend_from_slice(b"0.00"),
@@ -2211,8 +2211,8 @@ impl<'a> TabularWriter<'a> {
                     hsp.end_gaps,
                     hsp.stored_gaps[1],
                 ),
-                Evalue => out.extend_from_slice(format_evalue_ncbi_tabular(hsp.evalue).as_bytes()),
-                BitScore => out.extend_from_slice(format_bitscore_ncbi(hsp.bit_score).as_bytes()),
+                Evalue => write_evalue_ncbi_tabular(out, hsp.evalue).expect("a Vec takes every byte"),
+                BitScore => write_bitscore_ncbi(out, hsp.bit_score).expect("a Vec takes every byte"),
                 Score => push_num(out, hsp.score),
                 AlignmentLength => push_num(out, hsp.length),
                 PercentIdentical => out.extend_from_slice(

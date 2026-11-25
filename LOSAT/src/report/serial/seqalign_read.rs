@@ -52,15 +52,32 @@ pub(crate) struct AlnScores {
 
 /// The Dense-seg of two rows that the tabular formats build of a Seq-align
 /// (tabular.cpp:925-941): its segments' starts (two per segment, -1 for a gap) and lengths, and
-/// the strands of its first segment (`GetSeqStrand`: plus where the Dense-seg has none).
+/// the strands of its first segment (`GetSeqStrand`: plus where the Dense-seg has none) and of
+/// its last.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PairDenseg {
     pub(crate) starts: Vec<i32>,
     pub(crate) lens: Vec<u32>,
     pub(crate) strands: [Strand; 2],
+    /// The strands of the last segment (plus where the Dense-seg has none).
+    pub(crate) last_strands: [Strand; 2],
     /// Whether the Dense-seg has strands and its first is minus: the tabular formats reverse it
     /// then (tabular.cpp:943-952).
     pub(crate) first_minus: bool,
+}
+
+impl PairDenseg {
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:643-680
+    /// The strands that `CAlnMap` reads of the Dense-seg as the tabular formats read it (before
+    /// `Denseg::pair` reverses them where `first_minus`): the first segment's, or where the
+    /// Dense-seg is reversed the last segment's, which `Reverse` makes the first.
+    pub(crate) fn pair_strands(&self) -> [Strand; 2] {
+        if self.first_minus {
+            self.last_strands
+        } else {
+            self.strands
+        }
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3160-3212
@@ -131,7 +148,7 @@ impl<'a> ReadAlign<'a> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:229-270
     /// `GetAlnScores`: the scores of the Seq-align's list, and where it has no `e_value` or
     /// `sum_e` those of its first segment (a Dense-diag's, a Std-seg's or the Dense-seg's) read
-    /// again from -1. A score without an id is NCBI's unset member (`GetId()`), a value of the
+    /// on top of the values already found. A score without an id is NCBI's unset member (`GetId()`), a value of the
     /// other kind its `CInvalidChoiceSelection`; the `use_this_gi` scores are not read by the
     /// tabular formats, but a `gi:` score that is no number throws there and is refused.
     pub(crate) fn scores(&self) -> Result<AlnScores, ReadStop> {
@@ -301,10 +318,12 @@ impl<'a> ReadAlign<'a> {
                 return Err(ReadStop::Unsupported("an alignment row without letters"));
             }
         }
-        let row_strand = |row: usize| strands.get(row).map_or(Strand::Plus, |&s| strand(s));
+        let row_strand = |at: usize| strands.get(at).map_or(Strand::Plus, |&s| strand(s));
+        let last = 2 * (numseg - 1);
         Ok(PairDenseg {
             first_minus: strands.first() == Some(&2),
             strands: [row_strand(0), row_strand(1)],
+            last_strands: [row_strand(last), row_strand(last + 1)],
             starts,
             lens,
         })
@@ -364,11 +383,10 @@ fn read_scores(list: V<'_>, scores: &mut AlnScores) -> Result<bool, ReadStop> {
             }
             b"num_ident" => scores.num_ident = int()?,
             text if text.starts_with(b"gi:") => {
-                let digits = &text[3..];
-                if digits.is_empty() || digits.len() > 18 || !digits.iter().all(u8::is_ascii_digit)
-                {
+                if gi_of_name(text).is_none() {
                     return Err(ReadStop::Unsupported(
-                        "a gi: score whose name is no plain number",
+                        "a gi: score whose name NCBI BLAST+ cannot convert to a GI, where it \
+                         throws",
                     ));
                 }
             }
@@ -376,6 +394,41 @@ fn read_scores(list: V<'_>, scores: &mut AlnScores) -> Result<bool, ReadStop> {
         }
     }
     Ok(has_score)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:262-266
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3370-3384
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:868-940
+/// The GI of a `gi:` score's name as `s_GetBlastScore` converts it: every `gi:` removed
+/// (`NStr::Replace`, which looks again at the place of each removal), then `StringToNumeric<TGi>`
+/// (an `Int8` in base 10 without flags: one optional sign, at least one digit and nothing else,
+/// within the `Int8` range). `None` where the conversion throws.
+pub(crate) fn gi_of_name(name: &[u8]) -> Option<i64> {
+    let mut text = name.to_vec();
+    let mut at = 0;
+    while let Some(found) = text[at..].windows(3).position(|window| window == b"gi:") {
+        at += found;
+        text.drain(at..at + 3);
+    }
+    let (negative, digits) = match text.split_first() {
+        Some((b'-', rest)) => (true, rest),
+        Some((b'+', rest)) => (false, rest),
+        _ => (false, &text[..]),
+    };
+    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let mut value: i64 = 0;
+    for &digit in digits {
+        let digit = i64::from(digit - b'0');
+        value = value.checked_mul(10)?;
+        value = if negative {
+            value.checked_sub(digit)?
+        } else {
+            value.checked_add(digit)?
+        };
+    }
+    Some(value)
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:147-170

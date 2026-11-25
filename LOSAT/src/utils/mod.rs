@@ -23,6 +23,9 @@ pub(crate) mod os_bytes;
 // end with, as NCBI BLAST+ 2.17.0 wrote it on Linux (cited in the module).
 pub(crate) mod os_error_text;
 pub(crate) mod process_id;
+// NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:51-175,217-241
+// NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:98,215-264,287-309
+pub(crate) mod random_gen;
 // No NCBI counterpart: whether two names are one file where there are no inode numbers (WASI).
 pub(crate) mod same_file;
 pub mod seg;

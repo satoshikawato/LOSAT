@@ -45,7 +45,7 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 
 These are on the list for a later release:
 
-- the programs `deltablast` and `blast_formatter`, and `makeprofiledb -binary`, `-dbtype delta` and `-dbtype cobalt`;
+- the programs `deltablast` and `blast_formatter`, and `makeprofiledb -dbtype delta` and `-dbtype cobalt`;
 - `psiblast -phi_pattern`;
 - the `psiblast` output formats `13` to `16`;
 - `-html` in `psiblast`, `rpsblast` and `rpstblastn`.

@@ -106,15 +106,6 @@ pub(crate) fn check_in_pssm_options(
     {
         return Ok(());
     }
-    // The pairwise report, the tabular reports 6, 7, 10 and 20, BLAST XML, the Seq-annots of
-    // outfmt 8 and 9 and the archive (the others are item PS15b-2's).
-    if let Some(number) = outfmts
-        .iter()
-        .find(|number| !matches!(number, 0 | 5..=11 | 20))
-    {
-        let option = if psi.from_msa { "-in_msa" } else { "-in_pssm" };
-        bail!("output format {number} with {option} is not supported by LOSAT's PSIBLAST yet");
-    }
     // The archive's request holds the PSSM that the search holds (`PsiSearch::archive_pssm`):
     // `-in_pssm`'s object, whose delayed member of another format the archive's stream does not
     // write yet where NCBI's read of it fails (`report::archive::pssm_unwritten`; the later

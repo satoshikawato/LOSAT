@@ -5010,6 +5010,14 @@ fn blastn_pairwise_report(
         prolog: report.prolog,
         parsed_subjects: report.database_parsed.to_vec(),
         subject_sources: report.database_sources.to_vec(),
+        subject_oids: report.database_ordinals.zip(report.database_reader).map(
+            |(ordinals, reader)| {
+                ordinals
+                    .iter()
+                    .map(|&o| reader.oid_map().oid(o).get())
+                    .collect::<Arc<[u32]>>()
+            },
+        ),
     };
     Ok((queries, pairwise_report))
 }
@@ -5154,11 +5162,15 @@ fn blastn_xml_stats(
 /// A subject interval has the strand both, so its mapping is the shift by its start.
 ///
 /// An HSP that NCBI keeps outside its query context with a Seq-align query start below 0
-/// (`BlastnHsp::seqalign_query_start`) reaches the reports only where the shift moves its
-/// Dense-diag's start to 0 or past it (`BlastnHsp::record_query_start`,
-/// `left_of_query_refusal`): its offsets, which `adjust_blastn_offsets` kept at 0, are those of
-/// the moved start (`Blast_HSPGetAdjustedOffsets` of its `Int4` offsets plus the shift).
-fn shift_to_records(hit_lists: &mut [Option<BlastnHitList>], ranges: &ReportRanges<'_>) {
+/// (`BlastnHsp::seqalign_query_start`) moves by the `-query_loc` start for an ungapped Dense-diag
+/// (`ungapped = true`), and keeps a negative start for a gapped Dense-seg (`ungapped = false`).
+/// Coordinates below 0 after the shift stay clamped at 0 in `hsp.q_start`/`hsp.q_end`; report
+/// formatters read the exact signed start via `BlastnHsp::record_query_start`.
+fn shift_to_records(
+    hit_lists: &mut [Option<BlastnHitList>],
+    ranges: &ReportRanges<'_>,
+    ungapped: bool,
+) {
     let (queries, subjects) = (&ranges.queries.placements, ranges.subjects.placements);
     if !queries.ranged() && !subjects.ranged() {
         return;
@@ -5169,11 +5181,11 @@ fn shift_to_records(hit_lists: &mut [Option<BlastnHitList>], ranges: &ReportRang
                 let q_shift = queries.offset(hsp.q_idx as usize);
                 let s_shift = subjects.offset(hsp.s_idx as usize);
                 if hsp.seqalign_query_start() < 0 {
-                    let start = hsp.record_query_start(q_shift, true);
+                    let start = hsp.record_query_start(q_shift, ungapped);
                     let length =
                         i64::from(hsp.internal_q_end_0) - i64::from(hsp.internal_q_offset_0);
-                    hsp.q_start = (start + 1) as usize;
-                    hsp.q_end = (start + length) as usize;
+                    hsp.q_start = (start + 1).max(0) as usize;
+                    hsp.q_end = (start + length).max(0) as usize;
                 } else {
                     hsp.q_start += q_shift;
                     hsp.q_end += q_shift;
@@ -5496,10 +5508,9 @@ fn post_process_hits_and_write(
     // the subject's interval (`shift_to_records`); their internal offsets stay those of
     // the searched letters, from which the shown rows are read.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1619-1636
-    // An HSP that NCBI keeps outside its query context reaches here only with a Seq-align query
-    // start of at least 0 (`left_of_query_refusal` fails or refuses the batch of one below 0), and
-    // the reports show it with query coordinates past the query's end (remaining-gaps X1b-p).
-    shift_to_records(&mut hit_lists, report.ranges);
+    // For `-subject`, `left_of_query_refusal` stopped batches with a Seq-align query start below
+    // 0; for `-db`, class N HSPs reach the reports and each formatter handles them as NCBI does.
+    shift_to_records(&mut hit_lists, report.ranges, report.ungapped);
     let wants_rows =
         outputs.hits.is_some() || output_formats.iter().any(|format| format.is_pairwise());
     // EXPERIMENT (LOSAT_X_RPTSTREAM): the same masks, made once for every batch.
@@ -5553,6 +5564,7 @@ fn post_process_hits_and_write(
                 subject: subject_masks.as_deref(),
                 database: database_masks.as_deref(),
             },
+            report.ungapped,
         )
     });
     // The rendered hits of the queries `queries`, under `-html` with their rows' masks in
@@ -5932,6 +5944,13 @@ fn post_process_hits_and_write(
                     probe.as_mut(),
                 )?;
             } else {
+                let left_of_record = (report.database_reader.is_some()
+                    && crate::algorithm::blastn::left_of_query::any_left_of_record(
+                        &hit_lists,
+                        &report.ranges.queries.placements,
+                        report.ungapped,
+                    ))
+                .then_some((&report.ranges.queries.placements, report.ungapped));
                 crate::algorithm::blastn::x_tab_par::write_output(
                     report.x_tab_pool,
                     &hit_lists,
@@ -5948,7 +5967,9 @@ fn post_process_hits_and_write(
                         .then_some(report.queries_before + hit_lists.len()),
                     probe.as_mut(),
                     format_warnings.as_mut(),
-                )?;
+                    left_of_record,
+                )
+                .map_err(crate::cli::NativeError::of_writer)?;
             }
             std::io::Write::flush(&mut writer)?;
             Ok(())
@@ -6478,6 +6499,9 @@ fn open_search_database(
     // open and the output file exists) and before the test for an empty query.
     let database = match args.database_name() {
         Some(name) => {
+            let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+                outputs.formats.first().map(|format| format.outfmt),
+            );
             let database = database::BlastnDatabase::open_restricted(
                 name,
                 settings,
@@ -6486,11 +6510,13 @@ fn open_search_database(
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis)
-            .after_calls(args.first_query_ordinal > 0);
+            .after_calls(args.first_query_ordinal > 0)
+            .keeping_scope(keeps_scope, separate_xml2);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
                 &args.db_filter,
+                database.list_gis(),
                 database.list_taxids(),
                 &database.statistics(),
                 false,
@@ -7453,7 +7479,7 @@ fn database_search_error(
     shown: &ShownSubjects,
 ) -> anyhow::Error {
     let error = match error.downcast::<database::PreliminaryReadError>() {
-        Ok(read_error) => crate::blastinput::app::engine_error(read_error.0),
+        Ok(read_error) => crate::blastinput::app::engine_error(read_error.as_bytes()),
         Err(error) => error,
     };
     if !error.is::<crate::cli::NativeError>() {
@@ -7732,13 +7758,11 @@ fn ungapped_subject_stage(
 /// remaining-gaps X1b-p).
 fn left_of_query_refusal(
     args: &BlastnArgs,
-    source: SubjectSource<'_>,
     hit_lists: &[Option<BlastnHitList>],
     lengths: &[usize],
     offsets: &[usize],
     records: &[FastaRecord],
 ) -> Option<anyhow::Error> {
-    let database_search = matches!(source, SubjectSource::Database(_));
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1609-1628
     // An ungapped search's HSPs are Dense-diags (`x_UngappedHSPToDenseDiag`).
     let dense_diag = args.ungapped;
@@ -7758,43 +7782,35 @@ fn left_of_query_refusal(
             return false;
         };
         let mut finished = hit_list.clone();
-        if !database_search {
-            finish_query_hit_list(
-                &mut finished,
-                lengths[q_idx],
-                args.report_counts.hitlist_size,
-                args.max_hsps_per_subject.unwrap_or(0),
-                args.qcov_hsp_perc.unwrap_or(0.0),
-                args.subject_besthit,
-                args.culling_limit_value(),
-                args.best_hit(),
-                args.ungapped,
-                true,
-            );
-        }
+        finish_query_hit_list(
+            &mut finished,
+            lengths[q_idx],
+            args.report_counts.hitlist_size,
+            args.max_hsps_per_subject.unwrap_or(0),
+            args.qcov_hsp_perc.unwrap_or(0.0),
+            args.subject_besthit,
+            args.culling_limit_value(),
+            args.best_hit(),
+            args.ungapped,
+            true,
+        );
         drop_hsps_of_score_zero(&mut finished);
         keeps_one(&finished, offset)
     })?;
     let id = records.get(q_idx).map_or(&[][..], FastaRecord::shown_id);
-    Some(hsp_left_of_query(id, database_search))
+    Some(hsp_left_of_query(id))
 }
 
-/// LOSAT's refusal of the query `query_id`, whose final hit list keeps an HSP with a Seq-align
-/// query start below 0 (`left_of_query_refusal`). Of a subject set NCBI stops with an exception
-/// there, after what it wrote before (`fail_batch!` in `run_in_pool`). Of a database
-/// (`database_search`) NCBI maps nothing, and its reports read the query row of the Seq-align
-/// each its own way: some stop with an exception after the rows before, others leave the HSP out
-/// or show it; LOSAT does not reproduce them yet (remaining-gaps X1b-p, decision X1b-p-1).
+/// LOSAT's refusal of the query `query_id` in a `-subject` search whose final hit list keeps an
+/// HSP with a Seq-align query start below 0 (`left_of_query_refusal`): NCBI stops with an
+/// exception when mapping the alignment to the subject (`s_RemapToSubjectLoc`, exit status 255),
+/// after what it wrote before (`fail_batch!` in `run_in_pool`). Database searches (`-db`) do not
+/// remap subjects and handle class N HSPs in each report formatter (`left_of_query.rs`).
 #[cold]
 #[inline(never)]
-fn hsp_left_of_query(query_id: &[u8], database_search: bool) -> anyhow::Error {
-    let ncbi = if database_search {
-        "whose reports from a database NCBI BLAST+ writes each its own way (some stop with an exception), which LOSAT does not reproduce yet"
-    } else {
-        "where NCBI BLAST+ stops with an exception when it maps the alignment to the subject (exit status 255); LOSAT refuses it after what NCBI BLAST+ writes before"
-    };
+fn hsp_left_of_query(query_id: &[u8]) -> anyhow::Error {
     anyhow::anyhow!(
-        "BLASTN: query {}: an HSP that NCBI BLAST+ keeps outside its query context (from an ungapped extension past an end of the context, such as with -xdrop_ungap 1e10) starts before the query's first letter, {ncbi}",
+        "BLASTN: query {}: an HSP that NCBI BLAST+ keeps outside its query context (from an ungapped extension past an end of the context, such as with -xdrop_ungap 1e10) starts before the query's first letter, where NCBI BLAST+ stops with an exception when it maps the alignment to the subject (exit status 255); LOSAT refuses it after what NCBI BLAST+ writes before",
         String::from_utf8_lossy(query_id)
     )
 }
@@ -8885,19 +8901,19 @@ fn run_in_pool(
         }
         // An HSP left of its query (`left_of_query_refusal`): of a subject set NCBI's search of the
         // batch throws, after the prologs, the reports of the batches before and the batch's reader
-        // messages; of a database LOSAT refuses after the batch's errors and prefetch (below).
-        let database_search = matches!(source, SubjectSource::Database(_));
-        let left_of_query = match left_of_query_refusal(
-            &args,
-            source,
-            &batch_hit_lists,
-            &lengths[start..],
-            &query_offsets[start..],
-            batch_records.searched(),
-        ) {
-            Some(error) if !database_search => fail_batch!(error),
-            database_refusal => database_refusal,
-        };
+        // messages. For a database search NCBI does not remap subjects and each report formatter
+        // handles class N HSPs directly after the batch's prefetch.
+        if !matches!(source, SubjectSource::Database(_)) {
+            if let Some(error) = left_of_query_refusal(
+                &args,
+                &batch_hit_lists,
+                &lengths[start..],
+                &query_offsets[start..],
+                batch_records.searched(),
+            ) {
+                fail_batch!(error);
+            }
+        }
         // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:304-309
         // The prefetch before the batch's reports reads `PRE_FETCH_SEQS_LIMIT`, after the batch's
         // search (a database's titles are read in its traceback, above): a value that NCBI cannot
@@ -9060,6 +9076,7 @@ fn run_in_pool(
                         .and_then(crate::report::pairwise::PairwiseView::of)
                         .is_some(),
                     gapped: !args.ungapped,
+                    placements: &query_input.placements,
                 };
                 let seq_aligns_of = |hit_lists: &[Option<BlastnHitList>]| -> usize {
                     database::seq_aligns_of(hit_lists, !args.ungapped)
@@ -9193,11 +9210,7 @@ fn run_in_pool(
                 }
                 Some(Err(error)) => Some(error),
             };
-            // The prefetch's error, else LOSAT's refusal of a database's HSP left of its query
-            // (above) where NCBI's reports read the batch's Seq-aligns, after its prefetch
-            // (blastn_app.cpp:304-312, cited above): after the warnings of the batches read so
-            // far with the prefetch's posts.
-            if let Some(error) = prefetch_error.or(left_of_query) {
+            if let Some(error) = prefetch_error {
                 let written = if stream.acting() { start } else { 0 };
                 for query_warnings in &warnings[written..=start] {
                     query_warnings.write(&mut *outputs.diagnostics, archive)?;
@@ -9217,6 +9230,9 @@ fn run_in_pool(
                     (database::prefetch_format(&output_formats), first_rows),
                 );
             }
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+            database.reset_scope();
         }
         // The batch numbers its queries from 0.
         let first = start as u32;
@@ -9865,6 +9881,7 @@ fn write_reports_untimed(
                         args.report_counts,
                     ),
                 ),
+                &ranges.queries.placements,
                 results.batches,
                 written.queries,
                 !args.ungapped,
@@ -10709,6 +10726,16 @@ fn search_query_batch<const UNGAPPED: bool>(
         context_valid: &context_valid,
         search_karlin: &search_karlin,
         query_eff_searchsp: &query_eff_searchsp,
+    })
+    .map_err(|error| {
+        context_statistics::setup_failure(
+            error,
+            first_batch,
+            false,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )
     })?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171
     // The wrapped ranges of a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE that leave no
@@ -10767,20 +10794,28 @@ fn search_query_batch<const UNGAPPED: bool>(
                 posts,
                 (x_keep, last),
             )?;
-            // A batch with a valid context whose chunks have none (the chunks' own masks would
-            // cover the letters that the batch's leave open) meets `BLAST_GapAlignSetUp` first
-            // in the set-up of its traceback, after the chunks:
+            // A batch with a valid context whose chunks have none (for example, under
+            // `-soft_masking false` with `-lcase_masking`, `restrict_masks`'s end extension
+            // covers the batch's remaining non-N base in chunk 0) meets `BLAST_GapAlignSetUp`
+            // first in the set-up of its traceback, after the chunks:
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:231-253
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1831-1837
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback_mt_priv.c:219-226
-            // The greedy set-up refuses there as in a batch that is not split. The check of the
-            // subjects before it (NCBI: `Traceback failed`, exit status 3) is not reproduced: no
-            // input that reaches this was found (line RG D1a-6, review A F1).
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback_mt_priv.c:218-228
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-996
+            // The subject check runs before the greedy set-up there (NCBI: `Traceback failed`,
+            // exit status 3, or SIGFPE for a count of 0; line RG D1a-6, review A F1).
             if let Some((_, false)) = &chunks {
-                if let Some(error) = context_statistics::greedy_setup_refusal(args, false) {
+                if let Some(error) = context_statistics::gap_align_setup_error(
+                    args,
+                    subjects,
+                    &seq_data,
+                    false,
+                    crate::blastinput::app::TRACEBACK_FAILED,
+                ) {
                     return Err(context_statistics::setup_failure(
                         error,
                         first_batch,
+                        false,
                         reborrow_outputs(&mut outputs),
                         intro,
                         &shown,
@@ -11227,7 +11262,16 @@ fn search_query_batch<const UNGAPPED: bool>(
     }
     // An overflow of a subject's search space (`subject_statistics`) is LOSAT's refusal, after the
     // preliminary stage's read errors (the searched blocks' above, the masks' here).
-    subject_space_overflow.check()?;
+    subject_space_overflow.check().map_err(|overflow| {
+        context_statistics::setup_failure(
+            overflow.into(),
+            first_batch,
+            false,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )
+    })?;
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
@@ -11266,7 +11310,16 @@ fn search_query_batch<const UNGAPPED: bool>(
             &shown,
         )
     })?;
-    subject_space_overflow.check()?;
+    subject_space_overflow.check().map_err(|overflow| {
+        context_statistics::setup_failure(
+            overflow.into(),
+            first_batch,
+            false,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )
+    })?;
     let mut batch = batch_result(hit_lists, Vec::new());
     if let Some(timing) = timing.as_ref() {
         batch.timing = blastn_timing_text(timing.as_ref(), t_search_start, t_total);

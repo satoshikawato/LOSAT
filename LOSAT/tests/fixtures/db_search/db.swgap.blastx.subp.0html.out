@@ -1,0 +1,124 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTX 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/rps/nest.faa).
+           1 sequences; 380 total letters
+
+
+
+<b>Query=</b> f101n
+
+Length=570
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+nest_101                                                              <a href=#Subject_1>394</a>     4e-144
+
+
+><a name=Subject_1></a> nest_101
+Length=380
+
+ Score = 394 bits (1012),  Expect = 4e-144, Method: Compositional matrix adjust.
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+ Frame = +1
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  96   MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  155
+
+Query  181  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  360
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  156  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  215
+
+Query  361  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  540
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  216  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  275
+
+Query  541  AEMYAAACRD  570
+            AEMYAAACRD
+Sbjct  276  AEMYAAACRD  285
+
+
+ Score = 353 bits (906),  Expect = 5e-128, Method: Compositional matrix adjust.
+ Identities = 190/190 (100%), Positives = 190/190 (100%), Gaps = 0/190 (0%)
+ Frame = +1
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+            MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG
+Sbjct  96   MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  155
+
+Query  181  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  360
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  156  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  215
+
+Query  361  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  540
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  216  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  275
+
+Query  541  AEMYAAACRD  570
+            AEMYAAACRD
+Sbjct  276  AEMYAAACRD  285
+
+
+ Score = 200 bits (508),  Expect = 7e-68, Method: Compositional matrix adjust.
+ Identities = 94/94 (100%), Positives = 94/94 (100%), Gaps = 0/94 (0%)
+ Frame = +1
+
+Query  289  EGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKI  468
+            EGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKI
+Sbjct  287  EGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKI  346
+
+Query  469  DTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  570
+            DTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD
+Sbjct  347  DTKEAPFTVRFGNDNDNNVICVGGAEMYAAACRD  380
+
+
+ Score = 17.3 bits (33),  Expect = 0.39, Method: Compositional matrix adjust.
+ Identities = 8/16 (50%), Positives = 9/16 (56%), Gaps = 0/16 (0%)
+ Frame = +2
+
+Query  494  CGSGTITIIM*SVWEG  541
+            CG+GTI      V EG
+Sbjct  57   CGTGTIVTHAGEVIEG  72
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 58575
+
+
+  Database: User specified sequence set (Input: tests/fasta/rps/nest.faa).
+    Posted date:  Unknown
+  Number of letters in database: 380
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

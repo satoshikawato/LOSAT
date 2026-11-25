@@ -12,6 +12,7 @@
 use anyhow::Result;
 
 use crate::report::serial::encoder::Encoder;
+use crate::report::serial::seqalign::AlignRow;
 use crate::report::serial::xml::{XmlEncoder, XmlPost, XmlThrow};
 
 use super::hsp::{mask_query_row, recount, round6, MaskLetter};
@@ -153,9 +154,27 @@ pub struct DocumentPosts {
     /// header, a 14 side file) or of the making of a 13 or 14 side file's report
     /// (`Xml2Document::failed`) (`run_ending_exception`).
     pub ends_run: Option<Box<crate::ncbi_exception::NcbiException>>,
+    /// Where the post of a held report's exception that the stream forms catch goes in the
+    /// epilog's bytes (`Xml2Document::epilog`): after the report's separator, before the
+    /// document's end, which NCBI writes after the post (`place_caught`).
+    pub caught_at: Option<usize>,
     /// Where NCBI's insertions into the report's stream end, and its regions and flushes, at
     /// offsets of the output buffers (`ostream::Cuts`; BLAST XML's, `BlastXmlWriter`).
     pub cuts: crate::report::ostream::Cuts,
+}
+
+impl DocumentPosts {
+    /// Puts `post`, the post of a held report's exception that the stream forms catch, where the
+    /// epilog marked it (`caught_at`: before the document's end); `Some(post)` back where nothing
+    /// marked it, for the caller to write after the report (`query_warnings::HitPosts::caught`).
+    pub fn place_caught(&mut self, post: Vec<u8>) -> Option<Vec<u8>> {
+        let Some(at) = self.caught_at.take() else {
+            return Some(post);
+        };
+        self.posts.push(DocumentPost { at, text: post });
+        self.posts.sort_by_key(|post| post.at);
+        None
+    }
 }
 
 /// The marker error with which outfmt 5's hit level stops the program's hits of a query whose
@@ -257,6 +276,8 @@ fn query_def(title: &[u8]) -> &[u8] {
 #[derive(Default)]
 pub(crate) struct Scratch {
     pub(crate) masked: Vec<u8>,
+    /// The subject row with its end gaps as spaces, where it has some (`HspCounts::hseq`).
+    pub(crate) hseq: Vec<u8>,
     pub(crate) midline: Vec<u8>,
     pub(crate) columns: Vec<usize>,
     pub(crate) segments: Vec<(usize, usize)>,
@@ -336,7 +357,7 @@ pub trait StructuredXml {
 /// texts (titles, messages, the names of their hits' subjects) that NCBI's writer must be able
 /// to write: all of them, except the last when the run stops after this call (`stops`: no epilog
 /// and no later report call follow it) and the documents hold that report back (`holds_back`:
-/// `StructuredXml::holds_back`, `Xml2Target::holds_back`).
+/// `StructuredXml::holds_back`, `Xml2Run::holds_back`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389
 /// A `-subject` report is written when the next query's results arrive, or in the epilog
@@ -768,11 +789,27 @@ fn fill_segments(segments: &mut Vec<(usize, usize)>, ops: Option<&[GapEditOp]>, 
 /// What the XML and JSON writers count again from an HSP's rows (s_SeqAlignSetToXMLHsps,
 /// blastxml_format.cpp:268-331, blastxml2_format.cpp:268-321): the masked query row
 /// (`scratch.masked`: the regions of `masks` with the HSP's frame, in `mask_letter`), the
-/// midline (`scratch.midline`) and the three counts.
+/// subject row as written (`HspCounts::hseq`), the midline (`scratch.midline`) and the three
+/// counts. Both rows show their end gaps (`end_gaps_as_spaces`).
 pub(crate) struct HspCounts {
     pub identity: i32,
     pub positive: i32,
     pub gaps: i32,
+    /// Whether the subject row has end gaps, which `scratch.hseq` holds as spaces.
+    subject_end_gaps: bool,
+}
+
+impl HspCounts {
+    /// The subject row as written (`Hsp_hseq`, `"hseq"`): the HSP's row `srow` as it is, or,
+    /// where it has end gaps (a Smith-Waterman alignment of `-use_sw_tback`), its copy with them
+    /// as spaces (`scratch.hseq`, `count_hsp`).
+    pub(crate) fn hseq<'r>(&self, srow: &'r [u8], scratch: &'r Scratch) -> &'r [u8] {
+        if self.subject_end_gaps {
+            &scratch.hseq
+        } else {
+            srow
+        }
+    }
 }
 
 pub(crate) fn count_hsp(
@@ -798,6 +835,16 @@ pub(crate) fn count_hsp(
         &mut scratch.columns,
     );
     let (identity, positive) = recount(hsp.qrow, hsp.srow, positives, &mut scratch.midline);
+    let ops = hsp.ops.unwrap_or_default();
+    end_gaps_as_spaces(&mut scratch.masked, ops, AlignRow::Query);
+    // The subject row is written as it is (`HspCounts::hseq`), copied only where it has end gaps.
+    let subject_end_gaps =
+        crate::report::serial::seqalign::row_end_gaps(ops, AlignRow::Subject).columns() > 0;
+    if subject_end_gaps {
+        scratch.hseq.clear();
+        scratch.hseq.extend_from_slice(hsp.srow);
+        end_gaps_as_spaces(&mut scratch.hseq, ops, AlignRow::Subject);
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:238-241
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:225-230, 258-260
     // The gaps of the Seq-align's segments (also for a translated search, lines 259-260): the
@@ -815,7 +862,26 @@ pub(crate) fn count_hsp(
         identity,
         positive,
         gaps,
+        subject_end_gaps,
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:279-297
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:279-303
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:476-477
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:500-502
+/// The row `row` (`AlignRow`) of an HSP whose edit script is `ops`, with its end gaps
+/// (`serial::seqalign::row_end_gaps`: a Smith-Waterman alignment of `-use_sw_tback`) the end
+/// character of `GetWholeAlnSeqString`, a space, as `Hsp_qseq` and `Hsp_hseq` show them. The
+/// query row's masking and the midline read the row before (the masking counts the residues by
+/// their `-`); the midline already has a space there. NCBI masks the row with its spaces and
+/// skips only `-`, a mask that runs past the query's last letter reaching the row's last column;
+/// the order is the same here because a Smith-Waterman alignment ends at its maximum, never with
+/// a gap, and a mask starts at a letter, after the leading gaps.
+fn end_gaps_as_spaces(written: &mut [u8], ops: &[GapEditOp], row: AlignRow) {
+    let (lo, hi) = crate::report::serial::seqalign::row_end_gaps(ops, row).span(written.len());
+    written[..lo].fill(b' ');
+    written[hi..].fill(b' ');
 }
 
 impl HspWrite for Xml5Hsps<'_, '_> {
@@ -857,7 +923,7 @@ impl HspWrite for Xml5Hsps<'_, '_> {
         int_member(enc, "gaps", 14, counts.gaps);
         int_member(enc, "align-len", 15, hsp.qrow.len() as i32);
         string_member(enc, "qseq", 17, &scratch.masked);
-        string_member(enc, "hseq", 18, hsp.srow);
+        string_member(enc, "hseq", 18, counts.hseq(hsp.srow, scratch));
         string_member(enc, "midline", 19, &scratch.midline);
         enc.end_sequence();
         Ok(())

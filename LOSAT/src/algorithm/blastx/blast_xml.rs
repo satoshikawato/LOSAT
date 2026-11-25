@@ -50,9 +50,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use anyhow::{ensure, Context, Result};
 
 use super::args::ResolvedOptions;
-use super::empty_rows::{
-    row_range_exception, rows_empty, rows_range, std_seg_lengths_not_accurate, SubjectLoc,
-};
+use super::empty_rows::{reported_rows_range, rows_empty, SubjectLoc};
 use super::input::FastaRecord;
 use super::report::{
     display_query_residue, has_seqalign, query_endpoints, reported, ShownSubjects,
@@ -76,7 +74,9 @@ use crate::report::blast_xml2::{
     RunSideFiles, SideFiles, Xml2Document, Xml2Kind, Xml2Run, Xml2Target, Xml2Writer,
 };
 use crate::report::query_warnings::{EMPTY_DATABASE_MESSAGE, INVALID_QUERY_MESSAGE};
-use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue};
+use crate::report::serial::seqalign::{
+    read_num_ident, row_range_exception, seqalign_evalue, std_seg_lengths_not_accurate,
+};
 
 const PROGRAM: &str = "BLASTX";
 
@@ -1400,8 +1400,9 @@ pub(super) fn xml2_writer(
         cbs: i32::from(options.composition),
         query_gencode: Some(i32::from(options.query_gencode)),
         db_gencode: None,
+        program_type: options.program_type(),
     };
-    let delayed = params.target.holds_back();
+    let delayed = params.holds_back();
     Xml2Writer::with_document(Xml2Document::with_files(kind, delayed, files), params)
 }
 
@@ -1723,19 +1724,22 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                     continue;
                                 }
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175
-                                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243-245
                                 // An HSP of length 0 (`empty_rows`): the Dense-seg of `-subject`'s
-                                // mapped Std-seg throws; else the start of a row whose range the
-                                // XML cannot take, the query's first (`empty_rows::rows_range`:
-                                // empty rows with `-db` and the rows that `-subject`'s mapper
-                                // leaves, `SubjectLoc::of_list`; RPSTBLASTN's row that starts with
-                                // a gap). NCBI catches it in `s_BlastXMLAddIteration`
-                                // (`CaughtException`).
-                                let thrown = match loc.of_list(list, options.gapped) {
-                                    SubjectLoc::Interval => {
-                                        rows_empty(hsp).then(std_seg_lengths_not_accurate)
-                                    }
-                                    SubjectLoc::Whole => rows_range(hsp).map(row_range_exception),
+                                // mapped Std-seg throws first (`CreateDensegFromStdseg`); else the
+                                // start of a row whose range the XML cannot take, the query's
+                                // first (`empty_rows::reported_rows_range`: empty rows with `-db`
+                                // and the rows that `-subject`'s mapper leaves,
+                                // `SubjectLoc::of_list`; a leading gap left in a reported gapped
+                                // edit script, for `-db` and `-subject` alike). NCBI catches it in
+                                // `s_BlastXMLAddIteration` (`CaughtException`).
+                                let list_loc = loc.of_list(list, options.gapped);
+                                let thrown = if list_loc == SubjectLoc::Interval && rows_empty(hsp)
+                                {
+                                    Some(std_seg_lengths_not_accurate())
+                                } else {
+                                    reported_rows_range(hsp, list_loc == SubjectLoc::Interval)
+                                        .map(row_range_exception)
                                 };
                                 if let Some(exception) = thrown {
                                     return Err(CaughtException(exception).into());
@@ -1841,7 +1845,7 @@ pub(super) fn write_xml_epilog(
         Some(xml2) => {
             let finished = xml2.finish(&mut buf).map_err(|error| {
                 // The held report of a `-subject` run that fails (`CaughtException`): its
-                // message, then the end of the document.
+                // message, then the end of the document (`DocumentPosts::place_caught`).
                 match error.downcast::<CaughtException>() {
                     Ok(CaughtException(exception)) => Ok(crate::ncbi_exception::error_post_line(
                         None,
@@ -1860,9 +1864,10 @@ pub(super) fn write_xml_epilog(
             (finished, document.take_posts())
         }
     };
+    let mut posts = posts;
     let post = match finished {
         Ok(()) => None,
-        Err(Ok(post)) => Some(post),
+        Err(Ok(post)) => posts.place_caught(post),
         Err(Err(error)) => return Err(error),
     };
     if let Some(post) = post {

@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "tm_cache_gi12a",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm cache gi12a",
+  "number-of-letters": 1560,
+  "number-of-sequences": 12,
+  "last-updated": "2026-11-25T12:55:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 39718,
+  "bytes-to-cache": 1773,
+  "files": [
+    "tm_cache_gi12a.pdb",
+    "tm_cache_gi12a.phr",
+    "tm_cache_gi12a.pin",
+    "tm_cache_gi12a.pnd",
+    "tm_cache_gi12a.pni",
+    "tm_cache_gi12a.pog",
+    "tm_cache_gi12a.pot",
+    "tm_cache_gi12a.psq",
+    "tm_cache_gi12a.ptf",
+    "tm_cache_gi12a.pto"
+  ]
+}

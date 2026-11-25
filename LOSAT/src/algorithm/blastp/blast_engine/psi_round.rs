@@ -579,6 +579,11 @@ fn run_queries(
             }
             write_converged(outputs)?;
         }
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+        if let Some(database) = subject_source.database() {
+            database.reset_scope();
+        }
     }
     if epilog {
         write_round_epilogs(args, subject_source, subject_label, outputs, calls)?;
@@ -738,25 +743,33 @@ fn later_round_report_contexts<'a>(
 
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:525-528
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:556-558
+// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1135-1145
 /// The line `Search has CONVERGED!` between two `NcbiEndl`s, for every report that is not
-/// structured (psiblast's outfmt 0, 6, 7, 10 and 20), on the report's one stream: the
-/// application writes it after the query's rounds, outside the formatter's regions (`Site::Report`:
-/// no `CBlastTabularInfo` lives there, so a failed write there is the application's "BLAST failed
-/// to write output", exit 6), each `NcbiEndl` a line feed and a flush (`ostream::ncbi_endl`). The
-/// next query's report starts in the format's region again (`Site::of_format`).
+/// structured (`HasStructuredOutputFormat`: BLAST XML, the Seq-annots, the XML2 and JSON documents
+/// and SAM) and not the archive (psiblast's outfmt 0 to 4, 6, 7, 10, 18 and 20), on the report's
+/// one stream: the application writes it after the query's rounds, outside the formatter's regions
+/// (`Site::Report`: no `CBlastTabularInfo` lives there, so a failed write there is the
+/// application's "BLAST failed to write output", exit 6), each `NcbiEndl` a line feed and a flush
+/// (`ostream::ncbi_endl`). The next query's report starts in the format's region again
+/// (`Site::of_format`).
 fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
     use crate::blastinput::app::ReportFormat;
     use crate::report::ostream::{ncbi_endl, ReportWrite, Site};
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
-        if matches!(
+        if !matches!(
             ReportFormat::from_number(number),
-            Some(
-                ReportFormat::Pairwise
-                    | ReportFormat::Tabular
-                    | ReportFormat::TabularWithComments
-                    | ReportFormat::CommaSeparatedValues
-                    | ReportFormat::CommaSeparatedValuesWithHeader
+            None | Some(
+                ReportFormat::Xml
+                    | ReportFormat::AsnText
+                    | ReportFormat::AsnBinary
+                    | ReportFormat::Xml2
+                    | ReportFormat::Json
+                    | ReportFormat::Xml2S
+                    | ReportFormat::JsonS
+                    | ReportFormat::JsonSeqalign
+                    | ReportFormat::Sam
+                    | ReportFormat::ArchiveFormat
             )
         ) {
             let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
@@ -773,9 +786,9 @@ fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2238 (cited at
 // `tabular::write_tabular_without_queries`: outfmt 7's count of the result sets formatted)
-/// The epilog of each report after the last round: outfmt 0's, outfmt 7's `# BLAST processed R
-/// queries` (R the rounds formatted, `m_QueriesFormatted`), BLAST XML's end, nothing for outfmt
-/// 6, 8 to 11 and 20.
+/// The epilog of each report after the last round: outfmt 0's (also that of the query-anchored
+/// reports 1 to 4), outfmt 7's `# BLAST processed R queries` (R the rounds formatted,
+/// `m_QueriesFormatted`), BLAST XML's end, nothing for outfmt 6, 8 to 12, 18 and 20.
 fn write_round_epilogs(
     args: &ResolvedBlastpArgs,
     subject_source: BlastpSubjectSource<'_>,
@@ -806,7 +819,10 @@ fn write_round_epilogs(
             continue;
         }
         match crate::blastinput::app::parse_formatting_string(format.outfmt)?.number {
-            0 => {}
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2237-2238
+            // The formats below the tabular ones end with the pairwise footer; the tabular ones and
+            // those after them write no footer.
+            0..=4 => {}
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2246
             // BLAST XML's end, after the rounds' `Iteration`s (`BlastXmlWriter::finish`).
             5 => {

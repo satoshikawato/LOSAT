@@ -1,0 +1,21 @@
+# TBLASTN 2.17.0+
+# Query: f101
+# Database: User specified sequence set (Input: tests/fasta/rps/nest_p.fna)
+# Fields: query id, subject id, % query coverage per subject
+# 15 hits found
+f101	nest_p	100
+f101	nest_p	100
+f101	nest_p	100
+f101	nest_p	100
+f101	nest_p	100
+f101	nest_p	100
+f101	nest_p	100
+f101	nest_p	100
+f101	nest_p	100
+f101	nest_p	100
+f101	nest_p	100
+f101	nest_p	100
+f101	nest_p	100
+f101	nest_p	100
+f101	nest_p	100
+# BLAST processed 1 queries

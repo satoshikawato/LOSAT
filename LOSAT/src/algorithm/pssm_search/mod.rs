@@ -126,7 +126,7 @@ pub struct PsiSearch {
     /// The PSSM was made from psiblast's `-in_msa` alignment, not read from `-in_pssm`: the
     /// refusals that name the option name that one.
     pub(crate) from_msa: bool,
-    /// The query's Seq-inst has the molecule `other` (psiblast only), with the coding number of
+    /// The query's Seq-inst has the molecule `other` (psiblast and tblastn), with the coding number of
     /// its Seq-data (`CSeq_data::E_Choice`: iupacaa 2, ncbieaa 8, ncbistdaa 10). NCBI searches it
     /// as a protein; the tabular formats read the query's letters through the object manager for
     /// the fields `qseq`, `sseq`, `btop`, `positive`, `ppos`, `nident`, `mismatch` and `pident`

@@ -14,6 +14,7 @@ use crate::report::blast_xml::writer::{
     count_hsp, int_member, real_member, replaced_posts, string_member, DocumentPost, HitSink,
     HitWrite, HspSink, HspWrite, Scratch, StructuredXml,
 };
+use crate::report::record::ProgramType;
 use crate::report::serial::encoder::{Encoder, SerialError};
 use crate::report::serial::json::JsonEncoder;
 use crate::report::serial::xml::XmlEncoder;
@@ -214,7 +215,23 @@ where
     enc.end_member();
     write_parameters(enc, run, params);
     enc.member("results", 5);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:661-698
+    // A `-subject` search's results are `bl2seq`, an iterative database search's its rounds
+    // (`iterations`, numbered from 1), any other database search's one `search`.
     match params.target {
+        Xml2Target::Database if params.iterative() => {
+            enc.variant("Results", "iterations", 0);
+            enc.begin_list(false);
+            enc.element();
+            enc.begin_sequence("Iteration");
+            int_member(enc, "iter-num", 0, 1);
+            enc.member("search", 1);
+            write_search(enc, run, params, query, scratch, start, hits)?;
+            enc.end_member();
+            enc.end_sequence();
+            enc.end_list();
+            enc.end_variant();
+        }
         Xml2Target::Database => {
             enc.variant("Results", "search", 1);
             write_search(enc, run, params, query, scratch, start, hits)?;
@@ -334,6 +351,7 @@ impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
             let mut writer = Xml2Hsps {
                 enc: &mut *enc,
                 run: self.run,
+                program_type: self.params.program_type,
                 masks: self.masks,
                 scratch: &mut *self.scratch,
                 hsps: 0,
@@ -351,6 +369,8 @@ impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
 struct Xml2Hsps<'a, E> {
     enc: &'a mut E,
     run: &'a XmlRun<'a>,
+    /// `Xml2Run::program_type`.
+    program_type: Option<ProgramType>,
     masks: &'a [crate::report::blast_xml::QueryMask],
     scratch: &'a mut Scratch,
     hsps: i32,
@@ -364,10 +384,13 @@ impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:159-170
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:247-259
         // A frame is written for a nucleotide sequence of a Std-seg (translated) Seq-align: the
-        // query of blastx, tblastx and rpstblastn (whose profiles are proteins), the subject of
-        // tblastn and tblastx.
-        let query_translated = matches!(program, "blastx" | "tblastx" | "rpstblastn");
-        let subject_translated = matches!(program, "tblastn" | "tblastx");
+        // query of blastx, tblastx and RPSTBLASTN (whose profiles are proteins), the subject of
+        // tblastn, PSI-TBLASTN (tblastn's `-in_pssm`) and tblastx. The program types that the
+        // program name does not name are read as types (`Xml2Run::program_type`).
+        let query_translated = matches!(program, "blastx" | "tblastx")
+            || self.program_type == Some(ProgramType::RpsTblastn);
+        let subject_translated = matches!(program, "tblastn" | "tblastx")
+            || self.program_type == Some(ProgramType::PsiTblastn);
         // The query's regions are applied by the frame of a translated query, else frame 0
         // (blastxml2_format.cpp:211, :253): a nucleotide query's regions of frame 0 are
         // applied too, which outfmt 5 does not do.
@@ -415,7 +438,7 @@ impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
         int_member(enc, "align-len", 17, hsp.qrow.len() as i32);
         int_member(enc, "gaps", 18, counts.gaps);
         string_member(enc, "qseq", 19, &self.scratch.masked);
-        string_member(enc, "hseq", 20, hsp.srow);
+        string_member(enc, "hseq", 20, counts.hseq(hsp.srow, self.scratch));
         string_member(enc, "midline", 21, &self.scratch.midline);
         enc.end_sequence();
         Ok(())
@@ -526,7 +549,7 @@ impl Xml2Writer<NoSideFiles> {
     /// way; a run uses `for_run` or `with_document`.
     #[cfg(test)]
     pub fn new(kind: Xml2Kind, params: Xml2Run) -> Self {
-        let delayed = params.target.holds_back();
+        let delayed = params.holds_back();
         Self::with_document(Xml2Document::new(kind, delayed), params)
     }
 }
@@ -541,7 +564,7 @@ impl Xml2Writer<RunSideFiles> {
         out: Option<&std::path::Path>,
         sink: Option<&super::SideFileSink>,
     ) -> Self {
-        let delayed = params.target.holds_back();
+        let delayed = params.holds_back();
         Self::with_document(Xml2Document::for_run(kind, delayed, out, sink), params)
     }
 }

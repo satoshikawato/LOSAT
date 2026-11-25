@@ -43,8 +43,10 @@ fn fails_one_batch(error: &anyhow::Error) -> bool {
 /// (`stage_d_pipeline::SetupEngineError`: a PSSM query whose `kbp_psi` is not valid, the average
 /// subject length); and where LOSAT refuses a step at which NCBI's search of the batch crashes,
 /// does not finish or stops, after it has printed the reports of the batches before
-/// (`ErrorAfterBatchReports`: line RG item X-short-bat, and the setup's statistics count of 0,
-/// `stage_d_pipeline::preliminary_setup_checks`, D1a-5 of line RG), or the batch's search fails
+/// (`ErrorAfterBatchReports`: line RG item X-short-bat, the setup's statistics count of 0,
+/// `stage_d_pipeline::preliminary_setup_checks`, D1a-5 of line RG, and a search space that
+/// overflows NCBI's `Int8`, `stage_d_pipeline::search_space_overflow`, line RG D1a-6 review A
+/// F2), or the batch's search fails
 /// after those reports (the failed or endless Smith-Waterman redo of `-use_sw_tback`,
 /// `match_redo`): that error, as the batch's failure. Any other refusal of LOSAT's (and any other
 /// error) is returned as `Err` to stop the run before its first byte.

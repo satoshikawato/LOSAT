@@ -227,26 +227,6 @@ impl<'s, E: Encoder> ArchiveOut<'s, E> {
     }
 }
 
-impl<E: Encoder> ArchiveOut<'_, Traced<E>> {
-    /// `finish` of a document written through `Traced` without a post function (the search
-    /// strategy's, whose file is apart from the output): `collect` gets all the bytes that its
-    /// stream replaced, whose posts the run writes where the request's batch starts
-    /// (`strategy::StrategyExport::take_posts`), so nothing here waits for the sink. Another
-    /// error of the encoder gives nothing.
-    fn finish_collecting(
-        mut self,
-        collect: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
-    ) -> Result<()> {
-        if self.enc.error().is_none() {
-            let replaced = self.enc.take_replaced_chars();
-            if !replaced.is_empty() {
-                collect(&replaced)?;
-            }
-        }
-        self.finish()
-    }
-}
-
 impl<E: Encoder, P: FnMut(&ReplacedChar) -> std::io::Result<()>> ArchiveOut<'_, Traced<E, P>> {
     /// `finish` of a document whose stream threw (`encoder::NullElement`, the application
     /// `application`): the sink gets the bytes that NCBI's stream flushed (with a post function,
@@ -672,32 +652,74 @@ fn request_written_as_is(
         && encoding.writes_params(database_params)
 }
 
-/// Writes the search strategy's request of one query batch (`write_strategy_document`) to `sink`
-/// in ASN.1 text (the strategy file is always ASN.1 text), through `Traced` when ASN.1 text does
-/// not write one of its strings as it is (`request_written_as_is`): `collect` then gets the bytes
-/// that it replaced.
-pub(super) fn write_strategy_request(
-    sink: &mut dyn Write,
+// No NCBI counterpart: carries an encoded `Blast4-request` together with its `COStreamBuffer`
+// `BufferPiece` writes and `803.7` posts from batch encoding to `ostream::StrategyStream`.
+/// One encoded `Blast4-request` of `-export_search_strategy` (`encode_strategy_request`):
+/// the ASN.1 text bytes, NCBI's `COStreamBuffer` pieces (`BufferPiece`), NCBI's `803.7` posts
+/// paired with the bytes `COStreamBuffer` had written before each post, and any `NullElement`
+/// exception raised before the document completed.
+pub(super) struct EncodedStrategyRequest {
+    pub(super) bytes: Vec<u8>,
+    pub(super) pieces: Vec<crate::report::serial::encoder::BufferPiece>,
+    pub(super) posts: Vec<(u64, Vec<u8>)>,
+    pub(super) thrown: Option<crate::cli::NativeError>,
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:635-651
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:366-369
+/// Encodes the search strategy's `Blast4-request` of one query batch (`write_strategy_document`)
+/// in ASN.1 text through `Traced`, recording NCBI's `COStreamBuffer` pieces (`BufferPiece`) and
+/// `803.7` posts (`Traced::take_posted`) so `ostream::StrategyStream` can feed each piece into
+/// NCBI's 8,191-byte file buffer at the batch's start.
+pub(super) fn encode_strategy_request(
     request: &super::ArchiveRequest,
     batch: &RequestInputs<'_>,
     sets: &[Param],
     database_params: &[Param],
-    collect: impl FnOnce(&[ReplacedChar]) -> std::io::Result<()>,
-) -> Result<()> {
+) -> Result<EncodedStrategyRequest> {
+    let mut bytes = Vec::new();
     let mut buf = Vec::new();
-    let encoding = ArchiveEncoding::Text;
-    if request_written_as_is(encoding, request, batch, sets, database_params) {
-        let mut out = ArchiveOut::new(AsnTextEncoder::new(&mut buf), sink);
+    let (pieces, posts, thrown) = {
+        let mut out = ArchiveOut::new(Traced::new(AsnTextEncoder::new(&mut buf), 0), &mut bytes);
         write_strategy_document(&mut out, request, batch, sets, database_params);
-        out.finish()
-    } else {
-        let mut out = ArchiveOut::new(Traced::new(AsnTextEncoder::new(&mut buf), 0), sink);
-        write_strategy_document(&mut out, request, batch, sets, database_params);
-        match out.enc.take_thrown() {
-            Some(thrown) => out.finish_thrown(collect, request.application, &thrown),
-            None => out.finish_collecting(collect),
+        let thrown = out.enc.take_thrown();
+        if thrown.is_some() {
+            out.enc.flush_to(out.sink, true)?;
+        } else if let Some(error) = out.enc.error() {
+            return Err(error.into());
         }
-    }
+        let posts = out
+            .enc
+            .take_posted()
+            .into_iter()
+            .map(|posted| {
+                (
+                    posted.written,
+                    posted.replaced.post(Some(request.application)),
+                )
+            })
+            .collect();
+        if let Some(thrown) = thrown {
+            (
+                Vec::new(),
+                posts,
+                Some(crate::cli::NativeError::null_element(
+                    request.application,
+                    &thrown,
+                )),
+            )
+        } else {
+            let pieces = out.enc.pieces().to_vec();
+            out.finish()?;
+            (pieces, posts, None)
+        }
+    };
+    Ok(EncodedStrategyRequest {
+        bytes,
+        pieces,
+        posts,
+        thrown,
+    })
 }
 
 fn write_error_document<E: Encoder>(out: &mut ArchiveOut<'_, E>, messages: &[Message]) {
@@ -811,8 +833,7 @@ fn archive_pieces<A: AlignSource>(
                 aligns,
             )?
             .enc
-            .pieces()
-            .to_vec(),
+            .piece_sizes(),
         ArchiveEncoding::Text => write
             .to(
                 Traced::new(AsnTextEncoder::new(&mut buf), 0),
@@ -820,8 +841,7 @@ fn archive_pieces<A: AlignSource>(
                 aligns,
             )?
             .enc
-            .pieces()
-            .to_vec(),
+            .piece_sizes(),
         ArchiveEncoding::Binary => write
             .to(
                 Traced::new(AsnBinaryEncoder::new(&mut buf), 0),
@@ -829,8 +849,7 @@ fn archive_pieces<A: AlignSource>(
                 aligns,
             )?
             .enc
-            .pieces()
-            .to_vec(),
+            .piece_sizes(),
     })
 }
 

@@ -663,6 +663,7 @@ pub(super) fn write_xml(
             .psi_search
             .as_ref()
             .and_then(|search| search.query_other_coding),
+        query_scopes: reports.query_scopes,
     };
     // The rows of the queries' HSPs (`query_rows`), one query at a time: the document
     // reads their letters query by query and formats them serially, so a window of

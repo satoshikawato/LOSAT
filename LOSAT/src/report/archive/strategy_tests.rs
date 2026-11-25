@@ -762,3 +762,45 @@ fn the_panic_hook_does_not_wait_for_a_lock_its_own_thread_holds() {
     }
     assert_eq!(HOOK_LOCKS.get(), 0);
 }
+
+/// `RunFiles::strategy_target` checks `-logfile` against the run's real files (line WQA D19 round
+/// R1): when `out` does not exist, `-logfile out/x.asn` stays on stderr (`Unopened`), so
+/// `-export_search_strategy out/x.asn` is not refused as the file of `-logfile`; when `out` exists
+/// in the run's files, `-logfile out/x.asn` opens that file and the strategy is refused.
+#[test]
+fn strategy_target_reads_logfile_against_runs_files() {
+    struct WithRegistered(Vec<Vec<u8>>);
+    impl crate::report::run_files::FileReceiver for WithRegistered {
+        fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn registered_files(&self) -> &[Vec<u8>] {
+            &self.0
+        }
+    }
+    let others = [RunFileName {
+        option: "logfile",
+        name: std::ffi::OsStr::new("out/x.asn"),
+    }];
+    let without_out = RunFiles::Receiver(Arc::new(WithRegistered(Vec::new())));
+    let file =
+        create_strategy_file_in(&without_out, Path::new("out/x.asn"), "TBLASTX", &others).unwrap();
+    assert!(
+        file.refusal.is_none(),
+        "without folder `out`, -logfile out/x.asn is unopened so strategy is a file: {:?}",
+        file.refusal
+    );
+    assert!(matches!(file.target, StrategyTarget::Received(_)));
+
+    let with_out = RunFiles::Receiver(Arc::new(WithRegistered(vec![b"out/keep".to_vec()])));
+    let refused =
+        create_strategy_file_in(&with_out, Path::new("out/x.asn"), "TBLASTX", &others).unwrap();
+    assert_eq!(
+        refused.refusal.as_deref(),
+        Some(
+            "-export_search_strategy out/x.asn (the file of -logfile too, whose bytes the \
+             command line's strategy file replaces or mixes with its own) is not supported in \
+             the browser; give a file name of the run's own"
+        )
+    );
+}

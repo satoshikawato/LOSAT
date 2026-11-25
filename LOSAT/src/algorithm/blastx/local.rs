@@ -1218,6 +1218,9 @@ fn search_database(
         check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
     // The database opens after the options are processed and before the query is read, as NCBI's
     // `InitializeSubject`.
+    let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+        outputs.formats.first().map(|format| format.outfmt),
+    );
     let database = BlastxDatabase::open_restricted(
         name,
         &settings,
@@ -1228,7 +1231,8 @@ fn search_database(
         args.app_name(),
     )?
     .showing_gis(args.show_gis)
-    .after_calls(args.first_query_ordinal > 0);
+    .after_calls(args.first_query_ordinal > 0)
+    .keeping_scope(keeps_scope, separate_xml2);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
         args.strategy.as_ref(),

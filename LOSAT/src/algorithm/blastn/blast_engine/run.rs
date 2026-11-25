@@ -6526,6 +6526,9 @@ fn open_search_database(
     // open and the output file exists) and before the test for an empty query.
     let database = match args.database_name() {
         Some(name) => {
+            let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+                outputs.formats.first().map(|format| format.outfmt),
+            );
             let database = database::BlastnDatabase::open_restricted(
                 name,
                 settings,
@@ -6535,7 +6538,8 @@ fn open_search_database(
                 args.app().ncbi_name(),
             )?
             .showing_gis(args.show_gis)
-            .after_calls(args.first_query_ordinal > 0);
+            .after_calls(args.first_query_ordinal > 0)
+            .keeping_scope(keeps_scope, separate_xml2);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
@@ -9367,6 +9371,9 @@ fn run_in_pool(
                     (database::prefetch_format(&output_formats), first_rows),
                 );
             }
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+            database.reset_scope();
         }
         // The batch numbers its queries from 0.
         let first = start as u32;

@@ -244,7 +244,6 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - A motif whose check makes NCBI hold 1 GiB or more at once is refused. This is its minimal map's string with the old buffer while it grows, or its match records with their copies, in allocations below 2^47 bytes.
 - Whether NCBI's allocations succeed depends on the host's memory. A repeat that does not advance, such as `<*`, makes NCBI's records grow until the memory runs out. These refusals name the site and quote its motif.
 - A motif match that may read beyond NCBI's buffer of the site's residues is refused.
-- In an archive, a VisibleString with a byte outside the visible ASCII range is refused. NCBI replaces it by `#` and posts an error. The DefLine, a UTF8String, takes any byte.
 - In an archive, a member named by its tag (`[0]`) is refused.
 - In an archive, Seq-align segments other than `Dense-seg`, `Std-seg` and `Packed-seg` (`dendiag`, `disc`, `spliced`, `sparse`) are refused.
 - A `Std-seg` alignment whose query id NCBI would take from a first location of the kind `packed-int`, `packed-pnt`, `mix`, `equiv`, `bond` or `feat` is refused. LOSAT does not look up those ids.

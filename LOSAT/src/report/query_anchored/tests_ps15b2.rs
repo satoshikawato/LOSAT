@@ -98,7 +98,10 @@ fn assert_throws(hsps: &Hsps, expected_site: ThrowSite, expected_msg: &[u8]) {
         .expect("of_writer must map NcbiException to NativeError");
     assert_eq!(native.exit, 255);
     assert_eq!(native.message, expected_report);
-    assert_eq!(crate::api::error::chain_bytes(&cli_error), expected_report);
+    assert_eq!(
+        crate::api::Error::search(&cli_error).message(),
+        expected_report.as_slice()
+    );
 }
 
 /// `assert_throws` on `unreadable(rows)`.

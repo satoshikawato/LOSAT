@@ -847,6 +847,7 @@ pub(crate) fn write_section<W: Write + ?Sized>(
 ///   runs forever or goes on with lengths near 2^32). Those four are NCBI failures without a
 ///   checkable valid result (AGENTS.md rule 3), so LOSAT refuses there (`UnreadableMergeRefusal`),
 ///   after the bytes of the report before the section, which NCBI writes before its failure.
+///
 /// The merge reads the HSPs' positions and lengths only (no
 /// `fCalcScore`), so the encoding of the PSSM's sequence plays no part. A PSSM query is never one
 /// of the subjects' Bioseqs (only a FASTA query record is, `subject_is_query_record`), so

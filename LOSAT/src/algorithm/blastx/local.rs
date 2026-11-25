@@ -1223,6 +1223,7 @@ fn search_database(
         archive,
         args.strategy.as_ref(),
         &args.db_filter,
+        database.list_gis(),
         database.list_taxids(),
         &database.statistics(),
         false,

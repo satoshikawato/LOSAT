@@ -161,6 +161,7 @@ pub(crate) fn note_archive_database_filter(
     archive: Option<&crate::report::archive::ArchiveHandle>,
     strategy: Option<&crate::report::archive::strategy::StrategyExport>,
     filter: &crate::blastinput::db_filter::DbFilterArgs,
+    list_gis: &[i64],
     list_taxids: &[i32],
     statistics: &crate::seqdb::DbStatistics,
     translated: bool,
@@ -204,7 +205,10 @@ pub(crate) fn note_archive_database_filter(
             translated,
         ))
     };
-    options.set_database_filter(filter.archive_parameter(list_taxids), request_length)?;
+    options.set_database_filter(
+        filter.archive_parameters(list_gis, list_taxids),
+        request_length,
+    )?;
     Ok(())
 }
 

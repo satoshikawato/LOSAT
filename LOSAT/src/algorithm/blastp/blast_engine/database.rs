@@ -255,6 +255,11 @@ impl BlastpDatabase {
         self.db.list_taxids()
     }
 
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(super) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
+    }
+
     /// The number of sequences the statistics' setup reads (`DbStatistics::setup_count`), NCBI's
     /// `Int4`.
     pub(super) fn statistics_num_sequences(&self) -> i32 {

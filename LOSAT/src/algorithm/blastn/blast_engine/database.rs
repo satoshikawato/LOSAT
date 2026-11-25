@@ -916,6 +916,11 @@ impl BlastnDatabase {
         self.db.list_taxids()
     }
 
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(super) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
+    }
+
     /// The number of sequences the search reads: the included ones (`SeqDb::num_seqs`), which
     /// the schedules count; the statistics' number (`metadata`) can be another.
     pub(super) fn num_subjects(&self) -> usize {

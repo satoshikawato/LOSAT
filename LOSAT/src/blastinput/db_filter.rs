@@ -73,7 +73,7 @@ impl DbFilterArgs {
 
 /// The names of the options of `DbFilterArgs`, for the `-subject_loc` exclusions of LOSAT Web's
 /// ABI v1, which keeps its own parser (`web_v1_argv`; the other readers are NCBI's).
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub const DB_FILTER_OPTIONS: [&str; 7] = [
     "seqidlist",
     "negative_seqidlist",

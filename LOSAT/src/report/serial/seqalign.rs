@@ -35,6 +35,7 @@ use std::io::Write;
 use crate::blastinput::app::Program;
 use crate::common::GapEditOp;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::archive::options::RequestKind;
 use crate::report::ostream::{ReportWrite, Site};
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryNames, QueryRecord, RunRecord, SubjectRecord};
@@ -676,14 +677,6 @@ fn blast_type(run: &RunRecord<'_>) -> (&'static str, i32) {
     }
 }
 
-/// `Blast_SubjectIsNucleotide` of the program.
-fn subject_is_nucleotide(program: Program) -> bool {
-    matches!(
-        program,
-        Program::Blastn | Program::Tblastn | Program::Tblastx
-    )
-}
-
 /// The value of a `User-field`'s `data` that BLAST sets.
 enum UserData {
     Bool(bool),
@@ -759,7 +752,7 @@ fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
             enc,
             b"Blast Database Title",
             title,
-            UserData::Bool(subject_is_nucleotide(run.program)),
+            UserData::Bool(RequestKind::from(run.program).subject_is_nucleotide()),
         ),
     }
     enc.end_list();
@@ -2200,8 +2193,7 @@ fn write_query_posting(
     diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
     buf.clear();
-    let prefix =
-        crate::report::archive::options::RequestKind::from(document.run.program).application();
+    let prefix = RequestKind::from(document.run.program).application();
     let post = |replaced: &ReplacedChar| {
         diagnostics.write_all(&replaced.post(Some(prefix)))?;
         diagnostics.flush()

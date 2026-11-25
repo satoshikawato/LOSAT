@@ -174,7 +174,7 @@ fn received_log_target<T>(
         (None, None) => Ok(direct(DiagTarget::Stderr)),
         (None, Some(name)) => {
             let registered = run_entries(receiver);
-            let entry = |path: &[u8]| run_entry(&registered, path);
+            let entry = |path: &[u8], cwd: &[u8]| run_entry(&registered, path, cwd);
             match log_name(name.as_encoded_bytes(), Some(&entry)) {
                 LogName::Unopened => Ok(direct(DiagTarget::Stderr)),
                 LogName::StandardError => Ok(direct(DiagTarget::StderrFile)),
@@ -296,7 +296,7 @@ impl OpenFiles {
         let bytes = name.as_encoded_bytes();
         let name = name.display();
         let registered = run_entries(table.receiver.as_ref());
-        let entry = |path: &[u8]| run_entry(&registered, path);
+        let entry = |path: &[u8], cwd: &[u8]| run_entry(&registered, path, cwd);
         match output_name(bytes, &entry) {
             OutputName::Unopened => Err(Unopened),
             OutputName::File {
@@ -615,39 +615,92 @@ enum Entry {
     Missing,
 }
 
-/// The paths inside the run's working directory that `receiver`'s registered files occupy,
-/// resolved with `Walk` so that `./q.fa` and `in/../q.fa` are `q.fa`, and `in/q.fa` gives the
-/// folder `in` (`run_entry`).
+/// Whether `path` (resolved without links) is a directory that the model knows can never be a
+/// regular file of a run (`run_entries`): `cwd` or its ancestors (`in_working_tree` with empty
+/// `rest`), `/`, or a system directory (`ROOT_DIRECTORIES`, `USER_DIRECTORIES`, `NO_FREE_SPACE`,
+/// `holds_known_file`).
+fn is_known_directory(path: &[u8], cwd: &[u8]) -> bool {
+    path == b"/"
+        || in_working_tree(path, cwd).is_some_and(|(_, rest)| rest.is_empty())
+        || ROOT_DIRECTORIES.contains(&path)
+        || USER_DIRECTORIES.contains(&path)
+        || NO_FREE_SPACE.contains(&path)
+        || holds_known_file(path)
+}
+
+/// The keys (`file_key`) of `receiver`'s registered files, inside or outside the working
+/// directory, resolved with `Walk` in each name's own `working_directory` so that `./q.fa`,
+/// `in/../q.fa`, and `/proc/self/cwd/q.fa` share one key (`\00/q.fa`), `../q.fa` carries its
+/// climb depth (`\01/q.fa`), and `/tmp/q.fa` or `/data/q.fa` keeps its resolved path
+/// (`run_entry`). Non-file directory names (`.`, `..`, `/`, `/tmp`, trailing `/`) are skipped.
 fn run_entries(receiver: &dyn FileReceiver) -> Vec<Vec<u8>> {
     let mut files = Vec::new();
     for raw in receiver.registered_files() {
-        if raw.is_empty() || !fits(raw) {
+        if raw.is_empty() || raw.ends_with(b"/") || !fits(raw) {
             continue;
         }
         let cwd = working_directory(raw);
         if let Some(path) = Walk::resolve(raw, &cwd) {
-            if let Some(rel) = inside_cwd(&path, &cwd) {
-                files.push(rel.to_vec());
+            if !is_known_directory(&path, &cwd) {
+                files.push(file_key(&path, &cwd));
             }
         }
     }
     files
 }
 
-/// The entry of the run's working directory at `path` (a normalized path relative to the working
-/// directory): the registered files of `registered` (`run_entries`) first, then the real working
-/// directory (`run_directory_entry`).
-fn run_entry(registered: &[Vec<u8>], path: &[u8]) -> Entry {
-    if registered.iter().any(|file| file.as_slice() == path) {
-        return Entry::File;
+/// What the run's files hold at `path` (resolved without links) in working directory `cwd`:
+/// `Some(Entry::File)` when a registered file's `file_key` equals `key`,
+/// `Some(Entry::Directory)` when a registered file sits below `key`, else
+/// `Some(run_directory_entry(rel))` when `path` is strictly inside `cwd`, else `None` (outside
+/// `cwd` and not named by a registered file, where the caller keeps the model's `directory_at`
+/// and `opens` rules).
+fn run_entry(registered: &[Vec<u8>], path: &[u8], cwd: &[u8]) -> Option<Entry> {
+    let key = file_key(path, cwd);
+    if registered
+        .iter()
+        .any(|file| file.as_slice() == key.as_slice())
+    {
+        return Some(Entry::File);
     }
-    if registered.iter().any(|file| {
-        file.strip_prefix(path)
-            .is_some_and(|rest| rest.starts_with(b"/"))
-    }) {
-        return Entry::Directory;
+    if registered
+        .iter()
+        .any(|file| file.len() > key.len() && within(file, &key))
+    {
+        return Some(Entry::Directory);
     }
-    run_directory_entry(path)
+    inside_cwd(path, cwd).map(run_directory_entry)
+}
+
+/// Whether `path` (resolved without links) lives in a virtual kernel file system or device tree
+/// rather than a regular file directory: procfs, sysfs, or `/dev` outside `/dev/shm`.
+fn is_virtual_or_device(path: &[u8]) -> bool {
+    within(path, b"/proc")
+        || within(path, b"/sys")
+        || (within(path, b"/dev") && !within(path, b"/dev/shm"))
+}
+
+/// Lookup of an entry of the run's files (`run_entry`) at a resolved path in `cwd`.
+type EntryLookup<'a> = &'a dyn Fn(&[u8], &[u8]) -> Option<Entry>;
+
+/// Whether `path` (resolved without links) in working directory `cwd` is a usable folder
+/// (`walks_to_directory`, `log_name`, `output_name`): an entry of the run's files must be
+/// `Entry::Directory` (which also makes a registered file's ancestor outside `cwd` present even
+/// where `directory_at` returns `Directory::None`, such as `/data` for `/data/q.fa`), else the
+/// model's `directory_at` must be `Directory::Known` when `final_dir` is true or not
+/// `Directory::None` for an intermediate step.
+fn folder_present(
+    path: &[u8],
+    cwd: &[u8],
+    entry: Option<EntryLookup<'_>>,
+    final_dir: bool,
+) -> bool {
+    match entry.and_then(|entry| entry(path, cwd)) {
+        Some(Entry::Directory) => true,
+        Some(Entry::File | Entry::Missing) => false,
+        None if final_dir => directory_at(path) == Directory::Known,
+        None => directory_at(path) != Directory::None,
+    }
 }
 
 /// The entry of the run's working directory at `path`, a path relative to it without links, `.`
@@ -711,7 +764,7 @@ const DISCARDING_DEVICES: [&[u8]; 4] =
 /// `/dev/full`, whose writes fail), a queue of `/dev/mqueue` (`Special`), a file of the run's
 /// directory (`Existing`; a folder of it does not open), or a file of that name in the working
 /// directory, in a home or in a directory where every user makes files (`File`).
-fn output_name(name: &[u8], entry: &dyn Fn(&[u8]) -> Entry) -> OutputName {
+fn output_name(name: &[u8], entry: EntryLookup<'_>) -> OutputName {
     if name.is_empty() || !fits(name) {
         return OutputName::Unopened;
     }
@@ -724,17 +777,14 @@ fn output_name(name: &[u8], entry: &dyn Fn(&[u8]) -> Entry) -> OutputName {
     let mut walk = Walk::at(name, &cwd);
     for part in folders.split(|byte| *byte == b'/') {
         walk.step(part);
-        if walk.refused || directory_at(walk.path()) == Directory::None {
-            return OutputName::Unopened;
-        }
-        if inside_cwd(walk.path(), &cwd).is_some_and(|path| entry(path) != Entry::Directory) {
+        if walk.refused || !folder_present(walk.path(), &cwd, Some(entry), false) {
             return OutputName::Unopened;
         }
         if directories.last().map(Vec::as_slice) != Some(walk.path()) {
             directories.push(walk.path().to_vec());
         }
     }
-    if directory_at(walk.path()) != Directory::Known || matches!(last, b"" | b"." | b"..") {
+    if !folder_present(walk.path(), &cwd, Some(entry), true) || matches!(last, b"" | b"." | b"..") {
         return OutputName::Unopened;
     }
     walk.step(last);
@@ -772,24 +822,26 @@ fn output_name(name: &[u8], entry: &dyn Fn(&[u8]) -> Entry) -> OutputName {
     if LOST_DEVICES.contains(&path.as_slice()) {
         return OutputName::Special;
     }
-    if !opens(&path) {
+    let found = entry(&path, &cwd);
+    if found == Some(Entry::Directory) {
+        return OutputName::Unopened;
+    }
+    let existing = found == Some(Entry::File) && !is_virtual_or_device(&path);
+    if !existing && !opens(&path) {
         return OutputName::Unopened;
     }
     if path.starts_with(b"/dev/mqueue/") {
         return OutputName::Special;
     }
-    match inside_cwd(&path, &cwd).map(entry) {
-        Some(Entry::Directory) => OutputName::Unopened,
-        Some(Entry::File) => OutputName::Existing,
-        Some(Entry::Missing) | None => {
-            let opened = crate::blastinput::ncbi_environment::PathRules::Unix
-                .normalize(name, None)
-                .expect("a path normalized without links has no link limit");
-            OutputName::File {
-                name: host_file_name(&path, &opened, &cwd),
-                key: file_key(&path, &cwd),
-            }
-        }
+    if existing {
+        return OutputName::Existing;
+    }
+    let opened = crate::blastinput::ncbi_environment::PathRules::Unix
+        .normalize(name, None)
+        .expect("a path normalized without links has no link limit");
+    OutputName::File {
+        name: host_file_name(&path, &opened, &cwd),
+        key: file_key(&path, &cwd),
     }
 }
 
@@ -1329,7 +1381,7 @@ thread_local! {
 /// `Entry::Directory` is `Unopened`, `Entry::File` is `Existing` (refused by LOSAT Web), and
 /// `Entry::Missing` is `File` named relative to the working directory (`host_file_name`); outside
 /// it, `File` is named by the path that NCBI opens (`LogFileName::path`).
-fn log_name(name: &[u8], entry: Option<&dyn Fn(&[u8]) -> Entry>) -> LogName {
+fn log_name(name: &[u8], entry: Option<EntryLookup<'_>>) -> LogName {
     let (cwd, file) = log_file(name);
     // The directories that the walk of the checked directory passes, each a directory of the
     // system: the opened path is none of them nor an ancestor of one.
@@ -1350,13 +1402,8 @@ fn log_name(name: &[u8], entry: Option<&dyn Fn(&[u8]) -> Entry>) -> LogName {
     let mut walk = Walk::at(&file.path, &cwd);
     for part in folders.split(|byte| *byte == b'/') {
         walk.step(part);
-        if walk.refused || directory_at(walk.path()) == Directory::None {
+        if walk.refused || !folder_present(walk.path(), &cwd, entry, false) {
             return LogName::Unopened;
-        }
-        if let Some(entry) = entry {
-            if inside_cwd(walk.path(), &cwd).is_some_and(|path| entry(path) != Entry::Directory) {
-                return LogName::Unopened;
-            }
         }
     }
     walk.step(last);
@@ -1364,7 +1411,15 @@ fn log_name(name: &[u8], entry: Option<&dyn Fn(&[u8]) -> Entry>) -> LogName {
         return LogName::Unopened;
     }
     let path = walk.path().to_vec();
-    if directories.iter().any(|directory| within(directory, &path)) || !opens(&path) {
+    if directories.iter().any(|directory| within(directory, &path)) {
+        return LogName::Unopened;
+    }
+    let found = entry.and_then(|entry| entry(&path, &cwd));
+    if found == Some(Entry::Directory) {
+        return LogName::Unopened;
+    }
+    let existing = found == Some(Entry::File) && !is_virtual_or_device(&path);
+    if !existing && !opens(&path) {
         return LogName::Unopened;
     }
     // A directory whose free space the system does not read keeps the file (NCBI ignores the
@@ -1383,13 +1438,12 @@ fn log_name(name: &[u8], entry: Option<&dyn Fn(&[u8]) -> Entry>) -> LogName {
     if stream(b"/fd/0".as_slice()) || LOST_DEVICES.contains(&path.as_slice()) {
         return LogName::Nowhere;
     }
-    match entry.and_then(|entry| inside_cwd(&path, &cwd).map(entry)) {
-        Some(Entry::Directory) => LogName::Unopened,
-        Some(Entry::File) => LogName::Existing,
-        Some(Entry::Missing) | None => LogName::File {
-            name: host_file_name(&path, &file.path, &cwd),
-            key: file_key(&path, &cwd),
-        },
+    if existing {
+        return LogName::Existing;
+    }
+    LogName::File {
+        name: host_file_name(&path, &file.path, &cwd),
+        key: file_key(&path, &cwd),
     }
 }
 
@@ -1397,13 +1451,14 @@ fn log_name(name: &[u8], entry: Option<&dyn Fn(&[u8]) -> Entry>) -> LogName {
 /// `strategy_name`), is one that the system walks to and the model knows: each directory that its
 /// walk passes may be one of root's that the model does not know, but none that is not there nor
 /// one that the user cannot search, and the directory where it ends is known (`directory_at`).
-/// When `entry` is given, every folder looked up inside `cwd` must be `Entry::Directory`. Each
-/// directory passed is added to `directories` (the opened path is none of them nor an ancestor of
-/// one).
+/// When `entry` is given, every folder looked up inside `cwd` (or named by a registered file)
+/// must be `Entry::Directory`, and an ancestor of a registered file outside `cwd` is present even
+/// where `directory_at` returns `Directory::None`. Each directory passed is added to `directories`
+/// (the opened path is none of them nor an ancestor of one).
 fn walks_to_directory(
     directory: &[u8],
     cwd: &[u8],
-    entry: Option<&dyn Fn(&[u8]) -> Entry>,
+    entry: Option<EntryLookup<'_>>,
     directories: &mut Vec<Vec<u8>>,
 ) -> bool {
     if directory.is_empty() || !fits(directory) {
@@ -1412,19 +1467,14 @@ fn walks_to_directory(
     let mut walk = Walk::at(directory, cwd);
     for part in directory.split(|byte| *byte == b'/') {
         walk.step(part);
-        if walk.refused || directory_at(walk.path()) == Directory::None {
+        if walk.refused || !folder_present(walk.path(), cwd, entry, false) {
             return false;
-        }
-        if let Some(entry) = entry {
-            if inside_cwd(walk.path(), cwd).is_some_and(|path| entry(path) != Entry::Directory) {
-                return false;
-            }
         }
         if directories.last().map(Vec::as_slice) != Some(walk.path()) {
             directories.push(walk.path().to_vec());
         }
     }
-    directory_at(walk.path()) == Directory::Known
+    folder_present(walk.path(), cwd, entry, true)
 }
 
 /// What an `-export_search_strategy` name gives for a `Receiver` (`RunFiles::strategy_target`).
@@ -1463,8 +1513,11 @@ impl RunFiles {
     // NCBI's arguments open as a stream of that name, truncated.
     /// What the `-export_search_strategy` name `name` gives for a `Receiver`, as the command line
     /// on Linux opens it for writing (`strategy_name`), in a run whose other files are `others`
-    /// (`StrategyTarget`). LOSAT's own names (`-`) are the strategy module's.
-    pub fn strategy_target(name: &OsStr, others: &[RunFileName<'_>]) -> StrategyTarget {
+    /// (`StrategyTarget`). LOSAT's own names (`-`) are the strategy module's. The `-logfile`
+    /// check reads the log name through the same entry view as `received_log_target` (`run_entries`
+    /// and `run_directory_entry`), so a `-logfile` that stays unopened does not match the strategy
+    /// file.
+    pub fn strategy_target(&self, name: &OsStr, others: &[RunFileName<'_>]) -> StrategyTarget {
         let name = name.as_encoded_bytes();
         let cwd = working_directory(name);
         let (target, path) = strategy_name(name, &cwd);
@@ -1477,6 +1530,14 @@ impl RunFiles {
         // Each name is read in a working directory of its own depth; their paths compare as the
         // run's files' (`file_key`).
         let key = file_key(&path, &cwd);
+        let registered = match self {
+            RunFiles::Disk => None,
+            RunFiles::Receiver(receiver) => Some(run_entries(receiver.as_ref())),
+        };
+        let entry_fn = registered
+            .as_deref()
+            .map(|registered| move |path: &[u8], cwd: &[u8]| run_entry(registered, path, cwd));
+        let entry: Option<EntryLookup<'_>> = entry_fn.as_ref().map(|entry| entry as _);
         for other in others {
             let bytes = other.name.as_encoded_bytes();
             let same = match other.option != "logfile" {
@@ -1486,7 +1547,7 @@ impl RunFiles {
                 false => {
                     special_log_target(Some(other.name)).is_none()
                         && matches!(
-                            log_name(bytes, None),
+                            log_name(bytes, entry),
                             LogName::File { key: other, .. } if other == key
                         )
                 }

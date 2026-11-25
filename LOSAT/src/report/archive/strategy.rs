@@ -410,7 +410,7 @@ pub fn create_strategy_file_in(
         target: StrategyTarget::None,
         refusal: Some(not_in_the_browser(path, what)),
     };
-    Ok(match RunFiles::strategy_target(path.as_os_str(), others) {
+    Ok(match files.strategy_target(path.as_os_str(), others) {
         Target::File => StrategyFile {
             target: StrategyTarget::Received(ReceivedFile {
                 name: path.as_os_str().as_encoded_bytes().to_vec(),

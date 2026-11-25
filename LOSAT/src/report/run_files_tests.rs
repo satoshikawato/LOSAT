@@ -381,14 +381,14 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
 /// file. Both as on the command line.
 #[test]
 fn a_long_log_name_is_read_in_linear_time() {
-    let all_dirs = |_: &[u8]| Entry::Directory;
-    let empty = |_: &[u8]| Entry::Missing;
+    let all_dirs: EntryLookup<'_> = &|path, cwd| inside_cwd(path, cwd).map(|_| Entry::Directory);
+    let empty: EntryLookup<'_> = &|path, cwd| inside_cwd(path, cwd).map(|_| Entry::Missing);
     let deep = format!("{}run.log", "a/".repeat(2040));
     let up = format!("{}run.log", "../".repeat(1360));
     for (name, entry, is_file) in [
-        (deep.clone(), &all_dirs as &dyn Fn(&[u8]) -> Entry, false),
-        (deep, &empty as &dyn Fn(&[u8]) -> Entry, false),
-        (up.clone(), &empty as &dyn Fn(&[u8]) -> Entry, true),
+        (deep.clone(), all_dirs, false),
+        (deep, empty, false),
+        (up.clone(), empty, true),
     ] {
         assert!(name.len() < 4096);
         WALK_STEPS.with(|steps| steps.set(0));
@@ -413,7 +413,7 @@ fn a_long_log_name_is_read_in_linear_time() {
 /// refuses the path as the command line does (`/dev/null`, `/proc/self/comm`).
 #[test]
 fn a_name_through_a_file_of_roots_names_a_file_as_documented() {
-    let empty = |_: &[u8]| Entry::Missing;
+    let empty = |path: &[u8], cwd: &[u8]| inside_cwd(path, cwd).map(|_| Entry::Missing);
     for (name, expected_file) in [
         ("/etc/passwd/../../tmp/x", Some(b"/tmp/x".as_slice())),
         ("/etc/zzz/../../tmp/x", Some(b"/tmp/x".as_slice())),
@@ -468,7 +468,8 @@ fn the_standard_error_file_writes_to_the_standard_error() {
 #[test]
 fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
     use StrategyTarget as T;
-    let target = |name: &str| RunFiles::strategy_target(OsStr::new(name), &[]);
+    let files = RunFiles::Receiver(Arc::new(Kept::default()));
+    let target = |name: &str| files.strategy_target(OsStr::new(name), &[]);
     let long_component = "a".repeat(256);
     let component_255 = "a".repeat(255);
     for (name, read) in [
@@ -537,6 +538,7 @@ fn a_strategy_name_is_read_as_the_command_line_opens_it_on_linux() {
 #[test]
 fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
     use StrategyTarget as T;
+    let files = RunFiles::Receiver(Arc::new(Kept::default()));
     let target = |name: &str, others: &[(&'static str, &str)]| {
         let others: Vec<RunFileName<'_>> = others
             .iter()
@@ -545,7 +547,7 @@ fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
                 name: OsStr::new(name),
             })
             .collect();
-        RunFiles::strategy_target(OsStr::new(name), &others)
+        files.strategy_target(OsStr::new(name), &others)
     };
     for (name, others, read) in [
         ("q.fa", vec![("query", "q.fa")], T::OtherFile("query")),
@@ -614,10 +616,12 @@ fn a_strategy_name_of_another_file_of_the_run_names_its_option() {
 /// makes files.
 #[test]
 fn a_receiver_reads_an_output_name_as_the_command_line_on_linux() {
-    let entry = |path: &[u8]| match path {
-        b"sub" | b"sub/deep" => Entry::Directory,
-        b"in.fa" | b"sub/f" => Entry::File,
-        _ => Entry::Missing,
+    let entry = |path: &[u8], cwd: &[u8]| {
+        inside_cwd(path, cwd).map(|rel| match rel {
+            b"sub" | b"sub/deep" => Entry::Directory,
+            b"in.fa" | b"sub/f" => Entry::File,
+            _ => Entry::Missing,
+        })
     };
     let name = |name: &str| output_name(name.as_bytes(), &entry);
     let long = "a".repeat(256);
@@ -692,10 +696,12 @@ fn a_receiver_reads_an_output_name_as_the_command_line_on_linux() {
 /// `run_entry`), covering both `/work` entries and registered search names (case 0-4, D19).
 #[test]
 fn log_and_output_names_share_the_runs_files_view() {
-    let entry = |path: &[u8]| match path {
-        b"db" | b"in" | b"a" => Entry::Directory,
-        b"q.fa" | b"in/q.fa" | b"db/keep" | b".ncbirc" => Entry::File,
-        _ => Entry::Missing,
+    let entry = |path: &[u8], cwd: &[u8]| {
+        inside_cwd(path, cwd).map(|rel| match rel {
+            b"db" | b"in" | b"a" => Entry::Directory,
+            b"q.fa" | b"in/q.fa" | b"db/keep" | b".ncbirc" => Entry::File,
+            _ => Entry::Missing,
+        })
     };
     let check_file = |raw: &str, want: &str| match log_name(raw.as_bytes(), Some(&entry)) {
         LogName::File { name, .. } => assert_eq!(name, want.as_bytes(), "{raw:?}"),
@@ -806,15 +812,81 @@ fn log_and_output_names_share_the_runs_files_view() {
     check_file("a/../../x.log", "../x.log");
     check_file("/tmp/run.log", "/tmp/run.log");
     check_file("/etc/default/../../tmp/run.log", "/tmp/run.log");
-    // Registered names resolved with `Walk` feed both `log_name` and `output_name`.
-    let receiver = Kept::with_registered(&["./q.fa", "sub/../s.fa", "in/a.fa", "/abs/outside.fa"]);
+    // Registered names resolved with `Walk` feed both `log_name` and `output_name`, inside and
+    // outside the working directory.
+    let receiver = Kept::with_registered(&[
+        "./q.fa",
+        "sub/../s.fa",
+        "in/a.fa",
+        "/abs/outside.fa",
+        "../up.fa",
+    ]);
     let resolved = run_entries(&receiver);
-    assert_eq!(run_entry(&resolved, b"q.fa"), Entry::File);
-    assert_eq!(run_entry(&resolved, b"s.fa"), Entry::File);
-    assert_eq!(run_entry(&resolved, b"in"), Entry::Directory);
-    assert_eq!(run_entry(&resolved, b"in/a.fa"), Entry::File);
-    assert_eq!(run_entry(&resolved, b"sub"), Entry::Missing);
-    assert_eq!(run_entry(&resolved, b"outside.fa"), Entry::Missing);
+    let cwd1 = working_directory(b"q.fa");
+    let cwd2 = working_directory(b"../up.fa");
+    assert_eq!(run_entry(&resolved, &cwd1, &cwd1), Some(Entry::Directory));
+    assert_eq!(
+        run_entry(&resolved, &[cwd1.as_slice(), b"/q.fa"].concat(), &cwd1),
+        Some(Entry::File)
+    );
+    assert_eq!(
+        run_entry(&resolved, &[cwd1.as_slice(), b"/s.fa"].concat(), &cwd1),
+        Some(Entry::File)
+    );
+    assert_eq!(
+        run_entry(&resolved, &[cwd1.as_slice(), b"/in"].concat(), &cwd1),
+        Some(Entry::Directory)
+    );
+    assert_eq!(
+        run_entry(&resolved, &[cwd1.as_slice(), b"/in/a.fa"].concat(), &cwd1),
+        Some(Entry::File)
+    );
+    assert_eq!(
+        run_entry(&resolved, &[cwd1.as_slice(), b"/sub"].concat(), &cwd1),
+        Some(Entry::Missing)
+    );
+    assert_eq!(
+        run_entry(
+            &resolved,
+            &[cwd1.as_slice(), b"/outside.fa"].concat(),
+            &cwd1
+        ),
+        Some(Entry::Missing)
+    );
+    assert_eq!(
+        run_entry(&resolved, b"/abs/outside.fa", &cwd1),
+        Some(Entry::File)
+    );
+    assert_eq!(run_entry(&resolved, b"/abs", &cwd1), Some(Entry::Directory));
+    assert_eq!(run_entry(&resolved, b"/abs/other.log", &cwd1), None);
+    assert_eq!(run_entry(&resolved, b"/\0/up.fa", &cwd2), Some(Entry::File));
+    // Direct `log_name` and `output_name` checks with an entry holding outside keys.
+    let outside_entry = |path: &[u8], cwd: &[u8]| run_entry(&resolved, path, cwd);
+    assert_eq!(
+        log_name(b"/abs/outside.fa", Some(&outside_entry)),
+        LogName::Existing
+    );
+    assert_eq!(
+        output_name(b"/abs/outside.fa", &outside_entry),
+        OutputName::Existing
+    );
+    assert_eq!(log_name(b"/abs", Some(&outside_entry)), LogName::Unopened);
+    assert_eq!(
+        log_name(b"/abs/run.log", Some(&outside_entry)),
+        LogName::Unopened
+    );
+    assert_eq!(
+        log_name(b"../up.fa", Some(&outside_entry)),
+        LogName::Existing
+    );
+    assert_eq!(
+        output_name(b"../up.fa", &outside_entry),
+        OutputName::Existing
+    );
+    assert!(matches!(
+        log_name(b"../other.log", Some(&outside_entry)),
+        LogName::File { ref name, .. } if name == b"../other.log"
+    ));
     // Registered names also reach `OpenFiles::create` through the same view.
     let files = OpenFiles::new(&RunFiles::Receiver(Arc::new(receiver)));
     assert!(matches!(files.create("q.fa"), Ok(Created::Refused(_))));
@@ -1073,4 +1145,112 @@ fn the_names_of_one_path_are_one_file() {
     assert_eq!(out("/tmp/x"), log("/tmp/x"));
     assert_eq!(out("/var/lock/x"), out("/run/lock/x"));
     assert_ne!(out("/tmp/x"), out("x"));
+}
+
+/// Registered search inputs outside the working directory (`run_entries`, `run_entry`; line WQA
+/// D19 round R1): `log_target` and `OpenFiles::create` see them by `file_key` inside and outside
+/// the working directory, treat their parent folders as present even where `directory_at` returns
+/// `Directory::None` (`/data` for `/data/q.fa`), keep sibling paths under root directories
+/// unopened (`/data/run.log`) and writable user directories open (`/tmp/run.log`, `../run.log`),
+/// and ignore non-file directory placeholders (`.`, `..`, `/tmp`, `/`).
+#[test]
+fn outside_cwd_registered_files_are_seen_by_log_and_output_names() {
+    let receiver = Arc::new(Kept::with_registered(&[
+        "/tmp/q.fa",
+        "../q.fa",
+        "/home/me/q.fa",
+        "/tmp/s.fa",
+        "/data/q.fa",
+        "/data/sub/a.fa",
+        "../parent_dir/q.fa",
+        "/var/lock/l.fa",
+        ".",
+        "..",
+        "/tmp",
+        "/",
+    ]));
+    let run_files = RunFiles::Receiver(receiver.clone());
+    let open_files = OpenFiles::new(&run_files);
+    // Case 2 outside cwd: refused by both `log_target` and `OpenFiles::create`.
+    for existing in [
+        "/tmp/q.fa",
+        "/tmp/x/../q.fa",
+        "../q.fa",
+        "./../q.fa",
+        "/home/me/q.fa",
+        "/tmp/s.fa",
+        "/data/q.fa",
+        "/data/sub/a.fa",
+        "/run/lock/l.fa",
+        "/var/lock/l.fa",
+    ] {
+        assert!(
+            run_files.log_target(Some(OsStr::new(existing))).is_err(),
+            "log_target should refuse {existing:?}"
+        );
+        assert!(
+            matches!(open_files.create(existing), Ok(Created::Refused(_))),
+            "create should refuse {existing:?}"
+        );
+    }
+    // Trailing slash on a registered outside file is stripped by NCBI's `log_file_name`, so
+    // `log_target` refuses it too.
+    assert!(run_files
+        .log_target(Some(OsStr::new("/tmp/q.fa/")))
+        .is_err());
+    // Ancestor folders and file-as-folder paths outside cwd stay unopened (stderr / Unopened).
+    for unopened in [
+        "/data",
+        "/data/",
+        "/data/sub",
+        "../parent_dir",
+        "/tmp/q.fa/run.log",
+        "/data/q.fa/run.log",
+    ] {
+        assert!(
+            matches!(
+                run_files.log_target(Some(OsStr::new(unopened))),
+                Ok((DiagTarget::Stderr, None))
+            ),
+            "log_target should keep {unopened:?} on stderr"
+        );
+        assert_eq!(
+            open_files.create(unopened).err(),
+            Some(Unopened),
+            "create should not open {unopened:?}"
+        );
+    }
+    // Controls: sibling files in writable outside dirs and cwd open; `/data/run.log` stays
+    // unopened because `/data` is outside `user_makes`.
+    for (raw, want) in [
+        ("/tmp/run.log", "/tmp/run.log"),
+        ("../run.log", "../run.log"),
+        ("run.log", "run.log"),
+    ] {
+        assert!(
+            matches!(
+                run_files.log_target(Some(OsStr::new(raw))),
+                Ok((DiagTarget::Memory(_), Some(ref name))) if name == want.as_bytes()
+            ),
+            "log_target control {raw:?}"
+        );
+        assert!(
+            matches!(open_files.create(raw), Ok(Created::File(_))),
+            "create control {raw:?}"
+        );
+    }
+    assert!(matches!(
+        run_files.log_target(Some(OsStr::new("/data/run.log"))),
+        Ok((DiagTarget::Stderr, None))
+    ));
+    assert_eq!(open_files.create("/data/run.log").err(), Some(Unopened));
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6514-6515
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:745-750
+    // `CDirEntry::ConvertToOSPath` calls `NormalizePath` without following symlinks, turning
+    // `/proc/self/cwd/../q.fa` into `/proc/self/q.fa`, which fails to open in procfs so NCBI
+    // keeps messages on stderr and never opens `../q.fa`.
+    assert!(matches!(
+        run_files.log_target(Some(OsStr::new("/proc/self/cwd/../q.fa"))),
+        Ok((DiagTarget::Stderr, None))
+    ));
 }

@@ -421,6 +421,16 @@ def build_join(args: argparse.Namespace) -> None:
             f"DBLIST {names}\n")
 
 
+def build_lru(args: argparse.Namespace) -> None:
+    """Line DBID hr-1 f1 (review 1, M1): CBlastDbDataLoader::m_Ids 1,000-handle LRU eviction."""
+    for name in ("lru12x100", "lru9x100", "lru12x1"):
+        subprocess.run(
+            [str(args.ncbi_bin / "makeblastdb"), "-in", str(HERE / f"{name}.faa"),
+             "-dbtype", "prot", "-parse_seqids", "-blastdb_version", "5",
+             "-title", f"{name} (parsed Seq-ids)", "-out", str(args.out / name)],
+            check=True, stdout=subprocess.DEVNULL)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--ncbi-bin", required=True, type=Path)
@@ -438,6 +448,7 @@ def main() -> int:
     ap.add_argument("--pssmread-only", action="store_true", help="build only the databases of line DBID pssmread")
     ap.add_argument("--taxrow-only", action="store_true", help="build only the databases of line DBID taxrow")
     ap.add_argument("--pircase-only", action="store_true", help="build only the databases of line DBID pircase")
+    ap.add_argument("--lru-only", action="store_true", help="build only the databases of line DBID hr-1 f1 (m_Ids LRU)")
     args = ap.parse_args()
     if args.weak_only:
         build_weak(args)
@@ -477,6 +488,9 @@ def main() -> int:
         return 0
     if args.pircase_only:
         build_pircase(args)
+        return 0
+    if args.lru_only:
+        build_lru(args)
         return 0
     variants = [r for r in records(SEQID / "variants.fa") if r[1:].split()[0] not in DROPPED_VARIANTS]
     all_records = (records(SEQID / "prot_ids.fa") + records(SEQID / "prot_extra.fa") + variants
@@ -609,6 +623,7 @@ def main() -> int:
     build_weakbatch(args)
     build_pssmrows(args)
     build_pssmread(args)
+    build_lru(args)
     return 0
 
 

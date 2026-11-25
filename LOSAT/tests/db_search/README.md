@@ -1102,10 +1102,14 @@ not warn; `zunf.s1`, `zunf.r3` do the same where Y's kept definition line is `lc
 `BLASTDB=tests/seqdb/taxdb/bad_magic` and the prefetch off: NCBI's PSSM read loads the Bioseq and writes the taxonomy
 database's text after the report; a refusal until review 3 of the line). Two `losat-rejection` rows (rc 1, with the `pssm`
 files kind: no PSSM file is written): `wk5.pf0.reject` (the prefetch off, a weakly matching sequence C that NCBI's scope has
-read before: NCBI reads C's letters) and `ah4.reject` (another sequence that also holds A's id), which line DBID hr-1
-freezes as NCBI's output `ah4` (Z holds `emb|AAA00001.1|` on its second line, not the line its Bioseq is loaded by, and the
-data loader's `m_Ids` takes exact handles: NCBI warns for A, the same in five runs with other environments and malloc
-settings; `prd2.pah` likewise).
+read before: NCBI reads C's letters) and `ah4.reject` (Z holds `emb|AAA00001.1|` on its second line and both A and Z pack to
+1, so NCBI's bulk prefetch orders them by `CSeq_id_Info` heap addresses; line DBID hr-1 f1 adds the deterministic siblings
+`ids/prd_aha1` (`db.id.prd.aha1`, A packed 1 before Z packed 2: A stays unresolved in the scope and NCBI warns) and
+`ids/prd_ahz1` (`db.id.prd.ahz1.reject`, Z packed 1 before A packed 2: Z registers A's handle in `m_Ids` first and NCBI reads
+Z's letters, refused until hr-2/hr-3); `prd2.pah` is deterministic and frozen as NCBI's output). `ids/lru12x100`, `ids/lru9x100`
+and `ids/lru12x1` (query `ids/lru_q.faa`, built by `make_ids.py --lru-only`; rows `db.hr1.bp.lru*.6t*`) test
+`CBlastDbDataLoader::m_Ids`'s 1,000-entry LRU eviction: 1,202 registrations evict S's registration so T resolves to its own
+record (`lru12x100`), while 902 (`lru9x100`) and 12 (`lru12x1`) stay within 1,000 and keep the hold (refused).
 
 Review 2 of pssmread (rows `db.id.prd2.*`; databases from `ids/prd_*.faa` and `ids/prdn_*.fna` by `make_ids.py
 --pssmread-only`, read through `ids/prd_xg.pal`, `prd_tw.pal`, `prd_tu.pal`, `prd_pah.pal`, `prdn_u.nal` and

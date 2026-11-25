@@ -1305,8 +1305,8 @@ fn an_unreadable_oid_list_file_is_ncbis_memory_map_error() {
 fn invalid_databases_give_ncbis_errors() {
     let error = open_error("alias_mixed", SeqType::Protein);
     assert!(
-        matches!(&error, SeqDbError::Format { message, .. }
-            if message == "DB list contains both Version 4 and Version 5 dbs"),
+        matches!(&error, SeqDbError::MixedVersions { .. })
+            && error.ncbi_message().as_deref() == Some(MIXED_VERSIONS.as_bytes()),
         "{error}"
     );
     let error = open_error("alias_loop_a", SeqType::Protein);
@@ -2876,7 +2876,6 @@ fn ncbis_errors_are_told_from_losats() {
     for message in [
         "Error: Not a valid version 4 or 5 database.",
         "Error: requested sequence type does not match DB.",
-        "DB list contains both Version 4 and Version 5 dbs",
         "Illegal configuration: DB alias files are mutually recursive.",
     ] {
         assert_eq!(
@@ -3354,9 +3353,41 @@ fn the_places_of_ncbis_throws_are_known_by_the_start_of_their_texts() {
     for text in [
         "Too many open files, please raise the open file limit",
         "Database memory map file error - CMemoryFile: Cannot memory map file 'x':No such file",
-        "Error: Not a valid version 4 or 5 database.",
+        "Illegal configuration: DB alias files are mutually recursive.",
         "Accessions to Oids lookup error in x",
     ] {
         assert_eq!(throw_site(text.as_bytes()), None, "{text}");
+    }
+    // The places that blastdbcheck 2.17.0 names (rows pp_p4_ver7, d_p4_pin_nucl_prot, a_gizero,
+    // pp_p5_pdb_cut and d_n5_no_ndb of row RG-D2b).
+    assert_eq!(place("Error: Not a valid version 4 or 5 database.").1, 182);
+    assert_eq!(
+        place("Error: requested sequence type does not match DB."),
+        (
+            "src/objtools/blast/seqdb_reader/seqdbfile.cpp",
+            223,
+            "BLASTDB::ncbi::CSeqDBIdxFile::CSeqDBIdxFile"
+        )
+    );
+    assert_eq!(place("Specified file is empty.").1, 864);
+    assert_eq!(place("LMDB runtime error: MDB_INVALID").1, 95);
+    let missing = missing_lmdb_file(Path::new("/x/p5.pdb"));
+    let text = missing.ncbi_request_message().unwrap();
+    assert_eq!(throw_site(&text).map(|site| site.line), Some(88));
+    // A list of volumes of both versions names one of two throws (rows mix45_v4 and mix45_v5).
+    for (version4_after_version5, line) in [(true, 225), (false, 232)] {
+        let error = SeqDbError::MixedVersions {
+            path: PathBuf::from("/x/p4"),
+            version4_after_version5,
+        };
+        assert_eq!(
+            error.ncbi_message().as_deref(),
+            Some(MIXED_VERSIONS.as_bytes())
+        );
+        let site = error.throw_site().unwrap();
+        assert_eq!(
+            (site.line, site.function),
+            (line, Some("BLASTDB::ncbi::CSeqDBLMDBSet::CSeqDBLMDBSet"))
+        );
     }
 }

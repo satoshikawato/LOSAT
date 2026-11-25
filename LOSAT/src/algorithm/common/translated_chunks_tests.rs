@@ -158,3 +158,63 @@ fn a_frame_after_an_empty_first_part_scans_the_whole_frame() {
         vec![(0, 0, vec![(0, 0)]), (0, 366, vec![(0, 366)])]
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310,478-483,804-830,
+// 1318-1331,1368-1369,1429
+#[test]
+fn translated_soft_mask_exits_match_chunks_and_skip_short_mask_reads() {
+    let mut split = HardSplitState::default();
+    let mut exits = Vec::new();
+
+    // Subjects shorter than 3 * word + 2 bases produce no exits and do not read masks.
+    let lead = translated_soft_mask_exits(10, 3, &mut exits, &mut split, || -> Result<_> {
+        panic!("short subject must not read masks")
+    })
+    .unwrap();
+    assert!(!lead);
+    assert!(exits.is_empty());
+
+    // Subjects whose frame +1 has at most MAX_DBSEQ_LEN residues emit the six frame lengths and
+    // do not read masks.
+    let lead =
+        translated_soft_mask_exits(15_000_000, 3, &mut exits, &mut split, || -> Result<_> {
+            panic!("unchunked subject must not read masks")
+        })
+        .unwrap();
+    assert!(!lead);
+    assert_eq!(
+        exits,
+        vec![5_000_000, 4_999_999, 4_999_999, 5_000_000, 4_999_999, 4_999_999]
+    );
+
+    // 15,300,000 bases with T2 out-of-order masks: exits equal translated_db_mask_chunks across
+    // all six frames in NCBI's order and lead is true.
+    let t2_masks = [
+        (14_999_400, 14_999_850),
+        (14_999_880, 15_180_000),
+        (3_000_000, 3_300_000),
+    ];
+    let length = 15_300_000usize;
+    let mut ranges = Vec::new();
+    complement_masks(&t2_masks, length, &mut ranges);
+    let mut expected_exits = Vec::new();
+    let mut expected_lead = false;
+    let mut check_split = HardSplitState::default();
+    for frame in NCBI_FRAMES {
+        let fl = frame_length(length, frame).unwrap();
+        let calls =
+            translated_db_mask_chunks(&ranges, false, frame, fl, length / 3, &mut check_split)
+                .unwrap();
+        for (chunk, scan) in calls {
+            expected_exits.push(chunk.length);
+            expected_lead |= scan_lead(&scan) > 0;
+        }
+    }
+    let lead = translated_soft_mask_exits(length, 3, &mut exits, &mut split, || {
+        Ok::<_, anyhow::Error>(Cow::Borrowed(ranges.as_slice()))
+    })
+    .unwrap();
+    assert!(expected_lead);
+    assert_eq!(lead, expected_lead);
+    assert_eq!(exits, expected_exits);
+}

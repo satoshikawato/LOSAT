@@ -364,7 +364,7 @@ impl Drop for XInnerSerial {
 // side by side.
 /// `search_internal` as the one-thread search, whatever thread it is called on. The caller runs
 /// several of these side by side; each takes the serial path of every stage (the Web's, `web.rs`).
-#[cfg(all(feature = "parallel", any(target_arch = "wasm32", test)))]
+#[cfg(all(feature = "parallel", any(losat_web_abi_v1, test)))]
 pub(crate) fn x_search_internal_serial<'a>(
     records: &[FastaRecord],
     subjects: impl Into<Subjects<'a>>,

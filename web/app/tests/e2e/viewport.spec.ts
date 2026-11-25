@@ -129,9 +129,10 @@ async function measureAllHelpTips(page: Page): Promise<{ readonly scrollWidth: n
         }
       }
 
+      const id = btn.getAttribute('data-testid') ?? btn.getAttribute('aria-label') ?? 'help-tip';
       if (prevRect === undefined) {
         tips.push({
-          id: btn.getAttribute('data-testid') ?? btn.getAttribute('aria-label') ?? 'help-tip',
+          id,
           btnLeft: br.left,
           btnTop: br.top,
           btnBottom: br.bottom,
@@ -145,7 +146,7 @@ async function measureAllHelpTips(page: Page): Promise<{ readonly scrollWidth: n
       }
 
       tips.push({
-        id: btn.getAttribute('data-testid') ?? btn.getAttribute('aria-label') ?? 'help-tip',
+        id,
         btnLeft: br.left,
         btnTop: br.top,
         btnBottom: br.bottom,
@@ -263,10 +264,14 @@ async function openBlastnParameters(page: Page): Promise<void> {
   await openParameters(page);
 }
 
-async function selectTaxidMade562(page: Page): Promise<void> {
-  await page.getByTestId('param-window_masker_db').check();
+async function fillTaxidMade562(page: Page): Promise<void> {
   await page.getByTestId('param-window_masker_db-taxid').fill('562');
   await expect(page.getByTestId('counts-note')).toContainText(/Made in this (?:browser|tab only)/);
+}
+
+async function selectTaxidMade562(page: Page): Promise<void> {
+  await page.getByTestId('param-window_masker_db').check();
+  await fillTaxidMade562(page);
 }
 
 const checkAllTipsAtWidths = (page: Page, label: string, requireAtLeastOne = true): Promise<void> =>
@@ -325,12 +330,11 @@ test('at 320, 390, 768, 850 and 900 px every visible "?" shares a line with its 
   await expect(page.getByTestId('param-conffile')).toBeVisible();
   await checkAllTipsAtWidths(page, 'BLASTN WindowMasker unchecked');
 
-  await page.getByTestId('param-window_masker_db').check();
+  await page.getByTestId('param-window_masker_db').setChecked(true);
   await expect(page.getByTestId('param-window_masker_db-missing')).toBeVisible();
   await checkAllTipsAtWidths(page, 'BLASTN Taxonomy ID empty');
 
-  await page.getByTestId('param-window_masker_db-taxid').fill('562');
-  await expect(page.getByTestId('counts-note')).toContainText(/Made in this (?:browser|tab only)/);
+  await fillTaxidMade562(page);
   await checkAllTipsAtWidths(page, 'BLASTN Taxonomy ID made');
 
   await page.getByTestId('param-window_masker_db-taxid').fill('9606');

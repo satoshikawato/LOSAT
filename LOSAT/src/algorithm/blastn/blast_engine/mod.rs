@@ -30,7 +30,7 @@ pub use run::x_query_drop_print_summary;
 pub use run::x_query_prep_par_print_summary;
 pub use run::x_tb_range_print_summary;
 // ABI v1 (`web_api::v1_blastn`) checks a search without subjects as the CLI does.
-#[cfg(target_arch = "wasm32")]
+#[cfg(losat_web_abi_v1)]
 pub(crate) use run::check_subjects_not_empty;
 // The end of a query reading and NCBI's message for a sequence without letters, shared with
 // TBLASTX (port plan step S5).

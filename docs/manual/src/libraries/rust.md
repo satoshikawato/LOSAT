@@ -23,6 +23,7 @@ losat = "0.2"
 |:---|:---|:---|
 | `parallel` | on | Searches with more than one thread (`-num_threads`), through Rayon |
 | `wasm-threads` | off | Turns on `parallel` for the `wasm32-wasip1-threads` target |
+| `no-web-abi-v1` | off | Leaves LOSAT Web's ABI v1 (`losat_web_*`) out of a WebAssembly build, as LOSAT builds its WASI command line; no effect on other targets |
 
 Without `parallel` (`default-features = false`), the build has no Rayon and searches on one thread, as the serial WebAssembly builds do. The crate's other features are for LOSAT's own diagnostics.
 

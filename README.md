@@ -125,7 +125,7 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `blastx` | Translated nucleotide against protein (`blastx`, `blastx-fast`) | `0`–`16`, `18`, `20` | [blastx](docs/manual/src/programs/blastx.md) |
 | `tblastn` | Protein or PSSM (`-in_pssm`) against translated nucleotide (`tblastn`, `tblastn-fast`) | `0`–`16`, `18`, `20` | [tblastn](docs/manual/src/programs/tblastn.md) |
 | `tblastx` | Translated nucleotide against translated nucleotide | `0`–`16`, `18`, `20` | [tblastx](docs/manual/src/programs/tblastx.md) |
-| `psiblast` | Iterated protein search with a PSSM (`-num_iterations`, `-in_pssm`, `-in_msa`, `-out_pssm`) | `0`, `5`–`11`, `20` | [psiblast](docs/manual/src/programs/psiblast.md) |
+| `psiblast` | Iterated protein search with a PSSM (`-num_iterations`, `-in_pssm`, `-in_msa`, `-out_pssm`) | `0`–`12`, `18`, `20` | [psiblast](docs/manual/src/programs/psiblast.md) |
 | `rpsblast` | Protein against a PSSM database such as CDD | `0`–`16`, `18`, `20` | [rpsblast](docs/manual/src/programs/rpsblast.md) |
 | `rpstblastn` | Translated nucleotide against a PSSM database | `0`–`16`, `18`, `20` | [rpstblastn](docs/manual/src/programs/rpstblastn.md) |
 | `makeblastdb` | Builds BLAST databases (versions 5 and 4; `-parse_seqids`, `-taxid`, `-mask_data`) from FASTA, ASN.1 (`asn1_txt`, `asn1_bin`) or BLAST databases, also compressed | | [makeblastdb](docs/manual/src/programs/makeblastdb.md) |

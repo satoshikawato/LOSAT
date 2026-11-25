@@ -1,0 +1,308 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          132     3e-39
+BDT63500.1 wsv172-like protein [Pasiphaea japonica whispovirus]       23.1    2.2  
+BDT63566.1 hypothetical protein [Pasiphaea japonica whispovirus]      22.3    3.6  
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       22.3    4.3  
+BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]       21.9    5.1  
+BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]       21.9    5.3  
+BDT63554.1 wsv440-like protein [Pasiphaea japonica whispovirus]       21.6    6.2  
+BDT63529.1 wsv332-like protein [Pasiphaea japonica whispovirus]       21.2    8.7  
+
+
+
+Query_1     10    TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV  69
+Subject_53  4     .NI.KIH..I........STIIK...KKIKMQ.R.V.I..VKDN....ELTET...S.QT  63
+Subject_59  1808                                               ..VKLLA..EMM.HE  1822
+Subject_57  173        .A.L..AAAG.CGV.SDSAQ.SSFN.SWT..LFHNNK..K                 212
+
+Query_1     70    IEGCTTVSSIKELISVLPEVVDVILID-EGQFFTDL-VLVNRLADKGKRIVIAALDGTSD  127
+Subject_53  64    .RD.VAT.V---.SY.DTSNY.Y.F..-.....S..GATCKDW.I....VTV.....NYE  119
+Subject_59  1823  FAS.L.SDMRMNMYNGVGS...ILS..N.EERYSII-ISI.KFIL.NIKD.L          1873
+
+Query_1     128   QQMFSPIHKLLPYTNSIVKLASKCMIC-----KIDTKEAPFTVRFGNDNDNNVICVGGAE  182
+Subject_53  120   ..L.PSVI..I.ICDK.E..SAV....NKNEASLTK.YL.YNNTGDD.HHKYDM....T.  179
+Subject_3   374                                                         .P.LSD  379
+
+Query_1     183   MYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQ-----AKLLLTNKNSPLY--GGEY  235
+Subject_53  180   T.C.V.IG.                                                     188
+Subject_3   380   V.GQEFKNL.E.YE.---E..VRI---------.IE-----.RK..H.LA.AKLET.TPF  422
+Subject_69  273                                                    H.KF.--P..W  281
+Subject_26  484                     .F.VN..PD..Q..N.GEYESMT.H.F..               512
+
+Query_1     236   MCFPD----RSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVM  291
+Subject_3   423   I..K.TINY..N.                                                 435
+Subject_69  282   IY..P----SL.NLS..                                             294
+Subject_32  291                                   .YMM..RH.VQSGDC...F.----YTIF  314
+
+Query_1     292   DRYYYSGIVFSLARGVDTVEWCSAS  316
+Subject_31  100                ..NN.D....L.  111
+Subject_32  315   V.FI..A                    321
+
+
+Lambda      K        H        a         alpha
+   0.320    0.137    0.406    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20272584
+Results from round 2
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          290     3e-100
+
+Sequences not found previously or not previously below threshold:
+
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       25.4    0.53 
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       22.3    4.0  
+BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]       21.5    6.5  
+BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]       21.5    8.0  
+
+
+
+Query_1     10    TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETR--YGCGTGTIVTHAG  67
+Subject_53  4     .NI.KIH..I........STIIK...KKIKMQ.R.V.I..VKDN.--...ELTET...S.  61
+Subject_59  1797                                      .Y.FLFDRKQL..VKLLA..EMM.  1820
+
+Query_1     68    EVIEGCTTVSSIKELISVLPEVVDVILID-EGQFFTDL-VLVNRLADKGKRIVIAALDGT  125
+Subject_53  62    QT.RD.VAT.V---.SY.DTSNY.Y.F..-.....S..GATCKDW.I....VTV.....N  117
+Subject_59  1821  HEFAS.L.SDMRMNMYNGVGS...ILS..N.EERYSII-ISI.KFIL.              1867
+
+Query_1     126   SDQQMFSPIHKLLPYTNSIVKLASKCMIC-----KIDTKEAPFTVRFGNDNDNNVICVGG  180
+Subject_53  118   YE..L.PSVI..I.ICDK.E..SAV....NKNEASLTK.YL.YNNTGDD.HHKYDM....  177
+Subject_4   379                 .NDKLE..IAE..V-------...MY                      397
+
+Query_1     181   AEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQ-----AKLLLTNKNSPLYGGEY  235
+Subject_53  178   T.T.C.V.IG.                                                   188
+Subject_26  484                       .F.VN..PD..Q..N.GEYESMT.H.F..             512
+
+Query_1     236   MCFPDRSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYY  295
+
+Query_1     296   YSGIVFSLARGVDTVEWCSAS  316
+Subject_31  100            ..NN.D....L.  111
+
+
+Lambda      K        H        a         alpha
+   0.317    0.139    0.421    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0426    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20272584
+
+Search has CONVERGED!
+Results from round 1
+
+
+Query= YP_009220615.1 putative protein kinase [White spot syndrome virus]
+
+Length=730
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]       503     5e-170
+BDT63577.1 wsv220-like protein [Pasiphaea japonica whispovirus]       23.1    5.1   
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       22.7    6.0   
+BDT63569.1 wsv119-like protein [Pasiphaea japonica whispovirus]       22.7    6.5   
+BDT63573.1 wsv271-like protein [Pasiphaea japonica whispovirus]       22.7    6.7   
+BDT63503.1 wsv514-like protein [Pasiphaea japonica whispovirus]       22.3    8.3   
+BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]       22.3    8.4   
+BDT63543.1 wsv321-like protein [Pasiphaea japonica whispovirus]       21.2    9.0   
+BDT63508.1 wsv001-like protein [Pasiphaea japonica whispovirus]       22.3    9.2   
+
+
+
+Query_2     45    KSCCSKNATRRSPP----SDSPYSLRPMKR-LKKNNGEVGGKAPPPVTLRLREDYESTPY  99
+Subject_54  189                                                              F  189
+Subject_76  7     .HSFK..GS..KQ.RTSTN.G.AV.Q.S.TPSQD.SASHQ.ESRA.ANV.            56
+
+Query_2     100   NFNRNKKKRPITIDENQFATLNPTYATDIIKKQQL---------PSVSAASVLRKHRANA  150
+Subject_54  190   .N.SHS..IITH.PKS.M..K.NS..A...TSSSSMSYRSNNTKSAIVTR.TTQR.SN.-  248
+Subject_80  69    ...S....YAMSV.L.M--RIHFA..SFGV..                              98
+
+Query_2     151   DTQYRKRFSHPNCAKFSTVNLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVKRNFS  210
+Subject_54  249   -----.Y.QQ.KR.C.QNIS....V.....I...QIL.GD..G.L.EP....IIIR.DAN  303
+
+Query_2     211   SIDKWVKLEKPPCYFAVAEADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYETIKQS  270
+Subject_54  304   .LE..LT.KDT.S..QR..VN...SCAQN.NYSF..RV.NFA..KPI.R.IER.SE.HTN  363
+Subject_46  52                                                    .IAA.-N..LAC  62
+
+Query_2     271   CIDAKEKASKFLWSNNRTKQPPSSWWPVGFGS---KNLSVLDTSPLLNWNRLCKNNGKGW  327
+Subject_54  364   .EL.IT.SYTLTPNQT.GYKL.DNM....YDGGCD.PTMCV.I..FKTYRNY.TTH----  419
+Subject_72  18                                            ...ATR.IKD..P..DKGM.  37
+Subject_22  77                                                            .R..  80
+Subject_46  63    KLNVM....II.AEM.KY.N.                                         83
+
+Query_2     328   IKTMSIDHMAKNVFKLSPGACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQPEYA  387
+Subject_54  420   ---LDLLYL.RD.....QESY.R.MK.E....F..SWC..Q.CNN.KGVSR.P..PEA.F  476
+Subject_72  38    PTNITA.AVE.-...FENMSEDELTKLSIN.AK.T.                          72
+Subject_22  81    K.S...SVLI.H                                                  92
+
+Query_2     388   SQVVMIGPSELYLEVKVGVYYMLETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKGAVG  447
+Subject_54  477   PYT.F.T...RF....L......D..R......RP.CLT...L.SL.GFGIQ.NL.....  536
+Subject_11  1238                     ..FIDDET.K..LS..QL                         1255
+
+Query_2     448   VRKMCVEGFCVEMDFAGISVIDVLNGDLKCKMDENV-VQQPNPSTTSSKPAAELMQDHGS  506
+Subject_54  537   .LSV.P....L..E...MALQ.......N.NLNGP.PPHNQ.QHLRID..--.MI.H.MA  594
+Subject_83  316                                               .LKTD..FTAIRQNSR  331
+Subject_6   1277                      L...EK.FN.ES..KI-IK                       1294
+
+Query_2     507   LCRMRDTLYGVRMLQATGRLPEGLQSKCKKPITDSISAIAIVGKMRERMLNQLPFVLVEI  566
+Subject_54  595   PSKLKGI..N.....V..N..DE.KK..TLH....HA.VGVANL..D.F......A.T..  654
+Subject_83  332   R...E.DVP.LG..                                                345
+
+Query_2     567   VNIVTRLSQQGLVNPDIKSDNIVIDGITGQPKMIDFGLIVPCKKYYNFKCWGT--DERFF  624
+Subject_54  655   I.................A.......S...........LL.ADYCDKV.RRNNPYP.NVY  714
+
+Query_2     625   SNHPHTAPEFINSELCSETAMTFGLAYLLIDMLSILIKRTADLSANSIYTNIPFLSIVSK  684
+Subject_54  715   NLY.Q....YLQGRM.N.A...Y..S..ISFVIAT.SS..T.FAVG.MK...KLSFLLGL  774
+
+Query_2     685   MYDQEKTNRPRAYEIAPVIGACFPFKDNIAKLFQSPKH  722
+Subject_54  775   A..KCASK..KP.ILTKA.AG...LQEK.M...LN...  812
+
+
+Lambda      K        H        a         alpha
+   0.317    0.133    0.397    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 39956488
+Results from round 2
+
+
+Query= YP_009220615.1 putative protein kinase [White spot syndrome virus]
+
+Length=730
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63551.1 wsv423-like protein [Pasiphaea japonica whispovirus]       1035    0.0  
+
+Sequences not found previously or not previously below threshold:
+
+BDT63564.1 wsv079-like protein [Pasiphaea japonica whispovirus]       28.9    0.086
+BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]       23.5    3.5  
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       23.5    4.0  
+
+
+
+Query_2     56    SPPSDSPYSLRPMKRLKKNNGEVGGKAPPPVTLRLREDYESTPY------NFNRNKKKRP  109
+Subject_54  186                                           .RHF------.N.SHS..II  199
+Subject_67  396   T...PGTS.G.AVRN.MD.DNMSQQQT..TL.FQNVKQET.STT------SVPT.SYLTC  449
+Subject_67  341   T...PGTS.G.VVRN.MD.DNMSQQQT..--..TSQNVKQE..IDSDDDSLPDL.NFTP.  398
+Subject_83  4679                                           .IL------.NTTETHN.L  4691
+
+Query_2     110   ITIDENQFATLNPTYATDIIK---------K--QQLPSVSAASVLRKHRANADTQYRKRF  158
+Subject_54  200   TH.PKS.M..K.NS..A...TSSSSMSYRSN--NTKSAIVTR.TTQR.SN.------.Y.  251
+Subject_67  450   S..SSTPSTIRSRS.L.CSTI---------S--STPSTIRSR.                   481
+Subject_67  399   SPGTSSGR.VR.LMDNDNMSQ---------Q--.TP.TLTFQN.KQETSSTTSVPTNSYL  447
+Subject_83  4692  ANLGAKAGVPE.AKLHRNVLT---------SIL.MNEDEITRDINDIESKLETR.L.NA.  4742
+
+Query_2     159   SHPNCAKFSTV--NLKARDYTPLSVLRSHVKGPKHLKSSCDTVTETNVVKRNFSSIDKWV  216
+Subject_54  252   QQ.KR.C.QNI--S....V.....I...QIL.GD..G.L.EP....IIIR.DAN.LE..L  309
+Subject_67  448   T---.STI.STPSTIRS.S.LTC.TIS.                                  472
+Subject_83  4743  QDLKRSMLISS--SSPSSVNA.....M.RTDAANG.L.---.NNDN.II.            4787
+
+Query_2     217   KLEKPPCYFAVAEADTNIAAGLESPFHLIRQAAKLGLISDVQDVSSNYETIKQSCIDAKE  276
+Subject_54  310   T.KDT.S..QR..VN...SCAQN.NYSF..RV.NFA..KPI.R.IER.SE.HTN.EL.IT  369
+
+Query_2     277   KASKFLWSNNRTKQPPSSWWPVGFGS---KNLSVLDTSPLLNWNRLCKNNGKGWIKTMSI  333
+Subject_54  370   .SYTLTPNQT.GYKL.DNM....YDGGCD.PTMCV.I..FKTYRNY.TTH-------LDL  422
+
+Query_2     334   DHMAKNVFKLSPGACESILEKKTTLLGEVTAQCKKWESYRRNIPVPAHVQPEYASQVVMI  393
+Subject_54  423   LYL.RD.....QESY.R.MK.E....F..SWC..Q.CNN.KGVSR.P..PEA.FPYT.F.  482
+
+Query_2     394   GPSELYLEVKVGVYYMLETGKVIKFMTDKEMYCEFVFETVFSHALEGRMKGAVGVRKMCV  453
+Subject_54  483   T...RF....L......D..R......RP.CLT...L.SL.GFGIQ.NL......LSV.P  542
+
+Query_2     454   EGFCVEMDFAGISVIDVLNGDLKCKMDENV-VQQPNPSTTSSKPAAELMQDHGSLCRMRD  512
+Subject_54  543   ....L..E...MALQ.......N.NLNGP.PPHNQ.QHLRID..--.MI.H.MAPSKLKG  600
+
+Query_2     513   TLYGVRMLQATGRLPEGLQSKCKKPITDSISAIAIVGKMRERMLNQLPFVLVEIVNIVTR  572
+Subject_54  601   I..N.....V..N..DE.KK..TLH....HA.VGVANL..D.F......A.T..I.....  660
+Subject_31  494                                   VGFGSG.TN.K.KK--YAIHC...V.K.  519
+
+Query_2     573   LSQQGLVNPDIKSDNIVIDGITGQPKMIDFGLIVPCKKYYNFKCWGT--DERFFSNHPHT  630
+Subject_54  661   ............A.......S...........LL.ADYCDKV.RRNNPYP.NVYNLY.Q.  720
+Subject_31  520   .IDC.QKKV.V.E.                                                533
+
+Query_2     631   APEFINSELCSETAMTFGLAYLLIDMLSILIKRTADLSANSIYTNIPFLSIVSKMYDQEK  690
+Subject_54  721   ...YLQGRM.N.A...Y..S..ISFVIAT.SS..T.FAVG.MK...KLSFLLGLA..KCA  780
+
+Query_2     691   TNRPRAYEIAPVIGACFPFKDNIAKLFQSPKH  722
+Subject_54  781   SK..KP.ILTKA.AG...LQEK.M...LN...  812
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.384    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0412    0.140     1.90     42.6     43.6 
+
+Effective search space used: 39956488
+
+Search has CONVERGED!
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

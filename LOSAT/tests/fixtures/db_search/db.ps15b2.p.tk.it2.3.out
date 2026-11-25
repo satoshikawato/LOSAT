@@ -1,0 +1,143 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          290     3e-100
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       25.4    0.53  
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       22.3    4.0   
+BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]       21.5    6.5   
+BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]       21.5    8.0   
+
+
+
+Query_1  10    TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETR--YGCGTGTIVTHAG  67
+52       4     .NI.KIH..I........STIIK...KKIKMQ.R.V.I..VKDN.--...ELTET...S.  61
+58       1797                                      .Y.FLFDRKQL..VKLLA..EMM.  1820
+
+Query_1  68    EVIEGCTTVSSIKELISVLPEVVDVILID-EGQFFTDL-VLVNRLADKGKRIVIAALDGT  125
+52       62    QT.RD.VAT.V---.SY.DTSNY.Y.F..-.....S..GATCKDW.I....VTV.....N  117
+58       1821  HEFAS.L.SDMRMNMYNGVGS...ILS..N.EERYSII-ISI.KFIL.              1867
+
+Query_1  126   SDQQMFSPIHKLLPYTNSIVKLASKCMIC-----KIDTKEAPFTVRFGNDNDNNVICVGG  180
+52       118   YE..L.PSVI..I.ICDK.E..SAV....NKNEASLTK.YL.YNNTGDD.HHKYDM....  177
+3        379                 .NDKLE..IAE..V-------...MY                      397
+
+Query_1  181   AEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQ-----AKLLLTNKNSPLYGGEY  235
+52       178   T.T.C.V.IG.                                                   188
+25       484                       .F.VN..PD..Q..N.GEYESMT.H.F..             512
+
+Query_1  236   MCFPDRSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYY  295
+
+Query_1  296   YSGIVFSLARGVDTVEWCSAS  316
+30       100            ..NN.D....L.  111
+
+
+Lambda      K        H        a         alpha
+   0.317    0.139    0.421    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0426    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20272584
+Results from round 2
+
+
+Query= YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          290     3e-100
+
+Sequences not found previously or not previously below threshold:
+
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       25.4    0.53 
+BDT63501.1 wsv166-like protein [Pasiphaea japonica whispovirus]       22.3    4.0  
+BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]       21.5    6.5  
+BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]       21.5    8.0  
+
+
+
+Query_1  10    TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETR--YGCGTGTIVTHAG  67
+52       4     .NI.KIH..I........STIIK...KKIKMQ.R.V.I..VKDN.--...ELTET...S.  61
+58       1797                                      .Y.FLFDRKQL..VKLLA..EMM.  1820
+
+Query_1  68    EVIEGCTTVSSIKELISVLPEVVDVILID-EGQFFTDL-VLVNRLADKGKRIVIAALDGT  125
+52       62    QT.RD.VAT.V---.SY.DTSNY.Y.F..-.....S..GATCKDW.I....VTV.....N  117
+58       1821  HEFAS.L.SDMRMNMYNGVGS...ILS..N.EERYSII-ISI.KFIL.              1867
+
+Query_1  126   SDQQMFSPIHKLLPYTNSIVKLASKCMIC-----KIDTKEAPFTVRFGNDNDNNVICVGG  180
+52       118   YE..L.PSVI..I.ICDK.E..SAV....NKNEASLTK.YL.YNNTGDD.HHKYDM....  177
+3        379                 .NDKLE..IAE..V-------...MY                      397
+
+Query_1  181   AEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQ-----AKLLLTNKNSPLYGGEY  235
+52       178   T.T.C.V.IG.                                                   188
+25       484                       .F.VN..PD..Q..N.GEYESMT.H.F..             512
+
+Query_1  236   MCFPDRSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYY  295
+
+Query_1  296   YSGIVFSLARGVDTVEWCSAS  316
+30       100            ..NN.D....L.  111
+
+
+Lambda      K        H        a         alpha
+   0.317    0.139    0.421    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0426    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20272584
+
+Search has CONVERGED!
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

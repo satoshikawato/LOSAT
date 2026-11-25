@@ -366,7 +366,7 @@ fn short_pre_chunk_alignments_match_ncbi_and_crashes_are_refused() {
     });
 }
 
-/// Ignored test (~284 Mbp per database; run by the workstation gate, runtime recorded in the PR):
+/// Ignored test (~284 Mbp per database; ~10 s in release mode on the workstation):
 /// `C0` (diagonal table clears after chunk 1 of `L`, skipping pre-chunk words so gapped
 /// `-window_size 0` completes and `tblastn`/`tblastx` rows match NCBI's `-num_threads 1` output)
 /// vs `C2` (last filler one base shorter: no clear after chunk 1, so `tblastn -window_size 0` is

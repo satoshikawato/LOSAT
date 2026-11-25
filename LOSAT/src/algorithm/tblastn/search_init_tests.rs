@@ -1229,9 +1229,28 @@ fn x_pairs_bf_gives_the_hits_and_table_of_pairs() {
                     got, expected,
                     "{matrix:?} window {window} packed {packed} {mode} unit {u}: init HSPs"
                 );
+                // After a clear (`Diagonals::finish_frame`), `Pair` cells hold NCBI's (-window,
+                // false) while `Packed` cells hold (0, false); packed tables never run lead
+                // subjects and both values lie at least a window behind every hit at offset 0 or
+                // more.
+                let reference_table: Vec<(i32, bool)> = if packed {
+                    reference
+                        .x_table()
+                        .into_iter()
+                        .map(|cell| {
+                            if cell == (-window, false) {
+                                (0, false)
+                            } else {
+                                cell
+                            }
+                        })
+                        .collect()
+                } else {
+                    reference.x_table()
+                };
                 assert_eq!(
                     branch_free.x_table(),
-                    reference.x_table(),
+                    reference_table,
                     "{matrix:?} window {window} packed {packed} {mode} unit {u}: table"
                 );
                 found += expected.len();

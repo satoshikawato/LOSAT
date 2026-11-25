@@ -371,7 +371,7 @@ fn run_inner(
     app::formatting_handler_check(&choice, Program::Blastx)?;
     let html = app::html_links(
         args.html,
-        Program::Blastx,
+        args.request_kind(),
         args.database_name(),
         &[choice.number],
     )?;

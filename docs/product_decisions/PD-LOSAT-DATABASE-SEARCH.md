@@ -119,7 +119,10 @@
   seconds, where version 1.3 listed a time 27 seconds later, and gives UTC for the forms of `TZ`
   that glibc reads outside POSIX and jiff's time for rules whose change falls in another year in
   UTC (tables of them; daylight time without a rule followed glibc's `posixrules`), which wait for
-  the maintainer's decision on its pull request; on 2026-11-24 line RG item D1c-1c-b wrote the
+  the maintainer's decision on its pull request; on 2026-11-23 line NP item M (b) read the
+  Seq-locs of a mask file nested to any depth, which LOSAT refused past 400 levels, as makeblastdb
+  reads them with a stack large enough (PD-LOSAT-NCBI-DEFECTS approved exception 28, the Owner's
+  「Q-MDEPTH=B」 of 2026-11-24); on 2026-11-24 line RG item D1c-1c-b wrote the
   sequences with a definition line without a Seq-id as NCBI writes them, which version 1.3 listed
   as not compared: those whose lines all lack one get no Seq-align, and beside lines with Seq-ids
   each format writes its `catch`, refused only at `sallacc` (NCBI's null pointer), in the organism
@@ -670,8 +673,6 @@ makeblastdb's closing "No sequences matched any of the masks provided."):
   later sequence or input file that fails) is reported as makeblastdb reports it. The files are
   left as makeblastdb leaves them after an error of its build at the last sequence (none in
   version 4; `NAME.nos`, `NAME.not`, `NAME.ntf`, `NAME.nto` in version 5, `.p..` for proteins).
-- Objects nested more than 400 levels deep (`mask data that LOSAT does not read: ...`), before
-  the build.
 - A string whose length passes the end of the file and is 1 GiB to 2^47 bytes (`mask data that
   LOSAT does not read: ...`), before the build: makeblastdb reserves the length before it reads
   (`CIStreamBuffer::GetChars`, `util/strbuffer.cpp:496-523`), which succeeds or throws

@@ -280,7 +280,7 @@ impl PsiblastArgs {
             db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
-            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::reader::named_refusal`).
+            // LOSAT refuses psiblast's `-html` (`cli::reader::named_refusal`).
             html: false,
             parse_deflines: self.parse_deflines,
             id_scope: None,

@@ -12,6 +12,8 @@ export const RESERVED_FLAGS: readonly string[] = Object.freeze(['-query', '-subj
 /** The CLI's database options: `-db` and the filters of a database search. */
 export const DATABASE_FLAGS: readonly string[] = Object.freeze([
   '-db',
+  '-gilist',
+  '-negative_gilist',
   '-seqidlist',
   '-negative_seqidlist',
   '-taxids',
@@ -20,6 +22,15 @@ export const DATABASE_FLAGS: readonly string[] = Object.freeze([
   '-negative_taxidlist',
   '-no_taxid_expansion',
 ]);
+
+/**
+ * The database IPG filters (`-ipglist`, `-negative_ipglist`): filters of a protein database
+ * search that the CLI of the modes of DATABASE_IPG_PROGRAMS has.
+ */
+export const DATABASE_IPG_FLAGS: readonly string[] = Object.freeze(['-ipglist', '-negative_ipglist']);
+
+/** The modes whose CLI has the database IPG filters (protein database searches: BLASTP and BLASTX). */
+export const DATABASE_IPG_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastp', 'blastx']);
 
 /**
  * The database masks (`-db_soft_mask`, `-db_hard_mask`): filters of a database search that the
@@ -49,7 +60,11 @@ function refusedWord(program: ProgramId, word: string): string | undefined {
   if (RESERVED_FLAGS.includes(flag) || (flag === '-mt_mode' && MT_MODE_PROGRAMS.includes(program))) return `${flag} is managed by LOSAT`;
   if (flag === '-db') return '-db (a database search) is not supported in the browser yet';
   if (program === 'blastn' && flag === '-filtering_db') return '-filtering_db (a BLAST database of repeats) is not supported in the browser yet';
-  if (DATABASE_FLAGS.includes(flag) || (DATABASE_MASK_PROGRAMS.includes(program) && DATABASE_MASK_FLAGS.includes(flag))) {
+  if (
+    DATABASE_FLAGS.includes(flag) ||
+    (DATABASE_MASK_PROGRAMS.includes(program) && DATABASE_MASK_FLAGS.includes(flag)) ||
+    (DATABASE_IPG_PROGRAMS.includes(program) && DATABASE_IPG_FLAGS.includes(flag))
+  ) {
     return `${flag} (a database search filter) is not supported in the browser yet`;
   }
   return undefined;

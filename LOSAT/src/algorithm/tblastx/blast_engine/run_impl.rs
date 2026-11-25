@@ -916,7 +916,7 @@ impl OneHitChunkMerge<'_> {
         // After the reports of the batches before (`ErrorAfterBatchReports`).
         self.failure.fail(
             self.s_idx,
-            anyhow::Error::new(ErrorAfterBatchReports(anyhow::anyhow!(
+            anyhow::Error::new(ErrorAfterBatchReports::new(anyhow::anyhow!(
                 "TBLASTX -window_size 0: a one-hit ungapped alignment whose length is 0 or less meets another in the overlap of two 5,000,000-letter parts of a subject frame, and their lengths add up to 0 (NCBI BLAST+ divides by that sum when it merges them; its result is undefined), which LOSAT does not support"
             ))),
         );
@@ -1389,6 +1389,9 @@ fn open_search_database(
     // (`TblastxDatabase::open`).
     let database = match args.database_name() {
         Some(name) => {
+            let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+                outputs.formats.first().map(|format| format.outfmt),
+            );
             let database = super::super::database::TblastxDatabase::open_restricted(
                 name,
                 settings,
@@ -1397,11 +1400,13 @@ fn open_search_database(
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis)
-            .after_calls(args.first_query_ordinal > 0);
+            .after_calls(args.first_query_ordinal > 0)
+            .keeping_scope(keeps_scope, separate_xml2);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
                 &args.db_filter,
+                database.list_gis(),
                 database.list_taxids(),
                 &database.statistics(),
                 true,
@@ -3786,7 +3791,7 @@ fn run_batch_loop(
                         Err(error) => error
                             .downcast::<ErrorAfterBatchReports>()
                             .ok()
-                            .map(|ErrorAfterBatchReports(error)| error)
+                            .map(|failure| failure.error)
                             .into(),
                     }
                 },
@@ -3842,7 +3847,7 @@ fn run_batch_loop(
                 // The reports of the batches before are written (for the first batch, the
                 // outfmt 0 prolog), then the messages of the failing batch's records (read
                 // before its search), then the error, which skips `PrintEpilog`.
-                Ok(ErrorAfterBatchReports(error)) => {
+                Ok(ErrorAfterBatchReports { error, .. }) => {
                     reports.write_before_failed_batch(outputs, done, &warnings)?;
                     batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                     return Err(error);
@@ -3889,7 +3894,7 @@ fn run_batch_loop(
                     }
                 }
                 Err(error) => {
-                    match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
+                    match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
                         Ok(failure) => {
                             reports.write_before_failed_batch(outputs, done, &warnings)?;
                             batch_warnings
@@ -3991,7 +3996,7 @@ fn run_batch_loop(
             // batch's reader messages, as a header file that NCBI cannot read.
             macro_rules! prefetch_failed {
                 ($error:expr) => {{
-                    match $error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
+                    match $error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
                         Ok(failure) => {
                             reports.write_before_failed_batch(outputs, done, &warnings)?;
                             batch_warnings
@@ -4218,6 +4223,9 @@ fn run_batch_loop(
                     }
                     warnings[start].append(&messages);
                 }
+                // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+                database.reset_scope();
             }
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the
@@ -5075,7 +5083,7 @@ fn search_query_batch<S: TbxScore>(
         false,
         "TBLASTX",
     )
-    .map_err(ErrorAfterBatchReports)?;
+    .map_err(ErrorAfterBatchReports::new)?;
     // `-db` whose sequences could not be read: this first batch with a valid context fails
     // (`run_in_pool` raises the kept read error).
     if matches!(subjects, Subjects::Unreadable) {

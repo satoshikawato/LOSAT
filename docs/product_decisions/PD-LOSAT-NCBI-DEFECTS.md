@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.108
+- Version: 1.109
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -747,15 +747,29 @@
   1.104 (line NP item M4b-T3), then 1.106 at the merge of dev a5595ed11 that brought 1.105
   (psiblast line item PS10b), then 1.107 at the merge of dev 22ac798e5 that brought 1.106 (line NP
   item M4b-3c part 2));
-  1.108 2026-11-24 (the tabular rows of 1.37 and 1.50 at which NCBI stops with its null pointer or
+  1.108 2026-11-24 (BLASTP, line RG item X-short-bat-2: the rejection of a compressed lookup table
+  whose neighbouring words fill NCBI's overflow banks (decision D3) comes in the search of the query
+  batch whose table fills them (of a split batch, its chunk's table), after the reports of the
+  query batches before, as TBLASTN's of 1.97 (it came before the run's first byte); the three
+  builders of the table name the first of NCBI's tables that fills them; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.107; first 1.99, then 1.100 at
+  the merge of dev of 2026-11-24 that brought 1.99, line RG item X-short-tbx-link, then 1.103 at
+  the merge of dev of 2026-11-25 that brought 1.100 to 1.102, line RG items KC-11d and D5c and
+  psiblast line item PS10e, then 1.104 at the merge of dev of 2026-11-25 that brought 1.103, line
+  RG item K10a, then 1.106 at the merge of dev of 2026-11-25 that brought 1.104 and 1.105, line NP
+  item M4b-T3 and psiblast line item PS10b, then 1.107 at the merge of dev of 2026-11-25 that
+  brought 1.106, line NP item M4b-3c part 2, then 1.108 at the merge of dev of 2026-11-26 that
+  brought 1.107, line NP item M (b));
+  1.109 2026-11-24 (the tabular rows of 1.37 and 1.50 at which NCBI stops with its null pointer or
   prints an uninitialised taxid: NCBI's bytes before the stop are written, then the refusal of
   rule 3, in every program, through one owner of the rows' stops; line RG-KB item 18b,
-  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.107;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.108;
   first 1.100, then 1.101 at the merge of dev that brought line RG item X-short-tbx-link's 1.99 and
   line RG item KC-11d's 1.100, then 1.104 at the merge of dev of 2026-11-25 that brought line RG
   item D5c's 1.101, psiblast line item PS10e's 1.102 and line RG item K10a's 1.103, then 1.108 at
   the merge of dev of 2026-11-26 that brought line NP item M4b-T3's 1.104, psiblast line item
-  PS10b's 1.105, line NP item M4b-3c part 2's 1.106 and line NP item M (b)'s 1.107)
+  PS10b's 1.105, line NP item M4b-3c part 2's 1.106 and line NP item M (b)'s 1.107, then 1.109 at
+  the merge of dev of 2026-11-26 that brought line RG item X-short-bat-2's 1.108)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -994,7 +1008,8 @@ Explicit rejections (rule 3):
   stops first.
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.87 at the first query batch NCBI searches), compressed-lookup thresholds that
-  exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
+  exhaust its overflow bank (in BLASTP since version 1.108, as in TBLASTN since 1.97, in the query
+  batch whose table exhausts it, after the reports of the batches before). (`-max_target_seqs` values that make NCBI's preliminary hit
   list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
 
@@ -3181,14 +3196,14 @@ file would differ, and NCBI's programs still could not open the database).
   of its build after the row's earlier fields. Also `staxid` of such a row when it is the first row
   of its query's (or round's) report: `m_SubjectTaxId` is printed before any row set it
   (`tabular.cpp:262-268`; the member is not initialised, a different number in each run). Since
-  version 1.108 (line RG-KB item 18b) LOSAT writes NCBI's bytes up to the stop, in every program:
+  version 1.109 (line RG-KB item 18b) LOSAT writes NCBI's bytes up to the stop, in every program:
   the rows before it and the row's fields before that field, each after its delimiter (`Print`
   writes the delimiter before each field, `tabular.cpp:1100-1108`; NCBI's stream is flushed as
   the formatter is destroyed), and then refuses (exit 1): NCBI's stack trace names the paths of
   its build and install and the addresses of its run, and the uninitialised number differs from
   run to run, so no program can write either. NCBI's run ends at the null pointer, so no later
   row, query or batch is written; after the uninitialised number NCBI goes on (exit 0). Before
-  1.108 LOSAT refused before the query batch's report, and before 1.37 every such subject; its
+  1.109 LOSAT refused before the query batch's report, and before 1.37 every such subject; its
   output was a prefix of NCBI's then too (probe of line RG-KB item 18b: blastp, psiblast, blastx,
   tblastn, tblastx and blastn). A failed lookup does not depend on the other
   subjects: one alone, the first, the last or two give the same rows. Since version 1.50 (line

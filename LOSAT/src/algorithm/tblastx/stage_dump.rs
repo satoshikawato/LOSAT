@@ -70,8 +70,9 @@ fn write_header_if_needed(file: &mut std::fs::File, path: &PathBuf) -> std::io::
 // boundaries, before TBLASTX nucleotide-coordinate output adjustment can hide
 // negative-frame or frame-relative ordering differences.
 // The ends are NCBI's `Int4` (`UngappedHit::q_end_int4`): a list of the one-hit word finder may
-// hold an HSP of length 0 or less before its first linking call, whose end lies at or before its
-// start, below 0 near a frame's start.
+// hold an HSP of length 0 or less up to the re-evaluation's fetch of the subject (so in the two
+// dumps after the first linking call too), whose end lies at or before its start, below 0 near a
+// frame's start.
 pub(crate) fn dump_ungapped_hits(stage: &str, hits: &[UngappedHit]) {
     let Some(dump) = stage_dump() else {
         return;

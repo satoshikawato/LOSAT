@@ -1,0 +1,409 @@
+# dir	op	args...  (ops: db tax put cp rm trunc poke text mkdir link; see README.md)
+t	tax	good
+t_no_9606	db	p5
+t_no_9606	tax	no_9606
+t_empty_fields	db	p5
+t_empty_fields	tax	empty_fields
+t_tabs0	db	p5
+t_tabs0	tax	tabs0
+t_high_bytes_utf8	db	p5
+t_high_bytes_utf8	tax	high_bytes_utf8
+t_bad_magic	db	p5
+t_bad_magic	tax	bad_magic
+t_none	db	p5
+d_p4_no_pni	db	p4
+d_p4_no_pni	tax	good
+d_p4_no_pni	rm	p4.pni
+d_p4_no_pni	rm	p4.pnd
+d_p4_no_psi	db	p4
+d_p4_no_psi	tax	good
+d_p4_no_psi	rm	p4.psi
+d_p4_no_psi	rm	p4.psd
+d_p4_no_psq	db	p4
+d_p4_no_psq	tax	good
+d_p4_no_psq	rm	p4.psq
+d_p4_no_phr	db	p4
+d_p4_no_phr	tax	good
+d_p4_no_phr	rm	p4.phr
+d_p4_no_pin	db	p4
+d_p4_no_pin	tax	good
+d_p4_no_pin	rm	p4.pin
+d_p4_pin_10	db	p4
+d_p4_pin_10	tax	good
+d_p4_pin_10	trunc	p4.pin	10
+d_p4_pin_cut	db	p4
+d_p4_pin_cut	tax	good
+d_p4_pin_cut	trunc	p4.pin	-8
+d_p4_pin_ver7	db	p4
+d_p4_pin_ver7	tax	good
+d_p4_pin_ver7	poke	p4.pin	3	07
+d_p4_pin_nucl	db	p4
+d_p4_pin_nucl	tax	good
+d_p4_pin_nucl	poke	p4.pin	7	00
+d_p4_psq_half	db	p4
+d_p4_psq_half	tax	good
+d_p4_psq_half	trunc	p4.psq	half
+d_p4_phr_half	db	p4
+d_p4_phr_half	tax	good
+d_p4_phr_half	trunc	p4.phr	half
+d_p4_phr_flip	db	p4
+d_p4_phr_flip	tax	good
+d_p4_phr_flip	poke	p4.phr	40	ffffffff
+d_p4_psq_zero	db	p4
+d_p4_psq_zero	tax	good
+d_p4_psq_zero	trunc	p4.psq	0
+d_p4_pnd_cut	db	p4
+d_p4_pnd_cut	tax	good
+d_p4_pnd_cut	trunc	p4.pnd	8
+d_p4_psd_cut	db	p4
+d_p4_psd_cut	tax	good
+d_p4_psd_cut	trunc	p4.psd	20
+d_p4_date	db	p4
+d_p4_date	tax	good
+d_p4_date	put	p4.pin	edited/p4_date.pin
+d_p4_totlen0	db	p4
+d_p4_totlen0	tax	good
+d_p4_totlen0	put	p4.pin	edited/p4_totlen0.pin
+d_p4_zero_oids	db	p4
+d_p4_zero_oids	tax	good
+d_p4_zero_oids	put	p4.pin	edited/p4_zero_oids.pin
+d_p4_pnd_swap	db	p4
+d_p4_pnd_swap	tax	good
+d_p4_pnd_swap	poke	p4.pnd	15	02
+d_p5_no_pdb	db	p5
+d_p5_no_pdb	tax	good
+d_p5_no_pdb	rm	p5.pdb
+d_p5_pdb_cut	db	p5
+d_p5_pdb_cut	tax	good
+d_p5_pdb_cut	trunc	p5.pdb	4096
+d_p5_no_pos	db	p5
+d_p5_no_pos	tax	good
+d_p5_no_pos	rm	p5.pos
+d_p5_no_pot	db	p5
+d_p5_no_pot	tax	good
+d_p5_no_pot	rm	p5.pot
+d_p5_no_ptf	db	p5
+d_p5_no_ptf	tax	good
+d_p5_no_ptf	rm	p5.ptf
+d_p5_no_ptf	rm	p5.pto
+d_p5_no_pni	db	p5
+d_p5_no_pni	tax	good
+d_p5_no_pni	rm	p5.pni
+d_p5_no_pni	rm	p5.pnd
+d_p5_no_pog	db	p5
+d_p5_no_pog	tax	good
+d_p5_no_pog	rm	p5.pog
+d_p5_pin_cut	db	p5
+d_p5_pin_cut	tax	good
+d_p5_pin_cut	trunc	p5.pin	-8
+d_p5_psq_zero	db	p5
+d_p5_psq_zero	tax	good
+d_p5_psq_zero	trunc	p5.psq	0
+d_p5_date	db	p5
+d_p5_date	tax	good
+d_p5_date	put	p5.pin	edited/p5_date.pin
+d_p5_zero_oids	db	p5
+d_p5_zero_oids	tax	good
+d_p5_zero_oids	put	p5.pin	edited/p5_zero_oids.pin
+d_n4_nsq_half	db	n4
+d_n4_nsq_half	tax	good
+d_n4_nsq_half	trunc	n4.nsq	half
+d_n5_no_ndb	db	n5
+d_n5_no_ndb	tax	good
+d_n5_no_ndb	rm	n5.ndb
+d_pmv_no_01pin	db	pmv
+d_pmv_no_01pin	tax	good
+d_pmv_no_01pin	rm	pmv.01.pin
+d_pmv_no_pal	db	pmv
+d_pmv_no_pal	tax	good
+d_pmv_no_pal	rm	pmv.pal
+leg_ptm	db	p5
+leg_ptm	tax	good
+leg_ptm	text	p5.ptm	
+leg_atm	db	p5
+leg_atm	tax	good
+leg_atm	text	p5.atm	x\n
+leg_zzz	db	p5
+leg_zzz	tax	good
+leg_zzz	text	p5.zzz	
+leg_ab	db	p5
+leg_ab	tax	good
+leg_ab	text	p5.ab	
+a	db	p5
+a	db	n5
+a	tax	good
+a	put	gi.gil	alias/gi.gil
+a	text	gi.txt	101\n102\n
+a	text	zero.gil	
+a	text	tx.txt	9606\n
+a	text	unk.pal	TITLE x\nDBLIST p5\nFOO bar\n
+a	text	novalue.pal	TITLE\nDBLIST p5\n
+a	text	nseq.pal	DBLIST p5\nNSEQ abc\n
+a	text	nseqbig.pal	DBLIST p5\nNSEQ 99999999999\n
+a	text	lenbig.pal	DBLIST p5\nLENGTH 99999999999\n
+a	text	lenbad.pal	DBLIST p5\nLENGTH 12x\n
+a	text	membx.pal	DBLIST p5\nMEMB_BIT x\nMAXLEN y\nMAXOID z\n
+a	text	first.pal	DBLIST p5\nFIRST_OID 1\n
+a	text	lastonly.pal	DBLIST p5\nLAST_OID 3\n
+a	text	fl_bad.pal	DBLIST p5\nFIRST_OID 1\nLAST_OID 3\nNSEQ 5\n
+a	text	fl_ok.pal	DBLIST p5\nFIRST_OID 1\nLAST_OID 3\nNSEQ 3\n
+a	text	fl_nonseq.pal	DBLIST p5\nFIRST_OID 1\nLAST_OID 3\n
+a	text	oidgi.pal	DBLIST p5\nOIDLIST nosuch.msk\nGILIST nosuch.gil\n
+a	text	oidnomax.pal	DBLIST p5\nOIDLIST nosuch.msk\n
+a	text	giext.pal	DBLIST p5\nGILIST gi.txt\n
+a	text	gizero.pal	DBLIST p5\nGILIST zero.gil\n
+a	text	gimiss.pal	DBLIST p5\nGILIST missing.gil\n
+a	text	taxmiss.pal	DBLIST p5\nTAXIDLIST missing.txt\n
+a	text	comments.pal	# c\n\n  \nTITLE t\n  # indented\nDBLIST p5\nSTATS_NSEQ 1\nSTATS_TOTLEN 2\nMASKLIST m\n
+a	text	crlf.pal	TITLE t\r\nDBLIST p5\r\nNSEQ 9\r\n
+a	text	nodblist.pal	TITLE t\n
+a	text	missdb.pal	DBLIST nosuchdb\n
+a	text	nucl.nal	DBLIST n5\nFOO 1\n
+a	text	empty.pal	
+a	text	giabs.pal	DBLIST p5\nGILIST <RUN>/cases/a/gi.txt\n
+a	text	ov1.pal	DBLIST p5\nFIRST_OID 65535\nLAST_OID 65535\n
+a	text	ov2.pal	DBLIST p5\nOIDLIST gi.gil\nMAXOID 65535\nLENGTH 4294967295\nNSEQ 65535\n
+a	text	ov3.pal	DBLIST p5\nFIRST_OID 2147483647\nLAST_OID 0\nNSEQ 2147483647\n
+a	text	signs.pal	DBLIST p5\nNSEQ +5\nMAXOID -1\nLENGTH  -1\nFIRST_OID 1\nLAST_OID 1\n
+r_empty	tax	good
+r_garbage	db	p5
+r_garbage	tax	good
+r_garbage	text	junk.pin	
+r_garbage	put	junk2.pin	junk/junk2.pin
+r_garbage2	db	p5
+r_garbage2	tax	good
+r_garbage2	put	junk.pin	junk/garbage2.pin
+r_tree	db	p5
+r_tree	tax	good
+r_tree	mkdir	sub
+r_tree	mkdir	sub/deep
+r_tree	db	q5	sub
+r_tree	db	n4	sub/deep
+r_tree	link	link_to_deep	sub/deep
+r_space	tax	good
+r_space	db	p5	.	my 
+r_symlink	tax	good
+r_symlink	link	p5.pdb	../../in/p5.pdb
+r_symlink	link	p5.phr	../../in/p5.phr
+r_symlink	link	p5.pin	../../in/p5.pin
+r_symlink	link	p5.pjs	../../in/p5.pjs
+r_symlink	link	p5.pnd	../../in/p5.pnd
+r_symlink	link	p5.pni	../../in/p5.pni
+r_symlink	link	p5.pog	../../in/p5.pog
+r_symlink	link	p5.pos	../../in/p5.pos
+r_symlink	link	p5.pot	../../in/p5.pot
+r_symlink	link	p5.psq	../../in/p5.psq
+r_symlink	link	p5.ptf	../../in/p5.ptf
+r_symlink	link	p5.pto	../../in/p5.pto
+nest	db	pmv
+nest	db	p5
+nest	tax	good
+nest	text	top.pal	TITLE top\nDBLIST pmv p5\n
+ord	tax	good
+ord	put	o4.phr	ord/o4.phr
+ord	put	o4.pin	ord/o4.pin
+ord	put	o4.pjs	ord/o4.pjs
+ord	put	o4.psq	ord/o4.psq
+ord	put	o5.pdb	ord/o5.pdb
+ord	put	o5.phr	ord/o5.phr
+ord	put	o5.pin	ord/o5.pin
+ord	put	o5.pjs	ord/o5.pjs
+ord	put	o5.pot	ord/o5.pot
+ord	put	o5.psq	ord/o5.psq
+ord	put	o5.ptf	ord/o5.ptf
+ord	put	o5.pto	ord/o5.pto
+ca	tax	good
+ca	put	ca4.phr	ca/ca4.phr
+ca	put	ca4.pin	ca/ca4.pin
+ca	put	ca4.pjs	ca/ca4.pjs
+ca	put	ca4.pog	ca/ca4.pog
+ca	put	ca4.psd	ca/ca4.psd
+ca	put	ca4.psi	ca/ca4.psi
+ca	put	ca4.psq	ca/ca4.psq
+ca	put	ca5.pdb	ca/ca5.pdb
+ca	put	ca5.phr	ca/ca5.phr
+ca	put	ca5.pin	ca/ca5.pin
+ca	put	ca5.pjs	ca/ca5.pjs
+ca	put	ca5.pog	ca/ca5.pog
+ca	put	ca5.pos	ca/ca5.pos
+ca	put	ca5.pot	ca/ca5.pot
+ca	put	ca5.psq	ca/ca5.psq
+ca	put	ca5.ptf	ca/ca5.ptf
+ca	put	ca5.pto	ca/ca5.pto
+c_ok	tax	good
+c_ok	put	db.aux	cdd/db.aux
+c_ok	put	db.freq	cdd/db.freq
+c_ok	put	db.loo	cdd/db.loo
+c_ok	put	db.pdb	cdd/db.pdb
+c_ok	put	db.phr	cdd/db.phr
+c_ok	put	db.pin	cdd/db.pin
+c_ok	put	db.pos	cdd/db.pos
+c_ok	put	db.pot	cdd/db.pot
+c_ok	put	db.psq	cdd/db.psq
+c_ok	put	db.ptf	cdd/db.ptf
+c_ok	put	db.pto	cdd/db.pto
+c_ok	put	db.rps	cdd/db.rps
+c_ok	cp	db.freq	db.wcounts
+c_ok	cp	db.freq	db.obsr
+c_nowc	tax	good
+c_nowc	put	db.aux	cdd/db.aux
+c_nowc	put	db.freq	cdd/db.freq
+c_nowc	put	db.loo	cdd/db.loo
+c_nowc	put	db.pdb	cdd/db.pdb
+c_nowc	put	db.phr	cdd/db.phr
+c_nowc	put	db.pin	cdd/db.pin
+c_nowc	put	db.pos	cdd/db.pos
+c_nowc	put	db.pot	cdd/db.pot
+c_nowc	put	db.psq	cdd/db.psq
+c_nowc	put	db.ptf	cdd/db.ptf
+c_nowc	put	db.pto	cdd/db.pto
+c_nowc	put	db.rps	cdd/db.rps
+c_noaux	tax	good
+c_noaux	put	db.freq	cdd/db.freq
+c_noaux	put	db.loo	cdd/db.loo
+c_noaux	put	db.pdb	cdd/db.pdb
+c_noaux	put	db.phr	cdd/db.phr
+c_noaux	put	db.pin	cdd/db.pin
+c_noaux	put	db.pos	cdd/db.pos
+c_noaux	put	db.pot	cdd/db.pot
+c_noaux	put	db.psq	cdd/db.psq
+c_noaux	put	db.ptf	cdd/db.ptf
+c_noaux	put	db.pto	cdd/db.pto
+c_noaux	put	db.rps	cdd/db.rps
+c_noaux	cp	db.freq	db.wcounts
+c_noaux	cp	db.freq	db.obsr
+c_nofreq	tax	good
+c_nofreq	put	db.aux	cdd/db.aux
+c_nofreq	put	db.freq	cdd/db.freq
+c_nofreq	put	db.loo	cdd/db.loo
+c_nofreq	put	db.pdb	cdd/db.pdb
+c_nofreq	put	db.phr	cdd/db.phr
+c_nofreq	put	db.pin	cdd/db.pin
+c_nofreq	put	db.pos	cdd/db.pos
+c_nofreq	put	db.pot	cdd/db.pot
+c_nofreq	put	db.psq	cdd/db.psq
+c_nofreq	put	db.ptf	cdd/db.ptf
+c_nofreq	put	db.pto	cdd/db.pto
+c_nofreq	put	db.rps	cdd/db.rps
+c_nofreq	cp	db.freq	db.wcounts
+c_nofreq	cp	db.freq	db.obsr
+c_nofreq	rm	db.freq
+c_freqmagic	tax	good
+c_freqmagic	put	db.aux	cdd/db.aux
+c_freqmagic	put	db.freq	cdd/db.freq
+c_freqmagic	put	db.loo	cdd/db.loo
+c_freqmagic	put	db.pdb	cdd/db.pdb
+c_freqmagic	put	db.phr	cdd/db.phr
+c_freqmagic	put	db.pin	cdd/db.pin
+c_freqmagic	put	db.pos	cdd/db.pos
+c_freqmagic	put	db.pot	cdd/db.pot
+c_freqmagic	put	db.psq	cdd/db.psq
+c_freqmagic	put	db.ptf	cdd/db.ptf
+c_freqmagic	put	db.pto	cdd/db.pto
+c_freqmagic	put	db.rps	cdd/db.rps
+c_freqmagic	cp	db.freq	db.wcounts
+c_freqmagic	cp	db.freq	db.obsr
+c_freqmagic	poke	db.freq	0	3412
+c_wcn	tax	good
+c_wcn	put	db.aux	cdd/db.aux
+c_wcn	put	db.freq	cdd/db.freq
+c_wcn	put	db.loo	cdd/db.loo
+c_wcn	put	db.pdb	cdd/db.pdb
+c_wcn	put	db.phr	cdd/db.phr
+c_wcn	put	db.pin	cdd/db.pin
+c_wcn	put	db.pos	cdd/db.pos
+c_wcn	put	db.pot	cdd/db.pot
+c_wcn	put	db.psq	cdd/db.psq
+c_wcn	put	db.ptf	cdd/db.ptf
+c_wcn	put	db.pto	cdd/db.pto
+c_wcn	put	db.rps	cdd/db.rps
+c_wcn	cp	db.freq	db.wcounts
+c_wcn	cp	db.freq	db.obsr
+c_wcn	poke	db.wcounts	4	04
+c_wcn	poke	db.obsr	4	02
+c_wcoff	tax	good
+c_wcoff	put	db.aux	cdd/db.aux
+c_wcoff	put	db.freq	cdd/db.freq
+c_wcoff	put	db.loo	cdd/db.loo
+c_wcoff	put	db.pdb	cdd/db.pdb
+c_wcoff	put	db.phr	cdd/db.phr
+c_wcoff	put	db.pin	cdd/db.pin
+c_wcoff	put	db.pos	cdd/db.pos
+c_wcoff	put	db.pot	cdd/db.pot
+c_wcoff	put	db.psq	cdd/db.psq
+c_wcoff	put	db.ptf	cdd/db.ptf
+c_wcoff	put	db.pto	cdd/db.pto
+c_wcoff	put	db.rps	cdd/db.rps
+c_wcoff	cp	db.freq	db.wcounts
+c_wcoff	cp	db.freq	db.obsr
+c_wcoff	poke	db.wcounts	12	26
+c_wcoff	poke	db.wcounts	16	4b
+c_obsr28	tax	good
+c_obsr28	put	db.aux	cdd/db.aux
+c_obsr28	put	db.freq	cdd/db.freq
+c_obsr28	put	db.loo	cdd/db.loo
+c_obsr28	put	db.pdb	cdd/db.pdb
+c_obsr28	put	db.phr	cdd/db.phr
+c_obsr28	put	db.pin	cdd/db.pin
+c_obsr28	put	db.pos	cdd/db.pos
+c_obsr28	put	db.pot	cdd/db.pot
+c_obsr28	put	db.psq	cdd/db.psq
+c_obsr28	put	db.ptf	cdd/db.ptf
+c_obsr28	put	db.pto	cdd/db.pto
+c_obsr28	put	db.rps	cdd/db.rps
+c_obsr28	cp	db.freq	db.wcounts
+c_obsr28	cp	db.freq	db.obsr
+c_obsr28	poke	db.obsr	0	16
+c_two	tax	good
+c_two	put	a1.aux	cdd/db.aux
+c_two	put	a1.freq	cdd/db.freq
+c_two	put	a1.loo	cdd/db.loo
+c_two	put	a1.pdb	two/a1.pdb
+c_two	put	a1.phr	cdd/db.phr
+c_two	put	a1.pin	two/a1.pin
+c_two	put	a1.pos	cdd/db.pos
+c_two	put	a1.pot	cdd/db.pot
+c_two	put	a1.psq	cdd/db.psq
+c_two	put	a1.ptf	cdd/db.ptf
+c_two	put	a1.pto	cdd/db.pto
+c_two	put	a1.rps	cdd/db.rps
+c_two	put	b2.aux	cdd/db.aux
+c_two	put	b2.freq	cdd/db.freq
+c_two	put	b2.loo	cdd/db.loo
+c_two	put	b2.pdb	two/b2.pdb
+c_two	put	b2.phr	cdd/db.phr
+c_two	put	b2.pin	two/b2.pin
+c_two	put	b2.pos	cdd/db.pos
+c_two	put	b2.pot	cdd/db.pot
+c_two	put	b2.psq	cdd/db.psq
+c_two	put	b2.ptf	cdd/db.ptf
+c_two	put	b2.pto	cdd/db.pto
+c_two	put	b2.rps	cdd/db.rps
+c_two	cp	b2.freq	b2.wcounts
+c_two	cp	b2.freq	b2.obsr
+mix	db	p5
+mix	tax	good
+mix	text	mix1.pal	DBLIST p5\nTITLE a\rNSEQ\nMAXLEN 5\n
+mix	text	mix2.pal	TITLE a\rDBLIST p5\nNSEQ\rMAXLEN 5\n
+dsl	db	p5
+dsl	db	p5	sub
+dsl	tax	good
+dsl	text	sub/bad.pal	DBLIST nosuch\n
+mix45	db	p4
+mix45	db	p5	sub
+mix45	db	p5
+mix45	db	p4	.	z
+mix45	tax	good
+mix45	text	both.pal	TITLE both\nDBLIST p4 sub/p5\n
+mix45	text	both5.pal	TITLE both5\nDBLIST p5 zp4\n
+mix45	text	both5r.pal	TITLE both5r\nDBLIST zp4 p5\n
+negtax	tax	good
+negtax	put	neg.phr	negtax/neg.phr
+negtax	put	neg.pin	negtax/neg.pin
+negtax	put	neg.pjs	negtax/neg.pjs
+negtax	put	neg.pnd	negtax/neg.pnd
+negtax	put	neg.pni	negtax/neg.pni
+negtax	put	neg.pog	negtax/neg.pog
+negtax	put	neg.psd	negtax/neg.psd
+negtax	put	neg.psi	negtax/neg.psi
+negtax	put	neg.psq	negtax/neg.psq

@@ -209,6 +209,7 @@ pub(super) fn begin_chunk_scan<'s>(
             chunk,
             hits: Vec::new(),
             stats,
+            exited: true,
         });
     }
     Ok(ChunkStart {
@@ -791,7 +792,12 @@ where
         hsp_list(init_hsps, contexts_ref, s_frames_listed)
     };
     adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
-    TblastxChunkScanResult { chunk, hits, stats }
+    TblastxChunkScanResult {
+        chunk,
+        hits,
+        stats,
+        exited: true,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
@@ -851,6 +857,7 @@ fn scan_chunk_plain<S: TbxScore>(
             chunk,
             hits: Vec::new(),
             stats,
+            exited: false,
         };
     }
     let x_soft = x_soft.flatten();
@@ -1291,6 +1298,7 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
             chunk,
             hits: Vec::new(),
             stats,
+            exited: false,
         };
     }
     let x_soft = x_soft.flatten();
@@ -1386,11 +1394,10 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
                         // -threshold allows it) gives a length of 0 or less, saved as any
                         // other: its ends are at or before its starts, and below 0 near a
                         // frame's start. NCBI links it with the others and its
-                        // re-evaluation deletes it; LOSAT keeps its `Int4` ends up to the
-                        // first linking call and drops it there, or without sum statistics
-                        // before the re-evaluation (`chaining.rs`, the impl of
-                        // `UngappedHit`; `subject_link::link_subject_hits_int4`,
-                        // `subject_link::drop_unread_without_linking`).
+                        // re-evaluation deletes it; LOSAT keeps it with its `Int4` ends up to
+                        // the re-evaluation's fetch of the subject and drops it there
+                        // (`chaining.rs`, the impl of `UngappedHit`;
+                        // `subject_link::drop_unread_int4_inverted`).
                         let hsp_q_absolute = ctx.frame_base + hit.q_start;
                         init_hsps.push(InitHSP {
                             q_start_absolute: hsp_q_absolute,

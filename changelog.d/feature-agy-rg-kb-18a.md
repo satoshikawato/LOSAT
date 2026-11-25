@@ -1,8 +1,9 @@
-- `blastx` and `rpstblastn` now read FASTA queries, `-subject` inputs, XML pre-scans, and Web ABI
-  v1 inputs through the shared `blastinput::fasta_reader` (the same reader used by `blastn`,
-  `blastp`, `tblastn`, and `tblastx`), removing BLASTX's duplicate line/FASTA reader and unifying
-  CLI and library batch cutting onto one `BatchCutter` (`blastx::input_source`). Output bytes are
-  identical to `dev` and NCBI BLAST+ 2.17.0, while FASTA reading is faster and uses less memory on
-  large `-subject` files; two LOSAT-only refusal messages (sequence exceeding `Int4` length and
-  other-molecule Seq-id under `-parse_deflines`) now use the shared reader's wording and program
-  name (`RPSTBLASTN` for `rpstblastn`).
+- `blastx` and `rpstblastn` read their FASTA input (queries, `-subject`, the pre-read of the XML
+  formats and LOSAT Web's ABI v1 inputs) with the reader of `blastn`, `blastp`, `tblastn` and
+  `tblastx`, so BLASTX no longer keeps a FASTA reader of its own, and ABI v1 reads BLASTX input as
+  the command line reads a file with the same bytes. Outputs do not change. A 35 MB `-subject` file
+  takes 0.33-0.87x the time (1 or 16 threads, with or without `-parse_deflines`) with 5-16 % less
+  peak memory, and large query files take 1-7 % less time (20 % with `-lcase_masking` at 16
+  threads). Two LOSAT-only refusals, a sequence longer than `Int4` and a `-parse_deflines` Seq-id
+  that names the other molecule, now have the other programs' wording and name the program that
+  refused (`RPSTBLASTN` for `rpstblastn`).

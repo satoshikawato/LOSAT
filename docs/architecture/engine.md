@@ -148,7 +148,7 @@ the diagram leaves out also close the cycle: `core` → `common` (`GapEditOp`), 
 | :--- | :--- | :--- | :--- |
 | `blastn` | `blast_engine::run` | `run_local`, `run_local_database` | megablast, blastn, dc-megablast, blastn-short, rmblastn; `blast_engine/run.rs` holds the search |
 | `blastp` | `blast_engine::run` | `run_local`, `run_local_database` | also the driver of psiblast and rpsblast (`args::BlastpApp`) |
-| `blastx` | `BlastxArgs::run` → `native::run` | `local::run_local`, `run_local_database`; Web ABI v1 `web::run_pair` | its own FASTA reader in `input.rs` |
+| `blastx` | `BlastxArgs::run` → `native::run` | `local::run_local`, `run_local_database`; Web ABI v1 `web::run_pair` | reads FASTA with `blastinput::fasta_reader`; `input_source.rs` gives each record BLASTX's form and cuts the reader batches of the command line, the library and the Web |
 | `tblastn` | `TblastnArgs::run` | `run_local`, `run_local_database`; Web ABI v1 `web::run_pair` | |
 | `tblastx` | `blast_engine::run` | `run_local`, `run_local_database` | `lookup/` is the protein word lookup that the other protein programs also use |
 | `psiblast` | `psiblast::run` → `blastp::run` | through `api` as `Program::Psiblast` | PSSM build and files, rounds, `-in_pssm` |
@@ -229,8 +229,8 @@ rpsblast yet.
 
 Known copies that remain: blastx keeps its own record type (`blastx/input.rs`, `FastaRecord`),
 made from the shared reader's record by `blastx/input_source.rs`, which also cuts the reader
-batches of the command line and of the library; each program has its own function that purges HSPs with common
-endpoints, written for its own HSP type; blastx has its own port of `hspfilter_culling.c`
+batches of the command line and of the library; each program has its own function that purges
+HSPs with common endpoints, written for its own HSP type; blastx has its own port of `hspfilter_culling.c`
 (`blastx/culling.rs`) instead of `core::hspfilter_culling`; and each of the five programs keeps its own report glue
 (`tabular.rs`, `blast_xml.rs`, `seqalign.rs`, `archive.rs`) in front of `report`.
 

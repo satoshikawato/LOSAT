@@ -7,7 +7,7 @@ import { computed } from 'vue';
 import { CUSTOM_OUTPUT } from 'losat/domain';
 import type { RunView } from '../application/coordinator';
 import { optionGrammar, type LoadedRun } from '../application/results';
-import { commandWords, userArgv } from '../domain/argv';
+import { commandWords, shellWord, userArgv } from '../domain/argv';
 import { COUNTS_FILE } from '../domain/counts';
 import { dateOf } from '../domain/download-sentences';
 import { fromText, worthSaying } from '../domain/input-parts';
@@ -30,6 +30,9 @@ const record = computed(() => props.run.record);
  */
 const searched = computed(() => props.run.snapshot.prints === undefined);
 const takesValue = computed(() => optionGrammar(props.loaded.description).takesValue);
+const commandEnv = computed(() =>
+  snapshot.value.database?.blastdbEnv ? { blastdb: snapshot.value.database.blastdbEnv } : undefined,
+);
 /** The -outfmt value of the output of the run's own -outfmt, if it has one. */
 const custom = computed(() => customOutfmt(snapshot.value.argv));
 /** A time in ISO 8601 form, local time (S13 screen review L5: "09/10/2026" read either way). */
@@ -57,7 +60,7 @@ const warningsPlace = computed(() => warningsPlaceParts(props.loaded.messages, p
 const noWarnings = computed(() => warningsPlace.value?.[0]?.text === NO_WARNINGS);
 const inputs = computed(() => [
   { role: 'Query', input: snapshot.value.query },
-  { role: 'Subject', input: snapshot.value.subject },
+  ...(snapshot.value.database === undefined ? [{ role: 'Subject', input: snapshot.value.subject }] : []),
 ]);
 </script>
 
@@ -88,6 +91,37 @@ const inputs = computed(() => [
             <!-- The file of the command is not the user's as given: what it is made of, and which records it leaves out (line WQA's D22, 2026-11-23). -->
             <template v-if="worthSaying(input.from)"><span :data-testid="`run-input-${role.toLowerCase()}-from`">From {{ fromText(input.from) }}</span><br /></template>
             <span class="muted small">SHA-256 {{ input.sha256 }}</span>
+          </dd>
+        </template>
+        <template v-if="searched && snapshot.database">
+          <dt>Database</dt>
+          <dd data-testid="run-database">
+            <code>{{ snapshot.database.name }}</code> ({{ snapshot.database.kind }}, {{ formatCount(snapshot.database.fileCount) }}
+            {{ snapshot.database.fileCount === 1 ? 'file' : 'files' }}, {{ formatBytes(snapshot.database.totalBytes) }}<template
+              v-if="snapshot.database.taxdb || snapshot.database.sqlite"
+            >,
+              {{ [snapshot.database.taxdb ? 'taxdb' : '', snapshot.database.sqlite ? 'taxonomy4blast.sqlite3' : ''].filter(Boolean).join(' + ') }}</template
+            >)
+            <template v-if="snapshot.database.blastdbEnv">
+              <br />
+              <span class="muted small" data-testid="run-database-blastdb">
+                CLI reproduction: run from the folder's parent with <code>{{ shellWord(`BLASTDB=${snapshot.database.blastdbEnv}`) }}</code>
+              </span>
+            </template>
+            <template v-if="snapshot.database.filterFiles && snapshot.database.filterFiles.length > 0">
+              <br />
+              <span class="muted small" data-testid="run-database-filters">
+                Filter lists:
+                {{ snapshot.database.filterFiles.map((f) => `${f.flag} ${f.name} (${formatBytes(f.size)})`).join(', ') }}
+              </span>
+            </template>
+          </dd>
+        </template>
+        <template v-if="searched && snapshot.filteringDb">
+          <dt>Repeats database</dt>
+          <dd data-testid="run-filtering-db">
+            <code>{{ snapshot.filteringDb.name }}</code> ({{ formatCount(snapshot.filteringDb.fileCount) }}
+            {{ snapshot.filteringDb.fileCount === 1 ? 'file' : 'files' }}, {{ formatBytes(snapshot.filteringDb.totalBytes) }})
           </dd>
         </template>
         <template v-if="snapshot.conffile">
@@ -165,10 +199,10 @@ const inputs = computed(() => [
       <h3>Command line</h3>
       <ul class="commands">
         <li v-for="format in loaded.description.formats" :key="format">
-          outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :words="commandWords(snapshot.argv, format)" :takes-value="takesValue" /></code>
+          outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :words="commandWords(snapshot.argv, format, commandEnv)" :takes-value="takesValue" /></code>
         </li>
         <li v-if="custom !== undefined">
-          outfmt {{ custom }}: <code data-testid="run-command-custom"><CommandText :words="commandWords(snapshot.argv, CUSTOM_OUTPUT)" :takes-value="takesValue" /></code>
+          outfmt {{ custom }}: <code data-testid="run-command-custom"><CommandText :words="commandWords(snapshot.argv, CUSTOM_OUTPUT, commandEnv)" :takes-value="takesValue" /></code>
         </li>
       </ul>
     </template>

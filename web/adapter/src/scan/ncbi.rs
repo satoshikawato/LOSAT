@@ -529,6 +529,10 @@ struct Builder {
     /// The residues of the data lines (the reader's `m_SeqData`, without the gaps): while there
     /// is none, a data line gets `CheckDataLine`.
     residues: u64,
+    /// Under `-parse_deflines` on nucleotide input, whether a data line has already carried a
+    /// protein-only residue (`E,F,I,J,L,O,P,Q,X,Z,*`): a record whose Seq-id names protein keeps
+    /// those letters in `m_SeqData`, so later data lines skip `CheckDataLine` (`fasta.cpp:715`).
+    any_protein_residue: bool,
     residue_counts: Box<[u64; 256]>,
 }
 
@@ -541,6 +545,7 @@ impl Builder {
             sequence_offset,
             length: 0,
             residues: 0,
+            any_protein_residue: false,
             residue_counts: Box::new([0; 256]),
         }
     }
@@ -729,7 +734,12 @@ impl Records {
         let check = self
             .current
             .as_ref()
-            .is_some_and(|current| current.residues == 0)
+            .is_some_and(|current| {
+                current.residues == 0
+                    && !(self.config.parse_deflines
+                        && !self.config.protein
+                        && current.any_protein_residue)
+            })
             .then(Check::new);
         if byte == b'>' {
             self.state = LineState::DataAngle(Prefix::new(byte), check);
@@ -826,7 +836,17 @@ impl Records {
                 *semicolon = true;
                 return;
             }
-            CharType::Other => return,
+            CharType::Other => {
+                if self.config.parse_deflines
+                    && !self.config.protein
+                    && PROTEIN_TYPES[byte as usize] == CharType::Residue
+                {
+                    if let Some(current) = self.current.as_mut() {
+                        current.any_protein_residue = true;
+                    }
+                }
+                return;
+            }
         }
         let mut residue = byte.to_ascii_uppercase();
         if !self.config.protein && residue == b'U' {

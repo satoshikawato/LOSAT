@@ -235,7 +235,7 @@ pub fn register(
         .map_err(reader_error)?;
         (records, QueryEnd::Input)
     };
-    check_scan(role_name, &scanned, &records, &end)?;
+    check_scan(role_name, config.protein, &scanned, &records, &end)?;
     let deflines =
         read_deflines(bytes, config, &scanned.records, &records).map_err(reader_error)?;
     let mut response = String::new();
@@ -361,7 +361,7 @@ fn tabular_id(record: &FastaRecord, role: u32, protein: bool) -> String {
 ///
 /// The errors are the CLI's texts, in the CLI's order. A subject's error fails here, as the CLI
 /// reads every subject before any query. The query's records are those that the CLI's query
-/// batches read before a reader's error (an id of the other molecule under `-parse_deflines`, a
+/// batches read before a reader's error (a refused id under `-parse_deflines`, a
 /// line that is not plausible data), and the error is kept with the query handle (`QueryEnd`): the
 /// run meets it in the batch that reads the record, after the reports of the batches before, as
 /// the CLI does (review of line WQA's D7, L1, 2026-11-19; line WQA's D10). The reader has NCBI's
@@ -399,9 +399,13 @@ pub fn register_inputs(
         )
         .map_err(|error| error.to_string())
     };
+    let parse_deflines = words.iter().any(|word| *word == "-parse_deflines");
     let scan = |role: u32| {
         let bytes = if role == ROLE_QUERY { query } else { subject };
-        scan::scan_ncbi(bytes, reader_config(program, role, data_loaders))
+        scan::scan_ncbi(
+            bytes,
+            reader_config(program, role, data_loaders).with_parse_deflines(parse_deflines),
+        )
     };
     // A database is read by the run, not here: its subject scan is empty and is not checked.
     let subject_scan = if database {
@@ -443,8 +447,20 @@ pub fn register_inputs(
         query_end,
         subject: subjects,
     } = read(query, subject)?;
-    check_scan("query", &query_scan, &queries, &query_end)?;
-    check_scan("subject", &subject_scan, &subjects, &QueryEnd::Input)?;
+    check_scan(
+        "query",
+        reader_of(program, ROLE_QUERY).1,
+        &query_scan,
+        &queries,
+        &query_end,
+    )?;
+    check_scan(
+        "subject",
+        reader_of(program, ROLE_SUBJECT).1,
+        &subject_scan,
+        &subjects,
+        &QueryEnd::Input,
+    )?;
     let run: Vec<String> = words.iter().map(|word| word.to_string()).collect();
     let mut store = store().lock().expect("input store");
     let query_handle = store.next_handle()?;
@@ -495,13 +511,16 @@ pub fn register_inputs(
 }
 
 /// Fails unless the index scan found the reader's records: for each record the same ID, length and
-/// residue counts (the stored residues upper-cased; plan TD-8), and the same number, or where the
-/// reader's error ended the records (`end`), at least as many: the scan's records past an error
-/// that it does not meet (an id under `-parse_deflines`), before its own stop (`Scanned::stop`) or
-/// without one, and as many where the scan met the reader's own error. A reader that stops where
-/// the scan reads on has no error (review M1, 2026-11-20).
+/// residue counts (the stored residues upper-cased; plan TD-8) — or, when a `-parse_deflines`
+/// Seq-id named the other molecule (`BelievedIds::named_molecule`), the exact alphabet relationship
+/// between the scan's program alphabet and the reader's Seq-id alphabet — and the same number, or
+/// where the reader's error ended the records (`end`), at least as many: the scan's records past
+/// an error that it does not meet (an id under `-parse_deflines`), before its own stop
+/// (`Scanned::stop`) or without one, and as many where the scan met the reader's own error. A
+/// reader that stops where the scan reads on has no error (review M1, 2026-11-20).
 fn check_scan(
     role: &str,
+    protein: bool,
     scanned: &scan::Scanned,
     records: &[FastaRecord],
     end: &QueryEnd,
@@ -519,9 +538,42 @@ fn check_scan(
         for &byte in record.seq() {
             counts[byte.to_ascii_uppercase() as usize] += 1;
         }
-        (record.believed().is_some() || scan.id == record_id(record.title()))
-            && scan.length == record.seq().len() as u64
-            && *scan.residue_counts == counts
+        let other_molecule = record
+            .believed()
+            .is_some_and(|ids| ids.named_molecule == Some(!protein));
+        let letters = if !other_molecule {
+            scan.length == record.seq().len() as u64 && *scan.residue_counts == counts
+        } else if protein {
+            // Protein program reading a nucleotide-named Seq-id: IUPACna letters stay as-is,
+            // `>?` gap lines emit `X` in both while data-line `X` is dropped, and every other
+            // protein-only letter is dropped.
+            record.seq().len() as u64 <= scan.length
+                && counts
+                    .iter()
+                    .zip(scan.residue_counts.iter())
+                    .enumerate()
+                    .all(|(byte, (&kept, &scanned))| match byte as u8 {
+                        b'A' | b'B' | b'C' | b'D' | b'G' | b'H' | b'K' | b'M' | b'N' | b'R'
+                        | b'S' | b'T' | b'U' | b'V' | b'W' | b'Y' => kept == scanned,
+                        b'X' => kept <= scanned,
+                        _ => kept == 0,
+                    })
+        } else {
+            // Nucleotide program reading a protein-named Seq-id: non-IUPACna letters become `N`.
+            record.seq().len() as u64 >= scan.length
+                && counts
+                    .iter()
+                    .zip(scan.residue_counts.iter())
+                    .enumerate()
+                    .all(|(byte, (&kept, &scanned))| {
+                        if byte == b'N' as usize {
+                            kept >= scanned
+                        } else {
+                            kept == scanned
+                        }
+                    })
+        };
+        (record.believed().is_some() || scan.id == record_id(record.title())) && letters
     };
     if !count
         || scanned
@@ -698,20 +750,20 @@ mod tests {
         let scanned =
             scan::scan_ncbi(bytes, reader_config(Program::Blastn, ROLE_QUERY, true)).unwrap();
         let input = QueryEnd::Input;
-        assert!(check_scan("query", &scanned, &records, &input).is_ok());
+        assert!(check_scan("query", false, &scanned, &records, &input).is_ok());
 
         let mut fewer = scanned.clone();
         fewer.records.truncate(1);
-        assert!(check_scan("query", &fewer, &records, &input).is_err());
+        assert!(check_scan("query", false, &fewer, &records, &input).is_err());
         let mut renamed = scanned.clone();
         renamed.records[1].id = "c".to_string();
-        assert!(check_scan("query", &renamed, &records, &input).is_err());
+        assert!(check_scan("query", false, &renamed, &records, &input).is_err());
         let mut longer = scanned.clone();
         longer.records[0].length += 1;
-        assert!(check_scan("query", &longer, &records, &input).is_err());
+        assert!(check_scan("query", false, &longer, &records, &input).is_err());
         let mut recounted = scanned.clone();
         recounted.records[0].residue_counts[b'A' as usize] += 1;
-        assert!(check_scan("query", &recounted, &records, &input).is_err());
+        assert!(check_scan("query", false, &recounted, &records, &input).is_err());
 
         // Where the reader's error ends the records: the records before it, and the scan's stop
         // where the scan meets that error too (line WQA's D10, 2026-11-19).
@@ -722,19 +774,19 @@ mod tests {
             scan::scan_ncbi(bad, reader_config(Program::Blastn, ROLE_QUERY, true)).unwrap();
         assert_eq!(stopped.records, scanned.records);
         assert_eq!(stopped.stop.as_ref().map(|stop| stop.offset), Some(18));
-        assert!(check_scan("query", &stopped, &read, &end).is_ok());
-        assert!(check_scan("query", &stopped, &read, &input).is_err());
-        assert!(check_scan("query", &scanned, &read, &input).is_ok());
+        assert!(check_scan("query", false, &stopped, &read, &end).is_ok());
+        assert!(check_scan("query", false, &stopped, &read, &input).is_err());
+        assert!(check_scan("query", false, &scanned, &read, &input).is_ok());
         // An error that the scan does not meet: the scan has more records, never fewer.
-        assert!(check_scan("query", &scanned, &read[..1], &end).is_ok());
-        assert!(check_scan("query", &fewer, &read, &end).is_err());
+        assert!(check_scan("query", false, &scanned, &read[..1], &end).is_ok());
+        assert!(check_scan("query", false, &fewer, &read, &end).is_err());
         let mut stopped_early = stopped.clone();
         stopped_early.records.truncate(1);
-        assert!(check_scan("query", &stopped_early, &read[..1], &end).is_ok());
-        assert!(check_scan("query", &stopped_early, &read, &end).is_err());
+        assert!(check_scan("query", false, &stopped_early, &read[..1], &end).is_ok());
+        assert!(check_scan("query", false, &stopped_early, &read, &end).is_err());
         // The reader's error before the scan's own stop (an id under `-parse_deflines`): the scan
         // has more records (review M1, 2026-11-20).
-        assert!(check_scan("query", &stopped, &read[..1], &end).is_ok());
+        assert!(check_scan("query", false, &stopped, &read[..1], &end).is_ok());
     }
 
     /// The `records` of a *register* response.
@@ -1049,18 +1101,18 @@ mod tests {
     }
 
     // Under `-parse_deflines` the reader's error can come before the scan's own stop (review M1,
-    // 2026-11-20): a Seq-id of the other molecule (`blastp -parse_deflines`: "Error: the Seq-id …
-    // names the other molecule" on the command line), or a first record without a defline, before
-    // a line that the scan stops at too. The inputs register with the reader's error, as the
-    // command line ends there.
+    // 2026-11-20): a refused database-ordinal Seq-id (`blastp -parse_deflines`: "Error: the query
+    // Seq-id ... names a database ordinal" on the command line), or a first record without a
+    // defline, before a line that the scan stops at too. The inputs register with the reader's
+    // error, as the command line ends there.
     #[test]
     fn the_readers_error_can_come_before_the_scans_stop() {
         let words = ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"];
         let subject = b">s1\nMKVLAAGIVA\n";
         let cases: [(&[u8], &str, usize); 2] = [
             (
-                b">p1\nMKVLAAGIVA\n>ref|NM_000001.1|\nMKVLAAGIVA\n>bad\nMKVL%%%%\n",
-                "names the other molecule",
+                b">p1\nMKVLAAGIVA\n>gnl|BL_ORD_ID|1\nMKVLAAGIVA\n>bad\nMKVL%%%%\n",
+                "names a database ordinal",
                 1,
             ),
             (
@@ -1095,6 +1147,58 @@ mod tests {
                 release(handle).unwrap();
             }
         }
+    }
+
+    // Under `-parse_deflines`, a Seq-id that names the other molecule is read with that molecule's
+    // alphabet (line RG-XT item X7-5): `check_scan` accepts the resulting length and counts, and
+    // the response reports the reader's length.
+    #[test]
+    fn other_molecule_parse_deflines_registers_with_readers_length() {
+        let bp_words = ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"];
+        let (qh, sh, resp) = register_inputs(
+            &bp_words,
+            b">p1\nMKVLAAGIVA\n",
+            b">gnl|TI|12345 trace\nMKVLEFAAGIVA\n",
+        )
+        .unwrap();
+        // M, K, V, A, A, G, V, A kept (8); L, E, F, I dropped by nucleotide alphabet.
+        assert!(resp.contains(r#""length":8"#), "blastp: {resp}");
+        release(qh).unwrap();
+        release(sh).unwrap();
+
+        let bn_words = ["blastn", "-query", "q", "-subject", "s", "-parse_deflines"];
+        let (qh, sh, resp) = register_inputs(
+            &bn_words,
+            b">n1\nACGTACGT\n",
+            b">sp|P99995.1|NAME_W\nACGEFLPQ\n",
+        )
+        .unwrap();
+        // All 8 letters kept by protein alphabet; E, F, L, P, Q become N.
+        assert!(resp.contains(r#""length":8"#), "blastn: {resp}");
+        release(qh).unwrap();
+        release(sh).unwrap();
+
+        // Protein-only letters on the first data line of a protein-named nucleotide record fill
+        // `m_SeqData`, so a later non-plausible line skips `CheckDataLine` (NCBI exit 0).
+        let (qh, sh, resp) = register_inputs(
+            &bn_words,
+            b">sp|P99995.1|NAME_W\nEEEEEE\n%%%%%%\n",
+            b">sp|P99996.1|NAME_S\nEEEEEE\n%%%%%%\n",
+        )
+        .unwrap();
+        assert!(resp.contains(r#""length":6"#), "{resp}");
+        assert!(!resp.contains("reader_error"), "{resp}");
+        release(qh).unwrap();
+        release(sh).unwrap();
+
+        // Conversely, a nucleotide-named protein record drops `EEEEEE` (`m_SeqData` stays empty),
+        // so `%%%%%%` triggers `CheckDataLine` (subject fails registration; query records error).
+        let bad_ti = b">gnl|TI|12345 trace\nEEEEEE\n%%%%%%\n";
+        assert!(register_inputs(&bp_words, b">p1\nMKVLAAGIVA\n", bad_ti).is_err());
+        let (qh, sh, resp) = register_inputs(&bp_words, bad_ti, b">p1\nMKVLAAGIVA\n").unwrap();
+        assert!(resp.contains("doesn't look like plausible data"), "{resp}");
+        release(qh).unwrap();
+        release(sh).unwrap();
     }
 
     // Another program's handle cannot bring a record to a run.

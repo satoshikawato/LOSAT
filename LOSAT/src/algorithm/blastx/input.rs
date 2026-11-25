@@ -447,6 +447,7 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
     let mut believed_keys = std::collections::HashSet::new();
     let mut believed_generated = 0;
     let mut believed_molecule = None;
+    let mut bad_positions = Vec::new();
     let mut batch = ReaderBatch {
         range,
         keep_whole: keep_defline,
@@ -635,63 +636,42 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
         if raw_residues == 0 {
             check_data_line(line, line_index + 1)?;
         }
-        if believed_molecule.is_some_and(|named| named != protein)
-            && !crate::blastinput::fasta_reader::believed::reads_the_same_in_both(line)
-        {
-            anyhow::bail!(
-                "the Seq-id of the record on line {} names the other molecule under \
-                 -parse_deflines (NCBI BLAST+ reads its letters as that molecule); this is not \
-                 supported by LOSAT's BLASTX",
-                line_index + 1
+        // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:809-1016
+        // Scan data lines through the common reader so one owner decides which letters are kept.
+        let before_len = record.sequence.len();
+        let outcome = crate::blastinput::fasta_reader::reader::scan_data_line(
+            line,
+            crate::blastinput::fasta_reader::reader::DataLineAlphabet::new(
+                believed_molecule,
+                protein,
+            ),
+            true,
+            &mut record.sequence,
+            &mut bad_positions,
+            |masked, start, count| {
+                if masked && lowercase {
+                    let first = start as i32;
+                    let last_pos = first + count as i32 - 1;
+                    if let Some(last) = record
+                        .lowercase_masks
+                        .last_mut()
+                        .filter(|r| r.1 + 1 == first)
+                    {
+                        last.1 = last_pos;
+                    } else {
+                        record.lowercase_masks.push((first, last_pos));
+                    }
+                }
+            },
+        );
+        raw_residues += outcome.residues_added;
+        if !protein && outcome.residues_added > 0 {
+            crate::blastinput::fasta_reader::reader::encode_nucleotide_residues(
+                &mut record.sequence[before_len..],
+                believed_molecule,
             );
         }
-        let mut bad = Vec::new();
-        let mut hyphens = false;
-        for (pos, &c) in line.iter().enumerate() {
-            if c == b';' {
-                break;
-            }
-            // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:930-931
-            if is_space(c) {
-                continue;
-            }
-            if c == b'-' {
-                hyphens = true;
-                continue;
-            }
-            let upper = c.to_ascii_uppercase();
-            let allowed = if protein {
-                // The letters `ABCDEFGHIJKLMNOPQRSTUVWXYZ*`, tested without a table in memory:
-                // `contains` on a static table first steps byte by byte to an aligned address,
-                // so its cost per letter depended on where the linker placed the table.
-                matches!(upper, b'A'..=b'Z' | b'*')
-            } else {
-                b"ABCDGHKMNRSTUVWY".contains(&upper)
-            };
-            if !allowed {
-                bad.push(pos + 1);
-                continue;
-            }
-            raw_residues += 1;
-            let offset = record.sequence.len() as i32;
-            record.sequence.push(if !protein && upper == b'U' {
-                b'T'
-            } else {
-                upper
-            });
-            if lowercase && c.is_ascii_lowercase() {
-                if let Some(last) = record
-                    .lowercase_masks
-                    .last_mut()
-                    .filter(|r| r.1 + 1 == offset)
-                {
-                    last.1 = offset;
-                } else {
-                    record.lowercase_masks.push((offset, offset));
-                }
-            }
-        }
-        if hyphens {
+        if outcome.hyphen_seen {
             let warning = InputWarning {
                 line: line_index + 1,
                 kind: "hyphens",
@@ -701,11 +681,11 @@ fn parse_fasta_lines<L: AsRef<[u8]>>(
             warn(&warning)?;
             record.warnings.push(warning);
         }
-        if !bad.is_empty() {
+        if !bad_positions.is_empty() {
             let warning = InputWarning {
                 line: line_index + 1,
                 kind: "invalid_residues",
-                positions: bad,
+                positions: bad_positions.iter().map(|&p| p as usize + 1).collect(),
                 text: crate::blastinput::fasta_reader::believed::nuc_or_prot(believed_molecule)
                     .as_bytes()
                     .to_vec(),
@@ -813,7 +793,7 @@ fn read_believed_defline(
     }
     Ok(BelievedLine {
         title_search: parsed.title_search,
-        ids: std::sync::Arc::new(BelievedIds::new(ids, read.strand)),
+        ids: std::sync::Arc::new(BelievedIds::new(ids, read.strand).with_named_molecule(molecule)),
         molecule,
     })
 }

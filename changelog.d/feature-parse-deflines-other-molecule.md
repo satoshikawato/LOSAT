@@ -1,0 +1,1 @@
+- Under `-parse_deflines`, FASTA records whose Seq-id names the other molecule (for example a nucleotide `gnl|TI|` id on protein input or a protein `sp|` id on nucleotide input) are now read with NCBI BLAST+ 2.17.0's deterministic alphabet and encoding instead of being refused, and BLASTX's data-line scanner now shares the common reader path.

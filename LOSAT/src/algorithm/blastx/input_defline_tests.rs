@@ -252,3 +252,61 @@ fn a_gap_line_reads_as_the_reader_of_the_other_programs_reads_it() {
         b"CFastaReader: Bad gap size at line 3\nCFastaReader: Problem parsing gap mods at line 3\nUnknown gap-type: caf\xe9\n"
     );
 }
+
+// `xSetSeqMol` + `AssignMolType` + `CSeqportUtil::Pack` through BLASTX's reader (folded into
+// `fasta_reader::reader::scan_data_line`, line RG-XT item X7-5): a protein subject with a
+// nucleotide-named id (`gnl|TI|`) drops non-IUPACna letters with NCBI's nucleotide warning; a
+// nucleotide query with a protein-named id (`sp|`) keeps protein letters without warning, maps
+// U->T and non-IUPACna letters to N, and preserves lowercase masks.
+#[test]
+fn blastx_other_molecule_accession_follows_ncbis_reading() {
+    let read_pd = |input: &[u8], protein: bool| {
+        let mut warnings = Vec::new();
+        let mut stream = FastaStream::new(Cursor::new(input.to_vec()));
+        stream.parse_deflines = true;
+        let records = parse_fasta_stream_keeping(
+            &mut stream,
+            protein,
+            true,
+            100,
+            false,
+            None,
+            &mut |_| Ok(()),
+            &mut |warning| crate::algorithm::blastx::native::reader_warning(warning, &mut warnings),
+        )
+        .unwrap();
+        (records, String::from_utf8(warnings).unwrap())
+    };
+    let (records, warnings) = read_pd(b">gnl|TI|12347 trace\nMKLVEFu\n", true);
+    assert_eq!(records[0].sequence, b"MKVU");
+    assert_eq!(records[0].lowercase_masks, vec![(3, 3)]);
+    assert_eq!(
+        warnings,
+        "FASTA-Reader: Ignoring invalid nucleotide residues at position(s): On line 2: 3, 5-6\n"
+    );
+
+    // Nucleotide queries under protein-named accessions (including ranged ids and `>?` gaps).
+    let nuc_cases: [(&[u8], &[u8], &[(i32, i32)]); 2] = [
+        (
+            b">sp|P99995.1|NAME_W\nACGUefILPQXZ*\n",
+            b"ACGTNNNNNNNNN",
+            &[(4, 5)],
+        ),
+        (b">sp|P99995.1:1-20\nae\n>?2\nfgA\n", b"ANNNNGA", &[(0, 5)]),
+    ];
+    for (input, seq, masks) in nuc_cases {
+        let (records, warnings) = read_pd(input, false);
+        assert_eq!(records[0].sequence, seq);
+        assert_eq!(records[0].lowercase_masks, masks);
+        assert!(warnings.is_empty(), "{warnings}");
+    }
+
+    // Lowercase mask across a `>?` gap line on a ranged nucleotide-named protein subject.
+    let (records, warnings) = read_pd(b">gnl|TI|12347:1-20 trace\naeu\n>?2\nfgcA\n", true);
+    assert_eq!(records[0].sequence, b"AUXXGCA");
+    assert_eq!(records[0].lowercase_masks, vec![(0, 5)]);
+    assert!(
+        warnings.contains("On line 2: 2") && warnings.contains("On line 4: 1"),
+        "{warnings}"
+    );
+}

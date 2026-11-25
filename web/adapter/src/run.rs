@@ -2865,10 +2865,10 @@ mod tests {
     // after the batches before, as the CLI's batches do (line WQA's D10, 2026-11-19; before,
     // `register` refused the input and `register_inputs` failed before the run, with the reader's
     // error where the CLI ends with an error of an earlier batch): a line that is not plausible data
-    // (`register`), and under `-parse_deflines` an id of the other molecule (`register_inputs`, whose
-    // response lists the scan's records past the error without a `shown_id`). BLASTP reads 10000
-    // letters a batch: 10 records of 1100 fill the first. A failed run emits no report (the host
-    // discards it); the library's tests compare the reports before the error with the CLI's
+    // (`register`), and under `-parse_deflines` a refused database-ordinal id (`register_inputs`,
+    // whose response lists the scan's records past the error without a `shown_id`). BLASTP reads
+    // 10000 letters a batch: 10 records of 1100 fill the first. A failed run emits no report (the
+    // host discards it); the library's tests compare the reports before the error with the CLI's
     // (`LOSAT/src/api/reader_end_tests.rs`).
     #[test]
     fn a_query_reader_error_ends_the_run_in_its_batch() {
@@ -2905,16 +2905,13 @@ mod tests {
         let (result, _) = registered_run(&words, &bad, &subject).unwrap();
         assert_eq!(result.unwrap_err(), format!("{cli}\n"));
 
-        // `-parse_deflines`: the record `ref|NM_000001.1|` names a nucleotide sequence, in batch 2.
+        // `-parse_deflines`: the record `gnl|BL_ORD_ID|1` names a database ordinal, in batch 2.
         let parse = [&words[..], &["-parse_deflines"]].concat();
         let mut other = fasta(&names);
-        other.extend_from_slice(&fasta(&["ref|NM_000001.1|", "q12"]));
+        other.extend_from_slice(&fasta(&["gnl|BL_ORD_ID|1", "q12"]));
         let (result, _) = registered_run(&parse, &other, &subject).unwrap();
         let error = result.unwrap_err();
-        assert!(
-            error.contains("names the other molecule under -parse_deflines"),
-            "{error}"
-        );
+        assert!(error.contains("names a database ordinal"), "{error}");
         let (query, subject_handle, response) =
             crate::store::register_inputs(&parse, &other, &subject).unwrap();
         crate::store::release(query).unwrap();
@@ -2922,7 +2919,7 @@ mod tests {
         let split = response.find(",\"subject\":").unwrap();
         let listed = &response[..split];
         assert!(
-            listed.contains(r#"{"index":11,"id":"ref|NM_000001.1|","length":1100,"shown_id":null},{"index":12,"id":"q12","length":1100,"shown_id":null}],"reader_error":""#),
+            listed.contains(r#"{"index":11,"id":"gnl|BL_ORD_ID|1","length":1100,"shown_id":null},{"index":12,"id":"q12","length":1100,"shown_id":null}],"reader_error":""#),
             "{listed}"
         );
         assert!(
@@ -2933,11 +2930,11 @@ mod tests {
             "{listed}"
         );
         // Two records of one id in batch 1 end the run there, before the reading of batch 2 meets
-        // the record of the other molecule, as on the CLI.
+        // the refused database-ordinal id, as on the CLI.
         let mut dup_names = names.clone();
         dup_names[1] = "q1";
         let mut dup = fasta(&dup_names);
-        dup.extend_from_slice(&fasta(&["ref|NM_000001.1|"]));
+        dup.extend_from_slice(&fasta(&["gnl|BL_ORD_ID|1"]));
         let (result, _) = registered_run(&parse, &dup, &subject).unwrap();
         let error = result.unwrap_err();
         assert!(

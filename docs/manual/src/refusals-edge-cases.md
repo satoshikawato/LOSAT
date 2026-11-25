@@ -129,7 +129,7 @@ Strategy files:
 - A mask that runs to the end after the part from the start, with masks stored after it: NCBI searches that part past its end without the later masks and applies them only to the letters of its alignments. Without later masks such a sequence is searched over that part (see [Differences](differences.md)).
 - A mask that ends before it starts, or ends past its sequence.
 - The refusals other than those found during the search come before the search, so before the first byte of output, and name the first such sequence by its position in the database.
-- `tblastn` and `tblastx` refuse every database whose masks overlap or are stored out of order.
+- `tblastn` and `tblastx` search masks that overlap or nest in the order of their start as NCBI BLAST+ does, and refuse the cases in their sections.
 
 ## blastx
 
@@ -160,6 +160,10 @@ Strategy files:
 - For each of these `-window_size 0` refusals but the last, LOSAT writes the results of the query batches before (with `-in_pssm`, one batch: the report's header) and then stops with the error.
 - With `-db_hard_mask`, where a sequence's masks leave a reading frame an empty part at its start (a mask within the sequence's first two bases, or within the one or two bases after its last whole codon, for example [1200, 1202) of 1,202 bases, or an empty mask at its start), NCBI searches the next part as the whole frame, then frees memory that it did not allocate and crashes in every run. LOSAT searches the frame as outside the mask; see [Differences](differences.md).
 - Where a frame's first part, from the frame's first letter, ends at a mask with no other part of the frame after it (masks at or near either end of a sequence), LOSAT searches the part alone; see [Differences](differences.md).
+- With `-db_hard_mask` on a database whose masks overlap or nest in the order of their start, `tblastn` searches the database as NCBI BLAST+ does, searching any sequence whose hits would reach another sequence's diagonal entries on its own as `blastp` and `blastx` do (see [Differences](differences.md#-db_hard_mask-with-overlapping-masks-that-reach-a-neighbouring-sequence)), with the same rows at every `-num_threads`, and refuses the cases below (one refused sequence refuses the whole database, exit status 1):
+  - Masks stored out of the order of their start, or a mask that ends before it starts or past its sequence (refused before the search).
+  - A sequence with overlapping masks one of whose reading frames NCBI searches whole past the later masks (a part from the frame's start ending at a mask with no later part after it, or an empty first part before overlapping masks; refused before the search).
+  - A part between overlapping masks shorter than the word whose seed NCBI's gapped search never ends on (its negative length sets the bounds of NCBI's interval tree, which splits nodes without end while memory grows), or whose alignments meet another part's in NCBI's merge across an overlap read past the list of ranges (refused during the search, naming the sequence by OID). Also refused before the search for a query whose lookup holds residue 0 (no FASTA query does): a short part whose one word reads past a reading frame's end.
 - With `-use_sw_tback`, a query and subject whose Smith-Waterman alignment NCBI never finishes is refused. Only a large `-evalue` or a small search space (`-searchsp`, `-dbsize`, or a small query and subject) can reach it.
 - With `-use_sw_tback`, a query batch on which NCBI crashes is refused: one whose last Smith-Waterman alignment fails after the batch's first query has kept one. Where the first query has kept none, the batch ends with NCBI's `BLAST engine error: Traceback failed`, and with LOSAT's `LOSAT engine error: Traceback failed`.
 - With `-use_sw_tback` and `-ungapped`, NCBI's traceback still sets up the Smith-Waterman alignment, reads gapped statistics that an ungapped search never computes, and crashes at every query batch it searches, with hits or without. LOSAT refuses at the first query batch that it searches, as `blastx` does.
@@ -175,6 +179,7 @@ Strategy files:
 - LOSAT writes the results of the query batches before and then stops with the error.
 - An extension that passes into the next frame without scoring higher there gives NCBI's output (apart from the version line, which names LOSAT).
 - `-db_hard_mask` on the sequences described under `tblastn` is searched as in `tblastn`: a frame after an empty part at its start whole (its masked bases stay masked), and a part that ends before its frame's end alone; see [Differences](differences.md).
+- With `-db_hard_mask` on a database whose masks overlap or nest in the order of their start, `tblastx` searches the database as NCBI BLAST+ does, searching any sequence whose hits would reach another sequence's diagonal entries on its own as `blastp` and `blastx` do (see [Differences](differences.md#-db_hard_mask-with-overlapping-masks-that-reach-a-neighbouring-sequence)), with the same rows at every `-num_threads`, and refuses the same shapes as `tblastn` before the search (masks stored out of start order or ending before they start or past the sequence, and a reading frame searched whole past later overlapping masks) as well as, during the search, a short part whose alignments meet another part's in NCBI's merge across an overlap read past its list of ranges. (`tblastx` is ungapped, so NCBI's endless gapped interval-tree split does not occur.)
 
 ## Alias files and database arithmetic
 

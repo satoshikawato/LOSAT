@@ -163,6 +163,22 @@ impl RequestKind {
         matches!(self, RequestKind::Rpsblast | RequestKind::Rpstblastn)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_program.h:72-90
+    /// Whether the subject sequences are nucleotide (`Blast_SubjectIsNucleotide`):
+    /// BLASTN, TBLASTN (including PSI-TBLASTN with `-in_pssm`) and TBLASTX search nucleotide
+    /// subjects; BLASTP, PSIBLAST, BLASTX, RPSBLAST and RPSTBLASTN search protein or profile
+    /// databases.
+    pub fn subject_is_nucleotide(self) -> bool {
+        matches!(
+            self,
+            RequestKind::Blastn
+                | RequestKind::Tblastn
+                | RequestKind::PsiTblastn
+                | RequestKind::Tblastx
+        )
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-74
     /// The setters that the handle's constructor calls after defaults mode, after the
     /// `EvalueThreshold` that every handle records: psiblast's PSSM engine defaults

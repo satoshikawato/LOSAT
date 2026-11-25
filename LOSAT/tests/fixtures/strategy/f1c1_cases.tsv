@@ -1,0 +1,325 @@
+# Frozen official NCBI BLAST+ 2.17.0 bytes for -export_search_strategy F1c-1 stream model,
+# write-failure handling, shared/aliased non-`-` file sinks, and 2>&1 merged diagnostics.
+# Columns: name, program, env, stdout, fsize, setup, args, rc
+# - env: comma-separated KEY=VAL (supports {rps:NAME}), or `-`.
+# - stdout: pipe | file | append | full | merged
+# - fsize: `-` or RLIMIT_FSIZE byte limit (SIGXFSZ ignored; stdout/stderr on pipes).
+# - setup: `-` or `symlink` (creates {dir}/F empty and symlink {dir}/L -> F).
+# - args: space-separated CLI arguments; {f}={dir}/F, {dot}={dir}/./F, {lnk}={dir}/L.
+# - rc: exit code (e.g. 0, 1, 6) or signal (`sig:6` for SIGABRT).
+name	program	env	stdout	fsize	setup	args	rc
+m.blastp.f0.fullm	blastp	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy /dev/full	0
+m.blastp.f0.fsz3000m	blastp	BATCH_SIZE=150	merged	3000	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy {f}	0
+m.blastp.f1.fullm	blastp	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 1 -export_search_strategy /dev/full	0
+m.blastp.f1.fsz3000m	blastp	BATCH_SIZE=150	merged	3000	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 1 -export_search_strategy {f}	0
+m.blastp.f2.fullm	blastp	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 2 -export_search_strategy /dev/full	0
+m.blastp.f2.fsz3000m	blastp	BATCH_SIZE=150	merged	3000	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 2 -export_search_strategy {f}	0
+m.blastp.f3.fullm	blastp	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 3 -export_search_strategy /dev/full	0
+m.blastp.f3.fsz3000m	blastp	BATCH_SIZE=150	merged	3000	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 3 -export_search_strategy {f}	0
+m.blastp.f4.fullm	blastp	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 4 -export_search_strategy /dev/full	0
+m.blastp.f4.fsz3000m	blastp	BATCH_SIZE=150	merged	3000	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 4 -export_search_strategy {f}	0
+m.blastp.f5.fullm	blastp	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 5 -export_search_strategy /dev/full	0
+m.blastp.f6.fullm	blastp	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/full	0
+m.blastp.f7.fullm	blastp	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 7 -export_search_strategy /dev/full	0
+m.blastp.f11.fullm	blastp	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy /dev/full	0
+m.tblastn.f0.fullm	tblastn	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -export_search_strategy /dev/full	0
+m.tblastn.f0.fsz3000m	tblastn	BATCH_SIZE=150	merged	3000	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -export_search_strategy {f}	0
+m.tblastn.f1.fullm	tblastn	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 1 -export_search_strategy /dev/full	0
+m.tblastn.f1.fsz3000m	tblastn	BATCH_SIZE=150	merged	3000	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 1 -export_search_strategy {f}	0
+m.tblastn.f2.fullm	tblastn	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 2 -export_search_strategy /dev/full	0
+m.tblastn.f2.fsz3000m	tblastn	BATCH_SIZE=150	merged	3000	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 2 -export_search_strategy {f}	0
+m.tblastn.f3.fullm	tblastn	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 3 -export_search_strategy /dev/full	0
+m.tblastn.f3.fsz3000m	tblastn	BATCH_SIZE=150	merged	3000	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 3 -export_search_strategy {f}	0
+m.tblastn.f4.fullm	tblastn	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 4 -export_search_strategy /dev/full	0
+m.tblastn.f4.fsz3000m	tblastn	BATCH_SIZE=150	merged	3000	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 4 -export_search_strategy {f}	0
+m.tblastn.f5.fullm	tblastn	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 5 -export_search_strategy /dev/full	0
+m.tblastn.f6.fullm	tblastn	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -export_search_strategy /dev/full	0
+m.tblastn.f7.fullm	tblastn	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 7 -export_search_strategy /dev/full	0
+m.tblastn.f11.fullm	tblastn	BATCH_SIZE=150	merged	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 11 -export_search_strategy /dev/full	0
+m.psiblast.f0.fullm	psiblast	-	merged	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy /dev/full	0
+m.psiblast.f0.fsz3000m	psiblast	-	merged	3000	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy {f}	0
+m.psiblast.f5.fullm	psiblast	-	merged	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 5 -export_search_strategy /dev/full	0
+m.psiblast.f6.fullm	psiblast	-	merged	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy /dev/full	0
+m.psiblast.f7.fullm	psiblast	-	merged	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 7 -export_search_strategy /dev/full	0
+m.psiblast.f11.fullm	psiblast	-	merged	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 11 -export_search_strategy /dev/full	0
+m.rpsblast.f0.fullm	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 0 -export_search_strategy /dev/full	0
+m.rpsblast.f0.fsz3000m	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	3000	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 0 -export_search_strategy {f}	0
+m.rpsblast.f1.fullm	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 1 -export_search_strategy /dev/full	0
+m.rpsblast.f1.fsz3000m	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	3000	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 1 -export_search_strategy {f}	0
+m.rpsblast.f2.fullm	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 2 -export_search_strategy /dev/full	0
+m.rpsblast.f2.fsz3000m	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	3000	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 2 -export_search_strategy {f}	0
+m.rpsblast.f3.fullm	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 3 -export_search_strategy /dev/full	0
+m.rpsblast.f3.fsz3000m	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	3000	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 3 -export_search_strategy {f}	0
+m.rpsblast.f4.fullm	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 4 -export_search_strategy /dev/full	0
+m.rpsblast.f4.fsz3000m	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	3000	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 4 -export_search_strategy {f}	0
+m.rpsblast.f5.fullm	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 5 -export_search_strategy /dev/full	0
+m.rpsblast.f6.fullm	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 6 -export_search_strategy /dev/full	0
+m.rpsblast.f7.fullm	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 7 -export_search_strategy /dev/full	0
+m.rpsblast.f11.fullm	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 11 -export_search_strategy /dev/full	0
+m.blastn.f0.fullm	blastn	BATCH_SIZE=500	merged	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 0 -export_search_strategy /dev/full	0
+m.blastn.f5.fullm	blastn	BATCH_SIZE=500	merged	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 5 -export_search_strategy /dev/full	0
+m.blastn.f6.fullm	blastn	BATCH_SIZE=500	merged	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy /dev/full	0
+m.blastn.f11.fullm	blastn	BATCH_SIZE=500	merged	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 11 -export_search_strategy /dev/full	0
+m.blastn.f0.fsz3000m	blastn	BATCH_SIZE=500	merged	3000	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 0 -export_search_strategy {f}	0
+m.blastn.f6.fsz3000m	blastn	BATCH_SIZE=500	merged	3000	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy {f}	0
+m.blastx.f0.fullm	blastx	BATCH_SIZE=200	merged	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy /dev/full	0
+m.blastx.f5.fullm	blastx	BATCH_SIZE=200	merged	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 5 -export_search_strategy /dev/full	0
+m.blastx.f6.fullm	blastx	BATCH_SIZE=200	merged	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/full	0
+m.blastx.f11.fullm	blastx	BATCH_SIZE=200	merged	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy /dev/full	0
+m.blastx.f0.fsz3000m	blastx	BATCH_SIZE=200	merged	3000	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy {f}	0
+m.blastx.f6.fsz3000m	blastx	BATCH_SIZE=200	merged	3000	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy {f}	0
+m.tblastx.f0.fullm	tblastx	BATCH_SIZE=200	merged	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 0 -export_search_strategy /dev/full	0
+m.tblastx.f5.fullm	tblastx	BATCH_SIZE=200	merged	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 5 -export_search_strategy /dev/full	0
+m.tblastx.f6.fullm	tblastx	BATCH_SIZE=200	merged	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 6 -export_search_strategy /dev/full	0
+m.tblastx.f11.fullm	tblastx	BATCH_SIZE=200	merged	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 11 -export_search_strategy /dev/full	0
+m.tblastx.f0.fsz3000m	tblastx	BATCH_SIZE=200	merged	3000	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 0 -export_search_strategy {f}	0
+m.tblastx.f6.fsz3000m	tblastx	BATCH_SIZE=200	merged	3000	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 6 -export_search_strategy {f}	0
+m.rpstblastn.f0.fullm	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 0 -export_search_strategy /dev/full	0
+m.rpstblastn.f5.fullm	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 5 -export_search_strategy /dev/full	0
+m.rpstblastn.f6.fullm	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy /dev/full	0
+m.rpstblastn.f11.fullm	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 11 -export_search_strategy /dev/full	0
+m.rpstblastn.f0.fsz3000m	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	3000	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 0 -export_search_strategy {f}	0
+m.rpstblastn.f6.fsz3000m	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	merged	3000	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy {f}	0
+fail.blastn.f0.full	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 0 -export_search_strategy /dev/full	0
+fail.blastn.f6.full	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy /dev/full	0
+fail.blastn.f11.full	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 11 -export_search_strategy /dev/full	0
+fail.blastp.f0.full	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy /dev/full	0
+fail.blastp.f6.full	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/full	0
+fail.blastp.f11.full	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy /dev/full	0
+fail.blastx.f0.full	blastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy /dev/full	0
+fail.blastx.f6.full	blastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/full	0
+fail.blastx.f11.full	blastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy /dev/full	0
+fail.tblastn.f0.full	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -export_search_strategy /dev/full	0
+fail.tblastn.f6.full	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -export_search_strategy /dev/full	0
+fail.tblastn.f11.full	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 11 -export_search_strategy /dev/full	0
+fail.tblastx.f0.full	tblastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 0 -export_search_strategy /dev/full	0
+fail.tblastx.f6.full	tblastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 6 -export_search_strategy /dev/full	0
+fail.tblastx.f11.full	tblastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 11 -export_search_strategy /dev/full	0
+fail.psiblast.f0.full	psiblast	-	pipe	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy /dev/full	0
+fail.psiblast.f6.full	psiblast	-	pipe	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy /dev/full	0
+fail.psiblast.f11.full	psiblast	-	pipe	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 11 -export_search_strategy /dev/full	0
+fail.rpsblast.f0.full	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 0 -export_search_strategy /dev/full	0
+fail.rpsblast.f6.full	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 6 -export_search_strategy /dev/full	0
+fail.rpsblast.f11.full	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 11 -export_search_strategy /dev/full	0
+fail.rpstblastn.f0.full	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 0 -export_search_strategy /dev/full	0
+fail.rpstblastn.f6.full	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy /dev/full	0
+fail.rpstblastn.f11.full	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 11 -export_search_strategy /dev/full	0
+fail.blastn.f5.full	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 5 -export_search_strategy /dev/full	0
+fail.blastn.f7.full	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 7 -export_search_strategy /dev/full	0
+fail.blastn.f18.full	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 18 -export_search_strategy /dev/full	0
+fail.blastn.f0.fsz100	blastn	BATCH_SIZE=500	pipe	100	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 0 -export_search_strategy {f}	0
+fail.blastn.f0.fsz5000	blastn	BATCH_SIZE=500	pipe	5000	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 0 -export_search_strategy {f}	0
+fail.blastn.f6.fsz100	blastn	BATCH_SIZE=500	pipe	100	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy {f}	0
+fail.blastn.f6.fsz5000	blastn	BATCH_SIZE=500	pipe	5000	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy {f}	0
+fail.blastn.f11.fsz100	blastn	BATCH_SIZE=500	pipe	100	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 11 -export_search_strategy {f}	0
+fail.blastn.f11.fsz5000	blastn	BATCH_SIZE=500	pipe	5000	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 11 -export_search_strategy {f}	0
+fail.blastp.f5.full	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 5 -export_search_strategy /dev/full	0
+fail.blastp.f7.full	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 7 -export_search_strategy /dev/full	0
+fail.blastp.f18.full	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 18 -export_search_strategy /dev/full	0
+fail.blastp.f0.fsz100	blastp	BATCH_SIZE=150	pipe	100	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy {f}	0
+fail.blastp.f0.fsz5000	blastp	BATCH_SIZE=150	pipe	5000	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy {f}	0
+fail.blastp.f6.fsz100	blastp	BATCH_SIZE=150	pipe	100	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy {f}	0
+fail.blastp.f6.fsz5000	blastp	BATCH_SIZE=150	pipe	5000	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy {f}	0
+fail.blastp.f11.fsz100	blastp	BATCH_SIZE=150	pipe	100	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy {f}	0
+fail.blastp.f11.fsz5000	blastp	BATCH_SIZE=150	pipe	5000	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy {f}	0
+fail.tblastn.f5.full	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 5 -export_search_strategy /dev/full	0
+fail.tblastn.f7.full	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 7 -export_search_strategy /dev/full	0
+fail.tblastn.f18.full	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 18 -export_search_strategy /dev/full	0
+fail.tblastn.f0.fsz100	tblastn	BATCH_SIZE=150	pipe	100	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -export_search_strategy {f}	0
+fail.tblastn.f0.fsz5000	tblastn	BATCH_SIZE=150	pipe	5000	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -export_search_strategy {f}	0
+fail.tblastn.f6.fsz100	tblastn	BATCH_SIZE=150	pipe	100	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -export_search_strategy {f}	0
+fail.tblastn.f6.fsz5000	tblastn	BATCH_SIZE=150	pipe	5000	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -export_search_strategy {f}	0
+fail.tblastn.f11.fsz100	tblastn	BATCH_SIZE=150	pipe	100	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 11 -export_search_strategy {f}	0
+fail.tblastn.f11.fsz5000	tblastn	BATCH_SIZE=150	pipe	5000	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 11 -export_search_strategy {f}	0
+fail.psiblast.f5.full	psiblast	-	pipe	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 5 -export_search_strategy /dev/full	0
+fail.psiblast.f7.full	psiblast	-	pipe	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 7 -export_search_strategy /dev/full	0
+fail.psiblast.f0.fsz100	psiblast	-	pipe	100	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy {f}	0
+fail.psiblast.f0.fsz5000	psiblast	-	pipe	5000	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy {f}	0
+fail.psiblast.f6.fsz100	psiblast	-	pipe	100	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {f}	0
+fail.psiblast.f6.fsz5000	psiblast	-	pipe	5000	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy {f}	0
+fail.psiblast.f11.fsz100	psiblast	-	pipe	100	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 11 -export_search_strategy {f}	0
+fail.psiblast.f11.fsz5000	psiblast	-	pipe	5000	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 11 -export_search_strategy {f}	0
+big.blastn.f6.full	blastn	-	pipe	-	-	-query tests/fasta/strategy/f1c1_big_nucl.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy /dev/full	0
+big.blastn.f6.fsz10000	blastn	-	pipe	10000	-	-query tests/fasta/strategy/f1c1_big_nucl.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy {f}	0
+big.blastn.f11.full	blastn	-	pipe	-	-	-query tests/fasta/strategy/f1c1_big_nucl.fna -db tests/db_search/arch_snucl -outfmt 11 -export_search_strategy /dev/full	0
+big.blastn.f11.fsz10000	blastn	-	pipe	10000	-	-query tests/fasta/strategy/f1c1_big_nucl.fna -db tests/db_search/arch_snucl -outfmt 11 -export_search_strategy {f}	0
+big.blastp.f0.full	blastp	-	pipe	-	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy /dev/full	0
+big.blastp.f0.fsz3000	blastp	-	pipe	3000	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy {f}	0
+big.blastp.f0.fsz10000	blastp	-	pipe	10000	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy {f}	0
+big.blastp.f6.full	blastp	-	pipe	-	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/full	0
+big.blastp.f6.fsz3000	blastp	-	pipe	3000	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy {f}	0
+big.blastp.f6.fsz10000	blastp	-	pipe	10000	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy {f}	0
+big.blastp.f11.full	blastp	-	pipe	-	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy /dev/full	0
+big.blastp.f11.fsz3000	blastp	-	pipe	3000	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy {f}	0
+big.blastp.f11.fsz10000	blastp	-	pipe	10000	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy {f}	0
+big.tblastn.f0.full	tblastn	-	pipe	-	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -export_search_strategy /dev/full	0
+big.tblastn.f0.fsz3000	tblastn	-	pipe	3000	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -export_search_strategy {f}	0
+big.tblastn.f0.fsz10000	tblastn	-	pipe	10000	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -export_search_strategy {f}	0
+big.tblastn.f6.full	tblastn	-	pipe	-	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -export_search_strategy /dev/full	0
+big.tblastn.f6.fsz3000	tblastn	-	pipe	3000	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -export_search_strategy {f}	0
+big.tblastn.f6.fsz10000	tblastn	-	pipe	10000	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -export_search_strategy {f}	0
+big.tblastn.f11.full	tblastn	-	pipe	-	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_tbn_snucl -outfmt 11 -export_search_strategy /dev/full	0
+big.tblastn.f11.fsz3000	tblastn	-	pipe	3000	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_tbn_snucl -outfmt 11 -export_search_strategy {f}	0
+big.tblastn.f11.fsz10000	tblastn	-	pipe	10000	-	-query tests/fasta/strategy/chunk_bp.faa -db tests/db_search/arch_tbn_snucl -outfmt 11 -export_search_strategy {f}	0
+big.rpsblast.f6.full	rpsblast	BLASTDB={rps:rps_mini}	pipe	-	-	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 6 -export_search_strategy /dev/full	0
+big.rpsblast.f6.fsz10000	rpsblast	BLASTDB={rps:rps_mini}	pipe	10000	-	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 6 -export_search_strategy {f}	0
+big.rpsblast.f11.full	rpsblast	BLASTDB={rps:rps_mini}	pipe	-	-	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 11 -export_search_strategy /dev/full	0
+big.rpsblast.f11.fsz10000	rpsblast	BLASTDB={rps:rps_mini}	pipe	10000	-	-query tests/fasta/rps/q40.faa -db rps_mini -outfmt 11 -export_search_strategy {f}	0
+big.blastx.f6.full	blastx	-	pipe	-	-	-query tests/fasta/strategy/split_bx.fna -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/full	0
+big.blastx.f6.fsz10000	blastx	-	pipe	10000	-	-query tests/fasta/strategy/split_bx.fna -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy {f}	0
+big.blastx.f11.full	blastx	-	pipe	-	-	-query tests/fasta/strategy/split_bx.fna -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy /dev/full	0
+big.blastx.f11.fsz10000	blastx	-	pipe	10000	-	-query tests/fasta/strategy/split_bx.fna -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy {f}	0
+pipe.blastn.f0.dsp	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 0 -export_search_strategy /dev/stdout	0
+pipe.blastn.f6.dsp	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy /dev/stdout	0
+pipe.blastn.f7.dsp	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 7 -export_search_strategy /dev/stdout	0
+pipe.blastn.f11.dsp	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 11 -export_search_strategy /dev/stdout	0
+pipe.blastn.f0.bothp	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 0 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.blastn.f6.bothp	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.blastn.f11.bothp	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 11 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.blastp.f0.dsp	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy /dev/stdout	0
+pipe.blastp.f6.dsp	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/stdout	0
+pipe.blastp.f7.dsp	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 7 -export_search_strategy /dev/stdout	0
+pipe.blastp.f11.dsp	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy /dev/stdout	0
+pipe.blastp.f0.bothp	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 0 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.blastp.f6.bothp	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.blastp.f11.bothp	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 11 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.blastx.f0.dsp	blastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy /dev/stdout	0
+pipe.blastx.f6.dsp	blastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/stdout	0
+pipe.blastx.f7.dsp	blastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 7 -export_search_strategy /dev/stdout	0
+pipe.blastx.f11.dsp	blastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy /dev/stdout	0
+pipe.blastx.f0.bothp	blastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 0 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.blastx.f6.bothp	blastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 6 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.blastx.f11.bothp	blastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 11 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.tblastn.f0.dsp	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -export_search_strategy /dev/stdout	0
+pipe.tblastn.f6.dsp	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -export_search_strategy /dev/stdout	0
+pipe.tblastn.f7.dsp	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 7 -export_search_strategy /dev/stdout	0
+pipe.tblastn.f11.dsp	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 11 -export_search_strategy /dev/stdout	0
+pipe.tblastn.f0.bothp	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.tblastn.f6.bothp	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.tblastn.f11.bothp	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 11 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.tblastx.f0.dsp	tblastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 0 -export_search_strategy /dev/stdout	0
+pipe.tblastx.f6.dsp	tblastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 6 -export_search_strategy /dev/stdout	0
+pipe.tblastx.f7.dsp	tblastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 7 -export_search_strategy /dev/stdout	0
+pipe.tblastx.f11.dsp	tblastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 11 -export_search_strategy /dev/stdout	0
+pipe.tblastx.f0.bothp	tblastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 0 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.tblastx.f6.bothp	tblastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 6 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.tblastx.f11.bothp	tblastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 11 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.psiblast.f0.dsp	psiblast	-	pipe	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy /dev/stdout	0
+pipe.psiblast.f6.dsp	psiblast	-	pipe	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy /dev/stdout	0
+pipe.psiblast.f7.dsp	psiblast	-	pipe	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 7 -export_search_strategy /dev/stdout	0
+pipe.psiblast.f11.dsp	psiblast	-	pipe	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 11 -export_search_strategy /dev/stdout	0
+pipe.psiblast.f0.bothp	psiblast	-	pipe	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 0 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.psiblast.f6.bothp	psiblast	-	pipe	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.psiblast.f11.bothp	psiblast	-	pipe	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 11 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.rpsblast.f0.dsp	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 0 -export_search_strategy /dev/stdout	0
+pipe.rpsblast.f6.dsp	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 6 -export_search_strategy /dev/stdout	0
+pipe.rpsblast.f7.dsp	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 7 -export_search_strategy /dev/stdout	0
+pipe.rpsblast.f11.dsp	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 11 -export_search_strategy /dev/stdout	0
+pipe.rpsblast.f0.bothp	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 0 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.rpsblast.f6.bothp	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 6 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.rpsblast.f11.bothp	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 11 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.rpstblastn.f0.dsp	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 0 -export_search_strategy /dev/stdout	0
+pipe.rpstblastn.f6.dsp	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy /dev/stdout	0
+pipe.rpstblastn.f7.dsp	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 7 -export_search_strategy /dev/stdout	0
+pipe.rpstblastn.f11.dsp	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 11 -export_search_strategy /dev/stdout	0
+pipe.rpstblastn.f0.bothp	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 0 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.rpstblastn.f6.bothp	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -out /dev/stdout -export_search_strategy /dev/stdout	0
+pipe.rpstblastn.f11.bothp	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 11 -out /dev/stdout -export_search_strategy /dev/stdout	0
+held.rpstblastn.f15.dsp	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 15 -export_search_strategy /dev/stdout	0
+held.rpstblastn.f16.dsp	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 16 -export_search_strategy /dev/stdout	0
+held.rpstblastn.f5.full	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	pipe	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 5 -export_search_strategy /dev/full	0
+held.blastx.f15.dsp	blastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 15 -export_search_strategy /dev/stdout	0
+held.blastx.f16.dsp	blastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 16 -export_search_strategy /dev/stdout	0
+held.blastx.f5.full	blastx	BATCH_SIZE=200	pipe	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 5 -export_search_strategy /dev/full	0
+held.blastx.f5.small.dsp	blastx	BATCH_SIZE=1	pipe	-	-	-query tests/fasta/strategy/title_b2_blastx.fna -db tests/db_search/arch_sprot -outfmt 5 -export_search_strategy /dev/stdout	0
+pipe.blastn.f15.dsp	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 15 -export_search_strategy /dev/stdout	0
+pipe.blastn.f16.dsp	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 16 -export_search_strategy /dev/stdout	0
+pipe.blastn.f18.dsp	blastn	BATCH_SIZE=500	pipe	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 18 -export_search_strategy /dev/stdout	0
+pipe.blastp.f15.dsp	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 15 -export_search_strategy /dev/stdout	0
+pipe.blastp.f16.dsp	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 16 -export_search_strategy /dev/stdout	0
+pipe.blastp.f18.dsp	blastp	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 18 -export_search_strategy /dev/stdout	0
+pipe.tblastn.f15.dsp	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 15 -export_search_strategy /dev/stdout	0
+pipe.tblastn.f16.dsp	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 16 -export_search_strategy /dev/stdout	0
+pipe.tblastn.f18.dsp	tblastn	BATCH_SIZE=150	pipe	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 18 -export_search_strategy /dev/stdout	0
+dsoout.blastn.f0	blastn	BATCH_SIZE=500	file	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 0 -export_search_strategy /dev/stdout -out {f}	0
+dsoout.blastn.f6	blastn	BATCH_SIZE=500	file	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy /dev/stdout -out {f}	0
+dsoout.blastp.f0	blastp	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy /dev/stdout -out {f}	0
+dsoout.blastp.f6	blastp	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/stdout -out {f}	0
+dsoout.tblastn.f0	tblastn	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -export_search_strategy /dev/stdout -out {f}	0
+dsoout.tblastn.f6	tblastn	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -export_search_strategy /dev/stdout -out {f}	0
+dsoout.psiblast.f0	psiblast	-	file	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 0 -export_search_strategy /dev/stdout -out {f}	0
+dsoout.psiblast.f6	psiblast	-	file	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy /dev/stdout -out {f}	0
+same.blastn.f6	blastn	BATCH_SIZE=500	file	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -out {f} -export_search_strategy {f}	0
+dso.blastn.f6	blastn	BATCH_SIZE=500	file	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy /dev/stdout	0
+same.blastp.f6	blastp	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -out {f} -export_search_strategy {f}	0
+dso.blastp.f6	blastp	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/stdout	0
+same.blastx.f6	blastx	BATCH_SIZE=200	file	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 6 -out {f} -export_search_strategy {f}	0
+dso.blastx.f6	blastx	BATCH_SIZE=200	file	-	-	-query tests/fasta/outfmt11/arch_bx_batches.fna -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/stdout	0
+same.tblastn.f6	tblastn	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -out {f} -export_search_strategy {f}	0
+dso.tblastn.f6	tblastn	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -export_search_strategy /dev/stdout	0
+same.tblastx.f6	tblastx	BATCH_SIZE=200	file	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 6 -out {f} -export_search_strategy {f}	0
+dso.tblastx.f6	tblastx	BATCH_SIZE=200	file	-	-	-query tests/fasta/outfmt11/arch_tbx_batches.fna -db tests/db_search/arch_tbx_snucl -outfmt 6 -export_search_strategy /dev/stdout	0
+same.psiblast.f6	psiblast	-	file	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -out {f} -export_search_strategy {f}	0
+dso.psiblast.f6	psiblast	-	file	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy /dev/stdout	0
+same.rpsblast.f6	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	file	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 6 -out {f} -export_search_strategy {f}	0
+dso.rpsblast.f6	rpsblast	BLASTDB={rps:rps_mini},BATCH_SIZE=1	file	-	-	-query tests/fasta/strategy/rps_mixed.faa -db rps_mini -outfmt 6 -export_search_strategy /dev/stdout	0
+same.rpstblastn.f6	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	file	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -out {f} -export_search_strategy {f}	0
+dso.rpstblastn.f6	rpstblastn	BLASTDB={rps:rps_mini},BATCH_SIZE=1	file	-	-	-query tests/fasta/rps/nq4.fna -db rps_mini -comp_based_stats 0 -outfmt 6 -export_search_strategy /dev/stdout	0
+same.blastp.f8	blastp	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 8 -out {f} -export_search_strategy {f}	0
+same.blastp.f9	blastp	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 9 -out {f} -export_search_strategy {f}	0
+same.blastp.f10	blastp	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 10 -out {f} -export_search_strategy {f}	0
+same.blastp.f12	blastp	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 12 -out {f} -export_search_strategy {f}	0
+same.blastp.f18	blastp	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 18 -out {f} -export_search_strategy {f}	0
+samedot.blastn.f6	blastn	BATCH_SIZE=500	file	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -out {f} -export_search_strategy {dot}	0
+samelnk.blastn.f6	blastn	BATCH_SIZE=500	file	-	symlink	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -out {f} -export_search_strategy {lnk}	0
+samedot.blastp.f6	blastp	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -out {f} -export_search_strategy {dot}	0
+samelnk.blastp.f6	blastp	BATCH_SIZE=150	file	-	symlink	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -out {f} -export_search_strategy {lnk}	0
+samedot.tblastn.f6	tblastn	BATCH_SIZE=150	file	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -out {f} -export_search_strategy {dot}	0
+samelnk.tblastn.f6	tblastn	BATCH_SIZE=150	file	-	symlink	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -out {f} -export_search_strategy {lnk}	0
+samedot.psiblast.f6	psiblast	-	file	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -out {f} -export_search_strategy {dot}	0
+samelnk.psiblast.f6	psiblast	-	file	-	symlink	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -out {f} -export_search_strategy {lnk}	0
+dsoapp.blastp.f6	blastp	BATCH_SIZE=150	append	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/stdout	0
+bothapp.blastp.f6	blastp	BATCH_SIZE=150	append	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -out /dev/stdout -export_search_strategy /dev/stdout	0
+dsoapp.blastp.f10	blastp	BATCH_SIZE=150	append	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 10 -export_search_strategy /dev/stdout	0
+bothapp.blastp.f10	blastp	BATCH_SIZE=150	append	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 10 -out /dev/stdout -export_search_strategy /dev/stdout	0
+dsoapp.blastp.f18	blastp	BATCH_SIZE=150	append	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 18 -export_search_strategy /dev/stdout	0
+bothapp.blastp.f18	blastp	BATCH_SIZE=150	append	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 18 -out /dev/stdout -export_search_strategy /dev/stdout	0
+dsoapp.blastn.f6	blastn	BATCH_SIZE=500	append	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy /dev/stdout	0
+dsoapp.psiblast.f6	psiblast	-	append	-	-	-query tests/fasta/psiblast/ps5_three.faa -db tests/db_search/paja -num_iterations 2 -outfmt 6 -export_search_strategy /dev/stdout	0
+post.blastn.f0.dspm	blastn	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_blastn.fna -db tests/db_search/arch_snucl -outfmt 0 -export_search_strategy /dev/stdout	0
+post.blastn.f0.filem	blastn	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_blastn.fna -db tests/db_search/arch_snucl -outfmt 0 -export_search_strategy {f}	0
+post.blastn.f6.dspm	blastn	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_blastn.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy /dev/stdout	0
+post.blastn.f6.filem	blastn	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_blastn.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy {f}	0
+post.blastp.f0.dspm	blastp	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_blastp.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy /dev/stdout	0
+post.blastp.f0.filem	blastp	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_blastp.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy {f}	0
+post.blastp.f6.dspm	blastp	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_blastp.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/stdout	0
+post.blastp.f6.filem	blastp	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_blastp.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy {f}	0
+post.tblastn.f0.dspm	tblastn	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_tblastn.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -export_search_strategy /dev/stdout	0
+post.tblastn.f0.filem	tblastn	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_tblastn.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -export_search_strategy {f}	0
+post.tblastn.f6.dspm	tblastn	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_tblastn.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -export_search_strategy /dev/stdout	0
+post.tblastn.f6.filem	tblastn	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_tblastn.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -export_search_strategy {f}	0
+post.blastx.f0.dspm	blastx	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_blastx.fna -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy /dev/stdout	0
+post.blastx.f0.filem	blastx	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_blastx.fna -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy {f}	0
+post.blastx.f6.dspm	blastx	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_blastx.fna -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/stdout	0
+post.blastx.f6.filem	blastx	BATCH_SIZE=1	merged	-	-	-query tests/fasta/strategy/title_b2_blastx.fna -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy {f}	0
+postpiece.blastp.f0.dspm	blastp	-	merged	-	-	-query tests/fasta/strategy/f1c1_mixp_piece.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy /dev/stdout	0
+postpiece.blastp.f0.filem	blastp	-	merged	-	-	-query tests/fasta/strategy/f1c1_mixp_piece.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy {f}	0
+postpiece.blastp.f0.fullm	blastp	-	merged	-	-	-query tests/fasta/strategy/f1c1_mixp_piece.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy /dev/full	0
+postpiece.blastp.f6.dspm	blastp	-	merged	-	-	-query tests/fasta/strategy/f1c1_mixp_piece.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/stdout	0
+postpiece.blastp.f6.filem	blastp	-	merged	-	-	-query tests/fasta/strategy/f1c1_mixp_piece.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy {f}	0
+postpiece.blastp.f6.fullm	blastp	-	merged	-	-	-query tests/fasta/strategy/f1c1_mixp_piece.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/full	0
+dsofull.blastn.f0	blastn	BATCH_SIZE=500	full	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 0 -export_search_strategy /dev/stdout	6
+dsofull.blastn.f5	blastn	BATCH_SIZE=500	full	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 5 -export_search_strategy /dev/stdout	sig:6
+dsofull.blastn.f6	blastn	BATCH_SIZE=500	full	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 6 -export_search_strategy /dev/stdout	sig:6
+dsofull.blastn.f11	blastn	BATCH_SIZE=500	full	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 11 -export_search_strategy /dev/stdout	sig:6
+dsofull.blastn.f18	blastn	BATCH_SIZE=500	full	-	-	-query tests/fasta/outfmt11/arch_batches.fna -db tests/db_search/arch_snucl -outfmt 18 -export_search_strategy /dev/stdout	sig:6
+dsofull.blastp.f0	blastp	BATCH_SIZE=150	full	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 0 -export_search_strategy /dev/stdout	6
+dsofull.blastp.f5	blastp	BATCH_SIZE=150	full	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 5 -export_search_strategy /dev/stdout	sig:6
+dsofull.blastp.f6	blastp	BATCH_SIZE=150	full	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 6 -export_search_strategy /dev/stdout	sig:6
+dsofull.blastp.f11	blastp	BATCH_SIZE=150	full	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 11 -export_search_strategy /dev/stdout	sig:6
+dsofull.blastp.f18	blastp	BATCH_SIZE=150	full	-	-	-query tests/fasta/outfmt11/arch_bp_batches.faa -db tests/db_search/arch_sprot -outfmt 18 -export_search_strategy /dev/stdout	sig:6
+dsofull.tblastn.f0	tblastn	BATCH_SIZE=150	full	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 0 -export_search_strategy /dev/stdout	6
+dsofull.tblastn.f5	tblastn	BATCH_SIZE=150	full	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 5 -export_search_strategy /dev/stdout	sig:6
+dsofull.tblastn.f6	tblastn	BATCH_SIZE=150	full	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 6 -export_search_strategy /dev/stdout	sig:6
+dsofull.tblastn.f11	tblastn	BATCH_SIZE=150	full	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 11 -export_search_strategy /dev/stdout	sig:6
+dsofull.tblastn.f18	tblastn	BATCH_SIZE=150	full	-	-	-query tests/fasta/outfmt11/arch_tbn_batches.faa -db tests/db_search/arch_tbn_snucl -outfmt 18 -export_search_strategy /dev/stdout	sig:6

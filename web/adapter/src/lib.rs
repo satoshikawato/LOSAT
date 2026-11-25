@@ -72,35 +72,38 @@ fn words(argv: &str) -> Vec<&str> {
     words
 }
 
-/// The version of ABI v2 (docs/web/abi_v2.md §10): 14 since `losat_web2_scan_begin` and
+/// The version of ABI v2 (docs/web/abi_v2.md §10): 15 since `losat_web2_scan_begin` and
 /// `losat_web2_register` take `parse_deflines` and *validation* emits `parse_deflines` when the
 /// argv parses so the index scan and the input check read records whose `-parse_deflines` Seq-id
-/// names the other molecule as the engine's reader reads them (line RG-XT item X7-5, 2026-11-25);
-/// 13 since `losat_web2_tool`, which runs `windowmasker` with the command line's words in the
-/// run's working directory, streams its standard output on stream 11 and the files that it writes
-/// on stream 12 as they are written, and gives its exit status on stream 2, and since
-/// `losat_web2_validate` checks a `windowmasker` argv (line NP WW3a, 2026-11-22); 12 since a run
-/// of `-db`, which takes no subject handle and reads the database from the run's working
-/// directory, which the host preopens as `/work`, and the *start* field `database` (line WQA D12a,
-/// 2026-11-20; 9 on its branch until 10 merged first, then 12 after D10's 11); 11 since a query is
-/// read as the command line's query batches read it: the records before the reader's error, with
-/// the error (`reader_error` of *register*, *inputs* and *scan*), which a run meets in the
-/// record's batch (line WQA's D10, 2026-11-19); 10 since a run prints the text that the command
-/// line prints in place of a run (its help, the XML of `-xmlhelp`, its versions) on stream 11,
-/// and the *start* field `prints` (line WQA's D14, 2026-11-20); 8 since the index scan and
-/// `register` read as the engine's reader with the run's data loaders (`scan_begin` and `register`
-/// take the program, the role and the setting, which *validation* gives on stream 2; a `>?` gap
-/// line and the lines that NCBI's line reader joins are indexed, and the reader's refusals come in
-/// its words; line WQA's D13 and D16, 2026-11-20); 7 since a run that fails keeps the output of
-/// the argv up to its error and drops the other outputs with the signal of stream 9 (line WQA's
-/// sweep, D15, 2026-11-20; versions 5 and 6 are taken by other open branches); 4 since
-/// `losat_web2_register_inputs`, which reads the inputs of a run with `-parse_deflines`, and the
-/// signal of stream 9 for every output stream that failed (line WQA's sweep, D7, 2026-11-19); 3
-/// since the signal of stream 9, which makes the host discard a stream that failed alone after a
-/// chunk of it was sent (line RG item T7-W).
+/// names the other molecule as the engine's reader reads them (line RG-XT item X7-5, 2026-11-25;
+/// 14 on its branch until line WQA D19 merged first); 14 since reading `-logfile` against the run's
+/// real files (normalized stream 8 and stream 12 names, the *start* field `log_file_name`, case-2
+/// refusal of an existing run file, and a tool's `/dev/stdout` on stream 11; line WQA D19,
+/// 2026-11-25); 13 since `losat_web2_tool`, which runs
+/// `windowmasker` with the command line's words in the run's working directory, streams its
+/// standard output on stream 11 and the files that it writes on stream 12 as they are written, and
+/// gives its exit status on stream 2, and since `losat_web2_validate` checks a `windowmasker` argv
+/// (line NP WW3a, 2026-11-22); 12 since a run of `-db`, which takes no subject
+/// handle and reads the database from the run's working directory, which the host preopens as
+/// `/work`, and the *start* field `database` (line WQA D12a, 2026-11-20; 9 on its branch until 10
+/// merged first, then 12 after D10's 11); 11 since a query is read as the command line's query
+/// batches read it: the records before the reader's error, with the error (`reader_error` of
+/// *register*, *inputs* and *scan*), which a run meets in the record's batch (line WQA's D10,
+/// 2026-11-19); 10 since a run prints the text that the command line prints in place of a run (its
+/// help, the XML of `-xmlhelp`, its versions) on stream 11, and the *start* field `prints` (line
+/// WQA's D14, 2026-11-20); 8 since the index scan and `register` read as the engine's reader with
+/// the run's data loaders (`scan_begin` and `register` take the program, the role and the setting,
+/// which *validation* gives on stream 2; a `>?` gap line and the lines that NCBI's line reader joins
+/// are indexed, and the reader's refusals come in its words; line WQA's D13 and D16, 2026-11-20); 7
+/// since a run that fails keeps the output of the argv up to its error and drops the other outputs
+/// with the signal of stream 9 (line WQA's sweep, D15, 2026-11-20; versions 5 and 6 are taken by
+/// other open branches); 4 since `losat_web2_register_inputs`, which reads the inputs of a run with
+/// `-parse_deflines`, and the signal of stream 9 for every output stream that failed (line WQA's
+/// sweep, D7, 2026-11-19); 3 since the signal of stream 9, which makes the host discard a stream
+/// that failed alone after a chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    14
+    15
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {

@@ -1,5 +1,5 @@
 // Browser searches with -parse_deflines where a subject's Seq-id names the other molecule
-// (line RG-XT item X7-5, ABI v2 version 14; docs/web/abi_v2.md §4 `losat_web2_scan_begin`, §9
+// (line RG-XT item X7-5, ABI v2 version 15; docs/web/abi_v2.md §4 `losat_web2_scan_begin`, §9
 // *validation* and *scan*): validation reports `parse_deflines`, the draft rescans the inputs
 // with it so the record table matches the engine's `register_inputs` lengths, and the search
 // completes with the native CLI's and NCBI's frozen outputs (`s1.bp.subj.*`, `s1.bn.subjx.*`).

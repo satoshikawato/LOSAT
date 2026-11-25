@@ -163,6 +163,7 @@ pub(crate) fn run_subject_report(ops: Vec<GapEditOp>, outfmt: &str) -> SubjectRe
                     0,
                     false,
                     None,
+                    None,
                 )
                 .and_then(|()| {
                     super::blast_xml::write_xml_epilog(&mut writer, &mut stderr, "blastx", 1, None)
@@ -187,6 +188,7 @@ pub(crate) fn run_subject_report(ops: Vec<GapEditOp>, outfmt: &str) -> SubjectRe
                     &[batch],
                     0,
                     false,
+                    None,
                     None,
                 )
                 .and_then(|()| {

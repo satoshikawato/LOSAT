@@ -1,0 +1,166 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= tk_lc lowercase stretches
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          69.7    4e-16
+BDT63500.1 wsv172-like protein [Pasiphaea japonica whispovirus]       23.1    2.4  
+BDT63572.1 wsv270-like protein [Pasiphaea japonica whispovirus]       21.9    3.6  
+BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]       22.3    4.1  
+BDT63566.1 hypothetical protein [Pasiphaea japonica whispovirus]      22.3    4.4  
+BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]       22.3    4.6  
+BDT63529.1 wsv332-like protein [Pasiphaea japonica whispovirus]       21.2    9.1  
+
+
+
+Query_1  10   TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV  69
+52       4    .NI.KIH..I........STIIK...KKIKMQ.R.V.I..VKDN....ELTET...S.QT  63
+
+Query_1  70   IEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQ  129
+52       64   .RD.VAT.V---.SY.DTSNY.Y.F.......S..ATCKDW.I....VTV.....NYE..  121
+                                                 \                        
+                                                 |                        
+                                                 G
+
+Query_1  130  MFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACR  189
+52       122  L.PSVI..I.ICDK.E..SANKNEASLTK.YL.YNNTGDD.HHKYDM....T.T.C.V.I  186
+                                  \                                       
+                                  |                                       
+                              VCMIC
+2        374                                                 .P.LSDV.GQEFK  386
+
+Query_1  190  DCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPDRSSHTGKLI  249
+52       187  G.                                                            188
+2        387  NL.E.YE.---E..VRI---------.IE.RK..H.LA.AKL.TPFI..K...N.       435
+                                                        \        \        
+                                                        |        |        
+                                                       ET     TINY
+25       484             .F.VN..PD..Q..N.GE.H.F..                           512
+                                           \                              
+                                           |                              
+                                       YESMT
+68       273                                       H.KF.P..WIY..PSL.NLS..   294
+
+Query_1  250  NDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIVFSLARGVDT  309
+74       82              NFGGYI.L.G.SG.II.GLGEPI..EL..LSN.                  116
+                                               \                          
+                                               |                          
+                                              RD
+30       100                                                         ..NN.  104
+31       291                .YMM..RH.VQSGDC...F.----YTIFV.FI..A             321
+
+Query_1  310  VEWCSAS  316
+30       105  D....L.  111
+
+
+Lambda      K        H        a         alpha
+   0.320    0.137    0.400    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20272584
+Results from round 2
+
+
+Query= tk_lc lowercase stretches
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          170     1e-53
+
+Sequences not found previously or not previously below threshold:
+
+BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]       21.5    6.5  
+BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]       21.5    7.8  
+
+
+
+Query_1  10   TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV  69
+52       4    .NI.KIH..I........STIIK...KKIKMQ.R.V.I..VKDN....ELTET...S.QT  63
+
+Query_1  70   IEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQ  129
+52       64   .RD.VAT.V---.SY.DTSNY.Y.F.......S..ATCKDW.I....VTV.....NYE..  121
+                                                 \                        
+                                                 |                        
+                                                 G
+
+Query_1  130  MFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACR  189
+52       122  L.PSVI..I.ICDK.E..SANKNEASLTK.YL.YNNTGDD.HHKYDM....T.T.C.V.I  186
+                                  \                                       
+                                  |                                       
+                              VCMIC
+
+Query_1  190  DCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPDRSSHTGKLI  249
+52       187  G.                                                            188
+25       484             .F.VN..PD..Q..N.GE.H.F..                           512
+                                           \                              
+                                           |                              
+                                       YESMT
+
+Query_1  250  NDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIVFSLARGVDT  309
+30       100                                                         ..NN.  104
+
+Query_1  310  VEWCSAS  316
+30       105  D....L.  111
+
+
+Lambda      K        H        a         alpha
+   0.317    0.139    0.416    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0425    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20272584
+
+Search has CONVERGED!
+
+
+  Database: PajaWSV proteins
+    Posted date:  Oct 13, 2026  1:44 PM
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

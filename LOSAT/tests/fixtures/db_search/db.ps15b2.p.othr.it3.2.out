@@ -1,0 +1,108 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= t
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          79.0    1e-22
+BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]       17.7    8.5  
+BDT63549.1 wsv206-like protein [Pasiphaea japonica whispovirus]       17.4    9.6  
+
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.129    0.364    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0396    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1659164
+Results from round 2
+
+
+Query= t
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          88.6    2e-26
+BDT63549.1 wsv206-like protein [Pasiphaea japonica whispovirus]       32.3    3e-05
+BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]       27.3    0.003
+
+Sequences not found previously or not previously below threshold:
+
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       18.5    3.5  
+BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]       18.5    3.8  
+BDT63533.1 wsv289-like protein [Pasiphaea japonica whispovirus]       17.7    8.7  
+
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.134    0.392    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1659164
+Results from round 3
+
+
+Query= t
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          75.2    3e-21
+BDT63505.1 wsv199-like protein [Pasiphaea japonica whispovirus]       49.7    3e-11
+BDT63533.1 wsv289-like protein [Pasiphaea japonica whispovirus]       34.3    8e-06
+BDT63549.1 wsv206-like protein [Pasiphaea japonica whispovirus]       29.3    5e-04
+BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]       26.6    0.005
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       24.7    0.026
+
+Sequences not found previously or not previously below threshold:
+
+BDT63506.1 wsv199-like protein [Pasiphaea japonica whispovirus]       45.5    8e-10
+BDT63504.1 wsv199-like protein [Pasiphaea japonica whispovirus]       45.5    9e-10
+BDT63575.1 wsv222-like protein [Pasiphaea japonica whispovirus]       22.8    0.10 
+BDT63569.1 wsv119-like protein [Pasiphaea japonica whispovirus]       20.5    0.76 
+
+

@@ -35,7 +35,7 @@ export interface ProgramDescription {
  * data loaders on (`dataLoaders`, ABI v2 *validation*, version 8): off under `[BLAST]
  * DATA_LOADERS=none` of its `-conffile`, where the reader reads a first line that may be a Seq-id as
  * data, as the CLI does (line WQA's D16, 2026-11-20), and whether `-parse_deflines` is active
- * (`parseDeflines`, ABI v2 *validation*, version 14; line RG-XT item X7-5, 2026-11-25). A refused
+ * (`parseDeflines`, ABI v2 *validation*, version 15; line RG-XT item X7-5, 2026-11-25). A refused
  * argv says `dataLoaders` when the engine's start read the registry before the option that it
  * refuses (line WQA's D13 round 3, L1), and says `parseDeflines` only when the argv parsed
  * (omitted on parse errors so the host keeps its previous value).
@@ -56,6 +56,12 @@ export type ValidationResult =
 export interface StartInfo {
   readonly conffile: string | null;
   readonly logFile: string | null;
+  /**
+   * The command line's normalized file name under which a run gives the `-logfile` file on stream 8
+   * (`logs` for `logs/`, `run.log` for `./run.log` and ` run.log`, `/tmp/run.log` outside the
+   * working tree, `/dev/stdout` for `/dev/stdout`; null where `-logfile` never makes a file).
+   */
+  readonly logFileName?: string | null;
   readonly strategyFile: string | null;
   readonly dryRun: boolean;
   /**

@@ -10,7 +10,7 @@ import type { InputRole, ProgramId } from './programs.js';
 export type FastaParserKind = 1 | 2;
 
 /**
- * The engine's reader of a program's input of a role (ABI v2 `scan_begin` and `register`, version 14):
+ * The engine's reader of a program's input of a role (ABI v2 `scan_begin` and `register`, version 15):
  * the reader of the CLI for that input, with NCBI's data loaders on or off as the run's registry sets
  * them (`[BLAST] DATA_LOADERS` of `-conffile`; the *validation* response's `data_loaders`) and with
  * `-parse_deflines` on or off (`parse_deflines`). With the loaders on, the reader refuses a first line

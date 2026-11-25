@@ -14,7 +14,7 @@ import type { Compression } from '../../ports/inflate.js';
 import { DIAGNOSTICS_STREAM } from '../../ports/run-output.js';
 
 /** The version of ABI v2 that this host speaks (`losat_web2_abi_version`, ABI v2 §10). */
-export const ABI_VERSION = 14;
+export const ABI_VERSION = 15;
 /** Stream 2: the JSON response of describe, validate, register, register_inputs, scan_end, inflate_begin, start and file_end. */
 export const RESPONSE_STREAM = 2;
 /** Stream 5: the inflated bytes of inflate_chunk and inflate_end. */
@@ -317,6 +317,7 @@ export class ReactorAbi {
     const json = this.response() as {
       conffile: string | null;
       log_file: string | null;
+      log_file_name?: string | null;
       strategy_file?: string | null;
       dry_run: boolean;
       register_inputs: boolean;
@@ -329,6 +330,7 @@ export class ReactorAbi {
       start: {
         conffile: json.conffile,
         logFile: json.log_file,
+        logFileName: json.log_file_name ?? null,
         strategyFile: json.strategy_file ?? null,
         dryRun: json.dry_run,
         registerInputs: json.register_inputs,
@@ -341,7 +343,7 @@ export class ReactorAbi {
   /**
    * The verdict on an argv: the CLI's error text, or whether its run reads the inputs with NCBI's
    * data loaders on and, when the argv parses, with `-parse_deflines` on (the *validation* JSON,
-   * ABI v2 §9, version 14), which `register` and `scanBegin` then take. When the argv does not
+   * ABI v2 §9, version 15), which `register` and `scanBegin` then take. When the argv does not
    * parse, `parse_deflines` is omitted so the host keeps its previous setting.
    */
   validate(argv: readonly string[]): ValidationResult {
@@ -376,7 +378,7 @@ export class ReactorAbi {
     return status < 0 ? { ok: false, message: this.lastError() } : { ok: true };
   }
 
-  /** Reads `bytes` with the engine's reader of `program`'s input of `role`, NCBI's data loaders and `-parse_deflines` on or off (ABI v2 §4, version 14). */
+  /** Reads `bytes` with the engine's reader of `program`'s input of `role`, NCBI's data loaders and `-parse_deflines` on or off (ABI v2 §4, version 15). */
   register(program: string, role: number, dataLoaders: boolean, parseDeflines: boolean, bytes: Uint8Array): RegisteredInput {
     const handle = this.check(
       this.call(this.exports.losat_web2_register, [encoder.encode(program), role, dataLoaders ? 1 : 0, parseDeflines ? 1 : 0, bytes]),
@@ -429,7 +431,7 @@ export class ReactorAbi {
     this.check(this.call(this.exports.losat_web2_release, [handle]));
   }
 
-  /** Starts an index scan with the engine's reader `reader` (ABI v2 §4, version 14). */
+  /** Starts an index scan with the engine's reader `reader` (ABI v2 §4, version 15). */
   scanBegin(reader: FastaReader): number {
     return this.check(
       this.call(this.exports.losat_web2_scan_begin, [

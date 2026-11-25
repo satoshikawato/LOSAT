@@ -1199,7 +1199,7 @@ impl WriteDb {
         }
         let mut masklist = Vec::new();
         for name in self.mask.gi_mask_names().filter(|name| !name.is_empty()) {
-            masklist.extend_from_slice(name.as_bytes());
+            masklist.extend_from_slice(name);
             masklist.push(b' ');
         }
         let mut alias =

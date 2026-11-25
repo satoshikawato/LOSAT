@@ -25,7 +25,7 @@ pub(crate) fn programs() -> impl Iterator<Item = &'static str> {
 /// LOSAT's descriptions and the search strategy's walk read them here.
 pub(crate) fn names_read(tool: &Tool) -> BTreeSet<&'static str> {
     let args = parse(tool, &base(tool.program, "")).expect("the base words read");
-    options(tool, &args, false).expect("the options of the base words");
+    options(tool, &args).expect("the options of the base words");
     args.names_read()
 }
 
@@ -68,7 +68,7 @@ fn one_list_of_programs() {
     for tool in TOOLS.iter().copied() {
         assert!(crate::cli::is_program(tool.program), "{}", tool.program);
         let args = parse(tool, &base(tool.program, "")).expect("the base words read");
-        let command = options(tool, &args, false).expect("the options of the base words");
+        let command = options(tool, &args).expect("the options of the base words");
         assert_eq!(program_of(&command), tool.program);
     }
 }
@@ -109,30 +109,28 @@ fn not_utf8() -> OsString {
     word
 }
 
-// A dry run of the library (`-dryrun`, which ends before LOSAT's refusals) reads a value that
-// LOSAT refuses for not being UTF-8 as its lossy text (`Args::with_lossy_text`); the run without
-// `-dryrun` is refused.
+// Both a dry run and a normal run keep a non-UTF-8 value verbatim in the option's `OsString`
+// (line RG item K10c).
 #[cfg(any(unix, windows))]
 #[test]
-fn a_dry_run_reads_a_value_that_is_not_utf8_as_its_lossy_text() {
+fn non_utf8_option_value_is_kept_verbatim() {
+    let raw = not_utf8();
     let argv = |dry_run: bool| {
         let mut argv: Vec<OsString> = ["losat", "blastn", "-db"].map(OsString::from).to_vec();
-        argv.push(not_utf8());
+        argv.push(raw.clone());
         argv.extend(dry_run.then(|| OsString::from("-dryrun")));
         crate::cli::try_parse_with_own_start(
             argv,
             &crate::blastinput::ncbi_environment::DiagTarget::Stderr,
         )
     };
-    let db = match argv(true).unwrap().command {
-        Commands::Blastn(args) => args.db,
-        command => panic!("{command:?}"),
-    };
-    assert_eq!(db.as_deref(), Some("a\u{FFFD}b"));
-    assert!(matches!(
-        argv(false),
-        Err(crate::cli::ArgvError::Refused(_))
-    ));
+    for dry_run in [true, false] {
+        let db = match argv(dry_run).unwrap().command {
+            Commands::Blastn(args) => args.db,
+            command => panic!("{command:?}"),
+        };
+        assert_eq!(db.as_deref(), Some(raw.as_os_str()));
+    }
 }
 
 // The arguments that LOSAT Web's ABI v1 checked (`checked`): a value that its key's kind does not
@@ -151,7 +149,7 @@ fn checked_arguments_and_values_that_do_not_convert() {
     let text = "LOSAT's BLASTX does not convert the value of -num_descriptions that NCBI's \
                 argument reader read";
     assert_eq!(not_converted(blastx, "num_descriptions"), text);
-    assert_eq!(options(blastx, &args, false).unwrap_err(), text);
+    assert_eq!(options(blastx, &args).unwrap_err(), text);
 }
 
 /// The arguments that NCBI's reader reads from `words` (after the toolkit's words that the
@@ -387,7 +385,7 @@ const GOLDEN: &str = include_str!("../../tests/fixtures/options/golden.txt");
 fn the_options_of_each_program_are_frozen() {
     let mut expected = GOLDEN.lines().filter(|line| !line.starts_with('#'));
     for tool in TOOLS.iter().copied() {
-        let text = golden(tool, |tool, args| options(tool, args, false));
+        let text = golden(tool, |tool, args| options(tool, args));
         for (at, line) in text.lines().enumerate() {
             assert_eq!(
                 Some(line),
@@ -415,7 +413,7 @@ const GOLDEN_HEAD: &str = "\
 fn write_the_options_golden() {
     let mut text = GOLDEN_HEAD.to_string();
     for tool in TOOLS.iter().copied() {
-        text += &golden(tool, |tool, args| options(tool, args, false));
+        text += &golden(tool, |tool, args| options(tool, args));
     }
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),

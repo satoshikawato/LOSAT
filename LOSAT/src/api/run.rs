@@ -476,7 +476,7 @@ pub(super) fn searched_queries(
 }
 
 /// The `-query_loc` of the program's arguments.
-fn query_loc(command: &Commands) -> Option<&str> {
+fn query_loc(command: &Commands) -> Option<&std::ffi::OsStr> {
     match command {
         Commands::Blastp(a) => a.query_loc.as_deref(),
         Commands::Tblastn(a) => a.query_loc.as_deref(),
@@ -1000,7 +1000,7 @@ pub fn run(
                     formats: group
                         .iter()
                         .map(|&position| FormatOutput {
-                            outfmt: formats[position],
+                            outfmt: formats[position].as_bytes(),
                             refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                             sink: OutputSink::Writer(
                                 writers[position].take().expect("one group per format"),
@@ -1092,7 +1092,7 @@ pub fn run_to_file(
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Out(&mut file),
                 }],
@@ -1161,7 +1161,7 @@ fn collect_one(
                 .iter()
                 .zip(writers.iter_mut())
                 .map(|(&position, writer)| FormatOutput {
-                    outfmt: formats[position],
+                    outfmt: formats[position].as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(writer),
                 })

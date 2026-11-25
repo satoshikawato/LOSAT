@@ -97,7 +97,7 @@ pub(super) struct ReportView<'a> {
     pub(super) listed_sources: &'a [SourceTaxname],
     pub(super) pairwise_database: &'a Option<PairwiseDatabase>,
     pub(super) shown_database: &'a Option<PairwiseDatabase>,
-    pub(super) subject_input_label: &'a str,
+    pub(super) subject_input_label: &'a [u8],
     /// NCBI's `Int8` (`report_prep::ReportLabels`).
     pub(super) shown_num_sequences: i64,
     pub(super) shown_total_letters: i64,
@@ -582,7 +582,7 @@ pub(super) fn write_xml(
         searched_lengths: query_lengths,
         placements: &ranges.query_input.placements,
     };
-    let db_name = database.map(|database| database.name().to_string());
+    let db_name = database.map(|database| database.name().to_vec());
     // `BlastOutput_program` and `_version` name the application: `blastp`, `rpsblast`
     // (`Blast_ProgramNameFromType` of its search's program, `RPSBLAST 2.17.0+`).
     let version = format!(
@@ -607,7 +607,7 @@ pub(super) fn write_xml(
                 BlastpApp::Psiblast => crate::report::blast_xml::REFERENCE_COMP_BASED_STATS,
                 _ => crate::report::blast_xml::REFERENCE_GAPPED_BLAST,
             },
-            db_name: db_name.as_deref().unwrap_or(""),
+            db_name: db_name.as_deref().unwrap_or(b""),
             matrix: Some(&args.matrix_name),
             expect: args.evalue,
             gap_open: args.scoring.gap_open,
@@ -854,7 +854,7 @@ pub(super) fn write_pairwise(
         .collect();
     let pairwise_report = BlastpPairwiseReport {
         version: crate::wording::REPORT_VERSION.to_string(),
-        database_name: blastp_scan_mode_definition(subject_input_label).into(),
+        database_name: blastp_scan_mode_definition(subject_input_label),
         database_num_sequences: shown_num_sequences,
         database_total_letters: shown_total_letters,
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267

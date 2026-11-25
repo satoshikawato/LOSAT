@@ -113,7 +113,7 @@ impl QueryScopeSpan {
 }
 
 /// Whether one of the `-outfmt` values `outfmts` is outfmt 5 (`QueryScopeSpan::of`).
-pub(crate) fn outfmts_have_xml<'a>(outfmts: impl IntoIterator<Item = &'a str>) -> bool {
+pub(crate) fn outfmts_have_xml<O: AsRef<[u8]>>(outfmts: impl IntoIterator<Item = O>) -> bool {
     use crate::blastinput::app::{parse_formatting_string, ReportFormat};
     outfmts.into_iter().any(|outfmt| {
         parse_formatting_string(outfmt)

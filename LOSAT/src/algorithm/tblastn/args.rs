@@ -1,10 +1,12 @@
 //! TBLASTN's options (NCBI c++/src/algo/blast/blastinput/tblastn_args.cpp and blast_args.cpp)
 //! and LOSAT's limits.
 use anyhow::Result;
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::PathBuf;
 
 use crate::blastinput::value_parsers::*;
+use crate::utils::os_bytes::os_str_bytes;
 
 use super::stage_d_pipeline::LocalStageDScoring;
 use crate::config::ScoringMatrix;
@@ -28,7 +30,7 @@ pub struct TblastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
     // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). NCBI's argument reader reports the
     // exclusion (`cli::reader`). The database is searched by `tblastn/database.rs`.
-    pub db: Option<String>,
+    pub db: Option<OsString>,
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
     /// `-no_taxid_expansion` (line DI-8).
     pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
@@ -68,7 +70,7 @@ pub struct TblastnArgs {
     // PD-TLOSAN-LOCAL-GENCODE-32 adds gc.prt ID 32 only for TBLASTN.
     pub db_gencode: u8,
     pub max_intron_length: Option<i32>,
-    pub matrix: Option<String>,
+    pub matrix: Option<OsString>,
     pub threshold: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:220-229,280-286:
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-214,276-278:
@@ -76,17 +78,17 @@ pub struct TblastnArgs {
     pub xdrop_gap: Option<f64>,
     pub xdrop_gap_final: Option<f64>,
     // Read when NCBI's handler reads it (`blastinput/app.rs` `parse_comp_based_stats`).
-    pub comp_based_stats: String,
-    pub outfmt: String,
+    pub comp_based_stats: OsString,
+    pub outfmt: OsString,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // Read by the query options handler (`check_options`).
-    pub query_loc: Option<String>,
+    pub query_loc: Option<OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
     // Read by the database arguments handler when it reads the subjects (`run`).
-    pub subject_loc: Option<String>,
+    pub subject_loc: Option<OsString>,
     // Read when NCBI's filtering handler reads it (`blastinput/app.rs` `parse_seg_option`);
     // an omitted value is NCBI's default for tblastn, "12 2.2 2.5".
-    pub seg: Option<String>,
+    pub seg: Option<OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1938-1942,2549-2557
     pub lcase_masking: bool,
     // NCBI's flag, off by default: the Smith-Waterman redo of each match
@@ -313,7 +315,7 @@ pub struct ResolvedTblastnArgs {
     pub subject_besthit: bool,
     pub composition_mode: crate::blastinput::app::CompositionMode,
     /// The `-comp_based_stats` value as typed.
-    pub comp_based_stats: String,
+    pub comp_based_stats: OsString,
     pub num_threads: usize,
     /// The `-query_loc` range, as given.
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
@@ -349,7 +351,12 @@ impl TblastnArgs {
         if !self.ungapped {
             return None;
         }
-        match ungapped_matrix(self.matrix.as_deref().unwrap_or("BLOSUM62")) {
+        let matrix = self
+            .matrix
+            .as_deref()
+            .map(os_str_bytes)
+            .unwrap_or(std::borrow::Cow::Borrowed(b"BLOSUM62"));
+        match ungapped_matrix(&matrix) {
             TblastxMatrix::Table(_) => None,
             other => Some(other),
         }
@@ -367,9 +374,12 @@ impl TblastnArgs {
         if self.unknown_matrix_name()
             == Some(crate::algorithm::tblastx::args::TblastxMatrix::Unknown)
         {
-            self.matrix_file = search
-                .file(self.matrix.as_deref().unwrap_or("BLOSUM62"))
-                .map_err(anyhow::Error::msg)?;
+            let matrix = self
+                .matrix
+                .as_deref()
+                .map(os_str_bytes)
+                .unwrap_or(std::borrow::Cow::Borrowed(b"BLOSUM62"));
+            self.matrix_file = search.file(&matrix).map_err(anyhow::Error::msg)?;
         }
         Ok(())
     }
@@ -388,8 +398,10 @@ impl TblastnArgs {
     /// search of `-subject`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
-    pub fn database_name(&self) -> Option<&str> {
-        self.db.as_deref().map(crate::seqdb::db_argument_name)
+    pub fn database_name(&self) -> Option<Vec<u8>> {
+        self.db
+            .as_deref()
+            .map(|db| crate::seqdb::db_argument_name_bytes(&os_str_bytes(db)).to_vec())
     }
 
     /// The options as `check_options` sets them, without its warnings.
@@ -457,8 +469,8 @@ impl TblastnArgs {
         if let Some(value) = self.evalue {
             evalue = value;
         }
-        let (matrix_gap_open, matrix_gap_extend) = self
-            .matrix
+        let matrix_arg_bytes = self.matrix.as_deref().map(os_str_bytes);
+        let (matrix_gap_open, matrix_gap_extend) = matrix_arg_bytes
             .as_deref()
             .and_then(protein_gap_existence_extend_params)
             .unwrap_or((0, 0));
@@ -502,22 +514,28 @@ impl TblastnArgs {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-408 (the
         // filtering handler; the default -seg of tblastn is "12 2.2 2.5")
         let soft_masking = self.soft_masking.unwrap_or(false);
-        let seg = parse_seg_option(self.seg.as_deref().unwrap_or("12 2.2 2.5"))?;
+        let seg_bytes = self
+            .seg
+            .as_deref()
+            .map(os_str_bytes)
+            .unwrap_or(std::borrow::Cow::Borrowed(b"12 2.2 2.5"));
+        let seg = parse_seg_option(&seg_bytes)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:586-623 (the word
         // threshold handler: the matrix's suggestion replaces only tblastn's default 13)
-        let matrix_name = self
-            .matrix
-            .clone()
-            .unwrap_or_else(|| "BLOSUM62".to_string());
+        let matrix_bytes: Vec<u8> = match matrix_arg_bytes.as_deref() {
+            Some(bytes) => bytes.to_vec(),
+            None => b"BLOSUM62".to_vec(),
+        };
+        let matrix_name = String::from_utf8_lossy(&matrix_bytes).into_owned();
         if let Some(value) = self.threshold {
             threshold = value;
         } else if threshold as i32 == 13 {
-            threshold = suggested_threshold(SuggestionProgram::TranslatedSubject, &matrix_name);
+            threshold = suggested_threshold(SuggestionProgram::TranslatedSubject, &matrix_bytes);
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-497
         let window_size = self
             .window_size
-            .unwrap_or_else(|| suggested_window_size(&matrix_name));
+            .unwrap_or_else(|| suggested_window_size(&matrix_bytes));
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
         // The query options handler comes after the window size handler and before the
         // formatting handler (tblastn_args.cpp:44-135).
@@ -528,12 +546,13 @@ impl TblastnArgs {
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2976 and
         // 2960-2977 (the formatting handler: other programs' formats, the hit list size
         // and its warning)
-        let choice = parse_formatting_string(&self.outfmt)?;
+        let choice = parse_formatting_string(os_str_bytes(&self.outfmt))?;
         formatting_handler_check(&choice, crate::blastinput::app::Program::Tblastn)?;
         // The hit list size and the counts of the pairwise report
         // (`blastinput::report_counts`), with the handler's warnings. The formats of a
         // `run_local` call are those of `outfmts`; the command line has the one `-outfmt`.
         let own_outfmt = [choice.number];
+        let db_name = self.database_name();
         let html = crate::blastinput::app::html_links(
             self.html,
             if psi {
@@ -541,7 +560,7 @@ impl TblastnArgs {
             } else {
                 crate::report::archive::options::RequestKind::Tblastn
             },
-            self.database_name(),
+            db_name.as_deref(),
             outfmts.unwrap_or(&own_outfmt),
         )?;
         let (counts, warnings) = crate::blastinput::report_counts::run_report_counts_with(
@@ -557,8 +576,11 @@ impl TblastnArgs {
         // composition-based statistics handler; `blastinput/app.rs`)
         // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:866-875
         // PSI-TBLASTN takes any value as mode 0, before the test of an ungapped search.
-        let (composition_mode, _) =
-            parse_comp_based_stats(&self.comp_based_stats, false, self.ungapped && !psi)?;
+        let (composition_mode, _) = parse_comp_based_stats(
+            os_str_bytes(&self.comp_based_stats),
+            false,
+            self.ungapped && !psi,
+        )?;
         let composition_mode = if psi {
             crate::blastinput::app::CompositionMode::NoCompositionBasedStats
         } else {
@@ -592,7 +614,7 @@ impl TblastnArgs {
             gapped: !self.ungapped,
             gap_open,
             gap_extend,
-            matrix_name: &matrix_name,
+            matrix_name: &matrix_bytes,
             threshold,
             word_size,
             compressed_lookup,

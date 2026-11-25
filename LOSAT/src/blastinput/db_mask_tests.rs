@@ -24,14 +24,14 @@ fn open(names: &[PathBuf]) -> (SeqDb, String) {
         .collect::<Vec<_>>()
         .join(" ");
     let mut db = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
-    db.read_name_records(&name, true).unwrap();
+    db.read_name_records(name.as_bytes(), true).unwrap();
     (db, name)
 }
 
 fn soft(text: &str) -> DbMaskOption {
     DbMaskOption {
         kind: MaskKind::Soft,
-        algorithm: FilteringAlgorithm::parse(text),
+        algorithm: FilteringAlgorithm::parse(text.as_bytes()),
     }
 }
 
@@ -54,7 +54,7 @@ fn resolve(
     name: &str,
 ) -> (Result<Option<ResolvedMask>>, String) {
     let mut warnings = Vec::new();
-    let resolved = option.resolve(db, name, "BLASTN", &mut |text| {
+    let resolved = option.resolve(db, name.as_bytes(), "BLASTN", &mut |text| {
         warnings.extend_from_slice(text);
         Ok(())
     });
@@ -74,15 +74,15 @@ fn an_int4_in_ncbi_s_form_is_an_id_and_any_other_text_a_name() {
         ("-5", -5),
     ] {
         assert_eq!(
-            FilteringAlgorithm::parse(text),
+            FilteringAlgorithm::parse(text.as_bytes()),
             FilteringAlgorithm::Id(id),
             "{text:?}"
         );
     }
     for text in [" 11", "11 ", "11x", "", "2147483648", "dust", "-"] {
         assert_eq!(
-            FilteringAlgorithm::parse(text),
-            FilteringAlgorithm::Name(text.to_string()),
+            FilteringAlgorithm::parse(text.as_bytes()),
+            FilteringAlgorithm::Name(text.as_bytes().to_vec()),
             "{text:?}"
         );
     }
@@ -92,19 +92,19 @@ fn an_int4_in_ncbi_s_form_is_an_id_and_any_other_text_a_name() {
 #[test]
 fn the_soft_option_comes_first() {
     let args = DbMaskArgs {
-        db_soft_mask: Some("dust".to_string()),
-        db_hard_mask: Some("11".to_string()),
+        db_soft_mask: Some(std::ffi::OsString::from("dust")),
+        db_hard_mask: Some(std::ffi::OsString::from("11")),
     };
     assert_eq!(
         args.option(),
         Some(DbMaskOption {
             kind: MaskKind::Soft,
-            algorithm: FilteringAlgorithm::Name("dust".to_string()),
+            algorithm: FilteringAlgorithm::Name(b"dust".to_vec()),
         })
     );
     let args = DbMaskArgs {
         db_soft_mask: None,
-        db_hard_mask: Some("+30".to_string()),
+        db_hard_mask: Some(std::ffi::OsString::from("+30")),
     };
     assert_eq!(
         args.option(),
@@ -123,12 +123,12 @@ fn an_id_above_0_must_be_the_database_s() {
     let (a5, a5_name) = open(&[dbmask("a5")]);
     for text in ["11", "+12", "30", "dust", "0", "-1", "-5", "99x"] {
         soft(text)
-            .validate_at_open(&a5, &a5_name, true, "BLASTN")
+            .validate_at_open(&a5, a5_name.as_bytes(), true, "BLASTN")
             .unwrap_or_else(|error| panic!("{text}: {error:#}"));
     }
     for (text, id) in [("99", 99), ("10", 10)] {
         assert_eq!(
-            native(soft(text).validate_at_open(&a5, "db/a5", true, "BLASTN")),
+            native(soft(text).validate_at_open(&a5, b"db/a5", true, "BLASTN")),
             (
                 1,
                 format!("LOSAT options error: Masking algorithm ID {id} is not supported in nucleotide 'db/a5' BLAST database\n")
@@ -137,7 +137,7 @@ fn an_id_above_0_must_be_the_database_s() {
     }
     let (nm5, _) = open(&[dbmask("nm5")]);
     assert_eq!(
-        native(soft("11").validate_at_open(&nm5, "db/nm5", true, "BLASTN")),
+        native(soft("11").validate_at_open(&nm5, b"db/nm5", true, "BLASTN")),
         (
             1,
             "LOSAT options error: Masking algorithm ID 11 is not supported in nucleotide 'db/nm5' BLAST database\n"
@@ -166,7 +166,7 @@ fn a_name_is_the_stored_description_or_the_mask_id() {
     assert_eq!(warning, "");
     assert_eq!(
         (resolved.id, resolved.key.as_deref()),
-        (11, Some("10:window=64; level=20; linker=1"))
+        (11, Some(b"10:window=64; level=20; linker=1".as_slice()))
     );
     assert_eq!(resolved.shown.len(), 1);
     assert_eq!(
@@ -189,9 +189,9 @@ fn a_name_is_the_stored_description_or_the_mask_id() {
 
     let (k5, k5_name) = open(&[dbmask("k5")]);
     for (text, id, key) in [
-        ("mydust", 100, Some("mydust")),
+        ("mydust", 100, Some(b"mydust".as_slice())),
         ("100", 100, None),
-        ("mywm", 101, Some("mywm")),
+        ("mywm", 101, Some(b"mywm".as_slice())),
     ] {
         let (resolved, warning) = resolve(&soft(text), &k5, &k5_name);
         let resolved = resolved.unwrap().unwrap();
@@ -325,14 +325,14 @@ fn the_archive_writes_the_key_of_a_name_or_the_id() {
             ("SubjectMaskingType", ParamValue::Integer(1)),
         ]
     );
-    mask.key = Some("mydust".to_string());
+    mask.key = Some(b"mydust".to_vec());
     mask.kind = MaskKind::Hard;
     assert_eq!(
         params(&mask),
         [
             (
                 "DbFilteringAlgorithmKey",
-                ParamValue::Str("mydust".to_string())
+                ParamValue::Str(b"mydust".to_vec())
             ),
             ("SubjectMaskingType", ParamValue::Integer(2)),
         ]
@@ -613,7 +613,7 @@ fn open_listed(names: &[PathBuf], ids: &[&str]) -> (SeqDb, String) {
     });
     let mut db = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
     db.restrict(&list, &mut Vec::new()).unwrap();
-    db.read_name_records(&name, true).unwrap();
+    db.read_name_records(name.as_bytes(), true).unwrap();
     (db, name)
 }
 
@@ -699,7 +699,7 @@ fn each_name_s_masked_using_line_comes_from_its_own_record() {
     );
     // Records read without the tables (another program's search) have none to give.
     let mut plain = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
-    plain.read_name_records(&name, false).unwrap();
+    plain.read_name_records(name.as_bytes(), false).unwrap();
     assert!(matches!(
         plain.name_mask_details(11),
         Err(crate::seqdb::NameMaskError::NotRead)

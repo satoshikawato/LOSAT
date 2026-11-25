@@ -95,7 +95,7 @@ const BLOCKS_PER_THREAD: usize = 8;
 /// (`ResolvedBlastpArgs::db`: the `-db` value without white space at its ends).
 pub(super) struct BlastpDatabase {
     db: SeqDb,
-    name: String,
+    name: Vec<u8>,
     /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
     /// and the batches' prefetch of outfmt 0, 5, 6 and 7).
     taxdb: shared::TaxdbRun,
@@ -168,11 +168,18 @@ impl BlastpDatabase {
     /// with the command line's errors, which name `program`.
     #[cfg(test)]
     pub(super) fn open(
-        name: &str,
+        name: impl AsRef<[u8]>,
         settings: &ApplicationSettings,
         program: &'static str,
     ) -> Result<Self> {
-        Self::open_restricted(name, settings, program, None, None, &mut std::io::sink())
+        Self::open_restricted(
+            name.as_ref(),
+            settings,
+            program,
+            None,
+            None,
+            &mut std::io::sink(),
+        )
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
@@ -180,7 +187,7 @@ impl BlastpDatabase {
     /// `-db_hard_mask`; series NP, M4b) (`shared::restrict_database`, whose warnings go to
     /// `diagnostics`).
     pub(super) fn open_restricted(
-        name: &str,
+        name: &[u8],
         settings: &ApplicationSettings,
         program: &'static str,
         list: Option<&crate::seqdb::DbList>,
@@ -192,7 +199,7 @@ impl BlastpDatabase {
         shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, program)?;
         Ok(Self {
             db,
-            name: name.to_string(),
+            name: name.to_vec(),
             taxdb: shared::TaxdbRun::default(),
             program,
             rps_units: None,
@@ -206,7 +213,7 @@ impl BlastpDatabase {
     }
 
     /// The `-db` value as NCBI keeps it.
-    pub(super) fn name(&self) -> &str {
+    pub(super) fn name(&self) -> &[u8] {
         &self.name
     }
 

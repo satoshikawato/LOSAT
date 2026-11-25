@@ -388,11 +388,11 @@ pub(super) fn first_batch_setup<'a>(
     (subject_source, subjects): (BlastpSubjectSource<'a>, &[EncodedProtein]),
     contexts: &[QueryContext],
     batches: CallBatches<'_>,
-    mut setup_error: impl FnMut(&str, &str) -> anyhow::Error,
+    mut setup_error: impl FnMut(&[u8], &str) -> anyhow::Error,
 ) -> Result<(bool, call_setup::BlastpDbExtent<'a>)> {
     let (args, database, skipped) = (call.args, subject_source.database(), batches.1);
     let reads = call_steps(call, subject_source, subjects, contexts, batches)?
-        .reads(|text| setup_error("", text))?;
+        .reads(|text| setup_error(b"", text))?;
     // A database without sequences (makeblastdb builds none; a volume whose index holds
     // no sequence) and without an alias file's LENGTH or STATS_TOTLEN
     // (`SeqDb::first_oid_read_fails`): NCBI opens it, writes the outfmt 0 prolog, reads the
@@ -419,7 +419,7 @@ pub(super) fn first_batch_setup<'a>(
     // the batches before the first searched one (`unsearched_batches_then_engine_error`).
     if call_setup::setup_fails(args, &extent, contexts)? {
         return Err(setup_error(
-            "",
+            b"",
             crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT,
         ));
     }

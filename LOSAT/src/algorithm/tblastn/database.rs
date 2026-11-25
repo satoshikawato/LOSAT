@@ -46,7 +46,7 @@ const PROGRAM: &str = "TBLASTN";
 /// (`TblastnArgs::database_name`: the `-db` value without white space at its ends).
 pub(super) struct TblastnDatabase {
     pub(crate) db: SeqDb,
-    name: String,
+    name: Vec<u8>,
     /// The taxonomy database of the run, opened by the XML2 and JSON formats and by the
     /// batches' prefetch of outfmt 0, 5, 6 and 7 (`prefetch_messages`).
     taxdb: shared::TaxdbRun,
@@ -96,8 +96,8 @@ impl TblastnDatabase {
     /// the command line's errors. The total length is NCBI's `Int8`, which the engine holds as
     /// such (`DatabaseNumbers::total_length`) on every target.
     #[cfg(test)]
-    pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, None, &mut std::io::sink())
+    pub(super) fn open(name: impl AsRef<[u8]>, settings: &ApplicationSettings) -> Result<Self> {
+        Self::open_restricted(name.as_ref(), settings, None, None, &mut std::io::sink())
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
@@ -105,7 +105,7 @@ impl TblastnDatabase {
     /// `-db_hard_mask`; series NP, M4b PR 2) (`shared::restrict_database`, whose warnings go to
     /// `diagnostics`).
     pub(super) fn open_restricted(
-        name: &str,
+        name: &[u8],
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
         mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
@@ -117,7 +117,7 @@ impl TblastnDatabase {
             shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, PROGRAM)?;
         Ok(Self {
             db,
-            name: name.to_string(),
+            name: name.to_vec(),
             taxdb: shared::TaxdbRun::default(),
             parsed_seqids,
         })
@@ -130,7 +130,7 @@ impl TblastnDatabase {
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).
-    pub(super) fn name(&self) -> &str {
+    pub(super) fn name(&self) -> &[u8] {
         &self.name
     }
 

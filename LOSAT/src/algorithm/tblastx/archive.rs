@@ -47,7 +47,7 @@ use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 /// (`strategy::StrategyExport::for_args`): the archive's recorded options, the counts
 /// of the `HitlistSize` and the database of `-db`.
 impl crate::report::archive::strategy::StrategyArgs for TblastxArgs {
-    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs {
         crate::report::archive::strategy::StrategyInputs {
             inputs: option_inputs(self),
             counts: crate::report::archive::strategy::HitlistArgs {
@@ -79,7 +79,10 @@ pub(crate) fn option_inputs(args: &TblastxArgs) -> OptionInputs {
     // as the lookup table takes it: `ncbi_int4_from_double`). Without `-threshold` and
     // `-window_size` the list holds the matrix's suggestions (`report::archive::options`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:884-892
-    inputs.matrix = args.matrix.clone();
+    inputs.matrix = args
+        .matrix
+        .as_deref()
+        .map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned());
     inputs.threshold = args.threshold.map(ncbi_int4_from_double);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:387-391
     // `MaskAtHash` is recorded with the value given (the class always sets it: false when absent).
@@ -121,7 +124,7 @@ pub(crate) fn handle_for(
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
     Some(ArchiveHandle::for_program(
         &option_inputs(args),
-        args.database_name(),
+        args.database_name().as_deref(),
         options,
     ))
 }

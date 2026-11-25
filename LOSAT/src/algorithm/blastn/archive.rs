@@ -37,7 +37,7 @@ use crate::utils::dust::MaskedInterval;
 /// (`strategy::StrategyExport::for_args`): the archive's recorded options (`-dust` as given), the counts
 /// of the `HitlistSize` and the database of `-db`.
 impl crate::report::archive::strategy::StrategyArgs for BlastnArgs {
-    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs {
         crate::report::archive::strategy::StrategyInputs {
             inputs: option_inputs(self, self.dust_filtering.as_deref()),
             counts: crate::report::archive::strategy::HitlistArgs {
@@ -52,7 +52,7 @@ impl crate::report::archive::strategy::StrategyArgs for BlastnArgs {
 
 /// The recorded options of a BLASTN run (`options::algorithm_options`'s inputs). `dust` is
 /// the `-dust` value as given (`BlastnArgs::resolve_dust` consumes it).
-pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInputs {
+pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&std::ffi::OsStr>) -> OptionInputs {
     let mut inputs = OptionInputs::new(Program::Blastn, &args.task);
     inputs.dbsize = args.dbsize;
     inputs.searchsp = args.searchsp;
@@ -78,7 +78,7 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     });
     inputs.template_length = args.template_length.map(i32::from);
     inputs.dust = dust
-        .and_then(|value| parse_dust_filtering(value).ok())
+        .and_then(|value| parse_dust_filtering(crate::utils::os_bytes::os_str_bytes(value)).ok())
         .map(|spec| match spec {
             DustSpec::No => Filter::No,
             DustSpec::Yes => Filter::Yes,
@@ -93,8 +93,14 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
             },
         });
     inputs.soft_masking = Some(args.soft_masking());
-    inputs.filtering_db = args.filtering_db.clone();
-    inputs.window_masker_db = args.window_masker_db.clone();
+    inputs.filtering_db = args
+        .filtering_db
+        .as_deref()
+        .map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned());
+    inputs.window_masker_db = args
+        .window_masker_db
+        .as_deref()
+        .map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned());
     inputs.window_masker_taxid = args.window_masker_taxid;
     inputs.culling_limit = args.culling_limit;
     inputs.best_hit_overhang = args.best_hit_overhang;
@@ -107,9 +113,7 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs.xdrop_gap_final = args.xdrop_gap_final;
     inputs.window_size = args.window_size;
     inputs.no_greedy = args.no_greedy;
-    inputs.mb_index_name = args
-        .megablast_index_name()
-        .map(|(name, _)| name.to_string());
+    inputs.mb_index_name = args.megablast_index_name().map(|(name, _)| name);
     inputs.hitlist_size = args
         .max_target_seqs
         .or(args.num_alignments)
@@ -121,7 +125,7 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
 /// archive (`ArchiveHandle::for_program`, with BLASTN's recorded options).
 pub(crate) fn handle_for(
     args: &BlastnArgs,
-    dust: Option<&str>,
+    dust: Option<&std::ffi::OsStr>,
     archive_requested: bool,
     options: &crate::report::archive::OptionsHandle,
 ) -> Option<ArchiveHandle> {
@@ -130,7 +134,7 @@ pub(crate) fn handle_for(
     }
     Some(ArchiveHandle::for_program(
         &option_inputs(args, dust),
-        args.database_name(),
+        args.database_name().as_deref(),
         options,
     ))
 }

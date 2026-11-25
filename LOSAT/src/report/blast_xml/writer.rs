@@ -204,7 +204,7 @@ fn write_header(
     string_member(&mut enc, "program", 0, run.program.as_bytes());
     string_member(&mut enc, "version", 1, run.version.as_bytes());
     string_member(&mut enc, "reference", 2, run.reference.as_bytes());
-    string_member(&mut enc, "db", 3, run.db_name.as_bytes());
+    string_member(&mut enc, "db", 3, run.db_name);
     string_member(&mut enc, "query-ID", 4, first.id);
     string_member(&mut enc, "query-def", 5, query_def(first.title));
     int_member(&mut enc, "query-len", 6, first.len);

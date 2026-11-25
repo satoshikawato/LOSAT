@@ -38,7 +38,7 @@ A configuration file may hold only these entries:
 
 A file with any other entry stops the run, and so does an `NCBI_CONFIG__<SECTION>__<NAME>` variable for another entry.
 
-LOSAT reads the files as NCBI BLAST+ 2.17.0 does: comments, sections, entries before the first section (left out), a value continued on the next line after a backslash, quotes at the ends of a value, and backslash escapes. A value that is not UTF-8 stops a run that uses it: `-window_masker_taxid` for `WINDOW_MASKER_PATH`, and `makeblastdb -parse_seqids` for `MAX_SEQID_LENGTH`. `BLASTDB` is read as its bytes, as NCBI BLAST+ reads it.
+LOSAT reads the files as NCBI BLAST+ 2.17.0 does: comments, sections, entries before the first section (left out), a value continued on the next line after a backslash, quotes at the ends of a value, and backslash escapes. `BLASTDB` and `WINDOW_MASKER_PATH` are read as their bytes, as NCBI BLAST+ reads them; a non-UTF-8 value for `MAX_SEQID_LENGTH` stops `makeblastdb -parse_seqids`.
 
 ### Malformed files and their messages
 
@@ -71,7 +71,7 @@ LOSAT refuses, before any output:
 - an ascii counts file whose unit size is 17 to 251 (NCBI BLAST+ masks with units that do not fit its 32-bit units, an undefined result);
 - an optimized ascii counts file whose hash parameters line (its third) leaves unread a value that NCBI BLAST+ then checks (the line ends, or a word before it is not a number: NCBI checks it uninitialized, an undefined result);
 - a `.ncbirc` that sets `[NCBI] .Inherits`;
-- a directory or path that is not UTF-8, and a current directory it cannot read.
+- a current directory it cannot read.
 
 The Web GUI refuses `-window_masker_taxid` other than 0.
 

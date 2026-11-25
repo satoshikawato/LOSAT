@@ -105,8 +105,8 @@ fn formatting_strings_are_read_as_ncbi_reads_them() {
         parse_formatting_string(" 6 ").unwrap(),
         FormatChoice {
             number: 6,
-            spec: String::new(),
-            delimiter: String::new(),
+            spec: Vec::new(),
+            delimiter: Vec::new(),
         }
     );
     assert_eq!(parse_formatting_string("+6").unwrap().number, 6);
@@ -116,8 +116,8 @@ fn formatting_strings_are_read_as_ncbi_reads_them() {
     assert_eq!(parse_formatting_string("0 std").unwrap().normalized(), "0");
     let delimited = parse_formatting_string("7 delim=, qseqid  sseqid ").unwrap();
     assert_eq!(
-        (delimited.spec.as_str(), delimited.delimiter.as_str()),
-        ("qseqid  sseqid", ",")
+        (delimited.spec.as_slice(), delimited.delimiter.as_slice()),
+        (b"qseqid  sseqid".as_slice(), b",".as_slice())
     );
     assert_eq!(delimited.normalized(), "7 qseqid  sseqid");
     assert!(!parse_formatting_string("6 delim=").unwrap().custom());
@@ -228,8 +228,8 @@ fn structured_formats_write_no_query_warnings() {
 fn report_formats_defer_ncbis_own_errors() {
     let choice = |number| FormatChoice {
         number,
-        spec: String::new(),
-        delimiter: String::new(),
+        spec: Vec::new(),
+        delimiter: Vec::new(),
     };
     let file = Some(Path::new("o.json"));
     for program in PROGRAMS {
@@ -299,8 +299,8 @@ fn report_formats_defer_ncbis_own_errors() {
 fn ncbis_later_format_errors_are_its_messages() {
     let choice = |number| FormatChoice {
         number,
-        spec: String::new(),
-        delimiter: String::new(),
+        spec: Vec::new(),
+        delimiter: Vec::new(),
     };
     let options =
         |text: &str| format!("1 LOSAT query/options error: {text}\n{USER_MANUAL_FOOTER}\n");
@@ -490,7 +490,7 @@ fn the_reports_of_the_formats_0_to_4_read_the_html_links() {
             .is_none());
     }
     for formats in [&[0][..], &[1], &[2], &[3], &[4]] {
-        assert!(html_links(false, RequestKind::Blastn, Some("db"), formats)
+        assert!(html_links(false, RequestKind::Blastn, Some(b"db"), formats)
             .unwrap()
             .is_none());
     }
@@ -520,7 +520,7 @@ fn html_links_names_registry_posts_and_refusals_by_application() {
         let links = html_links_with(
             true,
             kind,
-            Some("db"),
+            Some(b"db"),
             &[0],
             |prog| FormatterNcbirc::of(prog, Some(repeated.to_vec())),
             |prog| InitConfig::of(prog, Some((".ncbirc".into(), repeated.to_vec())), false),
@@ -550,7 +550,7 @@ fn html_links_names_registry_posts_and_refusals_by_application() {
         let ncbirc_err = html_links_with(
             true,
             kind,
-            Some("db"),
+            Some(b"db"),
             &[0],
             |prog| FormatterNcbirc::of_read(prog, Err(partial.to_string())),
             |prog| InitConfig::of(prog, None, false),
@@ -565,7 +565,7 @@ fn html_links_names_registry_posts_and_refusals_by_application() {
         let init_err = html_links_with(
             true,
             kind,
-            Some("db"),
+            Some(b"db"),
             &[0],
             |prog| FormatterNcbirc::of(prog, None),
             |prog| {

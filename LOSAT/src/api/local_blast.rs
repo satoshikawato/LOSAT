@@ -350,7 +350,7 @@ impl Write for PostsFirst<'_> {
 }
 
 /// The report of the `-outfmt` value `outfmt` (`None` for a value that NCBI's reading refuses).
-fn report_format_of(outfmt: &str) -> Option<crate::blastinput::app::ReportFormat> {
+fn report_format_of(outfmt: impl AsRef<[u8]>) -> Option<crate::blastinput::app::ReportFormat> {
     use crate::blastinput::app::{parse_formatting_string, ReportFormat};
     parse_formatting_string(outfmt)
         .ok()
@@ -361,7 +361,7 @@ fn report_format_of(outfmt: &str) -> Option<crate::blastinput::app::ReportFormat
 /// One requested output: an `-outfmt` value, parsed and validated by the program exactly
 /// as on the command line, where to write it, and what LOSAT's refusal of its report does.
 pub struct FormatOutput<'a> {
-    pub outfmt: &'a str,
+    pub outfmt: &'a [u8],
     pub sink: OutputSink<'a>,
     pub refusal: FormatRefusal,
 }
@@ -1015,7 +1015,7 @@ impl FormatOutput<'_> {
 impl<'a> ReportOutputs<'a> {
     /// The command-line shape: one output format and warnings, no records or observer.
     pub fn single(
-        outfmt: &'a str,
+        outfmt: &'a (impl AsRef<[u8]> + ?Sized),
         sink: OutputSink<'a>,
         diagnostics: &'a mut (dyn Write + Send),
     ) -> Self {
@@ -1023,7 +1023,7 @@ impl<'a> ReportOutputs<'a> {
             other_outfmts: &[],
             html_posts: None,
             formats: vec![FormatOutput {
-                outfmt,
+                outfmt: outfmt.as_ref(),
                 sink,
                 refusal: FormatRefusal::FailsCall,
             }],

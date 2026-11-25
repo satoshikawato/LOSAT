@@ -268,9 +268,9 @@ fn tabular_row(set: &DeflineSet, protein: bool) -> Option<Vec<String>> {
         &FormatChoice {
             number: 6,
             spec:
-                "sseqid sallseqid sacc saccver sallacc sgi sallgi stitle salltitles staxid staxids"
-                    .to_string(),
-            delimiter: String::new(),
+                b"sseqid sallseqid sacc saccver sallacc sgi sallgi stitle salltitles staxid staxids"
+                    .to_vec(),
+            delimiter: Vec::new(),
         },
         if protein {
             crate::report::archive::options::RequestKind::Blastp

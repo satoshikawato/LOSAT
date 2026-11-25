@@ -72,10 +72,11 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Tb
                 &search,
             )
             .unwrap();
-            db.read_name_records(path.to_str().unwrap(), false).unwrap();
+            db.read_name_records(path.to_str().unwrap().as_bytes(), false)
+                .unwrap();
             db
         },
-        name: name.to_string(),
+        name: name.as_bytes().to_vec(),
         taxdb: shared::TaxdbRun::default(),
         parsed_seqids: true,
     }

@@ -236,13 +236,16 @@ fn blastps_database_filters_and_id_options_reach_the_search() {
         "3",
     ])
     .unwrap();
-    assert_eq!(blastp.db_filter.taxids.as_deref(), Some("9606"));
+    assert_eq!(
+        blastp.db_filter.taxids.as_deref(),
+        Some(std::ffi::OsStr::new("9606"))
+    );
     assert!(blastp.db_filter.no_taxid_expansion);
     assert!(blastp.show_gis && blastp.parse_deflines && blastp.lcase_masking);
     let blastp = db(&["-negative_seqidlist", "l.txt"]).unwrap();
     assert_eq!(
         blastp.db_filter.negative_seqidlist.as_deref(),
-        Some("l.txt")
+        Some(std::ffi::OsStr::new("l.txt"))
     );
     let blastp = db(&[]).unwrap();
     assert!(!blastp.show_gis && !blastp.parse_deflines && !blastp.lcase_masking);

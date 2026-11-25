@@ -302,7 +302,7 @@ fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
         }
         ParamValue::Str(value) => {
             enc.variant("Blast4-value", "string", 11);
-            enc.visible_str(value.as_bytes());
+            enc.visible_str(value);
         }
         ParamValue::IntegerList(values) => {
             enc.variant("Blast4-value", "integer-list", 16);

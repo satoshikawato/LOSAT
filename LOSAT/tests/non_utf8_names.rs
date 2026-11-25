@@ -98,6 +98,17 @@ fn set_up(setup: &str, d: &Path) -> PathBuf {
             "copy" => {
                 std::fs::copy(losat.join(parts[1]), path_in(d, words(parts[2], db))).unwrap();
             }
+            "copydir" => {
+                let source = losat.join(parts[1]);
+                let target = path_in(d, words(parts[2], db));
+                std::fs::create_dir_all(&target).unwrap();
+                for entry in std::fs::read_dir(&source).unwrap() {
+                    let entry = entry.unwrap();
+                    if entry.file_type().unwrap().is_file() {
+                        std::fs::copy(entry.path(), target.join(entry.file_name())).unwrap();
+                    }
+                }
+            }
             "copydb" => {
                 let source = losat.join(parts[1]);
                 let prefix = format!("{}.", source.file_name().unwrap().to_str().unwrap());
@@ -138,6 +149,20 @@ fn set_up(setup: &str, d: &Path) -> PathBuf {
             "cwd" => {
                 cwd = path_in(d, words(parts[1], db));
                 std::fs::create_dir(&cwd).unwrap();
+            }
+            "mkidx" => {
+                let mut cmd = Command::new(BIN);
+                cmd.current_dir(&cwd).arg("makembindex");
+                for word in &parts[1..] {
+                    cmd.arg(OsString::from_vec(words(word, db)));
+                }
+                let _files = home_and_worker_log(&mut cmd, "non_utf8_mkidx");
+                let out = cmd.output().expect("run LOSAT makembindex");
+                assert!(
+                    out.status.success(),
+                    "mkidx failed: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
             }
             other => panic!("unknown step {other}"),
         }
@@ -281,8 +306,13 @@ fn undated(d: &Path, path: &[u8], data: &[u8]) -> Vec<u8> {
         let mut dates = 0;
         for name in listed.split(|&b| b == b'"').skip(1).step_by(2) {
             if INDEX.iter().any(|end| name.ends_with(end.as_bytes())) {
-                let index =
-                    std::fs::read(directory.join(OsString::from_vec(name.to_vec()))).unwrap();
+                let candidate = directory.join(OsString::from_vec(name.to_vec()));
+                let index = if candidate.exists() {
+                    std::fs::read(&candidate).unwrap()
+                } else {
+                    let base = name.rsplit(|&b| b == b'/').next().unwrap_or(name);
+                    std::fs::read(directory.join(OsString::from_vec(base.to_vec()))).unwrap()
+                };
                 let (start, end) = index_date(&index).unwrap();
                 dates += end - start;
             }
@@ -302,6 +332,12 @@ fn undated(d: &Path, path: &[u8], data: &[u8]) -> Vec<u8> {
             let total = (total - dates).to_string();
             data = [&data[..start], total.as_bytes(), &data[end..]].concat();
         }
+    }
+    if path.ends_with(b".log") {
+        data = without_time(&data);
+    }
+    if path.ends_with(b".nal") || path.ends_with(b".pal") {
+        data = masked(&data, b"# Alias file created: ", b"\n", b"<DATE>");
     }
     let mut out = Vec::with_capacity(data.len());
     let mut i = 0;
@@ -390,6 +426,7 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
             "NCBI_CONFIG_PATH",
             "NCBI_DONT_USE_LOCAL_CONFIG",
             "NCBI",
+            "WINDOW_MASKER_PATH",
         ] {
             command.env_remove(name);
         }
@@ -427,6 +464,6 @@ fn names_that_are_not_utf8_keep_their_bytes_as_in_ncbi() {
             ));
         }
     }
-    assert_eq!(ran, 159, "the cases of cases.tsv");
+    assert_eq!(ran, 216, "the cases of cases.tsv");
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }

@@ -608,7 +608,7 @@ fn hit_list_keeps_ncbis_subjects_on_ties() {
 fn outfmt7_headers_follow_print_header() {
     let header = |hits| {
         let mut out = Vec::new();
-        write_outfmt7_query_header(&mut out, b"q1 title", "db", hits).unwrap();
+        write_outfmt7_query_header(&mut out, b"q1 title", b"db", hits).unwrap();
         String::from_utf8(out).unwrap()
     };
     assert_eq!(
@@ -687,7 +687,10 @@ fn only_a_field_list_a_delimiter_and_10_and_20_take_the_shared_writer() {
     ] {
         match output_format(outfmt) {
             TblastxOutputFormat::CustomTabular(spec) => {
-                assert_eq!((spec.kind, spec.delimiter.as_str()), (kind, delimiter))
+                assert_eq!(
+                    (spec.kind, spec.delimiter.as_slice()),
+                    (kind, delimiter.as_bytes())
+                )
             }
             other => panic!("{outfmt}: {other:?}"),
         }

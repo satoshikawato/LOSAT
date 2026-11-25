@@ -73,9 +73,9 @@ impl OutputConfig {
 #[derive(Debug, Clone)]
 pub struct ReportContext {
     /// Subject/database file name or description
-    pub subject_name: Option<String>,
+    pub subject_name: Option<Vec<u8>>,
     /// Fully formatted database label for pairwise formatting
-    pub database_name: Option<String>,
+    pub database_name: Option<Vec<u8>>,
     /// Program name (blastn, tblastx, etc.)
     pub program: String,
 }

@@ -247,7 +247,7 @@ fn search_read_error(error: SeqDbError) -> anyhow::Error {
 /// numbers as the search uses them.
 pub(super) struct BlastnDatabase {
     pub(crate) db: SeqDb,
-    name: String,
+    name: Vec<u8>,
     metadata: SubjectMetadata,
     /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
     /// and the batches' prefetch of outfmt 0, 5, 6, 7 and 17).
@@ -438,20 +438,21 @@ impl BlastnDatabase {
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors. The total length is NCBI's `Int8`, which the engine holds
     /// as such (`SubjectMetadata::db_len_total`) on every target.
-    pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, None, &mut std::io::sink())
+    pub(super) fn open(name: impl AsRef<[u8]>, settings: &ApplicationSettings) -> Result<Self> {
+        Self::open_restricted(name.as_ref(), settings, None, None, &mut std::io::sink())
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
     /// line (`shared::restrict_database`, whose warnings go to `diagnostics`), and the id of the
     /// database mask `mask` checked as NCBI checks it there (`DbMaskOption::validate_at_open`).
     pub(super) fn open_restricted(
-        name: &str,
+        name: impl AsRef<[u8]>,
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
         mask: Option<&DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
     ) -> Result<Self> {
+        let name = name.as_ref();
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
         let parsed_seqids =
@@ -467,7 +468,7 @@ impl BlastnDatabase {
         };
         Ok(Self {
             db,
-            name: name.to_string(),
+            name: name.to_vec(),
             metadata,
             taxdb: shared::TaxdbRun::default(),
             loaded_before_batch: Default::default(),
@@ -486,22 +487,19 @@ impl BlastnDatabase {
     /// LOSAT does not know its place or the name opens other volumes than this database's.
     pub(super) fn index_volumes(
         &self,
-        indexname: &str,
+        indexname: &[u8],
     ) -> Result<Vec<(Vec<u8>, u32)>, Option<NcbiException>> {
         let path = self.db.search_path().ok_or(None)?;
-        let (paths, _) = crate::seqdb::SeqDb::volume_and_alias_paths(
-            indexname.as_bytes(),
-            SeqType::Nucleotide,
-            path,
-        )
-        .map_err(|error| {
-            if let Some(exception) = error.ncbi_exception() {
-                return Some(exception.clone());
-            }
-            let text = error.ncbi_message()?;
-            let site = error.throw_site()?;
-            Some(NcbiException::new(site, text))
-        })?;
+        let (paths, _) =
+            crate::seqdb::SeqDb::volume_and_alias_paths(indexname, SeqType::Nucleotide, path)
+                .map_err(|error| {
+                    if let Some(exception) = error.ncbi_exception() {
+                        return Some(exception.clone());
+                    }
+                    let text = error.ncbi_message()?;
+                    let site = error.throw_site()?;
+                    Some(NcbiException::new(site, text))
+                })?;
         paths
             .into_iter()
             .map(|vol_name| {
@@ -894,7 +892,7 @@ impl BlastnDatabase {
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).
-    pub(super) fn name(&self) -> &str {
+    pub(super) fn name(&self) -> &[u8] {
         &self.name
     }
 

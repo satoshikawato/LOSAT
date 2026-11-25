@@ -41,7 +41,7 @@ pub(super) enum ShownSubjects<'a> {
     /// `-db`: the `-db` value (outfmt 7's `# Database:` line), the database's `Database:`
     /// lines (outfmt 0) and the reported sequences by rank (their tabular ids).
     Database {
-        name: &'a str,
+        name: &'a [u8],
         pairwise: &'a PairwiseDatabase,
         reported: &'a super::database::ReportedSubjects,
         /// The OID of each ordinal id, which names a sequence without parsed Seq-ids.
@@ -55,12 +55,15 @@ pub(super) enum ShownSubjects<'a> {
 
 impl ShownSubjects<'_> {
     /// The name after `# Database: ` (outfmt 7) and in the pairwise report of a subject set.
-    pub(super) fn name(&self) -> String {
+    pub(super) fn name(&self) -> Vec<u8> {
         match self {
             Self::Fasta { path, .. } => {
-                format!("User specified sequence set (Input: {})", path.display())
+                let mut out = b"User specified sequence set (Input: ".to_vec();
+                out.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(path.as_os_str()));
+                out.push(b')');
+                out
             }
-            Self::Database { name, .. } => name.to_string(),
+            Self::Database { name, .. } => name.to_vec(),
         }
     }
 
@@ -153,21 +156,22 @@ pub(super) const ARCHIVE_FORMAT: i32 = 11;
 
 /// The format number of a checked `-outfmt` value, as NCBI's `ParseFormattingString` reads
 /// it (a custom specification of outfmt 0 is ignored); -1 for a value it does not read.
-pub(super) fn format_number(outfmt: &str) -> i32 {
+pub(super) fn format_number(outfmt: impl AsRef<[u8]>) -> i32 {
     crate::blastinput::app::parse_formatting_string(outfmt).map_or(-1, |choice| choice.number)
 }
 
 /// The XML2 / JSON document of a checked `-outfmt` value (16, 15, 14 or 13; `None` for the
 /// others). Outfmt 13 and 14 write side files next to `-out`, or to the caller's receiver of them
 /// (`OutputSink::Files`); a `run_local` call with neither stops at NCBI's XInclude check.
-pub(super) fn xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind> {
+pub(super) fn xml2_kind(outfmt: impl AsRef<[u8]>) -> Option<crate::report::blast_xml2::Xml2Kind> {
     use crate::blastinput::app::ReportFormat;
     crate::report::blast_xml2::Xml2Kind::of(ReportFormat::from_number(format_number(outfmt))?)
 }
 
 /// Whether a checked `-outfmt` value is a format of the structured XML family that takes the
 /// path of outfmt 5: BLAST XML (5) and the XML2 and JSON documents (16, 15, 14, 13).
-pub(super) fn is_structured_xml(outfmt: &str) -> bool {
+pub(super) fn is_structured_xml(outfmt: impl AsRef<[u8]>) -> bool {
+    let outfmt = outfmt.as_ref();
     format_number(outfmt) == 5 || xml2_kind(outfmt).is_some()
 }
 
@@ -196,21 +200,24 @@ pub(super) fn reads_subject_letters(
 /// then the rows'. The Seq-aligns and the archive (8, 9, 11, 12) and the other tabular reports
 /// (`write_tabular`, the default rows of 6 and 7, has no spec) read the lengths alone: their
 /// counts are the search's. A value that this does not know reads them.
-fn formats_read_subject_letters<'a>(
+fn formats_read_subject_letters<O: AsRef<[u8]>>(
     hits: bool,
     recounted: bool,
-    mut outfmts: impl Iterator<Item = &'a str>,
+    mut outfmts: impl Iterator<Item = O>,
 ) -> bool {
-    hits || outfmts.any(|outfmt| match format_number(outfmt) {
-        8 | 9 | 11 | 12 => false,
-        6 | 7 | 10 | 20 => {
-            recounted
-                || super::tabular::tabular_spec(outfmt)
-                    .is_some_and(|spec| super::tabular::reads_rows(&spec))
+    hits || outfmts.any(|outfmt| {
+        let outfmt = outfmt.as_ref();
+        match format_number(outfmt) {
+            8 | 9 | 11 | 12 => false,
+            6 | 7 | 10 | 20 => {
+                recounted
+                    || super::tabular::tabular_spec(outfmt)
+                        .is_some_and(|spec| super::tabular::reads_rows(&spec))
+            }
+            // The organism report (`report::tax_report`) shows scores and definition lines.
+            18 => false,
+            _ => true,
         }
-        // The organism report (`report::tax_report`) shows scores and definition lines.
-        18 => false,
-        _ => true,
     })
 }
 
@@ -928,7 +935,10 @@ pub(super) fn render(
                         &mut writer,
                     )?
                 }
-                _ => bail!("unsupported TBLASTN outfmt {}", format.outfmt),
+                _ => bail!(
+                    "unsupported TBLASTN outfmt {}",
+                    String::from_utf8_lossy(format.outfmt)
+                ),
             }
             writer.flush()?;
             Ok(())
@@ -1000,7 +1010,9 @@ fn write_tabular(
             // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
             // The title's bytes (`write_outfmt7_query_line`).
             crate::report::outfmt6::write_outfmt7_query_line(writer, &query.query_line())?;
-            writeln!(writer, "# Database: {}", shown.name())?;
+            writer.write_all(b"# Database: ")?;
+            writer.write_all(&shown.name())?;
+            writer.write_all(b"\n")?;
             if hit_count > 0 {
                 writeln!(writer, "# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score")?;
             }

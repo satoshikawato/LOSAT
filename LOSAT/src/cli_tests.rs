@@ -59,10 +59,10 @@ fn a_run_outside_main_posts_no_error_text() {
     assert!(!posted(text.as_bytes()));
 }
 
-// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value; LOSAT
-// rejects a value that is not UTF-8 explicitly, in both spellings of an option.
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:266-270 keeps the bytes of a string value;
+// LOSAT keeps non-UTF-8 values verbatim in both spellings of an option (line RG item K10c).
 #[test]
-fn option_values_that_are_not_utf8_are_rejected_explicitly() {
+fn option_values_that_are_not_utf8_keep_their_bytes() {
     for (option, value) in [
         ("-query_loc", vec![0xff]),
         ("-subject_loc", b"1-\xff".to_vec()),
@@ -76,24 +76,27 @@ fn option_values_that_are_not_utf8_are_rejected_explicitly() {
         inline.extend(&value);
         let joined = blastn_argv(vec![OsString::from_vec(inline)]);
         for argv in [separate, joined] {
-            let error = try_parse_from(argv).unwrap_err();
-            let message = error.to_string();
-            assert!(matches!(error, ArgvError::Refused(_)), "{message}");
-            assert!(
-                message.contains(&format!("the value of {option} is not UTF-8"))
-                    && message.contains("not supported by LOSAT's BLASTN"),
-                "{message}"
+            let Commands::Blastn(args) = try_parse_from(argv).unwrap().command else {
+                panic!("a BLASTN command line");
+            };
+            let got = match option {
+                "-query_loc" => args.query_loc.as_deref(),
+                "-subject_loc" => args.subject_loc.as_deref(),
+                "-dust" => args.dust_filtering.as_deref(),
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                got.map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned()),
+                Some(value.clone())
             );
         }
     }
 }
 
-// makeblastdb keeps its values as UTF-8 strings: a value that is not UTF-8 (a file name of
-// `-in`, `-out`, `-mask_data`, `-taxid_map`, `-logfile`, a `-title`) is LOSAT's explicit
-// rejection after NCBI's reader, in the words of makeblastdb's other refusals (line LIB-B,
-// probe 2026-11-21; line RG DECISIONS K4i-2b-2 (1)).
+// makeblastdb keeps its values as OsStrings verbatim (line RG item K10c).
 #[test]
-fn makeblastdb_rejects_values_that_are_not_utf8_explicitly() {
+fn makeblastdb_keeps_values_that_are_not_utf8() {
+    let raw = b"n\xe9.x".to_vec();
     for option in [
         "-in",
         "-out",
@@ -107,30 +110,35 @@ fn makeblastdb_rejects_values_that_are_not_utf8_explicitly() {
             OsString::from("makeblastdb"),
             OsString::from("-dbtype"),
             OsString::from("nucl"),
-            // `-taxid_map` requires it: the parser's errors come before the rejection.
+            // `-taxid_map` requires it: the parser's errors come before option conversion.
             OsString::from("-parse_seqids"),
             OsString::from(option),
-            OsString::from_vec(b"n\xe9.x".to_vec()),
+            OsString::from_vec(raw.clone()),
         ];
-        let error = try_parse_from(argv).unwrap_err();
-        let message = error.to_string();
-        assert!(
-            matches!(error, ArgvError::Refused(_)),
-            "{option}: {message}"
-        );
-        assert!(
-            message.contains(&format!("the value of {option} is not UTF-8"))
-                && message.contains("not supported by LOSAT's makeblastdb"),
-            "{message}"
+        let Commands::Makedb(args) = try_parse_from(argv).unwrap().command else {
+            panic!("a makeblastdb command line");
+        };
+        let got = match option {
+            "-in" => Some(args.input.as_os_str()),
+            "-out" => args.out.as_deref(),
+            "-mask_data" => args.mask_data.as_deref(),
+            "-taxid_map" => args.taxid_map.as_deref(),
+            "-logfile" => args.logfile.as_deref(),
+            "-title" => args.title.as_deref(),
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            got.map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned()),
+            Some(raw.clone()),
+            "{option}"
         );
     }
 }
 
 // BLASTX reads both ranges (line SX, SXd1), excludes `-subject_loc` with `-db` as the other
-// programs do, and rejects an option's value that is not UTF-8 with their text (DECISIONS 10
-// (c) of line SX).
+// programs do, and keeps non-UTF-8 option values verbatim (line RG item K10c).
 #[test]
-fn blastx_reads_the_ranges_and_rejects_values_that_are_not_utf8() {
+fn blastx_reads_the_ranges_and_keeps_values_that_are_not_utf8() {
     let parsed = try_parse_from([
         "losat",
         "blastx",
@@ -147,8 +155,14 @@ fn blastx_reads_the_ranges_and_rejects_values_that_are_not_utf8() {
     let Commands::Blastx(args) = parsed.command else {
         panic!("a BLASTX command line");
     };
-    assert_eq!(args.query_loc.as_deref(), Some("1-10"));
-    assert_eq!(args.subject_loc.as_deref(), Some("2-5"));
+    assert_eq!(
+        args.query_loc.as_deref(),
+        Some(std::ffi::OsStr::new("1-10"))
+    );
+    assert_eq!(
+        args.subject_loc.as_deref(),
+        Some(std::ffi::OsStr::new("2-5"))
+    );
     let error = try_parse_from([
         "losat",
         "blastx",
@@ -170,13 +184,23 @@ fn blastx_reads_the_ranges_and_rejects_values_that_are_not_utf8() {
         ("-subject_loc", b"1-\xff".to_vec()),
         ("-outfmt", vec![0xfe]),
     ] {
-        let mut argv = blastn_argv(vec![OsString::from(option), OsString::from_vec(value)]);
+        let mut argv = blastn_argv(vec![
+            OsString::from(option),
+            OsString::from_vec(value.clone()),
+        ]);
         argv[1] = OsString::from("blastx");
-        let message = try_parse_from(argv).unwrap_err().to_string();
-        assert!(
-            message.contains(&format!("the value of {option} is not UTF-8"))
-                && message.contains("not supported by LOSAT's BLASTX"),
-            "{message}"
+        let Commands::Blastx(parsed) = try_parse_from(argv).unwrap().command else {
+            panic!("a BLASTX command line");
+        };
+        let got = match option {
+            "-query_loc" => parsed.query_loc.as_deref(),
+            "-subject_loc" => parsed.subject_loc.as_deref(),
+            "-outfmt" => Some(parsed.outfmt.as_os_str()),
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            got.map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned()),
+            Some(value)
         );
     }
 }

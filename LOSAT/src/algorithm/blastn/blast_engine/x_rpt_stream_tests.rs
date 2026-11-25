@@ -173,7 +173,7 @@ fn the_switch_acts_where_the_outputs_and_options_allow() {
     let mut errors2 = Vec::<u8>::new();
     let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors2);
     outputs.formats.push(FormatOutput {
-        outfmt: "7",
+        outfmt: b"7",
         refusal: crate::api::local_blast::FormatRefusal::FailsCall,
         sink: OutputSink::Writer(&mut two),
     });

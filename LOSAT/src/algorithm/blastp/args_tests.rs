@@ -39,7 +39,11 @@ fn the_database_name_loses_the_white_space_at_its_ends() {
         ("   ", ""),
         ("\u{a0}db", "\u{a0}db"),
     ] {
-        assert_eq!(resolved_name(given).as_deref(), Some(kept), "{given:?}");
+        assert_eq!(
+            resolved_name(given).as_deref(),
+            Some(kept.as_bytes()),
+            "{given:?}"
+        );
     }
 }
 

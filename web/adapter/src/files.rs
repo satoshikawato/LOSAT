@@ -296,27 +296,32 @@ impl std::fmt::Debug for RegisteredCounts {
 }
 
 impl RegisteredCounts {
-    fn file(&self, name: &str) -> Result<&Counts, WinMaskError> {
-        self.files
-            .get(name)
+    fn file(&self, name: &std::path::Path) -> Result<&Counts, WinMaskError> {
+        name.to_str()
+            .and_then(|key| self.files.get(key))
             .map(|file| &**file)
             .ok_or_else(|| WinMaskError::Open {
-                name: name.as_bytes().to_vec(),
+                name: name.as_os_str().as_encoded_bytes().to_vec(),
             })
     }
 }
 
 impl CountsSource for RegisteredCounts {
-    fn discover(&self, name: &str) -> Result<StatFile, WinMaskError> {
+    fn discover(&self, name: &std::path::Path) -> Result<StatFile, WinMaskError> {
         self.file(name)?.found.clone()
     }
 
-    fn counts(&self, name: &str, params: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError> {
+    fn counts(
+        &self,
+        name: &std::path::Path,
+        params: &MaskerParams,
+    ) -> Result<Arc<UnitCounts>, WinMaskError> {
         let file = self.file(name)?;
         if *params != MaskerParams::default() {
             return Err(WinMaskError::CreateFail {
                 message: format!(
-                    "LOSAT Web holds the WindowMasker counts {name} read with BLASTN's settings only"
+                    "LOSAT Web holds the WindowMasker counts {} read with BLASTN's settings only",
+                    name.display()
                 ),
             });
         }
@@ -451,7 +456,7 @@ mod tests {
             assert!(response.contains("\"stat_type\":\"obinary\",\"unit_size\":9,\"error\":null"));
             let source = source();
             let counts = source
-                .counts(&name, &MaskerParams::default())
+                .counts(std::path::Path::new(&name), &MaskerParams::default())
                 .expect("registered counts");
             assert_eq!(counts.unit_size(), whole.unit_size());
             assert_eq!(counts.threshold(), whole.threshold());
@@ -476,7 +481,7 @@ mod tests {
                 .map(|_| ())
                 .expect_err("not counts LOSAT reads");
             let got = source()
-                .counts(name, &MaskerParams::default())
+                .counts(std::path::Path::new(name), &MaskerParams::default())
                 .map(|_| ())
                 .expect_err("the reader's error");
             assert_eq!(got, want, "{name}");
@@ -552,9 +557,14 @@ mod tests {
             "{response}"
         );
         let source = source();
-        assert!(source.discover("short.obinary").is_ok());
+        assert!(source
+            .discover(std::path::Path::new("short.obinary"))
+            .is_ok());
         assert!(matches!(
-            source.counts("short.obinary", &MaskerParams::default()),
+            source.counts(
+                std::path::Path::new("short.obinary"),
+                &MaskerParams::default()
+            ),
             Err(WinMaskError::Format { .. })
         ));
         release(file).expect("release");
@@ -568,7 +578,7 @@ mod tests {
         release(file).expect("release");
 
         assert_eq!(
-            source.discover("never.registered"),
+            source.discover(std::path::Path::new("never.registered")),
             Err(WinMaskError::Open {
                 name: b"never.registered".to_vec()
             })

@@ -393,7 +393,7 @@ fn database_numbers_come_from_the_index_files() {
     assert_eq!(shown.definition, b"nucleotide in volumes");
     assert_eq!(shown.databases[0].date, "Oct 12, 2026  4:12 PM");
     assert_eq!((shown.num_sequences, shown.total_letters), (12, 850));
-    assert_eq!(database.name(), fixture("nucl_mv"));
+    assert_eq!(database.name(), fixture("nucl_mv").as_bytes());
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-911
@@ -1047,7 +1047,8 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
         &search,
     )
     .unwrap();
-    db.read_name_records(path.to_str().unwrap(), false).unwrap();
+    db.read_name_records(path.to_str().unwrap().as_bytes(), false)
+        .unwrap();
     let parsed_seqids = db.has_parsed_seqids().unwrap();
     BlastnDatabase {
         metadata: SubjectMetadata {
@@ -1055,7 +1056,7 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
             db_num_seqs: db.num_seqs() as i32,
         },
         db,
-        name: name.to_string(),
+        name: name.as_bytes().to_vec(),
         taxdb: shared::TaxdbRun::default(),
         loaded_before_batch: Default::default(),
         parsed_seqids,

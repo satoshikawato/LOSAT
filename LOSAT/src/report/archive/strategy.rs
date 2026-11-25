@@ -548,16 +548,16 @@ pub struct HitlistArgs {
 
 /// What a program's arguments give its search strategy's requests (`StrategyArgs`): the recorded
 /// options, the counts of its `HitlistSize` and the database of `-db` as NCBI keeps it.
-pub(crate) struct StrategyInputs<'a> {
+pub(crate) struct StrategyInputs {
     pub(crate) inputs: OptionInputs,
     pub(crate) counts: HitlistArgs,
-    pub(crate) database: Option<&'a str>,
+    pub(crate) database: Option<Vec<u8>>,
 }
 
 /// The arguments of a program that writes `-export_search_strategy` (`StrategyExport::for_args`):
 /// each program's in its archive module, with its archive's recorded options.
 pub(crate) trait StrategyArgs {
-    fn strategy_inputs(&self) -> StrategyInputs<'_>;
+    fn strategy_inputs(&self) -> StrategyInputs;
 }
 
 /// The `HitlistSize` option of a run of format `outfmt` (`report_counts`): the archive's is that
@@ -598,7 +598,6 @@ pub fn open_strategy_file_in(
     let Some(path) = path else {
         return Ok(None);
     };
-    crate::blastinput::input_files::check_utf8_file_name(path, "export_search_strategy", label)?;
     create_strategy_file_in(files, path, label, others).map(Some)
 }
 
@@ -618,7 +617,7 @@ impl StrategyExport {
     pub fn new(
         sink: Box<dyn StrategySink>,
         inputs: &OptionInputs,
-        database: Option<&str>,
+        database: Option<&[u8]>,
         options: OptionsHandle,
     ) -> Self {
         Self::with_refusal(sink, inputs, database, options, None)
@@ -627,7 +626,7 @@ impl StrategyExport {
     fn with_refusal(
         sink: Box<dyn StrategySink>,
         inputs: &OptionInputs,
-        database: Option<&str>,
+        database: Option<&[u8]>,
         options: OptionsHandle,
         refusal: Option<String>,
     ) -> Self {
@@ -664,7 +663,7 @@ impl StrategyExport {
         mut inputs: OptionInputs,
         outfmt: Option<i32>,
         counts: HitlistArgs,
-        database: Option<&str>,
+        database: Option<&[u8]>,
         options: &OptionsHandle,
     ) -> Self {
         if let Some(outfmt) = outfmt {
@@ -696,7 +695,7 @@ impl StrategyExport {
             counts,
             database,
         } = args.strategy_inputs();
-        Self::for_run(file, inputs, outfmt, counts, database, options)
+        Self::for_run(file, inputs, outfmt, counts, database.as_deref(), options)
     }
 
     /// The run's options handle.

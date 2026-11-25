@@ -142,3 +142,28 @@ fn aborts_strips_trailing_newline_from_exception_message() {
          (Error: No tax info for any oid; NCBI's makeprofiledb aborts there)",
     );
 }
+
+struct FailingWriter(std::io::ErrorKind);
+
+impl Write for FailingWriter {
+    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::from(self.0))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Err(std::io::Error::from(self.0))
+    }
+}
+
+#[test]
+fn write_line_or_closed_pipe_maps_broken_pipe_only_off_windows() {
+    let mut pipe = FailingWriter(std::io::ErrorKind::BrokenPipe);
+    let pipe_result = write_line_or_closed_pipe(&mut pipe, b"Deleted\n");
+    #[cfg(windows)]
+    assert!(pipe_result.is_ok());
+    #[cfg(not(windows))]
+    assert!(matches!(pipe_result, Err(RunError::ClosedPipe)));
+
+    let mut full = FailingWriter(std::io::ErrorKind::WriteZero);
+    assert!(write_line_or_closed_pipe(&mut full, b"Deleted\n").is_ok());
+}

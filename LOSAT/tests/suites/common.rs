@@ -89,6 +89,8 @@ mod makeblastdb_rename_lock;
 mod makembindex_closed_pipe;
 #[path = "../makembindex_fixtures.rs"]
 mod makembindex_fixtures;
+#[path = "../makeprofiledb_closed_pipe.rs"]
+mod makeprofiledb_closed_pipe;
 #[path = "../makeprofiledb_fixtures.rs"]
 mod makeprofiledb_fixtures;
 #[path = "../masker_fixtures.rs"]

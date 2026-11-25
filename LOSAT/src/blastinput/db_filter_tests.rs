@@ -5,10 +5,10 @@ use super::*;
 fn the_archive_parameter_follows_the_list_option() {
     use crate::report::archive::options::{Param, ParamValue};
     let filter = |taxids: bool, negative: bool| DbFilterArgs {
-        taxids: (taxids && !negative).then(|| "1".to_string()),
-        negative_taxids: (taxids && negative).then(|| "1".to_string()),
-        seqidlist: (!taxids && !negative).then(|| "f".to_string()),
-        negative_seqidlist: (!taxids && negative).then(|| "f".to_string()),
+        taxids: (taxids && !negative).then(|| std::ffi::OsString::from("1")),
+        negative_taxids: (taxids && negative).then(|| std::ffi::OsString::from("1")),
+        seqidlist: (!taxids && !negative).then(|| std::ffi::OsString::from("f")),
+        negative_seqidlist: (!taxids && negative).then(|| std::ffi::OsString::from("f")),
         ..DbFilterArgs::default()
     };
     assert_eq!(
@@ -40,7 +40,7 @@ fn the_archive_parameter_follows_the_list_option() {
     // Positive and negative GI lists write GiList/NegativeGiList + empty TaxidList/NegativeTaxidList,
     // and a 0-GI file writes only the empty TaxidList/NegativeTaxidList.
     let pos_gi = DbFilterArgs {
-        gilist: Some("g.gil".to_string()),
+        gilist: Some(std::ffi::OsString::from("g.gil")),
         ..DbFilterArgs::default()
     };
     assert_eq!(
@@ -64,7 +64,7 @@ fn the_archive_parameter_follows_the_list_option() {
         }]
     );
     let neg_gi = DbFilterArgs {
-        negative_gilist: Some("g.gil".to_string()),
+        negative_gilist: Some(std::ffi::OsString::from("g.gil")),
         ..DbFilterArgs::default()
     };
     assert_eq!(
@@ -83,8 +83,8 @@ fn the_archive_parameter_follows_the_list_option() {
 
     // IPG lists write empty TaxidList / NegativeTaxidList; other lists take precedence over IPG.
     let pos_ipg = DbFilterArgs {
-        ipglist: Some("p.ipg".to_string()),
-        negative_ipglist: Some("n.ipg".to_string()),
+        ipglist: Some(std::ffi::OsString::from("p.ipg")),
+        negative_ipglist: Some(std::ffi::OsString::from("n.ipg")),
         ..DbFilterArgs::default()
     };
     assert_eq!(
@@ -95,7 +95,7 @@ fn the_archive_parameter_follows_the_list_option() {
         }]
     );
     let neg_ipg = DbFilterArgs {
-        negative_ipglist: Some("n.ipg".to_string()),
+        negative_ipglist: Some(std::ffi::OsString::from("n.ipg")),
         ..DbFilterArgs::default()
     };
     assert_eq!(
@@ -106,8 +106,8 @@ fn the_archive_parameter_follows_the_list_option() {
         }]
     );
     let gi_and_ipg = DbFilterArgs {
-        gilist: Some("g.gil".to_string()),
-        ipglist: Some("p.ipg".to_string()),
+        gilist: Some(std::ffi::OsString::from("g.gil")),
+        ipglist: Some(std::ffi::OsString::from("p.ipg")),
         ..DbFilterArgs::default()
     };
     assert_eq!(

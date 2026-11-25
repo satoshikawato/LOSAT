@@ -227,10 +227,10 @@ fn outfmt_and_fields_are_read_as_ncbi() {
             .tabular_report()
             .map(|spec| (spec.kind, spec.delimiter.clone()))
     };
-    assert_eq!(report("6"), Some((TabularKind::Tabular, "\t".to_string())));
+    assert_eq!(report("6"), Some((TabularKind::Tabular, b"\t".to_vec())));
     assert_eq!(
         report("7 std"),
-        Some((TabularKind::Commented, "\t".to_string()))
+        Some((TabularKind::Commented, b"\t".to_vec()))
     );
     assert_eq!(report("5"), None);
     // Words between single spaces; an empty word names no field.
@@ -251,15 +251,15 @@ fn outfmt_and_fields_are_read_as_ncbi() {
     }
     assert_eq!(
         tabular("6 std -evalue staxids"),
-        Some((TabularKind::Tabular, 12, "\t".to_string()))
+        Some((TabularKind::Tabular, 12, b"\t".to_vec()))
     );
     assert_eq!(
         tabular("7 delim=| std"),
-        Some((TabularKind::Commented, 12, "|".to_string()))
+        Some((TabularKind::Commented, 12, b"|".to_vec()))
     );
-    assert_eq!(tabular("10"), Some((TabularKind::Csv, 12, ",".to_string())));
+    assert_eq!(tabular("10"), Some((TabularKind::Csv, 12, b",".to_vec())));
     assert_eq!(
         tabular("20 qseqid"),
-        Some((TabularKind::CsvWithHeader, 1, ",".to_string()))
+        Some((TabularKind::CsvWithHeader, 1, b",".to_vec()))
     );
 }

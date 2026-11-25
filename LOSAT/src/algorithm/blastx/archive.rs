@@ -39,7 +39,7 @@ use crate::stats::tables::KarlinParams;
 /// (`strategy::StrategyExport::for_args`): the archive's recorded options, the counts
 /// of the `HitlistSize` and the database of `-db`.
 impl crate::report::archive::strategy::StrategyArgs for BlastxArgs {
-    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs {
         crate::report::archive::strategy::StrategyInputs {
             inputs: option_inputs(self),
             counts: crate::report::archive::strategy::HitlistArgs {
@@ -73,7 +73,10 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.evalue = Some(args.evalue);
     inputs.gapopen = args.gap_open;
     inputs.gapextend = args.gap_extend;
-    inputs.matrix = args.matrix.clone();
+    inputs.matrix = args
+        .matrix
+        .as_deref()
+        .map(|v| crate::utils::os_bytes::os_str_bytes(v).into_owned());
     // `-xdrop_gap` and `-xdrop_gap_final` as given (`SetGapXDropoff`, `SetGapXDropoffFinal`);
     // `-xdrop_ungap` has no entry (NCBI records none).
     inputs.xdrop_gap = args.xdrop_gap;
@@ -100,7 +103,9 @@ pub(crate) fn option_inputs(args: &BlastxArgs) -> OptionInputs {
     inputs.max_intron_length = args.max_intron_length;
     inputs.query_gencode = i32::from(args.query_gencode);
     inputs.hitlist_size = hitlist_size;
-    inputs.comp_based_stats = i32::from(super::args::composition_mode(&args.comp_based_stats));
+    inputs.comp_based_stats = i32::from(super::args::composition_mode(
+        crate::utils::os_bytes::os_str_bytes(&args.comp_based_stats),
+    ));
     inputs
 }
 
@@ -116,10 +121,10 @@ pub(crate) fn handle_for(
     }
     // NCBI keeps the name without the white space at its ends (`NStr::TruncateSpaces`,
     // blast_args.cpp:2472-2476), and the request's `database` is that name.
-    let database = args.db.as_deref().map(crate::seqdb::db_argument_name);
+    let database = args.database_name();
     Some(ArchiveHandle::for_program(
         &option_inputs(args),
-        database,
+        database.as_deref(),
         options,
     ))
 }

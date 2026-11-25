@@ -59,7 +59,7 @@ const NCBISTDAA_TO_AMINOACID: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
 /// (`BlastxArgs::database_name`: the `-db` value without white space at its ends).
 pub(crate) struct BlastxDatabase {
     pub(crate) db: SeqDb,
-    name: String,
+    name: Vec<u8>,
     /// The taxonomy database of the run and the taxids its volumes have looked up (XML2 and
     /// JSON, and the batches' prefetch of outfmt 0, 5, 6 and 7), kept across the query batches
     /// of the run.
@@ -104,8 +104,15 @@ impl BlastxDatabase {
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     #[cfg(test)]
-    pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, None, &mut std::io::sink(), PROGRAM)
+    pub(crate) fn open(name: impl AsRef<[u8]>, settings: &ApplicationSettings) -> Result<Self> {
+        Self::open_restricted(
+            name.as_ref(),
+            settings,
+            None,
+            None,
+            &mut std::io::sink(),
+            PROGRAM,
+        )
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
@@ -113,7 +120,7 @@ impl BlastxDatabase {
     /// `-db_hard_mask`; series NP, M4b) (`shared::restrict_database`, whose warnings go to
     /// `diagnostics`).
     pub(crate) fn open_restricted(
-        name: &str,
+        name: &[u8],
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
         mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
@@ -126,7 +133,7 @@ impl BlastxDatabase {
             shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, program)?;
         Ok(Self {
             db,
-            name: name.to_string(),
+            name: name.to_vec(),
             taxdb: shared::TaxdbRun::default(),
             parsed_seqids,
             program,
@@ -168,7 +175,7 @@ impl BlastxDatabase {
     }
 
     /// The `-db` value as NCBI keeps it.
-    pub(crate) fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &[u8] {
         &self.name
     }
 

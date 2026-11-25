@@ -290,7 +290,15 @@ impl Diagnostics {
 
     /// `LOG_POST_X`: rpsbproc's messages are its text alone (the old post format).
     fn post(&mut self, text: &str) {
-        self.post_bytes(format!("{text}\n").as_bytes());
+        self.post_line_bytes(text.as_bytes());
+    }
+
+    /// `LOG_POST_X` of raw bytes (adds the trailing newline).
+    fn post_line_bytes(&mut self, bytes: &[u8]) {
+        let mut line = Vec::with_capacity(bytes.len() + 1);
+        line.extend_from_slice(bytes);
+        line.push(b'\n');
+        self.post_bytes(&line);
     }
 
     /// Writes `bytes` where the diagnostics go; on standard error as `write_stderr_bytes`
@@ -460,10 +468,10 @@ fn find_data_path(diag: &mut Diagnostics, data_path: Option<&OsStr>) -> Option<O
             if found(datapath) {
                 return Some(datapath.to_os_string());
             }
-            diag.post(&format!(
-                "Specified data location ({}) does not exist or does not contain data files",
-                datapath.to_string_lossy()
-            ));
+            let mut msg = b"Specified data location (".to_vec();
+            msg.extend_from_slice(&crate::utils::os_bytes::os_str_bytes(datapath));
+            msg.extend_from_slice(b") does not exist or does not contain data files");
+            diag.post_line_bytes(&msg);
             None
         }
         None => {
@@ -695,23 +703,6 @@ fn init(
     settings: Result<ApplicationSettings, String>,
     diag: &mut Diagnostics,
 ) -> Result<Init, Outcome> {
-    // File names that are not UTF-8 are refused as the other programs refuse them (NCBI writes
-    // their bytes in its messages and the report's header).
-    for (role, name) in [
-        ("i", &args.infile),
-        ("o", &args.outfile),
-        ("d", &args.data_path),
-    ] {
-        if let Some(name) = name {
-            if let Err(error) = crate::blastinput::input_files::check_utf8_file_name(
-                std::path::Path::new(name),
-                role,
-                "rpsbproc",
-            ) {
-                return Err(Outcome::refused(error.to_string()));
-            }
-        }
-    }
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:1031-1044 (cited at the BLAST
     // programs in `cli::main_entry`): the application layer reads its environment and its
     // registry files (`rpsbproc.ini`, `.ncbirc`) before `Init`.
@@ -725,21 +716,21 @@ fn init(
     let mut header: Vec<u8> = b"#Post-RPSBLAST Processing Utility\n\n#Input data file:".to_vec();
     let mut input: Option<Box<dyn Read>> = None;
     if let Some(infile) = &args.infile {
-        let name = infile.to_string_lossy();
+        let name = crate::utils::os_bytes::os_str_bytes(infile);
         if file_exists(infile) {
             match std::fs::File::open(infile) {
                 Ok(file) => {
                     input = Some(Box::new(file));
                     header.push(b'\t');
-                    header.extend_from_slice(infile.as_encoded_bytes());
+                    header.extend_from_slice(&name);
                 }
                 Err(_) => {
-                    diag.post(&format!("Unable to open input file: {name}"));
+                    diag.post_line_bytes(&[b"Unable to open input file: ", &name[..]].concat());
                     status = E_INPUT_FILE_OPEN_ERROR;
                 }
             }
         } else {
-            diag.post(&format!("Input file does not exist: {name}"));
+            diag.post_line_bytes(&[b"Input file does not exist: ", &name[..]].concat());
             status = E_INPUT_FILE_OPEN_ERROR;
         }
     }
@@ -753,17 +744,15 @@ fn init(
     header.extend_from_slice(b"\n#Output data file:");
     let mut out: Box<dyn Write> = Box::new(crate::cli::standard_output());
     if let Some(outfile) = &args.outfile {
+        let name = crate::utils::os_bytes::os_str_bytes(outfile);
         match std::fs::File::create(outfile) {
             Ok(file) => {
                 out = Box::new(file);
                 header.push(b'\t');
-                header.extend_from_slice(outfile.as_encoded_bytes());
+                header.extend_from_slice(&name);
             }
             Err(_) => {
-                diag.post(&format!(
-                    "Unable to open output file: {}",
-                    outfile.to_string_lossy()
-                ));
+                diag.post_line_bytes(&[b"Unable to open output file: ", &name[..]].concat());
                 status = E_OUTPUT_FILE_OPEN_ERROR;
             }
         }
@@ -801,10 +790,10 @@ fn init(
     let mut data = CddData::default();
     match find_data_path(diag, args.data_path.as_deref()) {
         Some(path) => {
+            let base = crate::utils::os_bytes::os_str_bytes(&path);
             header.push(b'\t');
-            header.extend_from_slice(path.as_encoded_bytes());
-            let base = path.to_string_lossy().into_owned();
-            let file = |name: &str| format!("{base}/{name}");
+            header.extend_from_slice(&base);
+            let file = |name: &str| [&base[..], b"/", name.as_bytes()].concat();
             let files = DataFiles {
                 cddids: file("cddid.tbl"),
                 spfeats: file("cddannot.dat"),
@@ -813,18 +802,17 @@ fn init(
                 cdtrack: file("cdtrack.txt"),
                 famlinks: file("family_superfamily_links"),
             };
-            if path.to_str().is_none() {
-                return Err(Outcome::refused(
-                    "a data path that is not UTF-8 is not supported by LOSAT's rpsbproc"
-                        .to_string(),
-                ));
-            }
             match CddData::load(&files) {
                 Ok(loaded) => data = loaded,
                 Err(DataError::Missing(path)) => {
-                    diag.post(&format!(
-                        "Annotation data loading unsuccessful: Data file {path} does not exist"
-                    ));
+                    diag.post_line_bytes(
+                        &[
+                            b"Annotation data loading unsuccessful: Data file ".as_slice(),
+                            &path,
+                            b" does not exist",
+                        ]
+                        .concat(),
+                    );
                     status = E_DATA_LOAD_ERROR;
                 }
                 Err(DataError::Conversion(error)) => {

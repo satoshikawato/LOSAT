@@ -538,7 +538,7 @@ impl<'a> BuildDatabase<'a> {
     /// blastdb`) is copied as it is stored.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        dbname: &str,
+        dbname: &[u8],
         title: &[u8],
         is_protein: bool,
         log: &'a mut dyn Write,
@@ -547,10 +547,10 @@ impl<'a> BuildDatabase<'a> {
         platform: Platform,
         indices: Indices,
     ) -> Result<Self, WriteDbError> {
-        create_directories(dbname.as_bytes())?;
+        create_directories(dbname)?;
         // The name is the bytes of NCBI's `std::string`: the current directory's bytes joined with
         // `-out`, in the log line, the deletion and the files.
-        let output_dbname = create_absolute_path(dbname.as_bytes());
+        let output_dbname = create_absolute_path(dbname);
         let mol_type = if is_protein { "Protein" } else { "Nucleotide" };
         let _ = write!(
             log,

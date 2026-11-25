@@ -1,6 +1,8 @@
 use super::disc_lookup::DiscWordType;
 use crate::blastinput::value_parsers::*;
+use crate::utils::os_bytes::os_str_bytes;
 use crate::wording::QUERY_OPTIONS_ERROR;
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 /// BLASTN's `-task` (NCBI's nucleotide-nucleotide tasks, vecscreen aside: a program of its own),
@@ -74,7 +76,7 @@ pub struct BlastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
     // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). NCBI's argument reader reports the
     // exclusion (`cli::reader`). The database is searched by `blastn/blast_engine/database.rs`.
-    pub db: Option<String>,
+    pub db: Option<OsString>,
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
     /// `-no_taxid_expansion` (line DI-8).
     pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
@@ -136,7 +138,7 @@ pub struct BlastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3359-3362
     /// `-index_name`: the old-style index of `-use_index true` (`megablast_index_name`); without
     /// `-use_index true` NCBI ignores it.
-    pub index_name: Option<String>,
+    pub index_name: Option<OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:142-146
     // An omitted value keeps the default of the task (`coordination.rs` `determine_evalue`).
     pub evalue: Option<f64>,
@@ -203,7 +205,7 @@ pub struct BlastnArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:410-420
     // NCBI reads -dust in its filtering handler, after the output is opened
     // (`resolve_dust`); an omitted value keeps the default (20 64 1).
-    pub dust_filtering: Option<String>,
+    pub dust_filtering: Option<OsString>,
     pub dust: DustSpec,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1939-1942
     pub lcase_masking: bool,
@@ -214,7 +216,7 @@ pub struct BlastnArgs {
     // Read by the filtering handler after `-dust` and before the WindowMasker options, which
     // count it (`resolve_window_masker`); the repeat search runs where the masks of each query
     // batch are made (`repeat_filter`).
-    pub filtering_db: Option<String>,
+    pub filtering_db: Option<OsString>,
     /// The repeat search of `-filtering_db` (`repeat_filter::RepeatFilter`): the database's name
     /// and the settings that look it up, given by the caller that has them (`resolve_repeat_filter`);
     /// `None` without the option.
@@ -229,7 +231,7 @@ pub struct BlastnArgs {
     pub window_masker_taxid: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:358-363
     // Read by the filtering handler after `-dust` (`resolve_window_masker`).
-    pub window_masker_db: Option<String>,
+    pub window_masker_db: Option<OsString>,
     /// The masker of `-window_masker_db` or of `-window_masker_taxid` (`resolve_window_masker`);
     /// `None` without them (or with the taxid 0).
     pub window_masker: Option<std::sync::Arc<super::window_masker::WindowMasker>>,
@@ -262,10 +264,10 @@ pub struct BlastnArgs {
     pub strand: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // Read by the query options handler (`search_cli`), after the filtering handler.
-    pub query_loc: Option<String>,
+    pub query_loc: Option<OsString>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
     // Read by the database arguments handler when it reads the subjects (`run`).
-    pub subject_loc: Option<String>,
+    pub subject_loc: Option<OsString>,
     /// Apply subject best hit filtering (disabled by default)
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/cmdline_flags.cpp:135
     pub subject_besthit: bool,
@@ -324,7 +326,7 @@ pub struct BlastnArgs {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108
     // NCBI's argument is a string (c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660), parsed when the options
     // are set (`blastinput/app.rs` `parse_formatting_string` and `report_format`).
-    pub outfmt: String,
+    pub outfmt: OsString,
 
     /// The run's BLAST archive (outfmt 11), made by `run` and `run_local` before the search
     /// reads the arguments (`archive::handle_for`).
@@ -474,8 +476,10 @@ impl BlastnArgs {
     /// search of `-subject`.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
-    pub fn database_name(&self) -> Option<&str> {
-        self.db.as_deref().map(crate::seqdb::db_argument_name)
+    pub fn database_name(&self) -> Option<Vec<u8>> {
+        self.db
+            .as_deref()
+            .map(|db| crate::seqdb::db_argument_name_bytes(&os_str_bytes(db)).to_vec())
     }
 
     /// The name of the MegaBLAST index that NCBI's handler asks for, and whether it is an
@@ -484,13 +488,13 @@ impl BlastnArgs {
     /// (old style) or else the `-db` value as given (new style first).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3381-3414
-    pub(crate) fn megablast_index_name(&self) -> Option<(&str, bool)> {
+    pub(crate) fn megablast_index_name(&self) -> Option<(Vec<u8>, bool)> {
         if self.use_index != Some(true) || self.task != "megablast" {
             return None;
         }
         match (&self.index_name, &self.db) {
-            (Some(name), Some(_)) => Some((name, true)),
-            (None, Some(db)) => Some((db, false)),
+            (Some(name), Some(_)) => Some((os_str_bytes(name).into_owned(), true)),
+            (None, Some(db)) => Some((os_str_bytes(db).into_owned(), false)),
             (_, None) => None,
         }
     }
@@ -557,11 +561,12 @@ impl BlastnArgs {
         if let Some(value) = self.dust_filtering.take() {
             // See docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md exception 12.
             let footer = crate::wording::USER_MANUAL_FOOTER;
-            self.dust =
-                parse_dust_filtering(&value).map_err(|message| crate::cli::NativeError {
+            self.dust = parse_dust_filtering(os_str_bytes(&value)).map_err(|message| {
+                crate::cli::NativeError {
                     exit: 1,
                     message: format!("{QUERY_OPTIONS_ERROR} {message}\n{footer}\n").into(),
-                })?;
+                }
+            })?;
         }
         Ok(())
     }
@@ -584,7 +589,7 @@ impl BlastnArgs {
         }
         let source = super::window_masker::source_of(self.window_masker_counts.as_ref());
         let database = match &self.window_masker_db {
-            Some(name) => Some(super::window_masker::open(name, &*source)?),
+            Some(name) => Some(super::window_masker::open(&os_str_bytes(name), &*source)?),
             None => None,
         };
         let filter_dbs = usize::from(self.filtering_db.is_some())

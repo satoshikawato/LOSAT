@@ -141,7 +141,7 @@ pub(super) struct TblastnTabular<'a> {
 /// `stage_e_report::write_tabular`) and the other formats.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
-pub(super) fn tabular_spec(outfmt: &str) -> Option<TabularSpec> {
+pub(super) fn tabular_spec(outfmt: impl AsRef<[u8]>) -> Option<TabularSpec> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
     TabularSpec::of_app(
         crate::blastinput::app::ReportFormat::from_number(choice.number)?,
@@ -337,7 +337,7 @@ pub(super) fn write_tblastn_tabular(
         table.query_header(
             &mut buf,
             &query.query_line(),
-            tab.shown.name().as_bytes(),
+            &tab.shown.name(),
             (!tab.query_batch_skipped[q_idx]).then_some(hit_count),
         )?;
         writer.write_all(&buf)?;

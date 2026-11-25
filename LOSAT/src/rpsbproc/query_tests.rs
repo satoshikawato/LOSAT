@@ -10,6 +10,7 @@ fn fixture_data() -> CddData {
             "{}/tests/fixtures/rpsbproc/data/{name}",
             env!("CARGO_MANIFEST_DIR")
         )
+        .into_bytes()
     };
     CddData::load(&DataFiles {
         cddids: file("cddid.tbl"),

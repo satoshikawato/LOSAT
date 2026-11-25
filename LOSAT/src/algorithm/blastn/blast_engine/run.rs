@@ -91,9 +91,7 @@ use crate::blastinput::fasta_reader::{
     read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords,
     ReaderConfig,
 };
-use crate::blastinput::input_files::{
-    check_utf8_file_name, open_input, write_empty_subject_warnings_by_length,
-};
+use crate::blastinput::input_files::{open_input, write_empty_subject_warnings_by_length};
 use crate::blastinput::query_batch::{BatchCount, BatchSizeMixer, QueryReading, NO_DATA_MESSAGE};
 use crate::blastinput::seq_range::{
     cut_queries, cut_subjects, parse_optional_range, subjects_read, Placements, QueryInput,
@@ -4903,7 +4901,7 @@ struct BlastnReportInputs<'a> {
     /// `None`: no DUST.
     dust: Option<(i32, i32, i32)>,
     /// The database of `-filtering_db` (the filter string's `R -d <name>;`).
-    repeat_filter: Option<&'a str>,
+    repeat_filter: Option<&'a std::ffi::OsStr>,
     /// The WindowMasker option (the filter string's `W -d <name>;` or `W -t <taxid>;`).
     window_masker: Option<crate::report::blast_xml::filter::WindowMasker<'a>>,
     /// `-soft_masking` (the filter string's `m;`).
@@ -4952,7 +4950,7 @@ fn blastn_pairwise_report(
     report: &BlastnReportInputs<'_>,
     unsearched: Vec<bool>,
     query_titles: &[Arc<[u8]>],
-    subject_title: &str,
+    subject_title: &[u8],
 ) -> Result<(Vec<BlastnPairwiseQuery>, BlastnPairwiseReport)> {
     let context_karlin = report.context_karlin;
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-104
@@ -4992,7 +4990,7 @@ fn blastn_pairwise_report(
             indexed_megablast: report.indexed_megablast,
             matrix_only: report.matrix_only,
         },
-        database_name: subject_title.as_bytes().to_vec(),
+        database_name: subject_title.to_vec(),
         database_num_sequences: report.shown_num_seqs(),
         database_total_letters: report.shown_total_letters(),
         database: report.database.cloned(),
@@ -5394,7 +5392,7 @@ fn post_process_hits_and_write(
     query_ids: &[Arc<[u8]>],
     output_formats: &[BlastnOutputFormat],
     query_titles: &[Arc<[u8]>],
-    subject_title: &str,
+    subject_title: &[u8],
     timing: Option<&BlastnTiming>,
     report: &BlastnReportInputs<'_>,
     unsearched: Vec<bool>,
@@ -6009,7 +6007,7 @@ fn write_custom_tabular(
     query_ids: &[Arc<[u8]>],
     query_titles: &[Arc<[u8]>],
     query_lengths: &[usize],
-    subject_title: &str,
+    subject_title: &[u8],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     unsearched: &[bool],
     writer: &mut crate::cli::NcbiOstream<'_>,
@@ -6163,7 +6161,8 @@ pub fn run(
         args.export_search_strategy.as_deref(),
         "BLASTN",
     )?;
-    let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+    let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt).into_owned();
+    let choice = app::early_format_choice(&outfmt_bytes, strategy_file.is_some())?;
     let output_formats = output_formats_of(&choice, args.out.as_deref())?;
     // The BLAST archive (outfmt 11): its request, before anything is read or written.
     let archive_requested = output_formats.contains(&BlastnOutputFormat::Archive);
@@ -6176,7 +6175,7 @@ pub fn run(
         archive_requested,
         &options,
     )
-    .map(|handle| handle.with_outfmt_text(&args.outfmt));
+    .map(|handle| handle.with_outfmt_text(&outfmt_bytes));
     // The search strategy's request, with the archive's options handle.
     args.strategy = strategy_file.map(|file| {
         crate::report::archive::strategy::StrategyExport::for_args(
@@ -6254,7 +6253,6 @@ pub fn run(
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-781
     // The output file is created here, before the options are checked, so a run that
     // stops at a check leaves an empty file; `-` is standard output.
-    check_utf8_file_name(&args.query, "query", "BLASTN")?;
     // NCBI opens the query file inside `Run` too (`CStdCmdLineArgs` in its handler of the
     // arguments does not): its error is saved and an error archive follows.
     let query_file = match open_input(&args.query, "query", "BLASTN") {
@@ -6267,9 +6265,9 @@ pub fn run(
     // The output file is opened once, as NCBI's stream (a named pipe gives one reader one
     // end of file).
     let out_file = open_out_file(&args)?;
-    let outfmt = args.outfmt.clone();
+    let outfmt = crate::utils::os_bytes::os_str_bytes(&args.outfmt).into_owned();
     let mut report =
-        crate::cli::ReportStream::of_cli(out_file, "blastn", &args.outfmt, args.strategy.as_ref());
+        crate::cli::ReportStream::of_cli(out_file, "blastn", &outfmt, args.strategy.as_ref());
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
@@ -6352,7 +6350,12 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = crate::cli::ReportStream::of_cli(out_file, "blastn", &args.outfmt, None);
+        let mut report = crate::cli::ReportStream::of_cli(
+            out_file,
+            "blastn",
+            crate::utils::os_bytes::os_str_bytes(&args.outfmt),
+            None,
+        );
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -6408,7 +6411,6 @@ fn read_cli_subjects(
         }
         .into());
     };
-    check_utf8_file_name(subject_path, "subject", "BLASTN")?;
     let subject_file = open_input(subject_path, "subject", "BLASTN")?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
     // The subject range is read after the subject file is opened, before it is read.
@@ -6482,7 +6484,7 @@ fn open_search_database(
                 outputs.formats.first().map(|format| format.outfmt),
             );
             let database = database::BlastnDatabase::open_restricted(
-                name,
+                &name,
                 settings,
                 list,
                 args.db_mask.option().as_ref(),
@@ -6813,7 +6815,7 @@ pub(crate) fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
 /// names a search strategy file (`strategy`): the formatting handler reads it again
 /// (`process_options`) and fails there, after the query options.
 fn cli_output_formats(
-    outfmt: &str,
+    outfmt: impl AsRef<[u8]>,
     out: Option<&std::path::Path>,
     strategy: bool,
 ) -> Result<Vec<BlastnOutputFormat>> {
@@ -6842,8 +6844,8 @@ fn output_formats_of(
 /// formatting handler rejects it after `-out` is opened (`process_options`), or `search` (the
 /// XInclude formats without a file). `out`: the file of `api::run_to_file`, or the `-out` of the
 /// caller's receiver of the side files of a format (`FormatOutput::side_out`).
-fn parse_output_formats<'a>(
-    formats: impl IntoIterator<Item = (&'a str, Option<&'a std::path::Path>)>,
+fn parse_output_formats<'a, O: AsRef<[u8]>>(
+    formats: impl IntoIterator<Item = (O, Option<&'a std::path::Path>)>,
     strategy: bool,
 ) -> Result<Vec<BlastnOutputFormat>> {
     let mut output_formats = Vec::new();
@@ -6872,7 +6874,7 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     args.html_links = app::html_links(
         args.html,
         crate::report::archive::options::RequestKind::Blastn,
-        args.database_name(),
+        args.database_name().as_deref(),
         &outfmts,
     )?;
     // The hit list size and the counts of the pairwise report, with the formatting
@@ -7105,7 +7107,7 @@ pub(crate) fn repeat_search_hits(
     // The search's `CSeqDB`, without a list, meets the errors of the alias files' counts where it
     // opens the database (`common::database::restrict_database`).
     let opened = crate::algorithm::common::database::open_search_database(
-        filter.database(),
+        &crate::utils::os_bytes::os_str_bytes(filter.database()),
         crate::seqdb::SeqType::Nucleotide,
         filter.settings(),
     );
@@ -7133,7 +7135,7 @@ pub(crate) fn repeat_search_hits(
             other_outfmts: &[],
             html_posts: None,
             formats: vec![crate::api::local_blast::FormatOutput {
-                outfmt: "6",
+                outfmt: b"6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: crate::api::local_blast::OutputSink::Writer(&mut report),
             }],
@@ -7508,7 +7510,7 @@ impl QueryBatchSizes {
     /// search of the first batch fails with NCBI's error.
     pub(crate) fn of_database(
         args: &BlastnArgs,
-        name: &str,
+        name: &[u8],
         settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
     ) -> Result<Self> {
         let total_length = database::BlastnDatabase::open(name, settings)
@@ -7884,7 +7886,7 @@ impl<'a> SubjectSource<'a> {
 /// (`User specified sequence set (Input: PATH)`; the `-db` value for a database), the
 /// counts, and for a database the lines of `GetBlastDbInfo` (`PairwiseDatabase`).
 struct ShownSubjects {
-    name: String,
+    name: Vec<u8>,
     /// The statistics' number of sequences, NCBI's `Int4` (`SubjectMetadata::db_num_seqs`).
     num_seqs: i32,
     /// The statistics' total length, NCBI's `Int8` (`SubjectMetadata::db_len_total`).
@@ -7903,10 +7905,7 @@ impl ShownSubjects {
         let metadata = source.metadata();
         match source {
             SubjectSource::Prepared(_) => ShownSubjects {
-                name: format!(
-                    "User specified sequence set (Input: {})",
-                    args.subject_path().display()
-                ),
+                name: crate::report::pairwise::subject_set_name(args.subject_path()),
                 num_seqs: metadata.db_num_seqs,
                 total_letters: metadata.db_len_total,
                 database: None,
@@ -7914,7 +7913,7 @@ impl ShownSubjects {
                 html_links: args.html_links.clone(),
             },
             SubjectSource::Database(database) => ShownSubjects {
-                name: database.name().to_string(),
+                name: database.name().to_vec(),
                 num_seqs: metadata.db_num_seqs,
                 total_letters: metadata.db_len_total,
                 database: Some(database.pairwise_database_masked(args.db_mask_resolved.as_ref())),
@@ -9638,7 +9637,7 @@ fn write_format_prolog(
             &mut writer,
             crate::wording::REPORT_VERSION,
             intro,
-            shown.name.as_bytes(),
+            &shown.name,
             // Printed for a subject set only (a database prints `database`).
             i64::from(shown.num_seqs),
             shown.total_letters,
@@ -10133,7 +10132,7 @@ fn write_reports_untimed(
         .collect();
     // `User specified sequence set (Input: PATH)` for a subject set, the `-db` value for a
     // database (`ShownSubjects`).
-    let subject_title = subjects.shown.name.as_str();
+    let subject_title = &subjects.shown.name;
     let hitlist_size = args.report_counts.hitlist_size;
     post_process_hits_and_write(
         hit_lists,
@@ -10199,7 +10198,7 @@ fn window_masker_rejection(
     super::super::window_masker::rejection(
         args.window_masker
             .as_deref()
-            .map_or("", |masker| masker.name.as_str()),
+            .map_or(b"".as_slice(), |masker| masker.name.as_slice()),
         error,
     )
 }

@@ -74,7 +74,7 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Tb
     TblastxDatabase {
         parsed: db.has_parsed_seqids().unwrap(),
         db,
-        name: name.to_string(),
+        name: name.as_bytes().to_vec(),
         taxdb: shared::TaxdbRun::default(),
     }
 }

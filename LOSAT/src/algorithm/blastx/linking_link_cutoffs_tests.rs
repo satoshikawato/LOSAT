@@ -25,7 +25,7 @@ fn pinned_official_subject_aa_cutoff_boundaries() {
                 total: db,
                 count: 1,
                 gumbel_total: db,
-                shortest: (length as usize).max(10),
+                shortest: length.max(10),
                 average: db as i32,
                 request_count: 1,
             },

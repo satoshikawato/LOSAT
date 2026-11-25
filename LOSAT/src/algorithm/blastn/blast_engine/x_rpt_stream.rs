@@ -48,12 +48,15 @@
 //!   report call whose rows look a name up (`common::database::tabular_names`), as they go to the
 //!   first such row of the one call.
 //! - the errors: an error of NCBI's that a batch meets (a reader error, an `eEOF` batch, a batch
-//!   of queries without letters, `ErrorAfterInvalidBatches`, a header file that cannot be read)
+//!   of queries without letters, `after_batch_reports`, a header file that cannot be read)
 //!   comes after the reports of the batches before, without the epilog, in both: here they were
 //!   written when the loop took them, so the error paths write only what follows them (the
-//!   batch's title and reader warnings). An error that LOSAT raises where NCBI would not stop
-//!   (LOSAT's refusals) is written without the reports of the batches before by the off path,
-//!   and after them with the switch (drop-in DECISIONS 44: as NCBI reads them, the stored data
+//!   batch's title and reader warnings). Search space overflows
+//!   (`context_statistics::setup_failure` -> `ErrorAfterBatchReports`) follow the same path, so
+//!   both stream on and stream off write the reports of the batches before and then the refusal.
+//!   Any other error that LOSAT raises where NCBI would not stop (LOSAT's refusals) is written
+//!   without the reports of the batches before by the off path, and after them with the switch
+//!   (drop-in DECISIONS 44: as NCBI reads them, the stored data
 //!   and the report ids of a batch's reported subjects are checked in that batch, nothing is read
 //!   before the search). These are the refusals of a reported subject: with `-db` a definition
 //!   line that does not read as the reports read it, holds a byte outside ' ' ..= '~' or gives no
@@ -85,14 +88,16 @@
 //!   never streamed (`Off::Xml`, any number of batches). The refusals of the options and the
 //!   query lengths that a later batch could meet keep the reports after the loop: scoring options
 //!   without Karlin-Altschul values, large greedy gap costs or matrix-only scoring with the
-//!   greedy extension (`search_query_batch`, in `context_statistics`), a negative
-//!   `CHUNK_SIZE` (`search_query_chunks`), a search space that could overflow (`SearchSpace`) and
-//!   an ungapped cutoff of a query too long (`UngappedCutoff`). With one batch (the first batch takes
-//!   every query record) nothing can come after it, so none of these checks is made and no
-//!   subject value is made ahead (the one call makes them as without the switch). LOSAT's
-//!   internal invariant errors and panics are not argued; a write error of the output stops the
-//!   run where it happens (at the end without the switch); a `-db` file that changes or fails
-//!   after the preliminary stage has read it is not argued either.
+//!   greedy extension (`search_query_batch`, in `context_statistics`) and an ungapped cutoff of a
+//!   query too long (`UngappedCutoff`). The refusals of a split batch's query chunks
+//!   (`search_query_chunks`) and of the fetch under a negative seqid list come after the reports of
+//!   the batches before in both paths (`after_batch_reports`, line RG item X-short-bat-2), so a
+//!   negative `CHUNK_SIZE` streams. With one batch (the first batch takes every query record)
+//!   nothing can come after it, so none of these checks is made and no subject value is made ahead
+//!   (the one call makes them as without the switch). LOSAT's internal invariant errors and panics
+//!   are not argued; a write error of the output stops the run where it happens (at the end without
+//!   the switch); a `-db` file that changes or fails after the preliminary stage has read it is not
+//!   argued either.
 //! - what the report path writes to standard error (the query warnings) keeps its bytes and its
 //!   place before each query's report; `-verbose` and the debug and trace output, which a batch
 //!   writes while it is searched and the reports write again, keep the reports at the end
@@ -181,14 +186,10 @@ pub(super) enum Off {
     /// `-outfmt 5` (BLAST XML), 15 and 16 (the XML2 / JSON documents), which are written after
     /// the loop (the module doc has the reason).
     Xml,
-    /// A negative `CHUNK_SIZE`.
-    ChunkSize,
     /// An ungapped (`-ungapped`) or matrix-only search with a query of 2^30 letters or more, which
     /// LOSAT refuses in the batch that holds it (the word cutoff's doubled length overflows NCBI's `Int4`): a
     /// later batch's refusal would come after the first batch's reports.
     UngappedCutoff,
-    /// A database length times a query length that could overflow NCBI's 64-bit search space.
-    SearchSpace,
 }
 
 impl Off {
@@ -199,9 +200,7 @@ impl Off {
             Off::Debug => "debug",
             Off::Xml => "xml",
             Off::Scoring => "scoring",
-            Off::ChunkSize => "chunk_size",
             Off::UngappedCutoff => "ungapped_cutoff",
-            Off::SearchSpace => "search_space",
         }
     }
 }
@@ -497,9 +496,6 @@ fn check(
     {
         return Err(Off::Scoring);
     }
-    if batching.split.negative_chunk_size() {
-        return Err(Off::ChunkSize);
-    }
     // The word cutoff of an ungapped search and of matrix-only scoring
     // (`batch_setup::batch_cutoffs`).
     if (args.ungapped || config.matrix_only)
@@ -508,26 +504,6 @@ fn check(
         })
     {
         return Err(Off::UngappedCutoff);
-    }
-    // The search space of a context (`search_query_batch`, in `context_statistics`): the
-    // effective database length
-    // `db - n x a` (at least 1) times the effective query length `q - a` (at least 1), with the
-    // length adjustment `a` between 0 and the smaller root of `n a^2 - (q n + db) a + c`, which is
-    // at most `2 c / (q n + db) <= 2 q` (`compute_length_adjustment_ncbi`, `c <= q db`). So
-    // `(db + n (2 q + 1)) (2 q + 1)` bounds every product that can overflow there; a negative
-    // `n` (an alias file's `NSEQ`, NCBI's `Int4`) adds `|n| a` to the database length, so the
-    // bound takes `|n|`.
-    let metadata = source.metadata();
-    let db_length = if args.db_length() > 0 {
-        i128::from(args.db_length())
-    } else {
-        i128::from(metadata.db_len_total)
-    };
-    let factor = 2 * lengths.iter().copied().max().unwrap_or(0) as i128 + 1;
-    if (db_length.abs() + i128::from(metadata.db_num_seqs.unsigned_abs()) * factor) * factor
-        > i128::from(i64::MAX)
-    {
-        return Err(Off::SearchSpace);
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-312
     // The stored data and the report ids of the reported subjects (a database's definition

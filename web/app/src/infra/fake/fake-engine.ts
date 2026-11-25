@@ -218,8 +218,12 @@ export class FakeEngine implements EngineGateway, ToolEngine {
    * inputs read together (a run of `-parse_deflines` reads its records as one without it), and no help
    * or version printed (`validate` refuses their words, which `describe` does not list either).
    */
-  async start(): Promise<StartResult> {
-    return { ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } };
+  async start(argv: readonly string[] = []): Promise<StartResult> {
+    const database = argv.some((word) => word === '-db' || word.startsWith('-db='));
+    return {
+      ok: true,
+      start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database },
+    };
   }
 
   /**
@@ -311,7 +315,13 @@ export class FakeEngine implements EngineGateway, ToolEngine {
     const encoder = new TextEncoder();
     const program = request.argv[0] ?? '';
     const queries = fakeRecordKeys(request.query.bytes, programOf(request), 'query').slice(0, 200);
-    const subjects = fakeRecordKeys(request.subject?.bytes ?? new Uint8Array(0), programOf(request), 'subject').slice(0, 3);
+    const subjects =
+      request.subject !== undefined
+        ? fakeRecordKeys(request.subject.bytes, programOf(request), 'subject').slice(0, 3)
+        : [
+            { id: 'db_seq_1', length: 500 },
+            { id: 'db_seq_2', length: 320 },
+          ];
     const nucleotide = { query: ['blastn', 'blastx', 'tblastx'].includes(program), subject: ['blastn', 'tblastn', 'tblastx'].includes(program) };
     const translated = { query: program === 'blastx' || program === 'tblastx', subject: program === 'tblastn' || program === 'tblastx' };
     let out0 = `${FAKE_MARKER}\nProgram: ${program}\n`;

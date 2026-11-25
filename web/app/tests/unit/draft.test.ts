@@ -98,7 +98,7 @@ const file = (name: string, text: string) => new File([text], name, { type: 'tex
 const sourceOf = (draft: SearchDraft, role: InputRole, index = 0): DraftSource => draft.state.get()[role].sources[index]!;
 const datasetOf = (request: SearchRequest, role: InputRole) => {
   const input = request[role];
-  if (!('dataset' in input)) throw new Error('expected a dataset input');
+  if (input === undefined || !('dataset' in input)) throw new Error('expected a dataset input');
   return input.dataset;
 };
 
@@ -1707,9 +1707,8 @@ describe('SearchDraft submit', () => {
     expect(await refusal('-qcov_hsp_perc 50 -use_sw_tback')).toBe('ok');
   });
 
-  // WA-FM-04: the CLI's messages for these name -subject and -num_threads, which the browser sets itself. The CLI's help
-  // words are not refused: the engine prints the command line's help (line WQA's D14, 2026-11-20).
-  it("refuses in Additional options the options that a search in the browser cannot have, in the browser's words", async () => {
+  // WA-FM-04 & WQA D12b: -db is set in Subject, -filtering_db in Repeats database, and -mt_mode is managed by LOSAT.
+  it("refuses in Additional options the options that LOSAT or the form manages, in the browser's words", async () => {
     const { draft } = setup({ useCoordinator: true });
     draft.setPaste('query', '>q\nACGT\n');
     draft.setPaste('subject', '>s\nACGT\n');
@@ -1720,8 +1719,8 @@ describe('SearchDraft submit', () => {
       const validation = draft.state.get().validation;
       return validation.state === 'invalid' ? validation.message : validation.state;
     };
-    expect(await refusal('-db nt')).toBe('-db (a database search) is not supported in the browser yet');
-    expect(await refusal('-taxids 9606')).toBe('-taxids (a database search filter) is not supported in the browser yet');
+    expect(await refusal('-db nt')).toBe('-db is set in the form: Subject');
+    expect(await refusal('-filtering_db repeats')).toBe('-filtering_db is set in the form: Repeats database');
     expect(await refusal('-mt_mode 1')).toBe('-mt_mode is managed by LOSAT');
     expect(await draft.submit()).toEqual({ ok: false, message: '-mt_mode is managed by LOSAT' });
   });

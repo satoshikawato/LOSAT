@@ -1,0 +1,6 @@
+@HD	VN:1.2	GO:query
+@SQ	SN:BL_ORD_ID:0	LN:4200
+@SQ	SN:BL_ORD_ID:1	LN:110
+@PG	ID:0	VN:2.17.0+	CL:/home/kawato/tools/ncbi-blast-oracle/ncbi-blast-2.17.0+/bin/blastn -db tests/db_search/x1bq/rneg -query tests/db_search/x1bq/rneg_q.fna -task megablast -strand minus -xdrop_ungap 1e10 -outfmt 17 SR -num_threads 1 	PN:blastn
+Query_3	16	BL_ORD_ID:0	125	255	988D2147483647H	*	0	0	*	*	AS:i:988	EV:f:0	NM:i:988	PI:f:100.00	BS:f:1825.61
+Query_3	16	BL_ORD_ID:1	41	255	30M	*	0	0	*	*	AS:i:30	EV:f:8.30495e-13	NM:i:0	PI:f:100.00	BS:f:56.5198

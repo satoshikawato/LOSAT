@@ -4,13 +4,14 @@
 // NCBI-ScoreMat::PssmWithParameters,
 // NCBI-BlastDL::Blast-db-mask-info,
 // NCBI-BlastDL::Blast-def-line-set,
+// NCBI-Blast4::Blast4-archive,
 // from the ASN.1 modules and `.def` files of NCBI BLAST+ 2.17.0 (`c++/src/objects`, the pinned
 // commit 598d8ae6 of AGENTS.md). Regenerate and check with:
 //   python3 scripts/asn_spec_gen.py <ncbi-blast-2.17.0+-src/c++> \
 //       --out LOSAT/src/report/serial/asn_types/table.rs
 //   python3 scripts/asn_spec_check.py <ncbi-blast-2.17.0+-src/c++>
-// (418 types: 221 named, the others anonymous at their place of use;
-// 1017 members and variants, 796 named values.) The names are offsets into
+// (460 types: 252 named, the others anonymous at their place of use;
+// 1130 members and variants, 809 named values.) The names are offsets into
 // `NAMES` and the members and values spans of `MEMBERS` and `VALUES`: the table holds no pointer.
 
 use super::{EnumValue, Kind, Member, Name, Span, Storage, StringKind, TypeInfo, DEFAULT, DELAYED, OPTIONAL, REF};
@@ -240,12 +241,43 @@ pub(crate) mod named {
     pub(crate) const BLAST_MASK_LIST: u16 = 415;
     pub(crate) const BLAST_DEF_LINE_SET: u16 = 416;
     pub(crate) const BLAST_DEF_LINE: u16 = 417;
+    pub(crate) const BLAST4_ARCHIVE: u16 = 418;
+    pub(crate) const BLAST4_REQUEST: u16 = 419;
+    pub(crate) const BLAST4_REQUEST_BODY: u16 = 420;
+    pub(crate) const BLAST4_FINISH_PARAMS_REQUEST: u16 = 421;
+    pub(crate) const BLAST4_PARAMETERS: u16 = 422;
+    pub(crate) const BLAST4_PARAMETER: u16 = 423;
+    pub(crate) const BLAST4_VALUE: u16 = 424;
+    pub(crate) const BLAST4_CUTOFF: u16 = 425;
+    pub(crate) const BLAST4_STRAND_TYPE: u16 = 426;
+    pub(crate) const BLAST4_MASK: u16 = 433;
+    pub(crate) const BLAST4_FRAME_TYPE: u16 = 434;
+    pub(crate) const BLAST4_GET_SEARCH_RESULTS_REQUEST: u16 = 435;
+    pub(crate) const BLAST4_GET_SEQUENCES_REQUEST: u16 = 436;
+    pub(crate) const BLAST4_DATABASE: u16 = 437;
+    pub(crate) const BLAST4_RESIDUE_TYPE: u16 = 438;
+    pub(crate) const BLAST4_QUEUE_SEARCH_REQUEST: u16 = 439;
+    pub(crate) const BLAST4_QUERIES: u16 = 440;
+    pub(crate) const BLAST4_SUBJECT: u16 = 441;
+    pub(crate) const BLAST4_GET_REQUEST_INFO_REQUEST: u16 = 442;
+    pub(crate) const BLAST4_GET_SEQ_PARTS_REQUEST: u16 = 443;
+    pub(crate) const BLAST4_GET_PROTOCOL_INFO_REQUEST: u16 = 444;
+    pub(crate) const BLAST4_GET_SEARCH_INFO_REQUEST: u16 = 445;
+    pub(crate) const BLAST4_GET_DATABASES_EX_REQUEST: u16 = 446;
+    pub(crate) const BLAST4_GET_SEARCH_RESULTS_REPLY: u16 = 447;
+    pub(crate) const BLAST4_PHI_ALIGNMENTS: u16 = 448;
+    pub(crate) const BLAST4_KA_BLOCK: u16 = 450;
+    pub(crate) const BLAST4_SIMPLE_RESULTS: u16 = 452;
+    pub(crate) const BLAST4_ALIGNMENTS_FOR_QUERY: u16 = 453;
+    pub(crate) const BLAST4_SIMPLE_ALIGNMENT: u16 = 454;
+    pub(crate) const BLAST4_RANGE: u16 = 455;
+    pub(crate) const BLAST4_ERROR: u16 = 458;
 }
 
 /// Every name of the table, once.
-pub(crate) const NAMES: &str = "PssmWithParametersNCBI-ScoreMatpssmparamsPssmTRUEisProteinidentifiernumRowsnumColumnsrowLabelsFALSEbyRowqueryintermediateDatafinalDataObject-idNCBI-GeneralidstrSeq-entryNCBI-SeqsetseqsetBioseqNCBI-SequencedescrinstannotSeq-idNCBI-Seqloclocalgibbsqgibbmtgiimgenbankemblpirswissprotpatentothergeneralgiddbjprfpdbtpgtpetpdgpipenamed-annot-trackGiimport-iddbreleaseTextseq-idnameaccessionversionPatent-seq-idseqidcitId-patNCBI-Bibliocountrydoc-typenumberapp-numberDbtagtagPDB-seq-idmol32chainrelchain-idPDB-mol-idDatestdDate-stdyearmonthdayseasonhourminutesecondSeq-descrSeqdescmol-typemodifmethodtitleorgcommentnummaplocpubregionuserspdbxrefcreate-dateupdate-datehetsourcemolinfomodelevGIBB-molunknowngenomicpre-mRNAmRNArRNAtRNAsnRNAscRNApeptideother-geneticgenomic-mRNAGIBB-moddnarnaextrachromplasmidmitochondrialchloroplastkinetoplastcyanellesyntheticrecombinantpartialcompletemutagennatmuttransposoninsertion-seqno-leftno-rightmacronuclearproviraleststssurveychromoplastgenemaprestmapphysmapGIBB-methodconcept-transseq-peptbothseq-pept-overlapseq-pept-homolconcept-trans-aOrg-refNCBI-OrganismtaxnamecommonmodsynorgnameOrgNameattriblineagegcodemgcodedivpgcodeBinomialOrgNamegenusspeciessubspeciesMultiOrgNamePartialOrgNameTaxElementfixed-levellevelfamilyorderclassbinomialvirushybridnamedhybridOrgModsubtypesubnamestrainsubstraintypevarietyserotypeserogroupserovarcultivarpathovarchemovarbiovarbiotypegroupsubgroupisolateacronymdosagenat-hostsub-speciesspecimen-voucherauthorityformaforma-specialisecotypesynonymanamorphteleomorphbreedgb-acronymgb-anamorphgb-synonymculture-collectionbio-materialmetagenome-sourcetype-materialnomenclatureold-lineageold-nameNumberingcontenumrefrealNum-cont1refnumhas-zeroascendingNum-enumnamesNum-refalignsnot-setsourcesSeq-alignNCBI-SeqaligndimscoresegsboundsextglobaldiagsdiscScorevalueintDense-diag2idsstartslenstrandsscoresNa-strandplusminusboth-revDense-segnumseglensStd-seglocSeq-locnullemptywholepacked-intpntpacked-pntmixequivbondfeatSeq-intervalfromtostrandfuzz-fromfuzz-toInt-fuzzp-mrangepctlimaltmaxminunkgtlttrtlcirclePacked-seqintSeq-pointpointfuzzPacked-seqpntpointsSeq-loc-mixSeq-loc-equivSeq-bondabFeat-idNCBI-SeqfeatgibbPacked-segpresentSeq-align-setSpliced-segproduct-idgenomic-idproduct-strandgenomic-strandproduct-typeexonspoly-aproduct-lengthmodifierstranscriptproteinSpliced-exonproduct-startproduct-endgenomic-startgenomic-endpartsacceptor-before-exondonor-after-exonProduct-posnucposprotposProt-posamin0frameSpliced-exon-chunkmatchmismatchdiagproduct-insgenomic-insScore-setSplice-sitebasesUser-objectdataUser-fieldlabelboolosobjectstrsintsrealsossfieldsobjectsSpliced-seg-modifierstart-codon-foundstop-codon-foundSparse-segmaster-idrowsrow-scoresSparse-alignfirst-idsecond-idfirst-startssecond-startssecond-strandsseg-scoresSparse-seg-extindexdendiagdensegpackedsplicedsparseNum-realunitsPIR-blockPIR-Generalhad-puncthostsummarygeneticincludesplacementsuperfamilykeywordscross-referencedateseq-rawseqrefGB-blockGenBank-Generalextra-accessionsoriginentry-datetaxonomyPubdescfignumexcalign-groupreftypePub-equivNCBI-PubPubgensubmedlinemuidarticlejournalbookprocpat-idmanpmidCit-genauthorsvolumeissuepagesserial-numberAuth-listaffilAuthorroleis-corrPerson-iddbtagmlconsortiumName-stdlastfirstmiddlefullinitialssuffixprimarysecondarycompilereditorpatent-assigneetranslatorAffilcitystreetemailfaxphonepostal-codeTitletsubtransjtaiso-jtaml-jtacodenissnabrisbnPubMedIdCit-subimpmediumImprintsectioncprtpart-sup\"ENG\"languageprepubpart-supiretractpubstatushistorysubmittedin-pressCitRetractexpretractednoticein-errorerratumPubStatusreceivedacceptedepublishppublishrevisedpmcpmcrpubmedpubmedraheadofprintpremedlinePubStatusDateSetPubStatusDatepapertapefloppyMedline-entryNCBI-Medlineuidemabstractmeshsubstancexrefidnumgenepub-typemlfieldstatusCit-artCit-jourCit-bookcollCit-procmeetMeetingplaceArticleIdSetArticleIddoipiipmcidpmcpidpmpidMedlineUIDDOIPIIPmcIDPmcPidPmPidMedline-meshmptermqualMedline-qualsubhMedline-rnnameonlycasecMedline-sicarbbankhdbhgmlmimmsdprfseqdbpsdgdbMedline-fieldDocRefncbigipublisherCit-patdate-issueapp-dateapplicantsassigneespriorityPatent-priorityCit-letman-idmanuscriptletterthesissitesfeatsno-targetSP-blockSP-Generalextra-accimethplasnmdbrefcreatedsequpdannotupdstandardprelimEMBL-blockEMBL-Generalcreation-dateunannotatedfuninvmamphgplnpriprorodunavrlvrtpatEMBL-xrefdbnameEMBL-dbnamecodegeninfoepdecdtfdflybaseprositeenzymeecoseqhivPRF-blockPRF-Generalextra-srcPRF-ExtraSrcpartstatetaxonPDB-blockPDB-Generaldepositioncompoundexp-methodreplacePDB-replaceHeterogenBioSourceNCBI-BioSourcegenomeis-focuspcr-primersmitochondrionplastidvirionnucleomorphapicoplastleucoplastproplastidendogenous-virushydrogenosomechromosomechromatophoreplasmid-in-mitochondrionplasmid-in-plastidnaturalmutartificialSubSourcemapclonesubclonehaplotypegenotypesexcell-linecell-typetissue-typeclone-libdev-stagefrequencygermlinerearrangedlab-hostpop-varianttissue-libplasmid-nametransposon-nameinsertion-seq-nameplastid-namesegmentendogenous-virus-nametransgenicenvironmental-sampleisolation-sourcelat-loncollection-datecollected-byidentified-byfwd-primer-seqrev-primer-seqfwd-primer-namerev-primer-namemetagenomicmating-typelinkage-grouphaplogroupwhole-repliconphenotypealtitudePCRReactionSetPCRReactionforwardreversePCRPrimerSetPCRPrimerPCRPrimerSeqPCRPrimerNameMolInfobiomoltechtechexpcompletenessgbmoltypepre-RNAcRNAsnoRNAtranscribed-RNAncRNAtmRNAderivedhtgs-1htgs-2htgs-3fli-cdnahtgs-0htcwgsbarcodecomposite-wgs-htgstsatargetedno-endshas-lefthas-rightModelEvidenceSupportmrnaidentificationexon-countexon-lengthfull-lengthsupports-all-exon-comboModelEvidenceItemSeq-instreprlengthlineartopologyseq-datahistvirtualrawsegconstconsendeltaaanacirculartandemssdsmixedSeq-dataiupacnaiupacaancbi2nancbi4nancbi8nancbipnancbi8aancbieaancbipaancbistdaagapIUPACnaIUPACaaNCBI2naNCBI4naNCBI8naNCBIpnaNCBI8aaNCBIeaaNCBIpaaNCBIstdaaSeq-gaplinkagelinkage-evidencefragmentshort-armheterochromatincentromeretelomererepeatcontigscaffoldcontaminationunlinkedlinkedLinkage-evidencepaired-endsalign-genusalign-xgenusalign-trnscptwithin-cloneclone-contigstrobeunspecifiedpcrproximity-ligationSeq-extSeg-extRef-extMap-extSeq-featexceptproductlocationexp-evpseudoexcept-textextssupportSeqFeatDatacdregionprotsitersitetxinitpsec-strnon-std-residuebiosrcvariationGene-refNCBI-Genelocusalleledesclocus-tagformal-nameGene-nomenclaturesymbolofficialinterimCdregionorfconflictgapscode-breakstopsonetwothreeGenetic-codesncbieaasncbi8aasncbistdaaCode-breakProt-refNCBI-Proteinactivityprocessedpreproteinmaturesignal-peptidetransit-peptidepropeptideRNA-refNCBI-RNApremsgmiscRNATrna-extcodonanticodonRNA-genqualsRNA-qual-setRNA-qualvalImp-featkeydisulfidethiolesterxlinkthioetheractivebindingcleavageinhibitmodifiedglycosylationmyristoylationmutagenizedmetal-bindingphosphorylationacetylationamidationmethylationhydroxylationsulfatationoxidative-deaminationpyrrolidone-carboxylic-acidgamma-carboxyglutamic-acidblockedlipid-bindingnp-bindingdna-bindingtransmembrane-regionnitrosylationRsite-refNCBI-RsiteTxinitNCBI-TxInitexpressiontxsystemtxdescrtxorgmapping-preciselocation-accurateinittypeevidencepol1pol2pol3bacterialviralorganellesinglemultipleTx-evidenceexp-codephysiologicalexpression-systemlow-prec-datafrom-homologrna-seqrna-sizenp-mapnp-sizepe-seqcDNA-seqpe-mappe-sizepseudo-seqrev-pe-mapin-vitrooocytetransfectionhelixsheetturnClone-reflibraryconcordantuniqueplacement-methodclone-seqend-seqinsert-alignmentfishfingerprintend-seq-insert-alignmentexternalcuratedClone-seq-setClone-seqconfidencealign-idinsertendnohit-repnohitnorepother-chrmmultiple-repmultiplenorepno-hitprototypesupportingsupports-othernon-supportingVariation-refNCBI-Variationparent-idsample-idother-idssynonymsdescriptionpopulation-datavariant-propvalidatedclinical-testallele-originallele-stateallele-frequencyis-ancestral-alleleconsequenceext-locssomatic-originPhenotypeclinical-significanceuntestednon-pathogenicprobable-non-pathogenicprobable-pathogenicpathogenicdrug-responsehistocompatibilitybac-acghcomputationaldigital-arrayexpression-arrayflanking-sequencemaphmcd-analysismlpaoea-assemblyoligo-acghpaired-endqpcrread-depthromart-pcrsagesequence-alignmentsequencingsnp-arraysnp-genoytypingsouthernwesternoptical-mappingPopulation-datapopulationgenotype-frequencychromosomes-testedsample-idsflagsis-default-populationis-minor-alleleis-rare-alleleVariantPropertiesresource-linkgene-locationeffectmappingmap-weightfrequency-based-validationproject-dataquality-checkother-validationpreservedprovisionalhas3DsubmitterLinkoutclinicalgenotypeKitin-genenear-gene-5near-gene-3introndonoracceptorutr-5utr-3in-start-codonin-stop-codonintergenicconserved-noncodingno-changesynonymousnonsensemissenseframeshiftup-regulatordown-regulatorstop-gainstop-losshas-other-snphas-assembly-conflictis-assembly-specificis-uniquely-placedplaced-twice-on-same-chromplaced-twice-on-diff-chrommany-placementsis-mutationabove-5pct-allabove-5pct-1plusabove-1pct-allabove-1pct-1plusin-haplotype-sethas-genotypescontig-allele-missingwithdrawn-by-submitternon-overlapping-allelesstrain-specificgenotype-conflictlikely-artifactsomaticinheritedpaternalmaternalde-novobiparentaluniparentalnot-testedtested-inconclusivenot-reportedhomozygousheterozygoushemizygousnullizygousVariation-instobservationidentitysnvmnpdelinsdelinsmicrosatellitecnvdirect-copyrev-direct-copyinverted-copyeverted-copytranslocationprot-missenseprot-nonsenseprot-neutralprot-silentprot-otherDelta-itemmultipliermultiplier-fuzzmorphactionSeq-literalliteralthisoffsetdel-atins-beforeassertedreferencevariantproductsmosaicindividualallelespackagevariationsnoteuniparental-disomyinstancecomplexphasex-lengthtestsplicingloss-of-heterozygosityExt-locobject-idconditionGb-qualPub-setexperimentalnot-experimentalSeqFeatXrefSeqFeatSupportexperimentinferencemodel-evidenceExperimentSupportcategoryexplanationpmidsdoisEvidenceCategorycoordinatesexistenceInferenceSupportother-typesame-speciesbasissimilar-to-sequencesimilar-to-aasimilar-to-dnasimilar-to-rnasimilar-to-mrnasimiliar-to-estsimilar-to-other-rnaprofilenucleotide-motifprotein-motifab-initio-predictionalignmentEvidenceBasisprogramsaccessionsProgram-idDelta-extDelta-seqSeq-histassemblyreplacesreplaced-bydeletedSeq-hist-recSeq-annotAnnot-idncbiTextannot-idbboneAnnot-descrAnnotdescsrcalignAlign-defalign-typeblocksSeq-graphNCBI-Seqrestitle-xtitle-ycompnumvalgraphReal-graphaxisvaluesInt-graphByte-graphbyteSeq-tableNCBI-SeqTablefeat-typefeat-subtypenum-rowscolumnsSeqTable-columnheaderdefaultsparse-otherSeqTable-column-infofield-idfield-namelocation-idlocation-gilocation-fromlocation-tolocation-strandlocation-fuzz-from-limlocation-fuzz-to-limproduct-giproduct-fromproduct-toproduct-fuzz-from-limproduct-fuzz-to-limid-localxref-id-localdata-imp-keydata-regiondata-cdregion-frameext-typequal-qualqual-valdbxref-dbdbxref-tagSeqTable-multi-datastringbytescommon-stringcommon-bytesbitintervalint-deltaint-scaledreal-scaledbit-bvectorint1int2int8CommonString-tablestringsindexesCommonBytes-tableScaled-int-multi-datamuladdScaled-real-multi-dataBVector-datasizeSeqTable-sparse-indexbit-setindexes-deltabit-set-bvectorSeqTable-single-dataftablelocsseq-tableBioseq-setseq-setnuc-protsegsetconsetpub-setpdb-entrymut-setpop-setphy-seteco-setgen-prod-setwgs-setnamed-annotnamed-annot-prodread-setpaired-end-readssmall-genome-setPssmIntermediateDataresFreqsPerPosweightedResFreqsPerPosfreqRatiosinformationContentgaplessColumnWeightssigmaintervalSizesnumMatchingSeqsnumIndeptObsrPssmFinalDatalambdakappahscalingFactorlambdaUngappedkappaUngappedhUngappedwordScoreThresholdPssmParameterspseudocountrpsdbparamsconstraintsbitScoreThreshbitScoreReportingThreshannotatedSitesFormatRpsDbParametersmatrixNamegapOpengapExtendCoreDefnblocksloopsisDiscontinuousinsertionsCoreBlockstartstopminstartmaxstoppropertyBlockPropertyintvaluetextvalueunassignedthresholdminscoremaxscoremeanscorevarianceis-optionalLoopConstraintminlength100000maxlengthSite-annot-setSite-annotstartPositionstopPositionaliasesmotifmotifuseBlast-db-mask-infoNCBI-BlastDLalgo-idalgo-programalgo-optionsmasksBlast-filter-programdustwindowmaskerBlast-mask-listmoreBlast-def-line-setBlast-def-linetaxidmembershipslinksother-info";
+pub(crate) const NAMES: &str = "PssmWithParametersNCBI-ScoreMatpssmparamsPssmTRUEisProteinidentifiernumRowsnumColumnsrowLabelsFALSEbyRowqueryintermediateDatafinalDataObject-idNCBI-GeneralidstrSeq-entryNCBI-SeqsetseqsetBioseqNCBI-SequencedescrinstannotSeq-idNCBI-Seqloclocalgibbsqgibbmtgiimgenbankemblpirswissprotpatentothergeneralgiddbjprfpdbtpgtpetpdgpipenamed-annot-trackGiimport-iddbreleaseTextseq-idnameaccessionversionPatent-seq-idseqidcitId-patNCBI-Bibliocountrydoc-typenumberapp-numberDbtagtagPDB-seq-idmol32chainrelchain-idPDB-mol-idDatestdDate-stdyearmonthdayseasonhourminutesecondSeq-descrSeqdescmol-typemodifmethodtitleorgcommentnummaplocpubregionuserspdbxrefcreate-dateupdate-datehetsourcemolinfomodelevGIBB-molunknowngenomicpre-mRNAmRNArRNAtRNAsnRNAscRNApeptideother-geneticgenomic-mRNAGIBB-moddnarnaextrachromplasmidmitochondrialchloroplastkinetoplastcyanellesyntheticrecombinantpartialcompletemutagennatmuttransposoninsertion-seqno-leftno-rightmacronuclearproviraleststssurveychromoplastgenemaprestmapphysmapGIBB-methodconcept-transseq-peptbothseq-pept-overlapseq-pept-homolconcept-trans-aOrg-refNCBI-OrganismtaxnamecommonmodsynorgnameOrgNameattriblineagegcodemgcodedivpgcodeBinomialOrgNamegenusspeciessubspeciesMultiOrgNamePartialOrgNameTaxElementfixed-levellevelfamilyorderclassbinomialvirushybridnamedhybridOrgModsubtypesubnamestrainsubstraintypevarietyserotypeserogroupserovarcultivarpathovarchemovarbiovarbiotypegroupsubgroupisolateacronymdosagenat-hostsub-speciesspecimen-voucherauthorityformaforma-specialisecotypesynonymanamorphteleomorphbreedgb-acronymgb-anamorphgb-synonymculture-collectionbio-materialmetagenome-sourcetype-materialnomenclatureold-lineageold-nameNumberingcontenumrefrealNum-cont1refnumhas-zeroascendingNum-enumnamesNum-refalignsnot-setsourcesSeq-alignNCBI-SeqaligndimscoresegsboundsextglobaldiagsdiscScorevalueintDense-diag2idsstartslenstrandsscoresNa-strandplusminusboth-revDense-segnumseglensStd-seglocSeq-locnullemptywholepacked-intpntpacked-pntmixequivbondfeatSeq-intervalfromtostrandfuzz-fromfuzz-toInt-fuzzp-mrangepctlimaltmaxminunkgtlttrtlcirclePacked-seqintSeq-pointpointfuzzPacked-seqpntpointsSeq-loc-mixSeq-loc-equivSeq-bondabFeat-idNCBI-SeqfeatgibbPacked-segpresentSeq-align-setSpliced-segproduct-idgenomic-idproduct-strandgenomic-strandproduct-typeexonspoly-aproduct-lengthmodifierstranscriptproteinSpliced-exonproduct-startproduct-endgenomic-startgenomic-endpartsacceptor-before-exondonor-after-exonProduct-posnucposprotposProt-posamin0frameSpliced-exon-chunkmatchmismatchdiagproduct-insgenomic-insScore-setSplice-sitebasesUser-objectdataUser-fieldlabelboolosobjectstrsintsrealsossfieldsobjectsSpliced-seg-modifierstart-codon-foundstop-codon-foundSparse-segmaster-idrowsrow-scoresSparse-alignfirst-idsecond-idfirst-startssecond-startssecond-strandsseg-scoresSparse-seg-extindexdendiagdensegpackedsplicedsparseNum-realunitsPIR-blockPIR-Generalhad-puncthostsummarygeneticincludesplacementsuperfamilykeywordscross-referencedateseq-rawseqrefGB-blockGenBank-Generalextra-accessionsoriginentry-datetaxonomyPubdescfignumexcalign-groupreftypePub-equivNCBI-PubPubgensubmedlinemuidarticlejournalbookprocpat-idmanpmidCit-genauthorsvolumeissuepagesserial-numberAuth-listaffilAuthorroleis-corrPerson-iddbtagmlconsortiumName-stdlastfirstmiddlefullinitialssuffixprimarysecondarycompilereditorpatent-assigneetranslatorAffilcitystreetemailfaxphonepostal-codeTitletsubtransjtaiso-jtaml-jtacodenissnabrisbnPubMedIdCit-subimpmediumImprintsectioncprtpart-sup\"ENG\"languageprepubpart-supiretractpubstatushistorysubmittedin-pressCitRetractexpretractednoticein-errorerratumPubStatusreceivedacceptedepublishppublishrevisedpmcpmcrpubmedpubmedraheadofprintpremedlinePubStatusDateSetPubStatusDatepapertapefloppyMedline-entryNCBI-Medlineuidemabstractmeshsubstancexrefidnumgenepub-typemlfieldstatusCit-artCit-jourCit-bookcollCit-procmeetMeetingplaceArticleIdSetArticleIddoipiipmcidpmcpidpmpidMedlineUIDDOIPIIPmcIDPmcPidPmPidMedline-meshmptermqualMedline-qualsubhMedline-rnnameonlycasecMedline-sicarbbankhdbhgmlmimmsdprfseqdbpsdgdbMedline-fieldDocRefncbigipublisherCit-patdate-issueapp-dateapplicantsassigneespriorityPatent-priorityCit-letman-idmanuscriptletterthesissitesfeatsno-targetSP-blockSP-Generalextra-accimethplasnmdbrefcreatedsequpdannotupdstandardprelimEMBL-blockEMBL-Generalcreation-dateunannotatedfuninvmamphgplnpriprorodunavrlvrtpatEMBL-xrefdbnameEMBL-dbnamecodegeninfoepdecdtfdflybaseprositeenzymeecoseqhivPRF-blockPRF-Generalextra-srcPRF-ExtraSrcpartstatetaxonPDB-blockPDB-Generaldepositioncompoundexp-methodreplacePDB-replaceHeterogenBioSourceNCBI-BioSourcegenomeis-focuspcr-primersmitochondrionplastidvirionnucleomorphapicoplastleucoplastproplastidendogenous-virushydrogenosomechromosomechromatophoreplasmid-in-mitochondrionplasmid-in-plastidnaturalmutartificialSubSourcemapclonesubclonehaplotypegenotypesexcell-linecell-typetissue-typeclone-libdev-stagefrequencygermlinerearrangedlab-hostpop-varianttissue-libplasmid-nametransposon-nameinsertion-seq-nameplastid-namesegmentendogenous-virus-nametransgenicenvironmental-sampleisolation-sourcelat-loncollection-datecollected-byidentified-byfwd-primer-seqrev-primer-seqfwd-primer-namerev-primer-namemetagenomicmating-typelinkage-grouphaplogroupwhole-repliconphenotypealtitudePCRReactionSetPCRReactionforwardreversePCRPrimerSetPCRPrimerPCRPrimerSeqPCRPrimerNameMolInfobiomoltechtechexpcompletenessgbmoltypepre-RNAcRNAsnoRNAtranscribed-RNAncRNAtmRNAderivedhtgs-1htgs-2htgs-3fli-cdnahtgs-0htcwgsbarcodecomposite-wgs-htgstsatargetedno-endshas-lefthas-rightModelEvidenceSupportmrnaidentificationexon-countexon-lengthfull-lengthsupports-all-exon-comboModelEvidenceItemSeq-instreprlengthlineartopologyseq-datahistvirtualrawsegconstconsendeltaaanacirculartandemssdsmixedSeq-dataiupacnaiupacaancbi2nancbi4nancbi8nancbipnancbi8aancbieaancbipaancbistdaagapIUPACnaIUPACaaNCBI2naNCBI4naNCBI8naNCBIpnaNCBI8aaNCBIeaaNCBIpaaNCBIstdaaSeq-gaplinkagelinkage-evidencefragmentshort-armheterochromatincentromeretelomererepeatcontigscaffoldcontaminationunlinkedlinkedLinkage-evidencepaired-endsalign-genusalign-xgenusalign-trnscptwithin-cloneclone-contigstrobeunspecifiedpcrproximity-ligationSeq-extSeg-extRef-extMap-extSeq-featexceptproductlocationexp-evpseudoexcept-textextssupportSeqFeatDatacdregionprotsitersitetxinitpsec-strnon-std-residuebiosrcvariationGene-refNCBI-Genelocusalleledesclocus-tagformal-nameGene-nomenclaturesymbolofficialinterimCdregionorfconflictgapscode-breakstopsonetwothreeGenetic-codesncbieaasncbi8aasncbistdaaCode-breakProt-refNCBI-Proteinactivityprocessedpreproteinmaturesignal-peptidetransit-peptidepropeptideRNA-refNCBI-RNApremsgmiscRNATrna-extcodonanticodonRNA-genqualsRNA-qual-setRNA-qualvalImp-featkeydisulfidethiolesterxlinkthioetheractivebindingcleavageinhibitmodifiedglycosylationmyristoylationmutagenizedmetal-bindingphosphorylationacetylationamidationmethylationhydroxylationsulfatationoxidative-deaminationpyrrolidone-carboxylic-acidgamma-carboxyglutamic-acidblockedlipid-bindingnp-bindingdna-bindingtransmembrane-regionnitrosylationRsite-refNCBI-RsiteTxinitNCBI-TxInitexpressiontxsystemtxdescrtxorgmapping-preciselocation-accurateinittypeevidencepol1pol2pol3bacterialviralorganellesinglemultipleTx-evidenceexp-codephysiologicalexpression-systemlow-prec-datafrom-homologrna-seqrna-sizenp-mapnp-sizepe-seqcDNA-seqpe-mappe-sizepseudo-seqrev-pe-mapin-vitrooocytetransfectionhelixsheetturnClone-reflibraryconcordantuniqueplacement-methodclone-seqend-seqinsert-alignmentfishfingerprintend-seq-insert-alignmentexternalcuratedClone-seq-setClone-seqconfidencealign-idinsertendnohit-repnohitnorepother-chrmmultiple-repmultiplenorepno-hitprototypesupportingsupports-othernon-supportingVariation-refNCBI-Variationparent-idsample-idother-idssynonymsdescriptionpopulation-datavariant-propvalidatedclinical-testallele-originallele-stateallele-frequencyis-ancestral-alleleconsequenceext-locssomatic-originPhenotypeclinical-significanceuntestednon-pathogenicprobable-non-pathogenicprobable-pathogenicpathogenicdrug-responsehistocompatibilitybac-acghcomputationaldigital-arrayexpression-arrayflanking-sequencemaphmcd-analysismlpaoea-assemblyoligo-acghpaired-endqpcrread-depthromart-pcrsagesequence-alignmentsequencingsnp-arraysnp-genoytypingsouthernwesternoptical-mappingPopulation-datapopulationgenotype-frequencychromosomes-testedsample-idsflagsis-default-populationis-minor-alleleis-rare-alleleVariantPropertiesresource-linkgene-locationeffectmappingmap-weightfrequency-based-validationproject-dataquality-checkother-validationpreservedprovisionalhas3DsubmitterLinkoutclinicalgenotypeKitin-genenear-gene-5near-gene-3introndonoracceptorutr-5utr-3in-start-codonin-stop-codonintergenicconserved-noncodingno-changesynonymousnonsensemissenseframeshiftup-regulatordown-regulatorstop-gainstop-losshas-other-snphas-assembly-conflictis-assembly-specificis-uniquely-placedplaced-twice-on-same-chromplaced-twice-on-diff-chrommany-placementsis-mutationabove-5pct-allabove-5pct-1plusabove-1pct-allabove-1pct-1plusin-haplotype-sethas-genotypescontig-allele-missingwithdrawn-by-submitternon-overlapping-allelesstrain-specificgenotype-conflictlikely-artifactsomaticinheritedpaternalmaternalde-novobiparentaluniparentalnot-testedtested-inconclusivenot-reportedhomozygousheterozygoushemizygousnullizygousVariation-instobservationidentitysnvmnpdelinsdelinsmicrosatellitecnvdirect-copyrev-direct-copyinverted-copyeverted-copytranslocationprot-missenseprot-nonsenseprot-neutralprot-silentprot-otherDelta-itemmultipliermultiplier-fuzzmorphactionSeq-literalliteralthisoffsetdel-atins-beforeassertedreferencevariantproductsmosaicindividualallelespackagevariationsnoteuniparental-disomyinstancecomplexphasex-lengthtestsplicingloss-of-heterozygosityExt-locobject-idconditionGb-qualPub-setexperimentalnot-experimentalSeqFeatXrefSeqFeatSupportexperimentinferencemodel-evidenceExperimentSupportcategoryexplanationpmidsdoisEvidenceCategorycoordinatesexistenceInferenceSupportother-typesame-speciesbasissimilar-to-sequencesimilar-to-aasimilar-to-dnasimilar-to-rnasimilar-to-mrnasimiliar-to-estsimilar-to-other-rnaprofilenucleotide-motifprotein-motifab-initio-predictionalignmentEvidenceBasisprogramsaccessionsProgram-idDelta-extDelta-seqSeq-histassemblyreplacesreplaced-bydeletedSeq-hist-recSeq-annotAnnot-idncbiTextannot-idbboneAnnot-descrAnnotdescsrcalignAlign-defalign-typeblocksSeq-graphNCBI-Seqrestitle-xtitle-ycompnumvalgraphReal-graphaxisvaluesInt-graphByte-graphbyteSeq-tableNCBI-SeqTablefeat-typefeat-subtypenum-rowscolumnsSeqTable-columnheaderdefaultsparse-otherSeqTable-column-infofield-idfield-namelocation-idlocation-gilocation-fromlocation-tolocation-strandlocation-fuzz-from-limlocation-fuzz-to-limproduct-giproduct-fromproduct-toproduct-fuzz-from-limproduct-fuzz-to-limid-localxref-id-localdata-imp-keydata-regiondata-cdregion-frameext-typequal-qualqual-valdbxref-dbdbxref-tagSeqTable-multi-datastringbytescommon-stringcommon-bytesbitintervalint-deltaint-scaledreal-scaledbit-bvectorint1int2int8CommonString-tablestringsindexesCommonBytes-tableScaled-int-multi-datamuladdScaled-real-multi-dataBVector-datasizeSeqTable-sparse-indexbit-setindexes-deltabit-set-bvectorSeqTable-single-dataftablelocsseq-tableBioseq-setseq-setnuc-protsegsetconsetpub-setpdb-entrymut-setpop-setphy-seteco-setgen-prod-setwgs-setnamed-annotnamed-annot-prodread-setpaired-end-readssmall-genome-setPssmIntermediateDataresFreqsPerPosweightedResFreqsPerPosfreqRatiosinformationContentgaplessColumnWeightssigmaintervalSizesnumMatchingSeqsnumIndeptObsrPssmFinalDatalambdakappahscalingFactorlambdaUngappedkappaUngappedhUngappedwordScoreThresholdPssmParameterspseudocountrpsdbparamsconstraintsbitScoreThreshbitScoreReportingThreshannotatedSitesFormatRpsDbParametersmatrixNamegapOpengapExtendCoreDefnblocksloopsisDiscontinuousinsertionsCoreBlockstartstopminstartmaxstoppropertyBlockPropertyintvaluetextvalueunassignedthresholdminscoremaxscoremeanscorevarianceis-optionalLoopConstraintminlength100000maxlengthSite-annot-setSite-annotstartPositionstopPositionaliasesmotifmotifuseBlast-db-mask-infoNCBI-BlastDLalgo-idalgo-programalgo-optionsmasksBlast-filter-programdustwindowmaskerBlast-mask-listmoreBlast-def-line-setBlast-def-linetaxidmembershipslinksother-infoBlast4-archiveNCBI-Blast4requestresultsmessagesBlast4-requestidentbodyBlast4-request-bodyfinish-paramsget-databasesget-matricesget-parametersget-paramsetsget-programsget-search-resultsget-sequencesqueue-searchget-request-infoget-sequence-partsget-windowmasked-taxidsget-protocol-infoget-search-infoget-databases-exBlast4-finish-params-requestprogramserviceparamsetBlast4-parametersBlast4-parameterBlast4-valuebig-integerbioseqbooleancutoffintegermatrixseq-alignseq-idseq-locstrand-typebig-integer-listbioseq-listboolean-listcutoff-listinteger-listmatrix-listreal-listseq-align-listseq-id-listseq-loc-liststrand-type-liststring-listbioseq-setseq-align-setquery-maskBlast4-cutoffe-valueraw-scoreBlast4-strand-typeforward-strandreverse-strandboth-strandsBlast4-masklocationsBlast4-frame-typenotsetplus1plus2plus3minus1minus2minus3Blast4-get-search-results-requestrequest-idresult-typesBlast4-get-sequences-requestdatabaseseq-idsskip-seq-datatarget-onlyBlast4-databaseBlast4-residue-typenucleotideBlast4-queue-search-requestqueriessubjectalgorithm-optionsprogram-optionsformat-optionsBlast4-queriesBlast4-subjectsequencesBlast4-get-request-info-requestBlast4-get-seq-parts-requestseq-locationsBlast4-get-protocol-info-requestBlast4-get-search-info-requestinfoBlast4-get-databases-ex-requestBlast4-get-search-results-replyalignmentsphi-alignmentska-blockssearch-statssimple-resultsBlast4-phi-alignmentsnum-alignmentsseq-locsBlast4-ka-blockkgappedBlast4-simple-resultsall-alignmentsBlast4-alignments-for-queryquery-idBlast4-simple-alignmentsubject-idbit-scorenum-identitiesnum-indelsfull-query-rangefull-subject-rangeBlast4-rangeBlast4-errormessage";
 
-pub(crate) static TYPES: [TypeInfo; 418] = [
+pub(crate) static TYPES: [TypeInfo; 460] = [
     // 0: NCBI-ScoreMat PssmWithParameters
     TypeInfo { name: Name(0, 18), module: Name(18, 13), kind: Kind::Sequence(Span(0, 2)) },
     // 1: NCBI-ScoreMat Pssm
@@ -1082,9 +1114,93 @@ pub(crate) static TYPES: [TypeInfo; 418] = [
     TypeInfo { name: Name(12107, 18), module: Name(12004, 12), kind: Kind::List { element: 417, set: false, refs: true } },
     // 417: NCBI-BlastDL Blast-def-line
     TypeInfo { name: Name(12125, 14), module: Name(12004, 12), kind: Kind::Sequence(Span(1011, 6)) },
+    // 418: NCBI-Blast4 Blast4-archive
+    TypeInfo { name: Name(12170, 14), module: Name(12184, 11), kind: Kind::Sequence(Span(1017, 3)) },
+    // 419: NCBI-Blast4 Blast4-request
+    TypeInfo { name: Name(12217, 14), module: Name(12184, 11), kind: Kind::Sequence(Span(1020, 2)) },
+    // 420: NCBI-Blast4 Blast4-request-body
+    TypeInfo { name: Name(12240, 19), module: Name(12184, 11), kind: Kind::Choice(Span(1022, 15)) },
+    // 421: NCBI-Blast4 Blast4-finish-params-request
+    TypeInfo { name: Name(12484, 28), module: Name(12184, 11), kind: Kind::Sequence(Span(1037, 4)) },
+    // 422: NCBI-Blast4 Blast4-parameters
+    TypeInfo { name: Name(12534, 17), module: Name(12184, 11), kind: Kind::List { element: 423, set: false, refs: true } },
+    // 423: NCBI-Blast4 Blast4-parameter
+    TypeInfo { name: Name(12551, 16), module: Name(12184, 11), kind: Kind::Sequence(Span(1041, 2)) },
+    // 424: NCBI-Blast4 Blast4-value
+    TypeInfo { name: Name(12567, 12), module: Name(12184, 11), kind: Kind::Choice(Span(1043, 27)) },
+    // 425: NCBI-Blast4 Blast4-cutoff
+    TypeInfo { name: Name(12834, 13), module: Name(12184, 11), kind: Kind::Choice(Span(1070, 2)) },
+    // 426: NCBI-Blast4 Blast4-strand-type
+    TypeInfo { name: Name(12863, 18), module: Name(12184, 11), kind: Kind::Enumerated { integer: false, values: Span(796, 3) } },
+    // 427: (shared)
+    TypeInfo { name: Name(134, 0), module: Name(134, 0), kind: Kind::List { element: 8, set: false, refs: true } },
+    // 428: (shared)
+    TypeInfo { name: Name(134, 0), module: Name(134, 0), kind: Kind::List { element: 2, set: false, refs: false } },
+    // 429: (shared)
+    TypeInfo { name: Name(134, 0), module: Name(134, 0), kind: Kind::List { element: 425, set: false, refs: true } },
+    // 430: (shared)
+    TypeInfo { name: Name(134, 0), module: Name(134, 0), kind: Kind::List { element: 0, set: false, refs: true } },
+    // 431: (shared)
+    TypeInfo { name: Name(134, 0), module: Name(134, 0), kind: Kind::List { element: 47, set: false, refs: true } },
+    // 432: (shared)
+    TypeInfo { name: Name(134, 0), module: Name(134, 0), kind: Kind::List { element: 426, set: false, refs: false } },
+    // 433: NCBI-Blast4 Blast4-mask
+    TypeInfo { name: Name(12921, 11), module: Name(12184, 11), kind: Kind::Sequence(Span(1072, 2)) },
+    // 434: NCBI-Blast4 Blast4-frame-type
+    TypeInfo { name: Name(12941, 17), module: Name(12184, 11), kind: Kind::Enumerated { integer: false, values: Span(799, 7) } },
+    // 435: NCBI-Blast4 Blast4-get-search-results-request
+    TypeInfo { name: Name(12997, 33), module: Name(12184, 11), kind: Kind::Sequence(Span(1074, 2)) },
+    // 436: NCBI-Blast4 Blast4-get-sequences-request
+    TypeInfo { name: Name(13052, 28), module: Name(12184, 11), kind: Kind::Sequence(Span(1076, 4)) },
+    // 437: NCBI-Blast4 Blast4-database
+    TypeInfo { name: Name(13119, 15), module: Name(12184, 11), kind: Kind::Sequence(Span(1080, 2)) },
+    // 438: NCBI-Blast4 Blast4-residue-type
+    TypeInfo { name: Name(13134, 19), module: Name(12184, 11), kind: Kind::Enumerated { integer: false, values: Span(806, 3) } },
+    // 439: NCBI-Blast4 Blast4-queue-search-request
+    TypeInfo { name: Name(13163, 27), module: Name(12184, 11), kind: Kind::Sequence(Span(1082, 8)) },
+    // 440: NCBI-Blast4 Blast4-queries
+    TypeInfo { name: Name(13250, 14), module: Name(12184, 11), kind: Kind::Choice(Span(1090, 3)) },
+    // 441: NCBI-Blast4 Blast4-subject
+    TypeInfo { name: Name(13264, 14), module: Name(12184, 11), kind: Kind::Choice(Span(1093, 3)) },
+    // 442: NCBI-Blast4 Blast4-get-request-info-request
+    TypeInfo { name: Name(13287, 31), module: Name(12184, 11), kind: Kind::Sequence(Span(1096, 1)) },
+    // 443: NCBI-Blast4 Blast4-get-seq-parts-request
+    TypeInfo { name: Name(13318, 28), module: Name(12184, 11), kind: Kind::Sequence(Span(1097, 2)) },
+    // 444: NCBI-Blast4 Blast4-get-protocol-info-request
+    TypeInfo { name: Name(13359, 32), module: Name(12184, 11), kind: Kind::Alias(422) },
+    // 445: NCBI-Blast4 Blast4-get-search-info-request
+    TypeInfo { name: Name(13391, 30), module: Name(12184, 11), kind: Kind::Sequence(Span(1099, 2)) },
+    // 446: NCBI-Blast4 Blast4-get-databases-ex-request
+    TypeInfo { name: Name(13425, 31), module: Name(12184, 11), kind: Kind::Sequence(Span(1101, 1)) },
+    // 447: NCBI-Blast4 Blast4-get-search-results-reply
+    TypeInfo { name: Name(13456, 31), module: Name(12184, 11), kind: Kind::Sequence(Span(1102, 7)) },
+    // 448: NCBI-Blast4 Blast4-phi-alignments
+    TypeInfo { name: Name(13546, 21), module: Name(12184, 11), kind: Kind::Sequence(Span(1109, 2)) },
+    // 449: (shared)
+    TypeInfo { name: Name(134, 0), module: Name(134, 0), kind: Kind::List { element: 433, set: false, refs: true } },
+    // 450: NCBI-Blast4 Blast4-ka-block
+    TypeInfo { name: Name(13589, 15), module: Name(12184, 11), kind: Kind::Sequence(Span(1111, 4)) },
+    // 451: (shared)
+    TypeInfo { name: Name(134, 0), module: Name(134, 0), kind: Kind::List { element: 450, set: false, refs: true } },
+    // 452: NCBI-Blast4 Blast4-simple-results
+    TypeInfo { name: Name(13611, 21), module: Name(12184, 11), kind: Kind::Sequence(Span(1115, 1)) },
+    // 453: NCBI-Blast4 Blast4-alignments-for-query
+    TypeInfo { name: Name(13646, 27), module: Name(12184, 11), kind: Kind::Sequence(Span(1116, 2)) },
+    // 454: NCBI-Blast4 Blast4-simple-alignment
+    TypeInfo { name: Name(13681, 23), module: Name(12184, 11), kind: Kind::Sequence(Span(1118, 7)) },
+    // 455: NCBI-Blast4 Blast4-range
+    TypeInfo { name: Name(13781, 12), module: Name(12184, 11), kind: Kind::Sequence(Span(1125, 3)) },
+    // 456: (shared)
+    TypeInfo { name: Name(134, 0), module: Name(134, 0), kind: Kind::List { element: 454, set: false, refs: true } },
+    // 457: (shared)
+    TypeInfo { name: Name(134, 0), module: Name(134, 0), kind: Kind::List { element: 453, set: false, refs: true } },
+    // 458: NCBI-Blast4 Blast4-error
+    TypeInfo { name: Name(13793, 12), module: Name(12184, 11), kind: Kind::Sequence(Span(1128, 2)) },
+    // 459: (shared)
+    TypeInfo { name: Name(134, 0), module: Name(134, 0), kind: Kind::List { element: 458, set: false, refs: true } },
 ];
 
-pub(crate) static MEMBERS: [Member; 1017] = [
+pub(crate) static MEMBERS: [Member; 1130] = [
     Member { name: Name(31, 4), ty: 1, flags: REF, default: None }, // 0: PssmWithParameters.pssm
     Member { name: Name(35, 6), ty: 401, flags: OPTIONAL | REF, default: None }, // 1: PssmWithParameters.params
     Member { name: Name(49, 9), ty: 2, flags: DEFAULT, default: Some(Name(45, 4)) }, // 2: Pssm.isProtein
@@ -2102,9 +2218,122 @@ pub(crate) static MEMBERS: [Member; 1017] = [
     Member { name: Name(12144, 11), ty: 60, flags: OPTIONAL, default: None }, // 1014: Blast-def-line.memberships
     Member { name: Name(12155, 5), ty: 60, flags: OPTIONAL, default: None }, // 1015: Blast-def-line.links
     Member { name: Name(12160, 10), ty: 60, flags: OPTIONAL, default: None }, // 1016: Blast-def-line.other-info
+    Member { name: Name(12195, 7), ty: 419, flags: REF, default: None }, // 1017: Blast4-archive.request
+    Member { name: Name(12202, 7), ty: 447, flags: REF, default: None }, // 1018: Blast4-archive.results
+    Member { name: Name(12209, 8), ty: 459, flags: OPTIONAL, default: None }, // 1019: Blast4-archive.messages
+    Member { name: Name(12231, 5), ty: 5, flags: OPTIONAL, default: None }, // 1020: Blast4-request.ident
+    Member { name: Name(12236, 4), ty: 420, flags: REF, default: None }, // 1021: Blast4-request.body
+    Member { name: Name(12259, 13), ty: 421, flags: 0, default: None }, // 1022: Blast4-request-body.finish-params
+    Member { name: Name(12272, 13), ty: 64, flags: 0, default: None }, // 1023: Blast4-request-body.get-databases
+    Member { name: Name(12285, 12), ty: 64, flags: 0, default: None }, // 1024: Blast4-request-body.get-matrices
+    Member { name: Name(12297, 14), ty: 64, flags: 0, default: None }, // 1025: Blast4-request-body.get-parameters
+    Member { name: Name(12311, 13), ty: 64, flags: 0, default: None }, // 1026: Blast4-request-body.get-paramsets
+    Member { name: Name(12324, 12), ty: 64, flags: 0, default: None }, // 1027: Blast4-request-body.get-programs
+    Member { name: Name(12336, 18), ty: 435, flags: 0, default: None }, // 1028: Blast4-request-body.get-search-results
+    Member { name: Name(12354, 13), ty: 436, flags: 0, default: None }, // 1029: Blast4-request-body.get-sequences
+    Member { name: Name(12367, 12), ty: 439, flags: 0, default: None }, // 1030: Blast4-request-body.queue-search
+    Member { name: Name(12379, 16), ty: 442, flags: 0, default: None }, // 1031: Blast4-request-body.get-request-info
+    Member { name: Name(12395, 18), ty: 443, flags: 0, default: None }, // 1032: Blast4-request-body.get-sequence-parts
+    Member { name: Name(12413, 23), ty: 64, flags: 0, default: None }, // 1033: Blast4-request-body.get-windowmasked-taxids
+    Member { name: Name(12436, 17), ty: 444, flags: 0, default: None }, // 1034: Blast4-request-body.get-protocol-info
+    Member { name: Name(12453, 15), ty: 445, flags: 0, default: None }, // 1035: Blast4-request-body.get-search-info
+    Member { name: Name(12468, 16), ty: 446, flags: 0, default: None }, // 1036: Blast4-request-body.get-databases-ex
+    Member { name: Name(12512, 7), ty: 5, flags: 0, default: None }, // 1037: Blast4-finish-params-request.program
+    Member { name: Name(12519, 7), ty: 5, flags: 0, default: None }, // 1038: Blast4-finish-params-request.service
+    Member { name: Name(12526, 8), ty: 5, flags: OPTIONAL, default: None }, // 1039: Blast4-finish-params-request.paramset
+    Member { name: Name(35, 6), ty: 422, flags: OPTIONAL | REF, default: None }, // 1040: Blast4-finish-params-request.params
+    Member { name: Name(371, 4), ty: 5, flags: 0, default: None }, // 1041: Blast4-parameter.name
+    Member { name: Name(1815, 5), ty: 424, flags: REF, default: None }, // 1042: Blast4-parameter.value
+    Member { name: Name(12579, 11), ty: 16, flags: 0, default: None }, // 1043: Blast4-value.big-integer
+    Member { name: Name(12590, 6), ty: 8, flags: 0, default: None }, // 1044: Blast4-value.bioseq
+    Member { name: Name(12596, 7), ty: 2, flags: 0, default: None }, // 1045: Blast4-value.boolean
+    Member { name: Name(12603, 6), ty: 425, flags: 0, default: None }, // 1046: Blast4-value.cutoff
+    Member { name: Name(12609, 7), ty: 4, flags: 0, default: None }, // 1047: Blast4-value.integer
+    Member { name: Name(12616, 6), ty: 0, flags: 0, default: None }, // 1048: Blast4-value.matrix
+    Member { name: Name(1676, 4), ty: 50, flags: 0, default: None }, // 1049: Blast4-value.real
+    Member { name: Name(12622, 9), ty: 47, flags: 0, default: None }, // 1050: Blast4-value.seq-align
+    Member { name: Name(12631, 6), ty: 9, flags: 0, default: None }, // 1051: Blast4-value.seq-id
+    Member { name: Name(12637, 7), ty: 63, flags: 0, default: None }, // 1052: Blast4-value.seq-loc
+    Member { name: Name(12644, 11), ty: 426, flags: 0, default: None }, // 1053: Blast4-value.strand-type
+    Member { name: Name(10838, 6), ty: 5, flags: 0, default: None }, // 1054: Blast4-value.string
+    Member { name: Name(12655, 16), ty: 390, flags: 0, default: None }, // 1055: Blast4-value.big-integer-list
+    Member { name: Name(12671, 11), ty: 427, flags: 0, default: None }, // 1056: Blast4-value.bioseq-list
+    Member { name: Name(12682, 12), ty: 428, flags: 0, default: None }, // 1057: Blast4-value.boolean-list
+    Member { name: Name(12694, 11), ty: 429, flags: 0, default: None }, // 1058: Blast4-value.cutoff-list
+    Member { name: Name(12705, 12), ty: 60, flags: 0, default: None }, // 1059: Blast4-value.integer-list
+    Member { name: Name(12717, 11), ty: 430, flags: 0, default: None }, // 1060: Blast4-value.matrix-list
+    Member { name: Name(12728, 9), ty: 95, flags: 0, default: None }, // 1061: Blast4-value.real-list
+    Member { name: Name(12737, 14), ty: 431, flags: 0, default: None }, // 1062: Blast4-value.seq-align-list
+    Member { name: Name(12751, 11), ty: 54, flags: 0, default: None }, // 1063: Blast4-value.seq-id-list
+    Member { name: Name(12762, 12), ty: 77, flags: 0, default: None }, // 1064: Blast4-value.seq-loc-list
+    Member { name: Name(12774, 16), ty: 432, flags: 0, default: None }, // 1065: Blast4-value.strand-type-list
+    Member { name: Name(12790, 11), ty: 6, flags: 0, default: None }, // 1066: Blast4-value.string-list
+    Member { name: Name(12801, 10), ty: 396, flags: 0, default: None }, // 1067: Blast4-value.bioseq-set
+    Member { name: Name(12811, 13), ty: 81, flags: 0, default: None }, // 1068: Blast4-value.seq-align-set
+    Member { name: Name(12824, 10), ty: 433, flags: 0, default: None }, // 1069: Blast4-value.query-mask
+    Member { name: Name(12847, 7), ty: 50, flags: 0, default: None }, // 1070: Blast4-cutoff.e-value
+    Member { name: Name(12854, 9), ty: 4, flags: 0, default: None }, // 1071: Blast4-cutoff.raw-score
+    Member { name: Name(12932, 9), ty: 77, flags: 0, default: None }, // 1072: Blast4-mask.locations
+    Member { name: Name(2459, 5), ty: 434, flags: 0, default: None }, // 1073: Blast4-mask.frame
+    Member { name: Name(13030, 10), ty: 5, flags: 0, default: None }, // 1074: Blast4-get-search-results-request.request-id
+    Member { name: Name(13040, 12), ty: 4, flags: OPTIONAL, default: None }, // 1075: Blast4-get-search-results-request.result-types
+    Member { name: Name(13080, 8), ty: 437, flags: REF, default: None }, // 1076: Blast4-get-sequences-request.database
+    Member { name: Name(13088, 7), ty: 54, flags: 0, default: None }, // 1077: Blast4-get-sequences-request.seq-ids
+    Member { name: Name(13095, 13), ty: 2, flags: DEFAULT, default: Some(Name(94, 5)) }, // 1078: Blast4-get-sequences-request.skip-seq-data
+    Member { name: Name(13108, 11), ty: 2, flags: OPTIONAL, default: None }, // 1079: Blast4-get-sequences-request.target-only
+    Member { name: Name(371, 4), ty: 5, flags: 0, default: None }, // 1080: Blast4-database.name
+    Member { name: Name(1328, 4), ty: 438, flags: 0, default: None }, // 1081: Blast4-database.type
+    Member { name: Name(12512, 7), ty: 5, flags: 0, default: None }, // 1082: Blast4-queue-search-request.program
+    Member { name: Name(12519, 7), ty: 5, flags: 0, default: None }, // 1083: Blast4-queue-search-request.service
+    Member { name: Name(13190, 7), ty: 440, flags: REF, default: None }, // 1084: Blast4-queue-search-request.queries
+    Member { name: Name(13197, 7), ty: 441, flags: REF, default: None }, // 1085: Blast4-queue-search-request.subject
+    Member { name: Name(12526, 8), ty: 5, flags: OPTIONAL, default: None }, // 1086: Blast4-queue-search-request.paramset
+    Member { name: Name(13204, 17), ty: 422, flags: OPTIONAL | REF, default: None }, // 1087: Blast4-queue-search-request.algorithm-options
+    Member { name: Name(13221, 15), ty: 422, flags: OPTIONAL | REF, default: None }, // 1088: Blast4-queue-search-request.program-options
+    Member { name: Name(13236, 14), ty: 422, flags: OPTIONAL | REF, default: None }, // 1089: Blast4-queue-search-request.format-options
+    Member { name: Name(31, 4), ty: 0, flags: 0, default: None }, // 1090: Blast4-queries.pssm
+    Member { name: Name(12762, 12), ty: 77, flags: 0, default: None }, // 1091: Blast4-queries.seq-loc-list
+    Member { name: Name(12801, 10), ty: 396, flags: 0, default: None }, // 1092: Blast4-queries.bioseq-set
+    Member { name: Name(13080, 8), ty: 5, flags: 0, default: None }, // 1093: Blast4-subject.database
+    Member { name: Name(13278, 9), ty: 427, flags: 0, default: None }, // 1094: Blast4-subject.sequences
+    Member { name: Name(12762, 12), ty: 77, flags: 0, default: None }, // 1095: Blast4-subject.seq-loc-list
+    Member { name: Name(13030, 10), ty: 5, flags: 0, default: None }, // 1096: Blast4-get-request-info-request.request-id
+    Member { name: Name(13080, 8), ty: 437, flags: REF, default: None }, // 1097: Blast4-get-seq-parts-request.database
+    Member { name: Name(13346, 13), ty: 384, flags: 0, default: None }, // 1098: Blast4-get-seq-parts-request.seq-locations
+    Member { name: Name(13030, 10), ty: 5, flags: 0, default: None }, // 1099: Blast4-get-search-info-request.request-id
+    Member { name: Name(13421, 4), ty: 422, flags: OPTIONAL | REF, default: None }, // 1100: Blast4-get-search-info-request.info
+    Member { name: Name(35, 6), ty: 422, flags: OPTIONAL | REF, default: None }, // 1101: Blast4-get-databases-ex-request.params
+    Member { name: Name(13487, 10), ty: 81, flags: OPTIONAL | REF, default: None }, // 1102: Blast4-get-search-results-reply.alignments
+    Member { name: Name(13497, 14), ty: 448, flags: OPTIONAL | REF, default: None }, // 1103: Blast4-get-search-results-reply.phi-alignments
+    Member { name: Name(12047, 5), ty: 449, flags: OPTIONAL, default: None }, // 1104: Blast4-get-search-results-reply.masks
+    Member { name: Name(13511, 9), ty: 451, flags: OPTIONAL, default: None }, // 1105: Blast4-get-search-results-reply.ka-blocks
+    Member { name: Name(13520, 12), ty: 6, flags: OPTIONAL, default: None }, // 1106: Blast4-get-search-results-reply.search-stats
+    Member { name: Name(31, 4), ty: 0, flags: OPTIONAL | REF, default: None }, // 1107: Blast4-get-search-results-reply.pssm
+    Member { name: Name(13532, 14), ty: 452, flags: OPTIONAL | REF, default: None }, // 1108: Blast4-get-search-results-reply.simple-results
+    Member { name: Name(13567, 14), ty: 4, flags: 0, default: None }, // 1109: Blast4-phi-alignments.num-alignments
+    Member { name: Name(13581, 8), ty: 77, flags: 0, default: None }, // 1110: Blast4-phi-alignments.seq-locs
+    Member { name: Name(11477, 6), ty: 50, flags: 0, default: None }, // 1111: Blast4-ka-block.lambda
+    Member { name: Name(13604, 1), ty: 50, flags: 0, default: None }, // 1112: Blast4-ka-block.k
+    Member { name: Name(11488, 1), ty: 50, flags: 0, default: None }, // 1113: Blast4-ka-block.h
+    Member { name: Name(13605, 6), ty: 2, flags: 0, default: None }, // 1114: Blast4-ka-block.gapped
+    Member { name: Name(13632, 14), ty: 457, flags: 0, default: None }, // 1115: Blast4-simple-results.all-alignments
+    Member { name: Name(13673, 8), ty: 5, flags: 0, default: None }, // 1116: Blast4-alignments-for-query.query-id
+    Member { name: Name(13487, 10), ty: 456, flags: 0, default: None }, // 1117: Blast4-alignments-for-query.alignments
+    Member { name: Name(13704, 10), ty: 5, flags: 0, default: None }, // 1118: Blast4-simple-alignment.subject-id
+    Member { name: Name(12847, 7), ty: 50, flags: 0, default: None }, // 1119: Blast4-simple-alignment.e-value
+    Member { name: Name(13714, 9), ty: 50, flags: 0, default: None }, // 1120: Blast4-simple-alignment.bit-score
+    Member { name: Name(13723, 14), ty: 4, flags: OPTIONAL, default: None }, // 1121: Blast4-simple-alignment.num-identities
+    Member { name: Name(13737, 10), ty: 4, flags: OPTIONAL, default: None }, // 1122: Blast4-simple-alignment.num-indels
+    Member { name: Name(13747, 16), ty: 455, flags: REF, default: None }, // 1123: Blast4-simple-alignment.full-query-range
+    Member { name: Name(13763, 18), ty: 455, flags: REF, default: None }, // 1124: Blast4-simple-alignment.full-subject-range
+    Member { name: Name(11754, 5), ty: 4, flags: OPTIONAL, default: None }, // 1125: Blast4-range.start
+    Member { name: Name(7537, 3), ty: 4, flags: OPTIONAL, default: None }, // 1126: Blast4-range.end
+    Member { name: Name(1992, 6), ty: 4, flags: OPTIONAL, default: None }, // 1127: Blast4-range.strand
+    Member { name: Name(4363, 4), ty: 4, flags: 0, default: None }, // 1128: Blast4-error.code
+    Member { name: Name(13805, 7), ty: 5, flags: OPTIONAL, default: None }, // 1129: Blast4-error.message
 ];
 
-pub(crate) static VALUES: [EnumValue; 796] = [
+pub(crate) static VALUES: [EnumValue; 809] = [
     EnumValue { name: Name(691, 7), value: 0 }, // unknown
     EnumValue { name: Name(698, 7), value: 1 }, // genomic
     EnumValue { name: Name(705, 8), value: 2 }, // pre-mRNA
@@ -2901,4 +3130,17 @@ pub(crate) static VALUES: [EnumValue; 796] = [
     EnumValue { name: Name(5953, 6), value: 40 }, // repeat
     EnumValue { name: Name(286, 5), value: 100 }, // other
     EnumValue { name: Name(2039, 3), value: 255 }, // max
+    EnumValue { name: Name(12881, 14), value: 1 }, // forward-strand
+    EnumValue { name: Name(12895, 14), value: 2 }, // reverse-strand
+    EnumValue { name: Name(12909, 12), value: 3 }, // both-strands
+    EnumValue { name: Name(12958, 6), value: 0 }, // notset
+    EnumValue { name: Name(12964, 5), value: 1 }, // plus1
+    EnumValue { name: Name(12969, 5), value: 2 }, // plus2
+    EnumValue { name: Name(12974, 5), value: 3 }, // plus3
+    EnumValue { name: Name(12979, 6), value: 4 }, // minus1
+    EnumValue { name: Name(12985, 6), value: 5 }, // minus2
+    EnumValue { name: Name(12991, 6), value: 6 }, // minus3
+    EnumValue { name: Name(691, 7), value: 0 }, // unknown
+    EnumValue { name: Name(2314, 7), value: 1 }, // protein
+    EnumValue { name: Name(13153, 10), value: 2 }, // nucleotide
 ];

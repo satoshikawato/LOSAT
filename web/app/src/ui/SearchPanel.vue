@@ -95,7 +95,14 @@ const summaryParts = computed(() => {
   void state.value; // recompute with the draft
   // A draft whose argv prints the command line's help or version says so, not that it searches (line WQA's D20, 2026-11-23).
   const prints = props.draft.printsKind();
-  return prints === null ? searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value)) : printSummaryParts(program.value, prints);
+  if (prints !== null) return printSummaryParts(program.value, prints);
+  const database =
+    state.value.subjectSource === 'database'
+      ? state.value.database.selected === undefined
+        ? {}
+        : { name: state.value.database.selected }
+      : undefined;
+  return searchSummaryParts(program.value, effectiveValue('-task', values.value, options.value), database);
 });
 /**
  * The Algorithm parameters that differ from the engine's defaults ("♦"); the words of

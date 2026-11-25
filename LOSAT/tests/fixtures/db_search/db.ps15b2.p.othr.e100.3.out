@@ -1,0 +1,51 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: PajaWSV proteins
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+Query= t
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          79.0    1e-22
+BDT63516.1 wsv143-like protein [Pasiphaea japonica whispovirus]       17.7    8.5  
+BDT63549.1 wsv206-like protein [Pasiphaea japonica whispovirus]       17.4    9.6  
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       17.4    11   
+BDT63515.1 wsv139-like protein [Pasiphaea japonica whispovirus]       17.4    11   
+BDT63580.1 wsv360-like protein [Pasiphaea japonica whispovirus]       17.0    13   
+BDT63579.1 wsv343-like protein [Pasiphaea japonica whispovirus]       15.8    37   
+BDT63533.1 wsv289-like protein [Pasiphaea japonica whispovirus]       15.4    44   
+BDT63517.1 wsv188-like protein [Pasiphaea japonica whispovirus]       15.0    75   
+BDT63503.1 wsv514-like protein [Pasiphaea japonica whispovirus]       15.0    78   
+BDT63519.1 wsv026-like protein [Pasiphaea japonica whispovirus]       14.7    87   
+BDT63553.1 wsv433-like protein [Pasiphaea japonica whispovirus]       14.7    88   
+
+

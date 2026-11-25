@@ -1541,7 +1541,9 @@ test("Additional options: the command line's other options after the form's, mar
     await expect(validation).toHaveAttribute('data-state', 'ok');
   }
   await extra.fill('-db nt');
-  await expect(validation).toHaveText('-db (a database search) is not supported in the browser yet');
+  await expect(validation).toHaveText('-db is set in the form: Subject');
+  await extra.fill('-filtering_db repeats');
+  await expect(validation).toHaveText('-filtering_db is set in the form: Repeats database');
   await extra.fill('-mt_mode 1');
   await expect(validation).toHaveText('-mt_mode is managed by LOSAT');
   await extra.fill("-strand 'plus");

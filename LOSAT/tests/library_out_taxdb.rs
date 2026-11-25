@@ -355,17 +355,17 @@ fn run_multi_format_child(case: &str, taxdb_variant: &str, extra_envs: &[(&str, 
     );
 }
 
-/// Multi-format `losat::api::run_collect` with secondary XML2/JSON (`["6", "16"]`, `["5", "16"]`):
+/// Multi-format `losat::api::run_collect` with secondary XML2/JSON (`["6", "16"]`, `["5", "16"]`)
+/// and primary XML2/JSON (`["16", "6"]`, `["16", "5"]`):
 /// - opening-texts taxdb (`bad_magic`): opening texts are written once, not repeated for format 1;
 /// - non-collision `offset_last_past_end` (`tm_cache151`): volume offset error is not repeated;
-/// - cache-collision `offset_last_past_end` (`tm_cache_gi` / `tm_cache_ngi`): 1-query calls in
-///   `blastx` and `blastn` succeed with stdout matching single-format runs and pinned combined
-///   diagnostics, while 2-query `BATCH_SIZE=1` calls refuse batch 2 even for `["5", "16"]`
-///   (confirming `outfmt 5`'s `keeps_scope` does not leak into secondary `16`); `blastp`
-///   `["6", "16"]` / `["5", "16"]` refuse on `tm_cache_gi` (matching `dev`) while `["16", "6"]`
-///   succeeds.
+/// - cache-collision `offset_last_past_end` (`tm_cache_gi` / `tm_cache_ngi`): secondary XML2/JSON
+///   (`["6", "16"]`, `["5", "16"]`) refuses across `blastx`, `blastn`, and `blastp` (both 1-query
+///   and 2-query `BATCH_SIZE=1`, matching `dev`), while primary XML2/JSON (`["16", "6"]`,
+///   `["16", "5"]`) succeeds with stdout matching single-format runs and the same 12 diagnostics
+///   lines as single `["16"]`.
 #[test]
-fn multi_format_library_secondary_xml2_shares_open_and_isolates_collision_scope() {
+fn multi_format_library_secondary_xml2_shares_open_and_refuses_collision() {
     run_multi_format_child("bad_magic", "bad_magic", &[]);
     run_multi_format_child("tm_cache151", "offset_last_past_end", &[]);
     run_multi_format_child("collision_q1", "offset_last_past_end", &[]);
@@ -500,57 +500,51 @@ fn multi_format_taxdb_child() {
             }
         }
         "collision_q1" => {
-            // blastx on tm_cache_gi: 1 query succeeds for ["6","16"] (6 format-0 prefetch lines;
-            // tabular sets `warned` in blastx/local.rs so format 1 writes to `quiet`) and
-            // ["5","16"] (18 lines: 6 format-0 prefetch + 6 format-1 prefetch + 6 format-1 Hit).
-            let db_gi = db_dir.join("tm_cache_gi");
-            let bx_16 = run_db_formats(Program::Blastx, &db_gi, &nucl_q, &["16"]).unwrap();
-            for (first, want_lines) in [("6", 6usize), ("5", 18usize)] {
-                let (_, both) =
-                    assert_pair_reports_match(Program::Blastx, &db_gi, &nucl_q, first, &bx_16);
-                let diag = text(&both.diagnostics);
+            // Cache-colliding volumes refuse secondary XML2/JSON (`["6","16"]`, `["5","16"]`)
+            // across blastx, blastn, and blastp (matching dev), while primary XML2/JSON
+            // (`["16","6"]`, `["16","5"]`) succeeds with the same reports and 12 diagnostic lines
+            // as single `["16"]`.
+            for (program, db_name, query) in [
+                (Program::Blastx, "tm_cache_gi", nucl_q.as_slice()),
+                (Program::Blastn, "tm_cache_ngi", nucl_q.as_slice()),
+                (Program::Blastp, "tm_cache_gi", prot_q.as_slice()),
+            ] {
+                let db = db_dir.join(db_name);
+                let single_16 = run_db_formats(program, &db, query, &["16"]).unwrap();
+                let single_16_diag = text(&single_16.diagnostics);
                 assert_eq!(
-                    diag.matches(offset_msg).count(),
-                    want_lines,
-                    "blastx [{first}, 16] tm_cache_gi diag:\n{diag}"
+                    single_16_diag.matches(offset_msg).count(),
+                    12,
+                    "{program:?} [16] {db_name} diag:\n{single_16_diag}"
                 );
+                for other in ["6", "5"] {
+                    assert_cache_refusal(program, &db, query, &[other, "16"], db_name);
+                    let single_other = run_db_formats(program, &db, query, &[other]).unwrap();
+                    let both = run_db_formats(program, &db, query, &["16", other]).unwrap();
+                    assert_eq!(
+                        both.reports[0].bytes, single_16.reports[0].bytes,
+                        "{program:?} [16, {other}] report 0"
+                    );
+                    assert_eq!(
+                        both.reports[1].bytes, single_other.reports[0].bytes,
+                        "{program:?} [16, {other}] report 1"
+                    );
+                    let diag = text(&both.diagnostics);
+                    assert_eq!(
+                        diag, single_16_diag,
+                        "{program:?} [16, {other}] {db_name} diag vs single 16:\n{diag}"
+                    );
+                    assert_eq!(
+                        diag.matches(offset_msg).count(),
+                        12,
+                        "{program:?} [16, {other}] {db_name} diag:\n{diag}"
+                    );
+                }
             }
-            // blastn on tm_cache_ngi: 1 query succeeds for ["6","16"] and ["5","16"] with 18
-            // lines (6 format-0 prefetch + 6 format-1 prefetch + 6 format-1 Hit).
-            let db_ngi = db_dir.join("tm_cache_ngi");
-            let bn_16 = run_db_formats(Program::Blastn, &db_ngi, &nucl_q, &["16"]).unwrap();
-            for first in ["6", "5"] {
-                let (_, both) =
-                    assert_pair_reports_match(Program::Blastn, &db_ngi, &nucl_q, first, &bn_16);
-                let diag = text(&both.diagnostics);
-                assert_eq!(
-                    diag.matches(offset_msg).count(),
-                    18,
-                    "blastn [{first}, 16] tm_cache_ngi diag:\n{diag}"
-                );
-            }
-            // blastp on tm_cache_gi: ["6","16"] and ["5","16"] refuse (blastp builds xml2_loads
-            // only when format 0 is XML2, matching dev); ["16","6"] succeeds with 12 lines.
-            for first in ["6", "5"] {
-                assert_cache_refusal(
-                    Program::Blastp,
-                    &db_gi,
-                    &prot_q,
-                    &[first, "16"],
-                    "tm_cache_gi",
-                );
-            }
-            let bp_16_6 = run_db_formats(Program::Blastp, &db_gi, &prot_q, &["16", "6"]).unwrap();
-            assert_eq!(
-                text(&bp_16_6.diagnostics).matches(offset_msg).count(),
-                12,
-                "blastp [16, 6] tm_cache_gi diag:\n{}",
-                text(&bp_16_6.diagnostics)
-            );
         }
         "collision_q2_b1" => {
-            // 2 identical queries with BATCH_SIZE=1: secondary `16` resets scope after batch 1
-            // (`keeps_scope = false`), so batch 2 refuses even when format 0 is `5`.
+            // 2 identical queries with BATCH_SIZE=1: secondary XML2/JSON on a colliding volume
+            // refuses for both `["6","16"]` and `["5","16"]`.
             let mut two_nucl = nucl_q.clone();
             two_nucl.extend_from_slice(b"\n");
             two_nucl.extend_from_slice(&nucl_q);

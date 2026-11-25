@@ -4924,14 +4924,11 @@ pub(crate) struct TaxdbRun {
     /// ([`TaxdbRun::note_calls_before`]).
     calls_before: bool,
     /// Whether XML2/JSON taxonomy reads (`read_reported_taxonomy`) belong to a secondary format
-    /// behind a non-XML2 first format (e.g. a library call requesting `["5", "16"]` or `["6", "16"]`),
-    /// so cache-collision batch walks (`placed_load_texts`) use an isolated [`VolumeLookups`]
-    /// (`xml2_lookups`, `keeps_scope = false`) while still sharing the run's taxonomy handle, open
-    /// state, non-collision lookups, and `calls_before`.
+    /// behind a non-XML2 first format (e.g. a library call requesting `["5", "16"]` or `["6", "16"]`).
+    /// On a cache-colliding volume (`TaxdbRun::cache_collision`), secondary XML2/JSON is refused
+    /// (`TaxdbRun::refuse_cache_collision`); non-collision runs still share the run's taxonomy
+    /// handle, open state, volume lookups, and `calls_before`.
     separate_xml2: bool,
-    /// Isolated [`VolumeLookups`] (`keeps_scope = false`) for secondary XML2/JSON cache-collision
-    /// batch walks when `separate_xml2` is true.
-    xml2_lookups: std::sync::OnceLock<std::sync::Mutex<VolumeLookups>>,
 }
 
 /// The run's record of the loads of NCBI's BLAST database data loader ([`TaxdbRun::note_loaded`]):
@@ -5979,9 +5976,6 @@ impl TaxdbRun {
             rows_open.lock().expect("the rows' texts").clear();
         }
         self.load_texts.clear();
-        if let Some(xml2) = self.xml2_lookups.get() {
-            *xml2.lock().expect("the volume lookups") = VolumeLookups::default();
-        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2310-2313
@@ -5996,9 +5990,9 @@ impl TaxdbRun {
     }
 
     /// Records that the run's first format is not XML2/JSON (`!FormatThrow::is_xml2`), so any
-    /// secondary XML2/JSON cache-collision walk (`placed_load_texts`) isolates its scope state in
-    /// `xml2_lookups` (`keeps_scope = false`) while sharing the run's taxonomy handle, open state,
-    /// non-collision lookups, and `calls_before`.
+    /// secondary XML2/JSON lookup on a cache-colliding volume (`read_reported_taxonomy`) is
+    /// refused (`TaxdbRun::refuse_cache_collision`), while non-collision runs still share the
+    /// run's taxonomy handle, open state, volume lookups, and `calls_before`.
     pub(crate) fn set_separate_xml2(&mut self, separate: bool) {
         self.separate_xml2 = separate;
     }
@@ -6010,12 +6004,6 @@ impl TaxdbRun {
     /// unless the run keeps its scope (`set_keeps_scope`). Returns without locking when the run
     /// has not recorded an offset-error taxid.
     pub(crate) fn reset_scope(&self) {
-        self.reset_scope_of(false);
-    }
-
-    /// [`Self::reset_scope`] for either the primary [`VolumeLookups`] (`xml2 = false`) or, when
-    /// `separate_xml2` is set, the isolated secondary XML2/JSON [`VolumeLookups`] (`xml2 = true`).
-    fn reset_scope_of(&self, xml2: bool) {
         if self
             .texts
             .get()
@@ -6023,16 +6011,10 @@ impl TaxdbRun {
         {
             return;
         }
-        if xml2 && self.separate_xml2 {
-            if let Some(lookups) = self.xml2_lookups.get() {
-                lookups.lock().expect("the volume lookups").reset_scope();
-            }
-        } else {
-            self.volume_lookups
-                .lock()
-                .expect("the volume lookups")
-                .reset_scope();
-        }
+        self.volume_lookups
+            .lock()
+            .expect("the volume lookups")
+            .reset_scope();
     }
 
     /// Whether a prefetch of the run can stop at a lookup that fails on a file with NCBI's
@@ -6371,7 +6353,6 @@ impl TaxdbRun {
         by: u32,
         lookups: &[i32],
         planned: Option<&[bool]>,
-        xml2: bool,
         program: &str,
     ) -> Result<Vec<(i32, Vec<String>)>> {
         if lookups.is_empty() {
@@ -6393,7 +6374,7 @@ impl TaxdbRun {
                     BlobName::default()
                 };
                 Some(
-                    self.slot_misses(db, volume, ordinal, &name, lookups, last, xml2)
+                    self.slot_misses(db, volume, ordinal, &name, lookups, last)
                         .map_err(|cause| {
                             taxdb_error(slot_uncertain_error(db, volume, last, cause), program)
                         })?,
@@ -6418,7 +6399,6 @@ impl TaxdbRun {
     /// Which of the lookups `lookups` of a load of the sequence `ordinal` by the blob name `name`
     /// in the volume `volume` ask the taxonomy database again for the offset error's taxid `last`
     /// ([`VolumeLookups::offset_slot`]).
-    #[allow(clippy::too_many_arguments)]
     fn slot_misses(
         &self,
         db: &SeqDb,
@@ -6427,23 +6407,16 @@ impl TaxdbRun {
         name: &BlobName,
         lookups: &[i32],
         last: i32,
-        xml2: bool,
     ) -> std::result::Result<Vec<bool>, SlotUncertain> {
-        self.lookups_for(db, xml2)
+        self.volume_lookups(db)
             .offset_slot(volume, ordinal, name, lookups, last)
     }
 
-    /// The run's [`VolumeLookups`] on `db` for either the primary format (`xml2 = false`) or, when
-    /// `separate_xml2` is set, the isolated secondary XML2/JSON scope (`xml2 = true`), whose `kept`
-    /// and `in_scope_kept` are NCBI's for `db` ([`keeps_every_load`], `!reads_may_load_again`;
-    /// never in a sequential run, whose reads are all loads).
-    fn lookups_for(&self, db: &SeqDb, xml2: bool) -> std::sync::MutexGuard<'_, VolumeLookups> {
-        let mutex = if xml2 && self.separate_xml2 {
-            self.xml2_lookups.get_or_init(Default::default)
-        } else {
-            &self.volume_lookups
-        };
-        let mut record = mutex.lock().expect("the volume lookups");
+    /// The run's [`VolumeLookups`] on `db`, whose `kept` and `in_scope_kept` are NCBI's for `db`
+    /// ([`keeps_every_load`], `!reads_may_load_again`; never in a sequential run, whose reads are
+    /// all loads).
+    fn volume_lookups(&self, db: &SeqDb) -> std::sync::MutexGuard<'_, VolumeLookups> {
+        let mut record = self.volume_lookups.lock().expect("the volume lookups");
         record.kept = !record.sequential && keeps_every_load(db);
         record.in_scope_kept = !record.sequential && !reads_may_load_again(db);
         record
@@ -6611,7 +6584,7 @@ impl TaxdbRun {
                     ..BlobName::default()
                 };
                 Some(
-                    self.slot_misses(db, volume, oid, &name, &lookups, last, false)
+                    self.slot_misses(db, volume, oid, &name, &lookups, last)
                         .map_err(|cause| slot_uncertain_error(db, volume, last, cause))?,
                 )
             }
@@ -6675,13 +6648,12 @@ impl TaxdbRun {
         (ordinal, by): (u32, u32),
         lookups: &[i32],
         planned: Option<&[bool]>,
-        xml2: bool,
         lower: &str,
         program: &str,
     ) -> Result<(Vec<u8>, usize)> {
         let mut text = String::new();
         let mut opening = 0;
-        for (_, messages) in self.load(db, taxdb, ordinal, by, lookups, planned, xml2, program)? {
+        for (_, messages) in self.load(db, taxdb, ordinal, by, lookups, planned, program)? {
             for line in messages {
                 let opens = line != crate::seqdb::taxdb::MSG_OFFSET_ERROR;
                 text.push_str(&crate::seqdb::taxdb::err_post_line(lower, &line));
@@ -6707,7 +6679,7 @@ impl TaxdbRun {
         text: &mut String,
         program: &str,
     ) -> Result<()> {
-        for (_, messages) in self.load(db, taxdb, ordinal, by, lookups, None, false, program)? {
+        for (_, messages) in self.load(db, taxdb, ordinal, by, lookups, None, program)? {
             for line in messages {
                 text.push_str(&crate::seqdb::taxdb::err_post_line(lower, &line));
                 text.push('\n');
@@ -6961,13 +6933,15 @@ fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
 /// `ParsedSubject::volume_taxids`.
 ///
 /// On a database whose volume holds the offset error's taxid and another taxid of its slot
-/// ([`TaxdbRun::cache_collision`]), the volume's lookups follow NCBI's loads of the reported
-/// subjects by query batch (`batches`, asked only there, [`XmlBatchLoads`]; `None` where the caller
-/// does not know them, which LOSAT refuses there as before): a batch's prefetch in
-/// the order of its Seq-id handles ([`prefetch_slot_plan`]), or with the prefetch off each `Hit`'s
-/// read in the report's order, as the other formats' loads ([`load_read_texts`]); their texts
-/// come at the first `Hit` of the batch that asks the taxonomy database, or at the `Hit` that reads
-/// ([`PlacedLoadTexts`]). LOSAT refuses there what it refuses in those loads.
+/// ([`TaxdbRun::cache_collision`]), a secondary XML2/JSON format after a non-XML2 first format
+/// (`TaxdbRun::set_separate_xml2`) is refused (`TaxdbRun::refuse_cache_collision`); otherwise the
+/// volume's lookups follow NCBI's loads of the reported subjects by query batch (`batches`, asked
+/// only there, [`XmlBatchLoads`]; `None` where the caller does not know them, which LOSAT refuses
+/// there as before): a batch's prefetch in the order of its Seq-id handles
+/// ([`prefetch_slot_plan`]), or with the prefetch off each `Hit`'s read in the report's order, as
+/// the other formats' loads ([`load_read_texts`]); their texts come at the first `Hit` of the
+/// batch that asks the taxonomy database, or at the `Hit` that reads ([`PlacedLoadTexts`]). LOSAT
+/// refuses there what it refuses in those loads.
 pub(crate) fn read_reported_taxonomy<P>(
     db: &SeqDb,
     run: &TaxdbRun,
@@ -7024,6 +6998,9 @@ where
     // the offset error as in the loads of the other formats, which they follow there; without
     // the batches, refused before anything is opened or looked up.
     let placed = volume_lookup && run.cache_collision(db).is_some();
+    if placed && run.separate_xml2 {
+        run.refuse_cache_collision(db, program)?;
+    }
     let batches = match placed.then(batches) {
         Some(None) => {
             run.refuse_cache_collision(db, program)?;
@@ -7092,7 +7069,6 @@ where
                 ordinals[rank],
                 &volume_lookups,
                 None,
-                false,
                 program,
             )?
         };
@@ -7269,7 +7245,7 @@ where
                             (rank as u32, ordinal, SubjectLoad::Read(parsed))
                         }),
                         false,
-                        LoadsOrder::Reads { xml2: true },
+                        LoadsOrder::Reads,
                         program,
                     )
                 })?;
@@ -7296,7 +7272,7 @@ where
             {
                 run.refuse_cache_collision(db, program)?;
             }
-            let planned = prefetch_slot_plan(db, run, &loaded, None, true, true, program)?;
+            let planned = prefetch_slot_plan(db, run, &loaded, None, true, program)?;
             let order = LoadsOrder::Prefetch(planned.as_ref());
             let reads = db.without_scope_utf8_loads(|| {
                 prefetch_loads(db, run, loaded, true, order, program)
@@ -7311,7 +7287,7 @@ where
             }
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
-        run.reset_scope_of(true);
+        run.reset_scope();
     }
     Ok(placed)
 }
@@ -7700,7 +7676,7 @@ pub(crate) fn subject_read_texts<'s>(
             .into_iter()
             .map(|(key, ordinal, parsed)| (key, ordinal, SubjectLoad::Read(parsed))),
         rows_open,
-        LoadsOrder::Reads { xml2: false },
+        LoadsOrder::Reads,
         program,
     )
 }
@@ -7715,9 +7691,7 @@ enum LoadsOrder<'p> {
     /// such a database, LOSAT's refusal of a load of that slot where a query batch may read more
     /// sequences than NCBI keeps ([`slot_load_checks`]), and where a BLAST XML report that the
     /// stream cuts leaves such a load out (`report::query_warnings::ReadLoad::cut_refusal`).
-    /// `xml2`: true for secondary XML2/JSON cache-collision walks (`placed_load_texts`), which
-    /// use `TaxdbRun::xml2_lookups` when `separate_xml2` is set.
-    Reads { xml2: bool },
+    Reads,
     /// A batch's prefetch ([`batch_prefetch`], and the loads before a stop, [`prefetch_stop`]):
     /// the misses of each load in the slot of the offset error's taxid that NCBI's order of the
     /// loads gives (`planned`, by the reported subject's ordinal id, [`prefetch_slot_plan`]; `None`
@@ -7771,9 +7745,9 @@ fn load_read_texts<'s>(
         }
         return Ok(scope_utf8_reads(db, run, loads, &lower));
     };
-    let (planned, report_reads, xml2) = match order {
-        LoadsOrder::Reads { xml2 } => (None, true, xml2),
-        LoadsOrder::Prefetch(planned) => (planned, false, false),
+    let (planned, report_reads) = match order {
+        LoadsOrder::Reads => (None, true),
+        LoadsOrder::Prefetch(planned) => (planned, false),
     };
     let taxdb = run.taxdb(search_path);
     let texts = run.load_texts(db);
@@ -7864,7 +7838,6 @@ fn load_read_texts<'s>(
                     (blob, by),
                     &lookups,
                     misses.as_deref(),
-                    xml2,
                     &lower,
                     program,
                 )?;
@@ -8576,15 +8549,7 @@ pub(crate) fn batch_prefetch<'s, 'b>(
     // `CanResolveRange` pins segments in `CSeq_id::CompareOrdered` order up to the first empty
     // `CBioseq_Handle` (computed per load in `prefetch_slot_plan`).
     let pins = !fails && failed_lookup.is_none();
-    let planned = prefetch_slot_plan(
-        db,
-        run,
-        &loaded,
-        failed_lookup.as_ref(),
-        pins,
-        false,
-        program,
-    );
+    let planned = prefetch_slot_plan(db, run, &loaded, failed_lookup.as_ref(), pins, program);
     let reads = match planned.and_then(|planned| {
         let order = LoadsOrder::Prefetch(planned.as_ref());
         if posted {
@@ -8661,20 +8626,6 @@ impl PrefetchSlots {
     }
 }
 
-/// The misses in the slot of the offset error's taxid of the loads of a batch's prefetch
-/// ([`batch_prefetch`]), `loaded` its subjects in the batch's order (each ordinal once, as
-/// [`load_read_texts`] reads them), on a database whose volume holds that taxid and another of
-/// its slot ([`TaxdbRun::cache_collision`]); `None` on any other database, whose loads give the
-/// same texts in any order. NCBI loads the batch's Seq-align ids in the order of its map of their
-/// Seq-id handles (cited above [`LoadBeforeStop`]; [`load_places`]), ties by the addresses of
-/// the handles' infos; so LOSAT follows the slot through the loads by their handles' keys and
-/// takes the loads of one key as one step whose order only the boundaries between them decide
-/// ([`VolumeLookups::prefetch_slots`]). LOSAT's refusal where that order changes the texts, or
-/// leaves a slot that a later load's texts depend on (`SlotHolds::Either`). The reads of each
-/// subject are [`load_read_texts`]'s, whose refusals come first. `stop`: a Seq-align id of the
-/// batch whose lookup fails ([`batch_prefetch`]), where NCBI's loads end, so a load of the slot
-/// that may come after it (one that only looks up the other taxid writes no text, but changes
-/// what the slot holds) is refused ([`failed_lookup_refusal`]).
 /// The Seq-align id `gnl|BL_ORD_ID|<OID>` of a database sequence without parsed Seq-ids.
 fn ordinal_seqid(db: &SeqDb, ordinal: u32) -> crate::seqid::ParsedSeqId {
     crate::seqid::ParsedSeqId::General(crate::seqid::model::Dbtag {
@@ -8727,13 +8678,30 @@ fn prefetch_pin_stops(
     Ok(Some(empty_ids))
 }
 
+/// The misses in the slot of the offset error's taxid of the loads of a batch's prefetch
+/// ([`batch_prefetch`]), `loaded` its subjects in the batch's order (each ordinal once, as
+/// [`load_read_texts`] reads them), on a database whose volume holds that taxid and another of
+/// its slot ([`TaxdbRun::cache_collision`]); `None` on any other database, whose loads give the
+/// same texts in any order. NCBI loads the batch's Seq-align ids in the order of its map of their
+/// Seq-id handles (cited above [`LoadBeforeStop`]; [`load_places`]), ties by the addresses of
+/// the handles' infos; so LOSAT follows the slot through the loads by their handles' keys and
+/// takes the loads of one key as one step whose order only the boundaries between them decide
+/// ([`VolumeLookups::prefetch_slots`]). LOSAT's refusal where that order changes the texts, or
+/// leaves a slot that a later load's texts depend on (`SlotHolds::Either`). The reads of each
+/// subject are [`load_read_texts`]'s, whose refusals come first. `stop`: a Seq-align id of the
+/// batch whose lookup fails ([`batch_prefetch`]), where NCBI's loads end, so a load of the slot
+/// that may come after it (one that only looks up the other taxid writes no text, but changes
+/// what the slot holds) is refused ([`failed_lookup_refusal`]). `pins`: whether the batch's
+/// prefetch reaches `AddBioseq` without throwing on a failed lookup or a flipped no-bioseq
+/// alignment, so that loads strictly preceding every empty `CBioseq_Handle` in
+/// `CSeq_id::CompareOrdered` order ([`prefetch_pin_stops`]) are marked pinned via `SetLinkUsedTSE`
+/// (`SlotLoad::pins`).
 fn prefetch_slot_plan(
     db: &SeqDb,
     run: &TaxdbRun,
     loaded: &[(u32, Option<&crate::report::db_subject::ParsedSubject>)],
     stop: Option<&(u32, String)>,
     pins: bool,
-    xml2: bool,
     program: &str,
 ) -> Result<Option<PrefetchSlots>> {
     if !run.found(db) || db.search_path().is_none() || run.cache_collision(db).is_none() {
@@ -8811,7 +8779,7 @@ fn prefetch_slot_plan(
     // The prefetch holds what it loads to the end of the batch (cited above `RELEASED_KEPT`): the
     // batch's reports read the sequences again without a load.
     let misses = run
-        .lookups_for(db, xml2)
+        .volume_lookups(db)
         .prefetch_slots(&loads, |volume| unordered.contains(&volume), last)
         .map_err(|(volume, cause)| {
             taxdb_error(slot_uncertain_error(db, volume, last, cause), program)
@@ -9764,17 +9732,16 @@ fn prefetch_stop(
             .iter()
             .map(|&index| (subjects[index].ordinal, subjects[index].parsed))
             .collect();
-        let read =
-            prefetch_slot_plan(db, run, &sure, None, false, false, program).and_then(|planned| {
-                load_read_texts(
-                    db,
-                    run,
-                    loads,
-                    false,
-                    LoadsOrder::Prefetch(planned.as_ref()),
-                    program,
-                )
-            });
+        let read = prefetch_slot_plan(db, run, &sure, None, false, program).and_then(|planned| {
+            load_read_texts(
+                db,
+                run,
+                loads,
+                false,
+                LoadsOrder::Prefetch(planned.as_ref()),
+                program,
+            )
+        });
         match read {
             Ok(reads) => reads,
             Err(error) => return error,

@@ -3662,8 +3662,8 @@ fn outfmt_five_pins_prefetched_blobs_across_batches_and_restart_preserves_keeps_
 /// - `blob_read` (`!in_prefetch`) requires every `in_scope` exact-handle holder to be `blob_kept`
 ///   (`x_FindBestTSEInIndex` picks the earliest matching TSE);
 /// - `unordered_slot` re-attaches a `Kept` blob to live scope via `touch_same_handle`;
-/// - `TaxdbRun::reset_scope` fast path vs initialized `offset_error_taxid`, and `xml2_lookups`
-///   isolation + `restart`;
+/// - `TaxdbRun::reset_scope` fast path vs initialized `offset_error_taxid`, and `restart`
+///   preserving `keeps_scope`;
 /// - `FormatThrow::scope_flags` and `FormatThrow::is_xml2`;
 /// - `prefetch_slot_plan` sets `pinned` on `tm_gi21` (`keeps_scope = true`) when every segment
 ///   resolves to a non-empty `CBioseq_Handle`.
@@ -3732,28 +3732,22 @@ fn scope_lifetime_audit_invariants_hold() {
     assert_eq!(reattached[&0], vec![false, false]);
     assert_eq!(unordered.blob_read(0, &by(3)), BlobRead::Kept);
 
-    // 3. `TaxdbRun::reset_scope` fast path and `xml2_lookups` `restart`.
-    let mut isolated = TaxdbRun::default();
-    isolated.set_keeps_scope(true);
-    isolated.set_separate_xml2(true);
-    isolated.note_calls_before(true);
-    {
-        let mut xml2 = isolated
-            .xml2_lookups
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap();
-        assert!(!xml2.keeps_scope);
-        xml2.offset_slot(0, 0, &by(0), &[L, 150], L).unwrap();
-        assert!(!xml2.slot_blobs.is_empty());
-    }
-    assert!(isolated.unrecorded_calls());
-    isolated.restart();
-    assert!(isolated.volume_lookups.lock().unwrap().keeps_scope);
-    assert!(isolated
-        .xml2_lookups
-        .get()
+    // 3. `TaxdbRun::reset_scope` fast path and `restart` preserving `keeps_scope`.
+    let mut kept_run = TaxdbRun::default();
+    kept_run.set_keeps_scope(true);
+    kept_run.set_separate_xml2(true);
+    kept_run.note_calls_before(true);
+    kept_run
+        .volume_lookups
+        .lock()
         .unwrap()
+        .offset_slot(0, 0, &by(0), &[L, 150], L)
+        .unwrap();
+    assert!(kept_run.unrecorded_calls());
+    kept_run.restart();
+    assert!(kept_run.volume_lookups.lock().unwrap().keeps_scope);
+    assert!(kept_run
+        .volume_lookups
         .lock()
         .unwrap()
         .slot_blobs
@@ -3821,10 +3815,10 @@ fn scope_lifetime_audit_invariants_hold() {
 }
 
 /// Secondary XML2/JSON (`separate_xml2 = true`) shares the run's taxonomy handle, open state,
-/// non-collision volume lookups, and `calls_before`, while isolating only cache-collision scope
-/// state (`xml2_lookups`, `keeps_scope = false`).
+/// non-collision volume lookups, and `calls_before`, while refusing cache-colliding volumes
+/// (`refuse_cache_collision`).
 #[test]
-fn separate_xml2_shares_open_and_non_collision_state_and_isolates_collision_scope() {
+fn separate_xml2_shares_open_and_non_collision_state_and_refuses_collision() {
     let cwd = empty_cwd("sep_xml2_shared");
     // 1. Opening-texts taxdb (`bad_magic`): primary prefetch opens `lazy` once, so secondary
     //    `read_reported_taxonomy` gets empty `notes.open` (opening texts are not repeated).
@@ -3888,9 +3882,8 @@ fn separate_xml2_shares_open_and_non_collision_state_and_isolates_collision_scop
     .unwrap();
     assert!(notes_nc.lookups.is_empty());
 
-    // 3. Collision `offset_last_past_end` (`tm_cache_gi`): `keeps_scope = true` + `separate_xml2`:
-    //    primary keeps scope across `reset_scope`, while secondary `placed_load_texts` uses
-    //    `xml2_lookups` (`keeps_scope = false`) so batch 1 succeeds and batch 2 refuses `again`.
+    // 3. Collision `offset_last_past_end` (`tm_cache_gi`): `separate_xml2 = true` refuses
+    //    `read_reported_taxonomy` with `refuse_cache_collision` without affecting primary scope.
     let db_col = db_search("tm_cache_gi", Some(&variant("offset_last_past_end")), &cwd);
     let parsed_col = parsed_subjects(&db_col);
     let mut run_col = TaxdbRun::default();
@@ -3921,7 +3914,7 @@ fn separate_xml2_shares_open_and_non_collision_state_and_isolates_collision_scop
             hits: vec![(0..db_col.num_seqs() as usize).collect()],
         }])
     };
-    let (_, _, _, notes_col) = read_reported_taxonomy(
+    let sec_err = read_reported_taxonomy(
         &db_col,
         &run_col,
         &all_ordinals,
@@ -3930,23 +3923,14 @@ fn separate_xml2_shares_open_and_non_collision_state_and_isolates_collision_scop
         &one_batch,
         "BLASTP",
     )
-    .unwrap();
-    assert_eq!(notes_col.placed.batches.len(), 1);
-    assert!(notes_col.open.is_empty());
+    .err()
+    .expect("secondary XML2/JSON on colliding volume must refuse");
+    assert!(
+        sec_err.to_string().contains("256-slot taxonomy cache"),
+        "unexpected error: {sec_err}"
+    );
     // Primary `volume_lookups` still keeps its scope from batch 1 -> primary batch 2 writes nothing.
     assert!(primary_batch(1).text().is_empty());
-    // Secondary `xml2_lookups` reset its scope after batch 1 (`keeps_scope = false`) -> batch 2
-    // of secondary XML2 refuses `again`.
-    let sec_b2 = read_reported_taxonomy(
-        &db_col,
-        &run_col,
-        &all_ordinals,
-        &all_reported,
-        &wrapped_col,
-        &one_batch,
-        "BLASTP",
-    );
-    assert!(sec_b2.is_err());
     std::fs::remove_dir_all(&cwd).unwrap();
 }
 
@@ -4008,7 +3992,7 @@ fn prefetch_slot_plan_pins_only_prefix_before_first_empty_handle_in_compare_orde
         (4u32, Some(&empty_gi5)),
         (8u32, Some(&parsed[8])),
     ];
-    prefetch_slot_plan(&db, &run_a, &loaded_a, None, true, false, "BLASTP").unwrap();
+    prefetch_slot_plan(&db, &run_a, &loaded_a, None, true, "BLASTP").unwrap();
     assert!(pinned_blob(&run_a, 0));
     assert!(!pinned_blob(&run_a, 8));
 
@@ -4019,7 +4003,7 @@ fn prefetch_slot_plan_pins_only_prefix_before_first_empty_handle_in_compare_orde
     let mut run_b = TaxdbRun::default();
     run_b.set_keeps_scope(true);
     let loaded_b = [(0u32, Some(&parsed[0])), (1u32, Some(&empty_bbs))];
-    prefetch_slot_plan(&db, &run_b, &loaded_b, None, true, false, "BLASTP").unwrap();
+    prefetch_slot_plan(&db, &run_b, &loaded_b, None, true, "BLASTP").unwrap();
     assert!(!pinned_blob(&run_b, 0));
 
     // Case C: empty `pdb|1ABC|A` (`e_Pdb`, unpacked) vs `gi|1` (`e_Gi`): `gi|1` precedes
@@ -4033,7 +4017,7 @@ fn prefetch_slot_plan_pins_only_prefix_before_first_empty_handle_in_compare_orde
     let mut run_c = TaxdbRun::default();
     run_c.set_keeps_scope(true);
     let loaded_c = [(0u32, Some(&parsed[0])), (1u32, Some(&empty_pdb))];
-    prefetch_slot_plan(&db, &run_c, &loaded_c, None, true, false, "BLASTP").unwrap();
+    prefetch_slot_plan(&db, &run_c, &loaded_c, None, true, "BLASTP").unwrap();
     assert!(pinned_blob(&run_c, 0));
 
     // Case D: `HoldersUnknown` (even on a taxid-free subject that `prefetch_reads` does not
@@ -4054,7 +4038,7 @@ fn prefetch_slot_plan_pins_only_prefix_before_first_empty_handle_in_compare_orde
         prefetch_pin_stops(&db, &loaded_d, true, "BLASTP").unwrap(),
         None
     );
-    prefetch_slot_plan(&db, &run_d, &loaded_d, None, true, false, "BLASTP").unwrap();
+    prefetch_slot_plan(&db, &run_d, &loaded_d, None, true, "BLASTP").unwrap();
     assert!(!pinned_blob(&run_d, 0));
 
     std::fs::remove_dir_all(&cwd).unwrap();

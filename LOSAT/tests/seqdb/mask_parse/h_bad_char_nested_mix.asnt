@@ -1,0 +1,1 @@
+Blast-db-mask-info ::= { algo-id 0, algo-program windowmasker, algo-options "x", masks { masks { mix { int { from 5, to 14, id local str "a	b" }, mix { int { from 20, to 29, id local str "c	d" }, mix { int { from 30, to 39, id local str "e	f" } }, int { from 40, to 49, id local str "g	h" } }, int { from 50, to 59, id local str "i	j" } } }, more FALSE } }

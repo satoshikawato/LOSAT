@@ -146,6 +146,11 @@ pub struct TblastnArgs {
     /// `run` and the library's entries; `-in_pssm`'s reader refuses a PSSM that the run would write
     /// otherwise (`in_pssm::PssmReader::write_verification`). Not a public option.
     pub write_verification: Option<crate::blastinput::ncbi_environment::WriteVerification>,
+    /// `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET` of the run's application settings
+    /// (`ncbi_environment::ReadVerification`), set with them as `write_verification` is;
+    /// `-in_pssm`'s reader refuses a PSSM that fails a check they turn off
+    /// (`in_pssm::PssmReader::read_verification`). Not a public option.
+    pub read_verification: crate::blastinput::ncbi_environment::ReadVerification,
     /// The run's search strategy export (`-export_search_strategy`), made by `run` and by LOSAT
     /// Web's `web_adapter::give_strategy` (`strategy::StrategyExport::for_args`).
     pub strategy: Option<crate::report::archive::strategy::StrategyExport>,
@@ -244,6 +249,7 @@ impl TblastnArgs {
             in_pssm: args.given_option("in_pssm")?,
             archive: Default::default(),
             write_verification: Default::default(),
+            read_verification: Default::default(),
             strategy: Default::default(),
             tabular_taxdb: Default::default(),
             subject_taxdb: Default::default(),
@@ -530,7 +536,11 @@ impl TblastnArgs {
         let own_outfmt = [choice.number];
         let html = crate::blastinput::app::html_links(
             self.html,
-            crate::blastinput::app::Program::Tblastn,
+            if psi {
+                crate::report::archive::options::RequestKind::PsiTblastn
+            } else {
+                crate::report::archive::options::RequestKind::Tblastn
+            },
             self.database_name(),
             outfmts.unwrap_or(&own_outfmt),
         )?;
@@ -565,6 +575,7 @@ impl TblastnArgs {
                 self.db.is_some(),
                 self.archive.as_ref(),
                 self.write_verification.as_ref(),
+                &self.read_verification,
                 diagnostics,
             )?)),
             None => None,

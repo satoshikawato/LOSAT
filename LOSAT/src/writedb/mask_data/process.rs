@@ -49,6 +49,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::MaskedRangeSet;
+use crate::blastinput::ncbi_environment::ReadVerification;
 use crate::ncbi_str::{string_to_int, truncate_spaces_str};
 use crate::report::serial::asn_input::Utf8TagOnce;
 use crate::report::serial::asn_types::Post;
@@ -135,8 +136,23 @@ impl MaskDataError {
     ///   (`MakedbError::Unsupported`, status 1).
     /// * [`MaskFileError::EofInContinuation`]: `None`, exactly as NCBI (status 0, nothing is
     ///   printed here; the destructor's message follows).
-    pub(crate) fn into_makedb_error(self) -> Option<MakedbError> {
+    /// * What NCBI's reader throws where a check of the data fails that the run's settings
+    ///   (`read_verification`) turn off, after which NCBI reads on: LOSAT's refusal
+    ///   (`MakedbError::Unsupported`, status 1; `ReadVerification::refused`), at the place of
+    ///   NCBI's error.
+    pub(crate) fn into_makedb_error(
+        self,
+        read_verification: &ReadVerification,
+    ) -> Option<MakedbError> {
         match self {
+            MaskDataError::File(MaskFileError::Ncbi(WriteDbError::Exception(exception))) => Some(
+                match read_verification.refused(&exception, "mask data (-mask_data)") {
+                    Some(refused) => MakedbError::Unsupported(format!(
+                        "{refused} is not supported by LOSAT's makeblastdb"
+                    )),
+                    None => MakedbError::Build(WriteDbError::Exception(exception)),
+                },
+            ),
             MaskDataError::Ncbi(error) | MaskDataError::File(MaskFileError::Ncbi(error)) => {
                 Some(MakedbError::Build(error))
             }

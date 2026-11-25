@@ -1,0 +1,2 @@
+Warning: [rpsblast] Query_1 allx a query of X only: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options 
+Warning: [rpsblast] Query_2 oj_tk TK-TMK with.. : One or more O characters replaced by X for alignment score calculations at positions 29 

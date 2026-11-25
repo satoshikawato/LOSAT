@@ -91,7 +91,7 @@ fn a_pdb_query_holds_the_chains_of_its_handle() {
     // A sequence stored as pdb 1AB1 with chain 321 (no chain-id): its handle normalizes chain
     // 321 (0x141) to 'A' (65), matching the query `pdb|1AB1|A`.
     let mut chain_321_keys = Vec::new();
-    let chain_321 = crate::seqid::model::SeqId::Pdb(crate::seqid::model::PdbSeqId {
+    let chain_321 = crate::seqid::model::ParsedSeqId::Pdb(crate::seqid::model::PdbSeqId {
         mol: b"1AB1".to_vec(),
         chain: Some(321),
         rel: None,

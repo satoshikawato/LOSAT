@@ -1,0 +1,143 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>RPSBLAST 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+<b>Query=</b> allx a query of X only
+
+Length=60
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+<b>Query=</b> oj_tk TK-TMK with an O at 30 and a J at 60
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  <a href=#CDD:101>312</a>     3e-111
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>18.9</a>    0.30  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>14.3</a>    8.8   
+
+
+
+Query_2  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYOKNIYQQENGGNKHCLFVKHSLETRYGCGTJ  60
+101      1    .............................L.............................G  60
+
+Query_2  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+101      61   ............................................................  120
+
+Query_2  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+101      121  ............................................................  180
+103      149                                                             .  149
+
+Query_2  181  AEMYAAACRDCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPD  240
+101      181  ..........                                                    190
+102      83                                                  .DVH.E.FKALYE  95
+102      106                                     VVK.RA.FDQI..ARI.TP.V..K.  132
+                                                                 \        
+                                                                 |        
+                                                                ET
+103      150  .HIT.GK..                                                     158
+
+Query_2  241  RSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIV  300
+102      96   KYEAE..                                                       102
+102      137  K.NQ                                                          140
+              \                                                           
+              |                                                           
+              TINR
+
+Query_2  301  FSLARGVDTVEWCSASDEGLPQPDLVLLMLLDVEKCSNRDTFGVERFETNSIQERARALF  360
+102      108                                                        K.....  113
+
+Query_2  361  LDLAN  365
+102      114  DQINS  118
+
+
+Lambda      K        H        a         alpha
+   0.320    0.137    0.405    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 169824
+
+
+<b>Query=</b> rr_part ribonucleotide reductase residues 281-520
+
+Length=240
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>346</a>     3e-127
+CDD:101 f101 TK-TMK, chimeric thymidine and thymidylate kinase [W...  <a href=#CDD:101>17.8</a>    0.45  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>14.0</a>    6.9   
+
+
+
+Query_3  21   IFNVSVKKVSQGGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDL  80
+102      1    ............................................................  60
+103      103                                                   .Y..E.-.C.I  112
+
+Query_3  81   FMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSAR  140
+102      61   ............................................................  120
+103      113  N.Q                                                           115
+
+Query_3  141  IETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKY  200
+102      121  ............................................................  180
+101      131                                                             F  131
+
+Query_3  201  SPIPSLRPYVDYREMKRVVKIMTRNLDK  228
+101      132  ...HK.L..TNSIV-.LAS.C.ICKI.T  158
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.404    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 99803
+
+
+  Database: rps_mini
+    Posted date:  Nov 7, 2026  10:01 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

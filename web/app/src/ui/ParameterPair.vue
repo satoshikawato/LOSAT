@@ -73,23 +73,25 @@ function onList(next: string): void {
     </component>
     <div class="param-control">
       <!-- WebKit draws a select's chosen label at its whole length beyond the select's box (S13 screen review H2). -->
-      <span v-if="list.length > 0" class="select-clip">
-        <select
-          :id="id"
-          :value="other ? OTHER : shown"
-          v-bind="refusedMark(refused && !fieldsShown, refusalId)"
-          :data-testid="id"
-          @change="onList(($event.target as HTMLSelectElement).value)"
-        >
-          <option v-if="shown === ''" value="">Default</option>
-          <option v-for="item in list" :key="item" :value="item">{{ label(item) }}</option>
-          <option :value="OTHER">Other</option>
-        </select>
+      <span v-if="list.length > 0" class="control-tip">
+        <span class="select-clip">
+          <select
+            :id="id"
+            :value="other ? OTHER : shown"
+            v-bind="refusedMark(refused && !fieldsShown, refusalId)"
+            :data-testid="id"
+            @change="onList(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-if="shown === ''" value="">Default</option>
+            <option v-for="item in list" :key="item" :value="item">{{ label(item) }}</option>
+            <option :value="OTHER">Other</option>
+          </select>
+        </span>
+        <HelpTip v-if="help !== '' && !fieldsShown" :id="id" :label="`About ${pair.flags.join(' and ')}`" :text="help" />
       </span>
       <div v-if="fieldsShown" class="param-group">
         <ParameterField v-for="field in fields" :key="field.flag" :model="model" :field="field" inline />
       </div>
-      <HelpTip v-if="help !== '' && !fieldsShown" :id="id" :label="`About ${pair.flags.join(' and ')}`" :text="help" />
     </div>
   </div>
 </template>

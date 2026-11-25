@@ -25,6 +25,13 @@ fn unit_column(first: f64) -> Vec<f64> {
     col
 }
 
+fn assert_refused<T: std::fmt::Debug>(result: Result<T, DeltaError>) {
+    assert!(
+        matches!(result, Err(DeltaError::Rps(RpsError::Refused(_)))),
+        "expected refusal, got {result:?}"
+    );
+}
+
 #[test]
 fn uint4_of_accepts_defined_range_and_rejects_ub() {
     assert_eq!(uint4_of(0.0), Some(0));
@@ -46,14 +53,8 @@ fn encode_obsr_merges_relative_to_run_head_and_truncates() {
     let vals = [5.0, 5.00006, 5.00012, 5.00012, 5.00022, 5.0003199];
     assert_eq!(encode_obsr(&vals).unwrap(), [6000, 2, 6000, 3, 6000, 1]);
     assert_eq!(encode_obsr(&[-0.5, -0.5]).unwrap(), [500, 2]);
-    assert!(matches!(
-        encode_obsr(&[-2.0]),
-        Err(DeltaError::Rps(RpsError::Refused(_)))
-    ));
-    assert!(matches!(
-        encode_obsr(&[f64::NAN]),
-        Err(DeltaError::Rps(RpsError::Refused(_)))
-    ));
+    assert_refused(encode_obsr(&[-2.0]));
+    assert_refused(encode_obsr(&[f64::NAN]));
 }
 
 #[test]
@@ -121,40 +122,25 @@ fn check_delta_refuses_ncbi_ub_shapes() {
     // byRow TRUE
     let mut p_byrow = sample_pssm(Some(unit_column(1.0)), Some(vec![10.0]));
     p_byrow.by_row = Some(true);
-    assert!(matches!(
-        check_delta(&p_byrow, 1, b"a.smp", 6.0, true),
-        Err(DeltaError::Rps(RpsError::Refused(_)))
-    ));
+    assert_refused(check_delta(&p_byrow, 1, b"a.smp", 6.0, true));
 
     // numRows < 28 with non-empty weightedResFreqsPerPos
     let mut p_rows26 = sample_pssm(Some(vec![0.0; 26]), Some(vec![10.0]));
     p_rows26.num_rows = 26;
-    assert!(matches!(
-        check_delta(&p_rows26, 1, b"a.smp", 6.0, true),
-        Err(DeltaError::Rps(RpsError::Refused(_)))
-    ));
+    assert_refused(check_delta(&p_rows26, 1, b"a.smp", 6.0, true));
 
     // Empty numIndeptObsr
     let p_empty_obsr = sample_pssm(Some(unit_column(1.0)), Some(Vec::new()));
-    assert!(matches!(
-        check_delta(&p_empty_obsr, 1, b"a.smp", 6.0, true),
-        Err(DeltaError::Rps(RpsError::Refused(_)))
-    ));
+    assert_refused(check_delta(&p_empty_obsr, 1, b"a.smp", 6.0, true));
 
     // Partial trailing column: refused when every full column passes (even if obsr < 1.0, because
     // NCBI's column loop runs before the obsr < 1.0 check).
     let mut partial = unit_column(1.0);
     partial.push(0.0);
     let p_partial = sample_pssm(Some(partial.clone()), Some(vec![10.0]));
-    assert!(matches!(
-        check_delta(&p_partial, 1, b"a.smp", 6.0, true),
-        Err(DeltaError::Rps(RpsError::Refused(_)))
-    ));
+    assert_refused(check_delta(&p_partial, 1, b"a.smp", 6.0, true));
     let p_partial_low_obsr = sample_pssm(Some(partial), Some(vec![0.5]));
-    assert!(matches!(
-        check_delta(&p_partial_low_obsr, 1, b"a.smp", 0.0, true),
-        Err(DeltaError::Rps(RpsError::Refused(_)))
-    ));
+    assert_refused(check_delta(&p_partial_low_obsr, 1, b"a.smp", 0.0, true));
 }
 
 #[test]

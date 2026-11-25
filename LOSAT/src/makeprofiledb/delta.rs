@@ -88,9 +88,8 @@ pub(super) fn uint4_of(value: f64) -> Option<u32> {
     (value > -1.0 && value < 4_294_967_296.0).then_some(value as u32)
 }
 
-/// Converts a scaled delta float to `Uint4`, returning a rule-3 refusal when out of C++'s defined
-/// range.
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1674,1688
+/// Converts a scaled delta float to `Uint4` via [`uint4_of`], returning a rule-3 refusal when out
+/// of C++'s defined range.
 fn encode_uint4(scaled: f64, field: &str, expr: impl std::fmt::Display) -> Result<u32, DeltaError> {
     uint4_of(scaled).ok_or_else(|| {
         refused(format!(
@@ -388,6 +387,14 @@ fn write_delta_file(
 }
 
 impl DeltaVolume {
+    /// Records the current `.wcounts` column offset and `.obsr` word offset in the offset tables.
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1652,1682,1825-1826
+    fn push_current_offsets(&mut self) {
+        self.freq_offsets
+            .push(freq_record_offset(self.curr_freq_offset));
+        self.obsr_offsets.push(self.curr_obsr_offset);
+    }
+
     /// Encodes one profile's `.wcounts` and `.obsr` records into the scratch buffers.
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1598-1707
     fn encode_and_write_profile(
@@ -396,9 +403,9 @@ impl DeltaVolume {
         seq_size: i32,
         filename: &[u8],
     ) -> Result<(), DeltaError> {
-        let (freqs, obsr) = delta_fields(pssm, seq_size, filename)?;
+        let (weighted_freqs, obsr) = delta_fields(pssm, seq_size, filename)?;
         let obsr_words = encode_obsr(obsr)?;
-        if obsr.len() != freqs.len() / BLASTAA_SIZE {
+        if obsr.len() != weighted_freqs.len() / BLASTAA_SIZE {
             return Err(DeltaError::Exception(
                 [
                     b"Number of frequencies and observations columns do not match in ".as_slice(),
@@ -408,8 +415,9 @@ impl DeltaVolume {
             ));
         }
         self.scratch.clear();
-        self.scratch.reserve((freqs.len() + BLASTAA_SIZE) * 4);
-        for &val in freqs.as_ref() {
+        self.scratch
+            .reserve((weighted_freqs.len() + BLASTAA_SIZE) * 4);
+        for &val in weighted_freqs.as_ref() {
             let scaled = val * FIXED_POINT_SCALE_FACTOR;
             let encoded = encode_uint4(
                 scaled,
@@ -435,10 +443,9 @@ impl DeltaVolume {
             .expect("tmp_obsr open")
             .write_all(&self.scratch)?;
 
-        self.freq_offsets
-            .push(freq_record_offset(self.curr_freq_offset));
-        self.obsr_offsets.push(self.curr_obsr_offset);
-        self.curr_freq_offset = advance_offset(self.curr_freq_offset, freqs.len() + BLASTAA_SIZE);
+        self.push_current_offsets();
+        self.curr_freq_offset =
+            advance_offset(self.curr_freq_offset, weighted_freqs.len() + BLASTAA_SIZE);
         self.curr_obsr_offset = advance_offset(self.curr_obsr_offset, obsr_words.len());
         Ok(())
     }
@@ -488,9 +495,7 @@ impl DeltaVolume {
         for (_, posts) in &self.deferred_posts {
             post_fn(diag, posts);
         }
-        self.freq_offsets
-            .push(freq_record_offset(self.curr_freq_offset));
-        self.obsr_offsets.push(self.curr_obsr_offset);
+        self.push_current_offsets();
 
         let open = |extension: &str, message: &'static str| {
             let path = [&self.db_name[..], b".", extension.as_bytes()].concat();

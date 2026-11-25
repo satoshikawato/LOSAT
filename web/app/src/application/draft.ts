@@ -53,9 +53,12 @@ import {
   DB_FILE_FILTER_FIELDS,
   FILTERING_DB_FLAG,
   assembleSearchDirectory,
+  databaseTaxonomy,
   discoverBlastDatabases,
   matchingDatabases,
   noMatchingDatabaseMessage,
+  normalizeRunPath,
+  type AssembledSearchDirectory,
   type BlastDbDiscovery,
 } from '../domain/blast-db';
 import type { DatabaseFilterFileSnapshot, DatabaseSnapshot, InputPart } from '../domain/run';
@@ -431,10 +434,22 @@ export class SearchDraft {
 
   /** Sets several fields at once (NCBI's select of a pair: -reward and -penalty, or the gap costs). */
   setFields(entries: ReadonlyArray<readonly [string, FieldValue]>): void {
+    this.setFieldsForProgram(this.state.get().program, entries);
+  }
+
+  private setFieldForProgram(target: ProgramId, flag: string, value: FieldValue): void {
+    this.setFieldsForProgram(target, [[flag, value]]);
+  }
+
+  private setFieldsForProgram(target: ProgramId, entries: ReadonlyArray<readonly [string, FieldValue]>): void {
     const { program, values, description } = this.state.get();
-    const next = setFields(programById(program), values[program], entries, description?.parameters);
-    this.set({ values: { ...values, [program]: next }, message: undefined });
-    this.scheduleValidation();
+    const described = target === program ? description : this.described.get(target);
+    const next = setFields(programById(target), values[target], entries, described?.parameters);
+    this.set({
+      values: { ...values, [target]: next },
+      ...(target === program ? { message: undefined } : {}),
+    });
+    if (target === program) this.scheduleValidation();
   }
 
   /**
@@ -532,7 +547,18 @@ export class SearchDraft {
   /** Switches Subject between FASTA sequences (`-subject`) and a local BLAST database (`-db`). */
   setSubjectSource(subjectSource: SubjectSource): void {
     if (this.state.get().subjectSource === subjectSource) return;
-    this.set({ subjectSource, message: undefined });
+    const { database } = this.state.get();
+    if (subjectSource === 'fasta') {
+      this.deps.databaseMemory?.write('subject', undefined);
+      const { remembered: _rem, ...rest } = database;
+      void _rem;
+      this.set({ subjectSource, database: Object.freeze(rest), message: undefined });
+    } else {
+      if (database.discovery !== undefined && database.selected !== undefined) {
+        this.rememberDb('subject', database.selected, database.discovery.folder);
+      }
+      this.set({ subjectSource, message: undefined });
+    }
     this.scheduleValidation();
   }
 
@@ -545,17 +571,34 @@ export class SearchDraft {
       database: this.subjectDatabaseWith({ scanning: true as const }),
       message: undefined,
     });
-    const work = discoverBlastDatabases(files).then((discovery) => {
-      if (this.generations.get('subject-db') !== generation) return;
-      const matches = matchingDatabases(discovery, programById(this.state.get().program).subject);
-      const selected = matches[0]?.name;
-      if (selected !== undefined) this.rememberDb('subject', selected, discovery.folder);
-      this.set({
-        database: this.subjectDatabaseWith({ discovery, ...(selected === undefined ? {} : { selected }) }),
-        message: undefined,
+    const work = discoverBlastDatabases(files)
+      .then(
+        (discovery) => ({ ok: true as const, discovery }),
+        (error: unknown) => ({ ok: false as const, error }),
+      )
+      .then((outcome) => {
+        if (this.generations.get('subject-db') !== generation) return;
+        if (!outcome.ok) {
+          this.set({
+            database: this.subjectDatabaseWith({}),
+            message: { kind: 'error', text: messageOf(outcome.error) },
+          });
+          this.scheduleValidation();
+          return;
+        }
+        const { discovery } = outcome;
+        const { program, subjectSource } = this.state.get();
+        const matches = matchingDatabases(discovery, programById(program).subject);
+        const selected = matches[0]?.name;
+        if (selected !== undefined && subjectSource === 'database') {
+          this.rememberDb('subject', selected, discovery.folder);
+        }
+        this.set({
+          database: this.subjectDatabaseWith({ discovery, ...(selected === undefined ? {} : { selected }) }),
+          message: undefined,
+        });
+        this.scheduleValidation();
       });
-      this.scheduleValidation();
-    });
     this.track(work);
     await work;
   }
@@ -615,7 +658,7 @@ export class SearchDraft {
   setFilteringDbEnabled(enabled: boolean): void {
     if (!enabled) {
       this.resetFilteringDbPick();
-      this.setField(FILTERING_DB_FLAG, '');
+      this.setFieldForProgram('blastn', FILTERING_DB_FLAG, '');
       return;
     }
     this.setFilteringDbField(this.state.get().filteringDb.selected);
@@ -627,29 +670,44 @@ export class SearchDraft {
     const generation = this.nextGeneration('filtering-db');
     this.set({
       filteringDb: Object.freeze({ scanning: true as const }),
-      message: undefined,
+      ...(this.state.get().program === 'blastn' ? { message: undefined } : {}),
     });
-    this.setField(FILTERING_DB_FLAG, true);
-    const work = discoverBlastDatabases(files).then((discovery) => {
-      if (this.generations.get('filtering-db') !== generation) return;
-      const matches = matchingDatabases(discovery, 'nucleotide');
-      const selected = matches[0]?.name;
-      if (selected !== undefined) this.rememberDb('filtering', selected, discovery.folder);
-      this.set({
-        filteringDb: Object.freeze({
-          discovery,
-          ...(selected === undefined ? {} : { selected }),
-        }),
-        message: undefined,
+    this.setFieldForProgram('blastn', FILTERING_DB_FLAG, true);
+    const work = discoverBlastDatabases(files)
+      .then(
+        (discovery) => ({ ok: true as const, discovery }),
+        (error: unknown) => ({ ok: false as const, error }),
+      )
+      .then((outcome) => {
+        if (this.generations.get('filtering-db') !== generation) return;
+        const onBlastn = this.state.get().program === 'blastn';
+        if (!outcome.ok) {
+          this.set({
+            filteringDb: Object.freeze({}),
+            ...(onBlastn ? { message: { kind: 'error', text: messageOf(outcome.error) } } : {}),
+          });
+          this.setFilteringDbField(undefined);
+          return;
+        }
+        const { discovery } = outcome;
+        const matches = matchingDatabases(discovery, 'nucleotide');
+        const selected = matches[0]?.name;
+        if (selected !== undefined) this.rememberDb('filtering', selected, discovery.folder);
+        this.set({
+          filteringDb: Object.freeze({
+            discovery,
+            ...(selected === undefined ? {} : { selected }),
+          }),
+          ...(onBlastn ? { message: undefined } : {}),
+        });
+        this.setFilteringDbField(selected);
       });
-      this.setFilteringDbField(selected);
-    });
     this.track(work);
     await work;
   }
 
   private setFilteringDbField(selected: string | undefined): void {
-    this.setField(FILTERING_DB_FLAG, selected ?? true);
+    this.setFieldForProgram('blastn', FILTERING_DB_FLAG, selected ?? true);
   }
 
   /** Selects one discovered nucleotide database name for BLASTN `-filtering_db`. */
@@ -659,14 +717,14 @@ export class SearchDraft {
     if (!matchingDatabases(filteringDb.discovery, 'nucleotide').some((db) => db.name === name)) return;
     this.rememberDb('filtering', name, filteringDb.discovery.folder);
     this.set({ filteringDb: Object.freeze({ ...filteringDb, selected: name }) });
-    this.setField(FILTERING_DB_FLAG, name);
+    this.setFieldForProgram('blastn', FILTERING_DB_FLAG, name);
   }
 
   /** Clears the chosen BLASTN `-filtering_db` folder/files while keeping the option ready to pick again. */
   clearFilteringDb(): void {
     this.resetFilteringDbPick();
     const current = this.state.get().values.blastn[FILTERING_DB_FLAG];
-    if (current !== undefined && current !== '') this.setField(FILTERING_DB_FLAG, true);
+    if (current !== undefined && current !== '') this.setFieldForProgram('blastn', FILTERING_DB_FLAG, true);
   }
 
   private subjectDatabaseWith(pick: DatabasePickDraft): SubjectDatabaseDraft {
@@ -827,7 +885,10 @@ export class SearchDraft {
    * source. The other sources and the regions go.
    */
   useExample(example: ExampleId, query: string, subject: File): void {
-    this.set({ subjectSource: 'fasta' });
+    this.deps.databaseMemory?.write('subject', undefined);
+    const { remembered: _rem, ...restDb } = this.state.get().database;
+    void _rem;
+    this.set({ subjectSource: 'fasta', database: Object.freeze(restDb) });
     for (const role of ROLES) {
       for (const source of this.role(role).sources) {
         if (source.key !== PASTE_KEY) this.dropSource(role, source.key);
@@ -1115,7 +1176,7 @@ export class SearchDraft {
         if (described !== undefined && !described.has(field.flag)) continue;
         if (field.kind === 'file') {
           const file = database.filterFiles[field.flag];
-          if (file !== undefined) parameters.push([field.flag, file.name]);
+          if (file !== undefined) parameters.push([field.flag, normalizeRunPath(file.name) ?? file.name]);
         } else if (field.kind === 'flag') {
           if (database.filterValues[field.flag] === true) parameters.push([field.flag, true]);
         } else {
@@ -1284,29 +1345,30 @@ export class SearchDraft {
     const conffile = registryName(state.start) === undefined ? undefined : state.conffiles[program];
 
     // Assemble local BLAST database metadata and read-only run directory files (WQA D12b + RG-D4 W2).
-    const described = state.description === undefined ? undefined : new Set(state.description.parameters.map((option) => option.flag));
-    const activeFilterFiles: Record<string, File> = {};
-    const filterFileSnapshots: DatabaseFilterFileSnapshot[] = [];
-    if (subjectSource === 'database') {
-      for (const field of DB_FILE_FILTER_FIELDS) {
-        if (described !== undefined && !described.has(field.flag)) continue;
-        const file = database.filterFiles[field.flag];
-        if (file !== undefined) {
-          activeFilterFiles[field.flag] = file;
-          filterFileSnapshots.push(Object.freeze({ flag: field.flag, name: file.name, size: file.size }));
-        }
-      }
+    const activeFilterFiles = this.activeDatabaseFilterFiles(state);
+    const filterFileSnapshots: DatabaseFilterFileSnapshot[] = Object.entries(activeFilterFiles).map(([flag, file]) =>
+      Object.freeze({ flag, name: file.name, size: file.size }),
+    );
+    const usesFilteringDb = program === 'blastn' && parameters.some(([flag]) => flag === FILTERING_DB_FLAG);
+    let assembled: AssembledSearchDirectory;
+    try {
+      assembled = this.assembleRunDirectory(state, activeFilterFiles, usesFilteringDb);
+    } catch (error) {
+      return { ok: false, message: messageOf(error) };
     }
+    const runFiles: readonly DirectoryFile[] = assembled.files;
     let dbSnapshot: DatabaseSnapshot | undefined;
     if (subjectSource === 'database' && database.discovery !== undefined && database.selected !== undefined) {
+      const tax = databaseTaxonomy(database.discovery, database.selected);
       dbSnapshot = Object.freeze({
         name: database.selected,
         ...(database.discovery.folder === undefined ? {} : { folder: database.discovery.folder }),
         kind: programById(program).subject,
         fileCount: database.discovery.files.length,
         totalBytes: database.discovery.totalBytes,
-        taxdb: database.discovery.taxonomy.taxdb,
-        sqlite: database.discovery.taxonomy.sqlite,
+        taxdb: tax.taxdb,
+        sqlite: tax.sqlite,
+        ...(assembled.blastdbEnv === undefined ? {} : { blastdbEnv: assembled.blastdbEnv }),
         ...(filterFileSnapshots.length === 0 ? {} : { filterFiles: Object.freeze(filterFileSnapshots) }),
       });
       this.deps.databaseMemory?.write(
@@ -1314,31 +1376,23 @@ export class SearchDraft {
         database.discovery.folder === undefined ? { name: database.selected } : { name: database.selected, folder: database.discovery.folder },
       );
     }
-    const usesFilteringDb = program === 'blastn' && parameters.some(([flag]) => flag === FILTERING_DB_FLAG);
     let filteringSnapshot: DatabaseSnapshot | undefined;
     if (usesFilteringDb && filteringDb.discovery !== undefined && filteringDb.selected !== undefined) {
+      const fTax = databaseTaxonomy(filteringDb.discovery, filteringDb.selected);
       filteringSnapshot = Object.freeze({
         name: filteringDb.selected,
         ...(filteringDb.discovery.folder === undefined ? {} : { folder: filteringDb.discovery.folder }),
         kind: 'nucleotide' as const,
         fileCount: filteringDb.discovery.files.length,
         totalBytes: filteringDb.discovery.totalBytes,
-        taxdb: filteringDb.discovery.taxonomy.taxdb,
-        sqlite: filteringDb.discovery.taxonomy.sqlite,
+        taxdb: fTax.taxdb,
+        sqlite: fTax.sqlite,
       });
       this.deps.databaseMemory?.write(
         'filtering',
         filteringDb.discovery.folder === undefined ? { name: filteringDb.selected } : { name: filteringDb.selected, folder: filteringDb.discovery.folder },
       );
     }
-    const runFiles: readonly DirectoryFile[] = assembleSearchDirectory({
-      ...(dbSnapshot !== undefined && database.discovery !== undefined
-        ? { subjectDb: { discovery: database.discovery, selectedName: dbSnapshot.name }, filterFiles: activeFilterFiles }
-        : {}),
-      ...(filteringSnapshot !== undefined && filteringDb.discovery !== undefined
-        ? { filteringDb: { discovery: filteringDb.discovery, selectedName: filteringSnapshot.name } }
-        : {}),
-    });
 
     const resolvedQueries = await Promise.all(groups.query.map((sources) => this.resolveGroup(sources)));
     const requests: SearchRequest[] = [];
@@ -1456,7 +1510,8 @@ export class SearchDraft {
    * downloaded: the sentence that asks for it; undefined when there is none.
    */
   private fileProblem(): string | undefined {
-    const { program, values, description, counts, filteringDb } = this.state.get();
+    const state = this.state.get();
+    const { program, values, description, counts, filteringDb } = state;
     for (const section of describedSections(programById(program), description?.parameters)) {
       for (const field of section.fields) {
         if (field.kind === 'database') {
@@ -1481,7 +1536,42 @@ export class SearchDraft {
         if (counts[id] === undefined) return `Download the counts for ${id}.`;
       }
     }
+    const usesFilteringDb =
+      program === 'blastn' && typeof values.blastn[FILTERING_DB_FLAG] === 'string' && values.blastn[FILTERING_DB_FLAG] !== '';
+    try {
+      this.assembleRunDirectory(state, this.activeDatabaseFilterFiles(state), usesFilteringDb);
+    } catch (error) {
+      return messageOf(error);
+    }
     return undefined;
+  }
+
+  private activeDatabaseFilterFiles(state: DraftState): Readonly<Record<string, File>> {
+    if (state.subjectSource !== 'database') return {};
+    const described = state.description === undefined ? undefined : new Set(state.description.parameters.map((option) => option.flag));
+    const active: Record<string, File> = {};
+    for (const field of DB_FILE_FILTER_FIELDS) {
+      if (described !== undefined && !described.has(field.flag)) continue;
+      const file = state.database.filterFiles[field.flag];
+      if (file !== undefined) active[field.flag] = file;
+    }
+    return active;
+  }
+
+  private assembleRunDirectory(
+    state: DraftState,
+    activeFilterFiles: Readonly<Record<string, File>>,
+    usesFilteringDb: boolean,
+  ): AssembledSearchDirectory {
+    const { subjectSource, database, filteringDb } = state;
+    return assembleSearchDirectory({
+      ...(subjectSource === 'database' && database.discovery !== undefined && database.selected !== undefined
+        ? { subjectDb: { discovery: database.discovery, selectedName: database.selected }, filterFiles: activeFilterFiles }
+        : {}),
+      ...(usesFilteringDb && filteringDb.discovery !== undefined && filteringDb.selected !== undefined
+        ? { filteringDb: { discovery: filteringDb.discovery, selectedName: filteringDb.selected } }
+        : {}),
+    });
   }
 
   /** A box of accessions only, fetched or not yet: it is not searched. */

@@ -192,6 +192,12 @@ export function refusedFields(message: string, extra: string): { readonly extra:
   };
 }
 
+/** Environment variables that a CLI reproduction command sets before `losat`. */
+export interface CommandEnv {
+  /** Relative folder for `BLASTDB=<dir>` when a folder-picked `-db` has auxiliary taxonomy files. */
+  readonly blastdb?: string;
+}
+
 /**
  * Renders the CLI command that reproduces one output of a run, as a copyable POSIX shell
  * command. `-outfmt` is always written: several programs reject their CLI default format, so a
@@ -199,21 +205,33 @@ export function refusedFields(message: string, extra: string): { readonly extra:
  * format's -outfmt in place of the argv's; that of the argv's own -outfmt is the argv, with
  * `-out results` for 13 and 14, which the CLI writes as files (the files of the archive).
  */
-export function toShellCommand(argv: readonly string[], output: RunOutput): string {
-  return shellWords(commandWords(argv, output));
+export function toShellCommand(argv: readonly string[], output: RunOutput, env?: CommandEnv): string {
+  return shellWords(commandWords(argv, output, env));
 }
 
 /** The words of `toShellCommand`'s command. */
-export function commandWords(argv: readonly string[], output: RunOutput): readonly string[] {
-  if (output === CUSTOM_OUTPUT) return isFilesOutput(argv, output) ? ['losat', ...argv, '-out', FILES_OUT] : ['losat', ...argv];
+export function commandWords(argv: readonly string[], output: RunOutput, env?: CommandEnv): readonly string[] {
+  const prefix = env?.blastdb !== undefined && env.blastdb !== '' ? [`BLASTDB=${env.blastdb}`] : [];
+  if (output === CUSTOM_OUTPUT) {
+    return isFilesOutput(argv, output) ? [...prefix, 'losat', ...argv, '-out', FILES_OUT] : [...prefix, 'losat', ...argv];
+  }
   const option = outfmtOption(argv);
   const words = option === undefined ? argv : [...argv.slice(0, option.at), ...argv.slice(option.at + option.words)];
-  return ['losat', ...words, '-outfmt', String(output)];
+  return [...prefix, 'losat', ...words, '-outfmt', String(output)];
 }
+
+const SAFE_SHELL_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
+const ENV_ASSIGNMENT = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s;
 
 /** A word as a POSIX shell reads it back (`splitOptions`): quoted only where it needs it. */
 export function shellWord(word: string): string {
-  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
+  if (SAFE_SHELL_WORD.test(word)) return word;
+  const env = ENV_ASSIGNMENT.exec(word);
+  if (env !== null) {
+    const [, name, value] = env;
+    return `${name}=${SAFE_SHELL_WORD.test(value!) ? value! : `'${value!.replaceAll("'", "'\\''")}'`}`;
+  }
+  return `'${word.replaceAll("'", "'\\''")}'`;
 }
 
 /** Words as a POSIX shell reads them back (`splitOptions`): quoted only where they need it. */

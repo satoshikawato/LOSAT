@@ -1,6 +1,7 @@
-// Local BLAST database discovery, molecule-type matching, filter option metadata and
-// run-directory assembly (WQA D12b + RG-D4 W2). Single owner reused by Subject "Database" (-db)
-// and BLASTN "Repeats database" (-filtering_db).
+// Local BLAST database discovery, molecule-type matching, filter option metadata,
+// run-directory path normalization, duplicate checks and run-directory assembly
+// (WQA D12b + RG-D4 W2). Single owner reused by Subject "Database" (-db),
+// BLASTN "Repeats database" (-filtering_db), and WindowMasker (-infmt blastdb).
 import type { DirectoryFile, SequenceKind } from 'losat/domain';
 
 export const DB_FLAG = '-db';
@@ -65,6 +66,13 @@ export interface BlastDbCandidate {
   readonly volumes?: readonly string[];
 }
 
+export interface BlastDbTaxonomy {
+  readonly taxdb: boolean;
+  readonly sqlite: boolean;
+  /** Present auxiliary taxonomy files in the database's own folder. */
+  readonly files: readonly DirectoryFile[];
+}
+
 export interface BlastDbDiscovery {
   /** Top-level folder name when chosen via folder picker (`webkitRelativePath`), else undefined. */
   readonly folder?: string;
@@ -74,24 +82,88 @@ export interface BlastDbDiscovery {
   readonly files: readonly DirectoryFile[];
   /** Total bytes across all mounted files. */
   readonly totalBytes: number;
-  /** Auxiliary taxonomy files detected in the picked folder/files. */
-  readonly taxonomy: {
-    readonly taxdb: boolean;
-    readonly sqlite: boolean;
-  };
+}
+
+export interface AssembledSearchDirectory {
+  readonly files: readonly DirectoryFile[];
+  /**
+   * Relative folder of the selected `-db` whose auxiliary taxonomy files were mounted at the
+   * run directory root (`/work`); CLI reproduction commands prepend `BLASTDB=<blastdbEnv>`.
+   */
+  readonly blastdbEnv?: string;
+}
+
+/** Standard user-facing error when two different files claim the same run-directory path. */
+export function duplicateRunFileMessage(name: string): string {
+  return `A file named "${name}" is already in the run directory.`;
 }
 
 /**
- * Safe relative path for a picked File, using `/` separators and rejecting empty, `.`, `..`,
- * or NUL-containing segments (matching `RunDirectory`'s path rules in `packages/losat`).
+ * Normalizes a picked or folder-relative entry name for a run directory: uses `/` separators,
+ * trims whitespace, strips leading `./` and `/` segments, and rejects empty, interior `.`, `..`,
+ * or NUL-containing paths (matching `RunDirectory`'s path rules in `packages/losat`).
  */
-export function relativeFilePath(file: File): string | undefined {
-  const rel = (file as File & { readonly webkitRelativePath?: string }).webkitRelativePath;
-  const raw = (rel && rel.trim() !== '' ? rel : file.name).replaceAll('\\', '/').replace(/^\/+/, '');
-  if (raw === '' || raw.includes('\0')) return undefined;
-  const parts = raw.split('/').filter((segment) => segment !== '');
-  if (parts.length === 0 || parts.some((segment) => segment === '.' || segment === '..')) return undefined;
-  return parts.join('/');
+export function normalizeRunPath(raw: string): string | undefined {
+  const cleaned = raw.replaceAll('\\', '/').trim();
+  if (cleaned === '' || cleaned.includes('\0')) return undefined;
+  const parts: string[] = [];
+  for (const segment of cleaned.split('/')) {
+    if (segment === '' || (parts.length === 0 && segment === '.')) continue;
+    if (segment === '.' || segment === '..') return undefined;
+    parts.push(segment);
+  }
+  return parts.length === 0 ? undefined : parts.join('/');
+}
+
+/** Safe relative run-directory path for a picked File (preferring `relativeName`, then `webkitRelativePath`, then `file.name`). */
+export function pickedFilePath(file: File, relativeName?: string): string | undefined {
+  const rel = relativeName ?? (file as File & { readonly webkitRelativePath?: string }).webkitRelativePath;
+  return normalizeRunPath(rel && rel.trim() !== '' ? rel : file.name);
+}
+
+function parentPrefixes(name: string): string[] {
+  const segments = name.split('/');
+  const prefixes: string[] = [];
+  let prefix = '';
+  for (let i = 0; i < segments.length - 1; i++) {
+    prefix = prefix === '' ? segments[i]! : `${prefix}/${segments[i]!}`;
+    prefixes.push(prefix);
+  }
+  return prefixes;
+}
+
+/**
+ * Single owner for assembling unique run-directory entries: allows the exact same Blob/File
+ * reference to be added twice under the same path (mounting it once), and throws
+ * `duplicateRunFileMessage` whenever two different files claim the same path or collide as
+ * file vs. directory.
+ */
+export class RunDirectoryBuilder {
+  private readonly entries = new Map<string, Blob>();
+  private readonly directories = new Set<string>();
+
+  add(name: string, file: Blob): void {
+    const existing = this.entries.get(name);
+    if (existing === file) return;
+    if (existing !== undefined || this.directories.has(name)) {
+      throw new Error(duplicateRunFileMessage(name));
+    }
+    for (const prefix of parentPrefixes(name)) {
+      if (this.entries.has(prefix)) {
+        throw new Error(duplicateRunFileMessage(prefix));
+      }
+    }
+    this.entries.set(name, file);
+    for (const prefix of parentPrefixes(name)) this.directories.add(prefix);
+  }
+
+  has(name: string): boolean {
+    return this.entries.has(name);
+  }
+
+  build(): readonly DirectoryFile[] {
+    return Object.freeze([...this.entries.entries()].map(([name, file]) => Object.freeze({ name, file })));
+  }
 }
 
 /** Parses `TITLE` and `DBLIST` tokens from a BLAST `.nal` or `.pal` alias file. */
@@ -133,33 +205,99 @@ function parentDir(path: string): string {
   return slash < 0 ? '' : path.slice(0, slash);
 }
 
-function baseName(path: string): string {
-  const slash = path.lastIndexOf('/');
-  return slash < 0 ? path : path.slice(slash + 1);
-}
-
 function joinPath(dir: string, rel: string): string {
   const clean = rel.replace(/^\/+/, '');
   return dir === '' ? clean : `${dir}/${clean}`;
 }
 
+function classifyBlastDbFile(
+  name: string,
+): { readonly stem: string; readonly kind: SequenceKind; readonly entry: 'alias' | 'volume' } | undefined {
+  // Case-sensitive extensions matching NCBI `FindBlastDBs` (`seqdb.cpp:1438-1449`: *.pin, *.pal, *.nin, *.nal).
+  if (name.length <= 4) return undefined;
+  const ext = name.slice(-4);
+  const stem = name.slice(0, -4);
+  if (ext === '.nal') return { stem, kind: 'nucleotide', entry: 'alias' };
+  if (ext === '.nin') return { stem, kind: 'nucleotide', entry: 'volume' };
+  if (ext === '.pal') return { stem, kind: 'protein', entry: 'alias' };
+  if (ext === '.pin') return { stem, kind: 'protein', entry: 'volume' };
+  return undefined;
+}
+
 /**
- * Discovers valid BLAST databases (`.nal`/`.pal`, `.nin`/`.pin`, multi-volume sets) and
- * auxiliary taxonomy files (`taxdb.bti`/`taxdb.btd`, `taxonomy4blast.sqlite3`) from picked files.
- * Reads only tiny `.nal`/`.pal` alias text files; binary volume files are never read into memory.
+ * Synchronous, name-only BLAST database discovery shared by Subject Database (`-db`),
+ * BLASTN Repeats database (`-filtering_db`), and WindowMasker (`-infmt blastdb`).
+ * Matches NCBI `FindBlastDBs` case-sensitive `.nal`/`.nin`/`.pal`/`.pin` extensions,
+ * prefers aliases over index volumes of the same stem, and hides numbered volume stems
+ * (`foo.00`) when an alias `foo` of the same molecule type exists (plus any explicit
+ * `hiddenComponents` keys `${kind}:${stem}` learned from alias `DBLIST` lines).
+ */
+export function discoverBlastDatabaseNames(
+  fileNames: readonly string[],
+  hiddenComponents?: ReadonlySet<string>,
+): readonly BlastDbCandidate[] {
+  const byKey = new Map<string, { readonly name: string; readonly kind: SequenceKind; readonly entry: 'alias' | 'volume' }>();
+  const aliasStems = new Set<string>();
+
+  for (const name of fileNames) {
+    const classified = classifyBlastDbFile(name);
+    if (classified === undefined) continue;
+    const key = `${classified.kind}:${classified.stem}`;
+    if (classified.entry === 'alias') aliasStems.add(key);
+    const existing = byKey.get(key);
+    if (existing === undefined || (existing.entry === 'volume' && classified.entry === 'alias')) {
+      byKey.set(key, { name: classified.stem, kind: classified.kind, entry: classified.entry });
+    }
+  }
+
+  const databases: BlastDbCandidate[] = [];
+  for (const [key, item] of byKey) {
+    if (item.entry === 'volume') {
+      if (hiddenComponents?.has(key)) continue;
+      const numbered = /^(.*)\.\d{2,}$/.exec(item.name);
+      if (numbered !== null && aliasStems.has(`${item.kind}:${numbered[1]!}`)) continue;
+    }
+    databases.push(Object.freeze({ name: item.name, kind: item.kind, entry: item.entry }));
+  }
+
+  databases.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0));
+  return Object.freeze(databases);
+}
+
+const byShortestName = (a: BlastDbCandidate, b: BlastDbCandidate) => a.name.length - b.name.length || a.name.localeCompare(b.name);
+
+/**
+ * Picks the primary BLAST database name from a list of run-directory paths: an alias file
+ * (`.nal`/`.pal`) first, otherwise a volume (`.nin`/`.pin`), shortest name first.
+ */
+export function primaryBlastDbName(fileNames: readonly string[]): string | undefined {
+  const candidates = discoverBlastDatabaseNames(fileNames);
+  if (candidates.length === 0) return undefined;
+  const aliases = candidates.filter((db) => db.entry === 'alias').sort(byShortestName);
+  if (aliases.length > 0) return aliases[0]!.name;
+  return [...candidates].sort(byShortestName)[0]!.name;
+}
+
+/**
+ * Discovers valid BLAST databases (`.nal`/`.pal`, `.nin`/`.pin`, multi-volume sets) from picked
+ * files. Reads only tiny `.nal`/`.pal` alias text files; binary volume files are never read into memory.
  */
 export async function discoverBlastDatabases(picked: readonly File[]): Promise<BlastDbDiscovery> {
-  const seenPaths = new Set<string>();
-  const files: DirectoryFile[] = [];
+  const builder = new RunDirectoryBuilder();
+  const filesByName = new Map<string, File>();
   let totalBytes = 0;
   let folder: string | undefined;
   let allShareFolder = picked.length > 0;
 
   for (const file of picked) {
-    const path = relativeFilePath(file);
-    if (path === undefined || seenPaths.has(path)) continue;
-    seenPaths.add(path);
-    files.push({ name: path, file });
+    const path = pickedFilePath(file);
+    if (path === undefined) continue;
+    if (builder.has(path)) {
+      builder.add(path, file);
+      continue;
+    }
+    builder.add(path, file);
+    filesByName.set(path, file);
     totalBytes += file.size;
     const slash = path.indexOf('/');
     if (slash > 0) {
@@ -172,59 +310,23 @@ export async function discoverBlastDatabases(picked: readonly File[]): Promise<B
   }
   if (!allShareFolder) folder = undefined;
 
-  // Detect auxiliary taxonomy files anywhere in the pick.
-  const basenames = new Set(files.map((entry) => baseName(entry.name)));
-  const taxdb = basenames.has(TAXDB_INDEX_FILE) && basenames.has(TAXDB_DATA_FILE);
-  const sqlite = basenames.has(TAXONOMY_SQLITE_FILE);
-
-  // Collect `.nal`, `.nin`, `.pal`, `.pin` entries (case-sensitive, matching NCBI FindBlastDBs).
-  interface RawEntry {
-    readonly name: string;
-    readonly kind: SequenceKind;
-    readonly entry: 'alias' | 'volume';
-    readonly file: Blob;
-  }
-  const byKey = new Map<string, RawEntry>();
-  for (const entry of files) {
-    const ext = entry.name.length > 4 ? entry.name.slice(-4) : '';
-    let kind: SequenceKind | undefined;
-    let kindEntry: 'alias' | 'volume' | undefined;
-    if (ext === '.nal') {
-      kind = 'nucleotide';
-      kindEntry = 'alias';
-    } else if (ext === '.nin') {
-      kind = 'nucleotide';
-      kindEntry = 'volume';
-    } else if (ext === '.pal') {
-      kind = 'protein';
-      kindEntry = 'alias';
-    } else if (ext === '.pin') {
-      kind = 'protein';
-      kindEntry = 'volume';
-    }
-    if (kind === undefined || kindEntry === undefined) continue;
-    const stem = entry.name.slice(0, -4);
-    const key = `${kind}:${stem}`;
-    const existing = byKey.get(key);
-    // Prefer alias over index when both exist for the same stem.
-    if (existing === undefined || (existing.entry === 'volume' && kindEntry === 'alias')) {
-      byKey.set(key, { name: stem, kind, entry: kindEntry, file: entry.file });
-    }
-  }
+  const files = builder.build();
+  const names = files.map((entry) => entry.name);
+  const initial = discoverBlastDatabaseNames(names);
 
   // Read alias metadata (`TITLE`, `DBLIST`) to hide component volumes of multi-volume aliases.
   const aliasMeta = new Map<string, { readonly title?: string; readonly dblist: readonly string[] }>();
   const hiddenComponents = new Set<string>();
-  const aliasStems = new Set<string>();
 
-  for (const [key, item] of byKey) {
+  for (const item of initial) {
     if (item.entry !== 'alias') continue;
-    aliasStems.add(key);
-    if (item.file.size > MAX_ALIAS_BYTES) continue;
+    const ext = item.kind === 'nucleotide' ? '.nal' : '.pal';
+    const aliasFile = filesByName.get(`${item.name}${ext}`);
+    if (aliasFile === undefined || aliasFile.size > MAX_ALIAS_BYTES) continue;
     try {
-      const text = await item.file.text();
+      const text = await aliasFile.text();
       const meta = parseAliasMetadata(text);
-      aliasMeta.set(key, meta);
+      aliasMeta.set(`${item.kind}:${item.name}`, meta);
       const dir = parentDir(item.name);
       for (const token of meta.dblist) {
         hiddenComponents.add(`${item.kind}:${token}`);
@@ -235,34 +337,49 @@ export async function discoverBlastDatabases(picked: readonly File[]): Promise<B
     }
   }
 
-  const databases: BlastDbCandidate[] = [];
-  for (const [key, item] of byKey) {
-    if (item.entry === 'volume') {
-      if (hiddenComponents.has(key)) continue;
-      // Also hide numbered volume stems (`foo.00`) when an alias `foo` of the same molecule type exists.
-      const numbered = /^(.*)\.\d{2,}$/.exec(item.name);
-      if (numbered !== null && aliasStems.has(`${item.kind}:${numbered[1]!}`)) continue;
-    }
-    const meta = aliasMeta.get(key);
-    databases.push(
-      Object.freeze({
-        name: item.name,
-        kind: item.kind,
-        entry: item.entry,
-        ...(meta?.title === undefined ? {} : { title: meta.title }),
-        ...(meta !== undefined && meta.dblist.length > 0 ? { volumes: Object.freeze([...meta.dblist]) } : {}),
-      }),
-    );
-  }
-
-  databases.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0));
+  const databases = discoverBlastDatabaseNames(names, hiddenComponents).map((item) => {
+    const meta = aliasMeta.get(`${item.kind}:${item.name}`);
+    if (meta === undefined) return item;
+    return Object.freeze({
+      ...item,
+      ...(meta.title === undefined ? {} : { title: meta.title }),
+      ...(meta.dblist.length > 0 ? { volumes: Object.freeze([...meta.dblist]) } : {}),
+    });
+  });
 
   return Object.freeze({
     ...(folder === undefined ? {} : { folder }),
     databases: Object.freeze(databases),
-    files: Object.freeze(files),
+    files,
     totalBytes,
-    taxonomy: Object.freeze({ taxdb, sqlite }),
+  });
+}
+
+/**
+ * Auxiliary taxonomy files (`taxdb.bti`, `taxdb.btd`, `taxonomy4blast.sqlite3`) present in the
+ * selected database's own folder (never from unrelated sibling subfolders).
+ */
+export function databaseTaxonomy(discovery: BlastDbDiscovery, selectedName: string): BlastDbTaxonomy {
+  const dbDir = parentDir(selectedName);
+  const byName = new Map(discovery.files.map((entry) => [entry.name, entry]));
+  const present: DirectoryFile[] = [];
+  let hasBti = false;
+  let hasBtd = false;
+  let hasSqlite = false;
+
+  for (const aux of AUX_TAXONOMY_FILES) {
+    const entry = byName.get(joinPath(dbDir, aux));
+    if (entry === undefined) continue;
+    present.push(entry);
+    if (aux === TAXDB_INDEX_FILE) hasBti = true;
+    else if (aux === TAXDB_DATA_FILE) hasBtd = true;
+    else if (aux === TAXONOMY_SQLITE_FILE) hasSqlite = true;
+  }
+
+  return Object.freeze({
+    taxdb: hasBti && hasBtd,
+    sqlite: hasSqlite,
+    files: Object.freeze(present),
   });
 }
 
@@ -289,65 +406,51 @@ export function noMatchingDatabaseMessage(discovery: BlastDbDiscovery, kind: Seq
 }
 
 /**
- * Builds the deduplicated `DirectoryFile[]` mounted into `RunDirectory` for a search run:
+ * Builds the `DirectoryFile[]` mounted into `RunDirectory` for a search run:
  * - all picked files of the subject DB (with `taxdb.bti`, `taxdb.btd`, `taxonomy4blast.sqlite3`
- *   also mounted at root so NCBI's `SeqDB_ResolveDbPath` finds them in `/work`)
+ *   from the selected DB's own folder also mounted at root so NCBI's `SeqDB_ResolveDbPath` finds
+ *   them in `/work`, recording `blastdbEnv` so CLI reproduction commands prepend `BLASTDB=<dir>`)
  * - all picked files of BLASTN's `-filtering_db` repeats DB
  * - all picked DB filter list files (`-seqidlist`, `-taxidlist`, etc.), mounted at root by `file.name`
  *
- * Prevents duplicate paths and file-vs-directory collisions that `RunDirectory.open` rejects.
+ * Refuses with `duplicateRunFileMessage` whenever two different files claim the same mount path
+ * or collide as file vs. directory. The exact same `File` chosen twice is mounted once.
  */
 export function assembleSearchDirectory(parts: {
   readonly subjectDb?: { readonly discovery: BlastDbDiscovery; readonly selectedName: string };
   readonly filterFiles?: Readonly<Record<string, File>>;
   readonly filteringDb?: { readonly discovery: BlastDbDiscovery; readonly selectedName: string };
-}): readonly DirectoryFile[] {
-  const entries = new Map<string, Blob>();
-  const directories = new Set<string>();
-
-  const parentPrefixes = (name: string): string[] => {
-    const segments = name.split('/');
-    const prefixes: string[] = [];
-    let prefix = '';
-    for (let i = 0; i < segments.length - 1; i++) {
-      prefix = prefix === '' ? segments[i]! : `${prefix}/${segments[i]!}`;
-      prefixes.push(prefix);
-    }
-    return prefixes;
-  };
-
-  const canAdd = (name: string): boolean => !directories.has(name) && !parentPrefixes(name).some((prefix) => entries.has(prefix));
-
-  const add = (name: string, file: Blob, overwrite = false): void => {
-    if (!overwrite && entries.has(name)) return;
-    if (!canAdd(name)) return;
-    entries.set(name, file);
-    for (const prefix of parentPrefixes(name)) directories.add(prefix);
-  };
+}): AssembledSearchDirectory {
+  const builder = new RunDirectoryBuilder();
+  let blastdbEnv: string | undefined;
 
   if (parts.subjectDb !== undefined) {
-    for (const entry of parts.subjectDb.discovery.files) add(entry.name, entry.file);
-    // Alias auxiliary taxonomy files to root (`/work`) so `SeqDB_ResolveDbPath` resolves them
-    // without needing BLASTDB set. Prefer files in the selected DB's directory, then anywhere in the pick.
+    for (const entry of parts.subjectDb.discovery.files) builder.add(entry.name, entry.file);
+    // Alias auxiliary taxonomy files from the selected DB's own folder to root (`/work`)
+    // so `SeqDB_ResolveDbPath` resolves them as `BLASTDB=<dbDir>` does on the CLI.
     const dbDir = parentDir(parts.subjectDb.selectedName);
-    for (const aux of AUX_TAXONOMY_FILES) {
-      if (entries.has(aux)) continue;
-      const inDbDir = dbDir === '' ? undefined : parts.subjectDb.discovery.files.find((entry) => entry.name === `${dbDir}/${aux}`);
-      const anywhere = inDbDir ?? parts.subjectDb.discovery.files.find((entry) => baseName(entry.name) === aux);
-      if (anywhere !== undefined) add(aux, anywhere.file);
+    if (dbDir !== '') {
+      const tax = databaseTaxonomy(parts.subjectDb.discovery, parts.subjectDb.selectedName);
+      for (const entry of tax.files) {
+        const auxName = entry.name.slice(dbDir.length + 1);
+        builder.add(auxName, entry.file);
+        blastdbEnv = dbDir;
+      }
     }
   }
 
   if (parts.filteringDb !== undefined) {
-    for (const entry of parts.filteringDb.discovery.files) add(entry.name, entry.file);
+    for (const entry of parts.filteringDb.discovery.files) builder.add(entry.name, entry.file);
   }
 
   if (parts.filterFiles !== undefined) {
     for (const file of Object.values(parts.filterFiles)) {
-      const path = relativeFilePath(file);
-      if (path !== undefined) add(file.name, file, true);
+      const name = normalizeRunPath(file.name);
+      if (name === undefined) throw new Error(`Invalid file name: "${file.name}".`);
+      builder.add(name, file);
     }
   }
 
-  return Object.freeze([...entries.entries()].map(([name, file]) => Object.freeze({ name, file })));
+  const files = builder.build();
+  return Object.freeze(blastdbEnv === undefined ? { files } : { files, blastdbEnv });
 }

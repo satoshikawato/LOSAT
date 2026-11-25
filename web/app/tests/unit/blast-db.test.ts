@@ -6,12 +6,17 @@ import { holdsInputs, SearchDraft } from '../../src/application/draft';
 import { ResultsBrowser } from '../../src/application/results';
 import {
   assembleSearchDirectory,
+  databaseTaxonomy,
+  discoverBlastDatabaseNames,
   discoverBlastDatabases,
+  duplicateRunFileMessage,
   FILTERING_DB_FLAG,
   matchingDatabases,
   noMatchingDatabaseMessage,
+  normalizeRunPath,
   parseAliasMetadata,
-  relativeFilePath,
+  pickedFilePath,
+  primaryBlastDbName,
 } from '../../src/domain/blast-db';
 import { hspTable } from '../../src/domain/hsp-table';
 import { approvedExceptions } from '../../src/domain/verification';
@@ -45,12 +50,24 @@ function memoryStore(initial: Partial<Record<DatabaseSlot, RememberedDatabase>> 
 
 describe('blast-db domain discovery & directory assembly', () => {
   it('normalizes safe relative paths and rejects unsafe segments', () => {
-    expect(relativeFilePath(fileWithRelPath('mydb/nt.nin'))).toBe('mydb/nt.nin');
-    expect(relativeFilePath(fileWithRelPath('mydb\\sub\\nt.nin'))).toBe('mydb/sub/nt.nin');
-    expect(relativeFilePath(new File(['x'], 'plain.nin'))).toBe('plain.nin');
-    expect(relativeFilePath(fileWithRelPath('../escape.nin'))).toBeUndefined();
-    expect(relativeFilePath(fileWithRelPath('a/../b.nin'))).toBeUndefined();
-    expect(relativeFilePath(fileWithRelPath('bad\0name.nin'))).toBeUndefined();
+    expect(pickedFilePath(fileWithRelPath('mydb/nt.nin'))).toBe('mydb/nt.nin');
+    expect(pickedFilePath(fileWithRelPath('mydb\\sub\\nt.nin'))).toBe('mydb/sub/nt.nin');
+    expect(pickedFilePath(new File(['x'], 'plain.nin'))).toBe('plain.nin');
+    expect(normalizeRunPath('./sub/nt.nin')).toBe('sub/nt.nin');
+    expect(normalizeRunPath('/leading/nt.nin')).toBe('leading/nt.nin');
+    expect(pickedFilePath(fileWithRelPath('../escape.nin'))).toBeUndefined();
+    expect(pickedFilePath(fileWithRelPath('a/../b.nin'))).toBeUndefined();
+    expect(pickedFilePath(fileWithRelPath('a/./b.nin'))).toBeUndefined();
+    expect(pickedFilePath(fileWithRelPath('bad\0name.nin'))).toBeUndefined();
+  });
+
+  it('uses case-sensitive NCBI FindBlastDBs extensions in sync discovery and primaryBlastDbName', () => {
+    expect(discoverBlastDatabaseNames(['db/nt.nin', 'db/NT.NIN', 'db/prot.pin', 'db/PROT.PIN'])).toEqual([
+      { name: 'db/nt', kind: 'nucleotide', entry: 'volume' },
+      { name: 'db/prot', kind: 'protein', entry: 'volume' },
+    ]);
+    expect(primaryBlastDbName(['db/vol.00.nin', 'db/vol.01.nin', 'db/all.nal'])).toBe('db/all');
+    expect(primaryBlastDbName(['db/ONLY.NIN'])).toBeUndefined();
   });
 
   it('parses TITLE and quoted/unquoted DBLIST from alias files', () => {
@@ -58,7 +75,7 @@ describe('blast-db domain discovery & directory assembly', () => {
     expect(meta).toEqual({ title: 'Test Multi Volume DB', dblist: ['vol 00', 'vol_01'] });
   });
 
-  it('discovers single-volume, multi-volume aliases, molecule types, and taxonomy aux files without reading binary volumes', async () => {
+  it('discovers single-volume, multi-volume aliases, molecule types, and folder-scoped taxonomy aux files without reading binary volumes', async () => {
     let nsqReads = 0;
     const nsq = fileWithRelPath('dbdir/multi.00.nsq', 'BINARY');
     nsq.text = () => {
@@ -84,7 +101,7 @@ describe('blast-db domain discovery & directory assembly', () => {
     const discovery = await discoverBlastDatabases(files);
     expect(nsqReads).toBe(0);
     expect(discovery.folder).toBe('dbdir');
-    expect(discovery.taxonomy).toEqual({ taxdb: true, sqlite: true });
+    expect(databaseTaxonomy(discovery, 'dbdir/multi')).toMatchObject({ taxdb: true, sqlite: true });
     expect(discovery.databases).toEqual([
       { name: 'dbdir/multi', kind: 'nucleotide', entry: 'alias', title: 'Multi Nuc', volumes: ['multi.00', 'multi.01'] },
       { name: 'dbdir/prot', kind: 'protein', entry: 'volume' },
@@ -105,7 +122,7 @@ describe('blast-db domain discovery & directory assembly', () => {
     );
   });
 
-  it('mounts DB files, root aliases for taxdb/taxonomy4blast.sqlite3, filter lists by name, and deduplicates shared folders', async () => {
+  it('mounts DB files, root aliases for selected-folder taxonomy files with blastdbEnv, filter lists by name, and deduplicates identical Files', async () => {
     const dbFiles = [
       fileWithRelPath('mydb/nt.nin', 'nin'),
       fileWithRelPath('mydb/nt.nhr', 'nhr'),
@@ -117,12 +134,13 @@ describe('blast-db domain discovery & directory assembly', () => {
     const discovery = await discoverBlastDatabases(dbFiles);
     const seqidList = new File(['seq1\n'], 'keep.ids', { type: 'text/plain' });
 
-    const mounted = assembleSearchDirectory({
+    const assembled = assembleSearchDirectory({
       subjectDb: { discovery, selectedName: 'mydb/nt' },
       filteringDb: { discovery, selectedName: 'mydb/nt' },
-      filterFiles: { '-seqidlist': seqidList },
+      filterFiles: { '-seqidlist': seqidList, '-negative_seqidlist': seqidList },
     });
-    const names = mounted.map((entry) => entry.name).sort();
+    expect(assembled.blastdbEnv).toBe('mydb');
+    const names = assembled.files.map((entry) => entry.name).sort();
     expect(names).toEqual([
       'keep.ids',
       'mydb/nt.nhr',
@@ -135,6 +153,63 @@ describe('blast-db domain discovery & directory assembly', () => {
       'taxdb.bti',
       'taxonomy4blast.sqlite3',
     ]);
+  });
+
+  it('aliases taxonomy files ONLY from the selected DB folder and omits blastdbEnv for root picks or folders without taxonomy files (F1)', async () => {
+    const nested = await discoverBlastDatabases([
+      fileWithRelPath('root/subA/a.pin', 'a'),
+      fileWithRelPath('root/subB/b.pin', 'b'),
+      fileWithRelPath('root/subB/taxdb.bti', 'bti'),
+      fileWithRelPath('root/subB/taxdb.btd', 'btd'),
+      fileWithRelPath('root/subB/taxonomy4blast.sqlite3', 'sql'),
+    ]);
+    // Selecting subA/a must NOT pick up subB's taxonomy files.
+    const forA = assembleSearchDirectory({ subjectDb: { discovery: nested, selectedName: 'root/subA/a' } });
+    expect(forA.blastdbEnv).toBeUndefined();
+    expect(forA.files.some((f) => f.name === 'taxonomy4blast.sqlite3' || f.name === 'taxdb.bti')).toBe(false);
+    expect(databaseTaxonomy(nested, 'root/subA/a')).toMatchObject({ taxdb: false, sqlite: false });
+
+    // Selecting subB/b aliases subB's taxonomy files to root and sets blastdbEnv = 'root/subB'.
+    const forB = assembleSearchDirectory({ subjectDb: { discovery: nested, selectedName: 'root/subB/b' } });
+    expect(forB.blastdbEnv).toBe('root/subB');
+    expect(forB.files.map((f) => f.name)).toEqual(
+      expect.arrayContaining(['taxdb.bti', 'taxdb.btd', 'taxonomy4blast.sqlite3']),
+    );
+
+    // Multi-file root pick already has taxonomy files at root, so blastdbEnv is omitted.
+    const rootPick = await discoverBlastDatabases([
+      new File(['p'], 'tfp.pin'),
+      new File(['s'], 'taxonomy4blast.sqlite3'),
+    ]);
+    const forRoot = assembleSearchDirectory({ subjectDb: { discovery: rootPick, selectedName: 'tfp' } });
+    expect(forRoot.blastdbEnv).toBeUndefined();
+  });
+
+  it('refuses when two different files claim the same mount path (F2)', async () => {
+    const db = await discoverBlastDatabases([fileWithRelPath('mydb/nt.nin', 'nin')]);
+    const subjectDb = { discovery: db, selectedName: 'mydb/nt' };
+    const listA = new File(['seq1\n'], 'ids.txt');
+    const listB = new File(['seq2\n'], 'ids.txt');
+    const expectDup = (fn: () => unknown, name: string) => expect(fn).toThrow(duplicateRunFileMessage(name));
+
+    expectDup(
+      () => assembleSearchDirectory({ subjectDb, filterFiles: { '-seqidlist': listA, '-negative_seqidlist': listB } }),
+      'ids.txt',
+    );
+
+    // Filter file colliding with a multi-file root DB file.
+    const flatDb = await discoverBlastDatabases([new File(['nin'], 'nt.nin'), new File(['old'], 'ids.txt')]);
+    expectDup(
+      () => assembleSearchDirectory({ subjectDb: { discovery: flatDb, selectedName: 'nt' }, filterFiles: { '-seqidlist': listA } }),
+      'ids.txt',
+    );
+
+    // -db and -filtering_db having the same path with different File objects.
+    const otherDb = await discoverBlastDatabases([fileWithRelPath('mydb/nt.nin', 'different')]);
+    expectDup(
+      () => assembleSearchDirectory({ subjectDb, filteringDb: { discovery: otherDb, selectedName: 'mydb/nt' } }),
+      'mydb/nt.nin',
+    );
   });
 });
 
@@ -203,7 +278,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
   const pasteQuery = (draft: SearchDraft) => draft.setPaste('query', '>q1\nACGTACGTACGTACGTACGTACGT\n');
   const expectReady = (draft: SearchDraft) => expect(draft.readiness()).toBeUndefined();
 
-  it('runs a local -db search with filter list files, mounts directory read-only, omits FASTA subject, and reads subjectLength in ResultsBrowser', async () => {
+  it('runs a local -db search with filter list files, mounts directory read-only, records blastdbEnv, omits FASTA subject, and reads subjectLength in ResultsBrowser', async () => {
     const memory = memoryStore();
     const { draft, coordinator, results, runCalls } = setup(memory);
     pasteQuery(draft);
@@ -228,6 +303,9 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expect(submitted.ok).toBe(true);
     const runId = submitted.runIds![0]!;
     await waitCompleted(coordinator, runId);
+
+    const runView = coordinator.state.get().runs.find((r) => r.snapshot.runId === runId)!;
+    expect(runView.snapshot.kind !== 'tool' && runView.snapshot.database?.blastdbEnv).toBe('nucdb');
 
     expect(runCalls).toHaveLength(1);
     const req = runCalls[0]!;
@@ -254,6 +332,82 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expect(rs.subjects.length).toBeGreaterThan(0);
     expect(rs.subjects[0]!.length).toBe(500);
     expect(rs.subjects[0]!.recordId).toBe('db_seq_1');
+  });
+
+  it('refuses submit when two filter list flags pick different files with the same name (F2)', async () => {
+    const { draft } = setup();
+    pasteQuery(draft);
+    draft.setSubjectSource('database');
+    await draft.setSubjectDatabaseFiles([fileWithRelPath('nucdb/nt.nin', 'nin')]);
+    draft.setDatabaseFilterFile('-seqidlist', new File(['s1\n'], 'ids.txt'));
+    draft.setDatabaseFilterFile('-negative_seqidlist', new File(['s2\n'], 'ids.txt'));
+    await draft.idle();
+
+    expect(draft.readiness()).toBe(duplicateRunFileMessage('ids.txt'));
+    const submitted = await draft.submit();
+    expect(submitted).toEqual({ ok: false, message: duplicateRunFileMessage('ids.txt') });
+  });
+
+  it('writes -filtering_db explicitly to BLASTN when the user switches program during folder scan (F4)', async () => {
+    const { draft, coordinator, runCalls } = setup();
+    pasteQuery(draft);
+    draft.setPaste('subject', '>s1\nACGTACGTACGTACGTACGTACGT\n');
+
+    let resolveAlias!: (text: string) => void;
+    const delayedAlias = fileWithRelPath('rep/repeats.nal', 'TITLE Delayed\nDBLIST repeats.00\n');
+    delayedAlias.text = () =>
+      new Promise<string>((resolve) => {
+        resolveAlias = resolve;
+      });
+    const vol = fileWithRelPath('rep/repeats.00.nin', 'nin');
+
+    const scanPromise = draft.setFilteringDbFiles([delayedAlias, vol]);
+    // Switch to BLASTP while the repeats DB alias is still being read.
+    draft.setProgram('blastp');
+    resolveAlias('TITLE Delayed\nDBLIST repeats.00\n');
+    await scanPromise;
+
+    expect(draft.state.get().values.blastp[FILTERING_DB_FLAG]).toBeUndefined();
+    expect(draft.state.get().values.blastn[FILTERING_DB_FLAG]).toBe('rep/repeats');
+
+    // Switching back to BLASTN must allow Run immediately.
+    draft.setProgram('blastn');
+    await draft.idle();
+    expectReady(draft);
+    const submitted = await draft.submit();
+    expect(submitted.ok).toBe(true);
+    await waitCompleted(coordinator, submitted.runIds![0]!);
+    expect(runCalls[0]!.argv).toContain('-filtering_db');
+    expect(runCalls[0]!.argv).toContain('rep/repeats');
+  });
+
+  it('clears remembered subject DB when switching back to FASTA or loading an example so reload opens in FASTA mode (F5)', async () => {
+    const memory = memoryStore();
+    const { draft } = setup(memory);
+    const expectReloadedFasta = async () => {
+      expect(memory.data.subject).toBeUndefined();
+      const fresh = setup(memory).draft;
+      await fresh.idle();
+      expect(fresh.state.get().subjectSource).toBe('fasta');
+      expect(fresh.state.get().database.remembered).toBeUndefined();
+    };
+    const nucFile = fileWithRelPath('nucdb/nt.nin', 'nin');
+    const remembered = { name: 'nucdb/nt', folder: 'nucdb' };
+
+    draft.setSubjectSource('database');
+    await draft.setSubjectDatabaseFiles([nucFile]);
+    await draft.idle();
+    expect(memory.data.subject).toEqual(remembered);
+
+    // Switch back to FASTA -> memory clears -> a fresh draft (simulating reload) opens in FASTA mode.
+    draft.setSubjectSource('fasta');
+    await expectReloadedFasta();
+
+    // Also verify useExample clears remembered subject DB.
+    draft.setSubjectSource('database');
+    expect(memory.data.subject).toStrictEqual(remembered);
+    draft.useExample('ecoli-k12-genome', '>q\nACGT\n', new File(['>s\nACGT\n'], 'subject.fa'));
+    await expectReloadedFasta();
   });
 
   it('re-validates molecule type on program switch and restores reload prompt from DatabaseMemory', async () => {

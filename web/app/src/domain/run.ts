@@ -104,6 +104,8 @@ export interface DatabaseSnapshot {
   readonly totalBytes: number;
   readonly taxdb: boolean;
   readonly sqlite: boolean;
+  /** Relative database folder whose taxonomy files were mounted at the run directory root (`BLASTDB=<dir>` on CLI). */
+  readonly blastdbEnv?: string;
   readonly filterFiles?: readonly DatabaseFilterFileSnapshot[];
 }
 

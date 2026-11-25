@@ -7,7 +7,7 @@
 import { computed, ref, useId } from 'vue';
 import type { SequenceKind } from 'losat/domain';
 import type { DatabasePickDraft } from '../application/draft';
-import { matchingDatabases, noMatchingDatabaseMessage } from '../domain/blast-db';
+import { databaseTaxonomy, matchingDatabases, noMatchingDatabaseMessage } from '../domain/blast-db';
 import { formatBytes } from './format';
 import LosatLoader from './LosatLoader.vue';
 
@@ -41,8 +41,8 @@ const mismatch = computed(() =>
     : undefined,
 );
 const taxonomySummary = computed(() => {
-  const tax = discovery.value?.taxonomy;
-  if (tax === undefined) return '';
+  if (discovery.value === undefined || selected.value === undefined) return '';
+  const tax = databaseTaxonomy(discovery.value, selected.value.name);
   const parts: string[] = [];
   if (tax.taxdb) parts.push('taxdb');
   if (tax.sqlite) parts.push('taxonomy4blast.sqlite3');

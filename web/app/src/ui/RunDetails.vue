@@ -7,7 +7,7 @@ import { computed } from 'vue';
 import { CUSTOM_OUTPUT } from 'losat/domain';
 import type { RunView } from '../application/coordinator';
 import { optionGrammar, type LoadedRun } from '../application/results';
-import { commandWords, userArgv } from '../domain/argv';
+import { commandWords, shellWord, userArgv } from '../domain/argv';
 import { COUNTS_FILE } from '../domain/counts';
 import { dateOf } from '../domain/download-sentences';
 import { fromText, worthSaying } from '../domain/input-parts';
@@ -30,6 +30,9 @@ const record = computed(() => props.run.record);
  */
 const searched = computed(() => props.run.snapshot.prints === undefined);
 const takesValue = computed(() => optionGrammar(props.loaded.description).takesValue);
+const commandEnv = computed(() =>
+  snapshot.value.database?.blastdbEnv ? { blastdb: snapshot.value.database.blastdbEnv } : undefined,
+);
 /** The -outfmt value of the output of the run's own -outfmt, if it has one. */
 const custom = computed(() => customOutfmt(snapshot.value.argv));
 /** A time in ISO 8601 form, local time (S13 screen review L5: "09/10/2026" read either way). */
@@ -99,6 +102,12 @@ const inputs = computed(() => [
             >,
               {{ [snapshot.database.taxdb ? 'taxdb' : '', snapshot.database.sqlite ? 'taxonomy4blast.sqlite3' : ''].filter(Boolean).join(' + ') }}</template
             >)
+            <template v-if="snapshot.database.blastdbEnv">
+              <br />
+              <span class="muted small" data-testid="run-database-blastdb">
+                CLI reproduction: run from the folder's parent with <code>{{ shellWord(`BLASTDB=${snapshot.database.blastdbEnv}`) }}</code>
+              </span>
+            </template>
             <template v-if="snapshot.database.filterFiles && snapshot.database.filterFiles.length > 0">
               <br />
               <span class="muted small" data-testid="run-database-filters">
@@ -190,10 +199,10 @@ const inputs = computed(() => [
       <h3>Command line</h3>
       <ul class="commands">
         <li v-for="format in loaded.description.formats" :key="format">
-          outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :words="commandWords(snapshot.argv, format)" :takes-value="takesValue" /></code>
+          outfmt {{ format }}: <code :data-testid="`run-command-${format}`"><CommandText :words="commandWords(snapshot.argv, format, commandEnv)" :takes-value="takesValue" /></code>
         </li>
         <li v-if="custom !== undefined">
-          outfmt {{ custom }}: <code data-testid="run-command-custom"><CommandText :words="commandWords(snapshot.argv, CUSTOM_OUTPUT)" :takes-value="takesValue" /></code>
+          outfmt {{ custom }}: <code data-testid="run-command-custom"><CommandText :words="commandWords(snapshot.argv, CUSTOM_OUTPUT, commandEnv)" :takes-value="takesValue" /></code>
         </li>
       </ul>
     </template>

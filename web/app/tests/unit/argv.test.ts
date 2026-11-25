@@ -256,6 +256,34 @@ describe('toShellCommand', () => {
     expect(toShellCommand(['blastp', '-outfmt=+014 x'], CUSTOM_OUTPUT)).toBe("losat blastp '-outfmt=+014 x' -out results");
     expect(toShellCommand(['blastp', '-outfmt', '14'], 6)).toBe('losat blastp -outfmt 6');
   });
+
+  it('prepends BLASTDB=<dir> when a folder-picked database mounted taxonomy files at root (F1)', () => {
+    const argv = ['blastp', '-query', 'q.faa', '-db', 'protdb/tfp', '-taxids', '40674'];
+    expect(commandWords(argv, 6, { blastdb: 'protdb' })).toEqual([
+      'BLASTDB=protdb',
+      'losat',
+      'blastp',
+      '-query',
+      'q.faa',
+      '-db',
+      'protdb/tfp',
+      '-taxids',
+      '40674',
+      '-outfmt',
+      '6',
+    ]);
+    expect(toShellCommand(argv, 6, { blastdb: 'protdb' })).toBe(
+      'BLASTDB=protdb losat blastp -query q.faa -db protdb/tfp -taxids 40674 -outfmt 6',
+    );
+    const spaced = toShellCommand(['blastp', '-query', 'q.faa', '-db', 'my db/tfp'], 6, { blastdb: 'my db' });
+    expect(spaced).toBe("BLASTDB='my db' losat blastp -query q.faa -db 'my db/tfp' -outfmt 6");
+    expect(splitOptions(spaced)).toEqual(['BLASTDB=my db', 'losat', 'blastp', '-query', 'q.faa', '-db', 'my db/tfp', '-outfmt', '6']);
+    expect(
+      optionNames(commandWords(argv, 6, { blastdb: 'protdb' }), (flag) => flag === '-taxids')
+        .filter((part) => part.name)
+        .map((part) => part.text),
+    ).toEqual(['-query', '-db', '-taxids', '-outfmt']);
+  });
 });
 
 describe('optionValue', () => {

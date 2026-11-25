@@ -5,11 +5,12 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
+import { CUSTOM_OUTPUT } from 'losat/domain';
 import { axeViolations } from './support/axe';
 import { ENGINE, NO_ENGINE_REASON } from './support/engine';
 import { REPOSITORY } from './support/harness-server';
 import { NATIVE, NO_NATIVE_REASON } from './support/native';
-import { openParameters, openSearch, paste, program, result, submit, waitStatus } from './support/search';
+import { chooseRun, openParameters, openSearch, paste, program, result, submit, waitStatus } from './support/search';
 import { test } from './support/test';
 
 const LOSAT = join(REPOSITORY, 'LOSAT');
@@ -188,12 +189,13 @@ test.describe('real engine byte-parity for -db, filter lists, taxonomy, and BLAS
       }
 
       // 2. Protein -db + -seqidlist + -negative_seqidlist + taxonomy4blast.sqlite3 + taxdb (`blastp` against `taxfilter/tfp`)
+      // Use `seqdb/taxdb/good/taxdb.{bti,btd}` so taxid 9606 resolves to "Homo sapiens" in `sscinames`.
       const protDir = join(work, 'protdb');
       const protFiles = copyMatching(join(LOSAT, 'tests/db_search/taxfilter'), protDir, (name) =>
         name.startsWith('tfp.') || name === 'taxonomy4blast.sqlite3',
       );
-      copyFileSync(join(LOSAT, 'tests/makembindex/in/taxt5/taxdb.bti'), join(protDir, 'taxdb.bti'));
-      copyFileSync(join(LOSAT, 'tests/makembindex/in/taxt5/taxdb.btd'), join(protDir, 'taxdb.btd'));
+      copyFileSync(join(LOSAT, 'tests/seqdb/taxdb/good/taxdb.bti'), join(protDir, 'taxdb.bti'));
+      copyFileSync(join(LOSAT, 'tests/seqdb/taxdb/good/taxdb.btd'), join(protDir, 'taxdb.btd'));
       protFiles.push(join(protDir, 'taxdb.bti'), join(protDir, 'taxdb.btd'));
 
       const protQueryPath = join(LOSAT, 'tests/db_search/taxfilter/q.faa');
@@ -217,7 +219,7 @@ test.describe('real engine byte-parity for -db, filter lists, taxonomy, and BLAS
       }
 
       // -seqidlist mounted by name
-      const slCopy = join(protDir, 'sl_tfp.txt');
+      const slCopy = join(work, 'sl_tfp.txt');
       copyFileSync(join(LOSAT, 'tests/db_search/seqidlist/sl_tfp.txt'), slCopy);
       await toggleDbFilters(page);
       await page.getByTestId('db-filter-seqidlist-input').setInputFiles(slCopy);
@@ -226,14 +228,14 @@ test.describe('real engine byte-parity for -db, filter lists, taxonomy, and BLAS
       {
         const { output, command } = await result(page, 3, 6);
         expect(command).toContain('-seqidlist sl_tfp.txt');
-        const expected = runNative(['blastp', '-query', protQueryPath, '-db', 'tfp', '-seqidlist', 'sl_tfp.txt'], protDir, 6, {
+        const expected = runNative(['blastp', '-query', protQueryPath, '-db', 'tfp', '-seqidlist', slCopy], protDir, 6, {
           BLASTDB: protDir,
         });
         expect(output, 'blastp -db -seqidlist outfmt 6').toBe(expected);
       }
 
       // -negative_seqidlist mounted by name
-      const negCopy = join(protDir, 'sl_tfp_neg.txt');
+      const negCopy = join(work, 'sl_tfp_neg.txt');
       copyFileSync(join(LOSAT, 'tests/db_search/seqidlist/sl_tfp_neg.txt'), negCopy);
       await page.getByTestId('db-filter-seqidlist-remove').click();
       await page.getByTestId('db-filter-negative_seqidlist-input').setInputFiles(negCopy);
@@ -243,7 +245,7 @@ test.describe('real engine byte-parity for -db, filter lists, taxonomy, and BLAS
         const { output, command } = await result(page, 4, 6);
         expect(command).toContain('-negative_seqidlist sl_tfp_neg.txt');
         const expected = runNative(
-          ['blastp', '-query', protQueryPath, '-db', 'tfp', '-negative_seqidlist', 'sl_tfp_neg.txt'],
+          ['blastp', '-query', protQueryPath, '-db', 'tfp', '-negative_seqidlist', negCopy],
           protDir,
           6,
           { BLASTDB: protDir },
@@ -251,19 +253,63 @@ test.describe('real engine byte-parity for -db, filter lists, taxonomy, and BLAS
         expect(output, 'blastp -db -negative_seqidlist outfmt 6').toBe(expected);
       }
 
-      // Taxonomy filter (-taxids 40674 Mammalia) expanded with taxonomy4blast.sqlite3 + taxdb in folder
+      // Taxonomy filter (-taxids 40674 Mammalia) + taxdb scientific names (`sscinames`):
+      // On Chromium, pick `protdb/` as a folder so `-db protdb/tfp` mounts taxonomy files at root
+      // and displays `BLASTDB=protdb losat ...`; compare against native run from parent (`work`) with `BLASTDB=protdb`.
+      // On other browsers, multi-file pick runs in `protDir` without needing `BLASTDB=`.
       await page.getByTestId('db-filter-negative_seqidlist-remove').click();
+      if (useFolderPick) {
+        await page.getByTestId('subject-db-folder-input').setInputFiles(protDir);
+        await expect(page.getByTestId('subject-db-selected')).toContainText('protdb/tfp');
+        await expect(page.getByTestId('subject-db-meta')).toContainText('taxdb, taxonomy4blast.sqlite3');
+      }
       await page.getByTestId('db-filter-taxids').fill('40674');
+      await openParameters(page);
+      await page.getByTestId('param-extra').fill("-outfmt '6 qseqid sseqid sscinames'");
       await submit(page);
       await waitStatus(page, 5, 'completed');
       {
+        const protDbArg = useFolderPick ? 'protdb/tfp' : 'tfp';
+        const protCwd = useFolderPick ? work : protDir;
+        const protEnv: Record<string, string> = useFolderPick ? { BLASTDB: 'protdb' } : {};
+        const cmdPrefix = useFolderPick ? 'BLASTDB=protdb losat blastp ' : 'losat blastp ';
+
         const { output, command } = await result(page, 5, 6);
+        expect(command.startsWith(cmdPrefix), `outfmt 6 command prefix: ${command}`).toBe(true);
+        expect(command).toContain(`-db ${protDbArg}`);
         expect(command).toContain('-taxids 40674');
-        const expected = runNative(['blastp', '-query', protQueryPath, '-db', 'tfp', '-taxids', '40674'], protDir, 6, {
-          BLASTDB: protDir,
-        });
-        expect(output, 'blastp -db -taxids 40674 with taxonomy4blast.sqlite3 outfmt 6').toBe(expected);
+        const expected6 = runNative(['blastp', '-query', protQueryPath, '-db', protDbArg, '-taxids', '40674'], protCwd, 6, protEnv);
+        expect(output, 'blastp -db -taxids 40674 with taxonomy4blast.sqlite3 outfmt 6').toBe(expected6);
+
+        // Verify custom `sscinames` output (uses taxdb.bti/taxdb.btd) and Run details BLASTDB note.
+        await chooseRun(page, 5);
+        await page.getByTestId('results-view-outputs').click();
+        await page.getByTestId('format-custom').click();
+        await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', `5:${CUSTOM_OUTPUT}`);
+        const customCmd = (await page.getByTestId('result-command').textContent()) ?? '';
+        const customOut = (await page.getByTestId('result-output').textContent()) ?? '';
+        expect(customCmd.startsWith(cmdPrefix), `custom command prefix: ${customCmd}`).toBe(true);
+        expect(customCmd).toContain(`-db ${protDbArg}`);
+        expect(customCmd).toContain('-taxids 40674');
+        expect(customCmd).toContain("-outfmt '6 qseqid sseqid sscinames'");
+        expect(customOut).toContain('Homo sapiens');
+        const expectedCustom = runNative(
+          ['blastp', '-query', protQueryPath, '-db', protDbArg, '-taxids', '40674'],
+          protCwd,
+          '6 qseqid sseqid sscinames',
+          protEnv,
+        );
+        expect(customOut, 'blastp -db -taxids 40674 sscinames').toBe(expectedCustom);
+
+        await page.getByTestId('results-view-details').click();
+        await expect(page.getByTestId('run-command-6')).toContainText(cmdPrefix);
+        await expect(page.getByTestId('run-command-custom')).toContainText(cmdPrefix);
+        if (useFolderPick) {
+          await expect(page.getByTestId('run-database-blastdb')).toContainText('BLASTDB=protdb');
+        }
+        await page.getByTestId('tab-search').click();
       }
+      await page.getByTestId('param-extra').fill('');
       await page.getByTestId('db-filter-taxids').fill('');
 
       // 3. BLASTN -filtering_db (`rpt_d4`) with `-db` (`wm_s60k`)

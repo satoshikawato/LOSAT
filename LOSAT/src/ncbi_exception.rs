@@ -171,6 +171,16 @@ impl NcbiException {
         self.site
     }
 
+    /// The place of the first throw of the chain (the oldest exception, which every rethrow
+    /// keeps as a predecessor): where the error came from.
+    pub(crate) fn first_site(&self) -> ThrowSite {
+        let mut first = self;
+        while let Some(predecessor) = first.predecessor.as_deref() {
+            first = predecessor;
+        }
+        first.site
+    }
+
     /// Whether the exception's class (the `C<class>` of `GetErrCodeString`'s `C<class>::e<code>`)
     /// is `class`: the class that a `catch` of NCBI's matches first (`CEofException`, which
     /// `NCBI_RETHROW_SAME` keeps).

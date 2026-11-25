@@ -4,29 +4,71 @@ use crate::report::serial::encoder::{NullElement, ReplacedChar, Stream, StreamPo
 
 #[test]
 fn read_error_to_run_error_maps_all_variants() {
+    let default_rv = ReadVerification::default();
     assert!(matches!(
-        read_error_to_run_error(ReadError::Eof, "PssmWithParameters", |w| w),
+        read_error_to_run_error(
+            ReadError::Eof,
+            "PssmWithParameters",
+            "a profile (-in)",
+            &default_rv,
+            |w| w,
+        ),
         RunError::Exception(msg) if msg == b" Frame type= eFrameNamed, Object type= PssmWithParameters"
     ));
     assert!(matches!(
-        read_error_to_run_error(ReadError::Eof, "Blast-def-line-set", |w| w),
+        read_error_to_run_error(
+            ReadError::Eof,
+            "Blast-def-line-set",
+            "binary definition lines (ASN1_BlastDefLine)",
+            &default_rv,
+            |w| w,
+        ),
         RunError::Exception(msg) if msg == b" Frame type= eFrameNamed, Object type= Blast-def-line-set"
     ));
     assert!(matches!(
         read_error_to_run_error(
             ReadError::Std("basic_string::_M_create"),
             "PssmWithParameters",
-            |w| w
+            "a profile (-in)",
+            &default_rv,
+            |w| w,
         ),
         RunError::Unknown
     ));
     assert!(matches!(
-        read_error_to_run_error(ReadError::OutOfMemory, "Blast-def-line-set", |w| w),
+        read_error_to_run_error(
+            ReadError::OutOfMemory,
+            "Blast-def-line-set",
+            "binary definition lines (ASN1_BlastDefLine)",
+            &default_rv,
+            |w| w,
+        ),
         RunError::Unknown
     ));
     assert!(matches!(
-        read_error_to_run_error(ReadError::Unsupported("too big".to_string()), "PssmWithParameters", |w| format!("ctx: {w}")),
+        read_error_to_run_error(
+            ReadError::Unsupported("too big".to_string()),
+            "PssmWithParameters",
+            "a profile (-in)",
+            &default_rv,
+            |w| format!("ctx: {w}"),
+        ),
         RunError::Refused(msg) if msg == "ctx: too big"
+    ));
+    let read_off = ReadVerification::of(Some(std::ffi::OsStr::new("NO")), None);
+    let expected = crate::ncbi_exception::NcbiException::new(
+        crate::report::serial::object_frame::EXPECTED_MEMBER,
+        "member seqid expected",
+    );
+    assert!(matches!(
+        read_error_to_run_error(
+            ReadError::Serial(expected),
+            "Blast-def-line-set",
+            "binary definition lines (ASN1_BlastDefLine)",
+            &read_off,
+            |w| w,
+        ),
+        RunError::Refused(msg) if msg.contains("SERIAL_VERIFY_DATA_READ=NO")
     ));
 }
 

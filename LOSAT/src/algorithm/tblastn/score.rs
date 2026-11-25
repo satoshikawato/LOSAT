@@ -72,6 +72,15 @@ pub(super) trait TbnScore: Copy + Send + Sync {
     /// What the thread keeps of a unit's gapped-alignment memory.
     fn kept_scratch(scratch: Self::Scratch) -> GapAlignScratch;
 
+    /// Score of concatenated query offset `q` against subject residue `s_letter` (`OneWord`).
+    fn residue_score(
+        self,
+        query_sequence: &[u8],
+        q: i32,
+        s_letter: u8,
+        matrix: ScoringMatrix,
+    ) -> i32;
+
     /// `BlastGetStartForGappedAlignment` of an ungapped HSP of `length` letters
     /// (blast_gapalign.c:3393-3439).
     fn gapped_start(
@@ -232,6 +241,17 @@ impl TbnScore for MatrixScore {
     #[inline(always)]
     fn kept_scratch(scratch: Self::Scratch) -> GapAlignScratch {
         scratch
+    }
+
+    #[inline(always)]
+    fn residue_score(
+        self,
+        query_sequence: &[u8],
+        q: i32,
+        s_letter: u8,
+        matrix: ScoringMatrix,
+    ) -> i32 {
+        crate::utils::matrix::protein_score_rows(matrix).score(query_sequence[q as usize], s_letter)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
@@ -464,6 +484,17 @@ impl<'a> TbnScore for PssmScore<'a> {
 
     fn kept_scratch(scratch: Self::Scratch) -> GapAlignScratch {
         scratch.0
+    }
+
+    #[inline(always)]
+    fn residue_score(
+        self,
+        _query_sequence: &[u8],
+        q_pos: i32,
+        s_res: u8,
+        _matrix: ScoringMatrix,
+    ) -> i32 {
+        self.0.row(q_pos as usize)[s_res as usize]
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3410-3420 (cited at

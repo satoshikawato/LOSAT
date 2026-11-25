@@ -2622,8 +2622,9 @@ alone (the Owner's answers Q1 = B and Q2 = B of M4b, PD-LOSAT-NCBI-DEFECTS excep
 `tail` and `near`, where NCBI writes an HSP once per seed past the part, hold NCBI's run of the near input `th2tn`
 (`hedge_tailn.asnt`: `t4` [1000, 1196), the fewest bases short of the end after which frames +1 to +3 each keep a
 letter after the mask; `nucl_t4n.fna` stores the 4 freed bases as `N`, so that they stay masked as LOSAT reads them);
-the other rows are NCBI's own, which equal its run of the near input there. Masks out of
-order (`unsorted`, `overlap`) are refused, as for the other programs.
+the other rows are NCBI's own, which equal its run of the near input there. Masks that overlap in
+start order (`overlap`, `th1.15`) are searched with NCBI's rows (M4b-3c part 2); masks stored out of
+the order of their start (`unsorted`, `th2.11`) stay refused.
 
 The review rows of PR 2 (2026-11-21; `db.tmask.*.te.*`, `*.tl.*`, `*.th1.*`, `*.tm5.*.w0.*`, `*.3f`, `*.1a`) read
 inputs written by `ncbi-parity-20261019/M/m4b/scripts3/gen_fix3.py` (seed 20261124): `edge.fna` (`e1`, 1,200 bases whose
@@ -2788,3 +2789,11 @@ makeblastdb -in in/nmix_ids.fna -dbtype nucl -parse_seqids -out db/nmix_ids
   reads of `-html`): `rep/.ncbirc` (`[BLASTFMTUTIL]` with `PROTOCOL=https:` twice, `Found multiple ... settings`) and
   `bom/.ncbirc` (the one byte 0xEF, the start of a UTF-8 byte order mark, `Error reading the registry after line 1`,
   survey T2's `bom` file).
+
+Rows `db.html.rps.*` and `db.html.rpstbn.*` (line RG T4c, 2026-11-24; `../db_search_manifest/rpsblast.html.tsv`,
+`rpstblastn.html.tsv`): `-html` in rpsblast and rpstblastn, with the `rc/` directories above,
+`../seqdb/taxdb/good`, `../fasta/rps` and the profile databases of `rps/`.
+`rps/hx.{phr,pin,pdb,pos}.gz` are the files of `rps_mini` built with profile 101 under `ref|XP_000101.1|` and a title that holds `<`, `>`, `&` and double
+quotes, profile 102 under `pdb|1ABC|A` and profile 103 under `gnl|CDD|103` with the entities `&amp;` and `&lt;b&gt;` in its title (`rps/build.sh`; its other
+files are the same as `rps_mini`'s), searched as `rps-gz:rps_mini!phr=hx.phr.gz!pin=hx.pin.gz!pdb=hx.pdb.gz!pos=hx.pos.gz`: the profile titles of an RPS
+database reach the links of NCBI's HTML formatter through a reader of their own.

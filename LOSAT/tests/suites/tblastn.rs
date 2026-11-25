@@ -8,6 +8,8 @@
 
 #[path = "../run_local_tblastn.rs"]
 mod run_local_tblastn;
+#[path = "../t_db_hard_overlap.rs"]
+mod t_db_hard_overlap;
 #[path = "../tblastn_batch_refusal.rs"]
 mod tblastn_batch_refusal;
 #[path = "../tblastn_batch_rule.rs"]

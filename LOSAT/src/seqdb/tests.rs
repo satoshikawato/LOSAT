@@ -1607,6 +1607,23 @@ fn a_record_holds_a_seqid_where_any_line_has_one() {
         path
     )
     .unwrap());
+    // A line without its mandatory `seqid` member (a title only; a title and then a taxid; no
+    // member) or with a member out of order fails NCBI's read check: the full read reports it,
+    // so the walk counts it as holding one, even after a line whose list is empty.
+    let title_only = [
+        0x30, 0x80, 0x30, 0x80, 0xa0, 0x80, 0x1a, 0x01, b't', 0, 0, 0, 0, 0, 0,
+    ];
+    assert!(holds_a_seqid(&title_only, path).unwrap());
+    assert!(holds_a_seqid(&set(&[&without, &title_only]), path).unwrap());
+    let title_taxid = [
+        0x30, 0x0c, 0x30, 0x0a, 0xa0, 0x03, 0x1a, 0x01, b't', 0xa2, 0x03, 0x02, 0x01, 0x07,
+    ];
+    assert!(holds_a_seqid(&title_taxid, path).unwrap());
+    assert!(holds_a_seqid(&[0x30, 0x02, 0x30, 0x00], path).unwrap());
+    let taxid_then_ids = [
+        0x30, 0x0b, 0x30, 0x09, 0xa2, 0x03, 0x02, 0x01, 0x07, 0xa1, 0x02, 0x30, 0x00,
+    ];
+    assert!(holds_a_seqid(&taxid_then_ids, path).unwrap());
     // An empty record is read as before; one cut short is the reader's error.
     assert!(holds_a_seqid(&[], path).unwrap());
     assert!(holds_a_seqid(&without[..without.len() - 4], path).is_err());
@@ -2429,6 +2446,85 @@ fn header_members_lengths_and_bytes() {
     ))
     .unwrap();
     assert_eq!(deflines[0].title, b"p10#last ## protein#");
+}
+
+// D3c-3d: a header record without its mandatory seqid, read under `SERIAL_VERIFY_DATA_READ`.
+// NCBI's default read throws "member seqid expected"; with the check off it posts the member as
+// missing and reads on, which LOSAT refuses at that read (`SeqDbError::Setting`), alone
+// (`read_header`, `defline_set`) and in a piece (`visit_sequence_headers`). The decoder of the
+// ordinal ids takes such a record for one of parsed Seq-ids under every setting, and its readers
+// then read the whole set (`Volume::decode_header`). The other variable, the values that keep the
+// check, and the other records read as before.
+#[test]
+fn unchecked_reads_of_a_record_without_its_seqid_are_refused() {
+    use crate::blastinput::ncbi_environment::ReadVerification;
+    use std::ffi::OsStr;
+    let dir = temp_dir("unchecked-reads");
+    copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
+    let path = dir.join("prot_v4.phr");
+    let mut bytes = std::fs::read(&path).unwrap();
+    // The first record, rewritten at its length with a longer title in place of the Seq-ids.
+    let first = defline_record(b"p01 first protein [Test organism]", &bl_ord_id(&[0]));
+    assert_eq!(&bytes[..first.len()], first.as_slice());
+    let title = first.len() - 14;
+    let mut record = vec![0x30, 0x80, 0x30, 0x80, 0xa0, 0x80, 0x1a, title as u8];
+    record.extend(std::iter::repeat_n(b't', title));
+    record.extend_from_slice(&[0; 6]);
+    bytes[..first.len()].copy_from_slice(&record);
+    std::fs::write(&path, bytes).unwrap();
+    let name = dir.join("prot_v4").display().to_string();
+    let setting = |read: &str, get: &str| {
+        ReadVerification::of(
+            (!read.is_empty()).then_some(OsStr::new(read)),
+            (!get.is_empty()).then_some(OsStr::new(get)),
+        )
+    };
+    for (read, get, refused) in [
+        ("", "", false),
+        ("YES", "", false),
+        ("ALWAYS", "NO", false),
+        ("NO", "", true),
+        ("defvalue", "YES", true),
+    ] {
+        let mut db = SeqDb::open(&name, SeqType::Protein).unwrap();
+        db.refuse_unchecked_reads(&setting(read, get));
+        let ordinal = db.deflines(0).unwrap_err();
+        assert!(ordinal.is_parsed_seqids(), "{read:?} {get:?}: {ordinal}");
+        let errors = [
+            db.read_header(0).unwrap_err(),
+            db.defline_set(0).unwrap_err(),
+        ];
+        let mut visited = Vec::new();
+        db.visit_sequence_headers(db.header_ranges(10)[0], |ordinal, header| {
+            visited.push((ordinal, header.map(|_| 1)));
+            true
+        });
+        for error in errors
+            .iter()
+            .chain(visited.iter().filter_map(|(_, r)| r.as_ref().err()))
+        {
+            match error {
+                SeqDbError::Setting(text) => {
+                    assert!(refused, "{read:?} {get:?}");
+                    assert_eq!(
+                        text,
+                        &format!(
+                            "the environment variable SERIAL_VERIFY_DATA_READ={read} with a database header record that lacks a mandatory member"
+                        )
+                    );
+                }
+                SeqDbError::Ncbi(exception) => {
+                    assert!(!refused, "{read:?} {get:?}");
+                    assert!(exception.get_msg().ends_with(b"member seqid expected"));
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(matches!(visited[0], (0, Err(_))));
+        assert!(visited[1..].iter().all(|(_, lines)| matches!(lines, Ok(1))));
+        assert_eq!(db.deflines(1).unwrap().len(), 1);
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// `expected/date_pairs.tsv`: the date NCBI's blastdbcmd reports for a database

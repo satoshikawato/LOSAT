@@ -2733,3 +2733,27 @@ fn use_index_parses_as_an_ncbi_boolean() {
     assert!(parse("blastp", &["-index_name", "x"]).is_err());
     assert!(parse("blastn", &["-index_name", "x"]).is_ok());
 }
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
+// NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:946
+#[test]
+fn native_error_exception_truncates_what_at_first_nul() {
+    let site = crate::ncbi_exception::ThrowSite {
+        file: "src/objects/seq/../seqloc/Seq_id.cpp",
+        line: 2501,
+        kind: "CSeqIdException::eFormat",
+        function: Some("ncbi::objects::CSeq_id::Set"),
+    };
+    let plain = crate::ncbi_exception::NcbiException::new(site, b"Malformatted ID foo".to_vec());
+    let plain_err = crate::cli::NativeError::exception(&plain);
+    assert_eq!(plain_err.exit, 255);
+    assert_eq!(plain_err.message, b"Error: Malformatted ID foo\n\n");
+
+    let with_nul = crate::ncbi_exception::NcbiException::new(
+        site,
+        b"Malformatted ID \x00=\x00\x00\x00".to_vec(),
+    );
+    let nul_err = crate::cli::NativeError::exception(&with_nul);
+    assert_eq!(nul_err.exit, 255);
+    assert_eq!(nul_err.message, b"Error: Malformatted ID \n");
+}

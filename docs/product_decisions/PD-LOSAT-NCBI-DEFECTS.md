@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.104
+- Version: 1.105
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -707,7 +707,16 @@
   chunk, and refuses only those on which NCBI crashes, rule 3 narrowed; NCBI's one-thread diagonal
   offset and its clears taken from the database order for such sequences at every thread count,
   rule 4; line NP decision 58, Q1 = B and Q2 = B, 2026-11-23; Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07; numbered after 1.103)
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.103);
+  1.105 2026-11-25 (`losat makeblastdb -input_type asn1_txt|asn1_bin`, line RG item D3c-4: the
+  explicit rejections, rule 3, of a nucleotide ASN.1 sequence whose `Seq-data` (`iupacna`,
+  `ncbi2na` or `ncbi4na`) is shorter than `Seq-inst.length` asks for (including a `-hash_index`
+  read of 1 to 3 packed tail bases past the data, class of 1.86), of `NULL` elements inside
+  `Bioseq-set.seq-set`, `Bioseq.id`, `Seq-descr`, `Delta-ext`, `Blast-def-line-set`, or
+  `Blast-def-line.seqid` and an empty `Delta-ext` list (class of 1.45 and 1.52), and of a
+  punctuation-only Bioseq title that NCBI's `x_CleanAndCompress` reads past the end of (class of
+  1.2 and 1.37); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
+  after 1.104)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3867,6 +3876,19 @@ file would differ, and NCBI's programs still could not open the database).
   the sequence's end, and the index reads them (probes `p3` l93n and l94n, 4294967293 and 4294967294
   letters: SIGSEGV after `creating ....00.idx...`, no file left). LOSAT refuses (exit 1) at that
   sequence.
+- `losat makeblastdb -input_type asn1_txt` and `-input_type asn1_bin` (version 1.105, 2026-11-25,
+  line RG item D3c-4, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07):
+  (a) a nucleotide `Bioseq` whose `iupacna`, `ncbi2na` or `ncbi4na` `Seq-data` holds fewer bytes or
+  letters than `Seq-inst.length` asks for (including a `-hash_index` `CSeqVector` read of 1 to 3
+  packed tail bases past the end of `ncbi2na`/`ncbi4na` data), where `WriteDB_Ncbi4naToBinary`,
+  `WriteDB_Ncbi2naToBinary` and `copy_2bit_any`/`copy_4bit_any` read past the buffer (class of
+  1.86; fixture `llong.asn`); (b) a list element stated as `NULL` (`05 00` in BER) in
+  `Bioseq-set.seq-set`, `Bioseq.id`, `Seq-descr`, `Delta-ext`, `Blast-def-line-set` or
+  `Blast-def-line.seqid`, or an empty `Delta-ext` list, where NCBI dereferences a null pointer or
+  `dext.Get().front()` (`build_db.cpp:309`) and crashes (class of 1.45 and 1.52); and (c) a
+  punctuation-only Bioseq title that `CDeflineGenerator::x_CleanAndCompress` reads past the end of
+  and crashes on (class of 1.2 and 1.37). LOSAT refuses each with exit status 1 and erases the
+  partial build (`end_build(true)`).
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

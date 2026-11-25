@@ -193,6 +193,24 @@ impl<S: AsnSource> BerReader<S> {
         self.src.release_before(self.at);
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:443-455
+    /// Skips raw ASCII space, tab, newline and carriage return before the next object and peeks
+    /// the byte that starts it (`None` at end of input), releasing everything before it.
+    pub(crate) fn skip_raw_spaces_and_peek(&mut self) -> Option<u8> {
+        loop {
+            match self.src.byte_at(self.at) {
+                Some(b' ' | b'\t' | b'\n' | b'\r') => {
+                    self.at += 1;
+                    self.release();
+                }
+                other => {
+                    self.release();
+                    return other;
+                }
+            }
+        }
+    }
+
     /// The bytes that the source keeps from the cursor on.
     ///
     /// Three forms make most items of an object: a short tag and an indefinite length (the start

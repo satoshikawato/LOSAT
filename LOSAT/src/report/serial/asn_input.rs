@@ -158,6 +158,22 @@ impl Names {
         allocator: "makeblastdb",
         own_serial_message: false,
     };
+    /// A Seq-entry or Bioseq-set of makeblastdb's `-input_type asn1_txt` / `asn1_bin`.
+    pub(crate) const BIOSEQ: Names = Names {
+        document: "bioseq",
+        reader: "bioseq reader",
+        input: "file",
+        allocator: "makeblastdb",
+        own_serial_message: false,
+    };
+    /// Binary definition lines (`ASN1_BlastDefLine`) of a Bioseq.
+    pub(crate) const DEFLINE_HEADER: Names = Names {
+        document: "Blast-def-line-set",
+        reader: "Blast-def-line-set reader",
+        input: "header",
+        allocator: "makeblastdb",
+        own_serial_message: false,
+    };
     /// The bytes of a delayed member that a writer reads again (`CDelayBuffer::Update`). The read
     /// that kept them took them whole, so no length passes their end.
     pub(crate) const DELAYED: Names = Names {
@@ -681,6 +697,24 @@ impl<S: AsnSource> TextInput<S> {
     fn expect(&mut self, c: u8) -> R<()> {
         let result = self.r.expect(c);
         result.map_err(|e| self.fail(e))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:443-455
+    /// Skips raw ASCII space, tab, newline and carriage return before the next object and peeks
+    /// the byte that starts it (`None` at end of input), releasing everything before it.
+    pub(crate) fn skip_raw_spaces_and_peek(&mut self) -> Option<u8> {
+        loop {
+            match self.r.src.byte_at(self.r.pos) {
+                Some(b' ' | b'\t' | b'\n' | b'\r') => {
+                    self.r.pos += 1;
+                    self.r.src.release_before(self.r.pos);
+                }
+                other => {
+                    self.r.src.release_before(self.r.pos);
+                    return other;
+                }
+            }
+        }
     }
 }
 

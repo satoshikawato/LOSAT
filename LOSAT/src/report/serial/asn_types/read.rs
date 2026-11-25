@@ -358,6 +358,12 @@ impl<S: AsnSource> ObjectStream<TextInput<S>> {
             reader: TypedReader::new(TextInput::new(src, names), names),
         }
     }
+
+    /// Skips raw ASCII whitespace (` `, `\t`, `\n`, `\r`) before the next object and peeks its
+    /// first byte (`CSeqEntrySource` constructor, makeblastdb.cpp:443-455).
+    pub(crate) fn skip_raw_spaces_and_peek(&mut self) -> Option<u8> {
+        self.reader.inp.skip_raw_spaces_and_peek()
+    }
 }
 
 impl<S: AsnSource> ObjectStream<BerReader<S>> {
@@ -366,6 +372,12 @@ impl<S: AsnSource> ObjectStream<BerReader<S>> {
         ObjectStream {
             reader: TypedReader::new(BerReader::new(src, names), names),
         }
+    }
+
+    /// Skips raw ASCII whitespace (` `, `\t`, `\n`, `\r`) before the next object and peeks its
+    /// first byte (`CSeqEntrySource` constructor, makeblastdb.cpp:443-455).
+    pub(crate) fn skip_raw_spaces_and_peek(&mut self) -> Option<u8> {
+        self.reader.inp.skip_raw_spaces_and_peek()
     }
 }
 
@@ -518,6 +530,21 @@ const MISSING_VALUE_MEMBER: ThrowSite = ThrowSite {
     function: Some("ncbi::CMemberInfoFunctions::ReadWithSetFlagMember"),
 };
 
+/// `ReadWithSetFlagMember`'s rethrow of a `CSerialException` leaving a SEQUENCE member with a set
+/// flag (`error while reading <member>`): the one owner of that rethrow for the table reader
+/// (`set_flag_error`) and the BLAST database header decoder (`seqid::ber::BerError::member_read`).
+#[cold]
+#[inline(never)]
+pub(crate) fn rethrow_set_flag_member(e: NcbiException, member: &str) -> NcbiException {
+    let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
+    e.rethrow_same(
+        file,
+        line,
+        function,
+        format!("error while reading {member}"),
+    )
+}
+
 /// What reading the value of the SEQUENCE member `member` makes of `fail` that leaves it: a
 /// member with a set flag (one not held by `CRef<>`, `Member::is_ref`, and not delayed) is read
 /// in `ReadWithSetFlagMember`, which rethrows a `CSerialException` with `error while reading
@@ -536,9 +563,7 @@ pub(super) fn set_flag_error(fail: Fail, member: &Member) -> Fail {
                     format!("missing value {}", member.name()),
                 ));
             }
-            let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
-            let message = format!("error while reading {}", member.name());
-            Fail::serial(e.rethrow_same(file, line, function, message))
+            Fail::serial(rethrow_set_flag_member(*e, member.name()))
         }
         other => other,
     }

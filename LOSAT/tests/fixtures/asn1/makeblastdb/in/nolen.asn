@@ -1,0 +1,1 @@
+Seq-entry ::= seq { id { local str "nolen" }, descr { title "no length" }, inst { repr raw, mol dna, seq-data iupacna "ACGT" } }

@@ -1579,6 +1579,7 @@ impl<S: AsnSource> Reader<S> {
             if i == 128 {
                 self.append_piece(pos..pos + i, line, out, visible, skip, bad_char);
                 pos += i;
+                self.src.release_before(pos);
                 i = 0;
                 continue;
             }
@@ -1605,6 +1606,7 @@ impl<S: AsnSource> Reader<S> {
             } else {
                 line += 1;
                 pos = self.end_of_line_at(pos, c);
+                self.src.release_before(pos);
             }
         }
     }
@@ -1657,6 +1659,7 @@ impl<S: AsnSource> Reader<S> {
                 b'\'' => break,
                 b'\r' | b'\n' => {
                     self.skip_end_of_line(c);
+                    self.src.release_before(self.pos);
                     continue;
                 }
                 _ => {
@@ -1667,6 +1670,9 @@ impl<S: AsnSource> Reader<S> {
                     ));
                 }
             };
+            if self.pos & 0x3ff == 0 {
+                self.src.release_before(self.pos);
+            }
             match high.take() {
                 Some(h) => out.push((h << 4) | digit),
                 None => high = Some(digit),

@@ -707,7 +707,11 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
     return "\n".join(out)
 
 
-DEFAULT_ROOTS = [("NCBI-ScoreMat", "PssmWithParameters"), ("NCBI-BlastDL", "Blast-db-mask-info")]
+DEFAULT_ROOTS = [
+    ("NCBI-ScoreMat", "PssmWithParameters"),
+    ("NCBI-BlastDL", "Blast-db-mask-info"),
+    ("NCBI-BlastDL", "Blast-def-line-set"),
+]
 
 
 def build_table(source: Path, roots: list[tuple[str, str]]) -> Table:

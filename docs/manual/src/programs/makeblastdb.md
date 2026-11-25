@@ -1,6 +1,6 @@
 # makeblastdb
 
-`losat makeblastdb` builds a BLAST database from FASTA files, or from existing BLAST databases (`-input_type blastdb`). Build a database when you search the same sequences many times, when you need NCBI-style sequence ids, taxonomy ids or masks in the search, or when you want to read sequences back with [`blastdbcmd`](blastdbcmd.md).
+`losat makeblastdb` builds a BLAST database from FASTA files, ASN.1 text or binary `Seq-entry`/`Bioseq-set` files (`-input_type asn1_txt` or `asn1_bin`), or existing BLAST databases (`-input_type blastdb`). Build a database when you search the same sequences many times, when you need NCBI-style sequence ids, taxonomy ids or masks in the search, or when you want to read sequences back with [`blastdbcmd`](blastdbcmd.md).
 
 The files it writes are the files of NCBI's `makeblastdb`. NCBI BLAST+ and LOSAT read each other's databases. The default is format version 5, as in `makeblastdb` 2.17.0. `-blastdb_version 4` writes the older layout.
 
@@ -18,13 +18,13 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 - Name several files in one `-in` value, separated by spaces: `-in "a.faa b.faa"`. Their sequences go into one database.
 - A name ending in `.gz`, `.bz2` or `.zst` is read through gzip, bzip2 or zstd while the database is built. Files made of several gzip members, bzip2 streams or zstd frames (the output of `bgzip`, `pbzip2` and `pzstd`) are read to the end.
 - `-dbtype` is required: `nucl` or `prot`.
-- `-input_type` is `fasta` (the default) or `blastdb` (see [Copying databases](#copying-databases)). `asn1_txt` and `asn1_bin` are refused (see below).
+- `-input_type` is `fasta` (the default), `asn1_txt`, `asn1_bin`, or `blastdb` (see [Copying databases](#copying-databases)).
 
 ## Common options
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `-in` | `-` | FASTA input file or files, or the databases to copy with `-input_type blastdb`. |
+| `-in` | `-` | FASTA or ASN.1 input file or files, or the databases to copy with `-input_type blastdb`. |
 | `-dbtype` | required | `nucl` or `prot`. |
 | `-out` | the `-in` name | Name of the database to write. |
 | `-title` | the `-in` name (with `-input_type blastdb`, the input database's title) | Title stored in the database and shown by the search programs. |
@@ -140,7 +140,7 @@ The full list is on [Differences from NCBI BLAST+](../differences.md).
 ## What LOSAT refuses
 
 - `-gi_mask` with two mask files whose GI-mask files are the same files (one `-gi_mask_name` twice, or two names of one path), when both would write one data file at the same time. NCBI's files then depend on how its C++ runtime buffers two streams on one file. LOSAT stops at the sequence where the second would start writing that file (see [What LOSAT refuses](../refusals.md)). Where one of the two writes nothing, or their data files are written one after the other, LOSAT writes NCBI's files.
-- `-input_type asn1_txt` and `asn1_bin`. `fasta` and `blastdb` work.
+- `-input_type asn1_txt` and `asn1_bin` inputs whose title generation requires `MolInfo` prefixes/suffixes, `Unverified`/`Unreviewed` prefixes, feature-derived protein names, `BioSource` modifiers, empty-title `NC`/`NM`/`NR`/`WGS`/`TSA`/`TLS`/`PDB`/patent/segmented/map rules, or `AutoDef` (see [What LOSAT refuses](../refusals.md)). Explicit titles, `ASN1_BlastDefLine` headers, `CFastaReader` user objects, source taxname titles, and default protein titles work.
 - With `-dbtype nucl`, a FASTA record that NCBI packs into a piece of 4,294,967,293 bases or more (such as 4,294,967,293 letters of `A`, `C`, `G` and `T` in a row), where NCBI crashes.
 - NCBI settings that change which ids are parsed or which titles are stored (`[BLAST] LONG_SEQID`, a `[BLAST] MAX_SEQID_LENGTH` that `makeblastdb` would use with `-parse_seqids`, `DIAG_*` variables and other `NCBI_CONFIG_*` entries).
 

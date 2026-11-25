@@ -98,6 +98,8 @@ NCBI BLAST+ reads `BATCH_SIZE`, `CHUNK_SIZE`, `OVERLAP_CHUNK_SIZE` and `PRE_FETC
 | `TZ`, `TZDIR` | The time zone of the date stored in the database and of the times in the log, with `/etc/localtime` when `TZ` is unset (Unix, and the WASI command from what its host gives it, see [WebAssembly](#webassembly)). On Windows, as Microsoft's C runtime reads it for NCBI BLAST+: `TZ` in its form `tzn[+\|-]hh[:mm[:ss]][dzn]` (hours west of UTC; a daylight-time name means the United States rules), else the zone of the Windows settings with its daylight-time rules; `TZDIR` is not read. |
 | `BLASTDB_LMDB_MAP_SIZE` | The map size of the LMDB index of a version 5 database. |
 | `MAX_LMDB_TXN_ENTRY`, `LMDB_MIN_SPLIT_SIZE`, `LMDB_SPLIT_CHUNK_SIZE` | How NCBI's `makeblastdb` splits the writes of the LMDB index. |
+| `NCBI_MAKEBLASTDB_SKIP_UNVERIFIED_BIOSEQS` | Any non-empty value with `-input_type asn1_txt` or `asn1_bin`: skips `Bioseq` records marked `Unverified` (or inside an `Unverified` `nuc-prot` set), as in NCBI's `makeblastdb`. |
+| `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS` | Any non-empty value with `-input_type asn1_txt` or `asn1_bin`: ignores `CFastaReader` `DefLine` user objects on ASN.1 `Bioseq` records and builds definition lines from the `Bioseq` descriptors instead. (Refused with `-input_type fasta`; see below.) |
 
 ## Temporary files
 
@@ -111,7 +113,7 @@ Each of these makes NCBI BLAST+ do something that LOSAT does not do, so LOSAT st
 | :--- | :--- | :--- |
 | `BL2SEQ_LEGACY` | a search with `-subject` | Searches each subject on its own and writes the legacy bl2seq report. |
 | `SEQ_ID_PREFER_ACCESSION_OVER_GI`, `SEQ_ID_AVOID_GI` | the search programs, with a `-db` built with `-parse_seqids` | Changes which id of a sequence is shown. |
-| `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS` (a non-empty value) | `makeblastdb` | Stores other titles for some FASTA definition lines (with a tab, a Ctrl-A, or white space at their ends). |
+| `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS` (a non-empty value) | `makeblastdb -input_type fasta` | Stores other titles for some FASTA definition lines (with a tab, a Ctrl-A, or white space at their ends). With `-input_type asn1_txt` or `asn1_bin`, it is read as in NCBI BLAST+ (see above). |
 | `NCBI_CONFIG__BLAST__MAX_SEQID_LENGTH`, `[BLAST] MAX_SEQID_LENGTH` (a value other than 0 that NCBI converts) | `makeblastdb -parse_seqids` | Sets the longest Seq-id that `makeblastdb` parses. |
 | `BLAST_USAGE_REPORT` with a value that is not a Boolean | every program, also for `-version` and `-h` | Aborts. (A Boolean is accepted; LOSAT reports no usage.) |
 | `NCBI_CONFIG__BLAST__BLAST_USAGE_REPORT`, or else `[BLAST] BLAST_USAGE_REPORT` of `.ncbirc`, with a value that is not a Boolean, unless `BLAST_USAGE_REPORT` is false (for `.ncbirc` also unless `.ncbirc` is turned off in the environment) | every program, also for `-version` and `-h` | Aborts. |

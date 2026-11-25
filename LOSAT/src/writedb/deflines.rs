@@ -7,8 +7,11 @@
 
 use super::bioseq::{Bioseq, ParsedIds};
 use super::fasta_source::{fasta_reader_fasta, post_seq_id_warning, Warn};
+use crate::report::serial::asn_input::Names;
 use crate::report::serial::asn_types::table::named;
-use crate::report::serial::asn_types::{member_index, members, Value};
+use crate::report::serial::asn_types::{
+    member_index, members, read_ber_document, Post, ReadError, Value,
+};
 use crate::report::serial::pssm::Seqdesc;
 use crate::seqid::accguide::{identify_seq_id, parse_flags, F_NUC, F_PROT};
 use crate::seqid::label::content;
@@ -493,6 +496,160 @@ fn binary_header(descr: &[Seqdesc]) -> Result<Option<&[u8]>, BioseqDeflinesError
         }
     }
     Ok(None)
+}
+
+/// An empty `CRef<>` (`NULL`) inside a decoded `Blast-def-line-set`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NullDeflineElement {
+    /// A `NULL` element in `Blast-def-line-set`.
+    Defline,
+    /// A `NULL` element in `Blast-def-line.seqid`.
+    SeqId,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:722-733
+/// Decodes an `ASN1_BlastDefLine` binary header (`Blast-def-line-set`) through the table-driven
+/// BER reader (`asn_types::read_ber_document`), preserving NCBI's exact serial exceptions and
+/// diagnostic posts (`Post::BadChar`, `Post::Utf8Tag`). Empty membership and link lists are left
+/// as read so callers that compare with `seqid::ber::decode_full_set` see the exact decoded
+/// fields; [`strip_empty_lists`] mirrors `s_CheckEmptyLists`.
+pub(crate) fn decode_blast_def_line_set_ber(
+    bytes: &[u8],
+) -> (
+    Result<Result<DeflineSet, NullDeflineElement>, ReadError>,
+    Vec<Post>,
+) {
+    let (value, posts) = read_ber_document(bytes, named::BLAST_DEF_LINE_SET, Names::DEFLINE_HEADER);
+    let utf8 = posts.iter().any(|post| matches!(post, Post::Utf8Tag(_)));
+    let decoded = value.map(|root| value_to_defline_set(root, utf8));
+    (decoded, posts)
+}
+
+/// Converts a `Value` read under `named::BLAST_DEF_LINE_SET` into a [`DeflineSet`].
+fn value_to_defline_set(mut root: Value, utf8: bool) -> Result<DeflineSet, NullDeflineElement> {
+    let Value::List(ref mut items) = root else {
+        unreachable!("Blast-def-line-set is a SEQUENCE OF Blast-def-line");
+    };
+    let items = std::mem::take(items);
+    let idx_title = member_index(named::BLAST_DEF_LINE, "title");
+    let idx_seqid = member_index(named::BLAST_DEF_LINE, "seqid");
+    let idx_taxid = member_index(named::BLAST_DEF_LINE, "taxid");
+    let idx_memberships = member_index(named::BLAST_DEF_LINE, "memberships");
+    let idx_links = member_index(named::BLAST_DEF_LINE, "links");
+    let idx_other_info = member_index(named::BLAST_DEF_LINE, "other-info");
+    let mut deflines = Vec::with_capacity(items.len());
+    for mut item in items {
+        if matches!(item, Value::Null) {
+            return Err(NullDeflineElement::Defline);
+        }
+        let Value::Sequence(ref mut fields) = item else {
+            unreachable!("Blast-def-line is a SEQUENCE");
+        };
+        let fields = std::mem::take(fields);
+        let mut defline = BlastDefline::default();
+        for (pos, mut val) in fields {
+            let pos = usize::from(pos);
+            if pos == idx_title {
+                if let Value::Str(ref mut text) = val {
+                    defline.title = Some(std::mem::take(text));
+                }
+            } else if pos == idx_seqid {
+                if let Value::List(ref mut id_vals) = val {
+                    let id_vals = std::mem::take(id_vals);
+                    let mut ids = Vec::with_capacity(id_vals.len());
+                    for id_val in id_vals {
+                        if matches!(id_val, Value::Null) {
+                            return Err(NullDeflineElement::SeqId);
+                        }
+                        if let Some(id) = id_val.into_seq_id() {
+                            ids.push(id);
+                        }
+                    }
+                    defline.ids = ids;
+                }
+            } else if pos == idx_taxid {
+                if let Value::Int(taxid) = val {
+                    defline.taxid = Some(taxid as i32);
+                }
+            } else if pos == idx_memberships {
+                defline.memberships = take_int4s(&mut val).or(defline.memberships);
+            } else if pos == idx_links {
+                defline.links = take_int4s(&mut val).or(defline.links);
+            } else if pos == idx_other_info {
+                defline.other_info = take_int4s(&mut val).or(defline.other_info);
+            }
+        }
+        deflines.push(defline);
+    }
+    Ok(DeflineSet { deflines, utf8 })
+}
+
+fn take_int4s(val: &mut Value) -> Option<Vec<i32>> {
+    match val {
+        Value::Int4s(list) => Some(std::mem::take(list)),
+        _ => None,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:560-589
+/// `s_CheckEmptyLists`: clears empty `memberships` and `links` lists on every definition line.
+pub(crate) fn strip_empty_lists(set: &mut DeflineSet) {
+    for defline in &mut set.deflines {
+        if defline.memberships.as_ref().is_some_and(Vec::is_empty) {
+            defline.memberships = None;
+        }
+        if defline.links.as_ref().is_some_and(Vec::is_empty) {
+            defline.links = None;
+        }
+    }
+}
+
+/// `s_UseFastaReaderDeflines` for any Bioseq given its `ids` and optional `hist_old_id`.
+pub(crate) fn use_fasta_reader_deflines_for(
+    ids: &[ParsedSeqId],
+    hist_old_id: Option<&ParsedSeqId>,
+    deflines: &DeflineSet,
+) -> bool {
+    let score = |id: &ParsedSeqId| {
+        if matches!(id, ParsedSeqId::Local(_)) {
+            i32::MAX - 1
+        } else {
+            best_rank_score(id)
+        }
+    };
+    let non_local = match find_best(ids, score) {
+        Some(best) if !matches!(best, ParsedSeqId::Local(_)) => Some(best),
+        Some(best) => match (ids.first(), hist_old_id) {
+            (Some(first), Some(old)) if first == best && !matches!(old, ParsedSeqId::Local(_)) => {
+                Some(old)
+            }
+            _ => None,
+        },
+        None => None,
+    };
+    match non_local {
+        None | Some(ParsedSeqId::Prf(_)) | Some(ParsedSeqId::Pir(_)) => true,
+        Some(_) => deflines.deflines.iter().any(|defline| {
+            find_best(&defline.ids, best_rank_score)
+                .is_some_and(|id| !matches!(id, ParsedSeqId::Local(_)))
+        }),
+    }
+}
+
+/// `second_parse` from a raw `CFastaReader` `DefLine` field string (escaped as stored in the user
+/// object) without constructing a `ParsedIds`.
+pub(crate) fn second_parse_field(
+    defline_field: &[u8],
+    is_aa: bool,
+    warn: Warn<'_>,
+) -> Option<DeflineSet> {
+    let parsed = ParsedIds {
+        ids: Vec::new(),
+        hist_old_id: None,
+        defline_field: defline_field.to_vec(),
+        title_descr: None,
+    };
+    second_parse(&parsed, is_aa, warn)
 }
 
 #[cfg(test)]

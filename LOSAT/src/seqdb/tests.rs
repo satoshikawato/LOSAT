@@ -1837,17 +1837,18 @@ fn every_filtering_alias_key_is_rejected() {
     )
     .unwrap();
     assert_eq!(SeqDb::open(&name, SeqType::Protein).unwrap().num_seqs(), 10);
-    // MASKLIST is read (the GI-indexed masks, `gi_mask_list`); MEMB_BIT stays refused.
-    std::fs::write(
-        dir.join("keyed.pal"),
-        "TITLE t\nDBLIST prot_v4\nMEMB_BIT 1\n",
-    )
-    .unwrap();
-    let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
-    assert!(
-        matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("MEMB_BIT")),
-        "{error}"
-    );
+    // MASKLIST is read (the GI-indexed masks, `gi_mask_list`); MEMB_BIT is read and enables
+    // definition-line filtering (`drops_lineless_hits`) when non-zero.
+    for (bit, drops) in [(1, true), (0, false)] {
+        std::fs::write(
+            dir.join("keyed.pal"),
+            format!("TITLE t\nDBLIST prot_v4\nMEMB_BIT {bit}\n"),
+        )
+        .unwrap();
+        let db = SeqDb::open(&name, SeqType::Protein).unwrap();
+        assert_eq!(db.num_seqs(), 10);
+        assert_eq!(db.drops_lineless_hits(), drops);
+    }
     // Keys NCBI's CSeqDB does not apply are ignored: an unknown key, MAX_SEQ_LENGTH and
     // VDBLIST.
     std::fs::write(

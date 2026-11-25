@@ -89,5 +89,5 @@ line (the Owner, 2026-11-21).
 `tests/blastdbcheck_fixtures.rs` name rows where the test expects LOSAT's refusal (exit status 1, `Error: ` ... `not
 supported by LOSAT`) instead of NCBI's bytes: NCBI crashes or never ends; NCBI reads zeros past the end of a short
 file's last page; NCBI's alias checks overflow a signed integer and the overflow decides the check; `-cdd_delta`; alias
-keys that LOSAT's reader does not read yet (`MEMB_BIT`, `TAXIDLIST` over version 5). NCBI's frozen result stays for the
+keys that LOSAT's reader does not read yet (`TAXIDLIST` over version 5). NCBI's frozen result stays for the
 day LOSAT gives it.

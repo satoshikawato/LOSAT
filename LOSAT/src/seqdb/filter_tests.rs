@@ -1087,3 +1087,54 @@ fn ordinals_in_names_the_ordinals_of_an_oid_range() {
     assert_eq!(OidMap::unrestricted().ordinals_in(3, 7), 3..7);
     assert_eq!(OidMap::unrestricted().ordinals_in(7, 3), 7..7);
 }
+
+/// Lines rejected by `MEMB_BIT` (`memb_kept[i] == false`) are skipped before `x_FilterHasId`,
+/// taxid tests and `user_passed_any`: a `ti` string tag on a rejected line does not throw, and a
+/// user seqid rule that only matched the rejected line returns `Ok(None)`.
+#[test]
+fn memb_bit_short_circuits_id_lookups_and_user_passed_any() {
+    let general = |db: &str, tag: &str| {
+        ParsedSeqId::General(crate::seqid::model::Dbtag {
+            db: db.as_bytes().to_vec(),
+            tag: crate::seqid::model::ObjectId::Str(tag.as_bytes().to_vec()),
+        })
+    };
+    let line = |id: ParsedSeqId| BlastDefline {
+        ids: vec![id],
+        ..BlastDefline::default()
+    };
+    let rule = DeflineRule::Gis(vec![1001]);
+    let alias = Arc::new(super::super::id_list::AliasIdList {
+        gis: vec![7001],
+        ..Default::default()
+    });
+    // Line 0 has a bad `ti` string tag (would throw in alias lookup) and fails MEMB_BIT;
+    // line 1 passes MEMB_BIT and matches `rule`.
+    let set = DeflineSet {
+        deflines: vec![line(general("ti", "abc")), line(ParsedSeqId::Gi(1001))],
+        utf8: false,
+    };
+    assert_eq!(
+        line_mask_with_memb(
+            Some(&rule),
+            &[Arc::clone(&alias)],
+            &set,
+            Some(&[false, true])
+        ),
+        Ok(Some(vec![false, false]))
+    );
+    assert_eq!(
+        line_mask_with_memb(Some(&rule), &[], &set, Some(&[false, true])),
+        Ok(Some(vec![false, true]))
+    );
+    // Line 0 matches `rule` but fails MEMB_BIT; line 1 passes MEMB_BIT but fails `rule`:
+    // `user_passed_any` stays false -> `Ok(None)`.
+    let set2 = DeflineSet {
+        deflines: vec![line(ParsedSeqId::Gi(1001)), line(ParsedSeqId::Gi(2002))],
+        utf8: false,
+    };
+    assert_eq!(
+        line_mask_with_memb(Some(&rule), &[], &set2, Some(&[false, true])),
+        Ok(None)
+    );
+}

@@ -1,0 +1,62 @@
+bdc_mb0	db	blastdbcmd	-db	mb_0	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_mb1	db	blastdbcmd	-db	mb_1	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_mb2	db	blastdbcmd	-db	mb_2	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_mb3	db	blastdbcmd	-db	mb_3	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_mb4	db	blastdbcmd	-db	mb_4	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_mb31	db	blastdbcmd	-db	mb_31	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_mb32	db	blastdbcmd	-db	mb_32	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_mb_plus1	db	blastdbcmd	-db	mb_plus1	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_mb1_fasta	db	blastdbcmd	-db	mb_1	-dbtype	prot	-entry	all
+bdc_mb1_ctrla	db	blastdbcmd	-db	mb_1	-dbtype	prot	-entry	all	-ctrl_a
+bdc_mb1_target	db	blastdbcmd	-db	mb_1	-dbtype	prot	-entry	P00001.1	-target_only	-outfmt	%o|%a|%t
+bdc_mb1_info	db	blastdbcmd	-db	mb_1	-dbtype	prot	-info
+bdc_mb_abc	db	blastdbcmd	-db	mb_abc	-dbtype	prot	-info
+bdc_mb_neg1	db	blastdbcmd	-db	mb_neg1	-dbtype	prot	-info
+bdc_mb_empty	db	blastdbcmd	-db	mb_empty	-dbtype	prot	-info
+bdc_mb_over	db	blastdbcmd	-db	mb_over	-dbtype	prot	-info
+bdc_ord_si_mb	db	blastdbcmd	-db	ord_si_mb	-dbtype	prot	-info
+bdc_ord_mb_tx	db	blastdbcmd	-db	ord_mb_tx	-dbtype	prot	-info
+bdc_nest_1_1	db	blastdbcmd	-db	nest_1_1	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_nest_1_0	db	blastdbcmd	-db	nest_1_0	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_nest_0_1	db	blastdbcmd	-db	nest_0_1	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_conflict_plain_info	db	blastdbcmd	-db	conflict_plain	-dbtype	prot	-info
+bdc_conflict_plain_all	db	blastdbcmd	-db	conflict_plain	-dbtype	prot	-entry	all	-outfmt	%o|%a
+bdc_conflict_gi_info	db	blastdbcmd	-db	conflict_gi	-dbtype	prot	-info
+bdc_direct_and_sub	db	blastdbcmd	-db	direct_and_sub	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_multivol	db	blastdbcmd	-db	mb_1 mb_b_2	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_toprange_mb0	db	blastdbcmd	-db	toprange_mb0	-dbtype	prot	-entry	all	-outfmt	%o|%a
+bdc_mb1_range	db	blastdbcmd	-db	mb1_range	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_mb1_om1	db	blastdbcmd	-db	mb1_om1	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_mb1_gi	db	blastdbcmd	-db	mb1_gi	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_mb2_si_v4	db	blastdbcmd	-db	mb2_si_v4	-dbtype	prot	-entry	all	-outfmt	%o|%a|%t
+bdc_pz_mb0	db	blastdbcmd	-db	pz_mb0	-dbtype	prot	-entry	all	-outfmt	%o|%a
+bdc_pz_mb1	db	blastdbcmd	-db	pz_mb1	-dbtype	prot	-entry	all	-outfmt	%o|%a
+bdc_nmb_gm1	db	blastdbcmd	-db	nmb_gm_1	-dbtype	nucl	-entry	all	-outfmt	%o|%a|%m0
+bdc_nmb_gm2	db	blastdbcmd	-db	nmb_gm_2	-dbtype	nucl	-entry	all	-outfmt	%o|%a|%m0
+bdc_mask_empty_info	db	blastdbcmd	-db	nmb_mask_empty	-dbtype	nucl	-info
+bdc_nogless_a1	db/nogless	blastdbcmd	-db	a1	-dbtype	nucl	-entry	all	-outfmt	%o|%a|%m0
+bdc_nogless_a2	db/nogless	blastdbcmd	-db	a2	-dbtype	nucl	-entry	all	-outfmt	%o|%a|%m0
+bdc_nogless_cc	db/nogless	blastdbcmd	-db	cc	-dbtype	nucl	-entry	all	-outfmt	%o|%a|%m0
+chk_mb1	db	blastdbcheck	-db	mb_1	-dbtype	prot	-verbosity	3	-no_isam	-stride	1
+chk_conflict_plain	db	blastdbcheck	-db	conflict_plain	-dbtype	prot	-verbosity	3	-no_isam	-stride	1
+chk_conflict_gi	db	blastdbcheck	-db	conflict_gi	-dbtype	prot	-verbosity	3	-no_isam	-stride	1
+bp_mb1_f6	db	blastp	-query	../in/qp.fa	-db	mb_1	-outfmt	6
+bp_mb2_f6	db	blastp	-query	../in/qp.fa	-db	mb_2	-outfmt	6
+bp_mb4_lineless_f6	db	blastp	-query	../in/qp.fa	-db	mb_4	-outfmt	6
+bp_mb32_f6	db	blastp	-query	../in/qp.fa	-db	mb_32	-outfmt	6
+bp_mb1_f0	db	blastp	-query	../in/qp.fa	-db	mb_1	-outfmt	0
+bp_mb2_user_si	db	blastp	-query	../in/qp.fa	-db	mb_2	-seqidlist	si_p00001.txt	-outfmt	6
+bp_mb1_om1	db	blastp	-query	../in/qp.fa	-db	mb1_om1	-outfmt	6
+bp_conflict_nseq	db	blastp	-query	../in/qp.fa	-db	conflict_nseq	-outfmt	6
+bp_conflict_gi	db	blastp	-query	../in/qp.fa	-db	conflict_gi	-outfmt	6
+psi_mb1_f6	db	psiblast	-query	../in/qp.fa	-db	mb_1	-outfmt	6
+psi_conflict_nseq	db	psiblast	-query	../in/qp.fa	-db	conflict_nseq	-outfmt	6
+bx_mb1_f6	db	blastx	-query	../in/qn.fa	-db	mb_1	-outfmt	6
+bx_mb2_f6	db	blastx	-query	../in/qn.fa	-db	mb_2	-outfmt	6
+bn_nmb_gm1_hm	db	blastn	-query	../in/qn.fa	-db	nmb_gm_1	-dust	no	-db_hard_mask	0	-outfmt	6
+bn_nmb_gm2_hm	db	blastn	-query	../in/qn.fa	-db	nmb_gm_2	-dust	no	-db_hard_mask	0	-outfmt	6
+bn_nogless_a1_hm	db/nogless	blastn	-query	../../in/qn.fa	-db	a1	-dust	no	-db_hard_mask	0	-outfmt	6
+bn_nogless_a2_hm	db/nogless	blastn	-query	../../in/qn.fa	-db	a2	-dust	no	-db_hard_mask	0	-outfmt	6
+bn_nc_nseq	db	blastn	-query	../in/qn.fa	-db	nc_nseq	-outfmt	6
+tbn_nmb_gm1	db	tblastn	-query	../in/qp.fa	-db	nmb_gm_1	-outfmt	6
+tbx_nmb_gm2	db	tblastx	-query	../in/qn.fa	-db	nmb_gm_2	-outfmt	6

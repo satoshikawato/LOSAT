@@ -500,14 +500,34 @@ impl DeflineRule {
 /// Which of the definition lines of `set` NCBI's filtered header read keeps, in order, under
 /// the search's list rule `rule` and the alias files' lists `lists` attached to the volume
 /// (none: empty): `None` when a seqid rule passes no line; NCBI's exception of a lookup.
+#[cfg(test)]
 pub(crate) fn line_mask(
     rule: Option<&DeflineRule>,
     lists: &[Arc<super::id_list::AliasIdList>],
     set: &DeflineSet,
 ) -> Result<Option<Vec<bool>>, NcbiException> {
+    line_mask_with_memb(rule, lists, set, None)
+}
+
+/// Which of the definition lines of `set` NCBI's filtered header read keeps, in order, after
+/// `MEMB_BIT` (`memb_kept`) under the search's list rule `rule` and the alias files' lists
+/// `lists` attached to the volume (none: empty): a line whose `memb_kept` entry is `false` is
+/// dropped before its Seq-ids or taxids are tested (`seqdbvol.cpp:2008-2050`), so no lookup
+/// exception runs on it and it does not count toward `user_passed_any`. Returns `None` when a
+/// seqid rule passes no line, or NCBI's exception of a lookup.
+pub(crate) fn line_mask_with_memb(
+    rule: Option<&DeflineRule>,
+    lists: &[Arc<super::id_list::AliasIdList>],
+    set: &DeflineSet,
+    memb_kept: Option<&[bool]>,
+) -> Result<Option<Vec<bool>>, NcbiException> {
     let mut user_passed_any = false;
     let mut mask = Vec::with_capacity(set.deflines.len());
-    for defline in &set.deflines {
+    for (index, defline) in set.deflines.iter().enumerate() {
+        if memb_kept.is_some_and(|kept| !kept[index]) {
+            mask.push(false);
+            continue;
+        }
         // Without a list of its kind a test passes; with one, a line passes it by a Seq-id.
         let (mut have_user, mut have_vol) = (rule.is_none(), lists.is_empty());
         for id in &defline.ids {

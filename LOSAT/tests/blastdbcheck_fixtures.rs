@@ -70,9 +70,9 @@ const AWAITING_CDD_DELTA: [&str; 12] = [
 ];
 
 /// Rows whose alias files hold keys that LOSAT's database reader refuses until line RG-D reads
-/// them: `MEMB_BIT` (D1d) and `TAXIDLIST` over a version 5 database (D1c-2,
-/// `seqdb::alias::refuse_v5_lists`); `-dir .` of the alias rows meets both.
-const AWAITING_READER: [&str; 4] = ["a_membx", "a_taxmiss", "a_dir", "a_dir_v1"];
+/// them: `TAXIDLIST` over a version 5 database (D1c-2, `seqdb::alias::refuse_v5_lists`);
+/// `-dir .` of the alias rows meets it.
+const AWAITING_READER: [&str; 3] = ["a_taxmiss", "a_dir", "a_dir_v1"];
 
 /// `tests/fixtures/blastdbcheck`.
 fn fixtures() -> PathBuf {

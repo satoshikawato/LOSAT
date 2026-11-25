@@ -63,7 +63,7 @@ fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, any
         Err(error) => return Err(error),
     };
     match error.downcast::<PreliminaryReadError>() {
-        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.0)),
+        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.as_bytes())),
         Err(error) => Err(error),
     }
 }
@@ -103,7 +103,7 @@ fn first_database_read<'d>(
     if database.first_oid_read_fails() {
         let error = match pssm_failure {
             Some(failure) => failure.error("TBLASTN"),
-            None => PreliminaryReadError("Database memory map file error").into(),
+            None => PreliminaryReadError::from_static("Database memory map file error").into(),
         };
         return (Err((error, ReadFails::Setup)), before_setup);
     }
@@ -115,7 +115,7 @@ fn first_database_read<'d>(
         )
         .is_none()
     {
-        Err(PreliminaryReadError(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT).into())
+        Err(PreliminaryReadError::from_static(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT).into())
     } else if let Some(failure) = pssm_failure {
         Err(failure.error("TBLASTN"))
     } else {
@@ -244,7 +244,7 @@ fn refused_batch_setup_error(
 /// `-in_pssm` (`TblastnDatabase::pssm_search_read_failure`); `Err`: LOSAT's refusal.
 fn database_read_failure(error: anyhow::Error) -> Result<anyhow::Error> {
     match error.downcast::<PreliminaryReadError>() {
-        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.0)),
+        Ok(read_error) => Ok(crate::blastinput::app::engine_error(read_error.as_bytes())),
         Err(error) if error.is::<crate::cli::NativeError>() => Ok(error),
         Err(error) => Err(error),
     }
@@ -2332,8 +2332,11 @@ fn search(
             .first()
             .and_then(crate::api::local_blast::FormatOutput::report_format)
             == Some(crate::blastinput::app::ReportFormat::Xml);
+        // The record that the report shows (`query_batch::xml_shown_of`).
+        let shown_scopes = batches.query_scopes.as_ref().map(|s| s.numbered_from(0));
         let xml_cut = |query: usize| {
-            queries.get(query).is_some_and(|record| {
+            let shown = crate::blastinput::query_batch::xml_shown_of(shown_scopes, query);
+            queries.get(shown).is_some_and(|record| {
                 crate::report::blast_xml::names::iteration_cut_before_hits(
                     record.local_id.as_bytes(),
                     record.warning_id(),

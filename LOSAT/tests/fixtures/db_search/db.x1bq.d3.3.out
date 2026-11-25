@@ -1,0 +1,86 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tests/fasta/outfmt0/x1bo_d3_s.fna
+           2 sequences; 1,984 total letters
+
+
+
+Query= qA
+
+Length=1000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_minus3                                                              367     6e-105
+s_plus3                                                               367     6e-105
+
+
+
+Query_1  1    CGTTCCCATCGAGCATACATAAAGTCAGGTATACTCGTTTGAGCCGAGGTCCATTACCCG  60
+1        200  ............................................................  141
+
+Query_1  61   GACGAACGTAAGCACACTCACCAATCCTAAGGCTTCCGACCCAGACTTTCCTCGATTGAC  120
+1        140  ............................................................  81
+
+Query_1  121  TCTACAAGCAAAGGAGCGTCCGAGGTCCAATAGTGAGGAAACGCACCGGCCACCAACTGA  180
+1        80   ............................................................  21
+
+Query_1  181  ACAAGGTGGCTGAGAATATCACCTAGAAAGACGGATCATCACGTAATGCGTTACTAGCAA  240
+1        20   ....................                                          1
+
+Query_1  241  CTCAATGAACCGTTGCCAATGACACATTAAGTCATCCCCAAAAGTCCTGTCCTCTGTTTC  300
+
+Query_1  301  CACCATGGACTAATGTAACTGCTGCAGAAGGAGTCCAGGTGCATCTGTTGCCAAGCAGTC  360
+
+Query_1  361  GCCCGTGTATGACACAGTATATAGCGATAGGATCTAATTTTAACCCGTGGCTCCGTGATG  420
+
+Query_1  421  CTAAGCAGTGATTGGCTGTGCTCCACGAGTGGTCGATGATTTCGAAACAGAGGTTAAAAC  480
+
+Query_1  481  GGGGTCTCTTCGGATAGCTGAGCCCCTCTGAACATCAGGGTGTATTCTCTCTTTCTCGTG  540
+
+Query_1  541  TTTACGCCAATTATGACATGCGGAAAGCTCAAACGGCCGACTGGCCATACCGACAGCCTA  600
+
+Query_1  601  ACTCACATGTGTCGGTTTGTATCCGTCATGGCGTAATCATCACGAGTTTGGAAGGCTTAG  660
+
+Query_1  661  ACCTCTTTGTCTTTGTACACATCGTTATGTGCTGTGGCTTCTGAATCGGAGGCTAAGGGA  720
+
+Query_1  721  ATCCCGCGGCTCTGGACAGCATAGAGTACGTGCCCCAGACAATAGATTCCGGGACTGCAT  780
+
+Query_1  781  ACTATTCGCCAATCACGGTTCGGTGTTGGAGTGATCAGCCACTTGTGCTGTAGAGACCCA  840
+0        1                        ........................................  40
+
+Query_1  841  TTTTCAGATCCGTTTCAAATTGTTGGCCTTGAATGAGTCCGTTGCAAGGGCAATCGCATG  900
+0        41   ............................................................  100
+
+Query_1  901  CCGCTATAAGGGAAAATGCATTGCCGCCCATACAGATCAGGTTATTCATCTGGATTGGGG  960
+0        101  ............................................................  160
+
+Query_1  961  AAGCTCTTAATCGGCGGTCACAGATATAGGGCGGGCCCTC  1000
+0        161  ........................................  200
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+
+Effective search space used: 1936480
+
+
+Query= qB
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_minus3                                                              367     2e-105
+s_plus3                                                               367     2e-105
+
+

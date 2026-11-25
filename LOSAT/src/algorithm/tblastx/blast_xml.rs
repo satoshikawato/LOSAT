@@ -222,15 +222,34 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     // `report_stream`) never writes the `-subject` report of its last query, which NCBI holds
     // back, unless another format of the call (outfmt 5) writes it (`written_queries`; `only_xml2`:
     // every structured format of the call is XML2 or JSON).
+    let shows = |q_idx: usize| crate::blastinput::query_batch::xml_show_of(run.query_scopes, q_idx);
+    let holds_back = only_xml2 && document.holds_back();
     let reports = written_queries(
         queries.len(),
         !run.epilog,
-        only_xml2 && document.holds_back(),
+        holds_back,
+        crate::blastinput::query_batch::held_start_of(run.query_scopes, queries.len()),
     );
     let texts = queries[..reports]
         .iter()
         .enumerate()
         .map(|(q_idx, query)| {
+            let messages = query_messages(query, run.searched[q_idx], run.filtered_empty);
+            let has_hits = !query_hits[q_idx].is_empty();
+            // A query whose names no written result shows (`names_unshown_in`) has its message.
+            if crate::blastinput::query_batch::names_unshown_in(
+                run.query_scopes,
+                reports,
+                holds_back,
+                q_idx,
+            ) {
+                return Ok(names::labelled_query_text(
+                    query.warning_id(),
+                    query.title(),
+                    &messages,
+                    has_hits,
+                ));
+            }
             names::query_text(
                 PROGRAM,
                 query.local_id.as_bytes(),
@@ -238,8 +257,8 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 query.believed(),
                 query.title(),
                 false,
-                &query_messages(query, run.searched[q_idx], run.filtered_empty),
-                !query_hits[q_idx].is_empty(),
+                &messages,
+                has_hits,
             )
         })
         .collect::<Result<Vec<_>>>()?;
@@ -296,9 +315,10 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 warnings.prefetch_lines(&mut *writer, taxdb_printer.batch_texts(q_idx))?;
             }
         }
+        let show = shows(q_idx);
         if q_idx == reports {
             // The held report that is never written (`written_queries`).
-            document.unwritten(&mut buf)?;
+            document.unwritten(&mut buf, show.joins_held)?;
             crate::report::query_warnings::write_document_posts(
                 &buf,
                 document.take_posts(),
@@ -306,6 +326,14 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 warnings.as_deref_mut(),
             )?;
             buf.clear();
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392
+            // Queries whose results join the unwritten held report were still read, exported and
+            // searched before the stopping batch, so their warnings and requests follow.
+            if let Some(warnings) = warnings.as_deref_mut() {
+                for later in (q_idx + 1)..queries.len() {
+                    warnings.before_query(later, &mut *writer)?;
+                }
+            }
             break;
         }
         let text = &texts[q_idx];
@@ -324,15 +352,18 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 &mut masks,
             );
         }
+        // The query whose id, title and length the result shows (`XmlShow::label`).
+        let label = show.label.unwrap_or(q_idx);
         let xml_query = XmlQuery {
-            id: text.query_id(query.local_id.as_bytes()),
-            title: &text.title,
-            len: i32::try_from(searched_length)?,
+            id: texts[label].query_id(queries[label].local_id.as_bytes()),
+            title: &texts[label].title,
+            len: i32::try_from(queries[label].seq().len())?,
             stats: query_stats(&run.query_stats[q_idx], run.numbers),
             message: text.message.as_deref(),
             // Read by XML2 alone.
             searched: run.searched[q_idx],
             masks: &masks,
+            joins_held: show.joins_held,
         };
         // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): the texts of the
         // subjects that the query's report reads one by one (`QueryWarnings::subject_read`) and

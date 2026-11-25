@@ -530,7 +530,6 @@ pub(super) fn render(
             query_records,
             subject_records,
             subject_letters,
-            shown,
             hitlists,
             scoring,
             genetic_code,
@@ -1234,7 +1233,6 @@ fn pairwise_hits(
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     subject_letters: SubjectLetters<'_>,
-    shown: &ShownSubjects<'_>,
     hitlists: &[KappaResultHitList],
     scoring: LocalStageDScoring,
     genetic_code: u8,
@@ -1424,6 +1422,7 @@ fn pairwise_hits(
                     // (`report_num_ident`).
                     seqalign_num_ident: usize::try_from(payload.num_ident)?,
                     nullb_stop,
+                    query_left_of_record: false,
                 });
                 // The model of the reads sorts by `hsp_scores` without the rows
                 // (`TblastnDatabase::subject_read_texts`): the row's values where the records'
@@ -1572,6 +1571,14 @@ fn write_pairwise(
         .iter()
         .map(|record| Arc::from(record.title()))
         .collect();
+    let subject_oids: Option<Arc<[u32]>> =
+        matches!(shown, ShownSubjects::Database { .. }).then(|| {
+            shown
+                .report_oids()
+                .into_iter()
+                .map(|oid| oid.get())
+                .collect()
+        });
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:263-265
     let config = PairwiseConfig {
         program: "tblastn".into(),
@@ -1587,25 +1594,13 @@ fn write_pairwise(
         // NCBI's alignment display cannot read.
         unreadable_query: pssm.and_then(|psi| psi.query_other_coding).map(|_| {
             crate::report::pairwise::UnreadableQuery {
-                oids: matches!(shown, ShownSubjects::Database { .. }).then(|| {
-                    shown
-                        .report_oids()
-                        .into_iter()
-                        .map(|oid| oid.get())
-                        .collect()
-                }),
+                oids: subject_oids.clone(),
             }
         }),
         ..PairwiseConfig::default()
     };
     // A subject set's subjects are all loaded.
     let every_loaded = crate::report::db_subject::HitLoads::default();
-    let subject_oids: Option<Vec<u32>> = match shown {
-        ShownSubjects::Fasta { .. } => None,
-        ShownSubjects::Database { reported, .. } => {
-            Some(reported.oids.iter().map(|oid| oid.get()).collect())
-        }
-    };
     write_tblastn_pairwise_report(
         if pssm.is_some() {
             super::in_pssm::PROGRAM

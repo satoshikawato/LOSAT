@@ -172,6 +172,7 @@ fn tblastx_hit(sum_n: i32) -> PairwiseHit {
         query_case: Default::default(),
         seqalign_num_ident: 60,
         nullb_stop: None,
+        query_left_of_record: false,
     }
 }
 
@@ -1229,6 +1230,9 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         None,
         DatabaseHeading::loaded(parsed[1].as_deref().unwrap(), false, 2, true),
         false,
+        &parsed,
+        None,
+        1,
         &hits[&1],
         &[1, 2],
         0..2,

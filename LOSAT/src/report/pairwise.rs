@@ -380,6 +380,17 @@ pub struct PairwiseHit {
     /// Report-time stop or per-HSP alignment skip for a TBLASTN `-in_pssm -window_size 0`
     /// NULLB-start alignment (`None` for all ordinary HSPs).
     pub(crate) nullb_stop: Option<PairwiseNullbStop>,
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1950-1982
+    // NCBI reference (598d8ae6): c++/include/objects/seqalign/Dense_diag.hpp:98-121
+    /// Whether this is a BLASTN `-db` HSP whose Seq-align query start lies below 0 in record
+    /// coordinates (class N): outfmt 0 skips it at `x_PrepareRowData` without starting a heading
+    /// or changing `previousId`, outfmt 1-4 feeds its negative query start into `CAlnMix` (which
+    /// throws `alnmerger.cpp:372`), and `HspScores` uses its unsigned `TSeqPos` query range for
+    /// coverage and signed minimum coordinate for `-sorthsps 2`. When true, the record query start
+    /// (as `u32` bits) and query length are carried in `hit.sort_query_offset` and
+    /// `hit.sort_query_end` (otherwise unused in BLASTN) so `PairwiseHit` stays at 376 bytes
+    /// (`left_of_record`). `false` for all in-context HSPs and all other programs.
+    pub(crate) query_left_of_record: bool,
 }
 
 /// Report-time stop or per-HSP skip action for [`PairwiseHit::nullb_stop`]
@@ -396,6 +407,15 @@ pub(crate) enum PairwiseNullbStop {
 }
 
 impl PairwiseHit {
+    /// Record-coordinate `(query_start, query_len)` of a BLASTN `-db` class N HSP
+    /// (`query_left_of_record`), or `None` for normal in-context HSPs.
+    #[inline]
+    pub(crate) fn left_of_record(&self) -> Option<(i32, u32)> {
+        self.query_left_of_record.then_some((
+            self.hit.sort_query_offset as u32 as i32,
+            self.hit.sort_query_end as u32,
+        ))
+    }
     /// Whether the rows of the HSP are empty: BLASTX's ungapped HSPs of length 0
     /// (`algorithm::blastx::empty_rows::rows_empty`), the only ones without a column, whose
     /// `CSeq_align::GetSeqRange` throws `Row is empty` (Seq_align.cpp:227). It reads the hit's
@@ -643,6 +663,7 @@ impl From<Hit> for PairwiseHit {
             query_case: Default::default(),
             seqalign_num_ident,
             nullb_stop: None,
+            query_left_of_record: false,
         }
     }
 }
@@ -1044,6 +1065,7 @@ fn write_subject_part<'h, W: Write>(
     protein: bool,
     html: Option<&super::html_ids::HtmlReport>,
     records: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    oids: Option<&[u32]>,
     heading_of: impl Fn(u32) -> SubjectHeading<'h>,
     place: super::query_warnings::ReportHook<'_, W>,
     write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
@@ -1061,7 +1083,8 @@ fn write_subject_part<'h, W: Write>(
     );
     match heading_of(s_idx) {
         SubjectHeading::Database(heading) => write_database_subject_alignments_part(
-            writer, probe, heading, protein, hits, indices, part, html, place, write_hsp,
+            writer, probe, heading, protein, records, oids, s_idx, hits, indices, part, html,
+            place, write_hsp,
         ),
         SubjectHeading::Record(title) => write_subject_alignments_part(
             writer, probe, s_idx, records, title, protein, hits, indices, part, html, place,
@@ -1295,6 +1318,9 @@ fn write_database_subject_alignments_part<W: Write>(
     mut probe: Option<&mut FormatProbe<'_>>,
     title: DatabaseHeading<'_>,
     protein: bool,
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    oids: Option<&[u32]>,
+    s_idx: u32,
     hits: &[&PairwiseHit],
     hsp_indices: &[HspIndex],
     part: std::ops::Range<usize>,
@@ -1302,6 +1328,23 @@ fn write_database_subject_alignments_part<W: Write>(
     place: super::query_warnings::ReportHook<'_, W>,
     write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
+    if hits.iter().any(|hit| hit.query_left_of_record) {
+        return write_database_subject_with_left_of_record(
+            writer,
+            probe,
+            title,
+            protein,
+            parsed,
+            oids,
+            s_idx,
+            hits,
+            hsp_indices,
+            part,
+            html,
+            place,
+            write_hsp,
+        );
+    }
     let first_index = hsp_indices[0];
     let skipped = if part.start == 0 {
         if let Some(probe) = probe.as_mut() {
@@ -1340,6 +1383,118 @@ fn write_database_subject_alignments_part<W: Write>(
         place,
         write_hsp,
     )
+}
+
+/// Per-HSP skip handling for a database subject that contains at least one BLASTN class N HSP
+/// (`query_left_of_record`): `x_PrepareRowData` throws before `x_PrintDefLine`, so a
+/// class N HSP writes NCBI's `...alignment skipped` line without starting a heading or updating
+/// `previousId`; the first non-class-N HSP writes the heading (and sets `previousId`), and a
+/// later class N HSP leaves `previousId` unchanged so subsequent non-class-N HSPs do not repeat
+/// the heading.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1941-1984
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3956-3981
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn write_database_subject_with_left_of_record<W: Write>(
+    writer: &mut W,
+    mut probe: Option<&mut FormatProbe<'_>>,
+    title: DatabaseHeading<'_>,
+    protein: bool,
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    oids: Option<&[u32]>,
+    s_idx: u32,
+    hits: &[&PairwiseHit],
+    hsp_indices: &[HspIndex],
+    part: std::ops::Range<usize>,
+    html: Option<HtmlHeading<'_>>,
+    place: super::query_warnings::ReportHook<'_, W>,
+    mut write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
+) -> io::Result<()> {
+    let skip_id: Vec<u8> = match title {
+        DatabaseHeading::Skipped(id) => id.to_vec(),
+        DatabaseHeading::Parsed(subject, _) => subject.skipped_id().to_vec(),
+        DatabaseHeading::Title(..) => subject_skipped_id(parsed, oids, s_idx),
+    };
+    let Some(first_shown) = hits.iter().position(|hit| !hit.query_left_of_record) else {
+        for &hsp_index in &hsp_indices[part] {
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.begin(hsp_index);
+            }
+            write_skipped_alignment(writer, &skip_id)?;
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.end(hsp_index);
+            }
+        }
+        return Ok(());
+    };
+    let mut heading_done = part.start > first_shown;
+    let mut heading_skipped: Option<Vec<u8>> = None;
+    let mut seen_shown_in_part = false;
+    for idx in part {
+        let (hit, hsp_index) = (hits[idx], hsp_indices[idx]);
+        if hit.query_left_of_record {
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.begin(hsp_index);
+            }
+            write_skipped_alignment(writer, &skip_id)?;
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.end(hsp_index);
+            }
+            continue;
+        }
+        if !heading_done {
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_begin(hsp_index);
+            }
+            heading_skipped = write_database_subject_heading(
+                writer,
+                title,
+                protein,
+                hits[0].subject_length,
+                html,
+                &mut *place,
+            )?;
+            if let Some(probe) = probe.as_mut() {
+                writer.flush()?;
+                probe.subject_end(hsp_index);
+            }
+            heading_done = true;
+            seen_shown_in_part = true;
+        } else if !seen_shown_in_part {
+            let skipped = title.skipped_id(protein, html);
+            if let Some(html) = html {
+                later_part_posts(html, &skipped, writer, &mut *place)?;
+            }
+            heading_skipped = skipped?;
+            seen_shown_in_part = true;
+        } else if heading_skipped.is_some() {
+            if let Some(html) = html {
+                let retried = title.skipped_id(protein, Some(html));
+                place_heading_posts(html, true, writer, &mut *place)?;
+                heading_skipped = retried?;
+            }
+        }
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.begin(hsp_index);
+        }
+        match &heading_skipped {
+            None => write_hsp(writer, hit, hsp_index)?,
+            Some(id) => write_skipped_alignment(writer, id)?,
+        }
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.end(hsp_index);
+        }
+    }
+    Ok(())
 }
 
 /// NCBI's line in place of an alignment whose heading it cannot make (c++/src/objtools/align_format/showalign.cpp:1976-1981,
@@ -3343,7 +3498,14 @@ pub(crate) fn blastn_section_hsps(
         num_alignments,
         group,
         is_query,
-        |hit, segments| super::serial::seqalign::nucleotide_row_segments(&hit.hit, segments),
+        |hit, segments| match hit.left_of_record() {
+            Some(left) if hit.hit.gap_info.is_none() => {
+                super::serial::seqalign::nucleotide_left_of_record_segments(
+                    &hit.hit, left, segments,
+                )
+            }
+            _ => super::serial::seqalign::nucleotide_row_segments(&hit.hit, segments),
+        },
     )
 }
 
@@ -3792,6 +3954,9 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
                 probe,
                 DatabaseHeading::Skipped(&id),
                 true,
+                self.parsed_subjects,
+                None,
+                s_idx,
                 &group.subject_hits[&s_idx],
                 &group.subject_hit_indices[&s_idx],
                 part,
@@ -3811,6 +3976,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             true,
             config.html.as_ref(),
             parsed,
+            None,
             |subject| {
                 group_heading(
                     group,
@@ -3955,6 +4121,9 @@ pub struct BlastnPairwiseReport {
     /// The sources of the others' Bioseqs by subject index, from which NCBI makes an empty stored
     /// title (`stored_source`; empty where none has one).
     pub subject_sources: Vec<super::defline::SourceTaxname>,
+    /// The OIDs of a database search's listed subjects by subject index (`BL_ORD_ID:<oid>` for
+    /// outfmt 0 `...alignment skipped` lines on unparsed database subjects); `None` for `-subject`.
+    pub subject_oids: Option<Arc<[u32]>>,
 }
 
 // The description table of a report: BLASTN's, BLASTP's, TBLASTN's and TBLASTX's
@@ -4845,15 +5014,66 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             }
             return Ok(());
         };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1523-1530
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3074-3096
+        // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:235-237
+        // For gapped alignments (`Dense-seg`), `-sorthits 4` (`SortHitByMasterCoverageDescending`
+        // over >= 2 hits) and `-sorthsps 2` (`SortHspByMasterStartAscending` over a hit with >= 2
+        // HSPs) read row 0 via `GetSeqRange` or `GetSeqStop` before the description table and
+        // throw `Row is empty` on a class N HSP, even with `-num_descriptions 0` or matrix-only.
+        if report.gapped {
+            let sort = self.config.sort;
+            let hits_throw = sort.hits == Some(4)
+                && group.subject_order.len() >= 2
+                && group
+                    .subject_order
+                    .iter()
+                    .any(|s| group.subject_hits[s].iter().any(|h| h.query_left_of_record));
+            let hsps_throw = sort.hsps == Some(2)
+                && group.subject_order.iter().any(|s| {
+                    let hsps = &group.subject_hits[s];
+                    hsps.len() >= 2 && hsps.iter().any(|h| h.query_left_of_record)
+                });
+            if hits_throw || hsps_throw {
+                writer.flush()?;
+                return Err(
+                    crate::algorithm::blastn::left_of_query::dense_seg_empty_row_stop()
+                        .into_io_error(),
+                );
+            }
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:606-611
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1533-1543
         if report.intro.matrix_only {
             return writeln!(writer);
         }
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1068-1155
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2914,4271
+        // `CShowBlastDefline::x_InitDeflineTable` reads row 0 via `GetSeqRange` for every HSP of
+        // the first `num_descriptions` subjects before writing the table; a gapped (`Dense-seg`)
+        // class N HSP throws `CDense_seg::GetSeqStop(): Row is empty` after `-html`'s `.ncbirc`
+        // lookup.
+        let described = group.described(report.num_descriptions);
+        if report.gapped
+            && described
+                .iter()
+                .any(|s| group.subject_hits[s].iter().any(|h| h.query_left_of_record))
+        {
+            if self.config.html.is_some() {
+                place(
+                    super::query_warnings::ReportPlace::Html(super::html_ids::HtmlPost::Ncbirc),
+                    writer,
+                )?;
+            }
+            writer.flush()?;
+            return Err(
+                crate::algorithm::blastn::left_of_query::dense_seg_empty_row_stop().into_io_error(),
+            );
+        }
         // The titles of the subjects of the records read (by subject index).
         write_blastn_description_table(
             writer,
-            group.described(report.num_descriptions),
+            described,
             group.subject_order.len() <= report.num_descriptions,
             &group.subject_hits,
             &group.subject_titles,
@@ -4902,6 +5122,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             false,
             config.html.as_ref(),
             parsed,
+            report.subject_oids.as_deref(),
             |subject| {
                 group_heading(
                     group,
@@ -5500,6 +5721,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             false,
             config.html.as_ref(),
             parsed,
+            None,
             |subject| {
                 group_heading(
                     group,
@@ -5877,6 +6099,9 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
                 probe,
                 DatabaseHeading::Skipped(&id),
                 false,
+                self.parsed_subjects,
+                None,
+                s_idx,
                 &group.subject_hits[&s_idx],
                 &group.subject_hit_indices[&s_idx],
                 part,
@@ -5905,6 +6130,17 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         let has_skip = hits
             .iter()
             .any(|h| matches!(h.nullb_stop, Some(PairwiseNullbStop::SkipTranslate)));
+        let heading = |subject| {
+            group_heading(
+                group,
+                parsed,
+                sources,
+                database,
+                self.report.gapped,
+                self.thrown(subject).is_some(),
+                subject,
+            )
+        };
         if !written.is_empty() {
             if has_skip {
                 write_tblastn_subject_with_skips(
@@ -5916,17 +6152,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
                     config.html.as_ref(),
                     parsed,
                     self.subject_oids,
-                    |subject| {
-                        group_heading(
-                            group,
-                            parsed,
-                            sources,
-                            database,
-                            self.report.gapped,
-                            self.thrown(subject).is_some(),
-                            subject,
-                        )
-                    },
+                    heading,
                     place,
                     write_hsp,
                 )?;
@@ -5940,17 +6166,8 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
                     false,
                     config.html.as_ref(),
                     parsed,
-                    |subject| {
-                        group_heading(
-                            group,
-                            parsed,
-                            sources,
-                            database,
-                            self.report.gapped,
-                            self.thrown(subject).is_some(),
-                            subject,
-                        )
-                    },
+                    None,
+                    heading,
                     place,
                     write_hsp,
                 )?;
@@ -6346,6 +6563,7 @@ impl BlastxSections<'_> {
             true,
             config.html.as_ref(),
             self.records_parsed,
+            None,
             heading_of,
             place,
             write_hsp,

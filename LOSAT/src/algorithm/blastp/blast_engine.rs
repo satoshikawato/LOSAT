@@ -3675,6 +3675,7 @@ fn build_pairwise_hits(
             // (`recount_shown_identities`).
             seqalign_num_ident,
             nullb_stop: None,
+            query_left_of_record: false,
         })
     };
     // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the rows of the final list as an indexed map on the

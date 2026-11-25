@@ -1086,6 +1086,7 @@ impl<'a> PairwiseRows<'a> {
             query_case: Default::default(),
             seqalign_num_ident: seqalign_num_ident.map_or(hsp.hit.num_ident, |n| n as usize),
             nullb_stop: None,
+            query_left_of_record: false,
         }
     }
 }

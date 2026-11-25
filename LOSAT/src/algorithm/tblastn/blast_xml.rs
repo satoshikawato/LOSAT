@@ -219,14 +219,17 @@ pub(super) fn prepare(
     // The reports that the documents write (the one report call, so a run that stops is one
     // without the epilog): a run that stops never writes the `-subject` report of its last query
     // when every document of the call holds it back (`written_queries`; outfmt 5 writes it).
+    let scopes = ranges.query_scopes.map(|scopes| scopes.numbered_from(0));
+    let holds_back = only_xml2
+        && crate::report::blast_xml2::reports_held(
+            matches!(target, Xml2Target::Subjects(_)),
+            values.pssm,
+        );
     let reports = written_queries(
         query_records.len(),
         !ranges.epilog,
-        only_xml2
-            && crate::report::blast_xml2::reports_held(
-                matches!(target, Xml2Target::Subjects(_)),
-                values.pssm,
-            ),
+        holds_back,
+        crate::blastinput::query_batch::held_start_of(scopes, query_records.len()),
     );
     let texts = query_records[..reports]
         .iter()
@@ -234,6 +237,22 @@ pub(super) fn prepare(
         .zip(query_validity)
         .enumerate()
         .map(|(q_idx, ((query, hitlist), &valid))| {
+            let messages = query_messages(
+                query.seq(),
+                valid,
+                q_idx < values.identity_warned,
+                values.filtered_empty && !query_batch_skipped[q_idx],
+            );
+            // A query whose names no written result shows (`names_unshown_in`) has its message.
+            if crate::blastinput::query_batch::names_unshown_in(scopes, reports, holds_back, q_idx)
+            {
+                return Ok(names::labelled_query_text(
+                    query.warning_id(),
+                    query.title(),
+                    &messages,
+                    has_hits(hitlist),
+                ));
+            }
             names::query_text(
                 PROGRAM,
                 query.local_id.as_bytes(),
@@ -241,12 +260,7 @@ pub(super) fn prepare(
                 query.believed(),
                 query.title(),
                 true,
-                &query_messages(
-                    query.seq(),
-                    valid,
-                    q_idx < values.identity_warned,
-                    values.filtered_empty && !query_batch_skipped[q_idx],
-                ),
+                &messages,
                 has_hits(hitlist),
             )
         })
@@ -507,10 +521,16 @@ impl PreparedXml {
                     warnings.prefetch_lines(&mut *writer, taxdb_printer.batch_texts(q_idx))?;
                 }
             }
+            // How NCBI shows the query's result (`query_batch::XmlShow`).
+            let show = crate::blastinput::query_batch::xml_show_of(
+                ranges.query_scopes.map(|scopes| scopes.numbered_from(0)),
+                q_idx,
+            );
             if q_idx == self.texts.len() {
                 // The held report that is never written (`prepare`, `written_queries`); the one
-                // held before it is written, or fails (`CaughtException`: its post follows).
-                let written = document.unwritten(&mut buf);
+                // held before it is written, or fails (`CaughtException`: its post follows),
+                // unless this result joins it (`XmlShow::joins_held`).
+                let written = document.unwritten(&mut buf, show.joins_held);
                 crate::report::query_warnings::write_document_end(
                     written,
                     &buf,
@@ -520,6 +540,14 @@ impl PreparedXml {
                     warnings.as_deref_mut(),
                 )?;
                 buf.clear();
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392
+                // Queries whose results join the unwritten held report were still read, exported
+                // and searched before the stopping batch, so their warnings and requests follow.
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    for later in (q_idx + 1)..query_records.len().min(hitlists.len()) {
+                        warnings.before_query(later, &mut *writer)?;
+                    }
+                }
                 break;
             }
             let text = &self.texts[q_idx];
@@ -547,15 +575,18 @@ impl PreparedXml {
                     &mut masks,
                 );
             }
+            // The query whose id, title and length the result shows (`XmlShow::label`).
+            let label = show.label.unwrap_or(q_idx);
             let xml_query = XmlQuery {
-                id: text.query_id(query.local_id.as_bytes()),
-                title: &text.title,
-                len: i32::try_from(query_letters.len())?,
+                id: self.texts[label].query_id(query_records[label].local_id.as_bytes()),
+                title: &self.texts[label].title,
+                len: i32::try_from(query_records[label].seq().len())?,
                 stats: self.stats[q_idx],
                 message: text.message.as_deref(),
                 // Read by XML2 alone.
                 searched: self.searched[q_idx],
                 masks: &masks,
+                joins_held: show.joins_held,
             };
             // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): the texts of
             // the subjects that the query's report reads one by one

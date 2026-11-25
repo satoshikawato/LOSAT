@@ -344,6 +344,105 @@ pub(super) fn read_memory_si_list(bytes: &[u8], warnings: &mut Vec<String>) -> V
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1476-1491
+/// Compact variant of [`SeqidListFile`] storing all ids in one contiguous buffer
+/// ([`super::id_list::PackedStrings`]).
+pub(super) struct PackedSeqidListFile {
+    pub ids: super::id_list::PackedStrings,
+    pub info: SeqidListInfo,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:87-120
+fn read_binary_packed(
+    bytes: &[u8],
+) -> Result<Option<(SeqidListInfo, super::id_list::PackedStrings)>, String> {
+    let Some((info, mut cursor)) = read_header(bytes)? else {
+        return Ok(None);
+    };
+    let mut data = Vec::with_capacity(bytes.len().saturating_sub(cursor.at));
+    let mut spans = Vec::with_capacity(usize::try_from(info.num_ids).unwrap_or(0).min(1 << 20));
+    while cursor.at < bytes.len() && (spans.len() as u64) < info.num_ids {
+        let id_len = cursor.u8().ok_or(INVALID)?;
+        let len = if id_len == LONG_ID {
+            cursor.u32().ok_or(INVALID)? as usize
+        } else {
+            usize::from(id_len)
+        };
+        let piece = cursor.take(len).ok_or(INVALID)?;
+        let start = data.len();
+        data.extend_from_slice(piece);
+        spans.push((start, data.len()));
+    }
+    if spans.len() as u64 != info.num_ids {
+        return Err("Invalid total num of ids in seqidlist file".to_string());
+    }
+    Ok(Some((
+        info,
+        super::id_list::PackedStrings::from_parts(data, spans),
+    )))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1284-1322
+fn read_memory_si_list_packed(
+    bytes: &[u8],
+    warnings: &mut Vec<String>,
+) -> super::id_list::PackedStrings {
+    let mut data = Vec::with_capacity(bytes.len());
+    let mut spans = Vec::new();
+    let mut p = 0;
+    while p < bytes.len() {
+        while p < bytes.len() && matches!(bytes[p], b'>' | b' ' | b'\t' | b'\n' | b'\r') {
+            p += 1;
+        }
+        if p < bytes.len() && bytes[p] == b'#' {
+            while p < bytes.len() && bytes[p] != b'\n' {
+                p += 1;
+            }
+            continue;
+        }
+        let head = p;
+        while p < bytes.len() && !matches!(bytes[p], b' ' | b'\t' | b'\n' | b'\r') {
+            p += 1;
+        }
+        if p > head {
+            let acc = &bytes[head..p];
+            let str_id = crate::ncbi_str::truncate_spaces(acc);
+            if !str_id.is_empty() {
+                let start = data.len();
+                data.extend_from_slice(str_id);
+                spans.push((start, data.len()));
+            } else {
+                warnings.push(format!(
+                    "WARNING:  {} is not a valid seqid string.",
+                    String::from_utf8_lossy(acc)
+                ));
+            }
+        }
+    }
+    super::id_list::PackedStrings::from_parts(data, spans)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1476-1491
+/// Reads a seqid list file's bytes into compact [`PackedStrings`] storage, matching
+/// [`read_si_list`] for both binary and text lists.
+pub(super) fn read_si_list_packed(
+    bytes: &[u8],
+    warnings: &mut Vec<String>,
+) -> Result<PackedSeqidListFile, String> {
+    if bytes.is_empty() {
+        return Err("Failed to map seqidlist file ".to_string());
+    }
+    if let Some((info, ids)) = read_binary_packed(bytes)? {
+        if info.num_ids > 0 {
+            return Ok(PackedSeqidListFile { ids, info });
+        }
+    }
+    Ok(PackedSeqidListFile {
+        ids: read_memory_si_list_packed(bytes, warnings),
+        info: SeqidListInfo::default(),
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1476-1491
 // A binary list of no ids (`GetSeqidlist` returns 0) is read again as text: its header
 // bytes become tokens. The header of a text file is the default (`is_v4`).
 /// Reads a seqid list file's bytes: a binary list, else a text list. `Err`: NCBI's

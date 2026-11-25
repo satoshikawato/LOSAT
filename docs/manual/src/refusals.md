@@ -201,7 +201,7 @@ These refusals apply to every search program that reads databases.
 | :--- | :--- |
 | Alias-file key `MEMB_BIT` | Refused. It selects sequences by a membership bit. `GILIST`, `TILIST`, `SEQIDLIST` (over version 4 and version 5 databases) and `TAXIDLIST` (over version 5 databases; ignored on version 4 as in NCBI) are read, and so is `MASKLIST` (see [Databases](databases.md)). |
 | A `SEQIDLIST` file with a line that NCBI warns about, with an id that NCBI's accession lookup cannot simplify, or whose comparison with a search list posts a Seq-id warning | Refused. |
-| A version 5 alias `SEQIDLIST` combined with `-seqidlist` or `-negative_seqidlist`, when the alias `SEQIDLIST` or the search's `-seqidlist` holds two differently spelled Seq-ids that NCBI treats as equivalent (such as `NP_000103` and `NP_000103.1`, or `LOC7` and `loc7`) | Refused. NCBI's comparator for sorting these lists is not a strict weak ordering, so its result depends on its C++ library's sort steps. Without a search seqid list, or with such a pair only inside `-negative_seqidlist`, the search runs as in NCBI. |
+| A version 5 alias `SEQIDLIST` combined with `-seqidlist` or `-negative_seqidlist`, when the alias `SEQIDLIST` or the search's `-seqidlist` holds two differently spelled Seq-ids that NCBI treats as equivalent (such as `NP_000103` and `NP_000103.1`, or `LOC7` and `loc7`), or two unparseable Seq-ids that raise different exceptions, or an unparseable Seq-id alongside a Seq-id that posts a warning | Refused. NCBI's comparator for sorting these lists is not a strict weak ordering and parses ids during the sort, so its result or which error it reports depends on its C++ library's sort steps. Without a search seqid list, with a single unparseable exception text, or with equivalent pairs only inside `-negative_seqidlist`, the search runs as in NCBI. |
 | An alias file whose `OID_MASK_TYPE` hides predicted RefSeq lines, over a sequence with an id that NCBI warns about when it reads the id's accession | Refused where the sequence's lines are read. NCBI writes the warning again at each read. |
 | An `OIDLIST` file that is empty or shorter than 5 bytes (no byte after its 4-byte header) | Refused. NCBI crashes on an empty file, and its error for the other names a line of its source. A file whose bits NCBI would read past the memory page after its end is refused too. |
 | A GI, TI or PIG index of a version 4 database (`.pni`/`.pnd`, `.pti`/`.ptd`, `.ppi`/`.ppd` and the `.n` files) whose data file is empty, or ends more than a memory page before the last term its index counts, where a `GILIST` or `TILIST` or a `blastdbcmd` lookup opens it | Refused. NCBI reads the first and last terms of the data file when it opens the index, whatever the file's length, and there it reads past its mapping of the file. A data file of another length that ends inside that page is read as NCBI reads it: the index is not used, a `GILIST` ends in NCBI's batch-mode error and a `TILIST` finds no sequence. |
@@ -445,8 +445,8 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 | Input | What happens |
 | :--- | :--- |
-| `-binary` | Refused (PSSM files in ASN.1 binary are not read yet). |
 | `-dbtype delta`, `-dbtype cobalt` | Refused. |
+| A query with `iupacna` data holding a byte `>= 0x80` in a pair position (`0..(len & !1)`, before any odd overhang byte) | Refused. NCBI's `makeprofiledb` indexes its `iupacna`-to-`ncbi4na` table with a signed `char` and reads before the table. Bytes `< 0x80`, the final odd overhang byte, and `mol na` (which stops with NCBI's molecule error first) match NCBI. |
 | A query in a nucleotide coding with fewer bytes than its length needs: `ncbi2na` of fewer than a byte per 4 bases, `ncbi4na` of fewer than a byte per 2 bases, `iupacna` four letters or more short of an even length (three of an odd one) | Refused. NCBI's `makeprofiledb` reads past the query's data (its database then depends on memory outside the data, or it crashes). A query of enough bytes is built as NCBI builds it, and with frequency ratios only stops with NCBI's conversion error. |
 | In a profile with frequency ratios only, a query whose `seq-data` is a `gap` | Refused. NCBI's `makeprofiledb` reads past its table of sequence codings. A query in any other coding gets NCBI's result: its conversion error for a nucleotide coding (`ncbi8na` too), the codes of `ncbi8aa`, NCBI's unknown exception for `ncbipna` and `ncbipaa`. |
 | `-max_smp_vol 0` | Refused. NCBI's `makeprofiledb` crashes (division by zero). |
@@ -458,7 +458,8 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | In a profile with frequency ratios only, a query residue that is not one of the 28 protein codes: in `ncbieaa` a character other than a capital letter, `*` or `-` (such as a lower-case letter), in `iupacaa` a character other than a letter, in `ncbistdaa` a code of 28 or more | Refused. NCBI's `makeprofiledb` writes outside its data, and then crashes or gives a result that depends on the residue. A query whose length does not match, or a matrix that NCBI does not know, gets NCBI's error first. |
 | A query without Seq-ids and without descriptors (a version 4 database with `-index true` stops with NCBI's message) | Refused. NCBI's `makeprofiledb` aborts (version 5), or with `-index false` writes the `gnl\|BL_ORD_ID` id past the end of an empty list. |
 | `-index false` with a query whose first binary definition line has no Seq-id | Refused, as above. |
-| Binary definition lines (a `user` object `ASN1_BlastDefLine`) that are damaged or hold characters that NCBI's reader replaces | Refused. NCBI's `makeprofiledb` stops with its ASN.1 reader's error, or replaces the characters and reports each. |
+| Binary definition lines (a `user` object `ASN1_BlastDefLine`) with a `Seq-id` element stated as `NULL` in a version 5 database with no prior sequence written yet and no active taxid map (including `-taxid` or an empty `-taxid_map`) | Refused as a writer-destructor abort after posting `(802.5)`. NCBI's version 5 taxonomy writer aborts on close. With `-taxid_map` (non-empty) or an `org` descriptor, `-blastdb_version 4`, `-index false` when the `NULL` is the first id of the first line, or version 5 after a prior sequence, LOSAT matches NCBI. Damaged binary definition lines and replaced visible characters are read and reported as in NCBI. |
+| `:OtherType` pointers in ASN.1 text or `-binary` profiles and binary definition lines | Refused. NCBI's error depends on which ASN.1 classes the process has registered so far. |
 | A profile stored by row without scores whose query length is 4,294,967,295 letters (`numColumns -1`) | Refused. NCBI's `makeprofiledb` writes before its matrix. |
 | An error after which the database's writer fails again as it closes (a missing input file after the first with an empty `-out` in a version 5 database; a query without definition lines in a version 5 database) | Refused. NCBI's `makeprofiledb` aborts. |
 
@@ -473,7 +474,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 ## On the list for a later release
 
 - The programs `deltablast` and `blast_formatter`.
-- `makeprofiledb -binary` and `-dbtype delta` or `cobalt`.
+- `makeprofiledb -dbtype delta` or `cobalt`.
 - `psiblast -phi_pattern`.
 - The `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`.
 - `-html` in `psiblast`, `rpsblast` and `rpstblastn`.

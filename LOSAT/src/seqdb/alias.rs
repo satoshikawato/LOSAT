@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 use crate::utils::os_bytes::{os_str_bytes, path_bytes, path_from_bytes, path_of_bytes};
 
 use super::file::DbFile;
-use super::id_list::{AliasIdList, IdListKind};
+use super::id_list::{AliasIdList, IdListKind, PackedStrings, SeqIdSlice};
 use super::oid_list::{self, OidListError, OidListFile};
 use super::volume::with_extension;
 use super::{SeqDbError, SeqType};
@@ -1679,7 +1679,7 @@ impl LoadedList<'_> {
                 mut sorted,
             } => {
                 super::isam::insure_order(&mut ids, &mut sorted);
-                list.sis = ids.into_iter().map(|id| id.si).collect();
+                list.sis = PackedStrings::from_vecs(ids.into_iter().map(|id| id.si));
             }
         }
         list
@@ -2080,13 +2080,30 @@ fn attach_and_excluded(
     excluded
 }
 
+const ALIAS_SEQIDLIST_KIND: &str = "an alias file's SEQIDLIST";
+const USER_SEQIDLIST_KIND: &str = "the search's -seqidlist";
+const USER_NEG_SEQIDLIST_KIND: &str = "the search's -negative_seqidlist";
+
+fn optional_path(list_path: Option<&[u8]>) -> PathBuf {
+    list_path.map(path_from_bytes).unwrap_or_default()
+}
+
+fn display_seqid_token(bytes: &[u8]) -> String {
+    if bytes.iter().all(|&b| (0x20..0x7f).contains(&b)) {
+        String::from_utf8_lossy(bytes).into_owned()
+    } else {
+        bytes.escape_ascii().to_string()
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:565-576
 /// Parses one Seq-id string as `s_CompareSeqId` parses it (`fParse_AnyRaw` and
 /// `fParse_ValidLocal`), returning NCBI's `CSeqIdException` on parse failure and refusing tokens
 /// that post a Seq-id warning.
 fn parse_compare_seq_id(
     id: &[u8],
-    list_path: &[u8],
+    list_path: Option<&[u8]>,
+    list_kind: &str,
 ) -> Result<crate::seqid::ParsedSeqId, OidListError> {
     let flags = crate::seqid::accguide::parse_flags::ANY_RAW
         | crate::seqid::accguide::parse_flags::VALID_LOCAL;
@@ -2095,10 +2112,9 @@ fn parse_compare_seq_id(
         .map_err(|error| OidListError::reader(SeqDbError::Ncbi(error.exception())))?;
     if let Some(warning) = warnings.first() {
         return Err(OidListError::reader(SeqDbError::Unsupported {
-            path: path_from_bytes(list_path),
+            path: optional_path(list_path),
             message: format!(
-                "comparing seqids of an alias file's SEQIDLIST with a search list posts a Seq-id \
-                 warning (`{}`)",
+                "comparing seqids of {list_kind} with a search list posts a Seq-id warning (`{}`)",
                 String::from_utf8_lossy(&warning.message)
             ),
         }));
@@ -2110,12 +2126,19 @@ fn parse_compare_seq_id(
 /// `s_CompareSeqId`: compares two Seq-id strings using `CSeq_id` with flags `fParse_AnyRaw` and
 /// `fParse_ValidLocal`; identical strings or matching `CSeq_id`s compare equivalent (`false`),
 /// otherwise bytewise lexicographical order.
-fn compare_seq_id(id1: &[u8], id2: &[u8], list_path: &[u8]) -> Result<bool, OidListError> {
+fn compare_seq_id(
+    id1: &[u8],
+    path1: Option<&[u8]>,
+    kind1: &str,
+    id2: &[u8],
+    path2: Option<&[u8]>,
+    kind2: &str,
+) -> Result<bool, OidListError> {
     if id1 == id2 {
         return Ok(false);
     }
-    let seq1 = parse_compare_seq_id(id1, list_path)?;
-    let seq2 = parse_compare_seq_id(id2, list_path)?;
+    let seq1 = parse_compare_seq_id(id1, path1, kind1)?;
+    let seq2 = parse_compare_seq_id(id2, path2, kind2)?;
     if crate::seqid::defline_set::compare(&seq1, &seq2) == crate::seqid::defline_set::Sic::Yes {
         return Ok(false);
     }
@@ -2123,89 +2146,184 @@ fn compare_seq_id(id1: &[u8], id2: &[u8], list_path: &[u8]) -> Result<bool, OidL
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:565-576,592,611
-/// Rejects `items` when it contains two differently spelled Seq-ids that `s_CompareSeqId` treats
-/// as equivalent (`CSeq_id::Match`). Because `CSeq_id::Match` is not transitive (for example,
-/// `NP_000103` matches both `NP_000103.1` and `NP_000103.2`), sorting such a list with
-/// `s_CompareSeqId` violates strict weak ordering and NCBI's result depends on the C++ library's
-/// sort steps (`PD-LOSAT-NCBI-DEFECTS`, rule 3). When this check succeeds on a list with at least
-/// two distinct spellings, every unique entry has parsed cleanly and `s_CompareSeqId` agrees with
-/// raw bytewise order on `items`.
-fn reject_equivalent_seqid_pair(
-    items: &[Vec<u8>],
-    list_path: &[u8],
+/// Scans all unique entries of a bytewise-sorted list `items` (with at least two distinct entries)
+/// as `s_CompareSeqId` parses them, collecting compact `(match_key, index)` pairs while checking
+/// in order: (1) any Seq-id warning (refused), (2) two or more distinct exception texts (refused),
+/// (3) one common exception text (raised as NCBI's `CSeqIdException`).
+fn scan_compare_seqids<S: SeqIdSlice + ?Sized>(
+    items: &S,
+    list_path: Option<&[u8]>,
     list_kind: &str,
-) -> Result<(), OidListError> {
-    if items.len() <= 1 {
-        return Ok(());
-    }
-    let mut seen: rustc_hash::FxHashSet<&[u8]> =
-        rustc_hash::FxHashSet::with_capacity_and_hasher(items.len(), Default::default());
-    let mut unique: Vec<&[u8]> = Vec::with_capacity(items.len());
-    for item in items {
-        let bytes = item.as_slice();
-        if seen.insert(bytes) {
-            unique.push(bytes);
+) -> Result<Vec<(u64, u32)>, OidListError> {
+    let flags = crate::seqid::accguide::parse_flags::ANY_RAW
+        | crate::seqid::accguide::parse_flags::VALID_LOCAL;
+    let mut first_warning: Option<Vec<u8>> = None;
+    let mut first_exc: Option<(usize, crate::ncbi_exception::NcbiException, Vec<u8>)> = None;
+    let mut second_exc_idx: Option<usize> = None;
+    let mut key_entries: Vec<(u64, u32)> = Vec::new();
+    let mut tmp_keys: Vec<u64> = Vec::new();
+    for idx in 0..items.len() {
+        let bytes = items.get(idx);
+        if idx > 0 && bytes == items.get(idx - 1) {
+            continue;
         }
-    }
-    if unique.len() <= 1 {
-        return Ok(());
-    }
-    let mut parsed: Vec<(&[u8], crate::seqid::ParsedSeqId)> = Vec::with_capacity(unique.len());
-    for bytes in unique {
-        parsed.push((bytes, parse_compare_seq_id(bytes, list_path)?));
-    }
-    let mut buckets: rustc_hash::FxHashMap<u64, Vec<usize>> =
-        rustc_hash::FxHashMap::with_capacity_and_hasher(parsed.len(), Default::default());
-    let mut keys = Vec::new();
-    for (idx, (bytes, seq)) in parsed.iter().enumerate() {
-        keys.clear();
-        crate::seqid::defline_set::match_keys(seq, &mut keys);
-        for &key in &keys {
-            let bucket = buckets.entry(key).or_default();
-            for &prev in bucket.iter() {
-                if crate::seqid::defline_set::compare(&parsed[prev].1, seq)
-                    == crate::seqid::defline_set::Sic::Yes
-                {
-                    return Err(OidListError::reader(SeqDbError::Unsupported {
-                        path: path_from_bytes(list_path),
-                        message: format!(
-                            "{list_kind} holds two differently spelled Seq-ids (`{}` and `{}`) \
-                             that NCBI's `s_CompareSeqId` treats as equivalent; combining a \
-                             version 5 alias SEQIDLIST with a search seqid list then depends on \
-                             the C++ library's sort order",
-                            String::from_utf8_lossy(parsed[prev].0),
-                            String::from_utf8_lossy(bytes),
-                        ),
-                    }));
+        let mut item_warning: Option<Vec<u8>> = None;
+        let parsed = crate::seqid::parse::seq_id_from_text(bytes, flags, &mut |w| {
+            if item_warning.is_none() {
+                item_warning = Some(w.message);
+            }
+        });
+        if first_warning.is_none() {
+            if let Some(warn_msg) = item_warning {
+                first_warning = Some(warn_msg);
+                key_entries = Vec::new();
+            }
+        }
+        match parsed {
+            Ok(seq) if first_warning.is_none() && first_exc.is_none() => {
+                tmp_keys.clear();
+                crate::seqid::defline_set::match_keys(&seq, &mut tmp_keys);
+                let idx_u32 = u32::try_from(idx).map_err(|_| {
+                    OidListError::reader(SeqDbError::Unsupported {
+                        path: optional_path(list_path),
+                        message: format!("{list_kind} has more than u32::MAX entries"),
+                    })
+                })?;
+                for &k in &tmp_keys {
+                    key_entries.push((k, idx_u32));
                 }
             }
-            bucket.push(idx);
+            Ok(_) => {}
+            Err(error) => {
+                let exc = error.exception();
+                let c_what = crate::cli::c_string(&exc.ncbi_what()).to_vec();
+                match &first_exc {
+                    None => {
+                        key_entries = Vec::new();
+                        first_exc = Some((idx, exc, c_what));
+                    }
+                    Some((_, _, prev_what)) => {
+                        if second_exc_idx.is_none() && *prev_what != c_what {
+                            second_exc_idx = Some(idx);
+                        }
+                    }
+                }
+            }
         }
+    }
+    if let Some(warn_msg) = first_warning {
+        return Err(OidListError::reader(SeqDbError::Unsupported {
+            path: optional_path(list_path),
+            message: format!(
+                "comparing seqids of {list_kind} with a search list posts a Seq-id warning (`{}`)",
+                String::from_utf8_lossy(&warn_msg)
+            ),
+        }));
+    }
+    if let (Some((first_idx, _, _)), Some(second_idx)) = (&first_exc, second_exc_idx) {
+        return Err(OidListError::reader(SeqDbError::Unsupported {
+            path: optional_path(list_path),
+            message: format!(
+                "{list_kind} holds Seq-ids (`{}` and `{}`) that fail NCBI's `s_CompareSeqId` with \
+                 different exceptions; combining a version 5 alias SEQIDLIST with a search seqid \
+                 list then depends on the C++ library's sort order",
+                display_seqid_token(items.get(*first_idx)),
+                display_seqid_token(items.get(second_idx)),
+            ),
+        }));
+    }
+    if let Some((_, exc, _)) = first_exc {
+        return Err(OidListError::reader(SeqDbError::Ncbi(exc)));
+    }
+    Ok(key_entries)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:565-576,592,611
+/// Rejects a bytewise-sorted list `items` when it contains warnings, multiple distinct
+/// `s_CompareSeqId` exceptions, or two differently spelled Seq-ids that `s_CompareSeqId` treats
+/// as equivalent (`CSeq_id::Match`). Only key-colliding runs are re-parsed, keeping peak memory
+/// linear in the number of `(u64, u32)` keys rather than holding all parsed Seq-ids at once.
+fn validate_compare_seqids<S: SeqIdSlice + ?Sized>(
+    items: &S,
+    list_path: Option<&[u8]>,
+    list_kind: &str,
+) -> Result<(), OidListError> {
+    if items.len() <= 1 || items.get(0) == items.get(items.len() - 1) {
+        return Ok(());
+    }
+    let mut key_entries = scan_compare_seqids(items, list_path, list_kind)?;
+    key_entries.sort_unstable();
+    let mut run_start = 0;
+    while run_start < key_entries.len() {
+        let key = key_entries[run_start].0;
+        let mut run_end = run_start + 1;
+        while run_end < key_entries.len() && key_entries[run_end].0 == key {
+            run_end += 1;
+        }
+        if run_end - run_start >= 2 {
+            let mut parsed_run: Vec<(usize, crate::seqid::ParsedSeqId)> =
+                Vec::with_capacity(run_end - run_start);
+            for &(_, idx_u32) in &key_entries[run_start..run_end] {
+                let idx = idx_u32 as usize;
+                if parsed_run
+                    .last()
+                    .is_some_and(|&(prev_idx, _)| prev_idx == idx)
+                {
+                    continue;
+                }
+                let seq = parse_compare_seq_id(items.get(idx), list_path, list_kind)?;
+                for &(prev_idx, ref prev_seq) in &parsed_run {
+                    if crate::seqid::defline_set::compare(prev_seq, &seq)
+                        == crate::seqid::defline_set::Sic::Yes
+                    {
+                        return Err(OidListError::reader(SeqDbError::Unsupported {
+                            path: optional_path(list_path),
+                            message: format!(
+                                "{list_kind} holds two differently spelled Seq-ids (`{}` and \
+                                 `{}`) that NCBI's `s_CompareSeqId` treats as equivalent; \
+                                 combining a version 5 alias SEQIDLIST with a search seqid list \
+                                 then depends on the C++ library's sort order",
+                                display_seqid_token(items.get(prev_idx)),
+                                display_seqid_token(items.get(idx)),
+                            ),
+                        }));
+                    }
+                }
+                parsed_run.push((idx, seq));
+            }
+        }
+        run_start = run_end;
     }
     Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:612-622
-/// Sorted set intersection of `lhs` and `rhs` under a fallible comparator `less`
-/// (keeps matching elements from `lhs`, matching `std::set_intersection` in
+/// Sorted set intersection of `lhs` and `rhs` under fallible directional comparators `less_lr`
+/// and `less_rl` (keeps matching elements from `lhs`, matching `std::set_intersection` in
 /// `s_ProcessSeqIdFilters`).
-fn set_intersection_by<F>(
-    lhs: &[Vec<u8>],
-    rhs: &[Vec<u8>],
-    less: &mut F,
-) -> Result<Vec<Vec<u8>>, OidListError>
+fn set_intersection_by<'a, L, R, F, G>(
+    lhs: &'a L,
+    rhs: &R,
+    less_lr: &mut F,
+    less_rl: &mut G,
+) -> Result<Vec<&'a [u8]>, OidListError>
 where
+    L: SeqIdSlice + ?Sized,
+    R: SeqIdSlice + ?Sized,
     F: FnMut(&[u8], &[u8]) -> Result<bool, OidListError>,
+    G: FnMut(&[u8], &[u8]) -> Result<bool, OidListError>,
 {
     let mut out = Vec::new();
     let (mut i, mut j) = (0, 0);
     while i < lhs.len() && j < rhs.len() {
-        if less(&lhs[i], &rhs[j])? {
+        let a = lhs.get(i);
+        let b = rhs.get(j);
+        if less_lr(a, b)? {
             i += 1;
-        } else if less(&rhs[j], &lhs[i])? {
+        } else if less_rl(b, a)? {
             j += 1;
         } else {
-            out.push(lhs[i].clone());
+            out.push(a);
             i += 1;
             j += 1;
         }
@@ -2214,27 +2332,50 @@ where
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:623-633
-/// Sorted set difference of `lhs` and `rhs` under a fallible comparator `less` (matching
-/// `std::set_difference` in `s_ProcessSeqIdFilters`).
-fn set_difference_by<F>(
-    lhs: &[Vec<u8>],
-    rhs: &[Vec<u8>],
-    less: &mut F,
-) -> Result<Vec<Vec<u8>>, OidListError>
+/// Sorted set difference of `lhs` and `rhs` under fallible directional comparators `less_lr` and
+/// `less_rl` (matching `std::set_difference` in `s_ProcessSeqIdFilters`).
+fn set_difference_by<'a, L, R, F, G>(
+    lhs: &'a L,
+    rhs: &R,
+    less_lr: &mut F,
+    less_rl: &mut G,
+) -> Result<Vec<&'a [u8]>, OidListError>
 where
+    L: SeqIdSlice + ?Sized,
+    R: SeqIdSlice + ?Sized,
     F: FnMut(&[u8], &[u8]) -> Result<bool, OidListError>,
+    G: FnMut(&[u8], &[u8]) -> Result<bool, OidListError>,
+{
+    set_difference_by_get(lhs.len(), |idx| lhs.get(idx), rhs, less_lr, less_rl)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:623-633
+fn set_difference_by_get<'a, R, LGet, F, G>(
+    lhs_len: usize,
+    lhs_get: LGet,
+    rhs: &R,
+    less_lr: &mut F,
+    less_rl: &mut G,
+) -> Result<Vec<&'a [u8]>, OidListError>
+where
+    R: SeqIdSlice + ?Sized,
+    LGet: Fn(usize) -> &'a [u8],
+    F: FnMut(&[u8], &[u8]) -> Result<bool, OidListError>,
+    G: FnMut(&[u8], &[u8]) -> Result<bool, OidListError>,
 {
     let mut out = Vec::new();
     let (mut i, mut j) = (0, 0);
-    while i < lhs.len() {
+    while i < lhs_len {
         if j >= rhs.len() {
-            out.extend_from_slice(&lhs[i..]);
+            out.extend((i..lhs_len).map(&lhs_get));
             break;
         }
-        if less(&lhs[i], &rhs[j])? {
-            out.push(lhs[i].clone());
+        let a = lhs_get(i);
+        let b = rhs.get(j);
+        if less_lr(a, b)? {
+            out.push(a);
             i += 1;
-        } else if less(&rhs[j], &lhs[i])? {
+        } else if less_rl(b, a)? {
             j += 1;
         } else {
             i += 1;
@@ -2256,6 +2397,84 @@ fn ensure_lmdb_entries<'e>(
         *slot = Some(lmdb().map_err(OidListError::reader)?);
     }
     Ok(slot.as_deref().expect("lmdb entries loaded"))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:610-635
+/// Validates a sorted alias `SEQIDLIST` against `s_CompareSeqId` and applies the search's
+/// `-seqidlist` intersection and/or `-negative_seqidlist` difference, borrowing slices from
+/// `sorted_accs`.
+fn filter_alias_seqids<'a>(
+    sorted_accs: &'a PackedStrings,
+    fname: &[u8],
+    user_accs: &[Vec<u8>],
+    neg_user_accs: &[Vec<u8>],
+) -> Result<Vec<&'a [u8]>, OidListError> {
+    validate_compare_seqids(sorted_accs, Some(fname), ALIAS_SEQIDLIST_KIND)?;
+    let mut matched: Option<Vec<&'a [u8]>> = None;
+    if !user_accs.is_empty() {
+        let common = set_intersection_by(
+            sorted_accs,
+            user_accs,
+            &mut |a, b| {
+                compare_seq_id(
+                    a,
+                    Some(fname),
+                    ALIAS_SEQIDLIST_KIND,
+                    b,
+                    None,
+                    USER_SEQIDLIST_KIND,
+                )
+            },
+            &mut |b, a| {
+                compare_seq_id(
+                    b,
+                    None,
+                    USER_SEQIDLIST_KIND,
+                    a,
+                    Some(fname),
+                    ALIAS_SEQIDLIST_KIND,
+                )
+            },
+        )?;
+        if common.is_empty() {
+            return Ok(common);
+        }
+        matched = Some(common);
+    }
+    if !neg_user_accs.is_empty() {
+        let mut less_lr = |a: &[u8], b: &[u8]| {
+            compare_seq_id(
+                a,
+                Some(fname),
+                ALIAS_SEQIDLIST_KIND,
+                b,
+                None,
+                USER_NEG_SEQIDLIST_KIND,
+            )
+        };
+        let mut less_rl = |b: &[u8], a: &[u8]| {
+            compare_seq_id(
+                b,
+                None,
+                USER_NEG_SEQIDLIST_KIND,
+                a,
+                Some(fname),
+                ALIAS_SEQIDLIST_KIND,
+            )
+        };
+        let diff = match &matched {
+            Some(prev) => set_difference_by_get(
+                prev.len(),
+                |idx| prev[idx],
+                neg_user_accs,
+                &mut less_lr,
+                &mut less_rl,
+            )?,
+            None => set_difference_by(sorted_accs, neg_user_accs, &mut less_lr, &mut less_rl)?,
+        };
+        return Ok(diff);
+    }
+    Ok(matched.unwrap_or_default())
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:578-654
@@ -2285,75 +2504,85 @@ fn process_seqid_filters(
     };
     if !user_accs.is_empty() {
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:592
-        // Once `reject_equivalent_seqid_pair` passes, `s_CompareSeqId` reduces to bytewise `<` on
-        // `user_accs`, so `sort` yields the unique order independent of sort algorithm.
-        reject_equivalent_seqid_pair(&user_accs, fnames[0], "the search's -seqidlist")?;
-        user_accs.sort();
+        // Sort bytewise first so validation runs order-independently without extra hash sets;
+        // once `validate_compare_seqids` passes, `s_CompareSeqId` reduces to bytewise `<`.
+        user_accs.sort_unstable();
+        validate_compare_seqids(user_accs.as_slice(), None, USER_SEQIDLIST_KIND)?;
     }
     let neg_user_accs: &[Vec<u8>] = match user {
         Some(super::filter::DeflineRule::NegativeSeqids(ids)) if !ids.is_empty() => ids.as_slice(),
         _ => &[],
     };
-    let mut oids = Vec::new();
     for (fname, vols) in fnames.iter().zip(fnames_vols) {
-        let bytes = super::seqidlist::read_memory_file(fname).map_err(OidListError::reader)?;
-        let mut warnings = Vec::new();
-        let file = super::seqidlist::read_si_list(&bytes, &mut warnings)
-            .map_err(|text| OidListError::reader(SeqDbError::NotFound(text.into_bytes())))?;
-        if let Some(warning) = warnings.first() {
-            return Err(OidListError::reader(SeqDbError::Unsupported {
-                path: path_from_bytes(*fname),
-                message: format!(
-                    "the seqid list of an alias file's SEQIDLIST has a token NCBI reports (`{}`)",
-                    warning.trim()
-                ),
-            }));
-        }
+        let file = {
+            let bytes = super::seqidlist::read_memory_file(fname).map_err(OidListError::reader)?;
+            let mut warnings = Vec::new();
+            let file = super::seqidlist::read_si_list_packed(&bytes, &mut warnings)
+                .map_err(|text| OidListError::reader(SeqDbError::NotFound(text.into_bytes())))?;
+            if let Some(warning) = warnings.first() {
+                return Err(OidListError::reader(SeqDbError::Unsupported {
+                    path: path_from_bytes(*fname),
+                    message: format!(
+                        "the seqid list of an alias file's SEQIDLIST has a token NCBI reports \
+                         (`{}`)",
+                        warning.trim()
+                    ),
+                }));
+            }
+            file
+        };
+        let is_v4 = file.info.is_v4;
+        let mut ids = file.ids;
         // Binary `.bsl` keeps `in_order = true` (stored order); text lists sort on first `FindSi`.
-        let mut attached_sis = file.ids.clone();
-        if file.info.is_v4 {
-            attached_sis.sort();
+        if is_v4 {
+            ids.sort_unstable();
         }
+        let has_user_filter = !user_accs.is_empty() || !neg_user_accs.is_empty();
+        // When a binary `.bsl` is intersected/differenced with a search list, `attached` keeps
+        // stored file order while the sorted view clones only the span index (sharing the bytes).
+        let mut sorted_binary = if !is_v4 && has_user_filter && !ids.is_empty() {
+            let mut sorted = ids.clone();
+            sorted.sort_unstable();
+            Some(sorted)
+        } else {
+            None
+        };
         let attached = std::sync::Arc::new(AliasIdList {
-            sis: attached_sis,
+            sis: ids,
             ..Default::default()
         });
-        let excluded = attach_and_excluded(volumes, vols, attached, vol_lists);
-        let mut accs = file.ids;
-        if accs.is_empty() {
+        let excluded =
+            attach_and_excluded(volumes, vols, std::sync::Arc::clone(&attached), vol_lists);
+        if attached.sis.is_empty() {
             continue;
         }
-        if !user_accs.is_empty() || !neg_user_accs.is_empty() {
-            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:611
-            // Once `reject_equivalent_seqid_pair` passes, `s_CompareSeqId` reduces to bytewise `<`
-            // on `accs`, so `sort` yields the unique order independent of sort algorithm.
-            reject_equivalent_seqid_pair(&accs, fname, "an alias file's SEQIDLIST")?;
-            accs.sort();
-            if !user_accs.is_empty() {
-                accs = set_intersection_by(&accs, &user_accs, &mut |a, b| {
-                    compare_seq_id(a, b, fname)
-                })?;
-                if accs.is_empty() {
-                    continue;
-                }
-            }
-            if !neg_user_accs.is_empty() {
-                accs = set_difference_by(&accs, neg_user_accs, &mut |a, b| {
-                    compare_seq_id(a, b, fname)
-                })?;
-                if accs.is_empty() {
-                    continue;
-                }
-            }
-        }
-        let entries = ensure_lmdb_entries(entries_slot, lmdb)?;
-        super::filter::entries_accessions_to_oids(entries, &accs, &mut oids)
-            .map_err(OidListError::reader)?;
-        for oid in oids.iter().flatten().copied() {
-            if oid >= num_oids || excluded.iter().any(|&(s, e)| oid >= s && oid < e) {
+        if has_user_filter {
+            let sorted_ref = sorted_binary.as_ref().unwrap_or(&attached.sis);
+            let matched = filter_alias_seqids(sorted_ref, fname, &user_accs, neg_user_accs)?;
+            if matched.is_empty() {
                 continue;
             }
-            f_bits[(oid / 64) as usize] |= 1u64 << (oid % 64);
+            let entries = ensure_lmdb_entries(entries_slot, lmdb)?;
+            super::filter::entries_accessions_to_bits(
+                entries,
+                matched.as_slice(),
+                num_oids,
+                &excluded,
+                f_bits,
+            )
+            .map_err(OidListError::reader)?;
+            drop(matched);
+            sorted_binary.take();
+        } else {
+            let entries = ensure_lmdb_entries(entries_slot, lmdb)?;
+            super::filter::entries_accessions_to_bits(
+                entries,
+                &attached.sis,
+                num_oids,
+                &excluded,
+                f_bits,
+            )
+            .map_err(OidListError::reader)?;
         }
     }
     Ok(())

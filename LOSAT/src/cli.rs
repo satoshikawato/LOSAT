@@ -660,6 +660,14 @@ pub(crate) fn is_silent_end(error: &anyhow::Error) -> bool {
         .is_some_and(|native| native.exit == 0 && native.message.is_empty())
 }
 
+// NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:946
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:342
+/// The C-string prefix of `bytes` up to its first NUL byte (`const char *` output of
+/// `CException::what()`).
+pub(crate) fn c_string(bytes: &[u8]) -> &[u8] {
+    bytes.split(|&byte| byte == 0).next().unwrap_or_default()
+}
+
 impl NativeError {
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:242-247
     /// The end of a run by a `CIOException` other than `eFlush`, which `CATCH_ALL` ends without a
@@ -676,15 +684,19 @@ impl NativeError {
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbiexpt.hpp:946
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp:342
     /// `CATCH_ALL`'s report of an exception of NCBI's C++ Toolkit (`CException`) that ends a
-    /// BLAST program: `Error: `, the exception's `what()` (which ends with a line feed) and the
-    /// post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`); a `CSeqDBException`, which
-    /// `CATCH_ALL` catches before (its branch comes first), `BLAST Database error: ` and its
-    /// message, exit status 2 (`BLAST_DATABASE_ERROR`). Every place of a `CSeqDBException` that
-    /// LOSAT raises reports the code `eInvalid` (`seqdb::throw_site`), so the texts of that
-    /// branch for `eTooManyOpenFiles` and `eMemoryMappingFailure` do not arise here (the reader's
-    /// errors of those codes are `common::database::database_error`'s). The one producer of these
-    /// reports: an exception of NCBI's that LOSAT raises where NCBI throws it becomes this error.
+    /// BLAST program: `Error: `, the exception's `what()` as a C string (ending at the first NUL
+    /// byte, dropping any bytes and trailing line feed after it; without a NUL, `what()` ends
+    /// with a line feed) and the post's line feed, exit status 255 (`BLAST_UNKNOWN_ERROR`); a
+    /// `CSeqDBException`, which `CATCH_ALL` catches before (its branch comes first),
+    /// `BLAST Database error: ` and its message, exit status 2 (`BLAST_DATABASE_ERROR`). Every
+    /// place of a `CSeqDBException` that LOSAT raises reports the code `eInvalid`
+    /// (`seqdb::throw_site`), so the texts of that branch for `eTooManyOpenFiles` and
+    /// `eMemoryMappingFailure` do not arise here (the reader's errors of those codes are
+    /// `common::database::database_error`'s). The one producer of these reports: an exception of
+    /// NCBI's that LOSAT raises where NCBI throws it becomes this error.
     pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
         if e.kind().starts_with("CSeqDBException::") {
             return NativeError {
@@ -692,9 +704,11 @@ impl NativeError {
                 message: [DATABASE_ERROR.as_bytes(), b" ", e.get_msg(), b"\n"].concat(),
             };
         }
+        let what = e.what();
+        let what = c_string(&what);
         NativeError {
             exit: 255,
-            message: [b"Error: ".as_slice(), &e.what(), b"\n"].concat(),
+            message: [b"Error: ".as_slice(), what, b"\n"].concat(),
         }
     }
 

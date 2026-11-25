@@ -153,10 +153,14 @@ fn post_utf8_string(db: &SeqDb, ordinal: u32, warn: Warn<'_>, utf8_once: &mut Ut
 /// One sequence of the input (`GetNext`'s outputs).
 pub(crate) struct RawSequence<'s> {
     /// The sequence as stored: a protein's NCBIstdaa bytes without the separating zero bytes, a
-    /// nucleotide's packed bases with the count of the last byte.
+    /// nucleotide's packed bases with the count of the last byte. Empty when [`Self::negative_length`]
+    /// is set.
     pub(crate) sequence: &'s [u8],
     /// A nucleotide's ambiguity data as stored; empty for a protein.
     pub(crate) ambiguities: &'s [u8],
+    /// Whether this protein's signed 32-bit `GetRawSeqAndAmbig` length wrapped negative
+    /// (`>= 2^31` residues), so `CWriteDB_Impl::AddSequence` throws `basic_string::_M_create`.
+    pub(crate) negative_length: bool,
     /// The definition lines (`GetHdr`: a `gnl|BL_ORD_ID|n` holds the OID in the input).
     pub(crate) deflines: DeflineSet,
     /// The ranges of each algorithm of the input, in the order of the input's ids, under the id
@@ -277,6 +281,19 @@ impl<'a> RawSeqDbSource<'a> {
         self.db.column_meta_data(&self.columns[index])
     }
 
+    /// Loads the mask and column blocks for `range`.
+    fn load_aux_blocks(&mut self, range: BlockRange) {
+        for (block, &(algo_id, _)) in self.mask_blocks.iter_mut().zip(&self.masks) {
+            self.db.read_mask_block(range, algo_id, block);
+        }
+        for (block, title) in self.column_blocks.iter_mut().zip(&self.columns) {
+            if title == MASK_DATA_TITLE && !self.masks.is_empty() {
+                continue;
+            }
+            self.db.read_column_block(title, range, block);
+        }
+    }
+
     /// The block that holds the ordinal id `ordinal`, read with its masks and blobs when it is
     /// not the one held. A block that cannot be read is read again as its first sequence alone,
     /// so that an error is the one of the sequence NCBI would meet it at.
@@ -302,15 +319,7 @@ impl<'a> RawSeqDbSource<'a> {
                 self.db.read_block(range)?
             }
         };
-        for (block, &(algo_id, _)) in self.mask_blocks.iter_mut().zip(&self.masks) {
-            self.db.read_mask_block(range, algo_id, block);
-        }
-        for (block, title) in self.column_blocks.iter_mut().zip(&self.columns) {
-            if title == MASK_DATA_TITLE && !self.masks.is_empty() {
-                continue;
-            }
-            self.db.read_column_block(title, range, block);
-        }
+        self.load_aux_blocks(range);
         self.block = Some((range, block));
         Ok(range)
     }
@@ -342,18 +351,38 @@ impl<'a> RawSeqDbSource<'a> {
             None => return Ok(None),
         };
         self.next += 1;
-        let range = self.block_of(ordinal)?;
+        let protein = self.db.seqtype() == SeqType::Protein;
+        let (range, negative_length) = if protein {
+            let len = self.db.protein_length_i32(ordinal)?;
+            if len <= 0 {
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2997-3056
+                // `GetRawSeqAndAmbig` opens `.psq` and tests the signed 32-bit `s_len`: `0`
+                // throws `eFileErr` before deflines, masks, or blobs are read; a negative `s_len`
+                // (`>= 2^31`) succeeds here and fails later in `CWriteDB_Impl::AddSequence`.
+                self.db.check_protein_range(ordinal)?;
+                if len == 0 {
+                    return Err(WriteDbError::Database(
+                        "File error: could not get sequence data.".to_string(),
+                    )
+                    .into());
+                }
+                self.block = None;
+                let range = self.db.x_block_range(ordinal, ordinal + 1).ok_or_else(|| {
+                    SeqDbError::Range(format!(
+                        "ordinal id {ordinal} is outside the database ({} sequences)",
+                        self.db.num_seqs()
+                    ))
+                })?;
+                self.load_aux_blocks(range);
+                (range, true)
+            } else {
+                (self.block_of(ordinal)?, false)
+            }
+        } else {
+            (self.block_of(ordinal)?, false)
+        };
         let i = (ordinal - range.first_ordinal) as usize;
         let vol_oid = range.first + i as u32;
-        let protein = self.db.seqtype() == SeqType::Protein;
-        if let Some((_, block)) = &self.block {
-            if protein && block.protein(i).is_empty() {
-                return Err(WriteDbError::Database(
-                    "File error: could not get sequence data.".to_string(),
-                )
-                .into());
-            }
-        }
         let deflines = self.db.defline_set(ordinal)?;
 
         let mut masks = Vec::with_capacity(self.masks.len());
@@ -397,17 +426,22 @@ impl<'a> RawSeqDbSource<'a> {
             column_blobs.push(block.blob(vol_oid)?.to_vec());
         }
 
-        let Some((_, block)) = &self.block else {
-            unreachable!("block_of holds the block");
-        };
-        let (sequence, ambiguities): (&[u8], &[u8]) = if protein {
-            (block.protein(i), &[])
+        let (sequence, ambiguities): (&[u8], &[u8]) = if negative_length {
+            (&[], &[])
         } else {
-            (block.nucleotide_packed(i), block.ambiguity_bytes(i))
+            let Some((_, block)) = &self.block else {
+                unreachable!("block_of holds the block");
+            };
+            if protein {
+                (block.protein(i), &[])
+            } else {
+                (block.nucleotide_packed(i), block.ambiguity_bytes(i))
+            }
         };
         Ok(Some(RawSequence {
             sequence,
             ambiguities,
+            negative_length,
             deflines,
             masks,
             column_blobs,

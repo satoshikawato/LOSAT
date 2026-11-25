@@ -54,6 +54,91 @@ impl IdListKind {
     }
 }
 
+/// Compact storage for Seq-id byte strings (`AliasIdList::sis`, version 5 alias `SEQIDLIST`
+/// filtering): one shared contiguous byte buffer plus `(start, end)` spans, avoiding one heap
+/// allocation per id.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PackedStrings {
+    data: std::sync::Arc<[u8]>,
+    spans: Vec<(usize, usize)>,
+}
+
+impl PackedStrings {
+    pub(crate) fn from_parts(data: Vec<u8>, mut spans: Vec<(usize, usize)>) -> Self {
+        spans.shrink_to_fit();
+        Self {
+            data: std::sync::Arc::from(data.into_boxed_slice()),
+            spans,
+        }
+    }
+
+    pub(crate) fn from_vecs(items: impl IntoIterator<Item = Vec<u8>>) -> Self {
+        let mut data = Vec::new();
+        let mut spans = Vec::new();
+        for item in items {
+            let start = data.len();
+            data.extend_from_slice(&item);
+            spans.push((start, data.len()));
+        }
+        Self::from_parts(data, spans)
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.spans.is_empty()
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.spans.len()
+    }
+
+    pub(crate) fn get(&self, index: usize) -> &[u8] {
+        let (start, end) = self.spans[index];
+        &self.data[start..end]
+    }
+
+    pub(crate) fn sort_unstable(&mut self) {
+        let data = &self.data;
+        self.spans
+            .sort_unstable_by(|&(s1, e1), &(s2, e2)| data[s1..e1].cmp(&data[s2..e2]));
+    }
+}
+
+/// Indexed view over Seq-id byte strings (`[Vec<u8>]`, `[&[u8]]`, or [`PackedStrings`]).
+pub(crate) trait SeqIdSlice {
+    fn len(&self) -> usize;
+    fn get(&self, index: usize) -> &[u8];
+}
+
+impl SeqIdSlice for [Vec<u8>] {
+    fn len(&self) -> usize {
+        <[Vec<u8>]>::len(self)
+    }
+
+    fn get(&self, index: usize) -> &[u8] {
+        self[index].as_slice()
+    }
+}
+
+impl SeqIdSlice for [&[u8]] {
+    fn len(&self) -> usize {
+        <[&[u8]]>::len(self)
+    }
+
+    fn get(&self, index: usize) -> &[u8] {
+        self[index]
+    }
+}
+
+impl SeqIdSlice for PackedStrings {
+    fn len(&self) -> usize {
+        PackedStrings::len(self)
+    }
+
+    fn get(&self, index: usize) -> &[u8] {
+        PackedStrings::get(self, index)
+    }
+}
+
 /// An id list of the alias files as NCBI attaches it to a volume it reaches
 /// (`CSeqDBVol::AttachVolumeGiList`): the ids its filtered header read finds a definition line's
 /// Seq-ids in (`CSeqDBGiList::FindId`, [`find_id`]), each kind in NCBI's order, and the taxids of
@@ -67,7 +152,7 @@ pub(crate) struct AliasIdList {
     /// The Seq-id strings of a `SEQIDLIST`, as the last translation left them, in its order (out
     /// of order where a second simplification changed one after the sort; sorted for a version 5
     /// text list, file order for a version 5 binary list).
-    pub sis: Vec<Vec<u8>>,
+    pub sis: PackedStrings,
     /// The taxids of a version 5 `TAXIDLIST` (`GetTaxIdsList`).
     pub taxids: BTreeSet<i32>,
 }
@@ -75,7 +160,7 @@ pub(crate) struct AliasIdList {
 impl AliasIdList {
     /// `FindId`: whether the list holds `id` ([`find_id`]).
     pub(crate) fn find_id(&self, id: &ParsedSeqId) -> Result<bool, NcbiException> {
-        find_id(&self.gis, &self.tis, &self.sis, id)
+        find_id_in(&self.gis, &self.tis, &self.sis, id)
     }
 
     /// Whether the list holds taxids (positive `GetNumTaxIds` count).
@@ -129,6 +214,15 @@ pub(crate) fn find_id(
     sis: &[Vec<u8>],
     id: &ParsedSeqId,
 ) -> Result<bool, NcbiException> {
+    find_id_in(gis, tis, sis, id)
+}
+
+fn find_id_in<S: SeqIdSlice + ?Sized>(
+    gis: &[i64],
+    tis: &[u64],
+    sis: &S,
+    id: &ParsedSeqId,
+) -> Result<bool, NcbiException> {
     match id {
         ParsedSeqId::Gi(gi) => Ok(gis.binary_search(gi).is_ok()),
         ParsedSeqId::General(dbtag) if dbtag.db == b"ti" => {
@@ -138,7 +232,7 @@ pub(crate) fn find_id(
             };
             Ok(tis.binary_search(&(ti as u64)).is_ok())
         }
-        _ => find_si_forms(sis, id),
+        _ => find_si_forms_in(sis, id),
     }
 }
 
@@ -171,7 +265,15 @@ pub(crate) fn negative_find_id(
 /// The lookups of a Seq-id that is not a gi or a ti in the Seq-id strings `sis` of a list
 /// (`FindSi`, [`find_si`]); NCBI's exception of the simplification.
 pub(crate) fn find_si_forms(sis: &[Vec<u8>], id: &ParsedSeqId) -> Result<bool, NcbiException> {
-    if find_si(sis, &blast_seq_id_string(id, true)) || find_si(sis, &blast_seq_id_string(id, false))
+    find_si_forms_in(sis, id)
+}
+
+fn find_si_forms_in<S: SeqIdSlice + ?Sized>(
+    sis: &S,
+    id: &ParsedSeqId,
+) -> Result<bool, NcbiException> {
+    if find_si_in(sis, &blast_seq_id_string(id, true))
+        || find_si_in(sis, &blast_seq_id_string(id, false))
     {
         return Ok(true);
     }
@@ -182,11 +284,11 @@ pub(crate) fn find_si_forms(sis: &[Vec<u8>], id: &ParsedSeqId) -> Result<bool, N
             unreachable!("a parsed Seq-id is simplified without parsing")
         }
     };
-    if find_si(sis, &str_id) {
+    if find_si_in(sis, &str_id) {
         return Ok(true);
     }
     Ok(match str_id.iter().position(|&c| c == b'.') {
-        Some(pos) => find_si(sis, &str_id[..pos]),
+        Some(pos) => find_si_in(sis, &str_id[..pos]),
         None => false,
     })
 }
@@ -197,11 +299,16 @@ pub(crate) fn find_si_forms(sis: &[Vec<u8>], id: &ParsedSeqId) -> Result<bool, N
 // (bytes) until the middle id is `si`: on ids out of order (an alias file's list that a second
 // simplification changed after its sort) the walk is NCBI's, not that of a search of sorted ids.
 /// Whether NCBI's binary search of the Seq-id strings `sis`, in their order, finds `si`.
+#[cfg(test)]
 pub(crate) fn find_si(sis: &[Vec<u8>], si: &[u8]) -> bool {
+    find_si_in(sis, si)
+}
+
+fn find_si_in<S: SeqIdSlice + ?Sized>(sis: &S, si: &[u8]) -> bool {
     let (mut b, mut e) = (0, sis.len());
     while b < e {
         let m = (b + e) / 2;
-        match sis[m].as_slice().cmp(si) {
+        match sis.get(m).cmp(si) {
             std::cmp::Ordering::Less => b = m + 1,
             std::cmp::Ordering::Greater => e = m,
             std::cmp::Ordering::Equal => return true,

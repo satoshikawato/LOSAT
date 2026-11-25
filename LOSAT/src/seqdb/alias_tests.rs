@@ -205,11 +205,18 @@ fn the_stored_header_keeps_the_lines_the_type_erases() {
 
 #[test]
 fn v5_compare_seq_id_and_set_ops_match_ncbi_semantics() {
-    use super::{
-        compare_seq_id, reject_equivalent_seqid_pair, set_difference_by, set_intersection_by,
-    };
+    use super::{compare_seq_id, set_difference_by, set_intersection_by, validate_compare_seqids};
 
-    let cmp = |a: &[u8], b: &[u8]| compare_seq_id(a, b, b"test.txt");
+    let cmp = |a: &[u8], b: &[u8]| {
+        compare_seq_id(
+            a,
+            Some(b"test.txt"),
+            "an alias file's SEQIDLIST",
+            b,
+            None,
+            "the search's -seqidlist",
+        )
+    };
 
     // Versioned vs unversioned: equal under s_CompareSeqId (neither is less than the other).
     assert!(!cmp(b"NP_000103.1", b"NP_000103").unwrap());
@@ -235,31 +242,58 @@ fn v5_compare_seq_id_and_set_ops_match_ncbi_semantics() {
         b"NP_000103.1".to_vec(),
         b"P10102.1".to_vec(),
     ];
-    reject_equivalent_seqid_pair(&a, b"test.txt", "an alias file's SEQIDLIST").unwrap();
-    reject_equivalent_seqid_pair(&b, b"test.txt", "the search's -seqidlist").unwrap();
-    a.sort();
-    b.sort();
+    a.sort_unstable();
+    b.sort_unstable();
+    validate_compare_seqids(a.as_slice(), Some(b"test.txt"), "an alias file's SEQIDLIST").unwrap();
+    validate_compare_seqids(b.as_slice(), None, "the search's -seqidlist").unwrap();
 
-    let mut less = |x: &[u8], y: &[u8]| compare_seq_id(x, y, b"test.txt");
-    let inter = set_intersection_by(&a, &b, &mut less).unwrap();
-    assert_eq!(inter, vec![b"NP_000103".to_vec()]);
+    let mut less_lr = |x: &[u8], y: &[u8]| cmp(x, y);
+    let mut less_rl = |x: &[u8], y: &[u8]| cmp(x, y);
+    let inter =
+        set_intersection_by(a.as_slice(), b.as_slice(), &mut less_lr, &mut less_rl).unwrap();
+    assert_eq!(inter, vec![b"NP_000103".as_slice()]);
     // Single-element case-different local ids compare equal directly.
+    let single_lhs = [b"LOC7".to_vec()];
+    let single_rhs = [b"loc7".to_vec()];
     assert_eq!(
-        set_intersection_by(&[b"LOC7".to_vec()], &[b"loc7".to_vec()], &mut less).unwrap(),
-        vec![b"LOC7".to_vec()]
+        set_intersection_by(
+            single_lhs.as_slice(),
+            single_rhs.as_slice(),
+            &mut less_lr,
+            &mut less_rl
+        )
+        .unwrap(),
+        vec![b"LOC7".as_slice()]
     );
 
-    let diff = set_difference_by(&a, &b, &mut less).unwrap();
-    assert_eq!(diff, vec![b"LOC7".to_vec(), b"NP_000118.1".to_vec()]);
+    let diff = set_difference_by(a.as_slice(), b.as_slice(), &mut less_lr, &mut less_rl).unwrap();
+    assert_eq!(diff, vec![b"LOC7".as_slice(), b"NP_000118.1".as_slice()]);
+
+    // Multiset semantics of std::set_difference: duplicate entries are preserved when not deduped.
+    let dup_lhs = [b"NP_000103.1".to_vec(), b"NP_000103.1".to_vec()];
+    let dup_rhs = [b"NP_000103.1".to_vec()];
+    let dup_diff = set_difference_by(
+        dup_lhs.as_slice(),
+        dup_rhs.as_slice(),
+        &mut less_lr,
+        &mut less_rl,
+    )
+    .unwrap();
+    assert_eq!(dup_diff, vec![b"NP_000103.1".as_slice()]);
 }
 
 #[test]
 fn v5_rejects_non_strict_weak_equivalent_seqid_pairs() {
-    use super::reject_equivalent_seqid_pair;
+    use super::validate_compare_seqids;
 
     let check = |ids: &[&[u8]]| {
-        let owned: Vec<Vec<u8>> = ids.iter().map(|s| s.to_vec()).collect();
-        reject_equivalent_seqid_pair(&owned, b"test.txt", "an alias file's SEQIDLIST")
+        let mut owned: Vec<Vec<u8>> = ids.iter().map(|s| s.to_vec()).collect();
+        owned.sort_unstable();
+        validate_compare_seqids(
+            owned.as_slice(),
+            Some(b"test.txt"),
+            "an alias file's SEQIDLIST",
+        )
     };
 
     // Unversioned + versioned pairs (all three permutations from the review probe), case-variant
@@ -304,13 +338,49 @@ fn v5_rejects_non_strict_weak_equivalent_seqid_pairs() {
         assert!(check(ok).is_ok(), "unexpected refusal for {ok:?}");
     }
 
-    // An unparseable token alongside another distinct token raises NCBI's CSeqIdException.
+    // One common exception text across all unparseable entries raises NCBI's CSeqIdException
+    // (including two distinct NUL-prefixed tokens whose C-string `what()` is identical).
     for unparseable in [
         &[b"sp||".as_slice(), b"NP_000103.1".as_slice()][..],
         &[b"NP_000103", b"NP_000103.1", b"sp||"],
+        &[b"\x00aaa", b"\x00bbb", b"NP_000103.1"],
     ] {
         let err = check(unparseable).unwrap_err().to_error();
         assert!(err.ncbi_exception().is_some(), "{unparseable:?}: {err}");
+    }
+
+    // Two or more distinct exception texts depend on the C++ library's sort order and are refused
+    // identically across all input permutations.
+    for multi_exc in [
+        &[
+            b"sp||".as_slice(),
+            b"tr||".as_slice(),
+            b"NP_000103.1".as_slice(),
+        ][..],
+        &[b"tr||", b"sp||", b"NP_000103.1"],
+        &[b"NP_000103.1", b"sp||", b"tr||"],
+        &[b"NP_000103.1", b"tr||", b"sp||"],
+        &[b"\x00aaa", b"PM\x00bbb"],
+    ] {
+        let err = check(multi_exc).unwrap_err().to_error().to_string();
+        assert!(
+            err.contains("fail NCBI's `s_CompareSeqId` with different exceptions"),
+            "{multi_exc:?}: {err}"
+        );
+    }
+
+    // A Seq-id that posts a warning alongside an unparseable token is refused (step 1 before
+    // step 3) regardless of whether the warning sorts before or after the unparseable token.
+    // `AAAAA01P000001` (5+8 with protein flag `P` and division 0) posts accguide warning 11.
+    for warn_and_bad in [
+        [b"AAAAA01P000001".as_slice(), b"sp||".as_slice()],
+        [b"\x00bad".as_slice(), b"AAAAA01P000001".as_slice()],
+    ] {
+        let err = check(&warn_and_bad).unwrap_err().to_error().to_string();
+        assert!(
+            err.contains("posts a Seq-id warning"),
+            "{warn_and_bad:?}: {err}"
+        );
     }
 
     // End-to-end SeqDb::restrict_seqids checks over the idlist fixtures:
@@ -346,8 +416,8 @@ fn v5_rejects_non_strict_weak_equivalent_seqid_pairs() {
             );
         }
     }
-    // 3. Clean alias SEQIDLIST + ambiguous -seqidlist is refused, while ambiguous
-    // -negative_seqidlist succeeds (NCBI sorts negative_seqidlist with bytewise `<`).
+    // 3. Clean alias SEQIDLIST + ambiguous -seqidlist is refused without naming the alias file
+    // path, while ambiguous -negative_seqidlist succeeds (NCBI sorts negative_seqidlist with `<`).
     let mut db = open_id("g_sq");
     let mut warnings = Vec::new();
     let err = db
@@ -355,8 +425,14 @@ fn v5_rejects_non_strict_weak_equivalent_seqid_pairs() {
         .unwrap_err()
         .to_string();
     assert!(
-        err.contains("the search's -seqidlist holds two differently spelled Seq-ids"),
+        err.starts_with(
+            "unsupported database: the search's -seqidlist holds two differently spelled Seq-ids"
+        ),
         "{err}"
+    );
+    assert!(
+        !err.contains("sq_v5.txt"),
+        "must not name alias path: {err}"
     );
     let mut db = open_id("g_sq");
     let mut warnings = Vec::new();

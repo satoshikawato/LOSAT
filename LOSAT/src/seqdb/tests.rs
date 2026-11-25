@@ -879,7 +879,6 @@ fn alias_count_keys_follow_ncbis_walks() {
     // walks' counts.
     let db = open("DBLIST prot_v4\nFIRST_OID 2147483648\n").unwrap();
     assert_eq!((db.num_seqs(), db.ncbi_num_seqs()), (0, 10));
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:110-139
@@ -941,7 +940,6 @@ fn alias_value_errors_come_in_ncbis_order() {
     db.x_keep_oids(|oid| oid < 3);
     db.check_alias_values().unwrap();
     assert!(what(db.read_name_records(&name, false).unwrap_err()).contains("'n1'"));
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:131-206
@@ -1071,7 +1069,6 @@ fn alias_oid_ranges_select_ncbis_oids() {
     write("f31p1.pal", "DBLIST prot_old\nFIRST_OID 2147483649\n");
     let db = SeqDb::open(&names("f31p1", "prot_v4"), SeqType::Protein).unwrap();
     assert_eq!(oids(&db), (10..20).collect::<Vec<u32>>());
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:191-234
@@ -1162,7 +1159,6 @@ fn alias_oid_lists_select_ncbis_oids() {
         db.check_alias_values(),
         Err(SeqDbError::MemoryMap(_))
     ));
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:191-294
@@ -1229,7 +1225,6 @@ fn oid_lists_over_unions_of_ranges_keep_ncbis_oids() {
     );
     write("pa.pal", b"DBLIST c3 c4\nFIRST_OID 10\nLAST_OID 10\n");
     assert_eq!(oids("pa"), []);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:709-719
@@ -1279,7 +1274,6 @@ fn an_unreadable_oid_list_file_is_ncbis_memory_map_error() {
     if std::fs::File::open(&mask).is_ok() {
         // A user that reads any file (root) cannot see the error.
         std::fs::set_permissions(&mask, std::fs::Permissions::from_mode(0o600)).unwrap();
-        std::fs::remove_dir_all(&dir).unwrap();
         return;
     }
     std::fs::write(dir.join("np.pal"), b"DBLIST prot_v4\nOIDLIST np.msk\n").unwrap();
@@ -1305,7 +1299,6 @@ fn an_unreadable_oid_list_file_is_ncbis_memory_map_error() {
         (718, Some("ncbi::CSeqDBFileMemMap::Init"))
     );
     std::fs::set_permissions(&mask, std::fs::Permissions::from_mode(0o600)).unwrap();
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -1399,15 +1392,8 @@ fn index_file_errors() {
     assert_eq!(index.ambiguity_range(0).unwrap(), Some((12, 12)));
 }
 
-fn temp_dir(tag: &str) -> PathBuf {
-    static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-seqdb-{tag}-{}-{}",
-        crate::utils::test_dir::process_id(),
-        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn temp_dir(tag: &str) -> crate::utils::test_dir::TempDir {
+    crate::utils::test_dir::TempDir::unique(&format!("seqdb-{tag}"))
 }
 
 fn copy_database(name: &str, exts: &[&str], dir: &Path) {
@@ -1457,7 +1443,6 @@ fn column_files_and_missing_files() {
         ));
     }
     // The databases are closed before their files are removed (Windows).
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -1476,7 +1461,6 @@ fn an_alias_that_names_itself_reads_the_volume_beside_it() {
         assert_eq!(db.title(), b"through the alias");
         assert_eq!(db.num_seqs(), 10);
     }
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -1786,7 +1770,6 @@ fn masklist_names_the_gi_masks_of_a_database_of_one_name() {
             "{passed_over}"
         );
     }
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// A `MASKLIST` name that is not UTF-8 is its bytes, as NCBI's `std::string` is: the name finds
@@ -1825,7 +1808,6 @@ fn a_masklist_name_not_utf8_is_read_by_its_bytes() {
         ]
         .concat())
     );
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -1898,7 +1880,6 @@ fn every_filtering_alias_key_is_rejected() {
             "{database}: {error}"
         );
     }
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -1979,7 +1960,8 @@ fn one_name_is_not_a_list() {
         names.push("q\"d");
     }
     for name in names {
-        let dir = temp_dir("one-name").join(name);
+        let root = temp_dir("one-name");
+        let dir = root.join(name);
         std::fs::create_dir_all(&dir).unwrap();
         copy_database("prot_v4", &["pin", "phr", "psq"], &dir);
         let path = dir.join("prot_v4").to_str().unwrap().to_string();
@@ -1993,7 +1975,6 @@ fn one_name_is_not_a_list() {
             (vec![path.into_bytes()], Vec::new()),
             "{name}"
         );
-        std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
     }
 }
 
@@ -2051,7 +2032,6 @@ fn volumes_to_remove_are_those_beside_the_alias_file() {
             == format!("Could not find volume or alias file (db.00) referenced in alias file ({name}).").as_bytes()),
         "{error}"
     );
-    std::fs::remove_dir_all(&root).unwrap();
 }
 
 #[test]
@@ -2073,7 +2053,6 @@ fn a_version_5_database_needs_its_lmdb_file() {
         SeqDb::open(&name, SeqType::Nucleotide).unwrap().num_seqs(),
         12
     );
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -2152,7 +2131,6 @@ fn ambiguity_data_that_do_not_fit_the_sequence() {
         block.nucleotide_iupac(0).unwrap_err().to_string(),
         block.nucleotide_blastna(0).unwrap_err().to_string()
     );
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// `SeqDb::x_nucleotide_check` of a block of one sequence and
@@ -2221,7 +2199,6 @@ fn x_nucleotide_check_reads_what_read_block_gives_one_sequence() {
             }
         }
     }
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -2239,7 +2216,6 @@ fn x_check_range_gives_the_errors_of_read_range() {
             "{start}..{end}"
         );
     }
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -2279,7 +2255,6 @@ fn with_range_lends_the_bytes_and_errors_of_read_range() {
         file.with_range(1, 4, <[u8]>::to_vec).unwrap(),
         bytes[1..4].to_vec()
     );
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// Reads in OID order (`file::in_order_reads`) give every range the bytes and the errors of the
@@ -2350,7 +2325,6 @@ fn in_order_reads_give_the_files_bytes_and_errors_from_a_window() {
     changed(2_100);
     // The guard is gone: the read goes to the file.
     assert_eq!(ordered.read_range(2_100, 2_104).unwrap(), b"XXXX");
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// A window that cannot be read (here the file is shorter than its length when it was opened, so
@@ -2372,7 +2346,6 @@ fn an_in_order_window_that_cannot_be_read_leaves_the_read_to_the_file() {
         file.read_range(990, 1_010),
         Err(SeqDbError::Read { .. })
     ));
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -2650,12 +2623,13 @@ fn search_path_table(name: &str, header: bool) -> Vec<Vec<String>> {
 }
 
 /// Builds the directory tree of `expected/search_path/layout.tsv` under a new
-/// temporary directory and returns its path without symbolic links, as the
-/// operating system reports a current directory.
+/// temporary directory and returns its guard and its path without symbolic
+/// links, as the operating system reports a current directory.
 #[cfg(unix)]
-fn search_path_sandbox(tag: &str, layout: &str) -> PathBuf {
+fn search_path_sandbox(tag: &str, layout: &str) -> (crate::utils::test_dir::TempDir, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
-    let root = temp_dir(tag).canonicalize().unwrap();
+    let dir = temp_dir(tag);
+    let root = dir.canonicalize().unwrap();
     let root_str = root.to_str().expect("temporary directory is UTF-8");
     let source = fixture_dir().join("db");
     for op in search_path_table(layout, false) {
@@ -2694,7 +2668,7 @@ fn search_path_sandbox(tag: &str, layout: &str) -> PathBuf {
             other => panic!("unknown layout line {other:?}"),
         }
     }
-    root
+    (dir, root)
 }
 
 /// The search path of a table row: `<unset>` and `<none>` stand for a
@@ -2818,7 +2792,7 @@ fn check_search_path_row(
 #[cfg(unix)]
 #[test]
 fn a_name_is_found_where_ncbi_finds_it() {
-    let root = search_path_sandbox("search-path", "layout.tsv");
+    let (_dir, root) = search_path_sandbox("search-path", "layout.tsv");
     let root_str = root.to_str().unwrap().to_string();
     let place = |value: &str| value.replace("{R}", &root_str);
     let rows = search_path_table("cases.tsv", true);
@@ -2829,7 +2803,6 @@ fn a_name_is_found_where_ncbi_finds_it() {
         check_search_path_row(id, &place(name), &search, &row[5..11], &row[12], &place);
     }
     assert!(rows.len() > 100, "{} cases", rows.len());
-    std::fs::remove_dir_all(&root).unwrap();
 }
 
 /// `expected/search_path/relative.tsv`: relative directories in `BLASTDB` and
@@ -2870,7 +2843,7 @@ fn relative_directories_are_used_as_they_are_written() {
 #[test]
 fn files_that_cannot_be_opened_give_ncbis_errors() {
     use std::os::unix::fs::PermissionsExt;
-    let root = search_path_sandbox("search-path-open", "open_layout.tsv");
+    let (_dir, root) = search_path_sandbox("search-path-open", "open_layout.tsv");
     let root_str = root.to_str().unwrap().to_string();
     let place = |value: &str| value.replace("{R}", &root_str);
     // The administrator reads files of any mode: nothing to compare then.
@@ -2922,7 +2895,6 @@ fn files_that_cannot_be_opened_give_ncbis_errors() {
     // Directories are opened again before the tree is removed.
     let closed = root.join("d/closed");
     std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755)).unwrap();
-    std::fs::remove_dir_all(&root).unwrap();
 }
 
 /// The string of the search path, and the errors of a search path that
@@ -3246,7 +3218,6 @@ fn a_file_whose_bytes_cannot_be_read_gives_ncbis_mapping_error() {
     assert!(matches!(error, SeqDbError::Read { .. }), "{error:?}");
     assert_eq!(error.ncbi_message(), None);
     assert!(error.is_unreadable());
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// `has_parsed_seqids` leaves a header file whose bytes cannot be read to the first read of a
@@ -3292,8 +3263,6 @@ fn has_parsed_seqids_leaves_an_unreadable_header_file_to_its_first_read() {
     let error = db.deflines(0).expect_err("the header is not read");
     assert!(matches!(error, SeqDbError::Read { .. }), "{error:?}");
     assert!(error.is_unreadable());
-    std::fs::remove_dir_all(&dir).unwrap();
-    std::fs::remove_dir_all(&later).unwrap();
 }
 
 /// Opens a database as a search program would and prints what a program

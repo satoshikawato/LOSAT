@@ -991,3 +991,13 @@ fn a_file_name_read_as_text_is_caught() {
     let args = parse_words("dustmasker", &["-in", "x.fa"]).unwrap();
     let _ = args.value("in");
 }
+
+// A debug build checks that a key read by its bytes is an argument of the program by its own name
+// (review F2 of line RG item K10d): a misspelt key would read as absent.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "-taxid_list is not an argument of the program")]
+fn a_misspelt_key_read_by_its_bytes_is_caught() {
+    let args = parse_words("blastdb_aliastool", &["-gi_file_in", "x.txt"]).unwrap();
+    let _ = args.bytes("taxid_list");
+}

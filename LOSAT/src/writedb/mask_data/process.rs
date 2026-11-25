@@ -53,7 +53,7 @@ use crate::blastinput::ncbi_environment::ReadVerification;
 use crate::ncbi_str::{string_to_int, truncate_spaces_str};
 use crate::report::serial::asn_input::Utf8TagOnce;
 use crate::report::serial::asn_types::Post;
-use crate::writedb::build_db::BuildDatabase;
+use crate::writedb::build_db::{endl, BuildDatabase};
 use crate::writedb::fasta_source::Warn;
 use crate::writedb::makeblastdb::MakedbError;
 use crate::writedb::mask_info::{MaskFileError, MaskFileReader};
@@ -130,7 +130,8 @@ impl MaskDataError {
     ///   for a file it refuses ("Error: NCBI C++ Exception: ..." of a `CException`, status 255;
     ///   "BLAST ran out of memory" of a `std::bad_alloc`, status 4; "Error: ..." of the
     ///   `std::length_error` of a string longer than `std::string` holds, status 255); LOSAT's
-    ///   refusal of a negative algorithm id ("losat makeblastdb: ...", status 1).
+    ///   refusal of a negative algorithm id ("losat makeblastdb: ...", status 1); the closed pipe
+    ///   of a log line ([`WriteDbError::ClosedPipe`], status 0, no message).
     /// * [`MaskFileError::Unsupported`]: NCBI reads the file and LOSAT does not
     ///   (`MakedbError::Unsupported`, status 1).
     /// * [`MaskFileError::EofInContinuation`]: `None`, exactly as NCBI (status 0, nothing is
@@ -279,7 +280,11 @@ pub(crate) fn process_mask_data(
             let algo_id = match algo_id {
                 Some(id) => id,
                 None => {
-                    let _ = writeln!(db.log(), "Mask file: {file}");
+                    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:962-963
+                    // The line ends as every line of the log, with a flush (`build_db::endl`),
+                    // where a closed pipe ends the build.
+                    let _ = write!(db.log(), "Mask file: {file}");
+                    endl(db.log())?;
                     let opts = &first_obj.algo_options;
                     let id = if !id_list.is_empty() {
                         db.register_masking_algorithm_id(

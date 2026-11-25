@@ -174,8 +174,9 @@ impl BlastxDatabase {
     }
 
     /// Whether the batches' fetches of the run may be refused for NCBI's taxonomy cache
-    /// (`shared::TaxdbRun::cache_may_refuse`): outfmt 5's prefetch, and the XML2 and JSON lookups
-    /// (`shared::read_reported_taxonomy`), which an XML run holds its document for.
+    /// (`shared::TaxdbRun::cache_may_refuse`): the prefetch of outfmt 5 and of 13 to 16, or the
+    /// reports' reads where it is off, where NCBI's order of the loads is not known, which an XML
+    /// run holds its document for.
     pub(crate) fn cache_may_refuse(&self) -> bool {
         self.taxdb.cache_may_refuse(&self.db)
     }
@@ -186,8 +187,8 @@ impl BlastxDatabase {
     /// a library call, `local::report_batches`) and the refusal follows no byte:
     /// - with `taxdb.bti` on the search path, a taxonomy database record (`taxdb_may_refuse`),
     ///   or a fetch where NCBI's taxonomy cache would repeat the offset error
-    ///   (`cache_may_refuse`: outfmt 5's prefetch, and the XML2 and JSON lookups of a batch with a
-    ///   subject that has a taxid, `read_reported_taxonomy`);
+    ///   (`cache_may_refuse`: the prefetch of outfmt 5 and of 13 to 16, or the reports' reads
+    ///   where it is off);
     /// - with parsed Seq-ids, one of the batch's subjects (`ReportedSubjects::for_batch`).
     ///
     /// The taxids of every sequence are looked up here, once (DECISIONS 32); the usual run, in
@@ -282,11 +283,21 @@ impl BlastxDatabase {
         let mut first = 0;
         while first < count {
             let end = count.min(first.saturating_add(X_LENGTHS_PER_READ));
-            let lengths = match self.db.x_protein_lengths(first, end) {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+            // Proteins whose NCBI 32-bit length is <= 0 (`0` or `>= 2^31`) are skipped by the
+            // search and do not contribute to the searchable longest sequence.
+            let lengths = match self.db.x_protein_lengths_i32(first, end) {
                 Ok(lengths) if !lengths.is_empty() => lengths,
                 _ => return self.x_check_stores(),
             };
-            longest = longest.max(lengths.iter().copied().max().unwrap_or(0) as usize);
+            longest = longest.max(
+                lengths
+                    .iter()
+                    .copied()
+                    .map(|len| len.max(0) as usize)
+                    .max()
+                    .unwrap_or(0),
+            );
             first += lengths.len() as u32;
         }
         if longest > MAX_DBSEQ_LEN {

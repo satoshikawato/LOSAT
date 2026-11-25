@@ -27,7 +27,6 @@
 use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -468,18 +467,21 @@ impl BlastnDatabase {
     pub(super) fn index_volumes(
         &self,
         indexname: &str,
-    ) -> Result<Vec<(String, u32)>, Option<NcbiException>> {
+    ) -> Result<Vec<(Vec<u8>, u32)>, Option<NcbiException>> {
         let path = self.db.search_path().ok_or(None)?;
-        let (paths, _) =
-            crate::seqdb::SeqDb::volume_and_alias_paths(indexname, SeqType::Nucleotide, path)
-                .map_err(|error| {
-                    if let Some(exception) = error.ncbi_exception() {
-                        return Some(exception.clone());
-                    }
-                    let text = error.ncbi_message()?;
-                    let site = crate::seqdb::throw_site(&text)?;
-                    Some(NcbiException::new(site, text))
-                })?;
+        let (paths, _) = crate::seqdb::SeqDb::volume_and_alias_paths(
+            indexname.as_bytes(),
+            SeqType::Nucleotide,
+            path,
+        )
+        .map_err(|error| {
+            if let Some(exception) = error.ncbi_exception() {
+                return Some(exception.clone());
+            }
+            let text = error.ncbi_message()?;
+            let site = error.throw_site()?;
+            Some(NcbiException::new(site, text))
+        })?;
         paths
             .into_iter()
             .map(|vol_name| {
@@ -487,7 +489,9 @@ impl BlastnDatabase {
                     .db
                     .volumes()
                     .iter()
-                    .find(|volume| volume.base() == Path::new(&vol_name))
+                    .find(|volume| {
+                        volume.base() == &*crate::utils::os_bytes::path_of_bytes(&vol_name)
+                    })
                     .ok_or(None)?;
                 Ok((vol_name, volume.num_oids()))
             })
@@ -497,11 +501,12 @@ impl BlastnDatabase {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:453-462
     /// `SeqDB_ResolveDbPath` of `file` on this database's search path: the path of the first
     /// directory that holds the regular file `file` (an absolute `file` as it is), `None` for
-    /// NCBI's empty string.
-    pub(super) fn resolve_db_path(&self, file: &str) -> Option<String> {
+    /// NCBI's empty string. The path is the bytes of NCBI's `std::string`.
+    pub(super) fn resolve_db_path(&self, file: &[u8]) -> Option<Vec<u8>> {
         match self.db.search_path() {
             Some(search) => search.resolve_file(file),
-            None => Some(file.to_string()).filter(|path| Path::new(path).is_file()),
+            None => Some(file.to_vec())
+                .filter(|_| crate::utils::os_bytes::path_of_bytes(file).is_file()),
         }
     }
 

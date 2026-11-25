@@ -1,0 +1,3 @@
+Warning: [blastp] Query_2 p03 every letter .. : One or more O characters replaced by X for alignment score calculations at positions 24 
+Error: (802.4) [blastp] [Cannot close serializing output stream] Exception: basic_ios::clear: iostream error
+BLAST failed to write output

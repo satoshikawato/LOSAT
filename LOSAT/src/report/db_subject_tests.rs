@@ -1446,8 +1446,7 @@ fn the_names_of_the_tables_take_only_the_loaded_subjects() {
     let damaged =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/taxdb/bad_magic");
     let names = |taxonomy: &super::super::tabular::TabularTaxonomy| {
-        let search =
-            crate::seqdb::SearchPath::new(&damaged, Some(damaged.as_os_str()), None).unwrap();
+        let search = crate::seqdb::SearchPath::new(&damaged, Some(damaged.as_os_str()), None);
         super::super::tabular::TabularNames::look_up(
             &spec,
             &crate::seqdb::taxdb::LazyTaxDb::new(search),

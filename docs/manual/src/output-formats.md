@@ -36,7 +36,7 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 - `psiblast` writes `0`, `5` to `11` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`. Its XML report holds one `Iteration` per round, and it writes one Seq-annot or archive per round.
 - `tblastn` with `-in_pssm` writes `0` to `10` and `20`.
 
-`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `makeprofiledb` have their own formats, listed on their pages.
+`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool` and `blastdbcheck` have their own formats, listed on their pages.
 
 ## Pairwise and query-anchored text (0 to 4)
 

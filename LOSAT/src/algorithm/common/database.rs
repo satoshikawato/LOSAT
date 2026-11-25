@@ -33,27 +33,13 @@ pub(crate) fn open_search_database(
     name: &str,
     seqtype: SeqType,
     settings: &ApplicationSettings,
-) -> Result<SeqDb, DatabaseOpenError> {
-    let registry = match &settings.blastdb {
-        Ok(value) => value.as_deref(),
-        Err(reason) => return Err(DatabaseOpenError::Registry(reason.clone())),
-    };
-    let path = SearchPath::from_environment(registry).map_err(DatabaseOpenError::Reader)?;
+) -> Result<SeqDb, SeqDbError> {
+    let path = SearchPath::from_environment(settings.blastdb.as_deref());
     // The errors of the alias files' counts depend on the list, and those of the headers come
     // after them (`restrict_database`).
-    let mut db = SeqDb::open_search_in(name, seqtype, &path).map_err(DatabaseOpenError::Reader)?;
+    let mut db = SeqDb::open_search_in(name.as_bytes(), seqtype, &path)?;
     db.fail_search_reads_with_oid_list();
     Ok(db)
-}
-
-/// Why `open_search_database` could not open a database.
-#[derive(Debug)]
-pub(crate) enum DatabaseOpenError {
-    /// The registry entry `[BLAST] BLASTDB` has a value that LOSAT does not read as NCBI
-    /// does (`ApplicationSettings::blastdb`).
-    Registry(String),
-    /// An error of the reader (NCBI's own, or LOSAT's refusal: `database_error`).
-    Reader(SeqDbError),
 }
 
 /// Opens the database of `-db name` (`open_search_database`) with the command line's
@@ -64,10 +50,7 @@ pub(crate) fn open_database(
     settings: &ApplicationSettings,
     program: &str,
 ) -> Result<SeqDb> {
-    open_search_database(name, seqtype, settings).map_err(|error| match error {
-        DatabaseOpenError::Registry(reason) => refusal(&reason, program),
-        DatabaseOpenError::Reader(error) => database_error(error, program),
-    })
+    open_search_database(name, seqtype, settings).map_err(|error| database_error(error, program))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:109-139
@@ -1268,15 +1251,19 @@ impl ReportedHeader {
     }
 }
 
-/// Whether the sequences of a database search keep a definition line under its list
-/// (`SeqDb::line_read`), each read once: the one check of NCBI's two places that drop a
-/// sequence without a line, the fetches with `check_oid_exclusion` (`FetchExcluded`) and the
-/// Seq-aligns (`SeqAligned`), with whether NCBI's read of the record there takes a UTF8String
-/// for a VisibleString (its warning, `seqdb::Utf8Reads`). A header that cannot be read as
-/// NCBI's header read adjusts it is not kept in the cache: each place decides what its error
-/// does.
+/// Whether the sequences of a database search keep a definition line with a Seq-id
+/// (`SeqDb::line_read`): the one check of NCBI's two places that drop a sequence without one,
+/// the fetches with `check_oid_exclusion` (`FetchExcluded`) and the Seq-aligns (`SeqAligned`),
+/// with whether NCBI's read of the record there takes a UTF8String for a VisibleString (its
+/// warning, `seqdb::Utf8Reads`). Under a list (`SeqDb::drops_lineless_hits`) each header is
+/// decoded once and kept in the cache; without one the check walks the record to its first
+/// Seq-id at each ask (`seqdb::header::holds_a_seqid`) and keeps nothing. A header that cannot
+/// be read as NCBI's header read adjusts it is not kept in the cache: each place decides what
+/// its error does.
 struct LineCheck<'a> {
     db: &'a SeqDb,
+    /// `SeqDb::drops_lineless_hits`: whether the reads decode the header (and the cache keeps it).
+    filters: bool,
     kept: std::sync::Mutex<std::collections::HashMap<u32, LineRead>>,
 }
 
@@ -1292,13 +1279,18 @@ impl<'a> LineCheck<'a> {
     fn new(db: &'a SeqDb) -> Self {
         LineCheck {
             db,
+            filters: db.drops_lineless_hits(),
             kept: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
-    /// What the read of `ordinal`'s header finds (read at its first check; the lock is not held
-    /// while the header is read and decoded), or the reader's error.
+    /// What the read of `ordinal`'s header finds (under a list read at its first check; the lock
+    /// is not held while the header is read and decoded), or the reader's error.
     fn read(&self, ordinal: u32) -> Result<LineRead, SeqDbError> {
+        if !self.filters {
+            let (kept, utf8) = self.db.line_read(ordinal)?;
+            return Ok(LineRead { kept, utf8 });
+        }
         let cached = self
             .kept
             .lock()
@@ -1772,7 +1764,8 @@ impl std::error::Error for FetchRefusal {}
 
 /// NCBI's Seq-aligns of the final hit lists of a database search (line DBID item lineless):
 /// a hit on a sequence that the database's list keeps without any of its definition
-/// lines gets none (`SeqDb::keeps_line`, blast_seqalign.cpp:1582-1586), so it leaves every
+/// lines, or whose lines hold no Seq-id (an edited header, without a list too; line RG
+/// D1c-1c-b), gets none (`SeqDb::keeps_line`, blast_seqalign.cpp:1582-1586), so it leaves every
 /// report, the prefetch, the taxonomy lookups and psiblast's PSSM, while it was searched, took
 /// its place in the hit list before the cut to `-max_target_seqs` and counts in the
 /// statistics. Each program drops such hit lists right after that cut, before the reads of
@@ -1790,18 +1783,16 @@ pub(crate) struct SeqAligned<'a> {
 }
 
 impl<'a> SeqAligned<'a> {
-    /// The check of `db`'s hits; `None` where no hit is dropped here: no list removes
-    /// lines, or the search's fetches have excluded the sequences without a line before
-    /// (`fetched`, the caller's: the search fetches its subjects with `check_oid_exclusion`, a
-    /// gapped search or an ungapped one of a nucleotide database; and the database's list is
-    /// negative, `SeqDb::excludes_lineless_at_fetch`).
+    /// The check of `db`'s hits; `None` where no hit is dropped here: the search's fetches have
+    /// excluded the sequences without a line before (`fetched`, the caller's: the search fetches
+    /// its subjects with `check_oid_exclusion`, a gapped search or an ungapped one of a nucleotide
+    /// database; and the database's list is negative, `SeqDb::excludes_lineless_at_fetch`, which
+    /// erases every line without a Seq-id).
     pub(crate) fn of(db: &'a SeqDb, fetched: bool) -> Option<Self> {
-        (db.drops_lineless_hits() && !(fetched && db.excludes_lineless_at_fetch())).then(|| {
-            SeqAligned {
-                check: LineCheck::new(db),
-                utf8: None,
-                failed: false,
-            }
+        (!(fetched && db.excludes_lineless_at_fetch())).then(|| SeqAligned {
+            check: LineCheck::new(db),
+            utf8: None,
+            failed: false,
         })
     }
 
@@ -3337,11 +3328,26 @@ impl<'a> HeaderReader<'a> {
         } else {
             return RecordCopy::Differs;
         };
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+        // No NCBI counterpart: LOSAT's copy-equivalence check (`copy_of`). `GetBioseq` returns a
+        // null Bioseq when the signed 32-bit `GetSeqLengthProt` length is less than 1, so treat
+        // such proteins as distinct without loading their sequence bytes into memory.
+        let protein = self.db.seqtype() == SeqType::Protein;
+        if protein {
+            let (Ok(len_a), Ok(len_b)) =
+                (self.db.protein_length_i32(a), self.db.protein_length_i32(b))
+            else {
+                return RecordCopy::Differs;
+            };
+            if len_a < 1 || len_b < 1 {
+                return RecordCopy::Differs;
+            }
+        }
         let (Ok(block_a), Ok(block_b)) = (self.db.read_sequence(a), self.db.read_sequence(b))
         else {
             return RecordCopy::Differs;
         };
-        let protein = self.db.seqtype() == SeqType::Protein;
         let same_letters = if protein {
             block_a.protein(0) == block_b.protein(0)
         } else {
@@ -4289,25 +4295,27 @@ pub(crate) fn reports_may_refuse(
             Ok(self)
         }
     }
-    let lineless_dropped = db.drops_lineless_hits();
     let check = |kept: &mut Kept,
                  headers: &HeaderReader<'_>,
                  ordinal: u32,
                  header: std::result::Result<crate::seqdb::SequenceHeader, SeqDbError>|
      -> std::result::Result<(), ReportRefusal> {
-        // A sequence left without a line gets no Seq-align (`SeqAligned`): none of its hits is
-        // reported, so it cannot make a report refuse (an error of its header comes below). The
-        // header read here is the filtered one: a sequence with a line is kept without asking
-        // again (review 1 of line RG D1c-1b, F2). A set of no line and a read that failed ask
-        // `SeqDb::keeps_line` (a volume that filters no line keeps a record of none, and a seqid
-        // list's read of a sequence it leaves no line fails; review 2 of D1c-1b, G3).
-        if lineless_dropped
-            && match &header {
-                Ok(crate::seqdb::SequenceHeader::Ordinal(lines)) if !lines.is_empty() => false,
-                Ok(crate::seqdb::SequenceHeader::Parsed(set)) if !set.deflines.is_empty() => false,
-                _ => matches!(db.keeps_line(ordinal), Ok(false)),
+        // A sequence left without a line with a Seq-id gets no Seq-align (`SeqAligned`): none of
+        // its hits is reported, so it cannot make a report refuse (an error of its header comes
+        // below). The header read here is the filtered one: a sequence with a line that holds a
+        // Seq-id is kept without asking again (review 1 of line RG D1c-1b, F2; an ordinal line
+        // holds its `BL_ORD_ID`). A set of no such line and a read that failed ask
+        // `SeqDb::keeps_line` (an empty record is kept, and a seqid list's read of a sequence it
+        // leaves no line fails; review 2 of D1c-1b, G3).
+        if match &header {
+            Ok(crate::seqdb::SequenceHeader::Ordinal(lines)) if !lines.is_empty() => false,
+            Ok(crate::seqdb::SequenceHeader::Parsed(set))
+                if set.deflines.iter().any(|defline| !defline.ids.is_empty()) =>
+            {
+                false
             }
-        {
+            _ => matches!(db.keeps_line(ordinal), Ok(false)),
+        } {
             return Ok(());
         }
         match reported_header(headers, header, ordinal, 0, program) {
@@ -4771,11 +4779,19 @@ pub(crate) fn x_check_protein_stores(
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, PROTEIN_STORE_BLOCK_BYTES) {
         let block = db
-            .read_block(range)
+            .read_protein_search_block(range)
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
             let with_sentinels = block.protein_with_sentinels(i);
             let ordinal = range.first_ordinal + i as u32;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+            // No NCBI counterpart: LOSAT's stored-byte check (`x_check_protein_stores`). Proteins
+            // with non-positive NCBI 32-bit length are skipped by NCBI and returned as `[0, 0]` by
+            // `read_protein_search_block`, so skip byte validation and report length 0.
+            if with_sentinels.len() == 2 {
+                each(ordinal, 0);
+                continue;
+            }
             check_protein_sequence(with_sentinels, || db.oid(ordinal), program)?;
             each(ordinal, with_sentinels.len() - 2);
         }
@@ -4962,24 +4978,152 @@ struct VolumeLookups {
     /// By volume, what the slot of the offset error's taxid holds ([`OffsetSlot`]); only where
     /// the taxonomy database has that error.
     offset_slots: rustc_hash::FxHashMap<usize, OffsetSlot>,
-    /// The sequences, by ordinal id, whose loads looked up a taxid of that slot: a later read of
-    /// one may find it in NCBI's scope and load nothing, or load it again.
-    slot_loads: rustc_hash::FxHashSet<u32>,
-    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:209-209
-    // NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:441-460
-    // NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:332-385
-    /// Those loads by the subject whose Seq-align id asked for the sequence, `(sequence,
-    /// subject)`: NCBI's data loader names a blob by the ordinal id with the Seq-id handle that
-    /// asked for it, and loads a blob that its data source does not hold, so where NCBI keeps
-    /// every sequence (`kept`) only a read again by the same subject's id loads nothing; one by
-    /// another id is another blob, which LOSAT takes as a read again whose load NCBI may make.
-    kept_loads: rustc_hash::FxHashSet<(u32, u32)>,
+    /// The blobs ([`BlobName`]), by the ordinal id of their sequence, whose loads looked up a
+    /// taxid of that slot: a later read by the same Seq-id handle may find the blob in NCBI's
+    /// scope or data source and load nothing, or load it again; one by another id is a load of
+    /// its own, unless NCBI's scope can give a Bioseq of those blobs for that id
+    /// ([`VolumeLookups::blob_read`]).
+    slot_blobs: rustc_hash::FxHashMap<u32, Vec<SlotBlob>>,
     /// A run of a program without NCBI's object manager ([`TaxdbRun::sequential`]): every read
     /// of a sequence is a load (`CSeqDB::GetBioseq`), a read again too.
     sequential: bool,
     /// NCBI keeps every sequence that the run loads ([`keeps_every_load`] of the run's database,
     /// set at each use, [`TaxdbRun::volume_lookups`]): a read again loads nothing.
     kept: bool,
+    /// While the loads of one batch's prefetch are walked ([`Self::prefetch_slots`]): the number
+    /// of blobs that each sequence had before it, the only ones that [`Self::blob_read`] meets
+    /// (NCBI's prefetch asks its scope only for the ids that it resolved before, then its loader
+    /// for every other handle: no blob of one prefetch stands in for another of it).
+    prefetch_from: Option<rustc_hash::FxHashMap<u32, usize>>,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:209-209
+// NCBI reference (598d8ae6): c++/src/objtools/data_loaders/blastdb/bdbloader.cpp:441-462
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:2224-2246
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:986-1006
+// NCBI reference (598d8ae6): c++/src/objmgr/data_source.cpp:1489-1491
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_info.cpp:832-882
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1769-1785
+// NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3288-3297
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1328-1371
+// NCBI's data source answers an id by its BLAST database data loader first, which names a blob by
+// the OID with the id's Seq-id handle and loads a blob that the data source does not hold. A read
+// of the reports finds a Bioseq that the scope holds without the loader, by the ids of that
+// Bioseq (those of the definition line that its load targeted) or a handle that matches the id; a
+// prefetch only by an id that the scope resolved before, and asks the loader for the batch's
+// other handles. So a read of a sequence by another Seq-align id than its loads before is a load
+// of its own where no Bioseq of those loads holds that id, and in one prefetch always (probe of
+// line NP item O4b2-7, `tm_hd` and `tm_hdr`, four heap layouts: `gb|XYZ00002.1|` of the second
+// volume, which the loader gives as the first sequence that holds it in its second line, looks
+// that sequence's slot up again after its load by `gb|AAA00001.1|`: twice; with the handles'
+// order the other way round, once).
+/// NCBI's name of the blob that a load of a sequence reads for a Seq-align id
+/// ([`VolumeLookups::offset_slot`]): the id's Seq-id handle, and the keys by which NCBI's scope
+/// matches that id with the ids of a Bioseq that it holds ([`blob_name`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct BlobName {
+    /// The key of the id's `CSeq_id_Handle` (`seqid::mask_handle::mask_handle_key`); `None`
+    /// where NCBI makes a new handle at each call (a Textseq-id with neither accession nor name)
+    /// or where no pure function knows it (a giim id).
+    handle: Option<Vec<u8>>,
+    /// The id's scope keys (`defline_set::scope_keys`) and its weak keys
+    /// (`id_scope::weak_keys`).
+    finds: (Vec<u64>, Vec<u64>),
+    /// The keys of the ids of the blob's Bioseq (the definition line that the load targets).
+    holds: BioseqKeys,
+}
+
+/// The keys of the ids of a Bioseq by which NCBI's scope finds it for an id ([`BlobName`]): their
+/// handles, their scope keys, and the keys that weak matches find (`id_scope::kind_keys`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct BioseqKeys {
+    handles: Vec<Vec<u8>>,
+    scope: Vec<u64>,
+    kinds: Vec<u64>,
+}
+
+impl BlobName {
+    /// Whether NCBI's scope can give the Bioseq whose ids have the keys `bioseq` for this id
+    /// without a load: one of its handle, an id that the scope takes for it, or a weak match.
+    fn found_in(&self, bioseq: &BioseqKeys) -> bool {
+        self.handle
+            .as_ref()
+            .is_some_and(|handle| bioseq.handles.contains(handle))
+            || self.finds.0.iter().any(|key| bioseq.scope.contains(key))
+            || self.finds.1.iter().any(|key| bioseq.kinds.contains(key))
+    }
+}
+
+/// A blob of [`VolumeLookups::slot_blobs`]: its handle and its Bioseq's keys ([`BlobName`]).
+#[derive(Clone, Debug)]
+struct SlotBlob {
+    handle: Vec<u8>,
+    holds: BioseqKeys,
+    /// Whether NCBI loaded it for certain (else its scope may have given another blob's Bioseq
+    /// for the id, so a later read by the handle may be its first load).
+    sure: bool,
+}
+
+/// How a load of a blob meets the run's blobs before ([`VolumeLookups::blob_read`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BlobRead {
+    /// NCBI loads it.
+    Fresh,
+    /// NCBI holds it from a load before ([`VolumeLookups::kept`]): no load.
+    Kept,
+    /// A load or none, as NCBI's scope and data source decide: the blob was read before, or
+    /// NCBI's scope can give another blob's Bioseq of the sequence for its id.
+    Again,
+}
+
+/// NCBI's name of the blob of the sequence `blob` of `db` that a read by the Seq-align id of the
+/// subject `by` loads ([`BlobName`]): the id's handle and keys, and the keys of the ids of the
+/// definition line of `blob` that the load targets (`DeflineSet::bioseq_defline`; a sequence
+/// without parsed Seq-ids is `gnl|BL_ORD_ID|<OID>`, its Bioseq's one id).
+fn blob_name(db: &SeqDb, blob: u32, by: u32, program: &str) -> Result<BlobName> {
+    use crate::seqid::ParsedSeqId;
+    let ordinal_id = |ordinal: u32| {
+        ParsedSeqId::General(crate::seqid::model::Dbtag {
+            db: b"BL_ORD_ID".to_vec(),
+            tag: crate::seqid::model::ObjectId::Id(db.oid(ordinal).get() as i32),
+        })
+    };
+    let header = |ordinal: u32| {
+        db.read_header(ordinal)
+            .map_err(|error| database_error(error, program))
+    };
+    let id = match header(by)? {
+        crate::seqdb::SequenceHeader::Parsed(set) => set.alignment_id().cloned(),
+        crate::seqdb::SequenceHeader::Ordinal(_) => None,
+    }
+    .unwrap_or_else(|| ordinal_id(by));
+    let line: Vec<ParsedSeqId> = match header(blob)? {
+        crate::seqdb::SequenceHeader::Parsed(set) => set
+            .bioseq_defline(&id)
+            .map(|line| set.deflines[line].ids.clone())
+            .unwrap_or_default(),
+        crate::seqdb::SequenceHeader::Ordinal(_) => vec![ordinal_id(blob)],
+    };
+    let mut holds = BioseqKeys::default();
+    for held in &line {
+        holds.handles.extend(
+            crate::seqid::mask_handle::mask_handle_key(held)
+                .ok()
+                .flatten(),
+        );
+        crate::seqid::defline_set::scope_keys(held, &mut holds.scope);
+        crate::seqid::id_scope::kind_keys(held, &mut holds.kinds);
+    }
+    let mut finds = (Vec::new(), Vec::new());
+    crate::seqid::defline_set::scope_keys(&id, &mut finds.0);
+    crate::seqid::id_scope::weak_keys(&id, &mut finds.1);
+    Ok(BlobName {
+        handle: crate::seqid::mask_handle::mask_handle_key(&id)
+            .ok()
+            .flatten(),
+        finds,
+        holds,
+    })
 }
 
 /// What the slot of the offset error's taxid `L` holds in a volume's taxonomy cache.
@@ -5037,12 +5181,15 @@ struct SlotOrder {
 /// `order`: the cause is the order of a prefetch's loads instead ([`SlotOrder`]): the load
 /// `ordinal` is one of them where their order decides how often its offset error is written
 /// (`ordinal == order.first`), else a later load that meets what that order left in the slot.
+/// `unnamed`: the cause is the load's Seq-align id, whose Seq-id handle LOSAT does not know
+/// ([`BlobName::handle`]): NCBI makes a new one at each read, each a load of its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SlotUncertain {
     ordinal: u32,
     again: bool,
     after: Option<SlotFetch>,
     order: Option<SlotOrder>,
+    unnamed: bool,
 }
 
 /// One load's lookups of the slot of the offset error's taxid ([`SlotHolds::walk`]).
@@ -5103,22 +5250,74 @@ impl VolumeLookups {
     // released: review 4 of line DBID pssmread found a second query's PSSM loading a sequence again
     // after 40 other included subjects and not after none (`cc_big40`, `cc_ac`), which LOSAT does
     // not model.
+    /// How a load of the sequence `ordinal` by the blob name `name` (with a handle) meets the
+    /// blobs of the run before whose loads looked up a taxid of the slot (`slot_blobs`): the same
+    /// handle's blob is held where NCBI keeps every sequence of the run and loaded it for certain
+    /// (`Kept`), else a load or none (`Again`); another handle's is a load of its own (`Fresh`)
+    /// unless NCBI's scope can give one of those blobs' Bioseqs for its id (`Again`). In a
+    /// prefetch, only the blobs before it count ([`Self::prefetch_from`]). A sequential run loads
+    /// at every read.
+    fn blob_read(&self, ordinal: u32, name: &BlobName) -> BlobRead {
+        if self.sequential {
+            return BlobRead::Fresh;
+        }
+        let (Some(blobs), Some(handle)) = (self.slot_blobs.get(&ordinal), &name.handle) else {
+            return BlobRead::Fresh;
+        };
+        let blobs = match &self.prefetch_from {
+            Some(from) => &blobs[..from.get(&ordinal).copied().unwrap_or(0)],
+            None => &blobs[..],
+        };
+        if let Some(same) = blobs.iter().find(|blob| &blob.handle == handle) {
+            return if same.sure && self.kept {
+                BlobRead::Kept
+            } else {
+                BlobRead::Again
+            };
+        }
+        if blobs.iter().any(|blob| name.found_in(&blob.holds)) {
+            BlobRead::Again
+        } else {
+            BlobRead::Fresh
+        }
+    }
+
+    /// Records the blob `name` of the sequence `ordinal` as loaded (`sure`) or maybe loaded
+    /// ([`SlotBlob`]), where its handle has no blob of the sequence yet.
+    fn record_blob(&mut self, ordinal: u32, name: &BlobName, sure: bool) {
+        let Some(handle) = &name.handle else {
+            return;
+        };
+        let blobs = self.slot_blobs.entry(ordinal).or_default();
+        if !blobs.iter().any(|blob| &blob.handle == handle) {
+            blobs.push(SlotBlob {
+                handle: handle.clone(),
+                holds: name.holds.clone(),
+                sure,
+            });
+        }
+    }
+
     /// Which of the lookups `lookups` of a load of the sequence `ordinal` in the volume `volume`
-    /// ask the taxonomy database again for the taxid of the offset error `last` (a lookup that
+    /// by the blob name `name` ([`BlobName`]: NCBI's blob of the Seq-align id that reads it) ask
+    /// the taxonomy database again for the taxid of the offset error `last` (a lookup that
     /// misses the slot after an earlier lookup of `last` in the volume), as NCBI's cache of the
-    /// volume holds the slot of `last` after the lookups recorded before. The first load of a
-    /// sequence in the run follows the slot. A read again of a sequence whose load looks up a
-    /// taxid of the slot is a load or none, as NCBI's scope decides: where loading it again gives
-    /// a text, LOSAT's refusal; else no text, and the slot holds what either leaves (`Either` where
-    /// they differ). `Err` names the load that is not certain ([`SlotUncertain`]). In a
-    /// sequential run every read is a first load: the slot is followed, never `Err`. Where NCBI
-    /// keeps every sequence of the run (`kept`), a read again by the Seq-align id of the subject
-    /// `by` that read it before loads nothing (`kept_loads`): no lookup, the slot as it was.
+    /// volume holds the slot of `last` after the lookups recorded before. A first load of a blob
+    /// follows the slot ([`Self::blob_read`]: also another Seq-align id's read of a sequence
+    /// loaded before, where no Bioseq of its blobs holds that id). A read again of a blob whose
+    /// load looks up a taxid of the slot, or of one whose Bioseq NCBI's scope can give instead, is
+    /// a load or none, as NCBI's scope decides: where loading it gives a text, LOSAT's refusal;
+    /// else no text, and the slot holds what either leaves (`Either` where they differ). Where
+    /// NCBI keeps every sequence of the run (`kept`), a read again of a blob it loaded for certain
+    /// loads nothing: no lookup, the slot as it was. `Err` names the load that is not certain
+    /// ([`SlotUncertain`]), also one by an id whose handle LOSAT does not know (`unnamed`: NCBI
+    /// loads a blob at each read). In a sequential run every read is a first load: the slot is
+    /// followed, never `Err`.
     fn offset_slot(
         &mut self,
         volume: usize,
         ordinal: u32,
-        by: u32,
+        name: &BlobName,
         lookups: &[i32],
         last: i32,
     ) -> std::result::Result<Vec<bool>, SlotUncertain> {
@@ -5126,13 +5325,23 @@ impl VolumeLookups {
         if !lookups.iter().any(|&taxid| in_slot(taxid)) {
             return Ok(vec![false; lookups.len()]);
         }
-        let again = !self.sequential && !self.slot_loads.insert(ordinal);
-        let by_before = !self.kept_loads.insert((ordinal, by));
-        if again && by_before && self.kept {
+        let before = self.offset_slots.get(&volume).copied().unwrap_or_default();
+        if !self.sequential && name.handle.is_none() {
+            return Err(SlotUncertain {
+                ordinal,
+                again: false,
+                after: before.other,
+                order: None,
+                unnamed: true,
+            });
+        }
+        let read = self.blob_read(ordinal, name);
+        if read == BlobRead::Kept {
             return Ok(vec![false; lookups.len()]);
         }
+        let again = read == BlobRead::Again;
+        self.record_blob(ordinal, name, !again);
         let slot = self.offset_slots.entry(volume).or_default();
-        let before = *slot;
         let uncertain = |own: Option<i32>| SlotUncertain {
             ordinal,
             again,
@@ -5144,6 +5353,7 @@ impl VolumeLookups {
                 })
                 .or(before.other),
             order: before.unordered,
+            unnamed: false,
         };
         let walk = before.holds.walk(lookups, last).map_err(uncertain)?;
         if !again {
@@ -5189,8 +5399,28 @@ impl VolumeLookups {
     /// `unordered`: the batch has more than [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids, or
     /// such a load's id is another subject's too). A load of its own key follows the slot
     /// ([`VolumeLookups::offset_slot`]); loads of one key are one step ([`Self::unordered_slot`]).
-    /// `Err`: the volume and the load whose texts NCBI's order or scope decides.
+    /// A blob of the prefetch is loaded whatever the prefetch loaded before it
+    /// ([`Self::prefetch_from`]). `Err`: the volume and the load whose texts NCBI's order or scope
+    /// decides.
     fn prefetch_slots(
+        &mut self,
+        loads: &[SlotLoad],
+        unordered: impl Fn(usize) -> bool,
+        last: i32,
+    ) -> std::result::Result<rustc_hash::FxHashMap<u32, Vec<bool>>, (usize, SlotUncertain)> {
+        self.prefetch_from = Some(
+            self.slot_blobs
+                .iter()
+                .map(|(&ordinal, blobs)| (ordinal, blobs.len()))
+                .collect(),
+        );
+        let misses = self.prefetch_walks(loads, unordered, last);
+        self.prefetch_from = None;
+        misses
+    }
+
+    /// [`Self::prefetch_slots`] once [`Self::prefetch_from`] is set.
+    fn prefetch_walks(
         &mut self,
         loads: &[SlotLoad],
         unordered: impl Fn(usize) -> bool,
@@ -5209,7 +5439,7 @@ impl VolumeLookups {
             for group in members.chunk_by(|a, b| all || a.order == b.order) {
                 if let [load] = group {
                     let own = self
-                        .offset_slot(volume, load.blob, load.ordinal, &load.lookups, last)
+                        .offset_slot(volume, load.blob, &load.name, &load.lookups, last)
                         .map_err(|cause| (volume, cause))?;
                     misses.insert(load.ordinal, own);
                 } else {
@@ -5232,13 +5462,20 @@ impl VolumeLookups {
     /// reproduce: each load looks the slot of `last` up as its lookups go (`L` for `last`, `O`
     /// for another taxid of the slot), and a lookup of `L` misses after an `O` or where the slot
     /// held another taxid before the group; only the boundaries between the loads depend on their
-    /// order ([`unordered_boundary_misses`]). Where every order gives the same number of misses
-    /// (from each state the slot may hold before), the texts are the same in every order: each load
-    /// gets the misses of the batch's order (the prefetch writes the texts of its loads as one, in
-    /// any order of the loads: the texts of opening first, then offset errors of one text), and the
-    /// slot holds what the last load leaves, or `Either` where the loads leave other taxids.
-    /// `Err`: a load loaded before in the run (NCBI's scope may keep it) or an order that changes
-    /// the number of misses.
+    /// order ([`unordered_boundary_misses`]). A load of a blob that NCBI holds from before loads
+    /// nothing ([`BlobRead::Kept`]), as does a second load of one handle in the group (NCBI's map
+    /// holds a handle once); another handle of a sequence of the group is a load of its own (the
+    /// prefetch asks the loader for every handle that its scope had not resolved before it); one
+    /// that NCBI makes or not ([`BlobRead::Again`]) is counted both ways (review 1 of line NP item
+    /// O4b2-3, F2). Where every
+    /// order and every such choice gives the same number of misses (from each state the slot may
+    /// hold before), the texts are the same in every case: each load gets the misses of the
+    /// batch's order with every such load made (the prefetch writes the texts of its loads as one,
+    /// in any order of the loads: the texts of opening first, then offset errors of one text), and
+    /// the slot holds what the last load leaves, or `Either` where the cases leave other taxids.
+    /// `Err`: a Seq-align id whose handle LOSAT does not know (`SlotUncertain::unnamed`), more
+    /// than [`UNORDERED_CHOICES`] loads made or not, or an order or a choice that changes the
+    /// number of misses.
     fn unordered_slot(
         &mut self,
         volume: usize,
@@ -5274,94 +5511,146 @@ impl VolumeLookups {
             second: second.blob,
             taxid,
         };
-        // A load of a sequence loaded before may be kept by NCBI's data loader (`offset_slot`), at
-        // a place LOSAT does not know either: the refusal names that load. Where NCBI keeps every
-        // sequence of the run, such a load by the Seq-align id of the subject that loaded it
-        // before loads nothing (`kept_loads`): the group is the others. Two loads of one sequence
-        // in the group are two subjects' ids, one blob or two as their handles are one or not.
-        if self.kept {
-            let fresh: Vec<&SlotLoad> = group
-                .iter()
-                .copied()
-                .filter(|load| !self.kept_loads.contains(&(load.blob, load.ordinal)))
-                .collect();
-            if fresh.len() < group.len() {
-                return self.kept_group(volume, group, &fresh, last);
-            }
+        let refusal = |load: &SlotLoad, again: bool, order: Option<SlotOrder>| SlotUncertain {
+            ordinal: load.blob,
+            again,
+            after: before.other,
+            order,
+            unnamed: false,
+        };
+        if let Some(load) = group
+            .iter()
+            .find(|load| !self.sequential && load.name.handle.is_none())
+        {
+            return Err(SlotUncertain {
+                unnamed: true,
+                ..refusal(load, false, None)
+            });
         }
-        let mut blobs = std::collections::HashSet::new();
-        for load in group {
-            if !self.sequential
-                && (self.slot_loads.contains(&load.blob) || !blobs.insert(load.blob))
-            {
-                let other = group
+        let reads: Vec<BlobRead> = group
+            .iter()
+            .enumerate()
+            .map(|(at, load)| {
+                let of_sequence = |other: &&&SlotLoad| other.blob == load.blob;
+                if self.sequential {
+                    BlobRead::Fresh
+                } else if group[..at]
                     .iter()
-                    .find(|other| other.blob != load.blob)
-                    .map_or(load.blob, |other| other.blob);
-                return Err(SlotUncertain {
-                    ordinal: load.blob,
-                    again: true,
-                    after: before.other,
-                    order: Some(SlotOrder {
-                        first: load.blob,
-                        second: other,
-                        taxid,
-                    }),
-                });
-            }
-        }
-        // Each load's lookups of the slot, a run of one taxid as one: its first and last, and the
-        // misses inside it.
-        let mut counts = UnorderedLoads::default();
-        let mut ends = Vec::with_capacity(group.len());
-        for load in group {
-            let marks: Vec<bool> = load
-                .lookups
+                    .filter(of_sequence)
+                    .any(|other| other.name.handle == load.name.handle)
+                {
+                    BlobRead::Kept
+                } else {
+                    self.blob_read(load.blob, &load.name)
+                }
+            })
+            .collect();
+        if reads.iter().all(|&read| read == BlobRead::Kept) {
+            return Ok(group
                 .iter()
-                .filter(|&&taxid| in_slot(taxid))
-                .map(|&taxid| taxid == last)
-                .collect();
-            let (starts_last, ends_last) = (marks[0], marks[marks.len() - 1]);
-            counts.add(starts_last, ends_last);
-            ends.push(ends_last);
+                .map(|load| (load.ordinal, vec![false; load.lookups.len()]))
+                .collect());
         }
+        let maybe: Vec<usize> = (0..group.len())
+            .filter(|&at| reads[at] == BlobRead::Again)
+            .collect();
+        if maybe.len() > UNORDERED_CHOICES {
+            // More cases than LOSAT counts: the first of those loads, which NCBI makes or not.
+            return Err(refusal(group[maybe[0]], true, None));
+        }
+        // Each load's lookups of the slot (`true` for `L`).
+        let marks: Vec<Vec<bool>> = group
+            .iter()
+            .map(|load| {
+                load.lookups
+                    .iter()
+                    .filter(|&&taxid| in_slot(taxid))
+                    .map(|&taxid| taxid == last)
+                    .collect()
+            })
+            .collect();
         let starts: &[bool] = match before.holds {
             SlotHolds::Other => &[false],
             SlotHolds::Last => &[true],
             SlotHolds::Either => &[false, true],
         };
-        let ranges: Vec<(usize, usize)> = starts
-            .iter()
-            .map(|&held_last| unordered_boundary_misses(held_last, counts))
-            .collect();
-        if ranges.iter().any(|&(fewest, most)| fewest != most) {
-            // The group's own order decides.
-            return Err(SlotUncertain {
-                ordinal: first.blob,
-                again: false,
-                after: before.other,
-                order: Some(order),
+        let mut total = None;
+        let mut leaves = None;
+        let mut own_order = false;
+        for choice in 0..1usize << maybe.len() {
+            let made = |at: usize| match reads[at] {
+                BlobRead::Fresh => true,
+                BlobRead::Kept => false,
+                BlobRead::Again => {
+                    let bit = maybe
+                        .iter()
+                        .position(|&index| index == at)
+                        .expect("a choice");
+                    choice >> bit & 1 == 1
+                }
+            };
+            // The loads made, each by its first and last lookup of the slot, a run of one taxid as
+            // one, and the misses inside each (an `L` after an `O` of the same load).
+            let mut counts = UnorderedLoads::default();
+            let mut inside = 0;
+            let mut ends = Vec::with_capacity(group.len());
+            for marks in (0..group.len()).filter(|&at| made(at)).map(|at| &marks[at]) {
+                let (starts_last, ends_last) = (marks[0], marks[marks.len() - 1]);
+                counts.add(starts_last, ends_last);
+                inside += marks.windows(2).filter(|pair| !pair[0] && pair[1]).count();
+                ends.push(ends_last);
+            }
+            let ranges: Vec<(usize, usize)> = starts
+                .iter()
+                .map(|&held_last| unordered_boundary_misses(held_last, counts))
+                .collect();
+            if ranges.iter().any(|&(fewest, most)| fewest != most) {
+                // The group's own order decides.
+                return Err(refusal(first, false, Some(order)));
+            }
+            if ranges.iter().any(|&range| range != ranges[0]) {
+                // Any order gives the same misses from each state, which an earlier load left
+                // open: that load is the cause (`offset_slot`'s refusal of a load after it).
+                return Err(refusal(first, false, before.unordered));
+            }
+            let misses = inside + ranges[0].0;
+            if total.is_some_and(|total| total != misses) {
+                // Whether NCBI makes a load decides.
+                return Err(refusal(group[maybe[0]], true, None));
+            }
+            total = Some(misses);
+            let end = match ends.first() {
+                None => before.holds,
+                Some(&end) if ends.iter().all(|&other| other == end) => {
+                    if end {
+                        SlotHolds::Last
+                    } else {
+                        SlotHolds::Other
+                    }
+                }
+                Some(_) => {
+                    own_order = true;
+                    SlotHolds::Either
+                }
+            };
+            leaves = Some(match leaves {
+                Some(leaves) if leaves != end => SlotHolds::Either,
+                _ => end,
             });
         }
-        if ranges.iter().any(|&range| range != ranges[0]) {
-            // Any order gives the same misses from each state, which an earlier load left open:
-            // that load is the cause (`offset_slot`'s refusal of a load after it).
-            return Err(SlotUncertain {
-                ordinal: first.blob,
-                again: false,
-                after: before.other,
-                order: before.unordered,
-            });
-        }
-        // The batch's order gives the same number of misses as NCBI's (from `Other` where the slot
-        // may hold either: the same number from each).
+        // The batch's order with every load made or not made gives the number of misses of every
+        // case (from `Other` where the slot may hold either: the same number from each).
         let mut holds = match before.holds {
             SlotHolds::Last => SlotHolds::Last,
             _ => SlotHolds::Other,
         };
         let mut other = before.other;
         let mut misses = Vec::with_capacity(group.len());
-        for load in group {
+        for (load, &read) in group.iter().zip(&reads) {
+            if read == BlobRead::Kept {
+                misses.push((load.ordinal, vec![false; load.lookups.len()]));
+                continue;
+            }
             let walk = holds
                 .walk(&load.lookups, last)
                 .expect("a walk from a definite state");
@@ -5370,52 +5659,23 @@ impl VolumeLookups {
                 other = Some(SlotFetch {
                     ordinal: load.blob,
                     taxid,
-                    again: false,
+                    again: read == BlobRead::Again,
                 });
             }
-            self.slot_loads.insert(load.blob);
-            self.kept_loads.insert((load.blob, load.ordinal));
+            self.record_blob(load.blob, &load.name, read == BlobRead::Fresh);
             misses.push((load.ordinal, walk.misses));
         }
         let slot = self.offset_slots.entry(volume).or_default();
         slot.other = other;
-        if ends.iter().all(|&end| end == ends[0]) {
-            slot.holds = holds;
-            slot.unordered = None;
-        } else {
-            slot.holds = SlotHolds::Either;
-            slot.unordered = Some(order);
-        }
-        Ok(misses)
-    }
-
-    /// [`Self::unordered_slot`] of the loads `group` where NCBI keeps every sequence of the run
-    /// (`kept`) and some of them read again a sequence that the same subject's Seq-align id loaded
-    /// before in the run (`kept_loads`): those load nothing (no misses), and the others
-    /// (`loading`) are the group.
-    fn kept_group(
-        &mut self,
-        volume: usize,
-        group: &[&SlotLoad],
-        loading: &[&SlotLoad],
-        last: i32,
-    ) -> std::result::Result<Vec<(u32, Vec<bool>)>, SlotUncertain> {
-        let mut misses: Vec<(u32, Vec<bool>)> = match loading {
-            [] => Vec::new(),
-            [load] => vec![(
-                load.ordinal,
-                self.offset_slot(volume, load.blob, load.ordinal, &load.lookups, last)?,
-            )],
-            _ => self.unordered_slot(volume, loading, last)?,
-        };
-        for load in group {
-            if !loading.iter().any(|other| std::ptr::eq(*other, *load)) {
-                misses.push((load.ordinal, vec![false; load.lookups.len()]));
-            }
-        }
+        slot.holds = leaves.expect("one case at least");
+        slot.unordered = (slot.holds == SlotHolds::Either && own_order).then_some(order);
         Ok(misses)
     }
 }
+
+/// The most loads of one step of [`VolumeLookups::unordered_slot`] that NCBI makes or not
+/// ([`BlobRead::Again`]), each of whose cases LOSAT counts: more are LOSAT's refusal.
+const UNORDERED_CHOICES: usize = 8;
 
 /// One load of a batch's prefetch that looks a taxid of the slot of the offset error's taxid up
 /// ([`VolumeLookups::prefetch_slots`]).
@@ -5431,6 +5691,8 @@ struct SlotLoad {
     /// The key of the subject's Seq-id handle in NCBI's map of the batch's loads
     /// ([`prefetch_load_key`]).
     order: u64,
+    /// NCBI's name of the blob ([`blob_name`] of the subject's Seq-align id).
+    name: BlobName,
 }
 
 /// The loads of one step of [`VolumeLookups::unordered_slot`], by the first and the last of their
@@ -5689,22 +5951,21 @@ impl TaxdbRun {
     /// only for such a damaged taxonomy database and once for the run; a header whose taxids do
     /// not decode is left to the lookups of the batches, which fail on it where it is reported.
     /// `(path of taxdb.bti, reason)` of the refusal of the fetches whose order LOSAT does not
-    /// follow there (the XML2 and JSON lookups, [`read_reported_taxonomy`]), made as a reader's
-    /// refusal ([`TaxonomyRefusal`]) where NCBI fetches ([`TaxdbRun::refuse_cache_collision`]); a
-    /// batch's prefetch ([`prefetch_slot_plan`]) and the reports' reads ([`load_read_texts`])
-    /// follow NCBI's order instead.
+    /// follow there; a batch's prefetch ([`prefetch_slot_plan`]) and the reports' reads
+    /// ([`load_read_texts`]) follow NCBI's order, the XML2 and JSON reports' too (they prefetch as
+    /// the other formats, [`prefetches_subjects`]).
     fn cache_collision(&self, db: &SeqDb) -> Option<&(std::path::PathBuf, String)> {
         self.collision
             .get_or_init(|| {
                 let last = self.prefetch_texts(db).offset_error_taxid?;
                 let (volume, other) = taxonomy_cache_collision(db, last)?;
-                let path = db.search_path()?.resolve_file("taxdb.bti")?;
+                let path = db.search_path()?.resolve_file(b"taxdb.bti")?;
                 let volume_name = db
                     .volumes()
                     .get(volume)
                     .map_or_else(String::new, |vol| vol.base().display().to_string());
                 Some((
-                    std::path::PathBuf::from(path),
+                    crate::utils::os_bytes::path_from_bytes(path),
                     format!(
                         "taxid {last}, the last entry of the taxonomy database, begins past the \
                          end of taxdb.btd, and the volume {volume_name} holds it and taxid \
@@ -5721,29 +5982,12 @@ impl TaxdbRun {
 
     /// Whether a fetch of the run may be refused because of NCBI's taxonomy cache: a volume holds
     /// the offset error's taxid and another taxid of its slot ([`TaxdbRun::cache_collision`]).
-    /// The XML2 and JSON lookups of such a run are refused, and a batch's prefetch or a report's
-    /// read where NCBI's order of its loads, or its keeping of a sequence read before, decides the
-    /// texts ([`prefetch_slot_plan`], [`load_read_texts`]), which can be a later batch: BLASTX holds its XML document (outfmt 5, and 13 to 16) then, which
+    /// Such a run refuses a batch's prefetch or a report's read (in every format) where NCBI's
+    /// order of its loads, or its keeping of a sequence read before, decides the texts ([`prefetch_slot_plan`], [`load_read_texts`]), which can be a later batch: BLASTX holds its XML document (outfmt 5, and 13 to 16) then, which
     /// the refusal drops; TBLASTX turns its report stream off and BLASTP takes the search of all
     /// queries, which make every batch's lookups before the first byte.
     pub(crate) fn cache_may_refuse(&self, db: &SeqDb) -> bool {
         self.cache_collision(db).is_some()
-    }
-
-    /// LOSAT's refusal of a fetch of the run where NCBI's taxonomy cache would repeat the offset
-    /// error ([`TaxdbRun::cache_collision`]), as a reader's refusal ([`TaxonomyRefusal`]) that names
-    /// `program`; `Ok` for any other run. The callers ask it only where NCBI fetches a subject.
-    fn refuse_cache_collision(&self, db: &SeqDb, program: &str) -> Result<()> {
-        match self.cache_collision(db) {
-            Some((path, message)) => Err(taxdb_error(
-                SeqDbError::Unsupported {
-                    path: path.clone(),
-                    message: message.clone(),
-                },
-                program,
-            )),
-            None => Ok(()),
-        }
     }
 
     /// The open of the database by the rows of a query batch whose report looks names up, made
@@ -5808,7 +6052,7 @@ impl TaxdbRun {
     /// or a load after such a read) is LOSAT's refusal ([`TaxonomyRefusal`]), naming `program`.
     /// `planned`: the misses of a load of a batch's prefetch that NCBI's order of the loads gave
     /// ([`prefetch_slot_plan`]), recorded there. `by`: the subject whose Seq-align id asks for
-    /// the sequence (`VolumeLookups::kept_loads`).
+    /// the sequence (NCBI's blob of that id, [`blob_name`]).
     #[allow(clippy::too_many_arguments)]
     fn load(
         &self,
@@ -5829,12 +6073,22 @@ impl TaxdbRun {
         let texts = self.prefetch_texts(db);
         let misses = match (texts.offset_error_taxid, planned) {
             (Some(_), Some(planned)) => Some(planned.to_vec()),
-            (Some(last), None) => Some(
-                self.slot_misses(db, volume, ordinal, by, lookups, last)
-                    .map_err(|cause| {
-                        taxdb_error(slot_uncertain_error(db, volume, last, cause), program)
-                    })?,
-            ),
+            (Some(last), None) => {
+                let name = if lookups
+                    .iter()
+                    .any(|&taxid| tax_cache_slot(taxid) == tax_cache_slot(last))
+                {
+                    blob_name(db, ordinal, by, program)?
+                } else {
+                    BlobName::default()
+                };
+                Some(
+                    self.slot_misses(db, volume, ordinal, &name, lookups, last)
+                        .map_err(|cause| {
+                            taxdb_error(slot_uncertain_error(db, volume, last, cause), program)
+                        })?,
+                )
+            }
             (None, _) => None,
         };
         let open = taxdb.open().map_err(|error| taxdb_error(error, program))?;
@@ -5851,20 +6105,20 @@ impl TaxdbRun {
         Ok(answers)
     }
 
-    /// Which of the lookups `lookups` of a load of the sequence `ordinal` by the Seq-align id of
-    /// the subject `by` in the volume `volume` ask the taxonomy database again for the offset
-    /// error's taxid `last` ([`VolumeLookups::offset_slot`]).
+    /// Which of the lookups `lookups` of a load of the sequence `ordinal` by the blob name `name`
+    /// in the volume `volume` ask the taxonomy database again for the offset error's taxid `last`
+    /// ([`VolumeLookups::offset_slot`]).
     fn slot_misses(
         &self,
         db: &SeqDb,
         volume: usize,
         ordinal: u32,
-        by: u32,
+        name: &BlobName,
         lookups: &[i32],
         last: i32,
     ) -> std::result::Result<Vec<bool>, SlotUncertain> {
         self.volume_lookups(db)
-            .offset_slot(volume, ordinal, by, lookups, last)
+            .offset_slot(volume, ordinal, name, lookups, last)
     }
 
     /// The run's [`VolumeLookups`] on `db`, whose `kept` is NCBI's for `db` ([`keeps_every_load`];
@@ -5931,6 +6185,16 @@ impl TaxdbRun {
             }),
             ..TaxdbRun::default()
         }
+    }
+
+    /// [`TaxdbRun::sequential`] of one `CSeqDB` of a program that opens several, each with its
+    /// volumes' caches, while the taxonomy database `taxdb` is the process's (NCBI's static
+    /// `CTaxDBFileInfo`): blastdbcheck opens each volume as a database of its own. The texts of
+    /// opening `taxdb` come with the first lookup of any of them.
+    pub(crate) fn sequential_with(taxdb: std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>) -> Self {
+        let run = Self::sequential();
+        let _ = run.lazy.set(taxdb);
+        run
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1462-1466
@@ -6020,8 +6284,14 @@ impl TaxdbRun {
             Some(last) => {
                 let volume = db.oid_volume(oid)?;
                 let lookups: Vec<i32> = taxids.clone().collect();
+                // A read by the OID (`CSeqDB::GetBioseq`), not by a Seq-id handle: one name for
+                // each sequence.
+                let name = BlobName {
+                    handle: Some([b"oid".as_slice(), &oid.to_le_bytes()].concat()),
+                    ..BlobName::default()
+                };
                 Some(
-                    self.slot_misses(db, volume, oid, oid, &lookups, last)
+                    self.slot_misses(db, volume, oid, &name, &lookups, last)
                         .map_err(|cause| slot_uncertain_error(db, volume, last, cause))?,
                 )
             }
@@ -6137,6 +6407,23 @@ fn slot_uncertain_error(db: &SeqDb, volume: usize, last: i32, cause: SlotUncerta
         return SeqDbError::Unsupported {
             path,
             message: slot_order_message(db, &volume_name, last, cause, order),
+        };
+    }
+    if cause.unnamed {
+        return SeqDbError::Unsupported {
+            path,
+            message: format!(
+                "taxid {last}, the last entry of the taxonomy database, begins past the end of \
+                 taxdb.btd, and the run reads database sequence {} of the volume {volume_name}, \
+                 which holds it or another taxid of its slot of NCBI BLAST+'s 256-slot taxonomy \
+                 cache of a volume (CSeqDBVol::m_TaxCache, CSeqDBIntCache), by a Seq-align id \
+                 whose Seq-id handle LOSAT does not know (a text id with neither accession nor \
+                 name, for which NCBI makes a new handle and so a new load at each read, or a giim \
+                 id): those loads decide how often NCBI writes \"{}\", which LOSAT does not \
+                 reproduce",
+                db.oid(cause.ordinal),
+                crate::seqdb::taxdb::MSG_OFFSET_ERROR
+            ),
         };
     }
     let read = if cause.again {
@@ -6334,8 +6621,7 @@ fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
 /// not know the taxid (the description is the id alone). Without `taxdb.bti`, or without a
 /// taxid, `taxonomy` is empty. A taxonomy database that LOSAT cannot read as NCBI does is a
 /// refusal made here, before any byte is written (a scientific name of any bytes is written as
-/// NCBI's streams write it); so is a run whose fetches NCBI's taxonomy cache would make repeat the
-/// offset error ([`TaxdbRun::cache_collision`]), when a reported subject has a positive taxid.
+/// NCBI's streams write it).
 ///
 /// NCBI's messages about the taxonomy database go to standard error, and not here: those of the
 /// loads of the reported subjects (the lookup that the volume makes for each taxid of a fetched
@@ -6354,6 +6640,12 @@ fn taxdb_error(error: SeqDbError, program: &str) -> anyhow::Error {
 /// asks it (`SubjectNames::of_parsed`): `Unnamed` for a definition line without a taxid, and no
 /// answer after the first `NotFound` (NCBI's loop ends there). The volume's lookups are those of
 /// `ParsedSubject::volume_taxids`.
+///
+/// On a database whose volume holds the offset error's taxid and another taxid of its slot
+/// ([`TaxdbRun::cache_collision`]), those loads are the caller's model too: a batch's prefetch in
+/// the order of its Seq-id handles ([`prefetch_slot_plan`]), or with the prefetch off each `Hit`'s
+/// read in the report's order ([`load_read_texts`]), as for the other formats, which refuse what
+/// that order does not decide.
 pub(crate) fn read_reported_taxonomy<P>(
     db: &SeqDb,
     run: &TaxdbRun,
@@ -6381,13 +6673,9 @@ where
     };
     let mut taxids = vec![0; ordinals.len()];
     let mut any_taxid = false;
-    // Whether a volume looks a taxid up when NCBI fetches the reported subjects (a positive one,
-    // `x_GetTaxonomy`; `ParsedSubject::volume_taxids`).
-    let mut volume_lookup = false;
     for &rank in reported {
         if let Some(subject) = parsed_subject(rank) {
             any_taxid |= defline_taxids(subject).iter().any(|&taxid| taxid != 0);
-            volume_lookup |= !subject.volume_taxids().is_empty();
             continue;
         }
         let defline_taxids = db
@@ -6396,7 +6684,6 @@ where
         // One definition line per reported sequence (`stored_title`).
         taxids[rank] = defline_taxids.first().copied().unwrap_or(0);
         any_taxid |= taxids[rank] != 0;
-        volume_lookup |= taxids[rank] > 0;
     }
     if !any_taxid || !db.taxdb_found() {
         return Ok((taxids, Vec::new(), Vec::new(), TaxdbNotes::default()));
@@ -6404,13 +6691,6 @@ where
     let Some(search_path) = db.search_path() else {
         return Ok((taxids, Vec::new(), Vec::new(), TaxdbNotes::default()));
     };
-    // NCBI fetches every reported subject of these formats (`s_IsPrefetchFormat` is true for
-    // them; with the prefetch off the report fetches each one), so a volume's lookups can repeat
-    // the offset error as in the prefetch of the other formats: the same refusal, asked where a
-    // volume looks a taxid up.
-    if volume_lookup {
-        run.refuse_cache_collision(db, program)?;
-    }
     let taxdb = run.taxdb(search_path);
     // NCBI opens the database at its first lookup: a load's (the texts are the load's, modelled
     // before this call) or a `Hit`'s, whose texts the caller's model of the batches kept
@@ -6477,7 +6757,7 @@ where
 /// API gives it to a search of records whose reports look every taxid up (`api::run`, with the
 /// call's start); LOSAT Web gives none (it has no files: the database is not found).
 #[derive(Clone, Debug)]
-pub struct TaxdbSetting(Result<Option<String>, String>);
+pub struct TaxdbSetting(Option<Vec<u8>>);
 
 impl TaxdbSetting {
     /// The value of `settings`.
@@ -6498,14 +6778,14 @@ pub(crate) struct SubjectTaxonomy {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:582-606
-/// What the tabular reports `specs` of a `-subject` search of `program` (upper case) ask of the
+/// What the tabular reports `specs` of a `-subject` search ask of the
 /// taxonomy database where NCBI makes their formatters: whether `taxdb.bti` is on the search path
 /// of `setting` (`x_CheckTaxDB`'s `SeqDB_ResolveDbPath` of `taxdb.bti`: the current directory,
 /// `BLASTDB` and the registry's `[BLAST] BLASTDB`, as a database is looked for, `seqdb::SearchPath`)
 /// for the plural names, which warn without it, and the organism report, whose lookups open it
 /// (`SubjectTaxdb`). A report of singular names reads nothing: NCBI looks a singular name up by
-/// the subject's taxid, and the records of `-subject` have none. A registry value that LOSAT does
-/// not read as NCBI is its refusal, as for `-db`. `setting` is `None` in LOSAT Web: not found.
+/// the subject's taxid, and the records of `-subject` have none. `setting` is `None` in LOSAT Web:
+/// not found.
 ///
 /// The command line and the library's searches of records call it at the same point, after the
 /// options are processed (each program's `open_search_database`).
@@ -6513,44 +6793,34 @@ pub(crate) struct SubjectTaxonomy {
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:126-134
 pub(crate) fn subject_taxonomy<'s>(
     setting: Option<&TaxdbSetting>,
-    program: &str,
     specs: impl IntoIterator<Item = &'s crate::report::tabular::TabularSpec>,
-) -> Result<SubjectTaxonomy> {
+) -> SubjectTaxonomy {
     let (mut looks_up, mut tax_report) = (false, false);
     for spec in specs {
         looks_up |= spec.looks_up_every_taxid();
         tax_report |= spec.kind == crate::report::tabular::TabularKind::TaxReport;
     }
     if !looks_up {
-        return Ok(SubjectTaxonomy::default());
+        return SubjectTaxonomy::default();
     }
     let Some(setting) = setting else {
-        return Ok(SubjectTaxonomy {
+        return SubjectTaxonomy {
             taxdb: None,
             found: Some(false),
-        });
+        };
     };
-    let path = subject_search_path(setting, program)?;
-    let found = path.resolve_file("taxdb.bti").is_some();
+    let path = SearchPath::from_environment(setting.0.as_deref());
+    let found = path.resolve_file(b"taxdb.bti").is_some();
     // The organism report's lookups open the run's own database.
     let taxdb = (tax_report && found).then(|| {
         SubjectTaxdb(std::sync::Arc::new(crate::seqdb::taxdb::LazyTaxDb::new(
             path,
         )))
     });
-    Ok(SubjectTaxonomy {
+    SubjectTaxonomy {
         taxdb,
         found: Some(found),
-    })
-}
-
-/// The search path of NCBI's databases of a `-subject` search (`subject_taxonomy`).
-fn subject_search_path(setting: &TaxdbSetting, program: &str) -> Result<SearchPath> {
-    let registry = match &setting.0 {
-        Ok(value) => value.as_deref(),
-        Err(reason) => bail!("{reason}; this is not supported by LOSAT's {program}"),
-    };
-    SearchPath::from_environment(registry).map_err(|error| database_error(error, program))
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:217-220
@@ -7033,7 +7303,9 @@ fn load_read_texts<'s>(
     // taxid whose slot a load's lookups take, if they take it ([`slot_load_checks`]).
     let collision = offset_taxid.filter(|_| run.cache_collision(db).is_some());
     let mut reads = Vec::new();
-    let mut fetched: std::collections::HashSet<u32> = Default::default();
+    // NCBI's blobs read (the sequence with the subject whose Seq-align id reads it, `blob_name`):
+    // a load that a stopping id is given instead is another blob than the sequence's own read.
+    let mut fetched: std::collections::HashSet<(u32, u32)> = Default::default();
     let mut thrown: std::collections::HashSet<u32> = Default::default();
     let mut row_opened = false;
     for (key, ordinal, load) in loads {
@@ -7056,7 +7328,11 @@ fn load_read_texts<'s>(
         if let (SubjectLoad::Instead { stop, by }, Some(last)) = (load, collision) {
             instead_slot_check(db, ordinal, stop, by, last, program)?;
         }
-        if !fetched.insert(ordinal) {
+        let by = match load {
+            SubjectLoad::Read(_) => ordinal,
+            SubjectLoad::Instead { stop, .. } => stop,
+        };
+        if !fetched.insert((ordinal, by)) {
             continue;
         }
         let (parsed, lookups_of) = match load {
@@ -7102,8 +7378,7 @@ fn load_read_texts<'s>(
                     None => None,
                 };
                 let misses = planned.map(|planned| planned.misses(ordinal, lookups.len()));
-                // The subject whose Seq-align id asks for the blob (`VolumeLookups::kept_loads`).
-                let by = lookups_of.map_or(ordinal, |(stop, _)| stop);
+                // The subject whose Seq-align id asks for the blob (`blob_name`).
                 let (text, opening) = run.load_text(
                     db,
                     &taxdb,
@@ -7241,7 +7516,7 @@ fn slot_load_checks(
 /// of the offset error's taxid `last`, on a database whose volume holds that taxid and another of
 /// its slot ([`TaxdbRun::cache_collision`]): NCBI makes that load or not, at a place among the
 /// prefetch's loads that LOSAT does not know, and as the blob of the stopping id's handle, which
-/// looks the slot up again after the sequence's own load (`VolumeLookups::kept_loads`).
+/// looks the slot up again after the sequence's own load (`blob_name`).
 fn instead_slot_check(
     db: &SeqDb,
     holder: u32,
@@ -7295,10 +7570,10 @@ fn slot_refusal(db: &SeqDb, message: String) -> SeqDbError {
 /// LOSAT's refusals of the taxonomy cache name.
 fn taxdb_bti_path(db: &SeqDb) -> std::path::PathBuf {
     db.search_path()
-        .and_then(|search_path| search_path.resolve_file("taxdb.bti"))
+        .and_then(|search_path| search_path.resolve_file(b"taxdb.bti"))
         .map_or_else(
             || std::path::PathBuf::from("taxdb.bti"),
-            std::path::PathBuf::from,
+            crate::utils::os_bytes::path_from_bytes,
         )
 }
 
@@ -7933,6 +8208,7 @@ fn prefetch_slot_plan(
             volume,
             lookups,
             order: place.order,
+            name: blob_name(db, blob, ordinal, program)?,
         });
     }
     if let (Some(stop), false) = (stop, loads.is_empty()) {
@@ -8107,7 +8383,8 @@ fn prefetch_load_key(db: &SeqDb, subject: &PrefetchSubject<'_>) -> (u64, Option<
 /// subjects whose lookups stop the batch (`ParsedSubject::prefetch_stops`) load nothing; the
 /// others load by their handle's place to the stops ([`LoadOrder::before`]). Unknown besides: a
 /// Seq-align id that another subject has too, and every subject of a batch of more than
-/// [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids (whose stops' order LOSAT does not know either).
+/// [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids or with one whose handle LOSAT does not know
+/// (whose stops' order LOSAT does not know either).
 /// The one owner of NCBI's order of a stopping batch's loads and lookups.
 fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> LoadOrder {
     let (places, many) = load_places(db, subjects);
@@ -8134,9 +8411,9 @@ fn load_before_stop(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> LoadOrder {
 /// [`LoadBeforeStop`]): its handle's key ([`prefetch_load_key`]), whether its lookup stops the
 /// batch (`ParsedSubject::prefetch_stops`), and why its place is not known: a Seq-align id that
 /// another subject has too, and every subject of a batch of more than [`PREFETCH_ONE_MAP_IDS`]
-/// distinct Seq-align ids (the second value). The one owner of that map for the stops
-/// ([`load_before_stop`]) and for the place of NCBI's warning of a UTF8String header among the
-/// loads ([`scope_utf8_prefetch_loads`]).
+/// distinct Seq-align ids or with one whose handle LOSAT does not know (the second value). The
+/// one owner of that map for the stops ([`load_before_stop`]) and for the place of NCBI's warning
+/// of a UTF8String header among the loads ([`scope_utf8_prefetch_loads`]).
 fn load_places(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> (Vec<LoadPlace>, bool) {
     let stops = |subject: &PrefetchSubject<'_>| {
         subject
@@ -8155,21 +8432,21 @@ fn load_places(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> (Vec<LoadPlace>,
         if !ordinals.insert(subject.ordinal) {
             continue;
         }
-        match handle {
-            Some(handle) => match handles.entry(handle) {
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    entry.insert(subject.ordinal);
-                    ids += 1;
-                }
-                std::collections::hash_map::Entry::Occupied(entry) => {
-                    shared.insert(*entry.get());
-                    shared.insert(subject.ordinal);
-                }
-            },
-            None => ids += 1,
+        let Some(handle) = handle else {
+            continue;
+        };
+        match handles.entry(handle) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(subject.ordinal);
+                ids += 1;
+            }
+            std::collections::hash_map::Entry::Occupied(entry) => {
+                shared.insert(*entry.get());
+                shared.insert(subject.ordinal);
+            }
         }
     }
-    let many = ids > PREFETCH_ONE_MAP_IDS;
+    let many = map_unknown(&keys, ids);
     let places = subjects
         .iter()
         .zip(&keys)
@@ -8183,17 +8460,38 @@ fn load_places(db: &SeqDb, subjects: &[PrefetchSubject<'_>]) -> (Vec<LoadPlace>,
             }),
             many,
             stops: stops(subject),
-            unknown: if many {
-                Some("the batch has more than 200 Seq-align ids, which NCBI's prefetch sorts by CSortableSeq_id and loads in pieces of 100")
-            } else if shared.contains(&subject.ordinal) {
-                Some("another subject of the batch has the same Seq-align id")
-            } else {
-                None
-            },
+            unknown: many.or_else(|| {
+                shared
+                    .contains(&subject.ordinal)
+                    .then_some("another subject of the batch has the same Seq-align id")
+            }),
         })
         .collect::<Vec<_>>();
-    (places, many)
+    (places, many.is_some())
 }
+
+/// Why LOSAT does not know NCBI's map of the Seq-id handles of a batch whose Seq-align ids have
+/// the keys `keys` ([`prefetch_load_key`]), `ids` of them distinct handles that LOSAT knows: more
+/// than [`PREFETCH_ONE_MAP_IDS`] ids, which NCBI's prefetch sorts otherwise and loads in pieces;
+/// or an id without such a handle, as NCBI makes a new handle for each Seq-align of a Textseq-id
+/// with neither accession nor name (one for each HSP of a gapped search) and LOSAT does not know a
+/// giim id's, so the number of handles in the map is not known (review 1 of line NP item O4b2-3,
+/// F6; re-review of item O4b2-7, R2-H1).
+fn map_unknown(keys: &[(u64, Option<Vec<u8>>)], ids: usize) -> Option<&'static str> {
+    if keys.iter().any(|(_, handle)| handle.is_none()) {
+        Some(UNNAMED_MAP)
+    } else {
+        (ids > PREFETCH_ONE_MAP_IDS).then_some(MANY_IDS)
+    }
+}
+
+/// Why NCBI's order of a batch's loads is not known where it has more than
+/// [`PREFETCH_ONE_MAP_IDS`] Seq-align ids ([`load_places`]).
+const MANY_IDS: &str = "the batch has more than 200 Seq-align ids, which NCBI's prefetch sorts by CSortableSeq_id and loads in pieces of 100";
+
+/// Why NCBI's order of a batch's loads is not known where a Seq-align id has no Seq-id handle
+/// that LOSAT knows ([`load_places`]).
+const UNNAMED_MAP: &str = "a Seq-align id of the batch has no Seq-id handle that LOSAT knows (NCBI makes one for each Seq-align of a text id with neither accession nor name; a giim id), so the number of ids in NCBI's map, which decides whether its prefetch sorts them by CSortableSeq_id in pieces of 100, is not known";
 
 /// NCBI's order of the loads and lookups of a stopping batch's subjects ([`load_before_stop`]).
 struct LoadOrder {
@@ -8204,7 +8502,7 @@ struct LoadOrder {
     /// ([`LoadOrder::stop_key`]), a group of one key in the batch's order (NCBI orders a group by
     /// the addresses of the handles' infos).
     stops: Vec<usize>,
-    /// The batch has more than [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids.
+    /// LOSAT does not know NCBI's map of the batch ([`LoadPlace::many`]).
     many: bool,
 }
 
@@ -8221,19 +8519,19 @@ struct LoadPlace {
     /// Its handle's identity (a hash of [`prefetch_load_key`]'s; `None` where no pure function
     /// knows it): two subjects of one handle are one load of NCBI's map.
     handle: Option<u64>,
-    /// The batch has more than [`PREFETCH_ONE_MAP_IDS`] distinct Seq-align ids.
-    many: bool,
+    /// Why LOSAT knows the order of none of the batch's loads ([`MANY_IDS`], [`UNNAMED_MAP`]).
+    many: Option<&'static str>,
 }
 
 impl LoadPlace {
     /// Why NCBI's order of this load and the load `other` is not known, for the place of NCBI's
     /// warning of a UTF8String header among a prefetch's loads ([`scope_utf8_prefetch_loads`]):
-    /// a batch of more than [`PREFETCH_ONE_MAP_IDS`] ids, or two handles of one key (one packed
+    /// a batch whose map LOSAT does not know (`many`), or two handles of one key (one packed
     /// number, or neither packed), which NCBI's map orders by the address of their info
     /// ([`ADDRESS_ORDER`]); `None` where the keys order them or they are one handle (one load).
     fn order_unknown(self, other: LoadPlace) -> Option<&'static str> {
-        if self.many {
-            return Some("the batch has more than 200 Seq-align ids, which NCBI's prefetch sorts by CSortableSeq_id and loads in pieces of 100");
+        if let Some(why) = self.many {
+            return Some(why);
         }
         if self.order != other.order || (self.handle.is_some() && self.handle == other.handle) {
             return None;

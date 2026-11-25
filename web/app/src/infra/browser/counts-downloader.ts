@@ -5,7 +5,7 @@
 // Continue asks for `Range: bytes=<saved>-`; the saved part is dropped, and the file asked from its
 // start, when the answer is not a 206, its Content-Range starts elsewhere, or its Last-Modified is
 // not the first answer's (the file changed on the site). There is no automatic retry.
-import { COUNTS_BUSY, COUNTS_CHANGED, type CountsCopy, type CountsDownloader, type CountsRequest, type CountsResult, type CountsStore } from '../../ports/counts';
+import { COUNTS_BUSY, COUNTS_CHANGED, COUNTS_IN_USE, type CountsCopy, type CountsDownloader, type CountsRequest, type CountsResult, type CountsStore } from '../../ports/counts';
 import type { DownloadProgress } from '../../ports/example';
 import { ask, contentLength, messageOf, PART_BYTES } from './http';
 
@@ -43,6 +43,7 @@ export class BrowserCountsDownloader implements CountsDownloader {
       await body.response.body?.cancel().catch(() => undefined);
       const name = (error as { name?: unknown }).name;
       if (name === COUNTS_BUSY) return { ok: false, reason: 'busy' };
+      if (name === COUNTS_IN_USE) return { ok: false, reason: 'in-use' };
       if (name === COUNTS_CHANGED) return { ok: false, reason: 'changed' };
       return { ok: false, reason: 'not-kept', detail: messageOf(error) };
     }

@@ -84,14 +84,6 @@ pub(super) fn subject_input_error(error: anyhow::Error) -> anyhow::Error {
         None => input_error(error),
     }
 }
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:251-255
-pub(super) fn output_error(_: io::Error) -> anyhow::Error {
-    NativeError {
-        exit: 6,
-        message: "BLAST failed to write output\n".into(),
-    }
-    .into()
-}
 /// The error of writing one batch's archive: the encoder's refusal of a byte NCBI writes as `#`
 /// (`SerialError`; a document with such a byte is written through `Traced`, `write_archive`, so
 /// only a string that its check does not see reaches it) is LOSAT's refusal, not an error of
@@ -135,11 +127,14 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
             || (e.exit == 3 && e.message.starts_with(ENGINE_ERROR.as_bytes()))
             || (e.exit == 2 && e.message.starts_with(DATABASE_ERROR.as_bytes()))
             || e.exit == 255
+            || e.exit == 0
     }) {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-185
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:199-202
         // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), a
-        // write to one that fails (`framing::side_file_write_error`), NCBI's engine error made
+        // write to one that fails (`framing::side_file_write_error`; on the command line NCBI's
+        // write fault, which `CATCH_ALL` swallows: exit status 0, `ostream::write_side_file`),
+        // NCBI's engine error made
         // already (`blast_xml::matrix::unsupported_score_matrix`), or any exception of NCBI's
         // that a report raises and that ends the program through `CATCH_ALL`'s `CException`
         // branch (`NativeError::exception`, exit status 255, blast_app_util.hpp:247-250; such as
@@ -149,6 +144,12 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // subject that throws in an outfmt 13 or 14 report, `Xml2Document::failed`), which is
         // not an engine error.
         error
+    } else if error
+        .downcast_ref::<io::Error>()
+        .is_some_and(crate::report::ostream::is_report_write_failure)
+    {
+        // The report stream's failure: NCBI's end is the stream's (`ReportStream::finish`).
+        error
     } else if let Some(native) = NativeError::of_writer_exception(&error) {
         // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-251
         // An exception of NCBI's that a report's writer raised (`NcbiException::into_io_error`:
@@ -157,10 +158,11 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // `CException` report, exit status 255 (as every program's `NativeError::of_writer`), not
         // a failed write.
         native.into()
-    } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
-        NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
-    } else if let Some(e) = error.downcast_ref::<io::Error>() {
-        output_error(io::Error::new(e.kind(), e.to_string()))
+    } else if error.downcast_ref::<io::Error>().is_some() {
+        // Any other error carried as an `io::Error` is LOSAT's own error (an internal error of a
+        // formatter, `report::query_anchored::internal`): only the report stream's failure (a
+        // closed pipe's too) is NCBI's "BLAST failed to write output" (line RG T3c review 3 N4).
+        error
     } else {
         engine(error)
     }
@@ -233,7 +235,6 @@ fn run_inner(
     // messages of each archive are the diagnostics posted since the previous one.
     let mut archive_stderr = crate::cli::CliStderr::process();
     let mut archive_tee;
-    let tax_report = choice.number() == Some(18);
     let mut stderr: Box<dyn Write + '_> = match &archive {
         Some(handle) => {
             archive_tee = crate::report::archive::DiagTee::new(&mut archive_stderr, handle.clone());
@@ -317,35 +318,33 @@ fn run_inner(
     // The report's stream (`cli::NcbiOstream`). The organism report's: NCBI's buffer of the file or
     // of standard output. Every other format's: LOSAT's buffer before the file or standard output,
     // behind the held document.
-    let stream = match out_file {
-        Some(path) if tax_report => crate::cli::NcbiOstream::file(create(path)?, strategy.as_ref()),
-        None if tax_report => crate::cli::NcbiOstream::standard_output(strategy.as_ref()),
-        out_file => {
-            let destination: Box<dyn Write> = crate::report::archive::strategy::hold_report(
-                strategy.as_ref(),
-                match out_file {
-                    None => Box::new(io::stdout().lock()),
-                    Some(path) => Box::new(create(path)?),
-                },
-            );
-            crate::cli::NcbiOstream::buffered(match structured_xml {
-                true => Box::new(
-                    held.insert(super::blast_xml::HeldOutput::new(
-                        destination,
-                        side_files.clone(),
-                    ))
-                    .clone(),
-                ),
-                false => destination,
-            })
+    let device = crate::cli::ReportStream::of_cli(
+        out_file.map(create).transpose()?,
+        program.lower,
+        &args.outfmt,
+        strategy.as_ref(),
+    );
+    let stream = match structured_xml {
+        true => {
+            let report = device.handle();
+            crate::cli::NcbiOstream::before_report(
+                held.insert(
+                    super::blast_xml::HeldOutput::new(Box::new(device), side_files.clone())
+                        .with_report(report.clone()),
+                )
+                .clone(),
+                report,
+            )
         }
+        false => crate::cli::NcbiOstream::report(device),
     };
     // The run's standard error goes through the held output (`HeldOutput::stderr`): a held
     // document gets the texts written in the meantime where NCBI writes them. The structured
-    // formats write no BLAST archive, so the run's standard error is the process's.
+    // formats write no BLAST archive, so the run's standard error is the process's, tied to the
+    // report on standard output (`cli::CliStderr`).
     if let Some(held) = &held {
         debug_assert!(archive.is_none());
-        stderr = Box::new(held.stderr(Box::new(io::stderr())));
+        stderr = Box::new(held.stderr(Box::new(crate::cli::CliStderr::process())));
     }
     // The run keeps its output in the caller's slot: an error of NCBI's own is followed by the
     // error archive in the same output (`run`).
@@ -358,8 +357,8 @@ fn run_inner(
     // those of the composition-based statistics handler and of `Validate`, which come later.
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
     // The query options handler comes before the genetic code and formatting handlers
-    // (blastx_args.cpp:104-115). LOSAT's own refusals of option values come earlier (clap's
-    // value parsers, `resolve`).
+    // (blastx_args.cpp:104-115). LOSAT's own refusals of option values come earlier (NCBI's
+    // argument reader, `cli::reader`, and `resolve`).
     // The filtering handler comes before the query options handler (blastx_args.cpp:87-107):
     // NCBI's error of `-seg` first (`local::check_filtering`).
     super::local::check_filtering(args)?;
@@ -449,7 +448,7 @@ fn run_inner(
             Some(&crate::algorithm::common::database::TaxdbSetting::of(
                 &settings,
             )),
-        )?,
+        ),
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -737,14 +736,11 @@ fn run_inner(
     if let Some(xml2) = xml2.borrow_mut().as_mut() {
         let mut start = Vec::new();
         xml2.document_mut().start(&mut start);
-        writer.write_all(&start).map_err(output_error)?;
+        writer.write_all(&start)?;
     }
     // NCBI writes the prolog out before it searches the first batch, so the warnings of the
-    // batch come after it when both streams go to one place (a plain report: dev's flush;
-    // `pairwise::flushes_after_prolog`).
-    if crate::report::pairwise::flushes_after_prolog(options.html.is_some(), false) {
-        writer.flush().map_err(output_error)?;
-    }
+    // batch come after it when both streams go to one place.
+    writer.flush()?;
     super::x_timing::run(XRun::Prolog, x_t);
     let x_t = super::x_timing::lap();
     // The database's sequences, read in blocks where they are searched and checked where they are
@@ -962,7 +958,7 @@ fn run_inner(
             queries_before,
             pool,
         )?;
-        writer.flush().map_err(output_error)
+        writer.flush().map_err(Into::into)
     };
     let mut take = |diagnostics: &mut dyn Write,
                     queries: &[FastaRecord],
@@ -1004,7 +1000,7 @@ fn run_inner(
         xml_failing,
     )
     .map_err(report_error)?;
-    writer.flush().map_err(output_error)?;
+    writer.flush()?;
     // The document a hold kept: written at the end of the run, with the epilog.
     if let Some(held) = &held {
         held.release().map_err(report_error)?;
@@ -1991,7 +1987,7 @@ pub(super) fn run_query_batches(
                     // `flow_bound(K)` are unwritten (blastx/x_bx_mem.rs).
                     let x_cap =
                         super::search::x_bx_mem::flow_unit_cap(pool, options, search_subjects);
-                    // The places (`XUnit::places`) searched at a time: K with the cap, else the
+                    // The places (`XUnit::places`) scanning at a time: K with the cap, else the
                     // threads, at one place a thread.
                     let (x_bound, x_lookahead, x_max_live, x_max_places) = match x_cap {
                         Some(k) => (super::search::x_bx_mem::flow_bound(k), 1, k, k),
@@ -2016,7 +2012,7 @@ pub(super) fn run_query_batches(
                         Some(layout) => prepare_unit(queries, layout, options, search_subjects),
                         None => prepare_lone_unit(queries, options, false),
                     },
-                    &|unit: &XUnit, alone: bool| {
+                    &|unit: &XUnit, alone: bool, scan_end: &dyn Fn()| {
                         let queries = unit.queries();
                         let large = x_cap.is_some() || alone || unit.places > 1 || x_large(queries);
                         crate::utils::xreach::x_reach!("LOSAT_X_BXBATCH", !large);
@@ -2029,6 +2025,7 @@ pub(super) fn run_query_batches(
                                 options,
                                 pool,
                                 unit.take_prep(options, search_subjects)?,
+                                Some(scan_end),
                             )
                         } else {
                             super::runtime::x_search_unit_serial(
@@ -2036,6 +2033,7 @@ pub(super) fn run_query_batches(
                                 search_subjects,
                                 options,
                                 unit.take_prep(options, search_subjects)?,
+                                Some(scan_end),
                             )
                         }
                     },
@@ -2104,6 +2102,7 @@ pub(super) fn run_query_batches(
                                     options,
                                     pool,
                                     unit.take_prep(options, search_subjects)?,
+                                    None,
                                 )
                             })
                             .collect::<Vec<_>>()
@@ -2125,6 +2124,7 @@ pub(super) fn run_query_batches(
                                             options,
                                             pool,
                                             unit.take_prep(options, search_subjects)?,
+                                            None,
                                         )
                                     } else {
                                         super::runtime::x_search_unit_serial(
@@ -2132,6 +2132,7 @@ pub(super) fn run_query_batches(
                                             search_subjects,
                                             options,
                                             unit.take_prep(options, search_subjects)?,
+                                            None,
                                         )
                                     };
                                     super::x_timing::run(XRun::WaveBusy, x_t);
@@ -2325,6 +2326,11 @@ pub fn run(
     let result = run_inner(args, settings, &mut output, &mut archive, &mut strategy);
     // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
     let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
+    // `~CBlastFormat` and `CATCH_ALL`: a failed report ends the run as NCBI's does.
+    let result = match output.as_ref().and_then(|output| output.report_handle()) {
+        Some(report) => report.finish(result),
+        None => result,
+    };
     if let (Some(handle), Some(writer)) = (&archive, output.as_mut()) {
         match &result {
             Err(error) => {
@@ -2346,8 +2352,9 @@ pub fn run(
 }
 
 /// The error archive of a run that stopped in `Run` before its output was opened (the taxid or
-/// seqid list, the files of `-subject` and `-query`, the subjects): into `-out`, or standard output; nothing when that
-/// cannot be opened (NCBI's call swallows that).
+/// seqid list, the files of `-subject` and `-query`, the subjects): into the run's report stream
+/// (`-out`, or standard output), as the other programs write it; nothing when `-out` cannot be
+/// opened (NCBI's call swallows that).
 fn write_run_error_archive(
     args: &BlastxArgs,
     archive: Option<&crate::report::archive::ArchiveHandle>,
@@ -2363,22 +2370,18 @@ fn write_run_error_archive(
     let Some(lines) = archive::error_lines(error, true) else {
         return;
     };
-    let destination: Option<Box<dyn Write>> =
-        match args.out.as_deref().filter(|p| *p != Path::new("-")) {
-            Some(path) => crate::cli::create_out_file(path, None)
-                .ok()
-                .map(|file| Box::new(file) as Box<dyn Write>),
-            None => Some(Box::new(io::stdout().lock())),
-        };
-    if let Some(mut destination) = destination {
-        let _ = crate::report::archive::write_error_archive_after_post(
-            handle,
-            error,
-            &lines,
-            &mut destination,
-        );
-        let _ = destination.flush();
-    }
+    let out_file = match args.out.as_deref().filter(|p| *p != Path::new("-")) {
+        Some(path) => match crate::cli::create_out_file(path, None) {
+            Ok(file) => Some(file),
+            Err(_) => return,
+        },
+        None => None,
+    };
+    let mut report =
+        crate::cli::ReportStream::of_cli(out_file, args.program().lower, &args.outfmt, None);
+    let _ =
+        crate::report::archive::write_error_archive_after_post(handle, error, &lines, &mut report);
+    let _ = report.finish(Ok(()));
 }
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:989-1013
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2196-2217
@@ -2450,9 +2453,9 @@ struct XUnit {
     last: bool,
     /// The places the unit takes in the flow (`x_flow`, `query_setup::unit_places`): the search
     /// units that `batch_ranges` makes of its letters, more than one only for a reader batch of
-    /// more than one such unit searched whole (`query_setup::searches_batch_whole`), whose search
-    /// holds a lookup table, a preparation and the workers' diagonal tables of all its letters; 1
-    /// for every other unit.
+    /// more than one such unit searched whole (`query_setup::searches_batch_whole`), whose scan
+    /// holds a lookup table and the workers' diagonal tables of all its letters (its batch end
+    /// holds neither: the flow counts the places until the scan ends); 1 for every other unit.
     places: usize,
     /// Phase 1 of the unit's reader batch when the batch has several units (or, in the capped batch
     /// flow, `LOSAT_X_BXCAPFILL`, is the unit itself), and the unit's place in it. `None`: the unit
@@ -2702,7 +2705,9 @@ type XSearched = std::thread::Result<Result<Vec<BatchResults>>>;
 
 // EXPERIMENT (LOSAT_X_BXFLOW): the reading loop of `run` with every query batch searched as a task
 // of its own (see the call in `run`). `search` searches one batch (the waves' function; `alone`:
-// with the pool inside), `write_batch` writes one batch's reports (or ends the run at its error),
+// with the pool inside), and calls its third argument when the batch's scan has ended (before its
+// redo and traceback, `runtime::x_search_unit_in_pool`), `write_batch` writes one batch's reports
+// (or ends the run at its error),
 // `write_warning` writes the bytes of one reader warning. A batch is spawned once `lookahead`
 // batches follow it and while fewer than `max_live` are spawned and not yet searched (by the
 // reading thread or by a search that ends); the batches still held when the input ends are
@@ -2725,7 +2730,7 @@ fn x_flow(
     split: &dyn Fn(&[FastaRecord]) -> Vec<XUnit>,
     prepare: &(dyn Fn(&[FastaRecord], Option<&std::sync::Arc<ReaderBatchShape>>) -> Result<UnitPrep>
           + Sync),
-    search: &(dyn Fn(&XUnit, bool) -> Result<Vec<BatchResults>> + Sync),
+    search: &(dyn Fn(&XUnit, bool, &dyn Fn()) -> Result<Vec<BatchResults>> + Sync),
     write_unit: &mut dyn FnMut(
         &[FastaRecord],
         usize,
@@ -2750,8 +2755,9 @@ fn x_flow(
         unwritten: usize,
     }
     // Units read and not yet spawned (the newest `lookahead` until the end of the input), in
-    // reader order, and the number spawned and not yet searched (at most `max_live`; a unit that
-    // waits for its reader batch's phase 1 is spawned) with their places (`XUnit::places`).
+    // reader order, the number spawned and not yet searched (at most `max_live`; a unit that
+    // waits for its reader batch's phase 1 is spawned), and the places (`XUnit::places`) of those
+    // whose scan has not ended (a unit gives back its places at its batch end, `spawn_search`).
     struct XHeld {
         batches: VecDeque<(usize, XUnit)>,
         live: usize,
@@ -2765,7 +2771,7 @@ fn x_flow(
         lookahead: usize,
         max_live: usize,
         max_places: usize,
-        search: &'f (dyn Fn(&XUnit, bool) -> Result<Vec<BatchResults>> + Sync),
+        search: &'f (dyn Fn(&XUnit, bool, &dyn Fn()) -> Result<Vec<BatchResults>> + Sync),
     }
     impl XLaunch<'_> {
         // The held units; a panic elsewhere cannot leave them unusable (nothing panics while
@@ -2779,11 +2785,14 @@ fn x_flow(
         // Spawns the held units beyond the newest `lookahead` (all of them at the end of the
         // input, then searched alone) while fewer than `max_live` are spawned and unsearched,
         // and a unit of several places (`XUnit::places`) while its places and those of the
-        // spawned and unsearched units are at most `max_places`, or none is spawned: a reader
+        // spawned units still scanning are at most `max_places`, or none is scanning: a reader
         // batch searched whole takes the places of the units the split would make of it, so
-        // that the letters searched at a time stay those of the split's units (one place each),
-        // and one of more places than `max_places` is searched with no other unit. A unit of a
-        // reader batch whose phase 1 has not ended is searched when it ends.
+        // that the letters scanned at a time (each scan holds a lookup table and diagonal tables
+        // of its letters) stay those of the split's units (one place each), and one of more
+        // places than `max_places` is scanned with no other unit. Its batch end (the redo and
+        // the traceback) holds none of those tables, and leaves the threads it does not use to
+        // the next unit's scan (`spawn_search`). A unit of a reader batch whose phase 1 has not
+        // ended is searched when it ends.
         fn release<'s>(
             &'s self,
             scope: &rayon::Scope<'s>,
@@ -2826,10 +2835,11 @@ fn x_flow(
             }
         }
 
-        // Spawns the search of unit `index`, spawned by `release`. The search sends its result
-        // (or panic) once and then spawns again, so a place freed by a search is filled without
-        // waiting for the writing thread. A unit whose phase 1 ends after the writing ended is
-        // not searched.
+        // Spawns the search of unit `index`, spawned by `release`. The search gives back the
+        // unit's places when its scan ends and spawns again (the units that wait for places
+        // start their scans beside its batch end), sends its result (or panic) once and then
+        // spawns again, so a place freed by a search is filled without waiting for the writing
+        // thread. A unit whose phase 1 ends after the writing ended is not searched.
         fn spawn_search<'s>(
             &'s self,
             scope: &rayon::Scope<'s>,
@@ -2848,13 +2858,24 @@ fn x_flow(
             }
             let sender = sender.clone();
             scope.spawn(move |scope| {
+                // The places are given back once: at the end of the scan, or with the search
+                // (a batch without a valid context, or an error before its batch end).
+                let given = std::cell::Cell::new(false);
+                let scan_end = || {
+                    if !given.replace(true) {
+                        self.held().places -= unit.places;
+                        self.release(scope, &sender);
+                    }
+                };
                 let searched = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    (self.search)(&unit, alone)
+                    (self.search)(&unit, alone, &scan_end)
                 }));
                 {
                     let mut held = self.held();
                     held.live -= 1;
-                    held.places -= unit.places;
+                    if !given.get() {
+                        held.places -= unit.places;
+                    }
                 }
                 // The receiver is gone only when the run already ended at an error.
                 let _ = sender.send((index, searched));

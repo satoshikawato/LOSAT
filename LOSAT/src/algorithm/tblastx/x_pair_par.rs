@@ -427,7 +427,7 @@ fn x_mask_max_cells(kib: usize, threads: usize) -> usize {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:510
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516
 // The cell of a hit in a unit's table: the raw diagonal minus the unit's lowest one, without a
 // mask (`XUnmasked`, module doc item 3), or, with LOSAT_X_TBXUNITMASK, that value masked to the
 // unit's table of `x_masked_cells` cells (`XMasked`, module doc). One type per form, so that the
@@ -1491,7 +1491,7 @@ impl XGroup {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-511
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:504-505
     /// One scan call of this group's table: `x_scan_subject_byte` on a table with presence bytes
     /// (LOSAT_X_TBXSCANBYTE), `x_scan_subject` (LOSAT_X_TBXSCANBF's choice), or
     /// `x_scan_subject_compact` on a compacted table. The offset array holds

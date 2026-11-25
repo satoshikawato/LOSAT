@@ -1,0 +1,1 @@
+- `blastx -use_sw_tback` with a `BATCH_SIZE` above 10,002 letters takes 6.6 % less wall time at 4 threads (a 200 kb query against 40 A. thaliana proteins), with the same output: the next query batch is searched while the previous one's alignments are redone (line NP, M4b-3b fix round 8).

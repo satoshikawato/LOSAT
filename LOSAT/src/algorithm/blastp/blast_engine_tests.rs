@@ -3014,12 +3014,8 @@ fn a_failed_lookup_fails_its_batch_after_the_posts_up_to_its_query() {
         )
         .unwrap_err()
     };
-    let hit_lists = [
-        Some(BlastpHitList::new(1)),
-        None,
-        Some(BlastpHitList::new(1)),
-        Some(BlastpHitList::new(1)),
-    ];
+    let hit = || Some(BlastpHitList::new(1));
+    let hit_lists = [hit(), None, hit(), hit()];
     let batches = [
         seq_range::RangedBatch {
             input: 0..2,

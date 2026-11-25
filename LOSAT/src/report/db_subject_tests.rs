@@ -3325,14 +3325,15 @@ fn every_heading_of_a_subject_with_a_line_without_a_seq_id_is_the_skipped_id() {
 #[test]
 fn outfmt_5_catches_a_titled_line_without_a_seq_id_after_the_first_titled_line() {
     let a = || vec![gb("A00001", 1)];
+    let no_id = Vec::new;
     for (lines, named) in [
-        (vec![(a(), Some("a")), (vec![], Some("b"))], false),
-        (vec![(a(), Some("a")), (vec![], Some(""))], false),
-        (vec![(a(), Some("a")), (vec![], None)], true),
-        (vec![(vec![], Some("z")), (a(), Some("a"))], true),
-        (vec![(vec![], None), (a(), Some("a"))], true),
+        (vec![(a(), Some("a")), (no_id(), Some("b"))], false),
+        (vec![(a(), Some("a")), (no_id(), Some(""))], false),
+        (vec![(a(), Some("a")), (no_id(), None)], true),
+        (vec![(no_id(), Some("z")), (a(), Some("a"))], true),
+        (vec![(no_id(), None), (a(), Some("a"))], true),
         (
-            vec![(vec![], None), (a(), Some("a")), (vec![], Some("c"))],
+            vec![(no_id(), None), (a(), Some("a")), (no_id(), Some("c"))],
             false,
         ),
     ] {

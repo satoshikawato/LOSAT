@@ -169,6 +169,6 @@ fn xml2_descriptions_stop_at_a_definition_line_without_a_seq_id() {
     assert_eq!(names.descriptions[1].taxonomy, missing);
     let untitled = subject(None);
     let names = SubjectNames::of_parsed(&untitled, &[named("Homo sapiens"), named("Mus musculus")]);
-    assert_eq!(names.descriptions.len(), 3);
+    assert_eq!(names.descriptions.len(), 3, "untitled lineless line");
     assert!(!names.defline_thrown);
 }

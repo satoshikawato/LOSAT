@@ -1268,10 +1268,11 @@ fn a_failed_lookup_refusal_names_the_first_query_of_the_batch_it_stops() {
         },
     )
     .unwrap();
+    let fail_subject_1 = |s_idx| (s_idx == 1).then_some(lineless);
     let error = check_failed_lookups(
         Some(&spec),
         [vec![0], vec![], vec![0], vec![2, 1]],
-        |s_idx| (s_idx == 1).then_some(lineless),
+        fail_subject_1,
         |s_idx, failure| failed_database_subject(s_idx, None, failure),
         "TBLASTN",
         true,

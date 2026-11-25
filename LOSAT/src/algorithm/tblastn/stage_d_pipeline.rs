@@ -2003,6 +2003,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
                     gap_letters,
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
+                    query_left_out: 0,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -4477,6 +4478,7 @@ fn finish_local_ungapped(
                     gap_letters,
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
+                    query_left_out: 0,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -4671,6 +4673,7 @@ fn finish_local_mode0_no_sum_stats(
                     gap_letters,
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
+                    query_left_out: 0,
                 })
             })
             .collect::<Result<Vec<_>>>()?;

@@ -7,7 +7,6 @@ use crate::algorithm::tblastx::report::display_codon;
 use crate::{common::GapEditOp, report::query_warnings::EMPTY_DATABASE_MESSAGE};
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
 use super::empty_rows::SubjectLoc;
-use crate::cli::NativeError;
 use crate::report::query_anchored::MaskSeek;
 use crate::utils::matrix::protein_display_score;
 use anyhow::{ensure, Result};
@@ -555,6 +554,7 @@ pub(crate) fn render_queries(
     xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
+    sort_lists(batches, SubjectLoc::of(shown));
     render_queries_with(
         writer,
         stderr,
@@ -592,17 +592,15 @@ pub(super) struct LocalReport<'a, 'p> {
     pub html_posts: Option<&'a mut dyn Write>,
 }
 
-/// Sorts the HSPs of each list of `batches` by e-value, the order of every report: NCBI sorts each
-/// list's HSPs, on their own ends, before it makes their Seq-aligns (`Hsp::seqalign_ends`).
+/// Puts each batch of `batches`, whose subjects are `loc`'s, in the order of every report
+/// (`BatchResults::put_in_report_order`: sorted by e-value, `-subject`'s HSPs mapped, once).
+/// Each batch's report calls it before any format reads the lists (`render_queries`, the
+/// archive's `native::ArchiveBatch::write`, `run_local`'s batch).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
-pub(super) fn sort_lists(batches: &mut [BatchResults]) {
+pub(super) fn sort_lists(batches: &mut [BatchResults], loc: SubjectLoc) {
     for batch in batches.iter_mut() {
-        for lists in &mut batch.queries {
-            for list in lists {
-                list.sort_evalue();
-            }
-        }
+        batch.put_in_report_order(loc);
     }
 }
 
@@ -716,7 +714,8 @@ fn posts_before_lookup_stop(
     Ok(())
 }
 
-/// `render_queries`, with what `run_local` adds (`local`).
+/// `render_queries`, with what `run_local` adds (`local`), of `batches` whose lists are in the
+/// order of the reports (`sort_lists`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_queries_with(
     writer: &mut crate::cli::NcbiOstream<'_>,
@@ -733,7 +732,6 @@ pub(super) fn render_queries_with(
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
-    sort_lists(batches);
     let (probe, first_hsp, made_hits, mut refusal, html_posts) = match local {
         Some(local) => (
             local.probe,
@@ -794,10 +792,9 @@ pub(super) fn render_queries_with(
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-287 (cited at
     // `native::reported_batch`)
     // `-subject`'s prefetch before the batch's reports, as `-db`'s (`native::batch_prefetch`): a
-    // subject's Seq-align whose empty rows the mapper leaves makes it write its warning (a gapped
-    // search has no HSP of length 0).
-    if !options.gapped
-        && SubjectLoc::of(shown) == SubjectLoc::Interval
+    // subject's Seq-align whose empty rows or remaining leading subject gap the mapper leaves
+    // makes it write its warning.
+    if SubjectLoc::of(shown) == SubjectLoc::Interval
         && super::native::batch_prefetch(batches, options, SubjectLoc::Interval).fails
     {
         stderr.write_all(&crate::algorithm::common::database::prefetch_warning(
@@ -1191,36 +1188,8 @@ fn write_pairwise(
             ShownSubjects::Database { reported, .. } => reported.loads(),
         },
     )
-    .map_err(empty_rows_stop)?;
+    .map_err(crate::report::pairwise::empty_rows_stop)?;
     Ok(())
-}
-
-/// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0 or at a
-/// row that starts with a gap (`EmptyRowsStop`) is NCBI's exception, `CSeq_align::GetSeqRange`'s
-/// where the sorts or the description table read such a row (after the query's `Length=`;
-/// `empty_rows::row_range_exception`), `CreateDensegFromStdseg` where they or
-/// `-subject`'s alignment section make a Dense-seg of the Seq-loc mapper's rows, or LOSAT's
-/// refusal of a query-anchored section whose merge NCBI frees a segment in (before the call's
-/// first byte); the exception of a subject's load that ends the run (`cli::NativeError::of_writer`,
-/// `x_pairwise_par::alignment_end`); a write error stays.
-fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
-    use crate::report::pairwise::EmptyRowsStop;
-    match error
-        .get_ref()
-        .and_then(|e| e.downcast_ref::<EmptyRowsStop>())
-    {
-        Some(EmptyRowsStop::RowRange(error)) => {
-            NativeError::exception(&super::empty_rows::row_range_exception(*error)).into()
-        }
-        Some(EmptyRowsStop::StdSegLengths) => {
-            NativeError::exception(&super::empty_rows::std_seg_lengths_not_accurate()).into()
-        }
-        Some(EmptyRowsStop::MergeFreesSegment) => super::empty_rows::EmptyRowsRefusal(
-            super::empty_rows::UNPORTED_ANCHORED_FREE.to_string(),
-        )
-        .into(),
-        None => NativeError::of_writer(error),
-    }
 }
 
 /// The hits of the HSPs that the reports of `batches` show (`has_seqalign`), in the order of the

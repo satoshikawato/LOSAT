@@ -477,6 +477,8 @@ fn ncbi_walk_follows_the_clears() {
         window: 40,
         offset,
         cleared: false,
+        written_unflagged: None,
+        written_flagged: None,
     };
     let start = |offset, cleared| Some(NcbiStart { offset, cleared });
     // The exit of a sequence at INT4_MAX / 4 clears the table: the next sequence starts at the
@@ -836,5 +838,207 @@ fn ncbi_walk_translated_matches_frozen_layouts_and_clears() {
             offset: expected_sum,
             cleared: false,
         }
+    );
+}
+
+/// Hard-mask chunk items `(frame_length, offset, ncbi_length)` across all six frames in NCBI's
+/// order for a translated sequence of `length` bases with stored masks `masks` (word size `word`).
+fn translated_hard_items(
+    length: usize,
+    masks: &[(u32, u32)],
+    word: usize,
+) -> Vec<(usize, usize, i32)> {
+    use crate::algorithm::common::translated_chunks::{
+        frame_length, translated_db_mask_chunks, NCBI_FRAMES,
+    };
+    use crate::core::subject_split::{complement_masks, HardSplitState};
+
+    if length < word * 3 + 2 {
+        return Vec::new();
+    }
+    let mut ranges = Vec::new();
+    complement_masks(masks, length, &mut ranges);
+    let neg_first = length / 3;
+    let mut split = HardSplitState::default();
+    let mut out = Vec::new();
+    for frame in NCBI_FRAMES {
+        let Some(fl) = frame_length(length, frame) else {
+            continue;
+        };
+        let calls =
+            translated_db_mask_chunks(&ranges, true, frame, fl, neg_first, &mut split).unwrap();
+        for (chunk, _) in calls {
+            out.push((fl, chunk.offset, chunk.ncbi_length));
+        }
+    }
+    out
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276,478-500,804-855
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66,87-107,162-173
+/// `NcbiWalk::translated_masked` on the overlapping-mask layouts (`lk`, `lkBA`, `fb`, `f2b`,
+/// `pa`, `nest`) at windows 0 and 40: exact `New` starts, margins below start and past end, and
+/// reach of earlier sequences' written entries.
+#[test]
+fn translated_hard_walk_on_frozen_layouts() {
+    let at = |offset, cleared| Some(NcbiStart { offset, cleared });
+    let lk_a = translated_hard_items(720, &[(120, 600), (180, 714)], 3);
+    let lk_b = translated_hard_items(720, &[(690, 705)], 3);
+    let nest = translated_hard_items(720, &[(120, 600), (180, 300)], 3);
+    let f_seq = translated_hard_items(722, &[(3, 717), (6, 717)], 3);
+    let f2_seq = translated_hard_items(720, &[(6, 714), (408, 714)], 3);
+    let mut pa_masks: Vec<(u32, u32)> = (0..79).map(|i| (6 + 9 * i, 9 + 9 * i)).collect();
+    pa_masks.push((713, 717));
+    let p_seq = translated_hard_items(720, &pa_masks, 3);
+
+    // lk (A then B) at window 0: A is New (below 628, past 627), B is New at -588 and reaches A.
+    let mut walk = NcbiWalk::new(3, 0);
+    let a0 = walk.translated_masked(&lk_a, false);
+    assert_eq!(a0.ncbi, at(0, false));
+    assert_eq!((a0.below_start, a0.past_end), (628, 627));
+    assert!(!a0.reaches_written);
+    let b0 = walk.translated_masked(&lk_b, false);
+    assert_eq!(b0.ncbi, at(-588, false));
+    assert!(b0.reaches_written);
+
+    // lk at window 40: A leaves entries 60 past its end; B reaches them.
+    let mut walk = NcbiWalk::new(3, 40);
+    let a40 = walk.translated_masked(&lk_a, false);
+    assert_eq!(a40.ncbi, at(40, false));
+    assert_eq!((a40.below_start, a40.past_end), (20, 60));
+    assert!(!a40.reaches_written);
+    let b40 = walk.translated_masked(&lk_b, false);
+    assert_eq!(b40.ncbi, None);
+    assert!(b40.reaches_written);
+
+    // lkBA (B then A) at window 0: A is not New, goes 628 below start and reaches B's entries.
+    let mut walk = NcbiWalk::new(3, 0);
+    let b_first = walk.translated_masked(&lk_b, false);
+    assert_eq!(b_first.ncbi, None);
+    assert!(!b_first.reaches_written);
+    let a_second = walk.translated_masked(&lk_a, false);
+    assert_eq!(a_second.ncbi, None);
+    assert_eq!(a_second.below_start, 628);
+    assert!(a_second.reaches_written);
+
+    // lkBA at window 40: A's walk goes 20 below start and reaches B's entries.
+    let mut walk = NcbiWalk::new(3, 40);
+    assert!(!walk.translated_masked(&lk_b, false).reaches_written);
+    let a_second_40 = walk.translated_masked(&lk_a, false);
+    assert_eq!(a_second_40.ncbi, None);
+    assert_eq!(a_second_40.below_start, 20);
+    assert!(a_second_40.reaches_written);
+
+    // fb (F then B) at window 0: F stores nothing, B is New at -1410 and reaches nothing written.
+    let mut walk = NcbiWalk::new(3, 0);
+    let f0 = walk.translated_masked(&f_seq, false);
+    assert_eq!(f0.ncbi, None);
+    assert!(!f0.reaches_written);
+    let fb_b = walk.translated_masked(&lk_b, false);
+    assert_eq!(fb_b.ncbi, at(-1410, false));
+    assert!(!fb_b.reaches_written);
+
+    // f2b (F2 then B) at window 0: F2 stores nothing, B is New at -588 and reaches nothing written.
+    let mut walk = NcbiWalk::new(3, 0);
+    assert!(!walk.translated_masked(&f2_seq, false).reaches_written);
+    let f2b_b = walk.translated_masked(&lk_b, false);
+    assert_eq!(f2b_b.ncbi, at(-588, false));
+    assert!(!f2b_b.reaches_written);
+
+    // pa (P then A) at window 0: P stores no entry, so A is neither New nor reaching written.
+    let mut walk = NcbiWalk::new(3, 0);
+    let p0 = walk.translated_masked(&p_seq, false);
+    assert!(!p0.reaches_written);
+    let pa_a0 = walk.translated_masked(&lk_a, false);
+    assert_eq!(pa_a0.ncbi, None);
+    assert!(!pa_a0.reaches_written);
+
+    // pa at window 40: P's one words write entries that A's walk reaches.
+    let mut walk = NcbiWalk::new(3, 40);
+    let p40 = walk.translated_masked(&p_seq, false);
+    assert!(!p40.reaches_written);
+    let pa_a40 = walk.translated_masked(&lk_a, false);
+    assert_eq!(pa_a40.ncbi, None);
+    assert!(pa_a40.reaches_written);
+
+    // nest (first sequence): New at window 40 (below 20) and at window 0 (below 100).
+    let mut walk = NcbiWalk::new(3, 40);
+    let n40 = walk.translated_masked(&nest, false);
+    assert_eq!(n40.ncbi, at(40, false));
+    assert_eq!(n40.below_start, 20);
+    assert!(!n40.reaches_written);
+    let mut walk = NcbiWalk::new(3, 0);
+    let n0 = walk.translated_masked(&nest, false);
+    assert_eq!(n0.ncbi, at(0, false));
+    assert_eq!(n0.below_start, 100);
+    assert!(!n0.reaches_written);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1098-1101
+/// `DiagonalWalk::frame` updates the sentinel per reading frame: a one word at the last letter of
+/// frame +2 (one residue shorter than frame +1) runs past frame +2's sentinel and is reported by
+/// `word_past_end` only when `zero_words` is true.
+#[test]
+fn diagonal_walk_per_frame_sentinel_word_past_end() {
+    // Frame +1 has 100 residues; frame +2 has 99 residues, with a short chunk at offset 98 whose
+    // 3-letter word passes its sentinel at 99, after a chunk that leaves an entry within window 40.
+    let items = [
+        (100usize, 0usize, 10i32),
+        (99, 0, 10),
+        (99, 60, -40),
+        (99, 98, -68),
+        (99, 40, 59),
+    ];
+    let with_zero = DiagonalWalk::ahead_items(3, 40, true, items);
+    assert_eq!(with_zero.word_past_end(), Some(98));
+    let without_zero = DiagonalWalk::ahead_items(3, 40, false, items);
+    assert_eq!(without_zero.word_past_end(), None);
+
+    // At frame length 100, offset 98 ends on the sentinel (98 + 3 == 101 <= 100 + 1), not past it.
+    let on_sentinel = [
+        (100usize, 0usize, 10i32),
+        (100, 60, -40),
+        (100, 98, -68),
+        (100, 40, 60),
+    ];
+    assert_eq!(
+        DiagonalWalk::ahead_items(3, 40, true, on_sentinel).word_past_end(),
+        None
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107,162-173
+/// A clear at INT4_MAX / 4 inside or at the end of a translated sequence resets `NcbiWalk`'s
+/// written-entry bounds so a later sequence does not falsely reach cleared entries.
+#[test]
+fn translated_masked_resets_written_bounds_on_clear() {
+    const LIMIT: i64 = (i32::MAX / 4) as i64;
+    let mut walk = NcbiWalk {
+        word: 3,
+        window: 0,
+        offset: LIMIT,
+        cleared: false,
+        written_unflagged: Some(LIMIT + 500),
+        written_flagged: None,
+    };
+    // Single chunk exits at LIMIT and clears the table; its own hit at LIMIT did reach LIMIT+500,
+    // and after the clear the next sequence sees no written entries.
+    let first = walk.translated_masked(&[(100, 0, 100)], false);
+    assert!(first.reaches_written);
+    assert_eq!(
+        walk.here(),
+        NcbiStart {
+            offset: 0,
+            cleared: true,
+        }
+    );
+    let next = walk.translated_masked(&[(100, 0, 40), (100, 80, -60), (100, 30, 70)], false);
+    assert!(!next.reaches_written);
+    assert_eq!(
+        next.ncbi,
+        Some(NcbiStart {
+            offset: 0,
+            cleared: true,
+        })
     );
 }

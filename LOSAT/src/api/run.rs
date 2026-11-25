@@ -784,6 +784,7 @@ fn run_local_entry(
             }
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastn);
             args.write_verification = start.settings().write_verification;
+            args.read_verification = start.settings().read_verification;
             run_local_tblastn(args, query, end, subject, outputs)
         }
         Commands::Blastn(mut args) => {
@@ -835,6 +836,7 @@ fn run_local_entry(
             let mut args = psiblast_args(args, outputs)?;
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Psiblast);
             args.write_verification = start.settings().write_verification;
+            args.read_verification = start.settings().read_verification;
             run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)

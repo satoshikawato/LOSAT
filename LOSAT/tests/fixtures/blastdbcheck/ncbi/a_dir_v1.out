@@ -1,0 +1,41 @@
+  [ERROR] could not find all volume or alias files referenced in "./empty", [skipped]
+  [ERROR] could not find all volume or alias files referenced in "./missdb", [skipped]
+  [ERROR] could not find all volume or alias files referenced in "./nodblist", [skipped]
+  <RUN>/cases/a/comments.pal / AliasFileTest:   [ERROR] unknown keyword encountered: #
+  <RUN>/cases/a/first.pal / AliasFileTest:   [ERROR] FIRST_OID not paired with LAST_OID
+  <RUN>/cases/a/fl_bad.pal / AliasFileTest:   [ERROR] (FIRST_OID, LAST_OID) is not consistent with NSEQ
+  <RUN>/cases/a/giabs.pal / AliasFileTest:   [ERROR] file <RUN>/cases/a/gi.txt referenced in keyword GILIST does not exist
+  <RUN>/cases/a/gimiss.pal / AliasFileTest:   [ERROR] file missing.gil referenced in keyword GILIST does not exist
+  <RUN>/cases/a/gimiss.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/gizero.pal / AliasFileTest:   [ERROR] file zero.gil referenced in keyword GILIST has zero length
+  <RUN>/cases/a/gizero.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/lastonly.pal / AliasFileTest:   [ERROR] FIRST_OID not paired with LAST_OID
+  <RUN>/cases/a/lenbad.pal / AliasFileTest:   [ERROR] could not convert value to number for LENGTH
+  <RUN>/cases/a/lenbad.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/membx.pal / AliasFileTest:   [ERROR] could not convert value to number for MEMB_BIT
+  <RUN>/cases/a/membx.pal / AliasFileTest:   [ERROR] could not convert value to number for MAXLEN
+  <RUN>/cases/a/membx.pal / AliasFileTest:   [ERROR] could not convert value to number for MAXOID
+  <RUN>/cases/a/membx.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/novalue.pal / AliasFileTest:   [ERROR] no value(s) found for keyword TITLE
+  <RUN>/cases/a/nseq.pal / AliasFileTest:   [ERROR] could not convert value to number for NSEQ
+  <RUN>/cases/a/nseq.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/nseqbig.pal / AliasFileTest:   [ERROR] could not convert value to number for NSEQ
+  <RUN>/cases/a/nucl.nal / AliasFileTest:   [ERROR] unknown keyword encountered: FOO
+  <RUN>/cases/a/oidgi.pal / AliasFileTest:   [ERROR] file nosuch.msk referenced in keyword OIDLIST does not exist
+  <RUN>/cases/a/oidgi.pal / AliasFileTest:   [ERROR] file nosuch.gil referenced in keyword GILIST does not exist
+  <RUN>/cases/a/oidgi.pal / AliasFileTest:   [ERROR] OIDLIST and GILIST cannot be present in the same alias file
+  <RUN>/cases/a/oidgi.pal / AliasFileTest:   [ERROR] OIDLIST cannot be provided without MAXOID , LENGTH, or NSEQ
+  <RUN>/cases/a/oidgi.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/oidnomax.pal / AliasFileTest:   [ERROR] file nosuch.msk referenced in keyword OIDLIST does not exist
+  <RUN>/cases/a/oidnomax.pal / AliasFileTest:   [ERROR] OIDLIST cannot be provided without MAXOID , LENGTH, or NSEQ
+  <RUN>/cases/a/oidnomax.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/ov1.pal / AliasFileTest:   [ERROR] FIRST_OID not paired with LAST_OID
+  <RUN>/cases/a/ov2.pal / AliasFileTest:   [ERROR] OIDLIST cannot be provided without MAXOID , LENGTH, or NSEQ
+  <RUN>/cases/a/ov3.pal / AliasFileTest:   [ERROR] (FIRST_OID, LAST_OID) is not consistent with NSEQ
+  <RUN>/cases/a/signs.pal / AliasFileTest:   [ERROR] (FIRST_OID, LAST_OID) is not consistent with NSEQ
+  <RUN>/cases/a/signs.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/taxmiss.pal / AliasFileTest:   [ERROR] file missing.txt referenced in keyword TAXIDLIST does not exist
+  <RUN>/cases/a/taxmiss.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/unk.pal / AliasFileTest:   [ERROR] unknown keyword encountered: FOO
+
+Total errors: 39

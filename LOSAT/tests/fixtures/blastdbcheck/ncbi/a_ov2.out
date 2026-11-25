@@ -1,0 +1,16 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing every 100-th OID.
+
+Testing 1 volume(s).
+ <RUN>/cases/a/p5
+ Result=SUCCESS. No errors reported for 1 volume(s).
+Testing 1 alias(es).
+ <RUN>/cases/a/ov2.pal
+  <RUN>/cases/a/ov2.pal / AliasFileTest:   [WARNING] oidlist file gi.gil does not have .msk extension
+  <RUN>/cases/a/ov2.pal / AliasFileTest:   [ERROR] OIDLIST cannot be provided without MAXOID , LENGTH, or NSEQ
+ Result=FAILURE. 1 errors reported in 1 alias(es).
+
+Total errors: 1

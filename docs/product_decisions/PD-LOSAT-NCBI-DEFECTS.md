@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.105
+- Version: 1.106
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -708,7 +708,20 @@
   offset and its clears taken from the database order for such sequences at every thread count,
   rule 4; line NP decision 58, Q1 = B and Q2 = B, 2026-11-23; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.103);
-  1.105 2026-11-25 (TBLASTN and TBLASTX `-db_hard_mask` on masks that overlap or nest in the order
+  1.105 2026-11-25 (rule-3 rejections of `losat makeprofiledb` with ASN.1 text and `-binary` PSSM
+  inputs and binary definition lines, psiblast line item PS10b: a query whose `iupacna` data holds
+  a byte >= 0x80 in a pair position before any final odd overhang byte, where NCBI's
+  `x_ConvertIupacnaTo4na` indexes its static table with a signed `char` and reads before the table;
+  a `Seq-id` element stated as `NULL` inside binary definition lines (`ASN1_BlastDefLine`) when
+  writing a version 5 database with no prior sequence written yet and no active taxid map (including
+  `-taxid` or an empty `-taxid_map`), where NCBI's taxonomy writer aborts on close while
+  `-taxid_map` or an `org` descriptor, `-blastdb_version 4`, `-index false` on the first slot, and
+  version 5 after an earlier profile match NCBI; and `:OtherType` pointers in both ASN.1 text and
+  `-binary` profiles via `Names::PROFILE` as well as binary definition lines, plus host-dependent
+  1 GiB..2^47 lengths, whose NCBI behaviour depends on process registration history or host memory;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.104 at
+  the merge of dev that brought line NP item M4b-T3's 1.104; first 1.104);
+  1.106 2026-11-25 (TBLASTN and TBLASTX `-db_hard_mask` on masks that overlap or nest in the order
   of their start, line NP item M4b-3c part 2: searched as NCBI searches them, rule 4, with NCBI's
   one-thread table where a sequence meets entries that no sequence wrote; the rule-3 rejections
   narrowed to masks out of the order of their start, NCBI's never-ending gapped search, a frame
@@ -716,7 +729,8 @@
   (Owner's decision of 2026-11-25 17:54 JST on question Q-3C2-STALE = B of line NP's series M,
   decision 77, chosen option 「B: 例外 29 を tblastn/tblastx にも広げ、配列ごとに独立探索する（4 検索統一）」);
   series M decision 46, 2026-11-21, Owner's answer A on overlapping masks; Owner-delegated, standing
-  instruction 2026-09-29, restated 2026-10-07, for the shape of the change; numbered after 1.104)
+  instruction 2026-09-29, restated 2026-10-07, for the shape of the change; numbered after 1.105 at
+  the merge of dev that brought psiblast line item PS10b's 1.105; first 1.105)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1713,7 +1727,7 @@ translated mask that leaves a frame an empty first part)". Line NP item M4b-3c.
       (`LOSAT/src/blastinput/db_mask_tests.rs`) and `a_frame_after_an_empty_first_part_scans_the_whole_frame`
       (`LOSAT/src/algorithm/common/translated_chunks_tests.rs`).
 
-## Approved exception 29 (BLASTP, BLASTX, TBLASTN and TBLASTX `-db_hard_mask`, diagonal entries that reach another sequence, versions 1.95 and 1.105)
+## Approved exception 29 (BLASTP, BLASTX, TBLASTN and TBLASTX `-db_hard_mask`, diagonal entries that reach another sequence, versions 1.95 and 1.106)
 
 The Owner decided on 2026-11-22 at 22:34 JST (words 「Q1=B Q2=B Q3=A Q4=A Q5=C Q6=B Q7=B Q8=B Q9=A
 Q10=A Q11=A Q12=A Q13=OK」 to the question batch of that day, whose Q7 is line NP's question Q5 of
@@ -1723,7 +1737,7 @@ M4b, `M/m4b/OWNER_QUESTIONS.md`) option B: 「配列ごとに独立に探す（�
 届く場合だけ、NCBI の 1 スレッドと bytes が違います…新しい例外になります」. On 2026-11-25 at
 17:54 JST (line NP's series M decision 77, question Q-3C2-STALE = B, `qbatch-20261125/ANSWERS.md`,
 chosen option 「B: 例外 29 を tblastn/tblastx にも広げ、配列ごとに独立探索する（4 検索統一）」), the
-Owner extended this exception to TBLASTN and TBLASTX (version 1.105, line NP item M4b-3c part 2).
+Owner extended this exception to TBLASTN and TBLASTX (version 1.106, line NP item M4b-3c part 2).
 Not taken: option A,
 refusing a database with such a sequence before the search (the explicit rejection `StaleDiagonals`
 of the first draft of version 1.95), which refuses whole seg-masked proteomes (and in TBLASTN and
@@ -1917,7 +1931,7 @@ entries that reach another sequence)". Line NP items M4b-3b and M4b-3c part 2.
     `LOSAT/src/algorithm/common/query_batch_tables_tests.rs`, `hard_mask_starts_and_ends_move_the_table`
     (`LOSAT/src/algorithm/blastp/blast_engine_tests.rs`, `LOSAT/src/algorithm/blastx/seed_tests.rs`).
 
-    For TBLASTN and TBLASTX (version 1.105, line NP item M4b-3c part 2), where a database has a
+    For TBLASTN and TBLASTX (version 1.106, line NP item M4b-3c part 2), where a database has a
     sequence whose stored masks overlap or nest in the order of their start and leave a reading
     frame a negative chunk, `blastinput::db_mask::translated_walk` runs `NcbiWalk::translated_masked`
     over all six frames of every searched sequence in database order (`HardStarts`): a sequence
@@ -3705,6 +3719,43 @@ file would differ, and NCBI's programs still could not open the database).
     32, with or without a later error such as a negative frequency ratio). A query of the wrong
     length and a matrix that NCBI's engine does not know are NCBI's errors first (fixture rows
     QC02-QC05), and a lower-case IUPACaa query is built (row QC01).
+  - A query in `iupacna` coding holding a byte `>= 0x80` in a pair position before any final odd
+    overhang byte (version 1.105, PS10b; reachable in ASN.1 binary where `StringStore` keeps raw
+    bytes without `#` replacement): `WriteDB_IupacnaToBinary` (`writedb_convert.cpp:590-604`)
+    converts all input bytes through `x_ConvertIupacnaTo4na` (`sequtil_convert_imp.cpp:313-339`),
+    whose pair loop indexes `sm_IupacnaTo4na` with a signed `char` and reads before the static table
+    in `.rodata` (undefined behaviour; fixture inputs `l_QR08.lst`-`l_QR10.lst`, scored and
+    frequency-ratio-only alike). Bytes `< 0x80` (row `B19`), the single odd overhang byte which
+    casts to `Uint1` (row `B18`), and `mol na` (which stops at NCBI's molecule error first, row
+    `B20`) are built or reported as in NCBI.
+  - Binary definition lines (`ASN1_BlastDefLine`) holding a `Seq-id` element stated as `NULL`
+    (version 1.105, PS10b; fixture input `l_QR12.lst` and rows `RB17`-`RB29`): carried to NCBI's
+    exact failing point rather than refused up front. With an active taxid map (a non-empty
+    `-taxid_map` or an earlier/current `org` descriptor without `-taxid`) `FixTaxId` stops before
+    writing with `Attempt to access NULL pointer.` (exit 255, rows `RB19`, `RB20`, `RB27`); with
+    `-index false` when the `NULL` element is the first `Seq-id` of the first definition line,
+    replacing it with `gnl|BL_ORD_ID|<oid>` removes it and builds the database (exit 0, rows `RB24`,
+    `RB25`); otherwise BER serialization in `WriteDb` posts `(802.5)` and fails at the exact BER
+    stream byte offset (`byte N: cannot write unassigned member NULL element while writing container `,
+    exit 255 in `-blastdb_version 4` and in version 5 when an earlier profile has already written an
+    OID; rows `RB17`, `RB18`, `RB21`-`RB23`, `RB26`, `RB28`, `RB29`). Only in version 5 when no OID
+    has been written yet (no `-taxid_map` or an empty map, including `-taxid`), where
+    `~CWriteDB_TaxID` throws `No tax info for any oid` out of its destructor and NCBI aborts
+    (exit 134), or when a later input error unwinds through `~CWriteDB_Impl`'s `Close` (v4 or v5,
+    exit 134), does LOSAT refuse via the writer-destructor-abort refusal below (fixture inputs
+    `l_QR12.lst`, `l_QR15.lst`). Damaged binary definition lines, replaced visible characters (803.7), `NULL`
+    `Blast-def-line` elements (`Attempt to access NULL pointer.`), and huge lengths (`Unknown
+    exception`) match NCBI through the shared table-driven BER reader (fixture rows `RB04`, `RB04m`,
+    `RB04b`, `RB08`-`RB16`).
+  - `:OtherType` pointers and host-dependent 1 GiB..2^47 string or octet lengths in `makeprofiledb`
+    profiles (both ASN.1 text and `-binary`, read through `Names::PROFILE` as `makeblastdb` uses
+    `Names::MASK`) and binary definition lines (version 1.105, PS10b; fixture inputs `l_QR11.lst`,
+    `l_QR13.lst`, `l_QR14.lst`): because `makeprofiledb` prints NCBI's `CSerialException` text
+    directly, whether `:OtherType` prints `class not found` or `incompatible member type` depends
+    on which ASN.1 classes the process has registered so far (for example, on text `:Seq-interval`,
+    NCBI 2.17.0 prints `class not found: Seq-interval`, whereas LOSAT before 1.105 (`Names::PSSM`)
+    erroneously printed `incompatible member type`), so both text and binary `:OtherType` pointers
+    are refused under one rule.
   - A query in a nucleotide coding with fewer bytes than NCBI's writer reads for its length (version
     1.86, PS10d): `ncbi2na` of fewer than `ceil(length / 4)` bytes, `ncbi4na` of fewer than
     `ceil(length / 2)`, `iupacna` whose NCBI4na form and its terminating zero hold fewer than
@@ -3821,7 +3872,7 @@ file would differ, and NCBI's programs still could not open the database).
     Counts of `PartsOutOfOrder`: TAIR10 0, the UniRef50 sample 0.
   - `HardMaskShape::Inverted`, before the search: a mask that ends before it starts, which makeblastdb
     never writes.
-  TBLASTN and TBLASTX (version 1.105, line NP item M4b-3c part 2) search masks that overlap or nest
+  TBLASTN and TBLASTX (version 1.106, line NP item M4b-3c part 2) search masks that overlap or nest
   in the order of their start as NCBI searches them: each strand maps the hard ranges once
   (`blast_engine.c:805-830`), every frame's chunk moves the one table of diagonals by its `Int4`
   length and the window, a chunk shorter than the word gets its one word in the two-hit scan, and

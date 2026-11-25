@@ -498,10 +498,10 @@ fn the_reports_of_the_formats_0_to_4_read_the_html_links() {
 
 // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:119
 // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:119
-// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:419
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:420
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:121
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:225
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:54-55
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
 #[test]
 fn html_links_names_registry_posts_and_refusals_by_application() {
     use crate::report::formatter_registry::{FormatterNcbirc, InitConfig};

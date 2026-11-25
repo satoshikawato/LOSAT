@@ -107,6 +107,7 @@ pub(crate) fn add_blastn_sam(
                     subject,
                     q_offset: hsp.internal_q_offset_0,
                     q_end: hsp.internal_q_end_0,
+                    q_left_out: 0,
                     s_offset: hsp.internal_s_offset_0 as i32,
                     s_end: hsp.internal_s_end_0 as i32,
                     q_frame: if hsp.query_frame < 0 { -1 } else { 1 },

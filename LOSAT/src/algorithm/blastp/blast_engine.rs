@@ -2754,6 +2754,14 @@ fn write_blastp_tabular_hit_lists(
                 rows.found(hsp.s_idx as usize);
                 let subject_id =
                     SubjectIdFields::of(subject_ids, subject_accessions, hsp.s_idx as usize);
+                // The columns inside the query row's range (a Smith-Waterman alignment's end gaps
+                // in the query's row are left out), as every table counts them.
+                let counts = crate::report::serial::seqalign::AlignLengths {
+                    length: hsp.length,
+                    gaps: hsp.gap_letters(),
+                    gap_opens: hsp.gapopen,
+                }
+                .within_query_range(hsp.gap_info.as_deref().unwrap_or_default());
                 crate::report::outfmt6::write_hit_fields_bytes(
                     writer,
                     query_id,
@@ -2761,9 +2769,9 @@ fn write_blastp_tabular_hit_lists(
                     subject_id.accession_version,
                     hsp.identity,
                     hsp.num_ident,
-                    hsp.length,
+                    counts.length,
                     hsp.mismatch,
-                    hsp.gapopen,
+                    counts.gap_opens,
                     hsp.q_start,
                     hsp.q_end,
                     hsp.s_start,

@@ -53,6 +53,11 @@ pub(super) struct KappaHspPayload {
     pub gap_letters: usize,
     pub edit_script: Vec<GapEditOp>,
     pub matrix_adjust_rule: EMatrixAdjustRule,
+    /// The query letters that `-subject`'s Seq-loc mapper left out of the HSP
+    /// (`KappaResultHitList::map_subject_alignments`: an end `Ins` segment), which its `qcovhsp`
+    /// and its Seq-align's `hsp_percent_coverage` still count
+    /// (`serial::seqalign::MappedScript::query_left_out`); 0 for every other HSP.
+    pub query_left_out: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -73,6 +78,9 @@ pub(super) struct KappaResultHitList {
     worst_evalue: f64,
     low_score: i32,
     heapified: bool,
+    /// Whether the lists are in the order of the reports: sorted, without HSPs of score 0 and,
+    /// for `-subject`'s records, mapped (`put_in_report_order`, which sets it once).
+    in_report_order: bool,
 }
 
 #[allow(dead_code)] // The public TBLASTN result path remains gated until C/D/E pass.
@@ -86,6 +94,7 @@ impl KappaResultHitList {
             worst_evalue: 0.0,
             low_score: i32::MAX,
             heapified: false,
+            in_report_order: false,
         })
     }
 
@@ -173,10 +182,67 @@ impl KappaResultHitList {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1577:
     // Sort at report conversion, after Kappa has finished using the list.
-    pub(super) fn sort_hsps_for_report(&mut self) {
+    fn sort_hsps_for_report(&mut self) {
         for list in &mut self.lists {
             sort_hsps_by_evalue(list);
             seqalign_scores_of(list);
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577
+    /// Puts the lists in the order of every report, once: each list's HSPs sorted by e-value
+    /// (`sort_hsps_for_report`), those of score 0 left out (`drop_zero_score_hsps`) and, for a
+    /// report of `-subject`'s records (`remaps`), the HSPs mapped as its Seq-loc mapper maps them
+    /// (`map_subject_alignments`). A later call leaves the lists as they are
+    /// (`in_report_order`): the mapper leaves out a first and a last segment with a gap row once
+    /// each, and a sort of the mapped HSPs could order ties otherwise.
+    pub(super) fn put_in_report_order(&mut self, remaps: bool) {
+        if std::mem::replace(&mut self.in_report_order, true) {
+            return;
+        }
+        self.sort_hsps_for_report();
+        self.drop_zero_score_hsps();
+        if remaps {
+            self.map_subject_alignments();
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1632-1638
+    /// `-subject`'s Seq-loc mapper (`s_RemapToSubjectLoc`) on the HSPs of the lists, after the
+    /// report's sort (`sort_hsps_for_report`; the mapper works on the sorted Seq-aligns): each HSP
+    /// as `serial::seqalign::mapped_script` keeps it, an end segment with a gap row left out (a
+    /// Smith-Waterman alignment of `-use_sw_tback` that starts with a gap): the starts move past
+    /// the left-out letters, the ends back before them, and the alignment's columns, gap openings
+    /// and gap letters lose them; the scores and the identities stay, and so does the coverage
+    /// (`KappaHspPayload::query_left_out`). Every format reads the mapped HSP. Only
+    /// `put_in_report_order` maps, once: a second mapping would leave out a segment again (a
+    /// script that starts `[Del, Ins, ..]`).
+    fn map_subject_alignments(&mut self) {
+        for list in &mut self.lists {
+            for (linked, payload) in list.hsps.hsps.iter_mut().zip(&mut list.payloads) {
+                let script = &payload.edit_script;
+                let mapped = crate::report::serial::seqalign::mapped_script(script);
+                if !mapped.drops(script) {
+                    continue;
+                }
+                // The left-out operations are gaps (`std_seg_kept`).
+                let dropped = script[..mapped.kept.start]
+                    .iter()
+                    .chain(&script[mapped.kept.end..]);
+                let (opens, letters) = dropped.fold((0, 0), |(opens, letters), op| {
+                    (opens + 1, letters + op.num() as usize)
+                });
+                let hsp = &mut linked.hsp;
+                hsp.q_start += mapped.start[0] as i32;
+                hsp.s_start += mapped.start[1] as i32;
+                hsp.q_end -= mapped.end[0] as i32;
+                hsp.s_end -= mapped.end[1] as i32;
+                payload.align_length -= letters;
+                payload.gap_letters -= letters;
+                payload.gap_opens -= opens;
+                payload.query_left_out = mapped.query_left_out() as usize;
+                payload.edit_script = payload.edit_script[mapped.kept].to_vec();
+            }
         }
     }
 

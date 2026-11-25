@@ -438,9 +438,8 @@ const BAD: u8 = 0;
 const SPACE: u8 = 1;
 const COMMENT: u8 = 2;
 const GAP: u8 = 3;
-/// The least residue value of the switch; the search finds residues by `Alphabet::is_residue`,
-/// which the tests check against it for every byte.
-#[cfg(test)]
+/// The least residue value of the switch; short-run scans check the action table against it
+/// directly and longer runs use `Alphabet::is_residue` (tested against it for every byte).
 const RESIDUE_MIN: u8 = b'*';
 
 /// The character switch of `ParseDataLine` for protein (`fAssumeProt`) or nucleotide

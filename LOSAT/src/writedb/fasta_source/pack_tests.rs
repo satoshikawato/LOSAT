@@ -267,9 +267,11 @@ fn ncbi8na_of_both_codings() {
 #[test]
 fn the_scan_of_the_best_coding_is_the_table() {
     for byte in 0..=u8::MAX {
+        let narrow = best_coding_iupacna(byte) == Coding::Ncbi2na;
+        assert_eq!(is_ncbi2na_best(byte), narrow, "{byte:#04x}");
         assert_eq!(
-            is_ncbi2na_best(byte),
-            best_coding_iupacna(byte) == Coding::Ncbi2na,
+            BEST_IS_NCBI4NA[byte as usize],
+            u8::from(!narrow),
             "{byte:#04x}"
         );
     }
@@ -301,9 +303,20 @@ fn ncbi2na_codes_and_their_bytes() {
     };
     for byte in 0..=u8::MAX {
         for at in 0..4 {
-            let mut src = b"ACGT".to_vec();
-            src[at] = byte;
-            assert_eq!(iupacna_to_ncbi2na(&src), packed(&src), "{byte:#04x} {at}");
+            let mut short = b"ACGT".to_vec();
+            short[at] = byte;
+            assert_eq!(
+                iupacna_to_ncbi2na(&short),
+                packed(&short),
+                "short {byte:#04x} {at}"
+            );
+            let mut blocked = b"ACGT".repeat(10);
+            blocked[at] = byte;
+            assert_eq!(
+                iupacna_to_ncbi2na(&blocked),
+                packed(&blocked),
+                "blocked {byte:#04x} {at}"
+            );
         }
     }
     let src: Vec<u8> = (0..1100usize).map(|i| b"ACGTUGCAAT"[i * 7 % 10]).collect();

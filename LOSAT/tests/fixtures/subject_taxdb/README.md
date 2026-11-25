@@ -10,4 +10,5 @@ database of a `-subject` search's tabular reports (line RG item E1w-2b, ad-RG-E-
   `csv20` = `20 qseqid sscinames`.
 - environment: `none` = no `BLASTDB`, `taxdb` = `BLASTDB=<tests/seqdb/taxdb/good>`,
   `badenv` = `NCBI_CONFIG__BLAST__BLASTDB` set to the bytes `x\xffy`.
-All runs exit 0. Used by `tests/library_out_taxdb.rs`.
+All runs exit 0. Used by `tests/library_out_taxdb.rs`. With `badenv`, the `plur` format gives the bytes of
+`none` (local NCBI BLAST+ 2.17.0, the six programs, line RG item K10a, 2026-11-24).

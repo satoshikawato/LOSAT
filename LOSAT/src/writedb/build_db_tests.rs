@@ -1,5 +1,17 @@
 use super::*;
 
+/// `normalize_path` of a name of text, as text.
+#[cfg(not(windows))]
+fn normalize_path(path: &str) -> String {
+    String::from_utf8(super::normalize_path(path.as_bytes())).unwrap()
+}
+
+/// `absolute_path_in` of a name of text, as text.
+#[cfg(not(windows))]
+fn absolute_path_in(cwd: Option<&Path>, dbname: &str) -> String {
+    String::from_utf8(super::absolute_path_in(cwd, dbname.as_bytes())).unwrap()
+}
+
 #[cfg(not(windows))]
 #[test]
 fn absolute_paths_are_normalized_as_ncbi_does() {
@@ -56,7 +68,7 @@ fn a_relative_name_is_joined_to_the_current_directory_as_ncbi_does() {
     // The process's own directory, as `create_absolute_path` reads it.
     let here = std::env::current_dir().unwrap();
     assert_eq!(
-        create_absolute_path("n"),
+        String::from_utf8(create_absolute_path(b"n")).unwrap(),
         format!("{}/n", here.to_string_lossy().trim_end_matches('/'))
     );
 }

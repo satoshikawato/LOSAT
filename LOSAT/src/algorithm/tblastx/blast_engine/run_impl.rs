@@ -297,7 +297,7 @@ fn tblastx_scan_interiors(
     interiors
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-310
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:281-308
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:83-123
 fn clip_tblastx_seq_ranges_for_scan_interior(
@@ -500,6 +500,16 @@ struct TblastxChunkScanResult {
     chunk: SubjectChunk,
     hits: Vec<UngappedHit>,
     stats: TblastxChunkScanStats,
+    /// Whether NCBI's word finder exited on this chunk (false for a soft-masked chunk without
+    /// scan ranges, `SUBJECT_SPLIT_NO_RANGE`, blast_engine.c:478-483).
+    #[cfg_attr(
+        any(
+            not(feature = "parallel"),
+            all(target_arch = "wasm32", not(feature = "wasm-threads"))
+        ),
+        allow(dead_code)
+    )]
+    exited: bool,
 }
 
 impl SubjectSplitState {
@@ -585,6 +595,48 @@ impl SubjectSplitState {
             overlap,
         })
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,804-855,1377 and
+// c++/src/algo/blast/core/blast_extend.c:87-107,162-173
+// For a `-db_soft_mask` stream subject whose out-of-order masks make a chunk's scan read letters
+// before it, initializes this worker's diagonal table to NCBI's one-thread start at this subject
+// (`XDbStream::lead_start`, series NP, M4b-T3), so clears at INT4_MAX / 4 fall where NCBI's do at
+// every thread count. Returns `Ok(true)` when this subject is a lead subject.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_apply_lead_subject_start(
+    stream: &crate::algorithm::common::x_db_stream::XDbStream<'_>,
+    s_idx: usize,
+    s_len: usize,
+    ranges: &[(i32, i32)],
+    wordsize: i32,
+    window: i32,
+    diag_array: &mut [DiagStruct],
+    diag_offset: &mut i32,
+) -> anyhow::Result<bool> {
+    let mut exits = Vec::new();
+    let mut split = crate::core::subject_split::HardSplitState::default();
+    let lead = crate::algorithm::common::translated_chunks::translated_soft_mask_exits(
+        s_len,
+        wordsize as usize,
+        &mut exits,
+        &mut split,
+        || Ok::<_, anyhow::Error>(std::borrow::Cow::Borrowed(ranges)),
+    )?;
+    if !lead {
+        return Ok(false);
+    }
+    let start = stream.lead_start(s_idx, wordsize as usize, window)?;
+    *diag_offset = start.offset;
+    let fill = if start.cleared {
+        DiagStruct::clear(window)
+    } else {
+        DiagStruct::default()
+    };
+    diag_array.fill(fill);
+    Ok(true)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
@@ -963,10 +1015,6 @@ pub fn run(
         }
     };
     let out_file = open_out_file(&args)?;
-    // Outfmt 0 to 4 (the query-anchored formats write through the same formatter).
-    let pairwise = format
-        .and_then(crate::report::pairwise::PairwiseView::of)
-        .is_some();
     // LOSAT's reports read the format number that NCBI reads: the number and the custom fields,
     // or the value as given when it has a delimiter, which `normalized` drops and the custom
     // tabular report reads (`report::output_format`, which parses it again as NCBI does).
@@ -975,13 +1023,12 @@ pub fn run(
         Some(parsed) if parsed.delimiter.is_empty() => parsed.normalized(),
         _ => args.outfmt.clone(),
     };
-    // The organism report's `-out` file is written as NCBI's buffer writes it.
-    let tax_report = format == Some(crate::blastinput::app::ReportFormat::TaxFormat);
-    let mut stream = crate::cli::ReportStream::of_cli(out_file, tax_report, args.strategy.as_ref());
+    let mut stream =
+        crate::cli::ReportStream::of_cli(out_file, "tblastx", &args.outfmt, args.strategy.as_ref());
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
-            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut stream), &mut *diagnostics);
+            ReportOutputs::single(&outfmt, OutputSink::Report(&mut stream), &mut *diagnostics);
         search_cli(
             args,
             list,
@@ -995,6 +1042,8 @@ pub fn run(
     };
     // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
     let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
+    // `~CBlastFormat` and `CATCH_ALL`: a failed report ends the run as NCBI's does.
+    let result = stream.finish(result);
     // NCBI writes an error archive after the archives of the batches before when the
     // application stops with one of its own errors, and when the run ends with messages that
     // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status).
@@ -1017,10 +1066,8 @@ pub fn run(
             }
         }
     }
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-    // The outfmt 0 formatter's stream throws when a write fails (blast_format.cpp:118-119;
-    // `cli::ReportStream::finish`).
-    stream.finish(result, pairwise || tax_report)
+    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
+    result
 }
 
 /// The error archive of a run that stopped in `Run` with `error` before its search wrote
@@ -1042,23 +1089,23 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = crate::cli::ReportStream::of_cli(out_file, false, None);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, "tblastx", &args.outfmt, None);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
             &lines,
             &mut report,
         );
-        let _ = std::io::Write::flush(&mut report);
+        let _ = report.finish(Ok(()));
     }
 }
 
 /// The `-out` file, created (`-`: standard output).
-fn open_out_file(args: &TblastxArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
+fn open_out_file(args: &TblastxArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some("TBLASTX")).map(std::io::BufWriter::new))
+        .map(|path| crate::cli::create_out_file(path, Some("TBLASTX")))
         .transpose()
 }
 
@@ -1361,7 +1408,7 @@ fn open_search_database(
                 settings,
             )),
             outputs,
-        )?,
+        ),
     }
     // LOSAT's refusal of a database name for the Seq-annot formats, before the search
     // (`report::serial::seqalign::check_database`).
@@ -1389,10 +1436,9 @@ fn subject_taxonomy(
     args: &mut TblastxArgs,
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
     outputs: &ReportOutputs<'_>,
-) -> Result<()> {
+) {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        "TBLASTX",
         outputs
             .formats
             .iter()
@@ -1400,10 +1446,9 @@ fn subject_taxonomy(
                 report::TblastxOutputFormat::CustomTabular(spec) => Some(spec),
                 _ => None,
             }),
-    )?;
+    );
     args.subject_taxdb = taxonomy.taxdb;
     args.tabular_taxdb = taxonomy.found;
-    Ok(())
 }
 
 /// The part of `run` after the output is opened: the options, `Query is Empty!`, the
@@ -1501,8 +1546,8 @@ pub fn run_local(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
-    // `run_local` has not (blastn's `run_local` does the same).
+    // The command line checks `-strand` when it reads it (NCBI's argument reader), before anything
+    // else; a caller of `run_local` has not (blastn's `run_local` does the same).
     crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // `run_local` searches subject records; a `-db` search runs through `run_local_database`.
     if args.db.is_some() {
@@ -1563,7 +1608,7 @@ fn run_local_formats(
     args.html_links = html_links;
     // The taxonomy database of the reports, where the command line asks (`open_search_database`).
     let setting = args.taxdb_setting.take();
-    subject_taxonomy(&mut args, setting.as_ref(), outputs)?;
+    subject_taxonomy(&mut args, setting.as_ref(), outputs);
     let whole_subjects = Placements::default();
     let (searched_subjects, subject_placements) = match &ranged_subjects {
         Some((cut, placements)) => (cut.as_slice(), placements),
@@ -1597,8 +1642,8 @@ pub fn run_local_database(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    // The command line checks `-strand` at parsing (clap), before anything else; a caller of
-    // `run_local` has not (blastn's `run_local` does the same).
+    // The command line checks `-strand` when it reads it (NCBI's argument reader), before anything
+    // else; a caller of `run_local` has not (blastn's `run_local` does the same).
     crate::algorithm::blastn::args::QueryStrand::parse(&args.strand)?;
     // The file of an unknown `-matrix`, then, as the command line's `run` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;
@@ -2003,11 +2048,7 @@ fn write_pairwise_prologs(
         if report::output_format(format.outfmt).is_pairwise()
             && prolog_before_search(&format.sink) == before_search
         {
-            let flush = crate::report::pairwise::flushes_after_prolog(
-                args.html_links.is_some(),
-                !format.sink.is_writer(),
-            );
-            let mut writer = format.sink.open()?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             match subjects {
                 ShownSubjects::Fasta { records, x_stored } => {
                     crate::report::pairwise::write_tblastx_pairwise_prolog(
@@ -2051,9 +2092,7 @@ fn write_pairwise_prologs(
                     )?
                 }
             }
-            if flush {
-                writer.flush()?;
-            }
+            std::io::Write::flush(&mut writer)?;
         }
     }
     Ok(())
@@ -2683,7 +2722,7 @@ fn write_tblastx_outputs(
                             .expect("a Seq-annot writes its posts to the diagnostics"),
                     )?
                 }
-                // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198
+                // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-199
                 // One BLAST archive per query batch (`archive`), from the Seq-aligns of outfmt 8.
                 report::TblastxOutputFormat::Archive => {
                     let handle = run
@@ -5165,12 +5204,13 @@ fn search_query_batch<S: TbxScore>(
             subject_emit.emit(st, s_idx);
             return;
         }
-        // NCBI: Creates ewp (diagonal table) ONCE per SUBJECT via BlastExtendWordNew
-        // (blast_engine.c:1002). Each subject sequence gets a fresh diagonal array.
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:109-180 (BlastExtendWordNew) allocates with calloc,
-        // which zeros all entries. The diag_offset is initialized to window.
-        //
-        // Reset diagonal state for each subject to match NCBI behavior:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1377 and
+        // c++/src/algo/blast/core/blast_extend.c:109-180
+        // NCBI makes one diagonal table per search thread (`s_BlastSetUpAuxStructures`,
+        // `BlastExtendWordNew` with `calloc`, `diag_offset` = `window`). A fresh table per subject
+        // gives the same rows for every subject without a scan lead (order-independent across
+        // threads); a `-db_soft_mask` lead subject starts at NCBI's one-thread table below
+        // (`x_apply_lead_subject_start`).
         for d in st.diag_array.iter_mut() {
             *d = DiagStruct::default();
         }
@@ -5222,6 +5262,34 @@ fn search_query_batch<S: TbxScore>(
             .as_ref()
             .map(|own| batch_statistics.of_subject(own));
         let statistics = x_own_statistics.as_ref().unwrap_or(&batch_statistics);
+        let x_lead_subject = if s_len / 3 > crate::core::subject_split::MAX_DBSEQ_LEN {
+            match (subjects, x_db_mask.as_deref()) {
+                (Subjects::Stream(stream), Some(ranges))
+                    if stream.mask().is_some_and(|mask| !mask.hard()) =>
+                {
+                    match x_apply_lead_subject_start(
+                        stream,
+                        s_idx,
+                        s_len,
+                        ranges,
+                        wordsize,
+                        window,
+                        &mut st.diag_array,
+                        &mut st.diag_offset,
+                    ) {
+                        Ok(lead) => lead,
+                        Err(error) => {
+                            x_read_failure.fail(s_idx, error);
+                            subject_emit.emit(st, s_idx);
+                            return;
+                        }
+                    }
+                }
+                _ => false,
+            }
+        } else {
+            false
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1492-1497
         // The preliminary search scans and extends the translation of the compressed
@@ -5326,6 +5394,7 @@ fn search_query_batch<S: TbxScore>(
                 subjects,
                 x_soft_subjects,
                 x_db_mask: x_db_mask.as_deref(),
+                x_lead_subject,
                 use_serial_scan_chunks,
                 use_parallel_chunks,
                 num_threads,

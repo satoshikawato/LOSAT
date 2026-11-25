@@ -1,14 +1,14 @@
 use super::{BlastnArgs, QueryStrand};
-use clap::{CommandFactory, Parser};
 
-#[derive(Parser)]
-struct TestCli {
-    #[command(flatten)]
-    args: BlastnArgs,
+/// BLASTN's options of the command line `losat blastn -query q.fa -subject s.fa <words>`.
+fn blastn(words: &[&str]) -> BlastnArgs {
+    let mut argv = vec!["losat", "blastn", "-query", "q.fa", "-subject", "s.fa"];
+    argv.extend_from_slice(words);
+    crate::cli::try_parse_from(argv).unwrap().blastn()
 }
 
 // blastn_args.cpp:57-59: -task takes NCBI's nucleotide tasks (NCBI's reader checks the set);
-// describe lists them in the order of NCBI's BLASTN page, and the help texts name every one.
+// describe lists them in the order of NCBI's BLASTN page, and `-help` names every one.
 #[test]
 fn task_takes_ncbis_tasks_and_the_help_names_them() {
     let tasks = crate::ncbi_app::args::choices("blastn", "task").unwrap();
@@ -23,27 +23,15 @@ fn task_takes_ncbis_tasks_and_the_help_names_them() {
         ]
     );
     for task in &tasks {
-        let argv = [
-            "losat",
-            "--query",
-            "q.fa",
-            "--subject",
-            "s.fa",
-            "--task",
-            task,
-        ];
-        assert_eq!(TestCli::try_parse_from(argv).unwrap().args.task, *task);
+        assert_eq!(blastn(&["-task", task]).task, *task);
     }
-    let command = TestCli::command();
-    let arg = command
-        .get_arguments()
-        .find(|arg| arg.get_long() == Some("task"))
-        .unwrap();
-    for help in [arg.get_help(), arg.get_long_help()] {
-        let help = help.unwrap().to_string();
-        for task in &tasks {
-            assert!(help.contains(task.as_str()), "{help}");
-        }
+    let Err(crate::cli::ArgvError::Printed(help)) =
+        crate::cli::try_parse_from(["losat", "blastn", "-help"])
+    else {
+        panic!("blastn -help prints no help");
+    };
+    for task in &tasks {
+        assert!(help.contains(&format!("'{task}'")), "{help}");
     }
     // NCBI BLAST+ 2.17.0 blastn `-task <name>` of a name that is not NCBI's (frozen on the
     // workstation with `env -i`, line RG item K4i-2b round 2): the constraint's error, NCBI's posts in LOSAT's words; the case of the name counts.
@@ -73,18 +61,14 @@ fn task_takes_ncbis_tasks_and_the_help_names_them() {
 // also for blastn-short (the handler comes after `ClearFilterOptions`).
 #[test]
 fn soft_masking_sets_mask_at_hash() {
-    let soft = |extra: &[&str]| {
-        let mut argv = vec!["losat", "--query", "q.fa", "--subject", "s.fa"];
-        argv.extend_from_slice(extra);
-        TestCli::parse_from(argv).args.soft_masking()
-    };
+    let soft = |extra: &[&str]| blastn(extra).soft_masking();
     assert!(soft(&[]));
-    assert!(soft(&["--task", "blastn-short"]));
+    assert!(soft(&["-task", "blastn-short"]));
     for value in ["true", "T", "1", "YES"] {
-        assert!(soft(&["--soft_masking", value]), "{value}");
+        assert!(soft(&["-soft_masking", value]), "{value}");
     }
     for value in ["false", "F", "0", "no"] {
-        assert!(!soft(&["--soft_masking", value]), "{value}");
+        assert!(!soft(&["-soft_masking", value]), "{value}");
     }
 }
 

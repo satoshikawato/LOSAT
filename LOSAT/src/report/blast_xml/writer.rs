@@ -153,6 +153,9 @@ pub struct DocumentPosts {
     /// header, a 14 side file) or of the making of a 13 or 14 side file's report
     /// (`Xml2Document::failed`) (`run_ending_exception`).
     pub ends_run: Option<Box<crate::ncbi_exception::NcbiException>>,
+    /// Where NCBI's insertions into the report's stream end, and its regions and flushes, at
+    /// offsets of the output buffers (`ostream::Cuts`; BLAST XML's, `BlastXmlWriter`).
+    pub cuts: crate::report::ostream::Cuts,
 }
 
 /// The marker error with which outfmt 5's hit level stops the program's hits of a query whose
@@ -416,12 +419,22 @@ impl StructuredXml for BlastXmlWriter {
     where
         F: FnOnce(&mut HitSink<'_>) -> Result<()>,
     {
+        use crate::report::ostream::{Cut, Site};
         if self.iterations == 0 {
+            // The header is written outside the `try` of the queries (`Site::Report`).
+            let header = out.len();
             if let Some(thrown) = write_header(out, run, query, &mut self.posts.posts)? {
                 // No `Iteration` and no `Hit` of the query is made: the run ends after the posts.
                 self.posts.ends_run = Some(Box::new(thrown.exception()));
                 return Ok(());
             }
+            // `serial_xml_start`, then the `<BlastOutput_iterations>` line: two insertions into
+            // `out_stream`.
+            self.posts.cuts.push(header, Cut::Site(Site::Report));
+            self.posts.cuts.push(
+                out.len() - b"\n<BlastOutput_iterations>".len(),
+                Cut::Insertion,
+            );
         }
         self.iterations += 1;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:572-589
@@ -465,26 +478,38 @@ impl StructuredXml for BlastXmlWriter {
         }
         tail.extend_from_slice(&out[head_end..]);
         out.truncate(head_end);
+        // The `Iteration`'s insertions, in the `try` (`Site::XmlIteration`): `serial_xml_start`,
+        // `"\n<Iteration_hits>\n"`, each `Hit` (`Xml5Hits`), `"</Iteration_hits>"` and
+        // `serial_xml_end`.
+        // The `Iteration`'s regions, its parts and (most often) its `Hit`s, in one allocation.
+        self.posts.cuts.reserve(32);
+        self.posts.cuts.push(start, Cut::Site(Site::XmlIteration));
+        self.posts.cuts.push(out.len(), Cut::Insertion);
         out.extend_from_slice(b"\n<Iteration_hits>\n");
+        self.posts.cuts.push(out.len(), Cut::Insertion);
         let mut writer = Xml5Hits {
             run,
             masks: query.masks,
             out: &mut *out,
             scratch: &mut self.scratch,
             posts: &mut self.posts.posts,
+            cuts: &mut self.posts.cuts,
             hits: 0,
         };
         let result = hits(&mut HitSink::new(&mut writer));
         match result {
             Ok(()) => {
                 out.extend_from_slice(b"</Iteration_hits>");
+                self.posts.cuts.push(out.len(), Cut::Insertion);
                 out.extend_from_slice(&tail);
+                self.posts.cuts.push(out.len(), Cut::Site(Site::Report));
             }
             // A `Hit` threw: the `Iteration` ends after the hits before it (no
             // `</Iteration_hits>`, no tail), no later `Hit` is made (nor its subject loaded), and
             // the run goes on.
             Err(error) if error.downcast_ref::<IterationThrew>().is_some() => {
                 self.posts.cut = true;
+                self.posts.cuts.push(out.len(), Cut::Site(Site::Report));
             }
             Err(error) => {
                 // An exception that `s_BlastXMLAddIteration` catches (`CaughtException`) leaves
@@ -520,11 +545,16 @@ impl StructuredXml for BlastXmlWriter {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2243
     /// (`m_SerialXmlEnd` is set by the first formatted query, blastxml_format.cpp:755-763.)
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()> {
+        use crate::report::ostream::{Cut, Site};
+        // `m_SerialXmlEnd` and `endl` into `m_Outfile`: an insertion, the line feed and a flush, outside
+        // the queries' `try`.
+        self.posts.cuts.push(out.len(), Cut::Site(Site::Report));
         if self.iterations > 0 {
-            out.extend_from_slice(b"\n</BlastOutput_iterations>\n</BlastOutput>\n\n");
-        } else {
-            out.push(b'\n');
+            out.extend_from_slice(b"\n</BlastOutput_iterations>\n</BlastOutput>\n");
+            self.posts.cuts.push(out.len(), Cut::Insertion);
         }
+        out.push(b'\n');
+        self.posts.cuts.push(out.len(), Cut::Flush);
         Ok(())
     }
 }
@@ -615,6 +645,8 @@ struct Xml5Hits<'a> {
     out: &'a mut Vec<u8>,
     scratch: &'a mut Scratch,
     posts: &'a mut Vec<DocumentPost>,
+    /// Each `Hit` is one insertion (`out_str` into `out_stream`).
+    cuts: &'a mut crate::report::ostream::Cuts,
     hits: i32,
 }
 
@@ -688,6 +720,8 @@ impl HitWrite for Xml5Hits<'_> {
         })();
         if result.is_ok() {
             self.out.extend_from_slice(&hit_buf);
+            self.cuts
+                .push(self.out.len(), crate::report::ostream::Cut::Insertion);
         }
         scratch.hit = hit_buf;
         result

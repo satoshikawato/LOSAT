@@ -9,9 +9,10 @@ use crate::utils::glibc_fma_libm::GlibcLibm;
 use anyhow::Result;
 
 use super::engine::RpsQuery;
+use super::profile::{ProfileRead, RowAfter};
 use super::redo::RpsQueryStats;
 use super::rescale::{residue_probabilities, rps_rescale_pssm};
-use super::ProfileSlice;
+use super::volumes::ProfileLetters;
 use super::RPS_K_MULT;
 use crate::algorithm::blastp::hsp::{BlastpHitList, BlastpHsp, BlastpHspList};
 use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
@@ -29,9 +30,13 @@ pub(crate) struct RpsTraceback<'a> {
     /// The concatenated rows and the profiles' offsets.
     pub(crate) rows: &'a [[i32; 28]],
     pub(crate) offsets: &'a [i32],
-    /// The consensus letters of the profiles, at the profiles' offsets (the sentinel rows hold
-    /// any byte), read when a list first needs them (`Consensus`).
-    pub(crate) consensus: &'a super::volumes::Consensus<'a>,
+    /// NCBI's row after the rows (`RpsVolumeFiles::row_after_rows`), the last entry of its row
+    /// pointers, which only the traceback without the redo reads (`TracebackProfile::rows`,
+    /// `mapped_rows`): read from the `.rps` file where `redo` is `None`, else `None`.
+    pub(crate) row_after_rows: Option<RowAfter>,
+    /// The `.psq` letters of the profiles, read when a list first needs them
+    /// (`ProfileLetters`; `TracebackProfile` reads them).
+    pub(crate) letters: &'a ProfileLetters<'a>,
     /// The database's alphabet (26 or 28 columns).
     pub(crate) alphabet: usize,
     /// The `.aux` scale (`score_params->scale_factor`).
@@ -50,6 +55,8 @@ pub(crate) struct RpsTraceback<'a> {
     pub(crate) hitlist_size: usize,
     /// The composition-based redo (modes 1 to 3), else the rescaled PSSM's traceback.
     pub(crate) redo: Option<super::redo::RpsRedoParams<'a>>,
+    /// The program of LOSAT's refusals (`RPSBLAST`, `RPSTBLASTN`).
+    pub(crate) program: &'static str,
 }
 
 /// The memory of one worker's traceback.
@@ -147,7 +154,8 @@ pub(super) fn swap_roles(hsp_list: &mut BlastpHspList, query_length: impl Fn(i32
 
 /// The identities of a volume's final HSPs of one query as NCBI's formatter counts them: the
 /// columns where the query's letters as read (`query_letters`, without the SEG and lower-case
-/// masks and without the X of `Blast_MaskUnsupportedAA`) equal the profile's consensus letters.
+/// masks and without the X of `Blast_MaskUnsupportedAA`) equal the profile's `.psq` letters
+/// (`letters` of each OID: `ProfileLetters::of`).
 /// The traceback counts on the searched letters (`num_ident` of `final_hsp` and of the redo, as
 /// NCBI's core does), which differ where the query is masked; NCBI's reports do not read that
 /// count but the aligned sequences of their scope (the outfmt 0 `Identities`, the tabular
@@ -159,18 +167,17 @@ pub(super) fn swap_roles(hsp_list: &mut BlastpHspList, query_length: impl Fn(i32
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-1007
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2140
-pub(super) fn formatter_identities(
+pub(super) fn formatter_identities<'l>(
     hit_list: &mut BlastpHitList,
     query: &RpsQuery<'_>,
-    consensus: &[u8],
-    offsets: &[i32],
-) {
+    letters: impl Fn(u32) -> Result<&'l [u8]>,
+) -> Result<()> {
     for hsp_list in hit_list
         .hsplist_array
         .iter_mut()
         .take(hit_list.hsplist_count)
     {
-        let profile = &consensus[offsets[hsp_list.oid as usize] as usize..];
+        let profile = letters(hsp_list.oid)?;
         for hsp in &mut hsp_list.hsps {
             let Some(ops) = hsp.gap_info.as_ref() else {
                 continue;
@@ -207,6 +214,7 @@ pub(super) fn formatter_identities(
             };
         }
     }
+    Ok(())
 }
 
 /// A query's preliminary lists in the order the traceback reads them from NCBI's HSP stream:
@@ -234,6 +242,13 @@ fn stream_lists(
 }
 
 impl RpsTraceback<'_> {
+    /// NCBI's row after the rows, for the traceback without the redo.
+    fn row_after(&self) -> &RowAfter {
+        self.row_after_rows
+            .as_ref()
+            .expect("read where the volume's traceback has no redo")
+    }
+
     /// The traceback of the query of letters `query` (without sentinels) and index `q_idx` from
     /// its preliminary hit list.
     ///
@@ -300,19 +315,18 @@ impl RpsTraceback<'_> {
         let mut k_mark: Option<u32> = None;
         for list in lists {
             let oid = list.oid as usize;
-            let start = self.offsets[oid] as usize;
-            let length = (self.offsets[oid + 1] - self.offsets[oid] - 1) as usize;
-            let consensus = &self.consensus.letters()?[start..start + length];
+            // The profile as NCBI's traceback reads it: `L_pin` (its `.pin` length) its length,
+            // its `.psq` letters, its rows from its offset (`TracebackProfile`).
+            let profile = self.letters.profile(list.oid, self.offsets, self.program)?;
+            let length = profile.length();
+            let consensus = profile.letters();
             let hsps = list.hsps.iter().map(|hsp| hsp.hsp);
             let (hsps, karlin, stat_length) = if translated {
                 // The profile's rows at the database's scale, without the rescale and the K of
                 // composition-based statistics 0 (blast_traceback.c:1184-1198); each HSP aligns
                 // on its frame after the containment test (blast_traceback.c:402-417).
-                let rows = ProfileSlice {
-                    rows: self.rows,
-                    start,
-                    len: length,
-                };
+                let rows = profile.mapped_rows(self.rows, self.row_after());
+                let reads = profile.trace_reads(ProfileRead::StartInMapping);
                 let (hsps, stat_length) = trace_hsps(
                     &TraceHsps {
                         rows: &rows,
@@ -333,23 +347,28 @@ impl RpsTraceback<'_> {
                         contained_before: true,
                         // rpsblast's and rpstblastn's databases are BLOSUM62's (the others are refused).
                         matrix: crate::config::ScoringMatrix::Blosum62,
+                        reads: Some(&reads),
                     },
                     hsps,
                     &mut scratch.gap,
                 );
+                profile.check()?;
                 (hsps, self.gapped, stat_length)
             } else {
-                let profile_rows = &self.rows[start..start + length];
+                let profile_rows = profile.rows(self.rows, self.row_after(), self.alphabet)?;
                 if !rps_rescale_pssm(
                     self.scale,
                     &probabilities,
-                    profile_rows,
+                    &profile_rows,
                     self.alphabet,
                     &mut scratch.pssm.rows,
                 )? {
                     continue;
                 }
                 k_mark = Some(list.oid);
+                // `trace_reads` refuses a start at or past the `L_pin` rows before the alignment
+                // reads them (read D), so the alignment reads the rescaled matrix as it is.
+                let reads = profile.trace_reads(ProfileRead::Start);
                 let (hsps, _) = trace_hsps(
                     &TraceHsps {
                         rows: &scratch.pssm,
@@ -363,10 +382,12 @@ impl RpsTraceback<'_> {
                         contained_before: false,
                         // rpsblast's and rpstblastn's databases are BLOSUM62's (the others are refused).
                         matrix: crate::config::ScoringMatrix::Blosum62,
+                        reads: Some(&reads),
                     },
                     hsps,
                     &mut scratch.gap,
                 );
+                profile.check()?;
                 let karlin = KarlinParams {
                     k: RPS_K_MULT * self.karlin_k[oid],
                     ..self.gapped
@@ -481,7 +502,7 @@ fn evalue_lengths(
 /// offset up, subject end down, query offset up, query end down) when not sorted already, stable
 /// as glibc's qsort.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1350
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1354
 pub(super) fn sort_by_score(hsps: &mut [BlastpHsp]) {
     let compare = |a: &BlastpHsp, b: &BlastpHsp| {
         b.raw_score

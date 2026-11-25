@@ -296,10 +296,16 @@ class DbSearchFixtureTests(unittest.TestCase):
         self.assertEqual(db_fixtures.row_env(plain, {})["NCBI"], "tests/n")
         self.assertEqual(db_fixtures.row_cwd(plain), db_fixtures.ENGINE)
 
+    def test_a_cwd_row_takes_an_rps_gz_db_cell(self):
+        row = {"row_id": "db.html.rps.x", "db": "rps-gz:rps_mini", "query": "tests/fasta/rps/xoj.faa", "outfmt": "0",
+               "extra_args": "cwd=tests/db_search/html/rc/rep -html"}
+        self.assertEqual(db_fixtures.run_dir(row), "tests/db_search/html/rc/rep")
+        self.assertEqual(db_fixtures.search_argv(row), ["-db", "rps_mini", "-query", "../../../../fasta/rps/xoj.faa", "-html", "-outfmt", "0"])
+
     def test_a_cwd_row_takes_only_what_it_can_rebase(self):
         row = {"row_id": "db.html.x", "db": "tests/d", "query": "tests/q.faa", "outfmt": "0", "extra_args": "cwd=tests/r"}
         for change in ({"query": "pssm:tests/p.asn"}, {"query": "pssm-gz:tests/p.asn.gz"}, {"query": "stdin:empty"},
-                       {"db": "rps-gz:rps_m"}, {"files": "xinclude"}, {"extra_args": "cwd=tests/r -seqidlist tests/l.txt"},
+                       {"files": "xinclude"}, {"extra_args": "cwd=tests/r -seqidlist tests/l.txt"},
                        {"extra_args": "cwd=tests/r cwd=tests/s"}, {"extra_args": "cwd="}, {"extra_args": "cwd=/abs"}):
             with self.assertRaises(SystemExit, msg=str(change)):
                 db_fixtures.search_argv({**row, **change})

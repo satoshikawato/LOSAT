@@ -72,8 +72,8 @@ fn the_search_is_blastps_with_rpsblasts_program() {
     assert_eq!(args.max_hsps_per_subject, None);
 }
 
-// Every output format that NCBI's rpsblast runs is BLASTP's report (items PS15a-1, PS15a-2);
-// `-html` is a later item's (line RG T4c).
+// Every output format that NCBI's rpsblast runs is BLASTP's report (items PS15a-1, PS15a-2),
+// and `-html` reaches BLASTP's arguments (line RG T4c1).
 #[test]
 fn options_of_later_items_are_refused() {
     for outfmt in [
@@ -84,11 +84,12 @@ fn options_of_later_items_are_refused() {
             .into_blastp_args()
             .unwrap_or_else(|error| panic!("outfmt {outfmt}: {error}"));
     }
-    let error = parse(&["-html"]).unwrap_err();
-    assert!(
-        error.contains("-html is not supported by LOSAT's RPSBLAST"),
-        "{error}"
-    );
+    let plain = parse(&[]).unwrap();
+    assert!(!plain.html);
+    assert!(!plain.into_blastp_args().unwrap().html);
+    let html = parse(&["-html"]).unwrap();
+    assert!(html.html);
+    assert!(html.into_blastp_args().unwrap().html);
     assert!(parse(&["-subject", "s.faa"]).is_err());
     assert!(parse(&["-mt_mode", "2"]).is_err());
 }

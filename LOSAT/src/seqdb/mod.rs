@@ -2873,6 +2873,14 @@ impl SeqDb {
         self.defline_set_at(self.find_volume(ordinal)?)
     }
 
+    /// [`SeqDb::defline_set`] written over `set`, whose buffers are kept from one sequence to the
+    /// next (`seqid::ber::decode_full_set_in`: sequential readers such as `seqmasks_io`).
+    pub fn defline_set_in(&self, ordinal: u32, set: &mut DeflineSet) -> Result<(), SeqDbError> {
+        let at = self.find_volume(ordinal)?;
+        self.header_set_in(at, set)?;
+        Ok(())
+    }
+
     /// The member that NCBI's warning of a UTF8String read where a VisibleString is expected
     /// names (`seqid::ber::utf8_string_path`) for the header of `ordinal`: where NCBI's read of
     /// the record meets one before any failure. `None` also where the record cannot be read.

@@ -1080,9 +1080,13 @@ impl<'a> Reader<'a> {
 /// The stored VisibleString `value` as NCBI's reader gives it, written over `out`, and the number
 /// of bytes it replaced. One pass makes the bytes and counts the replaced ones, `FIX_LANES` bytes
 /// a step: each lane counts in a `u8`, added up every 255 steps (before it could pass 255), so
-/// the step takes as many bytes as the vector registers hold. `out` is cut or lengthened to the
-/// string's length before it is written (a buffer kept from the string before is not cleared).
+/// the step takes as many bytes as the vector registers hold. An unallocated `out` is allocated
+/// once with `Vec::with_capacity` so fresh buffers skip `Vec::resize`'s amortized grow path; a
+/// kept buffer is cut or lengthened in place without clearing bytes it already holds.
 pub(crate) fn fix_visible_chars(value: &[u8], out: &mut Vec<u8>) -> usize {
+    if out.capacity() == 0 {
+        *out = Vec::with_capacity(value.len());
+    }
     out.truncate(value.len());
     out.resize(value.len(), 0);
     let (steps, rest) = value.as_chunks::<FIX_LANES>();
@@ -1355,11 +1359,12 @@ const BLAST_DEF_LINE: Class = Class {
 fn decode_defline(ber: &mut Reader<'_>, defline: &mut BlastDefline) -> Result<(), BerError> {
     let mut title = defline.title.take().unwrap_or_default();
     let mut has_title = false;
-    let ids = std::mem::take(&mut defline.ids);
-    *defline = BlastDefline {
-        ids,
-        ..BlastDefline::default()
-    };
+    defline.replaced_title_bytes = 0;
+    defline.replaced_id_bytes = 0;
+    defline.taxid = None;
+    defline.memberships = None;
+    defline.links = None;
+    defline.other_info = None;
     read_class(ber, &BLAST_DEF_LINE, |ber, member| {
         match member {
             DEFLINE_TITLE => {
@@ -1499,6 +1504,7 @@ const ID_STRINGS: usize = 3;
 
 impl IdStrings {
     /// A VisibleString member of a Seq-id (`Reader::fixed_string_in`), read into a spare buffer.
+    #[inline]
     fn read(&mut self, ber: &mut Reader<'_>) -> Result<Vec<u8>, BerError> {
         let mut value = if self.next < self.count {
             self.next += 1;
@@ -1511,7 +1517,9 @@ impl IdStrings {
     }
 
     /// Makes the string buffers of `id`, the Seq-id at the place the next one is read into, the
-    /// spare buffers, in the order of its members.
+    /// spare buffers, in the order of its members. Kept out of line so its 20-variant match does
+    /// not bloat `read_set`'s stack frame or spill registers on fresh sets where it never runs.
+    #[inline(never)]
     fn keep(&mut self, id: ParsedSeqId) {
         (self.next, self.count) = (0, 0);
         let mut put = |buffer: Vec<u8>| {

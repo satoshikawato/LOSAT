@@ -5,7 +5,6 @@ use crate::cli::{Commands, NativeError, NcbiOstream};
 use crate::common::GapEditOp::{self, Del, Ins, Sub};
 use crate::report::blast_xml::BlastXmlWriter;
 use crate::report::blast_xml2::{NoSideFiles, Xml2Kind};
-use crate::report::tabular::TabularSpec;
 
 use super::empty_rows::SubjectLoc;
 use super::input::FastaRecord;
@@ -157,6 +156,7 @@ pub(crate) fn run_subject_report(
 
     let shown = ShownSubjects::Fasta {
         path: Path::new("subject.faa"),
+        parsed: &[],
     };
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -216,15 +216,9 @@ pub(crate) fn run_subject_report(
             })
         }
         SubjectReportKind::Tabular7Qcovs => {
-            let spec = opts.tabular_report().unwrap_or_else(|| {
-                let choice = crate::blastinput::app::parse_formatting_string(outfmt).unwrap();
-                TabularSpec::of_app(
-                    crate::blastinput::app::ReportFormat::TabularComments,
-                    &choice,
-                    crate::report::archive::options::RequestKind::Blastx,
-                )
-                .unwrap()
-            });
+            let spec = opts
+                .tabular_report()
+                .expect("7 qseqid sseqid qcovs has a TabularSpec");
             let mut sink = OutputSink::Writer(&mut stdout);
             let mut writer = NcbiOstream::sink(&mut sink).unwrap();
             super::tabular::write_blastx_tabular(

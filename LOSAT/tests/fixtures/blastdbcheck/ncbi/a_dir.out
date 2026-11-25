@@ -1,0 +1,110 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing every 100-th OID.
+
+Finding database volumes.
+  [ERROR] could not find all volume or alias files referenced in "./empty", [skipped]
+  [ERROR] could not find all volume or alias files referenced in "./missdb", [skipped]
+  [ERROR] could not find all volume or alias files referenced in "./nodblist", [skipped]
+Testing 2 volume(s).
+ <RUN>/cases/a/p5
+ <RUN>/cases/a/n5
+ Result=SUCCESS. No errors reported for 2 volumes.
+Testing 26 alias(es).
+ <RUN>/cases/a/comments.pal
+  <RUN>/cases/a/comments.pal / AliasFileTest:   [ERROR] unknown keyword encountered: #
+ <RUN>/cases/a/crlf.pal
+ <RUN>/cases/a/first.pal
+  <RUN>/cases/a/first.pal / AliasFileTest:   [ERROR] FIRST_OID not paired with LAST_OID
+ <RUN>/cases/a/fl_bad.pal
+  <RUN>/cases/a/fl_bad.pal / AliasFileTest:   [ERROR] (FIRST_OID, LAST_OID) is not consistent with NSEQ
+ <RUN>/cases/a/fl_nonseq.pal
+ <RUN>/cases/a/fl_ok.pal
+ <RUN>/cases/a/giabs.pal
+  <RUN>/cases/a/giabs.pal / AliasFileTest:   [WARNING] gilist file <RUN>/cases/a/gi.txt does not have .gil extension
+  <RUN>/cases/a/giabs.pal / AliasFileTest:   [ERROR] file <RUN>/cases/a/gi.txt referenced in keyword GILIST does not exist
+ <RUN>/cases/a/giext.pal
+  <RUN>/cases/a/giext.pal / AliasFileTest:   [WARNING] gilist file gi.txt does not have .gil extension
+ <RUN>/cases/a/gimiss.pal
+  <RUN>/cases/a/gimiss.pal / AliasFileTest:   [ERROR] file missing.gil referenced in keyword GILIST does not exist
+  <RUN>/cases/a/gimiss.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/gimiss.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp", line 718: Error: (CSeqDBException::eInvalid) ncbi::CSeqDBFileMemMap::Init() - To be memory mapped the file must exist: '<RUN>/cases/a/missing.gil'
+
+ <RUN>/cases/a/gizero.pal
+  <RUN>/cases/a/gizero.pal / AliasFileTest:   [ERROR] file zero.gil referenced in keyword GILIST has zero length
+  <RUN>/cases/a/gizero.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/gizero.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objtools/blast/seqdb_reader/seqdbcommon.cpp", line 864: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::s_SeqDB_IsBinaryNumericList() - Specified file is empty.
+
+ <RUN>/cases/a/lastonly.pal
+  <RUN>/cases/a/lastonly.pal / AliasFileTest:   [ERROR] FIRST_OID not paired with LAST_OID
+ <RUN>/cases/a/lenbad.pal
+  <RUN>/cases/a/lenbad.pal / AliasFileTest:   [ERROR] could not convert value to number for LENGTH
+  <RUN>/cases/a/lenbad.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/lenbad.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp", line 908: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string '12x' to Uint8 (m_Pos = 2)
+
+ <RUN>/cases/a/lenbig.pal
+ <RUN>/cases/a/membx.pal
+  <RUN>/cases/a/membx.pal / AliasFileTest:   [ERROR] could not convert value to number for MEMB_BIT
+  <RUN>/cases/a/membx.pal / AliasFileTest:   [ERROR] could not convert value to number for MAXLEN
+  <RUN>/cases/a/membx.pal / AliasFileTest:   [ERROR] could not convert value to number for MAXOID
+  <RUN>/cases/a/membx.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/membx.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp", line 908: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string 'x' to Uint8 (m_Pos = 0)
+
+ <RUN>/cases/a/novalue.pal
+  <RUN>/cases/a/novalue.pal / AliasFileTest:   [ERROR] no value(s) found for keyword TITLE
+ <RUN>/cases/a/nseq.pal
+  <RUN>/cases/a/nseq.pal / AliasFileTest:   [ERROR] could not convert value to number for NSEQ
+  <RUN>/cases/a/nseq.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/nseq.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp", line 861: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string 'abc' to Int8 (m_Pos = 0)
+
+ <RUN>/cases/a/nseqbig.pal
+  <RUN>/cases/a/nseqbig.pal / AliasFileTest:   [ERROR] could not convert value to number for NSEQ
+ <RUN>/cases/a/nucl.nal
+  <RUN>/cases/a/nucl.nal / AliasFileTest:   [ERROR] unknown keyword encountered: FOO
+ <RUN>/cases/a/oidgi.pal
+  <RUN>/cases/a/oidgi.pal / AliasFileTest:   [ERROR] file nosuch.msk referenced in keyword OIDLIST does not exist
+  <RUN>/cases/a/oidgi.pal / AliasFileTest:   [ERROR] file nosuch.gil referenced in keyword GILIST does not exist
+  <RUN>/cases/a/oidgi.pal / AliasFileTest:   [ERROR] OIDLIST and GILIST cannot be present in the same alias file
+  <RUN>/cases/a/oidgi.pal / AliasFileTest:   [ERROR] OIDLIST cannot be provided without MAXOID , LENGTH, or NSEQ
+  <RUN>/cases/a/oidgi.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/oidgi.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp", line 718: Error: (CSeqDBException::eInvalid) ncbi::CSeqDBFileMemMap::Init() - To be memory mapped the file must exist: '<RUN>/cases/a/nosuch.msk'
+
+ <RUN>/cases/a/oidnomax.pal
+  <RUN>/cases/a/oidnomax.pal / AliasFileTest:   [ERROR] file nosuch.msk referenced in keyword OIDLIST does not exist
+  <RUN>/cases/a/oidnomax.pal / AliasFileTest:   [ERROR] OIDLIST cannot be provided without MAXOID , LENGTH, or NSEQ
+  <RUN>/cases/a/oidnomax.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/oidnomax.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp", line 718: Error: (CSeqDBException::eInvalid) ncbi::CSeqDBFileMemMap::Init() - To be memory mapped the file must exist: '<RUN>/cases/a/nosuch.msk'
+
+ <RUN>/cases/a/ov1.pal
+  <RUN>/cases/a/ov1.pal / AliasFileTest:   [ERROR] FIRST_OID not paired with LAST_OID
+ <RUN>/cases/a/ov2.pal
+  <RUN>/cases/a/ov2.pal / AliasFileTest:   [WARNING] oidlist file gi.gil does not have .msk extension
+  <RUN>/cases/a/ov2.pal / AliasFileTest:   [ERROR] OIDLIST cannot be provided without MAXOID , LENGTH, or NSEQ
+ <RUN>/cases/a/ov3.pal
+  <RUN>/cases/a/ov3.pal / AliasFileTest:   [ERROR] (FIRST_OID, LAST_OID) is not consistent with NSEQ
+ <RUN>/cases/a/signs.pal
+  <RUN>/cases/a/signs.pal / AliasFileTest:   [ERROR] (FIRST_OID, LAST_OID) is not consistent with NSEQ
+  <RUN>/cases/a/signs.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/signs.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp", line 908: Error: (CStringException::eConvert) ncbi::NStr::StringToUInt8() - Cannot convert string '-1' to Uint8 (m_Pos = 0)
+
+ <RUN>/cases/a/taxmiss.pal
+  <RUN>/cases/a/taxmiss.pal / AliasFileTest:   [ERROR] file missing.txt referenced in keyword TAXIDLIST does not exist
+  <RUN>/cases/a/taxmiss.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/taxmiss.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbifile.cpp", line 5754: Error: (CFileException::eMemoryMap) ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory mapped the file must exist: '<RUN>/cases/a/missing.txt'
+
+ <RUN>/cases/a/unk.pal
+  <RUN>/cases/a/unk.pal / AliasFileTest:   [ERROR] unknown keyword encountered: FOO
+ Result=FAILURE. 21 errors reported in 26 alias(es).
+
+Total errors: 39

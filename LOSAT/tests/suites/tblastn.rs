@@ -8,6 +8,8 @@
 
 #[path = "../run_local_tblastn.rs"]
 mod run_local_tblastn;
+#[path = "../t_db_hard_overlap.rs"]
+mod t_db_hard_overlap;
 #[path = "../tblastn_batch_refusal.rs"]
 mod tblastn_batch_refusal;
 #[path = "../tblastn_batch_rule.rs"]
@@ -16,6 +18,8 @@ mod tblastn_batch_rule;
 mod tblastn_culling;
 #[path = "../tblastn_db_search.rs"]
 mod tblastn_db_search;
+#[path = "../tblastn_db_soft_lead_start.rs"]
+mod tblastn_db_soft_lead_start;
 #[path = "../tblastn_db_stream.rs"]
 mod tblastn_db_stream;
 #[path = "../tblastn_in_pssm.rs"]

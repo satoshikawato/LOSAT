@@ -1,0 +1,145 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>RPSTBLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+<b>Query=</b> stopq
+
+Length=600
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.273    0.101    0.253    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 82388
+
+
+<b>Query=</b> len3
+
+Length=3
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 560
+
+
+<b>Query=</b> YP_009220476.1 bt strand=+ flank=0
+
+Length=637
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.317    0.136    0.383    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 87584
+
+
+<b>Query=</b> YP_009220478.1 bt strand=- flank=0
+
+Length=905
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 127370
+
+
+<b>Query=</b> lower
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>277</a>     2e-100
+
+
+
+Query_5      1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+XP_000101.1  1    ............................................................  60
+
+Query_5      181  TIVTHA<font color="#000000">geviegcttvssikelisvlp</font>EVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  360
+XP_000101.1  61   ............................................................  120
+
+Query_5      361  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  540
+XP_000101.1  121  ............................................................  180
+
+Query_5      541  AEMYAAACRD  570
+XP_000101.1  181  ..........  190
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 82867
+
+
+  Database: rps_mini
+    Posted date:  Nov 21, 2026  5:54 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

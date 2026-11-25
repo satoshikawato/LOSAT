@@ -156,14 +156,6 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ("blastx", "negative_ipglist", Refused::Read(None)),
     ("blastx", "import_search_strategy", Refused::Read(None)),
     ("blastx", "remote", Refused::Read(None)),
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:398-400,503
-    // The PSSM files in ASN.1 binary (psiblast line item PS10b) are refused where the run starts,
-    // after makeprofiledb's `Init` (`makeprofiledb::work::run`).
-    (
-        "makeprofiledb",
-        "binary",
-        Refused::Run("PSSM files in ASN.1 binary"),
-    ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1164
     // PHI-BLAST (PS8; the ASCII and ASN.1 PSSM files are PS2's and PS3's,
     // `algorithm::psiblast::pssm`, `-in_pssm` PS4's, `algorithm::psiblast::in_pssm`, the MSA
@@ -189,18 +181,16 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (cited at
     // `algorithm::rpsblast::args`)
-    // `-html` (PS15a) and the remote options and `-import_search_strategy` of every program.
+    // The remote options and `-import_search_strategy` of every program.
     ("rpsblast", "entrez_query", Refused::Read(None)),
-    ("rpsblast", "html", Refused::Read(None)),
     ("rpsblast", "import_search_strategy", Refused::Read(None)),
     ("rpsblast", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (cited
     // at `algorithm::rpstblastn::args`)
-    // `-html` (PS15a) and the remote options and `-import_search_strategy` of every program. The
+    // The remote options and `-import_search_strategy` of every program. The
     // composition-based statistics of a later item are refused once per run
     // (`rpstblastn::search::TranslatedRpsSearch::check_options`).
     ("rpstblastn", "entrez_query", Refused::Read(None)),
-    ("rpstblastn", "html", Refused::Read(None)),
     ("rpstblastn", "import_search_strategy", Refused::Read(None)),
     ("rpstblastn", "remote", Refused::Read(None)),
     (

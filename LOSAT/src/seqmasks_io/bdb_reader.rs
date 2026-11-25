@@ -16,6 +16,7 @@
 //!   knows it: [`NcbiException::site`] is [`ThrowSite::generated`] otherwise) or LOSAT's refusal
 //!   (`Refused`, a noun phrase that the program completes).
 
+use crate::blastinput::ncbi_environment::DatabaseSettings;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::db_subject::bioseq_facts;
 use crate::report::defline::bioseq_title_from_source;
@@ -100,20 +101,22 @@ pub(crate) fn prints_title(outfmt: &str) -> bool {
 
 impl MaskBdbReader {
     /// A new `CSeqDB` of `name` (the bytes of NCBI's `std::string`) and the molecule, on the
-    /// search path of the environment and `registry` (the `[BLAST] BLASTDB` of the
-    /// configuration: `ApplicationSettings::blastdb`). `program` names LOSAT's program in a
-    /// refusal.
+    /// search path of the environment and the registry of `database` (the `[BLAST] BLASTDB` of
+    /// the configuration: `ApplicationSettings::blastdb`), whose definition lines are read under
+    /// the checks of `database` (`SeqDb::refuse_unchecked_reads`). `program` names LOSAT's
+    /// program in a refusal.
     pub(crate) fn open(
         name: &[u8],
         molecule: SeqType,
-        registry: Option<&[u8]>,
+        database: DatabaseSettings<'_>,
         title_printed: bool,
         program: &'static str,
     ) -> Result<Self, BdbError> {
-        let path = SearchPath::from_environment(registry);
+        let path = SearchPath::from_environment(database.registry);
         // `GetNumOIDs`, not the OIDs that the alias files' ranges include.
-        let db = SeqDb::open_every_oid_in(name, molecule, &path)
+        let mut db = SeqDb::open_every_oid_in(name, molecule, &path)
             .map_err(|error| database_error(error, program))?;
+        db.refuse_unchecked_reads(database.read_verification);
         Ok(MaskBdbReader {
             db,
             molecule,
@@ -249,14 +252,25 @@ impl MaskBdbReader {
                 Vec::new(),
                 Some(self.db.nucleotide_ambiguity(oid).map_err(error)?),
             ),
-            SeqType::Protein => (
-                self.db
-                    .read_sequence(oid)
-                    .map_err(error)?
-                    .protein(0)
-                    .to_vec(),
-                None,
-            ),
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+            // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:228-232
+            // `GetBioseq` returns no Bioseq when the signed 32-bit protein length is below 1
+            // (`0` or `>= 2^31` residues), after opening `.psq` via `x_GetSequence`.
+            SeqType::Protein => {
+                if self.db.protein_length_i32(oid).map_err(error)? < 1 {
+                    self.db.check_protein_range(oid).map_err(error)?;
+                    (Vec::new(), None)
+                } else {
+                    (
+                        self.db
+                            .read_sequence(oid)
+                            .map_err(error)?
+                            .protein(0)
+                            .to_vec(),
+                        None,
+                    )
+                }
+            }
         };
         let has_letters = ambiguity
             .as_ref()
@@ -365,7 +379,7 @@ pub(crate) fn iupacaa_letters(stdaa: &[u8]) -> Vec<u8> {
 
 /// An error of the database reader: NCBI's exception (`SeqDbError::ncbi_exception`, or the
 /// `CSeqDBException` of `SeqDbError::ncbi_message`, with its place where LOSAT knows it,
-/// `seqdb::throw_site`), or LOSAT's refusal.
+/// `SeqDbError::throw_site`), or LOSAT's refusal.
 fn database_error(error: SeqDbError, program: &str) -> BdbError {
     // An NCBI exception of the reader itself (an alias value that does not convert), reported
     // as the application reports it (blastdbcmd's `database_error`).
@@ -374,7 +388,8 @@ fn database_error(error: SeqDbError, program: &str) -> BdbError {
     }
     match error.ncbi_request_message() {
         Some(text) => {
-            let site = crate::seqdb::throw_site(&text)
+            let site = error
+                .throw_site()
                 .unwrap_or(ThrowSite::generated("CSeqDBException::eInvalid"));
             BdbError::Ncbi(NcbiException::new(site, text))
         }

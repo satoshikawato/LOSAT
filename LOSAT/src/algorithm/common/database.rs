@@ -39,6 +39,8 @@ pub(crate) fn open_search_database(
     // after them (`restrict_database`).
     let mut db = SeqDb::open_search_in(name.as_bytes(), seqtype, &path)?;
     db.fail_search_reads_with_oid_list();
+    // The checks of NCBI's reads of the definition lines (`SERIAL_VERIFY_DATA_READ`).
+    db.refuse_unchecked_reads(&settings.read_verification);
     Ok(db)
 }
 
@@ -408,13 +410,17 @@ pub(crate) fn refusal(reason: &str, program: &str) -> anyhow::Error {
 /// The text of a reader error that is not NCBI's (`SeqDbError::ncbi_message` `None`), as LOSAT
 /// reports it: a file whose bytes the system does not give is LOSAT's error as it is
 /// (`SeqDbError::is_unreadable`: "cannot be read", where NCBI ends by SIGBUS; review M1 of line
-/// WQA D18, 2026-11-21), and so is a LOSAT internal error ([`SeqDbError::Internal`]); any other
-/// LOSAT's refusal of the database in `program`'s name ([`refusal`]). The one place of that choice
+/// WQA D18, 2026-11-21), and so is a LOSAT internal error ([`SeqDbError::Internal`]); a setting
+/// of the run that LOSAT refuses ([`SeqDbError::Setting`]) is refused in `program`'s name; any
+/// other is LOSAT's refusal of the database in `program`'s name ([`refusal`]). The one place of that choice
 /// for the search programs, blastdbcmd and the maskers' database reader; each ends with LOSAT's
 /// exit status of its own errors.
 pub(crate) fn losat_reader_error(error: &SeqDbError, program: &str) -> String {
     if error.is_unreadable() || matches!(error, SeqDbError::Internal(_)) {
         error.to_string()
+    } else if let SeqDbError::Setting(refused) = error {
+        // A setting of the run, not the database, is refused (`SeqDb::refuse_unchecked_reads`).
+        format!("{refused} is not supported by LOSAT's {program}")
     } else {
         refusal(&error.to_string(), program).to_string()
     }
@@ -1212,14 +1218,19 @@ pub(crate) fn keep_source(
 /// of NCBI's that LOSAT reports as NCBI's, `reported_exception`: the `CSerialException` of its
 /// read of the record, or the conversion of a `ti` tag under an id list, line RG D1c-1) is a
 /// `HeaderReadError` that names the query, so the batch fails after the outfmt 0 prolog as NCBI's
-/// does; LOSAT's refusals are errors of their own.
+/// does; so is LOSAT's refusal of a setting of the run that NCBI's read of that record would
+/// meet ([`SeqDbError::Setting`], `SeqDb::refuse_unchecked_reads`), which stops where NCBI's
+/// default error does, after the same output; LOSAT's other refusals are errors of their own.
 fn header_read_error(
     error: SeqDbError,
     query: usize,
     program: &str,
     utf8: Option<&Utf8Read>,
 ) -> anyhow::Error {
-    if error.ncbi_message().is_some() || reported_exception(&error).is_some() {
+    if error.ncbi_message().is_some()
+        || reported_exception(&error).is_some()
+        || matches!(error, SeqDbError::Setting(_))
+    {
         anyhow::Error::new(HeaderReadError {
             query,
             error: database_error(error, program),
@@ -1624,9 +1635,10 @@ impl<'a> FetchExcluded<'a> {
 
     /// LOSAT's refusal (in `program`'s name) of a search whose fetch of `ordinal` cannot read
     /// its header (`error`), where NCBI's search fails (`FetchRefusal`); a header file whose
-    /// bytes the system does not give is LOSAT's error as it is (`losat_reader_error`).
+    /// bytes the system does not give, and a setting of the run that LOSAT refuses, keep their
+    /// own words (`losat_reader_error`).
     pub(crate) fn refusal((ordinal, error): (u32, SeqDbError), program: &str) -> anyhow::Error {
-        if error.is_unreadable() {
+        if error.is_unreadable() || matches!(error, SeqDbError::Setting(_)) {
             return FetchRefusal(losat_reader_error(&error, program)).into();
         }
         // A header that LOSAT refuses where it is read (`seqdb::Volume::filtered_mask`) keeps
@@ -3425,11 +3437,26 @@ impl<'a> HeaderReader<'a> {
         } else {
             return RecordCopy::Differs;
         };
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+        // No NCBI counterpart: LOSAT's copy-equivalence check (`copy_of`). `GetBioseq` returns a
+        // null Bioseq when the signed 32-bit `GetSeqLengthProt` length is less than 1, so treat
+        // such proteins as distinct without loading their sequence bytes into memory.
+        let protein = self.db.seqtype() == SeqType::Protein;
+        if protein {
+            let (Ok(len_a), Ok(len_b)) =
+                (self.db.protein_length_i32(a), self.db.protein_length_i32(b))
+            else {
+                return RecordCopy::Differs;
+            };
+            if len_a < 1 || len_b < 1 {
+                return RecordCopy::Differs;
+            }
+        }
         let (Ok(block_a), Ok(block_b)) = (self.db.read_sequence(a), self.db.read_sequence(b))
         else {
             return RecordCopy::Differs;
         };
-        let protein = self.db.seqtype() == SeqType::Protein;
         let same_letters = if protein {
             block_a.protein(0) == block_b.protein(0)
         } else {
@@ -4824,11 +4851,19 @@ pub(crate) fn x_check_protein_stores(
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, PROTEIN_STORE_BLOCK_BYTES) {
         let block = db
-            .read_block(range)
+            .read_protein_search_block(range)
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
             let with_sentinels = block.protein_with_sentinels(i);
             let ordinal = range.first_ordinal + i as u32;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+            // No NCBI counterpart: LOSAT's stored-byte check (`x_check_protein_stores`). Proteins
+            // with non-positive NCBI 32-bit length are skipped by NCBI and returned as `[0, 0]` by
+            // `read_protein_search_block`, so skip byte validation and report length 0.
+            if with_sentinels.len() == 2 {
+                each(ordinal, 0);
+                continue;
+            }
             check_protein_sequence(with_sentinels, || db.oid(ordinal), program)?;
             each(ordinal, with_sentinels.len() - 2);
         }
@@ -6283,6 +6318,16 @@ impl TaxdbRun {
             }),
             ..TaxdbRun::default()
         }
+    }
+
+    /// [`TaxdbRun::sequential`] of one `CSeqDB` of a program that opens several, each with its
+    /// volumes' caches, while the taxonomy database `taxdb` is the process's (NCBI's static
+    /// `CTaxDBFileInfo`): blastdbcheck opens each volume as a database of its own. The texts of
+    /// opening `taxdb` come with the first lookup of any of them.
+    pub(crate) fn sequential_with(taxdb: std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>) -> Self {
+        let run = Self::sequential();
+        let _ = run.lazy.set(taxdb);
+        run
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1462-1466

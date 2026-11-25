@@ -480,6 +480,12 @@ struct SubjectChunk {
     offset: usize,
     length: usize,
     overlap: usize,
+    /// NCBI's `Int4` chunk length (`TranslatedChunk::ncbi_length`, negative between overlapping
+    /// hard masks).
+    ncbi_length: i32,
+    /// Whether NCBI reads the merge overlap past its list of hard ranges
+    /// (`TranslatedChunk::overlap_past_list`).
+    overlap_past_list: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -500,6 +506,16 @@ struct TblastxChunkScanResult {
     chunk: SubjectChunk,
     hits: Vec<UngappedHit>,
     stats: TblastxChunkScanStats,
+    /// Whether NCBI's word finder exited on this chunk (false for a soft-masked chunk without
+    /// scan ranges, `SUBJECT_SPLIT_NO_RANGE`, blast_engine.c:478-483).
+    #[cfg_attr(
+        any(
+            not(feature = "parallel"),
+            all(target_arch = "wasm32", not(feature = "wasm-threads"))
+        ),
+        allow(dead_code)
+    )]
+    exited: bool,
 }
 
 impl SubjectSplitState {
@@ -531,6 +547,8 @@ impl SubjectSplitState {
                 offset: chunk.offset,
                 length: chunk.length.min(subject_len.saturating_sub(chunk.offset)),
                 overlap: chunk.overlap,
+                ncbi_length: chunk.ncbi_length,
+                overlap_past_list: chunk.overlap_past_list,
             })
             .collect();
         let mut state = Self::new(subject_len);
@@ -583,17 +601,79 @@ impl SubjectSplitState {
             offset: offset as usize,
             length,
             overlap,
+            ncbi_length: length as i32,
+            overlap_past_list: false,
         })
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1377 and
+// c++/src/algo/blast/core/blast_extend.c:87-107,162-173
+// Initializes a worker's diagonal table to `start` (NCBI's one-thread start for a `-db_soft_mask`
+// lead subject or a `-db_hard_mask` walked/new subject, or the apart start for a walked subject
+// that does not meet unwritten entries).
+#[cold]
+#[inline(never)]
+fn x_apply_diag_start(
+    start: crate::algorithm::common::hard_chunk_walk::NcbiStart,
+    window: i32,
+    diag_array: &mut [DiagStruct],
+    diag_offset: &mut i32,
+) {
+    *diag_offset = start.offset;
+    let fill = if start.cleared {
+        DiagStruct::clear(window)
+    } else {
+        DiagStruct::default()
+    };
+    diag_array.fill(fill);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,804-855,1377 and
+// c++/src/algo/blast/core/blast_extend.c:87-107,162-173
+// For a `-db_soft_mask` stream subject whose out-of-order masks make a chunk's scan read letters
+// before it, initializes this worker's diagonal table to NCBI's one-thread start at this subject
+// (`XDbStream::lead_start`, series NP, M4b-T3), so clears at INT4_MAX / 4 fall where NCBI's do at
+// every thread count. Returns `Ok(true)` when this subject is a lead subject.
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_apply_lead_subject_start(
+    stream: &crate::algorithm::common::x_db_stream::XDbStream<'_>,
+    s_idx: usize,
+    s_len: usize,
+    ranges: &[(i32, i32)],
+    wordsize: i32,
+    window: i32,
+    diag_array: &mut [DiagStruct],
+    diag_offset: &mut i32,
+) -> anyhow::Result<bool> {
+    let mut exits = Vec::new();
+    let mut split = crate::core::subject_split::HardSplitState::default();
+    let lead = crate::algorithm::common::translated_chunks::translated_soft_mask_exits(
+        s_len,
+        wordsize as usize,
+        &mut exits,
+        &mut split,
+        || Ok::<_, anyhow::Error>(std::borrow::Cow::Borrowed(ranges)),
+    )?;
+    if !lead {
+        return Ok(false);
+    }
+    let start = stream.lead_start(s_idx, wordsize as usize, window)?;
+    x_apply_diag_start(start, window, diag_array, diag_offset);
+    Ok(true)
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+// Takes NCBI's signed `Int4` subject chunk length (`subject_len` is negative between overlapping
+// hard masks, moving `diag_offset` back by that length plus `window`).
 #[inline]
 fn advance_tblastx_diag_offset(
     diag_offset: &mut i32,
     diag_array: &mut [DiagStruct],
     window: i32,
-    subject_len: usize,
+    subject_len: i32,
 ) {
     if *diag_offset >= i32::MAX / 4 {
         *diag_offset = window;
@@ -601,7 +681,7 @@ fn advance_tblastx_diag_offset(
             *d = DiagStruct::clear(window);
         }
     } else {
-        *diag_offset += subject_len as i32 + window;
+        *diag_offset = diag_offset.wrapping_add(subject_len).wrapping_add(window);
     }
 }
 
@@ -872,7 +952,6 @@ pub fn run(
     // (`app::early_format_choice`).
     let strategy_file = crate::report::archive::strategy::open_strategy_file(
         args.export_search_strategy.as_deref(),
-        args.out.as_deref(),
         "TBLASTX",
     )?;
     let choice =
@@ -1005,6 +1084,14 @@ pub fn run(
                         &lines,
                         &mut stream,
                     );
+                } else if let Some(lines) = crate::report::archive::silent_end_lines(handle, error)
+                {
+                    // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:218-221
+                    // A run that `CATCH_ALL` ended without a post (`cli::NativeError::silent_end`,
+                    // such as a strategy stream `CIOException::eWrite` fault): write the error
+                    // archive of the messages saved before it.
+                    let _ =
+                        crate::report::archive::write_error_archive(handle, &lines, &mut stream);
                 }
             }
             Ok(()) => {
@@ -1194,7 +1281,7 @@ fn check_ncbi_options(
     // (`blastinput::report_counts`), with the handler's warnings.
     let html = crate::blastinput::app::html_links(
         args.html,
-        Program::Tblastx,
+        crate::report::archive::options::RequestKind::Tblastx,
         args.database_name(),
         &outfmts,
     )?;
@@ -1760,7 +1847,7 @@ fn search(
     // LOSAT's refusals of the masked search (`-db_hard_mask`) come where NCBI starts the search,
     // after its checks.
     if let (SubjectSource::Database(database), Some(mask)) = (&source, db_mask.as_ref()) {
-        database.check_mask_limits(mask, usize::try_from(args.word_size())?)?;
+        database.check_mask_limits(mask, args.word_size(), args.window())?;
     }
     crate::blastinput::app::check_search_environment(
         "TBLASTX",
@@ -5152,12 +5239,13 @@ fn search_query_batch<S: TbxScore>(
             subject_emit.emit(st, s_idx);
             return;
         }
-        // NCBI: Creates ewp (diagonal table) ONCE per SUBJECT via BlastExtendWordNew
-        // (blast_engine.c:1002). Each subject sequence gets a fresh diagonal array.
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:109-180 (BlastExtendWordNew) allocates with calloc,
-        // which zeros all entries. The diag_offset is initialized to window.
-        //
-        // Reset diagonal state for each subject to match NCBI behavior:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1377 and
+        // c++/src/algo/blast/core/blast_extend.c:109-180
+        // NCBI makes one diagonal table per search thread (`s_BlastSetUpAuxStructures`,
+        // `BlastExtendWordNew` with `calloc`, `diag_offset` = `window`). A fresh table per subject
+        // gives the same rows for every subject without a scan lead (order-independent across
+        // threads); a `-db_soft_mask` lead subject starts at NCBI's one-thread table below
+        // (`x_apply_lead_subject_start`).
         for d in st.diag_array.iter_mut() {
             *d = DiagStruct::default();
         }
@@ -5209,6 +5297,44 @@ fn search_query_batch<S: TbxScore>(
             .as_ref()
             .map(|own| batch_statistics.of_subject(own));
         let statistics = x_own_statistics.as_ref().unwrap_or(&batch_statistics);
+        let x_lead_subject = if s_len / 3 > crate::core::subject_split::MAX_DBSEQ_LEN {
+            match (subjects, x_db_mask.as_deref()) {
+                (Subjects::Stream(stream), Some(ranges))
+                    if stream.mask().is_some_and(|mask| !mask.hard()) =>
+                {
+                    match x_apply_lead_subject_start(
+                        stream,
+                        s_idx,
+                        s_len,
+                        ranges,
+                        wordsize,
+                        window,
+                        &mut st.diag_array,
+                        &mut st.diag_offset,
+                    ) {
+                        Ok(lead) => lead,
+                        Err(error) => {
+                            x_read_failure.fail(s_idx, error);
+                            subject_emit.emit(st, s_idx);
+                            return;
+                        }
+                    }
+                }
+                _ => false,
+            }
+        } else {
+            false
+        };
+        let x_hard_start = match subjects {
+            Subjects::Stream(stream) => match stream.hard_start(s_idx) {
+                Some(start) => {
+                    x_apply_diag_start(start, window, &mut st.diag_array, &mut st.diag_offset);
+                    true
+                }
+                None => false,
+            },
+            _ => false,
+        };
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1492-1497
         // The preliminary search scans and extends the translation of the compressed
@@ -5313,6 +5439,8 @@ fn search_query_batch<S: TbxScore>(
                 subjects,
                 x_soft_subjects,
                 x_db_mask: x_db_mask.as_deref(),
+                x_lead_subject,
+                x_hard_start,
                 use_serial_scan_chunks,
                 use_parallel_chunks,
                 num_threads,
@@ -5405,8 +5533,9 @@ fn search_query_batch<S: TbxScore>(
         // reevaluates ambiguities and calls BLAST_LinkHsps again.
         //
         // A list of the one-hit word finder (`-window_size 0`) that holds an HSP of length 0 or
-        // less links with NCBI's `Int4` ends, and those HSPs are dropped after it; without sum
-        // statistics the HSPs get their own E-values (`subject_link::first_link_subject_hits`).
+        // less links with NCBI's `Int4` ends and keeps those HSPs up to the re-evaluation's fetch;
+        // without sum statistics the HSPs get their own E-values
+        // (`subject_link::first_link_subject_hits`).
         x_link_timer.arm(LinkCall::First);
         let prelinked_ungapped_hits =
             subject_link::first_link_subject_hits(&link_args, combined_ungapped_hits, window);
@@ -5418,6 +5547,7 @@ fn search_query_batch<S: TbxScore>(
             prelinked_ungapped_hits,
             &link_args,
             &stage_args,
+            window,
             &mut x_lap,
         );
         // The re-evaluation's fetch of a subject with HSPs, which the negative seqid list may
@@ -5449,9 +5579,9 @@ fn search_query_batch<S: TbxScore>(
         } else {
             (&s_frames, s_frames_report)
         };
-        // Without sum statistics, the HSPs of length 0 or less, which NCBI's re-evaluation
-        // deletes without reading them (`subject_link::drop_unread_without_linking`).
-        subject_link::drop_unread_without_linking(&link_args, window, &mut prelinked_ungapped_hits);
+        // The HSPs of length 0 or less, which NCBI's re-evaluation deletes without reading them
+        // (`subject_link::drop_unread_int4_inverted`).
+        subject_link::drop_unread_int4_inverted(window, &mut prelinked_ungapped_hits);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2699-2705
         // The re-evaluation of HSPs on a subject (its `-subject_loc` range) of fewer than 12 bases
         // reads a frame NCBI never translates (`subject_loop::SubjectEmit::refuse_untranslated_frame`):

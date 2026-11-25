@@ -46,7 +46,8 @@
 //! statement. The unit tests compare it with `mask_range_reference` and with `x_mask_range` on
 //! random sequences of every kind the masker distinguishes.
 
-use super::{DustMasker, MaskedInterval, NcbiLfgRandom, PerfectInterval, X_BASE_CODE, X_RING};
+use super::{DustMasker, MaskedInterval, PerfectInterval, X_BASE_CODE, X_RING};
+use crate::utils::random_gen::NcbiRandom;
 use std::collections::VecDeque;
 
 /// No NCBI counterpart: the scalars of `XTripletWindow` (symdust.cpp:40-48 `triplets`), kept by
@@ -401,12 +402,12 @@ fn x_merge_at(
 /// NCBI reference (598d8ae6): c++/include/algo/dustmask/symdust.hpp:75-84
 /// The 2-bit code of `base` (`convert_iupac_to_ncbi2na`), drawing from `rng` where the table says 4.
 #[inline(always)]
-fn x_code(base: u8, rng: &mut NcbiLfgRandom) -> u8 {
+fn x_code(base: u8, rng: &mut NcbiRandom) -> u8 {
     let c = X_BASE_CODE[base as usize];
     if c < 4 {
         c
     } else {
-        (rng.next() & 0x3) as u8
+        (rng.get_rand() & 0x3) as u8
     }
 }
 
@@ -471,7 +472,7 @@ impl DustMasker {
         a: &mut XArrays,
         k: XConst,
         thr: &[u32; X_RING],
-        rng: &mut NcbiLfgRandom,
+        rng: &mut NcbiRandom,
         result: &mut Vec<MaskedInterval>,
         current_start: usize,
         merged: &mut Vec<PerfectInterval>,
@@ -585,7 +586,7 @@ impl DustMasker {
         run: &mut XRun,
         a: &mut XArrays,
         k: XConst,
-        rng: &mut NcbiLfgRandom,
+        rng: &mut NcbiRandom,
         result: &mut Vec<MaskedInterval>,
         current_start: usize,
         perfect_list: &mut VecDeque<PerfectInterval>,
@@ -617,7 +618,7 @@ impl DustMasker {
         seq: &[u8],
         start: usize,
         stop: usize,
-        rng: &mut NcbiLfgRandom,
+        rng: &mut NcbiRandom,
     ) -> Vec<MaskedInterval> {
         let seq = &seq[..=stop];
         let end = seq.len();

@@ -457,3 +457,60 @@ fn short_nucleotide_data_is_found_at_each_boundary() {
     assert_eq!(short(SeqData::Ncbieaa(Vec::new()), 22), None);
     assert_eq!(short(SeqData::Other, 22), None);
 }
+
+// NCBI `x_ConvertIupacnaTo4na` (`sequtil_convert_imp.cpp:328-337`): the pair loop indexes
+// `sm_IupacnaTo4na` with a signed `char` (undefined for byte >= 0x80), while the odd overhang
+// casts to `Uint1` (defined). Bytes < 0x80 and other codings are defined.
+#[test]
+fn iupacna_high_byte_finds_only_pair_positions() {
+    assert_eq!(iupacna_high_byte(&SeqData::Iupacna(Vec::new())), None);
+    assert_eq!(iupacna_high_byte(&SeqData::Iupacna(vec![0x80])), None);
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"GATT\x80".to_vec())),
+        None
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"AT\xff".to_vec())),
+        None
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"\x01TGG\x7fG".to_vec())),
+        None
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"\x80TGGCG".to_vec())),
+        Some((0, 0x80))
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"A\xc3GGCG".to_vec())),
+        Some((1, 0xC3))
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"ATGGC\xff".to_vec())),
+        Some((5, 0xFF))
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"GAT\x80A".to_vec())),
+        Some((3, 0x80))
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacna(b"A\x80".to_vec())),
+        Some((1, 0x80))
+    );
+    // Other codings never hit `x_ConvertIupacnaTo4na`.
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Ncbieaa(b"\x80\xff".to_vec())),
+        None
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Iupacaa(b"\x80\xff".to_vec())),
+        None
+    );
+    assert_eq!(
+        iupacna_high_byte(&SeqData::Ncbistdaa(vec![0x80, 0xff])),
+        None
+    );
+    assert_eq!(iupacna_high_byte(&SeqData::Ncbi2na(vec![0x80, 0xff])), None);
+    assert_eq!(iupacna_high_byte(&SeqData::Ncbi4na(vec![0x80, 0xff])), None);
+    assert_eq!(iupacna_high_byte(&SeqData::Other), None);
+}

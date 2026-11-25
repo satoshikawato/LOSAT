@@ -60,17 +60,17 @@
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:374-376 (the sequence of
 //! the search is the mapped volume's bytes, not a copy)
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-#[cfg(any(feature = "parallel", test))]
-use std::sync::OnceLock;
-use std::sync::{Arc, Condvar, Mutex, Weak};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 
 use anyhow::Result;
 
 use crate::algorithm::common::database as shared;
 use crate::algorithm::common::db_mask_search::{SearchMask, SubjectMasks};
-use crate::seqdb::{AmbiguityRun, SeqDb, SequenceBlock};
+use crate::algorithm::common::hard_chunk_walk::{HardStarts, NcbiStart, NcbiWalk};
+use crate::seqdb::{AmbiguityRun, SeqDb, SeqDbError, SequenceBlock};
 use crate::sequence::packed_subject::{x_stored_runs, PackedNucleotide, PackedRef};
 
 /// A read of the database that failed during the search, with
@@ -163,6 +163,26 @@ impl<T> XSharedReads<T> {
     }
 }
 
+/// A failure of [`XDbStream::lead_start`]'s one-thread walk, kept in the stream's `OnceLock` so
+/// that every caller sees the same read error (`XReadError` via `search_read_error_of`) or
+/// internal error.
+enum XLeadWalkError {
+    Read(SeqDbError),
+    Other(String),
+}
+
+impl From<SeqDbError> for XLeadWalkError {
+    fn from(error: SeqDbError) -> Self {
+        Self::Read(error)
+    }
+}
+
+impl From<anyhow::Error> for XLeadWalkError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Other(error.to_string())
+    }
+}
+
 /// The database of a `-db` search, read where it is searched.
 pub(crate) struct XDbStream<'a> {
     db: &'a SeqDb,
@@ -186,6 +206,15 @@ pub(crate) struct XDbStream<'a> {
     /// The database masking of the search (`-db_soft_mask`, `-db_hard_mask`; series NP, M4b PR 2),
     /// `None` without the options (`with_mask`).
     mask: Option<SearchMask>,
+    /// With `-db_soft_mask`, NCBI's one-thread diagonal-table start of every lead sequence
+    /// (`lead_start`, series NP, M4b-T3), computed once at the first lead sequence of the run
+    /// (`word`, `window`, recorded starts or walk error). Never populated for searches without a
+    /// lead sequence.
+    lead_starts: OnceLock<(usize, i32, std::result::Result<HardStarts, XLeadWalkError>)>,
+    /// With `-db_hard_mask` (series NP, M4b-3c part 2), the diagonal-table starts computed by
+    /// `ResolvedMask::check_losat_limits` when the database contains overlapping masks (`None`
+    /// when no walk ran).
+    hard_starts: Option<HardStarts>,
     /// With `-db_hard_mask`, the sequences as the stages after the preliminary one read them
     /// (`read_stage`), by ordinal id, while something holds them.
     masked_stores: XSharedReads<PackedNucleotide>,
@@ -218,6 +247,8 @@ impl<'a> XDbStream<'a> {
             stores: XSharedReads::new(),
             blocks: XSharedReads::new(),
             mask: None,
+            lead_starts: OnceLock::new(),
+            hard_starts: None,
             masked_stores: XSharedReads::new(),
             #[cfg(any(feature = "parallel", test))]
             cuts: Mutex::new(Vec::new()),
@@ -239,6 +270,124 @@ impl<'a> XDbStream<'a> {
     /// The database masking of the search (`with_mask`).
     pub(crate) fn mask(&self) -> Option<SearchMask> {
         self.mask
+    }
+
+    /// Attaches the `-db_hard_mask` diagonal-table starts from `ResolvedMask::translated_starts`
+    /// (`None` when the database has no overlapping masks).
+    pub(crate) fn with_hard_starts(mut self, hard_starts: Option<HardStarts>) -> Self {
+        self.hard_starts = hard_starts;
+        self
+    }
+
+    /// The `-db_hard_mask` diagonal-table start for sequence `ordinal`, if this sequence runs in
+    /// order on its own table (a walked sequence or a sequence that meets unwritten entries or
+    /// clears inside it in NCBI's one-thread search; `None` for all other sequences).
+    pub(crate) fn hard_start(&self, ordinal: usize) -> Option<NcbiStart> {
+        let starts = self.hard_starts.as_ref()?;
+        let ordinal = u32::try_from(ordinal).ok()?;
+        starts.of(ordinal)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,804-855,
+    // 1318-1331,1368-1369,1377,1407-1432
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107,162-173
+    // Each search thread makes one diagonal table for the database (`s_BlastSetUpAuxStructures`),
+    // and every query batch starts from a fresh table walking the same searched sequences in
+    // database order, so a lead sequence's one-thread start (`NcbiStart`) is fixed for the run.
+    /// NCBI's one-thread diagonal-table start ([`NcbiStart`]) of lead sequence `ordinal` in a
+    /// `-db_soft_mask` translated search of word size `word` and two-hit window `window` (0 for
+    /// one-hit). On the first call of the run, walks every searched sequence in database order
+    /// with its own mask reader (`SeqDb::searched_sequences`, never `X_MASK_READERS`) and records
+    /// the start of every lead sequence; later calls across threads and query batches read that
+    /// table. Requesting an ordinal that the walk did not record is an internal error; read
+    /// failures use the preliminary stage's errors (`search_read_error_of`, `XReadError`).
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn lead_start(&self, ordinal: usize, word: usize, window: i32) -> Result<NcbiStart> {
+        let Some(mask) = self.mask.filter(|mask| !mask.hard()) else {
+            anyhow::bail!(
+                "LOSAT internal error: lead_start requested on a stream without database soft masking"
+            );
+        };
+        let (walk_word, walk_window, result) = self.lead_starts.get_or_init(|| {
+            (
+                word,
+                window,
+                self.walk_lead_starts(mask.algo_id, word, window),
+            )
+        });
+        debug_assert_eq!(
+            (*walk_word, *walk_window),
+            (word, window),
+            "word and window are fixed for a run"
+        );
+        let starts = match result {
+            Ok(starts) => starts,
+            Err(XLeadWalkError::Read(error)) => {
+                return Err(XReadError(shared::search_read_error_of(error, self.program)).into());
+            }
+            Err(XLeadWalkError::Other(message)) => anyhow::bail!("{message}"),
+        };
+        let ordinal = u32::try_from(ordinal).expect("a database ordinal id fits Uint4");
+        starts.of(ordinal).ok_or_else(|| {
+            anyhow::anyhow!(
+                "LOSAT internal error: database sequence {} was not recorded as a soft-mask lead sequence",
+                self.db.oid(ordinal)
+            )
+        })
+    }
+
+    /// Walks every searched sequence in database order with [`NcbiWalk`] and records the
+    /// [`NcbiStart`] of each `-db_soft_mask` lead sequence (`lead_start`).
+    fn walk_lead_starts(
+        &self,
+        algo_id: i32,
+        word: usize,
+        window: i32,
+    ) -> std::result::Result<HardStarts, XLeadWalkError> {
+        let mut walk = NcbiWalk::new(i32::try_from(word).unwrap_or(i32::MAX), window);
+        let mut starts = HardStarts::default();
+        let mut exits = Vec::new();
+        let mut ranges = Vec::new();
+        let mut split = crate::core::subject_split::HardSplitState::default();
+        let mut walk_error: Option<XLeadWalkError> = None;
+        let walked = self
+            .db
+            .searched_sequences(algo_id, |ordinal, length, masks| {
+                let lead =
+                    match crate::algorithm::common::translated_chunks::translated_soft_mask_exits(
+                        length,
+                        word,
+                        &mut exits,
+                        &mut split,
+                        || -> std::result::Result<Cow<'_, [(i32, i32)]>, XLeadWalkError> {
+                            let stored = masks.read()?;
+                            crate::core::subject_split::complement_masks(
+                                stored,
+                                length,
+                                &mut ranges,
+                            );
+                            Ok(Cow::Borrowed(ranges.as_slice()))
+                        },
+                    ) {
+                        Ok(lead) => lead,
+                        Err(XLeadWalkError::Read(error)) => return Err(error),
+                        Err(error @ XLeadWalkError::Other(_)) => {
+                            walk_error = Some(error);
+                            return Ok(Some(()));
+                        }
+                    };
+                let start = walk.translated(exits.iter().copied());
+                if lead {
+                    starts.push(ordinal, start);
+                }
+                Ok(None::<()>)
+            });
+        if let Some(error) = walk_error {
+            return Err(error);
+        }
+        walked?;
+        Ok(starts)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:315-320, 393-402 and

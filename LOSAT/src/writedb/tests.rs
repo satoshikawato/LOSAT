@@ -10,6 +10,7 @@ use super::makeblastdb::{run_with, MakedbArgs};
 use super::platform::Platform;
 use super::time::LocalTime;
 use super::writer::{DbVersion, Indices, WriteDb};
+use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::seqdb::SeqType;
 use crate::utils::test_dir::TempDir;
 
@@ -534,7 +535,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
-            None,
+            &ApplicationSettings::default(),
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -634,7 +635,7 @@ fn makedb_version(
     let mut stdin = stdin;
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut stdin,
@@ -1435,7 +1436,7 @@ fn makedb_logged(input: &str, base: &str, log: &mut dyn std::io::Write) -> (i32,
     let mut err = Vec::new();
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -1660,7 +1661,7 @@ fn run_v5_case(case: &V5Case) {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
-            None,
+            &ApplicationSettings::default(),
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -1907,7 +1908,7 @@ fn input_files_that_cannot_be_opened_are_skipped() {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let status = run_with(
             &args,
-            None,
+            &ApplicationSettings::default(),
             Some(&now),
             LINUX,
             &mut std::io::empty(),
@@ -1984,7 +1985,7 @@ fn run_parse_case(case: &ParseCase) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -2093,7 +2094,7 @@ fn run_fix_case(case: &FixCase) {
     let mut stdin = case.stdin;
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut stdin,
@@ -2201,7 +2202,7 @@ fn parse_seqids_v5_run(label: &str, input: &str, extra: &[&str]) -> (i32, String
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -2300,7 +2301,7 @@ fn s2_gate() {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = run_with(
                 &args,
-                None,
+                &ApplicationSettings::default(),
                 Some(&now),
                 LINUX,
                 &mut std::io::empty(),
@@ -2343,7 +2344,7 @@ fn s3a_gate() {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let status = run_with(
                 &args,
-                None,
+                &ApplicationSettings::default(),
                 Some(&now),
                 LINUX,
                 &mut std::io::empty(),
@@ -2387,7 +2388,7 @@ fn s3b_gate() {
                     };
                     run_with(
                         &args,
-                        None,
+                        &ApplicationSettings::default(),
                         Some(&now),
                         LINUX,
                         &mut std::io::empty(),

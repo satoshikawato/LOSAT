@@ -1,0 +1,19 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing every 100-th OID.
+
+Testing 1 volume(s).
+ <RUN>/cases/a/p5
+ Result=SUCCESS. No errors reported for 1 volume(s).
+Testing 1 alias(es).
+ <RUN>/cases/a/gimiss.pal
+  <RUN>/cases/a/gimiss.pal / AliasFileTest:   [ERROR] file missing.gil referenced in keyword GILIST does not exist
+  <RUN>/cases/a/gimiss.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/gimiss.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp", line 718: Error: (CSeqDBException::eInvalid) ncbi::CSeqDBFileMemMap::Init() - To be memory mapped the file must exist: '<RUN>/cases/a/missing.gil'
+
+ Result=FAILURE. 1 errors reported in 1 alias(es).
+
+Total errors: 2

@@ -136,7 +136,9 @@ impl RpsUnit {
         let (setup_total, setup_count) = if total > 0 {
             (total, count)
         } else if volume.num_oids() > 0 {
-            (i64::from(volume.protein_length(0)?), 1)
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:932-938
+            let len = volume.protein_length_i32(0)?;
+            (if len < 0 { -1 } else { i64::from(len) }, 1)
         } else {
             (0, 0)
         };

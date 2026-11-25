@@ -89,13 +89,13 @@ pub struct UngappedHit {
 // that `Int4` in two's complement; a positive length leaves every end non-negative, where the
 // `Int4` and the `u32` are the same number. These methods are the one reader and writer of the
 // `Int4` ends: the one-hit path (`blast_gapalign::get_ungapped_hsp_list_int4`, the chunk offsets
-// and merge of `blast_engine/run_impl.rs`, the first linking call of `subject_link.rs`) uses them
-// from the conversion of such an HSP until the HSPs of length 0 or less are dropped right after
-// that linking call (without sum statistics, which link nothing, before the re-evaluation:
-// `subject_link::drop_unread_without_linking`), where NCBI's re-evaluation deletes them (a length
-// of 0 or less scores 0, below every cutoff: blast_hits.c:687-699, 449-453). Nothing after that
-// sees such an HSP; without sum statistics only the E-value of the first call and the reap by it
-// read one, and neither reads its ends.
+// and merge of `blast_engine/run_impl.rs`, the first linking call of `subject_link.rs` and the
+// sort after it) uses them from the conversion of such an HSP until the HSPs of length 0 or less
+// are dropped after the re-evaluation's fetch of the subject, which NCBI makes for every list that
+// still holds an HSP (`subject_link::drop_unread_int4_inverted`), where NCBI's re-evaluation
+// deletes them (a length of 0 or less scores 0, below every cutoff: blast_hits.c:687-699,
+// 449-453). Nothing after that sees such an HSP; the reap by the preliminary E-value before it
+// reads only the E-value of one (the first linking call's, without sum statistics its own).
 // In a chunk's list, from the conversion (`blast_gapalign::convert_init_hsps_unsorted`) to the move
 // by the chunk's offset (`blast_engine/run_impl.rs`, `adjust_tblastx_chunk_subject_offsets`), the
 // fields `s_aa_start`, `s_aa_end` and `s_seed_off` hold NCBI's chunk-local `Int4` the same way: below

@@ -106,11 +106,16 @@ fn wrap_items(words: &[&str], max_width: isize) -> Vec<String> {
     lines
 }
 
+/// Computes `argparse.HelpFormatter`'s inner wrapping width (`columns - 2`) as signed `isize`.
+fn formatter_width(columns: usize) -> isize {
+    (columns.min(isize::MAX as usize) as isize) - 2
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py:144-156
 /// Formats the usage banner wrapped for a terminal of `columns` columns (`width = columns - 2`),
-/// matching Python 3.13 `argparse.HelpFormatter`.
+/// matching Python 3.13 `argparse.HelpFormatter`'s usage wrapping.
 pub(crate) fn usage_text(columns: usize) -> String {
-    let width: isize = (columns.min(isize::MAX as usize) as isize) - 2;
+    let width = formatter_width(columns);
     let prefix = format!("usage: {PROG}");
     let joined = USAGE_PARTS.join(" ");
     if (prefix.len() + 1 + joined.len()) as isize <= width {
@@ -122,19 +127,17 @@ pub(crate) fn usage_text(columns: usize) -> String {
     // the prefix exceeds 75% of `width` (exact integer check: `4 * prefix.len() > 3 * width`).
     if width <= 0 || 4 * (prefix.len() as isize) > 3 * width {
         let indent = "usage: ".len();
-        let line_width = width - indent as isize;
         out.push_str(&prefix);
         out.push('\n');
         let pad = " ".repeat(indent);
-        for line in wrap_items(&USAGE_PARTS, line_width) {
+        for line in wrap_items(&USAGE_PARTS, width - indent as isize) {
             out.push_str(&pad);
             out.push_str(&line);
             out.push('\n');
         }
     } else {
         let indent = prefix.len() + 1;
-        let line_width = width - indent as isize;
-        let lines = wrap_items(&USAGE_PARTS, line_width);
+        let lines = wrap_items(&USAGE_PARTS, width - indent as isize);
         let pad = " ".repeat(indent);
         for (idx, line) in lines.into_iter().enumerate() {
             if idx == 0 {
@@ -152,9 +155,9 @@ pub(crate) fn usage_text(columns: usize) -> String {
 
 // NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py:41,144-156
 /// Formats the complete `-h` / `--help` text wrapped for a terminal of `columns` columns,
-/// matching Python 3.13 `argparse.HelpFormatter`.
+/// matching Python 3.13 `argparse.HelpFormatter`'s full help layout.
 pub(crate) fn help_text_for_columns(columns: usize) -> String {
-    let width: isize = (columns.min(isize::MAX as usize) as isize) - 2;
+    let width = formatter_width(columns);
     let mut out = usage_text(columns);
     out.push('\n');
 
@@ -510,19 +513,16 @@ pub(crate) fn parse_with_columns(words: &[OsString], columns: usize) -> ParseOut
 
         let (opt_part, explicit_val) = split_eq(token);
 
-        // Double-dash option (`--help` and prefixes `--h`, `--he`, `--hel`, plus `--=<val>`).
+        // Exact `-h` or double-dash `--help` (and prefixes `--h`, `--he`, `--hel`, plus `--=<val>`).
+        if opt_part == b"-h"
+            || (opt_part.starts_with(b"--") && is_double_dash_help(opt_part, explicit_val))
+        {
+            return help_or_ignored(columns, explicit_val);
+        }
         if opt_part.starts_with(b"--") {
-            if is_double_dash_help(opt_part, explicit_val) {
-                return help_or_ignored(columns, explicit_val);
-            }
             push_extra(token);
             i += 1;
             continue;
-        }
-
-        // Exact `-h` (handles `-h` and `-h=<val>`).
-        if opt_part == b"-h" {
-            return help_or_ignored(columns, explicit_val);
         }
 
         // Single-dash multi-character options and abbreviations.

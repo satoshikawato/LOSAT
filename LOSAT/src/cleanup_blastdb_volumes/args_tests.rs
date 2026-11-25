@@ -99,14 +99,17 @@ fn help_and_usage_wrap_by_terminal_columns() {
          \x20      [-dry-run] [-version] [-verbose]\n"
     );
     // 46 columns keeps [-h] on the first line (indent 34).
+    let indent34 = " ".repeat(34);
     assert_eq!(
         usage_text(46),
-        "usage: cleanup-blastdb-volumes.py [-h]\n\
-         \x20                                 -db DB\n\
-         \x20                                 -dbtype {prot,nucl}\n\
-         \x20                                 [-dry-run]\n\
-         \x20                                 [-version]\n\
-         \x20                                 [-verbose]\n"
+        format!(
+            "usage: cleanup-blastdb-volumes.py [-h]\n\
+             {indent34}-db DB\n\
+             {indent34}-dbtype {{prot,nucl}}\n\
+             {indent34}[-dry-run]\n\
+             {indent34}[-version]\n\
+             {indent34}[-verbose]\n"
+        )
     );
     // 40 columns wraps usage and options column.
     assert_eq!(

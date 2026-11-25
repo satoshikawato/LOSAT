@@ -6,8 +6,8 @@
 //! This module provides the nucleotide encodings of NCBI BLAST that the engines use:
 //! - IUPAC letters to BLASTNA codes (`encode_iupac_to_blastna`,
 //!   `encode_iupac_to_blastna_into`) and to ncbi4na codes (`iupacna_to_ncbi4na`)
-//! - NCBI's `CRandom` (`NcbiRandom`) and the resolution of an ambiguous ncbi4na letter
-//!   with it (`resolve_ncbi4na_base`)
+//! - resolution of an ambiguous ncbi4na letter with NCBI's `CRandom` (`utils::random_gen::NcbiRandom`,
+//!   `resolve_ncbi4na_base`)
 //! - the 2-bit packed subject (ncbi2na) built in one pass (`encode_subject_ncbi2na_packed`)
 //!
 //! Test-only (`#[cfg(test)]`): `resolve_ncbi4na_to_ncbi2na`, the two-pass form that is
@@ -25,6 +25,8 @@
 //! - Base 1: bits 4-5 (shift 4)
 //! - Base 2: bits 2-3 (shift 2)
 //! - Base 3: bits 0-1 (shift 0)
+
+use crate::utils::random_gen::NcbiRandom;
 
 /// Compression ratio: 4 nucleotides per byte
 pub const COMPRESSION_RATIO: usize = 4;
@@ -98,45 +100,6 @@ pub fn iupacna_to_ncbi4na(letter: u8) -> Option<u8> {
         b'-' => 0,
         _ => return None,
     })
-}
-
-// NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:98,227-230,287-308 and
-// c++/include/util/random_gen.hpp:224-241
-/// NCBI's `CRandom` (the lagged Fibonacci generator), which resolves the ambiguous
-/// letters of a subject (`resolve_ncbi4na_to_ncbi2na`).
-pub(crate) struct NcbiRandom {
-    state: [u32; 33],
-    j: usize,
-    k: usize,
-}
-
-impl NcbiRandom {
-    pub(crate) fn new(seed: u32) -> Self {
-        let mut state = [0; 33];
-        state[0] = seed;
-        for i in 1..state.len() {
-            state[i] = state[i - 1]
-                .wrapping_mul(1_103_515_245)
-                .wrapping_add(12_345);
-        }
-        let mut random = Self {
-            state,
-            j: 12,
-            k: 32,
-        };
-        for _ in 0..330 {
-            random.get_rand();
-        }
-        random
-    }
-
-    pub(crate) fn get_rand(&mut self) -> u32 {
-        let value = self.state[self.k].wrapping_add(self.state[self.j]);
-        self.state[self.k] = value;
-        self.j = if self.j == 0 { 32 } else { self.j - 1 };
-        self.k = if self.k == 0 { 32 } else { self.k - 1 };
-        value >> 1
-    }
 }
 
 /// The ncbi2na codes (0 A, 1 C, 2 G, 3 T) of an ncbi4na sequence, as NCBI makes the

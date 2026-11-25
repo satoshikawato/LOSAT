@@ -101,6 +101,10 @@ pub enum WriteDbError {
     /// NCBI's `std::invalid_argument` with its `what()`: `BuildLMDBFileName` of an empty
     /// database name (`writer::build_lmdb_file_name`).
     InvalidArgument(&'static str),
+    /// NCBI's `std::length_error` with its `what()`: `CWriteDB_Impl::AddSequence` assigning a
+    /// protein sequence whose signed 32-bit `GetRawSeqAndAmbig` length wrapped negative
+    /// (`>= 2^31` residues) to `std::string`.
+    LengthError(&'static str),
     /// LOSAT's refusal of given definition lines whose first line has no Seq-id in a database
     /// without parsed Seq-ids: NCBI's writer puts the `gnl|BL_ORD_ID` id past the end of the
     /// empty list (undefined behaviour). makeprofiledb gives such lines (a query without ids);
@@ -185,7 +189,9 @@ impl WriteDbError {
                 DATABASE_CREATION_ERROR,
                 &writer::gi_only_between_keys_message(*oid, name),
             ),
-            WriteDbError::InvalidArgument(what) => text("Error: ", what.as_bytes()),
+            WriteDbError::InvalidArgument(what) | WriteDbError::LengthError(what) => {
+                text("Error: ", what.as_bytes())
+            }
             WriteDbError::OrdinalIdWithoutIds => text(
                 "losat makeblastdb: ",
                 b"a first definition line without a Seq-id, whose gnl|BL_ORD_ID id NCBI's writer \

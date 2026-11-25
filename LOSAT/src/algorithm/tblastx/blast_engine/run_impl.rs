@@ -5491,8 +5491,9 @@ fn search_query_batch<S: TbxScore>(
         // reevaluates ambiguities and calls BLAST_LinkHsps again.
         //
         // A list of the one-hit word finder (`-window_size 0`) that holds an HSP of length 0 or
-        // less links with NCBI's `Int4` ends, and those HSPs are dropped after it; without sum
-        // statistics the HSPs get their own E-values (`subject_link::first_link_subject_hits`).
+        // less links with NCBI's `Int4` ends and keeps those HSPs up to the re-evaluation's fetch;
+        // without sum statistics the HSPs get their own E-values
+        // (`subject_link::first_link_subject_hits`).
         x_link_timer.arm(LinkCall::First);
         let prelinked_ungapped_hits =
             subject_link::first_link_subject_hits(&link_args, combined_ungapped_hits, window);
@@ -5504,6 +5505,7 @@ fn search_query_batch<S: TbxScore>(
             prelinked_ungapped_hits,
             &link_args,
             &stage_args,
+            window,
             &mut x_lap,
         );
         // The re-evaluation's fetch of a subject with HSPs, which the negative seqid list may
@@ -5535,9 +5537,9 @@ fn search_query_batch<S: TbxScore>(
         } else {
             (&s_frames, s_frames_report)
         };
-        // Without sum statistics, the HSPs of length 0 or less, which NCBI's re-evaluation
-        // deletes without reading them (`subject_link::drop_unread_without_linking`).
-        subject_link::drop_unread_without_linking(&link_args, window, &mut prelinked_ungapped_hits);
+        // The HSPs of length 0 or less, which NCBI's re-evaluation deletes without reading them
+        // (`subject_link::drop_unread_int4_inverted`).
+        subject_link::drop_unread_int4_inverted(window, &mut prelinked_ungapped_hits);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2699-2705
         // The re-evaluation of HSPs on a subject (its `-subject_loc` range) of fewer than 12 bases
         // reads a frame NCBI never translates (`subject_loop::SubjectEmit::refuse_untranslated_frame`):

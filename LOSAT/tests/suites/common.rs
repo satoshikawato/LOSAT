@@ -167,6 +167,8 @@ mod seq_id_first_line;
 mod seqalign_samples;
 #[path = "../serial_verify_read.rs"]
 mod serial_verify_read;
+#[path = "../strategy_stream_f1c1.rs"]
+mod strategy_stream_f1c1;
 #[path = "../suite_layout.rs"]
 mod suite_layout;
 #[path = "../syntax_cases_cli.rs"]

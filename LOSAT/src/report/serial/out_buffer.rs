@@ -96,6 +96,36 @@ pub(super) enum Piece {
     End,
 }
 
+/// One write of NCBI's object-stream output buffer (`COStreamBuffer::FlushBuffer`) to its
+/// underlying stream: `size` bytes written, leaving `leave` bytes in the buffer (`m_BackLimit`
+/// for an interior partial flush, `0` for `EndOfWrite` and the ASN.1 text separator).
+///
+/// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:880-898
+/// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:1138-1148
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BufferPiece {
+    pub size: usize,
+    pub leave: usize,
+    /// When NCBI's `FlushBuffer` with `false` runs inside a constructed `CObjectOStream::ByteBlock`
+    /// (`WriteBytes` or `EndBytes`), stack unwinding runs `~ByteBlock()` -> `Unended` ->
+    /// `InGoodState` -> `SetFailFlags` while `CObjectOStreamAsn` and its object stack are still
+    /// alive, posting `line N: <trace>: write fault` instead of `~CObjectOStream::Close`'s
+    /// `byte P: stack is empty: write fault`.
+    pub byte_block_trace: Option<String>,
+}
+
+impl BufferPiece {
+    // NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:880-898
+    /// Creates a `BufferPiece` outside any active `CObjectOStream::ByteBlock`.
+    pub fn new(size: usize, leave: usize) -> Self {
+        Self {
+            size,
+            leave,
+            byte_block_trace: None,
+        }
+    }
+}
+
 /// NCBI's buffer of one document (each document has a stream of its own,
 /// `serialobject.cpp` `WriteObject`).
 #[derive(Clone, Debug)]
@@ -107,10 +137,13 @@ pub(super) struct OutBuffer {
     used: usize,
     /// The bytes of the document written to the output (`m_BufferPos`).
     written: u64,
-    /// The size of each write of the buffer to the output (the `write` of `m_Output` with
-    /// `count` bytes of `m_Buffer`), in order: NCBI's insertions of the document into the
-    /// report's stream (`pieces`).
-    pieces: Vec<usize>,
+    /// Each write of the buffer to the output (the `write` of `m_Output` with `count` bytes of
+    /// `m_Buffer`), in order, together with the bytes left behind in the buffer (`leave`): NCBI's
+    /// insertions of the document into its output stream (`pieces`).
+    pieces: Vec<BufferPiece>,
+    /// Start index in `pieces` of pieces pushed inside a constructed `CObjectOStream::ByteBlock`
+    /// during the most recent `put` call (`usize::MAX` when none).
+    byte_block_from: usize,
     /// The stream's position at the first of them (`first_write`).
     first_write: Option<u64>,
 }
@@ -123,14 +156,32 @@ impl OutBuffer {
             used: 0,
             written: 0,
             pieces: Vec::new(),
+            byte_block_from: usize::MAX,
             first_write: None,
         }
     }
 
     /// The writes of the buffer to its output so far (`FlushBuffer`, `EndOfWrite`), each one
-    /// insertion of NCBI's into the output stream: the sizes, in order.
-    pub(super) fn pieces(&self) -> &[usize] {
+    /// insertion of NCBI's into the output stream with the bytes left behind in the buffer.
+    pub(super) fn pieces(&self) -> &[BufferPiece] {
         &self.pieces
+    }
+
+    // No NCBI counterpart: mutable slice access so `Traced::follow` can attach the live stack
+    // trace to pieces flushed inside a constructed `CObjectOStream::ByteBlock`.
+    pub(super) fn pieces_mut(&mut self) -> &mut [BufferPiece] {
+        &mut self.pieces
+    }
+
+    // No NCBI counterpart: index of the first piece pushed inside a constructed `ByteBlock`
+    // during the last `put` call (`usize::MAX` when none).
+    pub(super) fn byte_block_from(&self) -> usize {
+        self.byte_block_from
+    }
+
+    /// The byte sizes of [`Self::pieces`], in order.
+    pub(super) fn piece_sizes(&self) -> Vec<usize> {
+        self.pieces.iter().map(|piece| piece.size).collect()
     }
 
     /// The bytes of the document that NCBI has written to its output.
@@ -142,7 +193,7 @@ impl OutBuffer {
     fn end_of_write(&mut self) {
         if self.used > 0 {
             self.note_first_write(self.used);
-            self.pieces.push(self.used);
+            self.pieces.push(BufferPiece::new(self.used, 0));
         }
         self.written += self.used as u64;
         self.used = 0;
@@ -171,7 +222,7 @@ impl OutBuffer {
         let count = self.used - leave;
         if count > 0 {
             self.note_first_write(self.used);
-            self.pieces.push(count);
+            self.pieces.push(BufferPiece::new(count, leave));
         }
         self.written += count as u64;
         self.used = leave;
@@ -264,11 +315,12 @@ impl OutBuffer {
         posts: &[usize],
         written: &mut Vec<u64>,
     ) {
+        self.byte_block_from = usize::MAX;
         if piece == Piece::End && self.stream == Stream::Json {
             // `EndBlock` and `PutEol`, then `EndOfWrite`'s `FlushBuffer()`.
             self.json_markup(bytes);
             if self.used > 0 {
-                self.pieces.push(self.used);
+                self.pieces.push(BufferPiece::new(self.used, 0));
             }
             self.written += self.used as u64;
             self.used = 0;
@@ -287,7 +339,7 @@ impl OutBuffer {
             let count = self.used + bytes.len();
             if count > 0 {
                 self.note_first_write(count);
-                self.pieces.push(count);
+                self.pieces.push(BufferPiece::new(count, 0));
             }
             self.written += count as u64;
             self.used = 0;
@@ -402,12 +454,26 @@ impl OutBuffer {
             // (objostrasn.cpp:413-444). Every call puts one byte, so the encoder's bytes before a
             // post count NCBI's calls before it.
             Piece::Str => self.ones_with_posts(bytes.len(), posts, written),
-            // `PutChar` of a single quote, `WrapAt` at 78 with `false` and two `PutChar`s per byte,
-            // then `WrapAt` and `PutString` of `"'H"` (objostrasn.cpp:868-895).
+            // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:868-895
+            // NCBI reference (598d8ae6): c++/include/serial/impl/objostr.inl:285-289
+            // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:1128-1148
+            // `BeginBytes` writes the opening single quote inside `ByteBlock`'s constructor (so a
+            // flush there does not invoke `~ByteBlock`); `WriteBytes` (`WrapAt` at 78 with `false`
+            // and two `PutChar`s per byte) and `EndBytes` (`WrapAt` and `PutString` of `"'H"`) run
+            // inside the constructed `ByteBlock`.
             Piece::Octets => {
+                if !bytes.is_empty() {
+                    self.skip(1);
+                }
+                self.byte_block_from = self.pieces.len();
                 let end = bytes.len().saturating_sub(2);
-                self.skip_ones(end);
-                self.skip(bytes.len() - end);
+                if end > 1 {
+                    self.skip_ones(end - 1);
+                }
+                let tail = end.max(1);
+                if bytes.len() > tail {
+                    self.skip(bytes.len() - tail);
+                }
             }
             Piece::End => {}
         }
@@ -720,7 +786,7 @@ pub(crate) fn xml_pieces(document: &[u8], is_string: impl Fn(&[u8]) -> bool) -> 
         usize::MAX,
     );
     buffer.end_of_write();
-    buffer.pieces
+    buffer.piece_sizes()
 }
 
 /// NCBI's writes of its buffer of the whole `document` of its JSON stream (`CObjectOStreamJson`:
@@ -755,7 +821,7 @@ pub(crate) fn json_pieces(document: &[u8]) -> Vec<usize> {
         }
     }
     buffer.end_of_write();
-    buffer.pieces
+    buffer.piece_sizes()
 }
 
 /// The calls of NCBI's XML stream for `document` (see `xml_written_at`), with what it had written

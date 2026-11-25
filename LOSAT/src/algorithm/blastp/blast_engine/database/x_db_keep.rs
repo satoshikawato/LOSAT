@@ -151,7 +151,7 @@ fn x_read_search_block_into(
     program: &str,
 ) -> Result<SequenceBlock> {
     let block = db
-        .x_read_block_into(range, kept)
+        .x_read_protein_search_block_into(range, kept)
         .map_err(|error| crate::algorithm::common::database::search_read_error(error, program))?;
     prepare_search_block(&block, db.oid_map(), program)?;
     Ok(block)

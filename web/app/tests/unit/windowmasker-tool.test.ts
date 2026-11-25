@@ -15,11 +15,14 @@ import {
   type ToolRunResult,
 } from 'losat/ports';
 import { Coordinator, isToolRun, type SearchRequest, type ToolRequest } from '../../src/application/coordinator';
+import { CountsLoader } from '../../src/application/counts';
 import { SearchDraft } from '../../src/application/draft';
 import { ResultsBrowser } from '../../src/application/results';
 import { SessionFiles } from '../../src/application/session-files';
-import { countsLockName } from '../../src/domain/counts';
+import { countsLockName, type CountsMadeMeta } from '../../src/domain/counts';
 import { webCountsLocks } from '../../src/infra/browser/counts-locks';
+import { OpfsCountsStore } from '../../src/infra/data/counts-store';
+import { FakeCountsDownloader } from '../../src/infra/fake/fake-counts';
 import type { CountsLocks } from '../../src/ports/counts';
 import { MemoryOpfs } from './support/memory-opfs';
 import { ToolDraft } from '../../src/application/tool-draft';
@@ -1159,5 +1162,169 @@ describe('tool runs that read saved counts (-ustat from a saved copy)', () => {
     for (let i = 0; i < 100 && finishes.length < 2; i++) await sleep(1);
     finishes[1]!();
     await waitTerminal(coordinator, plain);
+  });
+
+  const expectValid = (draft: ToolDraft) => expect(draft.state.get().validation).toEqual({ state: 'ok' });
+  const makeTrackedDraft = (
+    engine: EngineGateway & ToolEngine,
+    data: DataService,
+    coordinator: Coordinator,
+    readSavedCounts?: (taxid: number) => Promise<File | undefined>,
+  ) => {
+    const calls: ToolRequest[][] = [];
+    const draft = new ToolDraft({
+      engine,
+      data,
+      enqueueToolAll: (requests) => {
+        calls.push([...requests]);
+        return coordinator.enqueueToolAll(requests);
+      },
+      ...(readSavedCounts === undefined ? {} : { readSavedCounts }),
+      debounceMs: 0,
+    });
+    return { draft, calls };
+  };
+  const submitAndComplete = async (draft: ToolDraft, coordinator: Coordinator) => {
+    const res = await draft.submit();
+    expect(res.ok).toBe(true);
+    expectValid(draft);
+    expect(draft.state.get().message).toBeUndefined();
+    const run = await waitTerminal(coordinator, res.runIds![0]!);
+    expect(run.status).toBe('completed');
+    return run;
+  };
+  const readyDraft = async (draft: ToolDraft, stage: 'mk_counts' | 'mask', taxid?: number, size?: number) => {
+    draft.ensureLoaded();
+    await sleep(20);
+    if (stage === 'mask') {
+      draft.setStage('mask');
+      if (taxid !== undefined && size !== undefined) draft.setUstatSaved(taxid, size);
+    }
+    draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa')]);
+    for (let i = 0; i < 40 && draft.state.get().fastaFiles.some((f) => f.status !== 'ready'); i++) await sleep(10);
+    await draft.runValidationNow();
+    expectValid(draft);
+  };
+
+  it('keeps validation ok on a saved-counts lock refusal so the next submit queues the run', async () => {
+    const opfs = new MemoryOpfs();
+    const counts = new OpfsCountsStore(opfs.root as unknown as FileSystemDirectoryHandle, opfs, undefined, () => Date.UTC(2026, 10, 25));
+    const made: CountsMadeMeta = { run: 1, argv: ['windowmasker', '-mk_counts'], inputs: [], engineBuild: 'test', madeAt: 10_000 };
+    const initTok = (await counts.beginCounts(562, { made, size: 6, from: 0, replace: true }))!;
+    await counts.appendCounts(initTok, new TextEncoder().encode('counts'));
+    await counts.finishCounts(initTok);
+
+    const engine = new FakeEngine();
+    const { coordinator, data } = makeCoordinator(engine, undefined, webCountsLocks(opfs));
+    let writeTok: string | undefined;
+    const { draft, calls } = makeTrackedDraft(engine, data, coordinator, async (taxid) => {
+      const file = (await counts.readCounts(taxid))?.file;
+      // Simulate a writer starting after resolveCountsChoice read the file, before holdCounts runs.
+      if (calls.length === 0 && writeTok === undefined) {
+        writeTok = (await counts.beginCounts(562, { made, size: 6, from: 0, replace: true }))!;
+      }
+      return file;
+    });
+    await readyDraft(draft, 'mask', 562, 6);
+
+    const first = await draft.submit();
+    const busyText = 'The saved counts for 562 are being written or removed. Run again when that ends.';
+    expect(first).toEqual({ ok: false, message: busyText });
+    expect(calls).toHaveLength(1);
+    expectValid(draft);
+    expect(draft.state.get().message).toEqual({ kind: 'error', text: busyText });
+
+    // Release the exclusive lock and click Run LOSAT again without changing any option.
+    await counts.appendCounts(writeTok!, new TextEncoder().encode('counts'));
+    await counts.finishCounts(writeTok!);
+    await submitAndComplete(draft, coordinator);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('still records an argv refusal from enqueueToolAll in validation', async () => {
+    const base = new FakeEngine();
+    let refuseOnEnqueue = false;
+    const engine = stubEngine(base, {
+      validateTool: async (argv) =>
+        refuseOnEnqueue
+          ? { ok: false, message: 'Error: Invalid argument "unit"' }
+          : base.validateTool(argv),
+    });
+    const { coordinator, data } = makeCoordinator(engine);
+    const { draft, calls } = makeTrackedDraft(engine, data, coordinator);
+    await readyDraft(draft, 'mk_counts');
+
+    refuseOnEnqueue = true;
+    const first = await draft.submit();
+    expect(first).toEqual({ ok: false, message: 'Error: Invalid argument "unit"' });
+    expect(calls).toHaveLength(1);
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: 'Error: Invalid argument "unit"' });
+    expect(draft.state.get().message).toEqual({ kind: 'error', text: 'Error: Invalid argument "unit"' });
+
+    // Without changing any option, a second submit stops at the recorded argv validation.
+    const second = await draft.submit();
+    expect(second).toEqual({ ok: false, message: 'Error: Invalid argument "unit"' });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('reads the new saved copy on Run again after a Replace invalidated the earlier handle', async () => {
+    const opfs = new MemoryOpfs();
+    const store = new OpfsCountsStore(opfs.root as unknown as FileSystemDirectoryHandle, opfs, undefined, () => Date.UTC(2026, 10, 25));
+    const loader = new CountsLoader({
+      downloader: new FakeCountsDownloader(store, {}),
+      store,
+      draft: { setCounts: () => undefined },
+    });
+    const made1: CountsMadeMeta = { run: 1, argv: ['windowmasker', '-mk_counts'], inputs: [], engineBuild: 'test', madeAt: 10_000 };
+    const made2: CountsMadeMeta = { run: 2, argv: ['windowmasker', '-mk_counts'], inputs: [], engineBuild: 'test', madeAt: 20_000 };
+    expect((await loader.saveMade(562, new File(['v1-counts'], 'v1.obinary'), made1)).ok).toBe(true);
+
+    const seenCounts: string[] = [];
+    const base = new FakeEngine();
+    const engine = stubEngine(base, {
+      async runTool(argv, opts) {
+        const entry = opts?.directory?.find((f) => f.name === 'windowmasker/562/wmasker.obinary');
+        if (entry !== undefined) seenCounts.push(await entry.file.text());
+        return base.runTool(argv, opts);
+      },
+    });
+    const locks = webCountsLocks(opfs);
+    const { coordinator, data } = makeCoordinator(engine, undefined, locks);
+
+    let readCount = 0;
+    const { draft } = makeTrackedDraft(engine, data, coordinator, async (taxid) => {
+      readCount++;
+      const file = (await loader.readSavedFile(taxid))?.file;
+      if (readCount === 1 && file !== undefined) {
+        // Replace the stored copy after resolveCountsChoice opened v1; simulate browser invalidating the old handle.
+        expect((await loader.saveMade(taxid, new File(['v2-replaced-counts!'], 'v2.obinary'), made2, { replace: true })).ok).toBe(true);
+        Object.defineProperty(file, 'slice', { value: () => new Blob([]) });
+      }
+      return file;
+    });
+    await readyDraft(draft, 'mask', 562, 9);
+
+    const first = await draft.submit();
+    const replacedText = 'The saved counts for 562 were replaced or removed after they were chosen. Run again.';
+    expect(first).toEqual({ ok: false, message: replacedText });
+    expectValid(draft);
+    expect(draft.state.get().message).toEqual({ kind: 'error', text: replacedText });
+
+    // Clicking Run LOSAT again without re-choosing reads the replacement copy from storage and succeeds.
+    const run = await submitAndComplete(draft, coordinator);
+    expect(seenCounts).toEqual(['v2-replaced-counts!']);
+    if (isToolRun(run)) {
+      const savedEntry = run.snapshot.directory.find((entry) => entry.name === 'windowmasker/562/wmasker.obinary');
+      expect(savedEntry?.size).toBe('v2-replaced-counts!'.length);
+    }
+
+    // If the saved copy is later removed, Run again reports it cleanly without marking argv invalid.
+    await loader.delete(562);
+    const third = await draft.submit();
+    expect(third).toEqual({
+      ok: false,
+      message: 'The saved counts for taxonomy ID 562 are no longer available.',
+    });
+    expectValid(draft);
   });
 });

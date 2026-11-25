@@ -183,8 +183,14 @@ export interface CoordinatorDeps {
   readonly countsLocks?: CountsLocks;
 }
 
-/** Whether a request was queued, or why not (a refusal of its argv is the validation's). */
-type Queued = { readonly ok: true } | { readonly ok: false; readonly message: string };
+/**
+ * Whether a request was queued, or why not: `'argv'` for an invalid or unstartable request (the engine's
+ * validation or start, or missing/unreadable inputs), `'counts'` for a transient saved-counts lock or
+ * replaced-file refusal (`holdCounts`, not a property of the draft's argv).
+ */
+type Queued =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: 'argv' | 'counts'; readonly message: string };
 export type EnqueueResult = Queued & { readonly runId?: string };
 export type EnqueueAllResult = Queued & { readonly runIds?: readonly string[] };
 
@@ -244,7 +250,7 @@ export class Coordinator {
    * group ID, and `cancelGroup` cancels them together.
    */
   async enqueueAll(requests: readonly SearchRequest[]): Promise<EnqueueAllResult> {
-    if (requests.length === 0) return { ok: false, message: 'There is nothing to search.' };
+    if (requests.length === 0) return { ok: false, reason: 'argv', message: 'There is nothing to search.' };
     // One at a time: a made input is named by its run's number and time, which are known before the argv is built (`inputName`) and
     // must stay the run's own until its snapshot is made.
     const turn = this.enqueueTurn.then(() => this.enqueueInTurn(requests));
@@ -260,7 +266,7 @@ export class Coordinator {
 
   /** Validates every tool request and queues them together in the single queue shared with searches. */
   async enqueueToolAll(requests: readonly ToolRequest[]): Promise<EnqueueAllResult> {
-    if (requests.length === 0) return { ok: false, message: 'There is nothing to run.' };
+    if (requests.length === 0) return { ok: false, reason: 'argv', message: 'There is nothing to run.' };
     const turn = this.enqueueTurn.then(() => this.enqueueToolInTurn(requests));
     this.enqueueTurn = turn.then(() => undefined, () => undefined);
     return turn;
@@ -273,7 +279,7 @@ export class Coordinator {
 
   private async enqueueToolInTurn(requests: readonly ToolRequest[]): Promise<EnqueueAllResult> {
     if (this.deps.engine.validateTool === undefined || this.deps.engine.runTool === undefined) {
-      return { ok: false, message: 'This engine does not support running tools.' };
+      return { ok: false, reason: 'argv', message: 'This engine does not support running tools.' };
     }
     const directories: Array<readonly DirectoryFile[]> = [];
     // `WasmEngine.validateTool` executes on the Engine worker behind any active run (`inTurn`).
@@ -287,9 +293,9 @@ export class Coordinator {
         try {
           verdict = await this.deps.engine.validateTool(request.argv, { directory });
         } catch (error) {
-          return { ok: false, message: uncheckedOptions(error) };
+          return { ok: false, reason: 'argv', message: uncheckedOptions(error) };
         }
-        if (!verdict.ok) return verdict;
+        if (!verdict.ok) return { ok: false, reason: 'argv', message: verdict.message };
       }
       directories.push(directory);
     }
@@ -320,7 +326,7 @@ export class Coordinator {
         ),
       ),
     );
-    if (refused !== undefined) return { ok: false, message: refused };
+    if (refused !== undefined) return { ok: false, reason: 'counts', message: refused };
     this.nextNumber += snapshots.length;
     this.setRuns([
       ...this.state.get().runs,
@@ -358,7 +364,7 @@ export class Coordinator {
         subjectName = inputName(request.subject, 'subject', run);
         argv = buildArgv({ program: request.program, queryName, subjectName, parameters: request.parameters, extra: request.extra ?? [] });
       } catch (error) {
-        return { ok: false, message: errorMessage(error) };
+        return { ok: false, reason: 'argv', message: errorMessage(error) };
       }
       // NCBI's application start first: the name of the registry file that the argv reads, and
       // whether the run is a dry run (line RG E1w-3b).
@@ -366,9 +372,9 @@ export class Coordinator {
       try {
         start = await this.deps.engine.start(argv);
       } catch (error) {
-        return { ok: false, message: uncheckedOptions(error) };
+        return { ok: false, reason: 'argv', message: uncheckedOptions(error) };
       }
-      if (!start.ok) return start;
+      if (!start.ok) return { ok: false, reason: 'argv', message: start.message };
       let conffile: Prepared['conffile'];
       const { dryRun, prints } = start.start;
       // The file chosen for the argv's -conffile, under its name (`registryName`: none for `-conffile=`).
@@ -381,16 +387,16 @@ export class Coordinator {
           const { file, sha256 } = await read;
           conffile = { snapshot: Object.freeze({ name: conffileName, fileName: chosen.name, size: file.size, sha256 }), file };
         } catch (error) {
-          return { ok: false, message: unreadableConffile(conffileName, chosen.name, error) };
+          return { ok: false, reason: 'argv', message: unreadableConffile(conffileName, chosen.name, error) };
         }
       }
       let validation: ValidationResult;
       try {
         validation = await this.deps.engine.validate(argv, conffile === undefined ? undefined : { name: conffile.snapshot.name, file: conffile.file });
       } catch (error) {
-        return { ok: false, message: uncheckedOptions(error) };
+        return { ok: false, reason: 'argv', message: uncheckedOptions(error) };
       }
-      if (!validation.ok) return validation;
+      if (!validation.ok) return { ok: false, reason: 'argv', message: validation.message };
       prepared.push({ request, number, queuedAt, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders: validation.dataLoaders });
     }
 
@@ -422,7 +428,7 @@ export class Coordinator {
         query = prints !== null ? await this.noInput(queryName) : await this.snapshotInput('Query', request.query, queryName, reader('query'), made);
         subject = prints !== null ? await this.noInput(subjectName) : await this.snapshotInput('Subject', request.subject, subjectName, reader('subject'), made);
       } catch (error) {
-        return { ok: false, message: failureText(error) };
+        return { ok: false, reason: 'argv', message: failureText(error) };
       }
       const title = request.title?.trim();
       // The run reads the file under the name that its argv gives the option.
@@ -465,7 +471,7 @@ export class Coordinator {
         return taxid === undefined || file === undefined ? [] : [{ runId: snapshot.runId, taxid, file }];
       }),
     );
-    if (refused !== undefined) return { ok: false, message: refused };
+    if (refused !== undefined) return { ok: false, reason: 'counts', message: refused };
     // The numbers that the names were made with are taken only now, so that a request that fails leaves no gap.
     this.nextNumber += snapshots.length;
     const numbered = snapshots;

@@ -19,7 +19,7 @@ import {
 import type { DataGateway } from '../ports/data';
 import { failureText } from './availability';
 import type { EnqueueAllResult, ToolDirectoryFile, ToolRequest } from './coordinator';
-import type { InputMode, Validation } from './draft';
+import type { InputMode, SubmitResult, Validation } from './draft';
 import { SessionFiles } from './session-files';
 import { Store } from './store';
 
@@ -454,7 +454,7 @@ export class ToolDraft {
   }
 
   /** Submits the current WindowMasker job(s) to the shared Coordinator queue. */
-  async submit(): Promise<EnqueueAllResult> {
+  async submit(): Promise<SubmitResult> {
     if (this.state.get().submitting) return { ok: false, message: 'A submission is already in progress.' };
     this.set({ submitting: true, message: undefined });
     try {
@@ -512,6 +512,10 @@ export class ToolDraft {
         }
         const result = await this.deps.enqueueToolAll(requests);
         if (!result.ok) {
+          if (result.reason === 'counts') {
+            this.reportError(result.message);
+            return { ok: false, message: result.message };
+          }
           const text = toolValidationSummary(result.message);
           this.set({
             validation: { state: 'invalid', message: result.message },

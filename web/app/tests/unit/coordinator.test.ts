@@ -316,6 +316,7 @@ describe('Coordinator', () => {
     const { coordinator } = setup(engine);
     expect(await coordinator.enqueue(request)).toEqual({
       ok: false,
+      reason: 'argv',
       message: 'LOSAT could not download its engine file /engine/serial.wasm (network error). Reload the page.',
     });
     const reading = new ManualEngine();
@@ -324,6 +325,7 @@ describe('Coordinator', () => {
     );
     expect(await other.enqueue(request)).toEqual({
       ok: false,
+      reason: 'argv',
       message: 'LOSAT could not download its engine file /engine/serial.wasm (network error). Reload the page.',
     });
   });
@@ -379,6 +381,7 @@ describe('Coordinator', () => {
     const { coordinator } = setup(new ManualEngine());
     expect(await coordinator.enqueue({ ...request, query: { text: '>q\n>?2147483647\nA\n' } })).toEqual({
       ok: false,
+      reason: 'argv',
       message: "Query FASTA: a query record longer than 2147483647 letters is not supported by LOSAT's BLASTN",
     });
     expect(coordinator.state.get().runs).toHaveLength(0);
@@ -519,7 +522,7 @@ describe('Coordinator', () => {
     const engine = new ManualEngine();
     engine.validate = async () => ({ ok: false, message: 'bad option' });
     const { coordinator } = setup(engine);
-    expect(await coordinator.enqueue(request)).toEqual({ ok: false, message: 'bad option' });
+    expect(await coordinator.enqueue(request)).toEqual({ ok: false, reason: 'argv', message: 'bad option' });
     expect(coordinator.state.get().runs).toHaveLength(0);
   });
 
@@ -638,6 +641,7 @@ describe('Coordinator', () => {
       Promise.reject(new DOMException('The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.', 'NotReadableError'));
     expect(await coordinator.enqueue({ ...request, extra: ['-conffile', 'settings.ini'], conffile: chosen })).toEqual({
       ok: false,
+      reason: 'argv',
       message:
         'The file chosen for -conffile settings.ini (my settings.ini) could not be read: The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired. Choose it again.',
     });
@@ -650,7 +654,11 @@ describe('Coordinator', () => {
     const engine = new ManualEngine();
     engine.startResult = { ok: false, message: 'the engine cannot start this argv' };
     const { coordinator } = setup(engine);
-    expect(await coordinator.enqueue({ ...request, extra: ['-unstartable'] })).toEqual({ ok: false, message: 'the engine cannot start this argv' });
+    expect(await coordinator.enqueue({ ...request, extra: ['-unstartable'] })).toEqual({
+      ok: false,
+      reason: 'argv',
+      message: 'the engine cannot start this argv',
+    });
     expect(engine.registries).toEqual([]);
     expect(coordinator.state.get().runs).toHaveLength(0);
   });
@@ -977,7 +985,7 @@ describe('Coordinator', () => {
       argv?.includes('-word_size') === true ? { ok: false, message: 'bad word size' } : { ok: true, dataLoaders: true };
     const { coordinator } = setup(engine);
     const bad = { ...request, parameters: [['-word_size', '1']] as const };
-    expect(await coordinator.enqueueAll([request, bad])).toEqual({ ok: false, message: 'bad word size' });
+    expect(await coordinator.enqueueAll([request, bad])).toEqual({ ok: false, reason: 'argv', message: 'bad word size' });
     expect(coordinator.state.get().runs).toHaveLength(0);
     const runId = (await coordinator.enqueue(request)).runId!;
     expect(viewOf(coordinator, runId)!.snapshot.number).toBe(1);
@@ -1151,6 +1159,7 @@ describe('the saved counts of a taxonomy ID, held by the runs that read them', (
     const token = await counts.beginCounts(TAXID, { made, size: 4, from: 0, replace: true });
     expect(await coordinator.enqueue(counted())).toEqual({
       ok: false,
+      reason: 'counts',
       message: 'The saved counts for 562 are being written or removed. Run again when that ends.',
     });
     expect(coordinator.state.get().runs).toHaveLength(0);
@@ -1161,6 +1170,7 @@ describe('the saved counts of a taxonomy ID, held by the runs that read them', (
     Object.defineProperty(stale, 'slice', { value: () => new Blob([]) });
     expect(await coordinator.enqueue(counted(stale))).toEqual({
       ok: false,
+      reason: 'counts',
       message: 'The saved counts for 562 were replaced or removed after they were chosen. Run again.',
     });
     expect(await held()).toBe(0);

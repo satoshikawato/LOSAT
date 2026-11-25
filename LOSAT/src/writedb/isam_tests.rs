@@ -85,7 +85,7 @@ fn records(list: &[&[u8]]) -> Vec<u8> {
 fn acc_isam(dir: &Dir) -> StringIsam {
     StringIsam::new(
         IsamType::Acc,
-        &dir.base(),
+        dir.base().as_bytes(),
         true,
         0,
         3_000_000_000,
@@ -153,8 +153,8 @@ fn a_high_byte_in_the_prefix_sorts_first() {
 #[test]
 fn gis_sort_as_int8_and_are_written_as_int4() {
     let dir = Dir::new("p24");
-    let mut gi = NumericIsam::new(IsamType::Gi, &dir.base(), true, 0, 3_000_000_000);
-    let mut pog = GiIndex::new(&dir.base(), true, 0, 3_000_000_000);
+    let mut gi = NumericIsam::new(IsamType::Gi, dir.base().as_bytes(), true, 0, 3_000_000_000);
+    let mut pog = GiIndex::new(dir.base().as_bytes(), true, 0, 3_000_000_000);
     let oids: [Vec<ParsedSeqId>; 4] = [
         vec![ParsedSeqId::Gi(0), refseq("NP_000010", 1)],
         vec![ParsedSeqId::Gi(2_147_483_648), refseq("NP_000011", 1)],
@@ -188,8 +188,8 @@ fn several_sample_pages_are_makeblastdb_s() {
     let dir = Dir::new("p14");
     let base = dir.base();
     let mut acc = acc_isam(&dir);
-    let mut gi = NumericIsam::new(IsamType::Gi, &base, true, 0, 3_000_000_000);
-    let mut pog = GiIndex::new(&base, true, 0, 3_000_000_000);
+    let mut gi = NumericIsam::new(IsamType::Gi, base.as_bytes(), true, 0, 3_000_000_000);
+    let mut pog = GiIndex::new(base.as_bytes(), true, 0, 3_000_000_000);
     let mut oid = 0u32;
     let mut add = |ids: Vec<ParsedSeqId>| {
         acc.add_ids(oid, &ids).unwrap();
@@ -492,7 +492,7 @@ fn the_next_volume_reuses_the_chunks() {
     let second = Dir::new("reuse2");
     let mut reused = StringIsam::new(
         IsamType::Acc,
-        &second.base(),
+        second.base().as_bytes(),
         true,
         0,
         3_000_000_000,

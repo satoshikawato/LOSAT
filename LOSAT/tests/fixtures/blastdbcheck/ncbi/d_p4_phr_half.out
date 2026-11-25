@@ -1,0 +1,22 @@
+Writing messages to <stdout> at verbosity (Minutiae)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Using `full' mode: every OID will be tested.
+
+Testing 1 volume(s).
+ <RUN>/cases/d_p4_phr_half/p4
+  <RUN>/cases/d_p4_phr_half/p4 / Stride: <testing every 1th OID>
+  <RUN>/cases/d_p4_phr_half/p4 / Stride:       Status for OID 0: PASS
+  <RUN>/cases/d_p4_phr_half/p4 / Stride:       Status for OID 1: PASS
+  <RUN>/cases/d_p4_phr_half/p4 / Stride:       Status for OID 2: PASS
+  <RUN>/cases/d_p4_phr_half/p4 / Stride:       Status for OID 3: PASS
+  <RUN>/cases/d_p4_phr_half/p4 / Stride:     headers failed; oid=4: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1037: Error: (CSerialException::eFormatError) ncbi::CObjectIStream::ExpectedMember() - byte 25: member seqid expected ( at Blast-def-line-set.[].[])
+
+  <RUN>/cases/d_p4_phr_half/p4 / Stride:       Status for OID 4: FAIL
+ Result=FAILURE. 1 errors reported in 1 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 1

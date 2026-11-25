@@ -1,13 +1,10 @@
 //! BLASTX options and native serial local-subject search/report dispatch.
-use crate::blastinput::value_parsers::{
-    ncbi_boolean, ncbi_double, ncbi_int8, ncbi_integer, ncbi_integer_as, ncbi_path, SegSpec,
-};
+use crate::blastinput::value_parsers::SegSpec;
 use crate::stats::protein_options::{
     protein_gap_existence_extend_params, suggested_threshold, suggested_window_size,
     SuggestionProgram,
 };
 use anyhow::{bail, Result};
-use clap::Args;
 use std::path::PathBuf;
 
 /// `-max_target_seqs` as the hit list count of `blastinput::report_counts`: a value below 1, which a
@@ -21,208 +18,124 @@ pub(crate) fn max_target_seqs_count(max_target_seqs: Option<i32>) -> Option<usiz
 pub(crate) const BLASTX_TASK: crate::blastinput::value_parsers::TaskParser =
     crate::blastinput::value_parsers::task_parser("BLASTX", "blastx");
 
-#[derive(Args, Debug, Clone)]
-#[command(rename_all = "snake_case")]
+#[derive(Debug, Clone)]
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:49-62
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:72-78
 pub struct BlastxArgs {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3425-3427
     // The default `-` is standard input (`input_files::open_input`).
-    #[arg(long, value_name = "PATH", default_value = "-", value_parser = ncbi_path())]
     pub query: PathBuf,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2366
     // Optional for the parser: without `-subject` and `-db` the run fails with NCBI's error
     // after the parsing (`blastinput/app.rs` `missing_subject_error`).
-    #[arg(long, value_name = "PATH", value_parser = ncbi_path())]
     pub subject: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2372-2376
     // Read by the database arguments handler when it reads the subjects (`native::run`).
-    #[arg(
-        long = "subject_loc",
-        value_name = "RANGE",
-        help = "Location on the subject sequence in 1-based offsets (Format: start-stop)"
-    )]
     pub subject_loc: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199
     // NCBI excludes `-subject` and `-subject_loc` with `-db` (c++/src/algo/blast/blastinput/blast_args.cpp:2364-2381).
     // NCBI's argument reader reports the exclusion (`cli::reader`).
-    #[arg(
-        long,
-        value_name = "NAME",
-        help = "BLAST database name (a protein database, with or without parsed Seq-ids)"
-    )]
     pub db: Option<String>,
     /// `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist` and
     /// `-no_taxid_expansion` (line DI-8).
-    #[command(flatten)]
     pub db_filter: crate::blastinput::db_filter::DbFilterArgs,
     /// `-db_soft_mask` and `-db_hard_mask` (`blastinput::db_mask`; series NP, M4b).
-    #[command(flatten)]
     pub db_mask: crate::blastinput::db_mask::DbMaskArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
     // No constraint and no dependency: read with `-db` and with `-subject`.
-    #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
     pub dbsize: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2663
-    #[arg(
-        long = "show_gis",
-        default_value_t = false,
-        help = "Show NCBI GIs in deflines?"
-    )]
     pub show_gis: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
     // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224), for `-outfmt` 0 to 4 and 18.
-    #[arg(long = "html", default_value_t = false, help = "Produce HTML output?")]
     pub html: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2050-2052
     // `-parse_deflines` is a flag of the programs (blast_args.cpp:1961).
-    #[arg(
-        long = "parse_deflines",
-        default_value_t = false,
-        help = "Should the query and subject defline(s) be parsed?"
-    )]
     pub parse_deflines: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:234-238
-    #[arg(long, value_parser = ncbi_int8, value_name = "INT_VALUE", help = "Effective length of the search space")]
     pub searchsp: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
-    #[arg(long, value_name = "PATH", value_parser = ncbi_path())]
     pub out: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535
     // The search strategy file (`report::archive::strategy`), created by `run` before the other
     // options are read.
-    #[arg(long, value_name = "filename", value_parser = ncbi_path(), help = "File name to record the search strategy used")]
     pub export_search_strategy: Option<PathBuf>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:99-100
-    #[arg(long, default_value = "blastx")]
     pub task: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:146-146
-    #[arg(
-        long,
-        default_value_t = 10.0,
-        value_parser = ncbi_double,
-        help = "Expectation value (E) threshold for saving hits [default: 10]"
-    )]
     pub evalue: f64,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:166-167
-    #[arg(long, value_parser = ncbi_integer, help = "Word size for wordfinder algorithm [default: 3; 5 for blastx-fast]")]
     pub word_size: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:203-205
-    #[arg(long, value_parser = ncbi_integer)]
     pub max_hsps: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:196-201
-    #[arg(long, value_parser = ncbi_double, help = "Percent query coverage per hsp")]
     pub qcov_hsp_perc: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:241-243
-    #[arg(long, value_parser = ncbi_boolean, action = clap::ArgAction::Set, help = "Use sum statistics [default: true]")]
     pub sum_stats: Option<bool>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:175-177
-    #[arg(long = "gapopen", value_parser = ncbi_integer, help = "Cost to open a gap [default: 11]")]
     pub gap_open: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:180-182
-    #[arg(long = "gapextend", value_parser = ncbi_integer, help = "Cost to extend a gap [default: 1]")]
     pub gap_extend: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:937-942
-    #[arg(long, default_value_t = 0, value_parser = ncbi_integer)]
     pub max_intron_length: i32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-338
     // Read when NCBI's filtering handler reads it (`seg_spec`).
-    #[arg(long, default_value = "12 2.2 2.5")]
     pub seg: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:339-342
-    #[arg(long, default_value = "false", value_parser = ncbi_boolean, action = clap::ArgAction::Set)]
     pub soft_masking: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:531-534
-    #[arg(long, help = "Scoring matrix name [default: BLOSUM62]")]
     pub matrix: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:578-583
-    #[arg(
-        long,
-        value_parser = ncbi_double,
-        help = "Minimum word score such that the word is added to the BLAST lookup table [default: 12; 19.3, 21 or 20.25 for word sizes 5, 6 and 7; 20 for blastx-fast]"
-    )]
     pub threshold: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:475-478
-    #[arg(long, value_parser = ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40]")]
     pub window_size: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:209-229, 276-286
     // (cited at `blastp::args::BlastpArgs::xdrop_ungap`): `-xdrop_ungap`, `-xdrop_gap` and
     // `-xdrop_gap_final` in bits, given to the options when given. `None`: BLASTX's defaults
     // (`ResolvedOptions`).
-    #[arg(long = "xdrop_ungap", value_name = "float_value", value_parser = ncbi_double, help = "X-dropoff value (in bits) for ungapped extensions [default: 7]")]
     pub xdrop_ungap: Option<f64>,
-    #[arg(long = "xdrop_gap", value_name = "float_value", value_parser = ncbi_double, help = "X-dropoff value (in bits) for preliminary gapped extensions [default: 15]")]
     pub xdrop_gap: Option<f64>,
-    #[arg(long = "xdrop_gap_final", value_name = "float_value", value_parser = ncbi_double, help = "X-dropoff value (in bits) for final gapped alignment [default: 25]")]
     pub xdrop_gap_final: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3296-3299
-    #[arg(
-        long,
-        value_parser = ncbi_integer,
-        help = "If the query range of a hit is enveloped by that of at least this many higher-scoring hits, delete the hit [default: 0, no culling]"
-    )]
     pub culling_limit: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3304-3328
     // With `-culling_limit` NCBI refuses the command line, LOSAT's parser too (with its own
     // text, as for the other exclusions; BLASTP's `best_hit_overhang`).
     /// Best Hit algorithm overhang value (recommended value: 0.1)
-    #[arg(long, value_parser = ncbi_double, value_name = "float_value")]
     pub best_hit_overhang: Option<f64>,
     /// Best Hit algorithm score edge value (recommended value: 0.1)
-    #[arg(long, value_parser = ncbi_double, value_name = "float_value")]
     pub best_hit_score_edge: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3329-3329
-    #[arg(long)]
     pub subject_besthit: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-917
-    #[arg(long)]
     pub ungapped: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1941-1942
-    #[arg(long)]
     pub lcase_masking: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806
     // NCBI's flag, off by default: the Smith-Waterman redo of each match (`kappa::sw_redo_context`,
     // item X4b-2), with every `-comp_based_stats`. RPSTBLASTN's own (`rpstblastn::args`) never
     // sets it here.
-    #[arg(long)]
     pub use_sw_tback: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
-    #[arg(long, default_value = "both")]
     pub strand: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // Read by the query options handler (`native::run`).
-    #[arg(
-        long = "query_loc",
-        value_name = "RANGE",
-        help = "Location on the query sequence in 1-based offsets (Format: start-stop)"
-    )]
     pub query_loc: Option<String>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1021-1024
-    #[arg(long, default_value_t = 1, value_parser = ncbi_integer_as::<u8>)]
     pub query_gencode: u8,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2657-2660
     // NCBI reads the value when it sets the options (`native::run`; `blastinput/app.rs`
     // `parse_formatting_string`).
-    #[arg(long, default_value = "0")]
     pub outfmt: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2726-2730
-    #[arg(
-        long,
-        value_parser = ncbi_integer,
-        help = "Maximum number of aligned sequences to keep [default: 500]"
-    )]
     pub max_target_seqs: Option<i32>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
-    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = ncbi_integer_as::<usize>, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
     pub num_descriptions: Option<usize>,
-    #[arg(long = "num_alignments", value_name = "int_value", value_parser = ncbi_integer_as::<usize>, help = "Number of database sequences to show alignments for [default: 250]")]
     pub num_alignments: Option<usize>,
     /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
     /// `blastinput::report_counts::FormattingArgs`).
-    #[command(flatten)]
     pub formatting: crate::blastinput::report_counts::FormattingArgs,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3158-3161
-    #[arg(long, default_value_t = 1, value_parser = ncbi_integer, help = "Number of threads (CPUs); serial WASI accepts only 1")]
     pub num_threads: i32,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3168-3181
     // `-mt_mode` is read and has no effect: LOSAT's output is the same at every thread count
@@ -231,59 +144,120 @@ pub struct BlastxArgs {
     // runs the queries in batches and writes the end of an outfmt 0 report or each XML
     // document per batch (`blastn_app.cpp:134-170`, `blastx_app.cpp` `x_RunMTBySplitQuery`);
     // that framing is not reproduced. The value must be 0 to 2 and `-num_threads` must be
-    // given with it, as in NCBI (clap's `requires` ignores a default value).
-    #[arg(long, value_name = "int_value", value_parser = ncbi_integer_as::<u8>, help = "Multi-thread mode: 0 auto, 1 split by queries, 2 split by database (accepted; the output does not depend on it)")]
+    // given with it, as in NCBI (NCBI's argument reader checks the dependency, `cli::reader`).
     pub mt_mode: Option<u8>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:796-797
     // Read when NCBI's handler reads it (`blastinput/app.rs` `parse_comp_based_stats`: the first
     // character chooses the mode, and the 'u' of unified P is BLASTP's only).
-    #[arg(
-        long,
-        default_value = "2",
-        help = "Use composition-based statistics: 0 (F, f) none, 1 composition-based statistics, 2 (D, d, T, t) conditional compositional score matrix adjustment, 3 unconditional compositional score matrix adjustment"
-    )]
     pub comp_based_stats: String,
     /// The RPS search of an RPSTBLASTN run (`algorithm::rpstblastn`), which takes the place of
     /// BLASTX's search of the query batches; `None` in every BLASTX run.
-    #[arg(skip)]
     pub(crate) rpstblastn: Option<std::sync::Arc<dyn RpsTblastnSearch>>,
     /// The recorded options of RPSTBLASTN's search strategy requests (`archive::option_inputs`),
     /// made by its command line from its own arguments as given, with `-export_search_strategy`;
     /// `None` in every BLASTX run.
-    #[arg(skip)]
     pub(crate) request_inputs: Option<Box<crate::report::archive::options::OptionInputs>>,
     /// The search strategy export of a search of records (`local::run_local`): LOSAT Web's
     /// `-export_search_strategy` (`web_adapter::give_strategy`). The command line makes its own
     /// (`native::RunSetup::open`).
-    #[arg(skip)]
     pub(crate) strategy: Option<crate::report::archive::strategy::StrategyExport>,
     /// The `[BLAST] BLASTDB` setting through which a `-subject` search's tabular reports look for
     /// the taxonomy database (`common::database::subject_taxonomy`), which a search of records of
     /// the library (`api::run`) reads from the call's application settings when a report looks
     /// every taxid up; `None` elsewhere (the command line passes its settings, LOSAT Web has no
     /// files). Not a public option.
-    #[arg(skip)]
     pub taxdb_setting: Option<crate::algorithm::common::database::TaxdbSetting>,
     /// The settings by which a search of the library looks up the file of an unknown matrix
     /// (`ResolvedOptions::find_matrix_file`), from its application start: set by `api::run` for an
     /// ungapped search whose `-matrix` NCBI's tables do not have (`unknown_matrix_name`) and by
     /// `run_local_database`; `None` for the command line, which looks it up with its own
     /// settings (`native::run`), and LOSAT Web, which has no file system. Not a public option.
-    #[arg(skip)]
     pub matrix_search: Option<crate::blastinput::ncbi_environment::MatrixSearch>,
     /// The position in the whole input of the first of these records, where the library searches
     /// each query batch as a call of its own (`api::run_batches`); 0 on the command line, whose
     /// records are the whole input. A later call's prefetch has no record of the loads of the
     /// calls before (`common::database::TaxdbRun::note_calls_before`). Not a public option.
-    #[arg(skip)]
     pub first_query_ordinal: usize,
     /// LOSAT's refusal of a record of these records with the id of a query of an earlier call of
     /// the run (`query_batch::ScopeRefusal`), where the library searches each query batch as a call
     /// of its own (`api::run_batches`): the call's add of its batch gives it, so that the batch
     /// stops in the command line's form (line WQA D10 round 5, 2026-11-20). `None` on the command
     /// line. Not a public option.
-    #[arg(skip)]
     pub(crate) scope_refusal: Option<crate::blastinput::query_batch::ScopeRefusal>,
+}
+
+impl BlastxArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, blastx's arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(BlastxArgs {
+            query: args.option_or_default("query")?,
+            subject: args.given_option("subject")?,
+            subject_loc: args.given_option("subject_loc")?,
+            db: args.given_option("db")?,
+            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args(args)?,
+            db_mask: crate::blastinput::db_mask::DbMaskArgs::from_args(args)?,
+            dbsize: args.given_option("dbsize")?,
+            show_gis: args.flag("show_gis"),
+            html: args.flag("html"),
+            parse_deflines: args.flag("parse_deflines"),
+            searchsp: args.given_option("searchsp")?,
+            out: args.given_option("out")?,
+            export_search_strategy: args.given_option("export_search_strategy")?,
+            task: args.option_or_default("task")?,
+            // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_options.h:157-158
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1454
+            // NCBI's XML gives `-evalue` no default (its search sets `BLAST_EXPECT_VALUE`, 10,
+            // where the option is not given): the one default that LOSAT writes itself.
+            evalue: args.given_option("evalue")?.unwrap_or(10.0),
+            word_size: args.given_option("word_size")?,
+            max_hsps: args.given_option("max_hsps")?,
+            qcov_hsp_perc: args.given_option("qcov_hsp_perc")?,
+            sum_stats: args.given_option("sum_stats")?,
+            gap_open: args.given_option("gapopen")?,
+            gap_extend: args.given_option("gapextend")?,
+            max_intron_length: args.option_or_default("max_intron_length")?,
+            seg: args.option_or_default("seg")?,
+            soft_masking: args.option_or_default("soft_masking")?,
+            matrix: args.given_option("matrix")?,
+            threshold: args.given_option("threshold")?,
+            window_size: args.given_option("window_size")?,
+            xdrop_ungap: args.given_option("xdrop_ungap")?,
+            xdrop_gap: args.given_option("xdrop_gap")?,
+            xdrop_gap_final: args.given_option("xdrop_gap_final")?,
+            culling_limit: args.given_option("culling_limit")?,
+            best_hit_overhang: args.given_option("best_hit_overhang")?,
+            best_hit_score_edge: args.given_option("best_hit_score_edge")?,
+            subject_besthit: args.flag("subject_besthit"),
+            ungapped: args.flag("ungapped"),
+            lcase_masking: args.flag("lcase_masking"),
+            use_sw_tback: args.flag("use_sw_tback"),
+            strand: args.option_or_default("strand")?,
+            query_loc: args.given_option("query_loc")?,
+            query_gencode: args.option_or_default("query_gencode")?,
+            outfmt: args.option_or_default("outfmt")?,
+            max_target_seqs: args.given_option("max_target_seqs")?,
+            num_descriptions: args.given_option("num_descriptions")?,
+            num_alignments: args.given_option("num_alignments")?,
+            formatting: crate::blastinput::report_counts::FormattingArgs::from_args(args)?,
+            num_threads: args.option_or_default("num_threads")?,
+            mt_mode: args.given_option("mt_mode")?,
+            comp_based_stats: args.option_or_default("comp_based_stats")?,
+            rpstblastn: Default::default(),
+            request_inputs: Default::default(),
+            strategy: Default::default(),
+            taxdb_setting: Default::default(),
+            matrix_search: Default::default(),
+            first_query_ordinal: Default::default(),
+            scope_refusal: Default::default(),
+        })
+    }
 }
 
 /// The search of RPSTBLASTN's query batches (`rps_search::translated`, series PR item PS12a,
@@ -496,7 +470,7 @@ pub(crate) fn composition_mode(value: &str) -> u8 {
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:43-49
 /// The fields that ABI v1 accepts (`web::v1_outfmt`, frozen, plan TD-1): the custom fields
 /// of BLASTX's report before it wrote them through the shared tabular writer.
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub const FIELDS: &[&str] = &[
     "qseqid", "qacc", "qaccver", "qlen", "sseqid", "sacc", "saccver", "slen", "qstart", "qend",
     "sstart", "send", "qseq", "sseq", "evalue", "bitscore", "score", "length", "pident", "nident",

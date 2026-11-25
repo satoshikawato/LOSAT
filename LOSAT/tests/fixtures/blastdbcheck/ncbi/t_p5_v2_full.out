@@ -1,0 +1,10 @@
+Writing messages to <stdout> at verbosity (Summary)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Using `full' mode: every OID will be tested.
+
+Testing 1 volume(s).
+ Result=SUCCESS. No errors reported for 1 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).

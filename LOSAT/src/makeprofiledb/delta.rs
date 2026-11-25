@@ -76,11 +76,28 @@ impl From<std::io::Error> for DeltaError {
     }
 }
 
+/// Builds a rule-3 refusal error for `-dbtype delta`.
+fn refused(reason: impl Into<String>) -> DeltaError {
+    DeltaError::Rps(RpsError::Refused(reason.into()))
+}
+
 /// A `double` converted to `Uint4` (`uint32_t`): `None` where C++'s floating-to-unsigned
 /// conversion is undefined (NaN, infinity, or a truncated value outside `0..=u32::MAX`).
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1674,1688
 pub(super) fn uint4_of(value: f64) -> Option<u32> {
     (value > -1.0 && value < 4_294_967_296.0).then_some(value as u32)
+}
+
+/// Converts a scaled delta float to `Uint4`, returning a rule-3 refusal when out of C++'s defined
+/// range.
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1674,1688
+fn encode_uint4(scaled: f64, field: &str, expr: impl std::fmt::Display) -> Result<u32, DeltaError> {
+    uint4_of(scaled).ok_or_else(|| {
+        refused(format!(
+            "a {field} for -dbtype delta (NCBI's conversion of {expr} to a 32-bit unsigned \
+             integer has no defined result)"
+        ))
+    })
 }
 
 /// Advances a 32-bit delta offset counter (`CurrFreqOffset` or `CurrObsrOffset`) by `added`
@@ -108,17 +125,13 @@ fn delta_fields<'a>(
     filename: &[u8],
 ) -> Result<(Cow<'a, [f64]>, &'a [f64]), DeltaError> {
     let input = |what: &[u8]| DeltaError::Input([filename, what].concat());
-    let Some(inter) = pssm.intermediate_data.as_ref() else {
+    let inter = pssm.intermediate_data.as_ref();
+    let Some(orig_freqs) = inter.and_then(|d| d.weighted_res_freqs_per_pos.as_deref()) else {
         return Err(input(
             b" contains no weighted residue frequencies for building delta database",
         ));
     };
-    let Some(orig_freqs) = inter.weighted_res_freqs_per_pos.as_deref() else {
-        return Err(input(
-            b" contains no weighted residue frequencies for building delta database",
-        ));
-    };
-    let Some(obsr) = inter.num_indept_obsr.as_deref() else {
+    let Some(obsr) = inter.and_then(|d| d.num_indept_obsr.as_deref()) else {
         return Err(input(
             b" contains no observations information for building delta database",
         ));
@@ -129,21 +142,20 @@ fn delta_fields<'a>(
     // iterator (and index over `seq_size`), overwriting the list header node or reading past
     // `orig_freqs`.
     if by_row && (seq_size > 0 || !orig_freqs.is_empty()) {
-        return Err(DeltaError::Rps(RpsError::Refused(
+        return Err(refused(
             "a profile stored by row (byRow TRUE) for -dbtype delta (NCBI's makeprofiledb copies \
-             the transposed weighted residue frequencies into an empty list's begin iterator)"
-                .to_string(),
-        )));
+             the transposed weighted residue frequencies into an empty list's begin iterator)",
+        ));
     }
     // NCBI's padding branch also copies `orig_freqs` into an empty list's begin iterator whenever
     // `orig_freqs` is non-empty.
     let freqs = if alphabet_size < BLASTAA_SIZE {
         if !orig_freqs.is_empty() {
-            return Err(DeltaError::Rps(RpsError::Refused(format!(
+            return Err(refused(format!(
                 "a profile with numRows {alphabet_size} (fewer than {BLASTAA_SIZE}) and weighted \
                  residue frequencies for -dbtype delta (NCBI's makeprofiledb copies them into an \
                  empty list's begin iterator)"
-            ))));
+            )));
         }
         let pad = (BLASTAA_SIZE - alphabet_size).saturating_mul(seq_size.max(0) as usize);
         Cow::Owned(vec![0.0; pad])
@@ -151,11 +163,10 @@ fn delta_fields<'a>(
         Cow::Borrowed(orig_freqs)
     };
     if obsr.is_empty() {
-        return Err(DeltaError::Rps(RpsError::Refused(
+        return Err(refused(
             "a profile with an empty numIndeptObsr list for -dbtype delta (NCBI's makeprofiledb \
-             dereferences the end iterator of the empty list)"
-                .to_string(),
-        )));
+             dereferences the end iterator of the empty list)",
+        ));
     }
     Ok((freqs, obsr))
 }
@@ -182,12 +193,12 @@ fn validate_cd(freqs: &[f64], obsr: &[f64]) -> Result<bool, DeltaError> {
         }
     }
     if !freqs.len().is_multiple_of(BLASTAA_SIZE) {
-        return Err(DeltaError::Rps(RpsError::Refused(format!(
+        return Err(refused(format!(
             "a profile whose weightedResFreqsPerPos has {} entries (not a multiple of \
              {BLASTAA_SIZE}) and every full column sums within {EPSILON} of 1.0 for -dbtype \
              delta (NCBI's makeprofiledb increments past the end of the list)",
             freqs.len()
-        ))));
+        )));
     }
     if obsr.iter().any(|&v| v < 1.0) {
         return Ok(false);
@@ -347,12 +358,11 @@ fn encode_obsr(obsr: &[f64]) -> Result<Vec<u32>, DeltaError> {
             num = num.wrapping_add(1);
         }
         let scaled = (current + 1.0) * FIXED_POINT_SCALE_FACTOR;
-        let Some(encoded) = uint4_of(scaled) else {
-            return Err(DeltaError::Rps(RpsError::Refused(format!(
-                "a numIndeptObsr value of {current} for -dbtype delta (NCBI's conversion of \
-                 ({current} + 1) * 1000 to a 32-bit unsigned integer has no defined result)"
-            ))));
-        };
+        let encoded = encode_uint4(
+            scaled,
+            &format!("numIndeptObsr value of {current}"),
+            format_args!("({current} + 1) * 1000"),
+        )?;
         out.push(encoded);
         out.push(num);
     }
@@ -378,6 +388,61 @@ fn write_delta_file(
 }
 
 impl DeltaVolume {
+    /// Encodes one profile's `.wcounts` and `.obsr` records into the scratch buffers.
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1598-1707
+    fn encode_and_write_profile(
+        &mut self,
+        pssm: &Pssm,
+        seq_size: i32,
+        filename: &[u8],
+    ) -> Result<(), DeltaError> {
+        let (freqs, obsr) = delta_fields(pssm, seq_size, filename)?;
+        let obsr_words = encode_obsr(obsr)?;
+        if obsr.len() != freqs.len() / BLASTAA_SIZE {
+            return Err(DeltaError::Exception(
+                [
+                    b"Number of frequencies and observations columns do not match in ".as_slice(),
+                    filename,
+                ]
+                .concat(),
+            ));
+        }
+        self.scratch.clear();
+        self.scratch.reserve((freqs.len() + BLASTAA_SIZE) * 4);
+        for &val in freqs.as_ref() {
+            let scaled = val * FIXED_POINT_SCALE_FACTOR;
+            let encoded = encode_uint4(
+                scaled,
+                &format!("weightedResFreqsPerPos value of {val}"),
+                format_args!("{val} * 1000"),
+            )?;
+            self.scratch.extend_from_slice(&encoded.to_le_bytes());
+        }
+        // Additional column of zeros for compatibility with RPS database.
+        self.scratch.extend_from_slice(&[0u8; BLASTAA_SIZE * 4]);
+
+        self.tmp_freq
+            .as_mut()
+            .expect("tmp_freq open")
+            .write_all(&self.scratch)?;
+        self.scratch.clear();
+        self.scratch.reserve(obsr_words.len() * 4);
+        for word in &obsr_words {
+            self.scratch.extend_from_slice(&word.to_le_bytes());
+        }
+        self.tmp_obsr
+            .as_mut()
+            .expect("tmp_obsr open")
+            .write_all(&self.scratch)?;
+
+        self.freq_offsets
+            .push(freq_record_offset(self.curr_freq_offset));
+        self.obsr_offsets.push(self.curr_obsr_offset);
+        self.curr_freq_offset = advance_offset(self.curr_freq_offset, freqs.len() + BLASTAA_SIZE);
+        self.curr_obsr_offset = advance_offset(self.curr_obsr_offset, obsr_words.len());
+        Ok(())
+    }
+
     /// Appends one profile's `.wcounts` and `.obsr` records to the scratch buffers during the
     /// volume pass, deferring any Pass-3 ASN.1 posts or errors to `finish`.
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1582-1707
@@ -395,83 +460,9 @@ impl DeltaVolume {
         if self.tmp_open_error.is_some() || self.deferred_error.is_some() {
             return;
         }
-        let (freqs, obsr) = match delta_fields(pssm, seq_size, filename) {
-            Ok(fields) => fields,
-            Err(error) => {
-                self.deferred_error = Some((profile_index, error));
-                return;
-            }
-        };
-        let obsr_words = match encode_obsr(obsr) {
-            Ok(words) => words,
-            Err(error) => {
-                self.deferred_error = Some((profile_index, error));
-                return;
-            }
-        };
-        if obsr.len() != freqs.len() / BLASTAA_SIZE {
-            self.deferred_error = Some((
-                profile_index,
-                DeltaError::Exception(
-                    [
-                        b"Number of frequencies and observations columns do not match in "
-                            .as_slice(),
-                        filename,
-                    ]
-                    .concat(),
-                ),
-            ));
-            return;
+        if let Err(error) = self.encode_and_write_profile(pssm, seq_size, filename) {
+            self.deferred_error = Some((profile_index, error));
         }
-        self.scratch.clear();
-        self.scratch.reserve((freqs.len() + BLASTAA_SIZE) * 4);
-        for &val in freqs.as_ref() {
-            let scaled = val * FIXED_POINT_SCALE_FACTOR;
-            let Some(encoded) = uint4_of(scaled) else {
-                self.deferred_error = Some((
-                    profile_index,
-                    DeltaError::Rps(RpsError::Refused(format!(
-                        "a weightedResFreqsPerPos value of {val} for -dbtype delta (NCBI's \
-                         conversion of {val} * 1000 to a 32-bit unsigned integer has no defined \
-                         result)"
-                    ))),
-                ));
-                return;
-            };
-            self.scratch.extend_from_slice(&encoded.to_le_bytes());
-        }
-        // Additional column of zeros for compatibility with RPS database.
-        self.scratch.extend_from_slice(&[0u8; BLASTAA_SIZE * 4]);
-
-        if let Err(error) = self
-            .tmp_freq
-            .as_mut()
-            .expect("tmp_freq open")
-            .write_all(&self.scratch)
-        {
-            self.deferred_error = Some((profile_index, DeltaError::Rps(RpsError::Io(error))));
-            return;
-        }
-        self.scratch.clear();
-        self.scratch.reserve(obsr_words.len() * 4);
-        for word in &obsr_words {
-            self.scratch.extend_from_slice(&word.to_le_bytes());
-        }
-        if let Err(error) = self
-            .tmp_obsr
-            .as_mut()
-            .expect("tmp_obsr open")
-            .write_all(&self.scratch)
-        {
-            self.deferred_error = Some((profile_index, DeltaError::Rps(RpsError::Io(error))));
-            return;
-        }
-
-        self.freq_offsets
-            .push(freq_record_offset(self.curr_freq_offset));
-        self.obsr_offsets.push(self.curr_obsr_offset);
-        self.curr_freq_offset = advance_offset(self.curr_freq_offset, freqs.len() + BLASTAA_SIZE);
-        self.curr_obsr_offset = advance_offset(self.curr_obsr_offset, obsr_words.len());
     }
 
     /// Completes `x_UpdateDelta` / `x_WrapUpDelta`: checks temporary-file creation, replays Pass-3

@@ -561,8 +561,8 @@
       "binary_name": "losat.wasm",
       "archive_format": "tar.gz",
       "filename": "LOSAT-0.2.0-wasm32-wasip1.tar.gz",
-      "features": "no-default-features",
-      "build_command": "cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --locked",
+      "features": "no-default-features,no-web-abi-v1",
+      "build_command": "cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --features no-web-abi-v1 --locked",
       "runner_script": "LOSAT/tests/run_losat_wasi.js",
       "historical_certification_binary_sha256": "000691b99169ddca8072954fdfa64348ad94b75546432655f6a05daea1d5eb47"
     },
@@ -573,8 +573,8 @@
       "binary_name": "losat.wasm",
       "archive_format": "tar.gz",
       "filename": "LOSAT-0.2.0-wasm32-wasip1-threads.tar.gz",
-      "features": "wasm-threads",
-      "build_command": "cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads --locked",
+      "features": "wasm-threads,no-web-abi-v1",
+      "build_command": "cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads,no-web-abi-v1 --locked",
       "runner_script": "LOSAT/tests/run_losat_wasi_threads.js",
       "historical_certification_binary_sha256": null,
       "historical_certification_note": "no v0.1.0 certification binary for this target"

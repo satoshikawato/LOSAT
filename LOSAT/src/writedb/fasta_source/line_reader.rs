@@ -11,7 +11,7 @@
 
 use std::io::Read;
 
-use crate::utils::byte_search::find_first;
+use crate::utils::byte_search::find_two_bytes;
 
 /// `m_BufferSize`.
 ///
@@ -55,12 +55,12 @@ pub(super) struct BufferedLineReader<R: Read> {
 }
 
 /// The first `\n` or `\r` of `bytes`, matching the line-terminator scan of
-/// `CBufferedLineReader` (`next_line` and `load_long`), found with [`find_first`].
+/// `CBufferedLineReader` (`next_line` and `load_long`), found with [`find_two_bytes`].
 ///
 /// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:509-616
 #[inline(always)]
 fn find_eol(bytes: &[u8]) -> Option<usize> {
-    find_first(bytes, |byte| (byte == b'\n') | (byte == b'\r'))
+    find_two_bytes(bytes, b'\n', b'\r')
 }
 
 impl<R: Read> BufferedLineReader<R> {

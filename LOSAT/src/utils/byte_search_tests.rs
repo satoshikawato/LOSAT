@@ -95,14 +95,42 @@ fn find_first_finds_a_match_at_every_place_of_every_window() {
         for at in 0..len {
             text[at] = b'b';
             assert_eq!(find_first(&text, is_b), Some(at), "{len} {at}");
+            assert_eq!(find_byte(&text, b'b'), Some(at), "byte {len} {at}");
+            assert_eq!(
+                find_two_bytes(&text, b'b', b'c'),
+                Some(at),
+                "two first {len} {at}"
+            );
+            text[at] = b'c';
+            assert_eq!(
+                find_two_bytes(&text, b'b', b'c'),
+                Some(at),
+                "two second {len} {at}"
+            );
+            text[at] = b'b';
             if at + 1 < len {
                 text[len - 1] = b'b';
                 assert_eq!(find_first(&text, is_b), Some(at), "{len} {at} and the end");
+                assert_eq!(
+                    find_byte(&text, b'b'),
+                    Some(at),
+                    "byte {len} {at} and the end"
+                );
+                text[len - 1] = b'c';
+                assert_eq!(
+                    find_two_bytes(&text, b'b', b'c'),
+                    Some(at),
+                    "two {len} {at} and c at end"
+                );
                 text[len - 1] = b'a';
             }
             text[at] = b'a';
         }
+        assert_eq!(find_byte(&text, b'b'), None, "byte none {len}");
+        assert_eq!(find_two_bytes(&text, b'b', b'c'), None, "two none {len}");
     }
+    assert_eq!(find_byte(b"", b'b'), None);
+    assert_eq!(find_two_bytes(b"", b'b', b'c'), None);
 }
 
 #[test]

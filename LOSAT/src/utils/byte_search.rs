@@ -1,9 +1,10 @@
 //! The searches of a byte string that LOSAT's ports share: the first byte that a test holds
-//! for ([`find_first`]), the first of one byte ([`find_byte`], C's `memchr`), the first
-//! occurrence of a byte string ([`find`], `string::find`) and the mask of one byte in a block of
-//! 16 ([`equal_bytes_16`], [`gather_high_bits`]). makeblastdb's FASTA reader, its titles
-//! and its header writer search every byte of every line, so the search tests the bytes a
-//! block or window at a time while keeping near matches proportional to their distance.
+//! for ([`find_first`]), the first of one byte ([`find_byte`], C's `memchr`), the first of two
+//! bytes ([`find_two_bytes`]), the first occurrence of a byte string ([`find`], `string::find`)
+//! and the mask of one byte in a block of 16 ([`equal_bytes_16`], [`gather_high_bits`]).
+//! makeblastdb's FASTA reader, its titles and its header writer search every byte of every line,
+//! so the search tests the bytes a block or window at a time while keeping near matches
+//! proportional to their distance.
 //!
 //! No NCBI counterpart: NCBI's code calls the C and C++ libraries for these searches, or tests
 //! one byte at a time (dustmasker's test of each letter for `N`); LOSAT keeps what they return
@@ -91,12 +92,15 @@ fn find_first_medium(haystack: &[u8], test: impl Fn(u8) -> bool + Copy) -> Optio
     }
 }
 
-/// Searches a haystack of at least [`WINDOW`] bytes after bytes `0..PREFIX + SMALL` have been
-/// ruled out.
+/// Searches a haystack of at least [`WINDOW`] bytes after bytes `0..skip` have been ruled out.
 #[inline(never)]
-fn find_first_windows(haystack: &[u8], test: impl Fn(u8) -> bool + Copy) -> Option<usize> {
+fn find_first_windows_from(
+    haystack: &[u8],
+    skip: usize,
+    test: impl Fn(u8) -> bool + Copy,
+) -> Option<usize> {
     let len = haystack.len();
-    let first_base = (PREFIX + SMALL).min(len - WINDOW);
+    let first_base = skip.min(len - WINDOW);
     let first_win: &[u8; WINDOW] = haystack[first_base..first_base + WINDOW]
         .try_into()
         .unwrap();
@@ -115,40 +119,82 @@ fn find_first_windows(haystack: &[u8], test: impl Fn(u8) -> bool + Copy) -> Opti
     None
 }
 
-/// The index of the first byte of `haystack` that `test` holds for.
-///
-/// Haystacks shorter than [`HALF`] are scanned directly. Longer haystacks check byte 0 first so
-/// dense hits return immediately, then widen progressively: 8-to-15-byte haystacks use two
-/// overlapping [`HALF`]-byte tests, 16-to-63-byte haystacks use [`find_first_medium`], and
-/// haystacks of [`WINDOW`] bytes or more check bytes `1..PREFIX`, a [`SMALL`]-byte head block,
-/// and then [`WINDOW`]-byte windows in [`find_first_windows`] (the first window by [`first_in`],
-/// each later window by [`holds_in`] and [`first_in`] only where `test` holds, with the last
-/// window overlapping the one before it).
+/// The bytes of an 8-byte block that are `byte`, as the high bit of each byte (all other bits
+/// clear). A byte is tested without a branch: it equals `byte` when its XOR with `byte` is 0,
+/// and the high bit of `((x & 0x7f) + 0x7f) | x` is set when byte `x` is non-zero (`0x7f + 0x7f
+/// = 0xfe`, so no sum carries into the next byte).
 #[inline(always)]
-pub(crate) fn find_first(haystack: &[u8], test: impl Fn(u8) -> bool + Copy) -> Option<usize> {
+fn equal_bytes_8(bytes: &[u8; HALF], byte: u8) -> u64 {
+    const LOW7: u64 = 0x7f7f_7f7f_7f7f_7f7f;
+    let spread = u64::from_ne_bytes([byte; HALF]);
+    let x = u64::from_le_bytes(*bytes) ^ spread;
+    !(((x & LOW7) + LOW7) | x | LOW7)
+}
+
+/// The byte index (`0..8`) of the lowest set high bit in a non-zero mask from [`equal_bytes_8`].
+#[inline(always)]
+fn first_high_bit(mask: u64) -> usize {
+    (mask.trailing_zeros() >> 3) as usize
+}
+
+/// Searches `haystack` with 8-byte word masks (`hit_at(offset)`) for short haystacks and the
+/// first [`SMALL`] bytes, then [`find_first_windows_from`] for long haystacks.
+#[inline(always)]
+fn find_mask_8(
+    haystack: &[u8],
+    hit_at: impl Fn(usize) -> u64 + Copy,
+    test: impl Fn(u8) -> bool + Copy,
+) -> Option<usize> {
     let len = haystack.len();
     if len < HALF {
         return haystack.iter().position(|&b| test(b));
     }
+    let h0 = hit_at(0);
+    if h0 != 0 {
+        return Some(first_high_bit(h0));
+    }
+    let check_tail = || {
+        let tail = len - HALF;
+        let ht = hit_at(tail);
+        (ht != 0).then(|| tail + first_high_bit(ht))
+    };
+    if len < SMALL {
+        return check_tail();
+    }
+    let h1 = hit_at(HALF);
+    if h1 != 0 {
+        return Some(HALF + first_high_bit(h1));
+    }
+    if len < WINDOW {
+        let mut off = SMALL;
+        while off + HALF <= len {
+            let h = hit_at(off);
+            if h != 0 {
+                return Some(off + first_high_bit(h));
+            }
+            off += HALF;
+        }
+        return check_tail();
+    }
+    find_first_windows_from(haystack, SMALL, test)
+}
+
+/// The index of the first byte of `haystack` that `test` holds for.
+///
+/// Haystacks shorter than [`SMALL`] are scanned directly. Longer haystacks check byte 0 first so
+/// dense hits return immediately, then widen progressively: 16-to-63-byte haystacks use
+/// [`find_first_medium`], and haystacks of [`WINDOW`] bytes or more check bytes `1..PREFIX`, a
+/// [`SMALL`]-byte head block, and then [`WINDOW`]-byte windows in [`find_first_windows_from`]
+/// (the first window by [`first_in`], each later window by [`holds_in`] and [`first_in`] only
+/// where `test` holds, with the last window overlapping the one before it).
+#[inline(always)]
+pub(crate) fn find_first(haystack: &[u8], test: impl Fn(u8) -> bool + Copy) -> Option<usize> {
+    let len = haystack.len();
+    if len < SMALL {
+        return haystack.iter().position(|&b| test(b));
+    }
     if test(haystack[0]) {
         return Some(0);
-    }
-    if len < SMALL {
-        let first8: &[u8; HALF] = haystack[..HALF].try_into().unwrap();
-        if holds_in(first8, test) {
-            return first8[1..].iter().position(|&b| test(b)).map(|i| 1 + i);
-        }
-        if len == HALF {
-            return None;
-        }
-        let last8: &[u8; HALF] = haystack[len - HALF..].try_into().unwrap();
-        if !holds_in(last8, test) {
-            return None;
-        }
-        return haystack[HALF..]
-            .iter()
-            .position(|&b| test(b))
-            .map(|i| HALF + i);
     }
     if len < WINDOW {
         return find_first_medium(haystack, test);
@@ -169,12 +215,30 @@ pub(crate) fn find_first(haystack: &[u8], test: impl Fn(u8) -> bool + Copy) -> O
     if holds_in(head, test) {
         return head.iter().position(|&b| test(b)).map(|i| PREFIX + i);
     }
-    find_first_windows(haystack, test)
+    find_first_windows_from(haystack, PREFIX + SMALL, test)
 }
 
 /// The index of the first `byte` of `haystack` (C's `memchr`).
+#[inline(always)]
 pub(crate) fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
-    find_first(haystack, |b| b == byte)
+    find_mask_8(
+        haystack,
+        |offset| equal_bytes_8(haystack[offset..offset + HALF].try_into().unwrap(), byte),
+        |b| b == byte,
+    )
+}
+
+/// The index of the first byte of `haystack` that equals `first` or `second`.
+#[inline(always)]
+pub(crate) fn find_two_bytes(haystack: &[u8], first: u8, second: u8) -> Option<usize> {
+    find_mask_8(
+        haystack,
+        |offset| {
+            let word: &[u8; HALF] = haystack[offset..offset + HALF].try_into().unwrap();
+            equal_bytes_8(word, first) | equal_bytes_8(word, second)
+        },
+        |b| b == first || b == second,
+    )
 }
 
 /// `string::find(needle)` of `haystack`: the index of the first occurrence of `needle` (0 for
@@ -202,14 +266,11 @@ pub(crate) fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 /// is `byte` when its XOR with `byte` is 0, and the high bit of `((x & 0x7f) + 0x7f) | x` is set
 /// when the byte `x` is not 0 (0x7f + 0x7f = 0xfe, so no sum leaves its byte).
 pub(crate) fn equal_bytes_16(block: &[u8; 16], byte: u8) -> (u64, u64) {
-    const LOW7: u64 = 0x7f7f_7f7f_7f7f_7f7f;
-    let spread = u64::from_ne_bytes([byte; 8]);
-    let equal = |bytes: &[u8]| {
-        let x = u64::from_le_bytes(bytes.try_into().expect("8 bytes")) ^ spread;
-        !(((x & LOW7) + LOW7) | x | LOW7)
-    };
-    let (low, high) = block.split_at(8);
-    (equal(low), equal(high))
+    let (low, high) = block.split_at(HALF);
+    (
+        equal_bytes_8(low.try_into().expect("8 bytes"), byte),
+        equal_bytes_8(high.try_into().expect("8 bytes"), byte),
+    )
 }
 
 /// The high bits of the 8 bytes of `bits` (as [`equal_bytes_16`] gives them) as the 8 low bits

@@ -498,8 +498,9 @@ pub(crate) fn cdd_query_pssm(
 }
 
 /// The descriptor that `CFastaReader` adds to a Bioseq: a `user` object of the type
-/// `CFastaReader` with the field `DefLine` holding the definition line as read.
-// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:600
+/// `CFastaReader` with the field `DefLine` holding `NStr::PrintableString` of the definition line
+/// as read.
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:598-602
 fn fasta_defline_descriptor(defline: &[u8]) -> Seqdesc {
     use crate::report::serial::asn_types::{member_index, members, table::named, Value};
     let object_id_str = |text: &[u8]| {
@@ -518,7 +519,9 @@ fn fasta_defline_descriptor(defline: &[u8]) -> Seqdesc {
             member_index(named::USER_FIELD, "data") as u16,
             Value::Choice(
                 member_index(data_type, "str") as u16,
-                Box::new(Value::Str(defline.to_vec())),
+                Box::new(Value::Str(
+                    crate::ncbi_str::printable_string(defline).into_owned(),
+                )),
             ),
         ),
     ]);

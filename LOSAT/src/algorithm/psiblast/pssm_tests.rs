@@ -1324,3 +1324,44 @@ fn a_pssm_title_outside_the_visible_range_is_written_with_ncbis_posts() {
     want.extend_from_slice(b"t\xe9tle\n");
     assert_eq!(file_posts("psiblast", &replaced).text(), want);
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:598-602
+/// `CFastaReader` stores `NStr::PrintableString` of the raw defline in the `DefLine` user field,
+/// so a non-ASCII byte such as `0xE9` is written as `\351` in the CDD PSSM ASN.1 text.
+#[test]
+fn cdd_fasta_defline_descriptor_escapes_with_printable_string() {
+    use crate::report::serial::pssm::{asn_text_posting, SeqEntry};
+    let value = PssmWithParameters {
+        pssm: Pssm {
+            is_protein: None,
+            identifier: None,
+            num_rows: 1,
+            num_columns: 1,
+            row_labels: None,
+            by_row: None,
+            query: Some(SeqEntry::Seq(Box::new(PssmQuery {
+                ids: vec![crate::seqid::ParsedSeqId::Local(ObjectId::Str(
+                    b"Query_1".to_vec(),
+                ))],
+                descr: Some(vec![
+                    fasta_defline_descriptor(b">q1 caf\xe9 title"),
+                    Seqdesc::Title(b"q1 caf\xe9 title".to_vec()),
+                ]),
+                inst: SeqInst::new(("raw", 2), ("aa", 3), Some(1), None),
+                annot: None,
+            }))),
+            intermediate_data: None,
+            final_data: None,
+        },
+        params: None,
+    };
+    let (bytes, replaced) = asn_text_posting(&value).unwrap();
+    let text = String::from_utf8(bytes).expect("escaped DefLine and replaced title are ASCII");
+    assert!(
+        text.contains(r#"data str ">q1 caf\351 title""#),
+        "expected NStr::PrintableString octal escape in DefLine:\n{text}"
+    );
+    assert!(text.contains(r#"title "q1 caf# title""#));
+    assert_eq!(replaced.len(), 1);
+    assert_eq!(replaced[0].byte, 0xe9);
+}

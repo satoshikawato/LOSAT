@@ -1,0 +1,27 @@
+{
+  "version": "1.2",
+  "dbname": "tm_stop_tie",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm stop tie",
+  "number-of-letters": 1560,
+  "number-of-sequences": 12,
+  "last-updated": "2026-11-25T12:55:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 52027,
+  "bytes-to-cache": 1765,
+  "files": [
+    "tm_stop_tie.pdb",
+    "tm_stop_tie.phr",
+    "tm_stop_tie.pin",
+    "tm_stop_tie.pnd",
+    "tm_stop_tie.pni",
+    "tm_stop_tie.pog",
+    "tm_stop_tie.pos",
+    "tm_stop_tie.pot",
+    "tm_stop_tie.psq",
+    "tm_stop_tie.ptf",
+    "tm_stop_tie.pto"
+  ]
+}

@@ -19,12 +19,10 @@
 //! Owner's answer Q5 = B of M4b, 2026-11-22). [`NcbiWalk`] follows NCBI's one-thread offsets over
 //! the searched sequences in database order: for `-db_hard_mask` protein searches (`plain`,
 //! `masked`) and translated searches (`translated_masked`) it names the sequences whose hits meet
-//! entries that no sequence wrote or where a clear falls inside them (and, for translated hard
-//! masks, tracks the highest entries written since the table was made or cleared to detect
-//! sequences whose word hits reach another sequence's entries), and for `-db_soft_mask` translated
-//! searches ([`NcbiWalk::translated`]) it gives the table start of each sequence whose scan reads
-//! before a chunk, so that all start on NCBI's table at NCBI's offset ([`HardStarts`],
-//! [`TableStart::New`]).
+//! entries that no sequence wrote or where a clear falls inside them, and for `-db_soft_mask`
+//! translated searches ([`NcbiWalk::translated`]) it gives the table start of each sequence whose
+//! scan reads before a chunk, so that all start on NCBI's table at NCBI's offset
+//! ([`HardStarts`], [`TableStart::New`]).
 
 /// What the word finder reads of one hard chunk ([`DiagonalWalk::chunk`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -611,14 +609,6 @@ pub(crate) struct TranslatedStart {
     pub(crate) ncbi: Option<NcbiStart>,
     /// How far the lowest chunk that reads a word that can hit lies below the sequence's start.
     pub(crate) below_start: i64,
-    /// How far the sequence's entries lie past its end (relative to the offset after its last
-    /// chunk).
-    pub(crate) past_end: i64,
-    /// Whether a chunk of the sequence reads back into an earlier chunk's entries.
-    pub(crate) reads_back: bool,
-    /// Whether a chunk of the sequence lies within reach of entries written by earlier sequences
-    /// since the table was made or cleared.
-    pub(crate) reaches_written: bool,
     /// The offset in its frame of the first one word past its frame's sentinel that can change a
     /// result (only when `zero_words` is true).
     pub(crate) word_past_end: Option<usize>,
@@ -664,11 +654,6 @@ pub(crate) struct NcbiWalk {
     window: i32,
     offset: i64,
     cleared: bool,
-    /// Highest unflagged entry written since the table was made or cleared (absolute offset,
-    /// tracked by [`NcbiWalk::translated_masked`]).
-    written_unflagged: Option<i64>,
-    /// Highest flagged two-hit entry written since the table was made or cleared (absolute offset).
-    written_flagged: Option<i64>,
 }
 
 impl NcbiWalk {
@@ -679,23 +664,16 @@ impl NcbiWalk {
             window,
             offset: i64::from(window),
             cleared: false,
-            written_unflagged: None,
-            written_flagged: None,
         }
     }
 
-    /// The exit of a chunk of `length` letters (NCBI's `Int4`). Returns `true` when the table was
-    /// cleared at INT4_MAX / 4.
-    fn exit(&mut self, length: i32) -> bool {
+    /// The exit of a chunk of `length` letters (NCBI's `Int4`).
+    fn exit(&mut self, length: i32) {
         if self.offset >= CLEAR_AT {
             self.offset = i64::from(self.window);
             self.cleared = true;
-            self.written_unflagged = None;
-            self.written_flagged = None;
-            true
         } else {
             self.offset += i64::from(length) + i64::from(self.window);
-            false
         }
     }
 
@@ -794,10 +772,9 @@ impl NcbiWalk {
     /// A searched translated subject with `-db_hard_mask` whose chunks across its six frames in
     /// NCBI's order are `chunks` (`(frame_length, offset, ncbi_length)` each; empty for a subject
     /// too short to be searched): returns its [`TranslatedStart`] (its [`NcbiStart`] where it
-    /// meets unwritten entries or clears inside it, its walk margins, whether any chunk reaches
-    /// entries written by earlier sequences since the last clear, and, when `zero_words` is true,
-    /// the first one word past a frame's sentinel that can change a result), then advances the
-    /// walk and updates the written-entry bounds across every chunk.
+    /// meets unwritten entries or clears inside it, its below-start margin, and, when `zero_words`
+    /// is true, the first one word past a frame's sentinel that can change a result), then advances
+    /// the walk across every chunk.
     pub(crate) fn translated_masked(
         &mut self,
         chunks: &[(usize, usize, i32)],
@@ -828,39 +805,12 @@ impl NcbiWalk {
         } else {
             ahead.word_past_end()
         };
-        let (prev_unflagged, prev_flagged) = (self.written_unflagged, self.written_flagged);
-        let mut cleared_inside = false;
-        let mut reaches_written = false;
-        let (word, window) = (i64::from(self.word), i64::from(self.window));
         for &(_, _, length) in chunks {
-            let d = self.offset;
-            let l = i64::from(length);
-            let hits = l >= word || window > 0;
-            if hits {
-                if !cleared_inside
-                    && (prev_unflagged.is_some_and(|stored| stored > d - window)
-                        || prev_flagged.is_some_and(|stored| stored > d))
-                {
-                    reaches_written = true;
-                }
-                let (unflagged, flagged) = if window > 0 {
-                    (d + (l - word).max(0), Some(d + (l - word + 1).max(1)))
-                } else {
-                    (d + l - word + 2, None)
-                };
-                self.written_unflagged = self.written_unflagged.max(Some(unflagged));
-                self.written_flagged = self.written_flagged.max(flagged);
-            }
-            if self.exit(length) {
-                cleared_inside = true;
-            }
+            self.exit(length);
         }
         TranslatedStart {
             ncbi,
             below_start: margins.below_start,
-            past_end: margins.past_end,
-            reads_back: ahead.reads_back,
-            reaches_written,
             word_past_end,
         }
     }

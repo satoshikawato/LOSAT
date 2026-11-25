@@ -1301,14 +1301,7 @@ fn pairwise_hits(
                         Some(crate::report::pairwise::PairwiseNullbStop::StdSegLengths)
                     }
                     Some(nullb) if nullb.translate_na_failure => {
-                        let id: Vec<u8> = match (shown.parsed_subject(oid), shown.oid(oid)) {
-                            (Some(parsed), _) => parsed.skipped_id().to_vec(),
-                            (None, Some(db_oid)) => format!("BL_ORD_ID:{db_oid}").into_bytes(),
-                            (None, None) => format!("Subject_{}", oid + 1).into_bytes(),
-                        };
-                        Some(crate::report::pairwise::PairwiseNullbStop::SkipTranslate(
-                            Arc::from(id),
-                        ))
+                        Some(crate::report::pairwise::PairwiseNullbStop::SkipTranslate)
                     }
                     _ => None,
                 };
@@ -1611,6 +1604,12 @@ fn write_pairwise(
     };
     // A subject set's subjects are all loaded.
     let every_loaded = crate::report::db_subject::HitLoads::default();
+    let subject_oids: Option<Vec<u32>> = match shown {
+        ShownSubjects::Fasta { .. } => None,
+        ShownSubjects::Database { reported, .. } => {
+            Some(reported.oids.iter().map(|oid| oid.get()).collect())
+        }
+    };
     write_tblastn_pairwise_report(
         if pssm.is_some() {
             super::in_pssm::PROGRAM
@@ -1638,6 +1637,7 @@ fn write_pairwise(
             ShownSubjects::Fasta { .. } => &every_loaded,
             ShownSubjects::Database { reported, .. } => &reported.loads,
         },
+        subject_oids.as_deref(),
     )
     // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`); a
     // sort or the description table may stop at a query row that starts with a gap

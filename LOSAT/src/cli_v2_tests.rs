@@ -1317,8 +1317,8 @@ fn numeric_values_are_validated_before_io() {
 #[test]
 fn flags_and_value_tokens_are_not_reinterpreted() {
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:804-806: -use_sw_tback is a flag; LOSAT's BLASTP runs the
-    // Smith-Waterman redo with composition-based statistics (item X4) and rejects it without
-    // them (`-comp_based_stats 0`, `-task blastp-short`, IDENTITY) where the search starts.
+    // Smith-Waterman redo with composition-based statistics (item X4) and without them
+    // (`-comp_based_stats 0`, `-matrix IDENTITY`, item X4-c0).
     let Commands::Blastp(a) = parse("blastp", &["-use_sw_tback"]).unwrap().command else {
         panic!()
     };
@@ -1330,10 +1330,7 @@ fn flags_and_value_tokens_are_not_reinterpreted() {
     else {
         panic!()
     };
-    assert!(crate::algorithm::blastp::blast_engine::check_options(&a)
-        .unwrap_err()
-        .to_string()
-        .contains("-use_sw_tback without composition-based statistics"));
+    crate::algorithm::blastp::blast_engine::check_options(&a).unwrap();
     // IDENTITY's reset of the default mode 2 (`identity_cbs_reset`); `-task blastp-short` keeps
     // the default mode 2 (it changes the matrix, the gap costs, the threshold, the word size and the
     // filter, `blast_options_handle.cpp:389-395`) and runs.
@@ -1343,10 +1340,7 @@ fn flags_and_value_tokens_are_not_reinterpreted() {
     else {
         panic!()
     };
-    assert!(crate::algorithm::blastp::blast_engine::check_options(&a)
-        .unwrap_err()
-        .to_string()
-        .contains("(-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them)"));
+    crate::algorithm::blastp::blast_engine::check_options(&a).unwrap();
     let Commands::Blastp(a) = parse("blastp", &["-use_sw_tback", "-task", "blastp-short"])
         .unwrap()
         .command

@@ -613,11 +613,24 @@ impl PreparedXml {
                             );
                             let unaligned = list.hsps.hsps.iter().zip(&list.payloads).map(
                                 |(linked, payload)| {
+                                    let invalidated =
+                                        payload.nullb.is_some_and(|n| n.scores_invalidated);
                                     XmlHsp::unaligned(
                                         linked.hsp.score,
                                         payload.bit_score,
-                                        seqalign_evalue(linked.evalue),
-                                        read_num_ident(i64::from(payload.num_ident), program_type),
+                                        if invalidated {
+                                            -1.0
+                                        } else {
+                                            seqalign_evalue(linked.evalue)
+                                        },
+                                        if invalidated {
+                                            -1
+                                        } else {
+                                            read_num_ident(
+                                                i64::from(payload.num_ident),
+                                                program_type,
+                                            )
+                                        },
                                     )
                                 },
                             );

@@ -384,15 +384,15 @@ pub struct PairwiseHit {
 
 /// Report-time stop or per-HSP alignment skip for a TBLASTN `-in_pssm -window_size 0`
 /// NULLB-start alignment (`algorithm::tblastn::nullb_report`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PairwiseNullbStop {
     /// `-subject`, positive frame, `rem in {1, 2}`, `k >= 2`: `CreateDensegFromStdseg` throws
     /// `Std-seg segment lengths not accurate!` (`EmptyRowsStop::StdSegLengths`).
     StdSegLengths,
     /// Positive frame, `rem in {1, 2}`, `-db` or (`-subject` with `k == 1`): `CAlnVec::TranslateNAToAA`
-    /// throws inside outfmt 0's per-HSP `try` block, writing `alignment skipped` with this Seq-id
-    /// text without emitting the subject heading yet.
-    SkipTranslate(Arc<[u8]>),
+    /// throws inside outfmt 0's per-HSP `try` block, writing `alignment skipped` with the
+    /// subject's Seq-id text (`subject_skipped_id`) without emitting the subject heading yet.
+    SkipTranslate,
 }
 
 impl PairwiseHit {
@@ -1085,6 +1085,7 @@ fn write_tblastn_subject_with_skips<'h, W: Write>(
     part: std::ops::Range<usize>,
     html: Option<&super::html_ids::HtmlReport>,
     records: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    subject_oids: Option<&[u32]>,
     heading_of: impl Fn(u32) -> SubjectHeading<'h>,
     place: super::query_warnings::ReportHook<'_, W>,
     mut write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
@@ -1102,18 +1103,19 @@ fn write_tblastn_subject_with_skips<'h, W: Write>(
     );
     let first_ok = hits
         .iter()
-        .position(|h| !matches!(h.nullb_stop, Some(PairwiseNullbStop::SkipTranslate(_))));
+        .position(|h| !matches!(h.nullb_stop, Some(PairwiseNullbStop::SkipTranslate)));
     let heading = heading_of(s_idx);
     let mut heading_skipped: Option<Vec<u8>> = None;
     for i in part {
         let hit = hits[i];
         let hsp_index = indices[i];
-        if let Some(PairwiseNullbStop::SkipTranslate(id)) = &hit.nullb_stop {
+        if matches!(hit.nullb_stop, Some(PairwiseNullbStop::SkipTranslate)) {
+            let id = subject_skipped_id(records, subject_oids, s_idx);
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
                 probe.begin(hsp_index);
             }
-            write_skipped_alignment(writer, id)?;
+            write_skipped_alignment(writer, &id)?;
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
                 probe.end(hsp_index);
@@ -5626,6 +5628,7 @@ pub fn write_tblastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
     // The rows' masks of `hits` under `-html` (`HtmlRowMasks`; `None` without).
     row_masks: Option<&[super::query_anchored::HspMasks]>,
     loads: &crate::report::db_subject::HitLoads,
+    subject_oids: Option<&[u32]>,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-224:
     // an all-invalid Run() batch carries -1 Karlin sentinel blocks only for
@@ -5689,6 +5692,7 @@ pub fn write_tblastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
             anchored,
             row_masks: HtmlRowMasks::new(row_masks, 0),
             loads,
+            subject_oids,
         },
         0,
         &hits_by_query,
@@ -5729,6 +5733,8 @@ struct TblastnSections<'a> {
     row_masks: HtmlRowMasks<'a>,
     /// What the reports' loads do at each subject, by subject (`thrown_load`).
     loads: &'a crate::report::db_subject::HitLoads,
+    /// Database OIDs by subject rank (`None` for `-subject`).
+    subject_oids: Option<&'a [u32]>,
 }
 
 impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
@@ -5898,7 +5904,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         let written = part.start..stop.unwrap_or(part.end);
         let has_skip = hits
             .iter()
-            .any(|h| matches!(h.nullb_stop, Some(PairwiseNullbStop::SkipTranslate(_))));
+            .any(|h| matches!(h.nullb_stop, Some(PairwiseNullbStop::SkipTranslate)));
         if !written.is_empty() {
             if has_skip {
                 write_tblastn_subject_with_skips(
@@ -5909,6 +5915,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
                     written,
                     config.html.as_ref(),
                     parsed,
+                    self.subject_oids,
                     |subject| {
                         group_heading(
                             group,

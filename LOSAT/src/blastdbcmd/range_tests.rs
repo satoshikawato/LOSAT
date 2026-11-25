@@ -80,4 +80,40 @@ fn clipping_follows_the_formatters() {
         SeqRange { from: 487, to: 599 }.clipped(488),
         Some((487, 487))
     );
+    // Zero-length sequence: NCBI's `SetTo` sets the open end to zero, making `Empty` true.
+    assert_eq!(SeqRange { from: 0, to: 9 }.clipped(0), None);
+    assert_eq!(
+        SeqRange {
+            from: 0,
+            to: u32::MAX
+        }
+        .clipped(0),
+        None
+    );
+    assert_eq!(
+        SeqRange {
+            from: u32::MAX,
+            to: u32::MAX
+        }
+        .clipped(0),
+        None
+    );
+    // `2^31 + 10` protein sequence: `0-` clips to `None`; open tail clips to `length - 1`.
+    let over_2gib = (1u32 << 31) + 10;
+    assert_eq!(
+        SeqRange {
+            from: u32::MAX,
+            to: u32::MAX
+        }
+        .clipped(over_2gib),
+        None
+    );
+    assert_eq!(
+        SeqRange {
+            from: 2_147_483_646,
+            to: u32::MAX
+        }
+        .clipped(over_2gib),
+        Some((2_147_483_646, over_2gib - 1))
+    );
 }

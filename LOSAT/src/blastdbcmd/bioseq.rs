@@ -78,11 +78,14 @@ impl DbBioseq {
         // `GetBioseq` looks the taxids up for a Bioseq it gives, one with definition lines and
         // letters, the first call for `oid` and the second for the target or `oid` again.
         let length = if set.deflines.is_empty() {
-            0
+            0i64
         } else {
             source.length(oid)?
         };
         let made = length >= 1;
+        if !made && !set.deflines.is_empty() {
+            source.check_non_positive_protein_range(oid)?;
+        }
         if made {
             source.post_bioseq_texts(oid, &set, None, out)?;
         }
@@ -112,7 +115,7 @@ impl DbBioseq {
             header,
             kept,
             target,
-            length,
+            length: length as u32,
         };
         write(&bioseq, out)
     }

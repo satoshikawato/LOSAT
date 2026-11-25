@@ -220,3 +220,53 @@ fn the_map_keeps_the_last_taxid_of_a_key_in_little_memory() {
     let per_entry = set.map.heap_bytes() as f64 / f64::from(n);
     assert!(per_entry < 50.0, "{per_entry} bytes per entry");
 }
+
+#[test]
+fn fix_tax_id_checked_dereferences_null_seqid_only_when_map_is_active() {
+    let make_deflines = || DeflineSet {
+        deflines: vec![
+            BlastDefline {
+                ids: vec![ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(
+                    b"id1".to_vec(),
+                ))],
+                taxid: Some(7),
+                ..BlastDefline::default()
+            },
+            BlastDefline {
+                ids: Vec::new(),
+                taxid: None,
+                ..BlastDefline::default()
+            },
+        ],
+        utf8: false,
+    };
+    let nulls = [(1, 0)];
+
+    // Empty map and no global taxid: GetDeflineKeys is not called.
+    let mut empty = TaxIdSet::default();
+    let mut deflines = make_deflines();
+    assert_eq!(empty.fix_tax_id_checked(&mut deflines, &nulls), Ok(()));
+    assert_eq!(deflines.deflines[0].taxid, Some(7));
+    assert_eq!(deflines.deflines[1].taxid, Some(0));
+
+    // Global taxid: GetDeflineKeys is not called.
+    let mut global = TaxIdSet::with_global(9606);
+    let mut deflines = make_deflines();
+    assert_eq!(global.fix_tax_id_checked(&mut deflines, &nulls), Ok(()));
+    assert_eq!(deflines.deflines[0].taxid, Some(9606));
+    assert_eq!(deflines.deflines[1].taxid, Some(9606));
+
+    // Non-empty map: GetDeflineKeys runs and stops at the NULL Seq-id (even when an earlier
+    // Seq-id on the same line would match the map).
+    let mut mapped = map("lcl|id1 10090\n").unwrap();
+    let mut deflines = make_deflines();
+    assert_eq!(mapped.fix_tax_id_checked(&mut deflines, &nulls), Err(()));
+    assert_eq!(deflines.deflines[0].taxid, Some(10090));
+
+    let mut mapped_same_line = map("lcl|id1 10090\n").unwrap();
+    let mut deflines = make_deflines();
+    assert_eq!(
+        mapped_same_line.fix_tax_id_checked(&mut deflines, &[(0, 1)]),
+        Err(())
+    );
+}

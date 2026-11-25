@@ -52,6 +52,10 @@ use super::x_prelim_compact::{x_expand_hit_list, XPrelimHsp};
 use super::x_redo_subjects::XRedoSubjects;
 use crate::utils::threading::SearchPool;
 
+/// Closure building per-query redo alignment parameters (`Fn(usize) -> Result<BlastRedoAlignParams> + Sync`).
+pub(crate) trait RedoParamsFn: Fn(usize) -> Result<BlastRedoAlignParams> + Sync {}
+impl<T: Fn(usize) -> Result<BlastRedoAlignParams> + Sync> RedoParamsFn for T {}
+
 /// One entry in a query batch's OID-ordered preliminary stream (`-comp_based_stats 0 -use_sw_tback`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:91-96,158-204
@@ -186,24 +190,131 @@ fn local_match_at(
         .hsplist_array[position]
 }
 
+fn clear_batch_lists(
+    lists: &mut [Option<BlastpHitList>],
+    range: Range<usize>,
+    x_prelim_freed: &mut usize,
+) {
+    for q_idx in range {
+        if lists[q_idx].take().is_some() {
+            *x_prelim_freed += 1;
+        }
+    }
+}
+
+#[inline]
+fn record_excluded(
+    sw_status: &mut SwBatchStatus,
+    best_evalue: f64,
+    batch_heaps: &[BlastCompoHeap],
+) {
+    let terminates_early = blast_compo_early_termination(best_evalue, batch_heaps);
+    let redone = sw_status.reaches_redo(terminates_early, true);
+    debug_assert!(!redone);
+}
+
+#[inline]
+fn insert_postprocessed(
+    heap: &mut BlastCompoHeap,
+    oid: u32,
+    postprocessed: super::kappa::BlastpPostprocessResult,
+) {
+    let Some(hsp_list) = postprocessed.hsp_list else {
+        return;
+    };
+    if heap.would_insert(postprocessed.best_evalue, postprocessed.best_score, oid) {
+        heap.insert(
+            hsp_list,
+            postprocessed.best_evalue,
+            postprocessed.best_score,
+            oid,
+        );
+    }
+}
+
+#[inline]
+fn check_batch_end_status(
+    sw_status: SwBatchStatus,
+    fetch_notes: &FetchNotes<'_>,
+    batch: Range<usize>,
+    heaps: &[BlastCompoHeap],
+) -> Result<()> {
+    if sw_status.failed() {
+        return Err(sw_oid_stop_error(fetch_notes, batch, heaps, None));
+    }
+    Ok(())
+}
+
+#[inline]
+fn endless_oid_error(
+    fetch_notes: &FetchNotes<'_>,
+    batch: &Range<usize>,
+    heaps: &[BlastCompoHeap],
+    ordinal: u32,
+    q_idx: usize,
+) -> anyhow::Error {
+    sw_oid_stop_error(fetch_notes, batch.clone(), heaps, Some((ordinal, q_idx)))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_sw_on_match<P>(
+    search: &SwCbs0Search<'_, P>,
+    q_idx: usize,
+    local_match: &BlastpHspList,
+    query_workspace: &BlastpKappaQueryWorkspace,
+    redo_align_params: &BlastRedoAlignParams,
+    unadjusted: &AdjustedProteinMatrix,
+    scratch: &mut SwScratch,
+    resume: Option<&super::kappa::smith_waterman::SwMatchResume>,
+    would_insert: &mut dyn FnMut(f64, i32) -> SwHeapAnswer,
+    save_resume: &mut Option<Box<super::kappa::smith_waterman::SwMatchResume>>,
+) -> Result<super::kappa::BlastpPostprocessResult> {
+    scratch.hits.clear();
+    scratch.hits.extend(
+        local_match
+            .hsps
+            .iter()
+            .map(preliminary_hit_from_local_match_hsp),
+    );
+    let subject = search.subjects.read(local_match.oid)?;
+    let subject_raw = subject.residues();
+    postprocess_preliminary_hits_smith_waterman(
+        &scratch.hits,
+        query_workspace,
+        &mut scratch.composition_workspace,
+        (search.query_nomask)(&search.contexts[q_idx]),
+        subject_raw,
+        search.matrix,
+        search.gapped_params,
+        search.gapped_gumbel,
+        redo_align_params,
+        search.evalue,
+        &mut scratch.gap_scratch,
+        &mut scratch.range_cache,
+        search.engine_positives,
+        Some(unadjusted),
+        &mut scratch.sw_scratch,
+        resume,
+        would_insert,
+        save_resume,
+    )
+}
+
 /// Runs BLASTP's `-comp_based_stats 0 -use_sw_tback` redo across all query batches in NCBI's
 /// OID stream order, expanding and releasing each batch's preliminary lists one batch at a time.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1498
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3100-3109,3525-3781
-pub(crate) fn run<P>(
+pub(crate) fn run<P: RedoParamsFn>(
     search: &SwCbs0Search<'_, P>,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     redone_matches: &mut [BlastCompoHeap],
     fetch_notes: &FetchNotes<'_>,
     x_prelim_freed: &mut usize,
-) -> Result<()>
-where
-    P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
-{
+) -> Result<()> {
     let unadjusted = unadjusted_square_matrix(search.matrix);
-    let mut serial_scratch = SerialScratch::new(search.matrix);
+    let mut serial_scratch = SwScratch::new(search.matrix);
 
     for batch in search.query_batches {
         if batch.searched.is_empty() {
@@ -222,10 +333,10 @@ where
             search.ordinals,
             search.fetch_excluded,
         );
-        if !events.is_empty() {
+        let batch_result = if !events.is_empty() {
             // Validate initial matrix / parameters once at batch start, as `one_thread_redo` does.
             let _ = (search.build_redo_align_params)(range.start)?;
-            let batch_result = run_batch(
+            run_batch(
                 search,
                 range.clone(),
                 &events,
@@ -234,26 +345,18 @@ where
                 fetch_notes,
                 &unadjusted,
                 &mut serial_scratch,
-            );
-            // Release this batch's preliminary lists even before propagating an error.
-            for q_idx in range.clone() {
-                if preliminary_hit_lists[q_idx].take().is_some() {
-                    *x_prelim_freed += 1;
-                }
-            }
-            batch_result?;
+            )
         } else {
-            for q_idx in range {
-                if preliminary_hit_lists[q_idx].take().is_some() {
-                    *x_prelim_freed += 1;
-                }
-            }
-        }
+            Ok(())
+        };
+        // Release this batch's preliminary lists even before propagating an error.
+        clear_batch_lists(preliminary_hit_lists, range, x_prelim_freed);
+        batch_result?;
     }
     Ok(())
 }
 
-struct SerialScratch {
+struct SwScratch {
     composition_workspace: BlastCompositionWorkspace,
     gap_scratch: GapAlignScratch,
     range_cache: BlastpKappaSubjectRangeCache,
@@ -261,7 +364,7 @@ struct SerialScratch {
     hits: Vec<super::gapalign::BlastpPreliminaryHsp>,
 }
 
-impl SerialScratch {
+impl SwScratch {
     fn new(matrix: ScoringMatrix) -> Self {
         let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
         if matrix != ScoringMatrix::Blosum62 {
@@ -278,7 +381,7 @@ impl SerialScratch {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_batch<P>(
+fn run_batch<P: RedoParamsFn>(
     search: &SwCbs0Search<'_, P>,
     batch: Range<usize>,
     events: &[Cbs0Event],
@@ -286,12 +389,9 @@ fn run_batch<P>(
     heaps: &mut [BlastCompoHeap],
     fetch_notes: &FetchNotes<'_>,
     unadjusted: &AdjustedProteinMatrix,
-    serial_scratch: &mut SerialScratch,
-) -> Result<()>
-where
-    P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
-{
-    if par::try_run_batch_parallel(
+    serial_scratch: &mut SwScratch,
+) -> Result<()> {
+    if par::try_par(
         search,
         batch.clone(),
         events,
@@ -326,7 +426,7 @@ fn run_batch_serial<P>(
     heaps: &mut [BlastCompoHeap],
     fetch_notes: &FetchNotes<'_>,
     unadjusted: &AdjustedProteinMatrix,
-    scratch: &mut SerialScratch,
+    scratch: &mut SwScratch,
 ) -> Result<()>
 where
     P: Fn(usize) -> Result<BlastRedoAlignParams>,
@@ -339,18 +439,15 @@ where
     for &event in events {
         match event {
             Cbs0Event::Excluded { best_evalue, .. } => {
-                let terminates_early =
-                    blast_compo_early_termination(best_evalue, &heaps[batch.clone()]);
-                let redone = sw_status.reaches_redo(terminates_early, true);
-                debug_assert!(!redone);
+                record_excluded(&mut sw_status, best_evalue, &heaps[batch.clone()]);
             }
             Cbs0Event::Kept {
                 ordinal,
                 q_idx,
                 position,
             } => {
-                let local_match = local_match_at(lists, q_idx, position);
-                if blast_compo_early_termination(local_match.best_evalue, &heaps[batch.clone()]) {
+                let m = local_match_at(lists, q_idx, position);
+                if blast_compo_early_termination(m.best_evalue, &heaps[batch.clone()]) {
                     continue;
                 }
                 let slot = q_idx - batch.start;
@@ -363,72 +460,33 @@ where
                         params_by_q[slot].insert(built)
                     }
                 };
-                scratch.hits.clear();
-                scratch.hits.extend(
-                    local_match
-                        .hsps
-                        .iter()
-                        .map(preliminary_hit_from_local_match_hsp),
-                );
-                let subject = search.subjects.read(local_match.oid)?;
-                let subject_raw = subject.residues();
                 let redone_match = &mut heaps[q_idx];
-                let redone = postprocess_preliminary_hits_smith_waterman(
-                    &scratch.hits,
+                let redone = run_sw_on_match(
+                    search,
+                    q_idx,
+                    m,
                     query_workspace,
-                    &mut scratch.composition_workspace,
-                    (search.query_nomask)(&search.contexts[q_idx]),
-                    subject_raw,
-                    search.matrix,
-                    search.gapped_params,
-                    search.gapped_gumbel,
                     redo_align_params,
-                    search.evalue,
-                    &mut scratch.gap_scratch,
-                    &mut scratch.range_cache,
-                    search.engine_positives,
-                    Some(unadjusted),
-                    &mut scratch.sw_scratch,
+                    unadjusted,
+                    scratch,
                     None,
                     &mut |evalue, score| {
-                        SwHeapAnswer::Known(redone_match.would_insert(
-                            evalue,
-                            score,
-                            local_match.oid,
-                        ))
+                        SwHeapAnswer::Known(redone_match.would_insert(evalue, score, m.oid))
                     },
                     &mut None,
                 );
                 let Some(postprocessed) = sw_status.redone(redone, || {
-                    sw_oid_stop_error(fetch_notes, batch.clone(), heaps, Some((ordinal, q_idx)))
+                    endless_oid_error(fetch_notes, &batch, heaps, ordinal, q_idx)
                 })?
                 else {
                     continue;
                 };
-                let Some(hsp_list) = postprocessed.hsp_list else {
-                    continue;
-                };
-                let redone_match = &mut heaps[q_idx];
-                if redone_match.would_insert(
-                    postprocessed.best_evalue,
-                    postprocessed.best_score,
-                    local_match.oid,
-                ) {
-                    redone_match.insert(
-                        hsp_list,
-                        postprocessed.best_evalue,
-                        postprocessed.best_score,
-                        local_match.oid,
-                    );
-                }
+                insert_postprocessed(&mut heaps[q_idx], m.oid, postprocessed);
             }
         }
     }
 
-    if sw_status.failed() {
-        return Err(sw_oid_stop_error(fetch_notes, batch, heaps, None));
-    }
-    Ok(())
+    check_batch_end_status(sw_status, fetch_notes, batch, heaps)
 }
 
 // ---- Parallel windows for OID-ordered CBS=0 Smith-Waterman redo ----
@@ -441,7 +499,7 @@ mod par {
     use super::*;
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn try_run_batch_parallel<P>(
+    pub(super) fn try_par<P>(
         search: &SwCbs0Search<'_, P>,
         _batch: Range<usize>,
         _events: &[Cbs0Event],
@@ -465,7 +523,6 @@ mod par {
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod par {
-    use super::super::gapalign::BlastpPreliminaryHsp;
     use super::super::hsp::COMPO_HEAP_EVALUE_STRETCH;
     use super::super::kappa::smith_waterman::SwMatchResume;
     use super::super::kappa::BlastpPostprocessResult;
@@ -531,30 +588,6 @@ mod par {
         pub next_cursor: usize,
     }
 
-    struct WorkerScratch {
-        composition_workspace: BlastCompositionWorkspace,
-        gap_scratch: GapAlignScratch,
-        range_cache: BlastpKappaSubjectRangeCache,
-        sw_scratch: SwMatchScratch,
-        hits: Vec<BlastpPreliminaryHsp>,
-    }
-
-    impl WorkerScratch {
-        fn new(matrix: ScoringMatrix) -> Self {
-            let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
-            if matrix != ScoringMatrix::Blosum62 {
-                blastp_use_matrix_workspace(&mut composition_workspace, matrix);
-            }
-            Self {
-                composition_workspace,
-                gap_scratch: GapAlignScratch::new(),
-                range_cache: BlastpKappaSubjectRangeCache::new(None),
-                sw_scratch: SwMatchScratch::new(),
-                hits: Vec::new(),
-            }
-        }
-    }
-
     /// Computes the E-value above which early termination may trigger in `batch` given the current
     /// `heaps` and remaining kept match counts per query (`remaining_per_q`), or `None` if at least
     /// one query in `batch` cannot fill its heap anymore.
@@ -612,33 +645,33 @@ mod par {
                 may_insert[slot] = 1;
                 continue;
             }
-            let local_match = local_match_at(lists, q_idx, position);
+            let m = local_match_at(lists, q_idx, position);
             let inserts = match &computed.result {
                 Ok(postprocessed) => postprocessed.hsp_list.is_some(),
                 Err(error) if error.is::<SwRedoFailed>() => false,
                 Err(_) => break,
             };
-            let may_end = end_above.is_some_and(|above| local_match.best_evalue > above);
+            let may_end = end_above.is_some_and(|above| m.best_evalue > above);
             if exact[slot] && !may_end {
                 let heap = ahead[slot].get_or_insert_with(|| heaps[q_idx].keys());
                 match (computed.deferred, &computed.result) {
                     (Some((evalue, score)), _) => {
-                        if heap.would_insert(evalue, score, local_match.oid) {
+                        if heap.would_insert(evalue, score, m.oid) {
                             continued.push((index, (evalue, score)));
                             exact[slot] = false;
                             may_insert[slot] = 1;
                         }
                     }
                     (None, Ok(postprocessed)) if inserts => {
-                        let (evalue, score) = (postprocessed.best_evalue, postprocessed.best_score);
-                        if heap.would_insert(evalue, score, local_match.oid) {
+                        let (ev, sc) = (postprocessed.best_evalue, postprocessed.best_score);
+                        if heap.would_insert(ev, sc, m.oid) {
                             let keys = BlastpHspList {
-                                oid: local_match.oid,
-                                query_index: local_match.query_index,
+                                oid: m.oid,
+                                query_index: m.query_index,
                                 hsps: Vec::new(),
-                                best_evalue: evalue,
+                                best_evalue: ev,
                             };
-                            heap.insert(keys, evalue, score, local_match.oid);
+                            heap.insert(keys, ev, sc, m.oid);
                         }
                     }
                     (None, _) => {}
@@ -688,12 +721,10 @@ mod par {
             events.extend_from_slice(&carry.events);
             before_same_query.resize(carried, 0);
             let mut carried_kept = 0usize;
-            for (&event, res) in carry.events.iter().zip(&carry.results) {
-                if let Cbs0Event::Kept { q_idx, .. } = event {
-                    if res.is_some() {
-                        in_window_per_q[q_idx - batch.start] += 1;
-                        carried_kept += 1;
-                    }
+            for (&ev, res) in carry.events.iter().zip(&carry.results) {
+                if let (Cbs0Event::Kept { q_idx, .. }, Some(_)) = (ev, res) {
+                    in_window_per_q[q_idx - batch.start] += 1;
+                    carried_kept += 1;
                 }
             }
             carried_jobs = carried_kept.div_ceil(OID_JOB_MATCHES);
@@ -727,13 +758,11 @@ mod par {
                 Cbs0Event::Kept {
                     q_idx, position, ..
                 } => {
-                    let local_match = local_match_at(lists, q_idx, position);
-                    let ended_now = blast_compo_early_termination(
-                        local_match.best_evalue,
-                        &heaps[batch.clone()],
-                    );
-                    let at_risk = !ended_now
-                        && end_above.is_some_and(|above| local_match.best_evalue > above);
+                    let m = local_match_at(lists, q_idx, position);
+                    let ended_now =
+                        blast_compo_early_termination(m.best_evalue, &heaps[batch.clone()]);
+                    let at_risk =
+                        !ended_now && end_above.is_some_and(|above| m.best_evalue > above);
                     if (!jobs.is_empty() || !new_indices.is_empty())
                         && (new_kept >= max_new_kept || (at_risk && new_at_risk >= risk_cap))
                     {
@@ -800,25 +829,22 @@ mod par {
             let computed = results.next().expect("one result per event");
             match event {
                 Cbs0Event::Excluded { best_evalue, .. } => {
-                    let terminates_early =
-                        blast_compo_early_termination(best_evalue, &heaps[batch.clone()]);
-                    let redone = sw_status.reaches_redo(terminates_early, true);
-                    debug_assert!(!redone);
+                    record_excluded(sw_status, best_evalue, &heaps[batch.clone()]);
                 }
                 Cbs0Event::Kept {
                     ordinal,
                     q_idx,
                     position,
                 } => {
-                    let local_match = local_match_at(lists, q_idx, position);
-                    if blast_compo_early_termination(local_match.best_evalue, &heaps[batch.clone()])
-                    {
+                    let m = local_match_at(lists, q_idx, position);
+                    let slot = q_idx - batch.start;
+                    if blast_compo_early_termination(m.best_evalue, &heaps[batch.clone()]) {
                         if computed.is_some() {
                             wasted += 1;
                         } else {
                             skipped += 1;
                         }
-                        remaining_per_q[q_idx - batch.start] -= 1;
+                        remaining_per_q[slot] -= 1;
                         continue;
                     }
                     let Some(OidComputed {
@@ -832,7 +858,7 @@ mod par {
                         );
                     };
                     if let Some((evalue, score)) = deferred {
-                        if heaps[q_idx].would_insert(evalue, score, local_match.oid) {
+                        if heaps[q_idx].would_insert(evalue, score, m.oid) {
                             let stopped = OidComputed {
                                 result,
                                 deferred,
@@ -846,29 +872,14 @@ mod par {
                         }
                         turned += 1;
                     }
-                    remaining_per_q[q_idx - batch.start] -= 1;
+                    remaining_per_q[slot] -= 1;
                     let Some(postprocessed) = sw_status.redone(result, || {
-                        sw_oid_stop_error(fetch_notes, batch.clone(), heaps, Some((ordinal, q_idx)))
+                        endless_oid_error(fetch_notes, &batch, heaps, ordinal, q_idx)
                     })?
                     else {
                         continue;
                     };
-                    let Some(hsp_list) = postprocessed.hsp_list else {
-                        continue;
-                    };
-                    let redone_match = &mut heaps[q_idx];
-                    if redone_match.would_insert(
-                        postprocessed.best_evalue,
-                        postprocessed.best_score,
-                        local_match.oid,
-                    ) {
-                        redone_match.insert(
-                            hsp_list,
-                            postprocessed.best_evalue,
-                            postprocessed.best_score,
-                            local_match.oid,
-                        );
-                    }
+                    insert_postprocessed(&mut heaps[q_idx], m.oid, postprocessed);
                 }
             }
         }
@@ -898,7 +909,7 @@ mod par {
             }
         }
         let mut counts = OidCounts::default();
-        let mut sw_status = SwBatchStatus::default();
+        let mut status = SwBatchStatus::default();
         let mut carry: Option<OidCarry> = None;
         let mut cursor = 0usize;
         let max_risk_cap = limits
@@ -958,7 +969,7 @@ mod par {
                 lists,
                 heaps,
                 &mut remaining_per_q,
-                &mut sw_status,
+                &mut status,
                 fetch_notes,
                 &mut carry,
             )?;
@@ -976,9 +987,7 @@ mod par {
             cursor = window.next_cursor;
         }
 
-        if sw_status.failed() {
-            return Err(sw_oid_stop_error(fetch_notes, batch, heaps, None));
-        }
+        check_batch_end_status(status, fetch_notes, batch, heaps)?;
         Ok(counts)
     }
 
@@ -986,59 +995,29 @@ mod par {
     fn redo_one_oid_match<P>(
         search: &SwCbs0Search<'_, P>,
         q_idx: usize,
-        local_match: &BlastpHspList,
+        m: &BlastpHspList,
         query_workspace: &BlastpKappaQueryWorkspace,
         redo_align_params: &BlastRedoAlignParams,
         unadjusted: &AdjustedProteinMatrix,
-        scratch: &mut WorkerScratch,
+        scratch: &mut SwScratch,
         heap_before: Option<(&BlastCompoHeap, usize)>,
         resume: Option<&SwMatchResume>,
     ) -> OidComputed {
-        scratch.hits.clear();
-        scratch.hits.extend(
-            local_match
-                .hsps
-                .iter()
-                .map(preliminary_hit_from_local_match_hsp),
-        );
-        let subject = match search.subjects.read(local_match.oid) {
-            Ok(subject) => subject,
-            Err(error) => {
-                return OidComputed {
-                    result: Err(error),
-                    deferred: None,
-                    resume: None,
-                };
-            }
-        };
-        let subject_raw = subject.residues();
         let mut deferred = None;
         let mut kept = None;
-        let result = postprocess_preliminary_hits_smith_waterman(
-            &scratch.hits,
+        let result = run_sw_on_match(
+            search,
+            q_idx,
+            m,
             query_workspace,
-            &mut scratch.composition_workspace,
-            (search.query_nomask)(&search.contexts[q_idx]),
-            subject_raw,
-            search.matrix,
-            search.gapped_params,
-            search.gapped_gumbel,
             redo_align_params,
-            search.evalue,
-            &mut scratch.gap_scratch,
-            &mut scratch.range_cache,
-            search.engine_positives,
-            Some(unadjusted),
-            &mut scratch.sw_scratch,
+            unadjusted,
+            scratch,
             resume,
             &mut |evalue, score| match heap_before {
                 Some((heap, before)) => {
-                    let inserts = x_sw_heap_test(
-                        heap,
-                        before,
-                        (evalue, score, local_match.oid),
-                        &mut deferred,
-                    );
+                    let inserts =
+                        x_sw_heap_test(heap, before, (evalue, score, m.oid), &mut deferred);
                     if deferred.is_some() {
                         SwHeapAnswer::Deferred
                     } else {
@@ -1062,7 +1041,7 @@ mod par {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn try_run_batch_parallel<P>(
+    pub(super) fn try_par<P: RedoParamsFn>(
         search: &SwCbs0Search<'_, P>,
         batch: Range<usize>,
         events: &[Cbs0Event],
@@ -1070,10 +1049,7 @@ mod par {
         heaps: &mut [BlastCompoHeap],
         fetch_notes: &FetchNotes<'_>,
         unadjusted: &AdjustedProteinMatrix,
-    ) -> Result<bool>
-    where
-        P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
-    {
+    ) -> Result<bool> {
         if !search.par.allow_parallel || !search.par.pool.enabled() || search.par.threads <= 1 {
             return Ok(false);
         }
@@ -1101,7 +1077,7 @@ mod par {
             search.par.timing,
             fetch_notes,
             &mut |heaps, window, carried| {
-                let run_job = |scratch: &mut WorkerScratch, job_indices: &[usize]| {
+                let run_job = |scratch: &mut SwScratch, job_indices: &[usize]| {
                     let mut out = Vec::with_capacity(job_indices.len());
                     let mut last_q: Option<(usize, BlastRedoAlignParams)> = None;
                     for &idx in job_indices {
@@ -1111,7 +1087,7 @@ mod par {
                         else {
                             continue;
                         };
-                        let local_match = local_match_at(lists, q_idx, position);
+                        let m = local_match_at(lists, q_idx, position);
                         let ws = workspaces[q_idx - batch.start]
                             .get_or_init(|| query_workspace_for(search, q_idx));
                         if last_q.as_ref().is_none_or(|(q, _)| *q != q_idx) {
@@ -1149,7 +1125,7 @@ mod par {
                         let comp = redo_one_oid_match(
                             search,
                             q_idx,
-                            local_match,
+                            m,
                             ws,
                             redo_align_params,
                             unadjusted,
@@ -1161,7 +1137,7 @@ mod par {
                     }
                     out
                 };
-                let new_scratch = || WorkerScratch::new(search.matrix);
+                let new_scratch = || SwScratch::new(search.matrix);
                 let per_job: Vec<Vec<(usize, OidComputed)>> =
                     if lpt && search.par.pool.enabled() && threads > 1 && window.jobs.len() > 1 {
                         let costs: Vec<u64> = window

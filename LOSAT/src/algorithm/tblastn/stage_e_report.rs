@@ -1036,19 +1036,16 @@ fn write_tabular(
                     continue;
                 }
                 if let Some(nullb) = payload.nullb {
-                    if nullb.std_seg_lengths_inaccurate {
+                    let exc = if nullb.std_seg_lengths_inaccurate {
+                        Some(crate::report::serial::seqalign::std_seg_lengths_not_accurate())
+                    } else if nullb.translate_na_failure {
+                        Some(crate::report::serial::seqalign::translate_na_to_aa_exception())
+                    } else {
+                        None
+                    };
+                    if let Some(exc) = exc {
                         writer.flush()?;
-                        return Err(crate::cli::NativeError::exception(
-                            &crate::report::serial::seqalign::std_seg_lengths_not_accurate(),
-                        )
-                        .into());
-                    }
-                    if nullb.translate_na_failure {
-                        writer.flush()?;
-                        return Err(crate::cli::NativeError::exception(
-                            &crate::report::serial::seqalign::translate_na_to_aa_exception(),
-                        )
-                        .into());
+                        return Err(crate::cli::NativeError::exception(&exc).into());
                     }
                 }
                 let hsp = &linked.hsp;
@@ -1306,9 +1303,8 @@ fn pairwise_hits(
                     _ => None,
                 };
                 let (qseq, sseq, report_positives) = if nullb_stop.is_some() {
-                    if let Some(table) = html_masks.as_deref_mut() {
+                    if html_masks.is_some() {
                         row_masks.clear();
-                        table.push(row_masks.copy_rows());
                     }
                     (String::new(), String::new(), 0)
                 } else {
@@ -1337,9 +1333,6 @@ fn pairwise_hits(
                         hsp.q_end,
                         &mut row_masks,
                     )?;
-                    if let Some(table) = html_masks.as_deref_mut() {
-                        table.push(row_masks.copy_rows());
-                    }
                     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2120-2154
                     let report_positives = crate::report::row_letters::display_positives(
                         qseq.as_bytes(),
@@ -1349,6 +1342,9 @@ fn pairwise_hits(
                     );
                     (qseq, sseq, report_positives)
                 };
+                if let Some(table) = html_masks.as_deref_mut() {
+                    table.push(row_masks.copy_rows());
+                }
                 // The rows are read from the searched letters; the report prints record
                 // coordinates (`record_coordinates`).
                 let searched = (hsp.q_start + 1, hsp.q_end, s_start, s_end);

@@ -1018,11 +1018,12 @@ pub(super) fn sw_cbs0_redo<P>(
 where
     P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
 {
+    use crate::algorithm::blastp::x_sw_cbs0::SwCbs0Par;
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let par = crate::algorithm::blastp::x_sw_cbs0::SwCbs0Par {
+    let par = SwCbs0Par {
         pool: redo.blastp_parallel_pool,
         threads: redo.blastp_num_threads,
         allow_parallel: x_redo_par::x_bp_redo_par()
@@ -1039,7 +1040,7 @@ where
         not(feature = "parallel"),
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
-    let par = crate::algorithm::blastp::x_sw_cbs0::SwCbs0Par {
+    let par = SwCbs0Par {
         pool: redo.blastp_parallel_pool,
         threads: 1,
         allow_parallel: false,

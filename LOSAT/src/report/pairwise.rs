@@ -382,8 +382,8 @@ pub struct PairwiseHit {
     pub(crate) nullb_stop: Option<PairwiseNullbStop>,
 }
 
-/// Report-time stop or per-HSP alignment skip for a TBLASTN `-in_pssm -window_size 0`
-/// NULLB-start alignment (`algorithm::tblastn::nullb_report`).
+/// Report-time stop or per-HSP skip action for [`PairwiseHit::nullb_stop`]
+/// (`algorithm::tblastn::nullb_report`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PairwiseNullbStop {
     /// `-subject`, positive frame, `rem in {1, 2}`, `k >= 2`: `CreateDensegFromStdseg` throws

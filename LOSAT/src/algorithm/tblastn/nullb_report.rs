@@ -199,30 +199,32 @@ pub(super) fn prepare_nullb_hsp(
                 }
             }
         }
-    } else if !remaps {
-        // Negative frame, -db: s_from = rem - 3 in {-3, -2, -1}.
-        // When rem == 2, s_from == -1 == GAP_VALUE, so s_CreateStdSegs writes an empty subject loc
-        // (equivalent to GapEditOp::Ins(k)). When rem in {0, 1}, s_from is -3 or -2 (written as
-        // unsigned TSeqPos in Std-seg, treated as end-gap spaces by CAlnVec and GetAlignLengths,
-        // while XML Hsp_gaps excludes it because starts[seg] != -1).
-        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:344-355
-        hsp.q_end = hsp.q_start + script_q;
-        hsp.s_end = hsp.s_start + script_s - k_i32;
-        payload.gap_letters += k;
-        payload.gap_opens += 1;
-        if rem == 2 {
-            *payload.edit_script.last_mut().expect("non-empty script") = GapEditOp::Ins(k_u32);
-        } else {
-            report.wrapped_minus_tail = k;
-        }
     } else {
-        // Negative frame, -subject: CSeq_loc_Mapper drops the invalid final Std-seg without
-        // invalidating scores (scores stay intact).
-        // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1568-1580
-        payload.edit_script.pop();
-        payload.align_length = payload.align_length.saturating_sub(k);
-        hsp.q_end = hsp.q_start + script_q - k_i32;
+        // Negative frame: `s_end` drops the final `k` columns in both `-db` and `-subject`.
         hsp.s_end = hsp.s_start + script_s - k_i32;
+        if !remaps {
+            // Negative frame, -db: s_from = rem - 3 in {-3, -2, -1}.
+            // When rem == 2, s_from == -1 == GAP_VALUE, so s_CreateStdSegs writes an empty subject
+            // loc (equivalent to GapEditOp::Ins(k)). When rem in {0, 1}, s_from is -3 or -2
+            // (written as unsigned TSeqPos in Std-seg, treated as end-gap spaces by CAlnVec and
+            // GetAlignLengths, while XML Hsp_gaps excludes it because starts[seg] != -1).
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:344-355
+            hsp.q_end = hsp.q_start + script_q;
+            payload.gap_letters += k;
+            payload.gap_opens += 1;
+            if rem == 2 {
+                *payload.edit_script.last_mut().expect("non-empty script") = GapEditOp::Ins(k_u32);
+            } else {
+                report.wrapped_minus_tail = k;
+            }
+        } else {
+            // Negative frame, -subject: CSeq_loc_Mapper drops the invalid final Std-seg without
+            // invalidating scores (scores stay intact).
+            // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1568-1580
+            payload.edit_script.pop();
+            payload.align_length = payload.align_length.saturating_sub(k);
+            hsp.q_end = hsp.q_start + script_q - k_i32;
+        }
     }
 
     payload.nullb = Some(report);
@@ -321,50 +323,46 @@ pub(super) fn aligned_sequences_nullb(
     let mut query_string = String::with_capacity(columns);
     let mut subject_string = String::with_capacity(columns);
     let mut s_emitted = 0usize;
+    let push_query = |q: &mut usize, out: &mut String| -> Result<()> {
+        let qa = query
+            .get(*q)
+            .context("TBLASTN report query offset overflow")?;
+        out.push(char::from(qa));
+        *q += 1;
+        Ok(())
+    };
+    let push_subject = |s: &mut usize, out: &mut String| -> Result<()> {
+        let &sa = translated
+            .get(*s)
+            .context("TBLASTN report subject offset overflow")?;
+        ensure!(
+            NCBISTDAA_TO_AA.get(sa as usize).is_some(),
+            "invalid TBLASTN subject amino acid"
+        );
+        out.push(char::from(displayed_subject(*s)));
+        *s += 1;
+        Ok(())
+    };
     for &op in script {
         for _ in 0..op.num() {
             match op {
                 GapEditOp::Sub(_) => {
-                    let qa = query
-                        .get(q)
-                        .context("TBLASTN report query offset overflow")?;
-                    query_string.push(char::from(qa));
+                    push_query(&mut q, &mut query_string)?;
                     if s_emitted < backed_subject_res {
-                        let &sa = translated
-                            .get(s)
-                            .context("TBLASTN report subject offset overflow")?;
-                        ensure!(
-                            NCBISTDAA_TO_AA.get(sa as usize).is_some(),
-                            "invalid TBLASTN subject amino acid"
-                        );
-                        subject_string.push(char::from(displayed_subject(s)));
-                        s += 1;
+                        push_subject(&mut s, &mut subject_string)?;
                     } else {
                         subject_string.push(tail_char);
                     }
-                    q += 1;
                     s_emitted += 1;
                 }
                 GapEditOp::Del(_) => {
-                    let &sa = translated
-                        .get(s)
-                        .context("TBLASTN report subject offset overflow")?;
                     query_string.push('-');
-                    ensure!(
-                        NCBISTDAA_TO_AA.get(sa as usize).is_some(),
-                        "invalid TBLASTN subject amino acid"
-                    );
-                    subject_string.push(char::from(displayed_subject(s)));
-                    s += 1;
+                    push_subject(&mut s, &mut subject_string)?;
                     s_emitted += 1;
                 }
                 GapEditOp::Ins(_) => {
-                    let qa = query
-                        .get(q)
-                        .context("TBLASTN report query offset overflow")?;
-                    query_string.push(char::from(qa));
+                    push_query(&mut q, &mut query_string)?;
                     subject_string.push('-');
-                    q += 1;
                 }
             }
         }

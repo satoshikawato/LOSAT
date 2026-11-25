@@ -329,9 +329,12 @@ mod par_tests {
             }
             let batch = 0..num_queries;
             let events = collect_batch_events(batch.clone(), &lists, None, &excluded);
-            let mut ref_heaps: Vec<BlastCompoHeap> = (0..num_queries)
-                .map(|_| BlastCompoHeap::new(heap_threshold, ECUTOFF))
-                .collect();
+            let make_heaps = || {
+                (0..num_queries)
+                    .map(|_| BlastCompoHeap::new(heap_threshold, ECUTOFF))
+                    .collect::<Vec<_>>()
+            };
+            let mut ref_heaps = make_heaps();
             let ref_res =
                 serial_oid_reference(batch.clone(), &events, &lists, &cases, &mut ref_heaps);
 
@@ -339,9 +342,7 @@ mod par_tests {
                 jobs: 1 + rng.below(5),
                 at_risk_matches: 1 + rng.below(6),
             };
-            let mut win_heaps: Vec<BlastCompoHeap> = (0..num_queries)
-                .map(|_| BlastCompoHeap::new(heap_threshold, ECUTOFF))
-                .collect();
+            let mut win_heaps = make_heaps();
             let win_res = drive_oid_windows(
                 batch.clone(),
                 &events,

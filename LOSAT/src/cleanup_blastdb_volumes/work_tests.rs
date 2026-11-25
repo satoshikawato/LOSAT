@@ -13,6 +13,26 @@ fn invoke(words: &[&str], env: &Env) -> (i32, Vec<u8>, Vec<u8>) {
     (rc, out, err)
 }
 
+fn touch_all(dir: &std::path::Path, names: &[&str]) {
+    for name in names {
+        fs::write(dir.join(name), b"").unwrap();
+    }
+}
+
+fn assert_removed(dir: &std::path::Path, names: &[&str]) {
+    for name in names {
+        assert!(!dir.join(name).exists(), "{name} should be removed");
+    }
+}
+
+fn assert_invalid_utf8_err(err: &[u8]) {
+    assert!(
+        String::from_utf8_lossy(err).contains("invalid UTF-8"),
+        "expected invalid UTF-8 error, got {:?}",
+        String::from_utf8_lossy(err)
+    );
+}
+
 struct FailingWriter {
     error_kind: io::ErrorKind,
     os_code: Option<i32>,
@@ -62,14 +82,13 @@ fn find_blastdb_direct_and_env_precedence() {
 
     // BLASTDB env lookup.
     fs::write(blastdb.join("envdb.pal"), b"DBLIST envdb.00\n").unwrap();
+    let blastdb_bytes = path_bytes(&blastdb).into_owned();
+    let want_envdb = Ok(Some(path_join(&blastdb_bytes, b"envdb")));
     let env_blastdb = Env {
-        blastdb: Some(path_bytes(&blastdb).into_owned()),
+        blastdb: Some(blastdb_bytes.clone()),
         ..Env::default()
     };
-    assert_eq!(
-        find_blastdb(b"envdb", true, &env_blastdb),
-        Ok(Some(path_join(path_bytes(&blastdb).as_ref(), b"envdb")))
-    );
+    assert_eq!(find_blastdb(b"envdb", true, &env_blastdb), want_envdb);
 
     // Config fallback: cwd .ncbirc -> cwd ncbi.ini -> home .ncbirc -> ncbi .ncbirc.
     fs::write(ini_target.join("idb.nal"), b"DBLIST idb.00\n").unwrap();
@@ -95,13 +114,10 @@ fn find_blastdb_direct_and_env_precedence() {
         cwd: Some(Err(
             "cannot determine current working directory: No such file or directory".to_string(),
         )),
-        blastdb: Some(path_bytes(&blastdb).into_owned()),
+        blastdb: Some(blastdb_bytes),
         ..Env::default()
     };
-    assert_eq!(
-        find_blastdb(b"envdb", true, &env_bad_cwd),
-        Ok(Some(path_join(path_bytes(&blastdb).as_ref(), b"envdb")))
-    );
+    assert_eq!(find_blastdb(b"envdb", true, &env_bad_cwd), want_envdb);
     assert!(find_blastdb(b"missing_db", true, &env_bad_cwd).is_err());
 }
 
@@ -110,20 +126,21 @@ fn dry_run_verbose_and_deletion_preserve_referenced_and_unrelated_files() {
     let dir = TempDir::unique("cleanup-run");
     let db_path = dir.join("mydb");
     fs::write(dir.join("mydb.pal"), b"TITLE test\nDBLIST \"mydb.00\"\n").unwrap();
-    for name in [
-        "mydb.00.pin",
-        "mydb.00.psq",
-        "mydb.01.pin",
-        "mydb.01.phr",
-        "mydb.01.psq",
-        "mydb.01.tar.gz.md5",
-        "mydb.01.pa",
-        "mydb.01.pinx",
-        "mydb.01.nin",
-        "other.01.pin",
-    ] {
-        fs::write(dir.join(name), b"").unwrap();
-    }
+    touch_all(
+        &dir,
+        &[
+            "mydb.00.pin",
+            "mydb.00.psq",
+            "mydb.01.pin",
+            "mydb.01.phr",
+            "mydb.01.psq",
+            "mydb.01.tar.gz.md5",
+            "mydb.01.pa",
+            "mydb.01.pinx",
+            "mydb.01.nin",
+            "other.01.pin",
+        ],
+    );
     let db_str = db_path.to_str().unwrap();
     let env = Env::default();
 
@@ -173,14 +190,15 @@ fn dry_run_verbose_and_deletion_preserve_referenced_and_unrelated_files() {
         want_rm.push_str(&format!("Removed {f}\n"));
     }
     assert_eq!(String::from_utf8(out).unwrap(), want_rm);
-    for removed in [
-        "mydb.01.phr",
-        "mydb.01.pin",
-        "mydb.01.psq",
-        "mydb.01.tar.gz.md5",
-    ] {
-        assert!(!dir.join(removed).exists(), "{removed} should be removed");
-    }
+    assert_removed(
+        &dir,
+        &[
+            "mydb.01.phr",
+            "mydb.01.pin",
+            "mydb.01.psq",
+            "mydb.01.tar.gz.md5",
+        ],
+    );
     for kept in [
         "mydb.pal",
         "mydb.00.pin",
@@ -203,9 +221,7 @@ fn dblist_splits_on_python_whitespace_u001c_to_u001f() {
         "DBLIST db.01\u{001c}db.02\u{001d}db.03\n",
     )
     .unwrap();
-    for name in ["db.01.pin", "db.02.pin", "db.03.pin", "db.04.pin"] {
-        fs::write(dir.join(name), b"").unwrap();
-    }
+    touch_all(&dir, &["db.01.pin", "db.02.pin", "db.03.pin", "db.04.pin"]);
     let db_str = db_path.to_str().unwrap();
     let (rc, out, err) = invoke(&["-db", db_str, "-dbtype", "prot"], &Env::default());
     assert_eq!(rc, 0);
@@ -234,7 +250,7 @@ fn alias_8kib_chunk_decoding_processes_earlier_chunks_before_invalid_utf8() {
     let (rc, out, err) = invoke(&["-db", &db1, "-dbtype", "prot"], &Env::default());
     assert_eq!(rc, 1);
     assert!(out.is_empty());
-    assert!(String::from_utf8_lossy(&err).contains("invalid UTF-8"));
+    assert_invalid_utf8_err(&err);
     assert!(dir1.join("db.01.pin").exists());
 
     // Bad byte at start of chunk 2 (byte 8192): chunk 1's DBLIST is processed first.
@@ -253,7 +269,7 @@ fn alias_8kib_chunk_decoding_processes_earlier_chunks_before_invalid_utf8() {
         String::from_utf8(out).unwrap(),
         format!("Removed {db2}.01.pin\n")
     );
-    assert!(String::from_utf8_lossy(&err).contains("invalid UTF-8"));
+    assert_invalid_utf8_err(&err);
     assert!(!dir2.join("db.01.pin").exists());
 
     // Valid multibyte UTF-8 split across byte 8191..8194 succeeds.
@@ -289,7 +305,7 @@ fn alias_8kib_chunk_decoding_processes_earlier_chunks_before_invalid_utf8() {
     let (rc, out, err) = invoke(&["-db", &db4, "-dbtype", "prot"], &Env::default());
     assert_eq!(rc, 1);
     assert!(out.is_empty());
-    assert!(String::from_utf8_lossy(&err).contains("invalid UTF-8"));
+    assert_invalid_utf8_err(&err);
     assert!(dir4.join("db.01.pin").exists());
 }
 
@@ -298,15 +314,16 @@ fn stdout_buffering_matches_python_block_and_line_failure_modes() {
     // Block-buffered (< 8 KiB): removes all files, then fails at exit flush with exit 120.
     let dir = TempDir::unique("cleanup-buf-small");
     fs::write(dir.join("db.pal"), b"DBLIST db.01\n").unwrap();
-    for name in [
-        "db.01.pin",
-        "db.02.pin",
-        "db.02.psq",
-        "db.03.pin",
-        "db.03.psq",
-    ] {
-        fs::write(dir.join(name), b"").unwrap();
-    }
+    touch_all(
+        &dir,
+        &[
+            "db.01.pin",
+            "db.02.pin",
+            "db.02.psq",
+            "db.03.pin",
+            "db.03.psq",
+        ],
+    );
     let db_str = dir.join("db").to_str().unwrap().to_string();
     let args: Vec<OsString> = ["-db", &db_str, "-dbtype", "prot"]
         .iter()
@@ -323,16 +340,12 @@ fn stdout_buffering_matches_python_block_and_line_failure_modes() {
     assert_eq!(out.writes, 1);
     let err_text = String::from_utf8(err).unwrap();
     assert!(err_text.starts_with("Exception ignored on flushing sys.stdout:\nBrokenPipeError:"));
-    for removed in ["db.02.pin", "db.02.psq", "db.03.pin", "db.03.psq"] {
-        assert!(!dir.join(removed).exists(), "{removed} should be removed");
-    }
+    assert_removed(&dir, &["db.02.pin", "db.02.psq", "db.03.pin", "db.03.psq"]);
 
     // Line-buffered (terminal): fails on the very first line (after unlinking 1 file), exit 1.
     let dir_tty = TempDir::unique("cleanup-buf-tty");
     fs::write(dir_tty.join("db.pal"), b"DBLIST db.01\n").unwrap();
-    for name in ["db.01.pin", "db.02.pin", "db.03.pin"] {
-        fs::write(dir_tty.join(name), b"").unwrap();
-    }
+    touch_all(&dir_tty, &["db.01.pin", "db.02.pin", "db.03.pin"]);
     let db_tty = dir_tty.join("db").to_str().unwrap().to_string();
     let args_tty: Vec<OsString> = ["-db", &db_tty, "-dbtype", "prot"]
         .iter()

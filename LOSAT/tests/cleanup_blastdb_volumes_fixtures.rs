@@ -80,6 +80,15 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
+fn rel_posix(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap()
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 fn listing(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     let mut found = BTreeMap::new();
     let mut stack = vec![dir.to_path_buf()];
@@ -89,12 +98,7 @@ fn listing(dir: &Path) -> BTreeMap<String, Vec<u8>> {
             if path.is_dir() {
                 stack.push(path);
             } else {
-                let relative = path.strip_prefix(dir).unwrap();
-                let parts: Vec<String> = relative
-                    .components()
-                    .map(|part| part.as_os_str().to_string_lossy().into_owned())
-                    .collect();
-                found.insert(parts.join("/"), fs::read(&path).unwrap());
+                found.insert(rel_posix(&path, dir), fs::read(&path).unwrap());
             }
         }
     }
@@ -108,13 +112,7 @@ fn readdir_positions(root: &Path) -> BTreeMap<String, BTreeMap<String, usize>> {
     let mut out = BTreeMap::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(at) = stack.pop() {
-        let rel_dir = at
-            .strip_prefix(root)
-            .unwrap()
-            .components()
-            .map(|part| part.as_os_str().to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
-            .join("/");
+        let rel_dir = rel_posix(&at, root);
         let mut order = BTreeMap::new();
         for (idx, entry) in fs::read_dir(&at).unwrap().enumerate() {
             let entry = entry.unwrap();

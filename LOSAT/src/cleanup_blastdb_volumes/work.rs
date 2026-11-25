@@ -268,12 +268,16 @@ impl<R: Read> AliasLineReader<R> {
         Ok(filled)
     }
 
+    fn emit_partial(&mut self) {
+        let finished = std::mem::take(&mut self.partial_line);
+        self.decoded_lines.push_back(finished);
+    }
+
     fn push_decoded_chunk(&mut self, text: &str) {
         let mut slice = text;
         if self.pending_cr {
             self.pending_cr = false;
-            self.decoded_lines
-                .push_back(std::mem::take(&mut self.partial_line));
+            self.emit_partial();
             if let Some(rest) = slice.strip_prefix('\n') {
                 slice = rest;
             }
@@ -282,30 +286,20 @@ impl<R: Read> AliasLineReader<R> {
         let mut start = 0usize;
         let mut i = 0usize;
         while i < bytes.len() {
-            if bytes[i] == b'\n' {
+            if bytes[i] == b'\n' || bytes[i] == b'\r' {
                 self.partial_line.push_str(&slice[start..i]);
-                self.decoded_lines
-                    .push_back(std::mem::take(&mut self.partial_line));
-                i += 1;
-                start = i;
-            } else if bytes[i] == b'\r' {
-                self.partial_line.push_str(&slice[start..i]);
-                if i + 1 == bytes.len() {
+                if bytes[i] == b'\n' {
+                    self.emit_partial();
+                    i += 1;
+                } else if i + 1 == bytes.len() {
                     // Wait for the next chunk (or EOF) to see whether `\n` follows this `\r`.
                     self.pending_cr = true;
                     i += 1;
-                    start = i;
-                } else if bytes[i + 1] == b'\n' {
-                    self.decoded_lines
-                        .push_back(std::mem::take(&mut self.partial_line));
-                    i += 2;
-                    start = i;
                 } else {
-                    self.decoded_lines
-                        .push_back(std::mem::take(&mut self.partial_line));
-                    i += 1;
-                    start = i;
+                    self.emit_partial();
+                    i += if bytes[i + 1] == b'\n' { 2 } else { 1 };
                 }
+                start = i;
             } else {
                 i += 1;
             }
@@ -329,11 +323,8 @@ impl<R: Read> AliasLineReader<R> {
                         "unexpected end of UTF-8 sequence".to_string(),
                     ));
                 }
-                if self.pending_cr {
+                if self.pending_cr || !self.partial_line.is_empty() {
                     self.pending_cr = false;
-                    return Ok(Some(std::mem::take(&mut self.partial_line)));
-                }
-                if !self.partial_line.is_empty() {
                     return Ok(Some(std::mem::take(&mut self.partial_line)));
                 }
                 return Ok(None);

@@ -143,7 +143,6 @@ pub(crate) fn run(words: &[OsString]) -> i32 {
     run_with_buffering(words, &env, &mut out, line_buffered, &mut err)
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py:104-141
 /// Runs `cleanup-blastdb-volumes.py` with `words`, `env`, block-buffered `out`, and `err`; returns
 /// the exit status (`0` on success, `-h`, or `-version`; `1` when the database or alias file is
 /// missing or a mid-run I/O or config error occurs; `2` on argument errors; `120` when exit-time

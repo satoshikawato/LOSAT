@@ -92,11 +92,14 @@ fn help_and_usage_wrap_by_terminal_columns() {
          \x20                                 [-verbose]\n"
     );
     // 45 columns puts usage options on the next line indented under "usage: " (7 spaces).
+    let indent7 = " ".repeat(7);
     assert_eq!(
         usage_text(45),
-        "usage: cleanup-blastdb-volumes.py\n\
-         \x20      [-h] -db DB -dbtype {prot,nucl}\n\
-         \x20      [-dry-run] [-version] [-verbose]\n"
+        format!(
+            "usage: cleanup-blastdb-volumes.py\n\
+             {indent7}[-h] -db DB -dbtype {{prot,nucl}}\n\
+             {indent7}[-dry-run] [-version] [-verbose]\n"
+        )
     );
     // 46 columns keeps [-h] on the first line (indent 34).
     let indent34 = " ".repeat(34);

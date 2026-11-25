@@ -38,8 +38,8 @@ use rayon::prelude::*;
 
 use crate::algorithm::blastn::coordination::SubjectMetadata;
 use crate::algorithm::blastn::hsp::{BlastnHitList, BlastnHspList, BlastnOutputFormat};
+pub(super) use crate::algorithm::common::database::PreliminaryReadError;
 use crate::algorithm::common::database::{self as shared, ParsedShown, ReportedHeader};
-pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::blastinput::db_mask::{DbMaskOption, ResolvedMask};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -416,6 +416,21 @@ impl BlastnDatabase {
     pub(super) fn after_calls(mut self, unrecorded: bool) -> Self {
         self.taxdb.note_calls_before(unrecorded);
         self
+    }
+
+    /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
+    /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
+    /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
+    pub(super) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+        self.taxdb.set_keeps_scope(keeps);
+        self.taxdb.set_separate_xml2(separate_xml2);
+        self
+    }
+
+    /// Mirrors `CBlastFormat::ResetScopeHistory` at the end of a query batch
+    /// (`shared::TaxdbRun::reset_scope`).
+    pub(super) fn reset_scope(&self) {
+        self.taxdb.reset_scope();
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
@@ -914,6 +929,11 @@ impl BlastnDatabase {
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(super) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
+    }
+
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(super) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
     }
 
     /// The number of sequences the search reads: the included ones (`SeqDb::num_seqs`), which
@@ -1743,7 +1763,7 @@ pub(super) fn drop_unaligned(
 // read again: the header file stays open, and the title is the same.
 /// Reads the definition lines of the sequences that the final hit lists `hit_lists` of a
 /// query batch name, in NCBI's order, into `titles` (`common::database::read_header`). A reader
-/// error of NCBI's own is a `HeaderReadError` (it fails the batch); LOSAT's refusals are errors
+/// error of NCBI's own is an `ErrorAfterBatchReports` (it fails the batch); LOSAT's refusals are errors
 /// of their own. The batch's first read of a record with a UTF8String where a VisibleString is
 /// expected, its fetches' and Seq-aligns' (`earlier`) or these, is returned
 /// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there.

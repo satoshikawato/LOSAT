@@ -105,3 +105,6 @@ pub use crate::algorithm::tblastx::lookup::x_tbn_lut_print_summary as x_lut_lean
 // prints counters and changes no value NCBI computes.
 pub use stage_d_linking::x_link_ctx_print_summary;
 pub use stage_d_linking::x_link_window_print_summary;
+
+#[cfg(test)]
+pub(crate) mod mapped_row_range_tests;

@@ -106,6 +106,7 @@ pub(crate) fn query_records_of<'a>(
             subject: subject_records.len() as u32 - 1,
             q_offset: i32::try_from(hit.sort_query_offset)?,
             q_end: i32::try_from(hit.sort_query_end)?,
+            q_left_out: 0,
             s_offset: i32::try_from(hit.sort_subject_offset)?,
             s_end: i32::try_from(hit.sort_subject_end)?,
             q_frame: i8::try_from(hit.query_frame)?,

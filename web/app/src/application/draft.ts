@@ -668,7 +668,7 @@ export class SearchDraft {
       ...(this.state.get().program === 'blastn' ? { message: undefined } : {}),
     });
     this.setFieldForProgram('blastn', FILTERING_DB_FLAG, true);
-    const work = this.scanDatabaseFiles(files).then((outcome) => {
+    const scan = this.scanDatabaseFiles(files).then((outcome) => {
       if (this.generations.get('filtering-db') !== generation) return;
       const onBlastn = this.state.get().program === 'blastn';
       if (!outcome.ok) {
@@ -692,8 +692,8 @@ export class SearchDraft {
       });
       this.setFilteringDbField(selected);
     });
-    this.track(work);
-    await work;
+    this.track(scan);
+    await scan;
   }
 
   private setFilteringDbField(selected: string | undefined): void {

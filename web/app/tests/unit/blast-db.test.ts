@@ -277,6 +277,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
 
   const pasteQuery = (draft: SearchDraft) => draft.setPaste('query', '>q1\nACGTACGTACGTACGTACGTACGT\n');
   const expectReady = (draft: SearchDraft) => expect(draft.readiness()).toBeUndefined();
+  const pickNucDb = (draft: SearchDraft) => draft.setSubjectDatabaseFiles([fileWithRelPath('nucdb/nt.nin', 'nin')]);
 
   it('runs a local -db search with filter list files, mounts directory read-only, records blastdbEnv, omits FASTA subject, and reads subjectLength in ResultsBrowser', async () => {
     const memory = memoryStore();
@@ -338,7 +339,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     const { draft } = setup();
     pasteQuery(draft);
     draft.setSubjectSource('database');
-    await draft.setSubjectDatabaseFiles([fileWithRelPath('nucdb/nt.nin', 'nin')]);
+    await pickNucDb(draft);
     draft.setDatabaseFilterFile('-seqidlist', new File(['s1\n'], 'ids.txt'));
     draft.setDatabaseFilterFile('-negative_seqidlist', new File(['s2\n'], 'ids.txt'));
     await draft.idle();
@@ -349,7 +350,8 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
   });
 
   it('writes -filtering_db explicitly to BLASTN when the user switches program during folder scan (F4)', async () => {
-    const { draft, coordinator, runCalls } = setup();
+    const env = setup();
+    const { draft, coordinator, runCalls } = env;
     pasteQuery(draft);
     draft.setPaste('subject', '>s1\nACGTACGTACGTACGTACGTACGT\n');
 
@@ -420,7 +422,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     await draft.idle();
     expect(draft.readiness()).toBe('Choose the folder again.');
 
-    await draft.setSubjectDatabaseFiles([fileWithRelPath('nucdb/nt.nin', 'nin')]);
+    await pickNucDb(draft);
     await draft.idle();
     expect(draft.state.get().database.remembered).toBeUndefined();
     expect(draft.state.get().database.selected).toBe('nucdb/nt');

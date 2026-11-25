@@ -423,11 +423,11 @@ export function assembleSearchDirectory(parts: {
   readonly filterFiles?: Readonly<Record<string, File>>;
   readonly filteringDb?: { readonly discovery: BlastDbDiscovery; readonly selectedName: string };
 }): AssembledSearchDirectory {
-  const builder = new RunDirectoryBuilder();
+  const dir = new RunDirectoryBuilder();
   let blastdbEnv: string | undefined;
 
   if (parts.subjectDb !== undefined) {
-    for (const entry of parts.subjectDb.discovery.files) builder.add(entry.name, entry.file);
+    for (const entry of parts.subjectDb.discovery.files) dir.add(entry.name, entry.file);
     // Alias auxiliary taxonomy files from the selected DB's own folder to root (`/work`)
     // so `SeqDB_ResolveDbPath` resolves them as `BLASTDB=<dbDir>` does on the CLI.
     const dbDir = parentDir(parts.subjectDb.selectedName);
@@ -435,24 +435,24 @@ export function assembleSearchDirectory(parts: {
       const tax = databaseTaxonomy(parts.subjectDb.discovery, parts.subjectDb.selectedName);
       for (const entry of tax.entries) {
         const auxName = entry.name.slice(dbDir.length + 1);
-        builder.add(auxName, entry.file);
+        dir.add(auxName, entry.file);
         blastdbEnv = dbDir;
       }
     }
   }
 
   if (parts.filteringDb !== undefined) {
-    for (const entry of parts.filteringDb.discovery.files) builder.add(entry.name, entry.file);
+    for (const entry of parts.filteringDb.discovery.files) dir.add(entry.name, entry.file);
   }
 
   if (parts.filterFiles !== undefined) {
     for (const file of Object.values(parts.filterFiles)) {
       const name = normalizeRunPath(file.name);
       if (name === undefined) throw new Error(`Invalid file name: "${file.name}".`);
-      builder.add(name, file);
+      dir.add(name, file);
     }
   }
 
-  const files = builder.build();
+  const files = dir.build();
   return Object.freeze(blastdbEnv === undefined ? { files } : { files, blastdbEnv });
 }

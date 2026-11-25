@@ -21,6 +21,7 @@ const toggleDbFilters = (page: Page) => page.getByTestId('subject-db-filters-tog
 const enableFilteringDb = (page: Page) => page.getByTestId('param-filtering_db').check();
 const setSubjectDbFiles = (page: Page, files: Parameters<ReturnType<Page['getByTestId']>['setInputFiles']>[0]) =>
   page.getByTestId('subject-db-files-input').setInputFiles(files);
+const expectTaxMeta = (page: Page) => expect(page.getByTestId('subject-db-meta')).toContainText('taxdb, taxonomy4blast.sqlite3');
 
 async function expectFilteringDbParity(
   page: Page,
@@ -205,7 +206,7 @@ test.describe('real engine byte-parity for -db, filter lists, taxonomy, and BLAS
       await paste(page, 'query', protQueryText);
       await setSubjectDbFiles(page, protFiles);
       await expect(page.getByTestId('subject-db-selected')).toContainText('tfp');
-      await expect(page.getByTestId('subject-db-meta')).toContainText('taxdb, taxonomy4blast.sqlite3');
+      await expectTaxMeta(page);
 
       // Plain protein -db search + verify non-zero subject length in SubjectTable
       await submit(page);
@@ -261,7 +262,7 @@ test.describe('real engine byte-parity for -db, filter lists, taxonomy, and BLAS
       if (useFolderPick) {
         await page.getByTestId('subject-db-folder-input').setInputFiles(protDir);
         await expect(page.getByTestId('subject-db-selected')).toContainText('protdb/tfp');
-        await expect(page.getByTestId('subject-db-meta')).toContainText('taxdb, taxonomy4blast.sqlite3');
+        await expectTaxMeta(page);
       }
       await page.getByTestId('db-filter-taxids').fill('40674');
       await openParameters(page);

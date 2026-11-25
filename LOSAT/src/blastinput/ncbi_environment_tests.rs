@@ -2120,12 +2120,10 @@ fn read_verification_is_read_as_ncbi_reads_its_variables() {
 
     use crate::ncbi_exception::{NcbiException, ThrowSite};
     use crate::report::serial::object_frame::{EXPECTED_MEMBER, UNASSIGNED_MEMBER};
+    let format_error = ThrowSite::generated("CSerialException::eFormatError");
     let read = NcbiException::new(EXPECTED_MEMBER, "member numRows expected");
     let get = NcbiException::new(UNASSIGNED_MEMBER, "C_E_Field_name::Get(): unassigned");
-    let other = NcbiException::new(
-        ThrowSite::generated("CSerialException::eFormatError"),
-        "another error",
-    );
+    let other = NcbiException::new(format_error, "another error");
     let refused =
         |setting: &ReadVerification, exception: &NcbiException| setting.refused(exception, "X");
     let read_off = of(Some("never"), None);
@@ -2136,10 +2134,8 @@ fn read_verification_is_read_as_ncbi_reads_its_variables() {
         )
     );
     // The first throw decides: a rethrow of the check is the check's.
-    let rethrown = NcbiException::new(EXPECTED_MEMBER, "member seqid expected").rethrow(
-        ThrowSite::generated("CSerialException::eFormatError"),
-        "at byte 34",
-    );
+    let rethrown = NcbiException::new(EXPECTED_MEMBER, "member seqid expected")
+        .rethrow(format_error, "at byte 34");
     assert!(refused(&read_off, &rethrown).is_some());
     let other_first = other
         .clone()

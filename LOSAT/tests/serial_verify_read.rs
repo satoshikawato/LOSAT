@@ -12,6 +12,8 @@ use std::process::{Command, Output, Stdio};
 
 const READ: &str = "SERIAL_VERIFY_DATA_READ";
 const GET: &str = "SERIAL_VERIFY_DATA_GET";
+const OFF_VALUES: [&str; 3] = ["NO", "never", "DefValue_Always"];
+const OFF_PAIRS: [(&str, &str); 2] = [(READ, "NO"), (GET, "NEVER")];
 
 /// A directory of its own for one test.
 fn temp_dir(tag: &str) -> PathBuf {
@@ -58,63 +60,16 @@ fn clocked(bytes: &[u8]) -> String {
         .join("\n")
 }
 
-/// `args` on an input that fails the check of `variable`: each value that keeps the checks, and
-/// an off value of the other variable, give what the run without them gives; each value that
-/// turns `variable`'s check off gives the same output and LOSAT's refusal, "the environment
-/// variable <variable>=<value> with <refused>", with exit status 1.
-fn refused<S: AsRef<OsStr> + Debug>(dir: &Path, args: &[S], variable: &str, refused: &str) {
-    let unset = losat(dir, args, None);
-    assert_ne!(unset.status.code(), Some(0), "{args:?}");
-    let other = if variable == READ { GET } else { READ };
-    for (name, value) in [
-        (variable, "YES"),
-        (variable, "ALWAYS"),
-        (variable, "maybe"),
-        (variable, ""),
-        (other, "NO"),
-    ] {
-        let run = losat(dir, args, Some((name, value)));
-        assert_eq!(
-            (
-                run.status.code(),
-                clocked(&run.stdout),
-                clocked(&run.stderr)
-            ),
-            (
-                unset.status.code(),
-                clocked(&unset.stdout),
-                clocked(&unset.stderr)
-            ),
-            "{args:?} {name}={value}"
-        );
-    }
-    for value in ["NO", "never", "DefValue_Always"] {
-        let run = losat(dir, args, Some((variable, value)));
-        let err = String::from_utf8_lossy(&run.stderr);
-        assert_eq!(run.status.code(), Some(1), "{args:?} {value}: {err}");
-        assert_eq!(
-            clocked(&run.stdout),
-            clocked(&unset.stdout),
-            "{args:?} {value}"
-        );
-        let text = format!("the environment variable {variable}={value} with {refused}\n");
-        assert!(err.ends_with(&text), "{args:?} {value}: {err}");
-    }
-}
-
-/// `args` on an input that passes the checks: the values that turn them off change nothing.
-fn unchanged<S: AsRef<OsStr> + Debug>(dir: &Path, args: &[S]) {
-    unchanged_from(dir, args, &|| {});
-}
-
-/// `unchanged`, with `reset` before each run: a build that replaces its database of an earlier
-/// run says so (makeblastdb's "Deleted existing ... BLAST database"), so each run starts from
-/// the same files.
-fn unchanged_from<S: AsRef<OsStr> + Debug>(dir: &Path, args: &[S], reset: &dyn Fn()) {
-    reset();
-    let unset = losat(dir, args, None);
-    assert_eq!(unset.status.code(), Some(0), "{args:?}");
-    for (name, value) in [(READ, "NO"), (GET, "NEVER")] {
+/// Checks that every `(name, value)` in `pairs` produces the same `(status, stdout, stderr)` as
+/// `unset` (after `clocked`), calling `reset` before each run.
+fn assert_same_as_unset<S: AsRef<OsStr> + Debug>(
+    dir: &Path,
+    args: &[S],
+    unset: &Output,
+    pairs: &[(&str, &str)],
+    reset: &dyn Fn(),
+) {
+    for &(name, value) in pairs {
         reset();
         let run = losat(dir, args, Some((name, value)));
         assert_eq!(
@@ -131,6 +86,72 @@ fn unchanged_from<S: AsRef<OsStr> + Debug>(dir: &Path, args: &[S], reset: &dyn F
             "{args:?} {name}={value}"
         );
     }
+}
+
+/// Checks `OFF_VALUES` of `variable`: each exits 1 with LOSAT's refusal suffix and either the
+/// exact stdout of `unset` (`!prefix_only`) or a non-empty prefix of it (`prefix_only`).
+fn assert_refused_values<S: AsRef<OsStr> + Debug>(
+    dir: &Path,
+    args: &[S],
+    unset: &Output,
+    variable: &str,
+    refused: &str,
+    prefix_only: bool,
+) {
+    for value in OFF_VALUES {
+        let run = losat(dir, args, Some((variable, value)));
+        let err = String::from_utf8_lossy(&run.stderr);
+        assert_eq!(run.status.code(), Some(1), "{args:?} {value}: {err}");
+        if prefix_only {
+            assert!(!run.stdout.is_empty(), "{args:?} {value}: empty stdout");
+            assert!(
+                unset.stdout.starts_with(&run.stdout),
+                "{args:?} {value}: stdout not a prefix of unset"
+            );
+        } else {
+            assert_eq!(
+                clocked(&run.stdout),
+                clocked(&unset.stdout),
+                "{args:?} {value}"
+            );
+        }
+        let text = format!("the environment variable {variable}={value} with {refused}\n");
+        assert!(err.ends_with(&text), "{args:?} {value}: {err}");
+    }
+}
+
+/// `args` on an input that fails the check of `variable`: each value that keeps the checks, and
+/// an off value of the other variable, give what the run without them gives; each value that
+/// turns `variable`'s check off gives the same output and LOSAT's refusal, "the environment
+/// variable <variable>=<value> with <refused>", with exit status 1.
+fn refused<S: AsRef<OsStr> + Debug>(dir: &Path, args: &[S], variable: &str, refused: &str) {
+    let unset = losat(dir, args, None);
+    assert_ne!(unset.status.code(), Some(0), "{args:?}");
+    let other = if variable == READ { GET } else { READ };
+    let keeping = [
+        (variable, "YES"),
+        (variable, "ALWAYS"),
+        (variable, "maybe"),
+        (variable, ""),
+        (other, "NO"),
+    ];
+    assert_same_as_unset(dir, args, &unset, &keeping, &|| {});
+    assert_refused_values(dir, args, &unset, variable, refused, false);
+}
+
+/// `args` on an input that passes the checks: the values that turn them off change nothing.
+fn unchanged<S: AsRef<OsStr> + Debug>(dir: &Path, args: &[S]) {
+    unchanged_from(dir, args, &|| {});
+}
+
+/// `unchanged`, with `reset` before each run: a build that replaces its database of an earlier
+/// run says so (makeblastdb's "Deleted existing ... BLAST database"), so each run starts from
+/// the same files.
+fn unchanged_from<S: AsRef<OsStr> + Debug>(dir: &Path, args: &[S], reset: &dyn Fn()) {
+    reset();
+    let unset = losat(dir, args, None);
+    assert_eq!(unset.status.code(), Some(0), "{args:?}");
+    assert_same_as_unset(dir, args, &unset, &OFF_PAIRS, reset);
 }
 
 /// A PSSM whose read lacks a mandatory member (`c20`: a User-object without its type; `norows`:
@@ -265,7 +286,11 @@ fn profiles_and_mask_data_that_lack_a_member_are_refused_with_the_check_off() {
         "a profile (-in) that lacks a mandatory member is not supported by LOSAT's MAKEPROFILEDB",
     );
     let built = dir.join("built");
-    std::fs::create_dir_all(&built).unwrap();
+    let reset_built = || {
+        let _ = std::fs::remove_dir_all(&built);
+        std::fs::create_dir_all(&built).unwrap();
+    };
+    reset_built();
     let out = built.join("m").display().to_string();
     let mask = |data: &str| {
         [
@@ -287,10 +312,11 @@ fn profiles_and_mask_data_that_lack_a_member_are_refused_with_the_check_off() {
         READ,
         "mask data (-mask_data) that lacks a mandatory member is not supported by LOSAT's makeblastdb",
     );
-    unchanged_from(&dir, &mask("tests/seqdb/mask_parse/dust.asnt"), &|| {
-        let _ = std::fs::remove_dir_all(&built);
-        std::fs::create_dir_all(&built).unwrap();
-    });
+    unchanged_from(
+        &dir,
+        &mask("tests/seqdb/mask_parse/dust.asnt"),
+        &reset_built,
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -481,33 +507,16 @@ fn a_header_record_that_lacks_its_seqid_is_refused_with_the_check_off() {
     ];
     let unset_chk = losat(&dir, &check_cut, None);
     assert_eq!(unset_chk.status.code(), Some(1), "{check_cut:?}");
-    for (name, value) in [(READ, "YES"), (READ, "ALWAYS"), (READ, ""), (GET, "NO")] {
-        let run = losat(&dir, &check_cut, Some((name, value)));
-        assert_eq!(
-            (run.status.code(), &run.stdout, &run.stderr),
-            (
-                unset_chk.status.code(),
-                &unset_chk.stdout,
-                &unset_chk.stderr
-            ),
-            "{check_cut:?} {name}={value}"
-        );
-    }
-    for value in ["NO", "never", "DefValue_Always"] {
-        let run = losat(&dir, &check_cut, Some((READ, value)));
-        let err = String::from_utf8_lossy(&run.stderr);
-        assert_eq!(run.status.code(), Some(1), "{check_cut:?} {value}: {err}");
-        assert!(
-            !run.stdout.is_empty(),
-            "{check_cut:?} {value}: empty stdout"
-        );
-        assert!(
-            unset_chk.stdout.starts_with(&run.stdout),
-            "{check_cut:?} {value}: stdout not a prefix of unset"
-        );
-        let text = format!("the environment variable {READ}={value} with {record} BLASTDBCHECK\n");
-        assert!(err.ends_with(&text), "{check_cut:?} {value}: {err}");
-    }
+    let keeping = [(READ, "YES"), (READ, "ALWAYS"), (READ, ""), (GET, "NO")];
+    assert_same_as_unset(&dir, &check_cut, &unset_chk, &keeping, &|| {});
+    assert_refused_values(
+        &dir,
+        &check_cut,
+        &unset_chk,
+        READ,
+        &format!("{record} BLASTDBCHECK"),
+        true,
+    );
     let check_whole = [
         "blastdbcheck",
         "-db",
@@ -519,17 +528,6 @@ fn a_header_record_that_lacks_its_seqid_is_refused_with_the_check_off() {
         "4",
     ];
     let unset_whole = losat(&dir, &check_whole, None);
-    for (name, value) in [(READ, "NO"), (GET, "NEVER")] {
-        let run = losat(&dir, &check_whole, Some((name, value)));
-        assert_eq!(
-            (run.status.code(), &run.stdout, &run.stderr),
-            (
-                unset_whole.status.code(),
-                &unset_whole.stdout,
-                &unset_whole.stderr
-            ),
-            "{check_whole:?} {name}={value}"
-        );
-    }
+    assert_same_as_unset(&dir, &check_whole, &unset_whole, &OFF_PAIRS, &|| {});
     let _ = std::fs::remove_dir_all(&dir);
 }

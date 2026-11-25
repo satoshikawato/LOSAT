@@ -276,8 +276,16 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
   }
 
   const pasteQuery = (draft: SearchDraft) => draft.setPaste('query', '>q1\nACGTACGTACGTACGTACGTACGT\n');
+  const pasteSubject = (draft: SearchDraft) => draft.setPaste('subject', '>s1\nACGTACGTACGTACGTACGTACGT\n');
   const expectReady = (draft: SearchDraft) => expect(draft.readiness()).toBeUndefined();
   const pickNucDb = (draft: SearchDraft) => draft.setSubjectDatabaseFiles([fileWithRelPath('nucdb/nt.nin', 'nin')]);
+  const submitAndWait = async (draft: SearchDraft, coordinator: Coordinator) => {
+    const submitted = await draft.submit();
+    expect(submitted.ok).toBe(true);
+    const runId = submitted.runIds![0]!;
+    await waitCompleted(coordinator, runId);
+    return runId;
+  };
 
   it('runs a local -db search with filter list files, mounts directory read-only, records blastdbEnv, omits FASTA subject, and reads subjectLength in ResultsBrowser', async () => {
     const memory = memoryStore();
@@ -353,7 +361,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     const env = setup();
     const { draft, coordinator, runCalls } = env;
     pasteQuery(draft);
-    draft.setPaste('subject', '>s1\nACGTACGTACGTACGTACGTACGT\n');
+    pasteSubject(draft);
 
     let resolveAlias!: (text: string) => void;
     const delayedAlias = fileWithRelPath('rep/repeats.nal', 'TITLE Delayed\nDBLIST repeats.00\n');
@@ -376,11 +384,8 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     draft.setProgram('blastn');
     await draft.idle();
     expectReady(draft);
-    const submitted = await draft.submit();
-    expect(submitted.ok).toBe(true);
-    await waitCompleted(coordinator, submitted.runIds![0]!);
-    expect(runCalls[0]!.argv).toContain('-filtering_db');
-    expect(runCalls[0]!.argv).toContain('rep/repeats');
+    await submitAndWait(draft, coordinator);
+    expect(runCalls[0]!.argv.slice(-2)).toEqual([FILTERING_DB_FLAG, 'rep/repeats']);
   });
 
   it('clears remembered subject DB when switching back to FASTA or loading an example so reload opens in FASTA mode (F5)', async () => {
@@ -437,7 +442,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
   it('supports BLASTN -filtering_db with both -subject and -db and clears on resetFields', async () => {
     const { draft, coordinator, runCalls } = setup();
     pasteQuery(draft);
-    draft.setPaste('subject', '>s1\nACGTACGTACGTACGTACGTACGT\n');
+    pasteSubject(draft);
     draft.setFilteringDbEnabled(true);
     await draft.idle();
     expect(draft.readiness()).toBe('Choose a repeats database folder or files.');
@@ -450,9 +455,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     await draft.idle();
     expectReady(draft);
 
-    const submitted = await draft.submit();
-    expect(submitted.ok).toBe(true);
-    await waitCompleted(coordinator, submitted.runIds![0]!);
+    await submitAndWait(draft, coordinator);
     expect(runCalls[0]!.argv).toContain(FILTERING_DB_FLAG);
     expect(runCalls[0]!.argv).toContain('rep/repeats');
     expect(runCalls[0]!.files?.map((f) => f.name).sort()).toEqual(['rep/repeats.nhr', 'rep/repeats.nin', 'rep/repeats.nsq']);

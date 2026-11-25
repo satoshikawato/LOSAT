@@ -314,3 +314,23 @@ fn ncbi2na_codes_and_their_bytes() {
         );
     }
 }
+
+/// `pack_four_codes` packs every quadruple of 2-bit codes `(c0..=c3)` in `0..4` into
+/// `(c0 << 6) | (c1 << 4) | (c2 << 2) | c3`.
+#[test]
+fn pack_four_codes_matches_all_256_quadruples() {
+    for c0 in 0..4u8 {
+        for c1 in 0..4u8 {
+            for c2 in 0..4u8 {
+                for c3 in 0..4u8 {
+                    let expected = (c0 << 6) | (c1 << 4) | (c2 << 2) | c3;
+                    assert_eq!(
+                        pack_four_codes([c0, c1, c2, c3]),
+                        expected,
+                        "{c0} {c1} {c2} {c3}"
+                    );
+                }
+            }
+        }
+    }
+}

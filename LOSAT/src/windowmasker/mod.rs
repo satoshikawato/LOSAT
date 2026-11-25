@@ -118,13 +118,14 @@ pub(crate) fn run_in(
 pub(crate) fn check_in(
     words: &[OsString],
     files: &crate::report::run_files::RunFiles,
+    out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
     crate::ncbi_app::run_in(
         &TOOL,
         words,
         files,
-        (&mut std::io::empty(), &mut std::io::sink(), err),
+        (&mut std::io::empty(), out, err),
         app::check,
     )
 }

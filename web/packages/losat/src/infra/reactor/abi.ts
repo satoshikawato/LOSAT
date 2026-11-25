@@ -317,6 +317,7 @@ export class ReactorAbi {
     const json = this.response() as {
       conffile: string | null;
       log_file: string | null;
+      log_file_name?: string | null;
       strategy_file?: string | null;
       dry_run: boolean;
       register_inputs: boolean;
@@ -329,6 +330,7 @@ export class ReactorAbi {
       start: {
         conffile: json.conffile,
         logFile: json.log_file,
+        logFileName: json.log_file_name ?? null,
         strategyFile: json.strategy_file ?? null,
         dryRun: json.dry_run,
         registerInputs: json.register_inputs,

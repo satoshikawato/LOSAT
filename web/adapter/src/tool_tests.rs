@@ -512,3 +512,156 @@ fn a_tool_run_runs_windowmasker_alone() {
     }
     assert!(emitted().is_empty());
 }
+
+/// Tool runs and tool validation read `-logfile` against the run's real files (line WQA D19):
+/// missing/existing folders keep diagnostics on stream 3 with no log file; existing files are
+/// refused (exit status 1 in `run`, `Err` in `validate`); `/dev/stdout` writes diagnostics into
+/// stream 11 in chronological order; and stream 12 carries normalized host file names for both
+/// `-logfile` and `-out`.
+#[test]
+fn a_tool_run_reads_logfile_against_the_runs_files() {
+    emitted();
+    let fasta = fixture("winmask/fasta/dm2L_3k.fa");
+    // Case 0 & 1: missing folder and existing folder (`src`) keep diagnostics on stream 3.
+    for log in ["d19-no-such-folder/run.log", "src", "src/"] {
+        run(&[
+            "windowmasker",
+            "-mk_counts",
+            "-in",
+            &fasta,
+            "-unit",
+            "5",
+            "-out",
+            "d19-tool.counts",
+            "-logfile",
+            log,
+        ])
+        .unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":0}".to_vec()),
+            "{log}"
+        );
+        assert_eq!(
+            joined(&calls, STREAM_DIAGNOSTICS),
+            b"pass 1\npass 2\n",
+            "{log}"
+        );
+        assert_eq!(
+            files(&frames(&calls))
+                .iter()
+                .map(|(n, _)| n.as_slice())
+                .collect::<Vec<_>>(),
+            vec![b"d19-tool.counts".as_slice()],
+            "{log}"
+        );
+    }
+    // Case 2: existing file of the run's directory (`Cargo.toml` in `web/adapter`) is refused by
+    // both `run` (status 1, stream 3) and `validate`.
+    let expected_refusal = "Error: a -logfile file 'Cargo.toml' that is a file of the run's \
+         directory (the command line appends its messages to it; LOSAT Web reads the run's files \
+         and writes none of them) is not supported by LOSAT's WINDOWMASKER";
+    assert_eq!(
+        validate(&[
+            "windowmasker",
+            "-mk_counts",
+            "-in",
+            &fasta,
+            "-logfile",
+            "Cargo.toml"
+        ]),
+        Err(expected_refusal.to_string())
+    );
+    run(&[
+        "windowmasker",
+        "-mk_counts",
+        "-in",
+        &fasta,
+        "-logfile",
+        "Cargo.toml",
+    ])
+    .unwrap();
+    let calls = emitted();
+    assert_eq!(
+        calls.last().unwrap(),
+        &(STREAM_RESPONSE, b"{\"status\":1}".to_vec())
+    );
+    assert_eq!(
+        joined(&calls, STREAM_DIAGNOSTICS),
+        format!("{expected_refusal}\n").as_bytes()
+    );
+    assert!(joined(&calls, STREAM_PRINTED).is_empty());
+    assert!(frames(&calls).is_empty());
+    // Case 3: `-logfile /dev/stdout` writes diagnostic messages into stream 11 before counts.
+    run(&["windowmasker", "-mk_counts", "-in", &fasta, "-unit", "5"]).unwrap();
+    let plain_calls = emitted();
+    let plain_out = joined(&plain_calls, STREAM_PRINTED);
+    assert_eq!(
+        joined(&plain_calls, STREAM_DIAGNOSTICS),
+        b"pass 1\npass 2\n"
+    );
+    for extra in [&[][..], &["-out", "/dev/stdout"][..]] {
+        let mut words = vec!["windowmasker", "-mk_counts", "-in", &fasta, "-unit", "5"];
+        words.extend_from_slice(extra);
+        words.extend(["-logfile", "/dev/stdout"]);
+        run(&words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":0}".to_vec())
+        );
+        assert!(joined(&calls, STREAM_DIAGNOSTICS).is_empty(), "{extra:?}");
+        assert!(frames(&calls).is_empty(), "{extra:?}");
+        let mut want = b"pass 1\npass 2\n".to_vec();
+        want.extend_from_slice(&plain_out);
+        assert_eq!(joined(&calls, STREAM_PRINTED), want, "{extra:?}");
+    }
+    // Case 4: normalized file names on stream 12 (` run.log` -> `run.log`, `./x.counts` -> `x.counts`,
+    // `d19-slash/` -> `d19-slash`).
+    let file_names = |calls: &[(u32, Vec<u8>)]| {
+        files(&frames(calls))
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect::<Vec<_>>()
+    };
+    run(&[
+        "windowmasker",
+        "-mk_counts",
+        "-in",
+        &fasta,
+        "-unit",
+        "5",
+        "-out",
+        "./x.counts",
+        "-logfile",
+        " run.log",
+    ])
+    .unwrap();
+    let calls = emitted();
+    assert!(joined(&calls, STREAM_DIAGNOSTICS).is_empty(), "run.log");
+    let got = files(&frames(&calls));
+    assert_eq!(
+        file_names(&calls),
+        vec![b"run.log".to_vec(), b"x.counts".to_vec()]
+    );
+    assert_eq!(got[0].1, b"pass 1\npass 2\n");
+    run(&[
+        "windowmasker",
+        "-mk_counts",
+        "-in",
+        &fasta,
+        "-unit",
+        "5",
+        "-out",
+        "./x.counts",
+        "-logfile",
+        "d19-slash/",
+    ])
+    .unwrap();
+    let calls = emitted();
+    assert_eq!(
+        file_names(&calls),
+        vec![b"d19-slash".to_vec(), b"x.counts".to_vec()]
+    );
+}

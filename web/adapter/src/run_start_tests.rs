@@ -255,23 +255,21 @@ fn the_logfile_is_a_file_of_the_run() {
         let mut joined = plain_words.clone();
         joined.push("-logfile=run.log");
         assert_eq!(run_of(&joined).1, logged, "{program}");
-        for name in [
-            "logs/run.log",
-            "./run.log",
-            "a/b/run.log",
-            "/tmp/run.log",
-            "/dev/stdout",
-            "logs/",
-            "run.log/",
-            "a/b/",
-            "/tmp/abs/run.log/",
-            " run.log",
-            "run.log ",
-            "/var/lock/run.log",
-            "/var/crash/run.log",
-            "/home/me/run.log",
-            "/etc/default/../../tmp/run.log",
-            "/run/user/1000/run.log",
+        for (name, expected_name) in [
+            ("./run.log", "run.log"),
+            ("/tmp/run.log", "/tmp/run.log"),
+            ("/dev/stdout", "/dev/stdout"),
+            ("logs/", "logs"),
+            ("run.log/", "run.log"),
+            ("/tmp/abs/run.log/", "/tmp/abs/run.log"),
+            (" run.log", "run.log"),
+            ("run.log ", "run.log"),
+            ("/var/lock/run.log", "/var/lock/run.log"),
+            ("/var/crash/run.log", "/var/crash/run.log"),
+            ("/home/me/run.log", "/home/me/run.log"),
+            ("/etc/default/../../tmp/run.log", "/tmp/run.log"),
+            ("/run/user/1000/run.log", "/run/user/1000/run.log"),
+            ("/proc/self/cwd/run.log", "run.log"),
         ] {
             let mut words = plain_words.clone();
             words.extend(["-logfile", name]);
@@ -290,12 +288,23 @@ fn the_logfile_is_a_file_of_the_run() {
                     stream_text(&streams, STREAM_DIAGNOSTICS),
                     run_files(&streams)
                 ),
-                (stderr.clone(), Some(vec![(name.to_string(), file.clone())])),
+                (
+                    stderr.clone(),
+                    Some(vec![(expected_name.to_string(), file.clone())])
+                ),
                 "{program} {name}"
             );
             assert_eq!(messages_place(&streams), Some(place), "{program} {name}");
         }
+        // A relative name whose folder is absent in the run's directory (or is a directory of it)
+        // stays on stream 3 with no file (line WQA D19, cases 0 and 1).
         for (value, quiet) in [
+            ("logs/run.log", false),
+            ("a/b/run.log", false),
+            ("a/b/", false),
+            ("a/../run.log", false),
+            ("src", false),
+            ("src/", false),
             ("", to_log),
             ("/dev/null", to_log),
             ("//dev/null", to_log),
@@ -354,13 +363,24 @@ fn the_logfile_is_a_file_of_the_run() {
             assert_eq!(streams.get(&6), plain.get(&6), "{program} {value:?}");
         }
         // The command line opens the file of `-logfile` before it prints its help and its
-        // version: a name with a directory is that file, empty (line WQA's D14, 2026-11-21).
+        // version: a name in a folder present in the run's directory (`-query d/q.fa`) makes that
+        // file empty, while one in a missing folder makes none (line WQA's D14 and D19).
         for (word, kind) in [("-h", "help"), ("-version", "version")] {
-            let mut ending = argv(program, &[]);
-            ending.extend(["-logfile", "d/run.log", word]);
-            assert_eq!(prints(&ending), Some(kind), "{program} {word}");
-            validate(&ending).unwrap();
-            let (result, streams) = run_of(&ending);
+            let mut with_folder = vec![
+                program,
+                "-query",
+                "d/q.fa",
+                "-subject",
+                "s.fa",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "d/run.log",
+                word,
+            ];
+            assert_eq!(prints(&with_folder), Some(kind), "{program} {word}");
+            validate(&with_folder).unwrap();
+            let (result, streams) = run_of(&with_folder);
             result.unwrap();
             assert!(
                 streams.contains_key(&crate::emit::STREAM_PRINTED),
@@ -371,6 +391,11 @@ fn the_logfile_is_a_file_of_the_run() {
                 Some(vec![("d/run.log".to_string(), String::new())]),
                 "{program} {word}"
             );
+            with_folder[2] = "q.fa";
+            validate(&with_folder).unwrap();
+            let (result, streams) = run_of(&with_folder);
+            result.unwrap();
+            assert_eq!(run_files(&streams), None, "{program} {word} missing folder");
         }
     }
 }
@@ -425,6 +450,155 @@ fn an_argument_error_posts_to_the_runs_logfile() {
             "{program}: validate"
         );
     }
+}
+
+/// The search's file receiver sees `-query`, `-subject` (unless `-`), registered kind-2 registry
+/// files read by the run's start (`.ncbirc`, `-conffile`, `<program>.ini`), and registered kind-1
+/// `-window_masker_db` counts files (line WQA D19): their parent folders allow `-logfile`, the
+/// folders themselves stay on stream 3, and the files themselves are refused at both `validate`
+/// and `run`.
+#[test]
+fn the_search_receiver_reads_logfile_against_registered_files() {
+    let refusal = |program: &str, name: &str| {
+        format!(
+            "a -logfile file '{name}' that is a file of the run's directory (the command line \
+             appends its messages to it; LOSAT Web reads the run's files and writes none of \
+             them) is not supported by LOSAT's {}",
+            program.to_ascii_uppercase()
+        )
+    };
+    // `-query in/q.fa` creates folder `in` and file `in/q.fa`; `-subject s.fa` creates `s.fa`.
+    let base = [
+        "tblastx",
+        "-query",
+        "in/q.fa",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+    ];
+    let warning = "Warning: [tblastx] Examining 5 or more matches is recommended\n";
+    let with_log = |name: &'static str| {
+        let mut w = base.to_vec();
+        w.extend(["-logfile", name]);
+        w
+    };
+    // Case 0 (folder present via `-query in/q.fa`): makes `in/run.log`.
+    validate(&with_log("in/run.log")).unwrap();
+    let (res, streams) = run_of(&with_log("in/run.log"));
+    res.unwrap();
+    assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), "");
+    assert_eq!(
+        run_files(&streams),
+        Some(vec![("in/run.log".to_string(), warning.to_string())])
+    );
+    // Case 1 (folder `in` itself): stays on stream 3, no file.
+    validate(&with_log("in")).unwrap();
+    let (res, streams) = run_of(&with_log("in"));
+    res.unwrap();
+    assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), warning, "in");
+    assert_eq!(run_files(&streams), None);
+    // Case 2 (`in/q.fa`, `s.fa`, `./s.fa`, `in/../s.fa`): refused at validate and run.
+    for existing in ["in/q.fa", "s.fa", "./s.fa", "in/../s.fa"] {
+        let words = with_log(existing);
+        assert_eq!(validate(&words).unwrap_err(), refusal("tblastx", existing));
+        assert_eq!(run_of(&words).0.unwrap_err(), refusal("tblastx", existing));
+    }
+    // `-query -` is stdin, not a file of the run's folder.
+    validate(&[
+        "tblastx",
+        "-query",
+        "-",
+        "-subject",
+        "s.fa",
+        "-logfile",
+        "-",
+        "-num_threads",
+        "1",
+    ])
+    .unwrap();
+    // `-conffile sub/d19_conf.ini` (kind 2): creates folder `sub` and file `sub/d19_conf.ini`.
+    let _conf = Registered::new("sub/d19_conf.ini", b"[BLAST]\n");
+    let conf_base = [
+        "tblastx",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-conffile",
+        "sub/d19_conf.ini",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+    ];
+    let with_conf_log = |name: &'static str| {
+        let mut w = conf_base.to_vec();
+        w.extend(["-logfile", name]);
+        w
+    };
+    validate(&with_conf_log("sub/run.log")).unwrap();
+    let (res, streams) = run_of(&with_conf_log("sub/run.log"));
+    res.unwrap();
+    assert_eq!(
+        run_files(&streams),
+        Some(vec![("sub/run.log".to_string(), warning.to_string())])
+    );
+    let (res, streams) = run_of(&with_conf_log("sub"));
+    res.unwrap();
+    assert_eq!(stream_text(&streams, STREAM_DIAGNOSTICS), warning);
+    assert_eq!(run_files(&streams), None);
+    assert_eq!(
+        validate(&with_conf_log("sub/d19_conf.ini")).unwrap_err(),
+        refusal("tblastx", "sub/d19_conf.ini")
+    );
+    // BLASTN `-window_masker_db wm/d19.obinary` (kind 1): creates folder `wm` and file `wm/d19.obinary`.
+    let counts_bytes = std::fs::read(format!(
+        "{}/../../LOSAT/tests/winmask/counts/mg1655_u9.obinary",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    let wm_handle = crate::files::begin(
+        crate::files::KIND_WINDOW_MASKER_COUNTS,
+        "wm/d19.obinary",
+        counts_bytes.len(),
+    )
+    .unwrap();
+    crate::files::chunk(wm_handle, &counts_bytes).unwrap();
+    crate::files::end(wm_handle).unwrap();
+    let wm_base = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-window_masker_db",
+        "wm/d19.obinary",
+        "-num_threads",
+        "1",
+    ];
+    let with_wm_log = |name: &'static str| {
+        let mut w = wm_base.to_vec();
+        w.extend(["-logfile", name]);
+        w
+    };
+    validate(&with_wm_log("wm/run.log")).unwrap();
+    let (res, streams) = run_of(&with_wm_log("wm/run.log"));
+    res.unwrap();
+    assert_eq!(
+        run_files(&streams),
+        Some(vec![("wm/run.log".to_string(), String::new())])
+    );
+    let (res, streams) = run_of(&with_wm_log("wm"));
+    res.unwrap();
+    assert_eq!(run_files(&streams), None);
+    assert_eq!(
+        validate(&with_wm_log("wm/d19.obinary")).unwrap_err(),
+        refusal("blastn", "wm/d19.obinary")
+    );
+    crate::files::release(wm_handle).unwrap();
 }
 
 /// NCBI's error for an argv without `-subject` and `-db`, which the command line raises after
@@ -562,7 +736,7 @@ fn a_dry_run_ends_after_the_start_and_the_arguments() {
 fn the_start_json_tells_the_files_and_the_dry_run() {
     assert_eq!(
         start_json(&["blastn", "-outfmt", "6"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     assert_eq!(
         start_json(&[
@@ -575,7 +749,25 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "-dryrun"
         ])
         .unwrap(),
-        r#"{"conffile":"c.ini","log_file":"x.log","strategy_file":null,"dry_run":true,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":"c.ini","log_file":"x.log","log_file_name":"x.log","strategy_file":null,"dry_run":true,"register_inputs":false,"prints":null,"database":false}"#
+    );
+    // `log_file` keeps NCBI's scan of the argv; `log_file_name` is the normalized host file name
+    // under which a run gives the file on stream 8 (line WQA D19, case 4).
+    assert_eq!(
+        start_json(&["tblastx", "-logfile", "logs/"]).unwrap(),
+        r#"{"conffile":null,"log_file":"logs/","log_file_name":"logs","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+    );
+    assert_eq!(
+        start_json(&["tblastx", "-logfile", "./run.log"]).unwrap(),
+        r#"{"conffile":null,"log_file":"./run.log","log_file_name":"run.log","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+    );
+    assert_eq!(
+        start_json(&["tblastx", "-logfile", "-"]).unwrap(),
+        r#"{"conffile":null,"log_file":"-","log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+    );
+    assert_eq!(
+        start_json(&["tblastx", "-logfile", "/dev/stdout"]).unwrap(),
+        r#"{"conffile":null,"log_file":"/dev/stdout","log_file_name":"/dev/stdout","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     // The name of the search strategy file, under which a run gives it (line RG item F1w).
     assert_eq!(
@@ -587,12 +779,12 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "run.log"
         ])
         .unwrap(),
-        r#"{"conffile":null,"log_file":"run.log","strategy_file":"out/s.asn","dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":"run.log","log_file_name":"run.log","strategy_file":"out/s.asn","dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     // After `--` nothing is the start's.
     assert_eq!(
         start_json(&["blastp", "--", "-dryrun"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     // A run that prints the command line's text (line WQA's D14, 2026-11-20): a version word, read
     // before the arguments and the configuration (no `-conffile` to register, not a dry run), or a
@@ -608,20 +800,20 @@ fn the_start_json_tells_the_files_and_the_dry_run() {
             "v.log"
         ])
         .unwrap(),
-        r#"{"conffile":null,"log_file":"v.log","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"version","database":false}"#
+        r#"{"conffile":null,"log_file":"v.log","log_file_name":"v.log","strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"version","database":false}"#
     );
     assert_eq!(
         start_json(&["tblastn", "-conffile", "c.ini", "-dryrun", "-h"]).unwrap(),
-        r#"{"conffile":"c.ini","log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
+        r#"{"conffile":"c.ini","log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
     );
     assert_eq!(
         start_json(&["blastx", "-parse_deflines", "-xmlhelp"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":"help","database":false}"#
     );
     // The words before a help word are read first: an error there is the run's.
     assert_eq!(
         start_json(&["blastp", "-evalue", "x", "-help"]).unwrap(),
-        r#"{"conffile":null,"log_file":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
+        r#"{"conffile":null,"log_file":null,"log_file_name":null,"strategy_file":null,"dry_run":false,"register_inputs":false,"prints":null,"database":false}"#
     );
     assert_eq!(
         start_json(&["psiblast"]).unwrap_err(),

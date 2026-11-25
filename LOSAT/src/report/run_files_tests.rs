@@ -4,32 +4,52 @@ use std::sync::Mutex;
 use crate::blastinput::ncbi_environment::TextPlace as Place;
 
 #[derive(Default)]
-struct Kept(Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
+struct Kept {
+    files: Mutex<Vec<(Vec<u8>, Vec<u8>)>>,
+    registered: Vec<Vec<u8>>,
+}
+
+impl Kept {
+    fn with_registered(names: &[&str]) -> Self {
+        Self {
+            files: Mutex::new(Vec::new()),
+            registered: names.iter().map(|name| name.as_bytes().to_vec()).collect(),
+        }
+    }
+}
 
 impl FileReceiver for Kept {
     fn receive(&self, name: &[u8], bytes: &[u8]) -> io::Result<()> {
-        self.0.lock().unwrap().push((name.to_vec(), bytes.to_vec()));
+        self.files
+            .lock()
+            .unwrap()
+            .push((name.to_vec(), bytes.to_vec()));
         Ok(())
+    }
+
+    fn registered_files(&self) -> &[Vec<u8>] {
+        &self.registered
     }
 }
 
 /// The names of `-logfile` of a receiver: NCBI's special names, the names of directories and
-/// of the standard error, the null device and the file systems without free space, and a file
-/// in memory, handed over under its whole name, also with a directory (line WQA's sweep, D11,
-/// 2026-11-20: refused before) and as NCBI reads it (its round 2: `logs/` and ` run.log` are
-/// files, `/dev/fd/2` and `/proc/self/fd/2` give no message, `/dev/fd/3` and
-/// `/proc/self/status` do not open, `/proc/self/cwd/run.log` is `run.log`; its round 3:
-/// `//run.log` has no directory, a user's command line opens no new name in a directory of
-/// root's (`/etc/run.log`, `/dev/run.log`) and none of its devices but those whose writes are
-/// lost (`/dev/ptmx`), and makes files in `/tmp`, `/var/tmp`, `/dev/shm`, `/run/lock`, its
-/// home and its own directories; its round 4: the directories of root's are all but the
-/// user's (`/data`), the links of `/var/lock`, `/var/run` and merged `/usr` are followed, a
-/// directory of root's that is not there is none (`/bin/../tmp`), and the system refuses a
-/// component of 256 bytes and a path of 4096; NCBI BLAST+ 2.17.0 and LOSAT's command line on
-/// Ubuntu 24.04 as a user, `fix-logfile-dir/r4/cli1.jsonl` and review 2's `cli-names.jsonl`).
+/// of the standard error, the standard output, the null device and the file systems without free
+/// space, and a file in memory under the command line's file name (`host_file_name`), against the
+/// run's real files (line WQA's sweep, D11 and D19).
 #[test]
 fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
-    let kept = Arc::new(Kept::default());
+    // Registered folders standing for the folders that exist in the command line's directory for
+    // the D11 compatibility matrix (plus `in/q.fa` and `s.fa` for D19's existing-file and folder
+    // cases).
+    let kept = Arc::new(Kept::with_registered(&[
+        "logs/keep",
+        "a/b/keep",
+        "dev/keep",
+        " logs/keep",
+        "x/keep",
+        "in/q.fa",
+        "s.fa",
+    ]));
     let files = RunFiles::Receiver(kept.clone());
     let target = |name: Option<&str>| files.log_target(name.map(OsStr::new));
     // Linux's limits: a component of 255 bytes, a path of 4095 bytes given to the system.
@@ -48,10 +68,13 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
     let directory_4099 = format!("{}run.log", "x/../".repeat(820));
     let directory_4095 = format!("x{}/run.log", "/.".repeat(2047));
     let directory_4096 = format!("xx{}/run.log", "/.".repeat(2047));
-    assert!(matches!(target(None), DiagTarget::Stderr));
-    assert!(matches!(target(Some("-")), DiagTarget::Stderr));
-    assert!(matches!(target(Some("")), DiagTarget::Discard));
-    assert!(matches!(target(Some("/dev/null")), DiagTarget::Discard));
+    assert!(matches!(target(None), Ok((DiagTarget::Stderr, None))));
+    assert!(matches!(target(Some("-")), Ok((DiagTarget::Stderr, None))));
+    assert!(matches!(target(Some("")), Ok((DiagTarget::Discard, None))));
+    assert!(matches!(
+        target(Some("/dev/null")),
+        Ok((DiagTarget::Discard, None))
+    ));
     for name in [
         ".",
         "..",
@@ -65,6 +88,21 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
         "./",
         "//",
         "  ",
+        // Case 0 & 1: missing folder, file as folder, and existing folder inside working dir.
+        "nodir/run.log",
+        "nodir/../run.log",
+        "s.fa/run.log",
+        "in/q.fa/run.log",
+        "in",
+        "in/",
+        "logs",
+        "logs/",
+        "logs//",
+        "a/b",
+        "a/b/",
+        "src",
+        "src/",
+        "/proc/self/cwd/nodir/run.log",
         "/dev/fd",
         "/proc/self/fd/",
         "/home/../usr",
@@ -154,7 +192,32 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
         "/proc/1/exe/../../../tmp/run.log",
         "/proc/self/autogroup",
     ] {
-        assert!(matches!(target(Some(name)), DiagTarget::Stderr), "{name}");
+        assert!(
+            matches!(target(Some(name)), Ok((DiagTarget::Stderr, None))),
+            "{name}"
+        );
+    }
+    // Case 2: a file of the run's directory (registered or in `/work`) is refused.
+    for existing in [
+        "s.fa",
+        "./s.fa",
+        " s.fa ",
+        "s.fa/",
+        "in/../s.fa",
+        "in/q.fa",
+        "/proc/self/cwd/s.fa",
+        "Cargo.toml",
+    ] {
+        let reason = target(Some(existing)).err().expect("existing file refused");
+        assert_eq!(
+            reason,
+            format!(
+                "a -logfile file '{existing}' that is a file of the run's directory (the command \
+                 line appends its messages to it; LOSAT Web reads the run's files and writes none \
+                 of them)"
+            ),
+            "{existing}"
+        );
     }
     for name in [
         "/dev/stderr",
@@ -165,7 +228,7 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
         "/proc/self/root/dev/stderr",
     ] {
         assert!(
-            matches!(target(Some(name)), DiagTarget::StderrFile),
+            matches!(target(Some(name)), Ok((DiagTarget::StderrFile, None))),
             "{name}"
         );
     }
@@ -181,6 +244,7 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
         "/proc/self/fd/2",
         "/proc/thread-self/fd/1",
         "/dev/fd/../stderr",
+        "/dev/fd/../stdout",
         "/dev/fd/../fd/2",
         "/dev/mqueue/q",
         "/dev/full",
@@ -197,96 +261,114 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
         "//dev/ptmx",
         stdin_links_39.as_str(),
     ] {
-        assert!(matches!(target(Some(name)), DiagTarget::Discard), "{name}");
+        assert!(
+            matches!(target(Some(name)), Ok((DiagTarget::Discard, None))),
+            "{name}"
+        );
     }
+    // Case 3 & 4: files made, with the command line's host name.
     let names = [
-        "run.log",
-        "logs/run.log",
-        "./run.log",
-        "a/../run.log",
-        "/tmp/run.log",
-        "/dev/stdout",
-        "dev/stderr",
-        "../run.log",
-        "../proc/self/fd/2",
-        "logs/",
-        "logs//",
-        "run.log/",
-        "a/b/",
-        "/tmp/abs/run.log/",
-        " run.log",
-        "run.log ",
-        " logs/run.log",
-        "/proc/self/cwd/run.log",
-        "/proc/self/root/tmp/run.log",
-        "/home/me/run.log",
-        "/home/me/logs/run.log",
-        "/var/tmp/run.log",
-        "/dev/shm/run.log",
-        "/run/lock/run.log",
+        ("run.log", "run.log"),
+        ("logs/run.log", "logs/run.log"),
+        ("in/run.log", "in/run.log"),
+        ("src/run.log", "src/run.log"),
+        ("./run.log", "run.log"),
+        ("a/../run.log", "run.log"),
+        ("/tmp/run.log", "/tmp/run.log"),
+        ("/dev/stdout", "/dev/stdout"),
+        ("//dev/stdout", "/dev/stdout"),
+        ("/dev/stdout/", "/dev/stdout"),
+        ("dev/stderr", "dev/stderr"),
+        ("../run.log", "../run.log"),
+        ("a/../../run.log", "../run.log"),
+        ("../proc/self/fd/2", "../proc/self/fd/2"),
+        ("newlog/", "newlog"),
+        ("newlog//", "newlog"),
+        ("run.log/", "run.log"),
+        ("a/newb/", "a/newb"),
+        ("/tmp/abs/run.log/", "/tmp/abs/run.log"),
+        (" run.log", "run.log"),
+        ("run.log ", "run.log"),
+        (" logs/run.log", "logs/run.log"),
+        ("/proc/self/cwd/run.log", "run.log"),
+        ("/proc/self/root/tmp/run.log", "/proc/self/root/tmp/run.log"),
+        ("/home/me/run.log", "/home/me/run.log"),
+        ("/home/me/logs/run.log", "/home/me/logs/run.log"),
+        ("/var/tmp/run.log", "/var/tmp/run.log"),
+        ("/dev/shm/run.log", "/dev/shm/run.log"),
+        ("/run/lock/run.log", "/run/lock/run.log"),
         // Round 4.
-        "/var/lock/run.log",
-        "/var/run/lock/run.log",
-        "/var/crash/run.log",
-        "/var/run/../tmp/run.log",
-        "/usr/../tmp/run.log",
-        "/tmp/a/../run.log",
-        "/dev/shm/a/run.log",
-        component_255.as_str(),
-        directory_4094.as_str(),
-        directory_4095.as_str(),
+        ("/var/lock/run.log", "/var/lock/run.log"),
+        ("/var/run/lock/run.log", "/var/run/lock/run.log"),
+        ("/var/crash/run.log", "/var/crash/run.log"),
+        ("/var/run/../tmp/run.log", "/var/tmp/run.log"),
+        ("/usr/../tmp/run.log", "/tmp/run.log"),
+        ("/tmp/a/../run.log", "/tmp/run.log"),
+        ("/dev/shm/a/run.log", "/dev/shm/a/run.log"),
+        (component_255.as_str(), component_255.as_str()),
+        (directory_4094.as_str(), "run.log"),
+        (directory_4095.as_str(), "x/run.log"),
         // Round 5: a name climbs out of directories of root's that the model does not list,
         // which a user's command line passes (NCBI BLAST+ 2.17.0 writes the file; review 3).
-        "/etc/default/../../tmp/run.log",
-        "/usr/include/../../tmp/run.log",
-        "/usr/share/doc/../../../tmp/run.log",
-        "/usr/lib/x86_64-linux-gnu/../../../tmp/run.log",
-        "/var/mail/../tmp/run.log",
-        "/var/backups/../tmp/run.log",
-        "/dev/disk/../../tmp/run.log",
-        "/var/log/../../tmp/run.log",
-        "/var/lock/../../tmp/run.log",
+        ("/etc/default/../../tmp/run.log", "/tmp/run.log"),
+        ("/usr/include/../../tmp/run.log", "/tmp/run.log"),
+        ("/usr/share/doc/../../../tmp/run.log", "/tmp/run.log"),
+        (
+            "/usr/lib/x86_64-linux-gnu/../../../tmp/run.log",
+            "/tmp/run.log",
+        ),
+        ("/var/mail/../tmp/run.log", "/var/tmp/run.log"),
+        ("/var/backups/../tmp/run.log", "/var/tmp/run.log"),
+        ("/dev/disk/../../tmp/run.log", "/tmp/run.log"),
+        ("/var/log/../../tmp/run.log", "/tmp/run.log"),
+        ("/var/lock/../../tmp/run.log", "/tmp/run.log"),
         // Round 6: the directories around them, and a process's own descriptors, open to the
         // user.
-        "/var/cache/../../tmp/run.log",
-        "/etc/ssl/../../tmp/run.log",
-        "/proc/1/../../tmp/run.log",
-        "/proc/self/fd/../../../tmp/run.log",
+        ("/var/cache/../../tmp/run.log", "/tmp/run.log"),
+        ("/etc/ssl/../../tmp/run.log", "/tmp/run.log"),
+        ("/proc/1/../../tmp/run.log", "/tmp/run.log"),
+        ("/proc/self/fd/../../../tmp/run.log", "/tmp/run.log"),
         // Round 7: the model's host and its first user (review r6): the thread's `..` climbs
         // out of procfs, 40 links, `fdinfo` of Linux 5.15, a directory of the user's group
         // `adm`, a directory at the host's root, and places where the user writes.
-        "/proc/thread-self/../../../../tmp/run.log",
-        links_40.as_str(),
-        root_links_40.as_str(),
-        "/proc/1/fdinfo/../../../tmp/run.log",
-        "/var/log/unattended-upgrades/../../../tmp/run.log",
-        "/snap/../tmp/run.log",
-        "/run/user/1000/run.log",
-        "/var/run/user/1000/run.log",
-        "/run/shm/run.log",
-        "/mnt/wsl/run.log",
+        ("/proc/thread-self/../../../../tmp/run.log", "/tmp/run.log"),
+        (links_40.as_str(), "/tmp/run.log"),
+        (root_links_40.as_str(), root_links_40.as_str()),
+        ("/proc/1/fdinfo/../../../tmp/run.log", "/tmp/run.log"),
+        (
+            "/var/log/unattended-upgrades/../../../tmp/run.log",
+            "/tmp/run.log",
+        ),
+        ("/snap/../tmp/run.log", "/tmp/run.log"),
+        ("/run/user/1000/run.log", "/run/user/1000/run.log"),
+        ("/var/run/user/1000/run.log", "/var/run/user/1000/run.log"),
+        ("/run/shm/run.log", "/run/shm/run.log"),
+        ("/mnt/wsl/run.log", "/mnt/wsl/run.log"),
     ];
-    for name in names {
-        let log = target(Some(name));
+    for (name, expected_host_name) in names {
+        let (log, host_name) = target(Some(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert!(matches!(log, DiagTarget::Memory(_)), "{name}");
+        assert_eq!(
+            host_name.as_deref(),
+            Some(expected_host_name.as_bytes()),
+            "{name}"
+        );
         log.write_text(name.as_bytes(), &mut io::sink());
-        files.deliver_log(Some(OsStr::new(name)), log).unwrap();
+        files.deliver_log(host_name.as_deref(), log).unwrap();
     }
     // A target without a file hands nothing over.
+    files.deliver_log(Some(b"-"), DiagTarget::Stderr).unwrap();
     files
-        .deliver_log(Some(OsStr::new("-")), DiagTarget::Stderr)
+        .deliver_log(Some(b"/dev/stderr"), DiagTarget::StderrFile)
         .unwrap();
     files
-        .deliver_log(Some(OsStr::new("/dev/stderr")), DiagTarget::StderrFile)
-        .unwrap();
-    files
-        .deliver_log(Some(OsStr::new("/dev/fd/2")), DiagTarget::Discard)
+        .deliver_log(Some(b"/dev/fd/2"), DiagTarget::Discard)
         .unwrap();
     assert_eq!(
-        *kept.0.lock().unwrap(),
+        *kept.files.lock().unwrap(),
         names
             .iter()
-            .map(|name| (name.as_bytes().to_vec(), name.as_bytes().to_vec()))
+            .map(|(name, host_name)| (host_name.as_bytes().to_vec(), name.as_bytes().to_vec()))
             .collect::<Vec<_>>()
     );
 }
@@ -299,16 +381,25 @@ fn a_receiver_reads_a_log_name_as_the_command_line_on_linux() {
 /// file. Both as on the command line.
 #[test]
 fn a_long_log_name_is_read_in_linear_time() {
-    for (name, read) in [
-        (format!("{}run.log", "a/".repeat(2040)), LogName::Unopened),
-        (format!("{}run.log", "../".repeat(1360)), LogName::File),
+    let all_dirs = |_: &[u8]| Entry::Directory;
+    let empty = |_: &[u8]| Entry::Missing;
+    let deep = format!("{}run.log", "a/".repeat(2040));
+    let up = format!("{}run.log", "../".repeat(1360));
+    for (name, entry, is_file) in [
+        (deep.clone(), &all_dirs as &dyn Fn(&[u8]) -> Entry, false),
+        (deep, &empty as &dyn Fn(&[u8]) -> Entry, false),
+        (up.clone(), &empty as &dyn Fn(&[u8]) -> Entry, true),
     ] {
         assert!(name.len() < 4096);
         WALK_STEPS.with(|steps| steps.set(0));
         let started = std::time::Instant::now();
-        assert_eq!(log_name(name.as_bytes()), read);
+        let read = log_name(name.as_bytes(), Some(entry));
+        assert_eq!(matches!(read, LogName::File { .. }), is_file);
+        if is_file {
+            assert!(matches!(read, LogName::File { name, .. } if name == up.as_bytes()));
+        }
         let steps = WALK_STEPS.with(std::cell::Cell::get);
-        assert!(steps < 4 * name.len(), "{steps} steps");
+        assert!(steps < 6 * name.len(), "{steps} steps");
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 }
@@ -322,15 +413,23 @@ fn a_long_log_name_is_read_in_linear_time() {
 /// refuses the path as the command line does (`/dev/null`, `/proc/self/comm`).
 #[test]
 fn a_name_through_a_file_of_roots_names_a_file_as_documented() {
-    for (name, read) in [
-        ("/etc/passwd/../../tmp/x", LogName::File),
-        ("/etc/zzz/../../tmp/x", LogName::File),
-        ("/usr/bin/ls/../../../tmp/x", LogName::File),
-        ("/proc/self/status/../../../tmp/x", LogName::File),
-        ("/dev/null/../../tmp/x", LogName::Unopened),
-        ("/proc/self/comm/../../../tmp/x", LogName::Unopened),
+    let empty = |_: &[u8]| Entry::Missing;
+    for (name, expected_file) in [
+        ("/etc/passwd/../../tmp/x", Some(b"/tmp/x".as_slice())),
+        ("/etc/zzz/../../tmp/x", Some(b"/tmp/x".as_slice())),
+        ("/usr/bin/ls/../../../tmp/x", Some(b"/tmp/x".as_slice())),
+        (
+            "/proc/self/status/../../../tmp/x",
+            Some(b"/tmp/x".as_slice()),
+        ),
+        ("/dev/null/../../tmp/x", None),
+        ("/proc/self/comm/../../../tmp/x", None),
     ] {
-        assert_eq!(log_name(name.as_bytes()), read, "{name}");
+        match (log_name(name.as_bytes(), Some(&empty)), expected_file) {
+            (LogName::File { name: got, .. }, Some(want)) => assert_eq!(got, want, "{name}"),
+            (LogName::Unopened, None) => {}
+            (other, _) => panic!("{name}: unexpected {other:?}"),
+        }
     }
 }
 
@@ -522,18 +621,30 @@ fn a_receiver_reads_an_output_name_as_the_command_line_on_linux() {
     };
     let name = |name: &str| output_name(name.as_bytes(), &entry);
     let long = "a".repeat(256);
+    for (given, expected_host_name) in [
+        ("c.counts", "c.counts"),
+        (" c.counts", " c.counts"),
+        ("./c.counts", "c.counts"),
+        ("sub/c.counts", "sub/c.counts"),
+        ("sub/deep/c.counts", "sub/deep/c.counts"),
+        ("sub/../c.counts", "c.counts"),
+        ("./sub/./c.counts", "sub/c.counts"),
+        ("../c.counts", "../c.counts"),
+        ("sub/../../c.counts", "../c.counts"),
+        ("/proc/self/cwd/c.counts", "c.counts"),
+        ("/tmp/c.counts", "/tmp/c.counts"),
+        ("/home/me/c.counts", "/home/me/c.counts"),
+        ("/etc/default/../../tmp/c.counts", "/tmp/c.counts"),
+        ("/var/lock/c.counts", "/var/lock/c.counts"),
+    ] {
+        match name(given) {
+            OutputName::File { name: got, .. } => {
+                assert_eq!(got, expected_host_name.as_bytes(), "{given:?}");
+            }
+            other => panic!("{given:?}: expected File, got {other:?}"),
+        }
+    }
     for (given, expected) in [
-        ("c.counts", OutputName::File),
-        (" c.counts", OutputName::File),
-        ("sub/c.counts", OutputName::File),
-        ("sub/deep/c.counts", OutputName::File),
-        ("sub/../c.counts", OutputName::File),
-        ("./sub/./c.counts", OutputName::File),
-        ("../c.counts", OutputName::File),
-        ("/proc/self/cwd/c.counts", OutputName::File),
-        ("/tmp/c.counts", OutputName::File),
-        ("/home/me/c.counts", OutputName::File),
-        ("/etc/default/../../tmp/c.counts", OutputName::File),
         ("nodir/c.counts", OutputName::Unopened),
         ("nodir/../c.counts", OutputName::Unopened),
         ("in.fa/c.counts", OutputName::Unopened),
@@ -577,6 +688,150 @@ fn a_receiver_reads_an_output_name_as_the_command_line_on_linux() {
     }
 }
 
+/// `log_name` and `output_name` read the run's directory through one view (`run_entries`,
+/// `run_entry`), covering both `/work` entries and registered search names (case 0-4, D19).
+#[test]
+fn log_and_output_names_share_the_runs_files_view() {
+    let entry = |path: &[u8]| match path {
+        b"db" | b"in" | b"a" => Entry::Directory,
+        b"q.fa" | b"in/q.fa" | b"db/keep" | b".ncbirc" => Entry::File,
+        _ => Entry::Missing,
+    };
+    let check_file = |raw: &str, want: &str| match log_name(raw.as_bytes(), Some(&entry)) {
+        LogName::File { name, .. } => assert_eq!(name, want.as_bytes(), "{raw:?}"),
+        other => panic!("{raw:?}: expected File({want:?}), got {other:?}"),
+    };
+    // Case 0: folder absent or file as folder -> Unopened; folder present -> File.
+    for raw in [
+        "logs/run.log",
+        "a/../logs/run.log",
+        "q.fa/run.log",
+        "in/q.fa/run.log",
+        "nodir/../run.log",
+        "/proc/self/cwd/logs/run.log",
+    ] {
+        assert_eq!(
+            log_name(raw.as_bytes(), Some(&entry)),
+            LogName::Unopened,
+            "{raw:?}"
+        );
+    }
+    check_file("db/run.log", "db/run.log");
+    check_file("in/run.log", "in/run.log");
+    check_file("a/../run.log", "run.log");
+    // Case 1: folder of the run -> Unopened.
+    for raw in ["db", "db/", "in", "in/", "a", "/proc/self/cwd/db"] {
+        assert_eq!(
+            log_name(raw.as_bytes(), Some(&entry)),
+            LogName::Unopened,
+            "{raw:?}"
+        );
+    }
+    // Case 2: file of the run -> Existing.
+    for raw in [
+        "q.fa",
+        "./q.fa",
+        " q.fa",
+        "q.fa/",
+        "a/../q.fa",
+        "in/q.fa",
+        "db/keep",
+        ".ncbirc",
+        "/proc/self/cwd/q.fa",
+    ] {
+        assert_eq!(
+            log_name(raw.as_bytes(), Some(&entry)),
+            LogName::Existing,
+            "{raw:?}"
+        );
+    }
+    // Case 3: /dev/stdout -> Stdout; procfs fd/1 stays Nowhere.
+    for raw in [
+        "/dev/stdout",
+        "//dev/stdout",
+        "/dev/./stdout",
+        "/dev/stdout/",
+        "/tmp/../dev/stdout",
+        "/proc/self/root/dev/stdout",
+    ] {
+        assert_eq!(
+            log_name(raw.as_bytes(), Some(&entry)),
+            LogName::Stdout,
+            "{raw:?}"
+        );
+    }
+    for raw in [
+        "/dev/fd/1",
+        "/proc/self/fd/1",
+        "/proc/thread-self/fd/1",
+        "/dev/fd/../stdout",
+    ] {
+        assert_eq!(
+            log_name(raw.as_bytes(), Some(&entry)),
+            LogName::Nowhere,
+            "{raw:?}"
+        );
+    }
+    // `RunFiles::log_host_name` (used by `losat_web2_start` without a run directory).
+    for (raw, want) in [
+        ("run.log", Some("run.log")),
+        ("./run.log", Some("run.log")),
+        (" run.log", Some("run.log")),
+        ("logs/", Some("logs")),
+        ("logs/run.log", Some("logs/run.log")),
+        ("/proc/self/cwd/run.log", Some("run.log")),
+        ("/etc/default/../../tmp/run.log", Some("/tmp/run.log")),
+        ("/dev/stdout", Some("/dev/stdout")),
+        ("//dev/stdout", Some("/dev/stdout")),
+        ("-", None),
+        ("", None),
+        ("/dev/null", None),
+        (".", None),
+        ("/dev/stderr", None),
+        ("/dev/fd/2", None),
+        ("/etc/run.log", None),
+    ] {
+        assert_eq!(
+            RunFiles::log_host_name(OsStr::new(raw)).as_deref(),
+            want.map(str::as_bytes),
+            "{raw:?}"
+        );
+    }
+    // Case 4: normalized relative names inside the working tree, NCBI's open path outside.
+    check_file(" run.log", "run.log");
+    check_file("logs/", "logs");
+    check_file("./run.log", "run.log");
+    check_file("/proc/self/cwd/run.log", "run.log");
+    check_file("../x.log", "../x.log");
+    check_file("a/../../x.log", "../x.log");
+    check_file("/tmp/run.log", "/tmp/run.log");
+    check_file("/etc/default/../../tmp/run.log", "/tmp/run.log");
+    // Registered names resolved with `Walk` feed both `log_name` and `output_name`.
+    let receiver = Kept::with_registered(&["./q.fa", "sub/../s.fa", "in/a.fa", "/abs/outside.fa"]);
+    let resolved = run_entries(&receiver);
+    assert_eq!(run_entry(&resolved, b"q.fa"), Entry::File);
+    assert_eq!(run_entry(&resolved, b"s.fa"), Entry::File);
+    assert_eq!(run_entry(&resolved, b"in"), Entry::Directory);
+    assert_eq!(run_entry(&resolved, b"in/a.fa"), Entry::File);
+    assert_eq!(run_entry(&resolved, b"sub"), Entry::Missing);
+    assert_eq!(run_entry(&resolved, b"outside.fa"), Entry::Missing);
+    // Registered names also reach `OpenFiles::create` through the same view.
+    let files = OpenFiles::new(&RunFiles::Receiver(Arc::new(receiver)));
+    assert!(matches!(files.create("q.fa"), Ok(Created::Refused(_))));
+    assert!(matches!(files.create("in/a.fa"), Ok(Created::Refused(_))));
+    assert_eq!(files.create("in").err(), Some(Unopened));
+    assert!(matches!(files.create("in/out.txt"), Ok(Created::File(_))));
+    assert!(matches!(
+        files.log_target(Some(OsStr::new("/dev/stdout"))),
+        Ok(ToolLog::Stdout)
+    ));
+    assert!(matches!(
+        files.log_target(Some(OsStr::new("/dev/fd/1"))),
+        Ok(ToolLog::Target(DiagTarget::Discard))
+    ));
+    assert!(files.log_target(Some(OsStr::new("q.fa"))).is_err());
+}
+
 /// A receiver's output files (`OpenFiles::create`) in the working directory of this test (the
 /// crate's): a new name is a file in memory, which goes to the receiver under its whole name when
 /// the run's files end; a file of the directory is refused and a folder of it does not open, nor
@@ -596,7 +851,7 @@ fn a_receiver_s_output_file_goes_to_the_receiver_when_the_run_ends() {
     file.flush().unwrap();
     drop(file);
     assert!(
-        kept.0.lock().unwrap().is_empty(),
+        kept.files.lock().unwrap().is_empty(),
         "nothing before the run's files end"
     );
     assert!(matches!(
@@ -619,7 +874,7 @@ fn a_receiver_s_output_file_goes_to_the_receiver_when_the_run_ends() {
     );
     drop((null, full, files));
     assert_eq!(
-        *kept.0.lock().unwrap(),
+        *kept.files.lock().unwrap(),
         vec![(name.as_bytes().to_vec(), b"counts bytes".to_vec())],
         "one file, none of the devices"
     );
@@ -705,7 +960,9 @@ fn a_receiver_that_opens_its_files_takes_them_as_they_are_written() {
         panic!("a streamed file");
     };
     file.write_all(b"one").unwrap();
-    let log = files.log_target(Some(OsStr::new("ww3a-streamed.log")));
+    let Ok(ToolLog::Target(log)) = files.log_target(Some(OsStr::new("ww3a-streamed.log"))) else {
+        panic!("a streamed log file");
+    };
     assert!(matches!(log, DiagTarget::Stream(_)));
     assert_eq!(log.place(), Place::LogFile);
     log.write_text(b"message", &mut io::sink());
@@ -715,7 +972,7 @@ fn a_receiver_that_opens_its_files_takes_them_as_they_are_written() {
     assert_eq!(files.create("src").err(), Some(Unopened));
     assert!(matches!(
         files.log_target(Some(OsStr::new("-"))),
-        DiagTarget::Stderr
+        Ok(ToolLog::Target(DiagTarget::Stderr))
     ));
     assert_eq!(events.lock().unwrap().len(), 5, "no end before the run's");
     drop((log, files));
@@ -736,7 +993,7 @@ fn a_receiver_that_opens_its_files_takes_them_as_they_are_written() {
     let kept = RunFiles::Receiver(Arc::new(Kept::default()));
     assert!(matches!(
         kept.log_target(Some(OsStr::new("ww3a-kept.log"))),
-        DiagTarget::Memory(_)
+        Ok((DiagTarget::Memory(_), Some(ref name))) if name == b"ww3a-kept.log"
     ));
 }
 
@@ -752,7 +1009,9 @@ fn a_file_opened_twice_is_one_file_with_the_system_s_offsets() {
     let streamed = Streamed::default();
     let events = streamed.0.clone();
     let files = OpenFiles::new(&RunFiles::Receiver(Arc::new(streamed)));
-    let log = files.log_target(Some(OsStr::new("ww3a-twice.out")));
+    let Ok(ToolLog::Target(log)) = files.log_target(Some(OsStr::new("ww3a-twice.out"))) else {
+        panic!("a streamed log file");
+    };
     log.write_text(b"pass 1\n", &mut io::sink());
     let Ok(Created::File(mut out)) = files.create("./ww3a-twice.out") else {
         panic!("the same file");
@@ -778,7 +1037,9 @@ fn a_file_opened_twice_is_one_file_with_the_system_s_offsets() {
     // Whole: the same bytes, once.
     let kept = Arc::new(Kept::default());
     let files = OpenFiles::new(&RunFiles::Receiver(kept.clone()));
-    let log = files.log_target(Some(OsStr::new("ww3a-twice.out")));
+    let Ok(ToolLog::Target(log)) = files.log_target(Some(OsStr::new("ww3a-twice.out"))) else {
+        panic!("a log file");
+    };
     log.write_text(b"pass 1\n", &mut io::sink());
     let Ok(Created::File(mut out)) = files.create("ww3a-twice.out") else {
         panic!("the same file");
@@ -787,7 +1048,7 @@ fn a_file_opened_twice_is_one_file_with_the_system_s_offsets() {
     out.write_all(b"short").unwrap();
     drop((out, log, files));
     assert_eq!(
-        *kept.0.lock().unwrap(),
+        *kept.files.lock().unwrap(),
         vec![(b"ww3a-twice.out".to_vec(), b"shortg message\n".to_vec())]
     );
 }

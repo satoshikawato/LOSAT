@@ -336,11 +336,14 @@ pub fn check_windowmasker(words: &[&str]) -> Result<(), String> {
     }
     let words: Vec<OsString> = words.iter().map(OsString::from).collect();
     let log = Arc::new(Log::default());
+    let mut out = Vec::new();
     let mut err = Vec::new();
-    let status = crate::windowmasker::check_in(&words, &RunFiles::Receiver(log.clone()), &mut err);
+    let status =
+        crate::windowmasker::check_in(&words, &RunFiles::Receiver(log.clone()), &mut out, &mut err);
     if status == 0 {
         return Ok(());
     }
+    err.extend_from_slice(&out);
     err.extend_from_slice(
         &log.0
             .lock()

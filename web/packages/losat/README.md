@@ -111,7 +111,8 @@ of that output, whose error is at `error`: `'diagnostics'`, `'logfile'` or `'now
 A host that keeps every chunk would keep output that the command line does not write.
 
 `engine.start(argv)` reads what the command line reads before its arguments: the file that
-`-conffile` names, the file that `-logfile` names, the search strategy file that
+`-conffile` names, the file that `-logfile` names (`StartInfo.logFile` and its normalized host
+name `StartInfo.logFileName`), the search strategy file that
 `-export_search_strategy` names (`StartInfo.strategyFile`), and whether the argv has `-dryrun`. Give the
 file of `-conffile` under that name to `engine.validate(argv, registry)` and as
 `EngineRunRequest.conffile`; `reactorControl` validates it on an instance of its own, opened with its
@@ -120,16 +121,22 @@ second argument. A run returns the `-logfile` file and the search strategy file 
 `'logfile'` or `'export_search_strategy'`). When a run fails, `runFilesOf(error)` returns them. A run that the engine failed after it began to write ends
 its output with `fail` in place of `end` (`runOutputFailedOf(error)` is then true): the stream 3 that
 arrived holds the warnings that the command line writes to its standard error before the error. The engine reads a `-logfile` name as the command line on
-Linux reads it where the name's directories exist: the file's name is the whole name, which may
-contain `/` (`logs/run.log`, `/tmp/run.log`, `/dev/stdout`, `logs/`, which the command line makes as
-the file `logs`); show and save it as a name, not as a path. The standard error (`/dev/stderr`), a
+Linux reads it in a working directory holding the run's files (the run directory's files, plus a
+search's `-query`, `-subject`, `-conffile` and `-window_masker_db` names): a name in a folder that
+is missing (`logs/run.log` without `logs`) or naming a folder gives no file and keeps its messages
+on stream 3; a name that is an existing file of the run's directory (`q.fa`, `.ncbirc`, an input of
+`windowmasker`) is refused, because LOSAT Web does not write to the run's files. When a file is
+made, its name is the command line's file name (`run.log` for ` run.log` and `./run.log`, `logs` for
+`logs/`, `sub/run.log` when `sub` is a folder of the run, `/tmp/run.log` outside the working
+directory, and `/dev/stdout` for a search's `/dev/stdout`); show and save it as a name, not as a
+path. The standard error (`/dev/stderr`), a
 directory (`.`, `logs/.`) and a name where a user's command line cannot make or open a file give
 no file: their messages are on stream 3. A user makes files in the working directory, in a home
 (`/home/<user>/...`) and where every user does (`/tmp`, `/var/tmp`, `/dev/shm`, `/run/lock`,
 `/var/lock`, `/var/crash`); every other directory is root's (`/etc/run.log`, `/data/run.log`,
 `/dev/run.log`, `//run.log`), and the system refuses a component of more than 255 bytes. A name
 may climb out of a directory of root's (`/etc/default/../../tmp/run.log` is `/tmp/run.log`), but not out of one
-that a user cannot enter (`/root/../tmp/run.log`). `/dev/fd/2` and
+that a user cannot enter (`/root/../tmp/run.log`). `/dev/fd/2`, `/dev/fd/1` and
 `/proc/self/fd/2` give no file and send the messages that go to the file nowhere, as `/dev/null`
 does: the command line writes nothing to a log on a file system without free space, which these
 are.
@@ -222,8 +229,9 @@ lists, `-ids`, `-exclude_ids`, a BLAST database of `-infmt blastdb`, `-conffile`
 reads in place, as for a search of `-db` (above). A folder of the directory opens as it does on Linux, and a read of it
 fails: `-in <folder>` ends as the command line does, with "Is a directory". The promise resolves with the command line's
 exit status (`status`, whatever it is) and what the tool wrote: `stdout`, `stderr` and `files` (`-out FILE`, `-logfile FILE`,
-in the order the run opened them, named as the argv spells them: a name may hold `/`, as `sub/x` does for a folder of the
-directory). The status is the command line's: an argument error and a refusal by LOSAT are status 1, NCBI's exceptions
+in the order the run opened them, under the command line's file name: `x.counts` for `./x.counts`, `logs` for `-logfile logs/`,
+`sub/x` when `sub` is a folder of the directory; `-logfile /dev/stdout` writes diagnostic messages into `stdout` in the command
+line's order, and a `-out` or `-logfile` naming a file of the run's directory is refused with status 1). The status is the command line's: an argument error and a refusal by LOSAT are status 1, NCBI's exceptions
 (a missing file, a bad counts file) are status 3, a `-conffile` that is not there is status 255, and a registry file that is
 malformed (a `-conffile`, or a `windowmasker.ini` in the directory, with a bad section or entry line) is status 2; their text
 is on `stderr`, but with `-logfile FILE` NCBI's report is in that file, as it is on the command line. `stderr` arrives as

@@ -29,6 +29,14 @@ pub trait FileReceiver: Send + Sync {
     fn open(&self, _name: &[u8]) -> Option<Box<dyn FileStream>> {
         None
     }
+
+    /// The names of the run's files that the host holds outside the run's working directory
+    /// (LOSAT Web's registered inputs of a search: `-query`, `-subject`, the registry files that
+    /// the run's start reads, and the counts file of `-window_masker_db`). Default: none (a
+    /// tool's run opens its files in the working directory, which `run_directory_entry` reads).
+    fn registered_files(&self) -> &[Vec<u8>] {
+        &[]
+    }
 }
 
 /// A file of a tool's run that the receiver takes as the run writes it (`FileReceiver::open`): the
@@ -68,39 +76,71 @@ impl RunFiles {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:7570-7608 (cited at
     // `ncbi_environment::diag_target`): no file for `""` and `/dev/null`, `cerr` for `-`, else the
     // file, or `cerr` when its directory does not exist or it cannot be opened (a directory).
-    /// The target of the `-logfile` value `name` (`None` without one). On `Disk` the file
-    /// system's (`diag_target`). For a `Receiver`: NCBI's special names as there
+    /// The target of the `-logfile` value `name` (`None` without one), and the file's host name
+    /// when a `Receiver` keeps it in memory (`deliver_log`). On `Disk` the file system's
+    /// (`diag_target`, `None`). For a `Receiver`: NCBI's special names as there
     /// (`special_log_target`), and any other name as the command line of a user on Linux reads it
-    /// in a working directory of the user's own (`log_name`), as LOSAT Web reads a `-conffile`
-    /// name as a path of the command line's working directory (line WQA's sweep, D11, 2026-11-20;
-    /// it refused a name with a directory before): `cerr` for a directory, which NCBI cannot open
-    /// as a file, and for a name that a user's command line cannot open (`//run.log`,
-    /// `/etc/run.log`, `/data/run.log`, `/dev/kmsg`, a component of 256 bytes); the file that is
-    /// the standard error (`DiagTarget::StderrFile`) for `/dev/stderr`; no output for another
-    /// spelling of `/dev/null`, for a device whose writes are lost (`/dev/ptmx`) and for a name in
-    /// a file system that reports no free space (`/dev/fd/2`); and for any other name, one in the
-    /// working directory, in the user's home or in a directory where every user makes files, a
-    /// file in memory under the whole name, which `deliver_log` hands over (`logs/run.log`,
-    /// `logs/`, `/tmp/run.log`, `/var/lock/run.log`, and `/dev/stdout`, whose bytes the command
-    /// line writes into its standard output among the report's, where their place depends on the
-    /// report's buffering). A tool's run opens its files through `OpenFiles`, which reads the
-    /// names the same way (`received_log_target`).
-    pub fn log_target(&self, name: Option<&OsStr>) -> DiagTarget {
+    /// in a working directory holding exactly the run's files (`log_name`, `run_entries`): `cerr`
+    /// for a folder of the run's directory or a name whose folder inside the working directory is
+    /// missing or is a file, and for a name that a user's command line cannot open (`//run.log`,
+    /// `/etc/run.log`, `/data/run.log`, `/dev/kmsg`, a component of 256 bytes); `Err` with LOSAT's
+    /// refusal reason when the name is a file of the run's directory (`LogName::Existing`); the
+    /// file that is the standard error (`DiagTarget::StderrFile`) for `/dev/stderr`; no output for
+    /// another spelling of `/dev/null`, for a device whose writes are lost (`/dev/ptmx`) and for a
+    /// name in a file system that reports no free space (`/dev/fd/2`, `/dev/fd/1`,
+    /// `/proc/self/fd/1`); a file in memory named `/dev/stdout` for `/dev/stdout` (a search's
+    /// reports are split by format); and for any other file name in the working directory, in a
+    /// home or in a directory where every user makes files, a file in memory under the command
+    /// line's file name (`host_file_name`: `run.log` for ` run.log` and `./run.log`, `logs` for
+    /// `logs/`, `/tmp/run.log` outside the working directory). A tool's run opens its files
+    /// through `OpenFiles`, which reads the names the same way (`received_log_target`).
+    pub fn log_target(
+        &self,
+        name: Option<&OsStr>,
+    ) -> Result<(DiagTarget, Option<Vec<u8>>), String> {
         match self {
-            RunFiles::Disk => diag_target(name),
-            RunFiles::Receiver(_) => {
-                received_log_target(name, |_| DiagTarget::Memory(Default::default()))
+            RunFiles::Disk => Ok((diag_target(name), None)),
+            RunFiles::Receiver(receiver) => received_log_target(
+                name,
+                receiver.as_ref(),
+                |target| (target, None),
+                |host_name, _key| (DiagTarget::Memory(Default::default()), Some(host_name)),
+                || {
+                    (
+                        DiagTarget::Memory(Default::default()),
+                        Some(b"/dev/stdout".to_vec()),
+                    )
+                },
+            ),
+        }
+    }
+
+    /// The host file name of the `-logfile` value `name` (what a `Receiver` names the stream 8
+    /// entry if the file is made: `run.log` for `./run.log` and ` run.log`, `logs` for `logs/`,
+    /// `/tmp/run.log` outside the working directory, `/dev/stdout` for a search's `/dev/stdout`),
+    /// without checking the run's real directory (`losat_web2_start`, which has no run directory
+    /// yet). `None` for NCBI's special names (`-`, `""`, `/dev/null`) and names that never make a
+    /// stream 8 file (`.`, `..`, `/dev/stderr`, `/dev/fd/2`, `/etc/run.log`).
+    pub fn log_host_name(name: &OsStr) -> Option<Vec<u8>> {
+        if special_log_target(Some(name)).is_some() {
+            return None;
+        }
+        match log_name(name.as_encoded_bytes(), None) {
+            LogName::File { name, .. } => Some(name),
+            LogName::Stdout => Some(b"/dev/stdout".to_vec()),
+            LogName::Unopened | LogName::StandardError | LogName::Nowhere | LogName::Existing => {
+                None
             }
         }
     }
 
-    /// Hands the file of the `-logfile` value `name`, which `target` holds (`log_target`), to the
+    /// Hands the file of `-logfile`, named `name` (`log_target`), which `target` holds, to the
     /// receiver. Nothing on `Disk` (the file is written) and for a target without a file.
-    pub fn deliver_log(&self, name: Option<&OsStr>, target: DiagTarget) -> io::Result<()> {
+    pub fn deliver_log(&self, name: Option<&[u8]>, target: DiagTarget) -> io::Result<()> {
         match (self, name, target) {
             (RunFiles::Receiver(receiver), Some(name), DiagTarget::Memory(bytes)) => receiver
                 .receive(
-                    name.as_encoded_bytes(),
+                    name,
                     &bytes.into_inner().unwrap_or_else(PoisonError::into_inner),
                 ),
             _ => Ok(()),
@@ -108,20 +148,55 @@ impl RunFiles {
     }
 }
 
+/// LOSAT's refusal reason for a `-logfile` naming an existing file of the run's directory.
+fn existing_log_refusal(name: &OsStr) -> String {
+    format!(
+        "a -logfile file '{}' that is a file of the run's directory (the command line appends \
+         its messages to it; LOSAT Web reads the run's files and writes none of them)",
+        name.display()
+    )
+}
+
 /// The target of the `-logfile` value `name` for a `Receiver` (`RunFiles::log_target`,
-/// `OpenFiles::log_target`): NCBI's special names, then `log_name`'s reading; `file` gives the
-/// target of a name that is a file (`LogName::File`), from the name.
-fn received_log_target(name: Option<&OsStr>, file: impl FnOnce(&[u8]) -> DiagTarget) -> DiagTarget {
+/// `OpenFiles::log_target`): NCBI's special names, then `log_name`'s reading against the run's
+/// real files (`run_entries`, `run_entry`); `direct` wraps a `DiagTarget` without a new file,
+/// `file` opens a new file given its host name and key (`LogName::File`), and `stdout` handles
+/// `/dev/stdout` (`LogName::Stdout`). `Err` with LOSAT's refusal reason for `LogName::Existing`.
+fn received_log_target<T>(
+    name: Option<&OsStr>,
+    receiver: &dyn FileReceiver,
+    direct: impl FnOnce(DiagTarget) -> T,
+    file: impl FnOnce(Vec<u8>, Vec<u8>) -> T,
+    stdout: impl FnOnce() -> T,
+) -> Result<T, String> {
     match (special_log_target(name), name) {
-        (Some(target), _) => target,
-        (None, None) => DiagTarget::Stderr,
-        (None, Some(name)) => match log_name(name.as_encoded_bytes()) {
-            LogName::Unopened => DiagTarget::Stderr,
-            LogName::StandardError => DiagTarget::StderrFile,
-            LogName::Nowhere => DiagTarget::Discard,
-            LogName::File => file(name.as_encoded_bytes()),
-        },
+        (Some(target), _) => Ok(direct(target)),
+        (None, None) => Ok(direct(DiagTarget::Stderr)),
+        (None, Some(name)) => {
+            let registered = run_entries(receiver);
+            let entry = |path: &[u8]| run_entry(&registered, path);
+            match log_name(name.as_encoded_bytes(), Some(&entry)) {
+                LogName::Unopened => Ok(direct(DiagTarget::Stderr)),
+                LogName::StandardError => Ok(direct(DiagTarget::StderrFile)),
+                LogName::Nowhere => Ok(direct(DiagTarget::Discard)),
+                LogName::Stdout => Ok(stdout()),
+                LogName::Existing => Err(existing_log_refusal(name)),
+                LogName::File {
+                    name: host_name,
+                    key,
+                } => Ok(file(host_name, key)),
+            }
+        }
     }
+}
+
+/// The `-logfile` target opened for a tool run (`OpenFiles::log_target`).
+pub(crate) enum ToolLog {
+    /// A diagnostic target (`DiagTarget`).
+    Target(DiagTarget),
+    /// The run's standard output (`LogName::Stdout` on a `Receiver`), shared with the tool's
+    /// `out` writer (`ncbi_app::run_app`).
+    Stdout,
 }
 
 /// The files that one run of a tool opens by name for writing (`ncbi_app::run_app`: the file of
@@ -179,18 +254,24 @@ impl OpenFiles {
 
     /// The target of the `-logfile` value `name` (`RunFiles::log_target`), whose file, for a
     /// `Receiver`, is an opening of the run's file of that path that appends to it
-    /// (`DiagTarget::Stream`).
-    pub(crate) fn log_target(&self, name: Option<&OsStr>) -> DiagTarget {
+    /// (`DiagTarget::Stream`), or `ToolLog::Stdout` for `/dev/stdout`. `Err` with LOSAT's refusal
+    /// reason when the name is a file of the run's directory.
+    pub(crate) fn log_target(&self, name: Option<&OsStr>) -> Result<ToolLog, String> {
         match &self.0 {
-            None => diag_target(name),
-            Some(table) => received_log_target(name, |bytes| {
-                let key = log_key(bytes).expect("a file of log_name has a path");
-                DiagTarget::Stream(Mutex::new(Box::new(table.open(
-                    bytes,
-                    key,
-                    Opening::Append,
-                ))))
-            }),
+            None => Ok(ToolLog::Target(diag_target(name))),
+            Some(table) => received_log_target(
+                name,
+                table.receiver.as_ref(),
+                ToolLog::Target,
+                |host_name, key| {
+                    ToolLog::Target(DiagTarget::Stream(Mutex::new(Box::new(table.open(
+                        &host_name,
+                        key,
+                        Opening::Append,
+                    )))))
+                },
+                || ToolLog::Stdout,
+            ),
         }
     }
 
@@ -200,11 +281,11 @@ impl OpenFiles {
     /// (`File::create`, as before); `Err` where it does not open. For a `Receiver`, the name as the
     /// command line of a user on Linux opens it in the run's working directory (`output_name`): the
     /// run's file of that path, emptied (a file that the run opened before under that path or
-    /// another name of it, `file_key`, is that file); the run's standard output for a name of it
-    /// (`/dev/stdout`); writes that are lost (the null device) or that fail (`/dev/full`); `Err`
-    /// where that command line cannot open it (a directory, a folder that the run's directory does
-    /// not have, a directory of root's); and LOSAT's refusal of the names whose writes LOSAT Web
-    /// does not reproduce (`Created::Refused`).
+    /// another name of it, `file_key`, is that file, named by `host_file_name`); the run's standard
+    /// output for a name of it (`/dev/stdout`); writes that are lost (the null device) or that
+    /// fail (`/dev/full`); `Err` where that command line cannot open it (a directory, a folder
+    /// that the run's directory does not have, a directory of root's); and LOSAT's refusal of the
+    /// names whose writes LOSAT Web does not reproduce (`Created::Refused`).
     pub(crate) fn create(&self, name: &(impl AsRef<OsStr> + ?Sized)) -> Result<Created, Unopened> {
         let name = name.as_ref();
         let Some(table) = &self.0 else {
@@ -214,16 +295,18 @@ impl OpenFiles {
         };
         let bytes = name.as_encoded_bytes();
         let name = name.display();
-        match output_name(bytes, &run_directory_entry) {
+        let registered = run_entries(table.receiver.as_ref());
+        let entry = |path: &[u8]| run_entry(&registered, path);
+        match output_name(bytes, &entry) {
             OutputName::Unopened => Err(Unopened),
-            OutputName::File => {
-                let key = output_key(bytes).expect("a file of output_name has a path");
-                Ok(Created::File(OpenedFile::Shared(table.open(
-                    bytes,
-                    key,
-                    Opening::Create,
-                ))))
-            }
+            OutputName::File {
+                name: host_name,
+                key,
+            } => Ok(Created::File(OpenedFile::Shared(table.open(
+                &host_name,
+                key,
+                Opening::Create,
+            )))),
             OutputName::Stdout => Ok(Created::Stdout),
             OutputName::Discard => Ok(Created::File(OpenedFile::Discard)),
             OutputName::Full => Ok(Created::File(OpenedFile::Full)),
@@ -424,13 +507,10 @@ impl Write for OpenedFile {
     }
 }
 
-/// The path of a file of a run's working directory `cwd` (`working_directory`), without links,
-/// as one name of the run's files (`OpenFiles`): every name that the system opens at that path
-/// gives it (`x`, `./x`, `sub/../x`, `/proc/self/cwd/x`). A path in the working directory's tree
-/// (`WORKING_TREE`) is told by its place from the working directory (how many directories above
-/// it, then the rest), as each name has a working directory of its own depth; any other path is
-/// itself.
-fn file_key(path: &[u8], cwd: &[u8]) -> Vec<u8> {
+/// Where `path` (without links) sits relative to the working directory `cwd`: `Some((up, rest))`
+/// when `path` is in `WORKING_TREE` (`up` directories above `cwd`, then `rest` without a leading
+/// `/`), else `None`.
+fn in_working_tree<'a>(path: &'a [u8], cwd: &[u8]) -> Option<(usize, &'a [u8])> {
     let depth = cwd.len() / WORKING_TREE.len();
     let (mut rest, mut inside) = (path, 0);
     while inside < depth {
@@ -442,12 +522,47 @@ fn file_key(path: &[u8], cwd: &[u8]) -> Vec<u8> {
             _ => break,
         }
     }
-    if inside == 0 {
-        return path.to_vec();
+    (inside > 0).then(|| (depth - inside, rest.strip_prefix(b"/").unwrap_or(rest)))
+}
+
+/// The path of a file of a run's working directory `cwd` (`working_directory`), without links,
+/// as one name of the run's files (`OpenFiles`): every name that the system opens at that path
+/// gives it (`x`, `./x`, `sub/../x`, `/proc/self/cwd/x`). A path in the working directory's tree
+/// (`WORKING_TREE`) is told by its place from the working directory (how many directories above
+/// it, then the rest), as each name has a working directory of its own depth; any other path is
+/// itself.
+fn file_key(path: &[u8], cwd: &[u8]) -> Vec<u8> {
+    match in_working_tree(path, cwd) {
+        Some((up, rest)) => {
+            let mut key = format!("\0{up}").into_bytes();
+            if !rest.is_empty() {
+                key.push(b'/');
+                key.extend_from_slice(rest);
+            }
+            key
+        }
+        None => path.to_vec(),
     }
-    let mut key = format!("\0{}", depth - inside).into_bytes();
-    key.extend_from_slice(rest);
-    key
+}
+
+/// The file's name that the host gets (`log_name`, `output_name`): for a file in the working
+/// directory's tree (`in_working_tree`), its path relative to the run's directory (`run.log`,
+/// `logs/run.log`, `logs`, `../x.log`); for a file outside it, `opened` (the path that NCBI or
+/// the tool opens, normalized lexically: `/tmp/run.log`, `/var/lock/run.log`).
+fn host_file_name(path: &[u8], opened: &[u8], cwd: &[u8]) -> Vec<u8> {
+    match in_working_tree(path, cwd) {
+        Some((up, rest)) => {
+            let mut relative = b"../".repeat(up);
+            relative.extend_from_slice(rest);
+            relative
+        }
+        None => opened.to_vec(),
+    }
+}
+
+/// The relative path of `path` strictly inside the working directory `cwd`.
+fn inside_cwd<'a>(path: &'a [u8], cwd: &[u8]) -> Option<&'a [u8]> {
+    path.strip_prefix(cwd)?.strip_prefix(b"/")
 }
 
 /// The working directory in which a name is read (`WORKING_TREE`): deeper than the name's `..`
@@ -470,6 +585,7 @@ fn output_key(name: &[u8]) -> Option<Vec<u8>> {
 
 /// The path of the file that the `-logfile` name `name` opens (`file_key`), where `log_name` gives
 /// a file: the path that NCBI opens (`log_file_name`); `None` where the system refuses it.
+#[cfg(test)]
 fn log_key(name: &[u8]) -> Option<Vec<u8>> {
     let (cwd, file) = log_file(name);
     Walk::resolve(&file.path, &cwd).map(|path| file_key(&path, &cwd))
@@ -488,14 +604,50 @@ fn log_file(name: &[u8]) -> (Vec<u8>, crate::blastinput::ncbi_environment::LogFi
     (cwd, file)
 }
 
-/// What an entry of the run's working directory is (`output_name`): LOSAT Web's host gives the
-/// engine the files of the run's directory, whose folders are those that hold them (docs/web/
-/// abi_v2.md §3).
+/// What an entry of the run's working directory is (`log_name`, `output_name`): LOSAT Web's host
+/// gives the engine the files of the run's directory, whose folders are those that hold them
+/// (docs/web/abi_v2.md §3), and for a search also the host's registered input names
+/// (`FileReceiver::registered_files`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Entry {
     Directory,
     File,
     Missing,
+}
+
+/// The paths inside the run's working directory that `receiver`'s registered files occupy,
+/// resolved with `Walk` so that `./q.fa` and `in/../q.fa` are `q.fa`, and `in/q.fa` gives the
+/// folder `in` (`run_entry`).
+fn run_entries(receiver: &dyn FileReceiver) -> Vec<Vec<u8>> {
+    let mut files = Vec::new();
+    for raw in receiver.registered_files() {
+        if raw.is_empty() || !fits(raw) {
+            continue;
+        }
+        let cwd = working_directory(raw);
+        if let Some(path) = Walk::resolve(raw, &cwd) {
+            if let Some(rel) = inside_cwd(&path, &cwd) {
+                files.push(rel.to_vec());
+            }
+        }
+    }
+    files
+}
+
+/// The entry of the run's working directory at `path` (a normalized path relative to the working
+/// directory): the registered files of `registered` (`run_entries`) first, then the real working
+/// directory (`run_directory_entry`).
+fn run_entry(registered: &[Vec<u8>], path: &[u8]) -> Entry {
+    if registered.iter().any(|file| file.as_slice() == path) {
+        return Entry::File;
+    }
+    if registered.iter().any(|file| {
+        file.strip_prefix(path)
+            .is_some_and(|rest| rest.starts_with(b"/"))
+    }) {
+        return Entry::Directory;
+    }
+    run_directory_entry(path)
 }
 
 /// The entry of the run's working directory at `path`, a path relative to it without links, `.`
@@ -517,8 +669,8 @@ fn run_directory_entry(path: &[u8]) -> Entry {
 enum OutputName {
     /// The system does not open it: the command line's open fails.
     Unopened,
-    /// A file of that name, made.
-    File,
+    /// A file made at this host name (`host_file_name`) and file-table key (`file_key`).
+    File { name: Vec<u8>, key: Vec<u8> },
     /// The process's standard output.
     Stdout,
     /// Writes that are lost: the null device and the devices that take writes, and the standard
@@ -564,12 +716,6 @@ fn output_name(name: &[u8], entry: &dyn Fn(&[u8]) -> Entry) -> OutputName {
         return OutputName::Unopened;
     }
     let cwd = working_directory(name);
-    // The path inside the run's directory of a path inside the working directory.
-    let inside = |path: &[u8]| -> Option<Vec<u8>> {
-        path.strip_prefix(cwd.as_slice())?
-            .strip_prefix(b"/")
-            .map(<[u8]>::to_vec)
-    };
     let (folders, last) = match name.iter().rposition(|byte| *byte == b'/') {
         Some(at) => (&name[..at], &name[at + 1..]),
         None => (&name[..0], name),
@@ -581,7 +727,7 @@ fn output_name(name: &[u8], entry: &dyn Fn(&[u8]) -> Entry) -> OutputName {
         if walk.refused || directory_at(walk.path()) == Directory::None {
             return OutputName::Unopened;
         }
-        if inside(walk.path()).is_some_and(|path| entry(&path) != Entry::Directory) {
+        if inside_cwd(walk.path(), &cwd).is_some_and(|path| entry(path) != Entry::Directory) {
             return OutputName::Unopened;
         }
         if directories.last().map(Vec::as_slice) != Some(walk.path()) {
@@ -632,26 +778,42 @@ fn output_name(name: &[u8], entry: &dyn Fn(&[u8]) -> Entry) -> OutputName {
     if path.starts_with(b"/dev/mqueue/") {
         return OutputName::Special;
     }
-    match inside(&path).map(|path| entry(&path)) {
+    match inside_cwd(&path, &cwd).map(entry) {
         Some(Entry::Directory) => OutputName::Unopened,
         Some(Entry::File) => OutputName::Existing,
-        Some(Entry::Missing) | None => OutputName::File,
+        Some(Entry::Missing) | None => {
+            let opened = crate::blastinput::ncbi_environment::PathRules::Unix
+                .normalize(name, None)
+                .expect("a path normalized without links has no link limit");
+            OutputName::File {
+                name: host_file_name(&path, &opened, &cwd),
+                key: file_key(&path, &cwd),
+            }
+        }
     }
 }
 
 /// What a `-logfile` name that is not one of NCBI's special names gives, for a `Receiver`
-/// (`RunFiles::log_target`).
+/// (`RunFiles::log_target`, `OpenFiles::log_target`).
 #[derive(Debug, PartialEq, Eq)]
 enum LogName {
-    /// A name that NCBI cannot open, a directory: the messages stay on `cerr`.
+    /// A name that NCBI cannot open (a directory, a missing folder or a file as a folder inside
+    /// the working directory, or a path a user cannot open): the messages stay on `cerr`.
     Unopened,
     /// The process's standard error, opened as a file.
     StandardError,
+    /// The process's standard output (`/dev/stdout`, where the free-space check does not give
+    /// `Nowhere`): in a tool's run, stream 11; in a search's run, a stream 8 file named
+    /// `/dev/stdout`.
+    Stdout,
     /// No message: the null device written otherwise than NCBI's special `/dev/null`, or a file
     /// system that reports no free space.
     Nowhere,
-    /// A file of that name.
-    File,
+    /// A file of the run's working directory, which the command line appends to (refused by LOSAT
+    /// Web).
+    Existing,
+    /// A new file made at this host name (`host_file_name`) and file-table key (`file_key`).
+    File { name: Vec<u8>, key: Vec<u8> },
 }
 
 /// The working directory's tree on LOSAT Web's Linux (`log_name`): the working directory is a
@@ -967,11 +1129,11 @@ fn holds_known_file(directory: &[u8]) -> bool {
 /// What LOSAT Web's Linux has at `directory`, a path without links (`log_name`).
 #[derive(Debug, PartialEq, Eq)]
 enum Directory {
-    /// A directory that the model knows: `/`, one where the user makes entries (`user_makes`),
-    /// which the model takes as made where a name gives it (`logs`, `/tmp/a`; the working
-    /// directory and its ancestors), a directory at the root (`ROOT_DIRECTORIES`), a mount of
-    /// `NO_FREE_SPACE` (`/dev/pts`) and a directory of a file that the model knows (`/dev/net`,
-    /// `SELF`'s `fd`).
+    /// A directory that the model knows: `/`, one where the user makes entries (`user_makes`:
+    /// outside the working directory the model takes a user directory as present, such as
+    /// `/tmp/a`; inside the working directory `entry` tells the real folders of the run), a
+    /// directory at the root (`ROOT_DIRECTORIES`), a mount of `NO_FREE_SPACE` (`/dev/pts`) and a
+    /// directory of a file that the model knows (`/dev/net`, `SELF`'s `fd`).
     Known,
     /// Any other path in root's directories, which may be a directory there or not
     /// (`/etc/default`, `/usr/tmp`): the user cannot change them, and the model does not list
@@ -1144,61 +1306,65 @@ thread_local! {
 }
 
 /// What the `-logfile` name `name` gives on the command line on Linux (No NCBI counterpart: LOSAT
-/// Web has no file system; line WQA's sweep, D11, 2026-11-20 and its rounds 2 to 7), on the
-/// model's host as its first user (`USER_DIRECTORIES`). The name is
-/// read as NCBI reads it on Unix (`ncbi_environment::log_file_name`, the command line's reading
-/// too) in a working directory of the user's own (`WORKING_TREE`) on a file system with free
-/// space: `logs/run.log`, ` run.log` (`run.log`), `logs/` (the file `logs`) and `/tmp/run.log`
-/// are files. A directory of '/'s only (`//run.log`) is none, as `CDirEntry::Reset` leaves it
-/// empty. The system then follows the links of Linux (`LINKS`, at most `MAX_LINKS`;
-/// `/proc/self/cwd` is the working directory) in the directory that NCBI checks, in the path that
-/// it opens and in the directory whose free space it reads (`Walk`, once over the name), and
-/// refuses a component of more than
-/// 255 bytes and a path of 4096 or more (`fits`: `aaa...`, a directory `x/../x/../...` of 4096
-/// bytes). The directory that NCBI checks (the name's as written) is walked as the system walks
-/// it (`directory_at`): each directory that it passes may be one of root's that the model does
-/// not know, which a name passes on its way back out (`/etc/default/../../tmp`, as on the command
-/// line), but none that is not there (`/data`, a file: `/dev/null/x`, `/dev/stdout/..`) nor one
-/// that the user cannot search (`searchable`: `/root/..`, `/var/cache/ldconfig/..`); the
-/// directory where it ends must be one that the model knows, root's or one where the user makes
-/// entries, which the user made (`logs`, `/tmp/a`, `/home/me/logs`); not `/bin/..` (`/usr`, then
-/// `/usr/tmp`) or `/var/lock/..` (`/run`, then `/run/tmp`). The opened path is a directory, which
-/// NCBI cannot open (`cerr`), where it is the working directory or one of its ancestors, or a
-/// directory that the walk passed or one of its ancestors (`.`, `logs/.`, `a/b/..`, `/tmp/`,
-/// `/proc/self/cwd`); a directory of root's opens to no user (`opens`: `/tmp`, `/proc/self/fd`);
-/// NCBI cannot open a path that the system does not open to a user either (`opens`: `/dev/fd/3`,
-/// `/proc/self/status`, `/sys/...`, `/dev/pts/0`, `/dev/tty`, a name in a directory of root's:
-/// `/run.log`, `/etc/run.log`, `/var/log/run.log`, `/dev/run.log`, `/dev/kmsg`). A file opened in
-/// a file system that reports no free space (`NO_FREE_SPACE`) gets no message, as NCBI checks
-/// the space before it writes (`/dev/fd/2`, `/proc/self/fd/1`, `/proc/self/comm`,
-/// `/dev/mqueue/q`, `/dev/fd/../stderr`, whose directory is `/proc/self`). Otherwise
-/// `/dev/stderr` is the standard error, also written otherwise (`//dev/stderr`); the standard
-/// input is the null device (`/dev/stdin`), as for a command line run without one; the devices
-/// whose writes are lost (`LOST_DEVICES`: `/dev/ptmx`) give no message; `/dev/stdout` is a file
-/// of that name, whose bytes the command line writes into its standard output among the
-/// report's, `/proc/self/cwd/run.log` the file `run.log` of the working directory, and
-/// `/var/lock/run.log` a file in `/run/lock`, each under the name as typed. The model's command
-/// line is a user's (not root), with no terminal, its standard output and error being pipes, as a
-/// shell's `|` gives.
-fn log_name(name: &[u8]) -> LogName {
+/// Web has no file system; line WQA's sweep, D11 and D19), on the model's host as its first user
+/// (`USER_DIRECTORIES`), in a working directory holding the entries that `entry` reports
+/// (`run_entries`, `run_directory_entry`). The name is read as NCBI reads it on Unix
+/// (`ncbi_environment::log_file_name`, the command line's reading too) in a working directory of
+/// the user's own (`WORKING_TREE`) on a file system with free space: `run.log`, ` run.log`
+/// (`run.log`), `logs/` (the file `logs` when `logs` is not a folder or file of the run),
+/// `logs/run.log` when `logs` is a folder of the run, and `/tmp/run.log` are files. A directory of
+/// '/'s only (`//run.log`) is none, as `CDirEntry::Reset` leaves it empty. The system then follows
+/// the links of Linux (`LINKS`, at most `MAX_LINKS`; `/proc/self/cwd` is the working directory) in
+/// the directory that NCBI checks (`LogFileName::directory`), in the path that it opens
+/// (`LogFileName::path`) and in the directory whose free space it reads (`Walk`, once over each),
+/// and refuses a component of more than 255 bytes and a path of 4096 or more (`fits`). Every
+/// folder looked up inside the working directory must be `Entry::Directory`, else
+/// `LogName::Unopened`; outside it, folders keep the model's `directory_at` rules. The opened path
+/// cannot be the working directory, an ancestor, a directory passed by the walk, or a path that a
+/// user cannot open (`opens`). A file opened in a file system that reports no free space
+/// (`NO_FREE_SPACE`) gets no message (`/dev/fd/2`, `/dev/fd/1`, `/proc/self/fd/1`,
+/// `/proc/self/fd/2`, `/proc/self/comm`, `/dev/mqueue/q`, `/dev/fd/../stderr`). Otherwise
+/// `/dev/stderr` (also `//dev/stderr`) is `StandardError`; `/dev/stdout` (also `//dev/stdout`) is
+/// `Stdout`; `/dev/stdin` and `LOST_DEVICES` are `Nowhere`; inside the working directory,
+/// `Entry::Directory` is `Unopened`, `Entry::File` is `Existing` (refused by LOSAT Web), and
+/// `Entry::Missing` is `File` named relative to the working directory (`host_file_name`); outside
+/// it, `File` is named by the path that NCBI opens (`LogFileName::path`).
+fn log_name(name: &[u8], entry: Option<&dyn Fn(&[u8]) -> Entry>) -> LogName {
     let (cwd, file) = log_file(name);
     // The directories that the walk of the checked directory passes, each a directory of the
     // system: the opened path is none of them nor an ancestor of one.
     let mut directories: Vec<Vec<u8>> = Vec::new();
     if let Some(directory) = &file.directory {
-        if !walks_to_directory(directory, &cwd, &mut directories) {
+        if !walks_to_directory(directory, &cwd, entry, &mut directories) {
             return LogName::Unopened;
         }
     }
     directories.push(cwd.clone());
-    let Some(path) = Walk::resolve(&file.path, &cwd) else {
+    if file.path.is_empty() || !fits(&file.path) {
         return LogName::Unopened;
+    }
+    let (folders, last) = match file.path.iter().rposition(|byte| *byte == b'/') {
+        Some(at) => (&file.path[..at], &file.path[at + 1..]),
+        None => (&file.path[..0], file.path.as_slice()),
     };
-    if file.path.is_empty()
-        || !fits(&file.path)
-        || directories.iter().any(|directory| within(directory, &path))
-        || !opens(&path)
-    {
+    let mut walk = Walk::at(&file.path, &cwd);
+    for part in folders.split(|byte| *byte == b'/') {
+        walk.step(part);
+        if walk.refused || directory_at(walk.path()) == Directory::None {
+            return LogName::Unopened;
+        }
+        if let Some(entry) = entry {
+            if inside_cwd(walk.path(), &cwd).is_some_and(|path| entry(path) != Entry::Directory) {
+                return LogName::Unopened;
+            }
+        }
+    }
+    walk.step(last);
+    if walk.refused {
+        return LogName::Unopened;
+    }
+    let path = walk.path().to_vec();
+    if directories.iter().any(|directory| within(directory, &path)) || !opens(&path) {
         return LogName::Unopened;
     }
     // A directory whose free space the system does not read keeps the file (NCBI ignores the
@@ -1209,21 +1375,37 @@ fn log_name(name: &[u8]) -> LogName {
     }
     let stream = |descriptor: &[u8]| path.strip_prefix(SELF) == Some(descriptor);
     if stream(b"/fd/2".as_slice()) {
-        LogName::StandardError
-    } else if stream(b"/fd/0".as_slice()) || LOST_DEVICES.contains(&path.as_slice()) {
-        LogName::Nowhere
-    } else {
-        LogName::File
+        return LogName::StandardError;
+    }
+    if stream(b"/fd/1".as_slice()) {
+        return LogName::Stdout;
+    }
+    if stream(b"/fd/0".as_slice()) || LOST_DEVICES.contains(&path.as_slice()) {
+        return LogName::Nowhere;
+    }
+    match entry.and_then(|entry| inside_cwd(&path, &cwd).map(entry)) {
+        Some(Entry::Directory) => LogName::Unopened,
+        Some(Entry::File) => LogName::Existing,
+        Some(Entry::Missing) | None => LogName::File {
+            name: host_file_name(&path, &file.path, &cwd),
+            key: file_key(&path, &cwd),
+        },
     }
 }
 
 /// Whether `directory`, a directory of a name in the working directory `cwd` (`log_name`,
 /// `strategy_name`), is one that the system walks to and the model knows: each directory that its
 /// walk passes may be one of root's that the model does not know, but none that is not there nor
-/// one that the user cannot search, and the directory where it ends is known (`directory_at`). Each
+/// one that the user cannot search, and the directory where it ends is known (`directory_at`).
+/// When `entry` is given, every folder looked up inside `cwd` must be `Entry::Directory`. Each
 /// directory passed is added to `directories` (the opened path is none of them nor an ancestor of
 /// one).
-fn walks_to_directory(directory: &[u8], cwd: &[u8], directories: &mut Vec<Vec<u8>>) -> bool {
+fn walks_to_directory(
+    directory: &[u8],
+    cwd: &[u8],
+    entry: Option<&dyn Fn(&[u8]) -> Entry>,
+    directories: &mut Vec<Vec<u8>>,
+) -> bool {
     if directory.is_empty() || !fits(directory) {
         return false;
     }
@@ -1232,6 +1414,11 @@ fn walks_to_directory(directory: &[u8], cwd: &[u8], directories: &mut Vec<Vec<u8
         walk.step(part);
         if walk.refused || directory_at(walk.path()) == Directory::None {
             return false;
+        }
+        if let Some(entry) = entry {
+            if inside_cwd(walk.path(), cwd).is_some_and(|path| entry(path) != Entry::Directory) {
+                return false;
+            }
         }
         if directories.last().map(Vec::as_slice) != Some(walk.path()) {
             directories.push(walk.path().to_vec());
@@ -1298,8 +1485,10 @@ impl RunFiles {
                 // NCBI's special names (`-`, `/dev/null`) are no file of the run.
                 false => {
                     special_log_target(Some(other.name)).is_none()
-                        && log_name(bytes) == LogName::File
-                        && log_key(bytes).is_some_and(|other| other == key)
+                        && matches!(
+                            log_name(bytes, None),
+                            LogName::File { key: other, .. } if other == key
+                        )
                 }
             };
             if same {
@@ -1335,7 +1524,7 @@ fn strategy_name(name: &[u8], cwd: &[u8]) -> (StrategyTarget, Option<Vec<u8>>) {
         } else {
             &name[..slash]
         };
-        if !walks_to_directory(directory, cwd, &mut directories) {
+        if !walks_to_directory(directory, cwd, None, &mut directories) {
             return (StrategyTarget::Inaccessible, None);
         }
     }

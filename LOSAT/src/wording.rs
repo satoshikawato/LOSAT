@@ -20,7 +20,11 @@
 //!   producer for every program.
 //!
 //! NCBI's diagnostic codes such as `(106.15)`, the message bodies, the exit statuses and every
-//! other byte of the search outputs stay NCBI's.
+//! other byte of the search outputs stay NCBI's, and so do the bytes that a message quotes from
+//! the input: the piece of a string that a byte's post quotes (`Bad char [0x<hex>] in string at
+//! <position>`, then the piece that holds the byte, `ReplacedChar::message`) is copied as it is
+//! (an archive's `ident "2.17.0+"` quoted from an input made by NCBI stays NCBI's version;
+//! `quoted_piece`).
 //!
 //! [`losat_text`] is also the one mapping from NCBI's frozen bytes to LOSAT's (AGENTS.md rule 8):
 //! LOSAT's text is `losat_text` of NCBI's, so every comparison of LOSAT's output or messages with
@@ -171,15 +175,7 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
     let position = NCBI_POSITION.as_bytes();
     let version = NCBI_VERSION.as_bytes();
     let title = RPSBPROC_TITLE.as_bytes();
-    if !(contains(text, footer)
-        || contains(text, header)
-        || contains(text, position)
-        || contains(text, b"::")
-        || contains(text, version)
-        || contains(text, b" error:")
-        || contains(text, title)
-        || contains(text, XMLHELP_PROGRAM))
-    {
+    if !maps(text) {
         return Cow::Borrowed(text);
     }
     let mut out = Vec::with_capacity(text.len());
@@ -187,6 +183,13 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
     let mut changed = false;
     while i < text.len() {
         let rest = &text[i..];
+        if rest[0] == b'B' && matches!(out.last(), None | Some(b'\n' | b' ')) {
+            if let Some(quoted) = quoted_piece(rest) {
+                out.extend_from_slice(&rest[..quoted]);
+                i += quoted;
+                continue;
+            }
+        }
         // A binary (BER) archive's `ident`: a VisibleString (tag 26) of NCBI's length, whose length
         // byte becomes LOSAT's.
         if rest.starts_with(version) && out.ends_with(&[BER_VISIBLE_STRING, version.len() as u8]) {
@@ -297,6 +300,46 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
     } else {
         Cow::Borrowed(text)
     }
+}
+
+/// The texts that [`losat_bytes`] maps or that its rules start from: a text that holds none of
+/// them is LOSAT's as it is.
+const MAPPED: [&[u8]; 8] = [
+    NCBI_USER_MANUAL_FOOTER.as_bytes(),
+    NCBI_EXCEPTION_HEADER.as_bytes(),
+    NCBI_POSITION.as_bytes(),
+    b"::",
+    NCBI_VERSION.as_bytes(),
+    b" error:",
+    RPSBPROC_TITLE.as_bytes(),
+    XMLHELP_PROGRAM,
+];
+
+/// The texts of [`MAPPED`] that each byte starts, as bits (bit `k`: `MAPPED[k]`).
+const MAPPED_FIRST: [u8; 256] = {
+    let mut first = [0u8; 256];
+    let mut i = 0;
+    while i < MAPPED.len() {
+        first[MAPPED[i][0] as usize] |= 1 << i;
+        i += 1;
+    }
+    first
+};
+
+/// Whether `text` holds a text of [`MAPPED`]: one pass over its bytes, where a byte starts texts
+/// only those are compared (a post of many quoted bytes is read once, not once per text).
+fn maps(text: &[u8]) -> bool {
+    text.iter().enumerate().any(|(i, &b)| {
+        let mut starts = MAPPED_FIRST[b as usize];
+        while starts != 0 {
+            let k = starts.trailing_zeros() as usize;
+            if text[i..].starts_with(MAPPED[k]) {
+                return true;
+            }
+            starts &= starts - 1;
+        }
+        false
+    })
 }
 
 /// The member of an ASN.1 text archive that holds a message (`Blast4-error.message`).
@@ -708,6 +751,41 @@ fn xmlhelp_version(out: &[u8], text: &[u8]) -> Option<usize> {
     }
     i += number;
     Some(i + literal(&text[i..], b"</version>")?)
+}
+
+/// The length of a byte post's line and of the piece it quotes at the start of `text`, when the
+/// line (`Bad char [0x<hex>] in string at line <n>` or `byte <n>`, one or two hex digits in upper
+/// case, `ReplacedChar::message`) is followed by a line end or a space (a collapsed message) and
+/// the piece, the text after it up to the next line end, holds that byte: the input's bytes, which
+/// stay as they are. A skipped string's post quotes no piece, and the text after it is another's
+/// (it does not hold the byte), mapped as any.
+fn quoted_piece(text: &[u8]) -> Option<usize> {
+    let hex = text.strip_prefix(b"Bad char [0x")?;
+    let close = hex.iter().take(3).position(|&b| b == b']')?;
+    let digits = &hex[..close];
+    if digits.is_empty()
+        || !digits
+            .iter()
+            .all(|&b| matches!(b, b'0'..=b'9' | b'A'..=b'F'))
+    {
+        return None;
+    }
+    let byte = u8::from_str_radix(std::str::from_utf8(digits).ok()?, 16).ok()?;
+    let at = hex[close..].strip_prefix(b"] in string at ")?;
+    let number = at
+        .strip_prefix(b"line ")
+        .or_else(|| at.strip_prefix(b"byte "))?;
+    let n = number.iter().take_while(|b| b.is_ascii_digit()).count();
+    if n == 0 || !matches!(number.get(n), Some(b'\n' | b' ')) {
+        return None;
+    }
+    let start = text.len() - number.len() + n + 1;
+    let piece = &text[start..];
+    let piece = &piece[..piece
+        .iter()
+        .position(|&b| b == b'\n')
+        .unwrap_or(piece.len())];
+    piece.contains(&byte).then_some(start + piece.len())
 }
 
 /// The length of NCBI's rpsbproc banner `<title> v0.5.1` at the start of `text`.

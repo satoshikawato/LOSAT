@@ -4,7 +4,7 @@
 //! reader of an ASN.1 Seq-id (text and binary) of the table's types, for the generic value
 //! (`Value::SeqId`) and for makeblastdb's mask files (`writedb::mask_info`).
 
-use super::read::TypedReader;
+use super::read::{PostSink, TypedReader};
 use super::table::named;
 use crate::report::serial::asn_input::{Input, R};
 use crate::seqid::model::{
@@ -14,7 +14,7 @@ use crate::seqid::model::{
 
 /// A `Seq-id` of any alternative (the variants in the order of `seqid::model::SEQ_ID_ALTERNATIVES`,
 /// checked by `seq_id_tests`).
-pub(crate) fn read_seq_id<I: Input>(r: &mut TypedReader<I>) -> R<ParsedSeqId> {
+pub(crate) fn read_seq_id<I: Input, P: PostSink>(r: &mut TypedReader<I, P>) -> R<ParsedSeqId> {
     let mut seq_id = None;
     read_seq_id_into(r, &mut seq_id)?;
     Ok(mandatory(seq_id))
@@ -22,8 +22,8 @@ pub(crate) fn read_seq_id<I: Input>(r: &mut TypedReader<I>) -> R<ParsedSeqId> {
 
 /// `read_seq_id` into `slot`, whose earlier value it replaces: a reader of many Seq-ids (the
 /// masks of a mask file) keeps one slot and moves no Seq-id through the frames.
-pub(crate) fn read_seq_id_into<I: Input>(
-    r: &mut TypedReader<I>,
+pub(crate) fn read_seq_id_into<I: Input, P: PostSink>(
+    r: &mut TypedReader<I, P>,
     slot: &mut Option<ParsedSeqId>,
 ) -> R<()> {
     r.choice(
@@ -59,7 +59,7 @@ pub(crate) fn read_seq_id_into<I: Input>(
 
 /// An INTEGER of Int4 storage (`ReadInt4`: the number fits).
 #[inline]
-fn int4<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<i32> {
+fn int4<I: Input, P: PostSink>(r: &mut TypedReader<I, P>, ty: u16) -> R<i32> {
     Ok(r.integer(ty)? as i32)
 }
 
@@ -70,7 +70,7 @@ pub(crate) fn mandatory<T>(value: Option<T>) -> T {
 }
 
 /// An `Object-id`.
-pub(crate) fn object_id<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<ObjectId> {
+pub(crate) fn object_id<I: Input, P: PostSink>(r: &mut TypedReader<I, P>, ty: u16) -> R<ObjectId> {
     r.choice(
         ty,
         #[inline(always)]
@@ -84,7 +84,7 @@ pub(crate) fn object_id<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<ObjectId
     )
 }
 
-fn dbtag<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<Dbtag> {
+fn dbtag<I: Input, P: PostSink>(r: &mut TypedReader<I, P>, ty: u16) -> R<Dbtag> {
     let (mut db, mut tag) = (None, None);
     r.class(ty, |r, index, ty| {
         match index {
@@ -99,7 +99,7 @@ fn dbtag<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<Dbtag> {
     })
 }
 
-fn textseq_id<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<TextseqId> {
+fn textseq_id<I: Input, P: PostSink>(r: &mut TypedReader<I, P>, ty: u16) -> R<TextseqId> {
     let mut id = TextseqId::default();
     r.class(ty, |r, index, ty| {
         match index {
@@ -113,7 +113,7 @@ fn textseq_id<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<TextseqId> {
     Ok(id)
 }
 
-fn giimport_id<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<GiimportId> {
+fn giimport_id<I: Input, P: PostSink>(r: &mut TypedReader<I, P>, ty: u16) -> R<GiimportId> {
     let (mut id, mut db, mut release) = (None, None, None);
     r.class(ty, |r, index, ty| {
         match index {
@@ -130,7 +130,7 @@ fn giimport_id<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<GiimportId> {
     })
 }
 
-fn patent_seq_id<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<PatentSeqId> {
+fn patent_seq_id<I: Input, P: PostSink>(r: &mut TypedReader<I, P>, ty: u16) -> R<PatentSeqId> {
     let (mut seqid, mut cit) = (None, None);
     r.class(ty, |r, index, ty| {
         match index {
@@ -145,7 +145,7 @@ fn patent_seq_id<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<PatentSeqId> {
     })
 }
 
-fn id_pat<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<IdPat> {
+fn id_pat<I: Input, P: PostSink>(r: &mut TypedReader<I, P>, ty: u16) -> R<IdPat> {
     let (mut country, mut id, mut doc_type) = (None, None, None);
     r.class(ty, |r, index, ty| {
         match index {
@@ -170,7 +170,7 @@ fn id_pat<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<IdPat> {
     })
 }
 
-fn pdb_seq_id<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<PdbSeqId> {
+fn pdb_seq_id<I: Input, P: PostSink>(r: &mut TypedReader<I, P>, ty: u16) -> R<PdbSeqId> {
     let (mut mol, mut chain, mut rel, mut chain_id) = (None, None, None, None);
     r.class(ty, |r, index, ty| {
         match index {
@@ -189,7 +189,7 @@ fn pdb_seq_id<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<PdbSeqId> {
     })
 }
 
-fn date<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<Date> {
+fn date<I: Input, P: PostSink>(r: &mut TypedReader<I, P>, ty: u16) -> R<Date> {
     r.choice(ty, |r, variant, ty| {
         if variant == 0 {
             return Ok(Date::Str(r.text(ty)?));

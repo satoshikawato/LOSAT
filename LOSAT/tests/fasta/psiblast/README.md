@@ -91,3 +91,11 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   so round 2 has no Karlin-Altschul parameters (NCBI 2.17.0 psiblast crashes there, exit 139).
 - `q4c_tk_pol.faa` (line RG, series Q, Q4c): `tk.faa` then `pol.faa`; with `CHUNK_SIZE=1000` NCBI splits only the second
   query (rows `db.ps.it.split.two.*`).
+- `ps15b2_othr_*.faa` (line PS, PS15b-2 fix 1): subjects of the molecule-`other` PSSM
+  `tests/fixtures/pssm/ps15b2_tk_other_stdaa.asn.gz` (rows `db.ps15b2.p.othr.*`), from `tk.faa`: `del100` without
+  letter 101 (a query letter against a gap of the subject on a query row of its own: NCBI 2.17.0's merge writes
+  through a null row, SIGSEGV), `cover` that subject and letters 2-300 (another subject's block opens that row: NCBI
+  answers), `t2a_s1` letters 1-121 with a `W` after letter 61 (a later pass finds no row of its HSP), `t2a` that
+  subject and letters 101-192 with a `W` after letter 132 (with `-evalue 1e-10`, the two HSPs order their shared
+  segments in two ways), `tk195` letters 195-313 (at `-num_iterations 2`, round 2's two HSPs leave a segment's
+  start behind its row's end when NCBI orders the segments: NCBI reads past the row's end, `CObject is corrupted`).

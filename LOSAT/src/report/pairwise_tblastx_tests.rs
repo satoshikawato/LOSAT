@@ -1404,6 +1404,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
                     number: 2,
                     found_before,
                 },
+                None,
             )
             .unwrap();
         };
@@ -1527,6 +1528,7 @@ fn an_unreadable_query_writes_one_line_for_each_hsp_with_the_subjects_id() {
                 number,
                 found_before: None,
             },
+            None,
         )
         .unwrap();
         String::from_utf8(out).unwrap()

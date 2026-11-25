@@ -1479,6 +1479,10 @@ the key, two siblings over one volume). `neg.txt` and `pos.txt` are the seqid li
 `rps_mini3v.msk`, `OID_MASK_TYPE 1`): NCBI searches the three volumes bare, so the profile reaches the reports
 (`db.om.rps.rej.x3v`, `db.om.rtbn.rej.x3v`) unless it is past the cut (`oidmask/qrps8.faa`, eight queries of
 `tests/fasta/rps/q40.faa` whose first subject is another profile, rows `db.om.rps.x3vc.*` with `-max_target_seqs 1`).
+`rps/tx3v{00,01,02}.{phr,pin,pot,ptf}.gz` are the files of the volumes `rps_mini3v.00` to `.02` made as `rps/build.sh` makes
+them, with `makeprofiledb -taxid` 9606, 10090 and 562 (the other files are `rps_mini3v`'s; probe
+`PS/scripts/impl15b2_rps18_probe.sh` of line PS): row `db.ps15b2.rps.tax3v.18`, the organism report of the merged
+volumes at `-max_target_seqs 1` with the taxonomy database `tests/seqdb/taxdb/good`.
 `omb` (`make_oidmask.sh`) holds the byte 0x80 in the titles of two predicted lines, patched into its `.phr` after a
 build with `#` there, behind `ombx.pal` (`OID_MASK_TYPE 1`): row `db.om.bp.rej.omb.6` and A271. `ompart.pal` (`nol.msk`:
 OIDs 0, 3, 4, 6 and 7, each left with a line under the type) is the input of makeblastdb case `B_al_om`; `ompartn.nal`
@@ -2004,6 +2008,19 @@ it, so the first chunks have no valid context. The rejection row has `NSEQ 0`, w
 Rows `db.gr.bn.*` (the same item): `db.gr.bn.rej.mo00.b1` refuses matrix-only scoring with the greedy extension in the third
 batch of `alln_q.fna` (`BATCH_SIZE=1`) after the reports of the two batches before, the 142 bytes NCBI writes before it
 divides by zero there (SIGFPE); `db.gr.bn.alln_q.b1.7` is the near run NCBI finishes (`ncbi-near`).
+Rows `db.ak.*.l62*` (D1a-6 review A F2): `aliaskeys/n_nseq0_l62` (`NSEQ 0`, `LENGTH 4611686018427387904`) and
+`aliaskeys/n_nseq1_l62p3` (`NSEQ 1`, `LENGTH 4611686018427387907`) over `../taxfilter/tfn` with `BATCH_SIZE=1` and
+`allx_q649.faa` (TBLASTN, with and without `OLD_FSC=1`) or `alln_q.fna` (BLASTN split `CHUNK_SIZE=200`, TBLASTX):
+LOSAT writes the reports of the two unsearchable batches before batch 3 refuses the 64-bit effective search space overflow
+(`ncbi-near` against the matching `allx.faa` / `alln.fna` runs).
+Rows `db.cnt.avg2p32.g3.*`, `db.cnt.g3.*`, `db.ak.bn.rej.nseq0.g3.*` and `db.gr.bn.rej.mo00.g3.split.b1` (D1a-6 review A F1):
+`../fasta/rps/g3_acn.fna` (`>g3`, `aC` followed by 398 `N`) and `../fasta/rps/alln_g3.fna` (`alln.fna`, then `g3_acn.fna`)
+with `-task megablast -lcase_masking -soft_masking false -dust no -strand plus CHUNK_SIZE=200`: the whole batch keeps base `C`
+unmasked (valid batch context) while `restrict_masks` covers `aC` in chunk 0 so every chunk has no valid context. Chunk 0
+still reads OID 0 of an empty database (`aliaskeys/en`: `Database memory map file error`, exit 3), a database without its
+sequence file (`arch_tbn_snucl_nonsq`) is reported with exit 0, and otherwise the batch's traceback set-up checks the
+subjects (`dbcounts/avg2p32`: `Traceback failed`, exit 3, before greedy refusals; `aliaskeys/n_nseq0`: count 0 refusal) and
+then the greedy set-up (`db.gr.bn.rej.mo00.g3.split.b1`).
 Frozen with NCBI BLAST+ 2.17.0 on the developer machine and again on the workstation (`env_blast`), the same bytes.
 
 Rows `db.ak.*.ord.*` (D1a-2): the order of a search database's errors, NCBI's (probes p4c_e*, p4c_f2): the list, the alias

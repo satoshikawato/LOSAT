@@ -474,7 +474,8 @@ where
                 position,
             } => {
                 let m = get_m(lists, q_idx, position);
-                if ends_early(m.best_evalue, heaps, &batch) {
+                let early = ends_early(m.best_evalue, heaps, &batch);
+                if early {
                     continue;
                 }
                 let slot = q_idx - batch.start;

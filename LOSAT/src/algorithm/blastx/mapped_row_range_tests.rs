@@ -154,9 +154,10 @@ pub(crate) fn run_subject_report(
     };
     batch.put_in_report_order(SubjectLoc::Interval);
 
+    let no_parsed = super::report::RecordsParsed::default();
     let shown = ShownSubjects::Fasta {
         path: Path::new("subject.faa"),
-        parsed: &[],
+        parsed: &no_parsed,
     };
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();

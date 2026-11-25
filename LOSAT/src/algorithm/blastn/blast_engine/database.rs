@@ -38,8 +38,8 @@ use rayon::prelude::*;
 
 use crate::algorithm::blastn::coordination::SubjectMetadata;
 use crate::algorithm::blastn::hsp::{BlastnHitList, BlastnHspList, BlastnOutputFormat};
+pub(super) use crate::algorithm::common::database::PreliminaryReadError;
 use crate::algorithm::common::database::{self as shared, ParsedShown, ReportedHeader};
-pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::blastinput::db_mask::{DbMaskOption, ResolvedMask};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -916,6 +916,11 @@ impl BlastnDatabase {
         self.db.list_taxids()
     }
 
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(super) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
+    }
+
     /// The number of sequences the search reads: the included ones (`SeqDb::num_seqs`), which
     /// the schedules count; the statistics' number (`metadata`) can be another.
     pub(super) fn num_subjects(&self) -> usize {
@@ -1743,7 +1748,7 @@ pub(super) fn drop_unaligned(
 // read again: the header file stays open, and the title is the same.
 /// Reads the definition lines of the sequences that the final hit lists `hit_lists` of a
 /// query batch name, in NCBI's order, into `titles` (`common::database::read_header`). A reader
-/// error of NCBI's own is a `HeaderReadError` (it fails the batch); LOSAT's refusals are errors
+/// error of NCBI's own is an `ErrorAfterBatchReports` (it fails the batch); LOSAT's refusals are errors
 /// of their own. The batch's first read of a record with a UTF8String where a VisibleString is
 /// expected, its fetches' and Seq-aligns' (`earlier`) or these, is returned
 /// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there.

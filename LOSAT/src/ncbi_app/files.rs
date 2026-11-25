@@ -379,6 +379,77 @@ impl CallerOutput<'_> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:777-799 (`CArg_OutputFile` opens a
+// `CNcbiOfstream`, or takes `cout`, without exceptions enabled on it: a failed write sets
+// `badbit` and later writes do nothing)
+/// An output as NCBI's `ostream` writes to it (`makembindex` and `dbindex`): after a write fails
+/// (`badbit`), the later writes do nothing and nothing reports the failure; a write to a closed
+/// pipe outside Windows sets [`Ostream::closed`] and returns that error (`ends_like_sigpipe`).
+pub(crate) struct Ostream<'a> {
+    inner: &'a mut dyn Write,
+    bad: bool,
+    closed: bool,
+}
+
+impl<'a> Ostream<'a> {
+    pub(crate) fn new(inner: &'a mut dyn Write) -> Self {
+        Ostream {
+            inner,
+            bad: false,
+            closed: false,
+        }
+    }
+
+    /// Whether a write or a flush has failed (`badbit`).
+    pub(crate) fn bad(&self) -> bool {
+        self.bad
+    }
+
+    /// Whether a write found the pipe closed where that ends NCBI's process (SIGPIPE).
+    pub(crate) fn closed(&self) -> bool {
+        self.closed
+    }
+
+    fn result(&mut self, outcome: std::io::Result<()>) -> std::io::Result<()> {
+        if let Err(error) = outcome {
+            self.bad = true;
+            if ends_like_sigpipe(&error) {
+                self.closed = true;
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    fn closed_pipe() -> std::io::Error {
+        std::io::Error::from(std::io::ErrorKind::BrokenPipe)
+    }
+}
+
+impl Write for Ostream<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.closed {
+            return Err(Self::closed_pipe());
+        }
+        if !self.bad {
+            let outcome = self.inner.write_all(buf);
+            self.result(outcome)?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.closed {
+            return Err(Self::closed_pipe());
+        }
+        if !self.bad {
+            let outcome = self.inner.flush();
+            self.result(outcome)?;
+        }
+        Ok(())
+    }
+}
+
 impl OutputFile<'_> {
     /// LOSAT's refusal of the file's name, which the program reports in place of its run.
     pub(crate) fn refusal(&self) -> Option<&str> {

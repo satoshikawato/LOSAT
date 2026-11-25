@@ -1684,7 +1684,9 @@ fn psiblast_round_two_part_table_shows_zero_when_all_bit_scores_are_negative() {
             .unwrap_or_else(|| panic!("missing row for {name} in:\n{text}"))
             .to_string()
     };
-    let tokens = |line: &str| -> Vec<&str> { line.split_whitespace().collect() };
+    fn tokens(line: &str) -> Vec<&str> {
+        line.split_whitespace().collect()
+    }
     assert_eq!(tokens(&row("neg_repeat")), vec!["neg_repeat", "0.0", "0.0"]);
     assert_eq!(tokens(&row("neg_new")), vec!["neg_new", "0.0", "0.0"]);
     assert_eq!(tokens(&row("pos_new")), vec!["pos_new", "42.5", "1e-09"]);

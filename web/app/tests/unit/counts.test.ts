@@ -10,7 +10,7 @@ import { activeSavedCountsTaxid, CountsLoader, savedTabCopyOf } from '../../src/
 import { Coordinator, isToolRun, type EnqueueAllResult, type SearchRequest } from '../../src/application/coordinator';
 import { SearchDraft } from '../../src/application/draft';
 import { buildArgv } from '../../src/domain/argv';
-import { COUNTS_FILE, COUNTS_HOST, countsName, countsUrl, parseTaxid, type CountsMadeMeta, type CountsOrigin } from '../../src/domain/counts';
+import { COUNTS_FILE, COUNTS_HOST, countsEntryOf, countsName, countsUrl, parseTaxid, type CountsMadeMeta, type CountsOrigin } from '../../src/domain/counts';
 import { changedFields, formControlOf, formParameters, setFields, type EngineOption } from '../../src/domain/parameters';
 import { programById } from '../../src/domain/programs';
 import { BrowserCountsDownloader } from '../../src/infra/browser/counts-downloader';
@@ -52,6 +52,46 @@ describe('the taxonomy ID', () => {
     expect(countsName(-1)).toBe('windowmasker/-1/wmasker.obinary');
     expect(countsUrl(9606)).toBe('https://ftp.ncbi.nlm.nih.gov/blast/windowmasker_files/9606/wmasker.obinary');
     expect(COUNTS_HOST).toBe('ftp.ncbi.nlm.nih.gov');
+  });
+
+  it('builds one SavedCountsEntry from any complete CountsCopy (madeAt, Last-Modified, or savedAt fallback)', () => {
+    const made: CountsCopy = {
+      taxid: 562,
+      url: '',
+      lastModified: '',
+      size: 700,
+      savedBytes: 700,
+      complete: true,
+      savedAt: Date.UTC(2026, 10, 25),
+      made: madeMeta(4),
+    };
+    expect(countsEntryOf(made)).toEqual({
+      taxid: 562,
+      name: COUNTS_FILE,
+      size: 700,
+      origin: 'made',
+      date: '2026-11-22',
+      copy: made,
+    });
+    const downloaded: CountsCopy = {
+      taxid: HUMAN,
+      url: countsUrl(HUMAN),
+      lastModified: LAST_MODIFIED,
+      size: 5000,
+      savedBytes: 5000,
+      complete: true,
+      savedAt: Date.UTC(2026, 10, 25),
+    };
+    expect(countsEntryOf(downloaded)).toEqual({
+      taxid: HUMAN,
+      name: COUNTS_FILE,
+      size: 5000,
+      origin: 'downloaded',
+      date: '2026-10-01',
+      copy: downloaded,
+    });
+    const noDate: CountsCopy = { ...downloaded, lastModified: '' };
+    expect(countsEntryOf(noDate).date).toBe('2026-11-25');
   });
 });
 
@@ -612,11 +652,15 @@ describe('CountsLoader', () => {
     expect(rep3).toMatchObject({ ok: true, copy: { complete: true, size: 2345, made: madeMeta(6) } });
   });
 
-  it('refuses a save in place while another tab is downloading the same ID', async () => {
+  it('refuses a save in place while another tab is saving or downloading the same ID', async () => {
     const { loader, store } = setup();
     const lock = (await store.beginCounts(HUMAN, { url: countsUrl(HUMAN), lastModified: LAST_MODIFIED, size: 5000, from: 0 }))!;
     const res = await loader.saveMade(HUMAN, new File([bytesOf(50)], 'x.obinary'), madeMeta(3));
-    expect(res).toEqual({ ok: false, reason: 'busy', message: 'Another tab is downloading the counts for 9606.' });
+    expect(res).toEqual({
+      ok: false,
+      reason: 'busy',
+      message: 'Not saved: another tab is saving or downloading the counts for 9606. Save again when it has ended.',
+    });
     await store.closeCounts(lock);
   });
 
@@ -656,7 +700,10 @@ describe('CountsLoader', () => {
     downloader.next = { ok: false, reason: 'busy' };
     loader.download(HUMAN);
     await loader.idle();
-    expect(loader.state.get().load?.progress).toEqual({ state: 'failed', message: 'Another tab is downloading the counts for 9606.' });
+    expect(loader.state.get().load?.progress).toEqual({
+      state: 'failed',
+      message: 'Not downloaded: another tab is saving or downloading the counts for 9606. Download again when it has ended.',
+    });
   });
 
   it('shows a download that stopped as saved bytes, continues it from the saved copy, and deletes it', async () => {
@@ -810,6 +857,130 @@ describe('CountsLoader', () => {
     expect(otherDraft.get(562)).toMatchObject({ origin: { kind: 'made', taxid: 562, made: madeMeta(2) } });
     expect(other.state.get().saved[562]).toMatchObject({ complete: true, size: 450, made: madeMeta(2) });
     expect(other.state.get().list).toMatchObject([{ taxid: 562, size: 450, origin: 'made' }]);
+  });
+
+  it('tracks saving state during a save (cleared on success and failure), refuses same-tab download without calling the downloader, and tells another tab it is saving or downloading', async () => {
+    const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const expectFailedLoad = (loader: CountsLoader, taxid: number, message: string) =>
+      expect(loader.state.get().load).toEqual({ taxid, progress: { state: 'failed', message } });
+    const { one, store, pauseNextAppend } = setupTwoTabs();
+    const otherDownloader = new BrowserCountsDownloader({ store, fetch: site().fetchImpl });
+    const other = new CountsLoader({ downloader: otherDownloader, store, draft: { setCounts: () => undefined } });
+
+    expect(await one.loader.saveMade(562, new File([bytesOf(300, 1)], 'a.obinary'), madeMeta(1))).toMatchObject({ ok: true });
+    const paused = pauseNextAppend();
+    const replacing = one.loader.saveMade(562, new File([bytesOf(400, 2)], 'b.obinary'), madeMeta(2), { replace: true });
+    await paused.started;
+
+    // The writing tab reports the in-progress save in state.saving.
+    const saving562 = () => one.loader.state.get().saving[562];
+    expect(saving562()).toEqual({ run: 2 });
+
+    // Same-tab Download while this tab saves is refused before calling the downloader (0 requests).
+    one.downloader.next = { ok: false, reason: 'busy' };
+    one.loader.download(562);
+    await tick();
+    expect(one.downloader.requests).toEqual([]);
+    expectFailedLoad(
+      one.loader,
+      562,
+      'Not downloaded: this tab is saving the counts for 562. Download again when it has ended.',
+    );
+    expect(saving562()?.run).toBe(2);
+
+    // Same-tab concurrent Save while this tab saves says this tab is saving.
+    expect(await one.loader.saveMade(562, new File([bytesOf(100, 3)], 'c.obinary'), madeMeta(3), { replace: true })).toEqual({
+      ok: false,
+      reason: 'busy',
+      message: 'Not saved: this tab is saving the counts for 562. Save again when it has ended.',
+    });
+
+    // Another tab trying Download or Save while tab 1 writes gets the neutral "another tab is saving or downloading" wording.
+    other.download(562);
+    await other.idle();
+    expectFailedLoad(
+      other,
+      562,
+      'Not downloaded: another tab is saving or downloading the counts for 562. Download again when it has ended.',
+    );
+    expect(await other.saveMade(562, new File([bytesOf(110, 3)], 'other-c.obinary'), madeMeta(3))).toEqual({
+      ok: false,
+      reason: 'busy',
+      message: 'Not saved: another tab is saving or downloading the counts for 562. Save again when it has ended.',
+    });
+
+    // Success clears saving state and the stale same-tab refusal.
+    paused.release();
+    expect(await replacing).toMatchObject({ ok: true, copy: { size: 400, made: madeMeta(2) } });
+    await one.loader.idle();
+    expect(saving562()).toBeUndefined();
+    expect(one.loader.state.get().load).toBeUndefined();
+
+    // Failure also clears saving state.
+    const pausedFail = pauseNextAppend();
+    const failing = one.loader.saveMade(562, new File([bytesOf(500, 4)], 'd.obinary'), madeMeta(3), { replace: true });
+    await pausedFail.started;
+    expect(saving562()).toEqual({ run: 3 });
+    store.appendError = new Error('storage full');
+    pausedFail.release();
+    expect(await failing).toEqual({
+      ok: false,
+      reason: 'failed',
+      message: 'storage full The counts saved before for 562 are no longer kept.',
+    });
+    await one.loader.idle();
+    expect(Object.keys(one.loader.state.get().saving)).toEqual([]);
+  });
+
+  it('refuses a same-tab save and second download in place while this tab is downloading the same ID', async () => {
+    const { one, pauseNextAppend } = setupTwoTabs();
+    const paused = pauseNextAppend();
+    one.loader.download(HUMAN);
+    await paused.started;
+
+    const madeCopy = new File([bytesOf(300, 1)], 'same-tab.obinary');
+    expect(await one.loader.saveMade(HUMAN, madeCopy, madeMeta(1))).toEqual({
+      ok: false,
+      reason: 'busy',
+      message: 'Not saved: this tab is downloading the counts for 9606. Save again when it has ended.',
+    });
+
+    const requestsBefore = one.downloader.requests.length;
+    one.loader.download(HUMAN);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(one.downloader.requests).toHaveLength(requestsBefore);
+    expect(one.loader.state.get().load).toEqual({
+      taxid: HUMAN,
+      progress: {
+        state: 'failed',
+        message: 'Not downloaded: this tab is downloading the counts for 9606. Download again when it has ended.',
+      },
+    });
+
+    paused.release();
+    await one.loader.idle();
+    expect(one.loader.state.get().saved[HUMAN]).toMatchObject({ complete: true });
+    expect(await one.loader.saveMade(HUMAN, madeCopy, madeMeta(1))).toMatchObject({
+      ok: false,
+      reason: 'exists',
+    });
+  });
+
+  it('drops the replaced copy from the writing tab list while the Replace writes, and lists the new copy after it ends', async () => {
+    const tabs = setupTwoTabs();
+    const { loader } = tabs.one;
+    expect(await loader.saveMade(562, new File([bytesOf(310, 1)], 'list-a.obinary'), madeMeta(1))).toMatchObject({ ok: true });
+    expect(loader.state.get().list).toMatchObject([{ taxid: 562, size: 310, origin: 'made' }]);
+
+    const paused = tabs.pauseNextAppend();
+    const replacing = loader.saveMade(562, new File([bytesOf(460, 2)], 'list-b.obinary'), madeMeta(2), { replace: true });
+    await paused.started;
+    expect(loader.state.get().list).toEqual([]);
+
+    paused.release();
+    expect(await replacing).toMatchObject({ ok: true, copy: { taxid: 562, size: 460, made: madeMeta(2) } });
+    await loader.idle();
+    expect(loader.state.get().list).toMatchObject([{ taxid: 562, size: 460, origin: 'made' }]);
   });
 
   it('announces on begin only when replacing (also when overwriting an older-URL copy), and drops a stale read that ends after a newer one', async () => {
@@ -1264,9 +1435,9 @@ describe('OpfsCountsStore', () => {
       async () => estimate,
     );
     const made = (run: number, size: number) => ({ made: madeMeta(run), size, from: 0 as const, replace: true });
-    // 300 bytes free: a copy of 301 is refused, one of 300 is written.
+    // 300 bytes free: a copy of 301 is refused before creating the folder, one of 300 is written.
     await expect(store.beginCounts(562, made(1, 301))).rejects.toThrow("The browser's storage has no room for these counts: nothing was changed.");
-    expect(opfs.has(['562', 'meta.json'])).toBe(false);
+    expect(opfs.has(['562'])).toBe(false);
     const t1 = (await store.beginCounts(562, made(1, 300)))!;
     await store.appendCounts(t1, bytesOf(300, 1));
     await store.finishCounts(t1);

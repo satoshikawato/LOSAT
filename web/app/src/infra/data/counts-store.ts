@@ -9,8 +9,7 @@
 // `losat-web:windowmasker:<taxid>` from `beginCounts` to its end (or the tab's), so two tabs never
 // write one file. It writes with synchronous access handles, which exist only in dedicated
 // workers: it runs in the Data worker.
-import { COUNTS_FILE, COUNTS_LOCK_PREFIX, countsLockName, parseTaxid, type CountsMadeMeta } from '../../domain/counts';
-import { dateOf } from '../../domain/download-sentences';
+import { COUNTS_FILE, COUNTS_LOCK_PREFIX, countsEntryOf, countsLockName, parseTaxid, type CountsMadeMeta } from '../../domain/counts';
 import {
   COUNTS_BUSY,
   COUNTS_CHANGED,
@@ -71,7 +70,8 @@ export class OpfsCountsStore implements CountsStore {
     let copy = await readCopy(directory, taxid);
     if (copy === undefined) return undefined;
     // An interrupted made copy cannot be continued: delete it once no writer holds the ID's lock.
-    if (copy.made !== undefined && !copy.complete) {
+    const incompleteMade = (entry: CountsCopy): boolean => entry.made !== undefined && !entry.complete;
+    if (incompleteMade(copy)) {
       let release: (() => void) | undefined;
       try {
         release = await this.acquire(taxid, true);
@@ -87,12 +87,13 @@ export class OpfsCountsStore implements CountsStore {
           ignoreNotFound(error);
           return undefined;
         }
-        copy = await readCopy(directory, taxid);
-        if (copy === undefined) return undefined;
-        if (copy.made !== undefined && !copy.complete) {
+        const locked = await readCopy(directory, taxid);
+        if (locked === undefined) return undefined;
+        if (incompleteMade(locked)) {
           await removeEntry(this.root, String(taxid));
           return undefined;
         }
+        copy = locked;
       } finally {
         release();
       }
@@ -125,7 +126,7 @@ export class OpfsCountsStore implements CountsStore {
     for (const taxid of taxids) {
       const saved = await this.readCounts(taxid);
       if (saved?.file === undefined) continue;
-      entries.push(entryOf(saved.copy, saved.origin));
+      entries.push(countsEntryOf(saved.copy));
     }
     return entries;
   }
@@ -134,34 +135,44 @@ export class OpfsCountsStore implements CountsStore {
     const release = await this.acquire(taxid);
     let handle: SyncAccessHandle | undefined;
     try {
-      const directory = await this.root.getDirectoryHandle(String(taxid), { create: true });
+      let directory: FileSystemDirectoryHandle;
       if (start.made !== undefined) {
         if (start.from !== 0) throw named(COUNTS_CHANGED, 'a made copy cannot be continued');
-        if (start.replace === false) {
-          const existing = await readCopy(directory, taxid);
+        let existingDir: FileSystemDirectoryHandle | undefined;
+        try {
+          existingDir = await this.root.getDirectoryHandle(String(taxid));
+        } catch (error) {
+          ignoreNotFound(error);
+        }
+        if (start.replace === false && existingDir !== undefined) {
+          const existing = await readCopy(existingDir, taxid);
           if (existing !== undefined && (existing.complete || (existing.made === undefined && existing.savedBytes > 0))) {
             throw named(COUNTS_EXISTS, 'counts are already saved for this taxonomy ID');
           }
         }
-        await this.checkRoom(directory, start.size);
+        await this.checkRoom(existingDir, start.size);
+        directory = existingDir ?? (await this.root.getDirectoryHandle(String(taxid), { create: true }));
         // Meta first: a copy that is begun again is never read as the whole file of before.
         await writeMeta(directory, metaOf(taxid, start, 0, false, this.now()));
-      } else if (start.from > 0) {
-        const copy = await readCopy(directory, taxid);
-        if (
-          copy === undefined ||
-          copy.complete ||
-          copy.made !== undefined ||
-          copy.url !== start.url ||
-          copy.lastModified !== start.lastModified ||
-          copy.size !== start.size ||
-          copy.savedBytes < start.from
-        ) {
-          throw named(COUNTS_CHANGED, 'the saved part is not the one to continue');
-        }
       } else {
-        // Meta first: a copy that is begun again is never read as the whole file of before.
-        await writeMeta(directory, metaOf(taxid, start, 0, false, this.now()));
+        directory = await this.root.getDirectoryHandle(String(taxid), { create: true });
+        if (start.from > 0) {
+          const copy = await readCopy(directory, taxid);
+          if (
+            copy === undefined ||
+            copy.complete ||
+            copy.made !== undefined ||
+            copy.url !== start.url ||
+            copy.lastModified !== start.lastModified ||
+            copy.size !== start.size ||
+            copy.savedBytes < start.from
+          ) {
+            throw named(COUNTS_CHANGED, 'the saved part is not the one to continue');
+          }
+        } else {
+          // Meta first: a copy that is begun again is never read as the whole file of before.
+          await writeMeta(directory, metaOf(taxid, start, 0, false, this.now()));
+        }
       }
       handle = await openSyncHandle(directory, DATA_NAME);
       handle.truncate(start.from);
@@ -228,14 +239,16 @@ export class OpfsCountsStore implements CountsStore {
    * (quota − usage, the browser's estimate) and the bytes of the copy it replaces must hold the new file. Where the
    * browser gives no estimate, the writing goes on and a full storage refuses it part by part, as before.
    */
-  private async checkRoom(directory: FileSystemDirectoryHandle, size: number): Promise<void> {
+  private async checkRoom(directory: FileSystemDirectoryHandle | undefined, size: number): Promise<void> {
     const estimate = await this.estimate?.().catch(() => undefined);
     if (estimate === undefined) return;
     let before = 0;
-    try {
-      before = (await (await directory.getFileHandle(DATA_NAME)).getFile()).size;
-    } catch (error) {
-      ignoreNotFound(error);
+    if (directory !== undefined) {
+      try {
+        before = (await (await directory.getFileHandle(DATA_NAME)).getFile()).size;
+      } catch (error) {
+        ignoreNotFound(error);
+      }
     }
     if (estimate.quota - estimate.usage + before < size) {
       throw new Error("The browser's storage has no room for these counts: nothing was changed.");
@@ -284,10 +297,10 @@ export class OpfsCountsStore implements CountsStore {
         throw named(COUNTS_IN_USE, 'a run that reads the counts is queued or running');
       }
       if (holders.some((entry) => entry.mode === 'exclusive') || snapshot === undefined || attempt === 1) {
-        throw named(COUNTS_BUSY, 'another tab is downloading the counts');
+        throw named(COUNTS_BUSY, 'counts are being written');
       }
     }
-    throw named(COUNTS_BUSY, 'another tab is downloading the counts');
+    throw named(COUNTS_BUSY, 'counts are being written');
   }
 }
 
@@ -300,17 +313,6 @@ export async function opfsCountsStore(
   if (typeof storage?.getDirectory !== 'function') throw new Error('this browser has no Origin Private File System');
   const root = await (await storage.getDirectory()).getDirectoryHandle(COUNTS_DIRECTORY, { create: true });
   return new OpfsCountsStore(root, locks, undefined, undefined, estimate);
-}
-
-/** Builds the `listCounts` summary of one complete saved copy. */
-export function entryOf(copy: CountsCopy, origin: SavedCountsOrigin): SavedCountsEntry {
-  const date =
-    copy.made !== undefined ? isoDate(copy.made.madeAt) : (dateOf(copy.lastModified) ?? isoDate(copy.savedAt));
-  return { taxid: copy.taxid, name: DATA_NAME, size: copy.size, origin, date, copy };
-}
-
-function isoDate(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
 }
 
 function metaOf(taxid: number, start: CountsStart, savedBytes: number, complete: boolean, savedAt: number): CountsCopy {

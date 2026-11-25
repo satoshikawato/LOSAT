@@ -29,7 +29,10 @@ watch(
 const copy = computed(() => state.value.saved[props.taxid] ?? undefined);
 /** The download of this taxonomy ID, or the failure of it. */
 const progress = computed(() => (state.value.load?.taxid === props.taxid ? state.value.load.progress : undefined));
-const busy = computed(() => progress.value !== undefined && progress.value.state !== 'failed');
+/** This tab's save of a browser-made copy for this taxonomy ID, while it writes. */
+const saving = computed(() => state.value.saving[props.taxid]);
+const downloading = computed(() => progress.value !== undefined && progress.value.state !== 'failed');
+const busy = computed(() => saving.value !== undefined || downloading.value);
 /** A download that failed, or a Delete refused in place (a run reads the copy). */
 const failure = computed(() =>
   progress.value?.state === 'failed'
@@ -50,6 +53,9 @@ const help = computed(
 );
 
 const sentence = computed(() => {
+  if (saving.value !== undefined) {
+    return `Saving the counts made by run ${saving.value.run}…`;
+  }
   const now = progress.value;
   switch (now?.state) {
     case 'reading':
@@ -120,8 +126,8 @@ onUpdated(() => {
     </button>
     <button v-else-if="!busy && partial" type="button" data-testid="counts-continue" @click="press">Continue</button>
     <span class="hint" data-testid="counts-note"><LosatLoader v-if="busy" />{{ sentence }}</span>
-    <button v-if="busy" type="button" class="link" data-testid="counts-cancel" @click="counts.cancel()">Cancel</button>
-    <button v-else-if="saved || partial" type="button" class="link" data-testid="counts-delete" @click="void counts.delete(taxid)">Delete</button>
+    <button v-if="downloading" type="button" class="link" data-testid="counts-cancel" @click="counts.cancel()">Cancel</button>
+    <button v-else-if="!busy && (saved || partial)" type="button" class="link" data-testid="counts-delete" @click="void counts.delete(taxid)">Delete</button>
     <HelpTip :id="`counts-${taxid}`" label="About the counts download" :text="help" />
     <p v-if="failure" class="error" data-testid="counts-error">{{ failure }}</p>
     <p v-if="note" class="muted" data-testid="counts-note-text">{{ note }}</p>

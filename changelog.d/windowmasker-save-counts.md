@@ -2,7 +2,8 @@
   be saved for a taxonomy ID (`Save for taxonomy ID`) in the browser's OPFS counts store
   (`windowmasker/<taxid>/wmasker.obinary`, streaming in 8 MiB slices under the ID's Web Lock),
   with a native confirmation dialog before replacing an existing copy, in-place refusal when
-  another tab is downloading that ID, cross-tab synchronization, `Made in this browser` status in
+  this tab or another tab is saving or downloading that ID, saving status while this tab writes,
+  cross-tab synchronization, `Made in this browser` status in
   BLASTN's taxonomy ID row, `Use in BLASTN` switching to `-window_masker_taxid`, and saved counts
   listed in WindowMasker's `-ustat` and `-in` pickers. While a queued or running search or tool run
   reads a taxonomy ID's saved counts, Replace, Delete and Download of that ID are refused in place

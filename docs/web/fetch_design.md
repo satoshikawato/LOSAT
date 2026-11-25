@@ -296,7 +296,13 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
      古い版のタブは `url` が一致しないため未取得とみなし、NCBI のファイルと取り違えることはない（Download を押さない限り上書きしない）。
    - 保存は Web Lock `losat-web:windowmasker:<taxid>` の下で 8 MiB ずつ流し（724 MB の counts をページ JS ヒープに載せない）、
      同じ ID に既に保存済み（取得済み・途中まで取得・ブラウザ作成のいずれか）があれば `COUNTS_EXISTS` で止めて確認ダイアログ
-     （`ReplaceCountsDialog.vue`）を出す。別のタブが同じ ID を取得中ならその場で「Another tab is downloading the counts for <taxid>.」と断る。
+     （`ReplaceCountsDialog.vue`）を出す。同じ ID をこのタブまたは別タブが保存・取得中なら、断った操作と分かることだけをその場で言う
+     （このタブが書いているときは `Not saved: this tab is saving / downloading the counts for <taxid>. Save again when it has ended.`、
+     `Not downloaded: this tab is saving / downloading the counts for <taxid>. Download again when it has ended.`、
+     別タブが書いているときは保存か取得か区別できないため `another tab is saving or downloading the counts for <taxid>.`）。
+     このタブが保存している間、BLASTN の Taxonomy ID 行は「Saving the counts made by run `<r>`…」を出し（Download・Delete・Cancel は出さない）、
+     同じ ID への Download は NCBI へ問い合わせる前にその場で断る。差し替えが始まると書いているタブ自身の `-ustat` / `-in` 選択一覧からも
+     置き換え中のコピーを外し、完了後に新しいコピーを並べる。
      途中で途切れた作成コピー（`complete: false`）は再開せず、次の読み取り時に削除する。
    - 保存済み counts を読む run（`-window_masker_taxid` の検索、保存済みコピーを `-ustat`・`-in` に選んだ WindowMasker の run）は、
      待ち行列に入る時から終わるまで（完了・失敗・待ち行列での Cancel・実行中の Cancel）その ID の Web Lock を shared で持つ
@@ -313,6 +319,8 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
      他のタブは持っているファイルを手放して OPFS から読み直し、BLASTN の行と WindowMasker の選択一覧を更新する。
      差し替えは書き始めた直後（前のコピーが消えた時点）と終わった時（成功だけでなく失敗時も含む）に知らせるため、
      書き込みの途中で失敗したりタブが閉じられたりしても、他のタブに前のファイルは残らない。
+     差し替え中、書いているタブは「Saving the counts made by run `<r>`…」（Download・Delete なし）、他のタブは前のコピーを外した未保存表示
+     （Download を押すと `Not downloaded: another tab is saving or downloading the counts for <taxid>. Download again when it has ended.` で断る）になる。
    - 検索への渡し方は取得した counts と同一（`windowmasker/<taxid>/wmasker.obinary`）。Run details は URL 行を出さず
      「`<taxid>`: wmasker.obinary made in this browser by run `<n>` (`<YYYY-MM-DD>`), `<size>`」と SHA-256 を示す。
    - e2e（`tests/e2e/window-masker-save.spec.ts`）：`ascii`・`binary`・`obinary` の各形式で作成・保存した counts による BLASTN

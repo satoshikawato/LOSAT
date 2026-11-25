@@ -364,7 +364,7 @@ test('save is refused while another tab downloads the same ID, and cross-tab cha
 
     // Refused in place while page 1 holds the download lock.
     await expect(page2.getByTestId('tool-save-error')).toHaveText(
-      `Another tab is downloading the counts for ${TAXID}.`,
+      `Not saved: another tab is saving or downloading the counts for ${TAXID}. Save again when it has ended.`,
     );
     await expect(page2.getByTestId('replace-counts-dialog')).not.toBeVisible();
 

@@ -5,47 +5,16 @@
 // src/infra/data/counts-store.ts): the file of a human is 724 MB, and is never held in memory.
 // A download that stops (Cancel, a cut connection, a closed tab) leaves the bytes saved so far, and
 // "Continue" asks for the rest with a Range. Tests use src/infra/fake/fake-counts.ts.
-import type { CountsMadeMeta } from '../domain/counts';
+import type { CountsCopy, CountsMadeMeta, SavedCountsEntry, SavedCountsOrigin } from '../domain/counts';
 import type { DownloadProgress } from './example';
 
-/** Whether a saved copy of counts came from NCBI's site or from this browser's WindowMasker tab. */
-export type SavedCountsOrigin = 'downloaded' | 'made';
-
-/** What a saved file of counts records about itself (meta.json). */
-export interface CountsCopy {
-  readonly taxid: number;
-  readonly url: string;
-  /** The Last-Modified of the first answer, as the site sent it ('' when it sent none or for a made copy). */
-  readonly lastModified: string;
-  /** The size of the whole file. */
-  readonly size: number;
-  /** Bytes kept from the start of the file; Continue asks for the file from this byte. */
-  readonly savedBytes: number;
-  /** The whole file is kept. */
-  readonly complete: boolean;
-  /** When the last part was saved, in milliseconds since the epoch. */
-  readonly savedAt: number;
-  /** Present when the counts were made in this browser's WindowMasker tab; absent for an NCBI download. */
-  readonly made?: CountsMadeMeta;
-}
+export type { CountsCopy, SavedCountsEntry, SavedCountsOrigin };
 
 export interface SavedCounts {
   readonly copy: CountsCopy;
   readonly origin: SavedCountsOrigin;
   /** The kept file, read from the browser's storage, not from memory; only when the copy is complete. */
   readonly file?: File;
-}
-
-/** One complete saved counts file listed for the WindowMasker tab's pickers (`listCounts`). */
-export interface SavedCountsEntry {
-  readonly taxid: number;
-  /** The file name under windowmasker/<taxid>/ (wmasker.obinary). */
-  readonly name: string;
-  readonly size: number;
-  readonly origin: SavedCountsOrigin;
-  /** ISO date (yyyy-mm-dd) of the copy: Last-Modified for a download, madeAt for a made copy, or savedAt. */
-  readonly date: string;
-  readonly copy: CountsCopy;
 }
 
 /** What a part is appended to: a new or continued download, or a copy made in this browser written whole. */
@@ -67,7 +36,7 @@ export type CountsStart =
       readonly replace?: boolean;
     };
 
-/** The name of the error that `beginCounts` or `deleteCounts` rejects with when another tab writes the same file. */
+/** The name of the error that `beginCounts` or `deleteCounts` rejects with when another writer holds the same file. */
 export const COUNTS_BUSY = 'CountsBusyError';
 /** The name of the error that `beginCounts` or `deleteCounts` rejects with when a queued or running search uses the same file. */
 export const COUNTS_IN_USE = 'CountsInUseError';
@@ -119,7 +88,7 @@ export type CountsResult =
   | { readonly ok: false; readonly reason: 'unreachable'; readonly detail: string }
   /** An HTTP status other than 200 or 206 (such as 404, or a 500 that may pass on another try). */
   | { readonly ok: false; readonly reason: 'refused'; readonly status: number }
-  /** Another tab is downloading the same file. */
+  /** Another writer is saving or downloading the same file. */
   | { readonly ok: false; readonly reason: 'busy' }
   /** A queued or running search uses the saved counts for this taxonomy ID. */
   | { readonly ok: false; readonly reason: 'in-use' }

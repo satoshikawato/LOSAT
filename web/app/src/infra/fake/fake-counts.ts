@@ -2,8 +2,7 @@
 // memory (or keeps nothing, as a browser without OPFS does) with the real store's rules (one
 // writing at a time, a continued part must be the saved one), a downloader that answers from a
 // table by taxonomy ID and keeps the requests, and the deletions between tabs.
-import { COUNTS_FILE } from '../../domain/counts';
-import { dateOf } from '../../domain/download-sentences';
+import { COUNTS_FILE, countsEntryOf } from '../../domain/counts';
 import type {
   CountsChanges,
   CountsCopy,
@@ -60,11 +59,7 @@ export class MemoryCountsStore implements CountsStore {
     for (const taxid of taxids) {
       const saved = await this.readCounts(taxid);
       if (saved?.file === undefined) continue;
-      const date =
-        saved.copy.made !== undefined
-          ? new Date(saved.copy.made.madeAt).toISOString().slice(0, 10)
-          : (dateOf(saved.copy.lastModified) ?? new Date(saved.copy.savedAt).toISOString().slice(0, 10));
-      list.push({ taxid, name: COUNTS_FILE, size: saved.copy.size, origin: saved.origin, date, copy: saved.copy });
+      list.push(countsEntryOf(saved.copy));
     }
     return list;
   }

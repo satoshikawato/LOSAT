@@ -72,23 +72,21 @@ fn check_delta_thresholds_validation_and_error_order() {
     );
 
     // Sum epsilon boundaries: 1.0001 and 0.9999 are within 0.0001 in f64; 1.00011 and 0.99989 fail.
+    let run_default = |sum: f64, exclude: bool| {
+        let p = sample_pssm(Some(unit_column(sum)), Some(vec![10.0]));
+        check_delta(&p, 1, b"a.smp", 6.0, exclude).unwrap()
+    };
     for ok_sum in [1.0001, 0.9999] {
-        let p = sample_pssm(Some(unit_column(ok_sum)), Some(vec![10.0]));
-        assert_eq!(
-            check_delta(&p, 1, b"a.smp", 6.0, true).unwrap(),
-            DeltaCheck::Included,
-            "{ok_sum}"
-        );
+        assert_eq!(run_default(ok_sum, true), DeltaCheck::Included, "{ok_sum}");
     }
     for bad_sum in [1.00011, 0.99989] {
-        let p = sample_pssm(Some(unit_column(bad_sum)), Some(vec![10.0]));
         assert_eq!(
-            check_delta(&p, 1, b"a.smp", 6.0, true).unwrap(),
+            run_default(bad_sum, true),
             DeltaCheck::ExcludedInvalidCd,
             "{bad_sum}"
         );
         assert_eq!(
-            check_delta(&p, 1, b"a.smp", 6.0, false).unwrap(),
+            run_default(bad_sum, false),
             DeltaCheck::Included,
             "{bad_sum}"
         );

@@ -27,15 +27,16 @@ async function expectFilteringDbParity(
   page: Page,
   runIndex: number,
   subjectArgs: readonly string[],
+  filteringDbArg: string,
   queryPath: string,
   cwd: string,
   label: string,
 ): Promise<void> {
   const { output, command } = await result(page, runIndex, 6);
-  expect(command).toContain('-filtering_db rpt_d4');
+  expect(command).toContain(`-filtering_db ${filteringDbArg}`);
   if (subjectArgs[0] === '-db') expect(command).toContain(`-db ${subjectArgs[1]}`);
   const expected = runNative(
-    ['blastn', '-query', queryPath, ...subjectArgs, '-filtering_db', 'rpt_d4', '-soft_masking', 'false'],
+    ['blastn', '-query', queryPath, ...subjectArgs, '-filtering_db', filteringDbArg, '-soft_masking', 'false'],
     cwd,
     6,
   );
@@ -314,24 +315,39 @@ test.describe('real engine byte-parity for -db, filter lists, taxonomy, and BLAS
       await page.getByTestId('db-filter-taxids').fill('');
 
       // 3. BLASTN -filtering_db (`rpt_d4`) with `-db` (`wm_s60k`)
+      // On Chromium, pick `rptdb/` (which holds both `wm_s60k.*` and `rpt_d4.*`) as a folder in
+      // BOTH pickers to verify same-folder deduplication and parity from the parent directory.
       const rptDir = join(work, 'rptdb');
       const wmFiles = copyMatching(join(LOSAT, 'tests/db_search'), rptDir, (name) => name.startsWith('wm_s60k.'));
       const rptFiles = copyMatching(join(LOSAT, 'tests/db_search'), rptDir, (name) => name.startsWith('rpt_d4.'));
       const wmQueryPath = join(LOSAT, 'tests/fixtures/blastn_regression/inputs/wm_query.fa');
       const wmQueryText = readFileSync(wmQueryPath, 'utf8');
+      const wmDbArg = useFolderPick ? 'rptdb/wm_s60k' : 'wm_s60k';
+      const rptDbArg = useFolderPick ? 'rptdb/rpt_d4' : 'rpt_d4';
+      const rptCwd = useFolderPick ? work : rptDir;
 
       await program(page, 'blastn');
       await paste(page, 'query', wmQueryText);
-      await setSubjectDbFiles(page, wmFiles);
-      await expect(page.getByTestId('subject-db-selected')).toContainText('wm_s60k');
+      if (useFolderPick) {
+        await page.getByTestId('subject-db-folder-input').setInputFiles(rptDir);
+        await page.getByTestId('subject-db-select').selectOption(wmDbArg);
+      } else {
+        await setSubjectDbFiles(page, wmFiles);
+        await expect(page.getByTestId('subject-db-selected')).toContainText(wmDbArg);
+      }
       await openParameters(page);
       await enableFilteringDb(page);
-      await page.getByTestId('param-filtering_db-files-input').setInputFiles(rptFiles);
-      await expect(page.getByTestId('param-filtering_db-selected')).toContainText('rpt_d4');
+      if (useFolderPick) {
+        await page.getByTestId('param-filtering_db-folder-input').setInputFiles(rptDir);
+        await page.getByTestId('param-filtering_db-select').selectOption(rptDbArg);
+      } else {
+        await page.getByTestId('param-filtering_db-files-input').setInputFiles(rptFiles);
+        await expect(page.getByTestId('param-filtering_db-selected')).toContainText(rptDbArg);
+      }
       await page.getByTestId('param-soft_masking').uncheck();
       await submit(page);
       await waitStatus(page, 6, 'completed');
-      await expectFilteringDbParity(page, 6, ['-db', 'wm_s60k'], wmQueryPath, rptDir, 'blastn -db -filtering_db outfmt 6');
+      await expectFilteringDbParity(page, 6, ['-db', wmDbArg], rptDbArg, wmQueryPath, rptCwd, 'blastn -db -filtering_db outfmt 6');
 
       // 4. BLASTN -filtering_db (`rpt_d4`) with `-subject` FASTA
       const wmSubjectPath = join(LOSAT, 'tests/fixtures/blastn_regression/inputs/s60k.fa');
@@ -340,7 +356,15 @@ test.describe('real engine byte-parity for -db, filter lists, taxonomy, and BLAS
       await paste(page, 'subject', wmSubjectText);
       await submit(page);
       await waitStatus(page, 7, 'completed');
-      await expectFilteringDbParity(page, 7, ['-subject', wmSubjectPath], wmQueryPath, rptDir, 'blastn -subject -filtering_db outfmt 6');
+      await expectFilteringDbParity(
+        page,
+        7,
+        ['-subject', wmSubjectPath],
+        rptDbArg,
+        wmQueryPath,
+        rptCwd,
+        'blastn -subject -filtering_db outfmt 6',
+      );
     } finally {
       rmSync(work, { recursive: true, force: true });
     }

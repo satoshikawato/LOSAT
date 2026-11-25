@@ -134,11 +134,16 @@ function parentPrefixes(name: string): string[] {
   return prefixes;
 }
 
+/** Two picks of one disk file: the browser creates a new File each time; name, size, and lastModified are what it exposes. */
+function sameDiskFile(a: Blob, b: Blob): boolean {
+  return a instanceof File && b instanceof File && a.name === b.name && a.size === b.size && a.lastModified === b.lastModified;
+}
+
 /**
  * Single owner for assembling unique run-directory entries: allows the exact same Blob/File
- * reference to be added twice under the same path (mounting it once), and throws
- * `duplicateRunFileMessage` whenever two different files claim the same path or collide as
- * file vs. directory.
+ * reference or a second pick of the same disk File (`name`, `size`, and `lastModified` equal)
+ * to be added twice under the same path (mounting it once), and throws `duplicateRunFileMessage`
+ * whenever two different files claim the same path or collide as file vs. directory.
  */
 export class RunDirectoryBuilder {
   private readonly entries = new Map<string, Blob>();
@@ -146,7 +151,7 @@ export class RunDirectoryBuilder {
 
   add(name: string, file: Blob): void {
     const existing = this.entries.get(name);
-    if (existing === file) return;
+    if (existing === file || (existing !== undefined && sameDiskFile(existing, file))) return;
     if (existing !== undefined || this.directories.has(name)) {
       throw new Error(duplicateRunFileMessage(name));
     }
@@ -416,7 +421,8 @@ export function noMatchingDatabaseMessage(discovery: BlastDbDiscovery, kind: Seq
  * - all picked DB filter list files (`-seqidlist`, `-taxidlist`, etc.), mounted at root by `file.name`
  *
  * Refuses with `duplicateRunFileMessage` whenever two different files claim the same mount path
- * or collide as file vs. directory. The exact same `File` chosen twice is mounted once.
+ * or collide as file vs. directory. The same `File` reference or a second pick of the same disk
+ * file (`name`, `size`, and `lastModified` equal) is mounted once.
  */
 export function assembleSearchDirectory(parts: {
   readonly subjectDb?: { readonly discovery: BlastDbDiscovery; readonly selectedName: string };

@@ -27,9 +27,11 @@ import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
 import type { DatabaseMemory, DatabaseSlot, RememberedDatabase } from '../../src/ports/db-memory';
 import { NodeInflater } from './support/node-inflater';
 
-function fileWithRelPath(relPath: string, content: BlobPart = 'data'): File {
+const TEST_MTIME = 1_764_100_000_000;
+
+function fileWithRelPath(relPath: string, content: BlobPart = 'data', lastModified = TEST_MTIME): File {
   const base = relPath.slice(relPath.lastIndexOf('/') + 1);
-  const f = new File([content], base, { type: 'application/octet-stream' });
+  const f = new File([content], base, { type: 'application/octet-stream', lastModified });
   Object.defineProperty(f, 'webkitRelativePath', { value: relPath, configurable: true });
   return f;
 }
@@ -185,30 +187,47 @@ describe('blast-db domain discovery & directory assembly', () => {
     expect(forRoot.blastdbEnv).toBeUndefined();
   });
 
-  it('refuses when two different files claim the same mount path (F2)', async () => {
+  it('refuses when two different files claim the same mount path (F2 / G1)', async () => {
     const db = await discoverBlastDatabases([fileWithRelPath('mydb/nt.nin', 'nin')]);
     const subjectDb = { discovery: db, selectedName: 'mydb/nt' };
-    const listA = new File(['seq1\n'], 'ids.txt');
-    const listB = new File(['seq2\n'], 'ids.txt');
+    const listA = new File(['seq1\n'], 'ids.txt', { lastModified: TEST_MTIME });
+    const listDiffMtime = new File(['seq2\n'], 'ids.txt', { lastModified: TEST_MTIME + 1 });
+    const listDiffSize = new File(['seq11\n'], 'ids.txt', { lastModified: TEST_MTIME });
     const expectDup = (fn: () => unknown, name: string) => expect(fn).toThrow(duplicateRunFileMessage(name));
 
+    // Same name and size, different lastModified -> refused.
     expectDup(
-      () => assembleSearchDirectory({ subjectDb, filterFiles: { '-seqidlist': listA, '-negative_seqidlist': listB } }),
+      () => assembleSearchDirectory({ subjectDb, filterFiles: { '-seqidlist': listA, '-negative_seqidlist': listDiffMtime } }),
       'ids.txt',
     );
 
-    // Filter file colliding with a multi-file root DB file.
-    const flatDb = await discoverBlastDatabases([new File(['nin'], 'nt.nin'), new File(['old'], 'ids.txt')]);
+    // Same name and lastModified, different size -> refused.
+    expectDup(
+      () => assembleSearchDirectory({ subjectDb, filterFiles: { '-seqidlist': listA, '-negative_seqidlist': listDiffSize } }),
+      'ids.txt',
+    );
+
+    // Filter file colliding with a multi-file root DB file of different size.
+    const flatDb = await discoverBlastDatabases([
+      new File(['nin'], 'nt.nin', { lastModified: TEST_MTIME }),
+      new File(['old'], 'ids.txt', { lastModified: TEST_MTIME }),
+    ]);
     expectDup(
       () => assembleSearchDirectory({ subjectDb: { discovery: flatDb, selectedName: 'nt' }, filterFiles: { '-seqidlist': listA } }),
       'ids.txt',
     );
 
-    // -db and -filtering_db having the same path with different File objects.
+    // -db and -filtering_db having the same path with different sizes.
     const otherDb = await discoverBlastDatabases([fileWithRelPath('mydb/nt.nin', 'different')]);
     expectDup(
       () => assembleSearchDirectory({ subjectDb, filteringDb: { discovery: otherDb, selectedName: 'mydb/nt' } }),
       'mydb/nt.nin',
+    );
+
+    // Filter list file named like the DB folder (file vs. directory collision).
+    expectDup(
+      () => assembleSearchDirectory({ subjectDb, filterFiles: { '-seqidlist': new File(['s1\n'], 'mydb', { lastModified: TEST_MTIME }) } }),
+      'mydb',
     );
   });
 });
@@ -340,18 +359,71 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expect(rs.subjects[0]!.recordId).toBe('db_seq_1');
   });
 
-  it('refuses submit when two filter list flags pick different files with the same name (F2)', async () => {
+  it('refuses submit when two filter list flags pick different files with the same name (F2 / G1)', async () => {
     const { draft } = setup();
     pasteQuery(draft);
     draft.setSubjectSource('database');
     await pickNucDb(draft);
-    draft.setDatabaseFilterFile('-seqidlist', new File(['s1\n'], 'ids.txt'));
-    draft.setDatabaseFilterFile('-negative_seqidlist', new File(['s2\n'], 'ids.txt'));
+    draft.setDatabaseFilterFile('-seqidlist', new File(['s1\n'], 'ids.txt', { lastModified: TEST_MTIME }));
+    draft.setDatabaseFilterFile('-negative_seqidlist', new File(['s2\n'], 'ids.txt', { lastModified: TEST_MTIME + 1 }));
     await draft.idle();
 
     expect(draft.readiness()).toBe(duplicateRunFileMessage('ids.txt'));
     const submitted = await draft.submit();
     expect(submitted).toEqual({ ok: false, message: duplicateRunFileMessage('ids.txt') });
+  });
+
+  it('allows picking the same folder twice for -db and -filtering_db and mounts each file once (G1)', async () => {
+    const { draft, coordinator, runCalls } = setup();
+    const pickSharedFolder = () =>
+      ['nt.nin', 'nt.nhr', 'nt.nsq', 'repeats.nin', 'repeats.nhr', 'repeats.nsq'].map((name) =>
+        fileWithRelPath(`blastdb/${name}`, name, TEST_MTIME),
+      );
+    pasteQuery(draft);
+    draft.setSubjectSource('database');
+    await draft.setSubjectDatabaseFiles(pickSharedFolder());
+    draft.selectSubjectDatabase('blastdb/nt');
+    draft.setFilteringDbEnabled(true);
+    await draft.setFilteringDbFiles(pickSharedFolder());
+    draft.selectFilteringDb('blastdb/repeats');
+    await draft.idle();
+
+    expectReady(draft);
+    await submitAndWait(draft, coordinator);
+
+    expect(runCalls).toHaveLength(1);
+    const req = runCalls[0]!;
+    expect(req.argv[0]).toBe('blastn');
+    expect(req.argv.slice(3)).toEqual(['-db', 'blastdb/nt', FILTERING_DB_FLAG, 'blastdb/repeats']);
+    expect(req.files?.map((f) => f.name).sort()).toEqual([
+      'blastdb/nt.nhr',
+      'blastdb/nt.nin',
+      'blastdb/nt.nsq',
+      'blastdb/repeats.nhr',
+      'blastdb/repeats.nin',
+      'blastdb/repeats.nsq',
+    ]);
+  });
+
+  it('allows picking the same disk file in a multi-file DB and a -seqidlist filter (G1)', async () => {
+    const { draft, coordinator, runCalls } = setup();
+    pasteQuery(draft);
+    draft.setSubjectSource('database');
+    await draft.setSubjectDatabaseFiles([
+      new File(['nin'], 'nt.nin', { lastModified: TEST_MTIME }),
+      new File(['s1\n'], 'ids.txt', { lastModified: TEST_MTIME }),
+    ]);
+    draft.setDatabaseFilterFile('-seqidlist', new File(['s1\n'], 'ids.txt', { lastModified: TEST_MTIME }));
+    await draft.idle();
+
+    expectReady(draft);
+    await submitAndWait(draft, coordinator);
+
+    expect(runCalls).toHaveLength(1);
+    const req = runCalls[0]!;
+    expect(req.argv[0]).toBe('blastn');
+    expect(req.argv.slice(3)).toEqual(['-db', 'nt', '-seqidlist', 'ids.txt']);
+    expect(req.files?.map((f) => f.name).sort()).toEqual(['ids.txt', 'nt.nin']);
   });
 
   it('writes -filtering_db explicitly to BLASTN when the user switches program during folder scan (F4)', async () => {

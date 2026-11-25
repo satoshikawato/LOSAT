@@ -447,6 +447,9 @@ fn heading_of(title: &[u8]) -> String {
         None,
         DatabaseHeading::Title(title, &crate::report::defline::UNNAMED_SOURCE),
         true,
+        &[],
+        None,
+        0,
         &[&hit],
         &[0],
         0..1,
@@ -1270,6 +1273,7 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
         prolog: true,
         parsed_subjects: Vec::new(),
         subject_sources: Vec::new(),
+        subject_oids: None,
     };
     // Query 0: subjects 1 (2 HSPs) and 2; query 1: no hits; queries 2 and 3: subject 1.
     let hits: Vec<PairwiseHit> = [(0, 1), (0, 1), (0, 2), (2, 1), (3, 1)]
@@ -1584,6 +1588,95 @@ fn html_rows_put_each_mask_of_the_rows_list_in_a_span() {
     assert!(of.of(3).is_none() && of.of(5).is_none());
     assert_eq!(rows(of.of(4)), html);
     assert!(HtmlRowMasks::new(None, 0).of(0).is_none());
+}
+
+// Review R2 finding 4: with `-html` and a skipped database heading, a later part of a subject
+// (`LOSAT_X_PAIRWISEPAR`) that opens with class N HSPs must write their `alignment skipped` lines
+// before retrying the heading and placing its HTML posts at the part's first non-class-N HSP; a
+// later part holding only class N HSPs must place no heading posts at all.
+#[test]
+fn later_part_html_posts_wait_for_first_shown_hsp_with_class_n() {
+    use crate::report::defline::SourceTaxname;
+    use crate::report::html_ids::{HtmlHeading, HtmlPost, HtmlReport};
+    use crate::report::query_warnings::ReportPlace;
+
+    let bad_source = SourceTaxname::Named(Arc::from(&b"Bad \x81 name"[..]))
+        .of_stored(|| b"BL_ORD_ID:0".to_vec());
+    let links = Arc::new(html_links_with(None));
+    let report = HtmlReport::new(&links, [crate::seqdb::Oid::of_unrestricted(0)]);
+
+    let make = |left_of_record: bool| {
+        let mut hit = PairwiseHit::from(make_hit());
+        hit.subject_length = Some(100);
+        hit.query_left_of_record = left_of_record;
+        hit
+    };
+    // 0: shown (starts heading, skipped + 1 InitConfig post)
+    // 1: class N (skipped, no post)
+    // 2: class N (skipped, no post)
+    // 3: shown (retries heading, skipped + 1 InitConfig post)
+    // 4: class N (skipped, no post)
+    // 5: class N (skipped, no post)
+    let owned = [
+        make(false),
+        make(true),
+        make(true),
+        make(false),
+        make(true),
+        make(true),
+    ];
+    let hits: Vec<&PairwiseHit> = owned.iter().collect();
+    let indices: Vec<HspIndex> = (0..hits.len()).collect();
+
+    let run_parts = |parts: &[std::ops::Range<usize>]| -> (Vec<u8>, Vec<(usize, HtmlPost)>) {
+        let mut out = Vec::new();
+        let mut placed = Vec::new();
+        for part in parts {
+            let posts = std::cell::RefCell::new(Vec::new());
+            let html = HtmlHeading {
+                report: &report,
+                s_idx: 0,
+                rank: 1,
+                posts: &posts,
+            };
+            let mut hook = |place: ReportPlace, writer: &mut Vec<u8>| -> io::Result<()> {
+                if let ReportPlace::Html(post) = place {
+                    placed.push((writer.len(), post));
+                }
+                Ok(())
+            };
+            write_database_subject_alignments_part(
+                &mut out,
+                None,
+                DatabaseHeading::Title(&[], &bad_source),
+                false,
+                &[],
+                Some(&[0]),
+                0,
+                &hits,
+                &indices,
+                part.clone(),
+                Some(html),
+                &mut hook,
+                |writer, _, _| writer.write_all(b"<hsp>\n"),
+            )
+            .unwrap();
+        }
+        (out, placed)
+    };
+
+    let (serial_out, serial_posts) = run_parts(&[0..6]);
+    // Part 0..1 has first_shown; part 1..4 opens with 2 class N HSPs before shown idx 3;
+    // part 4..6 has ONLY class N HSPs (must emit no posts).
+    let (split_out, split_posts) = run_parts(&[0..1, 1..4, 4..6]);
+    assert_eq!(split_out, serial_out);
+    assert_eq!(split_posts, serial_posts);
+    // Exactly two InitConfig posts: before idx 0 (byte 0) and before idx 3 (after 3 lines).
+    assert_eq!(split_posts.len(), 2);
+    assert_eq!(split_posts[0].0, 0);
+    assert!(split_posts[1].0 > 0);
+    let prefix = std::str::from_utf8(&split_out[..split_posts[1].0]).unwrap();
+    assert_eq!(prefix.lines().count(), 3);
 }
 
 /// The `Gaps =` of an HSP's header, the tables' counts and the library's `HspRecord` count the

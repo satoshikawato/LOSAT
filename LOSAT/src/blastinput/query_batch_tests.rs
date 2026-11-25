@@ -982,3 +982,189 @@ fn the_mixer_is_ncbis() {
     mixer.set_target_hits(60_000_000);
     assert_eq!(mixer.batch_size(None), 300_000);
 }
+
+/// `QueryScopes::xml_show` of every query of `fasta`, added in batches of `batch` records to the
+/// scopes of `span`, as (label, joins_held), and `held_start_of` of the whole run.
+fn xml_shows(
+    span: super::QueryScopeSpan,
+    fasta: &[u8],
+    batch: usize,
+) -> (Vec<(Option<usize>, bool)>, usize) {
+    let records = parsed_records(fasta);
+    let mut scopes = super::QueryScopes::new(span, "BLASTP");
+    for (n, chunk) in records.chunks(batch).enumerate() {
+        scopes
+            .add_batch(chunk, &vec![false; chunk.len()], n * batch)
+            .unwrap();
+    }
+    let shows = (0..records.len())
+        .map(|query| {
+            let show = super::QueryScopes::xml_show(Some(&scopes), query);
+            (show.label, show.joins_held)
+        })
+        .collect();
+    let start = super::held_start_of(Some(scopes.numbered_from(0)), records.len());
+    (shows, start)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2413
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:713-719
+/// Probes of line RG-KB item 7c (NCBI BLAST+ 2.17.0, `-parse_deflines`, blastp, tblastn, blastx and
+/// tblastx alike): a result shows the first query of its batch whose best Seq-id matches its own,
+/// with `-db` and `-subject`, in every XML family format; with `-subject` the XML2 and JSON
+/// documents join every result whose Seq-id matches that of the held report's first, across
+/// batches too (`BATCH_SIZE` 1), and a result of another Seq-id leads the next report.
+#[test]
+fn xml_results_show_and_join_the_queries_whose_seq_ids_match() {
+    use super::QueryScopeSpan::{Batch, Run};
+    const NO: (Option<usize>, bool) = (None, false);
+    let vpair: &[u8] = b">ref|NP_000001.1| first\nMKV\n>ref|NP_000001| second\nMKVL\n";
+    for span in [Run, Batch] {
+        assert_eq!(xml_shows(span, vpair, 2), (vec![NO, (Some(0), true)], 0));
+        // Batches of one record: the label is the batch's own, the report is still joined.
+        assert_eq!(xml_shows(span, vpair, 1), (vec![NO, (None, true)], 0));
+    }
+    // Both orders, PDB chains, accession case with a version, GenBank and EMBL.
+    for pair in [
+        &b">ref|NP_000001| second\nMKVL\n>ref|NP_000001.1| first\nMKV\n"[..],
+        b">pdb|1ABC|A first\nMKV\n>pdb|1ABC| second\nMKVL\n",
+        b">ref|NP_000001.1| first\nMKV\n>ref|np_000001| second\nMKVL\n",
+        b">gb|AAB00001.1| first\nMKV\n>emb|AAB00001| second\nMKVL\n",
+    ] {
+        assert_eq!(xml_shows(Run, pair, 2), (vec![NO, (Some(0), true)], 0));
+    }
+    // Three records: the third, of another Seq-id, leads the last report (`vpair3a`); one of the
+    // first's after another's shows the first and leads a report of its own (`vpair3b`).
+    let vpair3a: &[u8] =
+        b">ref|NP_000001.1| first\nMKV\n>ref|NP_000001| second\nMKVL\n>ref|NP_000002.1| third\nMKV\n";
+    assert_eq!(
+        xml_shows(Run, vpair3a, 3),
+        (vec![NO, (Some(0), true), NO], 2)
+    );
+    assert_eq!(xml_shows(Run, vpair3a, 1), (vec![NO, (None, true), NO], 2));
+    let vpair3b: &[u8] =
+        b">ref|NP_000001.1| first\nMKV\n>ref|NP_000002.1| third\nMKV\n>ref|NP_000001| second\nMKVL\n";
+    assert_eq!(
+        xml_shows(Run, vpair3b, 3),
+        (vec![NO, NO, (Some(0), false)], 2)
+    );
+    assert_eq!(xml_shows(Run, vpair3b, 1), (vec![NO, NO, NO], 2));
+    // The third matches the second, not the first (`vpair3c`): it shows the second, the first
+    // query of its batch that it matches, and leads a report of its own.
+    let vpair3c: &[u8] =
+        b">ref|NP_000001.1| first\nMKV\n>ref|NP_000001| second\nMKVL\n>ref|NP_000001.2| third\nMKV\n";
+    for span in [Run, Batch] {
+        assert_eq!(
+            xml_shows(span, vpair3c, 3),
+            (vec![NO, (Some(0), true), (Some(1), false)], 2)
+        );
+        assert_eq!(xml_shows(span, vpair3c, 1), (vec![NO, (None, true), NO], 2));
+    }
+    // A shown query keeps its own names, the second of `vpair3c` too when the third is written
+    // (NCBI: `Iteration_query-def` `second`); when a stopping run drops the third (`reports = 2`),
+    // or when a second query joins across batches under `-subject` XML2/JSON (`holds_back = true`),
+    // its names are unshown.
+    let unshown = |fasta: &[u8], batch: usize, reports: usize, holds_back: bool| {
+        let records = parsed_records(fasta);
+        let mut scopes = super::QueryScopes::new(Run, "BLASTP");
+        for (n, chunk) in records.chunks(batch).enumerate() {
+            scopes
+                .add_batch(chunk, &vec![false; chunk.len()], n * batch)
+                .unwrap();
+        }
+        let call = Some(scopes.numbered_from(0));
+        (0..reports)
+            .map(|query| super::names_unshown_in(call, reports, holds_back, query))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(unshown(vpair3c, 3, 3, false), [false, false, true]);
+    assert_eq!(unshown(vpair3c, 3, 3, true), [false, false, true]);
+    assert_eq!(unshown(vpair3c, 3, 2, true), [false, true]);
+    assert_eq!(unshown(vpair3a, 3, 3, false), [false, true, false]);
+    assert_eq!(unshown(vpair, 1, 2, true), [false, true]);
+    assert_eq!(unshown(vpair, 1, 2, false), [false, false]);
+    // Cross-batch join where a third query in the second batch labels itself with the second:
+    // the second is shown when the third is written, unshown when the third is held unwritten.
+    let records = parsed_records(vpair3c);
+    let mut split = super::QueryScopes::new(Run, "BLASTP");
+    split.add_batch(&records[..1], &[false], 0).unwrap();
+    split.add_batch(&records[1..], &[false, false], 1).unwrap();
+    let call = Some(split.numbered_from(0));
+    assert!(!super::names_unshown_in(call, 3, true, 1));
+    assert!(super::names_unshown_in(call, 2, true, 1));
+    // A call that starts at a later batch numbers the label and the held report's start as it
+    // numbers its queries.
+    let later: &[u8] = b">ref|NP_000002.1| a\nMKV\n>ref|NP_000003.1| b\nMKV\n\
+        >ref|NP_000001.1| c\nMKV\n>ref|NP_000001| d\nMKVL\n";
+    let records = parsed_records(later);
+    let mut scopes = super::QueryScopes::new(Run, "BLASTP");
+    scopes.add_batch(&records[..2], &[false; 2], 0).unwrap();
+    scopes.add_batch(&records[2..], &[false; 2], 2).unwrap();
+    let call = scopes.numbered_from(2);
+    let show = call.xml_show(1);
+    assert_eq!((show.label, show.joins_held), (Some(0), true));
+    assert_eq!(super::held_start_of(Some(call), 2), 0);
+    assert_eq!(super::held_start_of(Some(scopes.numbered_from(0)), 4), 2);
+    assert_eq!(super::held_start_of(None, 4), 3);
+    assert_eq!(super::xml_show_of(None, 3), super::XmlShow::default());
+    // The pairs that the scope holds as one sequence stay refused: NCBI searches the first
+    // record's letters for the second (accession, `gnl` and `lcl` case, GenBank and EMBL of one
+    // version).
+    for pair in [
+        &b">ref|NP_000001.1| first\nMKV\n>ref|np_000001.1| second\nMKVL\n"[..],
+        b">gnl|db|tag1 first\nMKV\n>gnl|DB|TAG1 second\nMKVL\n",
+        b">lcl|q1 first\nMKV\n>lcl|Q1 second\nMKVL\n",
+        b">gb|AAB00001.1| first\nMKV\n>emb|AAB00001.1| second\nMKVL\n",
+    ] {
+        let records = parsed_records(pair);
+        let mut scopes = super::QueryScopes::new(Run, "BLASTP");
+        assert!(scopes.add_batch(&records, &[false; 2], 0).is_err());
+    }
+}
+
+/// Only an accession with and without its version, in any case, or a PDB molecule with and
+/// without its chain may be an earlier id of the scope in another form
+/// (`QueryScope::add_version_form`): two chains of one molecule, two versions or two accessions
+/// never are, nor ids of a scope that has none of the other form. A scope that takes another's
+/// ids takes their forms (`QueryScope::extend`).
+#[test]
+fn only_another_form_of_a_scope_s_id_may_match_it() {
+    let fasta: &[u8] = b">ref|NP_000001.1| a\nMKV\n>ref|NP_000002.1| b\nMKV\n>ref|np_000001| c\nMKV\n>pdb|1ABC|A d\nMKV\n>pdb|1ABC|B e\nMKV\n>pdb|1ABC| f\nMKV\n>ref|NP_000002.2| g\nMKV\n>h x\nMKV\n";
+    let records = parsed_records(fasta);
+    let ids = |n: usize| &records[n].believed().unwrap().ids;
+    let mut scope = super::QueryScope::default();
+    let others: Vec<bool> = (0..records.len())
+        .map(|n| scope.add(ids(n), (n, 3), "BLASTP").unwrap())
+        .collect();
+    assert_eq!(
+        others,
+        [false, false, true, false, false, true, false, false]
+    );
+    let mut first = super::QueryScope::default();
+    assert!(!first.add(ids(2), (0, 3), "BLASTP").unwrap());
+    let mut first = super::QueryScope::default();
+    first.add(ids(0), (0, 3), "BLASTP").unwrap();
+    let mut whole = super::QueryScope::default();
+    whole.extend(&first);
+    assert!(whole.add_after_refusal(ids(2), (1, 3)));
+}
+
+/// A run whose queries' Seq-ids all differ keeps nothing per query for the XML family formats
+/// (`HeldIds`): no label and no join, and the second query is NCBI's `F`.
+#[test]
+fn queries_of_different_seq_ids_keep_no_xml_lists() {
+    use super::QueryScopeSpan::{Batch, Run};
+    let fasta: &[u8] = b">ref|NP_000001.1| a\nMKV\n>ref|NP_000002.1| b\nMKV\n>c x\nMKV\n>pdb|1ABC|A d\nMKV\n>pdb|1ABC|B e\nMKV\n";
+    let records = parsed_records(fasta);
+    for (span, batch) in [(Run, 5), (Run, 1), (Batch, 2)] {
+        let mut scopes = super::QueryScopes::new(span, "BLASTP");
+        for (n, chunk) in records.chunks(batch).enumerate() {
+            scopes
+                .add_batch(chunk, &vec![false; chunk.len()], n * batch)
+                .unwrap();
+        }
+        assert!(scopes.held.joins.is_empty() && scopes.held.labels.is_empty());
+        assert_eq!(scopes.held.second, Some(1));
+        assert_eq!(xml_shows(span, fasta, batch).1, 4);
+    }
+}

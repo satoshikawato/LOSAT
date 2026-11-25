@@ -23,6 +23,15 @@ fn main() {
     if target == "wasm32-wasip1-threads" {
         println!("cargo:rustc-cfg=losat_wasi_threads");
     }
+    // LOSAT Web's ABI v1 (`web_api`, `web_v1_argv`, and what only they call): every wasm32 build
+    // but one with the feature `no-web-abi-v1` (Cargo.toml), which the WASI command line selects so
+    // that it links neither v1's exports nor clap (line RG item K4i-3d). One cfg for every such item.
+    println!("cargo:rustc-check-cfg=cfg(losat_web_abi_v1)");
+    if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32")
+        && env::var_os("CARGO_FEATURE_NO_WEB_ABI_V1").is_none()
+    {
+        println!("cargo:rustc-cfg=losat_web_abi_v1");
+    }
     if target != "wasm32-wasip1" && target != "wasm32-wasip1-threads" {
         return;
     }

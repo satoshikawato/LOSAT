@@ -196,6 +196,10 @@ impl<R> Ahead<R> {
     // at or past `until` yet (the flow across BLASTX chunks offers the tasks of the loop's chunk and
     // the next one only, `blastx/x_subject_flow.rs` `run_chunks`). Helpers that leave do so once
     // every index below `len` is claimed, as with `announce`.
+    #[cfg_attr(
+        not(any(feature = "parallel", test)),
+        expect(dead_code, reason = "used only with the parallel feature or tests")
+    )]
     pub(crate) fn x_announce_until(
         &self,
         at: usize,

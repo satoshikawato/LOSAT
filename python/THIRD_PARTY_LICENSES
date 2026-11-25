@@ -22,8 +22,8 @@ Builds covered (the crates below are the union of what Cargo links into them):
   - losat CLI, Windows x86-64: x86_64-pc-windows-msvc, default features
   - losat CLI, macOS aarch64: aarch64-apple-darwin, default features
   - losat CLI, macOS x86-64: x86_64-apple-darwin, default features
-  - losat CLI, WASI: wasm32-wasip1, --no-default-features
-  - losat CLI, WASI threads: wasm32-wasip1-threads, --features wasm-threads
+  - losat CLI, WASI: wasm32-wasip1, --no-default-features --features no-web-abi-v1
+  - losat CLI, WASI threads: wasm32-wasip1-threads, --features wasm-threads,no-web-abi-v1
   - pylosat wheel, Linux x86-64: x86_64-unknown-linux-gnu, default features
   - pylosat wheel, Linux aarch64: aarch64-unknown-linux-gnu, default features
   - pylosat wheel, Windows x86-64: x86_64-pc-windows-msvc, default features

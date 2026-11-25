@@ -51,11 +51,12 @@
 //!   of queries without letters, `ErrorAfterBatchReports`, a header file that cannot be read)
 //!   comes after the reports of the batches before, without the epilog, in both: here they were
 //!   written when the loop took them, so the error paths write only what follows them (the
-//!   batch's title and reader warnings). Search space overflows (`context_statistics::setup_failure`
-//!   -> `ErrorAfterBatchReports`) follow the same path, so both stream on and stream off write the
-//!   reports of the batches before and then the refusal. An error that LOSAT raises where NCBI would not stop
-//!   (LOSAT's refusals) is written without the reports of the batches before by the off path,
-//!   and after them with the switch (drop-in DECISIONS 44: as NCBI reads them, the stored data
+//!   batch's title and reader warnings). Search space overflows
+//!   (`context_statistics::setup_failure` -> `ErrorAfterBatchReports`) follow the same path, so
+//!   both stream on and stream off write the reports of the batches before and then the refusal.
+//!   Any other error that LOSAT raises where NCBI would not stop (LOSAT's refusals) is written
+//!   without the reports of the batches before by the off path, and after them with the switch
+//!   (drop-in DECISIONS 44: as NCBI reads them, the stored data
 //!   and the report ids of a batch's reported subjects are checked in that batch, nothing is read
 //!   before the search). These are the refusals of a reported subject: with `-db` a definition
 //!   line that does not read as the reports read it, holds a byte outside ' ' ..= '~' or gives no

@@ -280,8 +280,13 @@ fn database_arguments_are_checked_as_ncbi_checks_them() {
 fn a_refused_first_batch_writes_each_prolog_once_on_setup_refusal() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let dir = temp_dir("refused-prolog");
-    let cases: &[(&str, &str, &[&str])] = &[
-        ("nseq0", "tests/db_search/aliaskeys/n_nseq0", &[]),
+    let cases: &[(&str, &str, &[&str], &str)] = &[
+        (
+            "nseq0",
+            "tests/db_search/aliaskeys/n_nseq0",
+            &[],
+            "the statistics count 0 sequences of the database",
+        ),
         (
             "mo00",
             "tests/db_search/taxfilter/tfn",
@@ -295,15 +300,45 @@ fn a_refused_first_batch_writes_each_prolog_once_on_setup_refusal() {
                 "-gapextend",
                 "0",
             ],
+            "reward 0 and penalty 0 (matrix-only scoring) with the greedy extension",
         ),
         (
             "mb40k",
             "tests/db_search/taxfilter/tfn",
             &["-gapopen", "40000", "-gapextend", "40000"],
+            "gap costs above 32767 with greedy extension (-task megablast)",
         ),
-        ("n0l62", "tests/db_search/aliaskeys/n_nseq0_l62", &[]),
+        (
+            "n1l62p3",
+            "tests/db_search/aliaskeys/n_nseq1_l62p3",
+            &[],
+            "overflows NCBI BLAST+'s 64-bit effective search space",
+        ),
     ];
-    for &(tag, db, extra) in cases {
+    for &(tag, db, extra, setup_err) in cases {
+        let control = losat()
+            .args([
+                "blastn",
+                "-db",
+                db,
+                "-query",
+                "tests/db_search/q1c/dup2_bn.fna",
+            ])
+            .args(extra)
+            .args(["-outfmt", "6", "-num_threads", "1"])
+            .current_dir(manifest)
+            .output()
+            .expect("run control blastn");
+        let control_stderr = String::from_utf8_lossy(&control.stderr);
+        assert_eq!(
+            control.status.code(),
+            Some(1),
+            "{tag} control: {control_stderr}"
+        );
+        assert!(
+            control_stderr.contains(setup_err),
+            "{tag} control expected {setup_err:?}, got: {control_stderr}"
+        );
         let run = |outfmt: &str, out_file: Option<&Path>| {
             let mut cmd = losat();
             cmd.args([

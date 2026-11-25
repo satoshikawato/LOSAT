@@ -80,7 +80,7 @@ use super::super::scoring::{
 use super::super::seqalign::write_blastn_seqalign;
 use super::super::tracing as blastn_trace;
 use super::super::ungapped;
-use crate::blastinput::app::{self as app, Program};
+use crate::blastinput::app::{self as app, ErrorAfterBatchReports, Program};
 use crate::core::blast_hits::reap_by_query_coverage;
 use crate::report::record::QueryNames;
 // EXPERIMENT (LOSAT_X_BNSTORE): the subjects' letters read from the records or from packed subjects.
@@ -7408,24 +7408,6 @@ fn search(
     x_pair_seed::summary();
     x_result
 }
-
-/// An error of a query batch after the first that `run_in_pool` reports after writing the
-/// reports of the batches before (`write_batch_reports`, hits included, without the epilog).
-/// Used for set-up errors that do not depend on the queries (Karlin-Altschul scoring error,
-/// average subject length, statistics count of 0, greedy set-up refusals, where earlier batches
-/// had no valid query), for 64-bit search space overflows (`context_statistics::setup_failure`
-/// in set-up or mid-search at `subject_space_overflow.check()`, which depend on query length and
-/// may follow valid batches with hits), and for database read errors (`database_search_error`).
-#[derive(Debug)]
-struct ErrorAfterBatchReports(anyhow::Error);
-
-impl std::fmt::Display for ErrorAfterBatchReports {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for ErrorAfterBatchReports {}
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:295-312
 /// A database error of a query batch's search (`database::search_blocks`,

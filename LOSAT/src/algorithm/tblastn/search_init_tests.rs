@@ -935,7 +935,7 @@ fn x_two_hit_table_kept_across_units_gives_the_hits_of_a_cleared_table() {
             .map(|unit| {
                 let mut hits = Vec::new();
                 two_hit.pairs(1, 0, unit, &x_word_pairs(query, unit), &mut hits);
-                two_hit.exit(unit.len());
+                two_hit.exit(unit.len() as i32);
                 hits
             })
             .collect()
@@ -1255,8 +1255,8 @@ fn x_pairs_bf_gives_the_hits_and_table_of_pairs() {
                 );
                 found += expected.len();
                 if mode != "cleared" {
-                    reference.exit(unit.len());
-                    branch_free.exit(unit.len());
+                    reference.exit(unit.len() as i32);
+                    branch_free.exit(unit.len() as i32);
                 }
             }
         }
@@ -1341,8 +1341,8 @@ fn x_byte_table_walks_give_the_reference_hits_and_table() {
                     "{matrix:?} X-drops {x_dropoffs:?}: diagonal table"
                 );
                 found += got.len();
-                fast.exit(unit.len());
-                reference.exit(unit.len());
+                fast.exit(unit.len() as i32);
+                reference.exit(unit.len() as i32);
             }
         }
         assert!(
@@ -1424,5 +1424,130 @@ fn diagonals_hard_table_and_pair_clear_match_ncbi() {
     assert_eq!(
         packed.entries,
         XDiagCells::Packed(vec![0; packed.entries.len()])
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-607, 773-803
+/// Negative Int4 chunk length in `Diagonals::finish_frame`, plus two-hit (`x_pairs_bf`,
+/// `x_pairs_bf_of`) and one-hit (`x_pairs_one_hit`) loops on `Pair` cells when an entry lies
+/// above the hit (negative diff), when `s` is non-negative with negative `s_left_off`, and when
+/// `diff` exceeds `q` (unsigned context boundary check).
+#[test]
+fn diagonals_negative_exit_and_pairs_with_entry_above_hit() {
+    use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
+
+    // 1. Negative chunk length moves offset backward; clear at INT4_MAX / 4 is unchanged.
+    let mut table = Diagonals::new(32, 40, false);
+    table.finish_frame(40);
+    assert_eq!(table.offset, 120);
+    table.finish_frame(-140);
+    assert_eq!(table.offset, 20);
+    table.offset = i32::MAX / 4;
+    table.finish_frame(-140);
+    assert_eq!(table.offset, 40);
+    assert_eq!(
+        table.entries,
+        XDiagCells::Pair(vec![(-40, false); table.entries.len()])
+    );
+
+    // 2. Two-hit `x_pairs_bf` and `x_pairs_bf_of` on `Pair` cells with entry above hit.
+    let q_bytes = b"WWWWWWACDEFGHIKLMNPQ";
+    let (query, offsets) = x_concatenated(&[q_bytes]);
+    let subject =
+        encode_tblastn_lookup_query(q_bytes, None, false).aa_seq[1..=q_bytes.len()].to_vec();
+    let x_dropoffs = [16];
+    let cutoffs = [11];
+
+    let set_cell = |two_hit: &mut XTwoHit<'_>, index: usize, value: (i32, bool)| {
+        if let XDiagCells::Pair(cells) = &mut two_hit.diagonals.entries {
+            cells[index] = value;
+        }
+    };
+    let run_bf = |two_hit: &mut XTwoHit<'_>, pairs: &[BlastOffsetPair], hits: &mut Vec<InitHsp>| {
+        if let Some(mat_table) = two_hit.x_ungap_matrix() {
+            two_hit.x_pairs_bf_of(mat_table, 1, 0, &subject, pairs, hits);
+        } else {
+            two_hit.x_pairs_bf(1, 0, &subject, pairs, hits);
+        }
+    };
+
+    for matrix in [ScoringMatrix::Blosum62, ScoringMatrix::Blosum45] {
+        let mut two_hit = XTwoHit::x_with_layout(
+            false,
+            None,
+            &query,
+            &offsets,
+            &x_dropoffs,
+            &cutoffs,
+            matrix,
+            40,
+            3,
+        );
+        // Set diagonal (q=10, s=5) to an unflagged entry above s + offset (diff = -15).
+        let idx = ((10i32 - 5) & two_hit.diagonals.mask) as usize;
+        set_cell(&mut two_hit, idx, (60, false));
+        let pair = [BlastOffsetPair {
+            q_off: 10,
+            s_off: 5,
+        }];
+        let mut hits = Vec::new();
+        run_bf(&mut two_hit, &pair, &mut hits);
+        assert!(hits.is_empty(), "negative diff must be skipped without hit");
+        assert_eq!(
+            two_hit.x_cell(idx),
+            (60, false),
+            "unflagged entry above hit must stay unchanged"
+        );
+
+        // Flagged entry above s + offset stays flagged; at or below s + offset clears flag.
+        set_cell(&mut two_hit, idx, (60, true));
+        run_bf(&mut two_hit, &pair, &mut hits);
+        assert_eq!(two_hit.x_cell(idx), (60, true));
+        set_cell(&mut two_hit, idx, (45, true));
+        run_bf(&mut two_hit, &pair, &mut hits);
+        assert_eq!(two_hit.x_cell(idx), (45, false));
+
+        // 3. Non-negative s with negative s_left_off and no x_around extends normally, and diff
+        //    exceeding q wraps unsigned above context start 0 (accepted by NCBI's Uint4 test):
+        //    offset 40, s 0, q 0, last_hit 30 -> previous -10, diff 10, s_left_off -7.
+        set_cell(&mut two_hit, 0, (30, false));
+        let pair_neg_left = [BlastOffsetPair { q_off: 0, s_off: 0 }];
+        hits.clear();
+        run_bf(&mut two_hit, &pair_neg_left, &mut hits);
+        assert_eq!(
+            hits.len(),
+            1,
+            "{matrix:?}: s >= 0 with s_left_off < 0 must still extend without x_around"
+        );
+    }
+
+    // 4. One-hit (`x_pairs_one_hit`) skips hits when entry lies above s + offset.
+    let mut one_hit = XTwoHit::x_with_layout(
+        false,
+        None,
+        &query,
+        &offsets,
+        &x_dropoffs,
+        &cutoffs,
+        ScoringMatrix::Blosum62,
+        0,
+        3,
+    );
+    one_hit.diagonals.offset = -10;
+    let mut hits = Vec::new();
+    one_hit
+        .x_pairs_one_hit(
+            super::super::score::MatrixScore,
+            1,
+            0,
+            &subject,
+            &[BlastOffsetPair { q_off: 0, s_off: 0 }],
+            &mut hits,
+        )
+        .unwrap();
+    assert!(
+        hits.is_empty(),
+        "one-hit at offset -10 on unwritten 0 must be skipped"
     );
 }

@@ -173,6 +173,7 @@ impl OneWord<'_> {
     /// The two-hit extension (`s_BlastAaExtendTwoHit`) of the hit at query offset `q_right_off`
     /// and subject offset 0 whose first hit ends at `s_left_off` (signed), with the X-drop
     /// `x_drop`.
+    #[cfg(test)]
     pub(crate) fn extend(&self, s_left_off: i32, q_right_off: i32, x_drop: i32) -> OneWordSeed {
         self.extend_with(
             s_left_off,

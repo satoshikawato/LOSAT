@@ -358,8 +358,8 @@ BLAST+.
    /dev/stdout` with standard output closed, or a pipe whose reader closes mid-run), NCBI 2.17.0 is
    ended by SIGPIPE at that line, leaving the current `.NN.idx` incomplete and writing no `done`,
    no `.map`, no `.shd`, and no later index or database volumes; LOSAT stops at the same line with
-   exit status 0 and no message (the incomplete `.NN.idx` holds what LOSAT's writer has buffered,
-   where NCBI's killed process holds what its 8 KiB stream had flushed). When a volume has no
+   exit status 0 and no message (the incomplete `.NN.idx` matches NCBI's: the 44-byte header
+   followed by the complete 8 KiB blocks written before the stopping line). When a volume has no
    indexed words (so `-stat` receives no write) or `-stat` hits a non-pipe write failure
    (`/dev/full`, or a closed pipe on Windows), the index completes with exit status 0 in both.
    Functions: `ncbi_app::files::Ostream` (one stream of `-out` for each program;
@@ -378,8 +378,10 @@ BLAST+.
    (`a_closed_pipe_ends_the_build_at_its_line`), `tests/makembindex_closed_pipe.rs`
    (`normal_index_builds_complete_with_a_closed_stdout_pipe`,
    `show_filters_help_and_version_on_a_closed_pipe_end_silently`,
-   `stat_on_a_closed_pipe_stops_at_once`, `stat_pipe_closed_after_first_line_stops_at_once`) and
-   `makembindex/tests.rs` (`show_filters_on_a_closed_pipe_ends_silently`). Release-notes sentence: When the reader of `losat
+   `stat_on_a_closed_pipe_stops_at_once`, `stat_pipe_closed_after_first_line_stops_at_once`,
+   `volume_and_idmap_named_fifos_stop_at_once`), `makembindex/tests.rs`
+   (`show_filters_on_a_closed_pipe_ends_silently`) and `dbindex/format_tests.rs`
+   (`super_header_save_reports_closed_pipe_and_ignores_other_write_errors`). Release-notes sentence: When the reader of `losat
    blastdbcmd`'s, `losat dustmasker`'s, `losat segmasker`'s, `losat windowmasker`'s or `losat convert2blastmask`'s output, of `losat makeblastdb`'s log, or of `losat makembindex`'s `-show_filters` or `-stat` output closes the pipe early, LOSAT stops at once with
    exit status 0, where NCBI's programs are ended by SIGPIPE (141).
 11. **BLASTN's progress bar on a terminal** (version 1.22, 2026-11-20, recorded for the v0.2.0

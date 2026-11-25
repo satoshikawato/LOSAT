@@ -21,11 +21,16 @@
 // without a signal and the run goes on (exception 10).
 #![cfg(unix)]
 
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
 
+const HEADER_LEN: u64 = 44;
+const STREAM_BLOCK: u64 = 8192;
 const SMALL_FA: &str = ">seq1 first\nACGTACGTACGTAGCTAGCTAGCTAGCATCGATCGATCGATCGATCGTAGCTAGCTAGCTAGCTAGCATGC\n>seq2 second\nTTGACCGGTTAACCGGTTAAGGCCTTAAGGCCTTAAACGTACGTACGTAGCTAGCTAGCATCGATCGATCG\n";
 const TINY_FA: &str = ">t1\nACGTA\n";
 const MV_IDMAP_ARGS: [&str; 6] = ["-input", "mvdb", "-nmer", "8", "-idmap", "true"];
@@ -347,12 +352,13 @@ fn show_filters_help_and_version_on_a_closed_pipe_end_silently() {
 #[test]
 fn stat_on_a_closed_pipe_stops_at_once() {
     // Multi-volume new-style DB: stops in vol 00's first index volume with no done, no .map,
-    // no .shd, and no later DB volumes.
+    // no .shd, and no later DB volumes. Its first indexed 8-mer is 0x11b1 (4529), past two 8 KiB
+    // blocks of hash-table words, so NCBI leaves 44 + 2 * 8192 = 16,428 bytes.
     let mv_ref = TempDir::new("stat-mv-ref");
     build_multivol_db(&mv_ref.0, "mvdb");
     let full_run = makembindex(&mv_ref.0, &MV_IDMAP_ARGS, Stdio::null());
     assert_eq!(full_run.status.code(), Some(0));
-    let full_vol0_len = fs::metadata(mv_ref.0.join("mvdb.00.00.idx")).unwrap().len();
+    let full_vol0_bytes = fs::read(mv_ref.0.join("mvdb.00.00.idx")).unwrap();
 
     let mv = TempDir::new("stat-mv");
     build_multivol_db(&mv.0, "mvdb");
@@ -377,15 +383,73 @@ fn stat_on_a_closed_pipe_stops_at_once() {
         "unexpected stderr: {err:?}"
     );
     assert_eq!(index_files(&mv.0), ["mvdb.00.00.idx"]);
-    let partial_len = fs::metadata(mv.0.join("mvdb.00.00.idx")).unwrap().len();
-    assert!(
-        partial_len < full_vol0_len,
-        "expected partial volume ({partial_len} < {full_vol0_len})"
+    let partial_bytes = fs::read(mv.0.join("mvdb.00.00.idx")).unwrap();
+    assert_eq!(
+        partial_bytes.len() as u64,
+        HEADER_LEN + 2 * STREAM_BLOCK,
+        "mvdb first 8-mer is 0x11b1 (2 complete 8 KiB blocks after header)"
     );
+    assert_eq!(partial_bytes, full_vol0_bytes[..partial_bytes.len()]);
 
-    // Old-style multi-volume index (-volsize 1): stops in .00.idx, no .map, no .01.idx.
+    // New-style single-volume DB containing 8-mer 0 (AAAAAAAA): stops right after the 44-byte
+    // header, matching NCBI's 44-byte file byte-for-byte.
+    let ns = TempDir::new("stat-new-44");
+    fs::write(ns.0.join("big.fa"), pseudo_fasta(1, 250_000)).unwrap();
+    let built = losat_cmd(
+        &ns.0,
+        "makeblastdb",
+        &["-in", "big.fa", "-dbtype", "nucl", "-out", "db"],
+    )
+    .stdout(Stdio::null())
+    .stderr(Stdio::piped())
+    .output()
+    .unwrap();
+    assert!(built.status.success());
+    let full_ns = makembindex(&ns.0, &["-input", "db", "-nmer", "8"], Stdio::null());
+    assert_eq!(full_ns.status.code(), Some(0));
+    let full_ns_bytes = fs::read(ns.0.join("db.00.idx")).unwrap();
+    fs::remove_file(ns.0.join("db.00.idx")).unwrap();
+    fs::remove_file(ns.0.join("db.shd")).unwrap();
+    let out = makembindex(
+        &ns.0,
+        &["-input", "db", "-nmer", "8", "-stat", "/dev/stdout"],
+        closed_pipe(),
+    );
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stderr_text(&out).ends_with("db.00.idx..."));
+    assert_eq!(index_files(&ns.0), ["db.00.idx"]);
+    let ns_partial = fs::read(ns.0.join("db.00.idx")).unwrap();
+    assert_eq!(ns_partial.len() as u64, HEADER_LEN);
+    assert_eq!(ns_partial, full_ns_bytes[..HEADER_LEN as usize]);
+
+    // Old-style multi-volume index (-volsize 1) containing 8-mer 0: stops in .00.idx at 44 bytes,
+    // no .map, no .01.idx.
     let old_mv = TempDir::new("stat-old-mv");
     fs::write(old_mv.0.join("big.fa"), pseudo_fasta(4, 300_000)).unwrap();
+    let full_old = makembindex(
+        &old_mv.0,
+        &[
+            "-old_style_index",
+            "true",
+            "-iformat",
+            "fasta",
+            "-input",
+            "big.fa",
+            "-output",
+            "ref",
+            "-nmer",
+            "8",
+            "-volsize",
+            "1",
+        ],
+        Stdio::null(),
+    );
+    assert_eq!(full_old.status.code(), Some(0));
+    let full_old_head =
+        fs::read(old_mv.0.join("ref.00.idx")).unwrap()[..HEADER_LEN as usize].to_vec();
+    for f in index_files(&old_mv.0) {
+        fs::remove_file(old_mv.0.join(f)).unwrap();
+    }
     let out = makembindex(
         &old_mv.0,
         &[
@@ -411,6 +475,67 @@ fn stat_on_a_closed_pipe_stops_at_once() {
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(stderr_text(&out), "creating idx.00.idx...");
     assert_eq!(index_files(&old_mv.0), ["idx.00.idx"]);
+    let old_partial = fs::read(old_mv.0.join("idx.00.idx")).unwrap();
+    assert_eq!(old_partial.len() as u64, HEADER_LEN);
+    assert_eq!(old_partial, full_old_head);
+
+    // Exact 8 KiB block boundary for the first non-empty 8-mer (-legacy false -stride 1 -ws_hint 8):
+    // nmer 2045 leaves 44 bytes (8188 bytes written before -stat); nmer 2046 and 2047 both leave
+    // 44 + 8192 = 8236 bytes, matching NCBI 2.17.0 byte-for-byte.
+    for (first_nmer, expected_len) in [
+        (2045usize, HEADER_LEN),
+        (2046, HEADER_LEN + STREAM_BLOCK),
+        (2047, HEADER_LEN + STREAM_BLOCK),
+    ] {
+        let bdir = TempDir::new(&format!("stat-boundary-{first_nmer}"));
+        let mut seq = String::with_capacity(18);
+        for shift in (0..8).rev() {
+            seq.push(b"ACGT"[(first_nmer >> (2 * shift)) & 3] as char);
+        }
+        seq.push_str("TTTTTTTTTT");
+        fs::write(bdir.0.join("in.fa"), format!(">s0\n{seq}\n")).unwrap();
+        let common = [
+            "-old_style_index",
+            "true",
+            "-iformat",
+            "fasta",
+            "-input",
+            "in.fa",
+            "-nmer",
+            "8",
+            "-legacy",
+            "false",
+            "-stride",
+            "1",
+            "-ws_hint",
+            "8",
+        ];
+        let mut full_args = common.to_vec();
+        full_args.extend(["-output", "ref"]);
+        assert_eq!(
+            makembindex(&bdir.0, &full_args, Stdio::null())
+                .status
+                .code(),
+            Some(0)
+        );
+        let ref_bytes = fs::read(bdir.0.join("ref.00.idx")).unwrap();
+        let mut closed_args = common.to_vec();
+        closed_args.extend(["-output", "idx", "-stat", "/dev/stdout"]);
+        let out = makembindex(&bdir.0, &closed_args, closed_pipe());
+        assert_eq!(out.status.code(), Some(0), "nmer={first_nmer}");
+        assert_eq!(stderr_text(&out), "creating idx.00.idx...");
+        let part_bytes = fs::read(bdir.0.join("idx.00.idx")).unwrap();
+        assert_eq!(
+            part_bytes.len() as u64,
+            expected_len,
+            "nmer={first_nmer} expected {expected_len} bytes"
+        );
+        assert_eq!(
+            part_bytes,
+            ref_bytes[..expected_len as usize],
+            "nmer={first_nmer} bytes mismatch"
+        );
+    }
 
     // Unwritable -output path still stops at -stat /dev/stdout before done and .01.idx.
     let bad_out = TempDir::new("stat-bad-out");
@@ -518,7 +643,8 @@ fn stat_pipe_closed_after_first_line_stops_at_once() {
         Stdio::null(),
     );
     assert_eq!(full.status.code(), Some(0));
-    let full_len = fs::metadata(tmp.0.join("ref.00.idx")).unwrap().len();
+    let full_bytes = fs::read(tmp.0.join("ref.00.idx")).unwrap();
+    let full_len = full_bytes.len() as u64;
     fs::remove_file(tmp.0.join("ref.00.idx")).unwrap();
 
     let mut child = losat_cmd(
@@ -559,9 +685,97 @@ fn stat_pipe_closed_after_first_line_stops_at_once() {
         "creating idx.00.idx..."
     );
     assert_eq!(index_files(&tmp.0), ["idx.00.idx"]);
-    let partial_len = fs::metadata(tmp.0.join("idx.00.idx")).unwrap().len();
+    let partial_bytes = fs::read(tmp.0.join("idx.00.idx")).unwrap();
+    let partial_len = partial_bytes.len() as u64;
     assert!(
-        partial_len < full_len,
-        "expected partial volume ({partial_len} < {full_len})"
+        partial_len >= HEADER_LEN && partial_len < full_len,
+        "expected partial volume in [{HEADER_LEN}, {full_len}), got {partial_len}"
+    );
+    assert!(
+        (partial_len - HEADER_LEN).is_multiple_of(STREAM_BLOCK),
+        "expected header + multiple of 8192 bytes, got {partial_len}"
+    );
+    assert_eq!(partial_bytes, full_bytes[..partial_bytes.len()]);
+}
+
+/// Opens a named FIFO for reading and drops the reader as soon as the writer opens it.
+fn spawn_fifo_closer(fifo: &Path) -> (Arc<AtomicBool>, thread::JoinHandle<()>) {
+    let opened = Arc::new(AtomicBool::new(false));
+    let opened_flag = Arc::clone(&opened);
+    let path = fifo.to_path_buf();
+    let handle = thread::spawn(move || {
+        if let Ok(reader) = File::open(&path) {
+            opened_flag.store(true, Ordering::SeqCst);
+            drop(reader);
+        }
+    });
+    (opened, handle)
+}
+
+fn finish_fifo_closer(fifo: &Path, opened: &AtomicBool, handle: thread::JoinHandle<()>) {
+    if !opened.load(Ordering::SeqCst) {
+        let _ = OpenOptions::new().write(true).open(fifo);
+    }
+    handle.join().unwrap();
+}
+
+fn run_old_style_fifo_case(tag: &str, fasta: &str, fifo_name: &str, expected_files: &[&str]) {
+    let dir = TempDir::new(tag);
+    fs::write(dir.0.join("in.fa"), fasta).unwrap();
+    let fifo = dir.0.join(fifo_name);
+    assert!(Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .expect("mkfifo")
+        .success());
+    let (opened, handle) = spawn_fifo_closer(&fifo);
+    let out = makembindex(
+        &dir.0,
+        &[
+            "-old_style_index",
+            "true",
+            "-iformat",
+            "fasta",
+            "-input",
+            "in.fa",
+            "-output",
+            "idx",
+            "-nmer",
+            "8",
+            "-idmap",
+            "true",
+        ],
+        Stdio::null(),
+    );
+    finish_fifo_closer(&fifo, &opened, handle);
+    assert!(opened.load(Ordering::SeqCst), "{tag}: FIFO was not opened");
+    assert_eq!(out.status.code(), Some(0), "{tag}");
+    assert_eq!(stderr_text(&out), "creating idx.00.idx...", "{tag}");
+    assert_eq!(index_files(&dir.0), expected_files, "{tag}");
+}
+
+#[test]
+fn volume_and_idmap_named_fifos_stop_at_once() {
+    // 1. Volume `.00.idx` is a named FIFO (>1 MiB volume exceeds any kernel pipe buffer so
+    //    closing the reader on open always hits BrokenPipe, stopping before done, .map, .01.idx).
+    run_old_style_fifo_case(
+        "fifo-idx",
+        &pseudo_fasta(1, 250_000),
+        "idx.00.idx",
+        &["idx.00.idx"],
+    );
+
+    // 2. `.00.idx.map` is a named FIFO (~200 KiB of titles exceeds the kernel pipe buffer so
+    //    closing the reader on open always hits BrokenPipe, stopping before done and .01.idx).
+    let mut many = String::new();
+    let pad = "x".repeat(60);
+    for i in 0..2500 {
+        many.push_str(&format!(">seq_{i:05}_{pad}\nACGTACGTACGT\n"));
+    }
+    run_old_style_fifo_case(
+        "fifo-map",
+        &many,
+        "idx.00.idx.map",
+        &["idx.00.idx", "idx.00.idx.map"],
     );
 }

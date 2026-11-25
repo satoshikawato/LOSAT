@@ -43,7 +43,15 @@ impl SuperHeader {
         else {
             return false;
         };
-        let mut stream = crate::ncbi_app::files::Ostream::new(&mut file);
+        self.save_to(&mut file)
+    }
+
+    /// Writes the version-1 super header to `writer` through `Ostream`; returns whether the write
+    /// met a closed pipe where SIGPIPE ends NCBI's process.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:196-203
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:241-252
+    pub(crate) fn save_to(&self, writer: &mut dyn Write) -> bool {
+        let mut stream = crate::ncbi_app::files::Ostream::new(writer);
         let mut out = std::io::BufWriter::new(&mut stream);
         for word in [0u32, 1, self.num_seq, self.num_vol] {
             if out.write_all(&word.to_le_bytes()).is_err() {

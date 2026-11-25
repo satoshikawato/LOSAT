@@ -21,6 +21,13 @@ use crate::ncbi_app::files::{ends_like_sigpipe, Ostream};
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1537
 const MEGABYTE: u64 = 1024 * 1024;
 
+/// Block size in bytes that NCBI's binary `CNcbiOfstream` writes to a regular index volume after
+/// `SaveHeader` flushes the 44-byte header (`dbindex_factory.cpp:1633`).
+const INDEX_STREAM_BLOCK: u64 = 8192;
+
+/// Number of 4-byte index words in one [`INDEX_STREAM_BLOCK`].
+const INDEX_BLOCK_WORDS: usize = (INDEX_STREAM_BLOCK / 4) as usize;
+
 /// `CSubjectMap_Factory_Base::CMaskHelper`: an iterator over the masked intervals of a sequence
 /// (the packed locations of its `mask_locs_`, each a list of `(from, to)`), which `In` moves
 /// forward and `Adjust` back, as NCBI's does (the chunks of a long sequence overlap).
@@ -823,10 +830,12 @@ impl OffsetData {
             }
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1408-1436
-        // Each line of `-stat` is flushed at its end; through `Ostream`, a non-pipe write failure
-        // sets the stream bad and drops the rest while the index finishes, whereas a closed pipe
-        // outside Windows ends the run at once (`ends_like_sigpipe`;
-        // PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+        // Through `Ostream`, a non-pipe write failure sets the stream bad and drops the rest while
+        // the index finishes, whereas a closed pipe outside Windows ends the run at once
+        // (`ends_like_sigpipe`; PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+        // Buffered `-stat` lines are flushed right before each 8 KiB block boundary of `.NN.idx`
+        // (and once after the loop) so a closed pipe stops in the same 8 KiB block as NCBI's
+        // per-line flush without issuing one write syscall per Nmer.
         let mut stat_file = options
             .stat_file_name
             .as_deref()
@@ -834,10 +843,24 @@ impl OffsetData {
         let mut stats = stat_file
             .as_mut()
             .map(|file| Ostream::new(file as &mut dyn Write));
-        let mut stat_line = Vec::new();
+        let mut stat_buf = Vec::new();
         write_word(os, self.total)?;
         let mut tot: Word = 0;
+        let flush_stats =
+            |stats: &mut Option<Ostream<'_>>, buf: &mut Vec<u8>| -> std::io::Result<()> {
+                if !buf.is_empty() {
+                    if let Some(stats) = stats {
+                        stats.write_all(buf)?;
+                        stats.flush()?;
+                    }
+                    buf.clear();
+                }
+                Ok(())
+            };
         for (nmer, &size) in self.sizes.iter().enumerate() {
+            if (nmer + 2).is_multiple_of(INDEX_BLOCK_WORDS) {
+                flush_stats(&mut stats, &mut stat_buf)?;
+            }
             if size != 0 {
                 tot = tot.wrapping_add(1);
                 write_word(os, tot)?;
@@ -845,15 +868,11 @@ impl OffsetData {
                 write_word(os, 0)?;
             }
             tot = tot.wrapping_add(size);
-            if size > 0 {
-                if let Some(stats) = &mut stats {
-                    stat_line.clear();
-                    let _ = writeln!(stat_line, "{nmer:>10x} {size}");
-                    stats.write_all(&stat_line)?;
-                    stats.flush()?;
-                }
+            if size > 0 && stats.as_ref().is_some_and(|stream| !stream.bad()) {
+                let _ = writeln!(stat_buf, "{nmer:>10x} {size}");
             }
         }
+        flush_stats(&mut stats, &mut stat_buf)?;
         write_word(os, self.total)?;
         write_word(os, 0)?;
         let mut later = Vec::new();
@@ -969,13 +988,14 @@ pub(crate) fn make_index(
         i = i.wrapping_add(1);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1735-1755
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1604-1634
     // NCBI opens the volume as a binary output stream without exceptions: a file that does not
-    // open, or a non-pipe write failure, is not reported (`Ostream` drops the remaining writes). A
-    // closed pipe on the volume or on `-stat` ends NCBI's process by SIGPIPE (`ends_like_sigpipe`):
-    // stop the run at once (`Stop::ClosedPipe`).
+    // open, or a non-pipe write failure, is not reported (`Ostream` drops the remaining writes).
+    // `SaveHeader` flushes the header to the stream before `OffsetData::Save`, and the subsequent
+    // writes reach a regular file in 8 KiB blocks; on a closed pipe (`Stop::ClosedPipe`), cutting
+    // a regular volume back to the header plus complete 8 KiB blocks matches what NCBI's
+    // SIGPIPE-ended process leaves on disk.
     let outcome = if let Ok(mut file) = File::create(crate::utils::os_bytes::path_of_bytes(oname)) {
-        let mut stream = Ostream::new(&mut file);
-        let mut os = BufWriter::with_capacity(1 << 20, &mut stream);
         let header = Header::of(
             options.legacy,
             options.hkey_width as Word,
@@ -983,11 +1003,31 @@ pub(crate) fn make_index(
             options.ws_hint as Word,
             [start, start_chunk, *stop, stop_chunk],
         );
-        header
-            .write(&mut os)
-            .and_then(|()| offset_data.save(&mut os, options))
-            .and_then(|()| subject_map.save(&mut os))
-            .and_then(|()| os.flush())
+        let mut head = Vec::with_capacity(super::format::HEADER_SIZE);
+        let _ = header.write(&mut head);
+        let outcome = {
+            let mut stream = Ostream::new(&mut file);
+            stream
+                .write_all(&head)
+                .and_then(|()| stream.flush())
+                .and_then(|()| {
+                    let mut os = BufWriter::with_capacity(1 << 20, &mut stream);
+                    offset_data
+                        .save(&mut os, options)
+                        .and_then(|()| subject_map.save(&mut os))
+                        .and_then(|()| os.flush())
+                })
+        };
+        if matches!(&outcome, Err(error) if ends_like_sigpipe(error)) {
+            if let Ok(meta) = file.metadata() {
+                let head_len = head.len() as u64;
+                if meta.is_file() && meta.len() >= head_len {
+                    let blocks = (meta.len() - head_len) / INDEX_STREAM_BLOCK * INDEX_STREAM_BLOCK;
+                    let _ = file.set_len(head_len + blocks);
+                }
+            }
+        }
+        outcome
     } else {
         offset_data.save(&mut std::io::sink(), options)
     };

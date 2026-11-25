@@ -15,3 +15,6 @@
   report before the refusal, nor did `blastn` where it writes its reports after the search (with
   `-dbsize` near NCBI's 64-bit bound or a negative `CHUNK_SIZE`), and no program wrote all of those
   messages.
+- Database searches: the outfmt 0 65-byte description-id length check measures the Seq-align id written
+  by NCBI's catch path whenever generating the description line throws (a definition line without a
+  Seq-id, or an undecodable title or source name) for both protein and nucleotide databases.

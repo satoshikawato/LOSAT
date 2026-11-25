@@ -4540,7 +4540,13 @@ impl BatchReports<'_> {
                     tabular: formats.iter().any(|format| format.tabular_reads_subject()),
                     stops_at_failed_lookup: formats.iter().any(|format| {
                         format.is_tabular()
-                            && crate::report::tabular::may_stop_at_failed_lookup(
+                            && crate::report::tabular::stops_at_lookup_failure(
+                                format.tabular_spec(),
+                            )
+                    }),
+                    stops_at_lineless: formats.iter().any(|format| {
+                        format.is_tabular()
+                            && crate::report::tabular::stops_at_lineless_accession(
                                 format.tabular_spec(),
                             )
                     }),

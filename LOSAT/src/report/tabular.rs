@@ -1068,6 +1068,22 @@ pub fn may_stop_at_failed_lookup(spec: Option<&TabularSpec>) -> bool {
     spec.is_none_or(TabularSpec::may_stop_at_failed_lookup)
 }
 
+/// Whether a tabular report of `spec` (`None`: the default fields) can stop at a row whose
+/// subject lookup throws (`sacc`, `saccver`, default fields, or `staxid`), apart from a
+/// lineless-only definition line (`stops_at_lineless_accession`).
+pub fn stops_at_lookup_failure(spec: Option<&TabularSpec>) -> bool {
+    spec.is_none_or(|spec| {
+        spec.writes_rows()
+            && spec.has_any(&[SubjectAccession, SubjectAccessionVersion, SubjectTaxId])
+    })
+}
+
+/// Whether a tabular report of `spec` (`None`: the default fields) stops at a subject that has a
+/// definition line without a Seq-id (`LookupFailure::lineless`, `failed_lookup_stop`: `sallacc`).
+pub fn stops_at_lineless_accession(spec: Option<&TabularSpec>) -> bool {
+    spec.is_some_and(|spec| spec.writes_rows() && spec.has(SubjectAllAccessions))
+}
+
 /// The check, before a tabular report of `spec` (`None`: the default fields) writes the rows of
 /// `result_sets` (each the indices of its subjects in row order, a subject's run of rows once,
 /// one set per query or psiblast round), that NCBI has a result for each row whose subject

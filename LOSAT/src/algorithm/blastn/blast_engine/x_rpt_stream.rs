@@ -51,35 +51,38 @@
 //!   of queries without letters, `ErrorAfterInvalidBatches`, a header file that cannot be read)
 //!   comes after the reports of the batches before, without the epilog, in both: here they were
 //!   written when the loop took them, so the error paths write only what follows them (the
-//!   batch's title and reader warnings). An error that LOSAT raises where NCBI would not stop
-//!   (LOSAT's refusals) is written without the reports of the batches before by the off path,
-//!   and after them with the switch (drop-in DECISIONS 44: as NCBI reads them, the stored data
-//!   and the report ids of a batch's reported subjects are checked in that batch, nothing is read
-//!   before the search). These are the refusals of a reported subject: with `-db` a definition
-//!   line that does not read as the reports read it, holds a byte outside ' ' ..= '~' or gives no
-//!   tabular subject id (`database::reported_subjects`), with parsed Seq-ids a header that the
-//!   reports refuse and two sequences that outfmt 0 would join (`check_reported_parsed`,
-//!   `refuse_joined_hits`), one that the batches' prefetch reads where no report reads it (the
-//!   Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, a table of fields that read nothing of the
-//!   subject) and cannot read as NCBI does (`check_prefetched_parsed`), ambiguity data that the
-//!   traceback cannot decode (`traceback_listed`), a taxid or a lookup of the taxonomy database
-//!   that the prefetch refuses (`batch_prefetch`), and what a custom
-//!   tabular report reads (the taxonomy fields, the names of the taxonomy database, `sall*`); with
-//!   a subject set a report id (`tabular_subject_ids`; the ids are made once where LOSAT refuses
-//!   none, `SubjectCache`) and with `-parse_deflines` the parsed ids that a custom tabular report
-//!   shows. Each is made by the report call (or the search) of the batch before that batch writes
-//!   a byte, so the output is the reports of the batches before (without the epilog) and their
-//!   query warnings, then the refusal and its exit status (the search's refusals, of the titles'
-//!   reading, the traceback and the prefetch, come after the batch's title warnings, as without
-//!   the switch; where several sequences are refused, the one named is the batch's first, not the
-//!   search's). The parsed ids of `-parse_deflines` without `sall*` are refused while the rows are
-//!   made (`TabularSubjects::values`), after the rows of the queries before in both paths, so
-//!   their bytes do not change. An error of NCBI's of the taxonomy database or of reading the
-//!   database that a later batch's prefetch or report meets likewise comes after the reports of
-//!   the batches before, as NCBI's loop writes them (without the switch after none); any other
-//!   input that LOSAT does not refuse gives the same bytes either way. Outfmt 17 writes its
-//!   document only at the end (`SamDocument::finish`), so a refusal in a later batch finds nothing
-//!   written there either.
+//!   batch's title and reader warnings). A tabular failed-lookup refusal (`FailedLookupRefusal`,
+//!   including a subject set's refused tabular id from `tabular_subject_ids`) comes after the
+//!   reports of the batches before on both paths (off and on), matching NCBI. Any other error
+//!   that LOSAT raises where NCBI would not stop (LOSAT's other refusals: stored title, ambiguity
+//!   data, prefetch, parsed Seq-id, taxonomy record, and the like) is written without the reports
+//!   of the batches before by the off path, and after them with the switch (drop-in DECISIONS 44:
+//!   as NCBI reads them, the stored data and the report ids of a batch's reported subjects are
+//!   checked in that batch, nothing is read before the search). These are the refusals of a
+//!   reported subject: with `-db` a definition line that does not read as the reports read it,
+//!   holds a byte outside ' ' ..= '~' or gives no tabular subject id (`database::reported_subjects`),
+//!   with parsed Seq-ids a header that the reports refuse and two sequences that outfmt 0 would
+//!   join (`check_reported_parsed`, `refuse_joined_hits`), one that the batches' prefetch reads
+//!   where no report reads it (the Seq-annots with `PRE_FETCH_SEQS_LIMIT=2147483647`, a table of
+//!   fields that read nothing of the subject) and cannot read as NCBI does
+//!   (`check_prefetched_parsed`), ambiguity data that the traceback cannot decode
+//!   (`traceback_listed`), a taxid or a lookup of the taxonomy database that the prefetch refuses
+//!   (`batch_prefetch`), and what a custom tabular report reads (the taxonomy fields, the names of
+//!   the taxonomy database, `sall*`); with a subject set a report id (`tabular_subject_ids`; the
+//!   ids are made once where LOSAT refuses none, `SubjectCache`) and with `-parse_deflines` the
+//!   parsed ids that a custom tabular report shows. Each is made by the report call (or the search)
+//!   of the batch before that batch writes a byte, so the output is the reports of the batches
+//!   before (without the epilog) and their query warnings, then the refusal and its exit status
+//!   (the search's refusals, of the titles' reading, the traceback and the prefetch, come after
+//!   the batch's title warnings, as without the switch; where several sequences are refused, the
+//!   one named is the batch's first, not the search's). The parsed ids of `-parse_deflines`
+//!   without `sall*` are refused while the rows are made (`TabularSubjects::values`), after the
+//!   rows of the queries before in both paths, so their bytes do not change. An error of NCBI's of
+//!   the taxonomy database or of reading the database that a later batch's prefetch or report meets
+//!   likewise comes after the reports of the batches before, as NCBI's loop writes them (without
+//!   the switch after none); any other input that LOSAT does not refuse gives the same bytes either
+//!   way. Outfmt 17 writes its document only at the end (`SamDocument::finish`), so a refusal in a
+//!   later batch finds nothing written there either.
 //!   BLAST XML has refusals of its own (a `-db` name, query title or id, or a title of a subject
 //!   with a hit that cannot be written, `blast_xml.rs`), made per report call; `-outfmt 5` is
 //!   never streamed (`Off::Xml`, any number of batches). The refusals of the options and the

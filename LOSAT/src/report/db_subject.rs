@@ -1821,6 +1821,43 @@ impl ParsedSubject {
             .any(|defline| defline.ids.is_empty())
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1585-1604
+    /// Whether `description_line` can take NCBI's `catch` branch (whose start is the Seq-align
+    /// id's, not the display id's): a definition line without a Seq-id, or a non-ASCII byte in the
+    /// target's title, source name, or empty-title PDB/patent id fields (the only inputs for which
+    /// `html_decode` can return `UnknownEncoding`).
+    pub fn description_may_throw(&self) -> bool {
+        if self.has_lineless_line() {
+            return true;
+        }
+        let title = self.target().title.as_deref().unwrap_or_default();
+        if !title.is_ascii() {
+            return true;
+        }
+        if !title.iter().all(|byte| b".,;~ ".contains(byte)) {
+            return false;
+        }
+        if self
+            .source
+            .name()
+            .ok()
+            .flatten()
+            .is_some_and(|name| !name.is_ascii())
+        {
+            return true;
+        }
+        self.target().ids.iter().any(|id| match id {
+            ParsedSeqId::Pdb(pdb) => pdb.chain_id.as_deref().is_some_and(|s| !s.is_ascii()),
+            ParsedSeqId::Patent(patent) => {
+                let number = match &patent.cit.id {
+                    PatentNumber::Number(number) | PatentNumber::AppNumber(number) => number,
+                };
+                !patent.cit.country.is_ascii() || !number.is_ascii()
+            }
+            _ => false,
+        })
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4748-4760
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-536
     // `GetDisplayIds` takes the label of each line's best id up to the line that holds the

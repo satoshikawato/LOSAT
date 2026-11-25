@@ -4068,10 +4068,15 @@ pub(crate) fn check_shown_parsed_subject(
     program: &str,
 ) -> Result<()> {
     let generated = subject.heading_generates_title();
-    // The description line is made once, where its title is checked (protein) or where a line
-    // without a Seq-id can make it the line of NCBI's `catch`, whose start is the Seq-align id's
-    // (`description_line`); any other subject's start is its display id's, as it was.
-    let line = (protein || subject.has_lineless_line()).then(|| subject.description_line(protein));
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1586-1600
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:895-917
+    // The description line is made once, where its title is checked (protein) or where
+    // `description_line` can take NCBI's `catch` branch (`description_may_throw`: a line without
+    // a Seq-id, or a non-ASCII title/source that can throw `UnknownEncoding`), whose start is the
+    // Seq-align id's; for any other nucleotide subject `description_line` cannot throw, so its
+    // start is its display id's (`description_start`).
+    let line =
+        (protein || subject.description_may_throw()).then(|| subject.description_line(protein));
     if let Some((_, title, _)) = line.as_ref().filter(|_| protein) {
         let heading_reads_past_end = generated
             && subject
@@ -4152,10 +4157,14 @@ pub(crate) struct ParsedShown {
     pub(crate) taxonomy: bool,
     /// The subject ids that the tabular formats print (`ParsedSubject::check_printed_word`).
     pub(crate) words: crate::report::tabular::PrintedIds,
-    /// Whether a tabular format can stop at a row whose subject lookups fail
-    /// (`report::tabular::may_stop_at_failed_lookup`: `sacc`, `saccver`, the default fields, a
+    /// Whether a tabular format can stop at a row whose subject lookup throws
+    /// (`report::tabular::stops_at_lookup_failure`: `sacc`, `saccver`, the default fields, a
     /// first row's `staxid`), so that such a sequence may be refused (`reports_may_refuse`).
     pub(crate) stops_at_failed_lookup: bool,
+    /// Whether a tabular format stops at a subject that has a definition line without a Seq-id
+    /// (`report::tabular::stops_at_lineless_accession`: `sallacc`), so that such a sequence may be
+    /// refused (`reports_may_refuse`).
+    pub(crate) stops_at_lineless: bool,
     /// Whether the batches' prefetch reads the subjects by their Seq-align ids (the first
     /// format's: outfmt 0, 5, 6, 7, 10, 17 and 20, with `PRE_FETCH_SEQS_LIMIT=2147483647` also the
     /// Seq-annots 8, 9 and 12, [`prefetches_subjects`]), unless `PRE_FETCH_SEQS_LIMIT` turns it
@@ -4526,10 +4535,19 @@ pub(crate) fn reports_may_refuse(
                 )
                 .map_err(|_| ReportRefusal::Headers)?;
                 // A sequence whose lookups fail (`ParsedSubject::lookup_failure`), where a field
-                // list can stop at it.
+                // list can stop at it (`failed_lookup_stop`: `sacc`/`saccver`/default/`staxid` at
+                // a thrown lookup, `sallacc` at a definition line without a Seq-id).
                 if shown.tabular
-                    && shown.stops_at_failed_lookup
-                    && !matches!(subject.lookup_failure(protein), Ok(None))
+                    && (shown.stops_at_failed_lookup || shown.stops_at_lineless)
+                    && match subject.lookup_failure(protein) {
+                        Ok(None) => false,
+                        Ok(Some(failure)) => {
+                            (shown.stops_at_failed_lookup
+                                && (failure.subject_id || failure.all_ids))
+                                || (shown.stops_at_lineless && failure.lineless)
+                        }
+                        Err(_) => true,
+                    }
                 {
                     return Err(ReportRefusal::Headers);
                 }

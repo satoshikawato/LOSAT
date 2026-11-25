@@ -3392,3 +3392,89 @@ fn the_organism_report_refuses_a_line_without_a_seq_id_and_a_set_without_any_is_
         .unwrap_err()
         .contains("internal error"));
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1586-1600
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:895-917
+// When a subject's description title throws (`UnknownEncoding`), NCBI's catch puts the Seq-align
+// id on the description line and pads/wraps using that id rather than the display id. The 65-byte
+// length check in `check_shown_parsed_subject` must measure the Seq-align id for both protein and
+// nucleotide databases (display <= 65 & alignment > 65 refuses; display > 65 & alignment <= 65
+// passes), and must also cover an empty nucleotide title whose source name throws.
+#[test]
+fn thrown_description_title_measures_seq_align_id_for_65_byte_limit() {
+    use crate::algorithm::common::database::check_shown_parsed_subject;
+    use crate::report::defline::SourceTaxname;
+    let oid = || crate::seqdb::Oid::of_unrestricted(0);
+    let long_acc = "X".repeat(66);
+    let long_local = ParsedSeqId::Local(ObjectId::Str(vec![b'a'; 66]));
+
+    let make = |ids: Vec<ParsedSeqId>, title: Option<&[u8]>, taxid: Option<i32>| {
+        ParsedSubject::new(DeflineSet {
+            deflines: vec![BlastDefline {
+                ids,
+                title: title.map(|bytes| bytes.to_vec()),
+                taxid,
+                ..BlastDefline::default()
+            }],
+            utf8: false,
+        })
+        .unwrap()
+    };
+
+    for (protein, program) in [(true, "BLASTP"), (false, "BLASTN")] {
+        // Case 1: display id <= 65 (`NP_000001.1`), Seq-align id > 65 (`lcl|aaaa...`).
+        let long_align_throwing = make(
+            vec![long_local.clone(), gb("NP_000001", 1)],
+            Some(b"bad\x81"),
+            None,
+        );
+        assert!(long_align_throwing.description_start().len() <= 65);
+        assert!(long_align_throwing.description_line(protein).0.len() > 65);
+        let err = check_shown_parsed_subject(&long_align_throwing, protein, false, oid, program)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("longer than 65 bytes"), "{program}: {err}");
+
+        let long_align_ok = make(
+            vec![long_local.clone(), gb("NP_000001", 1)],
+            Some(b"ok"),
+            None,
+        );
+        assert!(check_shown_parsed_subject(&long_align_ok, protein, false, oid, program).is_ok());
+
+        // Case 2: display id > 65 (`XXXX...`), Seq-align id <= 65 (`gi|777`).
+        let long_display_throwing = make(
+            vec![ParsedSeqId::Gi(777), gb(&long_acc, 1)],
+            Some(b"bad\x81"),
+            None,
+        );
+        assert!(long_display_throwing.description_start().len() > 65);
+        assert!(long_display_throwing.description_line(protein).0.len() <= 65);
+        assert!(
+            check_shown_parsed_subject(&long_display_throwing, protein, false, oid, program)
+                .is_ok(),
+            "{program}: throwing title uses short Seq-align id"
+        );
+
+        let long_display_ok = make(
+            vec![ParsedSeqId::Gi(777), gb(&long_acc, 1)],
+            Some(b"ok"),
+            None,
+        );
+        let err = check_shown_parsed_subject(&long_display_ok, protein, false, oid, program)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("longer than 65 bytes"), "{program}: {err}");
+    }
+
+    // Empty nucleotide title whose source name throws `UnknownEncoding`: same rule.
+    let nucl_source_throwing = make(vec![long_local, gb("NM_000001", 1)], Some(b""), Some(9606))
+        .with_source(false, |_| {
+            SourceTaxname::Named(std::sync::Arc::from(&b"bad\x81"[..]))
+        });
+    assert!(nucl_source_throwing.description_may_throw());
+    let err = check_shown_parsed_subject(&nucl_source_throwing, false, true, oid, "BLASTN")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("longer than 65 bytes"), "{err}");
+}

@@ -51,6 +51,10 @@ pub struct HspRecord<'a> {
     /// translated query), in the searched letters.
     pub q_offset: i32,
     pub q_end: i32,
+    /// The query letters that `-subject`'s Seq-loc mapper left out of the HSP (the records of
+    /// BLASTX and TBLASTN come mapped, `serial::seqalign::mapped_script`: an end `Ins`), which its
+    /// `hsp_percent_coverage` still counts (`MappedScript::query_left_out`); 0 for every other HSP.
+    pub q_left_out: i32,
     /// `subject.offset` and `subject.end` (exclusive), likewise for the subject.
     pub s_offset: i32,
     pub s_end: i32,

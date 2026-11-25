@@ -1,0 +1,314 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "gp",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 544
+        },
+        {
+          id str "blast_score",
+          value int 544
+        },
+        {
+          id str "e_value",
+          value real { 288603679992651, 10, -92 }
+        },
+        {
+          id str "bit_score",
+          value real { 214156801579084, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 100
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 100
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_1",
+          gi 101
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          100
+        },
+        strands {
+          unknown,
+          unknown
+        }
+      },
+      ext {
+        {
+          type str "use_this_seqid",
+          data {
+            {
+              label str "SEQIDS",
+              num 2,
+              data strs {
+                "gi:101",
+                "gi:102"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "gp",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 538
+        },
+        {
+          id str "blast_score",
+          value int 538
+        },
+        {
+          id str "e_value",
+          value real { 169631173245726, 10, -91 }
+        },
+        {
+          id str "bit_score",
+          value real { 21184560412358, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 100
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 100
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_6",
+          gi 108
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          100
+        },
+        strands {
+          unknown,
+          unknown
+        }
+      },
+      ext {
+        {
+          type str "use_this_seqid",
+          data {
+            {
+              label str "SEQIDS",
+              num 1,
+              data strs {
+                "gi:108"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "gp",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 541
+        },
+        {
+          id str "blast_score",
+          value int 541
+        },
+        {
+          id str "e_value",
+          value real { 511795574935378, 10, -92 }
+        },
+        {
+          id str "bit_score",
+          value real { 213001202851332, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 100
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 100
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_11",
+          gi 113
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          100
+        },
+        strands {
+          unknown,
+          unknown
+        }
+      },
+      ext {
+        {
+          type str "use_this_seqid",
+          data {
+            {
+              label str "SEQIDS",
+              num 2,
+              data strs {
+                "gi:113",
+                "gi:115"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

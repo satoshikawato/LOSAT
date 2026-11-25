@@ -1215,6 +1215,32 @@ Rows `db.tm.bp.fast.*`, `db.tm.bp.2vol.*` and `db.tm.*.cache*`, all with `BLASTD
   is `gb|CCC00003.1|` (150); built as above (`for v in tm_hdg_a tm_hdg_b`). Each Seq-align id gives that sequence's
   first line, so the Bioseq of either load holds the other's id; the prefetch still loads both blobs (it asks its scope
   only for ids resolved before it): the offset error twice. Rows `db.tm.hd.g.*`.
+- `tm_hdg2.pal` (`DBLIST tm_hdg_a tm_hdg_c`), `tm_hdg2_q.faa`, line NP item O4b2-8: reuses `tm_hdg_a` (protein P1) and
+  adds `tm_hdg_c` (`gb|XYZ00002.1|`, taxid 562, unrelated 130-aa protein P2), built with `makeblastdb -in tm_hdg_c.faa
+  -dbtype prot -out tm_hdg_c -title "tm hdg c" -parse_seqids -taxid_map tm_hdg_c.map`. `tm_hdg2_q.faa` holds P1 then P2:
+  with `BATCH_SIZE=1`, batch 1 prefetches `gi|5` and resets NCBI's scope, so batch 2's prefetch of `gb|XYZ00002.1|` loads
+  fresh (the offset error twice; row `db.tm.hd.g2.bp.qe.q2b1.6`).
+- `tm_cache_ngi`, `tm_cache_ngi_q1.fna`, and `tm_cache_ngi_q2.fna`, line NP item O4b2-8: nucleotide counterpart of
+  `tm_cache_gi` (12 copies of the 390-bp coding sequence of P1 with the same gi numbers and taxids 99990/150, built with
+  `makeblastdb -in tm_cache_ngi.fna -dbtype nucl -out tm_cache_ngi -title "tm cache ngi" -parse_seqids -taxid_map
+  tm_cache_ngi.map`) and one/two query copies, for two-batch outfmt 5 (scope kept) vs outfmt 6 (scope reset) rows across
+  `blastn`, `tblastn`, `tblastx`, and `blastx` (`db.tm.*.cachengi.*`, `db.tm.bx.cachegi.*`, `db.tm.bp.cachegi.q2b1.*`,
+  `db.tm.psi.cachegi.*`).
+- `tm_cache_gi12a` (12 proteins: 6 copies of P1 `gi|1..6` and 6 copies of P2 `gi|7..12`, alternating taxids 99990 and 150)
+  and `tm_gi21` (21 copies of P1 `gi|1..21`, alternating 99990 and 150), built with `makeblastdb -dbtype prot -parse_seqids
+  -taxid_map`, plus `nz_qcut.faa` and `nz_qcut.fna` (a non-hitting ASCII `>q0 none` query followed by `nz_q1` with a
+  non-ASCII UTF-8 query title `>q1 a\xc3\xa9b z`), line NP item O4b2-8 (L6): 11-20 sequence two-batch rows
+  (`db.tm.bp.cachegi12a.q2b1.lim0.6`, `db.tm.bp.cachegi.q2b1.lim0.*`), >20 sequence rows (`db.tm.bp.gi21.*`: outfmt 5 pins
+  all 21 prefetched blobs while outfmt 6 and prefetch-off report reads are refused), and end-to-end BLAST XML stream-cut
+  refusals (`db.nz.bp.c150.lim0.xmlcut.5.reject` anchored by `db.nz.bp.xmlcut.good.5`, and
+  `db.nz.bx.c150.lim0.xmlcut.5.reject`).
+- `tm_stop_gi`, `tm_stop_u`, `tm_stop_tie`, and `tm_stop_q2.faa`, line NP item O4b2-8 (b): `tm_stop_gi` holds 11 copies of
+  P1 (`gi|5,1,3` taxid 99990, `gi|6,2,4` taxid 150, `ref|NP_000008.1|` taxid 99990, `gi|9..12` alternating 99990/150;
+  `-parse_seqids`), `tm_stop_u` holds one unparsed v5 sequence of P2 (`-taxid 9606`, no `-parse_seqids`, so no accession
+  table), `tm_stop_tie` adds `gi|8` (taxid 99990, same packed key 8 as `ref|NP_000008.1|`), and `tm_stop_q2.faa` holds P2
+  then P1. Mixed with `tm_stop_u`, `gi|1..6` surely load before `ref|NP_000008.1|` stops with exit 2 and 3 offset errors
+  (`db.tm.bp.stopgi.{6,0,16,q2b1.6}`), while `tm_stop_tie`'s tied key varies across heap layouts and is refused
+  (`db.tm.bp.stopgi.tie.6.reject`).
 
 Rows `db.tm.psi.*` and `db.tm.bp.off0.*` (line DBID, item P1): psiblast's prefetch, and `PRE_FETCH_SEQS_LIMIT`, which turns
 NCBI's prefetch of a query batch off when it is 0 or below the batch's number of Seq-aligns (one per HSP; the count of
@@ -2793,3 +2819,11 @@ makeblastdb -in in/nmix_ids.fna -dbtype nucl -parse_seqids -out db/nmix_ids
   reads of `-html`): `rep/.ncbirc` (`[BLASTFMTUTIL]` with `PROTOCOL=https:` twice, `Found multiple ... settings`) and
   `bom/.ncbirc` (the one byte 0xEF, the start of a UTF-8 byte order mark, `Error reading the registry after line 1`,
   survey T2's `bom` file).
+
+Rows `db.html.rps.*` and `db.html.rpstbn.*` (line RG T4c, 2026-11-24; `../db_search_manifest/rpsblast.html.tsv`,
+`rpstblastn.html.tsv`): `-html` in rpsblast and rpstblastn, with the `rc/` directories above,
+`../seqdb/taxdb/good`, `../fasta/rps` and the profile databases of `rps/`.
+`rps/hx.{phr,pin,pdb,pos}.gz` are the files of `rps_mini` built with profile 101 under `ref|XP_000101.1|` and a title that holds `<`, `>`, `&` and double
+quotes, profile 102 under `pdb|1ABC|A` and profile 103 under `gnl|CDD|103` with the entities `&amp;` and `&lt;b&gt;` in its title (`rps/build.sh`; its other
+files are the same as `rps_mini`'s), searched as `rps-gz:rps_mini!phr=hx.phr.gz!pin=hx.pin.gz!pdb=hx.pdb.gz!pos=hx.pos.gz`: the profile titles of an RPS
+database reach the links of NCBI's HTML formatter through a reader of their own.

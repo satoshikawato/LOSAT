@@ -24,6 +24,7 @@ fn entry(row: &[i32]) -> Entry {
             positive: 0,
             edit_script: Vec::new(),
             composition_method: 0,
+            query_left_out: 0,
         },
     }
 }

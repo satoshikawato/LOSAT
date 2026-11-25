@@ -438,7 +438,7 @@ impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
         int_member(enc, "align-len", 17, hsp.qrow.len() as i32);
         int_member(enc, "gaps", 18, counts.gaps);
         string_member(enc, "qseq", 19, &self.scratch.masked);
-        string_member(enc, "hseq", 20, hsp.srow);
+        string_member(enc, "hseq", 20, counts.hseq(hsp.srow, self.scratch));
         string_member(enc, "midline", 21, &self.scratch.midline);
         enc.end_sequence();
         Ok(())

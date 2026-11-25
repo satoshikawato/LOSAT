@@ -411,7 +411,7 @@ impl BlastpArgs {
             query: args.option_or_default("query")?,
             subject: args.given_option("subject")?,
             db: args.given_option("db")?,
-            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args(args)?,
+            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args_with_ipg(args)?,
             db_mask: crate::blastinput::db_mask::DbMaskArgs::from_args(args)?,
             dbsize: args.given_option("dbsize")?,
             show_gis: args.flag("show_gis"),
@@ -547,8 +547,7 @@ pub struct ResolvedBlastpArgs {
     /// `-show_gis`, for the same reports.
     pub show_gis: bool,
     /// The `-html` links of the outfmt 0 to 4 reports (`blastinput::app::html_links`); None
-    /// without `-html` or any of those formats, and for psiblast and rpsblast, which have no
-    /// `-html`.
+    /// without `-html` or any of those formats, and for psiblast, which has no `-html`.
     pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
     /// outfmt 0 to 4 and 18 reports (the organism report takes no links).
@@ -887,7 +886,7 @@ impl BlastpArgs {
         )?;
         let html = crate::blastinput::app::html_links(
             self.html,
-            crate::blastinput::app::Program::Blastp,
+            self.app.request_kind(),
             self.db.as_deref().map(crate::seqdb::db_argument_name),
             &[choice.number],
         )?;

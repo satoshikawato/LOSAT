@@ -47,6 +47,7 @@ test:
     - makeprofiledb -version
     - rpsbproc -version
     - blastdb_aliastool -version
+    - blastdbcheck -version
     - cleanup-blastdb-volumes.py -version
 
 about:
@@ -65,7 +66,7 @@ about:
     databases (-db), rpsblast and rpstblastn against profile databases (-db),
     and provides makeblastdb, blastdbcmd,
     dustmasker, segmasker, windowmasker, convert2blastmask, makembindex,
-    makeprofiledb, rpsbproc, blastdb_aliastool and cleanup-blastdb-volumes.py. Its output equals NCBI BLAST+ 2.17.0's on the release test set (E-values, bit
+    makeprofiledb, rpsbproc, blastdb_aliastool, blastdbcheck and cleanup-blastdb-volumes.py. Its output equals NCBI BLAST+ 2.17.0's on the release test set (E-values, bit
     scores, coordinates and every output format byte for byte), and it needs no
     BLAST+ installation.
   dev_url: https://github.com/satoshikawato/LOSAT

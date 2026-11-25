@@ -23,6 +23,7 @@ pub const ENTRY_NAMES: [&str; 19] = [
     "makeprofiledb",
     "rpsbproc",
     "blastdb_aliastool",
+    "blastdbcheck",
     "cleanup-blastdb-volumes.py",
 ];
 

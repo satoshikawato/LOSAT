@@ -65,6 +65,7 @@ const PROGRAMS: [&str; 19] = [
     "makeprofiledb",
     "rpsbproc",
     "blastdb_aliastool",
+    "blastdbcheck",
     "cleanup-blastdb-volumes.py",
 ];
 
@@ -299,6 +300,7 @@ fn top_level_help_names_every_program() {
             "makembindex",
             "makeprofiledb",
             "blastdb_aliastool",
+            "blastdbcheck",
             "cleanup-blastdb-volumes.py",
         ] {
             let line = text

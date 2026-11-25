@@ -12,11 +12,11 @@ Put the program name after `losat` and keep the rest of the command line:
 | `makeblastdb -in p.faa -dbtype prot` | `losat makeblastdb -in p.faa -dbtype prot` |
 | `blastdbcmd -db p_db -info` | `losat blastdbcmd -db p_db -info` |
 
-The programs are `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`, `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `cleanup-blastdb-volumes.py` and `rpsbproc`.
+The programs are `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast`, `rpstblastn`, `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck`, `cleanup-blastdb-volumes.py` and `rpsbproc`.
 
 ## Use the NCBI names: `losat --install-shims`
 
-`losat --install-shims [DIR]` makes the 19 program names above in `DIR`. Each name is a link to `losat`, and an executable called by one of these names runs that program. Without `DIR`, the names are made in the folder that holds `losat`.
+`losat --install-shims [DIR]` makes the 20 program names above in `DIR`. Each name is a link to `losat`, and an executable called by one of these names runs that program. Without `DIR`, the names are made in the folder that holds `losat`.
 
 <!-- example: from-ncbi-blast-1 -->
 ```bash

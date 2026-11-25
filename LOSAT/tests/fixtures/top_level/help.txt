@@ -32,6 +32,7 @@ Other programs (losat <program> -help shows each one's options):
   makembindex                 Create a BLAST database index.
   makeprofiledb               Application to create databases for rpsblast, cobalt and deltablast
   blastdb_aliastool           Application to create BLAST database aliases
+  blastdbcheck                BLAST database integrity and validity checking application
   cleanup-blastdb-volumes.py  Remove needless BLAST database volumes.
 
 To call the programs by NCBI's names (blastn, makeblastdb, ...), link them with:

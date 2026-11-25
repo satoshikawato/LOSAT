@@ -7409,20 +7409,23 @@ fn search(
     x_result
 }
 
-/// An error of a query batch after the first that does not depend on the batch's queries
-/// (the Karlin-Altschul error of the scoring options, or the average subject length;
-/// `search_query_batch`, in `context_statistics`): the first batch with a valid query meets it, and NCBI raises it
-/// after the reports of the batches before, whose queries were all invalid.
+/// An error of a query batch after the first that `run_in_pool` reports after writing the
+/// reports of the batches before (`write_batch_reports`, hits included, without the epilog).
+/// Used for set-up errors that do not depend on the queries (Karlin-Altschul scoring error,
+/// average subject length, statistics count of 0, greedy set-up refusals, where earlier batches
+/// had no valid query), for 64-bit search space overflows (`context_statistics::setup_failure`
+/// in set-up or mid-search at `subject_space_overflow.check()`, which depend on query length and
+/// may follow valid batches with hits), and for database read errors (`database_search_error`).
 #[derive(Debug)]
-struct ErrorAfterInvalidBatches(anyhow::Error);
+struct ErrorAfterBatchReports(anyhow::Error);
 
-impl std::fmt::Display for ErrorAfterInvalidBatches {
+impl std::fmt::Display for ErrorAfterBatchReports {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl std::error::Error for ErrorAfterInvalidBatches {}
+impl std::error::Error for ErrorAfterBatchReports {}
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:295-312
 /// A database error of a query batch's search (`database::search_blocks`,
@@ -7430,7 +7433,7 @@ impl std::error::Error for ErrorAfterInvalidBatches {}
 /// search cannot read is NCBI's `BLAST engine error` (`database::PreliminaryReadError`,
 /// local_blast.cpp:240-251), one that the traceback cannot read its `BLAST Database
 /// error`. NCBI raises it in the batch's search, after the outfmt 0 prolog and the reports
-/// of the batches before (`ErrorAfterInvalidBatches`; for the first batch, the prolog of a
+/// of the batches before (`ErrorAfterBatchReports`; for the first batch, the prolog of a
 /// file sink is written here, the others were written before the search). LOSAT's
 /// refusals are errors of their own.
 fn database_search_error(
@@ -7448,7 +7451,7 @@ fn database_search_error(
         return error;
     }
     if !first_batch {
-        return ErrorAfterInvalidBatches(error).into();
+        return ErrorAfterBatchReports(error).into();
     }
     let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
     match write_pairwise_prologs(outputs, output_formats, intro, shown, false) {
@@ -8773,11 +8776,11 @@ fn run_in_pool(
         };
         let batch = match searched {
             Ok(batch) => batch,
-            Err(error) => match error.downcast::<ErrorAfterInvalidBatches>() {
+            Err(error) => match error.downcast::<ErrorAfterBatchReports>() {
                 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:295-318
                 // The reports of the batches before are written, then the error, which
                 // skips `PrintEpilog` (the outfmt 0 footer and outfmt 7's last line).
-                Ok(ErrorAfterInvalidBatches(error)) => {
+                Ok(ErrorAfterBatchReports(error)) => {
                     // EXPERIMENT (LOSAT_X_CSRQSKEEP): as in `write_reports_before`, the keep frees
                     // the `qs` it holds first. No NCBI counterpart (memory only).
                     if let Some(keep) = &x_lut_keep {
@@ -10429,8 +10432,8 @@ fn refused_batch_setup_error(
     };
     set_up
         .err()
-        .map(|error| match error.downcast::<ErrorAfterInvalidBatches>() {
-            Ok(ErrorAfterInvalidBatches(error)) => error,
+        .map(|error| match error.downcast::<ErrorAfterBatchReports>() {
+            Ok(ErrorAfterBatchReports(error)) => error,
             Err(error) => error,
         })
 }

@@ -53,8 +53,7 @@
 //!   error that LOSAT raises where NCBI would not stop (LOSAT's refusals) is written without the
 //!   reports of the batches before; so the stream acts only where no such refusal can come after
 //!   the first batch (`check`): a query batch whose concatenated query is too long for the diag
-//!   table (`check_diag_table_window`), a search space that could overflow (`Off::SearchSpace`,
-//!   kept on the off path where `ErrorAfterBatchReports` writes the batches before alike),
+//!   table (`check_diag_table_window`),
 //!   a `-db` whose sequences could not be read before the search (some of those read errors are
 //!   LOSAT's refusals, raised by the first batch with a valid context, `Off::Unreadable`),
 //!   and the refusals of the reports: a `-subject` record without a tabular id
@@ -132,8 +131,6 @@ pub(super) enum Off {
     Debug,
     /// A concatenated query of a batch that the diag table could refuse.
     Window,
-    /// A search space that could overflow.
-    SearchSpace,
     /// A `-subject` record without a tabular id.
     SubjectIds,
     /// A `-db` whose sequences could not be read before the search: LOSAT refuses some of those
@@ -165,7 +162,6 @@ impl Off {
             Off::CustomTabular => "custom_tabular",
             Off::Debug => "debug",
             Off::Window => "window",
-            Off::SearchSpace => "search_space",
             Off::SubjectIds => "subject_ids",
             Off::Unreadable => "unreadable",
             Off::LargeParsed => "large_parsed",
@@ -246,20 +242,6 @@ pub(super) fn check(
     let concatenated: i128 = lengths().map(|letters| 2 * letters + 7).sum::<i128>() + 1;
     if concatenated + i128::from(args.window()) > 1 << 30 {
         return Err(Off::Window);
-    }
-    // The search space of a context (`context_cutoffs`, `try_compute_eff_lengths_tblastx`):
-    // the effective database length `db - n a`, at least 1, times the context's length minus
-    // the length adjustment `a`. The adjustment is between 0 and the smaller root of
-    // `n a^2 - (q n + db) a + c`, at most `2 c / (q n + db) <= 2 q` with `c <= q db`
-    // (`compute_length_adjustment_ncbi`; the bound of blastn's `x_rpt_stream::check`), and a
-    // context has at most a third of its query's letters, plus one. A negative `n` (an alias
-    // file's `NSEQ`, NCBI's `Int4`) adds `|n| a` to the database length: the bound takes `|n|`.
-    let db_length = i128::from(subjects.numbers.effective_length() / 3);
-    let factor = 2 * (lengths().max().unwrap_or(0) / 3 + 1) + 1;
-    if (db_length.abs() + i128::from(subjects.numbers.count.unsigned_abs()) * factor) * factor
-        > i128::from(i64::MAX)
-    {
-        return Err(Off::SearchSpace);
     }
     // Under `-parse_deflines`, two queries of the run with one id, which a batch's scope could
     // hold (`QueryScopes`), and with `-db` the scope of every query for the database's sequences

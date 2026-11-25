@@ -19,7 +19,7 @@
 use super::{
     context_lengths, database, database_search_error, prolog_with_report, reborrow_outputs,
     write_format_prolog, write_pairwise_prologs, BatchOutputs, BatchStage, BlastnArgs,
-    ContextKarlin, ErrorAfterInvalidBatches, KarlinParams, NuclScoringSpec, QueryBatching,
+    ContextKarlin, ErrorAfterBatchReports, KarlinParams, NuclScoringSpec, QueryBatching,
     QueryContext, SequenceData, ShownSubjects, SubjectSource, FIRST_BATCH_OUTPUTS,
 };
 use crate::algorithm::blastn::scoring::{
@@ -173,7 +173,7 @@ fn karlin_blocks<const UNGAPPED: bool>(
             // with a valid query would have raised the error), and NCBI has written their
             // reports (`run_in_pool`).
             if !first_batch {
-                return Err(ErrorAfterInvalidBatches(karlin_error(&message, empty_queries)).into());
+                return Err(ErrorAfterBatchReports(karlin_error(&message, empty_queries)).into());
             }
             // The prolog of a file sink (the others were written before the search).
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
@@ -269,12 +269,18 @@ pub(super) fn gap_align_setup_error(
         .or_else(|| greedy_setup_refusal(args, ungapped))
 }
 
-/// An error of the set-up of a batch with a valid context, NCBI's or LOSAT's refusal where NCBI
-/// crashes or LOSAT does not follow it, where NCBI meets it: in a batch after the first, the
-/// batches before had no valid query (one with a valid query would have raised it), and NCBI
-/// has written their reports (`run_in_pool`), before a crash too (a statistics count of 0,
-/// D1a-5; matrix-only scoring with gap costs 0 and 0, D1a-6; search space overflow, D1a-6 review
-/// A F2); in the first batch, after the prolog.
+/// A failure of a batch with a valid context — NCBI's own error or LOSAT's refusal where NCBI
+/// crashes or LOSAT does not follow it — at the point where NCBI meets it: in a batch after the
+/// first, wrapped in `ErrorAfterBatchReports` so `run_in_pool` writes the reports of the batches
+/// before (`write_batch_reports`, hits included, as for `database_search_error`); in the first
+/// batch, after writing the prologs that come with the reports (`write_pairwise_prologs`).
+///
+/// The average subject length, statistics count of 0 (D1a-5), and greedy set-up refusals (D1a-6)
+/// do not depend on the queries, so in a batch after the first every earlier batch had no valid
+/// query. A 64-bit effective search space overflow (`effective_search_spaces`,
+/// `batch_setup::batch_spaces`, or mid-search at `subject_space_overflow.check()` in `run.rs`;
+/// D1a-6 review A F2) depends on the query length (and subject length for per-subject spaces), so
+/// valid earlier batches with hits may precede it; the handler writes their reports alike.
 pub(super) fn setup_failure(
     error: anyhow::Error,
     first_batch: bool,
@@ -284,7 +290,7 @@ pub(super) fn setup_failure(
     shown: &ShownSubjects,
 ) -> anyhow::Error {
     if !first_batch {
-        return ErrorAfterInvalidBatches(error).into();
+        return ErrorAfterBatchReports(error).into();
     }
     // In `refused_batch_setup_error` (`setup_only`), a refusal that is not NCBI's `NativeError`
     // gives way to the scope refusal, whose `fail_batch!` writes the prologs itself.

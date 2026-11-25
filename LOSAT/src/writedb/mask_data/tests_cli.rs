@@ -515,7 +515,7 @@ fn a_refused_build_that_meets_a_closed_pipe_leaves_no_database() {
         let mut err = Vec::new();
         let status = run_with(
             &args,
-            None,
+            &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
             Some(&time_of("Oct 20, 2026  1:00 PM")),
             LINUX,
             &mut std::io::empty(),

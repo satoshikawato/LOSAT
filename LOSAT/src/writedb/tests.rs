@@ -1436,7 +1436,7 @@ fn makedb_logged(input: &str, base: &str, log: &mut dyn std::io::Write) -> (i32,
     let mut err = Vec::new();
     let status = run_with(
         &args,
-        None,
+        &ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut std::io::empty(),

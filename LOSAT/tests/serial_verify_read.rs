@@ -467,5 +467,69 @@ fn a_header_record_that_lacks_its_seqid_is_refused_with_the_check_off() {
         READ,
         &format!("{record} DUSTMASKER"),
     );
+    // blastdbcheck catches the header exception and continues to its summary on an unset run;
+    // with READ off it refuses at that OID after the exact prefix written before it.
+    let check_cut = [
+        "blastdbcheck",
+        "-db",
+        &cut,
+        "-dbtype",
+        "prot",
+        "-full",
+        "-verbosity",
+        "4",
+    ];
+    let unset_chk = losat(&dir, &check_cut, None);
+    assert_eq!(unset_chk.status.code(), Some(1), "{check_cut:?}");
+    for (name, value) in [(READ, "YES"), (READ, "ALWAYS"), (READ, ""), (GET, "NO")] {
+        let run = losat(&dir, &check_cut, Some((name, value)));
+        assert_eq!(
+            (run.status.code(), &run.stdout, &run.stderr),
+            (
+                unset_chk.status.code(),
+                &unset_chk.stdout,
+                &unset_chk.stderr
+            ),
+            "{check_cut:?} {name}={value}"
+        );
+    }
+    for value in ["NO", "never", "DefValue_Always"] {
+        let run = losat(&dir, &check_cut, Some((READ, value)));
+        let err = String::from_utf8_lossy(&run.stderr);
+        assert_eq!(run.status.code(), Some(1), "{check_cut:?} {value}: {err}");
+        assert!(
+            !run.stdout.is_empty(),
+            "{check_cut:?} {value}: empty stdout"
+        );
+        assert!(
+            unset_chk.stdout.starts_with(&run.stdout),
+            "{check_cut:?} {value}: stdout not a prefix of unset"
+        );
+        let text = format!("the environment variable {READ}={value} with {record} BLASTDBCHECK\n");
+        assert!(err.ends_with(&text), "{check_cut:?} {value}: {err}");
+    }
+    let check_whole = [
+        "blastdbcheck",
+        "-db",
+        &whole,
+        "-dbtype",
+        "prot",
+        "-full",
+        "-verbosity",
+        "4",
+    ];
+    let unset_whole = losat(&dir, &check_whole, None);
+    for (name, value) in [(READ, "NO"), (GET, "NEVER")] {
+        let run = losat(&dir, &check_whole, Some((name, value)));
+        assert_eq!(
+            (run.status.code(), &run.stdout, &run.stderr),
+            (
+                unset_whole.status.code(),
+                &unset_whole.stdout,
+                &unset_whole.stderr
+            ),
+            "{check_whole:?} {name}={value}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

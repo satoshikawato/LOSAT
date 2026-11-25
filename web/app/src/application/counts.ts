@@ -288,7 +288,7 @@ export class CountsLoader {
     this.setSaving(taxid, plainMade.run);
     this.clearMessages(taxid);
     const clearSave = () => {
-      if (this.writing.get(taxid)?.op === op) this.writing.delete(taxid);
+      this.releaseWriting(taxid, op);
       if (this.state.get().saving[taxid] !== undefined) this.setSaving(taxid, undefined);
     };
 
@@ -311,7 +311,7 @@ export class CountsLoader {
       this.nextTaxidRead(taxid);
       const saving = { ...this.state.get().saving };
       delete saving[taxid];
-      if (this.writing.get(taxid)?.op === op) this.writing.delete(taxid);
+      this.releaseWriting(taxid, op);
       this.update({
         saved: { ...this.state.get().saved, [taxid]: saved.copy },
         saving,
@@ -420,9 +420,7 @@ export class CountsLoader {
   }
 
   private async load(taxid: number, controller: AbortController): Promise<void> {
-    const releaseWriting = () => {
-      if (this.writing.get(taxid)?.op === controller) this.writing.delete(taxid);
-    };
+    const releaseWriting = () => this.releaseWriting(taxid, controller);
     try {
       const { signal } = controller;
       const url = countsUrl(taxid);
@@ -503,6 +501,10 @@ export class CountsLoader {
     return read;
   }
 
+  private releaseWriting(taxid: number, op: object): void {
+    if (this.writing.get(taxid)?.op === op) this.writing.delete(taxid);
+  }
+
   private writerOf(taxid: number): BusyWriter {
     const active = this.writing.get(taxid)?.kind;
     if (active === 'save') return 'this-save';
@@ -564,8 +566,22 @@ function problem(result: Exclude<CountsResult, { ok: true }>, taxid: number): st
   }
 }
 
+type RefusalAction = 'delete' | 'replace' | 'save' | 'download';
 type BusyAction = 'download' | 'save' | 'delete';
 type BusyWriter = 'this-save' | 'this-download' | 'other-tab';
+
+function refusalSentence(action: RefusalAction, what: string): string {
+  switch (action) {
+    case 'delete':
+      return `Not removed: ${what} Press Delete again when it has ended.`;
+    case 'replace':
+      return `Not replaced: ${what} Save again when it has ended.`;
+    case 'save':
+      return `Not saved: ${what} Save again when it has ended.`;
+    case 'download':
+      return `Not downloaded: ${what} Download again when it has ended.`;
+  }
+}
 
 function busySentence(taxid: number, action: BusyAction, writer: BusyWriter): string {
   const what =
@@ -574,28 +590,13 @@ function busySentence(taxid: number, action: BusyAction, writer: BusyWriter): st
       : writer === 'this-download'
         ? `this tab is downloading the counts for ${taxid}.`
         : `another tab is saving or downloading the counts for ${taxid}.`;
-  switch (action) {
-    case 'download':
-      return `Not downloaded: ${what} Download again when it has ended.`;
-    case 'save':
-      return `Not saved: ${what} Save again when it has ended.`;
-    case 'delete':
-      return `Not removed: ${what} Press Delete again when it has ended.`;
-  }
+  return refusalSentence(action, what);
 }
 
 type CountsAction = 'delete' | 'replace' | 'download';
 
 function inUseSentence(taxid: number, action: CountsAction): string {
-  const what = `a run that reads the counts for ${taxid} was queued or running.`;
-  switch (action) {
-    case 'delete':
-      return `Not removed: ${what} Press Delete again when it has ended.`;
-    case 'replace':
-      return `Not replaced: ${what} Save again when it has ended.`;
-    case 'download':
-      return `Not downloaded: ${what} Download again when it has ended.`;
-  }
+  return refusalSentence(action, `a run that reads the counts for ${taxid} was queued or running.`);
 }
 
 function errorName(error: unknown): unknown {

@@ -152,8 +152,6 @@ export class OpfsCountsStore implements CountsStore {
         }
         await this.checkRoom(existingDir, start.size);
         directory = existingDir ?? (await this.root.getDirectoryHandle(String(taxid), { create: true }));
-        // Meta first: a copy that is begun again is never read as the whole file of before.
-        await writeMeta(directory, metaOf(taxid, start, 0, false, this.now()));
       } else {
         directory = await this.root.getDirectoryHandle(String(taxid), { create: true });
         if (start.from > 0) {
@@ -169,10 +167,11 @@ export class OpfsCountsStore implements CountsStore {
           ) {
             throw named(COUNTS_CHANGED, 'the saved part is not the one to continue');
           }
-        } else {
-          // Meta first: a copy that is begun again is never read as the whole file of before.
-          await writeMeta(directory, metaOf(taxid, start, 0, false, this.now()));
         }
+      }
+      if (start.made !== undefined || start.from === 0) {
+        // Meta first: a copy that is begun again is never read as the whole file of before.
+        await writeMeta(directory, metaOf(taxid, start, 0, false, this.now()));
       }
       handle = await openSyncHandle(directory, DATA_NAME);
       handle.truncate(start.from);
@@ -297,7 +296,7 @@ export class OpfsCountsStore implements CountsStore {
         throw named(COUNTS_IN_USE, 'a run that reads the counts is queued or running');
       }
       if (holders.some((entry) => entry.mode === 'exclusive') || snapshot === undefined || attempt === 1) {
-        throw named(COUNTS_BUSY, 'counts are being written');
+        break;
       }
     }
     throw named(COUNTS_BUSY, 'counts are being written');

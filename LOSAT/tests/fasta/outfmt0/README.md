@@ -20,6 +20,10 @@ letters is kept in the repository; the commit is the one that added the files.
   `db.x1bp.cov.tbn.6` (line RG X1b-p, review 2's probe D, 2026-11-23); the flanks' generator is not in the repository.
 - `x2b_r7_*`, `x2b_r11_*`: pairs of rows `x2b.tblastx.*` (`-window_size 0`, HSPs of length 0 or less); origin not recorded
   (commit f28d5c5a3, 2026-11-14).
+- `xtl2_wdw.faa` (W D W), `xtl2_wdw_q.fna` (`TGGGATTGG`, W D W in frame +1) and `xtl2_s11pad.fna` (an 11-base subject
+  `TGGTGGTGGTA`, W W W in frame +1, then 100 copies of `TAA`): written for rows `xtl2.*` (line RG item X-short-tbx-link-2,
+  2026-11-25): with PAM30 and `-threshold 11` the word W D W against W W W is the only one that reaches 11 and gives an HSP of
+  length -1; the 300 bases after the subject find nothing and make NCBI's linking cutoff finite.
 - `x2g_c0037_*` (commit 03b352b90) and `x2g_p0002_q.fna`, `x2g_p0086_*` (commit a8e16bfda), rows `x2g.blastx.*`: pairs of
   the line RG X2g survey (the commit messages: "rand2 cases", "random pairs of probe P1"); the generator is not in the
   repository (2026-11-14).

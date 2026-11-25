@@ -5,18 +5,31 @@
 // comparison (a rejection, an environment variable, an approved NCBI crash), adds nothing.
 // The plugin serves the table to the application as the module `virtual:losat-verification`.
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { OutputFormat, ProgramId } from 'losat/domain';
 import type { Plugin } from 'vite';
-import { optionKey, type BrowserVerification, type OptionGrammar, type ProgramVerification, type VerificationTable } from '../src/domain/verification.ts';
+import { parseToolDescription } from '../../packages/losat/src/domain/tool-description.ts';
+import {
+  optionKey,
+  toolOptionGrammar,
+  toolOptionKey,
+  type BrowserVerification,
+  type OptionGrammar,
+  type ProgramVerification,
+  type ToolOptionGrammar,
+  type VerificationTable,
+} from '../src/domain/verification.ts';
 
 const VIRTUAL_ID = 'virtual:losat-verification';
 const RESOLVED_ID = `\0${VIRTUAL_ID}`;
 const NCBI_VERSION = '2.17.0';
 const PROGRAMS = ['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx'] as const satisfies readonly ProgramId[];
 const DESCRIBE = fileURLToPath(new URL('../src/infra/fake/describe.json', import.meta.url));
+const WINDOWMASKER_XMLHELP = fileURLToPath(new URL('../src/infra/fake/windowmasker-xmlhelp.json', import.meta.url));
+const WINDOWMASKER_CASES_PATH = 'LOSAT/tests/windowmasker/cases.tsv';
+const WINDOWMASKER_SKIP_FLAGS = new Set(['-h', '-help', '-xmlhelp', '-version-full', '-version-full-xml', '-version-full-json', '-dryrun']);
 
 type Program = (typeof PROGRAMS)[number];
 type Source = VerificationTable['sources'][number];
@@ -70,6 +83,9 @@ export function generateVerificationTable(repository: string): VerificationTable
     sources.push({ path, sha256: createHash('sha256').update(bytes).digest('hex'), optionSets: accepted });
   }
 
+  const wm = windowMaskerToolVerification(repository);
+  sources.push(wm.source);
+
   const browsers = browserVerification(readTable(readFileSync(join(repository, 'docs/web/verification_cells.tsv'), 'utf8')));
   const programs: Partial<Dictionary<ProgramVerification>> = {};
   for (const program of PROGRAMS) {
@@ -78,7 +94,103 @@ export function generateVerificationTable(repository: string): VerificationTable
     const browser = browsers.get(program);
     programs[program] = browser === undefined ? { optionSets } : { optionSets, browser };
   }
-  return { ncbi: NCBI_VERSION, sources, programs };
+  return { ncbi: NCBI_VERSION, sources, programs, tools: { windowmasker: { optionSets: wm.optionSets } } };
+}
+
+/**
+ * Generates the windowmasker option sets from `LOSAT/tests/windowmasker/cases.tsv` and their
+ * NCBI-frozen `ncbi/<name>.rc` files (matching `masker_fixtures.rs`: last row per name wins,
+ * shell-word quoting, skipping non-zero exits, environment variables, stdin, help and `-dryrun`).
+ */
+function windowMaskerToolVerification(repository: string): { readonly source: Source; readonly optionSets: readonly string[] } {
+  const xmlDoc = JSON.parse(readFileSync(WINDOWMASKER_XMLHELP, 'utf8')) as { xml: string };
+  const description = parseToolDescription(xmlDoc.xml);
+  const baseGrammar = toolOptionGrammar(description);
+  const knownFlags = new Set(['-logfile', '-conffile', ...description.parameters.map((param) => param.flag)]);
+
+  const casesBytes = readFileSync(join(repository, WINDOWMASKER_CASES_PATH));
+  const cases = new Map<string, string>();
+  for (const line of casesBytes.toString('utf8').split(/\r?\n/)) {
+    if (line === '' || line.startsWith('#')) continue;
+    const tab = line.indexOf('\t');
+    if (tab < 0) continue;
+    cases.set(line.slice(0, tab), line.slice(tab + 1));
+  }
+
+  const ncbiDir = join(repository, 'LOSAT/tests/windowmasker/ncbi');
+  const keys = new Set<string>();
+  let accepted = 0;
+
+  for (const [name, args] of cases) {
+    const rcPath = join(ncbiDir, `${name}.rc`);
+    if (!existsSync(rcPath) || readFileSync(rcPath, 'utf8').trim() !== '0') continue;
+    const parsed = parseShellWords(args);
+    if (parsed === undefined || parsed.stdin !== undefined) continue;
+    const words = parsed.words;
+    if (words.length === 0 || hasEnvAssignment(words[0]!)) continue;
+    if (words.some((word) => WINDOWMASKER_SKIP_FLAGS.has(word.split('=', 1)[0]!))) continue;
+
+    let unknown = false;
+    const grammar: ToolOptionGrammar = {
+      takesValue: (flag) => {
+        if (!knownFlags.has(flag)) unknown = true;
+        return baseGrammar.takesValue(flag);
+      },
+      ...(baseGrammar.isBoolean === undefined ? {} : { isBoolean: baseGrammar.isBoolean }),
+      ...(baseGrammar.defaultValue === undefined ? {} : { defaultValue: baseGrammar.defaultValue }),
+    };
+    const key = toolOptionKey(['windowmasker', ...words], grammar);
+    if (unknown || key === undefined) continue;
+    keys.add(key);
+    accepted++;
+  }
+
+  return {
+    source: {
+      path: WINDOWMASKER_CASES_PATH,
+      sha256: createHash('sha256').update(casesBytes).digest('hex'),
+      optionSets: accepted,
+    },
+    optionSets: [...keys].sort(),
+  };
+}
+
+/** Splits `cases.tsv` shell words with single/double quotes and `< file` stdin (matching `masker_fixtures.rs`). */
+function parseShellWords(line: string): { readonly words: readonly string[]; readonly stdin?: string } | undefined {
+  const words: string[] = [];
+  let word: string | undefined;
+  let quote: '"' | "'" | undefined;
+  for (const ch of line) {
+    if (quote === undefined && (ch === '"' || ch === "'")) {
+      quote = ch;
+      word ??= '';
+    } else if (quote !== undefined && ch === quote) {
+      quote = undefined;
+    } else if (quote === undefined && (ch === ' ' || ch === '\t')) {
+      if (word !== undefined) {
+        words.push(word);
+        word = undefined;
+      }
+    } else {
+      word = (word ?? '') + ch;
+    }
+  }
+  if (quote !== undefined) return undefined;
+  if (word !== undefined) words.push(word);
+  const stdinAt = words.indexOf('<');
+  if (stdinAt >= 0) {
+    const stdin = words[stdinAt + 1];
+    if (stdin === undefined) return undefined;
+    words.splice(stdinAt, 2);
+    return { words, stdin };
+  }
+  return { words };
+}
+
+function hasEnvAssignment(word: string): boolean {
+  const eq = word.indexOf('=');
+  if (eq <= 0) return false;
+  return /^[A-Z_]+$/.test(word.slice(0, eq));
 }
 
 /** The key of an option set, or undefined when a flag is not one of the program's described options. */

@@ -187,7 +187,8 @@ export type ToolFileOrigin =
   | { readonly kind: 'pasted' }
   | { readonly kind: 'inflated'; readonly from: string }
   | { readonly kind: 'combined'; readonly parts: readonly string[] }
-  | { readonly kind: 'made'; readonly runNumber: number };
+  | { readonly kind: 'made'; readonly runNumber: number }
+  | { readonly kind: 'saved'; readonly taxid: number };
 
 /** Metadata of one file placed in a tool run's working directory (for Run details). */
 export interface ToolDirectoryEntry {

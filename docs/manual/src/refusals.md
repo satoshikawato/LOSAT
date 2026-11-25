@@ -452,9 +452,13 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | :--- | :--- |
 | An alias file of `-seqidlist` or `-taxidlist` over a version 5 database | Refused when the new alias file is opened to count its sequences, and the alias file is removed: LOSAT does not yet read these lists over a version 5 database (see Alias files and database arithmetic above). Over a version 4 database they are written as NCBI's. |
 
+## cleanup-blastdb-volumes.py
+
+`cleanup-blastdb-volumes.py` runs every option of NCBI BLAST+ 2.17.0's `cleanup-blastdb-volumes.py` (`-db`, `-dbtype`, `-dry-run`, `-verbose`, `-version`, `-h`/`--help`). It is a port of NCBI's Python utility rather than an NCBI C++ Toolkit application, so it does not take C++ Toolkit flags (`-logfile`, `-conffile`, `-dryrun`, `-xmlhelp`, `-version-full`).
+
 ## Programs LOSAT does not provide
 
-`blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `blastdbcheck`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.
+`blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `blastdbcheck`, `legacy_blast.pl`, `update_blastdb.pl` and `get_species_taxids.sh`.
 
 ## On the list for a later release
 

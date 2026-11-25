@@ -24,7 +24,7 @@ A different message, NCBI's short usage followed by `Error: Unknown argument: "x
 losat --install-shims: these files exist and are not this executable; nothing was installed: /path/to/bin/blastn
 ```
 
-A file with one of the 16 program names is already in the folder, often NCBI's own `blastn`. LOSAT never overwrites a file that is not a LOSAT link or copy, and it makes none of the names when one is in the way. Exit status is 1.
+A file with one of the 19 program names is already in the folder, often NCBI's own `blastn`. LOSAT never overwrites a file that is not a LOSAT link or copy, and it makes none of the names when one is in the way. Exit status is 1.
 
 You can:
 

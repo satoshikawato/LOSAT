@@ -1934,9 +1934,10 @@ fn pairwise_read_order<'p>(
     crate::report::x_pairwise_par::QueryGroup::read_order(
         lists.flat_map(|hsp_list| hsp_list.hsps.iter().map(|hsp| (hsp_list.oid, hsp))),
         |hsp| {
-            crate::report::hit_sort::HspScores::of_hit(
-                &crate::algorithm::blastn::hsp::BlastnHsp::clone(hsp).into_hit(),
-                hsp.num_ident,
+            crate::algorithm::blastn::left_of_query::blastn_hsp_scores(
+                hsp,
+                0,
+                hsp.gap_info.is_none(),
             )
         },
         |previous, oid| match (parsed(previous), parsed(oid)) {

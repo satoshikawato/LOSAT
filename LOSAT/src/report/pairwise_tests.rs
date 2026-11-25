@@ -447,6 +447,9 @@ fn heading_of(title: &[u8]) -> String {
         None,
         DatabaseHeading::Title(title, &crate::report::defline::UNNAMED_SOURCE),
         true,
+        &[],
+        None,
+        0,
         &[&hit],
         &[0],
         0..1,
@@ -1270,6 +1273,7 @@ fn blastn_reports_of_consecutive_query_ranges_are_the_whole_report() {
         prolog: true,
         parsed_subjects: Vec::new(),
         subject_sources: Vec::new(),
+        subject_oids: None,
     };
     // Query 0: subjects 1 (2 HSPs) and 2; query 1: no hits; queries 2 and 3: subject 1.
     let hits: Vec<PairwiseHit> = [(0, 1), (0, 1), (0, 2), (2, 1), (3, 1)]

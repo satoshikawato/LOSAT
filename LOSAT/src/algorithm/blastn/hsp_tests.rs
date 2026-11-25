@@ -337,6 +337,7 @@ fn test_blastn_outfmt7_header_matches_ncbi_shape() {
         Some(1),
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -360,6 +361,7 @@ fn test_blastn_outfmt7_header_matches_ncbi_shape() {
         &query_titles,
         "User specified sequence set (Input: subject.fasta)",
         &[true],
+        None,
         None,
         None,
         None,

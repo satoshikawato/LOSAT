@@ -2727,8 +2727,17 @@ deflines and of the chain letter in the keys of `.psd`. NCBI's `x_SetTitleFromPD
 2.17.0, run from `LOSAT/`) of `tests/fasta/outfmt0/x1bp_d3m_s.fna`, `x1bo_R_short_s.fna` and `x1bo_d3_s.fna`: subjects
 on which `-ungapped -xdrop_ungap 1e10` (and megablast for `rs`) keeps an HSP outside its query context. Fix 2 (review 1
 M1 and S1): `qpa` and `r3` the same of `x1bp_qpA_s.fna` and `x1bo_r3_s.fna`; `d3t` of `x1bo_d3_s.fna` with
-`-taxid 9606 -blastdb_version 4`, for the prefetch of row `db.x1bp.d3t.db.6.rej`, whose
+`-taxid 9606 -blastdb_version 4`, for the prefetch of row `db.x1bp.d3t.db.6`, whose
 `BLASTDB=tests/seqdb/taxdb/bad_magic` makes NCBI's prefetch write a message.
+
+`x1bq/`: rows `db.x1bq.*` (line RG, item X1b-q): `-db` alignments whose Seq-align query start lies below 0 in record
+coordinates. `mixed` is `makeblastdb -dbtype nucl` (NCBI BLAST+ 2.17.0, run from `LOSAT/`) of `x1bq/mixed_s.fna`
+(`s_infirst`: `x1bo_d3_s.fna`'s `s_plus3` + 80 random bases + `qB[0:250]`, giving normal, class N, and normal HSPs in one
+subject; `s_only_classN`: `s_plus3`; `s_norm_lo`: 40 random bases + `qB[150:270]` + 40 random bases; seed `20261125`).
+`rneg` is `makeblastdb -dbtype nucl` of `x1bq/rneg_s.fna` (`s_R_neg`: `x1bo_R_short_s.fna`'s first 4,200 bases; `s_norm`:
+`C`x40 + `x1bo_R_q.fna`'s `qB` + `G`x40), searched with `x1bq/rneg_q.fna` (`q0`, `qA`, `rc(qB)`, `qB`, `rc(qC[:4200])`
+from `x1bo_R_q.fna`) under `-task megablast -strand minus -xdrop_ungap 1e10`, which produces a gapped `Dense-seg` whose
+query start is `-1020`.
 
 ## Where some inputs come from (provenance)
 

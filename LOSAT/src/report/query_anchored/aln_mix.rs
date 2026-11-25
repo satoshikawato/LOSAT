@@ -64,6 +64,21 @@ const X_MERGE_START_ITERATOR: ThrowSite = ThrowSite {
 const X_MERGE_START_ITERATOR_MESSAGE: &str =
     "CAlnMixMerger::x_Merge(): Internal error: Start iterator already exists for seq2.";
 
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:365-377
+/// Where `x_Merge` throws when a second pass match belongs to a Dense-seg whose sequence has no
+/// row with matching `ds_idx` (e.g. a BLASTN `-db` alignment whose query row starts below 0 and
+/// has no query-row match in pass 1).
+const X_MERGE_PROPER_ROW: ThrowSite = ThrowSite {
+    file: "src/objtools/alnmgr/alnmerger.cpp",
+    line: 372,
+    kind: "CAlnException::eMergeFailure",
+    function: Some("ncbi::objects::CAlnMixMerger::x_Merge"),
+};
+
+/// The message of `X_MERGE_PROPER_ROW`.
+const X_MERGE_PROPER_ROW_MESSAGE: &str =
+    "CAlnMixMerger::x_Merge(): Proper row not found for the match. Cannot use fQuerySeqMergeOnly?";
+
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnsegments.cpp:162-169 (cited at
 // `Mix::build`)
 // NCBI BLAST+ 2.17.0 reports it at line 168, in `ncbi::objects::CAlnMixSegments::Build()` (exit
@@ -832,7 +847,12 @@ impl Mix {
                 }
                 match self.seqs[seq1].extra_row {
                     Some(row) => seq1 = row,
-                    None => return Err(MixError::Internal("proper row not found for the match")),
+                    None => {
+                        return Err(MixError::NcbiThrows(NcbiException::new(
+                            X_MERGE_PROPER_ROW,
+                            X_MERGE_PROPER_ROW_MESSAGE,
+                        )));
+                    }
                 }
             }
         }

@@ -168,7 +168,8 @@ impl crate::algorithm::common::hard_chunk_walk::HardTable for Diagonals {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-518, 776-779
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:46-65
-/// TBLASTN's `(last_hit, flag)` diagonal ring as a [`DiagTable`] for
+/// TBLASTN's `(last_hit, flag)` diagonal ring as a
+/// [`DiagTable`](crate::algorithm::common::diag_entry::DiagTable) for
 /// `common::hard_chunk_scan::OneWord`.
 pub(super) struct TbnPairRing<'a> {
     entries: &'a mut [(i32, bool)],

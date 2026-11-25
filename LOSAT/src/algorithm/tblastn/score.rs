@@ -737,7 +737,7 @@ impl<'a> TbnScore for PssmScore<'a> {
 #[cold]
 #[inline(never)]
 fn x_window_past_pssm(q_start: usize) -> anyhow::Error {
-    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::new(anyhow::anyhow!(
         "TBLASTN -in_pssm with -window_size 0: a one-hit alignment of negative length at query position {} would read past the PSSM (NCBI BLAST+ reads past its matrix there), which LOSAT does not support",
         q_start + 1
     )))

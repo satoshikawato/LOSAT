@@ -227,6 +227,11 @@ impl TblastxDatabase {
         self.db.list_taxids()
     }
 
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(crate) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
+    }
+
     /// Whether the first query batch with a valid context fails with NCBI's `Database memory map
     /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
     pub(crate) fn first_oid_read_fails(&self) -> bool {
@@ -430,7 +435,7 @@ pub(crate) fn drop_unaligned(
 /// batch name (in report order: query by query, in hit-list order; the subject index is the
 /// ordinal id, the query index counts from the batch's first query `first_query`) into
 /// `titles` (`common::database::read_header`). A reader error of NCBI's own is a
-/// `HeaderReadError` (it fails the batch); LOSAT's refusals are errors of their own. The first
+/// `ErrorAfterBatchReports` (it fails the batch); LOSAT's refusals are errors of their own. The first
 /// read of a record with a UTF8String where a VisibleString is expected is returned
 /// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there. `one_by_one`: the reports
 /// may read the reported sequences one by one (`shared::HeaderReader::new`).

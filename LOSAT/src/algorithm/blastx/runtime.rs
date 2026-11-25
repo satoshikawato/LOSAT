@@ -68,6 +68,10 @@ fn prelim_stream(options: &ResolvedOptions, queries: &PreparedQueryBatch) -> Hsp
 pub struct BatchResults {
     pub query_ordinal: usize,
     pub queries: Vec<Vec<HspList>>,
+    /// Whether `queries` are in the order of the reports: sorted and, for `-subject`'s records,
+    /// mapped (`BatchResults::put_in_report_order`, which sets it once); false as the search made
+    /// them.
+    pub(crate) in_report_order: bool,
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-101
     pub prepared: PreparedQueryBatch,
     pub parameters: Vec<ContextParameters>,
@@ -546,6 +550,7 @@ impl Runtime<'_> {
                 positive: 0,
                 edit_script: Vec::new(),
                 composition_method: 0,
+                query_left_out: 0,
             })
             .collect();
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2538-2588
@@ -647,6 +652,7 @@ impl Runtime<'_> {
                         positive,
                         edit_script: Vec::new(),
                         composition_method: 0,
+                        query_left_out: 0,
                     })
                 })
                 .collect();
@@ -763,6 +769,7 @@ impl PreliminarySink for Runtime<'_> {
     ) -> Result<()> {
         self.output.push(BatchResults {
             query_ordinal: ordinal,
+            in_report_order: false,
             queries: vec![Vec::new(); batch.original_lengths.len()],
             prepared: batch.x_for_results(),
             parameters: params.to_vec(),
@@ -1187,6 +1194,7 @@ impl PreliminarySink for Runtime<'_> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-101
         self.output.push(BatchResults {
             query_ordinal: self.ordinal,
+            in_report_order: false,
             queries: queries.into_iter().map(|q| q.lists).collect(),
             prepared: batch.x_for_results(),
             parameters: full,
@@ -1260,6 +1268,7 @@ fn finalize_redone(
                 positive,
                 edit_script: r.edit_script.clone(),
                 composition_method: r.composition_method,
+                query_left_out: 0,
             }
         })
         .collect();

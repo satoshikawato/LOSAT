@@ -816,6 +816,10 @@ fn every_list_tests_each_line_as_ncbis() {
         DeflineRule::NegativeTaxids(BTreeSet::new()),
         DeflineRule::Seqids(Vec::new()),
         DeflineRule::NegativeSeqids(Vec::new()),
+        DeflineRule::Gis(Vec::new()),
+        DeflineRule::NegativeGis(Vec::new()),
+        DeflineRule::Pigs,
+        DeflineRule::NegativePigs,
     ] {
         assert_eq!(
             line_mask(Some(&empty), &[], &bare),

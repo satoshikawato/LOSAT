@@ -134,6 +134,11 @@ impl BlastxDatabase {
         self.db.list_taxids()
     }
 
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(crate) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
+    }
+
     /// Whether the database has parsed Seq-ids: a batch can then refuse one of its subjects
     /// (`ReportedSubjects::for_batch`).
     pub(crate) fn parsed_seqids(&self) -> bool {
@@ -533,7 +538,7 @@ impl ReportedSubjects {
     /// The titles of the reported sequences of the batches `batches` (one query batch), read
     /// query by query in hit-list order where NCBI's traceback makes the batch's Seq-aligns
     /// (their Seq-ids), before the batch's prefetch: NCBI's reader error stops the run at this
-    /// batch (`HeaderReadError`). A sequence with parsed Seq-ids is read with every Seq-id
+    /// batch (`ErrorAfterBatchReports`). A sequence with parsed Seq-ids is read with every Seq-id
     /// (`shared::read_header`). A title LOSAT does not show as NCBI is its refusal
     /// (`check_reported_title`; with `pairwise`, `StoredTitle::check_shown_source`). The rest of
     /// the batch's reported sequences is `for_batch`. `one_by_one`: the reports may read the

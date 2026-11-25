@@ -97,20 +97,9 @@ pub(super) fn phi_karlin(args: &ResolvedBlastpArgs) -> Result<stats::PhiKarlin, 
 type PhiPrelimKey = (i32, i32, i32, i32, i32, i32, i32);
 
 /// Key identifying a final `BlastpHsp` in searched (pre-`shift_hsp_to_records`) coordinates
-/// between `phi_traceback` and `PhiCall::split_occurrences`.
-type PhiFinalKey = (
-    i32,
-    i32,
-    usize,
-    usize,
-    usize,
-    usize,
-    i32,
-    usize,
-    usize,
-    i64,
-    usize,
-);
+/// between `phi_traceback` and `PhiCall::split_occurrences`. Excludes fields that
+/// `recount_shown_identities` can recompute (`num_ident`, `mismatch`, `identity`, `num_positives`).
+type PhiFinalKey = (i32, i32, usize, usize, usize, usize, i32, usize, usize);
 
 /// The searches of the call's queries and what the preliminary stage gathers for the traceback.
 pub(super) struct PhiCall<'p> {
@@ -702,8 +691,6 @@ fn phi_final_key(hsp: &BlastpHsp, q_shift: usize, s_shift: usize) -> PhiFinalKey
         hsp.s_end - s_shift,
         hsp.raw_score,
         hsp.length,
-        hsp.num_ident,
-        hsp.mismatch,
         hsp.gapopen,
     )
 }

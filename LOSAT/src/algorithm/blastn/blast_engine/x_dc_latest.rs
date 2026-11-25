@@ -142,14 +142,16 @@ pub(super) const AHEAD: usize = 8;
 /// `find`'s place of an entry: a slot of the home bucket (0 to 6), none (`MISS`), or a stash
 /// entry (`STASHED` plus its index).
 pub(super) const MISS: u32 = 7;
-const STASHED: u32 = 8;
+pub(super) const STASHED: u32 = 8;
 
 // No NCBI counterpart: counters of LOSAT_TIMING (the stages folded on the maps, the chunks sent to
-// the chains because their scan ranges step back, the map's growths and its largest size).
+// the chains because their scan ranges step back, the map's growths, its largest size and the
+// calls of the fold in registers of LOSAT_X_DCFOLDREG).
 static STAGES: AtomicU64 = AtomicU64::new(0);
 static BACK: AtomicU64 = AtomicU64::new(0);
 static GROWS: AtomicU64 = AtomicU64::new(0);
 static MOST_BUCKETS: AtomicU64 = AtomicU64::new(0);
+static REG_CALLS: AtomicU64 = AtomicU64::new(0);
 
 /// One cache line: slots 0 to 6 (`diag`, `lvl`), the bucket's `stash_until` (`diag[UNTIL]`) and
 /// its slots' saved bits (`lvl[SAVED]`).
@@ -194,6 +196,12 @@ impl Found {
         bucket: 0,
         at: MISS,
     };
+
+    /// Tests: `find` found the entry in the stash.
+    #[cfg(test)]
+    pub(super) fn in_stash(&self) -> bool {
+        self.at >= STASHED
+    }
 }
 
 /// No NCBI counterpart: the latest insert of each diagonal (module comment).
@@ -210,6 +218,33 @@ pub(super) struct DiagLatest {
     /// Debug builds: the last S `put` saw in this stage (the order of (vi)).
     #[cfg(debug_assertions)]
     last_s: i32,
+    /// Tests: where set, what the folds read from the map and put into it, seed by seed (`Event`).
+    #[cfg(test)]
+    pub(super) trace: Option<Vec<Event>>,
+}
+
+/// Tests: one step of a fold on the map (`DiagLatest::trace`), written by the fold of
+/// LOSAT_X_DCLATEST (`x_pair_seed_disc.rs` `Latest`) and by that of LOSAT_X_DCFOLDREG
+/// (`x_dc_fold_reg.rs`), so that their tests compare them seed by seed.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Event {
+    /// The retrieve of the seed at S `s` on `diag`: the level and saved bit it gave the seed (0 and
+    /// false for no entry), and whether the entry was in the stash.
+    Read {
+        diag: i32,
+        s: i32,
+        level: i32,
+        saved: bool,
+        stash: bool,
+    },
+    /// The insert of the seed at S `s`.
+    Put {
+        diag: i32,
+        level: i32,
+        saved: bool,
+        s: i32,
+    },
 }
 
 // A map made without `begin` is a valid empty map of `UNBEGUN_BITS`, not an empty Vec: `find` and
@@ -228,6 +263,8 @@ impl Default for DiagLatest {
             top: i32::MIN,
             #[cfg(debug_assertions)]
             last_s: i32::MIN,
+            #[cfg(test)]
+            trace: None,
         }
     }
 }
@@ -609,13 +646,21 @@ impl DiagLatest {
 impl DiagLatest {
     /// Tests: everything the map holds that a seed's decisions or inserts read (not the debug
     /// order): the buckets' lanes, the stash, the size, `entries` and `top`.
-    pub(super) fn state(&self) -> (Vec<[i32; 16]>, Vec<(i32, i32, bool)>, u32, u32, usize, i32) {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    pub(super) fn state(&self) -> MapState {
         let buckets = self
             .buckets
             .iter()
             .map(|b| std::array::from_fn(|k| if k < 8 { b.diag[k] } else { b.lvl[k - 8] }))
             .collect();
-        let stash = self.stash.iter().map(|e| (e.diag, e.level, e.saved)).collect();
+        let stash = self
+            .stash
+            .iter()
+            .map(|e| (e.diag, e.level, e.saved))
+            .collect();
         (
             buckets,
             stash,
@@ -625,7 +670,23 @@ impl DiagLatest {
             self.top,
         )
     }
+
+    /// Tests: `e` into the trace, where the map has one.
+    pub(super) fn note(&mut self, e: Event) {
+        if let Some(trace) = self.trace.as_mut() {
+            trace.push(e);
+        }
+    }
 }
+
+/// Tests: `DiagLatest::state` (the buckets' 16 lanes, the stash's entries, `bits`, `shift`,
+/// `entries`, `top`).
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(super) type MapState = (Vec<[i32; 16]>, Vec<(i32, i32, bool)>, u32, u32, usize, i32);
 
 /// EXPERIMENT (LOSAT_X_DCFOLDREG): the map during one call of the fold that keeps it in registers
 /// (`x_dc_fold_reg.rs`). What every seed reads or writes is held here, in a local of that fold,
@@ -739,15 +800,15 @@ impl<'a> Hot<'a> {
 
     /// `put`'s first statements: the order of S (debug builds) and `top`.
     #[inline(always)]
-    fn before_put(&mut self, level: i32, s: i32) {
+    fn before_put(&mut self, level: i32, _s: i32) {
         #[cfg(debug_assertions)]
         {
             assert!(
-                s >= self.map.last_s,
-                "LOSAT_X_DCLATEST: a seed at {s} after one at {}",
+                _s >= self.map.last_s,
+                "LOSAT_X_DCLATEST: a seed at {_s} after one at {}",
                 self.map.last_s
             );
-            self.map.last_s = s;
+            self.map.last_s = _s;
         }
         debug_assert!(level >= 0);
         if self.top < level {
@@ -838,6 +899,12 @@ impl<'a> Hot<'a> {
         self.top = self.map.top;
         self.entries = self.map.entries;
     }
+
+    /// Tests: `e` into the map's trace (`DiagLatest::note`).
+    #[cfg(test)]
+    pub(super) fn note(&mut self, e: Event) {
+        self.map.note(e);
+    }
 }
 
 impl Drop for Hot<'_> {
@@ -859,17 +926,24 @@ pub(super) fn count_stage(ascend: bool) {
     counter.fetch_add(1, Ordering::Relaxed);
 }
 
+/// No NCBI counterpart: counts a call of the fold with the map in registers
+/// (`x_dc_fold_reg.rs`, LOSAT_X_DCFOLDREG).
+pub(super) fn count_reg_call() {
+    REG_CALLS.fetch_add(1, Ordering::Relaxed);
+}
+
 /// No NCBI counterpart: the fields of the `[TIMING] x_dc_latest:` line (after the stage's
 /// `x_pairpardisc_seed:` line while the switch is on): the stages folded on the maps, the chunks
-/// whose scan ranges step back (sent to the chains), the maps' growths and the most buckets a map
-/// had.
+/// whose scan ranges step back (sent to the chains), the maps' growths, the most buckets a map
+/// had, and the calls of the fold in registers (`LOSAT_X_DCFOLDREG`).
 pub(super) fn timing_fields() -> String {
     format!(
-        " stages={} back={} grows={} buckets={}",
+        " stages={} back={} grows={} buckets={} reg_calls={}",
         STAGES.load(Ordering::Relaxed),
         BACK.load(Ordering::Relaxed),
         GROWS.load(Ordering::Relaxed),
-        MOST_BUCKETS.load(Ordering::Relaxed)
+        MOST_BUCKETS.load(Ordering::Relaxed),
+        REG_CALLS.load(Ordering::Relaxed)
     )
 }
 

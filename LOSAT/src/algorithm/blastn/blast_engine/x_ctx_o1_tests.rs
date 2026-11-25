@@ -67,6 +67,26 @@ fn check(lengths: &[usize], force_blocks: bool) -> &'static str {
     assert_eq!(form.needs_runs(), unanswered > 0);
     assert_eq!(form.get(total), None);
     assert_eq!(form.get(total + 1000), None);
+    // EXPERIMENT (LOSAT_X_DCEMITHOIST): the form as a value answers as `get` at every offset
+    // (and past the end), in the variant of its form
+    let view = form.x_view();
+    let view_get = |n: usize| match &view {
+        XView::Div(v) => v.get(n),
+        XView::Blocks(v) => v.get(n),
+        XView::BlocksRanks(v) => v.get(n),
+    };
+    match (&view, name) {
+        (XView::Div(_), "div") | (XView::Blocks(_) | XView::BlocksRanks(_), "blocks") => {}
+        _ => panic!("view of a {name} form"),
+    }
+    let empty_contexts = contexts.iter().any(|c| c.len == 0);
+    if name == "blocks" {
+        assert_eq!(matches!(view, XView::BlocksRanks(_)), empty_contexts);
+    }
+    for n in (0..total + 3).chain([total + 1000, 1 << 31, usize::MAX >> 1]) {
+        assert_eq!(view_get(n), form.get(n), "view at offset {n} of {lengths:?}");
+    }
+    assert_eq!(XNone.get(0), None);
     name
 }
 

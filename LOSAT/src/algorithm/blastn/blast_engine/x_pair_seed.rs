@@ -167,6 +167,18 @@ trait SeedOut {
     /// words the scan still hands out go to `Cut::run_cold`, which leaves at once).
     #[inline(always)]
     fn close(&mut self) {}
+
+    /// EXPERIMENT (LOSAT_X_DCEMITHOIST): the seeds `seed` gives for the pairs of one word's run, in
+    /// the run's order (at most one per pair; the caller has room for the whole run): each through
+    /// `push`. A strip's list (`Vec<Seed>`) makes room for the whole run once instead.
+    #[inline(always)]
+    fn x_push_run(&mut self, run: &[u32], mut seed: impl FnMut(u32) -> Option<Seed>) {
+        for &q_off_1 in run {
+            if let Some(s) = seed(q_off_1) {
+                self.push(s);
+            }
+        }
+    }
 }
 
 /// EXPERIMENT (LOSAT_X_SEEDPIECE): where the scan of a strip goes on after a seed piece: the
@@ -318,6 +330,30 @@ impl SeedOut for Vec<Seed> {
     #[inline(always)]
     fn push(&mut self, seed: Seed) {
         Vec::push(self, seed);
+    }
+
+    /// The run's seeds appended in order, as `Vec::push` appends them one by one, with the room
+    /// for the whole run made once (`reserve`) and the length written once, after the run: the
+    /// loop keeps the count of the seeds written in a register instead of reading and writing the
+    /// list's length and testing its capacity for each seed.
+    #[inline(always)]
+    fn x_push_run(&mut self, run: &[u32], mut seed: impl FnMut(u32) -> Option<Seed>) {
+        self.reserve(run.len());
+        let len = self.len();
+        let spare = self.spare_capacity_mut();
+        let mut k = 0usize;
+        for &q_off_1 in run {
+            if let Some(s) = seed(q_off_1) {
+                debug_assert!(k < spare.len());
+                // SAFETY: `k` counts the seeds written, at most one per pair of the run before
+                // this one, so `k < run.len() <= spare.len()` (`reserve` above).
+                unsafe { spare.get_unchecked_mut(k) }.write(s);
+                k += 1;
+            }
+        }
+        // SAFETY: the `k` slots after the first `len` were written above (in order, from the
+        // first spare slot), and `len + k <= len + run.len() <=` the capacity.
+        unsafe { self.set_len(len + k) };
     }
 }
 

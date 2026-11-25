@@ -450,6 +450,7 @@ export LOSAT_X_CLUTPAIRS=1
 export LOSAT_X_CSRQSKEEP=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
+export LOSAT_X_DCEMITHOIST=1
 export LOSAT_X_DCLATEST=1
 export LOSAT_X_DCQSAHEAD=1
 export LOSAT_X_DCSEEDLEAN=1
@@ -4397,6 +4398,30 @@ Scheduling (each value computed by one thread with the original function; order 
   both arms) x1.003. `=0` is dev's (x0.998); instructions of megablast and blastn at one thread move by at most
   0.04 %. Peak RSS with `MALLOC_ARENA_MAX=1`: 374 against 386 MiB (`-subject`, 16 threads) and 113 against
   115 MiB (`-db`); with the default arenas both arms vary between about 130 and 144 MiB on `-db`.
+- `LOSAT_X_DCEMITHOIST=1` (BLASTN `-task dc-megablast` with one template, and megablast given template options,
+  wherever the strips scan reads a table laid out as CSR (`LOSAT_X_DCCSR`): the stages of `LOSAT_X_PAIRPARDISC` and
+  `LOSAT_X_PAIRPARDISCARR`, any thread count, with or without `LOSAT_X_PAIRPARFOLD`'s partitions and
+  `LOSAT_X_SEEDPIECE`'s pieces; in the strict set from the pull request that added it, 2026-11-25:
+  `LOSAT_X_DCEMITHOIST=0` turns it off) hands each word's run of that scan to one loop per run
+  (`blast_engine/x_pair_seed_disc.rs` `scan_strip_disc_csr_hoist`, `DcPairs`, argument in its comment) instead of
+  calling `seed_of_pair` for every pair. `seed_of_pair` read for every pair what is fixed for the strip or the word:
+  the lookup width and the word length through the table (equal for a table with templates, so its word extension
+  never runs there), `s_range` through a reference, the form of the query's context index (`LOSAT_X_CTXO1`'s
+  `Div` or `Blocks`, chosen per offset and its fields read again), the subject's bound test, and a strip list's
+  length and capacity for each push. Now the form is made once per strip as a value (`x_ctx_o1::CtxO1::x_view`,
+  the same arithmetic) and chosen once per run, each form with its own loop, the subject's bound is tested once
+  per word, the context is read without a bounds check (the index answers below the number of contexts it was made
+  of, checked equal to the contexts' count once per strip), and a strip's list makes room for the whole run once
+  and writes its length after it (`SeedOut::x_push_run`); a word's presence bit is not tested again (every word in
+  the ring passed it). The pairs, the seeds and their order are `seed_of_pair`'s; a piece's cut (`Cut::fit`,
+  `Cut::run_cold`, which keeps `seed_of_pair`) is the same. `LOSAT_X_REACH` records the switch's side once per
+  strip: its own where the strip reads a CSR, the reference where it walks chains (two templates, or a table
+  below the CSR's size rule). The unit test `the_hoisted_emit_gives_the_seeds_of_seed_of_pair` compares the
+  seeds of both scans in order on CSR tables of random queries (strips cut anywhere, words at the ends of strips
+  and of the subject, masked subjects, query sets with each context form, and seed pieces of 1 to 7 seeds that
+  stop inside runs), `x_ctx_o1`'s tests the forms' values with `get` at every offset, and
+  `LOSAT/tests/blastn_dc_emit_hoist.rs` the reports with `=0`'s at 1 and 4 threads on a CSR table.
+  Evidence: TODO-AB.
 - `LOSAT_X_DCLATEST=1` (BLASTN `-task dc-megablast`, and megablast given template options, wherever
   `LOSAT_X_PAIRPARDISC`'s stage of the diagonal hash runs: a query block over 8000 letters, a subject searched
   by its owner, masked or not, two threads or more or one with `LOSAT_X_BNDCONE`, with or without

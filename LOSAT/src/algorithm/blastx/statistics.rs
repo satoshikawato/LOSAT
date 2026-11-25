@@ -197,6 +197,17 @@ pub(crate) fn evaluate_ungapped(
     subject_length: i32,
     prepared: Option<LinkCutoffs>,
 ) -> Result<LinkedHspList> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1768-1769
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1830-1831
+    // Both `BLAST_LinkHsps` and `Blast_HSPListGetEvalues` return immediately when the HSP list is
+    // empty (keeping `best_evalue` at 0.0), so skipped subjects with no per-subject link cutoffs
+    // do not reach the `prepared` unwrap below.
+    if input.is_empty() {
+        return Ok(LinkedHspList {
+            hsps: Vec::new(),
+            best_evalue: 0.0,
+        });
+    }
     if let Some(link) = link_parameters(options) {
         if link.longest_intron <= 0 {
             return Ok(link_even(

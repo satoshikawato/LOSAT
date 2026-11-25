@@ -298,11 +298,21 @@ impl BlastxDatabase {
         let mut first = 0;
         while first < count {
             let end = count.min(first.saturating_add(X_LENGTHS_PER_READ));
-            let lengths = match self.db.x_protein_lengths(first, end) {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+            // Proteins whose NCBI 32-bit length is <= 0 (`0` or `>= 2^31`) are skipped by the
+            // search and do not contribute to the searchable longest sequence.
+            let lengths = match self.db.x_protein_lengths_i32(first, end) {
                 Ok(lengths) if !lengths.is_empty() => lengths,
                 _ => return self.x_check_stores(),
             };
-            longest = longest.max(lengths.iter().copied().max().unwrap_or(0) as usize);
+            longest = longest.max(
+                lengths
+                    .iter()
+                    .copied()
+                    .map(|len| len.max(0) as usize)
+                    .max()
+                    .unwrap_or(0),
+            );
             first += lengths.len() as u32;
         }
         if longest > MAX_DBSEQ_LEN {

@@ -1,0 +1,7 @@
+<h1>Tax BLAST report</h1><pre><b>Query=</b> qp1 title
+
+Length=190
+</pre><table><caption><h2>Organism Report</h2></caption><tr><th>Accession</th><th>Descr</th><th>Score</th><th>E-value</th></tr></table><h1>Tax BLAST report</h1><pre><b>Query=</b> qp2
+
+Length=80
+</pre><table><caption><h2>Organism Report</h2></caption><tr><th>Accession</th><th>Descr</th><th>Score</th><th>E-value</th></tr></table>

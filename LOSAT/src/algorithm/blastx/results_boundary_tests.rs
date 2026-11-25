@@ -111,3 +111,92 @@ fn a_context_past_the_batch_tests_an_empty_heap() {
     }
     assert!(heaps.iter().all(|heap| heap.entries.len() == 1));
 }
+
+// No NCBI counterpart (scheduling only): a heap filled to its cutoff (`CompoHeap::early`) is one with
+// at least `threshold` entries at or below the cutoff, and each insert at or below it adds one, so
+// `x_early_ahead` (the guess of the composition redo's matches redone ahead) with `ahead[q]` matches
+// counted ahead is `early` on the heaps after that many more such inserts, and `early` itself with
+// none. Random inserts into two heaps of random thresholds, E-values about the cutoff and five times
+// it, ties included.
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:330-391
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:404-409
+#[test]
+fn filled_to_cutoff_counts_the_entries_at_or_below_it() {
+    let mut state = 0x2545_F491_4F6C_DD1D_u64;
+    let mut random = move |below: usize| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % below as u64) as usize
+    };
+    let evalues = [
+        0.0, 1e-30, 0.001, 0.002, 0.0021, 0.005, 0.01, 0.0101, 0.1, 1.0,
+    ];
+    // A heap that `insert` made from empty, as the redo makes it (an insert where `would_insert`).
+    let build = |threshold: usize, inserts: &[(f64, i32)]| {
+        let mut heap = CompoHeap::new(threshold);
+        for (oid, &(e, score)) in inserts.iter().enumerate() {
+            if heap.would_insert(e, score, oid) {
+                heap.insert(HeapEntry {
+                    list: HspList {
+                        query_index: 0,
+                        oid,
+                        hsps: Vec::new(),
+                        best_evalue: e,
+                    },
+                    best_score: score,
+                });
+            }
+        }
+        heap
+    };
+    for round in 0..500 {
+        let shapes: Vec<(usize, Vec<(f64, i32)>)> = (0..2)
+            .map(|_| {
+                let threshold = 1 + random(5);
+                let inserts = (0..random(20))
+                    .map(|_| (evalues[random(evalues.len())], random(40) as i32))
+                    .collect();
+                (threshold, inserts)
+            })
+            .collect();
+        let heaps: Vec<CompoHeap> = shapes.iter().map(|(t, i)| build(*t, i)).collect();
+        for heap in &heaps {
+            let at_or_below = heap
+                .entries
+                .iter()
+                .filter(|entry| entry.list.best_evalue <= heap.cutoff)
+                .count();
+            assert_eq!(
+                heap.entries.len() >= heap.threshold && heap.worst <= heap.cutoff,
+                at_or_below >= heap.threshold,
+                "round {round}"
+            );
+        }
+        assert!(heaps[0].x_counts_ahead(0.002) && !heaps[0].x_counts_ahead(0.0021));
+        for &e in &evalues {
+            assert_eq!(
+                CompoHeap::x_early_ahead(e, &heaps, &[0, 0]),
+                CompoHeap::early(e, &heaps),
+                "round {round} e {e}"
+            );
+            for ahead in [[1, 0], [0, 2], [1, 1], [3, 5], [6, 6]] {
+                // The heaps after `ahead[q]` more inserts at or below the cutoff.
+                let filled: Vec<CompoHeap> = shapes
+                    .iter()
+                    .zip(ahead)
+                    .map(|((threshold, inserts), more)| {
+                        let mut inserts = inserts.clone();
+                        inserts.extend((0..more).map(|k| (evalues[random(4)], k as i32)));
+                        build(*threshold, &inserts)
+                    })
+                    .collect();
+                assert_eq!(
+                    CompoHeap::x_early_ahead(e, &heaps, &ahead),
+                    CompoHeap::early(e, &filled),
+                    "round {round} e {e} ahead {ahead:?}"
+                );
+            }
+        }
+    }
+}

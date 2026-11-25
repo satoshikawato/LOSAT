@@ -22,11 +22,13 @@ use std::time::{Duration, Instant};
 
 /// Rows where LOSAT must refuse (exit status 1, standard error starting `Error: ` and containing
 /// `not supported by LOSAT`) because NCBI's result is a crash or an endless loop that LOSAT does
-/// not reproduce: a sequence file of no bytes, a cut string ISAM, a garbage index found by `-dir`
-/// (status 139), `-stride` of 0 or less (killed after 5 s); NCBI's frozen result stays beside it.
-const LOSAT_REFUSES: [&str; 7] = [
+/// not reproduce: a sequence file of no bytes, an empty `.rps` profile file, a cut string ISAM, a
+/// garbage index found by `-dir` (status 139), `-stride` of 0 or less (killed after 5 s); NCBI's
+/// frozen result stays beside it.
+const LOSAT_REFUSES: [&str; 8] = [
     "d_p4_psq_zero",
     "d_p5_psq_zero",
+    "c_rps0",
     "d_p4_psd_cut",
     "r_garbage",
     "r_garbage2",
@@ -34,45 +36,16 @@ const LOSAT_REFUSES: [&str; 7] = [
     "strideneg",
 ];
 
-/// Rows where NCBI reads zeros past the end of a short file inside its last mapped page (a
-/// truncated index, sequence or header file) and succeeds; LOSAT must refuse them (as above)
-/// until its volume readers model that page (row RG-D2b's next PR).
-const AWAITING_ZERO_PAGE: [&str; 6] = [
-    "d_p4_pin_10",
-    "d_p4_pin_cut",
-    "d_p4_psq_half",
-    "d_p4_phr_half",
-    "d_p5_pin_cut",
-    "d_n4_nsq_half",
-];
-
-/// Rows of an alias file whose count checks overflow a signed integer in NCBI's binary, where
-/// the overflow's result (undefined in C) decides the check; LOSAT must refuse them (as above)
-/// until the Owner decides the exception (Q-D2B-OV). An overflow that decides nothing gives NCBI's
-/// result (a_ov3).
-const AWAITING_Q_D2B_OV: [&str; 2] = ["a_ov1", "a_ov2"];
-
-/// Rows of `-cdd_delta`, which LOSAT refuses until row RG-D2b ports its test of a CDD database's
-/// headers (the next PR of the row).
-const AWAITING_CDD_DELTA: [&str; 12] = [
-    "cdd",
-    "c_ok",
-    "c_ok_v1",
-    "c_nowc",
-    "c_noaux",
-    "c_nofreq",
-    "c_freqmagic",
-    "c_wcn",
-    "c_wcoff",
-    "c_obsr28",
-    "c_two",
-    "c_two_v4",
-];
-
 /// Rows whose alias files hold keys that LOSAT's database reader refuses until line RG-D reads
 /// them: `MEMB_BIT` (D1d) and `TAXIDLIST` over a version 5 database (D1c-2,
 /// `seqdb::alias::refuse_v5_lists`); `-dir .` of the alias rows meets both.
 const AWAITING_READER: [&str; 4] = ["a_membx", "a_taxmiss", "a_dir", "a_dir_v1"];
+
+/// Rows covered by approved exception `Q-D2b-OV=A` (`PD-LOSAT-NCBI-DEFECTS`, Owner decision
+/// 2026-11-25 17:54 JST): NCBI's 32/64-bit signed integer arithmetic overflows and wraps to produce
+/// a false error (`a_ov1`, `a_ov2`) or a wrapped OID (`ends_intmin`), whereas LOSAT widens the
+/// calculation and reports the exact result (NCBI's frozen output stays beside it for provenance).
+const APPROVED_WIDENED_OVERFLOW: [&str; 3] = ["a_ov1", "a_ov2", "ends_intmin"];
 
 /// `tests/fixtures/blastdbcheck`.
 fn fixtures() -> PathBuf {
@@ -477,16 +450,80 @@ fn text(bytes: &[u8]) -> String {
 }
 
 /// Every list of rows that LOSAT must refuse.
-const REFUSAL_LISTS: [&[&str]; 5] = [
-    &LOSAT_REFUSES,
-    &AWAITING_ZERO_PAGE,
-    &AWAITING_Q_D2B_OV,
-    &AWAITING_CDD_DELTA,
-    &AWAITING_READER,
-];
+const REFUSAL_LISTS: [&[&str]; 2] = [&LOSAT_REFUSES, &AWAITING_READER];
 
 fn must_refuse(name: &str) -> bool {
     REFUSAL_LISTS.iter().any(|list| list.contains(&name))
+}
+
+/// Expected LOSAT output for an approved widened-overflow row (`Q-D2b-OV=A`,
+/// `PD-LOSAT-NCBI-DEFECTS`): exact arithmetic avoids NCBI's signed overflow false error, keeping
+/// all non-overflow warnings (`a_ov2` `.msk` extension warning) and returning exit status 0.
+fn expected_widened(name: &str) -> Run {
+    let (out, rc): (&[u8], i32) = match name {
+        "a_ov1" => (
+            concat!(
+                "Writing messages to <stdout> at verbosity (Detailed)\n",
+                "ISAM testing is ENABLED.\n",
+                "Legacy testing is DISABLED.\n",
+                "TaxID testing is DISABLED.\n",
+                "Testing every 100-th OID.\n",
+                "\n",
+                "Testing 1 volume(s).\n",
+                " <RUN>/cases/a/p5\n",
+                " Result=SUCCESS. No errors reported for 1 volume(s).\n",
+                "Testing 1 alias(es).\n",
+                " <RUN>/cases/a/ov1.pal\n",
+                " Result=SUCCESS. No errors reported for 1 alias(es).\n",
+            )
+            .as_bytes(),
+            0,
+        ),
+        "a_ov2" => (
+            concat!(
+                "Writing messages to <stdout> at verbosity (Detailed)\n",
+                "ISAM testing is ENABLED.\n",
+                "Legacy testing is DISABLED.\n",
+                "TaxID testing is DISABLED.\n",
+                "Testing every 100-th OID.\n",
+                "\n",
+                "Testing 1 volume(s).\n",
+                " <RUN>/cases/a/p5\n",
+                " Result=SUCCESS. No errors reported for 1 volume(s).\n",
+                "Testing 1 alias(es).\n",
+                " <RUN>/cases/a/ov2.pal\n",
+                "  <RUN>/cases/a/ov2.pal / AliasFileTest:   [WARNING] oidlist file gi.gil does not have .msk extension\n",
+                " Result=SUCCESS. No errors reported for 1 alias(es).\n",
+            )
+            .as_bytes(),
+            0,
+        ),
+        "ends_intmin" => (
+            concat!(
+                "Writing messages to <stdout> at verbosity (Minutiae)\n",
+                "ISAM testing is ENABLED.\n",
+                "Legacy testing is DISABLED.\n",
+                "TaxID testing is DISABLED.\n",
+                "Testing first -2147483648 and last -2147483648 OIDs.\n",
+                "\n",
+                "Testing 1 volume(s).\n",
+                " <RUN>/in/p5\n",
+                "  <RUN>/in/p5 / EndPoints: <testing -2147483648 OIDs at each end>\n",
+                "  <RUN>/in/p5 / EndPoints:     Failed during headers, oid 2147483657: OID not found\n",
+                "\n",
+                "  <RUN>/in/p5 / EndPoints:       Status for OID 2147483657: FAIL\n",
+                " Result=FAILURE. 1 errors reported in 1 volume(s).\n",
+                "Testing 0 alias(es).\n",
+                " Result=SUCCESS. No errors reported for 0 alias(es).\n",
+                "\n",
+                "Total errors: 1\n",
+            )
+            .as_bytes(),
+            1,
+        ),
+        _ => panic!("unexpected approved widened row {name}"),
+    };
+    (out.to_vec(), Vec::new(), rc, String::new())
 }
 
 #[test]
@@ -516,11 +553,15 @@ fn blastdbcheck_gives_ncbis_bytes() {
             }
             continue;
         }
-        let want = expected(&name);
+        let want = if APPROVED_WIDENED_OVERFLOW.contains(&name.as_str()) {
+            expected_widened(&name)
+        } else {
+            expected(&name)
+        };
         if got != want {
             eprintln!(
-                "--- {name}: LOSAT status {}, NCBI {}\nLOSAT stdout: {:?}\nNCBI stdout:  {:?}\n\
-                 LOSAT stderr: {:?}\nNCBI stderr:  {:?}\nLOSAT files:\n{}NCBI files:\n{}",
+                "--- {name}: LOSAT status {}, expected {}\nLOSAT stdout: {:?}\nexpected stdout:  {:?}\n\
+                 LOSAT stderr: {:?}\nexpected stderr:  {:?}\nLOSAT files:\n{}expected files:\n{}",
                 got.2,
                 want.2,
                 text(&got.0),
@@ -535,17 +576,239 @@ fn blastdbcheck_gives_ncbis_bytes() {
             let _ = fs::remove_dir_all(&dir);
         }
     }
-    assert!(differ.is_empty(), "rows that differ from NCBI: {differ:?}");
+    assert!(
+        differ.is_empty(),
+        "rows that differ from expected: {differ:?}"
+    );
 }
 
-/// Every id in the refusal lists names a row of the table, and no row is in two lists.
+/// Every id in the refusal and approved-exception lists names a row of the table, and no row is in
+/// two lists.
 #[test]
 fn refusal_lists_name_rows() {
     let ids: Vec<String> = rows().into_iter().map(|row| row.id).collect();
     let mut seen = Vec::new();
-    for name in REFUSAL_LISTS.iter().flat_map(|list| list.iter()) {
+    for name in REFUSAL_LISTS
+        .iter()
+        .flat_map(|list| list.iter())
+        .chain(APPROVED_WIDENED_OVERFLOW.iter())
+    {
         assert!(ids.iter().any(|id| id == name), "no row {name}");
         assert!(!seen.contains(name), "{name} is in two lists");
         seen.push(name);
     }
+}
+
+/// D2b-3 cross-program parity: `blastdbcmd`, `blastp`, and `blastn` share the same 4 KiB
+/// last-page zero-read behavior in `seqdb` and match NCBI BLAST+ 2.17.0 on the same truncated
+/// inputs (`p4_pin_10`, `p4_pin_cut`, `p4_psq_half`, `p4_phr_half`, `n4_nsq_half`).
+#[test]
+fn zero_page_cross_program_parity() {
+    let run_prog = |dir: &Path, sub: &str, args: &[&str]| -> (Vec<u8>, Vec<u8>, i32) {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_losat"));
+        cmd.arg(sub)
+            .args(args)
+            .current_dir(dir)
+            .stdin(Stdio::null())
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("TZ", "UTC")
+            .env("LC_ALL", "C");
+        let out = cmd.output().unwrap();
+        (out.stdout, out.stderr, out.status.code().unwrap_or(-1))
+    };
+    let cp_db = |dst: &Path, stem: &str| {
+        fs::create_dir_all(dst).unwrap();
+        let prefix = format!("{stem}.");
+        for entry in fs::read_dir(base_in()).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().into_string().unwrap();
+            if name.starts_with(&prefix) {
+                fs::copy(entry.path(), dst.join(name)).unwrap();
+            }
+        }
+    };
+
+    let root = scratch("zp-xprog");
+    fs::create_dir_all(&root).unwrap();
+    let q_prot = root.join("q.faa");
+    fs::write(&q_prot, b">q\nCSNFRHATLYNGCRFTMHYLCSNFRHATLYNGCRFTMHYL\n").unwrap();
+    let q_nucl = root.join("q.fna");
+    fs::write(
+        &q_nucl,
+        b">qn\nATGAAACCCTTTGGGCCCAAATTTGGGCCCAAATTTGGGCCCAAATTTGGGCCCAAATTT\n",
+    )
+    .unwrap();
+    let q_prot_s = q_prot.to_str().unwrap();
+    let q_nucl_s = q_nucl.to_str().unwrap();
+
+    // 1. p4_pin_10: blastdbcmd -info sees 0 sequences; blastp exits 3 with memory map error.
+    let d = root.join("p4_pin10");
+    cp_db(&d, "p4");
+    fs::OpenOptions::new()
+        .write(true)
+        .open(d.join("p4.pin"))
+        .unwrap()
+        .set_len(10)
+        .unwrap();
+    let (out, err, rc) = run_prog(&d, "blastdbcmd", &["-db", "p4", "-dbtype", "prot", "-info"]);
+    assert_eq!((rc, err.as_slice()), (0, b"".as_slice()));
+    assert!(
+        text(&out).contains("\t0 sequences; 0 total residues\n"),
+        "{}",
+        text(&out)
+    );
+    let (out, err, rc) = run_prog(
+        &d,
+        "blastp",
+        &["-query", q_prot_s, "-db", "p4", "-outfmt", "6"],
+    );
+    assert_eq!((rc, out.as_slice()), (3, b"".as_slice()));
+    assert_eq!(err, b"LOSAT engine error: Database memory map file error\n");
+
+    // 2. p4_pin_cut (-8 bytes): blastdbcmd prints signed negative lengths -364 and -1; blastp hits XP_000104.1.
+    let d = root.join("p4_pincut");
+    cp_db(&d, "p4");
+    let pin_len = fs::metadata(d.join("p4.pin")).unwrap().len();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(d.join("p4.pin"))
+        .unwrap()
+        .set_len(pin_len - 8)
+        .unwrap();
+    let (out, err, rc) = run_prog(
+        &d,
+        "blastdbcmd",
+        &[
+            "-db", "p4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %l %t",
+        ],
+    );
+    assert_eq!((rc, err.as_slice()), (0, b"".as_slice()));
+    assert_eq!(
+        text(&out),
+        concat!(
+            "0 60 alpha protein\n",
+            "1 45 beta predicted protein\n",
+            "2 70 gamma protein\n",
+            "3 50 delta predicted protein\n",
+            "4 40 epsilon protein\n",
+            "5 55 zeta protein\n",
+            "6 35 pir protein\n",
+            "7 -364 prf protein\n",
+            "8 -1 local protein\n",
+        )
+    );
+    let (out, err, rc) = run_prog(
+        &d,
+        "blastp",
+        &["-query", q_prot_s, "-db", "p4", "-outfmt", "6"],
+    );
+    assert_eq!((rc, err.as_slice()), (0, b"".as_slice()));
+    assert_eq!(
+        text(&out),
+        "q\tXP_000104.1\t100.000\t40\t0\t0\t1\t40\t1\t40\t2.85e-28\t82.8\n\
+         q\tXP_000104.1\t100.000\t30\t0\t0\t1\t30\t21\t50\t2.81e-20\t62.4\n"
+    );
+
+    // 3. p4_psq_half: zero-filled trailing protein bytes cut the alignment at residue 31 in blastp.
+    let d = root.join("p4_psqhalf");
+    cp_db(&d, "p4");
+    let psq_len = fs::metadata(d.join("p4.psq")).unwrap().len();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(d.join("p4.psq"))
+        .unwrap()
+        .set_len(psq_len / 2)
+        .unwrap();
+    let (out, err, rc) = run_prog(
+        &d,
+        "blastp",
+        &["-query", q_prot_s, "-db", "p4", "-outfmt", "6"],
+    );
+    assert_eq!((rc, err.as_slice()), (0, b"".as_slice()));
+    assert_eq!(
+        text(&out),
+        "q\tXP_000104.1\t100.000\t31\t0\t0\t1\t31\t1\t31\t2.62e-21\t65.1\n\
+         q\tXP_000104.1\t100.000\t20\t0\t0\t21\t40\t1\t20\t5.39e-13\t44.3\n"
+    );
+
+    // 4. p4_phr_half: blastdbcmd outputs OIDs 0..3, posts 8 Error (803.7) lines for NUL bytes,
+    // then stops with `byte 25: member seqid expected`; blastp exits 255 on zero-filled header.
+    let d = root.join("p4_phrhalf");
+    cp_db(&d, "p4");
+    let phr_len = fs::metadata(d.join("p4.phr")).unwrap().len();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(d.join("p4.phr"))
+        .unwrap()
+        .set_len(phr_len / 2)
+        .unwrap();
+    let (out, err, rc) = run_prog(
+        &d,
+        "blastdbcmd",
+        &[
+            "-db", "p4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %l %t",
+        ],
+    );
+    assert_eq!(rc, 1);
+    assert_eq!(
+        text(&out),
+        "0 60 alpha protein\n1 45 beta predicted protein\n2 70 gamma protein\n3 50 delta predicted protein\n"
+    );
+    let err_s = String::from_utf8_lossy(&err);
+    assert_eq!(
+        err_s
+            .matches("Error: (803.7) [blastdbcmd] Blast-def-line-set.E.title\n")
+            .count(),
+        8,
+        "{err_s}"
+    );
+    assert!(
+        err_s.ends_with("Error: [blastdbcmd] byte 25: member seqid expected\n"),
+        "{err_s}"
+    );
+    let (out, err, rc) = run_prog(
+        &d,
+        "blastp",
+        &["-query", q_prot_s, "-db", "p4", "-outfmt", "6"],
+    );
+    assert_eq!((rc, out.as_slice()), (255, b"".as_slice()));
+    assert_eq!(
+        text(&err),
+        "Error: byte 0: unexpected tag: None (0), should be constructed/None (32) ( at Blast-def-line-set.[])\n\n"
+    );
+
+    // 5. n4_nsq_half: zero-filled trailing 2-bit bytes yield lengths 120, 90, 148, 80 and blastn rc 0.
+    let d = root.join("n4_nsqhalf");
+    cp_db(&d, "n4");
+    let nsq_len = fs::metadata(d.join("n4.nsq")).unwrap().len();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(d.join("n4.nsq"))
+        .unwrap()
+        .set_len(nsq_len / 2)
+        .unwrap();
+    let (out, err, rc) = run_prog(
+        &d,
+        "blastdbcmd",
+        &[
+            "-db", "n4", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o %l %t",
+        ],
+    );
+    assert_eq!((rc, err.as_slice()), (0, b"".as_slice()));
+    assert_eq!(
+        text(&out),
+        "0 120 n one\n1 90 n two predicted\n2 148 n three\n3 80 n four\n"
+    );
+    let (out, err, rc) = run_prog(
+        &d,
+        "blastn",
+        &["-query", q_nucl_s, "-db", "n4", "-outfmt", "6"],
+    );
+    assert_eq!(
+        (rc, out.as_slice(), err.as_slice()),
+        (0, b"".as_slice(), b"".as_slice())
+    );
+
+    let _ = fs::remove_dir_all(&root);
 }

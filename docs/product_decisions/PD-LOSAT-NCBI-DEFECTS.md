@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.108
+- Version: 1.109
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -759,7 +759,11 @@
   RG item K10a, then 1.106 at the merge of dev of 2026-11-25 that brought 1.104 and 1.105, line NP
   item M4b-T3 and psiblast line item PS10b, then 1.107 at the merge of dev of 2026-11-25 that
   brought 1.106, line NP item M4b-3c part 2, then 1.108 at the merge of dev of 2026-11-26 that
-  brought 1.107, line NP item M (b))
+  brought 1.107, line NP item M (b));
+  1.109 2026-11-26 (exception 31, `losat blastdbcheck` alias count checks and `-ends`/`-stride` OID
+  arithmetic widened beyond NCBI's signed 32-bit/64-bit integer overflow, and empty CDD profile
+  files refused under rule 3, line RG-D2 items D2b-2..5; Owner 2026-11-25 17:54 JST, Q-D2b-OV=A;
+  numbered after 1.108)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -4540,6 +4544,28 @@ hits into the list that NCBI frees.
     every volume without an index comes before the index volumes, so that NCBI keeps no results
     (`rand_d5c2.py`, 267 databases of 2 to 9 volumes, `CHUNK_SIZE` 600 to 2,500, 1 and 4 threads):
     each LOSAT run gave NCBI's output.
+
+31. **`blastdbcheck` alias count checks and `-ends`/`-stride` OID arithmetic past signed 32-bit or
+    64-bit overflow (Owner 2026-11-25 17:54 JST, Q-D2b-OV=A, version 1.109).** NCBI BLAST+ 2.17.0
+    computes `blastdbcheck`'s alias-file count guards (`FIRST_OID`, `LAST_OID`, `MAXOID`, `NSEQ`,
+    `LENGTH`, `OIDLIST` combinations in `blastdbcheck.cpp:782-805`) and `-ends`/`-stride` OID bounds
+    (`blastdbcheck.cpp:666-682`, `590-605`) in signed 32-bit `int` and 64-bit `Int8`, where
+    products such as `(FIRST_OID + 1) * (LAST_OID + 1)` (e.g. `65535 * 65535`) or `num_oids - n`
+    for `-ends -2147483648` overflow signed integer arithmetic (undefined behavior in C++): NCBI's
+    x86-64 build wraps them to negative or zero values, emitting false alias errors (rows `a_ov1`
+    and `a_ov2`) or wrapping `-ends -2147483648` back into the valid OID range (row `ends_intmin`,
+    passing exit 0 while nearby `-ends -2147483638` jumps to `oid 2147483647` and fails with
+    `OID not found`). On 2026-11-25 17:54 JST (`qbatch-20261125/ANSWERS.md`), the Owner chose
+    option A (`Q-D2b-OV=A`: 「A: 広い型で正確に計算し誤判定を出さない（PD に新例外）」): LOSAT computes the
+    alias count expressions in 128-bit signed integers (`blastdbcheck::alias::check_values`) and
+    `-ends`/`-stride` OID arithmetic in 64-bit signed integers (`blastdbcheck::volume`), avoiding
+    signed overflow and producing exact results (`a_ov1` and `a_ov2` pass with exit 0 while keeping
+    non-overflow warnings such as `.msk` extension warnings; `ends_intmin` jumps past the volume
+    to `oid 2147483657` and fails with `OID not found`, matching nearby `-ends -2147483638`).
+    Not taken: (B) reproducing NCBI's signed wraparound; (C) refusing overflowing inputs. Under
+    rule 3, `blastdbcheck -cdd_delta` also refuses empty (0-byte) `.loo`, `.rps`, `.freq`,
+    `.wcounts`, and `.obsr` profile files (row `c_rps0`, where NCBI dereferences a null memory
+    mapping and crashes with exit status 139).
 
 ## Approved exception 26 (makeprofiledb's word table past `Int4`, psiblast line item PS10a, version 1.82)
 

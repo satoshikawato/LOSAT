@@ -39,6 +39,7 @@ use crate::report::serial::asn_ber_reader::{
 pub(crate) use crate::report::serial::asn_ber_reader::{
     CONTEXT_CONSTRUCTED as TAG_CONTEXT_CONSTRUCTED, TAG_SEQUENCE,
 };
+use crate::report::serial::encoder::{ReplacedChar, StreamPosition};
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1044
 // NCBI reference (598d8ae6): c++/src/serial/member.cpp:464-477
 // `ExpectedMember`'s throw: the members' read functions (`ReadMissingSimpleMember`) call it for a
@@ -514,6 +515,31 @@ pub(crate) struct Reader<'a> {
     utf8: bool,
     /// Whether such a string stops the read (`Failure::Utf8`; `utf8_string_path`).
     find_utf8: bool,
+    /// Active frame stack and collected `ReplacedChar` posts when collecting `Error: (803.7)`
+    /// diagnostics on the cold path (`replaced_char_posts`); `None` on the hot decode path.
+    posts: Option<PostCollector>,
+}
+
+/// Cold-path state for collecting NCBI's `Bad char [0x..]` (`Error: (803.7)`) posts in exact
+/// `CObjectIStreamAsnBinary::FixVisibleChars` order.
+struct PostCollector {
+    stack: Vec<Frame>,
+    posts: Vec<ReplacedChar>,
+}
+
+impl PostCollector {
+    fn trace(&self) -> String {
+        let mut out = String::new();
+        for &frame in &self.stack {
+            if let Some(name) = frame.trace_name() {
+                if !out.is_empty() {
+                    out.push('.');
+                }
+                out.push_str(name);
+            }
+        }
+        out
+    }
 }
 
 impl<'a> Reader<'a> {
@@ -523,6 +549,30 @@ impl<'a> Reader<'a> {
             pos: 0,
             utf8: false,
             find_utf8: false,
+            posts: None,
+        }
+    }
+
+    #[inline(always)]
+    fn push_frame(&mut self, frame: Frame) {
+        if let Some(collector) = self.posts.as_mut() {
+            collector.stack.push(frame);
+        }
+    }
+
+    #[inline(always)]
+    fn pop_frame(&mut self) {
+        if let Some(collector) = self.posts.as_mut() {
+            collector.stack.pop();
+        }
+    }
+
+    #[inline(always)]
+    fn set_top_frame(&mut self, frame: Frame) {
+        if let Some(collector) = self.posts.as_mut() {
+            if let Some(top) = collector.stack.last_mut() {
+                *top = frame;
+            }
         }
     }
 
@@ -924,9 +974,32 @@ impl<'a> Reader<'a> {
     }
 
     /// A VisibleString as NCBI's reader gives it (`fix_visible_chars`), and the number of
-    /// bytes it replaced.
+    /// bytes it replaced. When collecting diagnostics (`replaced_char_posts`), also records each
+    /// `ReplacedChar` in NCBI's `FixVisibleChars` order (mutating the string incrementally as `#`
+    /// replaces each bad byte, at the stream position right after the string's bytes).
     fn fixed_string(&mut self) -> Result<(Vec<u8>, usize), BerError> {
         let stored = self.visible_string()?;
+        if let Some(collector) = self.posts.as_mut() {
+            let mut fixed = stored.to_vec();
+            let mut count = 0usize;
+            let position = StreamPosition::Byte(self.pos as u64);
+            let mut trace: Option<String> = None;
+            for i in 0..fixed.len() {
+                let byte = fixed[i];
+                if !visible_char(byte) {
+                    let trace_str = trace.get_or_insert_with(|| collector.trace()).clone();
+                    collector.posts.push(ReplacedChar {
+                        trace: trace_str,
+                        byte,
+                        position,
+                        string: fixed.clone().into(),
+                    });
+                    fixed[i] = b'#';
+                    count += 1;
+                }
+            }
+            return Ok((fixed, count));
+        }
         Ok((fix_visible_chars(stored), replaced_bytes(stored)))
     }
 
@@ -1108,17 +1181,27 @@ fn read_container<'a>(
     array: Frame,
     mut element: impl FnMut(&mut Reader<'a>) -> Result<(), BerError>,
 ) -> Result<(), BerError> {
-    let end = ber.begin_sequence().map_err(|e| e.left(array))?;
-    loop {
-        let more = ber
-            .more(end)
-            .map_err(|e| e.left(Frame::ArrayElement).left(array))?;
-        if !more {
-            break;
+    ber.push_frame(array);
+    let result = (|| {
+        let end = ber.begin_sequence()?;
+        loop {
+            ber.push_frame(Frame::ArrayElement);
+            let step: Result<bool, BerError> = (|| {
+                if !ber.more(end)? {
+                    return Ok(false);
+                }
+                element(ber)?;
+                Ok(true)
+            })();
+            ber.pop_frame();
+            if !step.map_err(|e| e.left(Frame::ArrayElement))? {
+                break;
+            }
         }
-        element(ber).map_err(|e| e.left(Frame::ArrayElement).left(array))?;
-    }
-    ber.end_of_content(end).map_err(|e| e.left(array))
+        ber.end_of_content(end)
+    })();
+    ber.pop_frame();
+    result.map_err(|e| e.left(array))
 }
 
 /// The members of a class type that its read checks (generated `*_.cpp` of NCBI 598d8ae6, each
@@ -1147,39 +1230,54 @@ fn read_class<'a>(
     mut member: impl FnMut(&mut Reader<'a>, u8) -> Result<(), BerError>,
 ) -> Result<(), BerError> {
     let frame = Frame::Class(class.name);
-    let end = ber.begin_sequence().map_err(|e| e.left(frame))?;
-    let mut next = 0u8;
-    let mut current = None;
-    loop {
-        let begun = begin_class_member(ber, end, class.members, next)
-            .map_err(|e| e.left(Frame::Member(current)).left(frame))?;
-        let Some((number, member_end)) = begun else {
-            break;
-        };
-        let name = class.members[usize::from(number)];
-        current = Some(name);
-        let in_member = |e: BerError| e.left(Frame::Member(Some(name))).left(frame);
-        if let Some(skipped) = (next..number).find(|&at| class.mandatory & (1 << at) != 0) {
-            return Err(in_member(
-                ber.expected_member(class.members[usize::from(skipped)]),
-            ));
+    ber.push_frame(frame);
+    let result = (|| {
+        let end = ber.begin_sequence()?;
+        let mut next = 0u8;
+        let mut current = None;
+        loop {
+            ber.push_frame(Frame::Member(current));
+            let begun = begin_class_member(ber, end, class.members, next);
+            let (number, member_end) = match begun {
+                Ok(Some(found)) => found,
+                Ok(None) => {
+                    ber.pop_frame();
+                    break;
+                }
+                Err(e) => {
+                    ber.pop_frame();
+                    return Err(e.left(Frame::Member(current)));
+                }
+            };
+            let name = class.members[usize::from(number)];
+            current = Some(name);
+            ber.set_top_frame(Frame::Member(Some(name)));
+            let step = (|| {
+                if let Some(skipped) = (next..number).find(|&at| class.mandatory & (1 << at) != 0) {
+                    return Err(ber.expected_member(class.members[usize::from(skipped)]));
+                }
+                member(ber, number).map_err(|e| {
+                    if class.set_flag & (1 << number) != 0 {
+                        e.member_read(name)
+                    } else {
+                        e
+                    }
+                })?;
+                ber.end_of_content(member_end)
+            })();
+            ber.pop_frame();
+            step.map_err(|e| e.left(Frame::Member(Some(name))))?;
+            next = number + 1;
         }
-        member(ber, number).map_err(|e| {
-            in_member(if class.set_flag & (1 << number) != 0 {
-                e.member_read(name)
-            } else {
-                e
-            })
-        })?;
-        ber.end_of_content(member_end).map_err(in_member)?;
-        next = number + 1;
-    }
-    let count = class.members.len() as u8;
-    if let Some(skipped) = (next..count).find(|&at| class.mandatory & (1 << at) != 0) {
-        let name = class.members[usize::from(skipped)];
-        return Err(ber.expected_member(name).left(frame));
-    }
-    ber.end_of_content(end).map_err(|e| e.left(frame))
+        let count = class.members.len() as u8;
+        if let Some(skipped) = (next..count).find(|&at| class.mandatory & (1 << at) != 0) {
+            let name = class.members[usize::from(skipped)];
+            return Err(ber.expected_member(name));
+        }
+        ber.end_of_content(end)
+    })();
+    ber.pop_frame();
+    result.map_err(|e| e.left(frame))
 }
 
 /// `BeginClassMember` of a class with the members `names` whose next member is `next` (NCBI's
@@ -1216,12 +1314,23 @@ fn read_choice<'a, T>(
     names: &'static [&'static str],
     variant: impl FnOnce(&mut Reader<'a>, u8) -> Result<T, BerError>,
 ) -> Result<T, BerError> {
-    let (number, end) =
-        begin_choice_variant(ber, names).map_err(|e| e.left(Frame::Variant(None)))?;
+    ber.push_frame(Frame::Variant(None));
+    let (number, end) = match begin_choice_variant(ber, names) {
+        Ok(found) => found,
+        Err(e) => {
+            ber.pop_frame();
+            return Err(e.left(Frame::Variant(None)));
+        }
+    };
     let frame = Frame::Variant(Some(names[usize::from(number)]));
-    let value = variant(ber, number).map_err(|e| e.left(frame))?;
-    ber.end_of_content(end).map_err(|e| e.left(frame))?;
-    Ok(value)
+    ber.set_top_frame(frame);
+    let result: Result<T, BerError> = (|| {
+        let value = variant(ber, number)?;
+        ber.end_of_content(end)?;
+        Ok(value)
+    })();
+    ber.pop_frame();
+    result.map_err(|e| e.left(frame))
 }
 
 /// `BeginChoiceVariant` of a CHOICE whose variants are `names`.
@@ -1259,12 +1368,51 @@ pub fn decode_full_set(record: &[u8]) -> Result<DeflineSet, BerError> {
 /// `CObjectIStream::Read` of the root `Blast-def-line-set` (cited at `decode_full_set`).
 fn read_set(ber: &mut Reader<'_>) -> Result<Vec<BlastDefline>, BerError> {
     let mut deflines = Vec::new();
-    read_container(ber, Frame::SetArray, |ber| {
+    ber.push_frame(Frame::Root);
+    let result = read_container(ber, Frame::SetArray, |ber| {
         deflines.push(decode_defline(ber)?);
         Ok(())
-    })
-    .map_err(|e| e.left(Frame::Root))?;
+    });
+    ber.pop_frame();
+    result.map_err(|e| e.left(Frame::Root))?;
     Ok(deflines)
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:703-749
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1855-1898
+/// Cold-path re-decode of `record` that collects every `Error: (803.7)` `Bad char [0x..]` post
+/// emitted by NCBI's `CObjectIStreamAsnBinary::FixVisibleChars` in exact order up to either full
+/// decoding or the first BER error (such as `ExpectedMember` after a NUL-padded title).
+#[cold]
+#[inline(never)]
+pub fn replaced_char_posts(record: &[u8]) -> Vec<ReplacedChar> {
+    if record.is_empty() {
+        return Vec::new();
+    }
+    let mut ber = Reader::new(record);
+    ber.posts = Some(PostCollector {
+        stack: Vec::new(),
+        posts: Vec::new(),
+    });
+    let _ = read_set(&mut ber);
+    ber.posts.map_or_else(Vec::new, |collector| collector.posts)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2220
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
+// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:352-358
+/// The `CEofException` that NCBI's `x_GetHdrAsn1` throws when header offsets are non-ascending
+/// (`end < start`): `raw_data.size()` is non-zero (negative length cast to size), so
+/// `CObjectIStreamAsnBinary` runs and immediately hits EOF inside the root `Blast-def-line-set`
+/// frame (`Frame type= eFrameNamed, Object type= Blast-def-line-set`).
+pub(crate) fn negative_length_eof() -> NcbiException {
+    let (file, line, function) = HANDLE_EOF_RETHROW;
+    NcbiException::new(END_OF_FILE, "end of file").rethrow_same(
+        file,
+        line,
+        function,
+        Frame::Root.info(),
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:298-309

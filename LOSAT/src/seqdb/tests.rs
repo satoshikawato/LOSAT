@@ -1251,8 +1251,18 @@ fn integrity_errors_are_ncbis_seqdb_exceptions_and_refusals_are_not() {
     let integrity = SeqDbError::Integrity {
         path: PathBuf::from("h4.msk"),
         message: "header alone".to_string(),
+        assert: Some(super::SeqDbAssert {
+            cond: "start < end",
+            file: "include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp",
+            line: 128,
+        }),
     };
     assert!(integrity.is_seqdb_exception());
+    let exc = integrity.integrity_exception().unwrap();
+    let text = String::from_utf8(exc.ncbi_what()).unwrap();
+    assert!(text.contains("seqdbatlas.cpp\", line 77"), "{text}");
+    assert!(text.contains("Validation failed: [start < end]"), "{text}");
+    assert!(text.contains("seqdbfile.hpp:128"), "{text}");
     let refusal = SeqDbError::NcbiCrashes {
         path: PathBuf::from("e.msk"),
         message: "empty".to_string(),
@@ -1368,20 +1378,36 @@ fn index_file_errors() {
         message(IndexFile::parse(&version3, SeqType::Protein, &path)),
         "Error: Not a valid version 4 or 5 database."
     );
-    for cut in [0, 3, 20, bytes.len() - 1] {
-        assert!(
-            message(IndexFile::parse(&bytes[..cut], SeqType::Protein, &path))
-                .starts_with("index file ends inside a field")
-        );
-    }
-    // Offsets that go backwards.
+    // A 0-byte index cannot be mapped; a 3-byte index reads zeros from its first 4 KiB page and
+    // fails the version check; 20 bytes and len-1 read zero-filled fields inside the 4 KiB page.
+    assert!(
+        message(IndexFile::parse(&bytes[..0], SeqType::Protein, &path))
+            .starts_with("index file ends inside a field")
+    );
+    assert_eq!(
+        message(IndexFile::parse(&bytes[..3], SeqType::Protein, &path)),
+        "Error: Not a valid version 4 or 5 database."
+    );
+    let cut20 = IndexFile::parse(&bytes[..20], SeqType::Protein, &path).unwrap();
+    assert_eq!(cut20.num_oids, 0);
+    let cutm1 = IndexFile::parse(&bytes[..bytes.len() - 1], SeqType::Protein, &path).unwrap();
+    assert_eq!(cutm1.num_oids, 10);
+    // An index whose offset tables pass the mapped 4 KiB page still fails with a format error.
+    let mut past_page = bytes.clone();
+    // num_oids is right after version (4), seqtype (4), title (4+39), date (4+22) -> offset 77.
+    let num_oids_at = 4 + 4 + (4 + index.title.len()) + (4 + index.date.len());
+    past_page[num_oids_at..num_oids_at + 4].copy_from_slice(&2000u32.to_be_bytes());
+    assert!(
+        message(IndexFile::parse(&past_page, SeqType::Protein, &path))
+            .starts_with("index file ends inside a field")
+    );
+    // Offsets that go backwards are accepted by CSeqDBIdxFile and returned as stored.
     let mut backwards = bytes.clone();
     let last = backwards.len() - 4;
     backwards[last..].copy_from_slice(&0u32.to_be_bytes());
-    assert!(
-        message(IndexFile::parse(&backwards, SeqType::Protein, &path))
-            .contains("not in ascending order")
-    );
+    let backwards_idx = IndexFile::parse(&backwards, SeqType::Protein, &path).unwrap();
+    let (start, end) = backwards_idx.sequence_range(9).unwrap();
+    assert!(end < start, "expected end < start, got ({start}, {end})");
 
     let path = fixture_dir().join("db/nucl_v5.nin");
     let bytes = std::fs::read(&path).unwrap();
@@ -1430,13 +1456,23 @@ fn column_files_and_missing_files() {
         );
     }
 
-    // A sequence file cut short: a format error, not a read past the end.
+    // A sequence file cut short inside its last 4 KiB page reads zero-filled bytes, matching
+    // NCBI's memory-mapped page; a range past the mapped 4 KiB page gives a format error.
     copy_database("prot_v4", &["psq"], &dir);
     let whole = std::fs::read(dir.join("prot_v4.psq")).unwrap();
     std::fs::write(dir.join("prot_v4.psq"), &whole[..whole.len() - 5]).unwrap();
     {
         let db = SeqDb::open(&name, SeqType::Protein).unwrap();
         assert!(db.read_sequence(0).is_ok());
+        let seq9 = db.read_sequence(9).unwrap();
+        assert!(seq9.protein(0).ends_with(&[0, 0, 0, 0]));
+    }
+    let mut pin = std::fs::read(dir.join("prot_v4.pin")).unwrap();
+    let last = pin.len() - 4;
+    pin[last..].copy_from_slice(&8192u32.to_be_bytes());
+    std::fs::write(dir.join("prot_v4.pin"), &pin).unwrap();
+    {
+        let db = SeqDb::open(&name, SeqType::Protein).unwrap();
         assert!(matches!(
             db.read_sequence(9),
             Err(SeqDbError::Format { message, .. }) if message.contains("passes the end of the file")
@@ -2182,12 +2218,14 @@ fn x_nucleotide_check_reads_what_read_block_gives_one_sequence() {
     long_count[64..68].copy_from_slice(&[0, 0, 0, 9]);
     let mut remainder = original.clone();
     remainder[63] ^= 1;
-    for (what, bytes) in [
-        ("count past the end", long_count),
-        ("remainder", remainder),
-        ("cut in the 2-bit data", original[..50].to_vec()),
-        ("cut in the ambiguity data", original[..70].to_vec()),
-        ("cut before the sequence", original[..40].to_vec()),
+    for (what, bytes, expect_fail) in [
+        ("count past the end", long_count, true),
+        ("remainder", remainder, false),
+        // All three cuts of the 100-byte `.nsq` remain within the first 4 KiB page, so both
+        // `read_block` and `x_nucleotide_check` read zero-filled trailing bytes as NCBI does.
+        ("cut in the 2-bit data", original[..50].to_vec(), false),
+        ("cut in the ambiguity data", original[..70].to_vec(), false),
+        ("cut before the sequence", original[..40].to_vec(), false),
     ] {
         std::fs::write(&path, bytes).unwrap();
         let db = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
@@ -2195,10 +2233,23 @@ fn x_nucleotide_check_reads_what_read_block_gives_one_sequence() {
             let range = db.next_block(ordinal, 0).unwrap();
             let failed = check_as_read_block(&db, range, &format!("{what} {ordinal}"));
             if ordinal == 4 {
-                assert_eq!(failed, what != "remainder", "{what}");
+                assert_eq!(failed, expect_fail, "{what}");
             }
         }
     }
+    // A sequence whose stored offset passes the mapped 4 KiB page still fails identically in both.
+    std::fs::write(&path, &original).unwrap();
+    let nin_path = dir.join("nucl_v4.nin");
+    let mut nin = std::fs::read(&nin_path).unwrap();
+    let idx = IndexFile::parse(&nin, SeqType::Nucleotide, &nin_path).unwrap();
+    // Nucleotide `.nin` ends with 3 arrays of (num_oids + 1) u32s: header, sequence, ambiguity.
+    let stride = 4 * (idx.num_oids as usize + 1);
+    let seq_end_4 = nin.len() - 2 * stride + 5 * 4;
+    nin[seq_end_4..seq_end_4 + 4].copy_from_slice(&8192u32.to_be_bytes());
+    std::fs::write(&nin_path, &nin).unwrap();
+    let db = SeqDb::open(&name, SeqType::Nucleotide).unwrap();
+    let range = db.next_block(4, 0).unwrap();
+    assert!(check_as_read_block(&db, range, "past 4 KiB page 4"));
 }
 
 #[test]
@@ -2737,6 +2788,13 @@ fn check_search_path_row(
             "{id}: {read:?}"
         );
         assert_eq!(status, "2", "{id}: exit status of a database error");
+        return;
+    }
+    // A cut index inside the first 4 KiB page that NCBI opens with 0 sequences (`blastp` then
+    // reports `BLAST engine error: Database memory map file error`, exit 3).
+    if losat == "zero_oids" {
+        let db = opened.unwrap_or_else(|e| panic!("{id}: LOSAT does not open it: {e:?}"));
+        assert_eq!(db.num_seqs(), 0, "{id}: expected 0 sequences");
         return;
     }
     // Databases LOSAT refuses on purpose, whatever NCBI does with them.

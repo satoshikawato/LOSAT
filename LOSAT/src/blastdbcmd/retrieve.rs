@@ -49,6 +49,12 @@ pub(super) enum Stop {
     /// such read (`Source::deflines`), before the record's text. `Run::write` posts it and
     /// writes the record again; the warning is posted once.
     Utf8Post(String),
+    /// A failed binary ASN.1 header read that first replaced non-VisibleString bytes with `#`
+    /// (`Error: (803.7)`), then stopped with `after`.
+    ReplacedThen {
+        posts: Vec<crate::report::serial::encoder::ReplacedChar>,
+        after: Box<Stop>,
+    },
     /// A write found the pipe closed where SIGPIPE ends NCBI's process (`Ostream::closed`):
     /// the retrieval ends at once, exit status 0, no message. Any other failed write is
     /// dropped by the `Ostream` and the retrieval goes on.
@@ -148,11 +154,24 @@ impl<'a> Source<'a> {
     }
 
     /// The stop of a read of the header at `at` that failed with `error`: NCBI's warning first
-    /// where its read took a UTF8String before the failure (`utf8_post`), else the error.
+    /// where its read took a UTF8String before the failure (`utf8_post`), then any `#`-replaced
+    /// character posts before a binary ASN.1 failure, else the error.
     #[cold]
     #[inline(never)]
     fn failed_read(&self, at: SeqLocation, error: crate::seqdb::SeqDbError) -> Stop {
-        self.utf8_post(at).unwrap_or_else(|| error.into())
+        if let Some(post) = self.utf8_post(at) {
+            return post;
+        }
+        if matches!(error, crate::seqdb::SeqDbError::Ncbi(_)) {
+            let posts = self.db.header_replaced_char_posts_at(at);
+            if !posts.is_empty() {
+                return Stop::ReplacedThen {
+                    posts,
+                    after: Box::new(error.into()),
+                };
+            }
+        }
+        error.into()
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:411-425
@@ -452,6 +471,17 @@ impl Output<'_, '_> {
         Ok(())
     }
 
+    /// NCBI's errors (`803.7`) for non-VisibleString bytes replaced with `#`
+    /// (`Diag::post_replaced`), after flushing the output so far.
+    pub fn post_replaced_chars(
+        &mut self,
+        posts: &[crate::report::serial::encoder::ReplacedChar],
+    ) -> Result<(), Stop> {
+        self.out.flush().map_err(Stop::write)?;
+        self.diag.post_replaced(posts);
+        Ok(())
+    }
+
     /// The write of `object` to `m_Out` through `MSerial_AsnText`: the ASN.1 text document
     /// `document`, with NCBI's post of each byte its text stream replaces
     /// (`bioseq::write_asn_text`).
@@ -633,6 +663,22 @@ pub(super) fn process(
             debug_assert!(false, "a post that no write took");
             diag.post_utf8_string(&path);
             0
+        }
+        Err(Stop::ReplacedThen { posts, after }) => {
+            diag.post_replaced(&posts);
+            match *after {
+                Stop::Ncbi(message) => {
+                    diag.err_post(&message);
+                    1
+                }
+                Stop::NcbiBytes(message) => {
+                    diag.err_post_bytes(&message);
+                    1
+                }
+                Stop::Refused(reason) => diag.refuse(&reason),
+                Stop::ClosedPipe => 0,
+                Stop::Utf8Post(_) | Stop::ReplacedThen { .. } => 1,
+            }
         }
     }
 }
@@ -1096,6 +1142,10 @@ impl Run<'_, '_, '_> {
             .write(self.source, oid, config, target, &mut self.output)
         {
             Err(Stop::Utf8Post(path)) => self.write_after_utf8_post(&path, oid, config, target),
+            Err(Stop::ReplacedThen { posts, after }) => {
+                self.output.post_replaced_chars(&posts)?;
+                Err(*after)
+            }
             written => written,
         }
     }
@@ -1136,8 +1186,16 @@ impl Run<'_, '_, '_> {
         target: Option<&[u8]>,
     ) -> Result<(), Stop> {
         self.output.post_utf8_string(path)?;
-        self.formatter
+        match self
+            .formatter
             .write(self.source, oid, config, target, &mut self.output)
+        {
+            Err(Stop::ReplacedThen { posts, after }) => {
+                self.output.post_replaced_chars(&posts)?;
+                Err(*after)
+            }
+            written => written,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:411-416

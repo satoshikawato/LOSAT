@@ -159,7 +159,9 @@ impl Volume {
         mode: XDbIdxRead,
     ) -> Result<Self, SeqDbError> {
         let index_path = with_extension(base, seqtype, "in");
-        let index_file = DbFile::open(&index_path)?.read_in_order();
+        let index_file = DbFile::open(&index_path)?
+            .read_in_order()
+            .zero_pad_last_page();
         let index = match mode {
             XDbIdxRead::Off => IndexFile::parse(&index_file.read_all()?, seqtype, &index_path)?,
             XDbIdxRead::On => IndexFile::open(index_file, seqtype)?,
@@ -221,8 +223,9 @@ impl Volume {
         if let Some(file) = slot.get() {
             return Ok(file);
         }
-        let file =
-            DbFile::open(&with_extension(&self.base, self.index.seqtype, ext))?.read_in_order();
+        let file = DbFile::open(&with_extension(&self.base, self.index.seqtype, ext))?
+            .read_in_order()
+            .zero_pad_last_page();
         // Two threads may both open the file; the first one stored is used.
         Ok(slot.get_or_init(|| file))
     }
@@ -291,10 +294,48 @@ impl Volume {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
     /// The signed 32-bit length of protein `oid` (volume-relative) as NCBI's `GetSeqLengthProt`
-    /// returns it ([`ncbi_protein_length`]): `0` for an empty protein and negative for `2^31` or
-    /// more residues.
+    /// returns it: `end_offset - 1 - start_offset` in 32-bit signed arithmetic (negative for
+    /// `2^31` or more residues or non-ascending offsets).
     pub fn protein_length_i32(&self, oid: u32) -> Result<i32, SeqDbError> {
-        self.protein_length(oid).map(ncbi_protein_length)
+        assert!(
+            self.index.seqtype == SeqType::Protein,
+            "protein length of a nucleotide volume"
+        );
+        self.check_range(oid, oid.saturating_add(1))?;
+        let (start, end) = self.index.sequence_range(oid)?;
+        Ok((end as i32).wrapping_sub(1).wrapping_sub(start as i32))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1783-1804
+    /// Opens `.psq` and returns NCBI's `x_GetSequence` signed 32-bit length for protein `oid`
+    /// (volume-relative), checking that the mapped pointer at `start - 1` (and the residue bytes
+    /// when `length > 0`) lie inside the file's mapped 4 KiB page. Refuses 0-byte `.psq` files
+    /// where NCBI crashes.
+    pub fn protein_sequence_len_i32(&self, oid: u32) -> Result<i32, SeqDbError> {
+        assert!(
+            self.index.seqtype == SeqType::Protein,
+            "protein sequence length of a nucleotide volume"
+        );
+        self.check_range(oid, oid.saturating_add(1))?;
+        let file = self.seq_file()?;
+        let (start, end) = self.index.sequence_range(oid)?;
+        if file.is_empty() {
+            return Err(SeqDbError::NcbiCrashes {
+                path: file.path().to_path_buf(),
+                message: "the sequence file has no bytes, which NCBI maps as a null pointer"
+                    .to_string(),
+            });
+        }
+        let len = (end as i32).wrapping_sub(1).wrapping_sub(start as i32);
+        let Some(lead_start) = start.checked_sub(1) else {
+            return Err(self.index.sequence_changed(oid, 2));
+        };
+        if len > 0 {
+            file.x_check_range(lead_start, start + len as u64 + 1)?;
+        } else {
+            file.x_check_range(lead_start, lead_start + 1)?;
+        }
+        Ok(len)
     }
 
     fn checked_protein_range(&self, oid: u32) -> Result<(&DbFile, u64, u64), SeqDbError> {
@@ -391,15 +432,15 @@ impl Volume {
             return Ok(first + 1);
         }
         // `block_bytes(first, end) <= max_bytes` is `sequence_start(end) <= limit`.
-        let limit = self
-            .index
-            .sequence_start(first)?
-            .saturating_add(max_bytes - lead);
-        if self.index.sequence_start(n)? <= limit {
+        let first_start = self.index.sequence_start(first)?;
+        let limit = first_start.saturating_add(max_bytes - lead);
+        let last_start = self.index.sequence_start(n)?;
+        if last_start >= first_start && last_start <= limit {
             return Ok(n);
         }
         let mut window = window.max(1);
         let mut next = first + 1;
+        let mut prev = first_start;
         loop {
             // The end `n` does not fit, so the scan stops at or before it, unless the file
             // changed after the open and the entry of `n` reads differently.
@@ -408,8 +449,12 @@ impl Volume {
             }
             let count = window.min((n + 1 - next) as usize);
             let offsets = self.index.sequence_offsets(next, next + count as u32 - 1)?;
-            if let Some(at) = offsets.iter().position(|&offset| u64::from(offset) > limit) {
-                return Ok((next + at as u32).saturating_sub(1).max(first + 1));
+            for (at, &offset) in offsets.iter().enumerate() {
+                let offset = u64::from(offset);
+                if offset < prev || offset > limit {
+                    return Ok((next + at as u32).saturating_sub(1).max(first + 1));
+                }
+                prev = offset;
             }
             next += count as u32;
             window = (window * 2).min(X_BLOCK_END_MAX_WINDOW);
@@ -454,10 +499,16 @@ impl Volume {
                 window.first = first;
             }
             let base = (first - window.first) as usize;
-            let limit = u64::from(window.offsets[base]).saturating_add(max_bytes - lead);
+            let first_start = u64::from(window.offsets[base]);
+            let limit = first_start.saturating_add(max_bytes - lead);
             let after = &window.offsets[base + 1..];
-            if let Some(at) = after.iter().position(|&offset| u64::from(offset) > limit) {
-                return Ok((first + at as u32).max(first + 1));
+            let mut prev = first_start;
+            for (at, &offset) in after.iter().enumerate() {
+                let offset = u64::from(offset);
+                if offset < prev || offset > limit {
+                    return Ok((first + at as u32).max(first + 1));
+                }
+                prev = offset;
             }
             if window.first as usize + window.offsets.len() == n as usize + 1 {
                 return Ok(n);
@@ -587,15 +638,10 @@ impl Volume {
                 buffer,
             );
         }
-        // Cold path: at least one sequence has NCBI 32-bit length < 0 (>= 2^31 residues) or
-        // non-monotonic offsets. Validate the sequence file range without reading skipped bytes.
-        let changed = || self.index.sequence_changed(first, seq_offsets.len());
+        // Cold path: at least one sequence has NCBI 32-bit length < 0 (>= 2^31 residues or
+        // non-monotonic offsets) or start == 0. Validate and read each sequence as NCBI's
+        // `x_GetSequence` / `s_SeqDbGetSequence` does: non-positive lengths are skipped.
         let file = self.seq_file()?;
-        let data_start = u64::from(seq_offsets[0])
-            .checked_sub(1)
-            .ok_or_else(changed)?;
-        let data_end = u64::from(*seq_offsets.last().expect("non-empty range"));
-        file.x_check_range(data_start, data_end)?;
         let count = seq_offsets.len() - 1;
         let mut data = vec![0u8];
         let mut packed_offsets = Vec::with_capacity(seq_offsets.len());
@@ -604,16 +650,19 @@ impl Volume {
         for i in 0..count {
             let start = seq_offsets[i];
             let next = seq_offsets[i + 1];
-            let raw_len = next
-                .checked_sub(start)
-                .and_then(|bytes| bytes.checked_sub(1))
-                .ok_or_else(changed)?;
-            if ncbi_protein_length(raw_len) <= 0 {
+            let len_i32 = (next as i32).wrapping_sub(1).wrapping_sub(start as i32);
+            if len_i32 <= 0 {
+                if start >= 1 && next > start {
+                    file.x_check_range(u64::from(start) - 1, u64::from(next))?;
+                }
                 data.push(0);
                 packed_offsets.push(data.len() as u32);
                 prev_skipped = true;
             } else {
-                let raw = file.read_range(u64::from(start) - 1, u64::from(next))?;
+                let Some(lead_start) = u64::from(start).checked_sub(1) else {
+                    return Err(self.index.sequence_changed(first, seq_offsets.len()));
+                };
+                let raw = file.read_range(lead_start, u64::from(start) + len_i32 as u64 + 1)?;
                 if i == 0 || prev_skipped {
                     let last = data.len() - 1;
                     data[last] = raw[0];
@@ -666,13 +715,19 @@ impl Volume {
         buffer: BlockBuffer<'_>,
     ) -> Result<SequenceBlock, SeqDbError> {
         let seqtype = self.index.seqtype;
-        // Each sequence's ambiguity data inside its data (checked at open): read from the file,
-        // the entries can break it only if the file changed after the open.
-        if !self.index.holds_offsets()
-            && !amb_offsets
-                .iter()
-                .enumerate()
-                .all(|(i, &amb)| seq_offsets[i] < amb && amb <= seq_offsets[i + 1])
+        let valid_seq = match seqtype {
+            SeqType::Protein => {
+                seq_offsets[0] >= 1 && seq_offsets.windows(2).all(|pair| pair[0] < pair[1])
+            }
+            SeqType::Nucleotide => seq_offsets.windows(2).all(|pair| pair[0] <= pair[1]),
+        };
+        if !valid_seq {
+            return Err(self.index.sequence_changed(first, seq_offsets.len()));
+        }
+        if !amb_offsets
+            .iter()
+            .enumerate()
+            .all(|(i, &amb)| seq_offsets[i] < amb && amb <= seq_offsets[i + 1])
         {
             return Err(self.index.ambiguity_changed(first, amb_offsets.len()));
         }
@@ -719,7 +774,10 @@ impl Volume {
         let seq_offsets = self.index.sequence_offsets(first, end)?;
         let amb_offsets = self.index.ambiguity_offsets(first, end)?;
         let (start, amb_start, next) = (seq_offsets[0], amb_offsets[0], seq_offsets[1]);
-        if !self.index.holds_offsets() && (start >= amb_start || amb_start > next) {
+        if start > next {
+            return Err(self.index.sequence_changed(first, seq_offsets.len()));
+        }
+        if start >= amb_start || amb_start > next {
             return Err(self.index.ambiguity_changed(first, amb_offsets.len()));
         }
         let file = self.seq_file()?;
@@ -769,10 +827,22 @@ impl Volume {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
     /// [`Self::x_protein_lengths`] as NCBI's signed 32-bit `GetSeqLengthProt` lengths
-    /// ([`ncbi_protein_length`]).
+    /// (`end - 1 - start`, including negative lengths for `>= 2^31` or non-ascending offsets).
     pub fn x_protein_lengths_i32(&self, first: u32, end: u32) -> Result<Vec<i32>, SeqDbError> {
-        self.x_protein_lengths(first, end)
-            .map(|lengths| lengths.into_iter().map(ncbi_protein_length).collect())
+        assert!(
+            self.index.seqtype == SeqType::Protein,
+            "protein lengths of a nucleotide volume"
+        );
+        self.check_range(first, end)?;
+        let offsets = self.index.sequence_offsets(first, end)?;
+        Ok(offsets
+            .windows(2)
+            .map(|pair| {
+                (pair[1] as i32)
+                    .wrapping_sub(1)
+                    .wrapping_sub(pair[0] as i32)
+            })
+            .collect())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2316
@@ -811,7 +881,39 @@ impl Volume {
         self.check_range(oid, oid.saturating_add(1))?;
         let (start, end) = self.index.header_range(oid)?;
         let file = self.hdr_file()?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2208-2220
+        // When `end < start`, `raw_data.size()` is non-zero (negative length cast to size), so
+        // `CObjectIStreamAsnBinary` runs and immediately hits EOF in `Blast-def-line-set`.
+        if end < start {
+            file.x_check_range(start, start)?;
+            return Err(SeqDbError::Ncbi(crate::seqid::ber::negative_length_eof()));
+        }
         file.with_range(start, end, |record| read(record, file.path()))?
+    }
+
+    /// Cold-path collection of `Error: (803.7)` `Bad char [0x..]` posts emitted by NCBI's binary
+    /// ASN.1 reader while reading the header record of `oid` (volume-relative), whether decoding
+    /// succeeds or stops at a subsequent BER error.
+    #[cold]
+    #[inline(never)]
+    pub fn header_replaced_char_posts(
+        &self,
+        oid: u32,
+    ) -> Vec<crate::report::serial::encoder::ReplacedChar> {
+        let Ok(()) = self.check_range(oid, oid.saturating_add(1)) else {
+            return Vec::new();
+        };
+        let Ok((start, end)) = self.index.header_range(oid) else {
+            return Vec::new();
+        };
+        if end <= start {
+            return Vec::new();
+        }
+        let Ok(file) = self.hdr_file() else {
+            return Vec::new();
+        };
+        file.with_range(start, end, crate::seqid::ber::replaced_char_posts)
+            .unwrap_or_default()
     }
 
     /// Sets the run's settings of NCBI's checks of what it reads (`SeqDb::refuse_unchecked_reads`).
@@ -1270,7 +1372,7 @@ impl Volume {
         self.check_range(first, end)?;
         let seq = self.index.sequence_offsets(first, end)?;
         let amb = self.index.ambiguity_offsets(first, end)?;
-        let file_len = self.seq_file()?.len();
+        let file_len = self.seq_file()?.readable_len();
         Ok(seq
             .iter()
             .zip(&amb)
@@ -1558,8 +1660,8 @@ impl Volume {
         let count = (end - first) as usize;
         while i < count {
             let start = u64::from(offsets[i]);
-            if u64::from(offsets[i + 1]) > file.len() {
-                // `read_range`'s error, from `deflines`.
+            if offsets[i + 1] < offsets[i] || u64::from(offsets[i + 1]) > file.len() {
+                // Non-ascending or zero-page record: `deflines` gives its exact result.
                 if !one_by_one(first + i as u32..first + i as u32 + 1, visit) {
                     return false;
                 }
@@ -1568,6 +1670,7 @@ impl Volume {
             }
             let mut stop = i + 1;
             while stop < count
+                && offsets[stop + 1] >= offsets[stop]
                 && u64::from(offsets[stop + 1]) <= file.len()
                 && u64::from(offsets[stop + 1]) - start <= piece_bytes
             {
@@ -1634,10 +1737,24 @@ const X_BLOCK_END_MAX_WINDOW: usize = 1 << 18;
 /// `Volume::block_end` over the held sequence offsets (`lead`: `Volume::lead`).
 pub(super) fn held_block_end(offsets: &[u32], first: u32, max_bytes: u64, lead: u64) -> u32 {
     let n = (offsets.len() - 1) as u32;
-    let block_bytes =
-        |end: u32| u64::from(offsets[end as usize]) - u64::from(offsets[first as usize]) + lead;
-    let fitting = super::partition_point_u32(first + 1..n + 1, |end| block_bytes(end) <= max_bytes);
-    first + (fitting.max(1) as u32)
+    if max_bytes < lead {
+        return first + 1;
+    }
+    let first_start = u64::from(offsets[first as usize]);
+    let limit = first_start.saturating_add(max_bytes - lead);
+    let last_start = u64::from(offsets[n as usize]);
+    if last_start >= first_start && last_start <= limit {
+        return n;
+    }
+    let mut prev = first_start;
+    for end in first + 1..=n {
+        let offset = u64::from(offsets[end as usize]);
+        if offset < prev || offset > limit {
+            return (end - 1).max(first + 1);
+        }
+        prev = offset;
+    }
+    n
 }
 
 /// Where `Volume::read_block_in` puts the bytes of a block.

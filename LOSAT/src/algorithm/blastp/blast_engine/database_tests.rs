@@ -1246,7 +1246,7 @@ mod x_db_cut_blocks {
             .sequence_start(100)
             .unwrap() as usize;
         let mut bytes = std::fs::read(&psq).unwrap();
-        bytes.truncate(bytes.len() - 500);
+        bytes.truncate(bytes.len() - 5000);
         std::fs::write(&psq, &bytes).unwrap();
         for foreign in [false, true] {
             if foreign {

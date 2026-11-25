@@ -60,3 +60,15 @@ fn a_taxid_is_any_positive_one_else_the_first_lines() {
     // A first line without ids: NCBI reads a null reference.
     assert!(has_taxid(0, &set(vec![line(Vec::new(), None)])).is_err());
 }
+
+/// Approved exception `Q-D2b-OV=A` (`PD-LOSAT-NCBI-DEFECTS`, Owner 2026-11-25 17:54 JST):
+/// `-ends` near `i32::MIN` widens `count - n` to `i64` instead of overflowing signed 32-bit `int`.
+#[test]
+fn widened_ends_near_int_min_jumps_past_volume() {
+    let count = 9i64;
+    let end = count - i64::from(i32::MIN);
+    assert_eq!(end, 2_147_483_657);
+    assert!(end > 0);
+    let near = count - i64::from(-2_147_483_638i32);
+    assert_eq!(near, i64::from(i32::MAX));
+}

@@ -182,6 +182,39 @@ impl SeqType {
     }
 }
 
+/// The `SEQDB_FILE_ASSERT` site that raised a [`SeqDbError::Integrity`]: its asserted expression
+/// and source location (`SeqDB_FileIntegrityAssert`, `seqdbcommon.cpp:2255-2262`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeqDbAssert {
+    pub cond: &'static str,
+    pub file: &'static str,
+    pub line: u32,
+}
+
+impl SeqDbAssert {
+    /// `Validation failed: [<cond>] at <NCBI_BUILD_ROOT>/<file>:<line>` thrown from
+    /// `SeqDB_ThrowException` (`seqdbatlas.cpp:77`).
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2255-2262
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:70-82
+    pub(crate) fn exception(self) -> crate::ncbi_exception::NcbiException {
+        let message = format!(
+            "Validation failed: [{}] at {}/{}:{}",
+            self.cond,
+            crate::ncbi_exception::NCBI_BUILD_ROOT,
+            self.file,
+            self.line
+        );
+        crate::ncbi_exception::NcbiException::new(
+            seqdb_site(
+                "src/objtools/blast/seqdb_reader/seqdbatlas.cpp",
+                77,
+                "BLASTDB::ncbi::SeqDB_ThrowException",
+            ),
+            message,
+        )
+    }
+}
+
 /// Error of the database reader.
 ///
 /// [`SeqDbError::ncbi_message`] says whether an error is one that NCBI BLAST+
@@ -230,9 +263,14 @@ pub enum SeqDbError {
         version4_after_version5: bool,
     },
     /// A file fails one of the integrity checks of NCBI's reader (`SEQDB_FILE_ASSERT`, a
-    /// `CSeqDBException` whose text names a line of NCBI's source): LOSAT's words, and NCBI's
-    /// text where NCBI's search replaces it ([`SeqDbError::ncbi_search_message`]).
-    Integrity { path: PathBuf, message: String },
+    /// `CSeqDBException` whose text names a line of NCBI's source): LOSAT's words, its NCBI
+    /// assert site when known ([`SeqDbError::integrity_exception`]), and NCBI's text where NCBI's
+    /// search replaces it ([`SeqDbError::ncbi_search_message`]).
+    Integrity {
+        path: PathBuf,
+        message: String,
+        assert: Option<SeqDbAssert>,
+    },
     /// A valid database that needs something LOSAT does not read.
     Unsupported { path: PathBuf, message: String },
     /// A file that NCBI BLAST+ crashes on where it reads it (an ISAM whose header does not fit its
@@ -300,7 +338,7 @@ impl std::fmt::Display for SeqDbError {
             SeqDbError::Map { path, source, .. } | SeqDbError::Read { path, source } => {
                 write!(f, "{} cannot be read: {}", path.display(), source)
             }
-            SeqDbError::Format { path, message } | SeqDbError::Integrity { path, message } => {
+            SeqDbError::Format { path, message } | SeqDbError::Integrity { path, message, .. } => {
                 write!(f, "{}: {}", path.display(), message)
             }
             SeqDbError::MixedVersions { path, .. } => {
@@ -369,9 +407,14 @@ impl SeqDbError {
                 path: path.clone(),
                 version4_after_version5: *version4_after_version5,
             },
-            SeqDbError::Integrity { path, message } => SeqDbError::Integrity {
+            SeqDbError::Integrity {
+                path,
+                message,
+                assert,
+            } => SeqDbError::Integrity {
                 path: path.clone(),
                 message: message.clone(),
+                assert: *assert,
             },
             SeqDbError::Unsupported { path, message } => SeqDbError::Unsupported {
                 path: path.clone(),
@@ -913,6 +956,17 @@ pub(crate) fn throw_site(message: &[u8]) -> Option<ThrowSite> {
 // ones on line 232: blastdbcheck 2.17.0 names these lines, rows mix45_v4 and mix45_v5 of row
 // RG-D2b.)
 impl SeqDbError {
+    /// The `CSeqDBException` of a failed `SEQDB_FILE_ASSERT` ([`SeqDbError::Integrity`]), when
+    /// its NCBI assert site is known.
+    pub(crate) fn integrity_exception(&self) -> Option<crate::ncbi_exception::NcbiException> {
+        match self {
+            SeqDbError::Integrity {
+                assert: Some(site), ..
+            } => Some(site.exception()),
+            _ => None,
+        }
+    }
+
     /// The place in NCBI's database reader that throws this error's `CSeqDBException`, where
     /// LOSAT knows it: the throw that [`SeqDbError::MixedVersions`] names, else the place of its
     /// text ([`throw_site`]).
@@ -2672,6 +2726,11 @@ impl SeqDb {
         self.volumes[at.volume].protein_length_i32(at.vol_oid)
     }
 
+    /// [`Volume::protein_sequence_len_i32`] of the protein at `at`.
+    pub fn protein_sequence_len_at(&self, at: SeqLocation) -> Result<i32, SeqDbError> {
+        self.volumes[at.volume].protein_sequence_len_i32(at.vol_oid)
+    }
+
     /// Validates that the sequence file opens and covers protein `ordinal` without reading its
     /// bytes (`Volume::check_protein_range`).
     pub fn check_protein_range(&self, ordinal: u32) -> Result<(), SeqDbError> {
@@ -3046,6 +3105,14 @@ impl SeqDb {
         self.is_restricted() || volume.has_alias_lists() || volume.has_oid_mask_type()
     }
 
+    /// [`Volume::header_replaced_char_posts`] of the sequence at `at`.
+    pub fn header_replaced_char_posts_at(
+        &self,
+        at: SeqLocation,
+    ) -> Vec<crate::report::serial::encoder::ReplacedChar> {
+        self.volumes[at.volume].header_replaced_char_posts(at.vol_oid)
+    }
+
     /// [`SeqDb::defline_set_at`] as NCBI's `GetHdr` gives it: `None` where the stored header has
     /// no bytes, which `defline_set_at` gives as a set of no lines (`Volume::header_set`).
     pub fn header_set_at(&self, at: SeqLocation) -> Result<Option<DeflineSet>, SeqDbError> {
@@ -3377,20 +3444,6 @@ fn volume_range_error(range: BlockRange, db: &SeqDb) -> SeqDbError {
         range.volume,
         db.volumes.len()
     ))
-}
-
-/// Number of leading values of the ascending `range` for which `fits` holds.
-fn partition_point_u32(range: std::ops::Range<u32>, fits: impl Fn(u32) -> bool) -> usize {
-    let (mut lo, mut hi) = (range.start, range.end);
-    while lo < hi {
-        let mid = lo + (hi - lo) / 2;
-        if fits(mid) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    (lo - range.start) as usize
 }
 
 /// The header of one sequence (`SeqDb::read_header`).

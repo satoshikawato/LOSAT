@@ -36,17 +36,20 @@ depends on the time-seeded random sample (`-random N` with 0 < N < 200: `combo`,
 else `-`; the test skips the rows with a seed (a crate-internal test covers them); `args` are bash words with
 single quotes only, `<RUN>` standing for the run directory.
 
-Families (194 rows, 69 case directories): command line and frame (`help`, `xmlhelp`,
+Families (215 rows, 84 case directories): command line and frame (`help`, `xmlhelp`,
 `noargs`, `arg_*`, `m_bad_lf`); verbosity, sampling and selection on `p5` (`t_p5*`, `t_*_full_v4`, `rnd*`, `ends*`,
 `stride*`, `combo`, `fx_*`, `noisam`, `taxids_*`, `cdd`, `t_abs_p5`, `t_dir_v4`); MetaData (`nt_p5*`, `t_*` taxdb
 variants, `lf0`, `lf1`, `*legacy*`, `d_*_date`, `d_p4_totlen0`, `d_*_zero_oids*`); damaged volumes (`d_p4_*`,
 `d_p5_*`, `d_n4_*`, `d_n5_*`, `d_pmv_*`, `pp_*`, `d_p4_pnd_swap`); names, lists and directories (`m_*`, `r_*`,
-`nest`, `m_blastdb_*`); alias checks (`a_*`, `a_dir`, `a_dir_v1`, `a_ov1`, `a_ov2`, `a_ov3`, `a_signs`, `a_giabs`); review rows of
-2026-11-25 (`mix1`, `mix2`: an alias file with the other end-of-line byte inside a line; `dirslash`, `dirslash2`:
-`-dir` with trailing separators; `mix45_*`: alias files over version 4 and version 5 volumes, in both orders;
-`d_p4_pin_nucl_prot`, `d_p4_pin_nucl_dir`: an index of the other molecule type; `negtax`, `negtax_v3`:
-`-must_have_taxids` with a negative taxid on a later definition line);
-CDD (`c_*`); other versions (`ord4`, `ord5`, `ca4`, `ca5`, `t_pmv_full_v4`).
+`nest`, `m_blastdb_*`); alias checks (`a_*`, `a_dir`, `a_dir_v1`, `a_ov1`, `a_ov2`, `a_ov3`, `a_signs`, `a_giabs`,
+`a_msk1`); review rows of 2026-11-25 (`mix1`, `mix2`: an alias file with the other end-of-line byte inside a line;
+`dirslash`, `dirslash2`: `-dir` with trailing separators; `mix45_*`: alias files over version 4 and version 5
+volumes, in both orders; `d_p4_pin_nucl_prot`, `d_p4_pin_nucl_dir`: an index of the other molecule type; `negtax`,
+`negtax_v3`: `-must_have_taxids` with a negative taxid on a later definition line);
+CDD (`c_*`, including `c_nucl`, `c_noloo`, `c_norps`, `c_noobsr`, `c_*magic`, `c_rps2`, `c_freq2`, `c_rps0`,
+`c_two_diff`); widened overflow and shared-reader rows of 2026-11-26 (`ends_intmin`, `ends_intmin_near`,
+`stride_intmax`, `d_p4_nonasc_seq`, `d_p4_nonasc_hdr`, `d_p4_badchar`, `d_p4_badchar_lf`, `d_p4_utf8`, `a_msk1`);
+other versions (`ord4`, `ord5`, `ca4`, `ca5`, `t_pmv_full_v4`).
 
 `legacy`, `legacy_atm`, `legacy_ab` and `nolegacy` each have one extra file next to `p5` (empty `p5.ptm`, non-empty
 `p5.atm`, empty `p5.ab` (not matched: two letters), empty `p5.zzz`), so no output depends on the order in which the
@@ -84,10 +87,11 @@ on that day, in a run of those rows only.
 `-version` and `-version-full` are not rows here: `tests/ncbi_toolkit_version.rs` checks them with LOSAT's own version
 line (the Owner, 2026-11-21).
 
-## Rows that wait for LOSAT
-`LOSAT_REFUSES`, `AWAITING_ZERO_PAGE`, `AWAITING_Q_D2B_OV`, `AWAITING_CDD_DELTA` and `AWAITING_READER` in
-`tests/blastdbcheck_fixtures.rs` name rows where the test expects LOSAT's refusal (exit status 1, `Error: ` ... `not
-supported by LOSAT`) instead of NCBI's bytes: NCBI crashes or never ends; NCBI reads zeros past the end of a short
-file's last page; NCBI's alias checks overflow a signed integer and the overflow decides the check; `-cdd_delta`; alias
-keys that LOSAT's reader does not read yet (`MEMB_BIT`, `TAXIDLIST` over version 5). NCBI's frozen result stays for the
-day LOSAT gives it.
+## Rows that wait for LOSAT or follow approved exceptions
+`LOSAT_REFUSES` and `AWAITING_READER` in `tests/blastdbcheck_fixtures.rs` name rows where the test expects LOSAT's
+refusal (exit status 1, `Error: ` ... `not supported by LOSAT`) instead of NCBI's bytes: NCBI crashes or never ends
+(`d_p4_psq_zero`, `d_p5_psq_zero`, `c_rps0`, `d_p4_psd_cut`, `r_garbage`, `r_garbage2`, `stride0`, `strideneg`), or
+alias keys that LOSAT's reader does not read yet (`MEMB_BIT`, `TAXIDLIST` over version 5).
+`APPROVED_WIDENED_OVERFLOW` (`a_ov1`, `a_ov2`, `ends_intmin`) names rows covered by approved exception 31 of
+`PD-LOSAT-NCBI-DEFECTS` (`Q-D2b-OV=A`), where LOSAT widens signed arithmetic and avoids NCBI's signed overflow.
+NCBI's frozen result stays beside every row for provenance.

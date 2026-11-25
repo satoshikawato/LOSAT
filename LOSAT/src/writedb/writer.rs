@@ -439,6 +439,21 @@ impl WriteDb {
         Ok(())
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:139-149
+    /// `AddSequence` of a raw protein whose signed 32-bit `GetRawSeqAndAmbig` length wrapped
+    /// negative (`>= 2^31` residues): publishes the previous sequence, resets the pending sequence
+    /// state, and returns the first error (`publish` failure if any, otherwise NCBI's
+    /// `std::length_error` `basic_string::_M_create`) without allocating, so `~CWriteDB_Impl`
+    /// closes the partial database containing prior sequences.
+    #[must_use]
+    pub fn add_raw_negative_length(&mut self) -> WriteDbError {
+        if let Err(error) = self.publish() {
+            return error;
+        }
+        self.reset_sequence_data();
+        WriteDbError::LengthError("basic_string::_M_create")
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:110-137
     /// `x_ResetSequenceData`: the next sequence starts without the data of the previous one
     /// (its definition lines, taxid, hash, PIG, ids and column blobs).

@@ -131,7 +131,9 @@ impl From<WriteDbError> for RunError {
             WriteDbError::CreationBytes(message) => RunError::Exception(message),
             WriteDbError::Exception(exception) => RunError::Exception(exception.get_msg().to_vec()),
             WriteDbError::Database(message) => RunError::SeqDb(message.into_bytes()),
-            WriteDbError::OutOfMemory | WriteDbError::InvalidArgument(_) => RunError::Unknown,
+            WriteDbError::OutOfMemory
+            | WriteDbError::InvalidArgument(_)
+            | WriteDbError::LengthError(_) => RunError::Unknown,
             WriteDbError::OrdinalIdWithoutIds => RunError::Refused(
                 "a query whose first definition line has no Seq-id, with -index false (NCBI's \
                  makeprofiledb writes its gnl|BL_ORD_ID id past the end of an empty list)"

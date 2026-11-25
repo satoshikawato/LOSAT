@@ -3068,9 +3068,11 @@ fn holding(id: u32, others: &[u32]) -> BlobName {
 
 /// `VolumeLookups::prefetch_slots`: one prefetch loads every handle of a sequence, also one that
 /// the Bioseq of its first load holds (NCBI's prefetch asks its scope only for the ids that it
-/// resolved before, then its loader; review 1 of item O4b2-7, M2), each for certain: a later
-/// batch's prefetch of both loads nothing where NCBI keeps every sequence, and a read of the
-/// reports by an id that the first Bioseq holds may be given it without a load.
+/// resolved before, then its loader; review 1 of item O4b2-7, M2), each for certain: within the
+/// same live scope a succeeding prefetch pins its blobs so a second prefetch and a report read by
+/// an exact handle of the first Bioseq load nothing; after `reset_scope`, a later batch's prefetch
+/// of both loads nothing where NCBI keeps every sequence and is refused otherwise, and a report
+/// read by id 3 loads fresh because the cleared scope no longer indexes the first Bioseq.
 #[test]
 fn a_prefetch_loads_each_handle_of_a_sequence() {
     const L: i32 = 99990;
@@ -3089,13 +3091,31 @@ fn a_prefetch_loads_each_handle_of_a_sequence() {
             kept,
             ..VolumeLookups::default()
         };
-        let misses = record.prefetch_slots(&loads(), |_| false, L).unwrap();
+        let misses = record.prefetch_slots(&loads(), |_| false, true, L).unwrap();
         assert_eq!(misses[&0], vec![true, false]);
         assert_eq!(misses[&1], vec![true, false]);
         assert!(record.prefetch_from.is_none());
-        assert!(record.slot_blobs[&0].iter().all(|blob| blob.sure));
+        assert!(record.slot_blobs[&0]
+            .iter()
+            .all(|blob| blob.sure && blob.in_scope && blob.pinned));
         let after = (record.offset_slots.clone(), record.slot_blobs.clone());
-        let again = record.prefetch_slots(&loads(), |_| false, L);
+        // Within the same live scope (e.g. outfmt 5 keeping scope), pinned blobs load nothing.
+        let same_scope = record.prefetch_slots(&loads(), |_| false, true, L).unwrap();
+        assert_eq!(same_scope[&0], vec![false, false]);
+        assert_eq!(same_scope[&1], vec![false, false]);
+        // A report read in the same live scope by exact handle 3 hits the first Bioseq's handles.
+        (record.offset_slots, record.slot_blobs) = after.clone();
+        assert_eq!(record.blob_read(0, &by(3)), BlobRead::Kept);
+        assert_eq!(
+            record.offset_slot(0, 0, &by(3), &[L, 150], L),
+            Ok(vec![false, false])
+        );
+        assert_eq!(record.slot_blobs[&0].len(), 2);
+        // After a batch scope reset, `in_scope` and `pinned` clear: only `kept` keeps the blobs.
+        (record.offset_slots, record.slot_blobs) = after;
+        record.reset_scope();
+        let after_reset = (record.offset_slots.clone(), record.slot_blobs.clone());
+        let again = record.prefetch_slots(&loads(), |_| false, true, L);
         if kept {
             let again = again.unwrap();
             assert_eq!(again[&0], vec![false, false]);
@@ -3103,10 +3123,13 @@ fn a_prefetch_loads_each_handle_of_a_sequence() {
         } else {
             assert!(again.is_err());
         }
-        // A read of the reports by id 3, whose handle the first Bioseq holds: given it or loaded.
-        (record.offset_slots, record.slot_blobs) = after;
-        assert_eq!(record.blob_read(0, &by(3)), BlobRead::Again);
-        assert!(record.offset_slot(0, 0, &by(3), &[L, 150], L).is_err());
+        // After reset, id 3 is no longer in live scope: fresh load (misses after 150).
+        (record.offset_slots, record.slot_blobs) = after_reset;
+        assert_eq!(record.blob_read(0, &by(3)), BlobRead::Fresh);
+        assert_eq!(
+            record.offset_slot(0, 0, &by(3), &[L, 150], L),
+            Ok(vec![true, false])
+        );
     }
 }
 
@@ -3251,12 +3274,15 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
 fn the_pssms_loads_write_the_offset_error_as_the_slot_holds_it() {
     let cwd = empty_cwd("pssm_slot");
     let offset = "Error: [psiblast] Error: Offset error at end of taxdb file.\n";
-    let loads = |name: &str, ordinals: &[u32]| -> Result<String> {
+    let loads = |name: &str, ordinals: &[u32], reset_at: Option<usize>| -> Result<String> {
         let db = db_search(name, Some(&variant("offset_last_past_end")), &cwd);
         let parsed = parsed_subjects(&db);
         let run = TaxdbRun::default();
         let mut text = Vec::new();
-        for &ordinal in ordinals {
+        for (index, &ordinal) in ordinals.iter().enumerate() {
+            if reset_at == Some(index) {
+                run.reset_scope();
+            }
             let subject = &parsed[ordinal as usize];
             let lookups = blob_taxids(&db, ordinal, Some(subject), ordinal, "PSIBLAST")?;
             text.extend(pssm_load_texts(
@@ -3270,13 +3296,21 @@ fn the_pssms_loads_write_the_offset_error_as_the_slot_holds_it() {
         }
         Ok(String::from_utf8(text).unwrap())
     };
-    assert_eq!(loads("tm_cache150", &[0, 1, 2]).unwrap(), offset.repeat(2));
-    assert_eq!(loads("tm_cache150", &[0, 2, 1]).unwrap(), offset);
-    assert_eq!(loads("tm_cache150", &[0, 0, 2]).unwrap(), offset);
-    // NCBI keeps every sequence of a database of three: the read again loads nothing.
-    assert_eq!(loads("tm_cache150", &[0, 1, 0]).unwrap(), offset);
-    // Of twelve (`tm_cache_gi`: 0 to 5 hold 99990, 6 to 11 hold 150), NCBI may have released it.
-    let error = loads("tm_cache_gi", &[0, 6, 0]).unwrap_err();
+    assert_eq!(
+        loads("tm_cache150", &[0, 1, 2], None).unwrap(),
+        offset.repeat(2)
+    );
+    assert_eq!(loads("tm_cache150", &[0, 2, 1], None).unwrap(), offset);
+    assert_eq!(loads("tm_cache150", &[0, 0, 2], None).unwrap(), offset);
+    // NCBI keeps every sequence of a database of three across resets: the read again loads nothing.
+    assert_eq!(loads("tm_cache150", &[0, 1, 0], Some(2)).unwrap(), offset);
+    // Of twelve (`tm_cache_gi`: 0 to 5 hold 99990, 6 to 11 hold 150), within one query's live
+    // scope (no `ResetScopeHistory`) 12 <= 20 fits in the scope queue + DS cache; after a query
+    // reset, NCBI may have released it from the 10-slot DS cache.
+    if default_object_manager() {
+        assert_eq!(loads("tm_cache_gi", &[0, 6, 0], None).unwrap(), offset);
+    }
+    let error = loads("tm_cache_gi", &[0, 6, 0], Some(2)).unwrap_err();
     assert!(error.is::<TaxonomyRefusal>(), "{error:#}");
     let text = format!("{error:#}");
     for part in [
@@ -3288,7 +3322,10 @@ fn the_pssms_loads_write_the_offset_error_as_the_slot_holds_it() {
     ] {
         assert!(text.contains(part), "{part}: {text}");
     }
-    assert_eq!(loads("tm_cache151", &[0, 1, 0, 2]).unwrap(), offset);
+    assert_eq!(
+        loads("tm_cache151", &[0, 1, 0, 2], Some(2)).unwrap(),
+        offset
+    );
     std::fs::remove_dir_all(&cwd).unwrap();
 }
 
@@ -3462,4 +3499,340 @@ fn the_map_of_a_batch_with_an_unknown_handle_is_unknown() {
     assert_eq!(map_unknown(&keys, 201), Some(MANY_IDS));
     let keys = [named(1), (u64::MAX, None)];
     assert_eq!(map_unknown(&keys, 1), Some(UNNAMED_MAP));
+}
+
+/// Scope lifetime across batches (`VolumeLookups::reset_scope`, `blob_read`, `keeps_scope`):
+/// - after a batch reset (non-outfmt 5), another handle previously held by a Bioseq (`holds` /
+///   `found_in`) is no longer in live scope and loads `Fresh` (fixes R2-L1);
+/// - in the same live scope, a report read by an exact held handle hits `Kept` without recording a
+///   synthetic blob, a report read by a scope/weak key hits `Again`, and a prefetch by a held
+///   handle hits `Again`;
+/// - when `kept` is true (<= 10 seqs), reading the same handle after a reset re-attaches its blob
+///   into the new live scope (`in_scope = true`).
+fn scope_slot_load(ordinal: u32, blob: u32, order: u64, name: BlobName) -> SlotLoad {
+    SlotLoad {
+        ordinal,
+        blob,
+        volume: 0,
+        lookups: vec![99990, 150],
+        order,
+        name,
+    }
+}
+
+fn prefetch_one(
+    lookups: &mut VolumeLookups,
+    ordinal: u32,
+    blob: u32,
+    order: u64,
+    name: BlobName,
+    pins: bool,
+) -> std::result::Result<rustc_hash::FxHashMap<u32, Vec<bool>>, (usize, SlotUncertain)> {
+    lookups.prefetch_slots(
+        &[scope_slot_load(ordinal, blob, order, name)],
+        |_| false,
+        pins,
+        99990,
+    )
+}
+
+#[test]
+fn a_batch_reset_clears_live_scope_matches_unless_keeps_scope() {
+    const L: i32 = 99990;
+    let mut record = VolumeLookups {
+        kept: true,
+        in_scope_kept: true,
+        ..VolumeLookups::default()
+    };
+    let b1 = prefetch_one(&mut record, 0, 0, 1, holding(0, &[3]), true).unwrap();
+    assert_eq!(b1[&0], vec![true, false]);
+    let after_b1 = (record.offset_slots.clone(), record.slot_blobs.clone());
+    // Same live scope: exact handle -> Kept on report read; scope key -> Again; prefetch -> Again.
+    assert_eq!(record.blob_read(0, &by(3)), BlobRead::Kept);
+    assert_eq!(record.blob_read(0, &found_in(4, 0)), BlobRead::Again);
+    assert!(prefetch_one(&mut record, 1, 0, 2, by(3), true).is_err());
+    // Reset scope (non-outfmt 5): batch 2 prefetch by id 3 loads Fresh -> second offset error.
+    (record.offset_slots, record.slot_blobs) = after_b1;
+    record.reset_scope();
+    assert_eq!(record.blob_read(0, &by(3)), BlobRead::Fresh);
+    assert_eq!(record.blob_read(0, &found_in(4, 0)), BlobRead::Fresh);
+    let b2 = prefetch_one(&mut record, 1, 0, 2, by(3), true).unwrap();
+    assert_eq!(b2[&1], vec![true, false]);
+    // Re-attachment: after reset, reading id 0 (Kept via DS cache) re-attaches it to live scope,
+    // so a same-batch report read of id 3 hits Kept again.
+    let mut reattach = VolumeLookups {
+        kept: true,
+        in_scope_kept: true,
+        ..VolumeLookups::default()
+    };
+    assert_eq!(
+        reattach.offset_slot(0, 0, &holding(0, &[3]), &[L, 150], L),
+        Ok(vec![true, false])
+    );
+    reattach.reset_scope();
+    assert_eq!(reattach.blob_read(0, &by(3)), BlobRead::Fresh);
+    assert_eq!(reattach.blob_read(0, &by(0)), BlobRead::Kept);
+    assert_eq!(
+        reattach.offset_slot(0, 0, &by(0), &[L, 150], L),
+        Ok(vec![false, false])
+    );
+    assert_eq!(reattach.blob_read(0, &by(3)), BlobRead::Kept);
+    // With `keeps_scope = true` (outfmt 5), `reset_scope` leaves `in_scope` and `pinned` intact.
+    let mut xml = VolumeLookups {
+        keeps_scope: true,
+        ..VolumeLookups::default()
+    };
+    let m1 = prefetch_one(&mut xml, 0, 0, 1, holding(0, &[3]), true).unwrap();
+    assert_eq!(m1[&0], vec![true, false]);
+    xml.reset_scope();
+    assert_eq!(xml.blob_read(0, &by(0)), BlobRead::Kept);
+    assert_eq!(xml.blob_read(0, &by(3)), BlobRead::Kept);
+    let m2 = prefetch_one(&mut xml, 0, 0, 1, by(0), true).unwrap();
+    assert_eq!(m2[&0], vec![false, false]);
+}
+
+/// `outfmt 5` pinning vs non-pinning prefetches, 11-20 `in_scope_kept` lifetime,
+/// `TaxdbRun::restart` preserving `keeps_scope`, and `FormatThrow::keeps_scope`.
+#[test]
+fn outfmt_five_pins_prefetched_blobs_across_batches_and_restart_preserves_keeps_scope() {
+    use crate::blastinput::app::Program;
+    use crate::report::archive::options::RequestKind;
+    use crate::report::db_subject::FormatThrow;
+    const L: i32 = 99990;
+    // >20 DB / OBJMGR_* (`kept = false, in_scope_kept = false`), outfmt 5 (`keeps_scope = true`):
+    // a failing/stopping prefetch (`pins = false`) does NOT pin; a succeeding one (`pins = true`)
+    // pins across `reset_scope`.
+    let mut unpinned = VolumeLookups {
+        keeps_scope: true,
+        ..VolumeLookups::default()
+    };
+    let m = prefetch_one(&mut unpinned, 0, 0, 1, by(0), false).unwrap();
+    assert_eq!(m[&0], vec![true, false]);
+    unpinned.reset_scope();
+    assert_eq!(unpinned.blob_read(0, &by(0)), BlobRead::Again);
+    assert!(prefetch_one(&mut unpinned, 0, 0, 1, by(0), true).is_err());
+    // 11-20 DB (`kept = false, in_scope_kept = true`): report reads survive `reset_scope` only
+    // when `keeps_scope = true`.
+    for keeps_scope in [false, true] {
+        let mut record = VolumeLookups {
+            in_scope_kept: true,
+            keeps_scope,
+            ..VolumeLookups::default()
+        };
+        assert_eq!(
+            record.offset_slot(0, 0, &by(0), &[L, 150], L),
+            Ok(vec![true, false])
+        );
+        record.reset_scope();
+        assert_eq!(
+            record.blob_read(0, &by(0)),
+            if keeps_scope {
+                BlobRead::Kept
+            } else {
+                BlobRead::Again
+            }
+        );
+    }
+    // `TaxdbRun::restart` preserves `keeps_scope`.
+    let mut run = TaxdbRun::default();
+    run.set_keeps_scope(true);
+    run.restart();
+    assert!(run.volume_lookups.lock().unwrap().keeps_scope);
+    // `FormatThrow::keeps_scope`: true for outfmt 5 alone.
+    for (program, app) in [
+        (Program::Blastp, RequestKind::Blastp),
+        (Program::Blastn, RequestKind::Blastn),
+        (Program::Tblastn, RequestKind::Tblastn),
+        (Program::Tblastx, RequestKind::Tblastx),
+        (Program::Blastx, RequestKind::Blastx),
+    ] {
+        assert!(FormatThrow::keeps_scope("5", program, app));
+    }
+    for outfmt in [
+        "0",
+        "6",
+        "6 qseqid evalue",
+        "7",
+        "8",
+        "11",
+        "15",
+        "16",
+        "17",
+        "18",
+    ] {
+        assert!(
+            !FormatThrow::keeps_scope(outfmt, Program::Blastp, RequestKind::Blastp),
+            "{outfmt}"
+        );
+    }
+}
+
+/// Audit invariants for scope lifetime:
+/// - `blob_read` (`!in_prefetch`) requires every `in_scope` exact-handle holder to be `blob_kept`
+///   (`x_FindBestTSEInIndex` picks the earliest matching TSE);
+/// - `unordered_slot` re-attaches a `Kept` blob to live scope via `touch_same_handle`;
+/// - `TaxdbRun::reset_scope` fast path vs initialized `offset_error_taxid`, and `for_xml2`
+///   isolation + `restart`;
+/// - `FormatThrow::scope_flags` (including `Psiblast`, `Rpsblast`, `Rpstblastn`, `"5 "`) and
+///   `FormatThrow::is_xml2`;
+/// - `prefetch_slot_plan` sets `pinned` on `tm_gi21` (`keeps_scope = true`) when every segment
+///   resolves to a non-empty `CBioseq_Handle`.
+#[test]
+fn scope_lifetime_audit_invariants_hold() {
+    use crate::blastinput::app::Program as Prog;
+    use crate::report::archive::options::RequestKind as Kind;
+    use crate::report::db_subject::FormatThrow as Throw;
+    const L: i32 = 99990;
+
+    // 1. Mixed `in_scope` blobs holding handle 3 on a >20 DB (`kept = false, in_scope_kept = false`,
+    //    `keeps_scope = true`): an earlier unpinned blob (`pins = false`) followed by a later
+    //    pinned blob (`pins = true`) must give `Again`, not `Kept`.
+    let mut mixed = VolumeLookups {
+        keeps_scope: true,
+        ..VolumeLookups::default()
+    };
+    prefetch_one(&mut mixed, 0, 0, 1, holding(0, &[3]), false).unwrap();
+    prefetch_one(&mut mixed, 0, 0, 1, holding(1, &[3]), true).unwrap();
+    assert_eq!(mixed.blob_read(0, &by(3)), BlobRead::Again);
+
+    // When both `in_scope` holders are pinned, `blob_read` gives `Kept`.
+    let mut both_pinned = VolumeLookups {
+        keeps_scope: true,
+        ..VolumeLookups::default()
+    };
+    prefetch_one(&mut both_pinned, 0, 0, 1, holding(0, &[3]), true).unwrap();
+    prefetch_one(&mut both_pinned, 0, 0, 1, holding(1, &[3]), true).unwrap();
+    assert_eq!(both_pinned.blob_read(0, &by(3)), BlobRead::Kept);
+
+    // When the earlier unpinned blob is cleared by `reset_scope` (`keeps_scope = false`), only the
+    // new pinned `in_scope` blob matches, giving `Kept`.
+    let mut after_reset = VolumeLookups::default();
+    prefetch_one(&mut after_reset, 0, 0, 1, holding(0, &[3]), false).unwrap();
+    after_reset.reset_scope();
+    prefetch_one(&mut after_reset, 0, 0, 1, holding(1, &[3]), true).unwrap();
+    assert_eq!(after_reset.blob_read(0, &by(3)), BlobRead::Kept);
+
+    // 2. `unordered_slot` re-attaches a `Kept` blob to live scope after `reset_scope`.
+    let mut unordered = VolumeLookups {
+        kept: true,
+        in_scope_kept: true,
+        ..VolumeLookups::default()
+    };
+    prefetch_one(&mut unordered, 0, 0, 1, holding(0, &[3]), true).unwrap();
+    unordered.reset_scope();
+    assert_eq!(unordered.blob_read(0, &by(3)), BlobRead::Fresh);
+    // Two loads with the same `order` key enter `unordered_slot`: blob 0 (`by(0)`) is `Kept` and
+    // must re-attach (`in_scope = true`), while blob 1 (`by(1)`) is `Fresh`.
+    let reattached = unordered
+        .prefetch_slots(
+            &[
+                scope_slot_load(0, 0, 5, by(0)),
+                SlotLoad {
+                    ordinal: 1,
+                    blob: 1,
+                    volume: 0,
+                    lookups: vec![150],
+                    order: 5,
+                    name: by(1),
+                },
+            ],
+            |_| false,
+            true,
+            L,
+        )
+        .unwrap();
+    assert_eq!(reattached[&0], vec![false, false]);
+    assert_eq!(unordered.blob_read(0, &by(3)), BlobRead::Kept);
+
+    // 3. `TaxdbRun::for_xml2` isolation, `restart`, and `reset_scope` fast path.
+    let mut isolated = TaxdbRun::default();
+    assert!(std::ptr::eq(isolated.for_xml2(), &isolated));
+    isolated.set_keeps_scope(true);
+    isolated.set_separate_xml2(true);
+    let xml2 = isolated.for_xml2();
+    assert!(!std::ptr::eq(xml2, &isolated));
+    assert!(!xml2.volume_lookups.lock().unwrap().keeps_scope);
+    // Seed an entry in `xml2` and check that `isolated.restart()` clears `xml2` too while keeping
+    // `isolated.keeps_scope == true`.
+    xml2.volume_lookups
+        .lock()
+        .unwrap()
+        .offset_slot(0, 0, &by(0), &[L, 150], L)
+        .unwrap();
+    assert!(!xml2.volume_lookups.lock().unwrap().slot_blobs.is_empty());
+    isolated.restart();
+    assert!(isolated.volume_lookups.lock().unwrap().keeps_scope);
+    assert!(isolated
+        .for_xml2()
+        .volume_lookups
+        .lock()
+        .unwrap()
+        .slot_blobs
+        .is_empty());
+
+    // Fast path: without `texts` initialized, `reset_scope` is a no-op; once `offset_error_taxid`
+    // is `Some(L)`, `reset_scope` clears `in_scope` when `keeps_scope = false`.
+    let fast = TaxdbRun::default();
+    fast.volume_lookups
+        .lock()
+        .unwrap()
+        .offset_slot(0, 0, &by(0), &[L], L)
+        .unwrap();
+    fast.reset_scope();
+    assert!(fast.volume_lookups.lock().unwrap().slot_blobs[&0][0].in_scope);
+    let _ = fast.texts.set(PrefetchTexts {
+        offset_error_taxid: Some(L),
+        ..PrefetchTexts::default()
+    });
+    fast.reset_scope();
+    assert!(!fast.volume_lookups.lock().unwrap().slot_blobs[&0][0].in_scope);
+
+    // 4. `FormatThrow::scope_flags` across request kinds and `FormatThrow::is_xml2`.
+    for (program, app) in [
+        (Prog::Blastp, Kind::Psiblast),
+        (Prog::Blastp, Kind::Rpsblast),
+        (Prog::Blastx, Kind::Rpstblastn),
+    ] {
+        assert_eq!(Throw::scope_flags(Some("5"), program, app), (true, true));
+        assert_eq!(Throw::scope_flags(Some("5 "), program, app), (true, true));
+        assert_eq!(Throw::scope_flags(Some("6"), program, app), (false, true));
+        assert_eq!(Throw::scope_flags(Some("15"), program, app), (false, false));
+        assert_eq!(Throw::scope_flags(None, program, app), (false, false));
+    }
+    for outfmt in ["13", "14", "15", "16", "15 "] {
+        assert!(Throw::is_xml2(outfmt), "{outfmt}");
+    }
+    for outfmt in ["0", "5", "6", "7", "8", "11", "17", "18"] {
+        assert!(!Throw::is_xml2(outfmt), "{outfmt}");
+    }
+
+    // 5. `prefetch_slot_plan` pins `tm_gi21` blobs under `keeps_scope = true` across `reset_scope`.
+    let cwd = empty_cwd("pin_gi21");
+    let taxdb = variant("offset_last_past_end");
+    let db = db_search("tm_gi21", Some(&taxdb), &cwd);
+    let parsed = parsed_subjects(&db);
+    let mut xml_run = TaxdbRun::default();
+    xml_run.set_keeps_scope(true);
+    let run_batch = |query: usize| {
+        batch_prefetch(
+            &db,
+            &xml_run,
+            std::iter::empty(),
+            [0u32, 1]
+                .into_iter()
+                .map(|o| PrefetchSubject::unflipped(o, Some(&parsed[o as usize]))),
+            "BLASTP",
+            &stop_queries(query),
+        )
+        .unwrap()
+    };
+    assert!(!run_batch(0).text().is_empty());
+    xml_run.reset_scope();
+    {
+        let lookups = xml_run.volume_lookups.lock().unwrap();
+        assert!(lookups.slot_blobs[&0][0].pinned);
+        assert!(lookups.slot_blobs[&0][0].in_scope);
+    }
+    assert!(run_batch(1).text().is_empty());
+    std::fs::remove_dir_all(&cwd).unwrap();
 }

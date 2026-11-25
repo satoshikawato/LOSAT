@@ -1354,6 +1354,11 @@ fn open_search_database(
     // (`TblastxDatabase::open`).
     let database = match args.database_name() {
         Some(name) => {
+            let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+                outputs.formats.first().map(|format| format.outfmt),
+                crate::blastinput::app::Program::Tblastx,
+                crate::report::archive::options::RequestKind::Tblastx,
+            );
             let database = super::super::database::TblastxDatabase::open_restricted(
                 name,
                 settings,
@@ -1362,7 +1367,8 @@ fn open_search_database(
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis)
-            .after_calls(args.first_query_ordinal > 0);
+            .after_calls(args.first_query_ordinal > 0)
+            .keeping_scope(keeps_scope, separate_xml2);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
@@ -4198,6 +4204,9 @@ fn run_batch_loop(
                     }
                     warnings[start].append(&messages);
                 }
+                // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+                database.reset_scope();
             }
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218 (the

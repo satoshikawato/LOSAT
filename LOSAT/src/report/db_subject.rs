@@ -2774,6 +2774,48 @@ impl FormatThrow {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+    /// Whether NCBI's formatter keeps its scope across the query batches of a run whose first
+    /// format is `outfmt` (`RunThrow::keeps_scope`: BLAST XML, outfmt 5, where
+    /// `CBlastFormat::ResetScopeHistory` returns without emptying the scope).
+    pub fn keeps_scope(
+        outfmt: &str,
+        program: crate::blastinput::app::Program,
+        app: crate::report::archive::options::RequestKind,
+    ) -> bool {
+        Self::of_outfmt(outfmt, program, app, false)
+            .run()
+            .is_some_and(|run| run.keeps_scope)
+    }
+
+    /// Whether `outfmt` is an XML2 or JSON format (outfmt 13 to 16), whose taxonomy lookups run
+    /// through `read_reported_taxonomy`.
+    pub fn is_xml2(outfmt: &str) -> bool {
+        crate::blastinput::app::parse_formatting_string(outfmt)
+            .ok()
+            .and_then(|choice| crate::blastinput::app::ReportFormat::from_number(choice.number))
+            .and_then(super::blast_xml2::Xml2Kind::of)
+            .is_some()
+    }
+
+    /// `(keeps_scope, separate_xml2)` for the first format `outfmt` of a run (`None` when a call
+    /// has no output format): whether NCBI's formatter keeps its scope across query batches
+    /// ([`Self::keeps_scope`]), and whether any XML2/JSON format in the call is secondary
+    /// (`!Self::is_xml2`).
+    pub fn scope_flags(
+        outfmt: Option<&str>,
+        prog: crate::blastinput::app::Program,
+        kind: crate::report::archive::options::RequestKind,
+    ) -> (bool, bool) {
+        match outfmt {
+            Some(outfmt) => (
+                Self::keeps_scope(outfmt, prog, kind),
+                !Self::is_xml2(outfmt),
+            ),
+            None => (false, false),
+        }
+    }
+
     /// The answer of two formats of one run: a refusal by either refuses, a format that reads
     /// nothing leaves the other's answer, and of two that write, the one that loads more after the
     /// throw (a subject is loaded where some report loads it), at the rows that either loads at,

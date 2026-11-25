@@ -114,6 +114,10 @@ const mark = (on = true) => refusedMark(refused.value && on, refusalId.value);
 
 /** The engine's help, behind the "?" (HelpTip). */
 const help = computed(() => optionHelp(option.value?.help));
+/** Whether the field's sentence hint is shown alongside its "?". */
+const showHint = computed(
+  () => !unread.value && Boolean(props.field.hint) && (props.field.kind !== 'file' || (fileOn.value && countsBy.value === 'file')),
+);
 
 const defaultLabel = computed(() => {
   const engineDefault = option.value?.defaultValue;
@@ -252,19 +256,21 @@ function onList(next: string): void {
         </template>
       </template>
       <template v-else-if="field.kind === 'file'">
-        <input
-          :id="id"
-          type="checkbox"
-          :checked="fileOn"
-          v-bind="mark(!fileOn)"
-          :data-testid="id"
-          @change="toggleFile(($event.target as HTMLInputElement).checked)"
-        />
-        <label v-if="inline" :id="`${id}-label`" class="param-label" :for="id">
-          <span v-if="changed" class="changed-mark" aria-hidden="true">♦</span>
-          {{ field.label }} <span class="flag">{{ shownFlag }}</span>
-          <span v-if="changed" class="visually-hidden">, changed from the default</span>
-        </label>
+        <span class="param-check-head">
+          <input
+            :id="id"
+            type="checkbox"
+            :checked="fileOn"
+            v-bind="mark(!fileOn)"
+            :data-testid="id"
+            @change="toggleFile(($event.target as HTMLInputElement).checked)"
+          />
+          <label v-if="inline" :id="`${id}-label`" class="param-label" :for="id">
+            <span v-if="changed" class="changed-mark" aria-hidden="true">♦</span>
+            {{ field.label }} <span class="flag">{{ shownFlag }}</span>
+            <span v-if="changed" class="visually-hidden">, changed from the default</span>
+          </label>
+        </span>
         <!-- How the counts are named, as NCBI's "Species-specific repeats" has its select after the box (WW2): a taxonomy ID, or a file of the user's. -->
         <span v-if="fileOn && taxidField" class="select-clip">
           <select :value="countsBy" aria-label="Name the counts by" :data-testid="`${id}-by`" @change="chooseCountsBy(($event.target as HTMLSelectElement).value)">
@@ -441,16 +447,13 @@ function onList(next: string): void {
           <option v-for="choice in choices" :key="choice" :value="choice">{{ choiceLabel(choice) }}</option>
         </select>
       </span>
-      <span v-if="!unread && field.hint && field.kind === 'file' && fileOn && countsBy === 'file'" class="param-hint-line">
+      <span v-if="showHint" class="hint-line">
         <span class="param-hint">{{ field.hint }}</span>
         <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
         <HelpTip v-if="help" :id="id" :label="`About ${field.flag}`" :text="help" />
       </span>
-      <template v-else>
-        <span v-if="!unread && field.hint && field.kind !== 'file'" class="param-hint">{{ field.hint }}</span>
-        <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
-        <HelpTip v-if="help" :id="id" :label="`About ${field.flag}`" :text="help" />
-      </template>
+      <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
+      <HelpTip v-else-if="help" :id="id" :label="`About ${field.flag}`" :text="help" />
       <!-- The line that downloads the counts of the taxonomy ID, under the row's controls (WW2). -->
       <CountsLine v-if="field.kind === 'file' && fileOn && countsBy === 'taxid' && taxid !== undefined && model.counts" :counts="model.counts" :taxid="taxid" :focus-id="`${id}-taxid`" />
     </div>

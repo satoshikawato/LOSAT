@@ -139,17 +139,19 @@ function onConffile(event: Event): void {
               :data-testid="`${prefix}-conffile-file`"
               @change="onConffile"
             />
-            <template v-if="conffile">
-              <span class="file-name" :data-testid="`${prefix}-conffile-name`">{{ conffile.name }} ({{ formatBytes(conffile.size) }})</span>
-              <button type="button" class="link" :data-testid="`${prefix}-conffile-remove`" @click="model.setConffile(undefined)">Remove</button>
-            </template>
-            <span v-else class="file-missing" role="status" :data-testid="`${prefix}-conffile-missing`">Choose the file that the search reads as {{ conffileName }}.</span>
+            <span class="hint-line">
+              <template v-if="conffile">
+                <span class="file-name" :data-testid="`${prefix}-conffile-name`">{{ conffile.name }} ({{ formatBytes(conffile.size) }})</span><wbr />
+                <button type="button" class="link" :data-testid="`${prefix}-conffile-remove`" @click="model.setConffile(undefined)">Remove</button>
+              </template>
+              <span v-else class="file-missing" role="status" :data-testid="`${prefix}-conffile-missing`">Choose the file that the search reads as {{ conffileName }}.</span>
+              <HelpTip
+                :id="`${prefix}-conffile`"
+                label="About -conffile"
+                text="The settings file that the losat command line reads with -conffile, in place of the program's .ini file: the search reads the file chosen here under the name in Additional options."
+              />
+            </span>
           </span>
-          <HelpTip
-            :id="`${prefix}-conffile`"
-            label="About -conffile"
-            text="The settings file that the losat command line reads with -conffile, in place of the program's .ini file: the search reads the file chosen here under the name in Additional options."
-          />
         </div>
       </div>
     </div>

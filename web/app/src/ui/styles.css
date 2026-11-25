@@ -843,6 +843,19 @@ input[type='radio'] {
   gap: 4px 6px;
 }
 
+.parameter-form .param-check-head {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: inherit;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.parameter-form .param-check-head > input[type='checkbox'] {
+  flex: none;
+}
+
 .parameter-form .param-check .param-label {
   min-width: 0;
 }
@@ -1307,9 +1320,32 @@ textarea {
   color: var(--muted);
 }
 
+/* A sentence and its trailing "?" (and any inline link between them) flow inline together;
+   reserving the "?" width in padding-right with a matching negative margin-right gives the "?"
+   zero extra advance width so it never wraps alone onto the next line at any width. */
+.hint-line {
+  box-sizing: border-box;
+  min-width: 0;
+  --hint-tip-space: 26px;
+}
+
+.hint-line:has(.help-tip) {
+  padding-right: var(--hint-tip-space);
+}
+
+.hint-line > .hint:has(+ wbr + .link),
+.hint-line > .file-name:has(+ wbr + .link) {
+  margin-right: 10px;
+}
+
+.hint-line > .help-tip {
+  margin-left: 6px;
+  margin-right: calc(-1 * var(--hint-tip-space));
+  vertical-align: middle;
+}
+
 /* A checkbox of a row with a file chosen beside it (BLASTN's WindowMasker counts): the box and its
-   name, the button with the file's name or the sentence that asks for it, and the hint, which
-   wraps under them where the row is narrow. */
+   name stay together on the first line, followed by the controls and the hint on its own line. */
 .parameter-form .param-inline[data-kind='file'] .param-control {
   display: flex;
   flex-wrap: wrap;
@@ -1317,14 +1353,8 @@ textarea {
   gap: 4px 8px;
 }
 
-.parameter-form .param-inline[data-kind='file'] .param-hint-line {
+.parameter-form .param-inline[data-kind='file'] .hint-line {
   flex: 1 0 100%;
-  min-width: 0;
-}
-
-.parameter-form .param-inline[data-kind='file'] .param-hint-line .help-tip {
-  margin-left: 6px;
-  vertical-align: middle;
 }
 
 .file-pick {
@@ -2365,6 +2395,10 @@ pre.range-text {
     min-height: 0;
   }
 
+  .hint-line {
+    --hint-tip-space: 30px;
+  }
+
   .region-bar {
     height: 36px;
   }
@@ -2616,8 +2650,11 @@ pre.range-text {
   width: 8em;
 }
 
+/* The dialog's border box stays at least 12 px from each viewport edge on narrow screens while
+   keeping its 32 rem content width (plus 40 px horizontal padding and 2 px border) on wide ones. */
 .replace-dialog {
-  max-width: min(32rem, calc(100vw - 24px));
+  box-sizing: border-box;
+  max-width: min(calc(32rem + 42px), calc(100% - 24px));
   padding: 16px 20px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);

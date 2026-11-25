@@ -354,41 +354,41 @@ pub(crate) fn prepare_unit_queries(
         .x_with_trim_memo()
     });
     // SEG reads only the residues of its own context and the hard masking below writes only there,
-    // so the contexts of a large batch (the six frames of the full query) are filtered on the
-    // search pool before the loop consumes the intervals in context order.
+    // so in a pool of 2+ threads the contexts are filtered before the loop consumes the intervals in
+    // context order.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
     // NCBI filters the contexts one after another in this loop. SEG of one context reads only that
-    // context, so with a pool of 2+ threads the contexts of a large batch are filtered in parallel
-    // and the intervals are kept in seg_ready; the loop below still consumes them in context order.
+    // context, so with a pool of 2+ threads this thread filters the contexts in context order and
+    // the pool's idle threads filter the next ones (`utils::xitems::x_map`: this thread runs no
+    // other job of the pool meanwhile, so the batch's setup never waits for another batch's search
+    // or helper); the intervals are kept in seg_ready and the loop below still consumes them in
+    // context order.
     #[allow(unused_mut)]
     let mut seg_ready: Vec<Option<Vec<(i32, i32)>>> = Vec::new();
     #[cfg(feature = "parallel")]
     if let Some(masker) = seg_masker.as_ref() {
         if super::runtime::x_bx_par_rule(|| {
-            buffer.len() >= 60_000
-                && !super::runtime::x_inner_serial()
+            !super::runtime::x_inner_serial()
                 && rayon::current_thread_index().is_some()
                 && rayon::current_num_threads() > 1
         }) {
-            use rayon::prelude::*;
             let buffer = &buffer;
-            // Diagnostic (LOSAT_TIMING): the parallel SEG's wall time for the common line
+            let contexts = &contexts;
+            // Diagnostic (LOSAT_TIMING): the SEG's wall time for the common line
             // (utils/xtiming.rs). No NCBI counterpart.
             let t_seg = crate::utils::xtiming::clock();
-            seg_ready = contexts
-                .par_iter()
-                .map(|context| {
-                    context.is_valid.then(|| {
-                        masker
-                            .mask_sequence(
-                                &buffer[context.offset + 1..context.offset + 1 + context.length],
-                            )
-                            .into_iter()
-                            .map(|r| (r.start as i32, r.end as i32 - 1))
-                            .collect()
-                    })
+            seg_ready = crate::utils::xitems::x_map(contexts.len(), |index| {
+                let context = &contexts[index];
+                context.is_valid.then(|| {
+                    masker
+                        .mask_sequence(
+                            &buffer[context.offset + 1..context.offset + 1 + context.length],
+                        )
+                        .into_iter()
+                        .map(|r| (r.start as i32, r.end as i32 - 1))
+                        .collect()
                 })
-                .collect();
+            });
             crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
         }
     }

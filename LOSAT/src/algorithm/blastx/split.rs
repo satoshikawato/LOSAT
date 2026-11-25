@@ -245,19 +245,19 @@ pub fn split_queries(
     };
     let mut chunks: Vec<QueryChunk> = Vec::new();
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-249
-    // Dispatch point: inside the search pool of 2+ threads, the chunks are prepared in
-    // parallel; otherwise the loop below prepares them one after another as NCBI does. The chunks
-    // are collected in index order and the corrections that follow still run in chunk order.
+    // Dispatch point: inside the search pool of 2+ threads, this thread prepares the chunks in
+    // index order and the pool's idle threads prepare the next ones (`utils::xitems::x_map`: this
+    // thread runs no other job of the pool meanwhile); otherwise the loop below prepares them one
+    // after another as NCBI does. The chunks are collected in index order and the corrections that
+    // follow still run in chunk order.
     #[cfg(feature = "parallel")]
     if super::runtime::x_bx_par_rule(|| {
         !super::runtime::x_inner_serial()
             && rayon::current_thread_index().is_some()
             && rayon::current_num_threads() > 1
     }) {
-        use rayon::prelude::*;
-        chunks = (0..count)
-            .into_par_iter()
-            .map(make_chunk)
+        chunks = crate::utils::xitems::x_map(count, &make_chunk)
+            .into_iter()
             .collect::<Result<Vec<_>>>()?;
     }
     if chunks.is_empty() {

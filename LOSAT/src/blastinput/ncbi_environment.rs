@@ -13,8 +13,10 @@ use super::ncbi_registry::{
     running_error_reading_post, running_syntax_error_notice, syntax_error_notice, Layer,
     RegistryEntry, RegistryRead,
 };
+use crate::ncbi_exception::NcbiException;
 use crate::ncbi_str::string_to_bool;
 use crate::report::diag_log::{Posts, CRITICAL, ERROR, WARNING};
+use crate::report::serial::object_frame::DataCheck;
 
 /// Registry entries (section, name; case-insensitive) that change no output of a search with
 /// `-subject`: the database and data-loader settings, the data directory, the directory of
@@ -1142,6 +1144,9 @@ pub struct ApplicationSettings {
     /// `SERIAL_VERIFY_DATA_WRITE` when its value changes what NCBI's object streams write; only
     /// the runs that write what it changes have to refuse to run then (`WriteVerification`).
     pub write_verification: Option<WriteVerification>,
+    /// `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET` where they turn NCBI's checks off;
+    /// only a run whose input fails the check has to refuse to run then (`ReadVerification`).
+    pub read_verification: ReadVerification,
     /// The value of the registry entry `[BLAST] MAX_SEQID_LENGTH` in the first layer that has
     /// the entry (the environment, then the program's `.ini` file, then `.ncbirc`), an empty
     /// value too: `registry.Get` answers from that layer, and an empty value there hides the
@@ -1202,11 +1207,10 @@ impl WriteVerification {
     /// nothing (a value that is not UTF-8 is none of the six words).
     pub fn of(value: &OsStr) -> Option<Self> {
         let text = value.to_str()?;
-        let is = |word: &&str| text.eq_ignore_ascii_case(word);
-        let off = ["NO", "NEVER", "DEFVALUE", "DEFVALUE_ALWAYS"]
+        let off = verification_off(text);
+        let blast_xml_changed = ["ALWAYS", "DEFVALUE_ALWAYS"]
             .iter()
-            .any(is);
-        let blast_xml_changed = ["ALWAYS", "DEFVALUE_ALWAYS"].iter().any(is);
+            .any(|word| text.eq_ignore_ascii_case(word));
         (off || blast_xml_changed).then(|| Self {
             value: text.to_owned(),
             off,
@@ -1252,6 +1256,114 @@ impl WriteVerification {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:257-287
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:233-262
+// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:180-221
+/// Whether `value` of `SERIAL_VERIFY_DATA_READ`, `SERIAL_VERIFY_DATA_GET` or
+/// `SERIAL_VERIFY_DATA_WRITE` turns NCBI's check of the data off: `NO`, `NEVER`, `DEFVALUE` or
+/// `DEFVALUE_ALWAYS`, without case. Every other value (`YES`, `ALWAYS`, an empty one, any other
+/// word) keeps NCBI's default, the check (NCBI BLAST+ 2.17.0, probe D3c-3d `probeA` for the read
+/// and get variables, D3c-3c review `probeF` for the write one). The one owner of the words for
+/// the three variables (`WriteVerification`, `ReadVerification`, rpsbproc's refusal).
+pub fn verification_off(value: &str) -> bool {
+    ["NO", "NEVER", "DEFVALUE", "DEFVALUE_ALWAYS"]
+        .iter()
+        .any(|word| value.eq_ignore_ascii_case(word))
+}
+
+/// `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET` where their value turns NCBI's check
+/// off (`verification_off`). NCBI reads each variable only while the registry parameter of its
+/// own (`[SERIAL] VERIFY_DATA_READ`, `VERIFY_DATA_GET`) is unset; LOSAT refuses those
+/// parameters' registry forms at every value (`rejected_variable`).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
+/// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:266-306
+/// The read check stops a read where a mandatory member is missing ("member X expected"); off,
+/// NCBI posts "member X is missing" and reads on with the member unset. The get check stops the
+/// getter of a member that is not set ("Attempt to get unassigned member"); off, the getter gives
+/// the member's default. Neither changes anything else: every input that NCBI reads without these
+/// errors gives the same output with every value (probes D3c-3d `probeA`, `probeB`, `probeC`:
+/// 58 inputs of every program with such a reader: the search programs, makeblastdb,
+/// makeprofiledb, blastdbcmd, the maskers and makembindex). Where NCBI's check
+/// stops a run, the same run with the check off goes on in ways LOSAT does not follow (an unset
+/// member that later code reads, another exception, makeblastdb `-input_type blastdb` stopping
+/// with an error while it writes the database): LOSAT refuses the run there (`ReadVerification::refused`), where the check
+/// would have stopped it, after what NCBI writes before that point.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ReadVerification {
+    /// The value of `SERIAL_VERIFY_DATA_READ` when it turns the read check off.
+    read: Option<String>,
+    /// The value of `SERIAL_VERIFY_DATA_GET` when it turns the get check off.
+    get: Option<String>,
+}
+
+impl ReadVerification {
+    /// The setting of the values `read` of `SERIAL_VERIFY_DATA_READ` and `get` of
+    /// `SERIAL_VERIFY_DATA_GET` (`None`: the variable is not set; a value that is not UTF-8 is
+    /// none of NCBI's words).
+    pub fn of(read: Option<&OsStr>, get: Option<&OsStr>) -> Self {
+        let off = |value: Option<&OsStr>| {
+            value
+                .and_then(OsStr::to_str)
+                .filter(|text| verification_off(text))
+                .map(str::to_owned)
+        };
+        Self {
+            read: off(read),
+            get: off(get),
+        }
+    }
+
+    /// Whether the setting turns the read check off (`SERIAL_VERIFY_DATA_READ`): the only check
+    /// that a database's header records meet (`seqdb::SeqDb::refuse_unchecked_reads`).
+    pub(crate) fn turns_read_check_off(&self) -> bool {
+        self.read.is_some()
+    }
+
+    /// What LOSAT refuses (the noun phrase before "is not supported by LOSAT's PSIBLAST") where
+    /// NCBI's check threw `exception` while it read `what` (an input: "a PSSM (-in_pssm)"), when
+    /// the setting turns that check off: the variable and its value, with the input and what the
+    /// check found. `None` for an exception of no check (`DataCheck::of`) and for a check that
+    /// the setting keeps: the run reports NCBI's error then. The one test of every reader's and
+    /// getter's error that depends on these variables.
+    pub(crate) fn refused(&self, exception: &NcbiException, what: &str) -> Option<String> {
+        Some(match DataCheck::of(exception)? {
+            DataCheck::Read => format!(
+                "the environment variable SERIAL_VERIFY_DATA_READ={} with {what} that lacks a \
+                 mandatory member",
+                self.read.as_ref()?
+            ),
+            DataCheck::Get => format!(
+                "the environment variable SERIAL_VERIFY_DATA_GET={} with {what} of which NCBI \
+                 BLAST+ gets a member that is not set",
+                self.get.as_ref()?
+            ),
+        })
+    }
+}
+
+/// What a program's reader of a database takes of its application settings
+/// (`ApplicationSettings::database`): the search path's registry entry and the checks of NCBI's
+/// reads of the definition lines.
+#[derive(Clone, Copy, Debug)]
+pub struct DatabaseSettings<'a> {
+    /// `ApplicationSettings::blastdb` as the search path takes it (`seqdb::SearchPath::
+    /// from_environment`): the bytes of the registry entry, `None` without one.
+    pub registry: Option<&'a [u8]>,
+    /// `ApplicationSettings::read_verification` (`seqdb::SeqDb::refuse_unchecked_reads`).
+    pub read_verification: &'a ReadVerification,
+}
+
+impl ApplicationSettings {
+    /// The settings of a program's reader of a database (`DatabaseSettings`).
+    pub fn database(&self) -> DatabaseSettings<'_> {
+        DatabaseSettings {
+            registry: self.blastdb.as_deref(),
+            read_verification: &self.read_verification,
+        }
+    }
+}
+
 impl Default for ApplicationSettings {
     /// No registry entry and no variable: both data loaders on, no `[BLAST] BLASTDB`.
     ///
@@ -1262,6 +1374,7 @@ impl Default for ApplicationSettings {
             blastdb: None,
             seq_id_rank_variable: None,
             write_verification: None,
+            read_verification: ReadVerification::default(),
             max_seqid_length: Ok(None),
             matrix_search: MatrixSearch::default(),
             window_masker_registry: Ok(WindowMaskerRegistry::default()),
@@ -2815,6 +2928,10 @@ fn settings_of(
             .find(|name| env(name).is_some()),
         write_verification: env("SERIAL_VERIFY_DATA_WRITE")
             .and_then(|value| WriteVerification::of(&value)),
+        read_verification: ReadVerification::of(
+            env("SERIAL_VERIFY_DATA_READ").as_deref(),
+            env("SERIAL_VERIFY_DATA_GET").as_deref(),
+        ),
         max_seqid_length: max_seqid_length.transpose(),
         matrix_search: MatrixSearch {
             data_path: env("NCBI_DATA_PATH"),

@@ -40,6 +40,7 @@ export const EXAMPLE_STORE_METHODS = ['readExample', 'saveExample', 'deleteExamp
 
 export const COUNTS_STORE_METHODS = [
   'readCounts',
+  'listCounts',
   'beginCounts',
   'appendCounts',
   'finishCounts',

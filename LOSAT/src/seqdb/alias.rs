@@ -1500,7 +1500,7 @@ pub(super) fn alias_oids(
     num_oids: u32,
     seqtype: SeqType,
     version5: bool,
-    user: UserList,
+    user: UserList<'_>,
 ) -> Result<AliasOids, OidListError> {
     let mut words = has_filters(root).then(|| vec![0u64; (num_oids as usize).div_ceil(64)]);
     let mut all = Shape::new(0, u64::from(num_oids), Special::None);
@@ -1562,10 +1562,10 @@ pub(super) fn alias_oids(
 /// What the walk of one volume ([`volume_set`]) reads and leaves: the OID list files read so far,
 /// the id lists, the volume's `OID_MASK_TYPE` and the id lists it attaches (indexes of
 /// `ListSet::loaded`).
-struct VolumeReach<'a, 'r> {
+struct VolumeReach<'a, 'u, 'r> {
     volume: &'r TreeVolume<'a>,
     files: &'r mut std::collections::HashMap<&'a [u8], OidListFile>,
-    lists: &'r mut ListSet<'a>,
+    lists: &'r mut ListSet<'a, 'u>,
     mask_type: &'r mut u32,
     attached: &'r mut Vec<usize>,
 }
@@ -1580,42 +1580,92 @@ struct VolumeReach<'a, 'r> {
 // the list depends on the search's positive list (`UserList`).
 /// The id lists of the alias files as NCBI's `CSeqDBGiListSet` holds them for the OID list
 /// ([`volume_set`]).
-struct ListSet<'a> {
+struct ListSet<'a, 'u> {
     seqtype: SeqType,
     version5: bool,
-    user: UserList,
+    user: UserList<'u>,
     loaded: Vec<LoadedList<'a>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:417-423
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:447-461
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:472-480
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:472-526
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:588-592
-// With a positive list, `GetNodeIdList` translates the gis and tis of an alias file's list from
-// it at the list's first use (`x_TranslateFromUserList`), which begins by putting the list in
-// order (`InsureOrder`, `ListIds::insure_order`): a list of Seq-ids is then sorted by its ids as
-// the file gives them, before any simplification. LOSAT's positive lists hold no gi and no ti, so
-// that translation finds nothing. The volumes then translate the list (`mixed_ids`) where the
-// positive list holds Seq-ids or taxids, and not at all where it holds none: a version 5
-// database's `-seqidlist` whose every id is a gi (`s_ProcessSeqIDsForV5` drops them,
-// seqdbgilistset.cpp:148-180) leaves the list's OIDs unset and its ISAMs unread.
+// With any positive user list, `GetNodeIdList` runs `x_TranslateFromUserList` at the list's first
+// use, which starts by putting the list in order (`InsureOrder`, `ListIds::insure_order`): a list
+// of Seq-ids is then sorted by its ids as the file gives them, before any simplification. For a
+// positive GI list, matching GIs of an alias `GILIST` take their OIDs directly from the user
+// list (`x_TranslateGisFromUserList`). The volumes then translate the list (`mixed_ids`) only
+// when the user list holds Seq-ids or taxids, or when one holds GIs and the other TIs: a positive
+// GI list does not translate an alias `GILIST` or v4 `SEQIDLIST` through the volumes' ISAMs, a
+// positive IPG list translates none, and a version 5 database's `-seqidlist` whose every id is a
+// gi (`s_ProcessSeqIDsForV5` drops them, seqdbgilistset.cpp:148-180) leaves every list's OIDs
+// unset and its ISAMs unread.
 /// What NCBI's `CSeqDBGiListSet` holds of the search's positive list (`m_UserList`) when it reads
 /// the alias files' id lists ([`alias_oids`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum UserList {
+pub(super) enum UserList<'a> {
     /// No positive list: the database opened without a list, or with a negative one.
     None,
     /// A positive list (`-seqidlist`, `-taxids`, `-taxidlist`) of `ids` Seq-ids and taxids, as
     /// NCBI counts them after its processing of the list.
     Positive { ids: usize },
+    /// A positive GI list (`-gilist`): its sorted GIs with their resolved OIDs.
+    PositiveGis(&'a [super::isam_num::NumOid]),
+    /// A positive IPG list (`-ipglist`): holds PIGs alone (`GetNumGis`, `GetNumTis`, `GetNumSis`
+    /// and `GetNumTaxIds` are all 0).
+    PositivePigs,
 }
 
-impl UserList {
+impl UserList<'_> {
     /// Whether the volumes translate an alias file's list (`m_UserList` empty or `mixed_ids` set).
-    fn translates(self) -> bool {
+    fn translates(self, list: &ListIds) -> bool {
         match self {
             UserList::None => true,
             UserList::Positive { ids } => ids > 0,
+            UserList::PositiveGis(gis) => !gis.is_empty() && matches!(list, ListIds::Ti(_)),
+            UserList::PositivePigs => false,
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:474-526
+/// `x_TranslateGisFromUserList`: copies resolved OIDs from the sorted positive user GI list
+/// `source` into matching unset entries of the sorted alias GI list `target`.
+fn translate_gis_from_user_list(
+    source: &[super::isam_num::NumOid],
+    target: &mut [super::isam_num::NumOid],
+) {
+    let source_num = source.len();
+    let target_num = target.len();
+    let (mut source_index, mut target_index) = (0usize, 0usize);
+    while source_index < source_num && target_index < target_num {
+        let source_gi = source[source_index].key;
+        let target_gi = target[target_index].key;
+        if source_gi == target_gi {
+            if target[target_index].oid.is_none() {
+                target[target_index].oid = source[source_index].oid;
+            }
+            target_index += 1;
+            source_index += 1;
+        } else if source_gi > target_gi {
+            target_index += 1;
+            let mut jump = 2;
+            let mut test = target_index + jump;
+            while test < target_num && target[test].key < source_gi {
+                target_index = test;
+                jump *= 2;
+                test = target_index + jump;
+            }
+        } else {
+            source_index += 1;
+            let mut jump = 2;
+            let mut test = source_index + jump;
+            while test < source_num && source[test].key < target_gi {
+                source_index = test;
+                jump *= 2;
+                test = source_index + jump;
+            }
         }
     }
 }
@@ -1680,7 +1730,7 @@ impl LoadedList<'_> {
     }
 }
 
-impl<'a> ListSet<'a> {
+impl<'a> ListSet<'a, '_> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:86-131
     // The file is mapped as an OID list file is (`not_a_file`), then read as its kind's list
     // (`id_list`; a seqid list as text, `seqidlist::read_memory_si_list`, its ids as the file
@@ -1755,8 +1805,11 @@ impl<'a> ListSet<'a> {
             }
             IdListKind::TaxId => unreachable!("no pass of a version 4 database reads TAXIDLIST"),
         };
-        if matches!(self.user, UserList::Positive { .. }) {
+        if !matches!(self.user, UserList::None) {
             ids.insure_order();
+            if let (UserList::PositiveGis(source), ListIds::Gi(target)) = (self.user, &mut ids) {
+                translate_gis_from_user_list(source, target);
+            }
         }
         self.loaded.push(LoadedList {
             kind,
@@ -1806,7 +1859,7 @@ impl<'a> ListSet<'a> {
             end: u64::from(volume.end),
         };
         let list = &mut self.loaded[at];
-        if !self.user.translates() || list.count == 0 {
+        if list.count == 0 {
             return Ok(frame.clear_words());
         }
         let bits_of = |oids: &mut dyn Iterator<Item = Option<u32>>| {
@@ -1819,6 +1872,12 @@ impl<'a> ListSet<'a> {
             }
             bits
         };
+        if !self.user.translates(&list.ids) {
+            return Ok(match &list.ids {
+                ListIds::Gi(gis) => bits_of(&mut gis.iter().map(|gi| gi.oid)),
+                ListIds::Ti(_) | ListIds::Si { .. } => frame.clear_words(),
+            });
+        }
         let base = &*path_of_bytes(volume.name);
         match &mut list.ids {
             ListIds::Gi(_) | ListIds::Ti(_) => {
@@ -1901,7 +1960,7 @@ impl<'a> ListSet<'a> {
 fn volume_set<'a>(
     node: &VolumeNode<'a>,
     frame: Frame,
-    reach: &mut VolumeReach<'a, '_>,
+    reach: &mut VolumeReach<'a, '_, '_>,
 ) -> Result<OidSet, OidListError> {
     let map = if node.volumes > 0 {
         OidSet::special(frame.start, frame.end, Special::AllSet)

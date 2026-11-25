@@ -73,6 +73,7 @@ fn hit_list_of_culled(
         worst_evalue,
         low_score,
         heapified: false,
+        in_report_order: false,
     }
 }
 

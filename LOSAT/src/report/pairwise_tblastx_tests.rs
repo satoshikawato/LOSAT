@@ -76,7 +76,6 @@ fn rows_text(query: &str, subject: &str, q_start: usize, s_start: usize, line: u
         &hit,
         query,
         subject,
-        [&[], &[]],
         Default::default(),
         None,
         &config,
@@ -85,7 +84,7 @@ fn rows_text(query: &str, subject: &str, q_start: usize, s_start: usize, line: u
     String::from_utf8(out).unwrap()
 }
 
-// showalign.cpp:1209-1216 and 1497-1502 (cited at `end_gap_span` and
+// showalign.cpp:1209-1216 and 1497-1502 (cited at `row_spans` and
 // `write_alignment_with_sequences`): a row's end gaps are spaces, a chunk without the row's
 // letters leaves the row out (the Query row with its middle line), and the next chunk's row
 // shows its first residue's number.
@@ -432,6 +431,7 @@ fn html_description_rows_are_ncbis() {
                 crate::report::db_subject::AfterThrow::SkipsAlignment { html: true },
             )),
             &crate::report::db_subject::HitLoads::default(),
+            None,
         )
         .unwrap();
         String::from_utf8(out)
@@ -491,6 +491,7 @@ fn description_table_shows_the_linked_set_column() {
         &mut crate::report::query_warnings::no_places,
         None,
         &crate::report::db_subject::HitLoads::default(),
+        None,
     )
     .unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -559,6 +560,7 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         &mut crate::report::query_warnings::no_places,
         None,
         &crate::report::db_subject::HitLoads::default(),
+        None,
     )
     .unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -609,6 +611,7 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         &mut crate::report::query_warnings::no_places,
         None,
         &crate::report::db_subject::HitLoads::default(),
+        None,
     )
     .unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -654,6 +657,7 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         &mut crate::report::query_warnings::no_places,
         None,
         &crate::report::db_subject::HitLoads::default(),
+        None,
     )
     .unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -704,6 +708,7 @@ fn sorthits_refuses_a_last_total_wider_than_its_column() {
             &mut crate::report::query_warnings::no_places,
             None,
             &crate::report::db_subject::HitLoads::default(),
+            None,
         )
         .map(|()| out)
     };
@@ -1067,6 +1072,7 @@ fn a_title_of_unknown_encoding_is_unknown_and_its_alignments_are_skipped() {
         &mut crate::report::query_warnings::no_places,
         None,
         &crate::report::db_subject::HitLoads::default(),
+        None,
     )
     .unwrap();
     let row = out.split(|&byte| byte == b'\n').nth(3).unwrap().to_vec();
@@ -1176,6 +1182,7 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         &mut crate::report::query_warnings::no_places,
         None,
         &loads,
+        None,
     )
     .unwrap();
     let rows: Vec<&[u8]> = out.split(|&byte| byte == b'\n').skip(3).take(2).collect();
@@ -1215,6 +1222,7 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         &mut crate::report::query_warnings::no_places,
         Some((&report, AfterThrow::SkipsAlignment { html: true })),
         &loads,
+        None,
     )
     .unwrap_err();
     let exception = crate::ncbi_exception::NcbiException::of_io_error(&error).unwrap();

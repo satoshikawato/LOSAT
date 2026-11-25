@@ -1734,11 +1734,11 @@ fn html_is_a_flag_of_the_five_search_programs_and_psiblast_refuses_it() {
 #[test]
 fn unported_ncbi_options_are_rejected_explicitly() {
     for (program, words) in [
-        ("tblastn", &["-gilist", "ids.gil"][..]),
-        ("tblastx", &["-gilist", "ids.gil"]),
-        ("blastp", &["-gilist", "ids.gil"]),
+        ("tblastn", &["-import_search_strategy", "s.asn"][..]),
+        ("tblastx", &["-import_search_strategy", "s.asn"]),
+        ("blastp", &["-import_search_strategy", "s.asn"]),
     ] {
-        // With a database (`-gilist` excludes `-subject` in NCBI's reader).
+        // With a database (`-import_search_strategy` remains refused).
         let mut argv = vec!["losat", program, "-query", "q.fa", "-db", "db"];
         argv.extend(words);
         let error = (parse_argv(argv).unwrap_err()).to_string();

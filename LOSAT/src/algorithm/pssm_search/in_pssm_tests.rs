@@ -1235,15 +1235,20 @@ fn a_query_with_one_letter_more_than_its_length_is_searched_as_its_first_letters
     assert_eq!(file.object.pssm.num_columns, full.pssm.num_columns);
 }
 
-// Line PS item PS7c (review S1): a PSSM of frequency ratios only whose Seq-inst `length` is not
-// its letters. From one less than the letters up (below 1 GiB) NCBI BLAST+ 2.17.0's PSSM engine
-// stops with its error (probes s1: 29, 31, 32, 60, 255, 1000 and 65,536 for 30 letters, valgrind
-// clean for 29 and 1000); a shorter `length` writes past NCBI's query buffer (valgrind: 27 and 28;
-// a crash for 0 and 1), and a longer one asks for a buffer whose allocation depends on the host's
-// memory: both refused.
+// Line PS item PS7c (review S1, R3): a PSSM of frequency ratios only whose Seq-inst `length` is not
+// its letters. Without `length`, NCBI BLAST+ 2.17.0's `GetBlastSequence` stops with its query
+// set-up error (`Warning: Cannot get sequence length `, exit 3, valgrind clean) for both
+// ratios-only PSSMs (`scores_error`) and PSSMs with scores (`setup_error`). From one less than the
+// letters up (below 1 GiB) NCBI's PSSM engine stops with its error (probes s1: 29, 31, 32, 60,
+// 255, 1000 and 65,536 for 30 letters, valgrind clean for 29 and 1000); a shorter `length` writes
+// past NCBI's query buffer (valgrind: 27 and 28 of 30, 0 of 1; for 30 letters NCBI aborts on 0 and
+// 1), and a longer one asks for a buffer whose allocation depends on the host's memory: both
+// refused.
 #[test]
 fn a_ratios_only_pssm_of_another_length_gets_the_engines_error_where_ncbi_stays_in_its_buffer() {
-    use crate::report::serial::pssm::SeqEntry;
+    use crate::report::serial::pssm::{SeqData, SeqEntry};
+    let missing_length = crate::report::query_warnings::missing_length_error();
+    assert_eq!(missing_length, "Warning: Cannot get sequence length ");
     let with_length = |length: Option<u32>| {
         let mut pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(
             "pssm/ps5_ratio30_noparams.asn.gz",
@@ -1256,6 +1261,13 @@ fn a_ratios_only_pssm_of_another_length_gets_the_engines_error_where_ncbi_stays_
         query.inst.length = length;
         psi_search_and_object(pssm, PssmReader::PSIBLAST)
     };
+    let (search, file) = with_length(None).unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(
+        search.scores_error.as_deref(),
+        Some(missing_length.as_str())
+    );
+    assert!(search.setup_error.is_none());
+    assert!(!file.valid);
     for length in [29, 31, 32, 60, 255, 1000, 65_536] {
         let (search, file) = with_length(Some(length)).unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(
@@ -1266,7 +1278,6 @@ fn a_ratios_only_pssm_of_another_length_gets_the_engines_error_where_ncbi_stays_
         assert!(!file.valid, "{length}");
     }
     for (length, words) in [
-        (None, "has no length"),
         (Some(28), "at least two letters more"),
         (Some(0), "at least two letters more"),
         (Some(1 << 30), "depending on the host's memory"),
@@ -1276,6 +1287,54 @@ fn a_ratios_only_pssm_of_another_length_gets_the_engines_error_where_ncbi_stays_
             panic!("{length:?}");
         };
         assert!(error.to_string().contains(words), "{length:?}: {error}");
+    }
+    // A 1-letter ratios-only PSSM with length 0 writes outside NCBI's query buffer under valgrind.
+    let mut one = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(
+        "pssm/ps5_ratio30_noparams.asn.gz",
+    ))
+    .unwrap();
+    one.pssm.num_columns = 1;
+    if let Some(data) = one.pssm.intermediate_data.as_mut() {
+        data.freq_ratios.truncate(one.pssm.num_rows as usize);
+    }
+    if let Some(SeqEntry::Seq(query)) = one.pssm.query.as_mut() {
+        query.inst.length = Some(0);
+        query.inst.seq_data = Some(SeqData::Ncbistdaa(vec![1]));
+    }
+    let Err(error) = psi_search_and_object(one, PssmReader::PSIBLAST) else {
+        panic!("1-letter ratios-only length 0");
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("has length 0 (NCBI BLAST+ 2.17.0 writes outside its query buffer)"),
+        "{error}"
+    );
+    // A PSSM with scores whose Seq-inst has no length stops in query set-up (`setup_error`) in
+    // both psiblast and tblastn.
+    let tblastn = PssmReader {
+        program: "TBLASTN",
+        ..PssmReader::PSIBLAST
+    };
+    for reader in [PssmReader::PSIBLAST, tblastn] {
+        let mut scored = crate::blastinput::pssm_text::read_pssm_with_parameters(&fixture(
+            "db_search/db.ps.asn.rnd.6.asn",
+        ))
+        .unwrap();
+        let Some(SeqEntry::Seq(query)) = scored.pssm.query.as_mut() else {
+            panic!("the PSSM's query");
+        };
+        query.inst.length = None;
+        let (search, file) =
+            psi_search_and_object(scored, reader).unwrap_or_else(|error| panic!("{error}"));
+        assert!(search.scores_error.is_none(), "{}", reader.program);
+        assert_eq!(
+            search.setup_error.as_deref(),
+            Some(missing_length.as_str()),
+            "{}",
+            reader.program
+        );
+        assert!(file.valid, "{}", reader.program);
     }
 }
 

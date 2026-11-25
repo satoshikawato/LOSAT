@@ -219,14 +219,20 @@ fn query_codes(object: &PssmWithParameters) -> Vec<u8> {
         )
         | None => Vec::new(),
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:253-255
-    // A query with one letter more than its Seq-inst's `length` (searched as its first `length`
-    // letters, `in_pssm`): its ASCII PSSM has a row per position of the length (NCBI BLAST+ 2.17.0,
-    // line PS item PS7c).
-    if let Some(length) = query.and_then(|query| query.inst.length) {
-        if usize::try_from(length).is_ok_and(|length| length >= 1 && length + 1 == codes.len()) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:202, 253-258
+    // NCBI reference (598d8ae6): c++/src/objects/scoremat/Pssm.cpp:61-74 (`CPssm::GetQueryLength`)
+    // `PrintAsciiPssm` loops up to `GetQueryLength()`: 0 when `Seq-inst.length` is absent, and
+    // `length` when the query has one letter more than its Seq-inst's `length` (searched as its
+    // first `length` letters, `in_pssm`; NCBI BLAST+ 2.17.0, line PS item PS7c).
+    match query.and_then(|query| query.inst.length) {
+        None => codes.clear(),
+        Some(length)
+            if usize::try_from(length)
+                .is_ok_and(|length| length >= 1 && length + 1 == codes.len()) =>
+        {
             codes.pop();
         }
+        Some(_) => {}
     }
     codes
 }

@@ -699,17 +699,26 @@ pub(crate) fn psi_search_and_object_of(
     // (`SetupQueries_OMF` checks each query's molecule before its letters), also for a PSSM of
     // frequency ratios only, whose engine sets the query up first too.
     let nucleotide_query = matches!(query.inst.mol.1, 1 | 2 | 4);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:532-543
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/bioseq_extract_data_priv.cpp:317-321
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:532-543, 609-652
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:469-473
     // Then the set-up takes the query's title (`GetTitle`, before its letters), which reads every
     // descriptor's variant: an empty descriptor is the query's error
     // (`report::query_warnings::null_descriptor_error`; NCBI BLAST+ 2.17.0, psiblast and tblastn,
     // on every report path and with a PSSM of frequency ratios only, probe D3c-3b `probe4`).
+    // Then `GetBlastSequence` checks `CanGetLength` before `seq-data` and the residues: a query
+    // Seq-inst without `length` ends with `Warning: Cannot get sequence length `
+    // (`report::query_warnings::missing_length_error`, exit status 3, valgrind clean: in
+    // `PsiBlastComputePssmScores` -> `MakeLocalQueryData` for frequency ratios only,
+    // `scores_error`, and in `SetupQueries_OMF` for a PSSM with scores, `setup_error`).
     let query_error = if validation_error.is_some() {
         None
     } else if nucleotide_query {
         Some("Nucleotide Bioseq specified in program which expects protein query".to_string())
     } else if query.has_empty() {
         Some(crate::report::query_warnings::null_descriptor_error())
+    } else if query.inst.length.is_none() {
+        Some(crate::report::query_warnings::missing_length_error())
     } else {
         invalid_residues
     };
@@ -869,25 +878,27 @@ pub(crate) fn psi_search_and_object_of(
     // less than the letters or more (NCBI BLAST+ 2.17.0, line PS item PS7c, review S1: valgrind
     // clean for 29, 1000 of 30 letters and 397, 399 of 398; every other length up to 65,536 the same
     // error). A shorter `length` writes past the buffer (valgrind's invalid write for 27 and 28
-    // of 30 and 396 of 398; NCBI crashes for 0 and 1), and one of `RATIOS_LENGTH_HOST_MEMORY` or
-    // more asks for a buffer whose allocation depends on the host's memory: both refused below.
+    // of 30, 0 of 1 and 396 of 398; for 30 letters NCBI aborts on 0 and 1), and one of
+    // `RATIOS_LENGTH_HOST_MEMORY` or more asks for a buffer whose allocation depends on the host's
+    // memory: both refused below.
     let ratios_length_mismatch =
         ratios_only && reads_values && !letters.is_empty() && letters.len() as i64 != length;
     let ratios_length_error = ratios_length_mismatch
         && length >= letters.len() as i64 - 1
         && (1..RATIOS_LENGTH_HOST_MEMORY).contains(&length);
     if ratios_length_mismatch && !ratios_length_error {
-        return Err(reader.refuse(if query.inst.length.is_none() {
-            "a PSSM of frequency ratios only whose query Seq-inst has no length (NCBI BLAST+ 2.17.0 writes outside its query buffer or crashes)".to_string()
-        } else if length < letters.len() as i64 - 1 {
+        return Err(reader.refuse(if length < letters.len() as i64 - 1 {
             "a PSSM of frequency ratios only whose query has at least two letters more than its Seq-inst's length (NCBI BLAST+ 2.17.0 writes outside its query buffer)".to_string()
         } else if length < 1 {
-            "a PSSM of frequency ratios only whose query Seq-inst has length 0 (NCBI BLAST+ 2.17.0 crashes)".to_string()
+            "a PSSM of frequency ratios only whose query Seq-inst has length 0 (NCBI BLAST+ 2.17.0 writes outside its query buffer)".to_string()
         } else {
             format!("a PSSM of frequency ratios only whose Seq-inst's length is {length} (NCBI BLAST+ 2.17.0's query buffer of that length, {RATIOS_LENGTH_HOST_MEMORY} letters or more, is allocated or not depending on the host's memory)")
         }));
     }
-    if letters.is_empty() || (letters.len() as i64 != length && !one_over && !ratios_length_error) {
+    if query.inst.length.is_some()
+        && (letters.is_empty()
+            || (letters.len() as i64 != length && !one_over && !ratios_length_error))
+    {
         return Err(reader.refuse(
             "a PSSM query whose letters are missing or of another length than its Seq-inst (NCBI BLAST+ 2.17.0 writes outside its query buffer or crashes unless there is one letter more than the Seq-inst's length)",
         ));

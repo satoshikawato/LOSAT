@@ -37,7 +37,7 @@
 
 use std::any::Any;
 use std::cell::Cell;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 /// What a taker lends the items it runs: the unit path keeps its scratch here, made by the first
@@ -56,6 +56,8 @@ pub(crate) struct XSet {
     next: AtomicUsize,
     done: Mutex<usize>,
     all_done: Condvar,
+    /// No item is taken any more (`x_close`): every item that ends notifies its owner.
+    closed: AtomicBool,
 }
 
 // SAFETY: `run` is a `Sync` closure; it is called only for a taken index below `n`, and its owner
@@ -73,6 +75,7 @@ impl XSet {
             next: AtomicUsize::new(0),
             done: Mutex::new(0),
             all_done: Condvar::new(),
+            closed: AtomicBool::new(false),
         })
     }
 
@@ -92,7 +95,7 @@ impl XSet {
                 IN_ITEM.with(|flag| flag.set(self.1));
                 let mut done = self.0.done.lock().unwrap_or_else(|e| e.into_inner());
                 *done += 1;
-                if *done == self.0.n {
+                if *done == self.0.n || self.0.closed.load(Ordering::Acquire) {
                     self.0.all_done.notify_all();
                 }
             }
@@ -112,6 +115,16 @@ impl XSet {
     pub(crate) fn wait(&self) {
         let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
         while *done < self.n {
+            done = self.all_done.wait(done).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
+    /// No item is taken any more; blocks until the items taken before have run.
+    fn x_close(&self) {
+        self.closed.store(true, Ordering::Release);
+        let taken = self.next.fetch_max(self.n, Ordering::AcqRel).min(self.n);
+        let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
+        while *done < taken {
             done = self.all_done.wait(done).unwrap_or_else(|e| e.into_inner());
         }
     }
@@ -167,7 +180,7 @@ pub(crate) fn in_item() -> bool {
 struct XHelped {
     set: Arc<XSet>,
     /// A helper job waits in a thread's queue.
-    queued: std::sync::atomic::AtomicBool,
+    queued: AtomicBool,
     /// The first panic of an item that a helper job ran, raised again by the owner (a panic in a
     /// `rayon::spawn` job would end the process).
     panic: Mutex<Option<Box<dyn Any + Send>>>,
@@ -222,7 +235,7 @@ pub(crate) fn x_each(n: usize, run: &(dyn Fn(usize) + Sync)) {
         let owned = XOwned(&set);
         let helped = Arc::new(XHelped {
             set: Arc::clone(&set),
-            queued: std::sync::atomic::AtomicBool::new(false),
+            queued: AtomicBool::new(false),
             panic: Mutex::new(None),
         });
         x_spawn_helper(&helped);
@@ -243,6 +256,63 @@ pub(crate) fn x_each(n: usize, run: &(dyn Fn(usize) + Sync)) {
     for i in 0..n {
         run(i);
     }
+}
+
+/// `body()` on this thread while `n` helper jobs of the pool each run one item `run(k, taker)` (a loop
+/// that ends when `body` has signalled its end, `utils::xahead::with_helpers`). When `body` returns
+/// or unwinds no item is taken any more, and this thread blocks (not in the pool) until the items
+/// that started have run; a helper job that starts later runs nothing. This thread runs no pool
+/// job. Outside a pool or in a pool of one thread: `body()` alone. A panic of an item is raised
+/// here.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) fn x_beside<T>(n: usize, run: &Run<'_>, body: impl FnOnce() -> T) -> T {
+    if n == 0 || rayon::current_thread_index().is_none() || rayon::current_num_threads() < 2 {
+        return body();
+    }
+    // Closes the set when `body` returns or unwinds, before the frame the items borrow goes.
+    struct XClose<'a>(&'a XSet);
+    impl Drop for XClose<'_> {
+        fn drop(&mut self) {
+            self.0.x_close();
+        }
+    }
+    let set = XSet::new(run, n);
+    let helped = Arc::new(XHelped {
+        set: Arc::clone(&set),
+        queued: AtomicBool::new(false),
+        panic: Mutex::new(None),
+    });
+    for _ in 0..n {
+        let helped = Arc::clone(&helped);
+        rayon::spawn(move || {
+            let mut taker = XTaker::default();
+            if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                helped.set.run_one(&mut taker)
+            })) {
+                helped
+                    .panic
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get_or_insert(panic);
+            }
+        });
+    }
+    let value = {
+        let _close = XClose(&set);
+        body()
+    };
+    let panic = helped
+        .panic
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+    if let Some(panic) = panic {
+        std::panic::resume_unwind(panic);
+    }
+    value
 }
 
 /// `f(i)` for every `i < n` (`x_each`), in index order.

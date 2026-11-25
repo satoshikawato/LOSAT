@@ -426,15 +426,24 @@ where
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     if let Some(ahead) = ahead {
-        // Outside a pool `in_place_scope` would start Rayon's global pool.
+        // The helpers are jobs of the pool (`utils::xitems::x_beside`), one per scratch; this thread
+        // runs no other job of the pool while it waits for them at the end, so the end of the loop
+        // never waits for another task of the pool (another batch's search in the BLASTX flow).
         if rayon::current_thread_index().is_some() {
-            return rayon::in_place_scope(|scope| {
-                // Set when the loop is over, also when it unwinds: the scope
-                // waits for the helpers.
-                let _finish = Finish(ahead);
-                for mut scratch in scratches {
-                    scope.spawn(move |_| ahead.work(&mut scratch, compute));
+            let scratches: Vec<std::sync::Mutex<Option<S>>> = scratches
+                .into_iter()
+                .map(|scratch| std::sync::Mutex::new(Some(scratch)))
+                .collect();
+            let helper = |k: usize, _: &mut crate::utils::xitems::XTaker| {
+                let scratch = lock(&scratches[k]).take();
+                if let Some(mut scratch) = scratch {
+                    ahead.work(&mut scratch, compute);
                 }
+            };
+            return crate::utils::xitems::x_beside(scratches.len(), &helper, || {
+                // Set when the loop is over, also when it unwinds: the helpers then leave, and
+                // `x_beside` waits for those that started.
+                let _finish = Finish(ahead);
                 body()
             });
         }

@@ -48,7 +48,7 @@ These are on the list for a later release:
 
 - the program `blast_formatter`, and `makeprofiledb -dbtype delta` and `-dbtype cobalt`;
 - `psiblast -phi_pattern`;
-- the `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`;
+- the `psiblast` output formats `13` to `16`;
 - `deltablast -show_domain_hits`, `-query_loc`, the output formats other than `0`, `6` and `7`, and `-export_search_strategy`;
 - `-html` in `psiblast` and `deltablast`.
 

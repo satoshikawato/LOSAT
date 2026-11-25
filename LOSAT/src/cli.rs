@@ -755,7 +755,8 @@ impl NativeError {
     /// report's writer carries, where it carries one (`NcbiException::of_io_error`: raised
     /// mid-report by the `-html` registries, `report::formatter_registry`, by a subject's load
     /// that ends the run, `report::x_pairwise_par::end_here`, or by the merge of a query-anchored
-    /// section, `report::query_anchored::write_section`), whichever program wrote the report. The
+    /// section, `report::query_anchored::write_section` and
+    /// `report::query_anchored::write_unreadable_section`), whichever program wrote the report. The
     /// one mapping of such an error: at the programs' report boundaries (`of_writer`, BLASTX's
     /// `native::report_error`) and, through `caught`, at the command line's end
     /// (`exit_on_native_error`) and in the library's message (`api::error::chain_bytes`), so the

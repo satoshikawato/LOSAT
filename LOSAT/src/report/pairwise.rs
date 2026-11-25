@@ -54,9 +54,13 @@ pub struct PairwiseConfig {
     /// report, with the run's links and the report's OIDs (`html_ids::HtmlReport`, made only with
     /// `-html`); `None`: the plain report.
     pub html: Option<super::html_ids::HtmlReport>,
-    /// A query whose sequence NCBI's alignment display cannot read (psiblast's PSSM query of the
-    /// molecule `other`): the alignments of outfmt 0 are one line each. `None` for every other
-    /// report.
+    /// A query whose sequence NCBI's alignment display cannot read (psiblast's and tblastn's PSSM
+    /// query of the molecule `other`): the alignments of outfmt 0 are one line each, the
+    /// query-anchored section of outfmt 1 to 4 a line feed where NCBI's merge of its HSPs
+    /// returns, fails with NCBI's `CAlnException` where that merge throws, and is refused where
+    /// that merge reads past a row's end, crashes, reads freed memory, or wraps a segment length
+    /// (`query_anchored::write_unreadable_section`).
+    /// `None` for every other report.
     pub unreadable_query: Option<UnreadableQuery>,
 }
 
@@ -4832,6 +4836,20 @@ fn write_anchored_section<W: Write>(
             "LOSAT internal error: a query-anchored report without its sequences",
         ));
     };
+    // A query whose sequence the display cannot read (`UnreadableQuery`): NCBI merges its HSPs
+    // as a nucleotide query's (its Bioseq is not a protein), then each merged frame's display
+    // throws and is caught; where the merge throws `CAlnException`, LOSAT reproduces it, and where
+    // it hits undefined behavior, crashes, or wraps a segment length, LOSAT refuses
+    // (`query_anchored::write_unreadable_section`).
+    if config.unreadable_query.is_some() {
+        let mut hsps = hsps_of(sequences);
+        hsps.set_query_not_protein();
+        return super::query_anchored::write_unreadable_section(
+            writer,
+            &hsps,
+            &config.program.to_ascii_uppercase(),
+        );
+    }
     super::query_anchored::write_section(
         writer,
         super::query_anchored::View {
@@ -5681,6 +5699,22 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<()> {
         let config = self.config;
+        // A PSSM query whose letters the display cannot read (`UnreadableQuery`): NCBI's line in
+        // place of each alignment.
+        if let Some(id) = config.unreadable_query_id(self.parsed_subjects, s_idx) {
+            return write_database_subject_alignments_part(
+                writer,
+                probe,
+                DatabaseHeading::Skipped(&id),
+                false,
+                &group.subject_hits[&s_idx],
+                &group.subject_hit_indices[&s_idx],
+                part,
+                None,
+                place,
+                |_, _, _| unreachable!("a skipped alignment is written by its line"),
+            );
+        }
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3650-3668:
         // display leaves an extra blank line after each translated HSP.
         let write_hsp = |writer: &mut W, hit: &PairwiseHit, hsp_index: HspIndex| {

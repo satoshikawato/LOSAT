@@ -11,10 +11,10 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 | `-outfmt` | Format | Written by |
 | --- | --- | --- |
 | `0` | Pairwise | all nine search programs |
-| `1` | Query-anchored, showing identities | all but `psiblast` and `deltablast` |
-| `2` | Query-anchored, no identities | all but `psiblast` and `deltablast` |
-| `3` | Flat query-anchored, showing identities | all but `psiblast` and `deltablast` |
-| `4` | Flat query-anchored, no identities | all but `psiblast` and `deltablast` |
+| `1` | Query-anchored, showing identities | all eight |
+| `2` | Query-anchored, no identities | all eight |
+| `3` | Flat query-anchored, showing identities | all eight |
+| `4` | Flat query-anchored, no identities | all eight |
 | `5` | BLAST XML | all eight |
 | `6` | Tabular | all nine search programs |
 | `7` | Tabular with comment lines | all nine search programs |
@@ -22,20 +22,20 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 | `9` | Seqalign, ASN.1 binary | all eight |
 | `10` | Comma-separated values | all eight |
 | `11` | BLAST archive (ASN.1 text, ASN.1 binary or XML) | all eight |
-| `12` | Seqalign, JSON | all but `psiblast` and `deltablast` |
+| `12` | Seqalign, JSON | all eight |
 | `13` | Multiple-file BLAST JSON (needs `-out`) | all but `psiblast` and `deltablast` |
 | `14` | Multiple-file BLAST XML2 (needs `-out`) | all but `psiblast` and `deltablast` |
 | `15` | Single-file BLAST JSON | all but `psiblast` and `deltablast` |
 | `16` | Single-file BLAST XML2 | all but `psiblast` and `deltablast` |
 | `17` | SAM | `blastn` only |
-| `18` | Organism report | all but `psiblast` and `deltablast` |
+| `18` | Organism report | all eight |
 | `20` | Comma-separated values with header lines | all eight |
 
 "All eight" is the five programs, `psiblast`, `rpsblast` and `rpstblastn`; `deltablast` is the ninth search program and writes only `0`, `6` and `7`. Some programs write fewer formats than the table shows:
 
-- `psiblast` writes `0`, `5` to `11` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`. Its XML report holds one `Iteration` per round, and it writes one Seq-annot or archive per round.
+- `psiblast` writes `0` to `12`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`. Its XML report holds one `Iteration` per round; it writes one query-anchored report, Seq-annot, JSON Seq-align set, archive or organism report per round. Formats `13` to `16` are not yet supported.
 - `deltablast` writes `0`, `6` and `7`, with `6` and `7` taking a custom field list. Its report shows each round, as `psiblast`'s does.
-- `tblastn` with `-in_pssm` writes `0` to `10` and `20`.
+- `tblastn` with `-in_pssm` writes every format but `11`.
 
 `rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool` and `blastdbcheck` have their own formats, listed on their pages.
 

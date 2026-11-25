@@ -1,5 +1,7 @@
 // No NCBI counterpart: the searches of a byte string that the ports share (cited in the module).
 pub(crate) mod byte_search;
+// No NCBI counterpart: decimal digits appended without `core::fmt` (cited in the module).
+pub(crate) mod decimal;
 pub mod dust;
 pub mod entry_names;
 // NCBI reference (598d8ae6): c++/src/util/format_guess.cpp (`CFormatGuess`, cited in the module).

@@ -93,10 +93,10 @@ pub(crate) fn unit_ranges(
 
 /// The places a unit of `records` takes (`unit_ranges`; no NCBI counterpart, scheduling only): for
 /// a reader batch searched whole (`searches_batch_whole`), the parts `batch_ranges` would make of
-/// it, whose letters its search holds at once (a lookup table, a preparation and the workers'
-/// diagonal tables of all of them); 1 for every other unit. The batch flow keeps the places
-/// searched at a time to the threads (`native.rs`, `x_flow`), and such a batch is left the threads
-/// of its places (`search::x_bx_mem::whole_batch_threads`).
+/// it, whose letters its scan holds at once (a lookup table and the workers' diagonal tables of
+/// all of them); 1 for every other unit. The batch flow keeps the places of the units scanning at
+/// a time to the threads, a unit's places counted until its scan ends (`native.rs`, `x_flow`), and
+/// such a batch is left the threads of its places (`search::x_bx_mem::whole_batch_threads`).
 #[cfg(feature = "parallel")]
 pub(crate) fn unit_places(
     records: &[FastaRecord],

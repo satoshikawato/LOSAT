@@ -804,7 +804,7 @@ fn test_blastp_diag_last_hit_after_one_hit_matches_ncbi_formula() {
     assert_eq!(11 - (5 - 1) + 19, 26);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-521
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:521-530
 #[test]
 fn test_blastp_flagged_diag_branch_matches_ncbi_skip_vs_reset_order() {
     let mut skip_diag = DiagStruct::default();
@@ -830,7 +830,7 @@ fn test_blastp_flagged_diag_branch_matches_ncbi_skip_vs_reset_order() {
     assert_eq!(reset_diag.last_hit(), 90);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:581-588
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:596-606
 #[test]
 fn test_blastp_two_hit_diag_update_matches_ncbi_flag_and_last_hit_updates() {
     let mut right_extended_diag = DiagStruct::default();
@@ -922,7 +922,7 @@ fn test_one_hit_caller_passes_ncbi_payload_directly_to_blastp_save_init_hsp() {
     assert_eq!(init_hsps[0].ungapped_data.length, 5);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-583
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-591
 #[test]
 fn test_two_hit_caller_preserves_second_hit_seed_and_length_when_right_extension_occurs() {
     let query = vec![
@@ -965,7 +965,7 @@ fn test_two_hit_caller_preserves_second_hit_seed_and_length_when_right_extension
     assert_eq!(init_hsps[0].ungapped_data.length, 6);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-583
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-591
 #[test]
 fn test_two_hit_caller_preserves_second_hit_seed_and_length_when_left_stops_early() {
     let query = vec![
@@ -1061,9 +1061,9 @@ fn test_blastp_for_each_offset_pair_preserves_scan_emission_order() {
     assert_eq!(emitted, expected);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:102-128
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_lookup.c:111-128
 //
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-505
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:510-511
 #[test]
 fn test_blastp_for_each_offset_pair_preserves_absolute_query_offsets_across_queries() {
     let ungapped = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
@@ -1986,7 +1986,7 @@ fn test_invalid_blastp_context_uses_ncbi_placeholder_cutoffs() {
         is_valid: false,
         ..make_query_context(0, 0)
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3577-3622
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3532-3533
     let scoring = crate::config::ProteinScoringSpec {
         matrix: ScoringMatrix::Blosum62,
         gap_open: 11,

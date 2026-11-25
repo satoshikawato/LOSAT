@@ -56,14 +56,8 @@ fn nucleotides() -> (Vec<FastaRecord>, Vec<FastaRecord>) {
 }
 
 /// A directory of the test `name`, empty.
-fn scratch(name: &str) -> PathBuf {
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-api-start-{name}-{}",
-        crate::utils::test_dir::process_id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn scratch(name: &str) -> crate::utils::test_dir::TempDir {
+    crate::utils::test_dir::TempDir::unique(&format!("api-start-{name}"))
 }
 
 fn path_text(path: &Path) -> &str {
@@ -157,7 +151,6 @@ fn every_search_call_starts_at_its_beginning() {
     let call = CallStart::new(&search, Inputs::new(&[], &[]), &mut diagnostics).unwrap();
     assert!(matches!(call.log, Some(DiagTarget::File(_))));
     assert_eq!(std::fs::read(&log).unwrap(), b"");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:705-707 (cited at `cli::main_entry`):
@@ -225,7 +218,6 @@ fn a_dry_run_searches_nothing_in_every_call() {
     let search = validate(Program::Blastp, &["-evalue", "1"]).unwrap();
     let outcome = run_collect(&search, records, &["6"]).unwrap();
     assert!(!outcome.reports[0].bytes.is_empty() && !outcome.hsps.is_empty());
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // NCBI BLAST+ 2.17.0 (probe `dry_log`): the `-logfile` file of a dry run is made (appended to),
@@ -244,7 +236,6 @@ fn a_dry_run_makes_the_logfile() {
     let batches = run_batches(&search, inputs).unwrap().count();
     assert_eq!(batches, 1);
     assert_eq!(std::fs::read(&log).unwrap(), b"OLD LINE\n");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (cited at
@@ -352,7 +343,6 @@ fn the_logfile_gets_what_the_command_line_writes_there() {
         }
         assert!(!dir.join("nodir").exists());
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // NCBI BLAST+ 2.17.0 (probes `conf_ok`, `conf_bad`, `conf_missing`, `conf_log`): the file of
@@ -437,7 +427,6 @@ fn the_conffile_is_loaded_as_on_the_command_line() {
         std::fs::read_to_string(&log).unwrap(),
         format!("{critical}\n")
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // No NCBI counterpart: LOSAT refuses the settings that change NCBI's output
@@ -482,7 +471,6 @@ fn a_started_call_refuses_the_settings_that_the_command_line_refuses() {
     assert!(!out.exists());
     assert_eq!(run_batches(&search, inputs).err(), Some(refused));
     assert!(diagnostics.is_empty());
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2377-2381 (`-subject_loc`
@@ -543,7 +531,6 @@ fn a_dry_run_parses_with_the_kind_of_its_subject() {
     let records = Inputs::new(&query, &subject);
     let outcome = run_collect(&search, records, &["6"]).unwrap();
     assert!(outcome.reports[0].bytes.is_empty());
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (cited at
@@ -576,7 +563,6 @@ fn an_out_file_that_cannot_be_made_is_an_error_of_the_run() {
         assert_eq!(std::fs::read_to_string(&log).unwrap(), logged, "{program}");
         assert!(diagnostics.is_empty(), "{program}");
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (cited at
@@ -633,7 +619,6 @@ fn the_batches_write_the_run_s_messages_once() {
             .collect::<Vec<_>>(),
         [warning, String::new()]
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:93-95 (cited at
@@ -692,7 +677,6 @@ fn an_outfmt_error_goes_where_the_run_s_errors_go() {
             assert!(diagnostics.is_empty() && !out.exists(), "{program}");
         }
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Registry files in memory, by path (the start of a caller that gives its own files:

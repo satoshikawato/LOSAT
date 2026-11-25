@@ -70,8 +70,9 @@ fn write_header_if_needed(file: &mut std::fs::File, path: &PathBuf) -> std::io::
 // boundaries, before TBLASTX nucleotide-coordinate output adjustment can hide
 // negative-frame or frame-relative ordering differences.
 // The ends are NCBI's `Int4` (`UngappedHit::q_end_int4`): a list of the one-hit word finder may
-// hold an HSP of length 0 or less before its first linking call, whose end lies at or before its
-// start, below 0 near a frame's start.
+// hold an HSP of length 0 or less up to the re-evaluation's fetch of the subject (so in the two
+// dumps after the first linking call too), whose end lies at or before its start, below 0 near a
+// frame's start.
 pub(crate) fn dump_ungapped_hits(stage: &str, hits: &[UngappedHit]) {
     let Some(dump) = stage_dump() else {
         return;
@@ -230,7 +231,7 @@ pub(crate) fn dump_final_output_order(stage: &str, pairs: &[(Hit, UngappedHit)])
                         .map(|(hit, _)| hit.e_value)
                         .min_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
                         .unwrap_or(f64::MAX);
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3098-3104
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3095-3106
                     let best_score = hits.first().map(|(hit, _)| hit.raw_score).unwrap_or(0);
                     FinalSubjectGroup {
                         s_idx,

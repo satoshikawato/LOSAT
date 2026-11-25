@@ -786,7 +786,7 @@ fn reads_back_a_database_written_by_the_losat_writer() {
             .unwrap();
         tax.insert_entries(taxids, oid as u32);
     }
-    lmdb.insert_volumes_info(&["db.00".to_string(), "db.01".to_string()], &[3, 2])
+    lmdb.insert_volumes_info(&[b"db.00".as_slice(), b"db.01"], &[3, 2])
         .unwrap();
     lmdb.close().unwrap();
     tax.close().unwrap();

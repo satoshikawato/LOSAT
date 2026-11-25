@@ -101,7 +101,7 @@ impl Hit {
 // =============================================================================
 
 /// Compare two evalues, treating both as equal if they're close enough to zero.
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c s_EvalueComp()
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1389-1404 s_EvalueComp()
 #[inline]
 fn evalue_comp(evalue1: f64, evalue2: f64) -> Ordering {
     const EPSILON: f64 = 1.0e-180;

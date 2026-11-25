@@ -754,7 +754,7 @@ impl ParsedSubject {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:458-466
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:272-283
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:257-264
     /// The `-subject` record with the ids `ids` and the FASTA title `title` under
     /// `-parse_deflines`, as one definition line: its Bioseq has no Blast-def-line user object, so
     /// its titles are generated and `stitle` and `salltitles` are `N/A`, and NCBI's scope holds

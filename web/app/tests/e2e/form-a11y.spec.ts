@@ -124,10 +124,19 @@ test("the engine's refusal of a form's value marks the field that holds it, unti
   await expectAccepted(other);
 });
 
-/** The middle of an element, in the page's coordinates. */
+/** The middle of an element, in the viewport's coordinates (those of page.mouse). */
 async function middle(locator: Locator): Promise<{ x: number; y: number }> {
   const box = (await locator.boundingBox())!;
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+/** Expects a point inside the viewport: page.mouse and elementFromPoint reach it only there. */
+function expectInViewport(page: Page, point: { x: number; y: number }): void {
+  const { width, height } = page.viewportSize()!;
+  expect(point.x).toBeGreaterThan(0);
+  expect(point.x).toBeLessThan(width);
+  expect(point.y).toBeGreaterThan(0);
+  expect(point.y).toBeLessThan(height);
 }
 
 test('the "?" help closes with Escape wherever the focus is, which stays there', async ({ page }) => {
@@ -202,13 +211,22 @@ test('two "?" helps are not open by the pointer at once, where one "?" is inside
   const firstHelp = page.getByTestId('param-soft_masking-help');
   const secondHelp = page.getByTestId('param-lcase_masking-help');
   const helps = page.locator('[role="tooltip"].help');
-  await first.hover();
+  // The pointer moves by coordinates, which hold only inside the viewport (elementFromPoint finds
+  // nothing outside it): the second "?" is brought into view first, then the pointer goes onto the
+  // first with page.mouse, not hover(). In WebKit, a scroll under the resting pointer (here on the
+  // "Algorithm parameters" bar) is followed about 0.1 s later by a mousemove of WebKit's own at that
+  // place; hover()'s hit-target check took it for its own move, and hover() retried with the first
+  // "?" scrolled to the bottom edge, the second below the viewport (Web runs 45391577563, 45397305733).
+  await second.scrollIntoViewIfNeeded();
+  const from = await middle(first);
+  expectInViewport(page, from);
+  await page.mouse.move(from.x, from.y);
   await expect(helps).toHaveCount(1);
   await expect(firstHelp).toBeVisible();
   // Across the box of the first help, onto the second "?": a pointer move at a time, so that the
   // two helps are never open together.
-  const from = await middle(first);
   const to = await middle(second);
+  expectInViewport(page, to);
   // The premise: the second "?" is inside the box around the first "?" and its help, and the
   // pointer reaches it there (the help does not cover it).
   const boxes = [(await first.boundingBox())!, (await firstHelp.boundingBox())!];
@@ -221,7 +239,6 @@ test('two "?" helps are not open by the pointer at once, where one "?" is inside
     [to.x, to.y] as const,
   );
   expect(reached).toBe('param-lcase_masking-help-toggle');
-  await page.mouse.move(from.x, from.y);
   const steps = 24;
   for (let i = 1; i <= steps; i++) {
     await page.mouse.move(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);

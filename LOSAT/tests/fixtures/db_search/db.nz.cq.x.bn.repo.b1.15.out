@@ -1,0 +1,201 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "db": "tests/db_search/nz_repo"
+      },
+      "params": {
+        "expect": 0.001,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "m;"
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "qN",
+          "query_len": 123,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0"
+                }
+              ],
+              "len": 123,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 228.258,
+                  "score": 123,
+                  "evalue": 1.52229e-64,
+                  "identity": 123,
+                  "query_from": 1,
+                  "query_to": 123,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 123,
+                  "hit_strand": "Plus",
+                  "align_len": 123,
+                  "gaps": 0,
+                  "qseq": "ATGGTATACGTGTATGTTTACGTGTATGTCTACGTCTATGTTTACGTGTACGTTTATGTATACGTGTATGTGTACGTATATGTTTACGTTTACGTCTACGTCTATGTGTATGTCTATGTGTAT",
+                  "hseq": "ATGGTATACGTGTATGTTTACGTGTATGTCTACGTCTATGTTTACGTGTACGTTTATGTATACGTGTATGTGTACGTATATGTTTACGTTTACGTCTACGTCTATGTGTATGTCTATGTGTAT",
+                  "midline": "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 4,
+            "db_len": 735,
+            "hsp_len": 10,
+            "eff_space": 78535,
+            "kappa": 0.46,
+            "lambda": 1.28,
+            "entropy": 0.85
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "db": "tests/db_search/nz_repo"
+      },
+      "params": {
+        "expect": 0.001,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "m;"
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "qZ",
+          "query_len": 249,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|1"
+                }
+              ],
+              "len": 249,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 460.936,
+                  "score": 249,
+                  "evalue": 2.88719e-134,
+                  "identity": 249,
+                  "query_from": 1,
+                  "query_to": 249,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 249,
+                  "hit_strand": "Plus",
+                  "align_len": 249,
+                  "gaps": 0,
+                  "qseq": "ATGGTGTACGTATACGTATACGTATATGTCTATGTTTACGTTTATGTCTATGTATACGTATATGTGTACGTTTATGTCTACGTTTATGTGTATGTATACGTGTACGTTTATGTGTACGTTTATGTCTACGTCTACGTATACGTGTACGTATACGTGTACGTCTACGTATATGTTTATGTCTACTGCTGCGTGTACGTTTATGTATACGTATATGTTTACGTCTACGTCTATGTTTACGTCTATGTATAT",
+                  "hseq": "ATGGTGTACGTATACGTATACGTATATGTCTATGTTTACGTTTATGTCTATGTATACGTATATGTGTACGTTTATGTCTACGTTTATGTGTATGTATACGTGTACGTTTATGTGTACGTTTATGTCTACGTCTACGTATACGTGTACGTATACGTGTACGTCTACGTATATGTTTATGTCTACTGCTGCGTGTACGTTTATGTATACGTATATGTTTACGTCTACGTCTATGTTTACGTCTATGTATAT",
+                  "midline": "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 4,
+            "db_len": 735,
+            "hsp_len": 11,
+            "eff_space": 164458,
+            "kappa": 0.46,
+            "lambda": 1.28,
+            "entropy": 0.85
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "db": "tests/db_search/nz_repo"
+      },
+      "params": {
+        "expect": 0.001,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "m;"
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "qI",
+          "query_len": 183,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|2"
+                }
+              ],
+              "len": 183,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 339.057,
+                  "score": 183,
+                  "evalue": 1.03193e-97,
+                  "identity": 183,
+                  "query_from": 1,
+                  "query_to": 183,
+                  "query_strand": "Plus",
+                  "hit_from": 1,
+                  "hit_to": 183,
+                  "hit_strand": "Plus",
+                  "align_len": 183,
+                  "gaps": 0,
+                  "qseq": "ATGTTTTTCTATGAACAGTACGGACAGCTTGGGCGATACATGGGGGGTGCATTGAAGATGTGCTCCGACAGTTGGGGGAGCGGCGTACCCGAGTCGAAGGTGCAGTGCACGTGGTCATGCTCACGCCAGTATAATTATTTTATTGAAATAGCGTATACCTGCCATACCGACCCCCTCCCATGT",
+                  "hseq": "ATGTTTTTCTATGAACAGTACGGACAGCTTGGGCGATACATGGGGGGTGCATTGAAGATGTGCTCCGACAGTTGGGGGAGCGGCGTACCCGAGTCGAAGGTGCAGTGCACGTGGTCATGCTCACGCCAGTATAATTATTTTATTGAAATAGCGTATACCTGCCATACCGACCCCCTCCCATGT",
+                  "midline": "|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 4,
+            "db_len": 735,
+            "hsp_len": 10,
+            "eff_space": 120235,
+            "kappa": 0.46,
+            "lambda": 1.28,
+            "entropy": 0.85
+          }
+        }
+      }
+    }
+  }
+]
+}

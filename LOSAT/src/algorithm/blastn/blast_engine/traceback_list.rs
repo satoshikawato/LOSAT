@@ -197,7 +197,7 @@ pub(super) fn trace_hsp_list(
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         let mut speculative_jobs = Vec::new();
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:403-405,509-513,598-601
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:403-405,509-512,598-601
         // Scheduling only; ordered containment and insertion stay unchanged.
         // Serial Wasm compiles out the speculative path and retains batch 8.
         const X_DEFAULT_SPECULATIVE_TRACEBACK_BATCH_SIZE: usize =

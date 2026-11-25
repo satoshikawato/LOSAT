@@ -216,14 +216,14 @@ impl TaxDb {
                 messages,
             })
         };
-        let Some(index_name) = search.resolve_file("taxdb.bti") else {
+        let Some(index_name) = search.resolve_file(b"taxdb.bti") else {
             return missing(Vec::new());
         };
         let mut data_name = index_name.clone();
         data_name.pop();
-        data_name.push('d');
-        let index_path = PathBuf::from(&index_name);
-        let data_path = PathBuf::from(&data_name);
+        data_name.push(b'd');
+        let index_path = crate::utils::os_bytes::path_from_bytes(index_name);
+        let data_path = crate::utils::os_bytes::path_from_bytes(data_name);
         if !super::alias::exists(&index_path) || !super::alias::exists(&data_path) {
             return missing(Vec::new());
         }

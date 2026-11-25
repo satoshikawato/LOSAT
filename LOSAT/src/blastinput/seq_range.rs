@@ -61,7 +61,7 @@ pub fn parse_sequence_range(value: &str, role: RangeRole) -> Result<SequenceRang
     let prefix = role.error_prefix();
     let tokens: Vec<&str> = value.split('-').collect();
     if tokens.len() != 2 || tokens[0].is_empty() || tokens[1].is_empty() {
-        return Err(app::engine_error(&format!("{prefix} (Format: start-stop)")));
+        return Err(app::engine_error(format!("{prefix} (Format: start-stop)")));
     }
     let mut numbers = [0i32; 2];
     for (number, token) in numbers.iter_mut().zip(&tokens) {
@@ -70,17 +70,17 @@ pub fn parse_sequence_range(value: &str, role: RangeRole) -> Result<SequenceRang
     }
     let [from, to] = numbers;
     if from <= 0 || to <= 0 {
-        return Err(app::engine_error(&format!(
+        return Err(app::engine_error(format!(
             "{prefix} (range elements cannot be less than or equal to 0)"
         )));
     }
     if from == to {
-        return Err(app::engine_error(&format!(
+        return Err(app::engine_error(format!(
             "{prefix} (range cannot be empty)"
         )));
     }
     if from > to {
-        return Err(app::engine_error(&format!(
+        return Err(app::engine_error(format!(
             "{prefix} (start cannot be larger than stop)"
         )));
     }

@@ -6,6 +6,7 @@
 import type { DirectoryFile, ToolDescription } from 'losat/domain';
 import { isUnavailable, type ToolEngine, type ToolValidation } from 'losat/ports';
 import { splitOptions } from '../domain/argv';
+import { countsName } from '../domain/counts';
 import type { FieldValue, FormValues } from '../domain/parameters';
 import { buildWindowMaskerArgv, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
 import {
@@ -18,7 +19,8 @@ import {
 import type { DataGateway } from '../ports/data';
 import { failureText } from './availability';
 import type { EnqueueAllResult, ToolDirectoryFile, ToolRequest } from './coordinator';
-import type { InputMode, Validation } from './draft';
+import type { InputMode, SubmitResult, Validation } from './draft';
+import { SessionFiles } from './session-files';
 import { Store } from './store';
 
 /** One FASTA file added to WindowMasker's Input block (inflated into OPFS when compressed). */
@@ -55,6 +57,7 @@ export type ToolCountsChoice =
       readonly name: string;
       readonly size: number;
     }
+  | { readonly kind: 'saved'; readonly taxid: number; readonly name: string; readonly size: number }
   | { readonly kind: 'file'; readonly file: File; readonly name: string; readonly size: number };
 
 export interface ToolDraftState {
@@ -84,6 +87,10 @@ export interface ToolDraftDeps {
   readonly engine: Pick<ToolEngine, 'describeTool' | 'validateTool'>;
   readonly data: Pick<DataGateway, 'inflateToSessionFile' | 'dropSessionFile' | 'getToolOutputFile'>;
   readonly enqueueToolAll: (requests: readonly ToolRequest[]) => Promise<EnqueueAllResult>;
+  /** Reads a counts file saved in this browser for a taxonomy ID (OPFS-backed File). */
+  readonly readSavedCounts?: (taxid: number) => Promise<File | undefined>;
+  /** Shared holder tracker for inflated session files; defaults to a draft-local instance in unit tests. */
+  readonly sessionFiles?: SessionFiles;
   /** True while the Engine worker is running another job (so `validateTool` would wait behind it). */
   readonly isBusy?: () => boolean;
   readonly debounceMs?: number;
@@ -103,8 +110,11 @@ export class ToolDraft {
   private validatedKey: string | undefined;
   private nextKey = 1;
   private readonly asking = new Set<Promise<unknown>>();
+  private readonly sessionFiles: SessionFiles;
 
   constructor(private readonly deps: ToolDraftDeps) {
+    this.sessionFiles =
+      deps.sessionFiles ?? new SessionFiles((token) => void deps.data.dropSessionFile(token).catch(() => undefined));
     const emptyValues = Object.fromEntries(STAGES.map((stage) => [stage, Object.freeze({})])) as Record<WindowMaskerStage, FormValues>;
     const emptyExtra = Object.fromEntries(STAGES.map((stage) => [stage, ''])) as Record<WindowMaskerStage, string>;
     this.state = new Store<ToolDraftState>({
@@ -266,7 +276,7 @@ export class ToolDraft {
   removeFastaFile(key: string): void {
     const target = this.state.get().fastaFiles.find((entry) => entry.key === key);
     if (target === undefined) return;
-    this.releaseSessionToken(target.sessionToken);
+    this.sessionFiles.release(`form:${key}`);
     this.set({
       fastaFiles: Object.freeze(this.state.get().fastaFiles.filter((entry) => entry.key !== key)),
       message: undefined,
@@ -282,6 +292,14 @@ export class ToolDraft {
   setUstatSession(runId: string, runNumber: number, key: string, name: string, size: number): void {
     this.set({
       ustatSource: sessionCountsChoice(runId, runNumber, key, name, size),
+      message: undefined,
+    });
+    this.scheduleValidation();
+  }
+
+  setUstatSaved(taxid: number, size: number): void {
+    this.set({
+      ustatSource: savedCountsChoice(taxid, size),
       message: undefined,
     });
     this.scheduleValidation();
@@ -303,6 +321,14 @@ export class ToolDraft {
   setConvertSession(runId: string, runNumber: number, key: string, name: string, size: number): void {
     this.set({
       convertSource: sessionCountsChoice(runId, runNumber, key, name, size),
+      message: undefined,
+    });
+    this.scheduleValidation();
+  }
+
+  setConvertSaved(taxid: number, size: number): void {
+    this.set({
+      convertSource: savedCountsChoice(taxid, size),
       message: undefined,
     });
     this.scheduleValidation();
@@ -428,55 +454,79 @@ export class ToolDraft {
   }
 
   /** Submits the current WindowMasker job(s) to the shared Coordinator queue. */
-  async submit(): Promise<EnqueueAllResult> {
-    const state = this.state.get();
-    if (state.submitting) return { ok: false, message: 'A submission is already in progress.' };
+  async submit(): Promise<SubmitResult> {
+    if (this.state.get().submitting) return { ok: false, message: 'A submission is already in progress.' };
     this.set({ submitting: true, message: undefined });
     try {
-      let extraWords: readonly string[];
-      try {
-        extraWords = this.parseExtra(state);
-      } catch (error) {
-        const message = errorMessage(error);
-        this.reportError(message);
-        return { ok: false, message };
-      }
-
-      const preview = this.buildArgv(state, extraWords);
-      const prints = toolPrintsKind(preview);
-
       const busy = this.deps.isBusy?.() === true;
       if (!busy) {
-        if (this.validationTimer !== undefined) {
-          clearTimeout(this.validationTimer);
-          this.validationTimer = undefined;
-          await this.runValidationNow();
-        } else {
-          await this.validationTurn;
+        for (;;) {
+          if (this.validationTimer !== undefined) {
+            clearTimeout(this.validationTimer);
+            this.validationTimer = undefined;
+            await this.runValidationNow();
+            continue;
+          }
+          const turn = this.validationTurn;
+          await turn;
+          if (this.validationTimer === undefined && this.validationTurn === turn) break;
         }
       }
-      const currentKey = this.validationKey(this.state.get());
-      const validated = this.state.get().validation;
-      if (validated.state === 'invalid' && (!busy || this.validatedKey === currentKey)) {
-        const text = toolValidationSummary(validated.message);
-        this.reportError(text);
-        return { ok: false, message: text };
-      }
+      // Re-read the draft state after awaiting validation (same order as SearchDraft.prepareAndEnqueue)
+      // so changes that arrived during the await (an inflate finishing, an option changing) are used.
+      const state = this.state.get();
+      // Hold every inflated session file token before any await inside buildStageRequests
+      // (such as -ustat/-in lookup or combineFastaFiles tail reads) so clicking Remove during
+      // submission cannot drop an OPFS session file out from under the submission.
+      const submitHolder = `submit:${this.nextKey++}`;
+      const stateTokens = state.fastaFiles.flatMap((entry) => (entry.sessionToken === undefined ? [] : [entry.sessionToken]));
+      if (stateTokens.length > 0) this.sessionFiles.set(submitHolder, stateTokens);
+      try {
+        let extraWords: readonly string[];
+        try {
+          extraWords = this.parseExtra(state);
+        } catch (error) {
+          const message = errorMessage(error);
+          this.reportError(message);
+          return { ok: false, message };
+        }
 
-      const requests = prints !== null
-        ? [this.buildPrintRequest(state, extraWords, prints)]
-        : await this.buildStageRequests(state, extraWords);
+        const currentKey = this.validationKey(state);
+        const validated = state.validation;
+        if (validated.state === 'invalid' && (!busy || this.validatedKey === currentKey)) {
+          const text = toolValidationSummary(validated.message);
+          this.reportError(text);
+          return { ok: false, message: text };
+        }
 
-      const result = await this.deps.enqueueToolAll(requests);
-      if (!result.ok) {
-        const text = toolValidationSummary(result.message);
-        this.set({
-          validation: { state: 'invalid', message: result.message },
-          message: { kind: 'error', text },
-        });
-        return { ok: false, message: text };
+        const preview = this.buildArgv(state, extraWords);
+        const prints = toolPrintsKind(preview);
+
+        const requests = prints !== null
+          ? [this.buildPrintRequest(state, extraWords, prints)]
+          : await this.buildStageRequests(state, extraWords);
+
+        const requestTokens = requests.flatMap((request) => request.sessionTokens ?? []);
+        if (requestTokens.length > 0) {
+          this.sessionFiles.set(submitHolder, new Set([...stateTokens, ...requestTokens]));
+        }
+        const result = await this.deps.enqueueToolAll(requests);
+        if (!result.ok) {
+          if (result.reason === 'counts') {
+            this.reportError(result.message);
+            return { ok: false, message: result.message };
+          }
+          const text = toolValidationSummary(result.message);
+          this.set({
+            validation: { state: 'invalid', message: result.message },
+            message: { kind: 'error', text },
+          });
+          return { ok: false, message: text };
+        }
+        return result;
+      } finally {
+        this.sessionFiles.release(submitHolder);
       }
-      return result;
     } catch (error) {
       const message = failureText(error);
       this.reportError(message);
@@ -564,7 +614,7 @@ export class ToolDraft {
       throw new Error(`${failed.name}: ${failed.error ?? 'could not be read'}`);
     }
 
-    const parts: ToolDirectoryFile[] = [];
+    const parts: Array<ToolDirectoryFile & { readonly sessionToken?: string }> = [];
     if (state.fastaPaste.trim() !== '') {
       parts.push({
         name: PASTE_NAME,
@@ -577,27 +627,43 @@ export class ToolDraft {
         name: entry.name,
         file: entry.file,
         origin: entry.inflatedFrom === undefined ? { kind: 'picked' } : { kind: 'inflated', from: entry.inflatedFrom },
+        ...(entry.sessionToken === undefined ? {} : { sessionToken: entry.sessionToken }),
       });
     }
     if (parts.length === 0) {
       throw new Error('Enter sequences or open FASTA files.');
     }
 
-    const makeRequest = (inputEntry: ToolDirectoryFile): ToolRequest => {
+    const makeRequest = (inputEntry: ToolDirectoryFile, sessionTokens: readonly string[]): ToolRequest => {
       const directory = assembleDirectory([inputEntry, ...(ustatFile === undefined ? [] : [ustatFile]), ...baseExtraDir]);
       const argv = this.buildArgv(state, extraWords, { inputName: inputEntry.name, ustatName: ustatFile?.name });
-      return { tool: 'windowmasker', stage, argv, directory };
+      return {
+        tool: 'windowmasker',
+        stage,
+        argv,
+        directory,
+        ...(sessionTokens.length === 0 ? {} : { sessionTokens: Object.freeze([...sessionTokens]) }),
+      };
     };
 
-    if (parts.length === 1) return [makeRequest(parts[0]!)];
-    if (state.fastaMode === 'separate') return parts.map(makeRequest);
+    if (parts.length === 1) {
+      const only = parts[0]!;
+      return [makeRequest(only, only.sessionToken === undefined ? [] : [only.sessionToken])];
+    }
+    if (state.fastaMode === 'separate') {
+      return parts.map((part) => makeRequest(part, part.sessionToken === undefined ? [] : [part.sessionToken]));
+    }
     const combined = await combineFastaFiles(parts);
+    const combinedTokens = parts.flatMap((part) => (part.sessionToken === undefined ? [] : [part.sessionToken]));
     return [
-      makeRequest({
-        name: COMBINED_NAME,
-        file: combined,
-        origin: { kind: 'combined', parts: Object.freeze(parts.map((part) => part.name)) },
-      }),
+      makeRequest(
+        {
+          name: COMBINED_NAME,
+          file: combined,
+          origin: { kind: 'combined', parts: Object.freeze(parts.map((part) => part.name)) },
+        },
+        combinedTokens,
+      ),
     ];
   }
 
@@ -605,6 +671,13 @@ export class ToolDraft {
     if (choice.kind === 'none') throw new Error(emptyMessage);
     if (choice.kind === 'file') {
       return { name: choice.name, file: choice.file, origin: { kind: 'picked' } };
+    }
+    if (choice.kind === 'saved') {
+      const file = await this.deps.readSavedCounts?.(choice.taxid);
+      if (file === undefined) {
+        throw new Error(`The saved counts for taxonomy ID ${choice.taxid} are no longer available.`);
+      }
+      return { name: choice.name, file, origin: { kind: 'saved', taxid: choice.taxid } };
     }
     const file = await this.deps.data.getToolOutputFile(choice.runId, choice.key, choice.name);
     return { name: choice.name, file, origin: { kind: 'made', runNumber: choice.runNumber } };
@@ -640,6 +713,7 @@ export class ToolDraft {
         this.updateFastaEntry(key, { status: 'failed', error: `A file named "${ref.name}" is already added.` });
         return;
       }
+      if (ref.token !== undefined) this.sessionFiles.set(`form:${key}`, [ref.token]);
       this.updateFastaEntry(key, {
         name: ref.name,
         size: ref.size,
@@ -787,6 +861,10 @@ function errorMessage(error: unknown): string {
 
 function sessionCountsChoice(runId: string, runNumber: number, key: string, name: string, size: number): ToolCountsChoice {
   return { kind: 'session', runId, runNumber, key, name, size };
+}
+
+function savedCountsChoice(taxid: number, size: number): ToolCountsChoice {
+  return { kind: 'saved', taxid, name: countsName(taxid), size };
 }
 
 function fileCountsChoice(file: File | undefined): ToolCountsChoice {

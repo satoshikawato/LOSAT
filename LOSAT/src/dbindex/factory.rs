@@ -329,6 +329,21 @@ impl SubjectMap {
         } else {
             self.chunks.last().expect("a chunk").seq_start as usize + (step / CR) as usize
         };
+        // NCBI's chunk end, the chunk's start plus `chunk_size_` as a `TSeqPos`, wraps past 2^32:
+        // the chunk's one valid interval is then `chunk_size` letters from its start, past the
+        // sequence's end, and building the index reads them (SIGSEGV for 4294967293 and
+        // 4294967294 letters; remaining-gaps-20261112/K/kc/p11d/p3 l93n, l94n).
+        if chunk_start < self.seq_len()
+            && u64::from(chunk_start) + self.chunk_size > u32::MAX.into()
+        {
+            let first_wrapping = (u64::from(u32::MAX) + 1 - self.chunk_size).div_ceil(step) * step;
+            return Err(StreamError::Refused(super::unsupported(&format!(
+                "a sequence of {} letters or more, whose last chunk of {} letters NCBI's \
+                 makembindex reads past the sequence's end (its end wraps at 32 bits)",
+                crate::ncbi_str::with_commas(first_wrapping + 1),
+                crate::ncbi_str::with_commas(self.chunk_size),
+            ))));
+        }
         if !self.add_chunk_base(seq_off) {
             return Ok((false, false));
         }
@@ -809,7 +824,7 @@ impl OffsetData {
         let mut stats = options
             .stat_file_name
             .as_deref()
-            .and_then(|name| File::create(name).ok())
+            .and_then(|name| File::create(crate::utils::os_bytes::path_of_bytes(name)).ok())
             .map(BufWriter::new);
         write_word(os, self.total)?;
         let mut tot: Word = 0;
@@ -866,7 +881,7 @@ impl From<StreamError> for Stop {
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1797-1803
 pub(crate) fn make_index(
     input: &mut dyn SequenceStream,
-    oname: &str,
+    oname: &[u8],
     start: SeqNum,
     stop: &mut SeqNum,
     options: &Options,
@@ -942,7 +957,7 @@ pub(crate) fn make_index(
     }
     // NCBI opens the volume as a binary output stream without exceptions: a file that does not
     // open, or a write that fails, is not reported.
-    if let Ok(file) = File::create(oname) {
+    if let Ok(file) = File::create(crate::utils::os_bytes::path_of_bytes(oname)) {
         let mut os = BufWriter::with_capacity(1 << 20, file);
         let header = Header::of(
             options.legacy,
@@ -960,7 +975,8 @@ pub(crate) fn make_index(
         let _ = offset_data.save(&mut std::io::sink(), options);
     }
     if options.idmap {
-        if let Ok(file) = File::create(format!("{oname}.map")) {
+        let map = [oname, b".map"].concat();
+        if let Ok(file) = File::create(crate::utils::os_bytes::path_of_bytes(&map)) {
             let mut maps = BufWriter::new(file);
             for id in &idmap {
                 let _ = maps.write_all(id);
@@ -971,3 +987,7 @@ pub(crate) fn make_index(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "factory_tests.rs"]
+mod tests;

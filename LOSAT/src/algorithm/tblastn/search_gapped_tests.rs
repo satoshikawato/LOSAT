@@ -5048,3 +5048,140 @@ fn a_seed_before_the_chunk_gives_its_gapped_start_with_ncbis_wrap() {
     assert_eq!(x_gapped_subject_start(40, 30, 14).unwrap(), 56);
     assert!(x_gapped_subject_start(seed, 14, 14).is_err());
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3393-3404,3942-3945,
+// 4300-4333
+/// `x_crashes_ncbi` and the middle gapped start of an initial alignment starting before its chunk:
+/// lengths 0..=11 with middle in the chunk are searched (`q_start + length / 2`, subject start
+/// `s_start + length / 2 >= 0`, matrix and PSSM alike, scoring only the chunk's letters); lengths
+/// above 11 (as `Uint4`, so negative too) or with middle before the chunk are refused.
+#[test]
+fn short_alignment_starting_before_chunk_uses_middle_and_refuses_ncbi_crashes() {
+    let make_hit = |q_start: i32, s_start: i32, length: i32| InitHsp {
+        frame: 1,
+        chunk_offset: 4_999_900,
+        q_seed: q_start as u32,
+        s_seed: s_start as u32,
+        q_start,
+        s_start,
+        length,
+        score: 60,
+    };
+
+    // Searched cases (middle lies in the chunk, length <= 11): exact gapped starts.
+    for (s_start, length, want_s_gapped) in [(-4, 11, 1), (-5, 11, 0), (-1, 11, 4), (-4, 8, 0)] {
+        let hit = make_hit(10, s_start, length);
+        assert!(!x_crashes_ncbi(&hit), "must search ({s_start}, {length})");
+        let q_gapped = x_gapped_start_before_chunk_middle(10, &hit).unwrap();
+        assert_eq!(q_gapped, 10 + (length as usize) / 2);
+        let s_gapped =
+            x_gapped_subject_start(hit.s_seed, q_gapped as i32, hit.q_seed as i32).unwrap();
+        assert_eq!(s_gapped, want_s_gapped, "({s_start}, {length})");
+    }
+
+    // Refused cases (middle before the chunk, length > 11, or negative length read as Uint4).
+    for (s_start, length) in [(-30, 11), (-6, 11), (-4, 12), (-1, -3), (-1, 0)] {
+        assert!(
+            x_crashes_ncbi(&make_hit(10, s_start, length)),
+            "must refuse ({s_start}, {length})"
+        );
+    }
+
+    // Non-negative subject starts are never refused by x_crashes_ncbi.
+    for (s_start, length) in [(0, 12), (0, -1), (5, 20)] {
+        assert!(!x_crashes_ncbi(&make_hit(10, s_start, length)));
+    }
+
+    // End-to-end score_gapped_chunk with MatrixScore and PssmScore on (-4, 11) -> start +1 and
+    // (-5, 11) -> start 0: scores only the chunk's letters (7 or 6 W/W matches; D/L flanks score
+    // -4 in BLOSUM62 and in the PSSM).
+    const W: u8 = 20;
+    const D: u8 = 3;
+    const L: u8 = 11;
+    let mut query = vec![D; 30];
+    query[10..21].fill(W);
+    let query_frames = [one_hit_frame(0, &query)];
+    let mut pssm_rows = vec![[-4; crate::core::blast_util::BLASTAA_SIZE]; 30];
+    for row in &mut pssm_rows[10..21] {
+        row[usize::from(W)] = 11;
+    }
+    let pssm = crate::algorithm::pssm_search::rows::QueryPssm { rows: pssm_rows };
+
+    struct BeforeChunkCase<'a> {
+        query: &'a [u8],
+        query_frames: &'a [QueryFrame],
+        frame: &'a QueryFrame,
+        chunk: TranslatedChunk,
+        chunk_letters: &'a [u8],
+        hit: InitHsp,
+    }
+    fn run_score<S: super::super::score::TbnScore>(
+        case: &BeforeChunkCase<'_>,
+        score: S,
+        scratch: &mut S::Scratch,
+    ) -> Vec<(usize, GappedHsp)> {
+        score_gapped_chunk::<_, true>(
+            &[case.query],
+            case.query_frames,
+            &[0],
+            30,
+            case.frame,
+            case.chunk,
+            case.chunk_letters,
+            &case.frame.aa_seq[1..],
+            &[case.hit],
+            11,
+            1,
+            38,
+            &[1],
+            ScoringMatrix::Blosum62,
+            scratch,
+            score,
+            None,
+        )
+        .unwrap()
+    }
+
+    for (s_start, want_s_gapped, inside_len) in [(-4i32, 1i32, 7usize), (-5, 0, 6)] {
+        let mut chunk_letters = vec![L; 30];
+        chunk_letters[..inside_len].fill(W);
+        let frame = one_hit_frame(1, &chunk_letters);
+        let case = BeforeChunkCase {
+            query: &query,
+            query_frames: &query_frames,
+            frame: &frame,
+            chunk: TranslatedChunk::new(4_999_900, chunk_letters.len()),
+            chunk_letters: &chunk_letters,
+            hit: make_hit(10, s_start, 11),
+        };
+        let mat = run_score(
+            &case,
+            super::super::score::MatrixScore,
+            &mut GapAlignScratch::new(),
+        );
+        let mut pssm_scratch = (
+            GapAlignScratch::new(),
+            crate::algorithm::pssm_search::gapalign::PssmGapScratch::new(),
+        );
+        let ps = run_score(
+            &case,
+            super::super::score::PssmScore(&pssm),
+            &mut pssm_scratch,
+        );
+        let want = vec![(
+            0,
+            GappedHsp {
+                frame: 1,
+                score: (inside_len as i32) * 11,
+                q_start: 10 + (11 - inside_len as i32),
+                q_end: 21,
+                q_gapped_start: 15,
+                s_start: 0,
+                s_end: inside_len as i32,
+                s_gapped_start: want_s_gapped,
+            },
+        )];
+        assert_eq!(mat, want, "matrix ({s_start})");
+        assert_eq!(ps, want, "pssm ({s_start})");
+    }
+}

@@ -89,8 +89,11 @@ NATIVE = (
 # - losat CLI, native: .github/workflows/release-readiness-v020.yml, job native-artifacts (matrix
 #   target_triple; `cd LOSAT && cargo build --release --bin losat --locked`, default features).
 # - losat CLI, WASI: the same workflow, serial-wasm-artifact (`--target wasm32-wasip1
-#   --no-default-features`) and threaded-wasm-artifact (`--target wasm32-wasip1-threads --features
-#   wasm-threads`, default features on).
+#   --no-default-features --features no-web-abi-v1`) and threaded-wasm-artifact (`--target
+#   wasm32-wasip1-threads --features wasm-threads,no-web-abi-v1`, default features on). The feature
+#   `no-web-abi-v1` leaves out LOSAT Web's ABI v1, whose clap the command then does not link; clap
+#   stays in the command's dependency graph (Cargo has no dependency that a feature removes), so
+#   its rows still list the WASI command line.
 # - pylosat wheel: .github/workflows/python-wheels.yml (`maturin build --release --locked` in
 #   python/, default features) on ubuntu-24.04, ubuntu-24.04-arm, windows-2025, macos-15 and
 #   macos-15-intel: the five native triples.
@@ -101,8 +104,8 @@ NATIVE = (
 #   `build-web-unknown` (wasm32-unknown-unknown) is used by no workflow, so it is not listed.
 BUILDS: tuple[Build, ...] = (
     *(Build(CLI, label, "native", "LOSAT", triple, ()) for label, triple in NATIVE),
-    Build(CLI, "WASI", "wasi", "LOSAT", "wasm32-wasip1", ("--no-default-features",)),
-    Build(CLI, "WASI threads", "wasi", "LOSAT", "wasm32-wasip1-threads", ("--features", "wasm-threads")),
+    Build(CLI, "WASI", "wasi", "LOSAT", "wasm32-wasip1", ("--no-default-features", "--features", "no-web-abi-v1")),
+    Build(CLI, "WASI threads", "wasi", "LOSAT", "wasm32-wasip1-threads", ("--features", "wasm-threads,no-web-abi-v1")),
     *(Build(WHEEL, label, "native", "python", triple, ()) for label, triple in NATIVE),
     Build(WEB, "serial reactor", "wasi", "web/adapter", "wasm32-wasip1", ()),
     Build(WEB, "threaded reactor", "wasi", "web/adapter", "wasm32-wasip1-threads", ("--features", "threads")),

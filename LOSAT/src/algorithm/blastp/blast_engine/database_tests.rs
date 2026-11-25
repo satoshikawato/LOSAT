@@ -970,7 +970,7 @@ mod x_db_cut_blocks {
         let (mut log, mut messages) = (Vec::new(), Vec::new());
         let status = crate::writedb::makeblastdb::run_with(
             &args,
-            None,
+            &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
             Some(&now),
             crate::writedb::Platform::host(),
             &mut fasta.as_slice(),

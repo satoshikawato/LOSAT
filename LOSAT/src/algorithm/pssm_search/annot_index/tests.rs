@@ -822,6 +822,7 @@ fn nests_of_any_depth_are_walked_without_recursion() {
                 "psiblast",
                 &crate::report::serial::pssm::SeqEntry::Set(set),
                 true,
+                &|_| None,
             )
             .expect("indexed");
             assert!(outcome.abort.is_none());

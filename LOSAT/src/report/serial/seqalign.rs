@@ -1886,7 +1886,7 @@ fn document_pieces(format: SerialFormat, document: &QueryDocument<'_, '_>) -> Ve
             document.subjects,
             document.hsps,
         );
-        enc.pieces().to_vec()
+        enc.piece_sizes()
     }
     let mut bytes = Vec::new();
     match format {

@@ -3,3 +3,4 @@
 *.out -text
 *.err -text
 *.tsv -text
+*.gz binary

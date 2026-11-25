@@ -21,15 +21,19 @@ impl SeqRange {
         self.from > self.to
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:285-291
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:477-486
+    // NCBI reference (598d8ae6): c++/include/util/range.hpp:148-155
+    // NCBI reference (598d8ae6): c++/include/util/range.hpp:180-183
     /// The range clipped to a sequence of `length` letters: `None` where NCBI then takes the
-    /// whole sequence (no range, or a range whose start is at or past the end).
+    /// whole sequence (no range, a zero-length sequence where `SetTo` sets the open end to zero,
+    /// or a range whose start is at or past the end).
     pub fn clipped(self, length: u32) -> Option<(u32, u32)> {
-        if self.is_empty() {
+        if length == 0 || self.is_empty() {
             return None;
         }
         let to = if length <= self.to {
-            length.wrapping_sub(1)
+            length - 1
         } else {
             self.to
         };

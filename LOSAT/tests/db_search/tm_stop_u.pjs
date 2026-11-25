@@ -1,0 +1,23 @@
+{
+  "version": "1.2",
+  "dbname": "tm_stop_u",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm stop u",
+  "number-of-letters": 130,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-25T12:55:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 37208,
+  "bytes-to-cache": 236,
+  "files": [
+    "tm_stop_u.pdb",
+    "tm_stop_u.phr",
+    "tm_stop_u.pin",
+    "tm_stop_u.pot",
+    "tm_stop_u.psq",
+    "tm_stop_u.ptf",
+    "tm_stop_u.pto"
+  ]
+}

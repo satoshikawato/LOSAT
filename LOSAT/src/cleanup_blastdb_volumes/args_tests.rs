@@ -6,6 +6,13 @@ fn os(words: &[&str]) -> Vec<OsString> {
     words.iter().map(OsString::from).collect()
 }
 
+fn err_80(msg: &str) -> ParseOutcome {
+    ParseOutcome::Error(format!(
+        "{}{PROG}: error: {msg}\n",
+        usage_text(DEFAULT_COLUMNS)
+    ))
+}
+
 #[test]
 fn help_and_version_flags() {
     for words in [
@@ -95,6 +102,8 @@ fn resolve_columns_follows_python_terminal_size_precedence() {
 #[test]
 fn version_wraps_with_terminal_columns() {
     let v = crate::wording::LOSAT_VERSION;
+    let wrapped_two = format!("cleanup-blastdb-volumes.py\n{v}\n");
+    let split_ver = "cleanup-blastdb-volumes.py LOSAT\n0.2.0\n";
     // Narrow widths break on hyphens like Python 3.13 `argparse.HelpFormatter`.
     assert_eq!(
         version_text_for_columns(1),
@@ -108,29 +117,19 @@ fn version_wraps_with_terminal_columns() {
         version_text_for_columns(24),
         format!("cleanup-blastdb-\nvolumes.py {v}\n")
     );
-    assert_eq!(
-        version_text_for_columns(28),
-        format!("cleanup-blastdb-volumes.py\n{v}\n")
-    );
-    assert_eq!(
-        version_text_for_columns(31),
-        format!("cleanup-blastdb-volumes.py\n{v}\n")
-    );
-    assert_eq!(
-        version_text_for_columns(34),
-        "cleanup-blastdb-volumes.py LOSAT\n0.2.0\n"
-    );
-    assert_eq!(
-        version_text_for_columns(39),
-        "cleanup-blastdb-volumes.py LOSAT\n0.2.0\n"
-    );
+    for cols in [28, 31] {
+        assert_eq!(version_text_for_columns(cols), wrapped_two, "cols={cols}");
+    }
+    for cols in [34, 39] {
+        assert_eq!(version_text_for_columns(cols), split_ver, "cols={cols}");
+    }
     assert_eq!(
         version_text_for_columns(40),
         format!("cleanup-blastdb-volumes.py {v}\n")
     );
     assert_eq!(
         parse_with_columns(&os(&["-version"]), 31),
-        ParseOutcome::Version(format!("cleanup-blastdb-volumes.py\n{v}\n"))
+        ParseOutcome::Version(wrapped_two)
     );
 }
 
@@ -319,8 +318,7 @@ fn valid_options_and_abbreviations() {
 
 #[test]
 fn error_messages_match_argparse() {
-    let usage = usage_text(DEFAULT_COLUMNS);
-    let err = |msg: &str| ParseOutcome::Error(format!("{usage}{PROG}: error: {msg}\n"));
+    let err = err_80;
 
     let need_both = err("the following arguments are required: -db, -dbtype");
     for words in [&[][..], &["--version"]] {
@@ -517,8 +515,6 @@ fn non_utf8_db_name_bytes_are_preserved() {
         })
     );
 
-    let usage = usage_text(DEFAULT_COLUMNS);
-    let err = |msg: &str| ParseOutcome::Error(format!("{usage}{PROG}: error: {msg}\n"));
     assert_eq!(
         parse(&[
             OsString::from("-db"),
@@ -526,7 +522,7 @@ fn non_utf8_db_name_bytes_are_preserved() {
             OsString::from("-dbtype"),
             OsString::from_vec(b"\x80".to_vec()),
         ]),
-        err("argument -dbtype: invalid choice: '\\udc80' (choose from prot, nucl)")
+        err_80("argument -dbtype: invalid choice: '\\udc80' (choose from prot, nucl)")
     );
     assert_eq!(
         parse(&[
@@ -536,10 +532,10 @@ fn non_utf8_db_name_bytes_are_preserved() {
             OsString::from("prot"),
             OsString::from_vec(b"\x80".to_vec()),
         ]),
-        err("unrecognized arguments: \\udc80")
+        err_80("unrecognized arguments: \\udc80")
     );
     assert_eq!(
         parse(&[OsString::from_vec(b"-=\x80".to_vec())]),
-        err("ambiguous option: -=\\udc80 could match -h, --help, -db, -dbtype, -dry-run, -version, -verbose")
+        err_80("ambiguous option: -=\\udc80 could match -h, --help, -db, -dbtype, -dry-run, -version, -verbose")
     );
 }

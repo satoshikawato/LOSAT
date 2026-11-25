@@ -105,26 +105,41 @@ pub(crate) fn resolve_columns(columns_env: Option<&str>, stdout_columns: Option<
     DEFAULT_COLUMNS
 }
 
-/// Greedily packs `words` into lines of at most `max_width` columns (each line takes at least one
-/// item, matching `argparse.HelpFormatter`'s usage and `textwrap` wrapping for our short words).
-fn wrap_items(words: &[&str], max_width: isize) -> Vec<String> {
+/// Greedily packs `(chunk, glued)` items into lines of at most `max_width` columns (`glued == true`
+/// joins directly onto the current line with no space, as after a hyphen; each line takes at least
+/// one item).
+fn pack_chunks<'a>(
+    chunks: impl IntoIterator<Item = (&'a str, bool)>,
+    max_width: isize,
+) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
-    for &word in words {
+    for (chunk, glued) in chunks {
         if current.is_empty() {
-            current.push_str(word);
-        } else if (current.len() + 1 + word.len()) as isize <= max_width {
-            current.push(' ');
-            current.push_str(word);
+            current.push_str(chunk);
         } else {
-            lines.push(std::mem::take(&mut current));
-            current.push_str(word);
+            let sep_len = usize::from(!glued);
+            if (current.len() + sep_len + chunk.len()) as isize <= max_width {
+                if !glued {
+                    current.push(' ');
+                }
+                current.push_str(chunk);
+            } else {
+                lines.push(std::mem::take(&mut current));
+                current.push_str(chunk);
+            }
         }
     }
     if !current.is_empty() {
         lines.push(current);
     }
     lines
+}
+
+/// Greedily packs `words` into lines of at most `max_width` columns (each line takes at least one
+/// item, matching `argparse.HelpFormatter`'s usage and `textwrap` wrapping for our short words).
+fn wrap_items(words: &[&str], max_width: isize) -> Vec<String> {
+    pack_chunks(words.iter().map(|&w| (w, false)), max_width)
 }
 
 /// Computes `argparse.HelpFormatter`'s inner wrapping width (`columns - 2`) as signed `isize`.
@@ -340,28 +355,7 @@ fn fill_text(text: &str, max_width: isize) -> String {
             chunks.push((&word[start..], glued));
         }
     }
-    let mut lines: Vec<String> = Vec::new();
-    let mut current = String::new();
-    for (chunk, glued) in chunks {
-        if current.is_empty() {
-            current.push_str(chunk);
-        } else {
-            let sep_len = usize::from(!glued);
-            if (current.len() + sep_len + chunk.len()) as isize <= max_width {
-                if !glued {
-                    current.push(' ');
-                }
-                current.push_str(chunk);
-            } else {
-                lines.push(std::mem::take(&mut current));
-                current.push_str(chunk);
-            }
-        }
-    }
-    if !current.is_empty() {
-        lines.push(current);
-    }
-    let mut out = lines.join("\n");
+    let mut out = pack_chunks(chunks, max_width).join("\n");
     out.push('\n');
     out
 }

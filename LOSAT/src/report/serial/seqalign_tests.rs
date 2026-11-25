@@ -1232,6 +1232,83 @@ fn row_end_gaps_are_the_rows_gap_operations_outside_its_letters() {
     assert_eq!(row_end_gaps(&[], AlignRow::Query), RowEndGaps::default());
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191,226-230
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1568-1580
+/// `reported_std_seg_row_range` / `reported_std_seg_rows_range`: `empty_query_rewritten` clears
+/// `RowRangeError::Empty` on the query row alone; any leading gap left in the reported edit
+/// script (`SeqidsNotConsistent`, e.g. after `-subject` dropped one end segment of `[Del, Ins]` or
+/// `[Ins, Del]`) is reported for `-db` and `-subject` alike.
+#[test]
+fn reported_std_seg_row_range_handles_empty_rewrite_and_mapped_leading_gaps() {
+    use super::seqalign::{
+        mapped_script, reported_std_seg_row_range, reported_std_seg_rows_range, AlignRow,
+        RowRangeError,
+    };
+    // Empty ungapped rows: `-subject` rewrites the query row only.
+    assert_eq!(
+        reported_std_seg_row_range(4, 4, &[], AlignRow::Query, false),
+        Some(RowRangeError::Empty)
+    );
+    assert_eq!(
+        reported_std_seg_row_range(4, 4, &[], AlignRow::Query, true),
+        None
+    );
+    assert_eq!(
+        reported_std_seg_row_range(4, 4, &[], AlignRow::Subject, true),
+        Some(RowRangeError::Empty)
+    );
+    assert_eq!(
+        reported_std_seg_rows_range(4, 4, &[], true),
+        Some(RowRangeError::Empty)
+    );
+
+    // `[Del(2), Ins(1), Sub(10)]` mapped once -> `[Ins(1), Sub(10)]` (subject starts with gap).
+    let del_ins = [Del(2), Ins(1), Sub(10)];
+    let mapped = &del_ins[mapped_script(&del_ins).kept];
+    assert_eq!(mapped, &[Ins(1), Sub(10)]);
+    for rewritten in [false, true] {
+        assert_eq!(
+            reported_std_seg_row_range(0, 11, mapped, AlignRow::Query, rewritten),
+            None
+        );
+        assert_eq!(
+            reported_std_seg_row_range(0, 11, mapped, AlignRow::Subject, rewritten),
+            Some(RowRangeError::SeqidsNotConsistent)
+        );
+        assert_eq!(
+            reported_std_seg_rows_range(0, 11, mapped, rewritten),
+            Some(RowRangeError::SeqidsNotConsistent)
+        );
+    }
+
+    // `[Ins(1), Del(2), Sub(10)]` mapped once -> `[Del(2), Sub(10)]` (query starts with gap).
+    let ins_del = [Ins(1), Del(2), Sub(10)];
+    let mapped = &ins_del[mapped_script(&ins_del).kept];
+    assert_eq!(mapped, &[Del(2), Sub(10)]);
+    for rewritten in [false, true] {
+        assert_eq!(
+            reported_std_seg_row_range(1, 11, mapped, AlignRow::Query, rewritten),
+            Some(RowRangeError::SeqidsNotConsistent)
+        );
+        assert_eq!(
+            reported_std_seg_row_range(1, 11, mapped, AlignRow::Subject, rewritten),
+            None
+        );
+        assert_eq!(
+            reported_std_seg_rows_range(1, 11, mapped, rewritten),
+            Some(RowRangeError::SeqidsNotConsistent)
+        );
+    }
+
+    // `[Del(2), Sub(10)]` mapped once -> `[Sub(10)]` (no leading gap remains).
+    let single = [Del(2), Sub(10)];
+    let mapped = &single[mapped_script(&single).kept];
+    assert_eq!(mapped, &[Sub(10)]);
+    for rewritten in [false, true] {
+        assert_eq!(reported_std_seg_rows_range(0, 10, mapped, rewritten), None);
+    }
+}
+
 /// The query frame of a translated query's section (`HspStrands::master_frame`): the HSP's own,
 /// or, where the query row starts with a gap, the minus frame of the record's length (NCBI
 /// BLAST+ 2.17.0 shows queries of 570, 571 and 572 nucleotides under -1, -2 and -3).

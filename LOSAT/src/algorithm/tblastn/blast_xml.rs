@@ -46,9 +46,8 @@ use crate::report::blast_xml::{
 };
 use crate::report::blast_xml2::{Xml2Run, Xml2Target};
 use crate::report::query_warnings::{query_messages, QueryWarnings};
-use crate::report::serial::seqalign::row_range_exception;
 use crate::report::serial::seqalign::{
-    read_num_ident, seqalign_evalue, std_seg_row_range, AlignRow,
+    read_num_ident, reported_std_seg_rows_range, row_range_exception, seqalign_evalue,
 };
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
@@ -620,19 +619,15 @@ impl PreparedXml {
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243-245
                                 // The start of a row whose range the XML cannot take, the query's
                                 // first: a row that starts with a gap (`-subject`'s mapping drops
-                                // such a first segment, `KappaResultHitList::put_in_report_order`).
-                                // NCBI catches it in `s_BlastXMLAddIteration` (`CaughtException`).
-                                let row_range = |row| {
-                                    std_seg_row_range(
-                                        i64::from(hsp.q_start),
-                                        i64::from(hsp.q_end),
-                                        &payload.edit_script,
-                                        row,
-                                    )
-                                };
-                                if let Some(error) = row_range(AlignRow::Query)
-                                    .or_else(|| row_range(AlignRow::Subject))
-                                {
+                                // at most one end segment, `KappaResultHitList::put_in_report_order`,
+                                // so any remaining leading gap still throws). NCBI catches it in
+                                // `s_BlastXMLAddIteration` (`CaughtException`).
+                                if let Some(error) = reported_std_seg_rows_range(
+                                    i64::from(hsp.q_start),
+                                    i64::from(hsp.q_end),
+                                    &payload.edit_script,
+                                    false,
+                                ) {
                                     return Err(CaughtException(row_range_exception(error)).into());
                                 }
                                 let frame = i32::from(hsp.frame);
@@ -725,7 +720,21 @@ impl PreparedXml {
             buf.clear();
         }
         if ranges.epilog {
-            document.finish(&mut buf)?;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2230
+            // A `-subject` run's held report that failed (`CaughtException`) is flushed in
+            // `PrintEpilog`: post its message before the document's closing bytes, then write
+            // the epilog and return Ok (exit 0).
+            if let Some(post) = crate::report::blast_xml::writer::caught_post(
+                document.finish(&mut buf),
+                &*document,
+                run.program,
+            )? {
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    writer.flush()?;
+                    warnings.sink.write_all(&post)?;
+                    warnings.sink.flush()?;
+                }
+            }
             crate::report::query_warnings::write_document_posts(
                 &buf,
                 document.take_posts(),

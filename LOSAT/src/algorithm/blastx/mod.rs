@@ -103,3 +103,6 @@ pub(crate) mod web;
 pub(crate) mod subjects;
 // The database path (`-db`): opening, the stored sequences, titles and ranks per batch.
 pub(crate) mod database;
+
+#[cfg(test)]
+pub(crate) mod mapped_row_range_tests;

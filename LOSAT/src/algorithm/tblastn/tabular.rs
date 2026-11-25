@@ -36,8 +36,7 @@ use crate::config::ScoringMatrix;
 use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::row_letters::QueryLetters;
-use crate::report::serial::seqalign::row_range_exception;
-use crate::report::serial::seqalign::{std_seg_row_range, AlignRow};
+use crate::report::serial::seqalign::{reported_std_seg_row_range, row_range_exception, AlignRow};
 use crate::report::tabular::{
     coverage_percent, taxdb_warning_line, union_length, QueryCoveragePerHsp, TabularField,
     TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularTaxonomy,
@@ -346,18 +345,20 @@ pub(super) fn write_tblastn_tabular(
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:816-824
         // `qcovs` reads the query range of every HSP of the query before its first row: a query
         // row that starts with a gap throws there, after outfmt 7's lines (`-subject`'s mapping
-        // drops such a first segment, `KappaResultHitList::put_in_report_order`).
+        // drops at most one end segment, `KappaResultHitList::put_in_report_order`, so any
+        // remaining leading query gap still throws).
         if needs.qcovs {
             let unranged = hitlist
                 .lists()
                 .iter()
                 .flat_map(|list| list.hsps.hsps.iter().zip(&list.payloads))
                 .find_map(|(linked, payload)| {
-                    std_seg_row_range(
+                    reported_std_seg_row_range(
                         i64::from(linked.hsp.q_start),
                         i64::from(linked.hsp.q_end),
                         &payload.edit_script,
                         AlignRow::Query,
+                        false,
                     )
                 });
             if let Some(error) = unranged {

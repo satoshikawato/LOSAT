@@ -388,25 +388,6 @@ impl PairwiseHit {
             )
     }
 
-    /// What `CSeq_align::GetSeqRange` of the row finds on the HSP's Seq-align as the report holds it
-    /// (`serial::seqalign::std_seg_row_range`): the empty rows of `rows_empty`, or the row that a
-    /// translated search's Smith-Waterman alignment starts with a gap in (`-use_sw_tback` of
-    /// BLASTX, TBLASTN and RPSTBLASTN; a `-subject` report's HSPs come mapped,
-    /// `serial::seqalign::mapped_script`). The hits that keep their Seq-align's offsets
-    /// (`has_sort_offsets`: BLASTX, TBLASTN and TBLASTX) have Std-segs; the others' Dense-seg has
-    /// a range in every row.
-    pub(crate) fn row_range(&self, row: AlignRow) -> Option<RowRangeError> {
-        if !self.hit.has_sort_offsets {
-            return None;
-        }
-        super::serial::seqalign::std_seg_row_range(
-            self.hit.sort_query_offset as i64,
-            self.hit.sort_query_end as i64,
-            self.hit.gap_info.as_deref().unwrap_or_default(),
-            row,
-        )
-    }
-
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1100-1122
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2576-2613
     /// The HSP's columns, gap letters and gap openings inside the query row's aligned range
@@ -414,7 +395,7 @@ impl PairwiseHit {
     /// Smith-Waterman alignment left out), as NCBI's tables count them (`GetAlignLengths`) and
     /// outfmt 0's HSP header its `Gaps` (`x_GetNumGaps`, in `write_hsp_identities` and
     /// `write_tblastn_hsp_info`; the line's denominators stay the alignment's columns). The
-    /// library's `HspRecord` holds them (`api::run::records`); `gaps` stays the alignment's.
+    /// library's `HspRecord` holds them (`api::run::records`).
     pub(crate) fn query_range_lengths(&self) -> super::serial::seqalign::AlignLengths {
         super::serial::seqalign::AlignLengths {
             length: self.hit.length,
@@ -426,22 +407,28 @@ impl PairwiseHit {
 }
 
 /// What `CSeq_align::GetSeqRange` of the row finds on the Seq-align of `hit`, of the subject whose hits are
-/// `hits`, as NCBI's formatters read it (`PairwiseHit::row_range`): `-subject`'s Seq-loc mapper
-/// (`remaps`) rewrites the empty query row of a subject with rows of letters into one nucleotide
-/// (`mapper_rewrites`; the empty subject row stays). Its leaving out of an end segment with a gap
-/// row is in the hit already (`serial::seqalign::mapped_script`).
+/// `hits`, as NCBI's formatters read it (`serial::seqalign::reported_std_seg_row_range`):
+/// `-subject`'s Seq-loc mapper (`remaps`) rewrites the empty query row of a subject with rows of
+/// letters into one nucleotide (`mapper_rewrites`; the empty subject row stays). Its leaving out of
+/// an end segment with a gap row is in the hit already (`serial::seqalign::mapped_script`). The
+/// hits that keep their Seq-align's offsets (`has_sort_offsets`: BLASTX, TBLASTN and TBLASTX) have
+/// Std-segs; the others' Dense-seg has a range in every row.
 fn seen_row_range(
     remaps: bool,
     hits: &[&PairwiseHit],
     hit: &PairwiseHit,
     row: AlignRow,
 ) -> Option<RowRangeError> {
-    let error = hit.row_range(row)?;
-    let seen = match (error, row) {
-        (RowRangeError::Empty, AlignRow::Query) => !mapper_rewrites(remaps, hits),
-        (RowRangeError::Empty, AlignRow::Subject) | (RowRangeError::SeqidsNotConsistent, _) => true,
-    };
-    seen.then_some(error)
+    if !hit.hit.has_sort_offsets {
+        return None;
+    }
+    super::serial::seqalign::reported_std_seg_row_range(
+        hit.hit.sort_query_offset as i64,
+        hit.hit.sort_query_end as i64,
+        hit.hit.gap_info.as_deref().unwrap_or_default(),
+        row,
+        mapper_rewrites(remaps, hits),
+    )
 }
 
 /// The first exception of `GetSeqRange` where a formatter reads the ranges of `row` of every HSP of

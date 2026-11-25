@@ -22,8 +22,8 @@ use anyhow::Result;
 
 use super::args::ResolvedOptions;
 use super::empty_rows::{
-    empty_row_scores, row_range, rows_empty, subject_mapped_rows, tabular_empty_row, AlignQueryIds,
-    MappedRows, SubjectLoc, TabularEmptyRow,
+    empty_row_scores, reported_row_range, rows_empty, subject_mapped_rows, tabular_empty_row,
+    AlignQueryIds, MappedRows, SubjectLoc, TabularEmptyRow,
 };
 use super::input::FastaRecord;
 use super::report::{alignment, has_seqalign, query_endpoints, query_warning, ShownSubjects};
@@ -33,7 +33,7 @@ use crate::cli::NativeError;
 use crate::report::pairwise::EmptyRowsRefusal;
 use crate::report::serial::seqalign::{mapped_empty_query_nucleotide, ungapped_interval};
 use crate::report::serial::seqalign::{
-    row_range_exception, std_seg_lengths_not_accurate, AlignRow, RowRangeError,
+    row_range_exception, std_seg_lengths_not_accurate, AlignRow,
 };
 use crate::report::tabular::{
     coverage_percent, taxdb_warning_line, union_length, DeflineIds, QueryCoveragePerHsp,
@@ -473,35 +473,40 @@ pub(super) fn write_blastx_tabular(
                 let mut table_rows = TabularRows::default();
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:816-824
                 // `qcovs` reads the query range of every HSP of the query before its first row
-                // (`GetMasterCoverage`, cited below): with `-db` a query row whose range it cannot
-                // take throws there, after outfmt 7's lines (`empty_rows::row_range`: the empty
-                // row of an HSP of length 0, a row that starts with a gap), and with `-subject` the
-                // mapped query row that wraps (`MappedRows::QueryRowWraps`) and the empty rows that
-                // the mapper leaves (`SubjectLoc::of_list`); `-subject`'s other mapped query rows
-                // are not empty.
+                // (`GetMasterCoverage`, cited below): a query row whose range it cannot take
+                // throws there, after outfmt 7's lines (`empty_rows::reported_row_range`: the
+                // empty row of an HSP of length 0 with `-db`, with `-subject` where the mapper
+                // leaves it or its mapped query row wraps (`MappedRows::QueryRowWraps`), and a
+                // leading gap left in a reported gapped edit script for `-db` and `-subject`
+                // alike).
                 let unranged = needs
                     .qcovs
                     .then(|| {
-                        listed
-                            .iter()
-                            .find_map(|list| match loc.of_list(list, options.gapped) {
-                                SubjectLoc::Whole => list.hsps.iter().find_map(|hsp| {
-                                    has_seqalign(hsp, options.gapped)
-                                        .then(|| row_range(hsp, AlignRow::Query))
-                                        .flatten()
-                                }),
-                                SubjectLoc::Interval => matches!(
+                        listed.iter().find_map(|list| {
+                            let list_loc = loc.of_list(list, options.gapped);
+                            let empty_query_rewritten = list_loc == SubjectLoc::Interval
+                                && !matches!(
                                     subject_mapped_rows(
-                                        loc,
+                                        list_loc,
                                         list,
                                         options.gapped,
                                         query,
                                         &subjects[list.oid]
                                     ),
                                     Some(MappedRows::QueryRowWraps)
-                                )
-                                .then_some(RowRangeError::Empty),
+                                );
+                            list.hsps.iter().find_map(|hsp| {
+                                has_seqalign(hsp, options.gapped)
+                                    .then(|| {
+                                        reported_row_range(
+                                            hsp,
+                                            AlignRow::Query,
+                                            empty_query_rewritten,
+                                        )
+                                    })
+                                    .flatten()
                             })
+                        })
                     })
                     .flatten();
                 if let Some(error) = unranged {

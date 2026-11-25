@@ -31,29 +31,41 @@ pub(crate) fn rows_empty(hsp: &super::results::Hsp) -> bool {
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
-/// What `CSeq_align::GetSeqRange` of the row finds on the Std-segs of the reported HSP `hsp`
-/// (`serial::seqalign::std_seg_row_range`, the one predicate of the writers): the empty rows of an
-/// HSP of length 0 (`rows_empty`), or the row that a gapped HSP's edit script starts with a gap in,
-/// as the engine made them (`-db`; `-subject`'s Seq-loc mapper rewrites some, `SubjectLoc`).
+/// What `CSeq_align::GetSeqRange` of the row finds on the reported (already `-subject`-mapped)
+/// Std-segs of `hsp` (`serial::seqalign::reported_std_seg_row_range`, the one predicate of the
+/// writers): the empty rows of an HSP of length 0 (`rows_empty`, unless `empty_query_rewritten`
+/// holds for `AlignRow::Query`), or a leading gap left in a gapped HSP's reported edit script.
 #[inline]
-pub(crate) fn row_range(hsp: &super::results::Hsp, row: AlignRow) -> Option<RowRangeError> {
-    crate::report::serial::seqalign::std_seg_row_range(
+pub(crate) fn reported_row_range(
+    hsp: &super::results::Hsp,
+    row: AlignRow,
+    empty_query_rewritten: bool,
+) -> Option<RowRangeError> {
+    crate::report::serial::seqalign::reported_std_seg_row_range(
         i64::from(hsp.hsp.q_start),
         i64::from(hsp.seqalign_ends().0),
         &hsp.edit_script,
         row,
+        empty_query_rewritten,
     )
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2907-2930
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243-245
-/// What a formatter that reads the query's range of `hsp`'s Seq-align and then the subject's finds
-/// (`row_range`): the first exception, `None` where both are taken. The description table of
-/// outfmt 0 to 4 (`s_ProcessAlignSet`) and BLAST XML (`s_SeqAlignToXMLHsp`) read them so; an HSP of
-/// length 0 has both rows empty, a gapped one at most one row that starts with a gap.
+/// What a formatter that reads the query's range of `hsp`'s reported Seq-align and then the
+/// subject's finds (`serial::seqalign::reported_std_seg_rows_range`): the first exception, `None`
+/// where both are taken.
 #[inline]
-pub(crate) fn rows_range(hsp: &super::results::Hsp) -> Option<RowRangeError> {
-    row_range(hsp, AlignRow::Query).or_else(|| row_range(hsp, AlignRow::Subject))
+pub(crate) fn reported_rows_range(
+    hsp: &super::results::Hsp,
+    empty_query_rewritten: bool,
+) -> Option<RowRangeError> {
+    crate::report::serial::seqalign::reported_std_seg_rows_range(
+        i64::from(hsp.hsp.q_start),
+        i64::from(hsp.seqalign_ends().0),
+        &hsp.edit_script,
+        empty_query_rewritten,
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1541-1547
@@ -443,15 +455,16 @@ pub(crate) fn subject_rows_all_empty(list: &super::results::HspList, gapped: boo
 /// Whether NCBI's prefetch of the query batch `batches` of a report of `loc`'s subjects (where it
 /// reads the Seq-aligns, `common::database::prefetch_reads_seq_aligns`) throws before it loads
 /// anything: `s_ExtractSeqidsAndRanges` asks for the subject row's range of every Seq-align
-/// (`row_range`), which throws on an empty one, of a subject whose every HSP of an ungapped search
-/// has length 0 (`subject_rows_all_empty`, and with `-subject` one that the mapper leaves so,
-/// `SubjectLoc::of_list`; the prefetch runs with `-subject` too, blastx_app.cpp:286-287), and on
-/// one that starts with a gap, of a gapped HSP as the engine made it (`-db`: RPSTBLASTN's
+/// (`reported_row_range`), which throws on an empty one, of a subject whose every HSP of an
+/// ungapped search has length 0 (`subject_rows_all_empty`, and with `-subject` one that the mapper
+/// leaves so, `SubjectLoc::of_list`; the prefetch runs with `-subject` too, blastx_app.cpp:286-287),
+/// and on one that starts with a gap, of a gapped HSP as reported (`-db`: RPSTBLASTN's
 /// Smith-Waterman redo, also among the HSPs that left its lists past the formatter's cut,
-/// `BatchResults::unlisted_subject_row_throws`; `-subject`'s mapper leaves out a first segment
-/// with a gap row, `serial::seqalign::mapped_script`). The prefetch catches it with its warning
-/// (`common::database::prefetch_warning`) and has read no subject, as a batch whose prefetch is
-/// off: the reports then read the subjects one by one (`-subject`'s are in the scope already).
+/// `BatchResults::unlisted_subject_row_throws`; `-subject`'s mapper drops at most one end segment,
+/// `serial::seqalign::mapped_script`, so a remaining leading subject gap throws too). The prefetch
+/// catches it with its warning (`common::database::prefetch_warning`) and has read no subject, as a
+/// batch whose prefetch is off: the reports then read the subjects one by one (`-subject`'s are in
+/// the scope already).
 pub(crate) fn prefetch_reads_unranged_row(
     batches: &[super::runtime::BatchResults],
     gapped: bool,
@@ -461,11 +474,15 @@ pub(crate) fn prefetch_reads_unranged_row(
         (loc == SubjectLoc::Whole && batch.unlisted_subject_row_throws)
             || batch.queries.iter().flatten().any(|list| {
                 if gapped {
-                    loc == SubjectLoc::Whole
-                        && list.hsps.iter().any(|hsp| {
-                            super::report::has_seqalign(hsp, gapped)
-                                && row_range(hsp, AlignRow::Subject).is_some()
-                        })
+                    list.hsps.iter().any(|hsp| {
+                        super::report::has_seqalign(hsp, gapped)
+                            && reported_row_range(
+                                hsp,
+                                AlignRow::Subject,
+                                loc == SubjectLoc::Interval,
+                            )
+                            .is_some()
+                    })
                 } else {
                     subject_rows_all_empty(list, gapped)
                         && loc.of_list(list, gapped) == SubjectLoc::Whole

@@ -268,32 +268,58 @@ fn a_row_that_starts_with_a_gap_has_no_range() {
         ..ungapped(0, 285)
     };
     let starts = gapped(vec![Ins(95), Sub(190)]);
-    assert_eq!(row_range(&starts, AlignRow::Query), None);
-    assert_eq!(
-        row_range(&starts, AlignRow::Subject),
-        Some(RowRangeError::SeqidsNotConsistent)
-    );
-    assert_eq!(
-        rows_range(&starts),
-        Some(RowRangeError::SeqidsNotConsistent)
-    );
+    for rewritten in [false, true] {
+        assert_eq!(
+            reported_row_range(&starts, AlignRow::Query, rewritten),
+            None
+        );
+        assert_eq!(
+            reported_row_range(&starts, AlignRow::Subject, rewritten),
+            Some(RowRangeError::SeqidsNotConsistent)
+        );
+        assert_eq!(
+            reported_rows_range(&starts, rewritten),
+            Some(RowRangeError::SeqidsNotConsistent)
+        );
+    }
     let query_first = gapped(vec![Del(3), Sub(190)]);
-    assert_eq!(
-        row_range(&query_first, AlignRow::Query),
-        Some(RowRangeError::SeqidsNotConsistent)
-    );
-    assert_eq!(row_range(&query_first, AlignRow::Subject), None);
+    for rewritten in [false, true] {
+        assert_eq!(
+            reported_row_range(&query_first, AlignRow::Query, rewritten),
+            Some(RowRangeError::SeqidsNotConsistent)
+        );
+        assert_eq!(
+            reported_row_range(&query_first, AlignRow::Subject, rewritten),
+            None
+        );
+    }
     for ops in [
         vec![Sub(190), Ins(95)],
         vec![Sub(90), Del(5), Sub(100)],
         Vec::new(),
     ] {
-        assert_eq!(rows_range(&gapped(ops.clone())), None, "{ops:?}");
+        assert_eq!(
+            reported_rows_range(&gapped(ops.clone()), false),
+            None,
+            "{ops:?}"
+        );
+        assert_eq!(
+            reported_rows_range(&gapped(ops.clone()), true),
+            None,
+            "{ops:?}"
+        );
     }
-    // An HSP of length 0: both rows empty, the query's first.
-    assert_eq!(rows_range(&ungapped(4, 4)), Some(RowRangeError::Empty));
+    // An HSP of length 0: both rows empty without rewrite; with rewrite, the subject row stays.
     assert_eq!(
-        row_range(&ungapped(4, 4), AlignRow::Subject),
+        reported_rows_range(&ungapped(4, 4), false),
+        Some(RowRangeError::Empty)
+    );
+    assert_eq!(
+        reported_row_range(&ungapped(4, 4), AlignRow::Query, true),
+        None
+    );
+    assert_eq!(
+        reported_row_range(&ungapped(4, 4), AlignRow::Subject, true),
         Some(RowRangeError::Empty)
     );
 }

@@ -1275,6 +1275,49 @@ pub(crate) fn std_seg_row_range(
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-230
+/// What `CSeq_align::GetSeqRange` of `row` finds on a reported (already `-subject`-mapped,
+/// `mapped_script`) Std-seg from `offset` to `end` with edit script `ops`: an empty row
+/// (`RowRangeError::Empty`) unless `empty_query_rewritten` holds for `AlignRow::Query`
+/// (`-subject`'s Seq-loc mapper rewrote the empty query row into a non-empty nucleotide,
+/// `mapper_rewrites_empty_rows`), and any leading gap left in the reported script
+/// (`RowRangeError::SeqidsNotConsistent`, for `-db` and `-subject` alike). The one owner of
+/// what the formatters read on a reported Std-seg row (`report::pairwise::seen_row_range`,
+/// `blastx::empty_rows::{reported_row_range, reported_rows_range}`, `tblastn::blast_xml`,
+/// `tblastn::tabular`).
+#[inline]
+pub(crate) fn reported_std_seg_row_range(
+    offset: i64,
+    end: i64,
+    ops: &[GapEditOp],
+    row: AlignRow,
+    empty_query_rewritten: bool,
+) -> Option<RowRangeError> {
+    let error = std_seg_row_range(offset, end, ops, row)?;
+    match (error, row) {
+        (RowRangeError::Empty, AlignRow::Query) if empty_query_rewritten => None,
+        _ => Some(error),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2907-2930
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243-245
+/// What a formatter that reads the query row's range of a reported Std-seg and then the
+/// subject's finds (`reported_std_seg_row_range`), query first: the description table of
+/// outfmt 0 to 4 (`s_ProcessAlignSet`) and BLAST XML (`s_SeqAlignToXMLHsp`).
+#[inline]
+pub(crate) fn reported_std_seg_rows_range(
+    offset: i64,
+    end: i64,
+    ops: &[GapEditOp],
+    empty_query_rewritten: bool,
+) -> Option<RowRangeError> {
+    reported_std_seg_row_range(offset, end, ops, AlignRow::Query, empty_query_rewritten).or_else(
+        || reported_std_seg_row_range(offset, end, ops, AlignRow::Subject, empty_query_rewritten),
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
 /// `std_seg_row_range` of a gapped HSP whose edit script is `ops` (never of length 0): the row that
 /// the script starts with a gap in (`RowRangeError::SeqidsNotConsistent`, `row_end_gaps`).
 #[inline]

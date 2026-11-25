@@ -719,10 +719,9 @@ pub(super) fn render_queries_with(
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-287 (cited at
     // `native::reported_batch`)
     // `-subject`'s prefetch before the batch's reports, as `-db`'s (`native::batch_prefetch`): a
-    // subject's Seq-align whose empty rows the mapper leaves makes it write its warning (a gapped
-    // search has no HSP of length 0).
-    if !options.gapped
-        && SubjectLoc::of(shown) == SubjectLoc::Interval
+    // subject's Seq-align whose empty rows or remaining leading subject gap the mapper leaves
+    // makes it write its warning.
+    if SubjectLoc::of(shown) == SubjectLoc::Interval
         && super::native::batch_prefetch(batches, options, SubjectLoc::Interval).fails
     {
         stderr.write_all(&crate::algorithm::common::database::prefetch_warning(

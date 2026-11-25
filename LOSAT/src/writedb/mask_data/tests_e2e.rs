@@ -98,8 +98,11 @@ enum Stop {
 /// build (the log head is written by `BuildDatabase::new`).
 fn build(db: &mut BuildDatabase<'_>, case: &Case, warn: Warn<'_>) -> Result<(), Stop> {
     db.set_max_file_size(case.max_file_size);
-    process_mask_data(db, &case.options(), &mut *warn)
-        .map_err(|error| error.into_makedb_error().map_or(Stop::Silent, Stop::Error))?;
+    process_mask_data(db, &case.options(), &mut *warn).map_err(|error| {
+        error
+            .into_makedb_error(&Default::default())
+            .map_or(Stop::Silent, Stop::Error)
+    })?;
     for input in &case.inputs {
         let file = std::fs::File::open(input).unwrap();
         db.add_fasta(file, &mut *warn)
@@ -719,8 +722,8 @@ fn every_mask_parse_file_runs_end_to_end() {
             ("LengthError".to_string(), 3),
             ("NoDatabase".to_string(), 3),
             ("OutOfMemory".to_string(), 4),
-            ("Read".to_string(), 149),
-            ("Serial".to_string(), 57),
+            ("Read".to_string(), 164),
+            ("Serial".to_string(), 92),
             ("UnknownEncoding".to_string(), 7),
         ]
     );
@@ -1157,7 +1160,7 @@ fn outcomes_become_makeblastdb_s_status_and_text() {
     let path = || PathBuf::from("m.asnb");
     let describe = |error: MaskDataError| {
         error
-            .into_makedb_error()
+            .into_makedb_error(&Default::default())
             .map(|e| (e.exit_code(), e.to_string()))
     };
     assert_eq!(

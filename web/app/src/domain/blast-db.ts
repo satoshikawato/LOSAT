@@ -66,11 +66,13 @@ export interface BlastDbCandidate {
   readonly volumes?: readonly string[];
 }
 
+export type DirectoryEntries = readonly DirectoryFile[];
+
 export interface BlastDbTaxonomy {
   readonly taxdb: boolean;
   readonly sqlite: boolean;
   /** Present auxiliary taxonomy files in the database's own folder. */
-  readonly files: readonly DirectoryFile[];
+  readonly entries: DirectoryEntries;
 }
 
 export interface BlastDbDiscovery {
@@ -85,7 +87,7 @@ export interface BlastDbDiscovery {
 }
 
 export interface AssembledSearchDirectory {
-  readonly files: readonly DirectoryFile[];
+  readonly files: DirectoryEntries;
   /**
    * Relative folder of the selected `-db` whose auxiliary taxonomy files were mounted at the
    * run directory root (`/work`); CLI reproduction commands prepend `BLASTDB=<blastdbEnv>`.
@@ -379,7 +381,7 @@ export function databaseTaxonomy(discovery: BlastDbDiscovery, selectedName: stri
   return Object.freeze({
     taxdb: hasBti && hasBtd,
     sqlite: hasSqlite,
-    files: Object.freeze(present),
+    entries: Object.freeze(present),
   });
 }
 
@@ -431,7 +433,7 @@ export function assembleSearchDirectory(parts: {
     const dbDir = parentDir(parts.subjectDb.selectedName);
     if (dbDir !== '') {
       const tax = databaseTaxonomy(parts.subjectDb.discovery, parts.subjectDb.selectedName);
-      for (const entry of tax.files) {
+      for (const entry of tax.entries) {
         const auxName = entry.name.slice(dbDir.length + 1);
         builder.add(auxName, entry.file);
         blastdbEnv = dbDir;

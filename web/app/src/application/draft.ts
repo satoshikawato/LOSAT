@@ -549,7 +549,7 @@ export class SearchDraft {
     if (this.state.get().subjectSource === subjectSource) return;
     const { database } = this.state.get();
     if (subjectSource === 'fasta') {
-      this.deps.databaseMemory?.write('subject', undefined);
+      this.forgetSubjectDb();
       const { remembered: _rem, ...rest } = database;
       void _rem;
       this.set({ subjectSource, database: Object.freeze(rest), message: undefined });
@@ -571,34 +571,29 @@ export class SearchDraft {
       database: this.subjectDatabaseWith({ scanning: true as const }),
       message: undefined,
     });
-    const work = discoverBlastDatabases(files)
-      .then(
-        (discovery) => ({ ok: true as const, discovery }),
-        (error: unknown) => ({ ok: false as const, error }),
-      )
-      .then((outcome) => {
-        if (this.generations.get('subject-db') !== generation) return;
-        if (!outcome.ok) {
-          this.set({
-            database: this.subjectDatabaseWith({}),
-            message: { kind: 'error', text: messageOf(outcome.error) },
-          });
-          this.scheduleValidation();
-          return;
-        }
-        const { discovery } = outcome;
-        const { program, subjectSource } = this.state.get();
-        const matches = matchingDatabases(discovery, programById(program).subject);
-        const selected = matches[0]?.name;
-        if (selected !== undefined && subjectSource === 'database') {
-          this.rememberDb('subject', selected, discovery.folder);
-        }
+    const work = this.scanDatabaseFiles(files).then((outcome) => {
+      if (this.generations.get('subject-db') !== generation) return;
+      if (!outcome.ok) {
         this.set({
-          database: this.subjectDatabaseWith({ discovery, ...(selected === undefined ? {} : { selected }) }),
-          message: undefined,
+          database: this.subjectDatabaseWith({}),
+          message: { kind: 'error', text: messageOf(outcome.error) },
         });
         this.scheduleValidation();
+        return;
+      }
+      const { discovery } = outcome;
+      const { program, subjectSource } = this.state.get();
+      const matches = matchingDatabases(discovery, programById(program).subject);
+      const selected = matches[0]?.name;
+      if (selected !== undefined && subjectSource === 'database') {
+        this.rememberDb('subject', selected, discovery.folder);
+      }
+      this.set({
+        database: this.subjectDatabaseWith({ discovery, ...(selected === undefined ? {} : { selected }) }),
+        message: undefined,
       });
+      this.scheduleValidation();
+    });
     this.track(work);
     await work;
   }
@@ -620,7 +615,7 @@ export class SearchDraft {
   /** Clears the chosen local BLAST database folder/files and any remembered reload notice. */
   clearSubjectDatabase(): void {
     this.nextGeneration('subject-db');
-    this.deps.databaseMemory?.write('subject', undefined);
+    this.forgetSubjectDb();
     this.set({
       database: this.subjectDatabaseWith({}),
       message: undefined,
@@ -673,35 +668,30 @@ export class SearchDraft {
       ...(this.state.get().program === 'blastn' ? { message: undefined } : {}),
     });
     this.setFieldForProgram('blastn', FILTERING_DB_FLAG, true);
-    const work = discoverBlastDatabases(files)
-      .then(
-        (discovery) => ({ ok: true as const, discovery }),
-        (error: unknown) => ({ ok: false as const, error }),
-      )
-      .then((outcome) => {
-        if (this.generations.get('filtering-db') !== generation) return;
-        const onBlastn = this.state.get().program === 'blastn';
-        if (!outcome.ok) {
-          this.set({
-            filteringDb: Object.freeze({}),
-            ...(onBlastn ? { message: { kind: 'error', text: messageOf(outcome.error) } } : {}),
-          });
-          this.setFilteringDbField(undefined);
-          return;
-        }
-        const { discovery } = outcome;
-        const matches = matchingDatabases(discovery, 'nucleotide');
-        const selected = matches[0]?.name;
-        if (selected !== undefined) this.rememberDb('filtering', selected, discovery.folder);
+    const work = this.scanDatabaseFiles(files).then((outcome) => {
+      if (this.generations.get('filtering-db') !== generation) return;
+      const onBlastn = this.state.get().program === 'blastn';
+      if (!outcome.ok) {
         this.set({
-          filteringDb: Object.freeze({
-            discovery,
-            ...(selected === undefined ? {} : { selected }),
-          }),
-          ...(onBlastn ? { message: undefined } : {}),
+          filteringDb: Object.freeze({}),
+          ...(onBlastn ? { message: { kind: 'error', text: messageOf(outcome.error) } } : {}),
         });
-        this.setFilteringDbField(selected);
+        this.setFilteringDbField(undefined);
+        return;
+      }
+      const { discovery } = outcome;
+      const matches = matchingDatabases(discovery, 'nucleotide');
+      const selected = matches[0]?.name;
+      if (selected !== undefined) this.rememberDb('filtering', selected, discovery.folder);
+      this.set({
+        filteringDb: Object.freeze({
+          discovery,
+          ...(selected === undefined ? {} : { selected }),
+        }),
+        ...(onBlastn ? { message: undefined } : {}),
       });
+      this.setFilteringDbField(selected);
+    });
     this.track(work);
     await work;
   }
@@ -734,6 +724,19 @@ export class SearchDraft {
 
   private rememberDb(slot: 'subject' | 'filtering', name: string, folder: string | undefined): void {
     this.deps.databaseMemory?.write(slot, folder === undefined ? { name } : { name, folder });
+  }
+
+  private forgetSubjectDb(): void {
+    this.deps.databaseMemory?.write('subject', undefined);
+  }
+
+  private scanDatabaseFiles(
+    files: readonly File[],
+  ): Promise<{ readonly ok: true; readonly discovery: BlastDbDiscovery } | { readonly ok: false; readonly error: unknown }> {
+    return discoverBlastDatabases(files).then(
+      (discovery) => ({ ok: true as const, discovery }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
   }
 
   private resetFilteringDbPick(): void {
@@ -885,7 +888,7 @@ export class SearchDraft {
    * source. The other sources and the regions go.
    */
   useExample(example: ExampleId, query: string, subject: File): void {
-    this.deps.databaseMemory?.write('subject', undefined);
+    this.forgetSubjectDb();
     const { remembered: _rem, ...restDb } = this.state.get().database;
     void _rem;
     this.set({ subjectSource: 'fasta', database: Object.freeze(restDb) });

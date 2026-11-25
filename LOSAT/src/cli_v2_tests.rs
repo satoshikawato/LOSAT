@@ -1734,11 +1734,11 @@ fn html_is_a_flag_of_the_five_search_programs_and_psiblast_refuses_it() {
 #[test]
 fn unported_ncbi_options_are_rejected_explicitly() {
     for (program, words) in [
-        ("tblastn", &["-entrez_query", "human[orgn]"][..]),
-        ("tblastx", &["-entrez_query", "human[orgn]"]),
-        ("blastp", &["-entrez_query", "human[orgn]"]),
+        ("tblastn", &["-entrez_query", "human[orgn]", "-remote"][..]),
+        ("tblastx", &["-entrez_query", "human[orgn]", "-remote"]),
+        ("blastp", &["-entrez_query", "human[orgn]", "-remote"]),
     ] {
-        // With a database (`-entrez_query` remains refused).
+        // With a database (`-entrez_query` and `-remote` remain refused).
         let mut argv = vec!["losat", program, "-query", "q.fa", "-db", "db"];
         argv.extend(words);
         let error = (parse_argv(argv).unwrap_err()).to_string();

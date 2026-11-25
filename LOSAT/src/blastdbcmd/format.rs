@@ -171,7 +171,7 @@ impl FormatSpec {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:187-201
-    // `Write(-1, config)` (`-ipg` of a PIG no volume holds): the sequence, its hash and the
+    // `Write` on OID -1 (`-ipg` of a PIG no volume holds): the sequence, its hash and the
     // definition lines are read before the line (`x_GetSeq`, `x_GetSeqHash`, `GetHdr`), and
     // each read throws `OID not found`; without them the line is written up to `%l`, whose
     // length throws, and `%o` is `-1`.
@@ -213,7 +213,7 @@ impl FormatSpec {
         &self,
         source: &Source,
         oid: u32,
-        length: u32,
+        length: i64,
         defline: Option<&BlastDefline>,
         seq: &[u8],
         hash: &str,
@@ -233,7 +233,7 @@ impl FormatSpec {
                 b's' => line.extend_from_slice(seq),
                 b'o' => push_decimal(line, i64::from(oid)),
                 b'h' => line.extend_from_slice(hash.as_bytes()),
-                b'l' => push_decimal(line, i64::from(length)),
+                b'l' => push_decimal(line, length),
                 b'a' | b'i' | b'g' | b't' | b'T' | b'P' | b'e' | b'n' => {
                     if let Some(defline) = defline {
                         fields.write_defline_field(kind, defline, line);
@@ -288,8 +288,10 @@ fn masks_string(masks: &[(u32, u32)]) -> String {
 /// clipped), with the masks of `-mask_sequence_with` in lower case, reverse-complemented for
 /// `-strand minus` (nucleotide databases: `Config` never holds the minus strand for a protein
 /// one).
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:286-290
 fn x_get_seq(source: &Source, oid: u32, config: &Config) -> Result<Vec<u8>, Stop> {
-    let range = config.range.clipped(source.length(oid)?);
+    // NCBI converts the signed `GetSeqLength` result to `TSeqPos` before clipping the range.
+    let range = config.range.clipped(source.length(oid)? as u32);
     let mut seq = source.string_letters(oid, range)?;
     if config.filt_algo >= 0 {
         let masks = source.masks(oid, config.filt_algo)?;

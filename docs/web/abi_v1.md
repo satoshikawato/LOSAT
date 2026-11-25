@@ -4,8 +4,12 @@ Status: **version 1, frozen** (plan TD-1), apart from fail-fast defect fixes, th
 program `tblastn`, which the Owner had added on 2026-11-04 for gbdraw's serial module
 (§7), the reading of the FASTA inputs, which follows the CLI since 2026-11-05 (plan
 DW-48, §7), and the options `-searchsp` and `-dbsize` of `blastn`, `tblastx` and `blastp`,
-which gbdraw asked for on 2026-11-10 (§7). The exports are in `LOSAT/src/web_api.rs`, which `LOSAT/src/lib.rs:31` builds for
-`wasm32` only. The program modules are `LOSAT/src/web_api/v1_blastn.rs`,
+which gbdraw asked for on 2026-11-10 (§7). The exports are in `LOSAT/src/web_api.rs`, which `LOSAT/src/lib.rs` builds for
+`wasm32` only, and not for the WASI command line (`--bin losat`), which LOSAT builds with the
+Cargo feature `no-web-abi-v1` (`LOSAT/build.rs` sets the cfg `losat_web_abi_v1` for every other
+wasm32 build; line RG item K4i-3d, 2026-11-25: the command exports no `losat_web_*` function and
+links no clap). A `--lib` build without that feature has ABI v1 as before: LOSAT's reactors, the Web's
+modules (web/adapter) and gbdraw's serial module (`--lib --no-default-features`). The program modules are `LOSAT/src/web_api/v1_blastn.rs`,
 `v1_blastp.rs`, `v1_tblastx.rs` and `v1_input.rs`; BLASTX has its own
 `LOSAT/src/algorithm/blastx/web.rs`, TBLASTN `LOSAT/src/algorithm/tblastn/web.rs`.
 gbdraw calls this ABI. The adapter

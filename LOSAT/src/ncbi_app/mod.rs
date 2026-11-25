@@ -463,7 +463,7 @@ pub(crate) fn run(
     body: Body,
 ) -> i32 {
     // The process's standard output without Rust's buffer (`cli::standard_output`): the
-    // writers' stream states (`Ostream`, blastdbcmd's `-metadata`) drop a failed write's bytes
+    // writers' stream states (`OutputFile`, blastdbcmd's `-metadata`) drop a failed write's bytes
     // and write nothing after it, as NCBI's streams do.
     let mut out = crate::cli::standard_output();
     let stderr = std::io::stderr();
@@ -478,8 +478,8 @@ pub(crate) fn run(
         words,
         (&mut std::io::stdin(), &mut out, &mut err),
         body,
-        // The command line's `-xmlhelp`: NCBI's XML without the arguments that LOSAT refuses
-        // (of the programs of `ncbi_app`, makeprofiledb's `-binary` at its run, `ncbi_xmlhelp_tests`).
+        // The command line's `-xmlhelp`: NCBI's XML without any refused arguments (none of the
+        // `ncbi_app` programs refuses an argument by name or at the run, `ncbi_xmlhelp_tests`).
         (start, Some(crate::cli::xml_help_text)),
         &RunFiles::Disk,
         true,

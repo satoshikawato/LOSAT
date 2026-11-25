@@ -89,7 +89,7 @@ impl FastaFormatter {
         }
         let mut text = std::mem::take(&mut self.text);
         text.clear();
-        // NCBI's insertion of the definition lines (`m_Out << fasta_deflines`; the long header
+        // NCBI's insertion of the definition lines into m_Out (the long header
         // of `CFastaOstream::Write` is taken as one too, LOSAT's form of it).
         if self.long_seqids {
             // The Bioseq's first source, from every line the filter keeps (the target's first),

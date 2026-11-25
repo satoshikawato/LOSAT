@@ -1,0 +1,28 @@
+Writing messages to <stdout> at verbosity (Minutiae)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+By default, testing 200 randomly sampled OIDs.
+Testing CDD files' headers for DELTA-BLAST
+
+Testing 1 volume(s).
+ <RUN>/in/p5
+  <RUN>/in/p5 / Sample: <testing 200 randomly selected OIDs (9 unique)>
+  <RUN>/in/p5 / Sample:       Status for OID 0: PASS
+  <RUN>/in/p5 / Sample:       Status for OID 1: PASS
+  <RUN>/in/p5 / Sample:       Status for OID 2: PASS
+  <RUN>/in/p5 / Sample:       Status for OID 3: PASS
+  <RUN>/in/p5 / Sample:       Status for OID 4: PASS
+  <RUN>/in/p5 / Sample:       Status for OID 5: PASS
+  <RUN>/in/p5 / Sample:       Status for OID 6: PASS
+  <RUN>/in/p5 / Sample:       Status for OID 7: PASS
+  <RUN>/in/p5 / Sample:       Status for OID 8: PASS
+  <RUN>/in/p5 / CDD_Headers:   [ERROR] caught exception while reading rps header 
+  <RUN>/in/p5 / CDD_Headers: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/blast/api/rps_aux.cpp", line 186: Error: (CBlastException::eInvalid) BLAST::ncbi::blast::CRpsAuxFile::CRpsAuxFile() - Cannot open RPS-BLAST auxiliary file: <RUN>/in/p5.aux
+
+ Result=FAILURE. 1 errors reported in 1 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 1

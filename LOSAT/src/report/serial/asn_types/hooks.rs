@@ -3,7 +3,7 @@
 //! reader (SURVEY_D3 §2.4 of line RG series F: `CSeq_descr`, `CVariation_ref`; the others keep
 //! caches only). (The Seq-id is read into LOSAT's Seq-id model by its own reader, `super::seq_id`.)
 
-use super::read::{Frame, Post};
+use super::read::{Frame, Post, PostSink};
 use super::table::named;
 use super::{member_index, Value};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
@@ -26,10 +26,18 @@ use crate::report::serial::asn_input::{Fail, R, VECTOR_RESERVE_LENGTH_ERROR};
 // here; SeqTable-multi-data's is a variant hook (`pre_read_variant`).
 /// The hook of NCBI's class `ty` before the value of its member at position `member` is read,
 /// with the members `read` so far.
+#[inline(always)]
 pub(super) fn pre_read_member(ty: u16, member: usize, read: &[(u16, Value)]) -> R<()> {
     if ty != named::DENSE_SEG {
         return Ok(());
     }
+    dense_seg_pre_read_member(member, read)
+}
+
+/// `pre_read_member` of a Dense-seg (its reserve hook).
+#[inline(never)]
+fn dense_seg_pre_read_member(member: usize, read: &[(u16, Value)]) -> R<()> {
+    let ty = named::DENSE_SEG;
     let get = |name: &str| {
         let index = member_index(named::DENSE_SEG, name);
         read.iter()
@@ -70,10 +78,18 @@ pub(super) fn pre_read_member(ty: u16, member: usize, read: &[(u16, Value)]) -> 
 // default, true: LOSAT reads no NCBI parameter.)
 /// The hook of the CHOICE `ty` before the value of its variant at position `variant` is read,
 /// with the reader's frames (the variant's on top).
+#[inline(always)]
 pub(super) fn pre_read_variant(ty: u16, variant: usize, frames: &[Frame]) -> R<()> {
     if ty != named::SEQTABLE_MULTI_DATA {
         return Ok(());
     }
+    multi_data_pre_read_variant(variant, frames)
+}
+
+/// `pre_read_variant` of a SeqTable-multi-data (its reserve hook).
+#[inline(never)]
+fn multi_data_pre_read_variant(variant: usize, frames: &[Frame]) -> R<()> {
+    let ty = named::SEQTABLE_MULTI_DATA;
     let reserved = matches!(
         super::members(ty)[variant].name(),
         "int"
@@ -111,8 +127,26 @@ pub(super) fn pre_read_variant(ty: u16, variant: usize, frames: &[Frame]) -> R<(
     Ok(())
 }
 
-/// The hook of the type `ty` after its value was read (not after a skip).
-pub(super) fn post_read(ty: u16, value: Value, posts: &mut Vec<Post>) -> R<Value> {
+/// Whether a hook of the type `ty` reads its value: the members read so far (`pre_read_member`
+/// of a Dense-seg), the whole value (`post_read` of a Seq-descr and a Variation-ref, which fail
+/// or post by it). Such a value is read whole where the reader keeps no value
+/// (`read::ObjectStream::read_value`).
+pub(super) fn reads_its_value(ty: u16) -> bool {
+    matches!(
+        ty,
+        named::DENSE_SEG | named::SEQ_DESCR | named::VARIATION_REF
+    )
+}
+
+/// Whether the type `ty` has a hook after its value was read (`post_read`).
+#[inline(always)]
+pub(super) fn has_post_read(ty: u16) -> bool {
+    matches!(ty, named::SEQ_DESCR | named::VARIATION_REF)
+}
+
+/// The hook of the type `ty` after its value was read (not after a skip), its posts given to
+/// `posts`: a type without one (`has_post_read`) gives the value back.
+pub(super) fn post_read(ty: u16, value: Value, posts: &mut dyn PostSink) -> R<Value> {
     match ty {
         named::SEQ_DESCR => seq_descr_post_read(value),
         named::VARIATION_REF => Ok(variation_ref_post_read(value, posts)),
@@ -147,15 +181,15 @@ const SEQ_DESCR_POST_READ: ThrowSite = ThrowSite {
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/VariantProperties.cpp:50-55
 // `SetVariant_prop()` makes a `VariantProperties` (version 5) when the member is not set. The
 // messages are posted when the class has been read, before the members that follow it.
-fn variation_ref_post_read(mut value: Value, posts: &mut Vec<Post>) -> Value {
+fn variation_ref_post_read(mut value: Value, posts: &mut dyn PostSink) -> Value {
     let member = |name: &str| member_index(named::VARIATION_REF, name);
-    let drop = |value: &mut Value, posts: &mut Vec<Post>, name: &str, message: &'static str| {
+    let drop = |value: &mut Value, posts: &mut dyn PostSink, name: &str, message: &'static str| {
         if value.take_member(member(name)).is_some() {
-            posts.push(Post::Error(message));
+            posts.post(Post::Error(message));
         }
     };
     let moved = |value: &mut Value,
-                 posts: &mut Vec<Post>,
+                 posts: &mut dyn PostSink,
                  name: &str,
                  property: &str,
                  message: &'static str| {
@@ -163,7 +197,7 @@ fn variation_ref_post_read(mut value: Value, posts: &mut Vec<Post>) -> Value {
             let prop = variant_prop(value);
             let index = member_index(named::VARIANTPROPERTIES, property);
             if prop.member(index).is_some() {
-                posts.push(Post::Error(message));
+                posts.post(Post::Error(message));
             } else {
                 prop.set_member(index, moved);
             }

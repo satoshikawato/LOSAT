@@ -549,20 +549,21 @@ fn makeprofiledb_refuses_binary_and_iupacna_high_byte_defects() {
              before) is not supported by LOSAT's MAKEPROFILEDB\n"
         )
     };
-    let qr12_v5_abort = "Error: (802.5) CObjectOStream: error at byte 15: \
+    let null_post_802_5 = "Error: (802.5) CObjectOStream: error at byte 15: \
         Blast-def-line-set.E.seqid.E: cannot write unassigned member NULL element while writing \
-        container \nError: an error (ERROR: byte 15: cannot write unassigned member NULL element \
-        while writing container ) after which the database's writer stops with another (Error: No \
-        tax info for any oid; NCBI's makeprofiledb aborts there) is not supported by LOSAT's \
-        MAKEPROFILEDB\n"
-        .to_string();
-    let qr15_close_abort = "Error: (802.5) CObjectOStream: error at byte 15: \
-        Blast-def-line-set.E.seqid.E: cannot write unassigned member NULL element while writing \
-        container \nError: an error (INPUT ERROR: in/nope.smp does not exists) after which the \
-        database's writer stops with another (Error: byte 15: cannot write unassigned member NULL \
-        element while writing container ; NCBI's makeprofiledb aborts there) is not supported by \
-        LOSAT's MAKEPROFILEDB\n"
-        .to_string();
+        container \n";
+    let qr12_v5_abort = format!(
+        "{null_post_802_5}Error: an error (ERROR: byte 15: cannot write unassigned member NULL \
+         element while writing container ) after which the database's writer stops with another \
+         (Error: No tax info for any oid; NCBI's makeprofiledb aborts there) is not supported by \
+         LOSAT's MAKEPROFILEDB\n"
+    );
+    let qr15_close_abort = format!(
+        "{null_post_802_5}Error: an error (INPUT ERROR: in/nope.smp does not exists) after which \
+         the database's writer stops with another (Error: byte 15: cannot write unassigned member \
+         NULL element while writing container ; NCBI's makeprofiledb aborts there) is not \
+         supported by LOSAT's MAKEPROFILEDB\n"
+    );
     let cases = [
         ("QR08", "QR08", "-binary", iupacna_err("0x80", 0)),
         ("QR09", "QR09", "-binary", iupacna_err("0x80", 3)),

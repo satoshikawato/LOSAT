@@ -65,6 +65,15 @@ fn post_asn_posts_suppresses_utf8_warning_and_writes_errors() {
 
 #[test]
 fn aborts_strips_trailing_newline_from_exception_message() {
+    let assert_refused =
+        |first: RunError, then: &WriteDbError, want: &str| match aborts(first, then) {
+            RunError::Refused(msg) => {
+                assert!(!msg.contains('\n'), "refusal split across lines: {msg:?}");
+                assert_eq!(msg, want);
+            }
+            other => panic!("expected Refused, got {other:?}"),
+        };
+
     let null = NullElement {
         stream: Stream::AsnBinary,
         element_frame: true,
@@ -74,34 +83,20 @@ fn aborts_strips_trailing_newline_from_exception_message() {
     };
     let then = WriteDbError::Exception(null.exception());
     assert!(then.message().ends_with(b"\n"));
-    let refused = aborts(
+    assert_refused(
         RunError::Input(b"in/nope.smp does not exists".to_vec()),
         &then,
+        "an error (INPUT ERROR: in/nope.smp does not exists) after which the database's \
+         writer stops with another (Error: byte 15: cannot write unassigned member NULL \
+         element while writing container ; NCBI's makeprofiledb aborts there)",
     );
-    match refused {
-        RunError::Refused(msg) => {
-            assert!(!msg.contains('\n'), "refusal split across lines: {msg:?}");
-            assert_eq!(
-                msg,
-                "an error (INPUT ERROR: in/nope.smp does not exists) after which the database's \
-                 writer stops with another (Error: byte 15: cannot write unassigned member NULL \
-                 element while writing container ; NCBI's makeprofiledb aborts there)"
-            );
-        }
-        other => panic!("expected Refused, got {other:?}"),
-    }
 
     let plain = WriteDbError::Other("No tax info for any oid".to_string());
     assert!(!plain.message().ends_with(b"\n"));
-    let refused = aborts(RunError::Exception(b"boom".to_vec()), &plain);
-    match refused {
-        RunError::Refused(msg) => {
-            assert_eq!(
-                msg,
-                "an error (ERROR: boom) after which the database's writer stops with another \
-                 (Error: No tax info for any oid; NCBI's makeprofiledb aborts there)"
-            );
-        }
-        other => panic!("expected Refused, got {other:?}"),
-    }
+    assert_refused(
+        RunError::Exception(b"boom".to_vec()),
+        &plain,
+        "an error (ERROR: boom) after which the database's writer stops with another \
+         (Error: No tax info for any oid; NCBI's makeprofiledb aborts there)",
+    );
 }

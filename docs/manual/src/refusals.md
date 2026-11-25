@@ -82,6 +82,7 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-xmlhelp`, `-version`, `-version-full`, `-version-full-xml`, `-version-full-json` in the library API and pylosat | Refused. They work on the command line and in LOSAT Web, which prints the command line's text. |
 | `-dryrun` | Reads and checks the arguments, then stops. It refuses what a normal run refuses. |
 | `-logfile` with `tblastx`, `rpsblast` or `rpstblastn` in the WASI command-line build | Refused. That build cannot send its standard error to a file. |
+| `-logfile` naming an existing file of the run (in the run's directory or a registered search input inside or outside the working directory), or naming a file the run opens for reading even when that file is missing (a `-db` search's `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist` or `-negative_taxidlist`, or a `windowmasker` input), and a `windowmasker` `-out` naming an existing file or a missing input the command line reads after opening `-out` (`-in` of `-mk_counts`, `-ustat` of masking) in LOSAT Web | Refused (exit status 1). The command line appends to or creates that file and reads it back; LOSAT Web reads the run's files and writes none of them. |
 | `-remote`, `-entrez_query` | Refused. They need NCBI's servers. See the end of this page. |
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#all-five-search-programs).

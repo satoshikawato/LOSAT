@@ -50,7 +50,7 @@ pub(super) fn run(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    match run_index(args, settings.blastdb.as_deref(), stdin, out, diag) {
+    match run_index(args, settings.database(), stdin, out, diag) {
         Ok(status) => status,
         Err(Failure::Ncbi(exception)) => {
             diag.write_text(&exception.report_default_ex(
@@ -214,7 +214,7 @@ fn fasta_file(name: &std::ffi::OsStr, titles: bool) -> Result<FastaStream<'stati
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/makeindex/mkindex_app.cpp:151-378
 fn run_index<'a>(
     args: &Args,
-    registry: Option<&[u8]>,
+    database: crate::blastinput::ncbi_environment::DatabaseSettings<'_>,
     stdin: &'a mut Cin<'_>,
     out: &mut dyn Write,
     diag: &mut Diag,
@@ -245,14 +245,14 @@ fn run_index<'a>(
             return Ok(1);
         };
         if args.flag("show_filters") {
-            let db = BlastDbStream::open(&input, Filter::None, registry, false)?;
+            let db = BlastDbStream::open(&input, Filter::None, database, false)?;
             let descriptions = db.descriptions()?;
             let _ = out.write_all(format!("{descriptions}\n").as_bytes());
             let _ = out.flush();
             return Ok(0);
         }
         if !old_style {
-            return new_style(args, &input, registry, &options, diag);
+            return new_style(args, &input, database, &options, diag);
         }
         let mask = args.bytes("db_mask");
         let filter = match &mask {
@@ -262,7 +262,7 @@ fn run_index<'a>(
         Box::new(BlastDbStream::open(
             &input,
             filter,
-            registry,
+            database,
             options.idmap,
         )?)
     };
@@ -282,21 +282,21 @@ fn run_index<'a>(
 fn new_style(
     args: &Args,
     input: &[u8],
-    registry: Option<&[u8]>,
+    database: crate::blastinput::ncbi_environment::DatabaseSettings<'_>,
     options: &Options,
     diag: &mut Diag,
 ) -> Result<i32, Failure> {
     if args.os_value("output").is_some() {
         warning(diag, "option 'output' is ignored for new style indices");
     }
-    let db_vols = BlastDbStream::open(input, Filter::None, registry, false)?.volume_paths(input)?;
+    let db_vols = BlastDbStream::open(input, Filter::None, database, false)?.volume_paths(input)?;
     let mask = args.bytes("db_mask");
     for dbv_name in &db_vols {
         let filter = match &mask {
             Some(name) => Filter::Name(name),
             None => Filter::None,
         };
-        let mut seqstream = BlastDbStream::open(dbv_name, filter, registry, options.idmap)?;
+        let mut seqstream = BlastDbStream::open(dbv_name, filter, database, options.idmap)?;
         let vol_num_seq = seqstream.num_oids();
         let (num_seq, num_vol) = make_volumes(&mut seqstream, dbv_name, options, diag)?;
         if num_seq != vol_num_seq {

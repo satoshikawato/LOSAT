@@ -308,6 +308,8 @@ fn slices_check<M: TbxScore>(sc: M, seed: u64) {
                 offset,
                 length: s_frame.aa_len - offset,
                 overlap: 0,
+                ncbi_length: (s_frame.aa_len - offset) as i32,
+                overlap_past_list: false,
             };
             for g in 0..pp.groups.len() {
                 if pp.groups[g].lookup.longest_chain <= 0 {

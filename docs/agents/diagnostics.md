@@ -5286,7 +5286,7 @@ Scheduling (each value computed by one thread with the original function; order 
   prolog (before the search, as before), the outfmt 0 epilog (fixed inputs) and outfmt 7's last line, which
   counts the queries of every batch (NCBI's `m_QueriesFormatted`; `write_output_blastn_hitlists_to_writer`
   takes the count). NCBI's errors of a later batch (reader errors, an `eEOF` batch, a batch of queries
-  without letters, `ErrorAfterInvalidBatches`, a header file that cannot be read) come after the reports of
+  without letters, `after_batch_reports`, a header file that cannot be read) come after the reports of
   the batches before in both paths. LOSAT's own refusals of a reported subject come before every report
   without the switch and, since 2026-11-03 (NCMEM1, drop-in DECISIONS 44), after the reports and query
   warnings of the batches before with it, with the same text and exit status: nothing is read before the
@@ -5314,11 +5314,12 @@ Scheduling (each value computed by one thread with the original function; order 
   writes would interleave: the Web adapter; the command line and ABI v1 are streamed), `debug` (`-verbose`,
   `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, `LOSAT_DEBUG_COORDS[_START]`, the blastn trace,
   `LOSAT_WASI_THREADS_DEBUG`: `run.rs` `x_debug_output`), `xml` (outfmt 5, 15 and 16), `scoring`
-  (no Karlin-Altschul values, or greedy gap costs LOSAT refuses), `chunk_size` (a negative `CHUNK_SIZE`),
+  (no Karlin-Altschul values, or greedy gap costs LOSAT refuses),
   `ungapped_cutoff` (`-ungapped` with a query of 2^30 letters or more) and `search_space`
   (`(db + n (2 q + 1)) (2 q + 1)` above 2^63 - 1, q the longest query: the overflow refusal of the
-  effective search space); the reasons `subject_ids`, `titles`, `joined`, `large_parsed`, `ambiguity` and
-  `taxonomy` are gone. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
+  effective search space); the reasons `subject_ids`, `titles`, `joined`, `large_parsed`, `ambiguity`,
+  `taxonomy` and `chunk_size` (a negative `CHUNK_SIZE`, whose refusals come after the reports of the batches
+  before in both paths since line RG item X-short-bat-2) are gone. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
   streamed too (since 2026-11-03, NCMEM1; before, `off=custom_tabular`). Outfmt 20's line of the field names
   comes with the first batch's
   report (or, where an error of NCBI's stops the first batch, from the call of the off path). With `LOSAT_TIMING` the `[TIMING]` blocks are printed
@@ -5364,7 +5365,7 @@ Scheduling (each value computed by one thread with the original function; order 
   and a subject set with a refused id that only they hit (the refusal after the rows of the batches before,
   which begin the rows of the same search not refused; the off bytes for queries that do not reach it);
   parsed Seq-id databases refused in the first or the third batch; custom tabular reports; and the
-  `search_space`, `scoring`, `chunk_size` and `debug` cases) and `LOSAT/tests/blastn_report_stream_api.rs` (`run_local` with hit
+  `search_space`, `scoring` and `debug` cases, and a negative `CHUNK_SIZE`, which streams) and `LOSAT/tests/blastn_report_stream_api.rs` (`run_local` with hit
   records and an observer, one and three formats: the formats, hits and observer ranges of one batch).
   Default ON since 2026-10-17 (perf/perfmb-default-bundle; workstation, perf-mb `logs/rptstream_report.md`,
   alternating rounds): blastn of 31,168 cDNAs against 3 Mb max RSS 502 -> 157 MiB at one thread (x1.006 wall), 638 ->

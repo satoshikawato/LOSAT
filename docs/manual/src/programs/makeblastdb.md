@@ -74,6 +74,8 @@ A mask finds its sequence by the same id as in NCBI BLAST+. Build with `-parse_s
 
 A mask file that is damaged stops with makeblastdb's own error and exit status. A text in it with a byte outside the visible ASCII range is stored with `#` in the byte's place, and the run reports it, as makeblastdb does.
 
+Locations nested inside each other (`mix` and `equiv`) are read at any depth. NCBI's makeblastdb crashes on nests of about 6,500 to 6,900 levels and more with the usual 8 MiB stack limit; LOSAT writes the database that it writes with no stack limit.
+
 ### GI-indexed masks
 
 `-gi_mask` writes the masks of each mask file into six files of their own instead of the mask column: `NAME.gmd` and `NAME.gnd` (the masked ranges), `NAME.gmo` and `NAME.gno` (the GIs of the masked sequences) and `NAME.gmi` and `NAME.gni` (their index). `NAME` is the mask file's entry of `-gi_mask_name`, or the mask file's name as you typed it; it is a path from the current directory, not from the database. The database gets an alias file (`.nal` or `.pal`) whose `MASKLIST` line names these files. Only sequences with a GI get masks: the masks of other sequences are left out without a message, and a mask file that reached no sequence with a GI writes no files and is left out of `MASKLIST`.

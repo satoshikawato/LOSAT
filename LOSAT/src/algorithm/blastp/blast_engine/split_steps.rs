@@ -7,7 +7,7 @@
 use anyhow::Result;
 
 use super::call_setup::{self, CallSetup};
-use super::database::{BlastpDatabase, HeaderReadError, PreliminaryReadError};
+use super::database::{BlastpDatabase, PreliminaryReadError};
 use super::{blastp_query_frames, pssm_hooks, BlastpSubjectSource, ResolvedBlastpArgs};
 use crate::algorithm::blastn::query_split::{ChunkQuery, SplitSizes};
 use crate::algorithm::blastp::encoding::EncodedProtein;
@@ -17,6 +17,7 @@ use crate::algorithm::blastp::protein_query_split::{
     SplitBatchSteps, UnmetChecks,
 };
 use crate::algorithm::tblastx::lookup::QueryContext;
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::blastinput::app::TRACEBACK_FAILED;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::query_batch::BatchSetUp;
@@ -98,8 +99,8 @@ pub(super) fn subjects_in_hand(subject_source: BlastpSubjectSource<'_>) -> bool 
 
 /// The form of a stop of the query batch whose first searched query is `query`: NCBI stops in the
 /// search of the batch after it has printed the reports of the batches before (blastp_app.cpp:
-/// 257-276, cited in `search`), BLASTP's batch failure (`database::HeaderReadError`; TBLASTN's and
-/// TBLASTX's are `blastinput::app::ErrorAfterBatchReports`). psiblast searches one query at a time
+/// 257-276, cited in `search`), the batch's failure (`ErrorAfterBatchReports::of_batch`, which
+/// names the batch for `search`). psiblast searches one query at a time
 /// and NCBI stops in the query's round 1 (it splits that round too), after the rounds of the
 /// queries before: every round of a query makes the same chunks, so a later round never reaches a
 /// stop, and the stop of the query's search is the plain error.
@@ -112,12 +113,7 @@ pub(super) fn batch_failure(
         error
     } else {
         // Before the batch's search: nothing of it read a header.
-        HeaderReadError {
-            query,
-            error,
-            utf8: None,
-        }
-        .into()
+        ErrorAfterBatchReports::of_batch(query, error).into()
     }
 }
 
@@ -346,7 +342,7 @@ fn call_steps(
         match reaches {
             // A stop of the chunks (in its form).
             Err(error)
-                if error.is::<HeaderReadError>()
+                if error.is::<ErrorAfterBatchReports>()
                     || (args.psi_search.is_some() && !error.is::<SetupText>()) =>
             {
                 return Ok(CallSteps::Fails(error))

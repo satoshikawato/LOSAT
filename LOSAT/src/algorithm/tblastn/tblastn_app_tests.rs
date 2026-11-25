@@ -30,9 +30,9 @@ fn a_read_failed_in_the_search_fails_as_the_check_s_error() {
 #[test]
 fn a_refusal_after_the_batches_reports_fails_the_batch() {
     let message = "TBLASTN: a refused step";
-    let refusal = batch_failure(anyhow::Error::new(ErrorAfterBatchReports(anyhow::anyhow!(
-        "{message}"
-    ))))
+    let refusal = batch_failure(anyhow::Error::new(ErrorAfterBatchReports::new(
+        anyhow::anyhow!("{message}"),
+    )))
     .expect("the batch's failure");
     assert!(!refusal.is::<ErrorAfterBatchReports>());
     assert!(refusal.downcast_ref::<crate::cli::NativeError>().is_none());
@@ -63,7 +63,7 @@ fn a_setup_count_of_zero_fails_the_batch_with_the_refusal() {
     let refusal = crate::algorithm::common::database::check_setup_count(100, 0, false, "TBLASTN")
         .expect_err("the refusal");
     let failed =
-        batch_failure(ErrorAfterBatchReports(refusal).into()).expect("the batch's failure");
+        batch_failure(ErrorAfterBatchReports::new(refusal).into()).expect("the batch's failure");
     assert!(failed.downcast_ref::<crate::cli::NativeError>().is_none());
     assert!(failed
         .to_string()

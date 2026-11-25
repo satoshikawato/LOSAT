@@ -247,7 +247,7 @@ pub(super) fn match_outcome<R: MatchRedo, T>(
 #[cold]
 #[inline(never)]
 pub(super) fn sw_ungapped_refusal() -> anyhow::Error {
-    ErrorAfterBatchReports(sw_ungapped_error("tblastn")).into()
+    ErrorAfterBatchReports::new(sw_ungapped_error("tblastn")).into()
 }
 
 /// The error of a query batch whose last redone match failed its Smith-Waterman redo: NCBI's
@@ -265,7 +265,7 @@ pub(super) fn sw_ungapped_refusal() -> anyhow::Error {
 #[cold]
 #[inline(never)]
 pub(super) fn sw_batch_failed(first_query_holds_match: bool) -> anyhow::Error {
-    ErrorAfterBatchReports(sw_batch_failed_error("tblastn", first_query_holds_match)).into()
+    ErrorAfterBatchReports::new(sw_batch_failed_error("tblastn", first_query_holds_match)).into()
 }
 
 /// LOSAT's refusal of a PSSM query's search (`-in_pssm`, the one query batch) whose
@@ -290,7 +290,7 @@ pub(super) fn sw_batch_failed(first_query_holds_match: bool) -> anyhow::Error {
 #[cold]
 #[inline(never)]
 pub(super) fn sw_pssm_refusal() -> anyhow::Error {
-    ErrorAfterBatchReports(anyhow::anyhow!(
+    ErrorAfterBatchReports::new(anyhow::anyhow!(
         "-use_sw_tback with -in_pssm on a search with hits, on which NCBI BLAST+ 2.17.0's tblastn fails, crashes, does not end or writes rows that differ from run to run, is not supported by LOSAT's TBLASTN"
     ))
     .into()
@@ -311,5 +311,5 @@ fn sw_endless(do_link_hsps: bool) -> anyhow::Error {
     } else {
         "the e-value of a score of 0 passes the threshold, a window of the match has several preliminary HSPs and the first query letter scores the window's first subject letter above 0"
     };
-    ErrorAfterBatchReports(sw_endless_error("tblastn", why)).into()
+    ErrorAfterBatchReports::new(sw_endless_error("tblastn", why)).into()
 }

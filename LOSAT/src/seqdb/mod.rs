@@ -60,7 +60,7 @@ pub mod tax_sqlite;
 pub mod taxdb;
 pub mod volume;
 
-pub use filter::{DbList, ListWarning, SeqidList, TaxidList};
+pub use filter::{DbList, GiList, ListWarning, PigList, SeqidList, TaxidList};
 pub(crate) use filter::{DbSequence, Oid, OidMap};
 
 #[cfg(test)]
@@ -1211,6 +1211,8 @@ pub struct SeqDb {
     positive_list: bool,
     /// `SeqDb::list_taxids`.
     list_taxids: Vec<i32>,
+    /// `SeqDb::list_gis`.
+    list_gis: Vec<i64>,
     /// `SeqDb::name_records`.
     name_records: Vec<NameRecord>,
     /// The LMDB files of a version 5 database for `SeqDb::seqid_lookup`, opened at its first use.
@@ -1450,12 +1452,21 @@ impl SeqDb {
     }
 
     /// The taxids of the search's list object after the volumes opened, ascending, which the
-    /// BLAST archive writes (`DbFilterArgs::archive_parameter`): of a positive list those the
+    /// BLAST archive writes (`DbFilterArgs::archive_parameters`): of a positive list those the
     /// database holds (`CSeqDBLMDBSet::TaxIdsToOids`, `tax_ids.swap` with `rv_tax_ids`), of a
     /// negative list all (`CSearchDatabase::x_InitializeDb` opens the database with a copy of
     /// it). Empty without a taxid list.
     pub fn list_taxids(&self) -> &[i32] {
         &self.list_taxids
+    }
+
+    /// The GIs of the search's list object after the volumes opened, which the BLAST archive and
+    /// search strategy write (`DbFilterArgs::archive_parameters`): sorted ascending (with
+    /// duplicates) for a positive `-gilist` (`InsureOrder` ran when the database opened), in file
+    /// order (with duplicates) for `-negative_gilist` (`CSearchDatabase::x_InitializeDb` opened
+    /// the database with a `CSeqDBIdSet` copy). Empty without a GI list or for a 0-GI file.
+    pub fn list_gis(&self) -> &[i64] {
+        &self.list_gis
     }
 
     /// The search path the database was opened with (`open_in`), none for a database opened
@@ -1792,6 +1803,7 @@ impl SeqDb {
             reports_show_gis: false,
             positive_list: false,
             list_taxids: Vec::new(),
+            list_gis: Vec::new(),
             name_records: Vec::new(),
             lookup_files: OnceLock::new(),
             lookup_isams: OnceLock::new(),
@@ -1861,7 +1873,7 @@ impl SeqDb {
         });
         let num_oids = self.num_oids();
         let scan = alias::needs_totals_scan(root);
-        let oids = match self.tree_oids(tree, None) {
+        let oids = match self.tree_oids(tree, alias::UserList::None, None) {
             Ok(oids) => oids,
             Err(failure) => {
                 self.oid_list_error = Some(failure);
@@ -1912,11 +1924,12 @@ impl SeqDb {
     }
 
     /// NCBI's OID list of the alias tree `tree` ([`alias::alias_oids`]) under the search's
-    /// list `user`.
+    /// Pass 1 positive list `user` and Pass 2 rule `user_rule`.
     fn tree_oids(
         &self,
         tree: &ListedTree,
-        user: Option<&filter::DeflineRule>,
+        user: alias::UserList<'_>,
+        user_rule: Option<&filter::DeflineRule>,
     ) -> Result<alias::AliasOids, oid_list::OidListError> {
         let volumes: Vec<alias::TreeVolume<'_>> = tree
             .names
@@ -1935,6 +1948,7 @@ impl SeqDb {
             self.seqtype,
             self.is_version5(),
             user,
+            user_rule,
             &|| self.lmdb_entries(),
         )
     }
@@ -1961,17 +1975,21 @@ impl SeqDb {
     // list's own resolution: the alias files' OID list is made again under the list. Its failure
     // is the constructor's (`build_oid_list`); the failure without the list stays the reports'
     // where their database scans the totals (`unlisted_oid_list_error`).
-    /// Makes the alias files' OID list again under the search's list `user` of a
-    /// database whose alias tree names id lists (`listed_tree`): the alias files' bits and
-    /// iteration range (`filter`), the volumes' id lists and the shape of NCBI's bit set, or the
-    /// failure (`oid_list_error`). Nothing changes for any other database.
-    fn translate_alias_lists(&mut self, user: Option<&filter::DeflineRule>) {
+    /// Makes the alias files' OID list again under the search's Pass 1 list `user` and Pass 2 rule
+    /// `user_rule` of a database whose alias tree names id lists (`listed_tree`): the alias files'
+    /// bits and iteration range (`filter`), the volumes' id lists and the shape of NCBI's bit set,
+    /// or the failure (`oid_list_error`). Nothing changes for any other database.
+    fn translate_alias_lists(
+        &mut self,
+        user: alias::UserList<'_>,
+        user_rule: Option<&filter::DeflineRule>,
+    ) {
         let Some(tree) = self.listed_tree.take() else {
             return;
         };
         let unlisted = self.oid_list_error.take();
         self.unlisted_oid_list_error = unlisted.filter(|_| self.oid_list_fails_scan);
-        match self.tree_oids(&tree, user) {
+        match self.tree_oids(&tree, user, user_rule) {
             Ok(oids) => {
                 let oids = self.set_tree_oids(oids);
                 if let Some(words) = oids.words {

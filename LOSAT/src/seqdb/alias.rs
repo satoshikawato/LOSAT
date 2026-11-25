@@ -1473,18 +1473,21 @@ pub(super) struct TreeVolume<'a> {
 
 /// The OIDs that the alias tree `root` includes and the shape of NCBI's bit set of them:
 /// `volumes` are the volumes in NCBI's order, of the sequence type `seqtype`, `version5` whether
-/// NCBI reads the database as version 5 (`IsBlastDBVersion5`), `user` the search's list as NCBI
-/// holds it ([`super::filter::DeflineRule`]), and `lmdb` the database's LMDB entries (opened only
-/// when version 5 Pass 2 reads a `SEQIDLIST` or `TAXIDLIST`). The OID list files and the id lists
-/// are read once each (`files`, [`ListSet`]), in NCBI's order ([`volume_set`], then Pass 2
-/// [`v5_list_filters`]): the first that fails is the error.
+/// NCBI reads the database as version 5 (`IsBlastDBVersion5`), `user` the search's positive list
+/// as Pass 1 (`CSeqDBGiListSet`) holds it ([`UserList`]), `user_rule` the search's list rule as
+/// Pass 2 reads its Seq-ids and taxids ([`super::filter::DeflineRule`]), and `lmdb` the database's
+/// LMDB entries (opened only when version 5 Pass 2 reads a `SEQIDLIST` or `TAXIDLIST`). The OID
+/// list files and the id lists are read once each (`files`, [`ListSet`]), in NCBI's order
+/// ([`volume_set`], then Pass 2 [`v5_list_filters`]): the first that fails is the error.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn alias_oids(
     root: &AliasNode,
     volumes: &[TreeVolume<'_>],
     num_oids: u32,
     seqtype: SeqType,
     version5: bool,
-    user: Option<&super::filter::DeflineRule>,
+    user: UserList<'_>,
+    user_rule: Option<&super::filter::DeflineRule>,
     lmdb: &dyn Fn() -> Result<Vec<super::filter::LmdbEntry>, SeqDbError>,
 ) -> Result<AliasOids, OidListError> {
     let mut words = has_filters(root).then(|| vec![0u64; (num_oids as usize).div_ceil(64)]);
@@ -1551,7 +1554,7 @@ pub(super) fn alias_oids(
                 volumes,
                 &v5_root_lists,
                 num_oids,
-                user,
+                user_rule,
                 lmdb,
                 words,
                 &mut vol_lists,
@@ -1571,7 +1574,7 @@ pub(super) fn alias_oids(
 /// What the walk of one volume ([`volume_set`]) reads and leaves: the OID list files read so far,
 /// the id lists, the volume's `OID_MASK_TYPE` and the id lists it attaches (indexes of
 /// `ListSet::loaded`).
-struct VolumeReach<'a, 'r, 'u> {
+struct VolumeReach<'a, 'u, 'r> {
     volume: &'r TreeVolume<'a>,
     files: &'r mut std::collections::HashMap<&'a [u8], OidListFile>,
     lists: &'r mut ListSet<'a, 'u>,
@@ -1586,43 +1589,96 @@ struct VolumeReach<'a, 'r, 'u> {
 // A list of ids needs the volume's ISAM of their kind (the volume's string ISAM for Seq-ids; the
 // volume opens an ISAM only where it has OIDs): without one NCBI throws `<GI|TI|SI> list
 // specified but no ISAM file found for <GI|TI|SI> in <volume>`. Whether the volumes translate
-// the list depends on the search's positive list (`DeflineRule`).
+// the list depends on the search's positive list (`UserList`).
 /// The id lists of the alias files as NCBI's `CSeqDBGiListSet` holds them for the OID list
 /// ([`volume_set`]).
 struct ListSet<'a, 'u> {
     seqtype: SeqType,
     version5: bool,
-    user: Option<&'u super::filter::DeflineRule>,
+    user: UserList<'u>,
     loaded: Vec<LoadedList<'a>>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:417-423
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:447-461
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:472-480
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:472-526
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:588-592
-// With a positive list, `GetNodeIdList` translates the gis and tis of an alias file's list from
-// it at the list's first use (`x_TranslateFromUserList`), which begins by putting the list in
-// order (`InsureOrder`, `ListIds::insure_order`): a list of Seq-ids is then sorted by its ids as
-// the file gives them, before any simplification. LOSAT's positive lists hold no gi and no ti, so
-// that translation finds nothing. The volumes then translate the list (`mixed_ids`) where the
-// positive list holds Seq-ids or taxids, and not at all where it holds none: a version 5
-// database's `-seqidlist` whose every id is a gi (`s_ProcessSeqIDsForV5` drops them,
-// seqdbgilistset.cpp:148-180) leaves the list's OIDs unset and its ISAMs unread.
-/// Whether `user` is a positive list in Pass 1 (`m_UserList` non-empty).
-fn is_positive_user(user: Option<&super::filter::DeflineRule>) -> bool {
-    matches!(
-        user,
-        Some(super::filter::DeflineRule::Seqids(_) | super::filter::DeflineRule::Taxids(_))
-    )
+// With any positive user list, `GetNodeIdList` runs `x_TranslateFromUserList` at the list's first
+// use, which starts by putting the list in order (`InsureOrder`, `ListIds::insure_order`): a list
+// of Seq-ids is then sorted by its ids as the file gives them, before any simplification. For a
+// positive GI list, matching GIs of an alias `GILIST` take their OIDs directly from the user
+// list (`x_TranslateGisFromUserList`). The volumes then translate the list (`mixed_ids`) only
+// when the user list holds Seq-ids or taxids, or when one holds GIs and the other TIs: a positive
+// GI list does not translate an alias `GILIST` or v4 `SEQIDLIST` through the volumes' ISAMs, a
+// positive IPG list translates none, and a version 5 database's `-seqidlist` whose every id is a
+// gi (`s_ProcessSeqIDsForV5` drops them, seqdbgilistset.cpp:148-180) leaves every list's OIDs
+// unset and its ISAMs unread.
+/// What NCBI's `CSeqDBGiListSet` holds of the search's positive list (`m_UserList`) when it reads
+/// the alias files' id lists ([`alias_oids`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum UserList<'a> {
+    /// No positive list: the database opened without a list, or with a negative one.
+    None,
+    /// A positive list (`-seqidlist`, `-taxids`, `-taxidlist`) of `ids` Seq-ids and taxids, as
+    /// NCBI counts them after its processing of the list.
+    Positive { ids: usize },
+    /// A positive GI list (`-gilist`): its sorted GIs with their resolved OIDs.
+    PositiveGis(&'a [super::isam_num::NumOid]),
+    /// A positive IPG list (`-ipglist`): holds PIGs alone (`GetNumGis`, `GetNumTis`, `GetNumSis`
+    /// and `GetNumTaxIds` are all 0).
+    PositivePigs,
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:417-423,447-461
-/// Whether Pass 1 volumes translate an alias file's list (`m_UserList` empty or `mixed_ids` set).
-fn user_translates_pass1(user: Option<&super::filter::DeflineRule>) -> bool {
-    match user {
-        Some(super::filter::DeflineRule::Seqids(ids)) => !ids.is_empty(),
-        Some(super::filter::DeflineRule::Taxids(found)) => !found.is_empty(),
-        _ => true,
+impl UserList<'_> {
+    /// Whether the volumes translate an alias file's list (`m_UserList` empty or `mixed_ids` set).
+    fn translates(self, list: &ListIds) -> bool {
+        match self {
+            UserList::None => true,
+            UserList::Positive { ids } => ids > 0,
+            UserList::PositiveGis(gis) => !gis.is_empty() && matches!(list, ListIds::Ti(_)),
+            UserList::PositivePigs => false,
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:474-526
+/// `x_TranslateGisFromUserList`: copies resolved OIDs from the sorted positive user GI list
+/// `source` into matching unset entries of the sorted alias GI list `target`.
+fn translate_gis_from_user_list(
+    source: &[super::isam_num::NumOid],
+    target: &mut [super::isam_num::NumOid],
+) {
+    let source_num = source.len();
+    let target_num = target.len();
+    let (mut source_index, mut target_index) = (0usize, 0usize);
+    while source_index < source_num && target_index < target_num {
+        let source_gi = source[source_index].key;
+        let target_gi = target[target_index].key;
+        if source_gi == target_gi {
+            if target[target_index].oid.is_none() {
+                target[target_index].oid = source[source_index].oid;
+            }
+            target_index += 1;
+            source_index += 1;
+        } else if source_gi > target_gi {
+            target_index += 1;
+            let mut jump = 2;
+            let mut test = target_index + jump;
+            while test < target_num && target[test].key < source_gi {
+                target_index = test;
+                jump *= 2;
+                test = target_index + jump;
+            }
+        } else {
+            source_index += 1;
+            let mut jump = 2;
+            let mut test = source_index + jump;
+            while test < source_num && source[test].key < target_gi {
+                source_index = test;
+                jump *= 2;
+                test = source_index + jump;
+            }
+        }
     }
 }
 
@@ -1761,8 +1817,11 @@ impl<'a> ListSet<'a, '_> {
             }
             IdListKind::TaxId => unreachable!("no pass of a version 4 database reads TAXIDLIST"),
         };
-        if is_positive_user(self.user) {
+        if !matches!(self.user, UserList::None) {
             ids.insure_order();
+            if let (UserList::PositiveGis(source), ListIds::Gi(target)) = (self.user, &mut ids) {
+                translate_gis_from_user_list(source, target);
+            }
         }
         self.loaded.push(LoadedList {
             kind,
@@ -1812,7 +1871,7 @@ impl<'a> ListSet<'a, '_> {
             end: u64::from(volume.end),
         };
         let list = &mut self.loaded[at];
-        if !user_translates_pass1(self.user) || list.count == 0 {
+        if list.count == 0 {
             return Ok(frame.clear_words());
         }
         let bits_of = |oids: &mut dyn Iterator<Item = Option<u32>>| {
@@ -1825,6 +1884,12 @@ impl<'a> ListSet<'a, '_> {
             }
             bits
         };
+        if !self.user.translates(&list.ids) {
+            return Ok(match &list.ids {
+                ListIds::Gi(gis) => bits_of(&mut gis.iter().map(|gi| gi.oid)),
+                ListIds::Ti(_) | ListIds::Si { .. } => frame.clear_words(),
+            });
+        }
         let base = &*path_of_bytes(volume.name);
         match &mut list.ids {
             ListIds::Gi(_) | ListIds::Ti(_) => {
@@ -2500,7 +2565,17 @@ fn process_seqid_filters(
     }
     let mut user_accs = match user {
         Some(super::filter::DeflineRule::Seqids(ids)) if !ids.is_empty() => ids.clone(),
-        _ => Vec::new(),
+        Some(
+            super::filter::DeflineRule::Seqids(_)
+            | super::filter::DeflineRule::NegativeSeqids(_)
+            | super::filter::DeflineRule::Taxids(_)
+            | super::filter::DeflineRule::NegativeTaxids(_)
+            | super::filter::DeflineRule::Gis(_)
+            | super::filter::DeflineRule::NegativeGis(_)
+            | super::filter::DeflineRule::Pigs
+            | super::filter::DeflineRule::NegativePigs,
+        )
+        | None => Vec::new(),
     };
     if !user_accs.is_empty() {
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:592
@@ -2511,7 +2586,17 @@ fn process_seqid_filters(
     }
     let neg_user_accs: &[Vec<u8>] = match user {
         Some(super::filter::DeflineRule::NegativeSeqids(ids)) if !ids.is_empty() => ids.as_slice(),
-        _ => &[],
+        Some(
+            super::filter::DeflineRule::NegativeSeqids(_)
+            | super::filter::DeflineRule::Seqids(_)
+            | super::filter::DeflineRule::Taxids(_)
+            | super::filter::DeflineRule::NegativeTaxids(_)
+            | super::filter::DeflineRule::Gis(_)
+            | super::filter::DeflineRule::NegativeGis(_)
+            | super::filter::DeflineRule::Pigs
+            | super::filter::DeflineRule::NegativePigs,
+        )
+        | None => &[],
     };
     for (fname, vols) in fnames.iter().zip(fnames_vols) {
         let file = {
@@ -2611,11 +2696,31 @@ fn process_taxid_filters(
     }
     let user_taxids = match user {
         Some(super::filter::DeflineRule::Taxids(found)) if !found.is_empty() => Some(found),
-        _ => None,
+        Some(
+            super::filter::DeflineRule::Taxids(_)
+            | super::filter::DeflineRule::NegativeTaxids(_)
+            | super::filter::DeflineRule::Seqids(_)
+            | super::filter::DeflineRule::NegativeSeqids(_)
+            | super::filter::DeflineRule::Gis(_)
+            | super::filter::DeflineRule::NegativeGis(_)
+            | super::filter::DeflineRule::Pigs
+            | super::filter::DeflineRule::NegativePigs,
+        )
+        | None => None,
     };
     let neg_user_taxids = match user {
         Some(super::filter::DeflineRule::NegativeTaxids(found)) if !found.is_empty() => Some(found),
-        _ => None,
+        Some(
+            super::filter::DeflineRule::NegativeTaxids(_)
+            | super::filter::DeflineRule::Taxids(_)
+            | super::filter::DeflineRule::Seqids(_)
+            | super::filter::DeflineRule::NegativeSeqids(_)
+            | super::filter::DeflineRule::Gis(_)
+            | super::filter::DeflineRule::NegativeGis(_)
+            | super::filter::DeflineRule::Pigs
+            | super::filter::DeflineRule::NegativePigs,
+        )
+        | None => None,
     };
     for (fname, vols) in fnames.iter().zip(fnames_vols) {
         let bytes = super::seqidlist::read_memory_file(fname).map_err(OidListError::reader)?;

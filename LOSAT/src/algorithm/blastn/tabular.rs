@@ -357,9 +357,9 @@ fn tabular_hsp<'r>(
         // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:288-297
         // A BLASTN alignment (X-drop or greedy) starts and ends with a substitution, so its rows
         // have no end gaps: a `-` at a row's end fills a segment past the query's end (an HSP that
-        // NCBI keeps outside its query context, `pairwise::context_letters`), the gap character.
-        end_gaps: false,
-        stored_gaps: [&[], &[]],
+        // NCBI keeps outside its query context, `pairwise::context_letters`), the gap character
+        // (`TabularHsp::ops`: no script).
+        ops: &[],
         qcovhsp,
     }
 }

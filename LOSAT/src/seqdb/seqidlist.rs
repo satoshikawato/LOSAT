@@ -55,6 +55,54 @@ pub struct SeqidListFile {
     pub info: SeqidListInfo,
 }
 
+/// Output sink for [`read_binary_into`], [`read_memory_si_list_into`], and [`read_si_list_into`].
+trait SeqIdSink {
+    fn reserve_ids(&mut self, approx_bytes: usize, approx_ids: usize);
+    fn push_id(&mut self, id: &[u8]);
+}
+
+impl SeqIdSink for Vec<Vec<u8>> {
+    fn reserve_ids(&mut self, _approx_bytes: usize, approx_ids: usize) {
+        self.reserve(approx_ids);
+    }
+
+    fn push_id(&mut self, id: &[u8]) {
+        self.push(id.to_vec());
+    }
+}
+
+/// Contiguous [`super::id_list::PackedStrings`] builder implementing [`SeqIdSink`].
+struct PackedSink {
+    data: Vec<u8>,
+    spans: Vec<(usize, usize)>,
+}
+
+impl PackedSink {
+    fn new() -> Self {
+        Self {
+            data: Vec::new(),
+            spans: Vec::new(),
+        }
+    }
+
+    fn finish(self) -> super::id_list::PackedStrings {
+        super::id_list::PackedStrings::from_parts(self.data, self.spans)
+    }
+}
+
+impl SeqIdSink for PackedSink {
+    fn reserve_ids(&mut self, approx_bytes: usize, approx_ids: usize) {
+        self.data.reserve(approx_bytes);
+        self.spans.reserve(approx_ids);
+    }
+
+    fn push_id(&mut self, id: &[u8]) {
+        let start = self.data.len();
+        self.data.extend_from_slice(id);
+        self.spans.push((start, self.data.len()));
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:58-85
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:87-108
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:111-120
@@ -62,26 +110,32 @@ pub struct SeqidListFile {
 // error. NCBI reads the header and the ids from the map without bounds; a header or an id
 // cut off by the end of the file reads memory past it. LOSAT gives the second error for such
 // a file instead.
-/// The header of a binary list and its ids: `Ok(None)` for a file that is not binary (its
-/// first byte is not NUL), `Err` with NCBI's message for a damaged one.
-fn read_binary(bytes: &[u8]) -> Result<Option<(SeqidListInfo, Vec<Vec<u8>>)>, String> {
+/// Reads the header and ids of a binary list into `out`: `Ok(None)` for a file that is not binary
+/// (its first byte is not NUL), `Err` with NCBI's message for a damaged one.
+fn read_binary_into<S: SeqIdSink>(
+    bytes: &[u8],
+    out: &mut S,
+) -> Result<Option<SeqidListInfo>, String> {
     let Some((info, mut cursor)) = read_header(bytes)? else {
         return Ok(None);
     };
-    let mut ids = Vec::with_capacity(usize::try_from(info.num_ids).unwrap_or(0).min(1 << 20));
-    while cursor.at < bytes.len() && (ids.len() as u64) < info.num_ids {
+    let approx_ids = usize::try_from(info.num_ids).unwrap_or(0).min(1 << 20);
+    out.reserve_ids(bytes.len().saturating_sub(cursor.at), approx_ids);
+    let mut count = 0u64;
+    while cursor.at < bytes.len() && count < info.num_ids {
         let id_len = cursor.u8().ok_or(INVALID)?;
         let len = if id_len == LONG_ID {
             cursor.u32().ok_or(INVALID)? as usize
         } else {
             usize::from(id_len)
         };
-        ids.push(cursor.take(len).ok_or(INVALID)?.to_vec());
+        out.push_id(cursor.take(len).ok_or(INVALID)?);
+        count += 1;
     }
-    if ids.len() as u64 != info.num_ids {
+    if count != info.num_ids {
         return Err("Invalid total num of ids in seqidlist file".to_string());
     }
-    Ok(Some((info, ids)))
+    Ok(Some(info))
 }
 
 /// NCBI's message of a binary list whose header is damaged.
@@ -309,9 +363,9 @@ impl<'a> Cursor<'a> {
 // A token holds no space, tab, line feed or carriage return, so `TruncateSpaces` (which
 // trims `isspace`: also form feed and vertical tab) can empty it only when it is made of
 // those two characters; such a token is reported and dropped.
-/// The tokens of a text list.
-pub(super) fn read_memory_si_list(bytes: &[u8], warnings: &mut Vec<String>) -> Vec<Vec<u8>> {
-    let mut sis = Vec::with_capacity(bytes.len() / 7);
+/// Reads the tokens of a text list into `out`.
+fn read_memory_si_list_into<S: SeqIdSink>(bytes: &[u8], warnings: &mut Vec<String>, out: &mut S) {
+    out.reserve_ids(bytes.len(), bytes.len() / 7);
     let mut p = 0;
     while p < bytes.len() {
         while p < bytes.len() && matches!(bytes[p], b'>' | b' ' | b'\t' | b'\n' | b'\r') {
@@ -331,7 +385,7 @@ pub(super) fn read_memory_si_list(bytes: &[u8], warnings: &mut Vec<String>) -> V
             let acc = &bytes[head..p];
             let str_id = crate::ncbi_str::truncate_spaces(acc);
             if !str_id.is_empty() {
-                sis.push(str_id.to_vec());
+                out.push_id(str_id);
             } else {
                 warnings.push(format!(
                     "WARNING:  {} is not a valid seqid string.",
@@ -340,6 +394,12 @@ pub(super) fn read_memory_si_list(bytes: &[u8], warnings: &mut Vec<String>) -> V
             }
         }
     }
+}
+
+/// The tokens of a text list.
+pub(super) fn read_memory_si_list(bytes: &[u8], warnings: &mut Vec<String>) -> Vec<Vec<u8>> {
+    let mut sis = Vec::new();
+    read_memory_si_list_into(bytes, warnings, &mut sis);
     sis
 }
 
@@ -351,116 +411,50 @@ pub(super) struct PackedSeqidListFile {
     pub info: SeqidListInfo,
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:87-120
-fn read_binary_packed(
-    bytes: &[u8],
-) -> Result<Option<(SeqidListInfo, super::id_list::PackedStrings)>, String> {
-    let Some((info, mut cursor)) = read_header(bytes)? else {
-        return Ok(None);
-    };
-    let mut data = Vec::with_capacity(bytes.len().saturating_sub(cursor.at));
-    let mut spans = Vec::with_capacity(usize::try_from(info.num_ids).unwrap_or(0).min(1 << 20));
-    while cursor.at < bytes.len() && (spans.len() as u64) < info.num_ids {
-        let id_len = cursor.u8().ok_or(INVALID)?;
-        let len = if id_len == LONG_ID {
-            cursor.u32().ok_or(INVALID)? as usize
-        } else {
-            usize::from(id_len)
-        };
-        let piece = cursor.take(len).ok_or(INVALID)?;
-        let start = data.len();
-        data.extend_from_slice(piece);
-        spans.push((start, data.len()));
-    }
-    if spans.len() as u64 != info.num_ids {
-        return Err("Invalid total num of ids in seqidlist file".to_string());
-    }
-    Ok(Some((
-        info,
-        super::id_list::PackedStrings::from_parts(data, spans),
-    )))
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1284-1322
-fn read_memory_si_list_packed(
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1476-1491
+// A binary list of no ids (`GetSeqidlist` returns 0) is read again as text: its header
+// bytes become tokens. The header of a text file is the default (`is_v4`).
+/// Single reader for both binary and text seqid lists, writing ids into `out`.
+fn read_si_list_into<S: SeqIdSink>(
     bytes: &[u8],
     warnings: &mut Vec<String>,
-) -> super::id_list::PackedStrings {
-    let mut data = Vec::with_capacity(bytes.len());
-    let mut spans = Vec::new();
-    let mut p = 0;
-    while p < bytes.len() {
-        while p < bytes.len() && matches!(bytes[p], b'>' | b' ' | b'\t' | b'\n' | b'\r') {
-            p += 1;
-        }
-        if p < bytes.len() && bytes[p] == b'#' {
-            while p < bytes.len() && bytes[p] != b'\n' {
-                p += 1;
-            }
-            continue;
-        }
-        let head = p;
-        while p < bytes.len() && !matches!(bytes[p], b' ' | b'\t' | b'\n' | b'\r') {
-            p += 1;
-        }
-        if p > head {
-            let acc = &bytes[head..p];
-            let str_id = crate::ncbi_str::truncate_spaces(acc);
-            if !str_id.is_empty() {
-                let start = data.len();
-                data.extend_from_slice(str_id);
-                spans.push((start, data.len()));
-            } else {
-                warnings.push(format!(
-                    "WARNING:  {} is not a valid seqid string.",
-                    String::from_utf8_lossy(acc)
-                ));
-            }
+    out: &mut S,
+) -> Result<SeqidListInfo, String> {
+    if bytes.is_empty() {
+        return Err("Failed to map seqidlist file ".to_string());
+    }
+    if let Some(info) = read_binary_into(bytes, out)? {
+        if info.num_ids > 0 {
+            return Ok(info);
         }
     }
-    super::id_list::PackedStrings::from_parts(data, spans)
+    read_memory_si_list_into(bytes, warnings, out);
+    Ok(SeqidListInfo::default())
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1476-1491
-/// Reads a seqid list file's bytes into compact [`PackedStrings`] storage, matching
-/// [`read_si_list`] for both binary and text lists.
+/// Reads a seqid list file's bytes into compact [`super::id_list::PackedStrings`] storage,
+/// matching [`read_si_list`] for both binary and text lists.
 pub(super) fn read_si_list_packed(
     bytes: &[u8],
     warnings: &mut Vec<String>,
 ) -> Result<PackedSeqidListFile, String> {
-    if bytes.is_empty() {
-        return Err("Failed to map seqidlist file ".to_string());
-    }
-    if let Some((info, ids)) = read_binary_packed(bytes)? {
-        if info.num_ids > 0 {
-            return Ok(PackedSeqidListFile { ids, info });
-        }
-    }
+    let mut sink = PackedSink::new();
+    let info = read_si_list_into(bytes, warnings, &mut sink)?;
     Ok(PackedSeqidListFile {
-        ids: read_memory_si_list_packed(bytes, warnings),
-        info: SeqidListInfo::default(),
+        ids: sink.finish(),
+        info,
     })
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1476-1491
-// A binary list of no ids (`GetSeqidlist` returns 0) is read again as text: its header
-// bytes become tokens. The header of a text file is the default (`is_v4`).
 /// Reads a seqid list file's bytes: a binary list, else a text list. `Err`: NCBI's
 /// `CSeqDBException` text (`BLAST Database error: ...`, exit status 2). The lines NCBI
 /// writes to `cerr` for tokens it drops are pushed to `warnings`.
 pub fn read_si_list(bytes: &[u8], warnings: &mut Vec<String>) -> Result<SeqidListFile, String> {
-    if bytes.is_empty() {
-        return Err("Failed to map seqidlist file ".to_string());
-    }
-    if let Some((info, ids)) = read_binary(bytes)? {
-        if info.num_ids > 0 {
-            return Ok(SeqidListFile { ids, info });
-        }
-    }
-    Ok(SeqidListFile {
-        ids: read_memory_si_list(bytes, warnings),
-        info: SeqidListInfo::default(),
-    })
+    let mut ids = Vec::new();
+    let info = read_si_list_into(bytes, warnings, &mut ids)?;
+    Ok(SeqidListFile { ids, info })
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:148-181

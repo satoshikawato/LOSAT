@@ -1,0 +1,18 @@
+Writing messages to <stdout> at verbosity (Minutiae)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Using `full' mode: every OID will be tested.
+
+Testing 1 volume(s).
+ <RUN>/cases/d_p4_no_psq/p4
+  <RUN>/cases/d_p4_no_psq/p4 / Stride: <testing every 1th OID>
+  <RUN>/cases/d_p4_no_psq/p4 / Stride:     Failed during sequence, oid 0: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objtools/blast/seqdb_reader/seqdbfile.cpp", line 128: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::CSeqDBExtFile::CSeqDBExtFile() - Error: File (<RUN>/cases/d_p4_no_psq/p4.psq) not found.
+
+  <RUN>/cases/d_p4_no_psq/p4 / Stride:       Status for OID 0: FAIL
+ Result=FAILURE. 1 errors reported in 1 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 1

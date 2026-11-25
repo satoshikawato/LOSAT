@@ -6285,6 +6285,16 @@ impl TaxdbRun {
         }
     }
 
+    /// [`TaxdbRun::sequential`] of one `CSeqDB` of a program that opens several, each with its
+    /// volumes' caches, while the taxonomy database `taxdb` is the process's (NCBI's static
+    /// `CTaxDBFileInfo`): blastdbcheck opens each volume as a database of its own. The texts of
+    /// opening `taxdb` come with the first lookup of any of them.
+    pub(crate) fn sequential_with(taxdb: std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>) -> Self {
+        let run = Self::sequential();
+        let _ = run.lazy.set(taxdb);
+        run
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1462-1466
     // `GetBioseq` makes the sources of a Bioseq it gives (one with definition lines and, with its
     // data, letters) through `x_GetTaxonomy` (cited at `SlotHolds::walk`), whose `GetTaxNames`

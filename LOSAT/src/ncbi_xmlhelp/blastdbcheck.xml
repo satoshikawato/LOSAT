@@ -1,0 +1,137 @@
+<?xml version="1.0"?>
+<ncbi_application xmlns="ncbi:application"
+ xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+ xs:schemaLocation="ncbi:application ncbi_application.xsd"
+>
+<program type="regular">
+<name>blastdbcheck</name>
+<version>2.17.0</version>
+<description>BLAST database integrity and validity checking application</description>
+<detailed_description></detailed_description>
+</program>
+<arguments>
+<key name="db" type="String" optional="true">
+<description>Specify a database name.</description>
+<group>1</group>
+<synopsis>DbName</synopsis>
+</key>
+<key name="dbtype" type="String" optional="true">
+<description>Molecule type of database</description>
+<group>1</group>
+<synopsis>molecule_type</synopsis>
+<constraint>
+<description>`guess&apos;, `nucl&apos;, `prot&apos;</description>
+<Strings case_sensitive="true">
+<value>guess</value>
+<value>nucl</value>
+<value>prot</value>
+</Strings>
+</constraint>
+<default>guess</default>
+</key>
+<key name="dir" type="String" optional="true">
+<description>Specify a directory containing one or more databases.</description>
+<group>1</group>
+<synopsis>DirName</synopsis>
+</key>
+<key name="ends" type="Integer" optional="true">
+<description>Check this many sequences at each end of the database.</description>
+<group>3</group>
+<synopsis>NumSequences</synopsis>
+</key>
+<key name="random" type="Integer" optional="true">
+<description>Check this many randomly selected sequences.</description>
+<group>3</group>
+<synopsis>NumSequences</synopsis>
+</key>
+<key name="stride" type="Integer" optional="true">
+<description>Check integrity of every Nth sequence.</description>
+<group>3</group>
+<synopsis>StrideLength</synopsis>
+</key>
+<key name="verbosity" type="Integer" optional="true">
+<description>0=Quiet, 1=Brief, 2=Summary, 3=Detailed, 4=Minutiae</description>
+<group>2</group>
+<synopsis>DefaultKey</synopsis>
+<constraint>
+<description>(&gt;=0 and =&lt;4)</description>
+</constraint>
+<default>2</default>
+</key>
+<flag name="cdd_delta" optional="true">
+<description>Do aditional tests for a CDD database for DELTA-BLAST</description>
+<group>3</group>
+</flag>
+<flag name="full" optional="true">
+<description>If true, test every sequence (warning: may be slow).</description>
+<group>3</group>
+</flag>
+<flag name="h" optional="true">
+<description>Print USAGE and DESCRIPTION;  ignore all other parameters</description>
+</flag>
+<flag name="help" optional="true">
+<description>Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters</description>
+</flag>
+<flag name="legacy" optional="true">
+<description>Enable check for existence of temporary files.</description>
+<group>3</group>
+</flag>
+<flag name="must_have_taxids" optional="true">
+<description>Require that all sequences in the database have taxid set.</description>
+<group>3</group>
+</flag>
+<flag name="no_isam" optional="true">
+<description>Disable ISAM testing.</description>
+<group>3</group>
+</flag>
+<flag name="recursive" optional="true">
+<description>Specify true to recurse through all dbs in directory tree.</description>
+<group>1</group>
+</flag>
+<flag name="version" optional="true">
+<description>Print version number;  ignore other arguments</description>
+</flag>
+<dependencies>
+<first_excludes_second>
+<arg1>db</arg1>
+<arg2>dir</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>db</arg1>
+<arg2>recursive</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>dir</arg1>
+<arg2>db</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>ends</arg1>
+<arg2>full</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>full</arg1>
+<arg2>stride</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>full</arg1>
+<arg2>random</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>full</arg1>
+<arg2>ends</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>random</arg1>
+<arg2>full</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>recursive</arg1>
+<arg2>db</arg2>
+</first_excludes_second>
+<first_excludes_second>
+<arg1>stride</arg1>
+<arg2>full</arg2>
+</first_excludes_second>
+</dependencies>
+</arguments>
+</ncbi_application>

@@ -875,11 +875,54 @@ fn affine_greedy_handles_gap_costs_above_32767_and_up_to_int_max() {
         (0, 600, 0, 601, expected_score)
     );
     let ops = with_tb.edit_script.expect("traceback edit script");
+    let ops_vec: Vec<(GapAlignOpType, i32)> = ops.op_type[..ops.size]
+        .iter()
+        .copied()
+        .zip(ops.num[..ops.size].iter().copied())
+        .collect();
     assert!(
-        ops.op_type[..ops.size].contains(&GapAlignOpType::Ins)
-            && ops.op_type[..ops.size].contains(&GapAlignOpType::Del),
-        "expected both Ins and Del in high-GCD gapped alignment: {:?}",
-        &ops.op_type[..ops.size]
+        ops_vec.iter().any(|&(op, _)| op == GapAlignOpType::Ins)
+            && ops_vec.iter().any(|&(op, _)| op == GapAlignOpType::Del),
+        "expected both Ins and Del in high-GCD gapped alignment: {ops_vec:?}"
+    );
+    // Exact 1/1000 scaled scoring runs through the dense kernel and must yield the exact same
+    // extents, seed, and edit script (with score * 1000).
+    let mut dense_ref_scratch = GreedyAlignScratch::new();
+    let dense_ref = run(
+        (1, -2, 40, 2),
+        100,
+        (300, 299),
+        &mut dense_ref_scratch,
+        true,
+    );
+    assert!(dense_ref_scratch.sparse_mem.is_none());
+    let dense_ops = dense_ref.edit_script.expect("dense traceback edit script");
+    let dense_ops_vec: Vec<(GapAlignOpType, i32)> = dense_ops.op_type[..dense_ops.size]
+        .iter()
+        .copied()
+        .zip(dense_ops.num[..dense_ops.size].iter().copied())
+        .collect();
+    assert_eq!(
+        (
+            with_tb.q_start,
+            with_tb.q_end,
+            with_tb.s_start,
+            with_tb.s_end,
+            with_tb.q_seed_start,
+            with_tb.s_seed_start,
+            with_tb.score,
+            ops_vec,
+        ),
+        (
+            dense_ref.q_start,
+            dense_ref.q_end,
+            dense_ref.s_start,
+            dense_ref.s_end,
+            dense_ref.q_seed_start,
+            dense_ref.s_seed_start,
+            dense_ref.score * 1000,
+            dense_ops_vec,
+        )
     );
 
     // Dense 32-bit overflow guard: gap costs <= 32767 with huge max_dist or x_drop
@@ -901,6 +944,34 @@ fn affine_greedy_handles_gap_costs_above_32767_and_up_to_int_max() {
         32_767,
         32_767
     ));
+    // `d * score_common_factor` boundary: for 1000/-2000 10000/20000, scf = 500 and reduced
+    // gap_extend = 41, so smd = 4_294_955 fits i32 while smd * 500 crosses i32::MAX between
+    // max_dist = 104_755 (2_147_477_500) and 104_756 (2_147_498_000).
+    assert!(!greedy_sparse::dense_affine_overflows(
+        104_755, 54, 1000, 2000, 10_000, 20_000
+    ));
+    assert!(greedy_sparse::dense_affine_overflows(
+        104_756, 54, 1000, 2000, 10_000, 20_000
+    ));
+    // Odd-reward wrapping_mul(2) turns x_drop < -2^30 into a large positive xdrop_offset;
+    // the entry pre-filter must not skip `dense_affine_overflows` for such values.
+    assert!(greedy_sparse::dense_affine_overflows(
+        1000,
+        -1_100_000_000,
+        1,
+        2,
+        32_767,
+        32_767
+    ));
+    let mut neg_xdrop_scratch = GreedyAlignScratch::new();
+    let _ = run(
+        (1, -2, 32_767, 32_767),
+        -1_100_000_000,
+        (120, 120),
+        &mut neg_xdrop_scratch,
+        false,
+    );
+    assert!(neg_xdrop_scratch.sparse_mem.is_some());
 }
 
 #[test]
@@ -1044,5 +1115,348 @@ fn sparse_affine_greedy_matches_dense_across_ordinary_gap_costs() {
                 }
             }
         }
+    }
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2762-2936
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:755-1249
+/// End-to-end differential comparison of `greedy_gapped_alignment_internal` (dense path) against
+/// `greedy_gapped_alignment_sparse` across plain, scaled, and odd-reward scorings and large gap
+/// costs up to 32767, verifying score, extents, seed, and full edit script in both modes.
+#[test]
+fn greedy_gapped_alignment_internal_matches_sparse_across_large_costs() {
+    type CoreOut = (
+        i32,
+        i32,
+        i32,
+        i32,
+        i32,
+        i32,
+        i32,
+        Option<Vec<(GapAlignOpType, i32)>>,
+    );
+    fn snapshot(core: GreedyGappedCore) -> CoreOut {
+        let ops = core.edit_script.map(|es| {
+            es.op_type[..es.size]
+                .iter()
+                .copied()
+                .zip(es.num[..es.size].iter().copied())
+                .collect()
+        });
+        (
+            core.q_start,
+            core.q_end,
+            core.s_start,
+            core.s_end,
+            core.q_seed_start,
+            core.s_seed_start,
+            core.score,
+            ops,
+        )
+    }
+
+    let mut rng = TestRng(0xD1FF_5A17_9001_CAFE);
+    let gap_opens = [0, 1_000, 20_000, 32_767];
+    let gap_extends = [1, 2, 1_000, 32_767];
+    let scorings = [
+        // (reward, penalty, base_xdrop)
+        (1, -2, 30),
+        (3, -4, 90),
+        (1_000, -2_000, 45_000),
+        (1_001, -2_001, 45_000),
+        (20_000, -20_000, 180_000),
+    ];
+
+    let mut total_cases = 0usize;
+    let mut gapped_cases = 0usize;
+
+    for &(reward, penalty, base_xdrop) in &scorings {
+        for &gap_open in &gap_opens {
+            for &gap_extend in &gap_extends {
+                // Keep dense table allocation modest when unreduced gap_extend is near 32767.
+                let pair_len = if gap_extend >= 20_000 { 64 } else { 180 };
+                let x_drop = if reward >= 20_000 {
+                    base_xdrop
+                } else if reward >= 1_000 && gap_open <= 20_000 && gap_extend <= 1_000 {
+                    base_xdrop
+                } else {
+                    base_xdrop.min(reward * 40)
+                };
+
+                // Build a related pair with a shared seed region in the middle and indels on
+                // both sides so left and right extensions both traverse gaps and mismatches.
+                let mut q = Vec::with_capacity(pair_len + 20);
+                let mut s = Vec::with_capacity(pair_len + 20);
+                let mid = pair_len / 2;
+                let mut seed_q = 0i32;
+                let mut seed_s = 0i32;
+                for i in 0..pair_len {
+                    let b = rng.below(4) as u8;
+                    if (mid.saturating_sub(6)..mid + 6).contains(&i) {
+                        if i == mid {
+                            seed_q = q.len() as i32;
+                            seed_s = s.len() as i32;
+                        }
+                        q.push(b);
+                        s.push(b);
+                    } else {
+                        match rng.below(100) {
+                            0..=3 => {
+                                q.push(b);
+                            }
+                            4..=7 => {
+                                q.push(b);
+                                s.push(b);
+                                s.push(rng.below(4) as u8);
+                            }
+                            8..=14 => {
+                                q.push(b);
+                                s.push((b + 1 + rng.below(3) as u8) & 3);
+                            }
+                            _ => {
+                                q.push(b);
+                                s.push(b);
+                            }
+                        }
+                    }
+                }
+
+                let cq = ContextQuery {
+                    buf: &q,
+                    start: 0,
+                    len: q.len() as i32,
+                };
+                let sp = SeqPointer {
+                    buf: &s,
+                    start: 0,
+                    len: s.len() as i32,
+                };
+                let mut dense_scratch = GreedyAlignScratch::new();
+                let mut sparse_scratch = GreedyAlignScratch::new();
+
+                for do_traceback in [false, true] {
+                    let dense = greedy_gapped_alignment_internal(
+                        cq,
+                        sp,
+                        s.len(),
+                        seed_q,
+                        seed_s,
+                        reward,
+                        penalty,
+                        gap_open,
+                        gap_extend,
+                        x_drop,
+                        &mut dense_scratch,
+                        do_traceback,
+                    )
+                    .expect("dense path converges");
+                    assert!(
+                        dense_scratch.sparse_mem.is_none(),
+                        "expected dense path for ({reward}/{penalty} {gap_open}/{gap_extend})"
+                    );
+                    let sparse = greedy_sparse::greedy_gapped_alignment_sparse(
+                        cq,
+                        sp,
+                        seed_q,
+                        seed_s,
+                        reward,
+                        penalty,
+                        gap_open,
+                        gap_extend,
+                        x_drop,
+                        &mut sparse_scratch,
+                        do_traceback,
+                    )
+                    .expect("sparse path converges");
+
+                    let got_d = snapshot(dense);
+                    let got_s = snapshot(sparse);
+                    assert_eq!(
+                        got_s, got_d,
+                        "entry dense vs sparse mismatch for scoring=({reward},{penalty},{gap_open},{gap_extend}) x_drop={x_drop} tb={do_traceback}"
+                    );
+                    if let Some(ref ops) = got_s.7 {
+                        if ops
+                            .iter()
+                            .any(|&(op, _)| op == GapAlignOpType::Ins || op == GapAlignOpType::Del)
+                        {
+                            gapped_cases += 1;
+                        }
+                    }
+                    total_cases += 1;
+                }
+            }
+        }
+    }
+
+    assert_eq!(
+        total_cases,
+        scorings.len() * gap_opens.len() * gap_extends.len() * 2
+    );
+    assert!(
+        gapped_cases >= 15,
+        "expected substantial gapped coverage in differential test, got {gapped_cases}"
+    );
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2808-2855
+/// When the `max_dist` doubling loop overflows `dense_affine_overflows`, handing over to the
+/// sparse kernel updates `scratch.max_dist` so the next call goes straight to the sparse path
+/// without re-running the dense kernel, and produces the exact same alignment as a direct sparse
+/// call (tested for both right-extension and left-extension hand-overs).
+#[test]
+fn greedy_gapped_alignment_handover_from_doubling_loop_persists_max_dist() {
+    // For 30_000/-30_000 30_000/30_000: scf = 15_000, reduced op_cost = 4, gap_open = 2,
+    // gap_extend = 3. At max_dist = 32_768: smd = 98_304, smd * scf = 1.47e9 (dense fits in
+    // ~1 MB). Doubling to 65_536 gives smd * scf = 2.95e9 > i32::MAX (hands over to sparse).
+    let reward = 30_000;
+    let penalty = -30_000;
+    let gap_open = 30_000;
+    let gap_extend = 30_000;
+    let x_drop = 60_000;
+    assert!(!greedy_sparse::dense_affine_overflows(
+        32_768, x_drop, reward, -penalty, gap_open, gap_extend
+    ));
+    assert!(greedy_sparse::dense_affine_overflows(
+        65_536, x_drop, reward, -penalty, gap_open, gap_extend
+    ));
+
+    // Every 4th base mismatches so score climbs +60_000 per 4 bp and distance reaches > 98_304
+    // (24_576 mismatches => ~98_304 bp) without x-dropping.
+    let len = 102_000usize;
+    let q: Vec<u8> = (0..len).map(|i| (i & 3) as u8).collect();
+    let mut s = q.clone();
+    for i in (3..len).step_by(4) {
+        s[i] = (s[i] + 1) & 3;
+    }
+
+    let cq = ContextQuery {
+        buf: &q,
+        start: 0,
+        len: q.len() as i32,
+    };
+    let sp = SeqPointer {
+        buf: &s,
+        start: 0,
+        len: s.len() as i32,
+    };
+
+    // Test both right-loop handover (seed near start) and left-loop handover (seed near end).
+    for (seed_pos, label) in [(16i32, "right"), ((len - 16) as i32, "left")] {
+        let mut scratch = GreedyAlignScratch::new();
+        scratch.max_dist = 32_768;
+        let got = greedy_gapped_alignment_internal(
+            cq,
+            sp,
+            s.len(),
+            seed_pos,
+            seed_pos,
+            reward,
+            penalty,
+            gap_open,
+            gap_extend,
+            x_drop,
+            &mut scratch,
+            true,
+        )
+        .expect("handover alignment converges");
+
+        assert!(
+            scratch.sparse_mem.is_some(),
+            "{label}: expected handover to sparse"
+        );
+        assert_eq!(
+            scratch.max_dist, 65_536,
+            "{label}: expected scratch.max_dist updated on handover"
+        );
+
+        let mut direct_scratch = GreedyAlignScratch::new();
+        let want = greedy_sparse::greedy_gapped_alignment_sparse(
+            cq,
+            sp,
+            seed_pos,
+            seed_pos,
+            reward,
+            penalty,
+            gap_open,
+            gap_extend,
+            x_drop,
+            &mut direct_scratch,
+            true,
+        )
+        .expect("direct sparse converges");
+
+        let got_ops: Vec<_> = {
+            let es = got.edit_script.as_ref().expect("got edit script");
+            es.op_type[..es.size]
+                .iter()
+                .copied()
+                .zip(es.num[..es.size].iter().copied())
+                .collect()
+        };
+        let want_ops: Vec<_> = {
+            let es = want.edit_script.as_ref().expect("want edit script");
+            es.op_type[..es.size]
+                .iter()
+                .copied()
+                .zip(es.num[..es.size].iter().copied())
+                .collect()
+        };
+        assert_eq!(
+            (
+                got.q_start,
+                got.q_end,
+                got.s_start,
+                got.s_end,
+                got.q_seed_start,
+                got.s_seed_start,
+                got.score,
+                got_ops,
+            ),
+            (
+                want.q_start,
+                want.q_end,
+                want.s_start,
+                want.s_end,
+                want.q_seed_start,
+                want.s_seed_start,
+                want.score,
+                want_ops,
+            ),
+            "{label}: handover result differs from direct sparse"
+        );
+
+        // Next call with the persisted `scratch.max_dist == 65_536` must enter the sparse path
+        // immediately on a tiny sequence that would otherwise converge in dense.
+        scratch.sparse_mem = None;
+        let tiny_q = ContextQuery {
+            buf: &q[..32],
+            start: 0,
+            len: 32,
+        };
+        let tiny_s = SeqPointer {
+            buf: &s[..32],
+            start: 0,
+            len: 32,
+        };
+        let _ = greedy_gapped_alignment_internal(
+            tiny_q,
+            tiny_s,
+            32,
+            16,
+            16,
+            reward,
+            penalty,
+            gap_open,
+            gap_extend,
+            x_drop,
+            &mut scratch,
+            false,
+        )
+        .expect("follow-up sparse call converges");
+        assert!(
+            scratch.sparse_mem.is_some(),
+            "{label}: follow-up call should route straight to sparse via persisted scratch.max_dist"
+        );
     }
 }

@@ -168,9 +168,10 @@ fn get_next_sparse_affine_tback_from_indel(
     state
 }
 
-/// Returns true when the dense 32-bit affine greedy table sizes would overflow `i32`.
+/// Returns true when the dense 32-bit affine greedy table sizes or per-distance score products
+/// would overflow `i32`.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:802-873
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:802-873,979-1125
 #[cold]
 #[inline(never)]
 pub(super) fn dense_affine_overflows(
@@ -203,6 +204,7 @@ pub(super) fn dense_affine_overflows(
     max_dist
         .checked_mul(gap_extend)
         .and_then(|smd| {
+            smd.checked_mul(score_common_factor)?;
             smd.checked_add(xdrop_offset)?.checked_add(2)?;
             smd.checked_add(max_penalty)?.checked_add(2)?;
             Some(())

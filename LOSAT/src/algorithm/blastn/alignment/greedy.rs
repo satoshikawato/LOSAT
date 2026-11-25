@@ -4007,10 +4007,13 @@ pub(super) fn greedy_gapped_alignment_internal(
     scratch: &mut GreedyAlignScratch,
     do_traceback: bool,
 ) -> Option<GreedyGappedCore> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:802-873
+    // Odd rewards double `x_drop` with `wrapping_mul(2)`, so raw values below `-2^30` wrap
+    // positive; gating on `x_drop.unsigned_abs()` catches those wraps as well as large positives.
     if gap_open > MAX_DENSE_GREEDY_GAP_COST
         || gap_extend > MAX_DENSE_GREEDY_GAP_COST
         || ((gap_open | gap_extend) != 0
-            && (scratch.max_dist > 16_384 || x_drop > 200_000_000)
+            && (scratch.max_dist > 16_384 || x_drop.unsigned_abs() > 100_000_000)
             && greedy_sparse::dense_affine_overflows(
                 scratch.max_dist.max(GREEDY_MAX_COST as i32),
                 x_drop,
@@ -4133,33 +4136,33 @@ pub(super) fn greedy_gapped_alignment_internal(
             scratch.max_dist = max_dist;
             break;
         }
-        max_dist = match max_dist.checked_mul(2) {
-            Some(next)
-                if (gap_open | gap_extend) == 0
-                    || next <= 16_384
-                    || !greedy_sparse::dense_affine_overflows(
-                        next, x_drop, reward, -penalty, gap_open, gap_extend,
-                    ) =>
-            {
-                next
-            }
-            _ => {
-                return greedy_sparse::greedy_gapped_alignment_sparse(
-                    query,
-                    subject,
-                    q_off,
-                    s_off,
-                    reward,
-                    penalty,
-                    gap_open,
-                    gap_extend,
-                    x_drop,
-                    scratch,
-                    do_traceback,
-                );
-            }
-        };
-        scratch.max_dist = max_dist;
+        if (gap_open | gap_extend) == 0 {
+            max_dist = max_dist.saturating_mul(2);
+            scratch.max_dist = max_dist;
+            continue;
+        }
+        let next = max_dist.saturating_mul(2);
+        scratch.max_dist = next;
+        if max_dist > i32::MAX / 2
+            || greedy_sparse::dense_affine_overflows(
+                next, x_drop, reward, -penalty, gap_open, gap_extend,
+            )
+        {
+            return greedy_sparse::greedy_gapped_alignment_sparse(
+                query,
+                subject,
+                q_off,
+                s_off,
+                reward,
+                penalty,
+                gap_open,
+                gap_extend,
+                x_drop,
+                scratch,
+                do_traceback,
+            );
+        }
+        max_dist = next;
     }
 
     loop {
@@ -4200,33 +4203,33 @@ pub(super) fn greedy_gapped_alignment_internal(
             scratch.max_dist = max_dist;
             break;
         }
-        max_dist = match max_dist.checked_mul(2) {
-            Some(next)
-                if (gap_open | gap_extend) == 0
-                    || next <= 16_384
-                    || !greedy_sparse::dense_affine_overflows(
-                        next, x_drop, reward, -penalty, gap_open, gap_extend,
-                    ) =>
-            {
-                next
-            }
-            _ => {
-                return greedy_sparse::greedy_gapped_alignment_sparse(
-                    query,
-                    subject,
-                    q_off,
-                    s_off,
-                    reward,
-                    penalty,
-                    gap_open,
-                    gap_extend,
-                    x_drop,
-                    scratch,
-                    do_traceback,
-                );
-            }
-        };
-        scratch.max_dist = max_dist;
+        if (gap_open | gap_extend) == 0 {
+            max_dist = max_dist.saturating_mul(2);
+            scratch.max_dist = max_dist;
+            continue;
+        }
+        let next = max_dist.saturating_mul(2);
+        scratch.max_dist = next;
+        if max_dist > i32::MAX / 2
+            || greedy_sparse::dense_affine_overflows(
+                next, x_drop, reward, -penalty, gap_open, gap_extend,
+            )
+        {
+            return greedy_sparse::greedy_gapped_alignment_sparse(
+                query,
+                subject,
+                q_off,
+                s_off,
+                reward,
+                penalty,
+                gap_open,
+                gap_extend,
+                x_drop,
+                scratch,
+                do_traceback,
+            );
+        }
+        max_dist = next;
     }
 
     if gap_open == 0 && gap_extend == 0 {

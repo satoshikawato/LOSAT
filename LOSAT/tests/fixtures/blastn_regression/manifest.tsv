@@ -1,4 +1,4 @@
-# Frozen BLASTN outputs of blastn: 2.17.0+;  Package: blast 2.17.0, build Aug 22 2026 11:52:50 (comparison oracle only; see blastn_regression_fixtures.py).
+# Frozen BLASTN outputs of blastn: 2.17.0+;  Package: blast 2.17.0, build Jul  1 2025 08:59:18 (comparison oracle only; see blastn_regression_fixtures.py).
 # Run from LOSAT/: env <env> blastn <argv> (LOSAT: losat blastn <argv> <losat_extra>). Written by `freeze`; do not edit.
 case_id	argv	losat_extra	exit	stdout_sha256	stdout_bytes	stderr_sha256	env	oracle_env
 prelim.default	-query tests/fixtures/blastn_regression/inputs/q3k.fa -subject tests/fixtures/blastn_regression/inputs/s600.fa -outfmt 6		0	fac9ee742dd96a045f5ec881e71834d6f8624faaa863ddb5f07552c3b2dd7302	27099			
@@ -374,3 +374,5 @@ g1.p_gapped_50k	-query tests/fixtures/blastn_regression/inputs/q3k.fa -subject t
 g1.p_gapped_60k_30k	-query tests/fixtures/blastn_regression/inputs/q3k.fa -subject tests/fixtures/blastn_regression/inputs/s600.fa -task megablast -reward 30000 -penalty -30000 -gapopen 60000 -gapextend 30000 -outfmt 6		0	b6e227538161b86028385a6a715644dd917d8cb08ee641ef0e1d985ea07e6522	27027			
 g1.p_gapped_60k_30k_fmt0	-query tests/fixtures/blastn_regression/inputs/q3k.fa -subject tests/fixtures/blastn_regression/inputs/s600.fa -task megablast -reward 30000 -penalty -30000 -gapopen 60000 -gapextend 30000 -max_target_seqs 20 -outfmt 0		0	9117b9556a519944d3a7b29e2b0f1125068b5fe5531dbc33797099776c9162d6	26198			
 g1.t2_intmax	-query tests/fixtures/blastn_regression/inputs/t2_query.fa -subject tests/fixtures/blastn_regression/inputs/t2_subject.fa -task megablast -gapopen 2147483647 -gapextend 2147483647 -outfmt 6		0	57ba339e7c8e9291017ecff35c9c5b0736abcf3d810e214b2fb35e5b51c6b37a	106			
+g1.p_no_greedy_60k_30k	-query tests/fixtures/blastn_regression/inputs/q3k.fa -subject tests/fixtures/blastn_regression/inputs/s600.fa -task megablast -no_greedy -reward 30000 -penalty -30000 -gapopen 60000 -gapextend 30000 -outfmt 6		0	2abbffe91bb439b52b79d3b57b8d6a924d8af9cc1e6ccaa7bb5d0d0ed758018f	27028			
+g1.p_no_greedy_intmax	-query tests/fixtures/blastn_regression/inputs/q3k.fa -subject tests/fixtures/blastn_regression/inputs/s600.fa -task megablast -no_greedy -gapopen 2147483647 -gapextend 2147483647 -outfmt 6		0	e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0			

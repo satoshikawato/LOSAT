@@ -626,6 +626,8 @@ _CASES += [
     ("g1.p_gapped_60k_30k", f"{P} -task megablast -reward 30000 -penalty -30000 -gapopen 60000 -gapextend 30000 -outfmt 6", ""),
     ("g1.p_gapped_60k_30k_fmt0", f"{P} -task megablast -reward 30000 -penalty -30000 -gapopen 60000 -gapextend 30000 -max_target_seqs 20 -outfmt 0", ""),
     ("g1.t2_intmax", f"{T2} -task megablast -gapopen 2147483647 -gapextend 2147483647 -outfmt 6", ""),
+    ("g1.p_no_greedy_60k_30k", f"{P} -task megablast -no_greedy -reward 30000 -penalty -30000 -gapopen 60000 -gapextend 30000 -outfmt 6", ""),
+    ("g1.p_no_greedy_intmax", f"{P} -task megablast -no_greedy -gapopen 2147483647 -gapextend 2147483647 -outfmt 6", ""),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 # NCBI's arguments of the cases of an approved exception that is an argument (see above).

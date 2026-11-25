@@ -194,7 +194,12 @@ pub(super) fn dense_affine_overflows(
     let mut gap_extend = in_gap_extend + match_score_half;
     let score_common_factor = gdb3(&mut op_cost, &mut gap_open, &mut gap_extend);
     let max_penalty = op_cost.max(gap_open + gap_extend);
-    let xdrop_offset = (xdrop_threshold.wrapping_add(match_score_half)) / score_common_factor + 1;
+    let Some(xdrop_offset) = xdrop_threshold
+        .checked_add(match_score_half)
+        .and_then(|s| (s / score_common_factor).checked_add(1))
+    else {
+        return true;
+    };
     max_dist
         .checked_mul(gap_extend)
         .and_then(|smd| {

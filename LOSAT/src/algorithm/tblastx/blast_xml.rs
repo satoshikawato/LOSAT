@@ -222,10 +222,11 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     // back, unless another format of the call (outfmt 5) writes it (`written_queries`; `only_xml2`:
     // every structured format of the call is XML2 or JSON).
     let shows = |q_idx: usize| crate::blastinput::query_batch::xml_show_of(run.query_scopes, q_idx);
+    let holds_back = only_xml2 && document.holds_back();
     let reports = written_queries(
         queries.len(),
         !run.epilog,
-        only_xml2 && document.holds_back(),
+        holds_back,
         crate::blastinput::query_batch::held_start_of(run.query_scopes, queries.len()),
     );
     let texts = queries[..reports]
@@ -234,8 +235,13 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
         .map(|(q_idx, query)| {
             let messages = query_messages(query, run.searched[q_idx], run.filtered_empty);
             let has_hits = !query_hits[q_idx].is_empty();
-            // A query whose names no result shows (`XmlShow::names_unshown`) has its message.
-            if shows(q_idx).names_unshown() {
+            // A query whose names no written result shows (`names_unshown_in`) has its message.
+            if crate::blastinput::query_batch::names_unshown_in(
+                run.query_scopes,
+                reports,
+                holds_back,
+                q_idx,
+            ) {
                 return Ok(names::labelled_query_text(
                     query.warning_id(),
                     query.title(),
@@ -319,6 +325,14 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
                 warnings.as_deref_mut(),
             )?;
             buf.clear();
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392
+            // Queries whose results join the unwritten held report were still read, exported and
+            // searched before the stopping batch, so their warnings and requests follow.
+            if let Some(warnings) = warnings.as_deref_mut() {
+                for later in (q_idx + 1)..queries.len() {
+                    warnings.before_query(later, &mut *writer)?;
+                }
+            }
             break;
         }
         let text = &texts[q_idx];

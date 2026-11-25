@@ -1074,8 +1074,8 @@ impl<S: Write> Write for HeldFormatWriter<S> {
 
 /// The `QueryText` of a query, refused as the writer refuses it. `search_skipped`: NCBI did not
 /// search the query's batch (its message then carries the query's id, made of its title).
-/// `labelled`: no result shows the query's names (`XmlShow::names_unshown`), so it has its
-/// message alone (`names::labelled_query_text`).
+/// `labelled`: no written result shows the query's names (`query_batch::names_unshown_in`), so it
+/// has its message alone (`names::labelled_query_text`).
 fn query_text(
     program: &str,
     query: &FastaRecord,
@@ -1290,16 +1290,24 @@ pub(super) fn scan_queries(
                 query_scopes.as_ref(),
                 written + index,
             );
-            let check = query_text(
-                options.program().upper,
-                query,
-                false,
-                false,
-                true,
-                options.merged_volumes(),
-                show.names_unshown(),
-            )
-            .map(drop);
+            // Check the record whose title this result actually shows: a result that joins a held
+            // report shows the held report's lead, not its own record; one with a batch label
+            // shows that earlier record of the batch when this result is written.
+            let check = if holds_back && show.joins_held {
+                Ok(())
+            } else {
+                let shown = show.label.map_or(query, |label| &batch[label - written]);
+                query_text(
+                    options.program().upper,
+                    shown,
+                    false,
+                    false,
+                    true,
+                    options.merged_volumes(),
+                    false,
+                )
+                .map(drop)
+            };
             if !holds_back {
                 check?;
                 continue;
@@ -1567,10 +1575,10 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     // (`TrimSeqAlign` counts following Seq-aligns of matching subject ids as one, as
     // `PruneSeqalign`): RPSTBLASTN's merged lists of several volumes, cut once per query
     // (`BatchResults::shown_lists`); every list otherwise.
-    for batch in batches {
+    'batches: for batch in batches {
         for qidx in 0..batch.queries.len() {
             if texts.len() == reports {
-                break;
+                break 'batches;
             }
             let lists = batch.shown_lists(qidx, options);
             if let Some(scopes) = &generated_scopes {
@@ -1593,7 +1601,12 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 options.filtered_empty,
                 has_hits,
                 options.merged_volumes(),
-                shows(batch.query_ordinal + qidx).names_unshown(),
+                crate::blastinput::query_batch::names_unshown_in(
+                    query_scopes,
+                    reports,
+                    document.holds_back(),
+                    batch.query_ordinal + qidx,
+                ),
             )?);
             for list in lists.iter().filter(|list| reported(list, options.gapped)) {
                 if let std::collections::hash_map::Entry::Vacant(slot) =
@@ -1627,7 +1640,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
     let (mut qrow, mut srow): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     // The queries written so far, by their texts.
     let mut written = 0usize;
-    for batch in batches {
+    'batches: for batch in batches {
         for qidx in 0..batch.queries.len() {
             // The lists that the cut keeps, as above.
             let lists = batch.shown_lists(qidx, options);
@@ -1657,7 +1670,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     diagnostics.write_all(&post)?;
                     diagnostics.flush()?;
                 }
-                break;
+                break 'batches;
             };
             // NCBI's prefetch of the batch, where it begins (`TaxdbPrinter::batch_texts`).
             let prefetch = taxdb_printer.batch_texts(batch.query_ordinal + qidx);

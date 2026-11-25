@@ -79,10 +79,11 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     // writes the `-subject` report of its last query, which NCBI holds back, unless another
     // format of the call (outfmt 5) writes it (`written_queries`).
     let shows = |q_idx: usize| crate::blastinput::query_batch::xml_show_of(xml.query_scopes, q_idx);
+    let holds_back = xml.only_xml2 && document.holds_back();
     let reports = written_queries(
         xml.queries.len(),
         !xml.epilog,
-        xml.only_xml2 && document.holds_back(),
+        holds_back,
         crate::blastinput::query_batch::held_start_of(xml.query_scopes, xml.queries.len()),
     );
     let has_hits = |q_idx: usize| {
@@ -97,7 +98,14 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
         false,
         &xml.messages,
         has_hits,
-        |q_idx| shows(q_idx).names_unshown(),
+        |q_idx| {
+            crate::blastinput::query_batch::names_unshown_in(
+                xml.query_scopes,
+                reports,
+                holds_back,
+                q_idx,
+            )
+        },
     )?;
     // The names of the subjects with hits in the written reports, made once each; a title NCBI
     // crashes on is refused here, before the first byte.
@@ -137,6 +145,14 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                 warnings.as_deref_mut(),
             )?;
             buf.clear();
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392
+            // Queries whose results join the unwritten held report were still read, exported and
+            // searched before the stopping batch, so their warnings and requests follow.
+            if let Some(warnings) = warnings.as_deref_mut() {
+                for later in (q_idx + 1)..xml.queries.len() {
+                    warnings.before_query(later, &mut *writer)?;
+                }
+            }
             break;
         }
         let text = &texts[q_idx];

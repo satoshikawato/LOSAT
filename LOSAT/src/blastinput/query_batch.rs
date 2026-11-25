@@ -692,10 +692,6 @@ struct Label {
     query: usize,
     /// The earlier query whose id, title and length the result shows.
     shown: usize,
-    /// Whether a later result of the batch shows this query's own id, title and length: one that
-    /// matches it before any earlier query (`>ref|NP_000001.1|`, `>ref|NP_000001|`,
-    /// `>ref|NP_000001.2|`: the third shows the second, which shows the first).
-    shown_later: bool,
 }
 
 /// The lead of the held report as the queries of a batch meet it (`HeldIds::note`): `None` while
@@ -730,17 +726,7 @@ impl HeldIds {
                 .find_map(|(n, other)| matches(other, id).then_some(n))
             {
                 let shown = batch_start + shown;
-                if let Ok(at) = self
-                    .labels
-                    .binary_search_by_key(&shown, |label| label.query)
-                {
-                    self.labels[at].shown_later = true;
-                }
-                self.labels.push(Label {
-                    query,
-                    shown,
-                    shown_later: false,
-                });
+                self.labels.push(Label { query, shown });
             }
         }
         let joins = match (&*lead, &self.lead) {
@@ -829,18 +815,6 @@ pub(crate) struct XmlShow {
     /// Whether the result joins the held report of the queries before it where the XML2 and JSON
     /// documents hold their reports (`blast_xml::XmlQuery::joins_held`).
     pub(crate) joins_held: bool,
-    /// With a `label`: whether a later result of the batch shows the query's own id, title and
-    /// length (`Label::shown_later`).
-    pub(crate) shown_later: bool,
-}
-
-impl XmlShow {
-    /// Whether no result shows the query's own id, title and length: its result shows an earlier
-    /// query's (`label`) and no later result shows its own (`shown_later`). Its `QueryText` is
-    /// then its message alone (`blast_xml::names::labelled_query_text`).
-    pub(crate) fn names_unshown(self) -> bool {
-        self.label.is_some() && !self.shown_later
-    }
 }
 
 /// How NCBI's set-up of a refused batch reads one of the batch's records (`ScopeRefusal`), where
@@ -1101,15 +1075,17 @@ impl QueryScopes {
         let Some(held) = scopes.map(|scopes| &scopes.held) else {
             return XmlShow::default();
         };
+        if held.labels.is_empty() && held.joins.is_empty() {
+            return XmlShow::default();
+        }
         let label = held
             .labels
             .binary_search_by_key(&query, |label| label.query)
             .ok()
-            .map(|at| &held.labels[at]);
+            .map(|at| held.labels[at].shown);
         XmlShow {
-            label: label.map(|label| label.shown),
+            label,
             joins_held: held.joins.binary_search(&query).is_ok(),
-            shown_later: label.is_some_and(|label| label.shown_later),
         }
     }
 
@@ -1415,6 +1391,40 @@ pub(crate) fn held_start_of(scopes: Option<QueryScopesFrom<'_>>, queries: usize)
         }
     }
     start
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-719
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2413
+/// Whether the names of the call's query `query` (`0..reports`) are never shown by any of the
+/// call's written reports (`0..reports`; `holds_back`: the call writes `-subject` XML2/JSON held
+/// reports alone, where a joining result shows the held report's lead instead of its own batch
+/// label): no `QueryText` title is then generated or refused for it
+/// (`blast_xml::names::labelled_query_text`). Ordinary runs (no labels and no joins) return
+/// `false` without per-query work.
+pub(crate) fn names_unshown_in(
+    scopes: Option<QueryScopesFrom<'_>>,
+    reports: usize,
+    holds_back: bool,
+    query: usize,
+) -> bool {
+    let Some(scopes) = scopes else {
+        return false;
+    };
+    let held = &scopes.scopes.held;
+    if held.labels.is_empty() && held.joins.is_empty() {
+        return false;
+    }
+    let show = scopes.xml_show(query);
+    if show.label.is_none() && !(holds_back && show.joins_held) {
+        return false;
+    }
+    let abs = scopes.first + query;
+    let end = scopes.first + reports;
+    !held.labels.iter().any(|label| {
+        label.shown == abs
+            && label.query < end
+            && !(holds_back && held.joins.binary_search(&label.query).is_ok())
+    })
 }
 
 /// The query batches as NCBI's batch loop reads them, up to the batch that stops the run.

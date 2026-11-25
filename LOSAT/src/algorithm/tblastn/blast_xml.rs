@@ -215,10 +215,11 @@ pub(super) fn prepare(
     // without the epilog): a run that stops never writes the `-subject` report of its last query
     // when every document of the call holds it back (`written_queries`; outfmt 5 writes it).
     let scopes = ranges.query_scopes.map(|scopes| scopes.numbered_from(0));
+    let holds_back = only_xml2 && target.holds_back();
     let reports = written_queries(
         query_records.len(),
         !ranges.epilog,
-        only_xml2 && target.holds_back(),
+        holds_back,
         crate::blastinput::query_batch::held_start_of(scopes, query_records.len()),
     );
     let texts = query_records[..reports]
@@ -233,8 +234,9 @@ pub(super) fn prepare(
                 q_idx < values.identity_warned,
                 values.filtered_empty && !query_batch_skipped[q_idx],
             );
-            // A query whose names no result shows (`XmlShow::names_unshown`) has its message.
-            if crate::blastinput::query_batch::xml_show_of(scopes, q_idx).names_unshown() {
+            // A query whose names no written result shows (`names_unshown_in`) has its message.
+            if crate::blastinput::query_batch::names_unshown_in(scopes, reports, holds_back, q_idx)
+            {
                 return Ok(names::labelled_query_text(
                     query.warning_id(),
                     query.title(),
@@ -522,6 +524,14 @@ impl PreparedXml {
                     warnings.as_deref_mut(),
                 )?;
                 buf.clear();
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392
+                // Queries whose results join the unwritten held report were still read, exported
+                // and searched before the stopping batch, so their warnings and requests follow.
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    for later in (q_idx + 1)..query_records.len().min(hitlists.len()) {
+                        warnings.before_query(later, &mut *writer)?;
+                    }
+                }
                 break;
             }
             let text = &self.texts[q_idx];

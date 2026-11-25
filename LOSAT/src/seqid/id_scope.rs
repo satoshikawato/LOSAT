@@ -242,7 +242,7 @@ fn version_kind_key(accession: &[u8], versioned: bool) -> u64 {
     hasher.finish()
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqloc/Textseq_id.cpp:141-153
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Textseq_id.cpp:141-156
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/PDB_seq_id.cpp:53-67
 /// The bit of the form of a Seq-id among the Seq-ids that `CSeq_id::Match` takes for one though
 /// `defline_set::scope_keys` tells them apart (0 for any other Seq-id): for a text Seq-id with an

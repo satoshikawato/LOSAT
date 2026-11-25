@@ -217,9 +217,9 @@ fn own_message(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2413
 /// The `QueryText` of a query whose result NCBI's XML family formats show with the id, title and
 /// length of an earlier query (`query_batch::XmlShow::label`; the document reads that query's
-/// `QueryText` for them) and whose own no later result shows (`query_batch::XmlShow::
-/// names_unshown`): its message alone (`query_text`'s, from its record's `warning_id` and FASTA
-/// `title`). NCBI's formatter generates no title of the record, so none is refused (`Refusal`).
+/// `QueryText` for them) and whose own no written result shows (`query_batch::names_unshown_in`):
+/// its message alone (`query_text`'s, from its record's `warning_id` and FASTA `title`). NCBI's
+/// formatter generates no title of the record, so none is refused (`Refusal`).
 pub fn labelled_query_text(
     warning_id: &[u8],
     title: &[u8],

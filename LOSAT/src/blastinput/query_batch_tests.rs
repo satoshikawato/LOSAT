@@ -1009,21 +1009,38 @@ fn xml_results_show_and_join_the_queries_whose_seq_ids_match() {
         );
         assert_eq!(xml_shows(span, vpair3c, 1), (vec![NO, (None, true), NO], 2));
     }
-    // A shown query keeps its own names, the second of `vpair3c` too, which the third shows
-    // (NCBI: `Iteration_query-def` `second`); the third of `vpair3c` and the second of `vpair3a`
-    // show an earlier query's names alone.
-    let unshown = |fasta: &[u8]| {
+    // A shown query keeps its own names, the second of `vpair3c` too when the third is written
+    // (NCBI: `Iteration_query-def` `second`); when a stopping run drops the third (`reports = 2`),
+    // or when a second query joins across batches under `-subject` XML2/JSON (`holds_back = true`),
+    // its names are unshown.
+    let unshown = |fasta: &[u8], batch: usize, reports: usize, holds_back: bool| {
         let records = parsed_records(fasta);
         let mut scopes = super::QueryScopes::new(Run, "BLASTP");
-        scopes
-            .add_batch(&records, &vec![false; records.len()], 0)
-            .unwrap();
-        (0..records.len())
-            .map(|query| super::QueryScopes::xml_show(Some(&scopes), query).names_unshown())
+        for (n, chunk) in records.chunks(batch).enumerate() {
+            scopes
+                .add_batch(chunk, &vec![false; chunk.len()], n * batch)
+                .unwrap();
+        }
+        let call = Some(scopes.numbered_from(0));
+        (0..reports)
+            .map(|query| super::names_unshown_in(call, reports, holds_back, query))
             .collect::<Vec<_>>()
     };
-    assert_eq!(unshown(vpair3c), [false, false, true]);
-    assert_eq!(unshown(vpair3a), [false, true, false]);
+    assert_eq!(unshown(vpair3c, 3, 3, false), [false, false, true]);
+    assert_eq!(unshown(vpair3c, 3, 3, true), [false, false, true]);
+    assert_eq!(unshown(vpair3c, 3, 2, true), [false, true]);
+    assert_eq!(unshown(vpair3a, 3, 3, false), [false, true, false]);
+    assert_eq!(unshown(vpair, 1, 2, true), [false, true]);
+    assert_eq!(unshown(vpair, 1, 2, false), [false, false]);
+    // Cross-batch join where a third query in the second batch labels itself with the second:
+    // the second is shown when the third is written, unshown when the third is held unwritten.
+    let records = parsed_records(vpair3c);
+    let mut split = super::QueryScopes::new(Run, "BLASTP");
+    split.add_batch(&records[..1], &[false], 0).unwrap();
+    split.add_batch(&records[1..], &[false, false], 1).unwrap();
+    let call = Some(split.numbered_from(0));
+    assert!(!super::names_unshown_in(call, 3, true, 1));
+    assert!(super::names_unshown_in(call, 2, true, 1));
     // A call that starts at a later batch numbers the label and the held report's start as it
     // numbers its queries.
     let later: &[u8] = b">ref|NP_000002.1| a\nMKV\n>ref|NP_000003.1| b\nMKV\n\

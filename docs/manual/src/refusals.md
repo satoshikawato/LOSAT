@@ -53,7 +53,7 @@ There is one section for each program, and one for the five search programs toge
 | `-gilist`, `-negative_gilist` | Five search programs, `psiblast` | Out of scope (GI lists) |
 | `-ipglist`, `-negative_ipglist` | `blastp`, `blastx`, `psiblast` | Out of scope (IPG lists) |
 | `-import_search_strategy` | All search programs | Out of scope (needs NCBI servers) |
-| `-html` | `psiblast`, `rpsblast`, `rpstblastn` | Not yet supported |
+| `-html` | `psiblast` | Not yet supported |
 | `-use_sw_tback` | `psiblast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY`), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes |
@@ -268,7 +268,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | Option or value | What happens |
 | :--- | :--- |
 | `-outfmt` 17, 19 and 21, and 13 and 14 without `-out` | NCBI's own errors. |
-| `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
+| `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
 | `-subject` | NCBI's argument error, as in NCBI (usage and `Unknown argument: "subject"`, exit status 1). It is not an `rpsblast` option. |
 | `-outfmt 1` to `5` or `13` to `16`, `-outfmt 18` when the profile has a taxid, or `-outfmt 20` with a field that shows more of the profile than its id (`sallseqid`, `sallacc`, `stitle`, `salltitles`, `staxids`, `slen`, `sseq`, `btop`, `nident`, `pident`, `mismatch`, `positive`, `ppos`, as in the default fields, or a taxonomy field when the profile has a taxid), with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI takes the query for the entry (the query's title in `Hit_def`, its letters in the identities, its taxonomy in the organism report). `-outfmt 8`, `9`, `11` and `12`, and `-outfmt 18` and `20` otherwise (such as `20 qseqid sseqid sacc evalue`), write NCBI's bytes (outfmt 11 apart from its `ident`: `LOSAT 0.2.0` where NCBI writes `2.17.0+`). |
@@ -292,7 +292,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-outfmt` 17, 19 and 21, and 13 and 14 without `-out` | NCBI's own errors. |
 | `-ungapped` without composition-based statistics | Refused. NCBI's `rpstblastn` crashes after the search. With composition-based statistics it gets NCBI's own error. |
 | `-sum_stats true` | Refused. NCBI's output then depends on memory contents, or it crashes. |
-| `-html`, `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
+| `-entrez_query`, `-remote`, `-import_search_strategy` | Refused. |
 | `-subject` | NCBI's argument error, as in NCBI (usage and `Unknown argument: "subject"`, exit status 1). It is not an `rpstblastn` option. |
 | `-outfmt 1` to `5` or `13` to `16`, `-outfmt 18` when the profile has a taxid, or `-outfmt 20` with a field of the alignment (such as `qstart`, `length` or the default fields) or a field that shows more of the profile than its id (`sallseqid`, `sallacc`, `stitle`, `salltitles`, `staxids`, `slen`, or a taxonomy field when the profile has a taxid), with a profile whose id is `lcl|Query_N`, the generated id of a query of its batch, in the hits | Refused. NCBI stops with an exception (after half a document in BLAST XML, after the header line in `-outfmt 20`) or takes the query for the entry. `-outfmt 8`, `9`, `11` and `12`, and `-outfmt 18` and `20` otherwise (such as `20 qseqid sseqid sacc evalue`), write NCBI's bytes (outfmt 11 apart from its `ident`: `LOSAT 0.2.0` where NCBI writes `2.17.0+`). |
 | `-query_gencode 32` | NCBI's argument error (exit status 1). |
@@ -462,7 +462,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 - `makeprofiledb -binary` and `-dbtype delta` or `cobalt`.
 - `psiblast -phi_pattern`.
 - The `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`.
-- `-html` in `psiblast`, `rpsblast` and `rpstblastn`.
+- `-html` in `psiblast`.
 
 ## Out of scope: they need NCBI's servers or its GI and IPG databases
 

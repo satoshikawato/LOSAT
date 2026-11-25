@@ -485,13 +485,103 @@ fn the_reports_of_the_formats_0_to_4_read_the_html_links() {
         );
     }
     for formats in [&[18][..], &[6, 18], &[5], &[]] {
-        assert!(html_links(true, Program::Blastp, None, formats)
+        assert!(html_links(true, RequestKind::Blastp, None, formats)
             .unwrap()
             .is_none());
     }
     for formats in [&[0][..], &[1], &[2], &[3], &[4]] {
-        assert!(html_links(false, Program::Blastn, Some("db"), formats)
+        assert!(html_links(false, RequestKind::Blastn, Some("db"), formats)
             .unwrap()
             .is_none());
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:119
+// NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:119
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:419
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:121
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:225
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:54-55
+#[test]
+fn html_links_names_registry_posts_and_refusals_by_application() {
+    use crate::report::formatter_registry::{FormatterNcbirc, InitConfig};
+    let repeated = b"[FOO]\na=1\na=2\n";
+    for (kind, post_name, nucleotide) in [
+        (RequestKind::Blastn, "blastn", true),
+        (RequestKind::Blastp, "blastp", false),
+        (RequestKind::Blastx, "blastx", false),
+        (RequestKind::Tblastn, "tblastn", true),
+        (RequestKind::Tblastx, "tblastx", true),
+        (RequestKind::Psiblast, "psiblast", false),
+        (RequestKind::PsiTblastn, "tblastn", true),
+        (RequestKind::Rpsblast, "rpsblast", false),
+        (RequestKind::Rpstblastn, "rpstblastn", false),
+    ] {
+        let links = html_links_with(
+            true,
+            kind,
+            Some("db"),
+            &[0],
+            |prog| FormatterNcbirc::of(prog, Some(repeated.to_vec())),
+            |prog| InitConfig::of(prog, Some((".ncbirc".into(), repeated.to_vec())), false),
+        )
+        .unwrap()
+        .unwrap();
+        let expected = format!(
+            "Warning: (110.8) [{post_name}] Found multiple [FOO] a settings; using the one from line 3\n"
+        );
+        assert_eq!(links.ncbirc.posts(), expected.as_bytes(), "{kind:?}");
+        assert_eq!(
+            links.registry.call_posts(0).0,
+            expected.as_bytes(),
+            "{kind:?}"
+        );
+        assert_eq!(links.nucleotide, nucleotide, "{kind:?}");
+    }
+
+    // A read failing after some bytes is refused with the application's name in upper case.
+    let partial = "cannot be read after its first 4 bytes (io)";
+    for (kind, upper) in [
+        (RequestKind::Rpsblast, "RPSBLAST"),
+        (RequestKind::Rpstblastn, "RPSTBLASTN"),
+        (RequestKind::Psiblast, "PSIBLAST"),
+        (RequestKind::PsiTblastn, "TBLASTN"),
+    ] {
+        let ncbirc_err = html_links_with(
+            true,
+            kind,
+            Some("db"),
+            &[0],
+            |prog| FormatterNcbirc::of_read(prog, Err(partial.to_string())),
+            |prog| InitConfig::of(prog, None, false),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            ncbirc_err.contains(partial)
+                && ncbirc_err.ends_with(&format!("not supported by LOSAT's {upper}")),
+            "{kind:?}: {ncbirc_err}"
+        );
+        let init_err = html_links_with(
+            true,
+            kind,
+            Some("db"),
+            &[0],
+            |prog| FormatterNcbirc::of(prog, None),
+            |prog| {
+                InitConfig::of_read(
+                    prog,
+                    Some(("bad.rc".into(), Err(partial.to_string()))),
+                    false,
+                )
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            init_err.contains(partial)
+                && init_err.ends_with(&format!("not supported by LOSAT's {upper}")),
+            "{kind:?}: {init_err}"
+        );
     }
 }

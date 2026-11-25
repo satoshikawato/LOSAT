@@ -530,7 +530,11 @@ impl TblastnArgs {
         let own_outfmt = [choice.number];
         let html = crate::blastinput::app::html_links(
             self.html,
-            crate::blastinput::app::Program::Tblastn,
+            if psi {
+                crate::report::archive::options::RequestKind::PsiTblastn
+            } else {
+                crate::report::archive::options::RequestKind::Tblastn
+            },
             self.database_name(),
             outfmts.unwrap_or(&own_outfmt),
         )?;

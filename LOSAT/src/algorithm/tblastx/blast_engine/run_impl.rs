@@ -1194,7 +1194,7 @@ fn check_ncbi_options(
     // (`blastinput::report_counts`), with the handler's warnings.
     let html = crate::blastinput::app::html_links(
         args.html,
-        Program::Tblastx,
+        crate::report::archive::options::RequestKind::Tblastx,
         args.database_name(),
         &outfmts,
     )?;

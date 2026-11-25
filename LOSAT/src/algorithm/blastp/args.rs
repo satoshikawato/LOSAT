@@ -875,7 +875,7 @@ impl BlastpArgs {
         )?;
         let html = crate::blastinput::app::html_links(
             self.html,
-            crate::blastinput::app::Program::Blastp,
+            self.app.request_kind(),
             self.db.as_deref().map(crate::seqdb::db_argument_name),
             &[choice.number],
         )?;

@@ -1256,14 +1256,20 @@ fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
             .unwrap() as u32
     };
     let stopped = |result: Result<crate::report::diag_log::Posts>| -> (usize, String) {
-        let failure = result.unwrap_err().downcast::<HeaderReadError>().unwrap();
+        let failure = result
+            .unwrap_err()
+            .downcast::<ErrorAfterBatchReports>()
+            .unwrap();
         let native = failure.error.downcast::<NativeError>().unwrap();
         assert_eq!(native.exit, 2);
-        (failure.query, String::from_utf8(native.message).unwrap())
+        (
+            failure.query.expect("the stop names its query"),
+            String::from_utf8(native.message).unwrap(),
+        )
     };
     let refused = |result: Result<crate::report::diag_log::Posts>| -> String {
         let refusal = result.unwrap_err();
-        assert!(!refusal.is::<HeaderReadError>(), "{refusal}");
+        assert!(!refusal.is::<ErrorAfterBatchReports>(), "{refusal}");
         refusal.to_string()
     };
     let error = "LOSAT database error: DB contains no accession info.\n".to_owned();
@@ -1476,10 +1482,16 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
         PrefetchSubject::unflipped(ordinal, parsed[ordinal as usize].as_deref())
     }
     let stopped = |result: Result<crate::report::diag_log::Posts>| -> (usize, String) {
-        let failure = result.unwrap_err().downcast::<HeaderReadError>().unwrap();
+        let failure = result
+            .unwrap_err()
+            .downcast::<ErrorAfterBatchReports>()
+            .unwrap();
         let native = failure.error.downcast::<NativeError>().unwrap();
         assert_eq!(native.exit, 2);
-        (failure.query, String::from_utf8(native.message).unwrap())
+        (
+            failure.query.expect("the stop names its query"),
+            String::from_utf8(native.message).unwrap(),
+        )
     };
     let error = "LOSAT database error: DB contains no accession info.\n".to_owned();
     // The model of the cut report of query 0 in `run`: its reads of `read` (each sequence's
@@ -1610,7 +1622,7 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
         &after_reports(1, &before),
     )
     .unwrap_err();
-    assert!(!refusal.is::<HeaderReadError>(), "{refusal}");
+    assert!(!refusal.is::<ErrorAfterBatchReports>(), "{refusal}");
     let why = refusal.to_string();
     assert!(
         why.contains("same packed number")
@@ -1767,13 +1779,16 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
         .unwrap_err()
     };
     let native = |error: anyhow::Error| -> (usize, String) {
-        let failure = error.downcast::<HeaderReadError>().unwrap();
+        let failure = error.downcast::<ErrorAfterBatchReports>().unwrap();
         let native = failure.error.downcast::<NativeError>().unwrap();
         assert_eq!(native.exit, 2);
-        (failure.query, String::from_utf8(native.message).unwrap())
+        (
+            failure.query.expect("the stop names its query"),
+            String::from_utf8(native.message).unwrap(),
+        )
     };
     let refused = |error: anyhow::Error| {
-        assert!(!error.is::<HeaderReadError>(), "{error}");
+        assert!(!error.is::<ErrorAfterBatchReports>(), "{error}");
         let why = error.to_string();
         assert!(why.contains("the run loaded that sequence"), "{why}");
     };
@@ -1888,10 +1903,16 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
         }
     }
     let stopped = |result: Result<()>| -> (usize, String) {
-        let failure = result.unwrap_err().downcast::<HeaderReadError>().unwrap();
+        let failure = result
+            .unwrap_err()
+            .downcast::<ErrorAfterBatchReports>()
+            .unwrap();
         let native = failure.error.downcast::<NativeError>().unwrap();
         assert_eq!(native.exit, 2);
-        (failure.query, String::from_utf8(native.message).unwrap())
+        (
+            failure.query.expect("the stop names its query"),
+            String::from_utf8(native.message).unwrap(),
+        )
     };
     let error = "LOSAT database error: DB contains no accession info.\n".to_owned();
     let names = [
@@ -2057,7 +2078,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
         .map(drop),
     ] {
         let refused = refused.unwrap_err();
-        assert!(!refused.is::<HeaderReadError>());
+        assert!(!refused.is::<ErrorAfterBatchReports>());
         assert!(
             refused.to_string().contains("whose lookup throws"),
             "{refused}"

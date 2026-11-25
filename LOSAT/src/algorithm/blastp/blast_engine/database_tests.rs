@@ -1724,9 +1724,9 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
         .read_titles(&database, &hit_lists, &[0])
         .err()
         .expect("a missing header file")
-        .downcast::<HeaderReadError>()
+        .downcast::<ErrorAfterBatchReports>()
         .expect("NCBI's error, with the query that reached it");
-    assert_eq!(error.query, 2);
+    assert_eq!(error.query, Some(2));
     let native = error
         .error
         .downcast_ref::<NativeError>()
@@ -1738,9 +1738,9 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
         .x_read_titles_lean(&database, &hit_lists, &[0])
         .err()
         .expect("a missing header file")
-        .downcast::<HeaderReadError>()
+        .downcast::<ErrorAfterBatchReports>()
         .expect("NCBI's error, with the query that reached it");
-    assert_eq!(lean_error.query, 2);
+    assert_eq!(lean_error.query, Some(2));
     assert_eq!(
         lean_error
             .error

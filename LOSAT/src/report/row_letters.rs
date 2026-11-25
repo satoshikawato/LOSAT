@@ -134,7 +134,8 @@ impl RowSide {
 /// The columns (0-based) of the rows of an alignment, whose operations are `ops`, where the
 /// letter of `side` is a gap character: a residue `gap` of `sequence`, whose residues the
 /// alignment reads from `start` (0-based) on (`pairwise::PairwiseHit::query_stored_gaps`,
-/// `subject_stored_gaps`; `pairwise::end_gap_span`). Empty without such a residue.
+/// `subject_stored_gaps`). Empty without such a residue. A row's end gaps are read from the edit
+/// script (`serial::seqalign::row_end_gaps`), where such a residue is a letter.
 pub(crate) fn stored_gap_columns(
     sequence: &[u8],
     gap: u8,

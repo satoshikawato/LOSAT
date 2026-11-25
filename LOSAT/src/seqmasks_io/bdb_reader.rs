@@ -365,7 +365,7 @@ pub(crate) fn iupacaa_letters(stdaa: &[u8]) -> Vec<u8> {
 
 /// An error of the database reader: NCBI's exception (`SeqDbError::ncbi_exception`, or the
 /// `CSeqDBException` of `SeqDbError::ncbi_message`, with its place where LOSAT knows it,
-/// `seqdb::throw_site`), or LOSAT's refusal.
+/// `SeqDbError::throw_site`), or LOSAT's refusal.
 fn database_error(error: SeqDbError, program: &str) -> BdbError {
     // An NCBI exception of the reader itself (an alias value that does not convert), reported
     // as the application reports it (blastdbcmd's `database_error`).
@@ -374,7 +374,8 @@ fn database_error(error: SeqDbError, program: &str) -> BdbError {
     }
     match error.ncbi_request_message() {
         Some(text) => {
-            let site = crate::seqdb::throw_site(&text)
+            let site = error
+                .throw_site()
                 .unwrap_or(ThrowSite::generated("CSeqDBException::eInvalid"));
             BdbError::Ncbi(NcbiException::new(site, text))
         }

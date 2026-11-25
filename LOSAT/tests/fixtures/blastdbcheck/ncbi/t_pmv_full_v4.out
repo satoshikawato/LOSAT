@@ -1,0 +1,22 @@
+Writing messages to <stdout> at verbosity (Minutiae)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Using `full' mode: every OID will be tested.
+
+Testing 2 volume(s).
+ <RUN>/in/pmv.00
+  <RUN>/in/pmv.00 / Stride: <testing every 1th OID>
+  <RUN>/in/pmv.00 / Stride:       Status for OID 0: PASS
+  <RUN>/in/pmv.00 / Stride:       Status for OID 1: PASS
+  <RUN>/in/pmv.00 / Stride:       Status for OID 2: PASS
+  <RUN>/in/pmv.00 / Stride:       Status for OID 3: PASS
+  <RUN>/in/pmv.00 / Stride:       Status for OID 4: PASS
+  <RUN>/in/pmv.00 / Stride:       Status for OID 5: PASS
+  <RUN>/in/pmv.00 / Stride:       Status for OID 6: PASS
+ <RUN>/in/pmv.01
+  <RUN>/in/pmv.01 / Stride: <testing every 1th OID>
+ Result=SUCCESS. No errors reported for 2 volume(s).
+Testing 1 alias(es).
+ <RUN>/in/pmv.pal
+ Result=SUCCESS. No errors reported for 1 alias(es).

@@ -40,7 +40,7 @@ flowchart LR
   lib["library users<br/>python/, LOSAT/examples"] --> api["api<br/>(run, run_batches, ...)"]
   api --> lb["api::local_blast"]
   adapter["web/adapter<br/>(Web ABI v2)"] --> lb
-  webapi["web_api<br/>(Web ABI v1, wasm32)"] -->|"blastn, blastp, tblastx"| local
+  webapi["web_api<br/>(Web ABI v1, wasm32 but the WASI command)"] -->|"blastn, blastp, tblastx"| local
   webapi -->|"blastx, tblastn"| pair["blastx::web::run_pair<br/>tblastn::web::run_pair"]
   pair --> engine
   lb --> local["&lt;program&gt;::run_local<br/>&lt;program&gt;::run_local_database"]
@@ -62,7 +62,8 @@ flowchart LR
   records, validates a command line and runs it through `api::local_blast`, which re-exports the
   programs' `run_local*` functions. A library search writes nothing to the process's standard
   output or error and never ends the process (`api/mod.rs`).
-- The Web: Web ABI v1 is the `extern "C"` exports of `web_api` (built only for `wasm32`), which
+- The Web: Web ABI v1 is the `extern "C"` exports of `web_api` (built only for `wasm32`, and not
+  for the WASI command line, which selects the feature `no-web-abi-v1`), which
   call `run_local` for blastn, blastp and tblastx and `web::run_pair` for blastx and tblastn; Web
   ABI v2 is the separate crate `web/adapter`, which calls `run_local*` like the library.
 
@@ -93,7 +94,7 @@ number (the Web adapter and the tests name them); the `losat` binary calls one h
 | `config` | scoring specifications, a compatibility mode (`CompatMode`) and configuration structs (`SeedConfig`, ..., `BlastnConfig`, `TblastxConfig`) | none |
 | `common` (the file `common.rs`) | `Hit`, `GapEditOp`, the HSP sort comparisons and the `write_output*` writers | `core/blast_hits.c`, `gapinfo.h` |
 | `sequence` | packed letters and packed subjects | via `core/blast_encoding.c` |
-| `web_api` | Web ABI v1 exports (`wasm32` only) | none |
+| `web_api` | Web ABI v1 exports (`wasm32` only, but not the WASI command line: `no-web-abi-v1`) | none |
 | `record` | the type `api::FastaRecord` | `CBlastFastaInputSource` |
 
 Four names are used more than once: the file `common.rs` and the directory `algorithm/common/` are

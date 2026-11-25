@@ -34,6 +34,7 @@ const FEATURES: &[(&str, bool)] = &[
     ("wasm-threads", cfg!(feature = "wasm-threads")),
     ("blastx-worker-probe", cfg!(feature = "blastx-worker-probe")),
     ("tblastx-wasm-scalar", cfg!(feature = "tblastx-wasm-scalar")),
+    ("no-web-abi-v1", cfg!(feature = "no-web-abi-v1")),
 ];
 
 /// The run of the tests that this process belongs to: nextest's (`NEXTEST_RUN_ID`, the same in

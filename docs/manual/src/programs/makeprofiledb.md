@@ -15,7 +15,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 ## Input
 
 - `-in` names a text file that lists the PSSM files, separated by spaces, tabs or line breaks. A name is read relative to the current directory, not to the list's directory.
-- Each PSSM file is a `PssmWithParameters` in ASN.1 text: CDD's `.smp` files, or the files that `psiblast -out_pssm` writes. A file with scores (`finalData`) is taken as it is; a file with frequency ratios only gets its scores computed from them, with the scoring matrix, the gap costs and the `-scale` of the database, as NCBI does. Every file needs its frequency ratios (`intermediateData`).
+- Each PSSM file is a `PssmWithParameters` in ASN.1 text (default) or in ASN.1 binary (BER, with `-binary`): CDD's `.smp` files, or the files that `psiblast -out_pssm` writes. A file with scores (`finalData`) is taken as it is; a file with frequency ratios only gets its scores computed from them, with the scoring matrix, the gap costs and the `-scale` of the database, as NCBI does. Every file needs its frequency ratios (`intermediateData`).
 - The first profile of a volume sets the volume's scoring matrix, gap costs and scale factor (from its `rpsdbparams` and `scalingFactor`, else from `-matrix`, `-gapopen`, `-gapextend` and `-scale`); every later profile must agree with them, or the run stops with NCBI's error (`Scaling factors do not match`, `Score matrix does not match`, ...).
 
 ## Common options
@@ -23,6 +23,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `-in` | none | The list of PSSM files. |
+| `-binary` | off | Read the PSSM files as ASN.1 binary (BER) instead of ASN.1 text. |
 | `-out` | the `-in` name | The name of the database. Directories in it are created. An existing database of that name is replaced. |
 | `-title` | the `-in` name | The title of the database. |
 | `-threshold` | `9.82` | The word score threshold of the word table, multiplied by the scale factor. A profile's own `wordScoreThreshold` is used instead when it has one, unless `-force` is given. |
@@ -55,18 +56,19 @@ After an error the RPS files are removed and the sequences already added stay in
 
 ## Differences from NCBI BLAST+
 
-None in the files or the messages of a normal run, or of a run that NCBI's `makeprofiledb` ends with an error message. A profile with scores near the limits of 32-bit integers, or a word score threshold (times the scale factor) beyond them, gets the table of words of the exact values, where NCBI's sums overflow. The inputs below, on which NCBI's `makeprofiledb` crashes, aborts, never ends or has no defined result, are refused with a message; so are damaged binary definition lines, for which NCBI's `makeprofiledb` prints the error of its ASN.1 reader.
+None in the files or the messages of a normal run, or of a run that NCBI's `makeprofiledb` ends with an error message. A profile with scores near the limits of 32-bit integers, or a word score threshold (times the scale factor) beyond them, gets the table of words of the exact values, where NCBI's sums overflow. The inputs below, on which NCBI's `makeprofiledb` crashes, aborts, never ends or has no defined result, are refused with a message.
 
 ## What LOSAT refuses
 
-- `-binary` (PSSM files in ASN.1 binary). Convert them to text, or wait for a later release.
 - `-dbtype delta` and `-dbtype cobalt`.
 - `-max_smp_vol 0`, on which NCBI's `makeprofiledb` crashes (division by zero).
 - `-in` naming a directory, on which NCBI's `makeprofiledb` never ends.
 - A profile stored by row (`byRow TRUE`) with more than 28 positions, whose frequency ratios NCBI's `makeprofiledb` reads from outside its data.
 - A frequency ratio too large for NCBI's integers (such as `1e300`), a list of frequency ratios shorter than the profile for a profile with frequency ratios only (NCBI's `makeprofiledb` reads past it), and a word score threshold that is not a number.
+- A query with `iupacna` data holding a byte `>= 0x80` in a pair position (any index before the final odd overhang byte): NCBI's `x_ConvertIupacnaTo4na` indexes its conversion table with a signed `char` and reads before the table.
 - A query without Seq-ids and without descriptors, except in a version 4 database with `-index true`, which stops with NCBI's message: NCBI's `makeprofiledb` aborts (version 5) or, with `-index false`, writes the `gnl|BL_ORD_ID` id past the end of an empty list. The same with `-index false` for a query whose first binary definition line has no Seq-id.
-- Binary definition lines (a `user` object `ASN1_BlastDefLine`, as in a query taken from a BLAST database) that are damaged or hold characters that NCBI's reader replaces: NCBI's `makeprofiledb` stops with its ASN.1 reader's error, or replaces the characters and reports each.
+- Binary definition lines (a `user` object `ASN1_BlastDefLine`, as in a query taken from a BLAST database) with a `Seq-id` element stated as `NULL` when writing a version 5 database with no prior sequence written yet and no active taxid map (including `-taxid` or an empty `-taxid_map`): NCBI's version 5 taxonomy writer aborts on close. With `-taxid_map` (non-empty) or an `org` descriptor, `-blastdb_version 4`, `-index false` when the `NULL` is the first id of the first line, or version 5 after a prior sequence, LOSAT matches NCBI. Damaged binary definition lines and replaced visible characters are read and reported as in NCBI.
+- `:OtherType` pointers in ASN.1 text or `-binary` profiles and binary definition lines, whose NCBI error message depends on which types the process has met before.
 - A profile stored by row without scores whose query length is 4,294,967,295 letters with `numColumns -1`: NCBI's `makeprofiledb` writes before its matrix.
 - An error after which the database's writer fails again as it closes, such as a missing input file after the first with an empty `-out` in a version 5 database, or a query without definition lines in a version 5 database: NCBI's `makeprofiledb` aborts there.
 - A sequence that has only a GI id between sequences with other ids, in a version 5 database with `-index true`: NCBI's `makeprofiledb` aborts there; `-blastdb_version 4` builds it.

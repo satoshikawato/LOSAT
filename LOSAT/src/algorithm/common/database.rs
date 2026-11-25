@@ -3425,11 +3425,26 @@ impl<'a> HeaderReader<'a> {
         } else {
             return RecordCopy::Differs;
         };
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+        // No NCBI counterpart: LOSAT's copy-equivalence check (`copy_of`). `GetBioseq` returns a
+        // null Bioseq when the signed 32-bit `GetSeqLengthProt` length is less than 1, so treat
+        // such proteins as distinct without loading their sequence bytes into memory.
+        let protein = self.db.seqtype() == SeqType::Protein;
+        if protein {
+            let (Ok(len_a), Ok(len_b)) =
+                (self.db.protein_length_i32(a), self.db.protein_length_i32(b))
+            else {
+                return RecordCopy::Differs;
+            };
+            if len_a < 1 || len_b < 1 {
+                return RecordCopy::Differs;
+            }
+        }
         let (Ok(block_a), Ok(block_b)) = (self.db.read_sequence(a), self.db.read_sequence(b))
         else {
             return RecordCopy::Differs;
         };
-        let protein = self.db.seqtype() == SeqType::Protein;
         let same_letters = if protein {
             block_a.protein(0) == block_b.protein(0)
         } else {
@@ -4824,11 +4839,19 @@ pub(crate) fn x_check_protein_stores(
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, PROTEIN_STORE_BLOCK_BYTES) {
         let block = db
-            .read_block(range)
+            .read_protein_search_block(range)
             .map_err(|error| search_read_error(error, program))?;
         for i in 0..block.len() {
             let with_sentinels = block.protein_with_sentinels(i);
             let ordinal = range.first_ordinal + i as u32;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+            // No NCBI counterpart: LOSAT's stored-byte check (`x_check_protein_stores`). Proteins
+            // with non-positive NCBI 32-bit length are skipped by NCBI and returned as `[0, 0]` by
+            // `read_protein_search_block`, so skip byte validation and report length 0.
+            if with_sentinels.len() == 2 {
+                each(ordinal, 0);
+                continue;
+            }
             check_protein_sequence(with_sentinels, || db.oid(ordinal), program)?;
             each(ordinal, with_sentinels.len() - 2);
         }
@@ -6283,6 +6306,16 @@ impl TaxdbRun {
             }),
             ..TaxdbRun::default()
         }
+    }
+
+    /// [`TaxdbRun::sequential`] of one `CSeqDB` of a program that opens several, each with its
+    /// volumes' caches, while the taxonomy database `taxdb` is the process's (NCBI's static
+    /// `CTaxDBFileInfo`): blastdbcheck opens each volume as a database of its own. The texts of
+    /// opening `taxdb` come with the first lookup of any of them.
+    pub(crate) fn sequential_with(taxdb: std::sync::Arc<crate::seqdb::taxdb::LazyTaxDb>) -> Self {
+        let run = Self::sequential();
+        let _ = run.lazy.set(taxdb);
+        run
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1462-1466

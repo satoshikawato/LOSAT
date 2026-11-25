@@ -268,18 +268,21 @@ impl TblastxDatabase {
     }
 
     /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`)
-    /// whose words have `word_size` letters (the shortest subject searched has `word_size * 3 + 2`
-    /// bases).
+    /// for word size `word` and two-hit window `window` (0 for one-hit; TBLASTX's translation has
+    /// no residue 0).
     pub(crate) fn check_mask_limits(
         &self,
         mask: &crate::blastinput::db_mask::ResolvedMask,
-        word_size: usize,
+        word: i32,
+        window: i32,
     ) -> Result<()> {
         mask.check_losat_limits(
             &self.db,
             PROGRAM,
             crate::blastinput::db_mask::HardScan::Translated {
-                min_length: word_size * 3 + 2,
+                word,
+                window,
+                zero_words: false,
             },
         )
     }
@@ -340,9 +343,11 @@ impl TblastxDatabase {
         threads: usize,
         mask: Option<&crate::blastinput::db_mask::ResolvedMask>,
     ) -> Result<XDbStream<'_>> {
-        Ok(XDbStream::new(&self.db, threads, PROGRAM)?.with_mask(
-            crate::algorithm::common::db_mask_search::SearchMask::of(mask),
-        ))
+        Ok(XDbStream::new(&self.db, threads, PROGRAM)?
+            .with_mask(crate::algorithm::common::db_mask_search::SearchMask::of(
+                mask,
+            ))
+            .with_hard_starts(mask.and_then(|m| m.translated_starts().cloned())))
     }
 }
 

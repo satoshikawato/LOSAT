@@ -127,6 +127,8 @@ fn batched_extensions_equal_scan_unit() {
                 offset,
                 length: s_frame.aa_len - offset,
                 overlap: 0,
+                ncbi_length: (s_frame.aa_len - offset) as i32,
+                overlap_past_list: false,
             };
             for (g, group) in pp.groups.iter().enumerate() {
                 if group.lookup.longest_chain <= 0 {

@@ -942,68 +942,73 @@ impl SeqDb {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1432 (cited at
     // `algorithm::common::hard_chunk_walk::NcbiWalk`): with one thread the search reads every
     // included sequence in the order of its id.
-    /// Every sequence that a search of this protein database reads (by ordinal id: those the list
-    /// and the alias files' ranges include), in that order, with its exact length (the index's,
-    /// `Volume::x_protein_lengths` once per block of 4,096 sequences, or read alone where the
-    /// block's cannot be read) and its masks of the filtering algorithm `algo_id` as stored (empty
-    /// for a sequence without them), until `visit` returns a finding: that finding with the
-    /// sequence's NCBI OID (as `blastdbcmd`'s `%o`) and its volume's path. A sequence whose masks
-    /// or length cannot be read ends the walk without a finding (the search meets that read error
-    /// first, as in [`SeqDb::first_searched_masks`]). No NCBI counterpart: LOSAT's walk before a
-    /// BLASTP or BLASTX search with `-db_hard_mask` (`blastinput::db_mask::ResolvedMask::
-    /// check_losat_limits`; series NP, M4b-3b).
-    pub fn searched_protein_masks<T>(
+    /// Every sequence that a search of this database reads (by ordinal id: those the list and the
+    /// alias files' ranges include), in that order, with its exact length (for proteins,
+    /// `Volume::x_protein_lengths_i32` once per block of 4,096 sequences, or
+    /// `SeqDb::protein_length_i32` where the block's cannot be read, skipping proteins whose NCBI
+    /// 32-bit length is `<= 0`; for nucleotides, `Volume::nucleotide_length`, index plus last
+    /// byte) and a lazy reader of its stored masks of the filtering algorithm `algo_id`
+    /// ([`SearchedMasks`], which reads the block's masks only when the visitor asks for them),
+    /// until `visit` returns a finding or an error: that finding with the sequence's NCBI OID (as
+    /// `blastdbcmd`'s `%o`) and its volume's path.
+    ///
+    /// No NCBI counterpart: LOSAT's one-thread walk for protein `-db_hard_mask` searches
+    /// (`blastinput::db_mask::ResolvedMask::check_losat_limits`; series NP, M4b-3b) and translated
+    /// `-db_soft_mask` searches (`algorithm::common::x_db_stream::XDbStream::lead_start`; series
+    /// NP, M4b-T3).
+    pub fn searched_sequences<T>(
         &self,
         algo_id: i32,
-        mut visit: impl FnMut(u32, usize, &[(u32, u32)]) -> Option<T>,
-    ) -> Option<(u32, PathBuf, T)> {
+        mut visit: impl FnMut(u32, usize, &mut SearchedMasks<'_>) -> Result<Option<T>, SeqDbError>,
+    ) -> Result<Option<(u32, PathBuf, T)>, SeqDbError> {
         const WALK_BLOCK: u32 = 4096;
+        let protein = self.seqtype() == super::SeqType::Protein;
         let mut block = MaskBlock::default();
         let mut ordinal = 0u32;
         let end_ordinal = self.num_seqs();
         while let Some(run) =
             self.x_block_range(ordinal, end_ordinal.min(ordinal.saturating_add(WALK_BLOCK)))
         {
-            self.read_mask_block(run, algo_id, &mut block);
             let volume = &self.volumes[run.volume];
-            let lengths = volume.x_protein_lengths_i32(run.first, run.end).ok();
+            let protein_lengths = protein
+                .then(|| volume.x_protein_lengths_i32(run.first, run.end).ok())
+                .flatten();
             for vol_oid in run.first..run.end {
                 let seq_ordinal = run.first_ordinal + (vol_oid - run.first);
-                let masks = match block.ranges(vol_oid) {
-                    Ok(BlockMasks::Ranges(masks)) => masks,
-                    // No masks; an algorithm not in the volume is refused before
-                    // (`check_search_masks`).
-                    Ok(BlockMasks::NoMaskData | BlockMasks::AlgorithmNotInVolume) => &[],
-                    Err(_) => return None,
+                let named_oid = self.volume_starts[run.volume] + vol_oid;
+                let length = if protein {
+                    let signed = match protein_lengths
+                        .as_ref()
+                        .and_then(|lengths| lengths.get((vol_oid - run.first) as usize))
+                    {
+                        Some(&length) => length,
+                        None => self.protein_length_i32(seq_ordinal)?,
+                    };
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+                    // `s_SeqDbGetSequence` returns an error for proteins whose NCBI 32-bit length
+                    // is not positive (`0` or `>= 2^31`), so the search skips them without reading
+                    // masks or advancing the diagonal offset.
+                    if signed <= 0 {
+                        continue;
+                    }
+                    signed as usize
+                } else {
+                    volume.nucleotide_length(vol_oid, named_oid)?
                 };
-                let indexed = lengths
-                    .as_ref()
-                    .and_then(|lengths| lengths.get((vol_oid - run.first) as usize));
-                let length = match indexed {
-                    Some(&length) => length,
-                    None => match self.protein_length_i32(seq_ordinal) {
-                        Ok(length) => length,
-                        Err(_) => return None,
-                    },
+                let mut masks = SearchedMasks {
+                    db: self,
+                    run,
+                    vol_oid,
+                    algo_id,
+                    block: &mut block,
                 };
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
-                // `s_SeqDbGetSequence` returns an error for proteins whose NCBI 32-bit length is
-                // not positive (`0` or `>= 2^31`), so the search skips them without reading masks
-                // or advancing the diagonal offset.
-                if length <= 0 {
-                    continue;
-                }
-                if let Some(found) = visit(seq_ordinal, length as usize, masks) {
-                    return Some((
-                        self.volume_starts[run.volume] + vol_oid,
-                        volume.base().to_path_buf(),
-                        found,
-                    ));
+                if let Some(found) = visit(seq_ordinal, length, &mut masks)? {
+                    return Ok(Some((named_oid, volume.base().to_path_buf(), found)));
                 }
             }
             ordinal = run.end_ordinal();
         }
-        None
+        Ok(None)
     }
 
     /// Whether the search reads a blob of the mask column `column` of volume `volume`: one of its
@@ -1024,6 +1029,32 @@ impl SeqDb {
             }
         }
         false
+    }
+}
+
+/// Lazy reader of a sequence's stored masks during [`SeqDb::searched_sequences`]: reads the
+/// block's mask data on the first request within that block, so sequences whose chunk schedule
+/// does not depend on masks never read them.
+pub struct SearchedMasks<'a> {
+    db: &'a SeqDb,
+    run: BlockRange,
+    vol_oid: u32,
+    algo_id: i32,
+    block: &'a mut MaskBlock,
+}
+
+impl SearchedMasks<'_> {
+    /// The current sequence's stored masks for the walk's algorithm (empty for a sequence without
+    /// mask data; a volume without the algorithm is refused before the search by
+    /// `check_search_masks`).
+    pub fn read(&mut self) -> Result<&[(u32, u32)], SeqDbError> {
+        self.db.read_mask_block(self.run, self.algo_id, self.block);
+        let span = match self.block.ranges_span(self.vol_oid) {
+            Ok(span) => span,
+            Err(Some(error)) => return Err(error),
+            Err(None) => return Err(std::mem::take(self.block).into_read_error(self.vol_oid)),
+        };
+        Ok(&self.block.ranges[span])
     }
 }
 
@@ -1143,6 +1174,51 @@ impl MaskBlock {
         )
         .map_err(BlockMaskError::Ranges)?;
         Ok(BlockMasks::Ranges(&self.ranges))
+    }
+
+    /// Populates `self.ranges` for `vol_oid` when column-backed and returns the span inside
+    /// `self.ranges` holding its masks (`0..0` when there are none or the volume lacks the
+    /// algorithm), `Err(Some(error))` on a format/internal error, or `Err(None)` on a block/blob
+    /// read error (`into_read_error`). Returns no borrow of `self`, so callers can extract an
+    /// owned read error after a read failure.
+    fn ranges_span(&mut self, vol_oid: u32) -> Result<std::ops::Range<usize>, Option<SeqDbError>> {
+        if self.error.is_some() {
+            return Err(None);
+        }
+        match self.source {
+            BlockSource::Column => {}
+            BlockSource::None => return Ok(0..0),
+            BlockSource::Gi => {
+                let first = self.read.map_or(0, |(range, _)| range.first);
+                return match self.gi_spans.get(vol_oid.wrapping_sub(first) as usize) {
+                    Some(Ok(span)) => Ok(span.clone()),
+                    Some(Err(_)) => Err(None),
+                    None => Err(Some(SeqDbError::Internal(format!(
+                        "LOSAT internal error: the masks of sequence {vol_oid} were asked for \
+                         outside the block read"
+                    )))),
+                };
+            }
+        }
+        let Ok(blob) = self.blobs.blob(vol_oid) else {
+            return Err(None);
+        };
+        if blob.is_empty() {
+            return Ok(0..0);
+        }
+        let Some(volume_algo) = self.volume_algo else {
+            return Ok(0..0);
+        };
+        self.ranges.clear();
+        read_ranges_into(
+            blob,
+            volume_algo,
+            &self.path,
+            &mut self.ranges,
+            &mut self.pass_starts,
+        )
+        .map_err(Some)?;
+        Ok(0..self.ranges.len())
     }
 
     /// The read error that [`MaskBlock::ranges`] gives the sequence `vol_oid` (`Read`), owned.

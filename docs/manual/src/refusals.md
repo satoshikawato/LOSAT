@@ -31,7 +31,7 @@ Error: -use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's 
 An output format the program does not write (exit status 1):
 
 ```text
-Error: output format 1 is not supported by LOSAT's PSIBLAST yet
+Error: output format 15 is not supported by LOSAT's PSIBLAST yet
 ```
 
 For example, NCBI BLAST+ runs `psiblast` with the Smith-Waterman traceback, and LOSAT stops with the second message above:
@@ -55,7 +55,7 @@ There is one section for each program, and one for the five search programs toge
 | `-use_sw_tback` | `psiblast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY`), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes |
-| `-phi_pattern`, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0`, `5` to `11` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`) |
+| `-phi_pattern`, non-listed `-outfmt` | `psiblast` | Not yet supported (listed: `0` to `12`, `18` and `20`, with a FASTA query, `-in_pssm` or `-in_msa`) |
 | `-mk_counts -infmt seqids` | `windowmasker` | Out of scope (needs NCBI servers) |
 | `deltablast`, `makeprofiledb`, `blast_formatter` | Standalone executables | Not yet provided |
 
@@ -82,6 +82,7 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 | `-xmlhelp`, `-version`, `-version-full`, `-version-full-xml`, `-version-full-json` in the library API and pylosat | Refused. They work on the command line and in LOSAT Web, which prints the command line's text. |
 | `-dryrun` | Reads and checks the arguments, then stops. It refuses what a normal run refuses. |
 | `-logfile` with `tblastx`, `rpsblast` or `rpstblastn` in the WASI command-line build | Refused. That build cannot send its standard error to a file. |
+| `-logfile` naming an existing file of the run (in the run's directory or a registered search input inside or outside the working directory), or naming a file the run opens for reading even when that file is missing (a `-db` search's `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist` or `-negative_taxidlist`, or a `windowmasker` input), and a `windowmasker` `-out` naming an existing file or a missing input the command line reads after opening `-out` (`-in` of `-mk_counts`, `-ustat` of masking) in LOSAT Web | Refused (exit status 1). The command line appends to or creates that file and reads it back; LOSAT Web reads the run's files and writes none of them. |
 | `-remote`, `-entrez_query` | Refused. They need NCBI's servers. See the end of this page. |
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#all-five-search-programs).
@@ -224,11 +225,12 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-in_msa` with a master sequence that is the start of a longer sequence above it in the alignment (`-msa_master_idx` names it) | Refused. NCBI reads and writes past its alignment buffers there, and its result depends on the memory allocator. Put the master sequence above the longer one in the file. |
 | `-html` | Refused: not yet supported. |
 | `-use_sw_tback` | Refused. |
-| `-outfmt` 1 to 4, 12 to 16 and 18 | Refused: not yet supported, with a FASTA query, `-in_pssm` or `-in_msa`. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
+| `-outfmt` 13 to 16 | Refused: not yet supported, with a FASTA query, `-in_pssm` or `-in_msa`. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
 | `-threshold` with the compressed lookup table | Refused, as in `blastp`. |
 | A gapped X-drop that overflows NCBI's kernels | Refused, as in `blastp`. This includes later rounds, and `-in_pssm` with the PSSM's Lambda. |
 | An infinite `-evalue`, or an `-evalue` of 1.7976931348623157e308 with composition-based statistics | Refused, as in `blastp`. |
 | A `-subject` set whose sequences all have no letters | Refused. NCBI's `psiblast` crashes; `blastp` runs it. |
+| `-outfmt` 1 to 4 with an `-in_pssm` PSSM whose query has the molecule `other`, at a round whose merge reads past a row's end, crashes, reads freed memory or wraps a segment length in NCBI | Refused after the report before the round's query-anchored section, which is NCBI's. NCBI reads such a query as a nucleotide sequence when it merges the alignments, three positions to a letter on three rows: where it reads past the last piece of a row while it orders the pieces, it stops with a C++ exception (`CObject is corrupted`, exit status 255); where a query letter against a gap of the subject falls on a row that no aligned piece opened, it crashes; where filling a row's unaligned stretch replaces a piece that it still lists, it reads memory it has freed; where a piece's walk finds the next piece before its own position, it computes a length below zero and then runs forever or goes on with lengths near 2^32. Rounds whose merge returns (an empty line for the section) or stops with NCBI's own merge exception (`CAlnException`, exit status 255) are answered as NCBI does. |
 | `-in_pssm` or `-in_msa` with a matrix or gap cost other than BLOSUM62 11/1 | Refused. |
 | `-outfmt 11` with a database and an `-in_pssm` file that holds frequency ratios only, without `params.rpsdbparams`, in the ASN.1 text archive (no `ARCHIVE_FORMAT`), `ARCHIVE_FORMAT=xml` or `ARCHIVE_FORMAT=bin` (NCBI stops with a C++ exception while it writes the request's PSSM, as it does for `-out_pssm`) | Refused. `-subject`, `-outfmt 6` and `-export_search_strategy` with such a file are answered as NCBI does. |
 | `-outfmt 11` with an `-in_pssm` file whose author names (a Pubdesc's authors, which NCBI reads again only when it writes them in another format) are in another format than the archive (`ARCHIVE_FORMAT=xml`, `ARCHIVE_FORMAT=bin` or no variable for ASN.1 text) and hold a number too large for its type | Refused: not yet supported (NCBI stops with an exception after part of the archive). Every other PSSM file is written in all three archives, with NCBI's message for a byte outside the visible ASCII range in those names, and so are `-in_msa` and a FASTA query. A list element stated as `NULL` (`05 00` in ASN.1 binary) stops each archive at the element, as NCBI's writer stops, and the error archive follows. |
@@ -256,7 +258,6 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-outfmt 11` | Refused. NCBI searches, then stops with a C++ exception whose report (in its error archive too) changes from run to run. |
 | `-mt_mode 1` with more than one thread and `-db` | Refused. |
 | A PSSM query that `-seg` masks completely | Refused. LOSAT writes the report's header and then stops with the error. |
-| `-outfmt` 12 to 16 and 18 | Refused: not yet supported. `-outfmt` 17, 19 and 21, and 13 and 14 without `-out`, get NCBI's own errors. |
 | `-db_gencode 32` | Refused. It is not one of NCBI's codes; LOSAT's `tblastn` takes it for its own translations. |
 | `-in_pssm` in LOSAT Web | Refused. The library API and pylosat take it as an input. |
 
@@ -486,7 +487,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 - The programs `deltablast` and `blast_formatter`.
 - `makeprofiledb -dbtype delta` or `cobalt`.
 - `psiblast -phi_pattern`.
-- The `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`.
+- The `psiblast` output formats `13` to `16`.
 - `-html` in `psiblast`.
 
 ## Out of scope: they need NCBI's servers

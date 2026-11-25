@@ -1,0 +1,55 @@
+PSITBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/db_search/tslice.fna).
+           5 sequences; 33,385 total letters
+
+
+
+Query= t
+
+Length=60
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+v_slice LvMJNV 21001-39000 with ambiguity codes                       17.8    1.2  
+m_minus MelaMJNV 59001-62000 with ambiguity codes                     16.6    3.1  
+v_mut_8pct LvMJNV 28501-30700 with substitutions and indels           15.8    5.9  
+v_far_22pct LvMJNV 28501-30700 diverged                               15.8    5.9  
+
+
+Sequence with id Subject_3 no longer exists in database...alignment skipped
+Sequence with id Subject_3 no longer exists in database...alignment skipped
+Sequence with id Subject_3 no longer exists in database...alignment skipped
+Sequence with id Subject_2 no longer exists in database...alignment skipped
+Sequence with id Subject_4 no longer exists in database...alignment skipped
+Sequence with id Subject_5 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.318    0.135    0.411    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0396    0.140     1.90     42.6     43.6 
+
+Effective search space used: 273825
+
+
+  Database: User specified sequence set (Input: tests/db_search/tslice.fna).
+    Posted date:  Unknown
+  Number of letters in database: 33,385
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

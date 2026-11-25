@@ -134,31 +134,46 @@ fn an_object_index_and_another_class_are_ncbis_errors() {
     }
     // A value of another class: NCBI's `CSerialException` whether or not its process knows the
     // class (psiblast and tblastn report it with their own message, `Names::own_serial_message`).
-    for (text, expected) in [
+    for (root, text, expected) in [
         (
-            "PDB-seq-id ::= { mol \"1ABC\", rel :Object-id id 1 }",
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Object-id id 1 }",
             "incompatible member type",
         ),
         (
-            "PDB-seq-id ::= { mol \"1ABC\", rel :Pssm { numRows 1, numColumns 1 } }",
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Pssm { numRows 1, numColumns 1 } }",
             "incompatible member type",
         ),
         (
+            named::PDB_SEQ_ID,
+            "PDB-seq-id ::= { mol \"1ABC\", rel :Date-std { year 2026 } }",
+            "incompatible member type",
+        ),
+        (
+            named::PDB_SEQ_ID,
             "PDB-seq-id ::= { mol \"1ABC\", rel :No-such-type id 1 }",
             "class not found: No-such-type",
         ),
         // The first `CSerialException` inside the value.
         (
-            "PDB-seq-id ::= { mol \"1ABC\", rel :Object-id foo 1 }",
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Object-id foo 1 }",
             "unexpected member",
         ),
     ] {
-        let e = serial(read(named::PDB_SEQ_ID, text));
+        let e = serial(read(root, text));
         assert!(e.contains(expected), "{text}: {e}");
     }
+    let date_std = other_pointer(
+        "Date-std",
+        &[0x30, 0x80, 0xa0, 0x80, 0x02, 0x01, 0x01, 0, 0, 0, 0],
+    );
+    let e = serial(ber(named::PDB_SEQ_ID, &pdb_ber(Some(&date_std))));
+    assert!(e.contains("incompatible member type"), "{e}");
     let other = other_pointer("Object-id", &[0xa0, 0x80, 0x02, 0x01, 0x05, 0, 0]);
     let e = serial(ber(named::PDB_SEQ_ID, &pdb_ber(Some(&other))));
-    assert!(e.contains("incompatible member type"), "{e}");
+    assert!(e.contains("class not found: Object-id"), "{e}");
     // A read that posts (a class's `PostRead`) posts only where NCBI knows the class, and so does
     // an error of another kind inside the value (the `CUtilException` of a number in text, which
     // the PSSM reader does not catch): refused.
@@ -168,18 +183,18 @@ fn an_object_index_and_another_class_are_ncbis_errors() {
     };
     assert_eq!(
         refused(read(
-            named::PDB_SEQ_ID,
-            "PDB-seq-id ::= { mol \"1ABC\", rel :Object-id id x }"
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Object-id id x }"
         )),
-        "':Object-id', a value of the type Object-id where a Date belongs (line 1): \
+        "':Object-id', a value of the type Object-id where a PssmParameters belongs (line 1): \
          whether NCBI's reader reads it depends on the types its process has met before"
     );
     assert_eq!(
         refused(read(
-            named::PDB_SEQ_ID,
-            "PDB-seq-id ::= { mol \"1ABC\", rel :Variation-ref { population-data { }, data unknown NULL } }"
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Variation-ref { population-data { }, data unknown NULL } }"
         )),
-        "':Variation-ref', a value of the type Variation-ref where a Date belongs (line 1): \
+        "':Variation-ref', a value of the type Variation-ref where a PssmParameters belongs (line 1): \
          whether NCBI's reader reads it depends on the types its process has met before"
     );
     // `:[]`: the name's `std::string` of the largest count of bytes.
@@ -190,6 +205,63 @@ fn an_object_index_and_another_class_are_ncbis_errors() {
         ),
         Err(ReadError::Std("basic_string::_M_create"))
     );
+}
+
+// Probe D3c-3b probe9 (`db.ptr.ps.params_other_outside`: `:Blast4-cutoff`) and PR #1633 R2 probe
+// (NCBI 2.17.0 psiblast and tblastn `-in_pssm` on the five `NCBI-BlastDL` types): classes that the
+// current read's root does not reach are not in NCBI's class registry during `-in_pssm` reading, so
+// NCBI throws "class not found" before reading their value (even when the value holds a bad number
+// or a byte outside visible ASCII).
+#[test]
+fn other_class_lookup_is_scoped_to_the_read_root() {
+    for (name, body) in [
+        ("Blast4-cutoff", "raw-score x"),
+        (
+            "Blast-db-mask-info",
+            "{ algo-id x, algo-program dust, algo-options \"\", masks { masks { }, more FALSE } }",
+        ),
+        (
+            "Blast-mask-list",
+            "{ masks { int { from x, to 1, id local id 1 } }, more FALSE }",
+        ),
+        (
+            "Blast-def-line-set",
+            "{ { seqid { local id 1 }, taxid x } }",
+        ),
+        ("Blast-def-line", "{ seqid { local id 1 }, taxid x }"),
+        ("Blast-filter-program", "x"),
+    ] {
+        let text = format!(
+            "PssmWithParameters ::= {{ pssm {{ numRows 1, numColumns 1 }}, params :{name} {body} }}"
+        );
+        let e = serial(read(named::PSSMWITHPARAMETERS, &text));
+        assert!(
+            e.contains(&format!("class not found: {name}")),
+            "{text}: {e}"
+        );
+    }
+    // ASN.1 binary under `PssmWithParameters`: `Object-id` is reachable (`incompatible member
+    // type`), while `Blast4-cutoff` is not (`class not found`).
+    let pssm_ber = |params: &[u8]| {
+        let mut out = vec![
+            0x30, 0x80, // PssmWithParameters
+            0xa0, 0x80, // pssm
+            0x30, 0x80, // Pssm
+            0xa2, 0x80, 0x02, 0x01, 0x01, 0, 0, // numRows 1
+            0xa3, 0x80, 0x02, 0x01, 0x01, 0, 0, // numColumns 1
+            0, 0, 0, 0, // end Pssm, end pssm
+            0xa1, 0x80, // params
+        ];
+        out.extend_from_slice(params);
+        out.extend_from_slice(&[0, 0, 0, 0]);
+        out
+    };
+    let obj_id = other_pointer("Object-id", &[0xa0, 0x80, 0x02, 0x01, 0x05, 0, 0]);
+    let e = serial(ber(named::PSSMWITHPARAMETERS, &pssm_ber(&obj_id)));
+    assert!(e.contains("incompatible member type"), "{e}");
+    let blast4_cutoff = other_pointer("Blast4-cutoff", &[0xa1, 0x80, 0x02, 0x01, 0x05, 0, 0]);
+    let e = serial(ber(named::PSSMWITHPARAMETERS, &pssm_ber(&blast4_cutoff)));
+    assert!(e.contains("class not found: Blast4-cutoff"), "{e}");
 }
 
 // Probe D3c-3b t_inst_null, t_query_null: a mandatory member held by `CRef<>` is allocated by the

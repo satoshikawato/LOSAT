@@ -74,10 +74,7 @@ pub(super) fn write_blastx_seqalign(
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: options.gapped,
-        program_type: options
-            .rpstblastn
-            .is_some()
-            .then_some(crate::report::record::ProgramType::RpsTblastn),
+        program_type: options.program_type(),
     };
     let mut subject_records: Vec<SubjectRecord<'_>> = Vec::new();
     let mut hsp_records: Vec<HspRecord<'_>> = Vec::new();

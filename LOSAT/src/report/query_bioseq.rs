@@ -60,7 +60,6 @@ pub struct QueryRecordRef<'r> {
 impl<'r> QueryRecordRef<'r> {
     /// The query record `record` as the FASTA reader read it; `None` without `-parse_deflines`.
     pub fn of(record: &'r crate::record::FastaRecord) -> Option<Self> {
-        use crate::blastinput::fasta_reader::InputRecord as _;
         Some(QueryRecordRef {
             believed: record.believed()?,
             title: &record.title,

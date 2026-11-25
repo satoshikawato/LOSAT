@@ -1445,7 +1445,7 @@ pub(super) fn reported_batch(
             Some(crate::report::query_bioseq::QueryRecordRef {
                 believed: record.believed()?,
                 title: &record.title,
-                length: record.seq().len(),
+                length: record.sequence.len(),
             })
         };
         let run = crate::report::query_bioseq::SeenRun {

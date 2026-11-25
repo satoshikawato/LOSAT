@@ -258,7 +258,7 @@ impl ArchiveBatch<'_> {
                 }
             }
         }
-        let reported;
+        let mut reported;
         let (subject_names, call_subjects): (_, &[FastaRecord]) =
             match (&database, &pairwise_database) {
                 (Some(database), Some(pairwise)) => {
@@ -302,6 +302,7 @@ impl ArchiveBatch<'_> {
                             results,
                             options.gapped,
                             scopes.numbered_from(queries_before),
+                            &crate::report::query_bioseq::SeenRun::REFUSED,
                         )?;
                     }
                     (

@@ -22,9 +22,9 @@ fn keys(text: &str) -> Vec<u64> {
 }
 
 /// The run's searched queries `records` (ids, title, length) as `QueryBioseqs::note` reads them.
-fn records(
-    records: &[(BelievedIds, &'static [u8], usize)],
-) -> impl Fn(usize) -> Option<QueryRecordRef<'_>> {
+fn records<'a>(
+    records: &'a [(BelievedIds, &'static [u8], usize)],
+) -> impl Fn(usize) -> Option<QueryRecordRef<'a>> {
     move |h| {
         records
             .get(h)

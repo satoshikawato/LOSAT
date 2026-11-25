@@ -547,6 +547,12 @@ fn asn1_inputs_that_fail_a_check_are_refused_with_the_check_off() {
             .windows(needle.len())
             .position(|w| w == needle)
             .expect("needle present");
+        assert!(
+            !haystack[pos + 1..]
+                .windows(needle.len())
+                .any(|w| w == needle),
+            "needle must occur once"
+        );
         let mut out = Vec::with_capacity(haystack.len() - needle.len());
         out.extend_from_slice(&haystack[..pos]);
         out.extend_from_slice(&haystack[pos + needle.len()..]);
@@ -598,31 +604,37 @@ fn asn1_inputs_that_fail_a_check_are_refused_with_the_check_off() {
                         is not supported by LOSAT's makeblastdb";
     let get_refused = "ASN.1 input (-input_type asn1_txt|asn1_bin) of which NCBI BLAST+ gets a \
                        member that is not set is not supported by LOSAT's makeblastdb";
+    let unset_len_err =
+        "CSeq_inst::GetLength(): Attempt to get unassigned member NCBI-Sequence::Seq-inst.length";
 
-    refused(
-        &dir,
-        &cmd(txt_no_repr.to_str().unwrap(), "asn1_txt"),
-        READ,
-        read_refused,
-    );
-    refused(
-        &dir,
-        &cmd(bin_no_repr.to_str().unwrap(), "asn1_bin"),
-        READ,
-        read_refused,
-    );
-    refused(
-        &dir,
-        &cmd(txt_no_len.to_str().unwrap(), "asn1_txt"),
-        GET,
-        get_refused,
-    );
-    refused(
-        &dir,
-        &cmd(bin_no_len.to_str().unwrap(), "asn1_bin"),
-        GET,
-        get_refused,
-    );
+    for (path, itype, variable, ncbi_substr, refusal) in [
+        (
+            &txt_no_repr,
+            "asn1_txt",
+            READ,
+            "member repr expected",
+            read_refused,
+        ),
+        (
+            &bin_no_repr,
+            "asn1_bin",
+            READ,
+            "member repr expected",
+            read_refused,
+        ),
+        (&txt_no_len, "asn1_txt", GET, unset_len_err, get_refused),
+        (&bin_no_len, "asn1_bin", GET, unset_len_err, get_refused),
+    ] {
+        let args = cmd(path.to_str().unwrap(), itype);
+        // Unset produces NCBI's exact error; `refused` then asserts that keeping values and the
+        // other variable match it unchanged (status, stdout, stderr) and off values refuse with
+        // the exact same stdout.
+        let unset = losat(&dir, &args, None);
+        let err = String::from_utf8_lossy(&unset.stderr);
+        assert_eq!(unset.status.code(), Some(255), "{args:?}: {err}");
+        assert!(err.contains(ncbi_substr), "{args:?}: {err}");
+        refused(&dir, &args, variable, refusal);
+    }
     unchanged_from(
         &dir,
         &cmd("tests/fixtures/asn1/e1.asn", "asn1_txt"),

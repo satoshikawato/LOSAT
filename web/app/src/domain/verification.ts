@@ -302,6 +302,8 @@ export function toolVerificationBadge(input: ToolBadgeInput, table: Verification
  * with a non-default subject genetic code (TBLASTN `PD-TLOSAN-LOCAL-GENCODE-32`, TBLASTX).
  */
 export function approvedExceptions(program: ProgramId, argv: readonly string[]): readonly string[] {
+  // The approved -db_gencode exception applies only to local -subject searches, not -db database searches.
+  if (argv.some((word) => word === '-db' || word.startsWith('-db='))) return [];
   const at = argv.lastIndexOf('-db_gencode');
   const code = at >= 0 ? argv[at + 1]?.trim() : undefined;
   if (code === undefined || code === '1' || (program !== 'tblastn' && program !== 'tblastx')) return [];

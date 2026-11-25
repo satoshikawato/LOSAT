@@ -76,7 +76,12 @@ fn windows_path_joining_and_unicode_case_folding() {
     ));
     assert!(fnmatch_bytes_case(
         "\u{0391}\u{039f}\u{03a3}.pin".as_bytes(),
-        "\u{03b1}\u{03bf}\u{03c2}.pin".as_bytes(),
+        "\u{03b1}\u{03bf}\u{03c3}.pin".as_bytes(),
+        true
+    ));
+    assert!(fnmatch_bytes_case(
+        "\u{0391}\u{039f}\u{03a3}.01.pin".as_bytes(),
+        "\u{03b1}\u{03bf}\u{03c2}.01.pin".as_bytes(),
         true
     ));
     assert!(!fnmatch_bytes_case(

@@ -67,7 +67,7 @@ fn windows_drive_or_unc_len(path: &[u8]) -> usize {
 }
 
 /// Splits `pattern` into `(dir_part, join_separator, base_part)` matching Python's `os.path.split`
-/// + `os.path.join` (`posixpath` on Unix, `ntpath` on Windows: Windows joins non-root prefixes
+/// and `os.path.join` (`posixpath` on Unix, `ntpath` on Windows: Windows joins non-root prefixes
 /// with `\` and collapses multiple root separators after a drive/UNC prefix to one).
 pub(crate) fn split_dir_base_os(pattern: &[u8], windows: bool) -> (&[u8], Option<u8>, &[u8]) {
     let drive = if windows {

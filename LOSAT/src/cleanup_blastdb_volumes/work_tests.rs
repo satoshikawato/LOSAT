@@ -128,7 +128,7 @@ fn dry_run_verbose_and_deletion_preserve_referenced_and_unrelated_files() {
     let env = Env::default();
 
     // Expected per-volume order matches `read_dir` order of `.p??`, followed by `.tar.gz.md5`.
-    let mut expected_files: Vec<String> = fs::read_dir(dir.path())
+    let mut expected_files: Vec<String> = fs::read_dir(&dir)
         .unwrap()
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())

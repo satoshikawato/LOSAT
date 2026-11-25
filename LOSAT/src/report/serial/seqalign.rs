@@ -643,14 +643,6 @@ fn blast_type(run: &RunRecord<'_>) -> (&'static str, i32) {
     }
 }
 
-/// `Blast_SubjectIsNucleotide` of the program.
-fn subject_is_nucleotide(program: Program) -> bool {
-    matches!(
-        program,
-        Program::Blastn | Program::Tblastn | Program::Tblastx
-    )
-}
-
 /// The value of a `User-field`'s `data` that BLAST sets.
 enum UserData {
     Bool(bool),
@@ -726,7 +718,10 @@ fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
             enc,
             b"Blast Database Title",
             title,
-            UserData::Bool(subject_is_nucleotide(run.program)),
+            UserData::Bool(
+                crate::report::archive::options::RequestKind::from(run.program)
+                    .subject_is_nucleotide(),
+            ),
         ),
     }
     enc.end_list();

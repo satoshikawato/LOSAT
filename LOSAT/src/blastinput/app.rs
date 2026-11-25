@@ -648,18 +648,8 @@ fn html_links_with(
             db_name: database.unwrap_or_default().as_bytes().to_vec(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:225
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
-            // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_program.h:72-90
-            // `m_IsDbNa` (whether the subject database is nucleotide, `Blast_SubjectIsNucleotide`):
-            // the subjects of BLASTN, TBLASTN (including PSI-TBLASTN with `-in_pssm`) and TBLASTX
-            // are nucleotide sequences; BLASTP, PSIBLAST, BLASTX, RPSBLAST and RPSTBLASTN search
-            // protein or profile databases.
-            nucleotide: matches!(
-                app,
-                RequestKind::Blastn
-                    | RequestKind::Tblastn
-                    | RequestKind::PsiTblastn
-                    | RequestKind::Tblastx
-            ),
+            // `m_IsDbNa` (whether the subject database is nucleotide, `Blast_SubjectIsNucleotide`).
+            nucleotide: app.subject_is_nucleotide(),
         },
     )))
 }

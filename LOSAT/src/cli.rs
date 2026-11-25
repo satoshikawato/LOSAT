@@ -412,8 +412,7 @@ fn usage_name(argv: &[OsString]) -> &str {
 // NCBI keeps the bytes of an option's value.
 /// LOSAT's refusal of the value of `-name` that is not UTF-8 in `program` (its name in LOSAT's
 /// refusals, `MAKEBLASTDB`): NCBI's arguments keep the value's bytes. The one text of it, for the
-/// programs on `cli::reader` (`reader::refusal_after_read`) and of blastdb_aliastool
-/// (`ncbi_app::args::Args::text_values_refusal`).
+/// programs on `cli::reader` (`reader::refusal_after_read`).
 pub(crate) fn non_utf8_value_refusal(program: &str, name: &str) -> String {
     format!(
         "the value of -{name} is not UTF-8; NCBI BLAST+ reads the bytes of an option's value, \
@@ -793,494 +792,7 @@ impl CaughtError for dyn std::error::Error + 'static {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-/// The report's output stream (the `-out` file or standard output), which records whether
-/// a write to it failed: NCBI's outfmt 0 stream throws there, which the application
-/// reports as "BLAST failed to write output" (blast_app_util.hpp:252-255).
-pub struct ReportStream {
-    pub inner: Box<dyn std::io::Write + Send>,
-    pub failed: bool,
-}
-
-impl ReportStream {
-    /// The command line's report stream: the `-out` file `out_file` (`None`: standard output),
-    /// behind NCBI's buffer for the organism report (`tax_report`, `report_destination`) and the
-    /// hold of a run whose strategy file `strategy` LOSAT refuses (`report_destination`).
-    pub fn of_cli(
-        out_file: Option<std::io::BufWriter<std::fs::File>>,
-        tax_report: bool,
-        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
-    ) -> Self {
-        ReportStream {
-            inner: report_destination(
-                out_file.map(|file| Box::new(file) as Box<dyn std::io::Write + Send>),
-                tax_report,
-                strategy,
-            ),
-            failed: false,
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-    /// The end of a run whose report went to this stream, `result` being the run's: what the
-    /// report wrote stays (a flush, also after an error, such as the outfmt 0 prolog). Where the
-    /// report's stream throws (`throws`: the stream of the outfmt 0 to 4 formatter,
-    /// blast_format.cpp:118-119, and the organism report's, `NcbiReportBuffer`), a write that
-    /// failed (`failed`) or an insertion that set the stream's `badbit` (`BadbitInsertion`) is
-    /// NCBI's "BLAST failed to write output", exit status 6. For the other formats NCBI aborts and
-    /// LOSAT reports the run's error, then the flush's (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
-    /// exception 3). The command line's runs of blastn, blastp (psiblast), tblastn and tblastx end
-    /// their report here, and so does the library's `-out` file (`api::local_blast::OutFile`).
-    pub(crate) fn finish(
-        &mut self,
-        result: anyhow::Result<()>,
-        throws: bool,
-    ) -> anyhow::Result<()> {
-        use anyhow::Context;
-        let flushed = std::io::Write::flush(self);
-        let badbit = result.as_ref().is_err_and(BadbitInsertion::is);
-        if (self.failed || badbit) && throws {
-            return Err(NativeError {
-                exit: 6,
-                message: "BLAST failed to write output\n".into(),
-            }
-            .into());
-        }
-        result?;
-        flushed.context("failed to write the output")
-    }
-}
-
-impl std::io::Write for ReportStream {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let written = self.inner.write(buf);
-        self.failed |= written.is_err();
-        written
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        let flushed = self.inner.flush();
-        self.failed |= flushed.is_err();
-        flushed
-    }
-}
-
-// C++ standard, [iostate.flags]: `setstate` calls `clear`, which throws `ios_base::failure` when the bit is in `exceptions()`.
-/// NCBI's `ios::failure` of the outfmt 0 to 4 formatter's stream that an insertion of the report
-/// raises itself, not a write that the file or device refused (`ReportStream::failed`): an
-/// insertion that sets `badbit` (`setstate`, which calls `clear`) throws on a stream whose
-/// `exceptions` mask holds `NcbiBadbit` (blast_format.cpp:118-119), and the application reports it
-/// as "BLAST failed to write output", exit status 6 (blast_app_util.hpp:252-255), after the bytes
-/// the report wrote before it. It travels as the `io::Error` of the report's writes (`error`),
-/// which a program reports as a failed write of the stream (`is`); the epilog's null matrix name
-/// raises it (`report::pairwise::write_matrix_line`).
-#[derive(Debug)]
-pub(crate) struct BadbitInsertion;
-
-impl BadbitInsertion {
-    /// The failure as the error of the report's writes.
-    pub(crate) fn error() -> std::io::Error {
-        std::io::Error::other(BadbitInsertion)
-    }
-
-    /// Whether `error` is this failure (an `io::Error` that holds it).
-    pub(crate) fn is(error: &anyhow::Error) -> bool {
-        error
-            .downcast_ref::<std::io::Error>()
-            .and_then(std::io::Error::get_ref)
-            .is_some_and(|inner| inner.is::<BadbitInsertion>())
-    }
-}
-
-impl std::fmt::Display for BadbitInsertion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("BLAST failed to write output")
-    }
-}
-
-impl std::error::Error for BadbitInsertion {}
-
-/// The stream of the organism report (outfmt 18) as NCBI's buffer writes it: NCBI's formatter
-/// never flushes it, a write to the file or device comes only where the buffer writes
-/// (`NcbiBuffer`), and `~CBlastFormat` turns the stream's exceptions off before its last flush
-/// (the exit flushes C's `stdout` without a check). So a write that fails where NCBI's buffer
-/// writes is "BLAST failed to write output" (`ReportStream::failed`; a reader that closed the
-/// pipe: NCBI is ended by SIGPIPE there), and the bytes still held are written when the run ends,
-/// a failure then unreported (NCBI BLAST+ 2.17.0, probe `T/t2/fix1` `f1.d5.*`: `-out /dev/full`
-/// exit 0 for 2 KB, 6 for 90 KB). One type for both streams: the `-out` file's `basic_filebuf`
-/// (`file`) and standard output's glibc buffer (`standard_output`, line-buffered on a terminal),
-/// and `cerr` is tied to `cout`: a write to standard error writes what standard output holds first
-/// (`tie_standard_output`, `CliStderr`), where NCBI aborts if that write fails (LOSAT: its error,
-/// non-zero exit). LOSAT's flushes of the report hold. Each `write` is one insertion of NCBI's
-/// (`insert`, `insert_streamed`: the writer of the report makes NCBI's insertions, into the
-/// `NcbiOstream` that the run opened, `sink`'s, `standard_output`'s or `file`'s, with nothing
-/// between).
-pub struct NcbiReportBuffer(std::sync::Arc<std::sync::Mutex<HeldReport>>);
-
-/// What `NcbiReportBuffer` holds.
-struct HeldReport {
-    inner: Box<dyn std::io::Write + Send>,
-    /// The bytes that NCBI's buffer holds.
-    held: Vec<u8>,
-    /// NCBI's buffer of the stream.
-    buffer: NcbiBuffer,
-}
-
-impl HeldReport {
-    /// NCBI's buffer writes what it holds (a flush).
-    fn write_held(&mut self) -> std::io::Result<()> {
-        self.buffer.flush();
-        let held = std::mem::take(&mut self.held);
-        self.inner.write_all(&held)?;
-        self.inner.flush()
-    }
-}
-
-impl Drop for HeldReport {
-    fn drop(&mut self) {
-        let _ = self.inner.write_all(&self.held);
-        let _ = self.inner.flush();
-    }
-}
-
-/// The organism report's standard output of the run, which a write to standard error writes
-/// first (`tie_standard_output`): standard output is the process's.
-static TIED_STANDARD_OUTPUT: std::sync::Mutex<
-    Option<std::sync::Weak<std::sync::Mutex<HeldReport>>>,
-> = std::sync::Mutex::new(None);
-
-fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:317-323
-impl NcbiReportBuffer {
-    fn new(inner: Box<dyn std::io::Write + Send>, buffer: NcbiBuffer) -> Self {
-        NcbiReportBuffer(std::sync::Arc::new(std::sync::Mutex::new(HeldReport {
-            inner,
-            held: Vec::new(),
-            buffer,
-        })))
-    }
-
-    /// The `-out` file `inner` (`NcbiStdio::File`: `BUFSIZ - 2` bytes held, the 8191st written
-    /// with them).
-    pub fn file(inner: Box<dyn std::io::Write + Send>) -> Self {
-        Self::new(inner, NcbiBuffer::new(NcbiStdio::File))
-    }
-
-    /// Standard output, glibc's buffer (`NcbiStdio::cout`, line-buffered on a terminal), tied to
-    /// standard error (`tie_standard_output`), writing to `inner` (the process's standard output).
-    pub fn standard_output(inner: Box<dyn std::io::Write + Send>) -> Self {
-        // NCBI's Windows (MSVC) and macOS (libc++, BSD stdio) builds buffer otherwise: there
-        // the exit status of a failing write is unverified (this model is their Linux builds').
-        let report = Self::new(inner, NcbiBuffer::new(NcbiStdio::cout()));
-        *lock(&TIED_STANDARD_OUTPUT) = Some(std::sync::Arc::downgrade(&report.0));
-        report
-    }
-}
-
-impl std::io::Write for NcbiReportBuffer {
-    /// One insertion of NCBI's (`NcbiBuffer::sputn`), whose stream is the bytes held and `buf`:
-    /// what NCBI's buffer writes of them is written, the first of them (all that it held, or
-    /// none), and it holds the rest.
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut report = lock(&self.0);
-        let report = &mut *report;
-        report.held.extend_from_slice(buf);
-        report.buffer.sputn(buf.len(), &report.held);
-        let written = report.held.len() - report.buffer.held();
-        if written > 0 {
-            report.inner.write_all(&report.held[..written])?;
-            report.inner.flush()?;
-            report.held.drain(..written);
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-/// A stream insertion (`operator<<`) in NCBI's report: one insertion (a string or a number) of
-/// `bytes`, one write call, which the organism report's stream takes as one (`NcbiReportBuffer`);
-/// other writers just take the bytes. A string that LOSAT streams is `insert_streamed`.
-pub fn insert(out: &mut (impl std::io::Write + ?Sized), bytes: &[u8]) -> std::io::Result<()> {
-    out.write_all(bytes)
-}
-
-/// One insertion of NCBI's of `len` bytes that LOSAT streams instead of holding (the organism
-/// report, whose runs of about 4 GiB of spaces `tax_report` keeps as counts): `fill` gives the bytes to
-/// the `Insertion`, which writes them in pieces that NCBI's buffers (`NcbiBuffer`) write as they
-/// write the whole. Each piece is longer than a buffer (`basic_filebuf` writes it with what it
-/// holds and keeps nothing; glibc keeps `(held + n) % block`, which adds up over the pieces as
-/// over the whole), and each but the last ends in `NCBI_BUFSIZ` bytes without a newline (so a
-/// line-buffered `cout` keeps its whole remainder there, as within the whole); the last is the
-/// rest. A string without such a place is written in one piece.
-pub fn insert_streamed<W: std::io::Write + ?Sized>(
-    out: &mut W,
-    len: u64,
-    fill: impl FnOnce(&mut Insertion<'_, W>) -> std::io::Result<()>,
-) -> std::io::Result<()> {
-    let mut insertion = Insertion {
-        out,
-        piece: Vec::new(),
-        left: len,
-        since_newline: 0,
-    };
-    fill(&mut insertion)?;
-    debug_assert_eq!(insertion.left, insertion.piece.len() as u64);
-    insertion.out.write_all(&insertion.piece)
-}
-
-/// The bytes of one insertion that LOSAT streams (`insert_streamed`).
-pub struct Insertion<'w, W: std::io::Write + ?Sized> {
-    out: &'w mut W,
-    /// The piece being made.
-    piece: Vec<u8>,
-    /// The bytes of the insertion not written yet, `piece`'s among them.
-    left: u64,
-    /// How many bytes follow the last newline.
-    since_newline: u64,
-}
-
-impl<W: std::io::Write + ?Sized> Insertion<'_, W> {
-    /// The length from which a piece is written where it may end.
-    const PIECE: usize = 1 << 16;
-
-    /// The next bytes of the insertion.
-    pub fn bytes(&mut self, bytes: &[u8]) -> std::io::Result<()> {
-        self.piece.extend_from_slice(bytes);
-        self.since_newline = match bytes.iter().rposition(|&byte| byte == b'\n') {
-            Some(at) => (bytes.len() - at - 1) as u64,
-            None => self.since_newline + bytes.len() as u64,
-        };
-        self.end_piece()
-    }
-
-    /// The next `count` bytes of the insertion, spaces.
-    pub fn spaces(&mut self, mut count: u64) -> std::io::Result<()> {
-        while count > 0 {
-            let n = count.min(Self::PIECE as u64);
-            self.piece.resize(self.piece.len() + n as usize, b' ');
-            self.since_newline += n;
-            count -= n;
-            self.end_piece()?;
-        }
-        Ok(())
-    }
-
-    /// Writes the piece where it may end (`insert_streamed`) once it is `PIECE` bytes long. A
-    /// piece ends only if more than `NCBI_BUFSIZ` bytes follow it, which is at least a block (a
-    /// block never exceeds `NCBI_BUFSIZ`), so the last piece always takes the buffer's branch of
-    /// an insertion longer than the room, as the whole insertion does; a final piece that exactly
-    /// filled a block would differ from the whole.
-    fn end_piece(&mut self) -> std::io::Result<()> {
-        let n = self.piece.len() as u64;
-        if n >= Self::PIECE as u64
-            && self.since_newline >= NCBI_BUFSIZ as u64
-            && self.left - n > NCBI_BUFSIZ as u64
-        {
-            self.out.write_all(&self.piece)?;
-            self.left -= n;
-            self.piece.clear();
-        }
-        Ok(())
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68-93
-/// The stream of a report as NCBI's formatter writes to it (`CBlastFormat::m_Outfile`), with
-/// nothing of a program's before it: each write is one insertion (`operator<<`) of NCBI's
-/// (`insert`, `insert_streamed`), passed on as one write. The organism report (`tax_report`)
-/// writes only to this type, and a writer becomes one only through the constructors below, one per
-/// destination, each saying what comes after it: they are the only places where a buffer or hold
-/// could come between the report's insertions and NCBI's buffer (`NcbiReportBuffer`, which counts
-/// each write as one insertion). A format's sink (`sink`: the command line's `ReportStream` of
-/// blastn, blastp, tblastn and tblastx, the library's and LOSAT Web's writers), blastx's command
-/// line (`standard_output` and `file` for the organism report, `buffered` for every other format),
-/// and the hold of a library call (`held`).
-pub struct NcbiOstream<'a>(Box<dyn std::io::Write + 'a>);
-
-impl<'a> NcbiOstream<'a> {
-    fn new(stream: Box<dyn std::io::Write + 'a>) -> Self {
-        NcbiOstream(stream)
-    }
-
-    /// A format's sink opened as its report's stream (`OutputSink::open`): the caller's writer as
-    /// it is, which the command line of blastn, blastp, tblastn and tblastx makes its
-    /// `ReportStream` (the organism report's is NCBI's buffer, `report_destination`), which the
-    /// library's `run_to_file` makes the same (`api::local_blast::OutFile`) and which a library
-    /// caller or LOSAT Web gives (no stream of NCBI's to model); or, for a library call's `Stdout`
-    /// and `File` sinks, LOSAT's buffered standard output or file (no stream of NCBI's either: the
-    /// report's bytes are NCBI's, the times at which they reach the device are not).
-    pub(crate) fn sink(
-        sink: &'a mut crate::api::local_blast::OutputSink<'_>,
-    ) -> std::io::Result<Self> {
-        sink.open().map(Self::new)
-    }
-
-    /// The organism report's standard output on blastx's command line: NCBI's buffer of `cout`
-    /// (`NcbiReportBuffer::standard_output`) before the process's standard output
-    /// (`report_standard_output`). Nothing comes before the buffer or between it and the device.
-    pub(crate) fn standard_output(
-        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
-    ) -> Self {
-        Self::new(report_destination(None, true, strategy))
-    }
-
-    /// The organism report's `-out` file `file` on blastx's command line: NCBI's `basic_filebuf`
-    /// (`NcbiReportBuffer::file`) before the file, as `standard_output`'s.
-    pub(crate) fn file(
-        file: std::fs::File,
-        strategy: Option<&crate::report::archive::strategy::StrategyExport>,
-    ) -> Self {
-        Self::new(report_destination(Some(Box::new(file)), true, strategy))
-    }
-
-    /// The stream of a format other than the organism report on blastx's command line
-    /// (`native::run_inner`): LOSAT's buffer of 8 KiB (`BufWriter`) before `destination` (the file
-    /// or standard output, behind the held document, `blast_xml::HeldOutput`). NCBI's buffers of these formats
-    /// are not modelled (the order of their texts against the report is item T8 of line RG); the
-    /// organism report never gets this stream (`run_inner` chooses by the format).
-    pub(crate) fn buffered(destination: Box<dyn std::io::Write + 'a>) -> Self {
-        Self::new(Box::new(std::io::BufWriter::new(destination)))
-    }
-
-    /// A format's stream (`sink`'s) behind the hold of a library call (`local::report_batches`,
-    /// `blast_xml::HeldFormats`), which passes the writes and flushes on in their order (at the
-    /// release, while it holds). The caller's writer has no stream of NCBI's (`sink`), so no buffer
-    /// of NCBI's comes after the hold.
-    pub(crate) fn held(
-        stream: crate::algorithm::blastx::HeldFormatWriter<NcbiOstream<'a>>,
-    ) -> Self {
-        Self::new(Box::new(stream))
-    }
-}
-
-impl std::io::Write for NcbiOstream<'_> {
-    /// One insertion, written with one write of the stream.
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.write_all(buf)?;
-        Ok(buf.len())
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        self.0.write_all(buf)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.0.flush()
-    }
-}
-
-/// `cerr.tie()`: before a write to standard error, the organism report's standard output writes
-/// what it holds (`NcbiReportBuffer::standard_output`); nothing for every other report.
-pub fn tie_standard_output() -> std::io::Result<()> {
-    let tied = lock(&TIED_STANDARD_OUTPUT)
-        .as_ref()
-        .and_then(std::sync::Weak::upgrade);
-    match tied {
-        Some(report) => lock(&report).write_held(),
-        None => Ok(()),
-    }
-}
-
-/// The command line's standard error, tied to the organism report's standard output
-/// (`tie_standard_output`): the process's (`process`), so that what standard output writes before
-/// a text is written before it where the text is made. A whole message is written with one
-/// `write_all` of the stream, which `std::io::Stderr` writes under one lock of standard error, so
-/// that no other thread's message comes inside it. An empty write is no write of NCBI's to `cerr`
-/// (a query without warnings, whose `ERR_POST` NCBI does not make): it writes nothing of the
-/// report. Where the standard error is the file of `-logfile` (tblastx's, rpsblast's and
-/// rpstblastn's run, `DiagTarget::into_standard_error`), a failed write is dropped, as NCBI's
-/// handler of that file drops it: `CFileHandleDiagHandler::Post` ignores what the write returns
-/// (NCBI BLAST+ 2.17.0 tblastx `-logfile /dev/full` runs and writes its report; line WQA's D11
-/// round 2, 2026-11-20).
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
-pub struct CliStderr(std::io::Stderr);
-
-impl CliStderr {
-    /// `result` of a write, dropped where the standard error is the file of `-logfile`.
-    fn logged<T: Default>(result: std::io::Result<T>) -> std::io::Result<T> {
-        match result {
-            Err(_) if crate::blastinput::ncbi_environment::terminal_stderr().is_some() => {
-                Ok(T::default())
-            }
-            result => result,
-        }
-    }
-}
-
-impl CliStderr {
-    /// The process's standard error.
-    pub fn process() -> Self {
-        CliStderr(std::io::stderr())
-    }
-}
-
-impl std::io::Write for CliStderr {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if buf.is_empty() {
-            return Ok(0);
-        }
-        tie_standard_output()?;
-        Self::logged(self.0.write_all(buf)).map(|()| buf.len())
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        if buf.is_empty() {
-            return Ok(());
-        }
-        tie_standard_output()?;
-        Self::logged(self.0.write_all(buf))
-    }
-
-    fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::io::Result<()> {
-        self.write_all(args.to_string().as_bytes())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.0.flush()
-    }
-}
-
-/// The report stream's writer of a run: the `-out` file `file` (`None`: standard output), behind
-/// NCBI's buffer for the organism report (`tax_report`, `NcbiReportBuffer`) and, nearest the
-/// destination, the hold of a run whose strategy file `strategy` LOSAT refuses
-/// (`strategy::hold_report_send`).
-pub fn report_destination(
-    file: Option<Box<dyn std::io::Write + Send>>,
-    tax_report: bool,
-    strategy: Option<&crate::report::archive::strategy::StrategyExport>,
-) -> Box<dyn std::io::Write + Send> {
-    use crate::report::archive::strategy::hold_report_send;
-    match (file, tax_report) {
-        (Some(file), true) => Box::new(NcbiReportBuffer::file(hold_report_send(strategy, file))),
-        (Some(file), false) => hold_report_send(strategy, file),
-        (None, true) => Box::new(NcbiReportBuffer::standard_output(hold_report_send(
-            strategy,
-            report_standard_output(),
-        ))),
-        (None, false) => hold_report_send(strategy, report_standard_output()),
-    }
-}
-
-/// Standard output as the report's stream (`ReportStream::inner`).
-///
-/// NCBI writes the report to `cout`; when the process starts with its standard output
-/// closed (`>&-`), its first write fails (outfmt 0: "BLAST failed to write output", exit
-/// 6; outfmt 6 and 7 abort). Rust's runtime opens `/dev/null` on a closed standard
-/// descriptor before `main`, which LOSAT cannot tell from a `/dev/null` that the caller
-/// opened (read and write, as Python's `subprocess.DEVNULL`), so the report is written
-/// there and the run succeeds (approved exception 6 of
-/// `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`, accepted by the maintainer in session S08b).
-pub fn report_standard_output() -> Box<dyn std::io::Write + Send> {
-    Box::new(std::io::BufWriter::new(std::io::stdout()))
-}
+pub use crate::report::ostream::{insert, insert_streamed, CliStderr, NcbiOstream, ReportStream};
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:95-99
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:615-619
@@ -1327,12 +839,19 @@ pub(crate) fn create_out_file(
 /// exits with 1 and writes nothing in NCBI BLAST+ 2.17.0; line WQA's D11 round 2, 2026-11-20). An
 /// error of a report's writer that carries an exception of NCBI's is that exception's report
 /// (`NativeError::caught`), whichever program wrote it.
+///
+/// The text of `CATCH_ALL` is a post on `cerr`, which a failed standard error does not take
+/// (`report::ostream::cerr_post`); the C++ runtime's text before an abort (exit -6, `std::terminate`)
+/// is written to C's `stderr` whatever `cerr`'s state.
 pub fn exit_on_native_error(error: &anyhow::Error) {
     if let Some(e) = NativeError::caught(error) {
-        if !posted(&e.message) {
+        if posted(&e.message) {
+        } else if e.exit < 0 {
             let mut stderr = std::io::stderr();
             let _ = std::io::Write::write_all(&mut stderr, catch_all_text(&e.message));
             let _ = std::io::Write::flush(&mut stderr);
+        } else {
+            let _ = crate::report::ostream::cerr_post(catch_all_text(&e.message));
         }
         if e.exit < 0 {
             std::process::abort();
@@ -1391,6 +910,12 @@ pub fn post_errors_in_run() {
     POST_ERRORS_IN_RUN.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Whether this is the command line's process (`post_errors_in_run`, which `main_entry` alone
+/// calls): its streams post NCBI's texts themselves (`report::ostream::write_side_file`).
+pub fn is_command_line_run() -> bool {
+    POST_ERRORS_IN_RUN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:327-332
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1155-1160
 /// Writes the text of `error` (a `NativeError`) to standard error now. NCBI's `CATCH_ALL` posts
@@ -1406,7 +931,7 @@ pub fn post_native_error(error: &anyhow::Error) {
         return;
     }
     if let Some(native) = error.downcast_ref::<NativeError>() {
-        let _ = std::io::Write::write_all(&mut std::io::stderr(), catch_all_text(&native.message));
+        let _ = crate::report::ostream::cerr_post(catch_all_text(&native.message));
         *POSTED_TEXT
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(native.message.clone());

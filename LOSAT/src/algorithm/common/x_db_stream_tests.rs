@@ -667,3 +667,40 @@ fn a_read_that_fails_fails_the_reader_and_the_threads_that_wait() {
         }
     }
 }
+
+/// `XDbStream::lead_start` returns an internal error on an unmasked or hard-masked stream, and
+/// when asked for an ordinal that the one-thread walk did not record as a lead sequence.
+#[test]
+fn lead_start_rejects_unmasked_and_non_lead_ordinals() {
+    use crate::algorithm::common::db_mask_search::SearchMask;
+    use crate::blastinput::db_mask::MaskKind;
+
+    let db = nucleotides("nucl_v4");
+    for mask in [
+        None,
+        Some(SearchMask {
+            algo_id: 11,
+            kind: MaskKind::Hard,
+        }),
+    ] {
+        let stream = XDbStream::new(&db, 1, "TBLASTN").unwrap().with_mask(mask);
+        let err = stream.lead_start(0, 3, 0).unwrap_err();
+        assert!(
+            err.to_string().contains("LOSAT internal error"),
+            "unexpected error for {mask:?}: {err}"
+        );
+    }
+
+    let soft = XDbStream::new(&db, 1, "TBLASTN")
+        .unwrap()
+        .with_mask(Some(SearchMask {
+            algo_id: 11,
+            kind: MaskKind::Soft,
+        }));
+    let err = soft.lead_start(0, 3, 0).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("not recorded as a soft-mask lead sequence"),
+        "unexpected error: {err}"
+    );
+}

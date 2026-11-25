@@ -143,6 +143,9 @@ impl From<WriteDbError> for RunError {
             WriteDbError::Io { path, source } => {
                 RunError::Failed(format!("{}: {source}", path.display()))
             }
+            // Only makeblastdb's log raises it (`writedb::build_db::endl`); makeprofiledb's
+            // writer never does.
+            WriteDbError::ClosedPipe => unreachable!("makeblastdb's closed log in makeprofiledb"),
         }
     }
 }

@@ -16,6 +16,8 @@ mod tblastn_batch_rule;
 mod tblastn_culling;
 #[path = "../tblastn_db_search.rs"]
 mod tblastn_db_search;
+#[path = "../tblastn_db_soft_lead_start.rs"]
+mod tblastn_db_soft_lead_start;
 #[path = "../tblastn_db_stream.rs"]
 mod tblastn_db_stream;
 #[path = "../tblastn_in_pssm.rs"]

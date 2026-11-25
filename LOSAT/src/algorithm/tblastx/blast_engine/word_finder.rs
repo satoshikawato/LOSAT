@@ -209,6 +209,7 @@ pub(super) fn begin_chunk_scan<'s>(
             chunk,
             hits: Vec::new(),
             stats,
+            exited: true,
         });
     }
     Ok(ChunkStart {
@@ -791,7 +792,12 @@ where
         hsp_list(init_hsps, contexts_ref, s_frames_listed)
     };
     adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
-    TblastxChunkScanResult { chunk, hits, stats }
+    TblastxChunkScanResult {
+        chunk,
+        hits,
+        stats,
+        exited: true,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
@@ -851,6 +857,7 @@ fn scan_chunk_plain<S: TbxScore>(
             chunk,
             hits: Vec::new(),
             stats,
+            exited: false,
         };
     }
     let x_soft = x_soft.flatten();
@@ -1291,6 +1298,7 @@ fn scan_chunk_one_hit<S: TbxScore, const AROUND: bool>(
             chunk,
             hits: Vec::new(),
             stats,
+            exited: false,
         };
     }
     let x_soft = x_soft.flatten();

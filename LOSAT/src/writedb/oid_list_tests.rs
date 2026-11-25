@@ -10,15 +10,15 @@ fn the_mask_file_is_makeblastdb_s() {
     ));
     std::fs::create_dir_all(&dir).unwrap();
     let base = dir.join("db").to_string_lossy().into_owned();
-    let mut list = OidList::exclude_model(&base, true, 0, 0);
+    let mut list = OidList::exclude_model(base.as_bytes(), true, 0, 0);
     for oid in [0, 2, 4, 9] {
         list.add_oid(oid);
     }
     list.close(10).unwrap();
-    let written = std::fs::read(list.filename()).unwrap();
+    let written = std::fs::read(crate::utils::os_bytes::path_of_bytes(list.filename())).unwrap();
     assert_eq!(written, [0, 0, 0, 9, 0x57, 0xBF]);
-    let mut empty = OidList::exclude_model(&dir.join("e").to_string_lossy(), false, 0, 0);
+    let mut empty = OidList::exclude_model(dir.join("e").to_string_lossy().as_bytes(), false, 0, 0);
     empty.close(0).unwrap();
-    assert!(!std::path::Path::new(empty.filename()).exists());
+    assert!(!crate::utils::os_bytes::path_of_bytes(empty.filename()).exists());
     std::fs::remove_dir_all(&dir).unwrap();
 }

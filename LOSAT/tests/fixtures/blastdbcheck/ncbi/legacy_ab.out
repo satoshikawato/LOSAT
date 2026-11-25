@@ -1,0 +1,21 @@
+Writing messages to <stdout> at verbosity (Minutiae)
+ISAM testing is ENABLED.
+Legacy testing is ENABLED.
+TaxID testing is DISABLED.
+By default, testing 200 randomly sampled OIDs.
+
+Testing 1 volume(s).
+ <RUN>/cases/leg_ab/p5
+  <RUN>/cases/leg_ab/p5 / Sample: <testing 200 randomly selected OIDs (9 unique)>
+  <RUN>/cases/leg_ab/p5 / Sample:       Status for OID 0: PASS
+  <RUN>/cases/leg_ab/p5 / Sample:       Status for OID 1: PASS
+  <RUN>/cases/leg_ab/p5 / Sample:       Status for OID 2: PASS
+  <RUN>/cases/leg_ab/p5 / Sample:       Status for OID 3: PASS
+  <RUN>/cases/leg_ab/p5 / Sample:       Status for OID 4: PASS
+  <RUN>/cases/leg_ab/p5 / Sample:       Status for OID 5: PASS
+  <RUN>/cases/leg_ab/p5 / Sample:       Status for OID 6: PASS
+  <RUN>/cases/leg_ab/p5 / Sample:       Status for OID 7: PASS
+  <RUN>/cases/leg_ab/p5 / Sample:       Status for OID 8: PASS
+ Result=SUCCESS. No errors reported for 1 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).

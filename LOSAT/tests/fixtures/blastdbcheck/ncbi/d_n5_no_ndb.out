@@ -1,0 +1,17 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Using `full' mode: every OID will be tested.
+
+Testing 1 volume(s).
+ <RUN>/cases/d_n5_no_ndb/n5
+  [ERROR] caught exception in <RUN>/cases/d_n5_no_ndb/n5
+NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp", line 88: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::CBlastEnv() - File <RUN>/cases/d_n5_no_ndb/n5.ndb not found. If you renamed any BLAST database files, please use original file names, and makeblastdb to rename the database. If you deleted any BLAST database files, you need to recreate the database.
+
+ Result=FAILURE. 1 errors reported in 1 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 1

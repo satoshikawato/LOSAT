@@ -26,8 +26,6 @@
 //! (`PrintOneResultSet` is called once per query's result set, the accumulated lists hold that
 //! one query.)
 
-use std::io::Write;
-
 use anyhow::Result;
 
 use super::blast_engine::{TblastxHsp, TblastxQueryStats, TblastxReportRun};
@@ -149,7 +147,7 @@ pub(crate) fn write_tblastx_xml<W: StructuredXml>(
     document: &mut W,
     all_masks: bool,
     only_xml2: bool,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     (hits, identities): (&[TblastxHsp], Option<&[u32]>),
     run: &TblastxReportRun<'_>,
     mut warnings: Option<&mut QueryWarnings<'_>>,

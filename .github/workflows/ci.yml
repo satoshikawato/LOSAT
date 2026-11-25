@@ -214,8 +214,8 @@ jobs:
       - run: cd LOSAT && cargo fmt --check
       - run: cd LOSAT && cargo clippy --locked --all-targets --all-features -- -D warnings
       # No NCBI counterpart: the crate's rustdoc builds without a warning (SWEBOK 2026-11-04 audit,
-      # KA2/KA11; of the 47 warnings of 2026-11-08, 43 were fixed and 4 are allowed on the two items
-      # whose doc comment clap prints as help, which keeps their text). Every feature, as built on
+      # KA2/KA11; of the 47 warnings of 2026-11-08, 43 were fixed then and the last 4, on two option
+      # texts, by line RG item K4i-3c on 2026-11-24: none is allowed). Every feature, as built on
       # x86_64 Linux: wasm32-only and test-only items are not documented here.
       - name: rustdoc (no warnings)
         run: cd LOSAT && cargo doc --locked --no-deps --all-features

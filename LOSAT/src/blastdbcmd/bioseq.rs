@@ -54,8 +54,8 @@ impl DbBioseq<'_> {
         source: &Source,
         oid: u32,
         with_header: bool,
-        target: Option<&str>,
-        target_id: fn(&str) -> Result<ParsedSeqId, Stop>,
+        target: Option<&[u8]>,
+        target_id: fn(&[u8]) -> Result<ParsedSeqId, Stop>,
         out: &mut Output<'a, 'b>,
         write: impl FnOnce(&DbBioseq<'_>, &mut Output<'a, 'b>) -> Result<(), Stop>,
     ) -> Result<(), Stop> {
@@ -146,7 +146,7 @@ pub(super) struct BioseqFormatter;
 /// The Seq-id of a `-target_only` target as `CBlastDB_BioseqFormatter` gets it: `CSeq_id` of `text`
 /// (`fParse_AnyRaw`: a number is a GI), whose GI `SeqDB_SimplifySeqid` gives as one
 /// (`GetBioseq` of `oid` and `gi`).
-fn bioseq_target_id(text: &str) -> Result<ParsedSeqId, Stop> {
+fn bioseq_target_id(text: &[u8]) -> Result<ParsedSeqId, Stop> {
     parse_target_with(text, ANY_RAW)
 }
 
@@ -158,7 +158,7 @@ impl BioseqFormatter {
         &self,
         source: &Source,
         oid: u32,
-        target: Option<&str>,
+        target: Option<&[u8]>,
         out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
         DbBioseq::with(

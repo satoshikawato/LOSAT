@@ -40,6 +40,8 @@ pub(crate) fn open_search_database(
     // after them (`restrict_database`).
     let mut db = SeqDb::open_search_in(name.as_bytes(), seqtype, &path)?;
     db.fail_search_reads_with_oid_list();
+    // The checks of NCBI's reads of the definition lines (`SERIAL_VERIFY_DATA_READ`).
+    db.refuse_unchecked_reads(&settings.read_verification);
     Ok(db)
 }
 
@@ -409,13 +411,17 @@ pub(crate) fn refusal(reason: &str, program: &str) -> anyhow::Error {
 /// The text of a reader error that is not NCBI's (`SeqDbError::ncbi_message` `None`), as LOSAT
 /// reports it: a file whose bytes the system does not give is LOSAT's error as it is
 /// (`SeqDbError::is_unreadable`: "cannot be read", where NCBI ends by SIGBUS; review M1 of line
-/// WQA D18, 2026-11-21), and so is a LOSAT internal error ([`SeqDbError::Internal`]); any other
-/// LOSAT's refusal of the database in `program`'s name ([`refusal`]). The one place of that choice
+/// WQA D18, 2026-11-21), and so is a LOSAT internal error ([`SeqDbError::Internal`]); a setting
+/// of the run that LOSAT refuses ([`SeqDbError::Setting`]) is refused in `program`'s name; any
+/// other is LOSAT's refusal of the database in `program`'s name ([`refusal`]). The one place of that choice
 /// for the search programs, blastdbcmd and the maskers' database reader; each ends with LOSAT's
 /// exit status of its own errors.
 pub(crate) fn losat_reader_error(error: &SeqDbError, program: &str) -> String {
     if error.is_unreadable() || matches!(error, SeqDbError::Internal(_)) {
         error.to_string()
+    } else if let SeqDbError::Setting(refused) = error {
+        // A setting of the run, not the database, is refused (`SeqDb::refuse_unchecked_reads`).
+        format!("{refused} is not supported by LOSAT's {program}")
     } else {
         refusal(&error.to_string(), program).to_string()
     }
@@ -1164,14 +1170,19 @@ pub(crate) fn keep_source(
 /// of NCBI's that LOSAT reports as NCBI's, `reported_exception`: the `CSerialException` of its
 /// read of the record, or the conversion of a `ti` tag under an id list, line RG D1c-1) is a
 /// `ErrorAfterBatchReports` that names the query, so the batch fails after the outfmt 0 prolog as NCBI's
-/// does; LOSAT's refusals are errors of their own.
+/// does; so is LOSAT's refusal of a setting of the run that NCBI's read of that record would
+/// meet ([`SeqDbError::Setting`], `SeqDb::refuse_unchecked_reads`), which stops where NCBI's
+/// default error does, after the same output; LOSAT's other refusals are errors of their own.
 fn header_read_error(
     error: SeqDbError,
     query: usize,
     program: &str,
     utf8: Option<&Utf8Read>,
 ) -> anyhow::Error {
-    if error.ncbi_message().is_some() || reported_exception(&error).is_some() {
+    if error.ncbi_message().is_some()
+        || reported_exception(&error).is_some()
+        || matches!(error, SeqDbError::Setting(_))
+    {
         anyhow::Error::new(ErrorAfterBatchReports {
             query: Some(query),
             error: database_error(error, program),
@@ -1576,9 +1587,10 @@ impl<'a> FetchExcluded<'a> {
 
     /// LOSAT's refusal (in `program`'s name) of a search whose fetch of `ordinal` cannot read
     /// its header (`error`), where NCBI's search fails (`FetchRefusal`); a header file whose
-    /// bytes the system does not give is LOSAT's error as it is (`losat_reader_error`).
+    /// bytes the system does not give, and a setting of the run that LOSAT refuses, keep their
+    /// own words (`losat_reader_error`).
     pub(crate) fn refusal((ordinal, error): (u32, SeqDbError), program: &str) -> anyhow::Error {
-        if error.is_unreadable() {
+        if error.is_unreadable() || matches!(error, SeqDbError::Setting(_)) {
             return FetchRefusal(losat_reader_error(&error, program)).into();
         }
         // A header that LOSAT refuses where it is read (`seqdb::Volume::filtered_mask`) keeps

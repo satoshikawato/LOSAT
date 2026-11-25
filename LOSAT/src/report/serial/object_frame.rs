@@ -2,11 +2,13 @@
 //! owner of a frame's texts (`GetFrameInfo`, which `NCBI_RETHROW_SAME` adds to a `CException`
 //! that leaves the frame, and `GetFrameName`, which `CSerialException::AddFrameInfo` adds to the
 //! exception's frame stack) and of the places of the `END_OBJECT_FRAME` of NCBI's ASN.1 text
-//! reader, and the throws of the object stack itself. The table reader
+//! reader, and the throws of the object stack itself (with the getter's throw of an unset member,
+//! which with `ExpectedMember`'s is a check of the data that NCBI's settings turn off:
+//! `DataCheck`). The table reader
 //! (`report::serial::asn_types::read`), which reads makeblastdb's mask files too
 //! (`writedb::mask_info`), keeps its stack of these frames.
 
-use crate::ncbi_exception::ThrowSite;
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 
 /// A frame of NCBI's object stack (`CObjectStackFrame::EFrameType`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,11 +93,57 @@ pub(crate) const SKIP_FILE_HEADER: ThrowSite = istr_site(
     "CSerialException::eFormatError",
     "ncbi::CObjectIStream::SkipFileHeader",
 );
+/// `ExpectedMember`'s throw of a mandatory member that the input skips (the read check,
+/// `DataCheck::Read`): every reader's (the table reader's, `asn_types::read`; the header records',
+/// `seqid::ber`).
 pub(crate) const EXPECTED_MEMBER: ThrowSite = istr_site(
     1037,
     "CSerialException::eFormatError",
     "ncbi::CObjectIStream::ExpectedMember",
 );
+
+// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:300-307
+// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:317-320
+// NCBI reference (598d8ae6): c++/src/serial/datatool/classstr.cpp:849-855
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:805-810
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:836-842
+// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:300-306
+// The generated getters call `ThrowUnassigned` with the index, so the place is that function's
+// throw (`file_name` and `file_line` are 0). Its function is a `const` method,
+// whose `__PRETTY_FUNCTION__` ends with `const`, not `)`: `ParseCurrFunctName` names no
+// function then.
+/// `ThrowUnassigned`, the throw of the getter of a member that is not set (the get check,
+/// `DataCheck::Get`): every getter's (the PSSM query's feature table, `annot_index::table`;
+/// rpsbproc's).
+pub(crate) const UNASSIGNED_MEMBER: ThrowSite = ThrowSite {
+    file: "src/serial/serialobject.cpp",
+    line: 306,
+    kind: "CUnassignedMember::eGet",
+    function: None,
+};
+
+/// A check of the data of NCBI's serial library that a setting of the process turns off
+/// (`blastinput::ncbi_environment::ReadVerification`): the read of a mandatory member
+/// (`SERIAL_VERIFY_DATA_READ`) and the get of an unset member (`SERIAL_VERIFY_DATA_GET`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DataCheck {
+    Read,
+    Get,
+}
+
+impl DataCheck {
+    /// The check that threw `exception` first (the oldest of its chain, which the frames it left
+    /// rethrew: `NcbiException::first_site`), `None` for an exception of no check. The one test
+    /// of which errors depend on the settings.
+    pub(crate) fn of(exception: &NcbiException) -> Option<DataCheck> {
+        match exception.first_site() {
+            site if site == EXPECTED_MEMBER => Some(DataCheck::Read),
+            site if site == UNASSIGNED_MEMBER => Some(DataCheck::Get),
+            _ => None,
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1206-1219
 /// `ReadPointer`'s check of a value of a named class that is not the declared type (a class of
 /// the module has no parent class: the second throw).

@@ -4441,9 +4441,10 @@ pub fn run(
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
     args.id_scope = args.parse_deflines.then(Default::default);
-    // The run's `SERIAL_VERIFY_DATA_WRITE`, which `-in_pssm`'s reader reads
-    // (`BlastpArgs::write_verification`).
+    // The run's `SERIAL_VERIFY_DATA_WRITE`, `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET`,
+    // which `-in_pssm`'s reader reads (`BlastpArgs::write_verification`, `read_verification`).
     args.write_verification = settings.write_verification.clone();
+    args.read_verification = settings.read_verification.clone();
     use crate::blastinput::app;
     use crate::blastinput::input_files;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:128-133
@@ -5402,6 +5403,7 @@ pub fn run_local_database(
     super::args::BLASTP_TASK.check(&mut args.task)?;
     report_formats(&args, outputs)?;
     args.write_verification = settings.write_verification.clone();
+    args.read_verification = settings.read_verification.clone();
     let archive_requested = outputs
         .formats
         .iter()

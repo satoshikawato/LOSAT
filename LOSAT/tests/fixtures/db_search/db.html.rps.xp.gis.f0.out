@@ -1,0 +1,200 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>RPSBLAST 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+<b>Query=</b> allx a query of X only
+
+Length=60
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+<b>Query=</b> oj_tk TK-TMK with an O at 30 and a J at 60
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >ref|XP_000101.1|</a>f101 TK-TMK, chimeric thymidine and thymidylate k...  <a href=#XP_000101.1>312</a>     3e-111
+gnl|CDD|102f102 ribonucleotide reductase large subunit [White spo...  <a href=#CDD:102>18.9</a>    0.30  
+gnl|CDD|103f103 DNA polymerase [White spot syndrome virus] residu...  <a href=#CDD:103>14.3</a>    8.8   
+
+
+><a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=protalign&blast_rank=1&RID=0" >XP_000101.1</a><a name=XP_000101.1></a> f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 312 bits (800),  Expect = 3e-111, Method: Composition-based stats.
+ Identities = 188/190 (99%), Positives = 188/190 (99%), Gaps = 0/190 (0%)
+
+Query  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYOKNIYQQENGGNKHCLFVKHSLETRYGCGTJ  60
+            MQLILSHHLTMAGRVELVTGPMFAGKSTY KNIYQQENGGNKHCLFVKHSLETRYGCGT 
+Sbjct  1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+
+Query  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+            TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA
+Sbjct  61   TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+
+Query  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+            ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG
+Sbjct  121  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+
+Query  181  AEMYAAACRD  190
+            AEMYAAACRD
+Sbjct  181  AEMYAAACRD  190
+
+
+>CDD:102<a name=CDD:102></a> f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 18.9 bits (38),  Expect = 0.30, Method: Composition-based stats.
+ Identities = 10/35 (29%), Positives = 15/35 (43%), Gaps = 6/35 (17%)
+
+Query  216  STQAKLLLTNKNSPLY--GGEYMCFPD----RSSH  244
+              +A+ L    NS     G  Y+CF D    +S+ 
+Sbjct  106  VVKARALFDQINSARIETGTPYVCFKDTINRKSNQ  140
+
+
+ Score = 14.7 bits (27),  Expect = 7.4, Method: Composition-based stats.
+ Identities = 5/11 (45%), Positives = 8/11 (73%), Gaps = 0/11 (0%)
+
+Query  355  RARALFLDLAN  365
+            +ARALF  + +
+Sbjct  108  KARALFDQINS  118
+
+
+ Score = 14.7 bits (27),  Expect = 7.9, Method: Composition-based stats.
+ Identities = 5/20 (25%), Positives = 10/20 (50%), Gaps = 0/20 (0%)
+
+Query  228  SPLYGGEYMCFPDRSSHTGK  247
+            S ++G E+    ++    GK
+Sbjct  83   SDVHGEEFKALYEKYEAEGK  102
+
+
+>CDD:103<a name=CDD:103></a> f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 14.3 bits (26),  Expect = 8.8, Method: Composition-based stats.
+ Identities = 5/10 (50%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+
+Query  180  GAEMYAAACR  189
+            GA + A  CR
+Sbjct  149  GAHITAGKCR  158
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.137    0.405    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 169824
+
+
+<b>Query=</b> rr_part ribonucleotide reductase residues 281-520
+
+Length=240
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+gnl|CDD|102f102 ribonucleotide reductase large subunit [White spo...  <a href=#CDD:102>346</a>     3e-127
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >ref|XP_000101.1|</a>f101 TK-TMK, chimeric thymidine and thymidylate k...  <a href=#XP_000101.1>17.8</a>    0.45  
+gnl|CDD|103f103 DNA polymerase [White spot syndrome virus] residu...  <a href=#CDD:103>14.0</a>    6.9   
+
+
+>CDD:102<a name=CDD:102></a> f102 ribonucleotide reductase large subunit [White spot syndrome 
+virus] residues 301-480
+Length=180
+
+ Score = 346 bits (888),  Expect = 3e-127, Method: Composition-based stats.
+ Identities = 180/180 (100%), Positives = 180/180 (100%), Gaps = 0/180 (0%)
+
+Query  21   IFNVSVKKVSQGGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDL  80
+            IFNVSVKKVSQGGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDL
+Sbjct  1    IFNVSVKKVSQGGDKRRGAAAIYISDWHLDVKDFIDCRKNAGNEDLRTRDLFPAIWVSDL  60
+
+Query  81   FMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSAR  140
+            FMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSAR
+Sbjct  61   FMERVKAGKNWSLMCPHECPGLSDVHGEEFKALYEKYEAEGKGKEVVKARALFDQINSAR  120
+
+Query  141  IETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKY  200
+            IETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKY
+Sbjct  121  IETGTPYVCFKDTINRKSNQENVGIIKSSNLCTEIVQYSDSEETAVCNLASIAVNKFVKY  180
+
+
+><a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=protalign&blast_rank=2&RID=0" >XP_000101.1</a><a name=XP_000101.1></a> f101 TK-TMK, chimeric thymidine and thymidylate kinase [White 
+spot syndrome virus] residues 1-190
+Length=190
+
+ Score = 17.8 bits (35),  Expect = 0.45, Method: Composition-based stats.
+ Identities = 10/29 (34%), Positives = 13/29 (45%), Gaps = 1/29 (3%)
+
+Query  200  YSPIPSLRPYVDYREMKRVVKIMTRNLDK  228
+            +SPI  L PY +    K   K M   +D 
+Sbjct  131  FSPIHKLLPYTNSIV-KLASKCMICKIDT  158
+
+
+>CDD:103<a name=CDD:103></a> f103 DNA polymerase [White spot syndrome virus] residues 1101-1290
+Length=190
+
+ Score = 14.0 bits (25),  Expect = 6.9, Method: Composition-based stats.
+ Identities = 7/14 (50%), Positives = 9/14 (64%), Gaps = 1/14 (7%)
+
+Query  70   DLFPAIWVSDLFME  83
+            D FP I V D+ M+
+Sbjct  103  DYFPEI-VCDINMQ  115
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.404    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 99803
+
+
+  Database: rps_mini
+    Posted date:  Nov 21, 2026  5:54 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

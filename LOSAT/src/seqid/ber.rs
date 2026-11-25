@@ -39,7 +39,13 @@ use crate::report::serial::asn_ber_reader::{
 pub(crate) use crate::report::serial::asn_ber_reader::{
     CONTEXT_CONSTRUCTED as TAG_CONTEXT_CONSTRUCTED, TAG_SEQUENCE,
 };
-use crate::report::serial::object_frame::{frame_info, frame_name, FrameKind};
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1044
+// NCBI reference (598d8ae6): c++/src/serial/member.cpp:464-477
+// `ExpectedMember`'s throw: the members' read functions (`ReadMissingSimpleMember`) call it for a
+// mandatory member that the record skips; it is the read check that `SERIAL_VERIFY_DATA_READ`
+// turns off (`object_frame::DataCheck`, the database reader's refusal:
+// `seqdb::SeqDb::refuse_unchecked_reads`).
+use crate::report::serial::object_frame::{frame_info, frame_name, FrameKind, EXPECTED_MEMBER};
 pub(crate) const TAG_NUMBER_MASK: u8 = 31;
 const INDEFINITE_LENGTH_BYTE: u8 = 0x80;
 /// Deepest nesting accepted inside a skipped member.
@@ -147,16 +153,6 @@ const UNEXPECTED_MEMBER: ThrowSite = site(
     FORMAT_ERROR,
     Some("ncbi::CObjectIStreamAsnBinary::UnexpectedMember"),
 );
-// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1044
-// The members' read functions (`ReadMissingSimpleMember`, member.cpp:464-477) call it for a
-// mandatory member that the record skips; the data is verified unless `SERIAL_VERIFY_DATA_READ`
-// says otherwise.
-const EXPECTED_MEMBER: ThrowSite = site(
-    OBJISTR,
-    1037,
-    FORMAT_ERROR,
-    Some("ncbi::CObjectIStream::ExpectedMember"),
-);
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:599-608
 const HANDLE_EOF: ThrowSite = site(
     OBJISTR,
@@ -253,7 +249,7 @@ impl Frame {
 enum Failure {
     /// NCBI's `CSerialException` as it leaves the frames of NCBI's object stack: the exception
     /// with its backlogs (`NCBI_RETHROW_SAME`) and its frame stack (`m_FrameStack`, which
-    /// `AddFrameInfo` extends, `NcbiException::add_frame_info`, and `ReportExtra` prints as
+    /// `AddFrameInfo` extends, `NcbiException::add_frame_infos`, and `ReportExtra` prints as
     /// ` at <frames>`).
     Serial { exception: NcbiException },
     /// The record ends where NCBI's stream needs a byte (the `CEofException` of
@@ -300,7 +296,7 @@ impl BerError {
     fn left(self, frame: Frame) -> Self {
         let failure = match *self.0 {
             Failure::Serial { mut exception } => {
-                exception.add_frame_info(frame.name());
+                exception.add_frame_infos(&[frame.name()]);
                 Failure::Serial { exception }
             }
             Failure::Eof { pos } => match frame {

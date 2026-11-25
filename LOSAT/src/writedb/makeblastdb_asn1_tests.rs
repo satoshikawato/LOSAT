@@ -282,6 +282,20 @@ fn snapshot_dir(
 }
 
 fn run_case(args_words: &[String], env: MakedbEnv, stdin_bytes: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
+    run_case_with_settings(
+        args_words,
+        env,
+        &ApplicationSettings::default(),
+        stdin_bytes,
+    )
+}
+
+fn run_case_with_settings(
+    args_words: &[String],
+    env: MakedbEnv,
+    settings: &ApplicationSettings,
+    stdin_bytes: &[u8],
+) -> (i32, Vec<u8>, Vec<u8>) {
     let args = parse_makedb_words(args_words);
     let mut stdin = std::io::Cursor::new(stdin_bytes);
     let mut stdout = Vec::new();
@@ -289,7 +303,7 @@ fn run_case(args_words: &[String], env: MakedbEnv, stdin_bytes: &[u8]) -> (i32, 
     let rc = run_with_env(
         &args,
         env,
-        None,
+        settings,
         Some(&FIXED_TIME),
         Platform::LINUX_X86_64,
         &mut stdin,
@@ -648,6 +662,140 @@ fn check_environment_allows_cfastareader_override_for_asn1_inputs() {
         assert!(
             check_environment(&args, &with_dont_scan).is_ok(),
             "{input_type} should allow {DONT_SCAN}"
+        );
+    }
+}
+
+/// Removes the single occurrence of `needle` from `haystack` (used to strip one BER TLV from
+/// `e1.asnb` to construct missing-mandatory-member and unset-`Seq-inst.length` binary inputs).
+fn strip_once_bytes(haystack: &[u8], needle: &[u8]) -> Vec<u8> {
+    let pos = haystack
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .expect("needle present in fixture");
+    assert!(
+        !haystack[pos + 1..]
+            .windows(needle.len())
+            .any(|w| w == needle),
+        "needle must occur once"
+    );
+    let mut out = Vec::with_capacity(haystack.len() - needle.len());
+    out.extend_from_slice(&haystack[..pos]);
+    out.extend_from_slice(&haystack[pos + needle.len()..]);
+    out
+}
+
+#[test]
+fn asn1_read_and_get_verification_refusal_matches_ncbi_contract() {
+    use crate::blastinput::ncbi_environment::ReadVerification;
+    use std::ffi::OsStr;
+
+    let (fix_a, _, _, _) = asn1_fixture_paths();
+    let txt = std::fs::read_to_string(fix_a.join("e1.asn")).unwrap();
+    let bin = std::fs::read(fix_a.join("e1.asnb")).unwrap();
+
+    let txt_no_repr = txt.replacen("repr raw, ", "", 1).into_bytes();
+    let txt_no_len = txt.replacen("length 12, ", "", 1).into_bytes();
+    // `a0 80 0a 01 02 00 00` = Seq-inst.repr raw; `a2 80 02 01 0c 00 00` = Seq-inst.length 12.
+    let bin_no_repr = strip_once_bytes(&bin, &[0xa0, 0x80, 0x0a, 0x01, 0x02, 0x00, 0x00]);
+    let bin_no_len = strip_once_bytes(&bin, &[0xa2, 0x80, 0x02, 0x01, 0x0c, 0x00, 0x00]);
+
+    let settings_unset = ApplicationSettings::default();
+    let settings_read_off = ApplicationSettings {
+        read_verification: ReadVerification::of(Some(OsStr::new("NO")), None),
+        ..Default::default()
+    };
+    let settings_get_off = ApplicationSettings {
+        read_verification: ReadVerification::of(None, Some(OsStr::new("NO"))),
+        ..Default::default()
+    };
+
+    let cases: [(&str, &str, &[u8], &str, &str); 4] = [
+        (
+            "txt_missing_repr",
+            "asn1_txt",
+            &txt_no_repr,
+            "member repr expected",
+            "SERIAL_VERIFY_DATA_READ=NO with ASN.1 input (-input_type asn1_txt|asn1_bin) that lacks a mandatory member is not supported by LOSAT's makeblastdb",
+        ),
+        (
+            "bin_missing_repr",
+            "asn1_bin",
+            &bin_no_repr,
+            "member repr expected",
+            "SERIAL_VERIFY_DATA_READ=NO with ASN.1 input (-input_type asn1_txt|asn1_bin) that lacks a mandatory member is not supported by LOSAT's makeblastdb",
+        ),
+        (
+            "txt_unset_length",
+            "asn1_txt",
+            &txt_no_len,
+            "CSeq_inst::GetLength(): Attempt to get unassigned member NCBI-Sequence::Seq-inst.length",
+            "SERIAL_VERIFY_DATA_GET=NO with ASN.1 input (-input_type asn1_txt|asn1_bin) of which NCBI BLAST+ gets a member that is not set is not supported by LOSAT's makeblastdb",
+        ),
+        (
+            "bin_unset_length",
+            "asn1_bin",
+            &bin_no_len,
+            "CSeq_inst::GetLength(): Attempt to get unassigned member NCBI-Sequence::Seq-inst.length",
+            "SERIAL_VERIFY_DATA_GET=NO with ASN.1 input (-input_type asn1_txt|asn1_bin) of which NCBI BLAST+ gets a member that is not set is not supported by LOSAT's makeblastdb",
+        ),
+    ];
+
+    for (label, itype, bytes, ncbi_substr, refusal_substr) in cases {
+        let is_read = label.contains("missing_repr");
+        let (matching, other) = if is_read {
+            (&settings_read_off, &settings_get_off)
+        } else {
+            (&settings_get_off, &settings_read_off)
+        };
+        let make_words = |dir: &TempDir| {
+            vec![
+                "-in".into(),
+                "-".into(),
+                "-input_type".into(),
+                itype.into(),
+                "-dbtype".into(),
+                "nucl".into(),
+                "-title".into(),
+                "T".into(),
+                "-out".into(),
+                format!("{}/db", dir_string(dir)),
+            ]
+        };
+
+        let dir_u = TempDir::unique(&format!("asn1-rv-unset-{label}"));
+        let (rc_u, out_u, err_u) = run_case_with_settings(
+            &make_words(&dir_u),
+            MakedbEnv::default(),
+            &settings_unset,
+            bytes,
+        );
+        assert_eq!(rc_u, 255, "{label} unset rc");
+        let err_u_str = String::from_utf8_lossy(&err_u);
+        assert!(
+            err_u_str.contains(ncbi_substr),
+            "{label} unset err: {err_u_str}"
+        );
+
+        let dir_o = TempDir::unique(&format!("asn1-rv-other-{label}"));
+        let (rc_o, out_o, err_o) =
+            run_case_with_settings(&make_words(&dir_o), MakedbEnv::default(), other, bytes);
+        assert_eq!(rc_o, rc_u, "{label} other var rc");
+        assert_eq!(err_o, err_u, "{label} other var err");
+        assert_eq!(
+            String::from_utf8_lossy(&out_o).replace(&dir_string(&dir_o), "<D>"),
+            String::from_utf8_lossy(&out_u).replace(&dir_string(&dir_u), "<D>"),
+            "{label} other var out"
+        );
+
+        let dir_r = TempDir::unique(&format!("asn1-rv-refuse-{label}"));
+        let (rc_r, out_r, err_r) =
+            run_case_with_settings(&make_words(&dir_r), MakedbEnv::default(), matching, bytes);
+        assert_refusal(label, rc_r, &err_r, refusal_substr);
+        assert_eq!(
+            String::from_utf8_lossy(&out_r).replace(&dir_string(&dir_r), "<D>"),
+            String::from_utf8_lossy(&out_u).replace(&dir_string(&dir_u), "<D>"),
+            "{label} refused out must match unset out"
         );
     }
 }

@@ -1345,6 +1345,20 @@ impl<'a> BuildDatabase<'a> {
         messages
     }
 
+    /// Closes the writer and removes any partial files already opened without writing `EndBuild`'s
+    /// log lines, used when a LOSAT refusal stops an ASN.1 build so stdout matches what NCBI wrote
+    /// before that point and no partial database files remain.
+    pub(crate) fn erase_after_refusal(&mut self) {
+        let close_error = self.output_db.close().err();
+        let files = self.output_db.list_files();
+        for file in &files {
+            let _ = dir_entry::remove(&path_of_bytes(file));
+        }
+        if close_error.is_some() {
+            let _ = self.output_db.destroy_after_failed_close();
+        }
+    }
+
     /// `s_FixBioseqDeltas` on a delta that `Seq-inst.length` does not describe
     /// (`Bioseq::delta_fix`), after the definition lines (`x_EditAndAddBioseq`), whose
     /// diagnostics come first where it throws: the length of the raw sequence it made, or its

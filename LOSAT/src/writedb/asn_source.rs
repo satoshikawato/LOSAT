@@ -25,6 +25,7 @@ use crate::report::serial::asn_text_reader::StreamSource;
 use crate::report::serial::asn_types::read::{ObjectStream, Post, ReadError};
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::{member_index, members, Value};
+use crate::report::serial::object_frame::UNASSIGNED_MEMBER;
 use crate::seqid::label;
 use crate::seqid::mask_handle::{
     handle_seq_id, mask_handle_key, mask_info_key, GiimTree, TreeHandle,
@@ -881,17 +882,9 @@ fn check_duplicate_bioseq_ids(bioseqs: &[BioseqSlot]) -> Result<(), WriteDbError
     Ok(())
 }
 
-/// `CUnassignedMember::eGet` at `src/serial/serialobject.cpp:306`.
+/// `CUnassignedMember::eGet` at `src/serial/serialobject.cpp:306` (`object_frame::UNASSIGNED_MEMBER`).
 fn unassigned_member(message: &str) -> NcbiException {
-    NcbiException::new(
-        ThrowSite {
-            file: "src/serial/serialobject.cpp",
-            line: 306,
-            kind: "CUnassignedMember::eGet",
-            function: None,
-        },
-        message,
-    )
+    NcbiException::new(UNASSIGNED_MEMBER, message)
 }
 
 fn object_id_str(val: &Value) -> Option<&[u8]> {

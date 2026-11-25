@@ -16,6 +16,7 @@
 //!   knows it: [`NcbiException::site`] is [`ThrowSite::generated`] otherwise) or LOSAT's refusal
 //!   (`Refused`, a noun phrase that the program completes).
 
+use crate::blastinput::ncbi_environment::DatabaseSettings;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::defline::bioseq_facts;
 use crate::report::defline::bioseq_title_from_source;
@@ -100,20 +101,22 @@ pub(crate) fn prints_title(outfmt: &str) -> bool {
 
 impl MaskBdbReader {
     /// A new `CSeqDB` of `name` (the bytes of NCBI's `std::string`) and the molecule, on the
-    /// search path of the environment and `registry` (the `[BLAST] BLASTDB` of the
-    /// configuration: `ApplicationSettings::blastdb`). `program` names LOSAT's program in a
-    /// refusal.
+    /// search path of the environment and the registry of `database` (the `[BLAST] BLASTDB` of
+    /// the configuration: `ApplicationSettings::blastdb`), whose definition lines are read under
+    /// the checks of `database` (`SeqDb::refuse_unchecked_reads`). `program` names LOSAT's
+    /// program in a refusal.
     pub(crate) fn open(
         name: &[u8],
         molecule: SeqType,
-        registry: Option<&[u8]>,
+        database: DatabaseSettings<'_>,
         title_printed: bool,
         program: &'static str,
     ) -> Result<Self, BdbError> {
-        let path = SearchPath::from_environment(registry);
+        let path = SearchPath::from_environment(database.registry);
         // `GetNumOIDs`, not the OIDs that the alias files' ranges include.
-        let db = SeqDb::open_every_oid_in(name, molecule, &path)
+        let mut db = SeqDb::open_every_oid_in(name, molecule, &path)
             .map_err(|error| database_error(error, program))?;
+        db.refuse_unchecked_reads(database.read_verification);
         Ok(MaskBdbReader {
             db,
             molecule,

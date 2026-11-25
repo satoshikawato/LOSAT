@@ -20,7 +20,9 @@ use super::time::LocalTime;
 use super::writer::{build_lmdb_file_name, DbVersion, Indices};
 use super::WriteDbError;
 use crate::blastinput::compressed::{compression_of_name, Compression};
-use crate::blastinput::ncbi_environment::{diag_target, ApplicationSettings, DiagStream};
+use crate::blastinput::ncbi_environment::{
+    diag_target, ApplicationSettings, DiagStream, ReadVerification,
+};
 use crate::ncbi_str::string_to_uint8_data_size;
 use crate::seqdb::date::iso8601_date_time_exception;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
@@ -278,6 +280,9 @@ fn unsupported(message: impl Into<String>) -> MakedbError {
 fn input_error(error: SeqDbError) -> MakedbError {
     match error {
         SeqDbError::Ncbi(exception) => MakedbError::Build(WriteDbError::Exception(exception)),
+        SeqDbError::Setting(refused) => {
+            unsupported(format!("{refused} is not supported by LOSAT's makeblastdb"))
+        }
         error if error.ncbi_message().is_some() => MakedbError::Database(error),
         error => unsupported(format!(
             "{error}; this database is not supported as input by LOSAT's makeblastdb"
@@ -713,7 +718,7 @@ fn verify_input_files(
 fn build_database_with_log(
     args: &MakedbArgs,
     env: MakedbEnv,
-    registry_blastdb: Option<&[u8]>,
+    settings: &ApplicationSettings,
     now: Option<&LocalTime>,
     platform: Platform,
     stdin: &mut dyn Read,
@@ -723,6 +728,7 @@ fn build_database_with_log(
     logfile_error: Option<MakedbError>,
     end_messages: &mut Vec<Vec<u8>>,
 ) -> Result<(), MakedbError> {
+    let registry_blastdb = registry_blastdb(settings);
     let version = db_version(args)?;
     let is_protein = args.dbtype == "prot";
     let blastdb_input = args.input_type == "blastdb";
@@ -841,7 +847,7 @@ fn build_database_with_log(
         process_mask_data(&mut db, &mask_options, &mut warn)
     };
     if let Err(error) = masked {
-        let error = error.into_makedb_error();
+        let error = error.into_makedb_error(&settings.read_verification);
         *end_messages = destructor_messages(&db, error.as_ref());
         return error.map_or(Ok(()), Err);
     }
@@ -860,6 +866,7 @@ fn build_database_with_log(
             &user_path,
             is_protein,
             registry_blastdb,
+            &settings.read_verification,
             randomize,
             err,
         );
@@ -893,6 +900,7 @@ fn build_database_with_log(
             &user_path,
             is_protein,
             registry_blastdb,
+            &settings.read_verification,
             stdin,
             err,
         );
@@ -965,7 +973,8 @@ fn seq_type(is_protein: bool) -> SeqType {
 // open, and `build_database_with_log` closes it after the messages, as makeblastdb's
 // destructors do. LOSAT's refusals and its own errors end the build and remove its files.
 /// `x_ProcessInputData` for `-input_type blastdb`, then `EndBuild` and the metadata file
-/// (`open_new_database`); `randomize` is the seed of `-randomize`.
+/// (`open_new_database`); `read_verification` is the run's `SERIAL_VERIFY_DATA_READ`
+/// (`ApplicationSettings::read_verification`), `randomize` the seed of `-randomize`.
 #[allow(clippy::too_many_arguments)]
 fn copy_input_databases(
     db: &mut BuildDatabase<'_>,
@@ -973,6 +982,7 @@ fn copy_input_databases(
     user_path: &[u8],
     is_protein: bool,
     registry_blastdb: Option<&[u8]>,
+    read_verification: &ReadVerification,
     randomize: Option<u32>,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
@@ -995,8 +1005,12 @@ fn copy_input_databases(
             "No valid input FASTA file or BLAST db is found.",
         ));
     }
-    let input = SeqDb::open_in(combine_and_quote(names).as_bytes(), seqtype, &search)
+    let mut input = SeqDb::open_in(combine_and_quote(names).as_bytes(), seqtype, &search)
         .map_err(input_error)?;
+    // The definition lines are read as the copy reaches them: a record that fails NCBI's check
+    // of a mandatory member under a `SERIAL_VERIFY_DATA_READ` that turns it off is refused there
+    // (`SeqDb::refuse_unchecked_reads`, `input_error`).
+    input.refuse_unchecked_reads(read_verification);
     let leafs = {
         let mut warn = warn_to(err);
         scan_leaf_tax_ids(&input, &mut warn, db.utf8_once())
@@ -1135,7 +1149,9 @@ fn add_input_and_close(
 /// `x_ProcessInputData` + `EndBuild` + `open_new_database` for `-input_type asn1_txt` and
 /// `-input_type asn1_bin`. Unlike FASTA (`AddFasta`), an error from NCBI leaves the build open so
 /// `build_database_with_log` runs `close_at_destruction` (writing any sequences already added);
-/// LOSAT refusals erase the partial files via `end_build(true)`.
+/// LOSAT refusals (including `read_verification` refusals for `SERIAL_VERIFY_DATA_READ` and
+/// `SERIAL_VERIFY_DATA_GET`) erase any partial files via `erase_after_refusal` without writing
+/// `EndBuild` log lines.
 #[allow(clippy::too_many_arguments)]
 fn add_asn_and_close(
     db: &mut BuildDatabase<'_>,
@@ -1146,17 +1162,13 @@ fn add_asn_and_close(
     user_path: &[u8],
     is_protein: bool,
     registry_blastdb: Option<&[u8]>,
+    read_verification: &ReadVerification,
     stdin: &mut dyn Read,
     err: &mut dyn Write,
 ) -> Result<(), MakedbError> {
-    let erase_if_losat = |db: &mut BuildDatabase<'_>, error: MakedbError, err: &mut dyn Write| {
+    let erase_if_losat = |db: &mut BuildDatabase<'_>, error: MakedbError| {
         if is_losat_error(&error) {
-            let mut warn = warn_to(err);
-            if let Err(stop) = db.end_build(true, &mut warn) {
-                if stop.is_closed_pipe() {
-                    return MakedbError::Build(stop);
-                }
-            }
+            db.erase_after_refusal();
         }
         error
     };
@@ -1175,7 +1187,20 @@ fn add_asn_and_close(
                 &mut warn,
             )
         };
-        res.map_err(|error| erase_if_losat(db, MakedbError::Build(error), err))
+        res.map_err(|error| {
+            let error = match error {
+                WriteDbError::Exception(exception) => match read_verification
+                    .refused(&exception, "ASN.1 input (-input_type asn1_txt|asn1_bin)")
+                {
+                    Some(refused) => {
+                        unsupported(format!("{refused} is not supported by LOSAT's makeblastdb"))
+                    }
+                    None => MakedbError::Build(WriteDbError::Exception(exception)),
+                },
+                other => MakedbError::Build(other),
+            };
+            erase_if_losat(db, error)
+        })
     };
 
     if let Some(stdin_map) = from_stdin {
@@ -1203,7 +1228,7 @@ fn add_asn_and_close(
                     let res = feed_one(db, &mut input, err);
                     if let Some(fault) = input.fault() {
                         let error = compressed_fault_error(name, compression, fault);
-                        return Err(erase_if_losat(db, error, err));
+                        return Err(erase_if_losat(db, error));
                     }
                     res?;
                 }
@@ -1379,7 +1404,7 @@ pub fn run(args: &MakedbArgs, settings: &ApplicationSettings) -> i32 {
     let now = LocalTime::now();
     let status = run_with(
         args,
-        registry_blastdb(settings),
+        settings,
         now.as_ref(),
         Platform::host(),
         &mut stdin.lock(),
@@ -1453,13 +1478,14 @@ pub(crate) fn registry_blastdb(settings: &ApplicationSettings) -> Option<&[u8]> 
 // nothing, exit status 1). LOSAT reads `-logfile` as an option of makeblastdb
 // only, not anywhere in the command line as NCBI's application does (for example
 // as the value of `-title`).
-/// One run with the registry entry `[BLAST] BLASTDB` of the application settings
-/// (`registry_blastdb`) and the given time, platform and streams: the build, then the error
-/// message and the exit code of a failed build. With `-logfile` the log and the
-/// messages go where makeblastdb sends them instead of `out` and `err`.
+/// One run with the application settings `settings` (the registry entry `[BLAST] BLASTDB`,
+/// `registry_blastdb`, and the checks of NCBI's reads, `ApplicationSettings::read_verification`)
+/// and the given time, platform and streams: the build, then the error message and the exit code
+/// of a failed build. With `-logfile` the log and the messages go where makeblastdb sends them
+/// instead of `out` and `err`.
 pub(crate) fn run_with(
     args: &MakedbArgs,
-    registry_blastdb: Option<&[u8]>,
+    settings: &ApplicationSettings,
     now: Option<&LocalTime>,
     platform: Platform,
     stdin: &mut dyn Read,
@@ -1469,7 +1495,7 @@ pub(crate) fn run_with(
     run_with_env(
         args,
         MakedbEnv::from_env(&|name| std::env::var_os(name)),
-        registry_blastdb,
+        settings,
         now,
         platform,
         stdin,
@@ -1484,7 +1510,7 @@ pub(crate) fn run_with(
 pub(crate) fn run_with_env(
     args: &MakedbArgs,
     env: MakedbEnv,
-    registry_blastdb: Option<&[u8]>,
+    settings: &ApplicationSettings,
     now: Option<&LocalTime>,
     platform: Platform,
     stdin: &mut dyn Read,
@@ -1497,7 +1523,7 @@ pub(crate) fn run_with_env(
             let result = build_database_with_log(
                 args,
                 env,
-                registry_blastdb,
+                settings,
                 now,
                 platform,
                 stdin,
@@ -1525,7 +1551,7 @@ pub(crate) fn run_with_env(
             let result = build_database_with_log(
                 args,
                 env,
-                registry_blastdb,
+                settings,
                 now,
                 platform,
                 stdin,
@@ -1544,7 +1570,7 @@ pub(crate) fn run_with_env(
             let result = build_database_with_log(
                 args,
                 env,
-                registry_blastdb,
+                settings,
                 now,
                 platform,
                 stdin,

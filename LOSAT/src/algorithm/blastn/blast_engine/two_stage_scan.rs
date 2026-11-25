@@ -27,8 +27,8 @@
 //!
 //! This module is a child of `run` for the items it keeps private (the types `DiagHashTable`,
 //! `OffsetPair`, `SubjectChunk` and `UngappedHit`; `scan_subject_kmers_with_ranges`,
-//! `scan_subject_disc_words_with_ranges`, `x_mb_hit_prefetch`, `x_bn_pv_once`, `x_bn_pv_once_of`,
-//! `x_bn_rank_once`, `x_bn_rank_once_on` and `OFFSET_ARRAY_SIZE`). Its function is the statements
+//! `scan_subject_disc_words_with_ranges`, `select_mb_scan_kind`, `MbScanSubjectKind`,
+//! `x_bn_pv_once_of`, `x_bn_rank_once_on` and `OFFSET_ARRAY_SIZE`). Its function is the statements
 //! of the branch of `prelim_chunk_hits` that were there, in their order; the strips scans of
 //! PAIRPAR (`x_pair_seed.rs` `scan_strip`, `x_pair_seed_disc.rs` `scan_strip_disc`) walk the lookup
 //! hits in the order `on_word` does. What the scan reads is `TwoStageScanInputs` (the batch's word
@@ -38,17 +38,18 @@
 use super::pair_extend;
 use super::prelim_subject::ScanBatch;
 use super::{
-    scan_subject_disc_words_with_ranges, scan_subject_kmers_with_ranges, x_bn_pv_once,
-    x_bn_pv_once_of, x_bn_rank_once, x_bn_rank_once_on, x_dc_csr, x_mb_hit_prefetch, DiagHashTable,
-    DiagStruct, OffsetPair, SmallNaWord, SubjectChunk, UngappedHit, OFFSET_ARRAY_SIZE,
+    scan_subject_disc_words_with_ranges, scan_subject_kmers_with_ranges, select_mb_scan_kind,
+    x_bn_pv_once_of, x_bn_rank_once_on, x_dc_csr, DiagHashTable, DiagStruct, MbScanSubjectKind,
+    OffsetPair, SmallNaWord, SubjectChunk, UngappedHit, OFFSET_ARRAY_SIZE,
 };
 use crate::algorithm::blastn::lookup::{TwoStageLookup, XHeadFifo};
 use std::mem::MaybeUninit;
 
 /// What the scan of one subject chunk with a two-stage table reads: the batch's word finder
 /// (`ScanBatch`, or its copy per subject: the query block, the cutoffs, the scoring, word lengths,
-/// the scan step and window, the diagonal table's form and sizes, the diagnostics), its two-stage
-/// table, and the chunk's own values: the packed subject from the chunk's start, the chunk's
+/// the scan step and window, the diagonal table's form and sizes, the diagnostics, and its
+/// two-stage table, `ScanBatch::two_stage_lookup_ref`, the one table the batch's forms were chosen
+/// from), and the chunk's own values: the packed subject from the chunk's start, the chunk's
 /// length, ranges and whether the subject is masked, the chunk (its offset in the subject), the
 /// diagonal table's offset for this chunk, whether the hash's retrieve takes the level bound of
 /// LOSAT_X_DIAGLV, and the subject's index and trace id (the trace lines). Built once per chunk by
@@ -60,7 +61,6 @@ use std::mem::MaybeUninit;
 /// The level bound and the diagnostics have no NCBI counterpart.
 pub(super) struct TwoStageScanInputs<'a> {
     pub(super) scan: &'a ScanBatch<'a>,
-    pub(super) two_stage: &'a TwoStageLookup,
     pub(super) search_seq_packed: &'a [u8],
     pub(super) s_len: usize,
     pub(super) subject_seq_ranges: &'a [(i32, i32)],
@@ -129,7 +129,6 @@ pub(super) struct TwoStageScanState<'s> {
 pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoStageScanState<'_>) {
     let &TwoStageScanInputs {
         scan,
-        two_stage,
         search_seq_packed,
         s_len,
         subject_seq_ranges,
@@ -155,6 +154,11 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         timing_ref,
         ..
     } = scan;
+    // The batch's table, the one its forms (`ScanBatch::forms`) were chosen from:
+    // `prelim_chunk_hits` calls this scan for a batch with a two-stage table only.
+    let Some(two_stage) = scan.two_stage_lookup_ref else {
+        unreachable!("the scan of a two-stage table without the batch's two-stage table")
+    };
     let ungapped_hits = &mut *state.ungapped_hits;
     let hit_level_array = &mut *state.hit_level_array;
     let hit_len_array = &mut *state.hit_len_array;
@@ -247,15 +251,15 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
     // The presence vector and its shift, held by the scans' per-word closures by value
     // (`lookup::XPvView`), which test each word there before they call out.
     let pv_view = two_stage.x_pv_view();
-    // The sides of the forms this chunk's scan takes, recorded while the run records them
-    // (`ScanBatch::x_recording`, the batch's; `record_forms`).
+    // The sides of the forms this chunk's scan takes, the batch's (`record_forms`), recorded while
+    // the run records them (`ScanBatch::x_recording`).
     if scan.x_recording {
-        record_forms(scan, two_stage);
+        record_forms(scan);
     }
-    // The batch's form of a contiguous table laid out as CSR (`ScanBatch::x_mb_head`, chosen
-    // once per batch by `MbCsrHead::choose`), tested before `on_word` is made: the scans of
-    // that form do not call it, and made before the test it was stored in each of their chunks.
-    if let Some(x_head) = scan.x_mb_head {
+    // The batch's form of a contiguous table laid out as CSR (`ScanForms::head`, chosen once per
+    // batch by `ScanForms::choose`), tested before `on_word` is made: the scans of that form do not
+    // call it, and made before the test it was stored in each of their chunks.
+    if let Some(x_head) = scan.forms.head {
         // EXPERIMENT (LOSAT_X_BNCSR): a contiguous table laid out as CSR has no
         // chains; its words with hits (the presence test of `for_each_hit` first)
         // go through `x_on_word_csr`, `on_word`'s statements with the cell's run
@@ -274,7 +278,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // EXPERIMENT (LOSAT_X_BNPVONCE): a packed head's presence bits hold one bit
         // per cell, so its scan tests the word there only (`XPacked::x_present`), not
         // first in the coarser presence vector, whose bit stands for several cells;
-        // for a head whose bits fit the cache (`x_bn_pv_once`). A larger packed head keeps the
+        // for a head whose bits fit the cache (`x_bn_pv_once_of`). A larger packed head keeps the
         // presence vector in front and tests its own bit after it, in the closure too, so a
         // word that passes the vector without a run of its cell is not kept either (the
         // vector's test first: a word it drops reads no bit of the head).
@@ -285,7 +289,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
         // one element per cell), whose `emit` gets the word only.
         // `x_scan_csr!(head, |k| test)`: the scan of `head` whose per-word closure
         // keeps a word `k` for the ring when `test` holds (`XWordBatch`).
-        let rank_once = scan.x_rank_once;
+        let rank_once = scan.forms.rank_once;
         macro_rules! x_scan_csr {
             ($head:expr, |$k:ident| $has:expr) => {{
                 use x_dc_csr::XHead;
@@ -339,7 +343,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                     }
                 };
                 let mut ring = head.ring::<(usize, usize, u64)>();
-                let mb_scan_kind = scan.mb_scan_kind(subject_masked);
+                let mb_scan_kind = scan.forms.scan_kind(subject_masked);
                 // The per-word closure holds what it reads by value (`move`: the debug switch,
                 // the presence vector and its shift, or the packed head) and the places it
                 // writes as its own references, so the scan keeps them in registers across the
@@ -613,7 +617,7 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
                 }
             }
         } else {
-            let mb_scan_kind = scan.mb_scan_kind(subject_masked);
+            let mb_scan_kind = scan.forms.scan_kind(subject_masked);
             // A word whose chain is empty (the presence vector, which `for_each_hit` tests first)
             // adds no pair: tested here, inline in the scan, so such a word makes no call to
             // `on_word` and is only counted for the debug summary (as the disc scans above). A
@@ -686,11 +690,10 @@ pub(super) fn scan_two_stage_lookup(x: &TwoStageScanInputs<'_>, state: &mut TwoS
 }
 
 /// The head of a contiguous two-stage table laid out as CSR (LOSAT_X_BNCSR) in the form its scan
-/// takes (`scan_two_stage_lookup`'s `x_scan_csr!`), chosen once per batch (`MbCsrHead::choose`,
-/// for `ScanBatch::x_mb_head`), as NCBI chooses a table's scanner once: a packed head
-/// (LOSAT_X_BNCSRPACK) whose presence bits are each word's only test (LOSAT_X_BNPVONCE,
-/// `PackedOnce`), a packed head behind the presence vector (`Packed`), or a head of one element per
-/// cell (`Csr`).
+/// takes (`scan_two_stage_lookup`'s `x_scan_csr!`, the strips' `x_pair_seed::scan_strip_csr`),
+/// chosen once per batch (`ScanForms::choose`): a packed head (LOSAT_X_BNCSRPACK) whose presence
+/// bits are each word's only test (LOSAT_X_BNPVONCE, `PackedOnce`), a packed head behind the
+/// presence vector (`Packed`), or a head of one element per cell (`Csr`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1022-1026 (the scanner chosen
 /// once for the search)
@@ -702,44 +705,99 @@ pub(super) enum MbCsrHead<'a> {
     Csr(&'a x_dc_csr::Csr),
 }
 
-impl<'a> MbCsrHead<'a> {
-    /// The form of the batch's table `two_stage` (`None` without a two-stage table, for a
-    /// discontiguous one and for a table with chains), and whether a word's run is the element
-    /// that the ring hands over with it (LOSAT_X_BNRANKONCE, for a table with a CSR head: `false`
-    /// otherwise, where no scan reads it). The sides are recorded by the chunks' scans
-    /// (`record_forms`), as they were recorded when each chunk chose them.
-    pub(super) fn choose(two_stage: Option<&'a TwoStageLookup>) -> (Option<Self>, bool) {
-        let Some(csr) = two_stage
+/// The word finder's forms of a batch, chosen once from its table, its lookup word length, its
+/// scan step and the switches (`ScanForms::choose`, the one place that chooses them, for
+/// `prelim_subject::ScanBatch::forms`), as NCBI chooses the lookup table's scanner once for the
+/// search. Every scan of the batch reads them and none chooses them again: the reference scans
+/// (`scan_two_stage_lookup`, `na_scan::scan_na_lookup`) through `ScanBatch`, the strips of PAIRPAR
+/// and of LOSAT_X_PAIRPARNA through their inputs (`x_pair_seed::Inputs::forms`,
+/// `x_pair_seed::NaInputs::forms`). They are the head of a contiguous two-stage table laid out as
+/// CSR in the form its scan takes (`head`: `None` for a table with chains, a discontiguous table
+/// and the other tables), whether a word's run is the element the ring hands over with it
+/// (`rank_once`, LOSAT_X_BNRANKONCE: `false` without a CSR head, where no scan reads it), and the
+/// megablast scanner of an unmasked and of a masked chunk (`scan_kind`; for a masked chunk NCBI's
+/// word finder falls back to the scanner of any offset).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1022-1026 (the scanner and
+/// the extension chosen once, `BlastChooseNucleotideScanSubject` at
+/// c++/src/algo/blast/core/blast_nascan.c:2982-2992, for a megablast table
+/// `s_MBChooseScanSubject` at :2602-2680) and c++/src/algo/blast/core/na_ungapped.c:1651-1667 (a
+/// masked chunk's scanner)
+/// The CSR head's forms and the ranked runs have no NCBI counterpart (layout only).
+#[derive(Clone, Copy)]
+pub(super) struct ScanForms<'a> {
+    pub(super) head: Option<MbCsrHead<'a>>,
+    pub(super) rank_once: bool,
+    /// The scanners of an unmasked chunk and of a masked one, in that order (`scan_kind`).
+    kinds: [Option<MbScanSubjectKind>; 2],
+}
+
+impl<'a> ScanForms<'a> {
+    /// The forms of a batch with the two-stage table `two_stage` (`None` for the other tables),
+    /// the lookup word length `lut_word_length` (the table's, else the word length) and the scan
+    /// step `scan_step`.
+    pub(super) fn choose(
+        two_stage: Option<&'a TwoStageLookup>,
+        lut_word_length: usize,
+        scan_step: usize,
+    ) -> Self {
+        let head = two_stage
             .filter(|table| table.disc().is_none())
             .and_then(|table| table.x_mb_csr())
-        else {
-            return (None, false);
-        };
-        let head = match csr.x_packed() {
-            Some(packed) if x_bn_pv_once_of(&packed) => MbCsrHead::PackedOnce(packed),
-            Some(packed) => MbCsrHead::Packed(packed),
-            None => MbCsrHead::Csr(csr),
-        };
-        (Some(head), x_bn_rank_once_on())
+            .map(|csr| match csr.x_packed() {
+                Some(packed) if x_bn_pv_once_of(&packed) => MbCsrHead::PackedOnce(packed),
+                Some(packed) => MbCsrHead::Packed(packed),
+                None => MbCsrHead::Csr(csr),
+            });
+        ScanForms {
+            head,
+            rank_once: head.is_some() && x_bn_rank_once_on(),
+            kinds: [false, true]
+                .map(|masked| select_mb_scan_kind(lut_word_length, scan_step, masked)),
+        }
+    }
+
+    /// The megablast scanner of a chunk (`subject_masked`: the chunk's subject is masked).
+    #[inline(always)]
+    pub(super) fn scan_kind(&self, subject_masked: bool) -> Option<MbScanSubjectKind> {
+        self.kinds[subject_masked as usize]
+    }
+
+    /// No NCBI counterpart: the sides (`LOSAT_X_REACH`) of the forms that a scan of a contiguous
+    /// two-stage table takes, these forms: LOSAT_X_BNRANKONCE (a CSR head or chains), while it is
+    /// on, and, for a packed head, LOSAT_X_BNPVONCE. Called by those scans (the reference scan
+    /// through `record_forms`, each strip of PAIRPAR) only while the run records the sides.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn record_head(&self) {
+        if x_bn_rank_once_on() {
+            crate::utils::xreach::x_reach!("LOSAT_X_BNRANKONCE", self.head.is_some());
+        }
+        match self.head {
+            Some(MbCsrHead::PackedOnce(_)) => {
+                crate::utils::xreach::x_reach!("LOSAT_X_BNPVONCE", true)
+            }
+            Some(MbCsrHead::Packed(_)) => crate::utils::xreach::x_reach!("LOSAT_X_BNPVONCE", false),
+            Some(MbCsrHead::Csr(_)) | None => {}
+        }
     }
 }
 
-/// No NCBI counterpart: the sides of the switches whose forms a chunk's scan with the two-stage
-/// table `two_stage` takes (`LOSAT_X_REACH`), called by `scan_two_stage_lookup` only while the run
-/// records them (`ScanBatch::x_recording`): LOSAT_X_MBHITPF; for a contiguous table
-/// LOSAT_X_BNRANKONCE (a CSR head or chains) and, for a packed head, LOSAT_X_BNPVONCE; the sides
-/// each chunk recorded where it chose its forms (`MbCsrHead::choose` chooses them once now).
+/// No NCBI counterpart: the sides (`LOSAT_X_REACH`) of the forms a chunk's reference scan takes,
+/// the batch's (`scan`): LOSAT_X_MBHITPF (`ScanBatch::x_hit_prefetch`) and, for a contiguous table
+/// (the batch's), those of `ScanForms::record_head`. Called by `scan_two_stage_lookup` only while
+/// the run records the sides (`ScanBatch::x_recording`).
 #[cold]
 #[inline(never)]
-fn record_forms(scan: &ScanBatch<'_>, two_stage: &TwoStageLookup) {
-    x_mb_hit_prefetch();
-    if two_stage.disc().is_some() {
+fn record_forms(scan: &ScanBatch<'_>) {
+    crate::utils::xreach::x_reach!("LOSAT_X_MBHITPF", scan.x_hit_prefetch);
+    if scan
+        .two_stage_lookup_ref
+        .is_some_and(|table| table.disc().is_some())
+    {
         return;
     }
-    x_bn_rank_once(scan.x_mb_head.is_some());
-    if let Some(packed) = two_stage.x_mb_csr().and_then(|csr| csr.x_packed()) {
-        x_bn_pv_once(&packed);
-    }
+    scan.forms.record_head();
 }
 
 /// No NCBI counterpart (call layout only): how many words of a CSR scan (`x_scan_csr!`) its

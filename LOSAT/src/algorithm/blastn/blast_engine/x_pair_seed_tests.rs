@@ -4,7 +4,7 @@
 ))]
 use super::super::{
     build_blastna_matrix, build_nucl_score_table, build_query_blastna_buffer,
-    diag_hash_insert_window, scan_subject_kmers_with_ranges,
+    diag_hash_insert_window, scan_subject_kmers_with_ranges, select_mb_scan_kind,
 };
 #[cfg(all(
     feature = "parallel",
@@ -346,8 +346,11 @@ fn seed_stage_on_strips_equals_one_scan() {
             vec![(0i32, s_len as i32)]
         };
         let diag_offset = 37 + rng.below(1000) as isize;
+        // the batch's forms (`ScanBatch::forms`), chosen as `ScanBatch::new` chooses them
+        let forms = ScanForms::choose(Some(&lookup), lut_word_length, scan_step);
         let x = Inputs {
             two_stage: &lookup,
+            forms: &forms,
             search_seq_packed: &packed,
             s_len,
             subject_seq_ranges: &seq_ranges,
@@ -371,6 +374,7 @@ fn seed_stage_on_strips_equals_one_scan() {
             small_na_word: false,
             diagnostics: false,
             one_subject_owner: true,
+            recording: crate::utils::xreach::recording(),
             timing: None,
         };
         let new_hash = || {

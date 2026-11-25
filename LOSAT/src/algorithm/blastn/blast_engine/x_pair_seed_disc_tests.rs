@@ -3,6 +3,7 @@
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 use super::super::super::scan_subject_disc_words_with_ranges;
+use super::super::super::two_stage_scan::ScanForms;
 use super::super::super::{
     build_blastna_matrix, build_nucl_score_table, build_query_blastna_buffer,
     diag_hash_insert_window, QueryContext, QueryContextIndex,
@@ -271,6 +272,13 @@ fn inputs<'a>(
 ) -> Inputs<'a> {
     Inputs {
         two_stage: lookup,
+        // the batch's forms (`ScanBatch::forms`, which the discontiguous stages do not read),
+        // chosen as `ScanBatch::new` chooses them, for as long as the test runs
+        forms: Box::leak(Box::new(ScanForms::choose(
+            Some(lookup),
+            lookup.lut_word_length(),
+            1,
+        ))),
         search_seq_packed: &c.packed,
         s_len: c.s_len,
         subject_seq_ranges: &c.seq_ranges,
@@ -294,6 +302,7 @@ fn inputs<'a>(
         small_na_word: false,
         diagnostics: false,
         one_subject_owner: true,
+        recording: crate::utils::xreach::recording(),
         timing: None,
     }
 }

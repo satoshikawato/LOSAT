@@ -1675,28 +1675,38 @@ pub(super) fn run(
     let Some(disc) = x.two_stage.disc() else {
         return false;
     };
+    // The sides are recorded while the run records them (`Inputs::recording`, the batch's), so a
+    // chunk of a run that records nothing makes none of the calls.
     if !in_scope(x) {
-        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", false);
-        reach_lean(false);
-        reach_latest(false);
+        if x.recording {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", false);
+            reach_lean(false);
+            reach_latest(false);
+        }
         return false;
     }
     let threads = match pool_threads() {
         Some(threads) => threads,
         // LOSAT_X_BNDCONE: the stage runs without a pool
         None if one_thread_on() => {
-            crate::utils::xreach::x_reach!("LOSAT_X_BNDCONE", true);
+            if x.recording {
+                crate::utils::xreach::x_reach!("LOSAT_X_BNDCONE", true);
+            }
             1
         }
         None => {
-            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", false);
-            reach_lean(false);
-            reach_latest(false);
+            if x.recording {
+                crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", false);
+                reach_lean(false);
+                reach_latest(false);
+            }
             return false;
         }
     };
-    crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", true);
-    reach_lean(true);
+    if x.recording {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", true);
+        reach_lean(true);
+    }
     // EXPERIMENT (LOSAT_X_DCLATEST): the folds keep maps of the latest inserts (every chunk of
     // the stage has the bounds, `latest_bound`), unless the chunk's scan ranges step back
     // (`latest_ranges_ascend`: those go to the chains).
@@ -1709,8 +1719,10 @@ pub(super) fn run(
     } else {
         None
     };
-    reach_latest(latest.is_some());
-    if super::super::x_diag_lv::lv2_on() {
+    if x.recording {
+        reach_latest(latest.is_some());
+    }
+    if x.recording && super::super::x_diag_lv::lv2_on() {
         // (the maps keep no memo)
         crate::utils::xreach::x_reach!(
             "LOSAT_X_DIAGLV2",
@@ -2159,26 +2171,35 @@ fn run_array(
     let Some(disc) = x.two_stage.disc() else {
         return false;
     };
+    // (the sides are recorded while the run records them, `Inputs::recording`)
     if !in_scope_array(x) {
-        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", false);
-        reach_lean(false);
+        if x.recording {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", false);
+            reach_lean(false);
+        }
         return false;
     }
     let threads = match pool_threads() {
         Some(threads) => threads,
         // LOSAT_X_BNDCONE: the stage runs without a pool
         None if one_thread_on() => {
-            crate::utils::xreach::x_reach!("LOSAT_X_BNDCONE", true);
+            if x.recording {
+                crate::utils::xreach::x_reach!("LOSAT_X_BNDCONE", true);
+            }
             1
         }
         None => {
-            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", false);
-            reach_lean(false);
+            if x.recording {
+                crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", false);
+                reach_lean(false);
+            }
             return false;
         }
     };
-    crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", true);
-    reach_lean(true);
+    if x.recording {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", true);
+        reach_lean(true);
+    }
     let timing = x.timing;
     let timed = timing.is_some() || timing_env();
     let t_start = timed.then(std::time::Instant::now);

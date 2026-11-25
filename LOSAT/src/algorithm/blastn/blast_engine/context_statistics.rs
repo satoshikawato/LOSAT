@@ -17,16 +17,15 @@
 //! batch's outputs before it is returned, as it did in `search_query_batch`.
 
 use super::{
-    context_lengths, database, database_search_error, prolog_with_report, reborrow_outputs,
-    write_format_prolog, write_pairwise_prologs, BatchOutputs, BatchStage, BlastnArgs,
-    ContextKarlin, KarlinParams, NuclScoringSpec, QueryBatching, QueryContext, SequenceData,
-    ShownSubjects, SubjectSource, FIRST_BATCH_OUTPUTS,
+    after_batch_reports, context_lengths, database, database_search_error, prolog_with_report,
+    reborrow_outputs, write_format_prolog, write_pairwise_prologs, BatchOutputs, BatchStage,
+    BlastnArgs, ContextKarlin, KarlinParams, NuclScoringSpec, QueryBatching, QueryContext,
+    SequenceData, ShownSubjects, SubjectSource, FIRST_BATCH_OUTPUTS,
 };
 use crate::algorithm::blastn::scoring::{
     check_greedy_gap_costs, check_greedy_matrix_only, context_blocks, context_blocks_ungapped,
     karlin_error,
 };
-use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::report::pairwise::BlastnIntro;
 use crate::wording::ENGINE_ERROR;
 use anyhow::Result;
@@ -174,9 +173,7 @@ fn karlin_blocks<const UNGAPPED: bool>(
             // with a valid query would have raised the error), and NCBI has written their
             // reports (`run_in_pool`).
             if !first_batch {
-                return Err(
-                    ErrorAfterBatchReports::new(karlin_error(&message, empty_queries)).into(),
-                );
+                return Err(after_batch_reports(karlin_error(&message, empty_queries)));
             }
             // The prolog of a file sink (the others were written before the search).
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
@@ -293,7 +290,7 @@ pub(super) fn setup_failure(
     shown: &ShownSubjects,
 ) -> anyhow::Error {
     if !first_batch {
-        return ErrorAfterBatchReports::new(error).into();
+        return after_batch_reports(error);
     }
     // In `refused_batch_setup_error` (`setup_only`), a refusal that is not NCBI's `NativeError`
     // gives way to the scope refusal, whose `fail_batch!` writes the prologs itself.

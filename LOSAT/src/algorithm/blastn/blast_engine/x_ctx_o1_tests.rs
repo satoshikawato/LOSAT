@@ -84,7 +84,11 @@ fn check(lengths: &[usize], force_blocks: bool) -> &'static str {
         assert_eq!(matches!(view, XView::BlocksRanks(_)), empty_contexts);
     }
     for n in (0..total + 3).chain([total + 1000, 1 << 31, usize::MAX >> 1]) {
-        assert_eq!(view_get(n), form.get(n), "view at offset {n} of {lengths:?}");
+        assert_eq!(
+            view_get(n),
+            form.get(n),
+            "view at offset {n} of {lengths:?}"
+        );
     }
     assert_eq!(XNone.get(0), None);
     name

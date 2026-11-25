@@ -122,9 +122,9 @@ fn latest_on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCLATEST"))
 }
 
-/// No NCBI counterpart: reads LOSAT_X_DCEMITHOIST once (a strict-set switch since 2026-11-25: on
+/// No NCBI counterpart: reads LOSAT_X_DCEMITHOIST once (a strict-set switch since 2026-11-26: on
 /// unless it is `0`). With it the strips scan of a table laid out as CSR (`scan_strip_disc_csr`,
-/// LOSAT_X_DCCSR) hands each word's run to `DcPairs::run` (`scan_strip_disc_csr_hoist`): the values
+/// LOSAT_X_DCCSR) hands each word's run to `DcPairs::run` (its `HOIST` instance): the values
 /// `seed_of_pair` reads for every pair read once per strip, the context form chosen once per run,
 /// the subject's bound tested once per word, and a strip's list given room for the run at once.
 /// The same pairs give the same seeds in the same order (the argument at `DcPairs`), so it does not
@@ -134,15 +134,9 @@ fn emit_hoist_on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCEMITHOIST"))
 }
 
-/// No NCBI counterpart: LOSAT_X_REACH for LOSAT_X_DCEMITHOIST, which acts in the strips scan of a
-/// table laid out as CSR only: `own_path` where a strip's scan reads the CSR, false where it walks
-/// the chains (two templates, or a table below LOSAT_X_DCCSR's size rule). Nothing while the switch
-/// is off.
-fn reach_emit_hoist(own_path: bool) {
-    if emit_hoist_on() {
-        crate::utils::xreach::x_reach!("LOSAT_X_DCEMITHOIST", own_path);
-    }
-}
+// No NCBI counterpart: counter of LOSAT_TIMING (the strips scanned through the hoisted CSR emit of
+// LOSAT_X_DCEMITHOIST).
+static EMIT_HOIST_STRIPS: AtomicU64 = AtomicU64::new(0);
 
 /// No NCBI counterpart: LOSAT_X_REACH for LOSAT_X_DCLATEST, which acts in the strips stage of the
 /// diagonal hash only: `own_path` where it folds into the maps, false where the chunk goes to the
@@ -305,13 +299,11 @@ pub(super) fn scan_strip_disc_from<O: SeedOut, const PIECE: bool>(
     // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains to walk.
     if let Some(csr) = disc.x_csr() {
         // EXPERIMENT (LOSAT_X_DCEMITHOIST): its runs through `DcPairs::run`.
-        reach_emit_hoist(true);
         if emit_hoist_on() {
-            return scan_strip_disc_csr_hoist::<O, PIECE>(x, disc, csr, job, from, out);
+            return scan_strip_disc_csr::<O, PIECE, true>(x, disc, csr, job, from, out);
         }
-        return scan_strip_disc_csr::<O, PIECE>(x, disc, csr, job, from, out);
+        return scan_strip_disc_csr::<O, PIECE, false>(x, disc, csr, job, from, out);
     }
-    reach_emit_hoist(false);
     let two_stage = x.two_stage;
     // (the presence vector by value: `lookup::XPvView`)
     let pv_view = two_stage.x_pv_view();
@@ -414,9 +406,15 @@ fn x_disc_word_pairs<O: SeedOut, const PIECE: bool>(
 /// its run), then the same presence test and the cell's run, which lists the chain's offsets in
 /// the chain's order; so the same pairs reach `seed_of_pair` in the same order.
 ///
+/// EXPERIMENT (LOSAT_X_DCEMITHOIST): with `HOIST` each word's run goes to `DcPairs::run` instead
+/// of `seed_of_pair` pair by pair: for each word the same seeds in the same order (`DcPairs`); the
+/// same cut of a piece (`Cut::fit`, and `Cut::run_cold` with `seed_of_pair` itself). A word in the
+/// ring has passed the presence test (the scan's closure lets no other word in, and the ring hands
+/// out only the words it took), so `emit` does not test it again.
+///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
 #[inline(never)]
-fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
+fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool, const HOIST: bool>(
     x: &Inputs<'_>,
     disc: &DiscTemplates,
     csr: &Csr,
@@ -425,17 +423,28 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
     out: &mut O,
 ) -> Option<Resume> {
     debug_assert!(!disc.two_templates);
+    if HOIST {
+        EMIT_HOIST_STRIPS.fetch_add(1, Ordering::Relaxed);
+    }
     let two_stage = x.two_stage;
     // (the presence vector by value: `lookup::XPvView`)
     let pv_view = two_stage.x_pv_view();
     let s_range = job.s_range;
+    // EXPERIMENT (LOSAT_X_DCEMITHOIST): the strip's values of `DcPairs` and the context index's
+    // form, made once
+    let hoist = if HOIST {
+        Some((DcPairs::new(x, s_range), x.query_context_index.x_view()))
+    } else {
+        None
+    };
     let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
     let cut = Cut::new(&from);
     let start = from.s;
     let mut emit = |(s_off, index): (i32, u32)| {
-        if !two_stage.has_hits(u64::from(index)) {
+        if !HOIST && !two_stage.has_hits(u64::from(index)) {
             return;
         }
+        debug_assert!(two_stage.has_hits(u64::from(index)));
         let kmer_start = s_off as usize;
         let mut run = csr.run(index as usize);
         if PIECE {
@@ -448,6 +457,10 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
                     return;
                 }
             }
+        }
+        if let (true, Some((pairs, form))) = (HOIST, hoist) {
+            pairs.run(form, run, kmer_start, out);
+            return;
         }
         for &q_off_1 in run {
             seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
@@ -468,75 +481,6 @@ fn scan_strip_disc_csr<O: SeedOut, const PIECE: bool>(
             // a place in it. The words with hits leave in the same order, so the same pairs reach
             // `seed_of_pair` in the same order; a cut stops only in `emit`, which runs only in a
             // push, and is seen after that push as before.
-            if !pv_view.has_hits(u64::from(index)) {
-                return true;
-            }
-            let left = ring.push((s_off, index), |w| w.1 as usize, &mut emit);
-            !PIECE || !left || cut.go()
-        },
-    );
-    // (a stopped scan drops the words still in the ring: the next piece scans them again)
-    if !PIECE || cut.go() {
-        ring.flush(&mut emit);
-    }
-    cut.stop.get()
-}
-
-/// EXPERIMENT (LOSAT_X_DCEMITHOIST): `scan_strip_disc_csr` with each word's run handed to
-/// `DcPairs::run` instead of `seed_of_pair` pair by pair: the same words in the same order through
-/// the same ring, the same cut of a piece (`Cut::fit`, and `Cut::run_cold` with `seed_of_pair`
-/// itself), and for each word the same seeds in the same order (`DcPairs`). A word in the ring has
-/// passed the presence test (the scan's closure lets no other word in, and the ring hands out only
-/// the words it took), so its emit does not test the presence bit again.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
-#[inline(never)]
-fn scan_strip_disc_csr_hoist<O: SeedOut, const PIECE: bool>(
-    x: &Inputs<'_>,
-    disc: &DiscTemplates,
-    csr: &Csr,
-    job: &StripJob,
-    from: Resume,
-    out: &mut O,
-) -> Option<Resume> {
-    debug_assert!(!disc.two_templates);
-    let two_stage = x.two_stage;
-    // (the presence vector by value: `lookup::XPvView`)
-    let pv_view = two_stage.x_pv_view();
-    let s_range = job.s_range;
-    let pairs = DcPairs::new(x, s_range);
-    let form = x.query_context_index.x_view();
-    let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
-    let cut = Cut::new(&from);
-    let start = from.s;
-    let mut emit = |(s_off, index): (i32, u32)| {
-        debug_assert!(two_stage.has_hits(u64::from(index)));
-        let kmer_start = s_off as usize;
-        let mut run = csr.run(index as usize);
-        if PIECE {
-            match cut.fit(run, out) {
-                Ok(fit) => run = fit,
-                Err((skip, rest)) => {
-                    cut.run_cold(kmer_start, skip, rest, out, |q_off_1, out| {
-                        seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out)
-                    });
-                    return;
-                }
-            }
-        }
-        pairs.run(form, run, kmer_start, out);
-    };
-    let mut ring: Ring<'_, (i32, u32)> = Ring::new(csr);
-    disc_word_scan_subject_until(
-        kind,
-        x.search_seq_packed,
-        disc.template_type,
-        disc.second_template_type,
-        disc.template_length as i32,
-        [start as i32, job.end as i32],
-        // (a cut stops only in `emit`, so only a word that let one out can have stopped it)
-        &mut |s_off, index, _index2| {
-            // (as in `scan_strip_disc_csr`: a word without hits does not enter the ring)
             if !pv_view.has_hits(u64::from(index)) {
                 return true;
             }
@@ -599,13 +543,7 @@ impl<'a> DcPairs<'a> {
     /// room for all of them), with the context form `form` (`QueryContextIndex::x_view`): one
     /// loop per form, its constants in registers.
     #[inline(always)]
-    fn run<O: SeedOut>(
-        self,
-        form: Option<XView<'_>>,
-        run: &[u32],
-        kmer_start: usize,
-        out: &mut O,
-    ) {
+    fn run<O: SeedOut>(self, form: Option<XView<'_>>, run: &[u32], kmer_start: usize, out: &mut O) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:730-733
         // (the subject's half of the bounds test, the same for every pair of the word)
         if kmer_start + self.word > self.s_len {
@@ -2430,6 +2368,12 @@ pub(super) fn summary() {
         if latest_on() {
             eprintln!("[TIMING] x_dc_latest:{}", latest::timing_fields());
         }
+    }
+    if (on() || arr_on()) && std::env::var_os("LOSAT_TIMING").is_some() {
+        eprintln!(
+            "[TIMING] x_dc_emit_hoist: strips={}",
+            load(&EMIT_HOIST_STRIPS)
+        );
     }
     if arr_on() && std::env::var_os("LOSAT_TIMING").is_some() {
         let s = |c: &AtomicU64| c.load(Ordering::Relaxed) as f64 / 1e9;

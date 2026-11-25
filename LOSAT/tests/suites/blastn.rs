@@ -22,6 +22,8 @@ mod blastn_db_search;
 mod blastn_db_soft_long;
 #[path = "../blastn_db_stream.rs"]
 mod blastn_db_stream;
+#[path = "../blastn_dc_emit_hoist.rs"]
+mod blastn_dc_emit_hoist;
 #[path = "../blastn_dc_latest.rs"]
 mod blastn_dc_latest;
 #[path = "../blastn_dc_qs_ahead.rs"]

@@ -14,25 +14,30 @@ const PROTEIN: RequestPolicy = RequestPolicy {
 #[derive(Clone, Default)]
 struct Sink(Arc<Mutex<Vec<u8>>>);
 
-impl std::io::Write for Sink {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 impl crate::report::archive::strategy::StrategySink for Sink {
-    fn truncate(&mut self, len: u64) -> std::io::Result<()> {
-        self.0.lock().unwrap().truncate(len as usize);
+    fn write_request(
+        &mut self,
+        bytes: &[u8],
+        _pieces: &[crate::report::serial::encoder::BufferPiece],
+        posts: &[(u64, Vec<u8>)],
+        diagnostics: &mut dyn std::io::Write,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+    ) -> std::io::Result<()> {
+        let _ = crate::report::ostream::emit_strategy_posts(posts, None, diagnostics, archive)?;
+        self.0.lock().unwrap().extend_from_slice(bytes);
         Ok(())
     }
 
-    fn can_cut(&self) -> bool {
-        true
+    fn write_partial(
+        &mut self,
+        bytes: &[u8],
+        posts: &[(u64, Vec<u8>)],
+        diagnostics: &mut dyn std::io::Write,
+        archive: Option<&crate::report::archive::ArchiveHandle>,
+    ) -> std::io::Result<()> {
+        let _ = crate::report::ostream::emit_strategy_posts(posts, None, diagnostics, archive)?;
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(())
     }
 }
 
@@ -110,13 +115,13 @@ fn a_title_with_a_replaced_byte_is_written_with_a_post() {
     let requests = RunRequests::new(PROTEIN, Some(&subjects[..]));
     let (strategy, sink) = export();
     requests.write(&strategy, 0, &good, None).unwrap();
-    let text = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
-    assert!(text.contains("title \"s#\""), "{text}");
     let mut diagnostics = Vec::new();
     strategy
         .take_all_posts()
         .write(&mut diagnostics, None)
         .unwrap();
+    let text = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
+    assert!(text.contains("title \"s#\""), "{text}");
     let posted = String::from_utf8(diagnostics).unwrap();
     assert!(
         posted.starts_with(

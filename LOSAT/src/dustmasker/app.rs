@@ -36,7 +36,7 @@ pub(super) fn run(
         linker: integer("linker"),
         parse_seqids: args.flag("parse_seqids"),
         hard_masking: args.flag("hard_masking"),
-        blastdb_registry: settings.blastdb.as_deref(),
+        database: settings.database(),
     };
     match work::run(&options, stdin, &mut output, diag) {
         Ok(()) => 0,

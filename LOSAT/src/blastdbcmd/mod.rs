@@ -148,7 +148,7 @@ fn run_body(
             }
             Ok(())
         };
-        let (db, _) = match open_database(&name, dbtype, &path, &restrict) {
+        let (db, _) = match open_database(&name, dbtype, &path, settings, &restrict) {
             Ok(opened) => opened,
             Err(error) => return database_error(diag, error),
         };
@@ -163,7 +163,7 @@ fn run_body(
             dbtype_protein,
         );
     }
-    let (db, volumes) = match open_database(&name, dbtype, &path, &|_| Ok(())) {
+    let (db, volumes) = match open_database(&name, dbtype, &path, settings, &|_| Ok(())) {
         Ok(opened) => opened,
         Err(error) => return database_error(diag, error),
     };
@@ -238,11 +238,13 @@ fn output_refusal(reason: &str) -> String {
 /// Opens the database `name` (the `-db` value as given, one name or several: blastdbcmd does not
 /// trim it) of the type `dbtype` (`prot`, `nucl`, or `guess`: protein first, then nucleotide),
 /// with the list of its volumes for `-info`, and `prepare`s it (the taxid list of `-target_only`, which NCBI's
-/// constructor applies). `guess` is NCBI's guess of the type (`SeqDb::open_guessing`).
+/// constructor applies), its reads of the definition lines under the checks of `settings`
+/// (`SeqDb::refuse_unchecked_reads`). `guess` is NCBI's guess of the type (`SeqDb::open_guessing`).
 fn open_database(
     name: &[u8],
     dbtype: &str,
     path: &SearchPath,
+    settings: &ApplicationSettings,
     prepare: &dyn Fn(&mut SeqDb) -> Result<(), SeqDbError>,
 ) -> Result<(SeqDb, Vec<Vec<u8>>), SeqDbError> {
     let types: &[SeqType] = match dbtype {
@@ -255,6 +257,7 @@ fn open_database(
         // `-target_only` moves (`SeqDb::check_alias_values`).
         let mut db = SeqDb::open_search_in(name, seqtype, path)?;
         let volumes = SeqDb::info_volumes(name, seqtype, path)?;
+        db.refuse_unchecked_reads(&settings.read_verification);
         prepare(&mut db)?;
         db.check_alias_values()?;
         Ok((db, volumes))

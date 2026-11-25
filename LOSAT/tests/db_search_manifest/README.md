@@ -136,8 +136,9 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   the `[LOCAL_ID] TOOL_URL` link (`db_name`), and an absolute path would put the checkout's path into the frozen bytes.
   Not taken: absolute paths (bytes of one machine), paths relative to DIR in the cells (every reader counts on paths
   relative to LOSAT/), a temporary directory with copies of the files (absolute paths again), a new column (a new
-  header for every file and every reader). A `cwd=` row with a PSSM, alignment, standard-input or `none:` query, an `rps-gz:` db cell, a
-  `files` column or a path under `tests/` in extra_args (an argument that would not be rebased) is refused. `freeze`
+  header for every file and every reader). A `cwd=` row with a PSSM, alignment, standard-input or `none:` query, a
+  `files` column or a path under `tests/` in extra_args (an argument that would not be rebased) is refused; an `rps-gz:`
+  db cell is taken (its names are databases of the inflated directory, not paths). `freeze`
   and `check` refuse to start when `LOSAT/.ncbirc` exists (it would change every row).
 
 ## Who runs which rows
@@ -153,7 +154,8 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   them; the library's host, LOSAT Web, runs `-html` with an empty environment and a run directory of the files that
   the argv names (`docs/web/abi_v2.md` §3), so no Web run has them.
 - `check_wasm_threading.py`: a few rows by id, every psiblast row and blastx's rows of outfmt 5 and 13 to 16; no row of
-  outfmt 0 to 4 or 18 (the `-html` rows) and no psiblast `-html` row (psiblast refuses `-html`).
+  outfmt 0 to 4 or 18 (the `-html` rows) of the blast programs (rpsblast and rpstblastn have none there) and no psiblast
+  `-html` row (psiblast refuses `-html`).
 - The Rust tests that read this directory read named program files (`blastp.tsv`, `psiblast.tsv`, `blastx.tsv`,
   `tblastn.tsv`, `tblastx.tsv`) and select their own rows, never a family file such as `<program>.html.tsv`;
   `check_manifest_sizes.py` checks the size of every file.

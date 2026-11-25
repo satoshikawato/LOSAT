@@ -218,3 +218,31 @@ fn translated_soft_mask_exits_match_chunks_and_skip_short_mask_reads() {
     assert_eq!(lead, expected_lead);
     assert_eq!(exits, expected_exits);
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276,805-830
+#[test]
+fn overlapping_hard_masks_record_negative_ncbi_length_and_full_range() {
+    let mut ranges = Vec::new();
+    complement_masks(&[(120, 600), (180, 714)], 720, &mut ranges);
+    let mut split = HardSplitState::default();
+    let plus1 = translated_db_mask_chunks(&ranges, true, 1, 240, 240, &mut split).unwrap();
+    let summary: Vec<_> = plus1
+        .iter()
+        .map(|(c, _)| (c.offset, c.length, c.ncbi_length, c.full_range))
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            (0, 40, 40, false),
+            (200, 0, -140, false),
+            (238, 2, 2, false)
+        ]
+    );
+
+    // Overlapping tail masks trigger `full_range` on frame +1.
+    complement_masks(&[(120, 720), (180, 720)], 720, &mut ranges);
+    let tail = translated_db_mask_chunks(&ranges, true, 1, 240, 240, &mut split).unwrap();
+    assert_eq!(tail.len(), 1);
+    assert!(tail[0].0.full_range);
+    assert_eq!(tail[0].0.length, 40);
+}

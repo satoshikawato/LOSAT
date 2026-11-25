@@ -417,6 +417,7 @@ fn the_request_holds_the_pssm_as_read_and_the_engines_errors_come_in_order() {
         archive: None,
         write_verification: None,
         out_pssm: false,
+        read_verification: None,
     };
     // A PSSM of frequency ratios only: the request holds it as read (no scores), the search
     // and the file the engine's scores (`with_computed_scores`).
@@ -1162,6 +1163,7 @@ fn a_karlin_altschul_value_that_is_not_finite_is_read_and_searched() {
         archive: None,
         write_verification: None,
         out_pssm: false,
+        read_verification: None,
     };
     let search = |pssm: PssmWithParameters, reader: PssmReader<'static>| {
         psi_search_and_object(pssm, reader)

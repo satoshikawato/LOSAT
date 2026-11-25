@@ -9,12 +9,16 @@ query = "-"
 subject = None
 subject_loc = None
 db = None
+db_filter.gilist = None
+db_filter.negative_gilist = None
 db_filter.seqidlist = None
 db_filter.negative_seqidlist = None
 db_filter.taxids = None
 db_filter.taxidlist = None
 db_filter.negative_taxids = None
 db_filter.negative_taxidlist = None
+db_filter.ipglist = None
+db_filter.negative_ipglist = None
 db_filter.no_taxid_expansion = false
 db_mask.db_soft_mask = None
 db_mask.db_hard_mask = None
@@ -81,9 +85,15 @@ scope_refusal = None
 [blastx -dbsize 2]
 - dbsize = None
 + dbsize = 2
+[blastx -gilist x]
+- db_filter.gilist = None
++ db_filter.gilist = "x"
 [blastx -seqidlist x]
 - db_filter.seqidlist = None
 + db_filter.seqidlist = "x"
+[blastx -negative_gilist x]
+- db_filter.negative_gilist = None
++ db_filter.negative_gilist = "x"
 [blastx -negative_seqidlist x]
 - db_filter.negative_seqidlist = None
 + db_filter.negative_seqidlist = "x"
@@ -102,6 +112,12 @@ scope_refusal = None
 [blastx -no_taxid_expansion]
 - db_filter.no_taxid_expansion = false
 + db_filter.no_taxid_expansion = true
+[blastx -ipglist x]
+- db_filter.ipglist = None
++ db_filter.ipglist = "x"
+[blastx -negative_ipglist x]
+- db_filter.negative_ipglist = None
++ db_filter.negative_ipglist = "x"
 [blastx -db_soft_mask x]
 - db_mask.db_soft_mask = None
 + db_mask.db_soft_mask = "x"
@@ -246,12 +262,16 @@ scope_refusal = None
 query = "-"
 subject = None
 db = None
+db_filter.gilist = None
+db_filter.negative_gilist = None
 db_filter.seqidlist = None
 db_filter.negative_seqidlist = None
 db_filter.taxids = None
 db_filter.taxidlist = None
 db_filter.negative_taxids = None
 db_filter.negative_taxidlist = None
+db_filter.ipglist = None
+db_filter.negative_ipglist = None
 db_filter.no_taxid_expansion = false
 db_mask.db_soft_mask = None
 db_mask.db_hard_mask = None
@@ -346,9 +366,15 @@ scope_refusal = None
 [blastn -dbsize 2]
 - dbsize = None
 + dbsize = 2
+[blastn -gilist x]
+- db_filter.gilist = None
++ db_filter.gilist = "x"
 [blastn -seqidlist x]
 - db_filter.seqidlist = None
 + db_filter.seqidlist = "x"
+[blastn -negative_gilist x]
+- db_filter.negative_gilist = None
++ db_filter.negative_gilist = "x"
 [blastn -negative_seqidlist x]
 - db_filter.negative_seqidlist = None
 + db_filter.negative_seqidlist = "x"
@@ -533,12 +559,16 @@ scope_refusal = None
 query = "-"
 subject = None
 db = None
+db_filter.gilist = None
+db_filter.negative_gilist = None
 db_filter.seqidlist = None
 db_filter.negative_seqidlist = None
 db_filter.taxids = None
 db_filter.taxidlist = None
 db_filter.negative_taxids = None
 db_filter.negative_taxidlist = None
+db_filter.ipglist = None
+db_filter.negative_ipglist = None
 db_filter.no_taxid_expansion = false
 db_mask.db_soft_mask = None
 db_mask.db_hard_mask = None
@@ -610,9 +640,15 @@ rps = None
 [blastp -dbsize 2]
 - dbsize = None
 + dbsize = 2
+[blastp -gilist x]
+- db_filter.gilist = None
++ db_filter.gilist = "x"
 [blastp -seqidlist x]
 - db_filter.seqidlist = None
 + db_filter.seqidlist = "x"
+[blastp -negative_gilist x]
+- db_filter.negative_gilist = None
++ db_filter.negative_gilist = "x"
 [blastp -negative_seqidlist x]
 - db_filter.negative_seqidlist = None
 + db_filter.negative_seqidlist = "x"
@@ -631,6 +667,12 @@ rps = None
 [blastp -no_taxid_expansion]
 - db_filter.no_taxid_expansion = false
 + db_filter.no_taxid_expansion = true
+[blastp -ipglist x]
+- db_filter.ipglist = None
++ db_filter.ipglist = "x"
+[blastp -negative_ipglist x]
+- db_filter.negative_ipglist = None
++ db_filter.negative_ipglist = "x"
 [blastp -db_soft_mask x]
 - db_mask.db_soft_mask = None
 + db_mask.db_soft_mask = "x"
@@ -763,12 +805,16 @@ rps = None
 query = "-"
 subject = None
 db = None
+db_filter.gilist = None
+db_filter.negative_gilist = None
 db_filter.seqidlist = None
 db_filter.negative_seqidlist = None
 db_filter.taxids = None
 db_filter.taxidlist = None
 db_filter.negative_taxids = None
 db_filter.negative_taxidlist = None
+db_filter.ipglist = None
+db_filter.negative_ipglist = None
 db_filter.no_taxid_expansion = false
 db_mask.db_soft_mask = None
 db_mask.db_hard_mask = None
@@ -831,9 +877,15 @@ matrix_file = None
 [tblastx -dbsize 2]
 - dbsize = None
 + dbsize = 2
+[tblastx -gilist x]
+- db_filter.gilist = None
++ db_filter.gilist = "x"
 [tblastx -seqidlist x]
 - db_filter.seqidlist = None
 + db_filter.seqidlist = "x"
+[tblastx -negative_gilist x]
+- db_filter.negative_gilist = None
++ db_filter.negative_gilist = "x"
 [tblastx -negative_seqidlist x]
 - db_filter.negative_seqidlist = None
 + db_filter.negative_seqidlist = "x"
@@ -973,12 +1025,16 @@ matrix_file = None
 query = "-"
 subject = None
 db = None
+db_filter.gilist = None
+db_filter.negative_gilist = None
 db_filter.seqidlist = None
 db_filter.negative_seqidlist = None
 db_filter.taxids = None
 db_filter.taxidlist = None
 db_filter.negative_taxids = None
 db_filter.negative_taxidlist = None
+db_filter.ipglist = None
+db_filter.negative_ipglist = None
 db_filter.no_taxid_expansion = false
 db_mask.db_soft_mask = None
 db_mask.db_hard_mask = None
@@ -1049,9 +1105,15 @@ scope_refusal = None
 [tblastn -dbsize 2]
 - dbsize = None
 + dbsize = 2
+[tblastn -gilist x]
+- db_filter.gilist = None
++ db_filter.gilist = "x"
 [tblastn -seqidlist x]
 - db_filter.seqidlist = None
 + db_filter.seqidlist = "x"
+[tblastn -negative_gilist x]
+- db_filter.negative_gilist = None
++ db_filter.negative_gilist = "x"
 [tblastn -negative_seqidlist x]
 - db_filter.negative_seqidlist = None
 + db_filter.negative_seqidlist = "x"
@@ -1214,12 +1276,16 @@ scope_refusal = None
 query = "-"
 subject = None
 db = None
+db_filter.gilist = None
+db_filter.negative_gilist = None
 db_filter.seqidlist = None
 db_filter.negative_seqidlist = None
 db_filter.taxids = None
 db_filter.taxidlist = None
 db_filter.negative_taxids = None
 db_filter.negative_taxidlist = None
+db_filter.ipglist = None
+db_filter.negative_ipglist = None
 db_filter.no_taxid_expansion = false
 dbsize = None
 show_gis = false
@@ -1285,9 +1351,15 @@ pssm_check = Call
 [psiblast -dbsize 2]
 - dbsize = None
 + dbsize = 2
+[psiblast -gilist x]
+- db_filter.gilist = None
++ db_filter.gilist = "x"
 [psiblast -seqidlist x]
 - db_filter.seqidlist = None
 + db_filter.seqidlist = "x"
+[psiblast -negative_gilist x]
+- db_filter.negative_gilist = None
++ db_filter.negative_gilist = "x"
 [psiblast -negative_seqidlist x]
 - db_filter.negative_seqidlist = None
 + db_filter.negative_seqidlist = "x"
@@ -1306,6 +1378,12 @@ pssm_check = Call
 [psiblast -no_taxid_expansion]
 - db_filter.no_taxid_expansion = false
 + db_filter.no_taxid_expansion = true
+[psiblast -ipglist x]
+- db_filter.ipglist = None
++ db_filter.ipglist = "x"
+[psiblast -negative_ipglist x]
+- db_filter.negative_ipglist = None
++ db_filter.negative_ipglist = "x"
 [psiblast -subject x]
 - subject = None
 + subject = "x"

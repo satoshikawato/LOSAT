@@ -221,6 +221,11 @@ impl TblastxDatabase {
         self.db.list_taxids()
     }
 
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(crate) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
+    }
+
     /// Whether the first query batch with a valid context fails with NCBI's `Database memory map
     /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
     pub(crate) fn first_oid_read_fails(&self) -> bool {

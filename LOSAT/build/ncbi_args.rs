@@ -132,28 +132,18 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // (`algorithm::blastn::repeat_filter`, line RG item D4) and `-best_hit_overhang` /
     // `-best_hit_score_edge` (series NP O6a).
     ("blastn", "entrez_query", Refused::Read(None)),
-    ("blastn", "gilist", Refused::Read(None)),
     ("blastn", "import_search_strategy", Refused::Read(None)),
-    ("blastn", "negative_gilist", Refused::Read(None)),
     ("blastn", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-2, psiblast's
     // too).
     ("blastp", "entrez_query", Refused::Read(None)),
-    ("blastp", "gilist", Refused::Read(None)),
     ("blastp", "import_search_strategy", Refused::Read(None)),
-    ("blastp", "ipglist", Refused::Read(None)),
-    ("blastp", "negative_gilist", Refused::Read(None)),
-    ("blastp", "negative_ipglist", Refused::Read(None)),
     ("blastp", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
     // `-use_sw_tback` (line RG item X4b-2, #1500).
-    ("blastx", "gilist", Refused::Read(None)),
-    ("blastx", "negative_gilist", Refused::Read(None)),
     ("blastx", "entrez_query", Refused::Read(None)),
-    ("blastx", "ipglist", Refused::Read(None)),
-    ("blastx", "negative_ipglist", Refused::Read(None)),
     ("blastx", "import_search_strategy", Refused::Read(None)),
     ("blastx", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:398-400,503
@@ -173,12 +163,8 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // `-in_pssm` (items F1b-1 and F1b-2 of line RG).
     ("psiblast", "phi_pattern", Refused::Read(None)),
     ("psiblast", "entrez_query", Refused::Read(None)),
-    ("psiblast", "gilist", Refused::Read(None)),
     ("psiblast", "html", Refused::Read(None)),
     ("psiblast", "import_search_strategy", Refused::Read(None)),
-    ("psiblast", "ipglist", Refused::Read(None)),
-    ("psiblast", "negative_gilist", Refused::Read(None)),
-    ("psiblast", "negative_ipglist", Refused::Read(None)),
     ("psiblast", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918 (cited at
     // blastp's check, `validate_requested_blastp_support`)
@@ -212,16 +198,12 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
     // `-use_sw_tback` (line RG item X4b-1, #1481).
     ("tblastn", "entrez_query", Refused::Read(None)),
-    ("tblastn", "gilist", Refused::Read(None)),
     ("tblastn", "import_search_strategy", Refused::Read(None)),
-    ("tblastn", "negative_gilist", Refused::Read(None)),
     ("tblastn", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3).
     ("tblastx", "entrez_query", Refused::Read(None)),
-    ("tblastx", "gilist", Refused::Read(None)),
     ("tblastx", "import_search_strategy", Refused::Read(None)),
-    ("tblastx", "negative_gilist", Refused::Read(None)),
     ("tblastx", "remote", Refused::Read(None)),
 ];
 

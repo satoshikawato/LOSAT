@@ -295,8 +295,8 @@ struct DatabaseMasking {
 
 #[derive(Debug)]
 struct DatabaseFilter {
-    /// The `TaxidList` or `NegativeTaxidList` program option.
-    list: Option<options::Param>,
+    /// The `GiList`/`NegativeGiList` and `TaxidList`/`NegativeTaxidList` program options.
+    list: Vec<options::Param>,
     /// How the `EffectiveSearchSpace` option of a searched batch is made.
     request_length: RequestLength,
 }
@@ -328,7 +328,7 @@ impl OptionsHandle {
     /// run, where the database is opened; a second setting is LOSAT's internal error.
     pub fn set_database_filter(
         &self,
-        list: Option<options::Param>,
+        list: Vec<options::Param>,
         request_length: RequestLength,
     ) -> anyhow::Result<()> {
         let set = self.0.filter.set(DatabaseFilter {
@@ -403,8 +403,10 @@ impl OptionsHandle {
         self.0
             .filter
             .get()
-            .and_then(|filter| filter.list.clone())
+            .map(|filter| &filter.list)
             .into_iter()
+            .flatten()
+            .cloned()
             .chain(
                 self.0
                     .masking

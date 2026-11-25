@@ -93,7 +93,7 @@ Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident 
 LOSAT stops with an error for these `blastn` settings instead of running something else. The full list is on [What LOSAT refuses](../refusals.md).
 
 - `-reward 0` with a penalty other than 0, and `-reward 0 -penalty 0` with the greedy extension of `-task megablast`.
-- `-remote`, `-entrez_query`, `-gilist` and `-import_search_strategy`.
+- `-remote`, `-entrez_query` and `-import_search_strategy`.
 - `-use_index true` with an index volume whose parts do not fit together, an index not made from the database, a seed that starts at or past the last letter of its sequence, and an old-style index of fewer sequences than the database searched in more than one query batch or query chunk (NCBI reads past the index or the sequence there, or stops with an error). Other searches with an index, and the warning paths (no index found, a first index volume whose header does not read, or a `-word_size` below the index's minimum), run as in NCBI BLAST+; with an index of only some database volumes and with `-db_hard_mask`, see [Differences from NCBI BLAST+](../differences.md#blastn--use_index-true-with-an-index-of-only-some-volumes) and [its `-db_hard_mask` item](../differences.md#blastn--use_index-true-with--db_hard_mask).
 - `-db_hard_mask` with `-task blastn-short` on a database whose sequences are masked to their end, and on a database whose masks overlap or are stored out of order.
 - Extreme `-xdrop_gap`, `-xdrop_gap_final` or `-xdrop_ungap` values for which NCBI BLAST+ overflows its 32-bit arithmetic.

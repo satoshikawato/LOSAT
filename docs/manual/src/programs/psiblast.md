@@ -90,7 +90,7 @@ Not yet supported:
 
 Also refused:
 
-- `-remote`, `-entrez_query`, `-html`, `-import_search_strategy`, `-gilist` and `-ipglist`.
+- `-remote`, `-entrez_query`, `-html` and `-import_search_strategy`.
 - `-use_sw_tback`.
 - With `-in_pssm` or `-in_msa`: any matrix or gap cost other than BLOSUM62 with 11/1.
 - With `-in_msa`, where NCBI BLAST+ crashes: a query sequence of X or O alone, and `-matrix IDENTITY`.

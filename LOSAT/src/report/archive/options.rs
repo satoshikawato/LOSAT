@@ -33,6 +33,8 @@ pub enum ParamValue {
     Str(String),
     /// `integer-list`.
     IntegerList(Vec<i32>),
+    /// `big-integer-list` (`Blast4-value` choice 12, `SEQUENCE OF BigInt`).
+    BigIntegerList(Vec<i64>),
 }
 
 /// A recorded parameter (`Blast4-parameter`).

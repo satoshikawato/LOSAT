@@ -333,6 +333,16 @@ fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
             }
             enc.end_list();
         }
+        // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:512
+        ParamValue::BigIntegerList(values) => {
+            enc.variant("Blast4-value", "big-integer-list", 12);
+            enc.begin_list(false);
+            for &value in values {
+                enc.element();
+                enc.big_int(value);
+            }
+            enc.end_list();
+        }
     }
     enc.end_variant();
     enc.end_member();

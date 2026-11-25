@@ -800,13 +800,16 @@ impl Volume {
             .ok_or_else(|| self.no_line_kept(oid))
     }
 
-    /// Whether the volume's rule is a negative seqid list's, also one the version 5 processing
-    /// emptied (`SeqDb::excludes_lineless_at_fetch`).
-    pub(super) fn has_negative_seqid_list(&self) -> bool {
+    /// Whether the volume's rule fills NCBI's `CSeqDBIdSet` (`x_InitIdSet`): a negative seqid
+    /// list (also one version 5 processing emptied), a positive GI list, or a negative GI list
+    /// (`SeqDb::excludes_lineless_at_fetch`).
+    pub(super) fn has_fetch_exclusion_list(&self) -> bool {
         self.defline_rule.as_ref().is_some_and(|line_rule| {
             matches!(
                 &*line_rule.rule,
                 super::filter::DeflineRule::NegativeSeqids(_)
+                    | super::filter::DeflineRule::Gis(_)
+                    | super::filter::DeflineRule::NegativeGis(_)
             )
         })
     }

@@ -1,0 +1,2035 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q0"
+                  }
+                }
+              },
+              title "q0"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "TIPYCCPAGQSSINLPTKTSLMFPTNYQYIVKWISHYPKCERNRGG
+VLPKGVWFQWHRDWMMQFRYWNNQAPHQGFKQELEPGSLHRIGPFGFWSMDEYQ"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 544
+          },
+          {
+            id str "blast_score",
+            value int 544
+          },
+          {
+            id str "e_value",
+            value real { 288603679992651, 10, -92 }
+          },
+          {
+            id str "bit_score",
+            value real { 214156801579084, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 100
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 100
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_1",
+            gi 101
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            100
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 2,
+                data strs {
+                  "gi:101",
+                  "gi:102"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 323611627204224, 10, -15 },
+        k { 139667698131006, 10, -15 },
+        h { 5133818303542, 10, -13 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q1"
+                  }
+                }
+              },
+              title "q1"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "MIRAHVVQIPWWYCPWTWFYAALCCQECHLAMKSSHAHTRWNARPP
+VCNRLSGCSISVVIPYASMHECHELMMRLLMYPMYTKSENEAMQIIVDVWDWFT"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 329585188064133, 10, -15 },
+        k { 134385337969612, 10, -15 },
+        h { 518668315958072, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q2"
+                  }
+                }
+              },
+              title "q2"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "HHMWSKRVFLGHAPDNRATIAQFFVTTVVPWLPKASCGIERRMWKT
+GYHSRICVMAKNVLLFGFHFIQRKTLRVTKAHTNPYGDKFYDSLSQVQIDDFWR"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 329364247293802, 10, -15 },
+        k { 138741787831576, 10, -15 },
+        h { 477513332712812, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_4"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q3"
+                  }
+                }
+              },
+              title "q3"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "SNDQLVKIKVIEAERWAASENDCRMTFTSSAISVRCREESNPVIVD
+LCALMHPNYDFSEGADALRHCTYIFGYFEDHGPGKKSHCDRHVAMVHTTGWQFK"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 322225039160465, 10, -15 },
+        k { 133596558186286, 10, -15 },
+        h { 435172792350568, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_5"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q4"
+                  }
+                }
+              },
+              title "q4"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "GRSFADLGVVYSMNLKSWAQEFANKGTILTIWDNRNIGRHKGRLFW
+IPRMSNDARRCEMRMYGFNPLPWFKIGGPIAMTHATFEWTFFSDNYDCDILADA"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 326552181899762, 10, -15 },
+        k { 140083986333164, 10, -15 },
+        h { 486593788073513, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_6"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q5"
+                  }
+                }
+              },
+              title "q5"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "VCFELYLSYMANSSGNTTHYGLTCYTYDKEHRVSLYELFHGGIFIV
+TQFDMHGTGTMQLVCDNNSGPWFVMLHGRTHFKPVNTVHFRRREKDTRLSLIED"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 538
+          },
+          {
+            id str "blast_score",
+            value int 538
+          },
+          {
+            id str "e_value",
+            value real { 169631173245726, 10, -91 }
+          },
+          {
+            id str "bit_score",
+            value real { 21184560412358, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 100
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 100
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_6",
+            gi 108
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            100
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "gi:108"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 325926604744529, 10, -15 },
+        k { 139767448549589, 10, -15 },
+        h { 452490894922681, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_7"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q6"
+                  }
+                }
+              },
+              title "q6"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "LVQMYGEILACNIWEVLDVLMITGGDYNPTQSKRTIHRITQWLMNS
+PHPSNSEKRMEWTMNMENIKDAYEEIEGSTCGFEFSEPTNKSVRYPNEVISKPP"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 314271513308284, 10, -15 },
+        k { 130914725222396, 10, -15 },
+        h { 406091723188008, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_8"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q7"
+                  }
+                }
+              },
+              title "q7"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "WGFVAPFQDLDVTPSHTECDQRIAEFDYYRMWEHMWINKYVPGIPQ
+ICELWRASAWGPNAILTFIPKTYSGHHFATYYYDIVSTPPVCITCGYDDWYIDR"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 326085267039817, 10, -15 },
+        k { 14266965010498, 10, -14 },
+        h { 533012331977506, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_9"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q8"
+                  }
+                }
+              },
+              title "q8"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "VAMINGCCCTGLMGPELMMSKDMNMKNFNWKMYRPVPSIMKRTYEK
+CWSVNHQTKDVPQAITMAILMPSCNRFATKLDYQQAGCCIYTIDLSHNHHHVPN"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 325304693068163, 10, -15 },
+        k { 13377983704822, 10, -14 },
+        h { 457804804519849, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_10"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q9"
+                  }
+                }
+              },
+              title "q9"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "FVDWCQGNNMGQSSRMSIGTGYNRFRMMIALMMKAGETRVLRDRHN
+AKWHARLQPQYRVGEQTYNCDAEFHYIHFAWKQGSQQDKETTWAIHESVTHQFP"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 323206785138269, 10, -15 },
+        k { 131832211763644, 10, -15 },
+        h { 441626465038321, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_11"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q10"
+                  }
+                }
+              },
+              title "q10"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "QQNSWLHSNAMERQVYQYHSGYNIHCGTLSPTGTHKSLVNIFVRFL
+VERDIWDLRVAPNLQDKTTAHSQPMDNGEDWWNQCTSCCTEHWSQPTFFWNFDH"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 541
+          },
+          {
+            id str "blast_score",
+            value int 541
+          },
+          {
+            id str "e_value",
+            value real { 511795574935378, 10, -92 }
+          },
+          {
+            id str "bit_score",
+            value real { 213001202851332, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 100
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 100
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs denseg {
+          dim 2,
+          numseg 1,
+          ids {
+            local str "Query_11",
+            gi 113
+          },
+          starts {
+            0,
+            0
+          },
+          lens {
+            100
+          },
+          strands {
+            unknown,
+            unknown
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 2,
+                data strs {
+                  "gi:113",
+                  "gi:115"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 321060289404856, 10, -15 },
+        k { 131914480881694, 10, -15 },
+        h { 475082939709001, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_12"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q11"
+                  }
+                }
+              },
+              title "q11"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "KVRQQAPENVIMESLWTKWIKYDVQHWHTVEFGNEDSWGFNIWVRI
+FAYRMQQIKGCHHHLHGSTCRYNQTDSVSEHCHFIKQWYTNARAWEPVLPMVIG"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 324475229357707, 10, -15 },
+        k { 135054415908044, 10, -15 },
+        h { 49350544451675, 10, -14 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_13"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q12"
+                  }
+                }
+              },
+              title "q12"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "HPCRNGWSPVGLEKGVAVFKNWMMGWFRFMTVLRPHTERFIPNRPW
+CYMDGETFTKDSCQPTVVMQYLEDPEQLTYRRAPNVYVHWGKGFWVGIDMNTCE"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 325459308750961, 10, -15 },
+        k { 14095098883317, 10, -14 },
+        h { 522274957216309, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastp",
+      service "psi",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_14"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q13"
+                  }
+                }
+              },
+              title "q13"
+            },
+            inst {
+              repr raw,
+              mol aa,
+              length 100,
+              seq-data ncbieaa "CWYCIENTAGQKFMCGTQANAQTESFWHTFGMTCNMGPRTRDYQTN
+GWIWKKIYTIRQKINALFCNRGQKNMCTHNWNGTKRFGFIFHIIWAFVLRRAAW"
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/gp",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "InclusionThreshold",
+          value real { 2, 10, -3 }
+        },
+        {
+          name "PseudoCountWeight",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFiltering",
+          value boolean FALSE
+        },
+        {
+          name "WordThreshold",
+          value integer 11
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "GapTrigger",
+          value real { 22, 10, 0 }
+        },
+        {
+          name "IgnoreMsaMaster",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24867
+        }
+      },
+      program-options {
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      },
+      format-options {
+        {
+          name "Web_StepNumber",
+          value integer 1
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+    },
+    masks {
+    },
+    ka-blocks {
+      {
+        lambda { 329596298835625, 10, -15 },
+        k { 13730662750049, 10, -14 },
+        h { 525519914012118, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24867",
+      "Effective search space used: 24867",
+      "Length adjustment: 19"
+    }
+  }
+}

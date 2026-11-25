@@ -134,6 +134,11 @@ impl BlastxDatabase {
         self.db.list_taxids()
     }
 
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(crate) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
+    }
+
     /// Whether the database has parsed Seq-ids: a batch can then refuse one of its subjects
     /// (`ReportedSubjects::for_batch`).
     pub(crate) fn parsed_seqids(&self) -> bool {

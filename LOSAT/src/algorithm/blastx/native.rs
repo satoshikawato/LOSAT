@@ -405,6 +405,7 @@ fn run_inner(
                 archive.as_ref(),
                 strategy.as_ref(),
                 &args.db_filter,
+                database.list_gis(),
                 database.list_taxids(),
                 &database.statistics(),
                 false,

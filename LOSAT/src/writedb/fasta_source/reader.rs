@@ -485,8 +485,10 @@ const NUCLEOTIDE_GAP_ACTIONS: [u8; 256] = char_actions(false, true);
 const NUCLEOTIDE_ACTIONS: [u8; 256] = char_actions(false, false);
 const PROTEIN_ACTIONS: [u8; 256] = char_actions(true, false);
 
-/// The residues of a data line: those of protein input, of nucleotide input with `fParseGaps`
-/// (a hyphen is a gap) or of nucleotide input without it (a hyphen is a residue).
+/// The residues of a data line, following the protein, nucleotide-with-gaps, and
+/// nucleotide-without-gaps cases of `CFastaReader::ParseDataLine`'s character switch.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-814,822-826,856-936
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Alphabet {
     Protein,
@@ -494,14 +496,20 @@ enum Alphabet {
     Nucleotide,
 }
 
-/// A letter of protein input, in either case (`char_actions`: every letter).
+/// Whether `byte` is a letter accepted by protein input in either case, following the letter
+/// cases of `CFastaReader::ParseDataLine`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-814,822-826,856-936
 const fn is_protein_letter(byte: u8) -> bool {
     (byte & 0xdf).wrapping_sub(b'A') < 26
 }
 
-/// A letter of nucleotide input, in either case (`char_actions`: `ABCDGHKMNRSTUVWY`), by the
-/// ranges of their offsets from `A`: A-D, G-H, K, M-N, R-W and Y. Clearing bit 5 makes a lower
-/// case letter upper case and moves no other byte into `A`-`Z`.
+/// Whether `byte` is a nucleotide letter in either case (`ABCDGHKMNRSTUVWY`), following the
+/// nucleotide branch of `CFastaReader::ParseDataLine` by the ranges of their offsets from `A`:
+/// A–D, G–H, K, M–N, R–W and Y. Clearing bit 5 folds lower case to upper case without mapping
+/// any non-letter into `A`–`Z`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-814,822-826,856-936
 const fn is_nucleotide_letter(byte: u8) -> bool {
     let offset = (byte & 0xdf).wrapping_sub(b'A');
     (offset <= 3)
@@ -522,9 +530,11 @@ impl Alphabet {
         }
     }
 
-    /// Whether the switch stores `byte` as a residue (`actions()[byte] >= RESIDUE_MIN`), by
-    /// arithmetic on the byte, which the search can test a block of bytes at a time
-    /// (`tests::residue_tests_match_the_tables` checks every byte).
+    /// Whether `CFastaReader::ParseDataLine`'s character switch stores `byte` as a residue
+    /// (`actions()[byte] >= RESIDUE_MIN`), computed by arithmetic so `find_first` can test a
+    /// block of bytes at once (`tests::residue_tests_match_the_tables` checks every byte).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-814,822-826,856-936
     const fn is_residue(self, byte: u8) -> bool {
         match self {
             Alphabet::Protein => is_protein_letter(byte) | (byte == b'*') | (byte == b'-'),
@@ -533,37 +543,56 @@ impl Alphabet {
         }
     }
 
-    /// The number of residues that `s` starts with: the run that `ParseDataLine` stores one
-    /// residue at a time, found with one search (LOSAT's speed).
+    /// The number of consecutive residues that `s` starts with, matching the residue cases of
+    /// `CFastaReader::ParseDataLine`. Short slices and the first 11 bytes use the action table
+    /// directly so spaced or digit-broken lines exit without extra arithmetic per byte; longer
+    /// runs use [`find_first`].
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-814,822-826,856-936
     fn residue_run(self, s: &[u8]) -> usize {
-        let end = match self {
-            Alphabet::Protein => find_first(s, |byte| !Alphabet::Protein.is_residue(byte)),
-            Alphabet::NucleotideGaps => {
-                find_first(s, |byte| !Alphabet::NucleotideGaps.is_residue(byte))
+        let actions = self.actions();
+        if s.len() < 28 {
+            return s
+                .iter()
+                .position(|&byte| actions[byte as usize] < RESIDUE_MIN)
+                .unwrap_or(s.len());
+        }
+        for (i, &byte) in s[..11].iter().enumerate() {
+            if actions[byte as usize] < RESIDUE_MIN {
+                return i;
             }
-            Alphabet::Nucleotide => find_first(s, |byte| !Alphabet::Nucleotide.is_residue(byte)),
+        }
+        let rest = &s[11..];
+        let end = match self {
+            Alphabet::Protein => find_first(rest, |byte| !Alphabet::Protein.is_residue(byte)),
+            Alphabet::NucleotideGaps => {
+                find_first(rest, |byte| !Alphabet::NucleotideGaps.is_residue(byte))
+            }
+            Alphabet::Nucleotide => find_first(rest, |byte| !Alphabet::Nucleotide.is_residue(byte)),
         };
-        end.unwrap_or(s.len())
+        11 + end.unwrap_or(rest.len())
     }
 }
 
 /// The bytes that `extend_upper` converts at once.
 const UPPER_BLOCK: usize = 32;
 
-/// Appends `run` to `out` in upper case (`to_ascii_uppercase` of every byte, as the switch stores
-/// a residue). The bytes are copied whole, then converted a block of `UPPER_BLOCK` at a time, the
-/// last block ending at the end of the run and overlapping the one before it (a byte converted
-/// twice is the same byte); a run shorter than a block is converted a byte at a time. A loop over
-/// the whole run left most of a 60-byte line to its scalar remainder (LOSAT's speed).
+/// Appends `run` to `out` in upper case (`to_ascii_uppercase` of every byte), matching the
+/// upper-case storage of accepted residues in `CFastaReader::ParseDataLine`. Short runs convert
+/// in a single pass; runs of at least `UPPER_BLOCK` bytes are copied whole and converted in
+/// blocks of `UPPER_BLOCK`, with the final block overlapping the previous one (converting a byte
+/// twice leaves it upper case).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:807-814,822-826,856-936
 fn extend_upper(out: &mut Vec<u8>, run: &[u8]) {
+    let len = run.len();
+    if len < UPPER_BLOCK {
+        out.extend(run.iter().map(u8::to_ascii_uppercase));
+        return;
+    }
     let start = out.len();
     out.extend_from_slice(run);
     let added = &mut out[start..];
-    let len = added.len();
-    if len < UPPER_BLOCK {
-        added.make_ascii_uppercase();
-        return;
-    }
     for block in added.as_chunks_mut::<UPPER_BLOCK>().0 {
         block.make_ascii_uppercase();
     }
@@ -857,12 +886,33 @@ fn is_ambig_nuc(c: u8) -> bool {
     b"URYSWKMBDHVN".contains(&c.to_ascii_uppercase())
 }
 
-/// The counts of `CheckDataLine`'s loop (cited at `check_data_line`) over `checked` (at most 70
-/// bytes): the good bytes (letters, `*` and `-`), the bad ones (neither good nor white space nor a
-/// digit) and, for nucleotide input, the ambiguous nucleotides among the letters, up to the first
-/// `;`, where the loop stops. Each is counted in a loop of its own without an early exit (LOSAT's
-/// speed; `tests::data_line_counts_match_the_loop` compares them with the loop).
-fn data_line_counts(checked: &[u8], is_nuc: bool) -> (usize, usize, usize) {
+/// General counting fallback for [`data_line_counts`] when `checked` contains a non-`ACGT`
+/// nucleotide byte or a non-residue protein byte, following `CFastaReader::CheckDataLine`'s
+/// classification loop and `;` comment stop.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:710-771
+#[cold]
+#[inline(never)]
+fn data_line_counts_slow(checked: &[u8], is_nuc: bool) -> (usize, usize, usize) {
+    if checked.len() < 32 {
+        let (mut good, mut bad, mut ambig_nuc) = (0usize, 0usize, 0usize);
+        for &c in checked {
+            if c.is_ascii_alphabetic() || c == b'*' {
+                good += 1;
+                if is_nuc && is_ambig_nuc(c) {
+                    ambig_nuc += 1;
+                }
+            } else if c == b'-' {
+                good += 1;
+            } else if is_space(c) || c.is_ascii_digit() {
+            } else if c == b';' {
+                break;
+            } else {
+                bad += 1;
+            }
+        }
+        return (good, bad, ambig_nuc);
+    }
     fn count(bytes: &[u8], test: impl Fn(u8) -> bool) -> usize {
         // At most 70 bytes: the count fits a byte.
         usize::from(
@@ -881,6 +931,30 @@ fn data_line_counts(checked: &[u8], is_nuc: bool) -> (usize, usize, usize) {
         0
     };
     (goods, bads, ambiguous)
+}
+
+/// Counts good bytes (letters, `*`, `-`), bad bytes (neither good, white space, nor digit), and
+/// for nucleotide input ambiguous nucleotide letters over `checked` (at most 70 bytes) up to the
+/// first `;`, following `CFastaReader::CheckDataLine`. A line consisting solely of `A`/`C`/`G`/`T`
+/// (nucleotide, either case) or accepted protein residues returns `(checked.len(), 0, 0)` after
+/// one [`find_first`] scan; any other line uses [`data_line_counts_slow`]
+/// (`tests::data_line_counts_match_the_loop` compares against the byte-by-byte loop).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:710-771
+fn data_line_counts(checked: &[u8], is_nuc: bool) -> (usize, usize, usize) {
+    debug_assert!(checked.len() <= 70);
+    if is_nuc {
+        let is_acgt = |c: u8| {
+            let u = c & 0xdf;
+            (u == b'A') | (u == b'C') | (u == b'G') | (u == b'T')
+        };
+        if find_first(checked, |c| !is_acgt(c)).is_none() {
+            return (checked.len(), 0, 0);
+        }
+    } else if find_first(checked, |c| !Alphabet::Protein.is_residue(c)).is_none() {
+        return (checked.len(), 0, 0);
+    }
+    data_line_counts_slow(checked, is_nuc)
 }
 
 impl RecordState {
@@ -1104,16 +1178,24 @@ impl RecordState {
                     pos += run - 1;
                 }
                 BAD => self.bad_positions.push(pos as u32),
-                _ => {
+                residue => {
                     self.close_gap(pos == 0, seq_data_length, raw_length);
                     // The residues that follow are stored at once (LOSAT's speed: no gap
                     // is open after the first one). The switch stores a residue in upper case
                     // (`tests::residue_tests_match_the_tables`).
-                    let run = alphabet.residue_run(&s[pos..]);
+                    let run = 1 + alphabet.residue_run(&s[pos + 1..]);
+                    debug_assert!(run >= 1);
                     if MASKS {
                         self.mask_run(&s[pos..pos + run]);
                     }
-                    extend_upper(&mut self.seq_data, &s[pos..pos + run]);
+                    if run == 1 {
+                        self.seq_data.push(residue);
+                    } else if run < UPPER_BLOCK {
+                        self.seq_data
+                            .extend(s[pos..pos + run].iter().map(|&byte| actions[byte as usize]));
+                    } else {
+                        extend_upper(&mut self.seq_data, &s[pos..pos + run]);
+                    }
                     pos += run - 1;
                 }
             }

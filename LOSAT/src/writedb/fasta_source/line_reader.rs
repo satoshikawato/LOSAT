@@ -54,7 +54,11 @@ pub(super) struct BufferedLineReader<R: Read> {
     line_number: u64,
 }
 
-/// The first `\n` or `\r` of `bytes`, found a block at a time (`utils::byte_search`).
+/// The first `\n` or `\r` of `bytes`, matching the line-terminator scan of
+/// `CBufferedLineReader` (`next_line` and `load_long`), found with [`find_first`].
+///
+/// NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:509-616
+#[inline(always)]
 fn find_eol(bytes: &[u8]) -> Option<usize> {
     find_first(bytes, |byte| (byte == b'\n') | (byte == b'\r'))
 }

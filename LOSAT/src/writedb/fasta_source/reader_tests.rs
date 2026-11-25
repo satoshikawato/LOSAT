@@ -40,8 +40,10 @@ fn residue_tests_match_the_tables() {
     }
 }
 
-/// The run that `residue_run` finds is the one that a scan of the switch one byte at a time finds,
-/// for every byte at every place of lines across the blocks of the search, and on random lines.
+/// The run that `residue_run` finds is the one that a scan of the switch one byte at a time finds:
+/// for every byte value at boundary places (first, second, prefix edge, middle and last) across
+/// search block sizes, for representative boundary bytes at every place of lines up to 64 bytes,
+/// and on random lines (every place of `find_first` is tested in `byte_search_tests.rs`).
 #[test]
 fn residue_runs_match_the_byte_by_byte_scan() {
     let scan = |alphabet: Alphabet, s: &[u8]| {
@@ -52,12 +54,30 @@ fn residue_runs_match_the_byte_by_byte_scan() {
     };
     for alphabet in ALPHABETS {
         for byte in 0..=u8::MAX {
-            for len in [1, 2, 31, 32, 33, 63, 64, 65, 80, 127, 128, 129, 200] {
-                for at in [0, 1, len / 2, len - 1] {
+            for len in [
+                1, 2, 10, 11, 12, 16, 27, 28, 31, 32, 33, 47, 48, 49, 63, 64, 65, 80, 127, 128,
+                129, 200,
+            ] {
+                for at in [0, 1, 10, 11, 12, len / 2, len - 1] {
                     if at >= len {
                         continue;
                     }
                     let mut line = b"acgtACGTnN".repeat(len / 10 + 1);
+                    line.truncate(len);
+                    line[at] = byte;
+                    assert_eq!(
+                        alphabet.residue_run(&line),
+                        scan(alphabet, &line),
+                        "{alphabet:?} {byte:#04x} {len} {at}"
+                    );
+                }
+            }
+        }
+        // Every place of lines up to 64 bytes for representative residue and non-residue bytes.
+        for &byte in b" ;-1*E\x00\xff" {
+            for len in 1..=64usize {
+                for at in 0..len {
+                    let mut line = b"acgtACGT".repeat(8);
                     line.truncate(len);
                     line[at] = byte;
                     assert_eq!(
@@ -87,8 +107,9 @@ fn residue_runs_match_the_byte_by_byte_scan() {
     }
 }
 
-/// `extend_upper` appends what the byte-by-byte map appends, for every byte at every place of runs
-/// of every length up to 100 and across blocks, after bytes already stored.
+/// `extend_upper` appends what the byte-by-byte map appends, for every byte at block-boundary
+/// places (`0`, `1`, `31`, `32`, `33`, `len / 2`, `len - 1`) of runs of every length up to 100
+/// and across blocks, after bytes already stored.
 #[test]
 fn extend_upper_is_the_byte_by_byte_map() {
     let stored = b"MKV".to_vec();
@@ -113,7 +134,8 @@ fn extend_upper_is_the_byte_by_byte_map() {
 }
 
 /// `data_line_counts` gives the counts of `CheckDataLine`'s loop, one byte at a time with its
-/// stop at `;`, for every byte at every place and on random lines of up to 70 bytes.
+/// stop at `;`, for every byte at the first, middle and last place of lines across block edges,
+/// for representative bytes at every place up to 70 bytes, and on random lines of up to 70 bytes.
 #[test]
 fn data_line_counts_match_the_loop() {
     let reference = |checked: &[u8], is_nuc: bool| {
@@ -138,9 +160,23 @@ fn data_line_counts_match_the_loop() {
     };
     for is_nuc in [false, true] {
         for byte in 0..=u8::MAX {
-            for len in [1, 2, 31, 32, 33, 60, 63, 64, 70] {
+            for len in [1, 2, 7, 8, 9, 15, 16, 31, 32, 33, 48, 60, 63, 64, 70] {
                 for at in [0, len / 2, len - 1] {
-                    let mut line = b"ACGTNRYacgt".repeat(7);
+                    let mut line = b"ACGTacgtAC".repeat(7);
+                    line.truncate(len);
+                    line[at] = byte;
+                    assert_eq!(
+                        data_line_counts(&line, is_nuc),
+                        reference(&line, is_nuc),
+                        "{is_nuc} {byte:#04x} {len} {at}"
+                    );
+                }
+            }
+        }
+        for &byte in b"U; -1*N\x00\xff" {
+            for len in [1, 8, 10, 16, 20, 32, 48, 60, 70] {
+                for at in 0..len {
+                    let mut line = b"ACGTacgtAC".repeat(7);
                     line.truncate(len);
                     line[at] = byte;
                     assert_eq!(

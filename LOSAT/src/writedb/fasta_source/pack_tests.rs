@@ -275,9 +275,10 @@ fn the_scan_of_the_best_coding_is_the_table() {
     }
 }
 
-/// `ncbi2na_code` is `CIupacnaTo2na`'s row for every byte, and `iupacna_to_ncbi2na` packs the
-/// codes four to a byte, the first in the high bits, for every length across its blocks and every
-/// residue at every place of a byte.
+/// `ncbi2na_code` returns the NCBI2na code for upper-case `A`, `C`, `G`, `T` and `U` (0 for
+/// every other byte), and `iupacna_to_ncbi2na` packs the codes four to a byte, the first in the
+/// high bits, for every length across its short and blocked paths and every byte at every place
+/// of a 4-base chunk.
 #[test]
 fn ncbi2na_codes_and_their_bytes() {
     let row = |residue: u8| match residue {

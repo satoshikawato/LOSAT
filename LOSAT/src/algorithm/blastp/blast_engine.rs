@@ -4858,6 +4858,9 @@ fn open_search_database(
     // open and the output file exists) and before the test for an empty query.
     let database = match resolved.db.as_deref() {
         Some(name) => {
+            let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+                outputs.formats.first().map(|format| format.outfmt),
+            );
             let database = database::BlastpDatabase::open_restricted(
                 name,
                 settings,
@@ -4867,7 +4870,8 @@ fn open_search_database(
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis)
-            .after_calls(args.first_query_ordinal > 0);
+            .after_calls(args.first_query_ordinal > 0)
+            .keeping_scope(keeps_scope, separate_xml2);
             let rps = resolved.rps_search.is_some();
             let database = if rps {
                 rps_hooks::with_units(resolved, database)?

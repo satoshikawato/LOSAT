@@ -433,6 +433,11 @@ fn split_special(acc: &[u8], fmt: u32) -> (usize, u32) {
 
 /// The digits of a range `<low>[-<high>]` as numbers with their counts (an empty high when
 /// there is no `-`), when both are ASCII digits alone, at most `max` (at most 9) of them.
+///
+/// Follows the first-hyphen split of a `special2` range token into low and optional high
+/// suffixes, parsing each side directly as base-10 digits.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1310
 fn range_numbers(range: &[u8], max: usize) -> Option<[(u32, usize); 2]> {
     let mut parts = [(0, 0); 2];
     let mut part = 0;
@@ -454,6 +459,11 @@ fn range_numbers(range: &[u8], max: usize) -> Option<[(u32, usize); 2]> {
 
 /// `number` (of at least `count` digits) with its last `count` digits (at most 9) replaced by
 /// those of `digits`.
+///
+/// Computes numerically the trailing-digit overwrite at the end of the running `special2`
+/// accession for each low and high range endpoint.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:1308,1311,1317
 fn with_last_digits(number: u32, (digits, count): (u32, usize)) -> u32 {
     // Divisions by constants (multiplications in the machine code).
     let cleared = match count {

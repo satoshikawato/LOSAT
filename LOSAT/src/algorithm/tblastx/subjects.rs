@@ -379,7 +379,7 @@ fn x_resolved_record_frames(
     table: &GeneticCode,
     by_table: bool,
 ) -> Vec<QueryFrame> {
-    let mut random = crate::core::blast_encoding::NcbiRandom::new(letters.len() as u32);
+    let mut random = crate::utils::random_gen::NcbiRandom::new(letters.len() as u32);
     let mut resolve = |letter: u8| {
         let code = ncbi4na_of(letter);
         b"ACGT"[usize::from(crate::core::blast_encoding::resolve_ncbi4na_base(

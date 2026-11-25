@@ -162,14 +162,14 @@ fn x_ring_buffer_dust_matches_reference_on_random_sequences() {
             len - 1
         };
         let start = start.min(stop);
-        let reference = masker.mask_range_reference(&seq, start, stop, &mut NcbiLfgRandom::new());
-        let fast = masker.x_mask_range(&seq, start, stop, &mut NcbiLfgRandom::new());
+        let reference = masker.mask_range_reference(&seq, start, stop, &mut NcbiRandom::default());
+        let fast = masker.x_mask_range(&seq, start, stop, &mut NcbiRandom::default());
         assert_eq!(
             fast, reference,
             "case {case}: level={level} window={window} linker={linker} start={start} stop={stop}"
         );
         // `LOSAT_X_DUSTREG` (`x_dust_regs.rs`): the same intervals as the reference.
-        let regs = masker.x_mask_range_regs(&seq, start, stop, &mut NcbiLfgRandom::new());
+        let regs = masker.x_mask_range_regs(&seq, start, stop, &mut NcbiRandom::default());
         assert_eq!(
             regs, reference,
             "regs case {case}: level={level} window={window} linker={linker} start={start} stop={stop}"

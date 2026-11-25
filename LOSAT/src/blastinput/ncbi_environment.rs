@@ -556,7 +556,7 @@ impl PathRules {
     }
 
     /// Whether `byte` is one of `ALL_SEPARATORS` (`CDirEntry::IsPathSeparator`).
-    pub(crate) fn is_separator(self, byte: u8) -> bool {
+    fn is_separator(self, byte: u8) -> bool {
         self.is_dir_separator(byte) || (self == Self::Windows && byte == b':')
     }
 
@@ -601,6 +601,22 @@ impl PathRules {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-377
+    /// The base and the extension of `path` as `SplitPath` cuts its name (the bytes after its
+    /// last separator) at the name's last `.`: the extension keeps its `.`; a name without one
+    /// has an empty extension.
+    pub(crate) fn base_and_ext(self, path: &[u8]) -> (&[u8], &[u8]) {
+        let name_at = path
+            .iter()
+            .rposition(|&byte| self.is_separator(byte))
+            .map_or(0, |at| at + 1);
+        let name = &path[name_at..];
+        match name.iter().rposition(|&byte| byte == b'.') {
+            Some(dot) => name.split_at(dot),
+            None => (name, &name[name.len()..]),
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:455-462
     /// `CDirEntry::AddTrailingPathSeparator`: `path` with `DIR_SEPARATOR` after it unless it is
     /// empty or ends with one of `ALL_SEPARATORS`.
@@ -616,7 +632,6 @@ impl PathRules {
     /// `CDirEntry::MakePath` of a directory and a name: the name after the directory with its
     /// trailing separator (`add_trailing_separator`); the name alone after an empty directory.
     /// An absolute name is joined as any other.
-    #[cfg(any(unix, test))]
     pub(crate) fn make_path(self, dir: &[u8], name: &[u8]) -> Vec<u8> {
         let mut path = self.add_trailing_separator(dir);
         path.extend_from_slice(name);
@@ -651,7 +666,6 @@ impl PathRules {
         }
         PathBuf::from(path)
     }
-
     /// `s_Win_IsDiskPath`: `X:` and a separator. A byte past the end is the string's NUL.
     fn is_disk_path(path: &[u8]) -> bool {
         let at = |index: usize| path.get(index).copied().unwrap_or(0);

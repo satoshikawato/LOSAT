@@ -20,8 +20,8 @@ pub const HELP: &str = include_str!("help.txt");
 // rpsblast's copied, not flattened: a flattened group would change the order of the options).
 // The search runs with BLASTX's driver and the RPS engine (`into_blastx_args`), composition-based
 // statistics 0 to 3 included (the default 1, item PS12b), with `-use_sw_tback` NCBI's
-// Smith-Waterman redo of the frames (item PS12c); `-html`, the remote options and
-// `-import_search_strategy` are refused by the parser (their rows of `ncbi_app::args::refusal`).
+// Smith-Waterman redo of the frames (item PS12c); the remote options and `-import_search_strategy`
+// are refused by the parser (their rows of `ncbi_app::args::refusal`).
 #[derive(Debug, Clone)]
 pub struct RpstblastnArgs {
     // *** Input query options
@@ -43,6 +43,9 @@ pub struct RpstblastnArgs {
     // *** Formatting options
     pub outfmt: String,
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224), for `-outfmt` 0 to 4 and 18.
+    pub html: bool,
     pub num_descriptions: Option<usize>,
     pub num_alignments: Option<usize>,
     /// `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler, `FormattingArgs`),
@@ -111,6 +114,7 @@ impl RpstblastnArgs {
             comp_based_stats: args.option_or_default("comp_based_stats")?,
             outfmt: args.option_or_default("outfmt")?,
             show_gis: args.flag("show_gis"),
+            html: args.flag("html"),
             num_descriptions: args.given_option("num_descriptions")?,
             num_alignments: args.given_option("num_alignments")?,
             formatting: FormattingArgs::from_args(args)?,
@@ -187,8 +191,7 @@ impl RpstblastnArgs {
             // hit cutoff (`rps_search::engine`), per volume with `-dbsize` on several volumes.
             dbsize: self.dbsize,
             show_gis: self.show_gis,
-            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::reader::named_refusal`).
-            html: false,
+            html: self.html,
             parse_deflines: self.parse_deflines,
             searchsp: self.searchsp,
             // `-xdrop_ungap` reaches NCBI's options check in BLASTX's resolve ("x_dropoff must be

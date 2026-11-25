@@ -48,6 +48,7 @@ mod write_tests;
 
 pub(crate) use crate::report::serial::asn_input::{Encoding, StringKind};
 pub(crate) use read::{read_ber_document, read_document, Post, ReadError};
+pub(crate) use typed::NestPart;
 
 /// `Member::flags`: an OPTIONAL member (`->SetOptional()`).
 pub(crate) const OPTIONAL: u8 = 1;

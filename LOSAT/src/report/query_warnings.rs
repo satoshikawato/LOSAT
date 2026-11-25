@@ -1215,6 +1215,17 @@ impl<'a> QueryWarnings<'a> {
     /// is flushed; a failed flush returns before them. Then the query's later lines go to the
     /// format's receiver (`with_later`), without a flush: they are no part of the diagnostics.
     pub fn before_query(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {
+        let result = self.before_query_inner(index, report);
+        if result.is_err() {
+            // A failed write (report failure or strategy write fault) ends NCBI's run before any
+            // later query's reads happen: keep `Drop` from dumping unread `ReadCursor` texts.
+            self.end_run();
+        }
+        result
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6493
+    fn before_query_inner(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {
         let placed = before_report(
             self.reads.as_mut(),
             self.before.get(index),
@@ -1222,16 +1233,22 @@ impl<'a> QueryWarnings<'a> {
             report,
             &mut *self.sink,
         )?;
-        match placed {
-            Some(posts) if posts.has_text() => {
-                report.flush()?;
-                posts.write(&mut *self.sink, self.archive)?;
-                self.sink.flush()
+        if let Some(posts) = placed {
+            // Flush `report` once before the first non-empty diagnostic byte written to
+            // `self.sink` (matching NCBI's `cerr.tie(&cout)`): ordinary warnings, `803.7`
+            // replaced-byte posts, and strategy write-failure diagnostics flush `report` before
+            // writing, while a silent `Post::Request` leaves `report` unflushed (NCBI's
+            // `SaveSearchStrategy` does not flush `cout`).
+            let mut tied = TiedDiagnostics {
+                report,
+                sink: &mut *self.sink,
+                flushed: false,
+            };
+            posts.write(&mut tied, self.archive)?;
+            if tied.flushed {
+                tied.sink.flush()?;
             }
-            // A search strategy request's mark alone shows nothing (`Posts::request`).
-            Some(posts) => posts.write(&mut *self.sink, self.archive),
-            None => Ok(()),
-        }?;
+        }
         // The query's result warnings of a format after a structured first one (`with_later`).
         if let Some((posts, receiver)) = self.later.as_mut() {
             if let Some(posts) = posts.get(index) {
@@ -1257,6 +1274,39 @@ impl<'a> QueryWarnings<'a> {
         }
         report.flush()?;
         Posts::of_lines(lines).write(&mut *self.sink, self.archive)?;
+        self.sink.flush()
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6493
+/// Diagnostics writer that flushes `report` once before the first non-empty write to `sink`,
+/// matching NCBI's `cerr.tie(&cout)` so bytes still held in a formatter's buffer reach the report
+/// stream before any diagnostic (`803.7`, strategy write failure, or query warning) is written,
+/// while leaving `report` unflushed when a request mark writes no diagnostics.
+struct TiedDiagnostics<'a> {
+    report: &'a mut dyn Write,
+    sink: &'a mut dyn Write,
+    flushed: bool,
+}
+
+impl Write for TiedDiagnostics<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if !buf.is_empty() && !self.flushed {
+            self.report.flush()?;
+            self.flushed = true;
+        }
+        self.sink.write(buf)
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        if !buf.is_empty() && !self.flushed {
+            self.report.flush()?;
+            self.flushed = true;
+        }
+        self.sink.write_all(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
         self.sink.flush()
     }
 }

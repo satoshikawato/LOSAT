@@ -55,6 +55,11 @@ pub(super) struct SubjectScan<'a> {
     /// (`scan_lead` above zero, series NP, M4b-T3): all six frames run their chunks in order on
     /// the worker's single diagonal table initialized to NCBI's one-thread start.
     pub(super) x_lead_subject: bool,
+    /// Whether this `-db_hard_mask` subject has a start from the database's overlapping-mask walk
+    /// (`XDbStream::hard_start`, series NP, M4b-3c part 2): all six frames run their chunks in
+    /// order on the worker's single diagonal table, and two-hit chunks shorter than the word go
+    /// through `common::hard_chunk_scan::OneWord`.
+    pub(super) x_hard_start: bool,
     pub(super) use_serial_scan_chunks: bool,
     pub(super) use_parallel_chunks: bool,
     pub(super) num_threads: usize,
@@ -117,6 +122,7 @@ pub(super) fn search_subject_frames<S: TbxScore>(
         x_soft_subjects,
         x_db_mask,
         x_lead_subject,
+        x_hard_start,
         use_serial_scan_chunks,
         use_parallel_chunks,
         num_threads,
@@ -189,6 +195,7 @@ pub(super) fn search_subject_frames<S: TbxScore>(
         // reach cells left by an earlier non-lead frame, so the whole lead subject runs its chunks
         // in order on the worker's single diagonal table (no parallel chunks with private tables).
         let x_chunks_in_order = x_lead_subject
+            || x_hard_start
             || x_soft_calls.as_ref().is_some_and(|calls| {
                 calls.iter().any(|(_, ranges)| {
                     crate::algorithm::common::translated_chunks::scan_lead(ranges) > 0
@@ -209,6 +216,7 @@ pub(super) fn search_subject_frames<S: TbxScore>(
             subject_full,
             subject_all,
             x_soft_calls: x_soft_calls.as_deref(),
+            x_hard_start,
         };
 
         // The word finder of a chunk (`word_finder::scan_chunk`), which the chunk driver calls.
@@ -268,6 +276,14 @@ pub(super) fn search_subject_frames<S: TbxScore>(
                     s_idx,
                     window,
                 }),
+                hard_merge: match subjects {
+                    Subjects::Stream(stream) if x_hard_start => Some(HardChunkMerge {
+                        failure: x_read_failure,
+                        s_idx,
+                        oid: stream.seqdb().oid(s_idx as u32),
+                    }),
+                    _ => None,
+                },
                 subject_besthit,
             },
             &scan_chunk,
@@ -306,6 +322,15 @@ pub(super) struct ChunkDrive {
     pub(super) offset_pairs_len: usize,
 }
 
+/// Refusal target for a hard-masked subject whose chunk ends the last hard range (NCBI reads the
+/// merge overlap past its list) and would join HSPs across the split (`add_chunk_result`).
+#[derive(Clone, Copy)]
+pub(super) struct HardChunkMerge<'s> {
+    pub(super) failure: &'s crate::algorithm::tblastx::subjects::XReadFailure,
+    pub(super) s_idx: usize,
+    pub(super) oid: crate::seqdb::Oid,
+}
+
 /// What each chunk's result is added to: the frame's HSP list and the subject's HSP-saving
 /// statistics (`SubjectSums`), and for the one-hit word finder (`-window_size 0` or less,
 /// `one_hit`) where a chunk merge NCBI leaves undefined is refused.
@@ -315,6 +340,9 @@ pub(super) struct ChunkSums<'s> {
     pub(super) stats_hsp_filtered_by_cutoff: &'s mut usize,
     pub(super) stats_score_distribution: &'s mut Vec<i32>,
     pub(super) one_hit: Option<OneHitChunkMerge<'s>>,
+    /// Present for a `-db_hard_mask` subject on the overlapping-mask walk (`x_hard_start`):
+    /// refuses joins when NCBI reads the merge overlap past its list of hard ranges.
+    pub(super) hard_merge: Option<HardChunkMerge<'s>>,
     /// `-subject_besthit`: the frame's list is filtered after each merge.
     pub(super) subject_besthit: bool,
 }
@@ -474,7 +502,7 @@ pub(super) fn search_frame_chunks<S: TbxScore, F>(
                             diag_offset,
                             diag_array,
                             window,
-                            result.chunk.length,
+                            result.chunk.ncbi_length,
                         );
                     }
                     add_chunk_result(&mut sums, result);
@@ -514,6 +542,36 @@ fn add_chunk_result(sums: &mut ChunkSums<'_>, result: TblastxChunkScanResult) {
     sums.stats_score_distribution
         .extend(result.stats.score_distribution);
     if !result.hits.is_empty() {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:576-584
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2873-2911
+        // On the last hard range NCBI reads the merge overlap past its list of ranges; refuse if
+        // the list and incoming HSPs would join across that undefined overlap.
+        if let Some(merge) = sums.hard_merge {
+            if result.chunk.overlap_past_list
+                && !sums.frame_ungapped_hits.is_empty()
+                && crate::algorithm::common::hard_chunk_scan::merge_joins(
+                    &crate::core::subject_split::HardChunk {
+                        offset: result.chunk.offset,
+                        length: result.chunk.ncbi_length,
+                        residual: 0,
+                        full_range: false,
+                        range: 0,
+                        overlap: result.chunk.overlap,
+                        overlap_past_list: true,
+                    },
+                    sums.frame_ungapped_hits.iter().map(|h| h.s_aa_end as i32),
+                    result.hits.iter().map(|h| h.s_aa_start as i32),
+                )
+            {
+                merge.failure.fail(
+                    merge.s_idx,
+                    crate::algorithm::common::hard_chunk_scan::short_chunk_merge_refusal(
+                        merge.oid, "TBLASTX",
+                    ),
+                );
+                return;
+            }
+        }
         if let Err(undefined) = merge_tblastx_subject_chunk_hits(
             sums.frame_ungapped_hits,
             result.hits,

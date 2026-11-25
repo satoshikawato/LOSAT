@@ -567,7 +567,7 @@ pub struct ResolvedOptions {
     /// `-show_gis`: the labels of the query-anchored sections (outfmt 1 to 4) show a sequence's GI.
     pub show_gis: bool,
     /// The `-html` links of the outfmt 0 to 4 reports (`blastinput::app::html_links`); None
-    /// without `-html` or any of those formats, and for rpstblastn, which has no `-html`.
+    /// without `-html` or any of those formats.
     pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
     /// outfmt 0 to 4 and 18 reports (the organism report takes no links).
@@ -667,6 +667,25 @@ impl BlastxArgs {
         )
     }
 
+    /// The NCBI application (`options::RequestKind`): RPSTBLASTN when `rpstblastn` is set, else
+    /// BLASTX.
+    pub(crate) fn request_kind(&self) -> crate::report::archive::options::RequestKind {
+        if self.rpstblastn.is_some() {
+            crate::report::archive::options::RequestKind::Rpstblastn
+        } else {
+            crate::report::archive::options::RequestKind::Blastx
+        }
+    }
+
+    /// The running application as a `RequestKind`: RPSTBLASTN when `rpstblastn` is set, else the
+    /// running application (`app`).
+    pub(crate) fn app_request_kind(&self) -> crate::report::archive::options::RequestKind {
+        if self.rpstblastn.is_some() {
+            crate::report::archive::options::RequestKind::Rpstblastn
+        } else {
+            crate::report::archive::options::RequestKind::from(self.app())
+        }
+    }
     /// Whether the search is ungapped with a `-matrix` that NCBI's tables do not have: the name
     /// that NCBI looks for as a file (`ResolvedOptions::unknown_matrix`, which the resolution
     /// sets for such a search; a gapped one refuses the name first).
@@ -892,11 +911,7 @@ impl BlastxArgs {
         // rpstblastn_app.cpp does not set it (as rpsblast's and psiblast's apps): its tabular
         // formats keep their own delimiter, the tab or the comma (`TabularSpec::of_app`;
         // `delim=` is still checked).
-        let app = if self.rpstblastn.is_some() {
-            crate::report::archive::options::RequestKind::Rpstblastn
-        } else {
-            crate::report::archive::options::RequestKind::Blastx
-        };
+        let app = self.request_kind();
         let tabular = crate::blastinput::app::ReportFormat::from_number(choice.number)
             .and_then(|format| crate::report::tabular::TabularSpec::of_app(format, choice, app))
             .map(crate::report::tabular::TabularSpec::intern);

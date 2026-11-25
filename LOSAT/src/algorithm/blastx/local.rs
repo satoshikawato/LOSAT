@@ -1514,8 +1514,8 @@ fn check_resolutions(
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
     let html = app::html_links(
         args.html,
-        args.app(),
-        Program::Blastx,
+        args.app_request_kind(),
+        args.request_kind(),
         args.database_name(),
         &outfmts,
     )?;

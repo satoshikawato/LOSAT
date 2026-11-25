@@ -47,7 +47,9 @@ fn subject_split_state_uses_ncbi_max_len_and_overlap() {
         SubjectChunkStatus::Ok(SubjectChunk {
             offset: 0,
             length: MAX_DBSEQ_LEN,
-            overlap: 0
+            overlap: 0,
+            ncbi_length: MAX_DBSEQ_LEN as i32,
+            overlap_past_list: false,
         })
     );
     assert_eq!(
@@ -55,7 +57,9 @@ fn subject_split_state_uses_ncbi_max_len_and_overlap() {
         SubjectChunkStatus::Ok(SubjectChunk {
             offset: MAX_DBSEQ_LEN - DBSEQ_CHUNK_OVERLAP,
             length: DBSEQ_CHUNK_OVERLAP + 250,
-            overlap: DBSEQ_CHUNK_OVERLAP
+            overlap: DBSEQ_CHUNK_OVERLAP,
+            ncbi_length: (DBSEQ_CHUNK_OVERLAP + 250) as i32,
+            overlap_past_list: false,
         })
     );
     assert_eq!(
@@ -105,7 +109,9 @@ fn subject_split_state_keeps_short_subjects_as_single_chunk() {
         SubjectChunkStatus::Ok(SubjectChunk {
             offset: 0,
             length: MAX_DBSEQ_LEN - 1,
-            overlap: 0
+            overlap: 0,
+            ncbi_length: (MAX_DBSEQ_LEN - 1) as i32,
+            overlap_past_list: false,
         })
     );
     assert_eq!(
@@ -922,6 +928,37 @@ fn the_offset_test_of_a_negative_window_is_the_one_hit_test_where_int4_holds() {
                     "offset {offset}, cell {last_hit}, word {s_off}"
                 );
             }
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+// A negative chunk length moves `diag_offset` back by the chunk length plus window; at or above
+// INT4_MAX / 4 the table clears to `DiagStruct::clear(window)` and `diag_offset` resets to window.
+#[test]
+fn advance_tblastx_diag_offset_handles_negative_length_and_clear() {
+    let window = 40;
+    let mut diag_array = vec![DiagStruct::default(); 4];
+    diag_array[0].set_last_hit(123);
+    diag_array[0].set_flag(1);
+    let mut diag_offset = 40;
+
+    advance_tblastx_diag_offset(&mut diag_offset, &mut diag_array, window, -100);
+    assert_eq!(diag_offset, -20);
+    assert_eq!((diag_array[0].last_hit(), diag_array[0].flag()), (123, 1));
+
+    let clear_at = i32::MAX / 4;
+    for (start, len, want_offset, cleared) in [
+        (clear_at - 1, -5, clear_at - 1 - 5 + window, false),
+        (clear_at, -5, window, true),
+    ] {
+        diag_offset = start;
+        advance_tblastx_diag_offset(&mut diag_offset, &mut diag_array, window, len);
+        assert_eq!(diag_offset, want_offset);
+        if cleared {
+            assert!(diag_array.iter().all(|d| *d == DiagStruct::clear(window)));
+        } else {
+            assert_eq!(diag_array[0].last_hit(), 123);
         }
     }
 }

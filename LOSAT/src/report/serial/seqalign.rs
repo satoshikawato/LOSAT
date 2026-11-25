@@ -33,6 +33,7 @@ use std::io::Write;
 
 use crate::blastinput::app::Program;
 use crate::common::GapEditOp;
+use crate::report::archive::options::RequestKind;
 use crate::report::ostream::{ReportWrite, Site};
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryNames, QueryRecord, RunRecord, SubjectRecord};
@@ -643,14 +644,6 @@ fn blast_type(run: &RunRecord<'_>) -> (&'static str, i32) {
     }
 }
 
-/// `Blast_SubjectIsNucleotide` of the program.
-fn subject_is_nucleotide(program: Program) -> bool {
-    matches!(
-        program,
-        Program::Blastn | Program::Tblastn | Program::Tblastx
-    )
-}
-
 /// The value of a `User-field`'s `data` that BLAST sets.
 enum UserData {
     Bool(bool),
@@ -726,7 +719,7 @@ fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
             enc,
             b"Blast Database Title",
             title,
-            UserData::Bool(subject_is_nucleotide(run.program)),
+            UserData::Bool(RequestKind::from(run.program).subject_is_nucleotide()),
         ),
     }
     enc.end_list();
@@ -1940,7 +1933,7 @@ fn document_pieces(format: SerialFormat, document: &QueryDocument<'_, '_>) -> Ve
             document.subjects,
             document.hsps,
         );
-        enc.pieces().to_vec()
+        enc.piece_sizes()
     }
     let mut bytes = Vec::new();
     match format {

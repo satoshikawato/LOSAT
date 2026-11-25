@@ -178,20 +178,17 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (cited at
     // `algorithm::rpsblast::args`)
-    // `-html` (PS15a), the remote options and `-import_search_strategy` (which the five search
-    // programs run, line RG item F2).
+    // The remote options and `-import_search_strategy` (which the five search programs run, line
+    // RG item F2).
     ("rpsblast", "entrez_query", Refused::Read(None)),
-    ("rpsblast", "html", Refused::Read(None)),
     ("rpsblast", "import_search_strategy", Refused::Read(None)),
     ("rpsblast", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (cited
     // at `algorithm::rpstblastn::args`)
-    // `-html` (PS15a), the remote options and `-import_search_strategy` (which the five search
-    // programs run, line RG item F2). The composition-based statistics of a later item are refused
-    // once per run
+    // The remote options and `-import_search_strategy` (which the five search programs run, line
+    // RG item F2). The composition-based statistics of a later item are refused once per run
     // (`rpstblastn::search::TranslatedRpsSearch::check_options`).
     ("rpstblastn", "entrez_query", Refused::Read(None)),
-    ("rpstblastn", "html", Refused::Read(None)),
     ("rpstblastn", "import_search_strategy", Refused::Read(None)),
     ("rpstblastn", "remote", Refused::Read(None)),
     (

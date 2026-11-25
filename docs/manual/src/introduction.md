@@ -48,7 +48,7 @@ These are on the list for a later release:
 - the programs `deltablast` and `blast_formatter`, and `makeprofiledb -dbtype delta` and `-dbtype cobalt`;
 - `psiblast -phi_pattern`;
 - the `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`;
-- `-html` in `psiblast`, `rpsblast` and `rpstblastn`.
+- `-html` in `psiblast`.
 
 LOSAT does not provide these NCBI programs: `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.
 

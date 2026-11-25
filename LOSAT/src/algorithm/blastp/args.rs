@@ -362,6 +362,11 @@ pub struct BlastpArgs {
     /// `run` and the library's entries; `-in_pssm`'s reader refuses a PSSM that the run would write
     /// otherwise (`in_pssm::PssmReader::write_verification`). Not a public option.
     pub write_verification: Option<crate::blastinput::ncbi_environment::WriteVerification>,
+    /// `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET` of the run's application settings
+    /// (`ncbi_environment::ReadVerification`), set with them as `write_verification` is;
+    /// `-in_pssm`'s reader refuses a PSSM that fails a check they turn off
+    /// (`in_pssm::PssmReader::read_verification`). Not a public option.
+    pub read_verification: crate::blastinput::ncbi_environment::ReadVerification,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1117-1119
     /// psiblast's `-inclusion_ethresh`; `None` keeps the options' default
     /// (`PSI_INCLUSION_ETHRESH`, which blastp's options have too).
@@ -462,6 +467,7 @@ impl BlastpArgs {
             taxdb_setting: Default::default(),
             matrix_search: Default::default(),
             write_verification: Default::default(),
+            read_verification: Default::default(),
             inclusion_ethresh: Default::default(),
             gap_trigger: Default::default(),
             sum_stats: Default::default(),
@@ -548,8 +554,7 @@ pub struct ResolvedBlastpArgs {
     /// `-show_gis`, for the same reports.
     pub show_gis: bool,
     /// The `-html` links of the outfmt 0 to 4 reports (`blastinput::app::html_links`); None
-    /// without `-html` or any of those formats, and for psiblast and rpsblast, which have no
-    /// `-html`.
+    /// without `-html` or any of those formats, and for psiblast, which has no `-html`.
     pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
     /// outfmt 0 to 4 and 18 reports (the organism report takes no links).
@@ -902,10 +907,11 @@ impl BlastpArgs {
             &choice,
             crate::blastinput::app::Program::Blastp,
         )?;
+        let request_kind = self.app.request_kind();
         let html = crate::blastinput::app::html_links(
             self.html,
-            crate::blastinput::app::Program::Blastp,
-            crate::blastinput::app::Program::Blastp,
+            request_kind,
+            request_kind,
             self.db.as_deref().map(crate::seqdb::db_argument_name),
             &[choice.number],
         )?;
@@ -951,6 +957,7 @@ impl BlastpArgs {
             database: self.db.is_some(),
             archive: self.archive.as_ref(),
             write_verification: self.write_verification.as_ref(),
+            read_verification: Some(&self.read_verification),
             out_pssm: self
                 .psiblast_pssm
                 .as_ref()

@@ -37,9 +37,10 @@ use crate::algorithm::common::translated_chunks::{
 use crate::algorithm::common::x_db_stream::x_frames_pooled;
 use crate::algorithm::tblastx::constants::SENTINEL_BYTE;
 use crate::algorithm::tblastx::translation::QueryFrame;
-use crate::core::blast_encoding::{iupacna_to_ncbi4na, NcbiRandom};
+use crate::core::blast_encoding::iupacna_to_ncbi4na;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::aa_char_to_ncbistdaa;
+use crate::utils::random_gen::NcbiRandom;
 use anyhow::{bail, Result};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};

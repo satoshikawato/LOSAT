@@ -529,6 +529,7 @@ fn make_blastp_args() -> BlastpArgs {
         taxdb_setting: None,
         matrix_search: None,
         write_verification: None,
+        read_verification: Default::default(),
         inclusion_ethresh: None,
         gap_trigger: None,
         sum_stats: false,

@@ -301,7 +301,8 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    - 保存済み counts を読む run（`-window_masker_taxid` の検索、保存済みコピーを `-ustat`・`-in` に選んだ WindowMasker の run）は、
      待ち行列に入る時から終わるまで（完了・失敗・待ち行列での Cancel・実行中の Cancel）その ID の Web Lock を shared で持つ
      （PR #1597 の review、指摘 3）。差し替え・削除・取得は同じ lock を exclusive・`ifAvailable` で取り、取れなければその場で
-     「A search that uses the counts for <taxid> is queued or running.」と断る（削除は書き込み中の取得・保存は従来どおり待つ）。
+     「Not replaced: …」・「Not removed: …」・「Not downloaded: …」（`a run that reads the counts for <taxid> was queued or running.`
+     … `when it has ended.`）と操作ごとの文で断る（削除は書き込み中の取得・保存は従来どおり待つ）。
      待ち行列に入れる時に選んだファイルの最後の 1 byte を読み、選んだ後に差し替え・削除されたコピーは入れずに断る。
      Web Locks の無いブラウザでは何も持たない（従来どおり）。
    - 作成コピーの保存は、書き始める前に `navigator.storage.estimate()` を読み、`quota − usage + 置き換える前のコピーの大きさ < 新しい大きさ`

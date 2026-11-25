@@ -207,7 +207,7 @@ export class OpfsCountsStore implements CountsStore {
   }
 
   async deleteCounts(taxid: number): Promise<void> {
-    // A queued or running search that reads the copy refuses the deletion (COUNTS_IN_USE); a writing (a download or a
+    // A queued or running run that reads the copy refuses the deletion (COUNTS_IN_USE); a writing (a download or a
     // save, here or in another tab) is waited for, as before, and its copy deleted after it.
     let release: () => void;
     try {
@@ -260,7 +260,7 @@ export class OpfsCountsStore implements CountsStore {
 
   /**
    * Takes the taxonomy ID's lock in exclusive mode and keeps it until the returned function is
-   * called. With `ifAvailable`, rejects with COUNTS_IN_USE when a queued or running search holds
+   * called. With `ifAvailable`, rejects with COUNTS_IN_USE when a queued or running run holds
    * the lock in shared mode, or COUNTS_BUSY when another writer holds it exclusively.
    */
   private async acquire(taxid: number, ifAvailable = true): Promise<() => void> {
@@ -281,7 +281,7 @@ export class OpfsCountsStore implements CountsStore {
       const snapshot = await this.locks.query?.().catch(() => undefined);
       const holders = (snapshot?.held ?? []).filter((entry) => entry.name === name);
       if (holders.some((entry) => entry.mode === 'shared')) {
-        throw named(COUNTS_IN_USE, 'a search that uses the counts is queued or running');
+        throw named(COUNTS_IN_USE, 'a run that reads the counts is queued or running');
       }
       if (holders.some((entry) => entry.mode === 'exclusive') || snapshot === undefined || attempt === 1) {
         throw named(COUNTS_BUSY, 'another tab is downloading the counts');

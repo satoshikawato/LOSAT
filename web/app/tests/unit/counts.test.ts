@@ -726,21 +726,27 @@ describe('CountsLoader', () => {
     expect(other.state.get().list).toEqual([]);
   });
 
-  it('refuses a save, a Replace and a Delete in place while a queued or running search reads the copy, and keeps the copy', async () => {
-    const { loader, store, draftState } = setup();
+  it('refuses a save, a Replace, a Delete and a download in place while a queued or running run reads the copy, and keeps the copy', async () => {
+    const { loader, downloader, store, draftState } = setup();
     expect(await loader.saveMade(562, new File([bytesOf(300, 1)], 'a.obinary'), madeMeta(1))).toMatchObject({ ok: true });
     store.inUse.add(562);
-    const refusal = 'A search that uses the counts for 562 is queued or running.';
+    const replaceRefusal = 'Not replaced: a run that reads the counts for 562 was queued or running. Save again when it has ended.';
+    const deleteRefusal = 'Not removed: a run that reads the counts for 562 was queued or running. Press Delete again when it has ended.';
+    const downloadRefusal = 'Not downloaded: a run that reads the counts for 9606 was queued or running. Download again when it has ended.';
     const other = new File([bytesOf(400, 2)], 'b.obinary');
-    expect(await loader.saveMade(562, other, madeMeta(2))).toEqual({ ok: false, reason: 'in-use', message: refusal });
-    expect(await loader.saveMade(562, other, madeMeta(2), { replace: true })).toEqual({ ok: false, reason: 'in-use', message: refusal });
+    expect(await loader.saveMade(562, other, madeMeta(2))).toEqual({ ok: false, reason: 'in-use', message: replaceRefusal });
+    expect(await loader.saveMade(562, other, madeMeta(2), { replace: true })).toEqual({ ok: false, reason: 'in-use', message: replaceRefusal });
     await loader.delete(562);
-    expect(loader.state.get().refusal).toEqual({ taxid: 562, text: refusal });
+    expect(loader.state.get().refusal).toEqual({ taxid: 562, text: deleteRefusal });
     expect(loader.state.get().note).toBeUndefined();
     expect(loader.state.get().saved[562]).toMatchObject({ complete: true, size: 300, made: madeMeta(1) });
     expect(draftState.get(562)).toMatchObject({ origin: { kind: 'made', taxid: 562, made: madeMeta(1) } });
     expect(loader.state.get().list).toMatchObject([{ taxid: 562, size: 300, origin: 'made' }]);
-    // Once the search ends, Delete removes the copy and the refusal goes.
+    downloader.next = { ok: false, reason: 'in-use' };
+    loader.download(HUMAN);
+    await loader.idle();
+    expect(loader.state.get().load).toEqual({ taxid: HUMAN, progress: { state: 'failed', message: downloadRefusal } });
+    // Once the run ends, Delete removes the copy and the refusal goes.
     store.inUse.delete(562);
     await loader.delete(562);
     expect(loader.state.get().refusal).toBeUndefined();

@@ -48,7 +48,7 @@ export interface CountsState {
   readonly inTab: Readonly<Record<string, true>>;
   /** A word on a taxonomy ID's copy: why it could not be removed. */
   readonly note?: { readonly taxid: number; readonly text: string };
-  /** Why the last Delete of a taxonomy ID's copy was refused (a search uses it, or another tab writes it); it stays. */
+  /** Why the last Delete of a taxonomy ID's copy was refused (a run reads it, or another tab writes it); it stays. */
   readonly refusal?: { readonly taxid: number; readonly text: string };
   /** Complete saved copies available in this browser, ordered by taxonomy ID. */
   readonly list: readonly SavedCountsEntry[];
@@ -299,7 +299,7 @@ export class CountsLoader {
     try {
       await this.deps.store.deleteCounts(taxid);
     } catch (error) {
-      // Refused in place (a queued or running search uses the copy, or another tab writes it): the copy stays.
+      // Refused in place (a queued or running run reads the copy, or another tab writes it): the copy stays.
       const refusal = inUseOrBusy(error, taxid);
       if (refusal !== undefined) this.update({ refusal: { taxid, text: refusal } });
       else this.update({ note: { taxid, text: `The saved counts could not be removed: ${messageOf(error)}` } });
@@ -465,7 +465,7 @@ function problem(result: Exclude<CountsResult, { ok: true }>, taxid: number): st
     case 'busy':
       return busySentence(taxid);
     case 'in-use':
-      return inUseSentence(taxid);
+      return inUseSentence(taxid, 'download');
     case 'changed':
       return `Another tab changed the saved counts for ${taxid}: press Continue again.`;
     case 'not-kept':
@@ -477,14 +477,24 @@ function busySentence(taxid: number): string {
   return `Another tab is downloading the counts for ${taxid}.`;
 }
 
-function inUseSentence(taxid: number): string {
-  return `A search that uses the counts for ${taxid} is queued or running.`;
+type CountsAction = 'delete' | 'replace' | 'download';
+
+function inUseSentence(taxid: number, action: CountsAction): string {
+  const what = `a run that reads the counts for ${taxid} was queued or running.`;
+  switch (action) {
+    case 'delete':
+      return `Not removed: ${what} Press Delete again when it has ended.`;
+    case 'replace':
+      return `Not replaced: ${what} Save again when it has ended.`;
+    case 'download':
+      return `Not downloaded: ${what} Download again when it has ended.`;
+  }
 }
 
 /** The sentence of a refusal in place (the ID's lock is held), or undefined for another error. */
 function inUseOrBusy(error: unknown, taxid: number): string | undefined {
   const name = (error as { name?: unknown } | null)?.name;
-  if (name === COUNTS_IN_USE) return inUseSentence(taxid);
+  if (name === COUNTS_IN_USE) return inUseSentence(taxid, 'delete');
   if (name === COUNTS_BUSY) return busySentence(taxid);
   return undefined;
 }
@@ -492,7 +502,7 @@ function inUseOrBusy(error: unknown, taxid: number): string | undefined {
 /** A save that could not start: refused in place (the ID's lock is held), or failed. */
 function refusedSave(error: unknown, taxid: number): Extract<SaveCountsResult, { ok: false }> {
   const name = (error as { name?: unknown } | null)?.name;
-  if (name === COUNTS_IN_USE) return { ok: false, reason: 'in-use', message: inUseSentence(taxid) };
+  if (name === COUNTS_IN_USE) return { ok: false, reason: 'in-use', message: inUseSentence(taxid, 'replace') };
   if (name === COUNTS_BUSY) return { ok: false, reason: 'busy', message: busySentence(taxid) };
   return { ok: false, reason: 'failed', message: messageOf(error) };
 }

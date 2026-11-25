@@ -781,14 +781,15 @@ test.describe('real reactors and native CLI parity', () => {
     await page.getByTestId('tool-tab-file-0').click();
     await page.getByTestId('tool-save-taxid-input').fill(String(TAXID));
     await page.getByTestId('tool-save-taxid-button').click();
-    const expectedRefusal = `A search that uses the counts for ${TAXID} is queued or running.`;
-    await expect(page.getByTestId('tool-save-error')).toHaveText(expectedRefusal);
+    const expectedReplaceRefusal = `Not replaced: a run that reads the counts for ${TAXID} was queued or running. Save again when it has ended.`;
+    const expectedDeleteRefusal = `Not removed: a run that reads the counts for ${TAXID} was queued or running. Press Delete again when it has ended.`;
+    await expect(page.getByTestId('tool-save-error')).toHaveText(expectedReplaceRefusal);
     await expect(page.getByTestId('replace-counts-dialog')).not.toBeVisible();
 
     // Attempt Delete on Search tab while Run 4 is queued: must be refused in place.
     await page.getByTestId('tab-search').click();
     await page.getByTestId('counts-delete').click();
-    await expect(page.getByTestId('counts-error')).toHaveText(expectedRefusal);
+    await expect(page.getByTestId('counts-error')).toHaveText(expectedDeleteRefusal);
     await expect(page.getByTestId('counts-note')).toHaveText(/^Made in this browser \(\d{4}-\d{2}-\d{2}, .+\)$/);
     await expect(page.getByTestId('counts-delete')).toBeVisible();
 

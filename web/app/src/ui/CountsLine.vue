@@ -30,7 +30,7 @@ const copy = computed(() => state.value.saved[props.taxid] ?? undefined);
 /** The download of this taxonomy ID, or the failure of it. */
 const progress = computed(() => (state.value.load?.taxid === props.taxid ? state.value.load.progress : undefined));
 const busy = computed(() => progress.value !== undefined && progress.value.state !== 'failed');
-/** A download that failed, or a Delete refused in place (a search uses the copy). */
+/** A download that failed, or a Delete refused in place (a run reads the copy). */
 const failure = computed(() =>
   progress.value?.state === 'failed'
     ? progress.value.message

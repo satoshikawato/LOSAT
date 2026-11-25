@@ -238,6 +238,25 @@ fn the_applications_lists_are_their_handles_and_classes() {
     }
 }
 
+// NCBI unit test (598d8ae6): c++/src/algo/blast/unit_tests/api/blastsetup_unit_test.cpp:225-238 SubjectIsNucleotide
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
+#[test]
+fn subject_is_nucleotide_follows_ncbi_program_types() {
+    for (kind, nucleotide) in [
+        (RequestKind::Blastn, true),
+        (RequestKind::Blastp, false),
+        (RequestKind::Blastx, false),
+        (RequestKind::Tblastn, true),
+        (RequestKind::Tblastx, true),
+        (RequestKind::Psiblast, false),
+        (RequestKind::PsiTblastn, true),
+        (RequestKind::Rpsblast, false),
+        (RequestKind::Rpstblastn, false),
+    ] {
+        assert_eq!(kind.subject_is_nucleotide(), nucleotide, "{kind:?}");
+    }
+}
+
 // NCBI BLAST+ 2.17.0 (probe 9): psiblast's given options in place (`p9.ps.q.db.opts2.f6`) or
 // where their class sets them (`p9.ps.q.db.opts1.f6`, `opts3`, `p9.ps.three.db.it2.ssp.f6`);
 // rpsblast's window only when given (`p9.rps.q40.opts.f6`).

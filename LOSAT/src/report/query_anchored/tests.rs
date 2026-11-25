@@ -92,7 +92,7 @@ fn probe(query: &str, query_number: usize, subjects: &[&str]) -> Probe {
 
 /// The Dense-seg of an HSP of BTOP `btop` that starts at `qstart` and `sstart` (1-based): one segment per
 /// run of aligned, query-only and subject-only columns.
-fn push_btop(hsps: &mut Hsps, subject: u32, qstart: u32, sstart: u32, btop: &str) {
+pub(super) fn push_btop(hsps: &mut Hsps, subject: u32, qstart: u32, sstart: u32, btop: &str) {
     let bytes = btop.as_bytes();
     let mut columns = Vec::new();
     let mut at = 0;

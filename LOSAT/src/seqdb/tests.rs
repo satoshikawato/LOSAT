@@ -1838,30 +1838,54 @@ fn alias_filter_keys_open_or_refuse_as_ncbi() {
     )
     .unwrap();
     assert_eq!(SeqDb::open(&name, SeqType::Protein).unwrap().num_seqs(), 10);
-    // Version 5 SEQIDLIST and TAXIDLIST remain refused explicitly.
-    for key in ["SEQIDLIST", "TAXIDLIST"] {
+    // On a version 5 database, GILIST, TILIST, SEQIDLIST and TAXIDLIST are all read (a missing
+    // file is NCBI's memory map error).
+    let name_v5 = dir.join("keyed_v5").to_str().unwrap().to_string();
+    for key in ["GILIST", "TILIST"] {
         std::fs::write(
-            dir.join("keyed.pal"),
+            dir.join("keyed_v5.pal"),
             format!("TITLE t\nDBLIST prot_v5\n{key} 1\n"),
         )
         .unwrap();
-        let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
+        let error = SeqDb::open(&name_v5, SeqType::Protein).unwrap_err();
         assert!(
-            matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains(key)),
+            matches!(&error, SeqDbError::MemoryMap(message)
+                if String::from_utf8_lossy(message)
+                    .ends_with(&format!("{}1'", std::path::MAIN_SEPARATOR))),
             "v5 {key}: {error}"
         );
     }
-    // MASKLIST is read (the GI-indexed masks, `gi_mask_list`); MEMB_BIT is read and enables
-    // definition-line filtering (`drops_lineless_hits`) when non-zero.
-    for (bit, drops) in [(1, true), (0, false)] {
+    for key in ["SEQIDLIST", "TAXIDLIST"] {
         std::fs::write(
-            dir.join("keyed.pal"),
-            format!("TITLE t\nDBLIST prot_v4\nMEMB_BIT {bit}\n"),
+            dir.join("keyed_v5.pal"),
+            format!("TITLE t\nDBLIST prot_v5\n{key} 1\n"),
         )
         .unwrap();
-        let db = SeqDb::open(&name, SeqType::Protein).unwrap();
-        assert_eq!(db.num_seqs(), 10);
-        assert_eq!(db.drops_lineless_hits(), drops);
+        let error = SeqDb::open(&name_v5, SeqType::Protein).unwrap_err();
+        assert!(
+            matches!(&error, SeqDbError::Ncbi(_))
+                && error
+                    .to_string()
+                    .ends_with(&format!("{}1'", std::path::MAIN_SEPARATOR)),
+            "v5 {key}: {error}"
+        );
+    }
+    // MASKLIST is read (the GI-indexed masks, `gi_mask_list`); MEMB_BIT is read on both v4 and
+    // v5 and enables definition-line filtering (`drops_lineless_hits`) when non-zero.
+    for (alias_file, db_name, base) in [
+        ("keyed.pal", &name, "prot_v4"),
+        ("keyed_v5.pal", &name_v5, "prot_v5"),
+    ] {
+        for (bit, drops) in [(1, true), (0, false)] {
+            std::fs::write(
+                dir.join(alias_file),
+                format!("TITLE t\nDBLIST {base}\nMEMB_BIT {bit}\n"),
+            )
+            .unwrap();
+            let db = SeqDb::open(db_name, SeqType::Protein).unwrap();
+            assert_eq!(db.num_seqs(), 10);
+            assert_eq!(db.drops_lineless_hits(), drops);
+        }
     }
     // Keys NCBI's CSeqDB does not apply are ignored: an unknown key, MAX_SEQ_LENGTH and
     // VDBLIST.

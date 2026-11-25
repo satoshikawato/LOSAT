@@ -1,0 +1,190 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>BLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: tests/db_search/x1bq/mixed_s.fna
+           3 sequences; 3,214 total letters
+
+
+
+<b>Query=</b> qA
+
+Length=1000
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_only_classN only class N                                            <a href=#BL_ORD_ID:1>367</a>     1e-104
+s_infirst mixed normal and class N                                    <a href=#BL_ORD_ID:0>367</a>     1e-104
+
+
+><a name=BL_ORD_ID:1></a> s_only_classN only class N
+Length=1342
+
+ Score = 367 bits (400),  Expect = 1e-104
+ Identities = 200/200 (100%), Gaps = 0/200 (0%)
+ Strand=Plus/Plus
+
+Query  801  CGGTGTTGGAGTGATCAGCCACTTGTGCTGTAGAGACCCATTTTCAGATCCGTTTCAAAT  860
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    CGGTGTTGGAGTGATCAGCCACTTGTGCTGTAGAGACCCATTTTCAGATCCGTTTCAAAT  60
+
+Query  861  TGTTGGCCTTGAATGAGTCCGTTGCAAGGGCAATCGCATGCCGCTATAAGGGAAAATGCA  920
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   TGTTGGCCTTGAATGAGTCCGTTGCAAGGGCAATCGCATGCCGCTATAAGGGAAAATGCA  120
+
+Query  921  TTGCCGCCCATACAGATCAGGTTATTCATCTGGATTGGGGAAGCTCTTAATCGGCGGTCA  980
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  TTGCCGCCCATACAGATCAGGTTATTCATCTGGATTGGGGAAGCTCTTAATCGGCGGTCA  180
+
+Query  981  CAGATATAGGGCGGGCCCTC  1000
+            ||||||||||||||||||||
+Sbjct  181  CAGATATAGGGCGGGCCCTC  200
+
+
+><a name=BL_ORD_ID:0></a> s_infirst mixed normal and class N
+Length=1672
+
+ Score = 367 bits (400),  Expect = 1e-104
+ Identities = 200/200 (100%), Gaps = 0/200 (0%)
+ Strand=Plus/Plus
+
+Query  801  CGGTGTTGGAGTGATCAGCCACTTGTGCTGTAGAGACCCATTTTCAGATCCGTTTCAAAT  860
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1    CGGTGTTGGAGTGATCAGCCACTTGTGCTGTAGAGACCCATTTTCAGATCCGTTTCAAAT  60
+
+Query  861  TGTTGGCCTTGAATGAGTCCGTTGCAAGGGCAATCGCATGCCGCTATAAGGGAAAATGCA  920
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  61   TGTTGGCCTTGAATGAGTCCGTTGCAAGGGCAATCGCATGCCGCTATAAGGGAAAATGCA  120
+
+Query  921  TTGCCGCCCATACAGATCAGGTTATTCATCTGGATTGGGGAAGCTCTTAATCGGCGGTCA  980
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  121  TTGCCGCCCATACAGATCAGGTTATTCATCTGGATTGGGGAAGCTCTTAATCGGCGGTCA  180
+
+Query  981  CAGATATAGGGCGGGCCCTC  1000
+            ||||||||||||||||||||
+Sbjct  181  CAGATATAGGGCGGGCCCTC  200
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+
+Effective search space used: 3133725
+
+
+<b>Query=</b> qB
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_infirst mixed normal and class N                                    <a href=#BL_ORD_ID:0>458</a>     9e-133
+s_only_classN only class N                                            <a href=#BL_ORD_ID:1>367</a>     3e-105
+s_norm_lo low scoring normal                                          <a href=#BL_ORD_ID:2>222</a>     9e-62 
+
+
+><a name=BL_ORD_ID:0></a> s_infirst mixed normal and class N
+Length=1672
+
+ Score = 458 bits (500),  Expect = 9e-133
+ Identities = 250/250 (100%), Gaps = 0/250 (0%)
+ Strand=Plus/Plus
+
+Query  1     AGAACCAATTCACGCCGTGGAAACTCTATCGCATTGTCCAGAAAGTCTCTTAGCTTGATT  60
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1423  AGAACCAATTCACGCCGTGGAAACTCTATCGCATTGTCCAGAAAGTCTCTTAGCTTGATT  1482
+
+Query  61    GCTATAATCATCAGTGCCATTCATATGTAACAGTCGTGTGCGTCACTCCAATATAACGTC  120
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1483  GCTATAATCATCAGTGCCATTCATATGTAACAGTCGTGTGCGTCACTCCAATATAACGTC  1542
+
+Query  121   CTTATATCCGTGTTACTATCGTTTAAAACACCCTGAGGTCGTCTCGTTCAGGAACGGTTC  180
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1543  CTTATATCCGTGTTACTATCGTTTAAAACACCCTGAGGTCGTCTCGTTCAGGAACGGTTC  1602
+
+Query  181   CGCCCCCAGCTATAACGAGGCACACGGAACAACAATGCAGTGGATTTGGTCCAGCAAGGT  240
+             ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  1603  CGCCCCCAGCTATAACGAGGCACACGGAACAACAATGCAGTGGATTTGGTCCAGCAAGGT  1662
+
+Query  241   GACGATTCCC  250
+             ||||||||||
+Sbjct  1663  GACGATTCCC  1672
+
+
+Sequence with id BL_ORD_ID:0 no longer exists in database...alignment skipped
+ Score = 21.4 bits (22),  Expect = 0.33
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Plus
+
+Query  249   CCGAGGCCTTG  259
+             |||||||||||
+Sbjct  1190  CCGAGGCCTTG  1200
+
+
+Sequence with id BL_ORD_ID:1 no longer exists in database...alignment skipped
+><a name=BL_ORD_ID:1></a> s_only_classN only class N
+Length=1342
+
+ Score = 21.4 bits (22),  Expect = 0.33
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Plus
+
+Query  249   CCGAGGCCTTG  259
+             |||||||||||
+Sbjct  1190  CCGAGGCCTTG  1200
+
+
+><a name=BL_ORD_ID:2></a> s_norm_lo low scoring normal
+Length=200
+
+ Score = 222 bits (242),  Expect = 9e-62
+ Identities = 121/121 (100%), Gaps = 0/121 (0%)
+ Strand=Plus/Plus
+
+Query  150  ACCCTGAGGTCGTCTCGTTCAGGAACGGTTCCGCCCCCAGCTATAACGAGGCACACGGAA  209
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  40   ACCCTGAGGTCGTCTCGTTCAGGAACGGTTCCGCCCCCAGCTATAACGAGGCACACGGAA  99
+
+Query  210  CAACAATGCAGTGGATTTGGTCCAGCAAGGTGACGATTCCCGAGGCCTTGAAGTATAGGT  269
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  100  CAACAATGCAGTGGATTTGGTCCAGCAAGGTGACGATTCCCGAGGCCTTGAAGTATAGGT  159
+
+Query  270  A  270
+            |
+Sbjct  160  A  160
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+
+Effective search space used: 915264
+
+
+  Database: tests/db_search/x1bq/mixed_s.fna
+    Posted date:  Nov 25, 2026  4:21 PM
+  Number of letters in database: 3,214
+  Number of sequences in database:  3
+
+
+
+Matrix: blastn matrix 2 -3
+</PRE>
+</BODY>
+</HTML>

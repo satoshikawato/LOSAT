@@ -633,7 +633,7 @@ pub(crate) fn report_ordinal_ids(
                     }
                     Ok(true) if reported => {
                         failed = Some(anyhow::anyhow!(
-                            "a hit of the profile of OID {} whose definition lines the RPS-BLAST database's alias files remove (their OID_MASK_TYPE, GILIST, TILIST, SEQIDLIST or MEMB_BIT), in a database of several volumes (NCBI BLAST+ 2.17.0 searches the volumes without the alias files, and its report does not find the profile: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
+                            "a hit of the profile of OID {} whose definition lines the RPS-BLAST database's alias files remove (their OID_MASK_TYPE, GILIST, TILIST, SEQIDLIST, TAXIDLIST or MEMB_BIT), in a database of several volumes (NCBI BLAST+ 2.17.0 searches the volumes without the alias files, and its report does not find the profile: Unknown, or a null pointer exception) is not supported by LOSAT's {program}",
                             hsp_list.oid
                         ));
                         return true;

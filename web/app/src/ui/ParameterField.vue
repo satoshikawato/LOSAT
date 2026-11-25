@@ -13,6 +13,7 @@ import type { ParameterField } from '../domain/programs';
 import { formatBytes, optionHelp } from './format';
 import type { FormModel } from './form-model';
 import CountsLine from './CountsLine.vue';
+import DatabasePicker from './DatabasePicker.vue';
 import HelpTip from './HelpTip.vue';
 import OptionName from './OptionName.vue';
 import { REFUSAL_ID, refusedMark } from './refusal';
@@ -68,6 +69,8 @@ const filterEditing = ref(false);
 const fileOn = computed(
   () => props.field.kind === 'file' && (value.value === true || text.value.trim() !== '' || taxidValue.value === true || taxidText.value.trim() !== ''),
 );
+/** A database option (`-filtering_db`) is on while its box is checked: no database yet (`true`), or the database path. */
+const dbOn = computed(() => props.field.kind === 'database' && (value.value === true || text.value.trim() !== ''));
 /** The row names its counts by a taxonomy ID (the default) or by a file chosen beside it. */
 const countsBy = computed(() => (taxidField.value === undefined || value.value === true || text.value.trim() !== '' ? 'file' : 'taxid'));
 /** The option that the row writes: -window_masker_taxid while the counts are named by a taxonomy ID. */
@@ -117,7 +120,11 @@ const mark = (on = true) => refusedMark(refused.value && on, refusalId.value);
 const help = computed(() => optionHelp(option.value?.help));
 /** Whether the field's sentence hint is shown alongside its "?". */
 const showHint = computed(
-  () => !unread.value && Boolean(props.field.hint) && (props.field.kind !== 'file' || (fileOn.value && countsBy.value === 'file')),
+  () =>
+    !unread.value &&
+    Boolean(props.field.hint) &&
+    (props.field.kind !== 'file' || (fileOn.value && countsBy.value === 'file')) &&
+    (props.field.kind !== 'database' || !dbOn.value),
 );
 /** Whether the taxonomy ID row's missing-ID sentence is shown alongside its "?". */
 const showTaxidMissing = computed(
@@ -181,6 +188,10 @@ function toggleFile(on: boolean): void {
   if (taxidField.value !== undefined) props.model.setRepeats?.(on ? 'taxid' : 'off');
   else if (on) props.model.setField(props.field.flag, true);
   else props.model.setFile(props.field.flag, undefined);
+}
+
+function toggleDatabase(on: boolean): void {
+  props.model.setFilteringDbEnabled?.(on);
 }
 
 /** The select of a row with a taxonomy ID: how the counts are named (a chosen file is let go). */
@@ -365,6 +376,16 @@ function onList(next: string): void {
               </button>
             </span>
           </template>
+          <template v-else-if="field.kind === 'database'">
+            <input
+              :id="id"
+              type="checkbox"
+              :checked="dbOn"
+              v-bind="mark()"
+              :data-testid="id"
+              @change="toggleDatabase(($event.target as HTMLInputElement).checked)"
+            />
+          </template>
           <template v-else-if="field.kind === 'file-text'">
             <button type="button" :data-testid="`${id}-choose`" @click="fileInput?.click()">Choose file…</button>
             <input
@@ -479,6 +500,18 @@ function onList(next: string): void {
         </span>
         <!-- The line that downloads the counts of the taxonomy ID, under the row's controls (WW2). -->
         <CountsLine v-if="field.kind === 'file' && fileOn && countsBy === 'taxid' && taxid !== undefined && model.counts" :counts="model.counts" :taxid="taxid" :focus-id="`${id}-taxid`" />
+        <!-- Shared local BLAST database picker for BLASTN `-filtering_db` (RG-D4 W2). -->
+        <DatabasePicker
+          v-if="field.kind === 'database' && dbOn && model.filteringDb !== undefined"
+          :pick="model.filteringDb"
+          :molecule-kind="field.database?.kind ?? 'nucleotide'"
+          :context-label="field.label"
+          :test-id-prefix="id"
+          select-label="Repeats database"
+          @files="model.setFilteringDbFiles?.($event)"
+          @select="model.selectFilteringDb?.($event)"
+          @clear="model.clearFilteringDb?.()"
+        />
       </template>
     </div>
   </div>

@@ -69,11 +69,6 @@ const AWAITING_CDD_DELTA: [&str; 12] = [
     "c_two_v4",
 ];
 
-/// Rows whose alias files hold keys that LOSAT's database reader refuses until line RG-D reads
-/// them: `TAXIDLIST` over a version 5 database (D1c-2, `seqdb::alias::refuse_v5_lists`);
-/// `-dir .` of the alias rows meets it.
-const AWAITING_READER: [&str; 3] = ["a_taxmiss", "a_dir", "a_dir_v1"];
-
 /// `tests/fixtures/blastdbcheck`.
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/blastdbcheck")
@@ -477,12 +472,11 @@ fn text(bytes: &[u8]) -> String {
 }
 
 /// Every list of rows that LOSAT must refuse.
-const REFUSAL_LISTS: [&[&str]; 5] = [
+const REFUSAL_LISTS: [&[&str]; 4] = [
     &LOSAT_REFUSES,
     &AWAITING_ZERO_PAGE,
     &AWAITING_Q_D2B_OV,
     &AWAITING_CDD_DELTA,
-    &AWAITING_READER,
 ];
 
 fn must_refuse(name: &str) -> bool {

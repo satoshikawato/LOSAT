@@ -352,7 +352,8 @@ pub fn word_cutoff_score_for_update(
     // NOTE: This intentionally mixes AA (query_len_aa) and nucleotide (subject_len_nucl) lengths!
     // This is exactly what NCBI does - see blast_parameters.c:360-362
     let min_len = (query_len_aa as u64).min(subject_len_nucl as u64);
-    let searchsp = (min_len * (subject_len_nucl as u64)) as i64;
+    // NCBI multiplies two `Uint8` values (unsigned 64-bit wrap when `subj_length` is negative).
+    let searchsp = min_len.wrapping_mul(subject_len_nucl as u64) as i64;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:348-374 (BlastInitialWordParametersUpdate)
     if crate::utils::xenv::debug_cutoffs_is_some() && subject_len_nucl > 600_000 {

@@ -16,7 +16,7 @@ use crate::utils::os_bytes::{path_from_bytes, path_of_bytes};
 use crate::writedb::alias_file::{self, AliasError, FilterType, CLOCK_ERROR};
 use crate::writedb::bioseq::{self, Bioseq, ParsedIds};
 use crate::writedb::build_db::{create_directories, delete_blast_db};
-use crate::writedb::convert::{short_nucleotide_data, ShortNucleotideData};
+use crate::writedb::convert::{iupacna_high_byte, short_nucleotide_data, ShortNucleotideData};
 use crate::writedb::deflines::{bioseq_deflines, first_org_taxid, BioseqDeflinesError};
 use crate::writedb::files::{make_short_name, DbVersion};
 use crate::writedb::taxid_set::{TaxIdMapError, TaxIdSet};
@@ -131,7 +131,9 @@ impl From<WriteDbError> for RunError {
             WriteDbError::CreationBytes(message) => RunError::Exception(message),
             WriteDbError::Exception(exception) => RunError::Exception(exception.get_msg().to_vec()),
             WriteDbError::Database(message) => RunError::SeqDb(message.into_bytes()),
-            WriteDbError::OutOfMemory | WriteDbError::InvalidArgument(_) => RunError::Unknown,
+            WriteDbError::OutOfMemory
+            | WriteDbError::InvalidArgument(_)
+            | WriteDbError::LengthError(_) => RunError::Unknown,
             WriteDbError::OrdinalIdWithoutIds => RunError::Refused(
                 "a query whose first definition line has no Seq-id, with -index false (NCBI's \
                  makeprofiledb writes its gnl|BL_ORD_ID id past the end of an empty list)"
@@ -143,6 +145,9 @@ impl From<WriteDbError> for RunError {
             WriteDbError::Io { path, source } => {
                 RunError::Failed(format!("{}: {source}", path.display()))
             }
+            // Only makeblastdb's log raises it (`writedb::build_db::endl`); makeprofiledb's
+            // writer never does.
+            WriteDbError::ClosedPipe => unreachable!("makeblastdb's closed log in makeprofiledb"),
         }
     }
 }
@@ -156,6 +161,8 @@ struct Params<'a> {
     log_file: Option<OpenedFile>,
     /// The list of profile files (`m_InPssmList`), read whole.
     in_list: Vec<u8>,
+    /// `-binary` (`m_binary_scoremat`): read profile files as ASN.1 binary (`MSerial_AsnBinary`).
+    binary: bool,
     /// `-title` (its bytes; `-in` without it).
     title: Vec<u8>,
     word_default_score_threshold: f64,
@@ -227,6 +234,7 @@ fn init<'a>(
     }
     drop(in_file);
     let in_bytes = crate::utils::os_bytes::os_str_bytes(in_name);
+    let binary = args.flag("binary");
     let title = args
         .bytes("title")
         .map_or_else(|| in_bytes.to_vec(), std::borrow::Cow::into_owned);
@@ -288,6 +296,7 @@ fn init<'a>(
         stdout: out,
         log_file,
         in_list,
+        binary,
         title,
         word_default_score_threshold,
         out_db_name,
@@ -368,13 +377,9 @@ pub(super) fn dry_run(
     }
 }
 
-/// LOSAT's refusals of a command line that NCBI's makeprofiledb reads: the binary profiles of
-/// `-binary` (their reader, row PS10b; its row of the refusals, `cli::run_refusal`) and the
-/// database types other than `rps` (row PS14).
+/// LOSAT's refusals of a command line that NCBI's makeprofiledb reads: database types other than
+/// `rps` (row PS14).
 fn refusal(args: &Args) -> Option<String> {
-    if args.flag("binary") {
-        return Some(crate::cli::run_refusal(super::PROGRAM, "binary"));
-    }
     match args.value("dbtype") {
         Some("rps") | None => None,
         Some(dbtype) => Some(unsupported(&format!(
@@ -584,56 +589,76 @@ fn create_alias_file(
     }
 }
 
-/// A profile file read: the reader's posts written, its errors as makeprofiledb's handler
-/// reports them.
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1381-1393
-// The read of `pssm` from `in_stream` in ASN.1 text (`MSerial_AsnText`): a `CSerialException`'s
-// message (`line N: ...`), the frame of the root object for a text that ends in it
-// (`CEofException`), the message of the newest exception of the reader's stack; a `std::exception`
-// is the handler's unknown one.
-fn read_profile(
-    path: &Path,
-    filename: &[u8],
-    diag: &mut Diag,
-) -> Result<PssmWithParameters, RunError> {
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1390-1394
-    // The file is read through a `CNcbiIfstream` whose open is not checked: a file that does not
-    // open (no permission) reads as an empty stream, whose reader stops at once.
-    let text = std::fs::read(path).unwrap_or_default();
-    let read = crate::blastinput::pssm_text::read_pssm(&text);
-    for post in &read.posts {
+/// Posts the messages emitted by the shared ASN.1 reader (`Post`) as makeprofiledb posts them:
+/// makeprofiledb leaves NCBI's diagnostic post level at its default (`eDiag_Error`), so warnings
+/// (`Post::Utf8Tag`, 803.10) are suppressed while errors (`Post::BadChar`, `Post::Error`,
+/// `Post::UnendedByteBlock`) are written with no application prefix.
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1381-1395
+fn post_asn_posts(diag: &mut Diag, posts: &[Post]) {
+    for post in posts {
         match post {
             Post::BadChar(replaced) => diag.post_replaced(std::slice::from_ref(replaced)),
             Post::Error(text) => diag.err_post(text),
-            // Posts of a text reader's string and byte blocks (makeprofiledb's application has no
-            // diagnostic prefix, as `Diag::err_post`).
+            Post::Utf8Tag(_) => {}
             other => diag.write_text(&other.line(None)),
         }
     }
+}
+
+/// Maps an ASN.1 [`ReadError`] of root type `root_type` to makeprofiledb's `Run` error: a
+/// `CSerialException` or `CException`'s newest `GetMsg()`, the root object's `Frame type=` for
+/// `CEofException`, `Unknown` for `std::exception`, and `Refused` for LOSAT's reader limits.
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1878-1904
+fn read_error_to_run_error(
+    error: ReadError,
+    root_type: &str,
+    refuse: impl FnOnce(String) -> String,
+) -> RunError {
+    match error {
+        ReadError::Serial(exception) | ReadError::Exception(exception) => {
+            RunError::Exception(exception.get_msg().to_vec())
+        }
+        ReadError::Eof => RunError::Exception(
+            format!(" Frame type= eFrameNamed, Object type= {root_type}").into_bytes(),
+        ),
+        ReadError::Std(_) | ReadError::OutOfMemory => RunError::Unknown,
+        ReadError::Unsupported(what) => RunError::Refused(refuse(what)),
+    }
+}
+
+/// A profile file read: the reader's posts written, its errors as makeprofiledb's handler
+/// reports them.
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1381-1395
+// The read of `pssm` from `in_stream` in ASN.1 text (`MSerial_AsnText`) or binary
+// (`MSerial_AsnBinary` when `-binary` is set): a `CSerialException`'s message (`line N: ...` or
+// `byte N: ...`), the frame of the root object for an input that ends in it (`CEofException`),
+// the message of the newest exception of the reader's stack; a `std::exception` is the handler's
+// unknown one.
+fn read_profile(
+    path: &Path,
+    filename: &[u8],
+    binary: bool,
+    diag: &mut Diag,
+) -> Result<PssmWithParameters, RunError> {
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1386-1395
+    // The file is read through a `CNcbiIfstream` whose open is not checked: a file that does not
+    // open (no permission) reads as an empty stream, whose reader stops at once.
+    let bytes = std::fs::read(path).unwrap_or_default();
+    let read = crate::blastinput::pssm_text::read_profile(&bytes, binary);
+    post_asn_posts(diag, &read.posts);
     use crate::blastinput::pssm_text::PssmReadError;
+    let refuse = |what: String| {
+        format!(
+            "a profile that LOSAT's PSSM reader does not read ({}: {what})",
+            String::from_utf8_lossy(filename)
+        )
+    };
     match read.result {
         Ok(pssm) => Ok(pssm),
-        // `GetMsg()` of the newest exception (the stream's position, or the rethrow of a member
-        // with a set flag), which `CATCH_ALL` prints after "ERROR: ".
-        Err(PssmReadError::Ncbi(ReadError::Serial(exception))) => {
-            Err(RunError::Exception(exception.get_msg().to_vec()))
+        Err(PssmReadError::Ncbi(error)) => {
+            Err(read_error_to_run_error(error, "PssmWithParameters", refuse))
         }
-        Err(PssmReadError::Ncbi(ReadError::Eof)) => Err(RunError::Exception(
-            b" Frame type= eFrameNamed, Object type= PssmWithParameters".to_vec(),
-        )),
-        Err(PssmReadError::Ncbi(ReadError::Exception(exception))) => {
-            Err(RunError::Exception(exception.get_msg().to_vec()))
-        }
-        Err(PssmReadError::Ncbi(ReadError::Std(_) | ReadError::OutOfMemory)) => {
-            Err(RunError::Unknown)
-        }
-        Err(PssmReadError::Refused(what))
-        | Err(PssmReadError::Ncbi(ReadError::Unsupported(what))) => {
-            Err(RunError::Refused(format!(
-                "a profile that LOSAT's PSSM reader does not read ({}: {what})",
-                String::from_utf8_lossy(filename)
-            )))
-        }
+        Err(PssmReadError::Refused(what)) => Err(RunError::Refused(refuse(what))),
     }
 }
 
@@ -705,6 +730,7 @@ fn make_vol(
         Platform::host(),
         indices,
     );
+    output_db.set_diag_prefix(None);
     output_db.set_max_file_size(MAX_FILE_SIZE);
     let result = add_profiles(params, diag, &mut rps, &mut output_db, smps);
     // `output_db->Close()` after the loop, or the writer's destructor in the unwinding of an
@@ -771,11 +797,13 @@ fn aborts(first: RunError, then: &WriteDbError) -> RunError {
     if let RunError::Refused(_) = first {
         return first;
     }
+    let message = then.message();
+    let message = message.strip_suffix(b"\n").unwrap_or(&message);
     RunError::Refused(format!(
         "an error ({}) after which the database's writer stops with another ({}; NCBI's \
          makeprofiledb aborts there)",
         first.text(),
-        String::from_utf8_lossy(&then.message())
+        String::from_utf8_lossy(message)
     ))
 }
 
@@ -792,7 +820,7 @@ fn add_profiles(
         if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
             return Err(RunError::Input([filename, b" does not exists"].concat()));
         }
-        let mut pssm_w_parameters = read_profile(&path, filename, diag)?;
+        let mut pssm_w_parameters = read_profile(&path, filename, params.binary, diag)?;
         let sm = check_input_scoremat(&pssm_w_parameters, filename)?;
         // `seq_size`, the `int` of `GetQueryLength()`: negative past `INT_MAX` (`query_length`).
         let seq_size = query_length(&pssm_w_parameters);
@@ -893,16 +921,22 @@ fn add_to_database(
     let Some(SeqEntry::Seq(query)) = &pssm_w_parameters.pssm.query else {
         unreachable!("check_input_scoremat found the query's Bioseq");
     };
-    let mut deflines = match &query.descr {
+    let (mut deflines, null_seqids) = match &query.descr {
         Some(descr) => {
-            let extracted = bioseq_deflines(&query.ids, descr).map_err(|error| match error {
+            let read = bioseq_deflines(&query.ids, descr);
+            post_asn_posts(diag, &read.posts);
+            let extracted = read.result.map_err(|error| match error {
                 BioseqDeflinesError::NoDeflines => {
                     RunError::Exception(b"Error: No deflines provided.".to_vec())
                 }
-                BioseqDeflinesError::BinaryHeader(reason) => RunError::Refused(format!(
-                    "binary definition lines (a user object ASN1_BlastDefLine) that LOSAT's \
-                     reader of database headers does not read ({reason})"
-                )),
+                BioseqDeflinesError::BinaryHeader(error) => {
+                    read_error_to_run_error(error, "Blast-def-line-set", |what| {
+                        format!(
+                            "binary definition lines (a user object ASN1_BlastDefLine) that \
+                             LOSAT's reader does not read ({what})"
+                        )
+                    })
+                }
                 BioseqDeflinesError::NullDescriptor => null_descriptor(),
             })?;
             // The binary definition lines are not encoded again here (`bin_hdr` is kept).
@@ -910,15 +944,18 @@ fn add_to_database(
                 output_db.post_extracted_deflines(&extracted.set);
                 post_writer(diag, params.stdout, output_db);
             }
-            extracted.set
+            (extracted.set, extracted.null_seqids)
         }
-        None => DeflineSet {
-            deflines: vec![BlastDefline {
-                ids: query.ids.clone(),
-                ..BlastDefline::default()
-            }],
-            utf8: false,
-        },
+        None => (
+            DeflineSet {
+                deflines: vec![BlastDefline {
+                    ids: query.ids.clone(),
+                    ..BlastDefline::default()
+                }],
+                utf8: false,
+            },
+            Vec::new(),
+        ),
     };
     if !params.user_taxids {
         let first_id = query.ids.first();
@@ -938,7 +975,13 @@ fn add_to_database(
             }
         }
     }
-    params.taxids.fix_tax_id(&mut deflines);
+    if params
+        .taxids
+        .fix_tax_id_checked(&mut deflines, &null_seqids)
+        .is_err()
+    {
+        return Err(null_descriptor());
+    }
     let inst = &query.inst;
     let seq_data = inst.seq_data.as_ref().map(|data| match data {
         SeqData::Iupacna(letters) => bioseq::SeqData::Iupacna(letters.clone()),
@@ -950,6 +993,7 @@ fn add_to_database(
         SeqData::Other(_) => bioseq::SeqData::Other,
     });
     let length = inst.length.unwrap_or(0);
+    let iupacna_hi = seq_data.as_ref().and_then(iupacna_high_byte);
     let short = seq_data
         .as_ref()
         .and_then(|data| short_nucleotide_data(data, length));
@@ -970,7 +1014,19 @@ fn add_to_database(
     let added = output_db.add_sequence(bioseq);
     post_writer(diag, params.stdout, output_db);
     added?;
-    output_db.set_deflines(deflines);
+    output_db.set_deflines_with_null_seqids(deflines, null_seqids);
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:590-604
+    // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:313-339
+    // Before `WriteDB_Ncbi4naToBinary`, `WriteDB_IupacnaToBinary` runs `x_ConvertIupacnaTo4na` on
+    // all `v.size()` bytes; its pair loop indexes the conversion table with a signed `char`, so
+    // any byte >= 0x80 in `0..(v.len() & !1)` reads before the table (undefined behaviour).
+    if let Some((index, byte)) = iupacna_hi {
+        return Err(RunError::Refused(format!(
+            "a profile whose query has an iupacna byte 0x{byte:02X} at position {index} (NCBI's \
+             makeprofiledb indexes its iupacna-to-ncbi4na table with a signed char and reads \
+             before the table)"
+        )));
+    }
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:158-180
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:100-108,324-331
     // A sequence that the writer keeps (its molecule checked) is published at the next
@@ -1003,3 +1059,7 @@ fn add_to_database(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "work_tests.rs"]
+mod tests;

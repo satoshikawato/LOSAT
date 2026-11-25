@@ -97,7 +97,7 @@ pub use local::{check_options, run_local, run_local_database};
 pub(crate) use query_setup::BATCH_SIZE as QUERY_BATCH_SIZE;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:277-279
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub(crate) mod web;
 // The subjects of a search by oid: `-subject` records or the stored sequences of `-db`.
 pub(crate) mod subjects;

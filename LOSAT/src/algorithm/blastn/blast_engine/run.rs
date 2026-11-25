@@ -6302,17 +6302,12 @@ pub fn run(
     // end of file).
     let out_file = open_out_file(&args)?;
     let outfmt = args.outfmt.clone();
-    let pairwise = output_formats.iter().any(|format| format.is_pairwise());
-    let tax_report = output_formats.iter().any(|format| {
-        format
-            .tabular_spec()
-            .is_some_and(|spec| spec.kind == crate::report::tabular::TabularKind::TaxReport)
-    });
-    let mut report = crate::cli::ReportStream::of_cli(out_file, tax_report, args.strategy.as_ref());
+    let mut report =
+        crate::cli::ReportStream::of_cli(out_file, "blastn", &args.outfmt, args.strategy.as_ref());
     let strategy = args.strategy.clone();
     let result = {
         let mut outputs =
-            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut *diagnostics);
+            ReportOutputs::single(&outfmt, OutputSink::Report(&mut report), &mut *diagnostics);
         search_cli(
             args,
             list,
@@ -6333,6 +6328,8 @@ pub fn run(
     };
     // A post of the search strategy left unwritten is LOSAT's internal error (`end_run`).
     let result = crate::report::archive::strategy::end_run(strategy.as_ref(), result);
+    // `~CBlastFormat` and `CATCH_ALL`: a failed report ends the run as NCBI's does.
+    let result = report.finish(result);
     // NCBI writes an error archive after the archives of the batches before when the
     // application stops with one of its own errors, and when the run ends with messages that
     // no archive carried (`PrintErrorArchive` after its `CATCH_ALL`, whatever the status:
@@ -6356,11 +6353,7 @@ pub fn run(
             }
         }
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:252-255
-    // The outfmt 0 formatter's stream throws when a write fails (oracle: `-out /dev/full`,
-    // exit 6; `cli::ReportStream::finish`).
-    report.finish(result, pairwise || tax_report)
+    result
 }
 
 /// The subjects of `-subject` as the handler of the database arguments reads them (`run`):
@@ -6385,23 +6378,23 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report = crate::cli::ReportStream::of_cli(out_file, false, None);
+        let mut report = crate::cli::ReportStream::of_cli(out_file, "blastn", &args.outfmt, None);
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
             &lines,
             &mut report,
         );
-        let _ = std::io::Write::flush(&mut report);
+        let _ = report.finish(Ok(()));
     }
 }
 
 /// The `-out` file, created (`-`: standard output).
-fn open_out_file(args: &BlastnArgs) -> Result<Option<std::io::BufWriter<std::fs::File>>> {
+fn open_out_file(args: &BlastnArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some("BLASTN")).map(std::io::BufWriter::new))
+        .map(|path| crate::cli::create_out_file(path, Some("BLASTN")))
         .transpose()
 }
 
@@ -9734,11 +9727,7 @@ fn write_format_prolog(
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<()> {
     if output_format.is_pairwise() {
-        let flush = crate::report::pairwise::flushes_after_prolog(
-            shown.html_links.is_some(),
-            !format.sink.is_writer(),
-        );
-        let mut writer = format.sink.open()?;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
         write_blastn_pairwise_prolog(
             &mut writer,
             crate::wording::REPORT_VERSION,
@@ -9753,9 +9742,7 @@ fn write_format_prolog(
                 .as_deref()
                 .map(|links| (links, diagnostics)),
         )?;
-        if flush {
-            writer.flush()?;
-        }
+        std::io::Write::flush(&mut writer)?;
     } else if let Some(kind) = output_format.xml2_kind() {
         let mut writer = format.sink.open()?;
         writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;

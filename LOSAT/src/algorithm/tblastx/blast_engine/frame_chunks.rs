@@ -51,6 +51,10 @@ pub(super) struct SubjectScan<'a> {
     /// A masked `-db` search (`-db_soft_mask`, `-db_hard_mask`; series NP, M4b PR 2): the
     /// subject's ranges in bases (`subject_prep::SubjectFrames::x_db_mask`).
     pub(super) x_db_mask: Option<&'a [(i32, i32)]>,
+    /// Whether this `-db_soft_mask` subject has a chunk whose scan reads letters before it
+    /// (`scan_lead` above zero, series NP, M4b-T3): all six frames run their chunks in order on
+    /// the worker's single diagonal table initialized to NCBI's one-thread start.
+    pub(super) x_lead_subject: bool,
     pub(super) use_serial_scan_chunks: bool,
     pub(super) use_parallel_chunks: bool,
     pub(super) num_threads: usize,
@@ -112,6 +116,7 @@ pub(super) fn search_subject_frames<S: TbxScore>(
         subjects,
         x_soft_subjects,
         x_db_mask,
+        x_lead_subject,
         use_serial_scan_chunks,
         use_parallel_chunks,
         num_threads,
@@ -179,13 +184,16 @@ pub(super) fn search_subject_frames<S: TbxScore>(
         // c++/src/algo/blast/core/aa_ungapped.c:516-547
         // A chunk whose scan reads letters before it (a range of masks stored out of order,
         // `common::translated_chunks::scan_lead`) gives hits at offsets below 0, whose tests read
-        // the cells the frame's earlier chunks left within reach: NCBI's chunks run in order on
-        // one table, so such a frame's do here too (no parallel chunks with tables of their own).
-        let x_chunks_in_order = x_soft_calls.as_ref().is_some_and(|calls| {
-            calls.iter().any(|(_, ranges)| {
-                crate::algorithm::common::translated_chunks::scan_lead(ranges) > 0
-            })
-        });
+        // the cells earlier chunks left within reach. For a lead subject (`x_lead_subject`), a
+        // later lead frame whose earlier chunks were skipped as `SUBJECT_SPLIT_NO_RANGE` can also
+        // reach cells left by an earlier non-lead frame, so the whole lead subject runs its chunks
+        // in order on the worker's single diagonal table (no parallel chunks with private tables).
+        let x_chunks_in_order = x_lead_subject
+            || x_soft_calls.as_ref().is_some_and(|calls| {
+                calls.iter().any(|(_, ranges)| {
+                    crate::algorithm::common::translated_chunks::scan_lead(ranges) > 0
+                })
+            });
 
         // What the word finder reads of this subject and frame (`word_finder::FrameCx`).
         let frame_cx = word_finder::FrameCx {
@@ -456,16 +464,19 @@ pub(super) fn search_frame_chunks<S: TbxScore, F>(
                 chunk_results.sort_by_key(|result| result.chunk.offset);
                 for result in chunk_results {
                     // Keep the canonical per-subject diagonal offset moving in the
-                    // same chunk order as NCBI before the next subject frame starts.
+                    // same chunk order as NCBI before the next subject frame starts
+                    // (skipping `SUBJECT_SPLIT_NO_RANGE` chunks that had no exit).
                     // The experimental workers above use local diagonal tables; the
                     // ordered merge below remains the NCBI `Blast_HSPListsMerge` path.
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:561-584, c++/src/algo/blast/core/blast_extend.c:167-173.
-                    advance_tblastx_diag_offset(
-                        diag_offset,
-                        diag_array,
-                        window,
-                        result.chunk.length,
-                    );
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,561-584, c++/src/algo/blast/core/blast_extend.c:167-173.
+                    if result.exited {
+                        advance_tblastx_diag_offset(
+                            diag_offset,
+                            diag_array,
+                            window,
+                            result.chunk.length,
+                        );
+                    }
                     add_chunk_result(&mut sums, result);
                 }
             }

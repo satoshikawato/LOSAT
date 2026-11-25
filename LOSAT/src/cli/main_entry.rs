@@ -139,6 +139,11 @@ fn run_main_entry() -> Result<()> {
     if let Some(start) = started("blastdb_aliastool") {
         std::process::exit(crate::blastdb_aliastool::run(&argv[2..], start));
     }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:1555-1559
+    // `losat blastdbcheck` too.
+    if let Some(start) = started("blastdbcheck") {
+        std::process::exit(crate::blastdbcheck::run(&argv[2..], start));
+    }
     // No NCBI counterpart: makes those names (`cli::install_shims`). Read before the top level
     // (`cli::top_level`), which has no options of its own.
     if argv

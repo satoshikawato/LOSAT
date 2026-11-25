@@ -371,7 +371,7 @@ fn import_queries(
     match queries {
         Queries::Pssm => {
             if matches!(program, "BLASTN" | "BLASTP" | "BLASTX" | "TBLASTX") {
-                Err(crate::blastinput::app::engine_error(&format!(
+                Err(crate::blastinput::app::engine_error(format!(
                     "PSSM found in saved strategy, but not supported for {}",
                     program_type_name(options.options.program)
                 )))

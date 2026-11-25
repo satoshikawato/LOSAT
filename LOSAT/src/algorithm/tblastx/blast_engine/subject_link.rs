@@ -26,8 +26,8 @@ use super::x_search_timing::XLap;
 use super::x_seed_release::{self, XSeedStage};
 use super::{
     apply_sum_stats_even_gap_linking_with_parallel, calculate_link_hsp_cutoffs_ncbi,
-    link_one_hit_with_int4_ends, reevaluate_ungapped_hsp_list, sort_ungapped_hits_by_score_ncbi,
-    stage_dump, trace_hsp_target, trace_ungapped_hit_if_match,
+    link_one_hit_with_int4_ends, reevaluate_ungapped_hsp_list, sort_ungapped_hits_by_score_int4,
+    sort_ungapped_hits_by_score_ncbi, stage_dump, trace_hsp_target, trace_ungapped_hit_if_match,
     ungapped_hits_is_sorted_by_score_ncbi, AtomicOrdering, AtomicU64, DiagStruct,
     DiagnosticCounters, Instant, KarlinParams, LinkCall, LinkingParams, QueryContext, QueryFrame,
     TbxScore, UngappedHit, XStage, BLAST_GAP_DECAY_RATE,
@@ -215,8 +215,8 @@ fn evalues_without_linking(
 
 /// The first linking call of the subject's HSP list from its frame loop (`hits`): an empty list
 /// stays as it is; a list of the one-hit word finder (`window` 0 or less) that holds an HSP of
-/// length 0 or less links with NCBI's `Int4` ends (`link_subject_hits_int4`); any other, and every
-/// list of a search without sum statistics, goes to `link_subject_hits`.
+/// length 0 or less links with NCBI's `Int4` ends (`link_subject_hits_int4`), which keeps those
+/// HSPs; any other, and every list of a search without sum statistics, goes to `link_subject_hits`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-890 (cited at the call in
 /// `process_subject`).
@@ -244,8 +244,10 @@ fn holds_int4_inverted(hits: &[UngappedHit]) -> bool {
 }
 
 /// The first linking call of a subject of the one-hit word finder whose list holds an HSP of
-/// length 0 or less (`holds_int4_inverted`), with NCBI's `Int4` ends; those HSPs are dropped after
-/// it, where NCBI's re-evaluation deletes them (`link_one_hit_with_int4_ends`).
+/// length 0 or less (`holds_int4_inverted`), with NCBI's `Int4` ends; those HSPs stay in the list,
+/// with their linked E-values, up to the re-evaluation's fetch of the subject, which NCBI makes
+/// for every list that still holds an HSP after the reap, and leave after it, where NCBI's
+/// re-evaluation deletes them (`drop_unread_int4_inverted`, `link_one_hit_with_int4_ends`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873 (the first
 /// `BLAST_LinkHsps`) and c++/src/algo/blast/core/blast_hits.c:2703-2731
@@ -297,8 +299,9 @@ pub(super) struct SubjectStageArgs<'a> {
 }
 
 /// The first linking call's list sorted by score (when it is not; a list that was not linked,
-/// without sum statistics, keeps its order), then reaped by the preliminary E-value, with its
-/// stage dumps and the `[DEBUG PRELIM_REAP]` line of LOSAT_DIAGNOSTICS.
+/// without sum statistics, keeps its order; a list of the one-hit word finder, `window` 0, with
+/// its ends read as NCBI's `Int4`), then reaped by the preliminary E-value, with its stage dumps
+/// and the `[DEBUG PRELIM_REAP]` line of LOSAT_DIAGNOSTICS.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1802-1803 (the sort that ends
 /// `BLAST_LinkHsps`) and c++/src/algo/blast/core/blast_engine.c:643-674
@@ -307,6 +310,7 @@ pub(super) fn sort_and_reap_after_first_link(
     mut prelinked_ungapped_hits: Vec<UngappedHit>,
     link: &SubjectLinkArgs<'_>,
     stage: &SubjectStageArgs<'_>,
+    window: i32,
     x_lap: &mut XLap<'_>,
 ) -> Vec<UngappedHit> {
     let &SubjectStageArgs {
@@ -331,10 +335,17 @@ pub(super) fn sort_and_reap_after_first_link(
     // Without sum statistics nothing sorts the list here: `Blast_HSPListGetEvalues` keeps the
     // order of the frame loop's list, and the re-evaluation's sort (blast_hits.c:2733-2734) is
     // the next.
-    if link.linking_params.is_some()
-        && !ungapped_hits_is_sorted_by_score_ncbi(&prelinked_ungapped_hits)
-    {
-        sort_ungapped_hits_by_score_ncbi(&mut prelinked_ungapped_hits);
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1347-1353
+    // A list of the one-hit word finder may still hold HSPs of length 0 or less, whose ends
+    // `ScoreCompareHSPs` reads as `Int4` (`score_compare_ungapped_hits_int4`, the comparator of
+    // that list's sort in the frame loop too); on ends of 0 or more the two comparators agree.
+    if link.linking_params.is_some() {
+        if window == 0 {
+            sort_ungapped_hits_by_score_int4(&mut prelinked_ungapped_hits);
+        } else if !ungapped_hits_is_sorted_by_score_ncbi(&prelinked_ungapped_hits) {
+            sort_ungapped_hits_by_score_ncbi(&mut prelinked_ungapped_hits);
+        }
     }
     if stage_dump::enabled() {
         stage_dump::dump_ungapped_hits(
@@ -372,28 +383,29 @@ pub(super) fn sort_and_reap_after_first_link(
     prelinked_ungapped_hits
 }
 
-/// In a search without sum statistics, the HSPs of length 0 or less of the one-hit word finder
-/// (`window` 0 or less) removed from the subject's list (`hits`) before its re-evaluation, which
-/// deletes them in NCBI. With sum statistics none is left here: `link_subject_hits_int4` dropped
-/// them after the first linking call.
+/// The HSPs of length 0 or less of the one-hit word finder (`window` 0 or less) removed from the
+/// subject's list (`hits`) before its re-evaluation, which deletes them in NCBI, with sum
+/// statistics or without.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687,699 (in
 /// `Blast_HSPReevaluateWithAmbiguitiesUngapped`) and :452-453 (in `s_UpdateReevaluatedHSP`)
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1480-1497 and
+/// c++/src/algo/blast/core/blast_hits.c:2651-2665 (the fetch of the subject, first in
+/// `Blast_HSPListReevaluateUngapped`)
 /// NCBI's re-evaluation reads no letter of such an HSP and scores it 0, below every context's
-/// cutoff (at least 1). Its E-value (`evalues_without_linking`) and the reap read only the HSP
-/// itself and nothing sorts the list before the re-evaluation, so the HSPs kept are NCBI's, in
-/// the order of NCBI's list (the `u32` and `Int4` comparators of the frame loop's sorts agree on
-/// HSPs of length 1 or more). They are removed after the fetch of the subject, which NCBI makes
-/// for a list that still holds them (`SubjectEmit::reevaluation_fetch_keeps`, the frames of its
-/// letters), and before the refusal of a subject of fewer than 12 bases, whose frame NCBI reads
-/// only for an HSP of length 1 or more.
+/// cutoff (at least 1). Up to here such an HSP is in NCBI's list, at NCBI's place: the first
+/// linking call (`link_subject_hits_int4`) and the sort after it
+/// (`sort_and_reap_after_first_link`) read its ends as NCBI's `Int4`, and the reap reads its
+/// E-value, the linking call's (without sum statistics its own, `evalues_without_linking`;
+/// nothing sorts that list before the re-evaluation, and the `u32` and `Int4` comparators of the
+/// frame loop's sorts agree on HSPs of length 1 or more). So the HSPs kept are NCBI's, in the order
+/// of NCBI's list. They are removed after the fetch of the subject, which NCBI makes for a list
+/// that still holds them (`SubjectEmit::reevaluation_fetch_keeps`, the frames of its letters),
+/// and before the refusal of a subject of fewer than 12 bases, whose frame NCBI reads only for an
+/// HSP of length 1 or more.
 #[inline]
-pub(super) fn drop_unread_without_linking(
-    link: &SubjectLinkArgs<'_>,
-    window: i32,
-    hits: &mut Vec<UngappedHit>,
-) {
-    if window <= 0 && link.linking_params.is_none() {
+pub(super) fn drop_unread_int4_inverted(window: i32, hits: &mut Vec<UngappedHit>) {
+    if window <= 0 {
         hits.retain(|hit| !hit.is_int4_inverted());
     }
 }

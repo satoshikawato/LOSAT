@@ -1229,9 +1229,28 @@ fn x_pairs_bf_gives_the_hits_and_table_of_pairs() {
                     got, expected,
                     "{matrix:?} window {window} packed {packed} {mode} unit {u}: init HSPs"
                 );
+                // After a clear (`Diagonals::finish_frame`), `Pair` cells hold NCBI's (-window,
+                // false) while `Packed` cells hold (0, false); packed tables never run lead
+                // subjects and both values lie at least a window behind every hit at offset 0 or
+                // more.
+                let reference_table: Vec<(i32, bool)> = if packed {
+                    reference
+                        .x_table()
+                        .into_iter()
+                        .map(|cell| {
+                            if cell == (-window, false) {
+                                (0, false)
+                            } else {
+                                cell
+                            }
+                        })
+                        .collect()
+                } else {
+                    reference.x_table()
+                };
                 assert_eq!(
                     branch_free.x_table(),
-                    reference.x_table(),
+                    reference_table,
                     "{matrix:?} window {window} packed {packed} {mode} unit {u}: table"
                 );
                 found += expected.len();
@@ -1599,4 +1618,70 @@ fn a_negative_window_runs_the_preliminary_stage_of_a_subject() {
         .unwrap();
         assert!(stages.initial.is_empty(), "window {window}");
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66,87-107,131-144,162-173
+/// `HardTable` on TBLASTN's `Diagonals` and `Pair` clear to `(-window, false)`: `ncbi_table`
+/// sets NCBI's offset and unwritten-cell value, `clear_table` and `finish_frame` at INT4_MAX / 4
+/// clear `Pair` cells to `(-window, false)`, and `move_offset` checks Int4 overflow.
+#[test]
+fn diagonals_hard_table_and_pair_clear_match_ncbi() {
+    use crate::algorithm::common::hard_chunk_walk::{HardTable, NcbiStart, TableStart};
+
+    let mut table = Diagonals::new(32, 40, false);
+    for (start, want_cell) in [
+        (
+            NcbiStart {
+                offset: 536_875_512,
+                cleared: false,
+            },
+            (0, false),
+        ),
+        (
+            NcbiStart {
+                offset: 40,
+                cleared: true,
+            },
+            (-40, false),
+        ),
+    ] {
+        TableStart::New(start).apply(&mut table, 40).unwrap();
+        assert_eq!(table.offset, start.offset);
+        assert_eq!(
+            table.entries,
+            XDiagCells::Pair(vec![want_cell; table.entries.len()])
+        );
+    }
+
+    // Reaching INT4_MAX / 4 clears Pair cells to (-window, false) and resets offset to window.
+    table.offset = i32::MAX / 4;
+    table.finish_frame(5_000_000);
+    assert_eq!(table.offset, 40);
+    assert_eq!(
+        table.entries,
+        XDiagCells::Pair(vec![(-40, false); table.entries.len()])
+    );
+
+    // clear_table and move_offset (including Int4 overflow check).
+    table.move_offset(100).unwrap();
+    assert_eq!(table.offset, 140);
+    assert!(table.move_offset(i32::MAX).is_err());
+    table.clear_table(40);
+    assert_eq!(
+        (table.offset, &table.entries),
+        (
+            40,
+            &XDiagCells::Pair(vec![(-40, false); table.entries.len()])
+        )
+    );
+
+    // Packed clear keeps 0 (a packed table never runs a lead subject).
+    let mut packed = Diagonals::new(32, 40, true);
+    packed.offset = i32::MAX / 4;
+    packed.finish_frame(5_000_000);
+    assert_eq!(packed.offset, 40);
+    assert_eq!(
+        packed.entries,
+        XDiagCells::Packed(vec![0; packed.entries.len()])
+    );
 }

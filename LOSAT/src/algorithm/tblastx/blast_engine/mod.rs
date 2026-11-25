@@ -267,9 +267,9 @@ pub(crate) fn reevaluate_ungapped_hsp_list<S: TbxScore>(
 
     for mut hit in ungapped_hits {
         // No HSP of length 0 or less arrives (its end, an `Int4` at or below its start, would read
-        // here as a `u32`): the one-hit word finder's path drops those HSPs after its first linking
-        // call, where NCBI's re-evaluation (this function) deletes them
-        // (`link_one_hit_with_int4_ends`).
+        // here as a `u32`): the one-hit word finder's path drops those HSPs after the fetch of the
+        // subject, where NCBI's re-evaluation (this function) deletes them
+        // (`subject_link::drop_unread_int4_inverted`).
         debug_assert!(
             !hit.is_int4_inverted(),
             "an HSP of length 0 or less reached the re-evaluation"

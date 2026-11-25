@@ -757,10 +757,59 @@ impl CompoHeap {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1580
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:404-409
+    /// NCBI's early termination test of a match whose best E-value is `e`: every heap of `heaps` is
+    /// filled to its cutoff (at least `threshold` entries, the worst at or below `cutoff`) and `e`
+    /// is above five times the cutoff.
+    ///
+    /// A heap that `insert` filled from empty (a threshold of 1 or more) is filled to its cutoff
+    /// exactly when at least `threshold` of its entries have a best E-value at or below `cutoff`.
+    /// `worst` is the largest best E-value of the entries (the list's maximum, then the heap's
+    /// root). As a list the heap holds at most `threshold` entries; as a heap it grows past
+    /// `threshold` only by an entry at or below the cutoff added to entries all at or below it, and
+    /// otherwise replaces its worst entry by a better one or keeps its entries. So each insert at or
+    /// below the cutoff adds one entry at or below it (pushed, or in place of a worst entry above
+    /// it), and no insert takes one away. `x_early_ahead` counts so; `results_boundary_tests.rs`
+    /// checks the equivalence over random inserts.
     pub fn early(e: f64, heaps: &[Self]) -> bool {
         heaps
             .iter()
             .all(|h| h.entries.len() >= h.threshold && h.worst <= h.cutoff && e > 5.0 * h.cutoff)
+    }
+
+    /// No NCBI counterpart: scheduling only. The guess of the composition redo that offers matches
+    /// to be redone ahead (`blastx/runtime/kappa_batch.rs`, `XPending`): `early(e, heaps)` on the
+    /// heaps as they will be once each heap `heaps[q]` has taken `ahead[q]` more entries at or below
+    /// its cutoff (the matches offered ahead of the loop that `x_counts_ahead` counts). That is,
+    /// every heap holds at least `threshold` entries at or below `cutoff` counting `ahead[q]` more
+    /// (see `early`), and `e` is above five times the cutoff. With `ahead` all zero it equals
+    /// `early`. It never decides a result: the loop's test in stream order is `early`.
+    #[cfg(any(test, feature = "parallel"))]
+    pub(crate) fn x_early_ahead(e: f64, heaps: &[Self], ahead: &[usize]) -> bool {
+        heaps.iter().enumerate().all(|(q, h)| {
+            let needed = h.threshold.saturating_sub(ahead[q]);
+            // A heap whose worst entry is at or below the cutoff has all its entries there; one
+            // above it holds `threshold` entries at most, so the count reads that many.
+            e > 5.0 * h.cutoff
+                && h.entries.len() >= needed
+                && (h.worst <= h.cutoff
+                    || h.entries
+                        .iter()
+                        .filter(|entry| entry.list.best_evalue <= h.cutoff)
+                        .take(needed)
+                        .count()
+                        >= needed)
+        })
+    }
+
+    /// No NCBI counterpart: scheduling only. Whether a match offered ahead whose best E-value is
+    /// `e` counts in `x_early_ahead`'s `ahead` for this heap (its query's): `e` at or below the
+    /// cutoff, an entry the early termination test counts if the redo keeps it there. A guess
+    /// either way (the redo moves the E-value), which changes the schedule only.
+    #[cfg(any(test, feature = "parallel"))]
+    pub(crate) fn x_counts_ahead(&self, e: f64) -> bool {
+        e <= self.cutoff
     }
 
     /// The heap test of a Smith-Waterman window in e-value mode (`-use_sw_tback`, line RG item

@@ -59,7 +59,7 @@ pub(crate) enum SeqalignSubjects<'a> {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_seqalign(
     format: SerialFormat,
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     stderr: &mut dyn Write,
     options: &super::args::ResolvedOptions,
     queries: &[FastaRecord],

@@ -495,7 +495,7 @@ impl BlastnDatabase {
                 return Some(exception.clone());
             }
             let text = error.ncbi_message()?;
-            let site = crate::seqdb::throw_site(&text)?;
+            let site = error.throw_site()?;
             Some(NcbiException::new(site, text))
         })?;
         paths

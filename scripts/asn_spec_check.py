@@ -79,7 +79,8 @@ CXX_STORAGE = {
     "unsigned int": "Uint4", "Int2": "Int2", "Int8": "Int8", "TGi": "Int8", "TEntrezId": "Int8",
     "TIntId": "Int8", "ncbi::TGi": "Int8", "ncbi::TEntrezId": "Int8", "ncbi::TIntId": "Int8",
     "Int4": "Int4", "NCBI_NS_NCBI::TGi": "Int8", "NCBI_NS_NCBI::TEntrezId": "Int8",
-    "NCBI_NS_NCBI::TIntId": "Int8",
+    "NCBI_NS_NCBI::TIntId": "Int8", "TTaxId": "Int4", "ncbi::TTaxId": "Int4",
+    "NCBI_NS_NCBI::TTaxId": "Int4",
 }
 ENUM_CONST = re.compile(r"\b(e\w+)\s*=\s*(-?\d+)")
 

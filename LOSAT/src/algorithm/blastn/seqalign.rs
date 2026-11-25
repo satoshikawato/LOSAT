@@ -20,8 +20,6 @@
 //! - the query length of the construction: the searched length (`query_data.GetSeqLength`,
 //!   blast_seqalign.cpp:1972, with `-query_loc` the interval's).
 
-use std::io::Write;
-
 use anyhow::Result;
 
 use super::hsp::BlastnHitList;
@@ -42,7 +40,7 @@ pub(crate) fn write_blastn_seqalign(
     queries: &QueryNames<'_>,
     subjects: SubjectNames<'_>,
     subject_placements: &Placements,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: &mut QueryWarnings<'_>,
     app: &str,
 ) -> Result<()> {

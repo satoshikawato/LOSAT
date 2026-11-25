@@ -492,7 +492,7 @@ pub(crate) fn composition_mode(value: &str) -> u8 {
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:43-49
 /// The fields that ABI v1 accepts (`web::v1_outfmt`, frozen, plan TD-1): the custom fields
 /// of BLASTX's report before it wrote them through the shared tabular writer.
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub const FIELDS: &[&str] = &[
     "qseqid", "qacc", "qaccver", "qlen", "sseqid", "sacc", "saccver", "slen", "qstart", "qend",
     "sstart", "send", "qseq", "sseq", "evalue", "bitscore", "score", "length", "pident", "nident",

@@ -36,6 +36,79 @@ fn x_redo_flow() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXREDOFLOW"))
 }
 
+/// No NCBI counterpart (scheduling only): the guess of which matches the redo makes ahead (the flow's
+/// offers and `=0`'s batches, `kappa_redo_batch`), with the matches offered ahead of the loop that
+/// it counts. A match is offered when the loop's early termination test (`CompoHeap::early`) will
+/// let it reach its redo even after the matches offered before it have filled their heaps: each
+/// offered match whose best E-value is at or below its heap's cutoff (`CompoHeap::x_counts_ahead`)
+/// counts as one more entry there, from the loop's match on (`CompoHeap::x_early_ahead`). A match
+/// that only those counted matches would end early is "not yet": nothing at or past it is offered
+/// until the loop has passed them and the heaps themselves decide. Why: with a short hit list a few
+/// inserts fill the heaps, while the heaps were empty when the whole window was offered (1 x 9,000
+/// x 595 `-use_sw_tback -max_target_seqs 3`: the loop redoes 32 of 205 matches; the flow redid
+/// 130 ahead at 4 threads and 204 at 8, its loop up to 6 times one thread's; with the matches
+/// counted, the 31 or 32 that the loop takes, in 0.6 times one thread's time). With a long hit
+/// list (the default 500) the counted matches do not reach a heap's threshold but at its very end,
+/// so the matches offered are those of the heaps as they are. The guess changes the time only: the
+/// loop tests and redoes every match in stream order.
+#[cfg(feature = "parallel")]
+struct XPending {
+    /// Per query: the counted matches offered from the loop's match on.
+    queries: Vec<usize>,
+    /// Per match: whether it is counted in `queries`.
+    counted: Vec<bool>,
+}
+
+#[cfg(feature = "parallel")]
+impl XPending {
+    fn new(queries: usize, matches: usize) -> Self {
+        Self {
+            queries: vec![0; queries],
+            counted: vec![false; matches],
+        }
+    }
+
+    /// The loop is at match `index` of `matches`: the match before it, inserted or skipped, is no
+    /// longer ahead of the loop.
+    fn at(&mut self, index: usize, matches: &[HspList]) {
+        if let Some(before) = index.checked_sub(1) {
+            if std::mem::take(&mut self.counted[before]) {
+                self.queries[matches[before].query_index] -= 1;
+            }
+        }
+    }
+
+    /// The guess for match `index`, `list` (`excluded`: `-use_sw_tback`'s fetch excludes its
+    /// subject, so it is never redone), on `heaps` as they are now: `Some(true)` offer it (and
+    /// count it), `Some(false)` the loop will skip it, `None` not yet (see `XPending`).
+    fn offer(
+        &mut self,
+        index: usize,
+        list: &HspList,
+        excluded: bool,
+        heaps: &[CompoHeap],
+    ) -> Option<bool> {
+        let e = list.best_evalue;
+        if excluded {
+            return Some(false);
+        }
+        if !CompoHeap::x_early_ahead(e, heaps, &self.queries) {
+            if heaps[list.query_index].x_counts_ahead(e) {
+                self.queries[list.query_index] += 1;
+                self.counted[index] = true;
+            }
+            return Some(true);
+        }
+        // Early on the heaps as they are: it stays so (no insert takes an entry away, `early`).
+        // Otherwise only the counted matches would end it early: not yet.
+        if CompoHeap::early(e, heaps) {
+            Some(false)
+        } else {
+            None
+        }
+    }
+}
+
 /// What the kappa branch of `batch_end` reads and writes of the batch: the batch with the
 /// parameters of its contexts, the Kappa state, the stream the matches are read from, and the
 /// queries' hit lists with the heaps that fill them (`heaps`) and the inactive ones (`inactive_heaps`,
@@ -309,14 +382,15 @@ impl Runtime<'_> {
         );
         // EXPERIMENT (LOSAT_X_BXREDOFLOW, in the strict set: on unless `=0`): the matches ahead
         // are redone as a flow (`utils::xahead`) instead of in the fork-join batches below: the
-        // loop's thread offers the next `x_batch` matches as it walks the stream, each worker
-        // takes the next one offered, and the loop takes a match's result when it reaches it
-        // (redoing other offered matches while one is still being redone). No thread waits for
-        // the longest match of a batch. The workers (`x_kappa_workers`: one per thread of the
-        // pool, at most one per match) are the loop's thread's and one per helper. A thread with
-        // nothing to redo spins, yields, then sleeps 50 us at a time (`Ahead::x_new_napping`). A
-        // match's result does not depend on who redoes it or when (`x_speculate_match`), so the
-        // schedule changes the time only.
+        // loop's thread offers the next `x_batch` matches as it walks the stream (those the guess
+        // `XPending` lets through, up to the first it cannot tell yet; the batches take the same
+        // guess), each worker takes the next one offered, and the loop takes a match's result when
+        // it reaches it (redoing other offered matches while one is still being redone). No
+        // thread waits for the longest match of a batch. The workers (`x_kappa_workers`: one per
+        // thread of the pool, at most one per match) are the loop's thread's and one per helper.
+        // A thread with nothing to redo spins, yields, then sleeps 50 us at a time
+        // (`Ahead::x_new_napping`). A match's result does not depend on who redoes it or when
+        // (`x_speculate_match`), so the schedule changes the time only.
         #[cfg(feature = "parallel")]
         let (x_workers, mut x_own, x_helpers) = if !x_workers.is_empty() && x_flow {
             let mut all = x_workers
@@ -351,40 +425,50 @@ impl Runtime<'_> {
         // order; it does not change any value NCBI computes.
         let mut x_reused = 0usize;
         let mut x_serial = 0usize;
+        // No NCBI counterpart (scheduling only): the guess of the matches made ahead, with the
+        // matches offered ahead of the loop that it counts (`XPending`), and (`=0`) the match where
+        // the next batch starts and the first match of the batch in `speculated`.
+        #[cfg(feature = "parallel")]
+        let mut x_pending = XPending::new(heaps.len(), matches.len());
+        #[cfg(feature = "parallel")]
+        let (mut x_batch_at, mut x_batch_from) = (0usize, 0usize);
         let x_t_loop = x_timing::lap();
         let mut x_walk = || -> Result<()> {
             for (match_index, list) in matches.iter().enumerate() {
+                #[cfg(feature = "parallel")]
+                x_pending.at(match_index, &matches);
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
                 // The flow offers the matches up to `x_batch` past this one that it has not offered
-                // yet, with the early-termination guess of the batches below on the heaps as they
-                // are now.
+                // yet, with the guess (`XPending`) on the heaps as they are now; it stops at the
+                // first match the guess cannot tell yet and goes on from there at a later match.
                 #[cfg(feature = "parallel")]
                 if let Some(ahead) = &x_ahead {
-                    ahead.announce(match_index, matches.len(), |next| {
-                        !(CompoHeap::early(matches[next].best_evalue, heaps)
-                            || (SW && marks.excluded(next)))
+                    ahead.x_announce_while(match_index, matches.len(), |next| {
+                        x_pending.offer(next, &matches[next], SW && marks.excluded(next), heaps)
                     });
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
                 // A batch of the following matches is redone ahead of time on the pool. The early-
-                // termination test (BlastCompo_EarlyTermination) is evaluated here on the heaps as
-                // they are now, and again, in stream order, below; a result is used only when the
-                // second test agrees.
+                // termination test (BlastCompo_EarlyTermination) is guessed here on the heaps as
+                // they are now (`XPending`), and evaluated, in stream order, below; a result is
+                // used only when the second test lets the match reach its redo.
                 #[cfg(feature = "parallel")]
-                if !x_workers.is_empty() && match_index % x_batch == 0 {
+                if !x_workers.is_empty() && match_index == x_batch_at {
                     use rayon::prelude::*;
-                    let batch_lists =
-                        &matches[match_index..(match_index + x_batch).min(matches.len())];
-                    // Early termination only becomes true as the heaps fill. A list that the fetch
-                    // excludes is never redone (`-use_sw_tback`'s markers).
-                    let wanted: Vec<bool> = batch_lists
-                        .iter()
-                        .enumerate()
-                        .map(|(position, list)| {
-                            !(CompoHeap::early(list.best_evalue, heaps)
-                                || (SW && marks.excluded(match_index + position)))
-                        })
-                        .collect();
+                    let window = &matches[match_index..(match_index + x_batch).min(matches.len())];
+                    // The batch ends before the first match the guess cannot tell yet; the next
+                    // batch starts there when the loop reaches it (every match before it then
+                    // done). The first match is always told: nothing is counted ahead of it.
+                    let mut wanted: Vec<bool> = Vec::with_capacity(window.len());
+                    for (position, list) in window.iter().enumerate() {
+                        let index = match_index + position;
+                        match x_pending.offer(index, list, SW && marks.excluded(index), heaps) {
+                            Some(offered) => wanted.push(offered),
+                            None => break,
+                        }
+                    }
+                    let batch_lists = &window[..wanted.len()];
+                    (x_batch_at, x_batch_from) = (match_index + wanted.len().max(1), match_index);
                     let (options, subjects, db_length) =
                         (self.options, self.subjects, self.db_length);
                     let full = &full;
@@ -449,7 +533,9 @@ impl Runtime<'_> {
                 } else if x_workers.is_empty() {
                     None
                 } else {
-                    speculated[match_index % x_batch].take()
+                    speculated
+                        .get_mut(match_index - x_batch_from)
+                        .and_then(Option::take)
                 };
                 #[cfg(not(feature = "parallel"))]
                 let x_ready: Option<(HspList, i32, Option<XMatrixLeft>)> = None;

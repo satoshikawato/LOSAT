@@ -426,7 +426,7 @@ impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
 /// target's `db` and `subjects`) rather than a number (`int_member`, `real_member`, `big_int`):
 /// NCBI's stream writes a string one character at a time and a number at once, which decides
 /// where its buffer reaches the output (`out_buffer::xml_written_at`).
-pub(super) fn is_string_element(tag: &[u8]) -> bool {
+pub(crate) fn is_string_element(tag: &[u8]) -> bool {
     matches!(
         tag,
         b"program"

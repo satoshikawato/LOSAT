@@ -1,0 +1,15 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing every 100-th OID.
+
+Finding database volumes.
+  [ERROR] could not find all volume or alias files referenced in "sub/bad", [skipped]
+Testing 1 volume(s).
+ <RUN>/cases/dsl/sub/p5
+ Result=SUCCESS. No errors reported for 1 volumes.
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 1

@@ -6,7 +6,6 @@
 //! the document, this module gathers what it holds from the hit lists, the query masks and
 //! the Karlin-Altschul blocks that BLASTN keeps for its other formats.
 
-use std::io::Write;
 use std::ops::Range;
 
 use anyhow::Result;
@@ -492,7 +491,7 @@ pub(crate) fn write_blastn_archives(
     call: &ArchiveCall<'_>,
     warnings: &mut QueryWarnings<'_>,
     first_context: &dyn Fn(usize) -> Result<FirstContext>,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,

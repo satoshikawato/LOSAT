@@ -454,7 +454,7 @@ fn with_batch(
 /// the bytes that the archive's stream replaces go to `diagnostics` (`write_archive`).
 pub(crate) fn write_blastx_archive(
     call: &ArchiveCall<'_>,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     let run = RunRecord {

@@ -10,6 +10,7 @@ use super::domains::{
     calculate, parse_align, parse_std_align, sort_reading_frames, AlignIndex, DomAlign,
 };
 use crate::ncbi_exception::{NcbiException, ThrowSite};
+use crate::report::serial::object_frame::UNASSIGNED_MEMBER;
 use crate::seqid::defline_set::{compare, Sic};
 use crate::seqid::model::{ObjectId, ParsedSeqId};
 
@@ -85,21 +86,6 @@ pub(crate) fn unassigned_member(module: &str, type_name: &str, member: &str) -> 
         ),
     ))
 }
-
-// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:317-320
-// NCBI reference (598d8ae6): c++/src/serial/datatool/classstr.cpp:849-855
-// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:805-810
-// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:836-842
-// The generated getters call `ThrowUnassigned` with the index, so the place is the `NCBI_THROW` of
-// serialobject.cpp:306 (`file_name` and `file_line` are 0). Its function is a `const` method,
-// whose `__PRETTY_FUNCTION__` ends with `const`, not `)`: `ParseCurrFunctName` names no
-// function then.
-const UNASSIGNED_MEMBER: ThrowSite = ThrowSite {
-    file: "src/serial/serialobject.cpp",
-    line: 306,
-    kind: "CUnassignedMember::eGet",
-    function: None,
-};
 
 /// A query of the output (`TDomQuery`) with its hits.
 #[derive(Debug)]

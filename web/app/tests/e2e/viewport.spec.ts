@@ -56,6 +56,7 @@ const COUNTS_FIXTURE = 'LOSAT/tests/winmask/counts/mg1655_u9.obinary';
 
 interface HelpTipMeasurement {
   readonly id: string;
+  readonly hasPrev: boolean;
   readonly btnLeft: number;
   readonly btnTop: number;
   readonly btnBottom: number;
@@ -134,6 +135,7 @@ async function measureAllHelpTips(page: Page): Promise<{ readonly scrollWidth: n
       if (prevRect === undefined) {
         tips.push({
           id,
+          hasPrev: false,
           btnLeft: br.left,
           btnTop: br.top,
           btnBottom: br.bottom,
@@ -148,6 +150,7 @@ async function measureAllHelpTips(page: Page): Promise<{ readonly scrollWidth: n
 
       tips.push({
         id,
+        hasPrev: true,
         btnLeft: br.left,
         btnTop: br.top,
         btnBottom: br.bottom,
@@ -176,6 +179,7 @@ function expectAllHelpTipsShareLine(
     expect(measured.tips.length, `${context}: expected at least one visible HelpTip`).toBeGreaterThan(0);
   }
   for (const tip of measured.tips) {
+    expect(tip.hasPrev, `${context}: no content before ${tip.id}`).toBe(true);
     expect(
       tip.overlapsY,
       `${context}: ${tip.id} should overlap its preceding content vertically (btn ${tip.btnTop.toFixed(1)}..${tip.btnBottom.toFixed(1)} vs prev ${tip.prevTop.toFixed(1)}..${tip.prevBottom.toFixed(1)})`,

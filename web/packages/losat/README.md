@@ -10,7 +10,7 @@ runs its searches through this package.
 - `losat-web-threads.wasm` runs a search on several threads. It needs memory that is shared
   between threads, which a browser allows only on a cross-origin isolated page (below).
 
-The two builds speak the same ABI (ABI v2 at version 13, `docs/web/abi_v2.md` in the repository). A search
+The two builds speak the same ABI (ABI v2 at version 14, `docs/web/abi_v2.md` in the repository). A search
 gets an argv, as on the command line, and FASTA bytes. It writes outfmt 0, 6 and 7 byte for byte
 as the command line does, and it also writes an HSP record for each hit. This holds for a host that
 drops the output that the engine tells it to discard (stream 9, in "Use").
@@ -27,7 +27,7 @@ ABI version that the reactors report (`losat_web2_abi_version`):
 
 | package | engine | ABI |
 |---|---|---|
-| 0.2.0 | 0.2.0 | 13 |
+| 0.2.0 | 0.2.0 | 14 |
 
 `losat/reactors/artifacts.json` is the record of the build of the two modules: how they were built
 and the SHA-256 of each as it was built. The threaded module in the package is that build with a guard
@@ -124,8 +124,7 @@ arrived holds the warnings that the command line writes to its standard error be
 Linux reads it in a working directory holding the run's files (the run directory's files, plus a
 search's `-query`, `-subject`, `-conffile` and `-window_masker_db` names): a name in a folder that
 is missing (`logs/run.log` without `logs`) or naming a folder gives no file and keeps its messages
-on stream 3; a name that is an existing file of the run's directory (`q.fa`, `.ncbirc`, an input of
-`windowmasker`) is refused, because LOSAT Web does not write to the run's files. When a file is
+on stream 3; a name that is an existing file of the run (`q.fa`, `.ncbirc`, `/tmp/q.fa`, an input of `windowmasker`, inside or outside the working directory) is refused, because LOSAT Web does not write to the run's files. When a file is
 made, its name is the command line's file name (`run.log` for ` run.log` and `./run.log`, `logs` for
 `logs/`, `sub/run.log` when `sub` is a folder of the run, `/tmp/run.log` outside the working
 directory, and `/dev/stdout` for a search's `/dev/stdout`); show and save it as a name, not as a

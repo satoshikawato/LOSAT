@@ -1385,6 +1385,10 @@ async function checkLogfileRunFiles(engine, native, scratch) {
   const EF = Buffer.from([0xef]);
   const CONF = Buffer.from("[BLAST]\n");
   const T = ["-max_target_seqs", "1", "-outfmt", "6", "-num_threads", "1"];
+  const workDir = fs.mkdtempSync(path.join(scratch, "d19-work."));
+  const cliDir = fs.mkdtempSync(path.join(scratch, "d19-cli."));
+  const absDir = fs.mkdtempSync(path.join(scratch, "d19-abs."));
+  const absQuery = path.join(absDir, "q.fa");
   const cases = [
     // (0) missing folder, `/work` folder, registered `-query` folder, missing folder with `.ncbirc`
     { id: "s0-nofolder", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, logfile: "logs/run.log" },
@@ -1395,8 +1399,9 @@ async function checkLogfileRunFiles(engine, native, scratch) {
     { id: "s1-folder", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: { "db/keep": Buffer.from("k\n") }, logfile: "db" },
     { id: "s1-folder-slash", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: { "db/keep": Buffer.from("k\n") }, logfile: "db/" },
     { id: "s1-inputfolder", program: "tblastx", query: ["in/q.fa", Q], subject: ["s.fa", S], work: {}, logfile: "in" },
-    // (2) existing files of the run's directory: refused at validate and run
+    // (2) existing files of the run's directory (and registered files outside `/work`): refused at validate and run
     { id: "s2-query", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, logfile: "q.fa", expect: "refusal" },
+    { id: "s2-abs-query", program: "tblastx", query: [absQuery, Q], subject: ["s.fa", S], work: {}, logfile: absQuery, expect: "refusal", cliAppends: absQuery },
     { id: "s2-subject", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, logfile: "s.fa", expect: "refusal" },
     { id: "s2-other", program: "tblastx", query: ["q.fa", Q], subject: ["s.fa", S], work: { "db/keep": Buffer.from("k\n") }, logfile: "db/keep", expect: "refusal" },
     { id: "s2-query-ncbirc", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, registry: { ".ncbirc": EF }, logfile: "q.fa", expect: "refusal" },
@@ -1420,17 +1425,16 @@ async function checkLogfileRunFiles(engine, native, scratch) {
     { id: "s-wmdb-dir", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm" },
     { id: "s-wmdb-self", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm/c.obinary", expect: "refusal" },
   ];
-  const workDir = fs.mkdtempSync(path.join(scratch, "d19-work."));
-  const cliDir = fs.mkdtempSync(path.join(scratch, "d19-cli."));
   const { reactor, close, waitForWorkers } = await engine.open(workDir);
   try {
     for (const c of cases) {
       const label = `${engine.name} ${c.id}`;
       clearDirectory(workDir);
       clearDirectory(cliDir);
+      clearDirectory(absDir);
       const writeInto = (root, map) => {
         for (const [rel, bytes] of Object.entries(map || {})) {
-          const full = path.join(root, rel);
+          const full = path.resolve(root, rel);
           fs.mkdirSync(path.dirname(full), { recursive: true });
           fs.writeFileSync(full, bytes);
         }
@@ -1463,6 +1467,17 @@ async function checkLogfileRunFiles(engine, native, scratch) {
         assert.equal(run.status, -1, `${label}: run refuses`);
         assert.equal(run.error, expectedError, `${label}: run refusal`);
         assert.ok(!run.streams.has(8), `${label}: no stream 8`);
+        if (c.cliAppends) {
+          const beforeBytes = fs.readFileSync(c.cliAppends);
+          const cli = nativeOnPipes(native, [...words, "-out", "o.txt"], cliDir);
+          assert.equal(cli.status, 0, `${label}: native CLI: ${cli.stderr}`);
+          const afterBytes = fs.readFileSync(c.cliAppends);
+          assert.ok(
+            afterBytes.length > beforeBytes.length && afterBytes.subarray(0, beforeBytes.length).equals(beforeBytes),
+            `${label}: native CLI appends to ${c.cliAppends}`,
+          );
+          assert.equal(cli.stderr.toString(), "", `${label}: native CLI stderr empty`);
+        }
       } else {
         assert.equal(validated.status, 0, `${label}: validate: ${validated.error}`);
         assert.equal(run.status, 0, `${label}: run: ${run.error}`);
@@ -1501,6 +1516,7 @@ async function checkLogfileRunFiles(engine, native, scratch) {
     await close();
     fs.rmSync(workDir, { recursive: true, force: true });
     fs.rmSync(cliDir, { recursive: true, force: true });
+    fs.rmSync(absDir, { recursive: true, force: true });
   }
   return cases.length;
 }
@@ -1677,7 +1693,7 @@ async function main() {
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor: own, close, waitForWorkers } = await engine.open();
-    assert.equal(own.exports.losat_web2_abi_version(), 13);
+    assert.equal(own.exports.losat_web2_abi_version(), 14);
     checkSurface(own, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const logRows = await checkLogfileNames(engine, options.native, scratch);

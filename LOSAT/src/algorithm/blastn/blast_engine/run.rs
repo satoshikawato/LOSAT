@@ -10739,6 +10739,16 @@ fn search_query_batch<const UNGAPPED: bool>(
         context_valid: &context_valid,
         search_karlin: &search_karlin,
         query_eff_searchsp: &query_eff_searchsp,
+    })
+    .map_err(|error| {
+        context_statistics::setup_failure(
+            error,
+            first_batch,
+            false,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )
     })?;
 
     // NCBI searches a batch of at least two query chunks chunk by chunk in its preliminary
@@ -10772,20 +10782,28 @@ fn search_query_batch<const UNGAPPED: bool>(
                 posts,
                 (x_keep, last),
             )?;
-            // A batch with a valid context whose chunks have none (the chunks' own masks would
-            // cover the letters that the batch's leave open) meets `BLAST_GapAlignSetUp` first
-            // in the set-up of its traceback, after the chunks:
+            // A batch with a valid context whose chunks have none (for example, under
+            // `-soft_masking false` with `-lcase_masking`, `restrict_masks`'s end extension
+            // covers the batch's remaining non-N base in chunk 0) meets `BLAST_GapAlignSetUp`
+            // first in the set-up of its traceback, after the chunks:
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:231-253
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1831-1837
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback_mt_priv.c:219-226
-            // The greedy set-up refuses there as in a batch that is not split. The check of the
-            // subjects before it (NCBI: `Traceback failed`, exit status 3) is not reproduced: no
-            // input that reaches this was found (line RG D1a-6, review A F1).
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback_mt_priv.c:218-228
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-996
+            // The subject check runs before the greedy set-up there (NCBI: `Traceback failed`,
+            // exit status 3, or SIGFPE for a count of 0; line RG D1a-6, review A F1).
             if let Some((_, false)) = &chunks {
-                if let Some(error) = context_statistics::greedy_setup_refusal(args, false) {
+                if let Some(error) = context_statistics::gap_align_setup_error(
+                    args,
+                    subjects,
+                    &seq_data,
+                    false,
+                    crate::blastinput::app::TRACEBACK_FAILED,
+                ) {
                     return Err(context_statistics::setup_failure(
                         error,
                         first_batch,
+                        false,
                         reborrow_outputs(&mut outputs),
                         intro,
                         &shown,
@@ -11232,7 +11250,16 @@ fn search_query_batch<const UNGAPPED: bool>(
     }
     // An overflow of a subject's search space (`subject_statistics`) is LOSAT's refusal, after the
     // preliminary stage's read errors (the searched blocks' above, the masks' here).
-    subject_space_overflow.check()?;
+    subject_space_overflow.check().map_err(|overflow| {
+        context_statistics::setup_failure(
+            overflow.into(),
+            first_batch,
+            false,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )
+    })?;
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
@@ -11271,7 +11298,16 @@ fn search_query_batch<const UNGAPPED: bool>(
             &shown,
         )
     })?;
-    subject_space_overflow.check()?;
+    subject_space_overflow.check().map_err(|overflow| {
+        context_statistics::setup_failure(
+            overflow.into(),
+            first_batch,
+            false,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )
+    })?;
     let mut batch = batch_result(hit_lists, Vec::new());
     if let Some(timing) = timing.as_ref() {
         batch.timing = blastn_timing_text(timing.as_ref(), t_search_start, t_total);

@@ -43,15 +43,18 @@
 //!   the batches before, without the epilog, in both: here they were written when the loop took
 //!   them, so the error paths write only what follows them (`BatchReports::queries_written`). So
 //!   do LOSAT's refusals of what a batch's search meets (`ErrorAfterBatchReports`: a statistics
-//!   count of 0 in the setup of the first batch with a valid context, `search_query_batch`, an ungapped
-//!   extension that scores higher past the end of its query frame, `extension::query_batch`, a
-//!   one-hit merge of lengths that add up to 0, the ungapped re-evaluation of HSPs on a subject (or
-//!   its `-subject_loc` range) of fewer than 12 bases, `SubjectEmit::refuse_untranslated_frame`, and
-//!   the re-evaluation's fetch of a subject whose header cannot be read under a negative seqid list,
-//!   `subject_loop::x_fetch_keeps`). Any other error that LOSAT raises where NCBI would
-//!   not stop (LOSAT's refusals) is written without the reports of the batches before; so the
-//!   stream acts only where no such refusal can come after the first batch (`check`): a query batch whose concatenated query is too long for the diag
-//!   table (`check_diag_table_window`), a search space that overflows (`SearchSpaceOverflow`),
+//!   count of 0 in the setup of the first batch with a valid context, `search_query_batch`, a
+//!   search space that overflows NCBI's `Int8`, `context_cutoffs::search_space_overflow`, an
+//!   ungapped extension that scores higher past the end of its query frame,
+//!   `extension::query_batch`, a one-hit merge of lengths that add up to 0, the ungapped
+//!   re-evaluation of HSPs on a subject (or its `-subject_loc` range) of fewer than 12 bases,
+//!   `SubjectEmit::refuse_untranslated_frame`, and the re-evaluation's fetch of a subject whose
+//!   header cannot be read under a negative seqid list, `subject_loop::x_fetch_keeps`). Any other
+//!   error that LOSAT raises where NCBI would not stop (LOSAT's refusals) is written without the
+//!   reports of the batches before; so the stream acts only where no such refusal can come after
+//!   the first batch (`check`): a query batch whose concatenated query is too long for the diag
+//!   table (`check_diag_table_window`), a search space that could overflow (`Off::SearchSpace`,
+//!   kept on the off path where `ErrorAfterBatchReports` writes the batches before alike),
 //!   a `-db` whose sequences could not be read before the search (some of those read errors are
 //!   LOSAT's refusals, raised by the first batch with a valid context, `Off::Unreadable`),
 //!   and the refusals of the reports: a `-subject` record without a tabular id

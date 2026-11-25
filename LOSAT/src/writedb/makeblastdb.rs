@@ -11,6 +11,7 @@ use super::data_size::uint8_to_string_data_size;
 use super::format_guess::appears_fasta;
 use super::mask_data::process::{process_mask_data, MaskDataOptions};
 use super::metadata::{db_files_metadata, metadata_user_path, write_metadata_file, DbMetadata};
+use super::ofstream::StreamBuf;
 use super::platform::Platform;
 use super::raw_source::{scan_leaf_tax_ids, RawCopyError, RawSeqDbSource};
 use super::taxid_set::{TaxIdMapError, TaxIdSet};
@@ -170,6 +171,7 @@ impl MakedbError {
                 | WriteDbError::Io { .. },
             ) => 255,
             MakedbError::Build(WriteDbError::OutOfMemory) => 4,
+            MakedbError::Build(WriteDbError::ClosedPipe) => 0,
             MakedbError::Output(_) => 6,
             MakedbError::Database(error) if !is_refusal(error) => 2,
             MakedbError::Build(WriteDbError::Database(_)) => 2,
@@ -189,6 +191,11 @@ impl MakedbError {
 }
 
 impl MakedbError {
+    /// Whether the run ended at a closed pipe ([`WriteDbError::ClosedPipe`]).
+    fn is_closed_pipe(&self) -> bool {
+        matches!(self, MakedbError::Build(error) if error.is_closed_pipe())
+    }
+
     /// The message makeblastdb prints for the error (without the line feed that ends it), as
     /// bytes ([`WriteDbError::message`]).
     pub fn message(&self) -> Vec<u8> {
@@ -767,7 +774,7 @@ fn build_database_with_log(
         "Maximum file size: {}",
         uint8_to_string_data_size(max_file_size)
     );
-    endl(db.log());
+    endl(db.log())?;
     db.set_max_file_size(max_file_size);
     let (taxids, stdin_map) = read_taxids(args, stdin, err)?;
     if let Some(taxids) = taxids {
@@ -811,7 +818,10 @@ fn build_database_with_log(
             err,
         );
         *end_messages = destructor_messages(&db, result.as_ref().err());
-        if result.as_ref().is_err_and(|error| !is_losat_error(error)) {
+        if result
+            .as_ref()
+            .is_err_and(|error| !is_losat_error(error) && !error.is_closed_pipe())
+        {
             end_messages.extend(db.close_at_destruction());
         }
         return result;
@@ -918,7 +928,7 @@ fn copy_input_databases(
         let mut warn = warn_to(err);
         scan_leaf_tax_ids(&input, &mut warn, db.utf8_once())
     };
-    db.set_leaf_tax_ids(leafs.map_err(raw_copy_error)?);
+    db.set_leaf_tax_ids(leafs.map_err(raw_copy_error)?)?;
     let mut source = RawSeqDbSource::new(&input, db, randomize).map_err(raw_copy_error)?;
     let copied = {
         let mut warn = warn_to(err);
@@ -928,7 +938,12 @@ fn copy_input_databases(
         let error = raw_copy_error(error);
         if is_losat_error(&error) {
             let mut warn = warn_to(err);
-            let _ = db.end_build(true, &mut warn);
+            // A closed pipe at the log of that `EndBuild` ends the run there (`endl`).
+            if let Err(stop) = db.end_build(true, &mut warn) {
+                if stop.is_closed_pipe() {
+                    return Err(stop.into());
+                }
+            }
         }
         return Err(error);
     }
@@ -1213,19 +1228,31 @@ pub fn run(args: &MakedbArgs, settings: &ApplicationSettings) -> i32 {
 }
 
 /// makeblastdb's log on NCBI's `cout`: a write is an insertion, a flush is the stream's flush
-/// (the end of each line, `build_db::endl`). The stream's state is not reported: NCBI's
-/// makeblastdb does not read it.
+/// (the end of each line, `build_db::endl`). The stream's state is not reported (NCBI's
+/// makeblastdb does not read it), but for a write that found the pipe closed where SIGPIPE ends
+/// NCBI's process (`StreamBuf::closed_pipe`): from that write on, every write and flush returns
+/// the error of a closed pipe, and the build ends at the end of the line (`build_db::endl`).
 struct CoutLog<'a>(super::cout::Cout<'a>);
+
+impl CoutLog<'_> {
+    /// The error of a closed pipe once a write found one.
+    fn closed_pipe(&self) -> std::io::Result<()> {
+        if self.0.rdbuf().closed_pipe() {
+            return Err(std::io::ErrorKind::BrokenPipe.into());
+        }
+        Ok(())
+    }
+}
 
 impl Write for CoutLog<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.0.insert(buf);
-        Ok(buf.len())
+        self.closed_pipe().map(|()| buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.0.flush();
-        Ok(())
+        self.closed_pipe()
     }
 }
 
@@ -1395,10 +1422,13 @@ fn log_of(name: &str) -> Option<std::fs::File> {
 }
 
 /// The error message and the exit code of a build, then the messages of
-/// `~CBuildDatabase` (`end_messages`).
+/// `~CBuildDatabase` (`end_messages`); nothing after a closed pipe.
 fn finish(result: Result<(), MakedbError>, end_messages: &[Vec<u8>], err: &mut dyn Write) -> i32 {
     let status = match result {
         Ok(()) => 0,
+        // A closed pipe ends the run where SIGPIPE ends NCBI's process: no message, and none of
+        // `~CBuildDatabase`'s (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+        Err(error) if error.is_closed_pipe() => return error.exit_code(),
         Err(error) => {
             let _ = err.write_all(&[error.message().as_slice(), b"\n"].concat());
             error.exit_code()

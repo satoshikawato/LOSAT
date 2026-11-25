@@ -77,6 +77,37 @@ fn run_on(
     (result.unwrap(), streams)
 }
 
+/// The result of `run` of a `-db` search `words` on the program's query fixture (`SEARCHES`,
+/// subject handle 0), and the bytes emitted on each stream.
+fn run_db_of(words: &[&str]) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
+    let (_, query, _) = SEARCHES
+        .iter()
+        .find(|(program, _, _)| *program == words[0])
+        .unwrap();
+    let program = Program::parse(words[0]).unwrap();
+    let (query, _) = crate::store::register(words[0], 0, true, &input(query)).unwrap();
+    crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
+    let result = crate::store::with_inputs(
+        program,
+        query,
+        0,
+        words,
+        Some(true),
+        |queries, end, subjects| run(words, queries, end, subjects),
+    );
+    crate::store::release(query).unwrap();
+    let mut streams = BTreeMap::new();
+    crate::emit::EMITTED.with(|emitted| {
+        for (stream, bytes) in emitted.borrow().iter() {
+            streams
+                .entry(*stream)
+                .or_insert_with(Vec::new)
+                .extend_from_slice(bytes);
+        }
+    });
+    (result.unwrap(), streams)
+}
+
 /// The argv of `program` on its inputs (`SEARCHES`), then `words`.
 fn argv<'a>(program: &'a str, words: &[&'a str]) -> Vec<&'a str> {
     let (_, query, subject) = SEARCHES
@@ -745,6 +776,122 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
             "{log}"
         );
     }
+
+    // Round R2 finding 1: an option that takes a value (`-export_search_strategy`) whose value
+    // starts with `-` (`-query`, `-subject`) must not hide the real `-query`/`-subject` input.
+    let strat_query_log = [
+        "tblastx",
+        "-export_search_strategy",
+        "-query",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "q.fa",
+    ];
+    assert_refused(
+        "strategy=-query -logfile q.fa",
+        "tblastx",
+        &strat_query_log,
+        "q.fa",
+    );
+    let strat_subject_log = [
+        "tblastx",
+        "-query",
+        "q.fa",
+        "-export_search_strategy",
+        "-subject",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "s.fa",
+    ];
+    assert_refused(
+        "strategy=-subject -logfile s.fa",
+        "tblastx",
+        &strat_subject_log,
+        "s.fa",
+    );
+    // Control (no `-logfile`): `-export_search_strategy -query` still runs and writes `-query`.
+    let strat_query_ctrl = [
+        "tblastx",
+        "-export_search_strategy",
+        "-query",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-max_target_seqs",
+        "1",
+        "-num_threads",
+        "1",
+    ];
+    validate(&strat_query_ctrl).unwrap();
+    let (res, streams) = run_of(&strat_query_ctrl);
+    res.unwrap();
+    let strat_files = run_files(&streams).expect("strategy file on stream 8");
+    assert_eq!(strat_files.len(), 1);
+    assert_eq!(strat_files[0].0, "-query");
+    assert!(strat_files[0].1.contains("Blast4-request"));
+
+    // Round R2 finding 2: `-db` list files accepted by LOSAT Web (`-seqidlist`,
+    // `-negative_seqidlist`, `-taxidlist`, `-negative_taxidlist`) are created and read back by
+    // the CLI when named by `-logfile` while missing, so LOSAT Web refuses them at `validate` and
+    // `run`, without making missing parent folders present.
+    let db_path = format!(
+        "{}/../../LOSAT/tests/windowmasker/db/wm",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    for (opt, missing) in [
+        ("-seqidlist", "d19-r2-miss-sl.txt"),
+        ("-negative_seqidlist", "d19-r2-miss-nsl.txt"),
+        ("-taxidlist", "d19-r2-miss-tl.txt"),
+        ("-negative_taxidlist", "d19-r2-miss-ntl.txt"),
+    ] {
+        let words = [
+            "blastn",
+            "-query",
+            "q.fa",
+            "-db",
+            &db_path,
+            opt,
+            missing,
+            "-num_threads",
+            "1",
+            "-logfile",
+            missing,
+        ];
+        let want = refusal("blastn", missing);
+        assert_eq!(validate(&words).unwrap_err(), want, "{opt}: validate");
+        assert_eq!(run_db_of(&words).0.unwrap_err(), want, "{opt}: run");
+    }
+    // Missing parent folder of a missing list file must NOT become present.
+    let missing_list_dir = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-db",
+        &db_path,
+        "-seqidlist",
+        "d19-r2-nosub/miss.txt",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "d19-r2-nosub/run.log",
+    ];
+    validate(&missing_list_dir).unwrap();
+    let (res, streams) = run_db_of(&missing_list_dir);
+    assert!(res.is_err(), "missing seqidlist fails search");
+    assert_eq!(run_files(&streams), None, "no log file in missing folder");
 }
 
 /// `registered_run_files` uses one reader regardless of whether the argv parses (line WQA D19
@@ -808,6 +955,41 @@ fn registered_run_files_uses_one_reader_regardless_of_parse() {
     assert_eq!(registered_run_files(&tblastx_base, &registry), want_tblastx);
     assert_eq!(registered_run_files(&tblastx_bad, &registry), want_tblastx);
     assert_eq!(registered_run_files(&tblastx_help, &registry), want_tblastx);
+
+    // Round R2 finding 1: value of `-export_search_strategy` named `-query` is skipped as its
+    // value, yielding `q.fa` and `s.fa` with and without an unknown option and with `-h`.
+    let strat_base = [
+        "tblastx",
+        "-export_search_strategy",
+        "-query",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+    ];
+    let strat_bad = [
+        "tblastx",
+        "-export_search_strategy",
+        "-query",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-no_such_option",
+    ];
+    let strat_help = [
+        "tblastx",
+        "-export_search_strategy",
+        "-query",
+        "-query",
+        "q.fa",
+        "-subject",
+        "s.fa",
+        "-h",
+    ];
+    assert_eq!(registered_run_files(&strat_base, &registry), want_tblastx);
+    assert_eq!(registered_run_files(&strat_bad, &registry), want_tblastx);
+    assert_eq!(registered_run_files(&strat_help, &registry), want_tblastx);
 
     let psiblast_base = ["psiblast", "-query", "q.fa", "-subject", "s.fa"];
     let psiblast_bad = [

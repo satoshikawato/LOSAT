@@ -664,4 +664,127 @@ fn a_tool_run_reads_logfile_against_the_runs_files() {
         file_names(&calls),
         vec![b"d19-slash".to_vec(), b"x.counts".to_vec()]
     );
+
+    // Round R2 finding 2: `-logfile` or `-out` naming a missing input the CLI reads back is
+    // refused by both `validate` and `run` (status 1, same sentence, no file).
+    let log_refusal = |name: &str| {
+        format!(
+            "Error: a -logfile file '{name}' that is a file of the run's directory (the command \
+             line appends its messages to it; LOSAT Web reads the run's files and writes none of \
+             them) is not supported by LOSAT's WINDOWMASKER"
+        )
+    };
+    let out_refusal = |name: &str| {
+        format!(
+            "Error: an output file '{name}' that is a file of the run's directory (the command \
+             line empties it; LOSAT Web reads the run's files and writes none of them) is not \
+             supported by LOSAT's WINDOWMASKER"
+        )
+    };
+    for (label, words, want) in [
+        (
+            "mk_counts -in missing -logfile same",
+            vec![
+                "windowmasker",
+                "-mk_counts",
+                "-in",
+                "d19-r2-missing.fa",
+                "-logfile",
+                "d19-r2-missing.fa",
+                "-out",
+                "d19-r2.counts",
+            ],
+            log_refusal("d19-r2-missing.fa"),
+        ),
+        (
+            "ustat missing -logfile same",
+            vec![
+                "windowmasker",
+                "-ustat",
+                "d19-r2-missing.counts",
+                "-in",
+                &fasta,
+                "-logfile",
+                "d19-r2-missing.counts",
+                "-out",
+                "d19-r2.mask",
+            ],
+            log_refusal("d19-r2-missing.counts"),
+        ),
+        (
+            "mk_counts -in missing -out same",
+            vec![
+                "windowmasker",
+                "-mk_counts",
+                "-in",
+                "d19-r2-missing-x.fa",
+                "-out",
+                "d19-r2-missing-x.fa",
+            ],
+            out_refusal("d19-r2-missing-x.fa"),
+        ),
+        (
+            "ustat missing -out same",
+            vec![
+                "windowmasker",
+                "-ustat",
+                "d19-r2-missing.counts",
+                "-in",
+                &fasta,
+                "-out",
+                "d19-r2-missing.counts",
+            ],
+            out_refusal("d19-r2-missing.counts"),
+        ),
+    ] {
+        assert_eq!(validate(&words), Err(want.clone()), "{label}: validate");
+        run(&words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":1}".to_vec()),
+            "{label}: status"
+        );
+        assert_eq!(
+            joined(&calls, STREAM_DIAGNOSTICS),
+            format!("{want}\n").as_bytes(),
+            "{label}: diag"
+        );
+        assert!(joined(&calls, STREAM_PRINTED).is_empty(), "{label}: stdout");
+        assert!(frames(&calls).is_empty(), "{label}: no files");
+    }
+    // Controls: `-mk_counts -in x.fa` (missing, no write name) stays status 3 with `Read error`,
+    // and a missing input's parent folder must NOT become present (`-in sub/x.fa -logfile
+    // sub/run.log` without `sub` keeps diagnostics on stream 3 with no file).
+    for (label, words) in [
+        (
+            "missing input control",
+            &["windowmasker", "-mk_counts", "-in", "d19-r2-missing-x.fa"][..],
+        ),
+        (
+            "missing input parent folder",
+            &[
+                "windowmasker",
+                "-mk_counts",
+                "-in",
+                "d19-r2-nosub/x.fa",
+                "-logfile",
+                "d19-r2-nosub/run.log",
+            ][..],
+        ),
+    ] {
+        assert_eq!(validate(words), Ok(()), "{label}: validate");
+        run(words).unwrap();
+        let calls = emitted();
+        assert_eq!(
+            calls.last().unwrap(),
+            &(STREAM_RESPONSE, b"{\"status\":3}".to_vec()),
+            "{label}: status"
+        );
+        assert!(
+            String::from_utf8_lossy(&joined(&calls, STREAM_DIAGNOSTICS)).contains("Read error"),
+            "{label}: Read error"
+        );
+        assert!(frames(&calls).is_empty(), "{label}: no stream 12 files");
+    }
 }

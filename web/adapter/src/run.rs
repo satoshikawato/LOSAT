@@ -483,22 +483,31 @@ fn start(
     }
 }
 
-/// The names of the search's files that the host holds outside `/work` (line WQA D19):
-/// - `-query` and `-subject` (unless `-`, standard input);
-/// - BLASTN's `-window_masker_db` or `-window_masker_taxid` (`windowmasker/<taxid>/wmasker.obinary`)
-///   when registered as kind 1;
-/// - the kind-2 registry files of `registry` that this run's start reads: `.ncbirc`, and without
-///   a version word either the registered file of `-conffile` or `<program>.ini` without one.
-fn registered_run_files(
-    words: &[&str],
-    registry: &crate::files::RegisteredRegistry,
-) -> Vec<Vec<u8>> {
-    use losat::web_adapter::{preparse, Preparsed, RegistryFiles as _};
+/// The file names of a search run (`search_run_files`): those the host holds outside `/work`
+/// (`registered`: `FileReceiver::registered_files`) and those in `/work` the run opens for reading
+/// whether present or missing (`read`: `FileReceiver::read_files`, a `-db` search's list files).
+#[derive(Default)]
+struct SearchRunFiles {
+    registered: Vec<Vec<u8>>,
+    read: Vec<Vec<u8>>,
+}
+
+/// The names of the search's files that the host holds outside `/work` and the list files of a
+/// `-db` search that the run opens for reading (line WQA D19 rounds R1 and R2):
+/// - `registered`: `-query` and `-subject` (unless `-`), BLASTN's `-window_masker_db` or
+///   `-window_masker_taxid` (`windowmasker/<taxid>/wmasker.obinary`) when registered as kind 1,
+///   and the kind-2 registry files of `registry` that this run's start reads (`.ncbirc`, and
+///   without a version word either the registered file of `-conffile` or `<program>.ini`);
+/// - `read`: with `-db`, the list files accepted by LOSAT Web (`-seqidlist`,
+///   `-negative_seqidlist`, `-taxidlist`, `-negative_taxidlist`), kept apart from `registered` so
+///   a missing list file does not make its parent folders present.
+fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry) -> SearchRunFiles {
+    use losat::web_adapter::{preparse, scan_program_argv, Preparsed, RegistryFiles as _};
     use std::path::Path;
 
     let (program_name, arguments) = words.split_first().unwrap_or((&"", &[]));
     let Ok(program) = Program::parse(program_name) else {
-        return Vec::new();
+        return SearchRunFiles::default();
     };
 
     fn push_input(names: &mut Vec<Vec<u8>>, value: &str) {
@@ -524,76 +533,61 @@ fn registered_run_files(
     }
 
     // The command line opens `-logfile` before it reads the arguments, so the run's input files do
-    // not depend on whether the argv parses. Read `-query`, `-subject`, and (for BLASTN)
-    // `-window_masker_db` / `-window_masker_taxid` through one scan for every argv.
-    let mut names: Vec<Vec<u8>> = Vec::new();
+    // not depend on whether the argv parses. Walk `arguments` once through the program's own
+    // argument definitions (`scan_program_argv`), skipping the value of every option that takes
+    // one (even when it starts with `-`).
+    let mut registered: Vec<Vec<u8>> = Vec::new();
+    let mut list_files: Vec<Vec<u8>> = Vec::new();
+    let mut has_db = false;
     let is_blastn = program == Program::Blastn;
-    let mut at = 0;
-    while at < arguments.len() {
-        let word = arguments[at];
-        if word == "--" {
-            break;
-        }
-        enum ValueKind {
-            Input,
-            Counts,
-            Taxid,
-        }
-        let kind = match word {
-            "-logfile" | "-conffile" => {
-                at += 1;
-                None
-            }
-            "-query" | "-subject" => Some(ValueKind::Input),
-            "-window_masker_db" if is_blastn => Some(ValueKind::Counts),
-            "-window_masker_taxid" if is_blastn => Some(ValueKind::Taxid),
-            _ => {
-                if let Some(value) = word
-                    .strip_prefix("-query=")
-                    .or_else(|| word.strip_prefix("-subject="))
-                {
-                    push_input(&mut names, value);
-                } else if is_blastn {
-                    if let Some(value) = word.strip_prefix("-window_masker_db=") {
-                        push_counts(&mut names, value);
-                    } else if let Some(value) = word.strip_prefix("-window_masker_taxid=") {
-                        push_taxid(&mut names, value);
-                    }
-                }
-                None
-            }
+    scan_program_argv(program_name, arguments, |name, value| {
+        let Some(value) = value else {
+            return;
         };
-        if let Some(kind) = kind {
-            at += 1;
-            if let Some(&value) = arguments.get(at) {
-                match kind {
-                    ValueKind::Input => push_input(&mut names, value),
-                    ValueKind::Counts => push_counts(&mut names, value),
-                    ValueKind::Taxid => push_taxid(&mut names, value),
+        match name {
+            "query" | "subject" => push_input(&mut registered, value),
+            "window_masker_db" if is_blastn => push_counts(&mut registered, value),
+            "window_masker_taxid" if is_blastn => push_taxid(&mut registered, value),
+            "db" => has_db = true,
+            "seqidlist" | "negative_seqidlist" | "taxidlist" | "negative_taxidlist" => {
+                if !value.is_empty() {
+                    list_files.push(value.as_bytes().to_vec());
                 }
             }
+            _ => {}
         }
-        at += 1;
-    }
+    });
     if registry.is_file(Path::new(".ncbirc")) {
-        names.push(b".ncbirc".to_vec());
+        registered.push(b".ncbirc".to_vec());
     }
     if let Preparsed::Words { conffile, .. } = preparse(arguments) {
         match conffile {
             Some(name) => {
                 if registry.is_file(Path::new(&name)) {
-                    names.push(name.as_encoded_bytes().to_vec());
+                    registered.push(name.as_encoded_bytes().to_vec());
                 }
             }
             None => {
                 let ini = format!("{program_name}.ini");
                 if registry.is_file(Path::new(&ini)) {
-                    names.push(ini.into_bytes());
+                    registered.push(ini.into_bytes());
                 }
             }
         }
     }
-    names
+    SearchRunFiles {
+        registered,
+        read: if has_db { list_files } else { Vec::new() },
+    }
+}
+
+/// The names of the search's files that the host holds outside `/work` (`search_run_files`).
+#[cfg(test)]
+fn registered_run_files(
+    words: &[&str],
+    registry: &crate::files::RegisteredRegistry,
+) -> Vec<Vec<u8>> {
+    search_run_files(words, registry).registered
 }
 
 /// What a run does after its start (`started_command`).
@@ -646,8 +640,8 @@ fn started_command(
 }
 
 /// A receiver of the files of a run that keeps none (`validate`, which emits nothing), carrying
-/// the search's registered file names so `-logfile` is checked against the run's real files.
-struct NoFiles(Vec<Vec<u8>>);
+/// the search's registered and read file names so `-logfile` is checked against the run's files.
+struct NoFiles(SearchRunFiles);
 
 impl losat::web_adapter::FileReceiver for NoFiles {
     fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
@@ -655,7 +649,11 @@ impl losat::web_adapter::FileReceiver for NoFiles {
     }
 
     fn registered_files(&self) -> &[Vec<u8>] {
-        &self.0
+        &self.0.registered
+    }
+
+    fn read_files(&self) -> &[Vec<u8>] {
+        &self.0.read
     }
 }
 
@@ -732,11 +730,11 @@ pub fn emit_start(words: &[&str]) -> Result<(), String> {
 /// `Err` with the start's error where the start, or LOSAT's check of its settings, ends the run.
 pub fn data_loaders(words: &[&str]) -> Result<bool, String> {
     let registry = crate::files::registry_files();
-    let registered = registered_run_files(words, &registry);
+    let run_names = search_run_files(words, &registry);
     let started = start(
         words,
         &registry,
-        &RunFiles::Receiver(Arc::new(NoFiles(registered))),
+        &RunFiles::Receiver(Arc::new(NoFiles(run_names))),
         &mut std::io::sink(),
     )
     .map_err(|(message, _)| message)?;
@@ -769,8 +767,8 @@ pub fn validate(words: &[&str]) -> Result<bool, String> {
 pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool, String> {
     use losat::web_adapter::{parse_optional_range, RangeRole};
     let registry = crate::files::registry_files();
-    let registered = registered_run_files(words, &registry);
-    let no_files = RunFiles::Receiver(Arc::new(NoFiles(registered)));
+    let run_names = search_run_files(words, &registry);
+    let no_files = RunFiles::Receiver(Arc::new(NoFiles(run_names)));
     let started =
         start(words, &registry, &no_files, &mut std::io::sink()).map_err(|(message, _)| message)?;
     if let Ok(settings) = started.settings() {
@@ -1776,7 +1774,7 @@ pub fn run(
     subject: &[FastaRecord],
 ) -> Result<(), String> {
     let registry = crate::files::registry_files();
-    let files = Arc::new(RunFileArchive::new(registered_run_files(words, &registry)));
+    let files = Arc::new(RunFileArchive::new(search_run_files(words, &registry)));
     let run_files = RunFiles::Receiver(files.clone());
     let mut diagnostics = StreamWriter::new(STREAM_DIAGNOSTICS);
     let (result, started) = match start(words, &registry, &run_files, &mut diagnostics) {
@@ -1822,20 +1820,20 @@ type ArchivedEntries = Vec<(Vec<u8>, Vec<u8>)>;
 /// `-export_search_strategy`, `strategy::end_run`) instead of a file lost without one.
 struct RunFileArchive {
     files: std::sync::Mutex<Option<ArchivedEntries>>,
-    registered: Vec<Vec<u8>>,
+    run_names: SearchRunFiles,
 }
 
 impl Default for RunFileArchive {
     fn default() -> Self {
-        Self::new(Vec::new())
+        Self::new(SearchRunFiles::default())
     }
 }
 
 impl RunFileArchive {
-    fn new(registered: Vec<Vec<u8>>) -> Self {
+    fn new(run_names: SearchRunFiles) -> Self {
         Self {
             files: std::sync::Mutex::new(Some(Vec::new())),
-            registered,
+            run_names,
         }
     }
 
@@ -1883,7 +1881,11 @@ impl losat::web_adapter::FileReceiver for RunFileArchive {
     }
 
     fn registered_files(&self) -> &[Vec<u8>] {
-        &self.registered
+        &self.run_names.registered
+    }
+
+    fn read_files(&self) -> &[Vec<u8>] {
+        &self.run_names.read
     }
 }
 
@@ -2040,7 +2042,7 @@ fn search_all(
                 false => losat::web_adapter::open_strategy_file(
                     &command,
                     &words[1..],
-                    &RunFiles::Receiver(Arc::new(NoFiles(Vec::new()))),
+                    &RunFiles::Receiver(Arc::new(NoFiles(SearchRunFiles::default()))),
                 )
                 .map_err(|error| format!("{error:#}"))?,
             };

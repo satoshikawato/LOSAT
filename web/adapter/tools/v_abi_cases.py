@@ -1044,6 +1044,7 @@ def tool() -> list[dict]:
     add("d19.t1_folder", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile fa", failure=True)
     add("d19.t1_folder_slash", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile fa/", failure=True)
     add("d19.t2_input", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile fa/dm2L_3k.fa", failure="refusal")
+    add("d19.t2_missing_input", "-mk_counts -in m.fa -logfile m.fa", failure="refusal")
     add("d19.t3_stdout", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile /dev/stdout", failure=True)
     add("d19.t3_stdout_counts", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -logfile /dev/stdout")
     add("d19.t3_stdout_both", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out /dev/stdout -logfile /dev/stdout")
@@ -1083,6 +1084,7 @@ def tool() -> list[dict]:
              "late_failure"),
             ("shared", "-mk_counts -in fa/dm2L_3k.fa -unit 5 -out ./out.counts -logfile out.counts", False),
             ("d19.t2_input", "-ustat counts/garbage.counts -in fa/dm2L_3k.fa -logfile fa/dm2L_3k.fa", "refusal"),
+            ("d19.t2_missing_input", "-mk_counts -in m.fa -logfile m.fa", "refusal"),
             ("d19.t3_stdout", "-in fa/dm2L_3k.fa -logfile /dev/stdout", True)):
         add(f"validate.{case_id}", words, failure, kind="validate")
     return rows

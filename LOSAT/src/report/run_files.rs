@@ -37,6 +37,24 @@ pub trait FileReceiver: Send + Sync {
     fn registered_files(&self) -> &[Vec<u8>] {
         &[]
     }
+
+    /// The names of files that the run opens for reading (whether present in `/work` or missing),
+    /// besides `registered_files` (line WQA D19 round R2): e.g. a `-db` search's list files
+    /// (`-seqidlist`, `-negative_seqidlist`, `-taxidlist`, `-negative_taxidlist`) and a tool's
+    /// input files (`-in`, `-ustat`, `-ids`, `-exclude_ids`). Kept apart from `registered_files`
+    /// so a missing input does not make its parent folders present; only matched when `log_name`
+    /// would otherwise make a new file (`LogName::File { key }`).
+    fn read_files(&self) -> &[Vec<u8>] {
+        &[]
+    }
+
+    /// The subset of `read_files` that a tool opens and reads after opening `-out` in a way that
+    /// changes the run when the file is missing (line WQA D19 round R2): `-in` of `windowmasker
+    /// -mk_counts` (without `-fa_list` or `-infmt blastdb`) and `-ustat` of masking. Only matched
+    /// when `output_name` would otherwise make a new file (`OutputName::File { key }`).
+    fn output_read_files(&self) -> &[Vec<u8>] {
+        &[]
+    }
 }
 
 /// A file of a tool's run that the receiver takes as the run writes it (`FileReceiver::open`): the
@@ -148,7 +166,8 @@ impl RunFiles {
     }
 }
 
-/// LOSAT's refusal reason for a `-logfile` naming an existing file of the run's directory.
+/// LOSAT's refusal reason for a `-logfile` naming an existing file of the run's directory or a
+/// file the run opens for reading.
 fn existing_log_refusal(name: &OsStr) -> String {
     format!(
         "a -logfile file '{}' that is a file of the run's directory (the command line appends \
@@ -157,9 +176,20 @@ fn existing_log_refusal(name: &OsStr) -> String {
     )
 }
 
+/// LOSAT's refusal reason for a tool's `-out` naming an existing file of the run's directory or
+/// an input the command line reads after opening `-out`.
+fn existing_output_refusal(name: &OsStr) -> String {
+    format!(
+        "an output file '{}' that is a file of the run's directory (the command \
+         line empties it; LOSAT Web reads the run's files and writes none of them)",
+        name.display()
+    )
+}
+
 /// The target of the `-logfile` value `name` for a `Receiver` (`RunFiles::log_target`,
 /// `OpenFiles::log_target`): NCBI's special names, then `log_name`'s reading against the run's
-/// real files (`run_entries`, `run_entry`); `direct` wraps a `DiagTarget` without a new file,
+/// real files (`run_entries`, `run_entry`), plus the case-2 refusal when a new file's `file_key`
+/// matches a name in `FileReceiver::read_files`; `direct` wraps a `DiagTarget` without a new file,
 /// `file` opens a new file given its host name and key (`LogName::File`), and `stdout` handles
 /// `/dev/stdout` (`LogName::Stdout`). `Err` with LOSAT's refusal reason for `LogName::Existing`.
 fn received_log_target<T>(
@@ -184,7 +214,16 @@ fn received_log_target<T>(
                 LogName::File {
                     name: host_name,
                     key,
-                } => Ok(file(host_name, key)),
+                } => {
+                    if path_keys(receiver.read_files())
+                        .iter()
+                        .any(|read| read.as_slice() == key.as_slice())
+                    {
+                        Err(existing_log_refusal(name))
+                    } else {
+                        Ok(file(host_name, key))
+                    }
+                }
             }
         }
     }
@@ -294,10 +333,7 @@ impl OpenFiles {
                 .map_err(|_| Unopened);
         };
         let bytes = name.as_encoded_bytes();
-        let name = name.display();
-        let registered = run_entries(table.receiver.as_ref());
-        let entry = |path: &[u8], cwd: &[u8]| run_entry(&registered, path, cwd);
-        match output_name(bytes, &entry) {
+        match receiver_output_name(table.receiver.as_ref(), bytes) {
             OutputName::Unopened => Err(Unopened),
             OutputName::File {
                 name: host_name,
@@ -311,14 +347,42 @@ impl OpenFiles {
             OutputName::Discard => Ok(Created::File(OpenedFile::Discard)),
             OutputName::Full => Ok(Created::File(OpenedFile::Full)),
             OutputName::Special => Ok(Created::Refused(format!(
-                "an output file '{name}' that is the standard error, a device or a file of \
-                 procfs (LOSAT Web writes no such file)"
+                "an output file '{}' that is the standard error, a device or a file of \
+                 procfs (LOSAT Web writes no such file)",
+                name.display()
             ))),
-            OutputName::Existing => Ok(Created::Refused(format!(
-                "an output file '{name}' that is a file of the run's directory (the command \
-                 line empties it; LOSAT Web reads the run's files and writes none of them)"
-            ))),
+            OutputName::Existing => Ok(Created::Refused(existing_output_refusal(name))),
         }
+    }
+
+    /// LOSAT Web's case-2 refusal reason for a tool's `-out` `name` (without opening or creating
+    /// the file, for `windowmasker::app::check` / `validate`): `Some(reason)` when `self` is a
+    /// `Receiver` and `receiver_output_name` resolves `name` to `OutputName::Existing`, else
+    /// `None`. Always `None` on `Disk`.
+    pub(crate) fn refused_output(&self, name: &OsStr) -> Option<String> {
+        let table = self.0.as_ref()?;
+        matches!(
+            receiver_output_name(table.receiver.as_ref(), name.as_encoded_bytes()),
+            OutputName::Existing
+        )
+        .then(|| existing_output_refusal(name))
+    }
+}
+
+/// Resolves `bytes` as an output file name of `receiver` (`output_name`), turning a new file
+/// whose `file_key` matches `FileReceiver::output_read_files` into `OutputName::Existing`.
+fn receiver_output_name(receiver: &dyn FileReceiver, bytes: &[u8]) -> OutputName {
+    let registered = run_entries(receiver);
+    let entry = |path: &[u8], cwd: &[u8]| run_entry(&registered, path, cwd);
+    match output_name(bytes, &entry) {
+        OutputName::File { key, .. }
+            if path_keys(receiver.output_read_files())
+                .iter()
+                .any(|read| read.as_slice() == key.as_slice()) =>
+        {
+            OutputName::Existing
+        }
+        other => other,
     }
 }
 
@@ -628,14 +692,14 @@ fn is_known_directory(path: &[u8], cwd: &[u8]) -> bool {
         || holds_known_file(path)
 }
 
-/// The keys (`file_key`) of `receiver`'s registered files, inside or outside the working
-/// directory, resolved with `Walk` in each name's own `working_directory` so that `./q.fa`,
-/// `in/../q.fa`, and `/proc/self/cwd/q.fa` share one key (`\00/q.fa`), `../q.fa` carries its
-/// climb depth (`\01/q.fa`), and `/tmp/q.fa` or `/data/q.fa` keeps its resolved path
-/// (`run_entry`). Non-file directory names (`.`, `..`, `/`, `/tmp`, trailing `/`) are skipped.
-fn run_entries(receiver: &dyn FileReceiver) -> Vec<Vec<u8>> {
+/// The keys (`file_key`) of `raw_names`, inside or outside the working directory, resolved with
+/// `Walk` in each name's own `working_directory` so that `./q.fa`, `in/../q.fa`, and
+/// `/proc/self/cwd/q.fa` share one key (`\00/q.fa`), `../q.fa` carries its climb depth
+/// (`\01/q.fa`), and `/tmp/q.fa` or `/data/q.fa` keeps its resolved path. Non-file directory
+/// names (`.`, `..`, `/`, `/tmp`, trailing `/`) are skipped.
+fn path_keys(raw_names: &[Vec<u8>]) -> Vec<Vec<u8>> {
     let mut files = Vec::new();
-    for raw in receiver.registered_files() {
+    for raw in raw_names {
         if raw.is_empty() || raw.ends_with(b"/") || !fits(raw) {
             continue;
         }
@@ -647,6 +711,11 @@ fn run_entries(receiver: &dyn FileReceiver) -> Vec<Vec<u8>> {
         }
     }
     files
+}
+
+/// The keys (`file_key`) of `receiver`'s registered files (`path_keys`, `run_entry`).
+fn run_entries(receiver: &dyn FileReceiver) -> Vec<Vec<u8>> {
+    path_keys(receiver.registered_files())
 }
 
 /// What the run's files hold at `path` (resolved without links) in working directory `cwd`:

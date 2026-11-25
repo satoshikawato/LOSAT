@@ -7,6 +7,8 @@ use crate::blastinput::ncbi_environment::TextPlace as Place;
 struct Kept {
     files: Mutex<Vec<(Vec<u8>, Vec<u8>)>>,
     registered: Vec<Vec<u8>>,
+    read: Vec<Vec<u8>>,
+    out_read: Vec<Vec<u8>>,
 }
 
 impl Kept {
@@ -14,6 +16,20 @@ impl Kept {
         Self {
             files: Mutex::new(Vec::new()),
             registered: names.iter().map(|name| name.as_bytes().to_vec()).collect(),
+            read: Vec::new(),
+            out_read: Vec::new(),
+        }
+    }
+
+    fn with_read_files(read: &[&str], out_read: &[&str]) -> Self {
+        Self {
+            files: Mutex::new(Vec::new()),
+            registered: Vec::new(),
+            read: read.iter().map(|name| name.as_bytes().to_vec()).collect(),
+            out_read: out_read
+                .iter()
+                .map(|name| name.as_bytes().to_vec())
+                .collect(),
         }
     }
 }
@@ -29,6 +45,14 @@ impl FileReceiver for Kept {
 
     fn registered_files(&self) -> &[Vec<u8>] {
         &self.registered
+    }
+
+    fn read_files(&self) -> &[Vec<u8>] {
+        &self.read
+    }
+
+    fn output_read_files(&self) -> &[Vec<u8>] {
+        &self.out_read
     }
 }
 
@@ -1253,4 +1277,51 @@ fn outside_cwd_registered_files_are_seen_by_log_and_output_names() {
         run_files.log_target(Some(OsStr::new("/proc/self/cwd/../q.fa"))),
         Ok((DiagTarget::Stderr, None))
     ));
+}
+
+/// Missing input files listed in `FileReceiver::read_files` / `output_read_files` (line WQA D19
+/// round R2) refuse `-logfile` / `-out` when `log_name` / `output_name` would otherwise create
+/// that file, without making missing parent folders present.
+#[test]
+fn read_files_refuse_matching_writes_without_creating_folders() {
+    let receiver = Arc::new(Kept::with_read_files(
+        &["missing.fa", "missing_sub/x.fa", "ids.txt"],
+        &["missing.fa"],
+    ));
+    let run_files = RunFiles::Receiver(receiver);
+    let open_files = OpenFiles::new(&run_files);
+
+    // `-logfile` naming a missing read input (also via `./`) is refused.
+    assert!(run_files
+        .log_target(Some(OsStr::new("missing.fa")))
+        .is_err());
+    assert!(run_files
+        .log_target(Some(OsStr::new("./missing.fa")))
+        .is_err());
+    assert!(run_files.log_target(Some(OsStr::new("ids.txt"))).is_err());
+
+    // Missing parent folder of a missing input does NOT become present.
+    assert!(matches!(
+        run_files.log_target(Some(OsStr::new("missing_sub/run.log"))),
+        Ok((DiagTarget::Stderr, None))
+    ));
+    assert!(matches!(
+        run_files.log_target(Some(OsStr::new("missing_sub/x.fa"))),
+        Ok((DiagTarget::Stderr, None))
+    ));
+
+    // `-out` refuses only `output_read_files` (`missing.fa`), not `ids.txt`.
+    assert!(matches!(
+        open_files.create("missing.fa"),
+        Ok(Created::Refused(_))
+    ));
+    assert!(matches!(
+        open_files.create("./missing.fa"),
+        Ok(Created::Refused(_))
+    ));
+    assert!(open_files
+        .refused_output(OsStr::new("missing.fa"))
+        .is_some());
+    assert!(matches!(open_files.create("ids.txt"), Ok(Created::File(_))));
+    assert!(open_files.refused_output(OsStr::new("ids.txt")).is_none());
 }

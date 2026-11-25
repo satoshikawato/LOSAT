@@ -15,7 +15,7 @@ mod ids;
 mod sdust;
 mod work;
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
 
 use crate::ncbi_app::Tool;
@@ -128,6 +128,83 @@ pub(crate) fn check_in(
         (&mut std::io::empty(), out, err),
         app::check,
     )
+}
+
+// No NCBI counterpart: LOSAT Web reads `-logfile` and `-out` against the input names the run
+// opens for reading, so a write name equal to a missing input is refused instead of diverging
+// from the command line, which creates the file and then reads it back (line WQA D19 round R2).
+/// The input file names that a `windowmasker` run with `words` opens for reading:
+/// `(for_logfile, for_out)`.
+/// - `for_logfile`: every file that the run opens after the application start opens `-logfile`:
+///   `-in` (unless `-` or `-infmt blastdb`; split on `,` for `-mk_counts` without `-fa_list true`),
+///   `-ustat` (in masking mode), `-ids` and `-exclude_ids` (when not `-convert`).
+/// - `for_out`: the subset that the command line opens and reads after opening `-out` in a way
+///   that changes the run when the file is missing: `-in` (split on `,`, unless `-` or
+///   `-infmt blastdb`) of `-mk_counts` without `-fa_list true`, and `-ustat` of masking.
+pub(crate) fn read_files<S: AsRef<OsStr>>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    let mut mk_counts = false;
+    let mut convert = false;
+    let mut fa_list = false;
+    let mut infmt_blastdb = false;
+    let mut input: Option<Vec<u8>> = None;
+    let mut ustat: Option<Vec<u8>> = None;
+    let mut ids: Option<Vec<u8>> = None;
+    let mut exclude_ids: Option<Vec<u8>> = None;
+    crate::ncbi_app::args::scan_argv("windowmasker", words, |name, value| match (name, value) {
+        ("mk_counts", None) => mk_counts = true,
+        ("convert", None) => convert = true,
+        ("fa_list", Some(v)) => {
+            fa_list = v
+                .to_str()
+                .and_then(crate::ncbi_str::string_to_bool)
+                .unwrap_or(false);
+        }
+        ("infmt", Some(v)) => infmt_blastdb = v == "blastdb",
+        ("in", Some(v)) => input = Some(v.as_encoded_bytes().to_vec()),
+        ("ustat", Some(v)) => ustat = Some(v.as_encoded_bytes().to_vec()),
+        ("ids", Some(v)) => ids = Some(v.as_encoded_bytes().to_vec()),
+        ("exclude_ids", Some(v)) => exclude_ids = Some(v.as_encoded_bytes().to_vec()),
+        _ => {}
+    });
+    let mut for_log = Vec::new();
+    let mut for_out = Vec::new();
+    let push_in = |out: &mut Vec<Vec<u8>>, bytes: &[u8]| {
+        if !bytes.is_empty() && bytes != b"-" {
+            out.push(bytes.to_vec());
+        }
+    };
+    let push_path = |out: &mut Vec<Vec<u8>>, bytes: &[u8]| {
+        if !bytes.is_empty() {
+            out.push(bytes.to_vec());
+        }
+    };
+    if let Some(ref raw_in) = input {
+        if !infmt_blastdb {
+            if mk_counts && !convert && !fa_list {
+                for part in raw_in.split(|&b| b == b',') {
+                    push_in(&mut for_log, part);
+                    push_in(&mut for_out, part);
+                }
+            } else {
+                push_in(&mut for_log, raw_in);
+            }
+        }
+    }
+    if !mk_counts && !convert {
+        if let Some(ref u) = ustat {
+            push_path(&mut for_log, u);
+            push_path(&mut for_out, u);
+        }
+    }
+    if !convert {
+        if let Some(ref list) = ids {
+            push_path(&mut for_log, list);
+        }
+        if let Some(ref list) = exclude_ids {
+            push_path(&mut for_log, list);
+        }
+    }
+    (for_log, for_out)
 }
 
 #[cfg(test)]

@@ -1,0 +1,1291 @@
+Blast4-archive ::= {
+  request {
+    ident "2.17.0+",
+    body queue-search {
+      program "blastx",
+      service "plain",
+      queries bioseq-set {
+        seq-set {
+          seq {
+            id {
+              local str "Query_1"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q0"
+                  }
+                }
+              },
+              title "q0"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na '14F5B3EFB5A7AD2DF73C379614017778EFD6143CD2CCFB
+80E8FDD3CD603B81B0DBAEBB9E580AEEEBF4BA4DB8FA38E4BF6F3E830D29D64D2AFF01281E816A
+F77936CFAD6FEBFFADCE8E0CD2'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_2"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q1"
+                  }
+                }
+              },
+              title "q1"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na '38F6E74EEB923D6EBACFB5BA17AFF39E77BBED283B4DE9
+CE037DD39D315BE839DB596BBB0DB7B7AFBDCFDEEB8F5B39F739383B4E078E39B79E3B358ECC50
+378038273923CFBA3BBA8FAFC5'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_3"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q2"
+                  }
+                }
+              },
+              title "q2"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na '4D33BADC06EEFDEAD39D68C36E714F9D2FFFB8516EB96E
+9E5809F7EEB3E06DB3BA005AF34F76CFEEE3A7003B9E7BFAFF4FF3D26C015E6EE1409D31435B3A
+E303FCE3DDEDD2B923E38FFE9B'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_4"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q3"
+                  }
+                }
+              },
+              title "q3"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na 'DC38D27AE00F02E3E09E06FA9E7DE00E3EDB385FC5DF79
+CFDEE6FB6E08370D6B8FBA37BB9DE393583CE3FF782B9E39DE6D3EC5CCFFEBCFF8234EB5AB000D
+D3EE36D3BA73AE4C516BE92FC0'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_5"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q4"
+                  }
+                }
+              },
+              title "q4"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na 'ADBDFF9E37ABBAECF7383780DFA9D283F9C302B14F7853
+FA8C36C33EB6D302B6DEFFA3D66CEDC38E76DBEE039B3B3AFF0D6796EBF00FAEB58F9CE1539C5F
+E0E85FFFDE30F38FB8CF7A78E7'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_6"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q5"
+                  }
+                }
+              },
+              title "q5"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na 'BBBFE07B37B7CCE9C3DF7AC31454F3ADE17BCC5CE30204
+DBBB77B381EFD3AEB3FF3EE152FE3393AC5AC53927AEEE30C3DEB5BAFEE39E4EB6C54FF016B831
+6E4FF6DB6E002315B7B778F823'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_7"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q6"
+                  }
+                }
+              },
+              title "q6"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na '7AE48ECEB80F7A7EC33FA82E7A3B9E38F16BAE3CC35854
+B701B14F4DB3C54BA78E0F75935B70F78006CE83A14E0CE8033C08E7CE080F82BDC5EEBFE0FF78
+16143037B9BCD60E0B8FDC0596'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_8"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q7"
+                  }
+                }
+              },
+              title "q7"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na 'EABFEE9D6FD28DE8EE156DD3160EE349B3E783F8F3CDB3
+BA8133BA3C3033B96ACF5923FB81EE9B9F79FAAD60E73DE17F3D6005CF7AD34FF9C5CF3CE33EED
+C5596BBB3C5EEBCE38FACCF8DB'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_9"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q8"
+                  }
+                }
+              },
+              title "q8"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na 'BA738F0EBEFBEC5ADE3AB5A078E3B70233833800FF0FA0
+0ECDB5AE5B73CE01B173800EFADEE0D3485023B964A73C53A73DE396DFB0DBFE71407A3CD24A7A
+FBECFCC53E37B74C34D34EE583'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_10"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q9"
+                  }
+                }
+              },
+              title "q9"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na 'FEE8FAED2AC30CEAD2DF76CEDCFAC5AF30DBFDB38E3E77
+8E3809EB8056EE79B8DB4C39C0E939DB792592CDBBAB8121730FB8E783F4F33D3FE7E804ABDD24
+A3020145EA73D3837B854D2FD6'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_11"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q10"
+                  }
+                }
+              },
+              title "q10"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na '4920F7E9E4F70E73A06D2BB34B34F7AF30CF4FBAC57B75
+85AC54C0DDEB833FFB9BFDEBA06E33FA8DE6EE9D60DE4A30051674F74963A30EB823EBA0D2EC5D
+FBEC5813EB749617FFFA0FF8D3'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_12"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q11"
+                  }
+                }
+              },
+              title "q11"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na '02E6D24A75A00EE3CE8377BA140E8F0338EE493E9316E8
+3FAC3823DFAAFF0CFEAE6CFFE7CDB39248F02BED34D3793AF717B6F30D2163DEEDE04FB4FF3C04
+BACC50E76E7EA05AE7963AE3EB'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_13"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q12"
+                  }
+                }
+              },
+              title "q12"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na '4D6EDB0EBEB75AEADE800AEE9EEFC00FA38EAFAFDBFCE1
+6E79B5931606FF3D60DB5BAEF33A3AE017F1408F7ED2585BAE392CDE8235A049E1736DB9D60EEC
+EE4FAAC0AFFEAEACF8CE0C5EE0'H
+            }
+          },
+          seq {
+            id {
+              local str "Query_14"
+            },
+            descr {
+              user {
+                type str "CFastaReader",
+                data {
+                  {
+                    label str "DefLine",
+                    data str ">q13"
+                  }
+                }
+              },
+              title "q13"
+            },
+            inst {
+              repr raw,
+              mol na,
+              length 300,
+              seq-data ncbi2na 'EFACFB3E00C59EB480FCEEEB1529C39D2160DFFE9317FA
+CE17B0CEAD66C56E3CD2143AFA3FA0003F314F6D200F0E77BFEC36EB4800CEEC54C3E83AC501BF
+EBFCFFD33CFEA7FEE79B6E79FA'H
+            }
+          }
+        }
+      },
+      subject database "tests/db_search/idlist/g",
+      algorithm-options {
+        {
+          name "EvalueThreshold",
+          value cutoff e-value { 1, 10, -10 }
+        },
+        {
+          name "LongestIntronLength",
+          value integer 0
+        },
+        {
+          name "MaskAtHash",
+          value boolean FALSE
+        },
+        {
+          name "SegFilteringWindow",
+          value integer 12
+        },
+        {
+          name "SegFilteringLocut",
+          value real { 22, 10, -1 }
+        },
+        {
+          name "SegFilteringHicut",
+          value real { 25, 10, -1 }
+        },
+        {
+          name "WordThreshold",
+          value integer 12
+        },
+        {
+          name "WindowSize",
+          value integer 40
+        },
+        {
+          name "UngappedMode",
+          value boolean FALSE
+        },
+        {
+          name "QueryGeneticCode",
+          value integer 1
+        },
+        {
+          name "HitlistSize",
+          value integer 500
+        },
+        {
+          name "CompositionBasedStats",
+          value integer 2
+        },
+        {
+          name "SmithWatermanMode",
+          value boolean FALSE
+        },
+        {
+          name "EffectiveSearchSpace",
+          value big-integer 24624
+        }
+      },
+      program-options {
+        {
+          name "GiList",
+          value big-integer-list {
+            102,
+            102,
+            108,
+            117
+          }
+        },
+        {
+          name "TaxidList",
+          value integer-list {
+          }
+        }
+      }
+    }
+  },
+  results {
+    alignments {
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 544
+          },
+          {
+            id str "blast_score",
+            value int 544
+          },
+          {
+            id str "e_value",
+            value real { 318027864704967, 10, -92 }
+          },
+          {
+            id str "bit_score",
+            value real { 214156801579084, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 100
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 100
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_1",
+              gi 102
+            },
+            loc {
+              int {
+                from 0,
+                to 299,
+                strand plus,
+                id local str "Query_1"
+              },
+              int {
+                from 0,
+                to 99,
+                strand unknown,
+                id gi 102
+              }
+            }
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "gi:102"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 538
+          },
+          {
+            id str "blast_score",
+            value int 538
+          },
+          {
+            id str "e_value",
+            value real { 186925682361743, 10, -91 }
+          },
+          {
+            id str "bit_score",
+            value real { 21184560412358, 10, -11 }
+          },
+          {
+            id str "num_ident",
+            value int 100
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 100
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_6",
+              gi 108
+            },
+            loc {
+              int {
+                from 0,
+                to 299,
+                strand plus,
+                id local str "Query_6"
+              },
+              int {
+                from 0,
+                to 99,
+                strand unknown,
+                id gi 108
+              }
+            }
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "gi:108"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        type partial,
+        dim 2,
+        score {
+          {
+            id str "score",
+            value int 547
+          },
+          {
+            id str "blast_score",
+            value int 547
+          },
+          {
+            id str "e_value",
+            value real { 749077140642252, 10, -93 }
+          },
+          {
+            id str "bit_score",
+            value real { 215312400306836, 10, -12 }
+          },
+          {
+            id str "num_ident",
+            value int 100
+          },
+          {
+            id str "comp_adjustment_method",
+            value int 2
+          },
+          {
+            id str "num_positives",
+            value int 100
+          },
+          {
+            id str "hsp_percent_coverage",
+            value real { 1, 10, 2 }
+          }
+        },
+        segs std {
+          {
+            dim 2,
+            ids {
+              local str "Query_13",
+              gi 117
+            },
+            loc {
+              int {
+                from 0,
+                to 299,
+                strand plus,
+                id local str "Query_13"
+              },
+              int {
+                from 0,
+                to 99,
+                strand unknown,
+                id gi 117
+              }
+            }
+          }
+        },
+        ext {
+          {
+            type str "use_this_seqid",
+            data {
+              {
+                label str "SEQIDS",
+                num 1,
+                data strs {
+                  "gi:117"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    masks {
+      {
+        locations {
+          packed-int {
+            {
+              from 7,
+              to 40,
+              id local str "Query_1"
+            },
+            {
+              from 106,
+              to 154,
+              id local str "Query_1"
+            },
+            {
+              from 193,
+              to 250,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 155,
+              to 197,
+              id local str "Query_1"
+            },
+            {
+              from 203,
+              to 257,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 111,
+              to 155,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 208,
+              to 258,
+              id local str "Query_1"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 127,
+              to 169,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 23,
+              to 74,
+              id local str "Query_2"
+            },
+            {
+              from 212,
+              to 239,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 129,
+              to 194,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 194,
+              to 229,
+              id local str "Query_2"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 65,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 203,
+              to 238,
+              id local str "Query_3"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 16,
+              to 109,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 227,
+              to 260,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 225,
+              to 263,
+              id local str "Query_4"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 1,
+              to 70,
+              id local str "Query_5"
+            },
+            {
+              from 97,
+              to 127,
+              id local str "Query_5"
+            },
+            {
+              from 145,
+              to 190,
+              id local str "Query_5"
+            },
+            {
+              from 208,
+              to 247,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 101,
+              to 128,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 270,
+              to 284,
+              id local str "Query_5"
+            },
+            {
+              from 144,
+              to 197,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 101,
+              to 130,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 100,
+              to 129,
+              id local str "Query_5"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 4,
+              to 94,
+              id local str "Query_6"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 89,
+              to 116,
+              id local str "Query_6"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 36,
+              to 95,
+              id local str "Query_6"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 260,
+              to 298,
+              id local str "Query_6"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 97,
+              to 123,
+              id local str "Query_6"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 127,
+              to 154,
+              id local str "Query_7"
+            },
+            {
+              from 187,
+              to 235,
+              id local str "Query_7"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 180,
+              to 218,
+              id local str "Query_7"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 182,
+              to 217,
+              id local str "Query_7"
+            },
+            {
+              from 44,
+              to 79,
+              id local str "Query_7"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 43,
+              to 88,
+              id local str "Query_8"
+            },
+            {
+              from 202,
+              to 250,
+              id local str "Query_8"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 260,
+              to 290,
+              id local str "Query_8"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 264,
+              to 299,
+              id local str "Query_8"
+            },
+            {
+              from 231,
+              to 239,
+              id local str "Query_8"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 205,
+              to 234,
+              id local str "Query_8"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 16,
+              to 40,
+              id local str "Query_9"
+            },
+            {
+              from 58,
+              to 85,
+              id local str "Query_9"
+            },
+            {
+              from 244,
+              to 286,
+              id local str "Query_9"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 266,
+              to 287,
+              id local str "Query_9"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 3,
+              to 98,
+              id local str "Query_9"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 47,
+              to 79,
+              id local str "Query_9"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 31,
+              to 88,
+              id local str "Query_10"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 128,
+              to 173,
+              id local str "Query_10"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 71,
+              to 97,
+              id local str "Query_10"
+            }
+          }
+        },
+        frame minus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 118,
+              to 165,
+              id local str "Query_10"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 37,
+              to 79,
+              id local str "Query_11"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 168,
+              to 200,
+              id local str "Query_12"
+            }
+          }
+        },
+        frame minus1
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 148,
+              to 207,
+              id local str "Query_12"
+            }
+          }
+        },
+        frame minus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 2,
+              to 35,
+              id local str "Query_13"
+            }
+          }
+        },
+        frame plus3
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 82,
+              to 139,
+              id local str "Query_14"
+            },
+            {
+              from 244,
+              to 295,
+              id local str "Query_14"
+            }
+          }
+        },
+        frame plus2
+      },
+      {
+        locations {
+          packed-int {
+            {
+              from 87,
+              to 140,
+              id local str "Query_14"
+            }
+          }
+        },
+        frame minus1
+      }
+    },
+    ka-blocks {
+      {
+        lambda { 317605957635731, 10, -15 },
+        k { 133956144488482, 10, -15 },
+        h { 401214524497119, 10, -15 },
+        gapped FALSE
+      },
+      {
+        lambda { 267, 10, -3 },
+        k { 41, 10, -3 },
+        h { 14, 10, -2 },
+        gapped TRUE
+      }
+    },
+    search-stats {
+      "Effective search space: 24624",
+      "Effective search space used: 24624",
+      "Length adjustment: 19"
+    }
+  }
+}

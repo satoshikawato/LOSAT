@@ -190,7 +190,7 @@ pub(crate) fn failed_stream_text(ty: u16, value: &Value) -> Vec<u8> {
     let mut out = Vec::new();
     let mut traced = Traced::new(AsnTextEncoder::new(&mut out), 0);
     write_document_until(&mut traced, ty, value, |enc| enc.first_write().is_some());
-    let held = traced.first_write().unwrap_or(0);
+    let held = traced.first_write().unwrap_or(0) as usize;
     drop(traced);
     out.clear();
     // The same encoder as the first pass (`Traced` writes NCBI's `#` for a byte that the stream

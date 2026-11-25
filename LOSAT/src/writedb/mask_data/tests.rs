@@ -13,8 +13,9 @@ use super::{ranges_are_empty, MaskInfoRegistry, MaskedRangeSet, MaskedRanges};
 use crate::seqdb::{MaskRanges, SeqDb, SeqType};
 use crate::seqid::model::ObjectId;
 use crate::seqid::ParsedSeqId;
+use crate::utils::test_dir::TempDir;
 use crate::writedb::mask_info::{MaskInterval, MaskLoc, MaskPart};
-use crate::writedb::tests::{files_named, TempDir, LINUX};
+use crate::writedb::tests::{base_in, files_named, LINUX};
 use crate::writedb::writer::{DbVersion, Indices, WriteDb};
 use crate::writedb::WriteDbError;
 
@@ -420,7 +421,7 @@ fn the_registry_runs_out_of_ids_in_each_range() {
 /// A protein database of `version` in the platform of the expected files.
 pub(super) fn new_db(base: &str, date: &[u8], max_file_size: u64, version: DbVersion) -> WriteDb {
     WriteDb::new(
-        base,
+        base.as_bytes(),
         true,
         b"t",
         date,
@@ -445,8 +446,13 @@ pub(super) fn bioseq(local_id: usize, length: usize) -> crate::writedb::bioseq::
 
 #[test]
 fn set_mask_data_checks_what_ncbi_checks() {
-    let tmp = TempDir::new("mask-checks");
-    let mut db = new_db(&tmp.base("db"), b"Oct 12, 2026  3:22 PM", 0, DbVersion::V4);
+    let tmp = TempDir::unique("writedb-mask-checks");
+    let mut db = new_db(
+        &base_in(&tmp, "db"),
+        b"Oct 12, 2026  3:22 PM",
+        0,
+        DbVersion::V4,
+    );
     // No sequence: "Need sequence data."
     let one = [MaskedRanges {
         algorithm_id: 20,
@@ -497,8 +503,13 @@ fn set_mask_data_checks_what_ncbi_checks() {
 
 #[test]
 fn a_column_is_not_created_in_an_open_volume() {
-    let tmp = TempDir::new("mask-late");
-    let mut db = new_db(&tmp.base("db"), b"Oct 12, 2026  3:22 PM", 0, DbVersion::V4);
+    let tmp = TempDir::unique("writedb-mask-late");
+    let mut db = new_db(
+        &base_in(&tmp, "db"),
+        b"Oct 12, 2026  3:22 PM",
+        0,
+        DbVersion::V4,
+    );
     db.add_sequence(bioseq(1, 10)).unwrap();
     db.add_sequence(bioseq(2, 10)).unwrap();
     // The first sequence is published, so a volume exists.
@@ -517,8 +528,13 @@ fn a_column_is_not_created_in_an_open_volume() {
 /// what NCBI allows.
 #[test]
 fn algorithms_are_registered_until_the_first_volume_is_written() {
-    let tmp = TempDir::new("mask-early");
-    let mut db = new_db(&tmp.base("db"), b"Oct 12, 2026  3:22 PM", 0, DbVersion::V4);
+    let tmp = TempDir::unique("writedb-mask-early");
+    let mut db = new_db(
+        &base_in(&tmp, "db"),
+        b"Oct 12, 2026  3:22 PM",
+        0,
+        DbVersion::V4,
+    );
     db.set_column_date(0, b"10/20/2026 12:00:00");
     db.add_sequence(bioseq(1, 10)).unwrap();
     assert_eq!(
@@ -535,12 +551,12 @@ fn algorithms_are_registered_until_the_first_volume_is_written() {
     )
     .unwrap();
     db.close().unwrap();
-    let written = files_named(&tmp.0, "db.");
+    let written = files_named(&tmp, "db.");
     assert_eq!(
         written,
         ["db.paa", "db.pab", "db.pac", "db.phr", "db.pin", "db.psq"]
     );
-    let reader = SeqDb::open(&tmp.base("db"), SeqType::Protein).unwrap();
+    let reader = SeqDb::open(&base_in(&tmp, "db"), SeqType::Protein).unwrap();
     assert_eq!(
         reader
             .mask_ranges_at(reader.locate_oid(0).unwrap(), 20)
@@ -553,10 +569,10 @@ fn algorithms_are_registered_until_the_first_volume_is_written() {
 /// which the volume was created, as `CTime::AsString()` writes it.
 #[test]
 fn column_dates_come_from_the_hook_or_the_clock() {
-    let tmp = TempDir::new("mask-dates");
+    let tmp = TempDir::unique("writedb-mask-dates");
     // 100 bytes per file: every sequence is a volume.
     let mut db = new_db(
-        &tmp.base("db"),
+        &base_in(&tmp, "db"),
         b"Oct 12, 2026  3:22 PM",
         100,
         DbVersion::V4,
@@ -579,7 +595,7 @@ fn column_dates_come_from_the_hook_or_the_clock() {
     }
     db.close().unwrap();
     let dates: Vec<String> = (0..3)
-        .map(|i| column_date(&tmp.0.join(format!("db.0{i}.paa"))).unwrap())
+        .map(|i| column_date(&tmp.join(format!("db.0{i}.paa"))).unwrap())
         .collect();
     assert_eq!(dates[1], "01/02/2003 04:05:06");
     for date in [&dates[0], &dates[2]] {
@@ -621,9 +637,9 @@ pub(super) fn column_date(path: &Path) -> Option<String> {
 fn the_column_files_are_the_same_in_version_4_and_5() {
     let mut files: Vec<Vec<Vec<u8>>> = Vec::new();
     for version in [DbVersion::V4, DbVersion::V5] {
-        let tmp = TempDir::new("mask-versions");
+        let tmp = TempDir::unique("writedb-mask-versions");
         // 100 bytes per file: every sequence is a volume, in both versions.
-        let mut db = new_db(&tmp.base("db"), b"Oct 12, 2026  3:22 PM", 100, version);
+        let mut db = new_db(&base_in(&tmp, "db"), b"Oct 12, 2026  3:22 PM", 100, version);
         for i in 0..3 {
             db.set_column_date(i, b"10/20/2026 12:00:00");
         }
@@ -644,7 +660,7 @@ fn the_column_files_are_the_same_in_version_4_and_5() {
             }
         }
         db.close().unwrap();
-        let written = files_named(&tmp.0, "db.");
+        let written = files_named(&tmp, "db.");
         let columns: Vec<&String> = written
             .iter()
             .filter(|f| f.ends_with("aa") || f.ends_with("ab") || f.ends_with("ac"))
@@ -659,10 +675,10 @@ fn the_column_files_are_the_same_in_version_4_and_5() {
         files.push(
             columns
                 .iter()
-                .map(|f| std::fs::read(tmp.0.join(f)).unwrap())
+                .map(|f| std::fs::read(tmp.join(f)).unwrap())
                 .collect(),
         );
-        let reader = SeqDb::open(&tmp.base("db"), SeqType::Protein).unwrap();
+        let reader = SeqDb::open(&base_in(&tmp, "db"), SeqType::Protein).unwrap();
         for oid in [0, 2] {
             assert_eq!(
                 reader

@@ -20,17 +20,20 @@ use super::masker::dust_masks_skip_ns;
 /// The arguments of the run, as NCBI's `CArgs` gives them (`AsInteger`, `AsString`,
 /// `AsBoolean`).
 pub(super) struct Options<'a> {
-    pub input: &'a str,
-    pub infmt: &'a str,
+    /// `-in`: the bytes of a FASTA file's name or of a database's.
+    pub input: &'a std::ffi::OsStr,
+    /// `-infmt`, which NCBI compares as its bytes.
+    pub infmt: std::borrow::Cow<'a, [u8]>,
     pub outfmt: &'a str,
     pub window: i32,
     pub level: i32,
     pub linker: i32,
     pub parse_seqids: bool,
     pub hard_masking: bool,
-    /// The `BLASTDB` of the configuration (`[BLAST] BLASTDB`), for `CSeqDB`'s search path
-    /// (`ApplicationSettings::blastdb`: `Err` when LOSAT does not read the entry as NCBI does).
-    pub blastdb_registry: Result<Option<&'a str>, &'a str>,
+    /// The settings of the database reader (`ApplicationSettings::database`): the `BLASTDB` of
+    /// the configuration (`[BLAST] BLASTDB`) for `CSeqDB`'s search path, and the checks of its
+    /// reads.
+    pub database: crate::blastinput::ncbi_environment::DatabaseSettings<'a>,
 }
 
 /// One sequence of the input (`CBioseq`): its Seq-ids, its title descriptor, its IUPAC letters.
@@ -240,14 +243,14 @@ fn reader<'a>(
     options: &Options<'_>,
     stdin: &'a mut Cin<'_>,
 ) -> Result<Box<dyn SequenceSource + 'a>, Failure> {
-    match options.infmt {
-        "fasta" => {
+    match &*options.infmt {
+        b"fasta" => {
             let input = open_input_file("in", options.input, stdin).map_err(Failure::Arg)?;
             super::fasta::source(input, options.parse_seqids)
         }
-        "blastdb" => Ok(Box::new(DatabaseSource::open(
-            options.input,
-            options.blastdb_registry,
+        b"blastdb" => Ok(Box::new(DatabaseSource::open(
+            &crate::utils::os_bytes::os_str_bytes(options.input),
+            options.database,
             prints_title(options.outfmt),
         )?)),
         _ => Err(Failure::Std("Unknown input format".to_string())),
@@ -261,14 +264,14 @@ struct DatabaseSource {
 
 impl DatabaseSource {
     fn open(
-        name: &str,
-        registry: Result<Option<&str>, &str>,
+        name: &[u8],
+        database: crate::blastinput::ncbi_environment::DatabaseSettings<'_>,
         title_printed: bool,
     ) -> Result<Self, Failure> {
         let reader = MaskBdbReader::open(
             name,
             SeqType::Nucleotide,
-            registry,
+            database,
             title_printed,
             super::PROGRAM,
         )

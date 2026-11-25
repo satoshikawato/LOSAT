@@ -196,11 +196,17 @@ fn options_of_later_items_are_refused() {
         .unwrap()
         .into_blastx_args()
         .is_ok());
+    // `-html` reaches BLASTX's arguments (line RG T4c1).
+    let plain = parse(&[]).unwrap();
+    assert!(!plain.html);
+    assert!(!plain.into_blastx_args().unwrap().html);
+    let html = parse(&["-html"]).unwrap();
+    assert!(html.html);
+    assert!(html.into_blastx_args().unwrap().html);
     // The flags take no value; `-entrez_query` goes with `-remote` (NCBI's reader), and the first
     // refused name in the words is the one named.
     for (name, words) in [
-        ("html", &["-html"][..]),
-        ("remote", &["-remote"]),
+        ("remote", &["-remote"][..]),
         ("entrez_query", &["-entrez_query", "x", "-remote"]),
         ("import_search_strategy", &["-import_search_strategy", "x"]),
     ] {

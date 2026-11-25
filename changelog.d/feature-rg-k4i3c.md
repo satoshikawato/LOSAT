@@ -11,5 +11,4 @@
   executes 0.27 million (2.5 %) fewer instructions, and a program that checks two command lines
   with the library's `validate` executes half as many; a small gain, well under a millisecond per
   run. LOSAT Web is unchanged: its frozen ABI v1 keeps its own copy of clap's command for the
-  messages of its BLASTX and TBLASTN. The WASI command-line binaries still link clap, through the
-  ABI v1 code.
+  messages of its BLASTX and TBLASTN.

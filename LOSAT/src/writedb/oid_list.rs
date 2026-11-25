@@ -36,7 +36,7 @@ pub(crate) struct OidList {
 }
 
 impl OidList {
-    pub(crate) fn exclude_model(dbname: &str, protein: bool, index: u32, max_fsize: u64) -> Self {
+    pub(crate) fn exclude_model(dbname: &[u8], protein: bool, index: u32, max_fsize: u64) -> Self {
         Self {
             file: WriteDbFile::lazy(dbname, exclude_model_extension(protein), index, max_fsize),
             oids: Vec::new(),
@@ -67,7 +67,7 @@ impl OidList {
         &mut self.file
     }
 
-    pub(crate) fn filename(&self) -> &str {
+    pub(crate) fn filename(&self) -> &[u8] {
         self.file.filename()
     }
 }

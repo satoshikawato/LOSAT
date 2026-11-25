@@ -1,0 +1,20 @@
+Writing messages to <stdout> at verbosity (Minutiae)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Using `full' mode: every OID will be tested.
+
+Testing 1 volume(s).
+ <RUN>/cases/d_p4_phr_flip/p4
+  <RUN>/cases/d_p4_phr_flip/p4 / Stride: <testing every 1th OID>
+  <RUN>/cases/d_p4_phr_flip/p4 / Stride:     headers failed; oid=0: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 377: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedSysTagByte() - byte 40: unexpected tag: private/constructed/31 (255), should be: VisibleString (26)
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eFormatError) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading accession ( at [].[].other.accession)
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eFormatError) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading seqid ( at Blast-def-line-set.[].[].seqid.[].[].other.accession)
+
+  <RUN>/cases/d_p4_phr_flip/p4 / Stride:       Status for OID 0: FAIL
+ Result=FAILURE. 1 errors reported in 1 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 1

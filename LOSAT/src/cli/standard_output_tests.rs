@@ -34,6 +34,28 @@ fn each_write_reaches_the_device_at_once_and_nothing_is_held() {
     std::fs::remove_file(&path).unwrap();
 }
 
+/// A gathered write is the device's own (`writev`): both parts land in one call, as the report
+/// stream writes NCBI's held bytes and the bytes after them.
+#[cfg(any(unix, target_os = "wasi"))]
+#[test]
+fn a_gathered_write_is_one_write_of_the_device() {
+    let path = scratch_file("gathered");
+    let file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    let mut out = StandardOutput(Device::Raw(std::mem::ManuallyDrop::new(file)));
+    let parts = [
+        std::io::IoSlice::new(b"held "),
+        std::io::IoSlice::new(b"and new\n"),
+    ];
+    assert_eq!(out.write_vectored(&parts).unwrap(), 13);
+    assert_eq!(std::fs::read(&path).unwrap(), b"held and new\n");
+    let StandardOutput(Device::Raw(file)) = out;
+    drop(std::mem::ManuallyDrop::into_inner(file));
+    std::fs::remove_file(&path).unwrap();
+}
+
 /// A write's error is the device's: on a descriptor opened only for reading (`1<file`) the
 /// write fails, as NCBI's does (it reports the failure). Rust's `Stdout` counts it as done.
 #[cfg(unix)]

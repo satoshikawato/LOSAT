@@ -14,12 +14,13 @@
 use std::io::{self, Write};
 
 use crate::blastinput::app::{FormatChoice, ReportFormat};
+use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
 use crate::report::outfmt6::{
     format_bitscore_ncbi, format_evalue_ncbi_tabular, format_percent_identity_ncbi,
     write_outfmt7_query_line,
 };
-use crate::report::pairwise::end_gap_span;
+use crate::report::serial::seqalign::{row_end_gaps, AlignRow};
 
 /// NCBI's `ETabularField`: the fields of a tabular report.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1672,24 +1673,48 @@ pub struct TabularHsp<'a> {
     /// The query and subject rows of the alignment (`-` for a gap; translated rows in
     /// residues), when `TabularNeeds::rows`.
     pub rows: Option<(&'a [u8], &'a [u8])>,
-    /// Whether a `-` that begins or ends a row of `rows` is an end gap (`end_gap_span`), which NCBI
-    /// shows as its end character, a space (`push_alignment_row`), as in the Smith-Waterman
-    /// alignments of rpsblast's `-use_sw_tback`. NCBI decides by where the `-` comes from
-    /// (alnvec.cpp:279-297): a gap segment outside the row's aligned segments is the end
-    /// character, a fill of a segment that has a start is the gap character. `true` for the
-    /// alignments of the engines other than BLASTN; `false` for every row of BLASTN (whose X-drop
-    /// and greedy alignments start and end with a substitution, so a `-` at a row's end fills a
-    /// segment past the query's end: `algorithm::blastn::tabular`, remaining-gaps X1b-p) and for
-    /// `-subject`'s mapped row of BLASTX (`blastx::empty_rows::MappedAlignment`), whose `-` past
-    /// the query's end fills its segment.
-    pub end_gaps: bool,
-    /// The columns (0-based, sorted) of `rows` whose `-` is a residue, the query's and the
-    /// subject's: a PSSM query's gap residue, a database's stored gap character
-    /// (`pairwise::PairwiseHit::query_stored_gaps`, `subject_stored_gaps`), which is no end gap
-    /// (`end_gap_span`).
-    pub stored_gaps: [&'a [u32]; 2],
+    // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:279-297
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1100-1122
+    /// The HSP's edit script (`gap_info`; the rows of `rows` are its columns), whose rows' aligned
+    /// ranges NCBI's table reads (`serial::seqalign::row_end_gaps`): `length`, `gapopen` and
+    /// `gaps` count the columns inside the query row's (`TabularHsp::within_query_range`, which
+    /// the writer applies), and `qseq`, `sseq` and `btop` show a row's end gaps as NCBI's end
+    /// character, a space (`push_alignment_row`), as in the Smith-Waterman alignments of
+    /// `-use_sw_tback`. NCBI decides by where a `-` comes from: a gap segment outside the row's
+    /// aligned segments is the end character; a `-` that is a residue (a PSSM query's gap residue,
+    /// a database's stored gap character) or fills a segment that has a start is the row's
+    /// letter. Empty for an ungapped HSP and for the rows whose `-` at an end fills a segment past
+    /// the query's end: BLASTN's (whose X-drop and greedy alignments start and end with a
+    /// substitution: `algorithm::blastn::tabular`, remaining-gaps X1b-p) and `-subject`'s mapped
+    /// row of BLASTX (`blastx::empty_rows::MappedAlignment`).
+    pub ops: &'a [GapEditOp],
     /// `qcovhsp` (the integer of NCBI's `hsp_percent_coverage`).
     pub qcovhsp: i32,
+}
+
+impl TabularHsp<'_> {
+    /// The row with `length`, `gaps` and `gap_opens` as NCBI's tables count them
+    /// (`serial::seqalign::AlignLengths::within_query_range` of `ops`, from the whole alignment's;
+    /// `pident` and `ppos` then divide by the shorter length, `mismatch` stays). The writer reads
+    /// every row so (`TabularWriter::row`).
+    pub(crate) fn within_query_range(self) -> Self {
+        let crate::report::serial::seqalign::AlignLengths {
+            length,
+            gaps,
+            gap_opens,
+        } = crate::report::serial::seqalign::AlignLengths {
+            length: self.length,
+            gaps: self.gaps,
+            gap_opens: self.gap_opens,
+        }
+        .within_query_range(self.ops);
+        Self {
+            length,
+            gaps,
+            gap_opens,
+            ..self
+        }
+    }
 }
 
 /// `NStr::Quote` with its default quote (`"`) and escape (`\`) characters.
@@ -1730,10 +1755,18 @@ pub fn query_sequence_exception(coding: i32) -> crate::ncbi_exception::NcbiExcep
 }
 
 /// The end of a report at a row that reads the letters of a query whose molecule is `other`
-/// ([`query_sequence_exception`]): what the report holds so far is written (`buffered`) and
-/// flushed, and the exception is the run's error.
-pub fn query_sequence_end(writer: &mut dyn Write, buffered: &[u8], coding: i32) -> anyhow::Error {
-    if let Err(error) = writer.write_all(buffered).and_then(|()| writer.flush()) {
+/// ([`query_sequence_exception`]): what the report holds so far is written (`buffered`), the
+/// exception's unwinding flushes the stream (NCBI's flush, as at `run_end`), and the exception is
+/// the run's error.
+pub fn query_sequence_end(
+    writer: &mut dyn crate::report::ostream::ReportWrite,
+    buffered: &[u8],
+    coding: i32,
+) -> anyhow::Error {
+    if let Err(error) = writer
+        .write_all(buffered)
+        .and_then(|()| writer.ncbi_flush())
+    {
         return error.into();
     }
     crate::cli::NativeError::exception(&query_sequence_exception(coding)).into()
@@ -1741,18 +1774,26 @@ pub fn query_sequence_end(writer: &mut dyn Write, buffered: &[u8], coding: i32) 
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of
 // every application, cited at `cli::NativeError::exception`)
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163 (cited at
+// `blastn::tabular::write_blastn_tabular`)
 /// The end of the run at a row whose subject's load throws outside the subject block
-/// (`TabularWriter::ends_run`): writes the report's rows before it, `buffered`, to `writer`,
-/// ends the reads (`end_reads`: `QueryWarnings::end_run`, `ReadCursor::end_run`; NCBI loads
-/// nothing after it) and gives NCBI's exception as the run's error
-/// (`blast_xml::writer::run_ending_exception`: `BLAST Database error: <message>`, exit status 2).
+/// (`TabularWriter::ends_run`): writes the report's rows before it, `buffered`, to `writer`, and
+/// the exception's unwinding runs `~CBlastTabularInfo`, which flushes the stream (NCBI's flush,
+/// the one of the query's end: a device that fails there ends the run as any tabular failure,
+/// not at the exception), ends the reads (`end_reads`: `QueryWarnings::end_run`,
+/// `ReadCursor::end_run`; NCBI loads nothing after it) and gives NCBI's exception as the run's
+/// error (`blast_xml::writer::run_ending_exception`: `BLAST Database error: <message>`, exit
+/// status 2).
 pub fn run_end(
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     buffered: &[u8],
     exception: &crate::ncbi_exception::NcbiException,
     end_reads: impl FnOnce(),
 ) -> anyhow::Error {
-    if let Err(error) = writer.write_all(buffered).and_then(|()| writer.flush()) {
+    if let Err(error) = writer
+        .write_all(buffered)
+        .and_then(|()| writer.ncbi_flush())
+    {
         return error.into();
     }
     end_reads();
@@ -1919,6 +1960,8 @@ impl<'a> TabularWriter<'a> {
         kept: Option<&TabularSubject<'_>>,
         hsp: &TabularHsp<'_>,
     ) {
+        // The counts inside the query row's aligned range (`TabularHsp::ops`).
+        let hsp = &hsp.within_query_range();
         if let Some(stage) = self.spec.failed_stage(subject.lookup) {
             self.failed_row(out, rows, query, subject, kept, hsp, stage);
             return;
@@ -2173,14 +2216,14 @@ impl<'a> TabularWriter<'a> {
                 QuerySeq => push_alignment_row(
                     out,
                     hsp.rows.map_or(&[][..], |rows| rows.0),
-                    hsp.end_gaps,
-                    hsp.stored_gaps[0],
+                    hsp.ops,
+                    AlignRow::Query,
                 ),
                 SubjectSeq => push_alignment_row(
                     out,
                     hsp.rows.map_or(&[][..], |rows| rows.1),
-                    hsp.end_gaps,
-                    hsp.stored_gaps[1],
+                    hsp.ops,
+                    AlignRow::Subject,
                 ),
                 Evalue => out.extend_from_slice(format_evalue_ncbi_tabular(hsp.evalue).as_bytes()),
                 BitScore => out.extend_from_slice(format_bitscore_ncbi(hsp.bit_score).as_bytes()),
@@ -2208,7 +2251,7 @@ impl<'a> TabularWriter<'a> {
                 SubjectFrame => push_num(out, frames(hsp).1),
                 Btop => {
                     if let Some((qrow, srow)) = hsp.rows {
-                        write_btop(out, qrow, srow, hsp.end_gaps, hsp.stored_gaps);
+                        write_btop(out, qrow, srow, hsp.ops);
                     }
                 }
                 SubjectTaxId | SubjectTaxIds | SubjectSciName | SubjectCommonName
@@ -2442,27 +2485,16 @@ fn push_coverage(out: &mut Vec<u8>, value: i32) {
     }
 }
 
-/// The BTOP string of two rows.
+/// The BTOP string of two rows, the columns of the edit script `ops` (`TabularHsp::ops`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1001-1027
 /// The rows' end gaps are spaces (`push_alignment_row`), so an end-gap column is the pair of a
 /// letter and a space. Rows without end gaps (every alignment but some Smith-Waterman redos', and
-/// rows whose `-` fill a segment, `end_gaps` false: `TabularHsp::end_gaps`) take the columns as
-/// they are; `end_gap_span` stops at each row's first letter from each end, or at its first `-`
-/// that is a residue (`stored`, the query's and the subject's: `TabularHsp::stored_gaps`).
-pub fn write_btop(
-    out: &mut Vec<u8>,
-    qrow: &[u8],
-    srow: &[u8],
-    end_gaps: bool,
-    stored: [&[u32]; 2],
-) {
+/// the rows of an empty script) take the columns as they are.
+pub fn write_btop(out: &mut Vec<u8>, qrow: &[u8], srow: &[u8], ops: &[GapEditOp]) {
     let columns = qrow.iter().copied().zip(srow.iter().copied());
-    if !end_gaps {
-        write_btop_columns(out, columns);
-        return;
-    }
-    let (q_span, s_span) = (end_gap_span(qrow, stored[0]), end_gap_span(srow, stored[1]));
+    let q_span = row_end_gaps(ops, AlignRow::Query).span(qrow.len());
+    let s_span = row_end_gaps(ops, AlignRow::Subject).span(srow.len());
     if q_span == (0, qrow.len()) && s_span == (0, srow.len()) {
         write_btop_columns(out, columns);
     } else {
@@ -2497,7 +2529,7 @@ fn write_btop_columns(out: &mut Vec<u8>, columns: impl Iterator<Item = (u8, u8)>
 }
 
 /// The letter of column `column` of a row whose columns between its end gaps are `span`
-/// (`end_gap_span`): NCBI's end character, a space, outside them.
+/// (`serial::seqalign::RowEndGaps::span`): NCBI's end character, a space, outside them.
 fn end_char(letter: u8, column: usize, span: (usize, usize)) -> u8 {
     if column < span.0 || column >= span.1 {
         b' '
@@ -2507,15 +2539,11 @@ fn end_char(letter: u8, column: usize, span: (usize, usize)) -> u8 {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
-/// `qseq` or `sseq`: the row with `-` for its inner gaps and a space (NCBI's end character, which
-/// the tabular writer does not set) for its end gaps (`end_gap_span`, whose `-` is no residue of
-/// `stored`: `TabularHsp::stored_gaps`), where it has some (`end_gaps`, `TabularHsp::end_gaps`).
-fn push_alignment_row(out: &mut Vec<u8>, row: &[u8], end_gaps: bool, stored: &[u32]) {
-    let span = if end_gaps {
-        end_gap_span(row, stored)
-    } else {
-        (0, row.len())
-    };
+/// `qseq` or `sseq`: the row `row` (`which`) of the edit script `ops` with `-` for its inner gaps
+/// and a space (NCBI's end character, which the tabular writer does not set) for its end gaps
+/// (`serial::seqalign::row_end_gaps`, `TabularHsp::ops`), where it has some.
+fn push_alignment_row(out: &mut Vec<u8>, row: &[u8], ops: &[GapEditOp], which: AlignRow) {
+    let span = row_end_gaps(ops, which).span(row.len());
     if span == (0, row.len()) {
         out.extend_from_slice(row);
         return;

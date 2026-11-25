@@ -447,7 +447,7 @@ pub(super) fn write_tabular_without_queries(
     spec: &TabularSpec,
     taxdb_found: bool,
     program: &str,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     write_tabular_prolog(spec, writer)?;
@@ -458,6 +458,8 @@ pub(super) fn write_tabular_without_queries(
             diagnostics.flush()?;
         }
         TabularWriter::new(spec, "", None).epilog(writer, 0)?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -473,7 +475,7 @@ pub(super) fn write_tabular_round_epilog(
     spec: &TabularSpec,
     taxdb_found: bool,
     program: &str,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
     rounds: usize,
 ) -> Result<()> {
@@ -486,6 +488,7 @@ pub(super) fn write_tabular_round_epilog(
         diagnostics.flush()?;
     }
     TabularWriter::new(spec, "", None).epilog(writer, rounds)?;
+    writer.ncbi_flush()?;
     Ok(())
 }
 
@@ -498,7 +501,7 @@ pub(super) fn write_tabular_round_epilog(
 pub(super) fn write_blastp_tabular(
     tab: &BlastpTabular<'_>,
     hit_lists: &[Option<BlastpHitList>],
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: Option<&mut QueryWarnings<'_>>,
     probe: Option<&mut FormatProbe<'_>>,
     rows: Option<&mut QueryRows<'_>>,
@@ -598,7 +601,7 @@ pub(super) fn write_blastp_tax_report(
 fn write_rpsblast_tabular(
     tab: &BlastpTabular<'_>,
     hit_lists: &[Option<BlastpHitList>],
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     warnings: Option<&mut QueryWarnings<'_>>,
     probe: Option<&mut FormatProbe<'_>>,
     rows: Option<&mut QueryRows<'_>>,
@@ -611,7 +614,7 @@ fn write_rpsblast_tabular(
 fn write_tabular_rows<const RPS: bool>(
     tab: &BlastpTabular<'_>,
     hit_lists: &[Option<BlastpHitList>],
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     mut warnings: Option<&mut QueryWarnings<'_>>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut rows: Option<&mut QueryRows<'_>>,
@@ -708,6 +711,8 @@ fn write_tabular_rows<const RPS: bool>(
         writer.write_all(&buf)?;
         buf.clear();
         let Some(hit_list) = hit_list else {
+            // `~CBlastTabularInfo` of the query's report flushes the stream.
+            writer.ncbi_flush()?;
             continue;
         };
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-986
@@ -823,10 +828,7 @@ fn write_tabular_rows<const RPS: bool>(
                     None => None,
                 };
                 row_index += 1;
-                let mut row = tabular_hsp(hsp, qcovhsp, rows.map(|(rows, _)| rows));
-                if let Some((_, stored_gaps)) = rows {
-                    row.stored_gaps = stored_gaps;
-                }
+                let mut row = tabular_hsp(hsp, qcovhsp, rows);
                 // Outside NCBI's alignment block `nident` is the 0 of `x_ResetFields`: with
                 // `nident` the block stays closed only on a Seq-align count of 0, which is that 0.
                 if !spec.opens_counts(&seqalign_num_ident) {
@@ -854,6 +856,7 @@ fn write_tabular_rows<const RPS: bool>(
                 hsp_index += 1;
             }
         }
+        writer.ncbi_flush()?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236
     // The warnings after the last query's report (`QueryWarnings::after_last_query`).
@@ -863,6 +866,7 @@ fn write_tabular_rows<const RPS: bool>(
     if let (TabularKind::Commented, Some(num_queries)) = (spec.kind, tab.epilog) {
         warn(&mut *writer, warnings)?;
         table.epilog(writer, num_queries)?;
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -875,24 +879,18 @@ fn reported(hit_list: &BlastpHitList) -> impl Iterator<Item = &super::hsp::Blast
 }
 
 /// The rows of the HSP `hsp` (the `index`-th of its query's final list, whose rows are `rows`):
-/// its rendered alignment, and the columns of its rows whose `-` is a residue
-/// (`TabularHsp::stored_gaps`).
-#[allow(clippy::type_complexity)]
+/// its rendered alignment, whose end gaps the table reads from the HSP's script
+/// (`TabularHsp::ops`).
 fn hsp_rows<'r>(
     rows: &'r [PairwiseHit],
     index: HspIndex,
     hsp: &BlastpHsp,
-) -> Result<((&'r [u8], &'r [u8]), [&'r [u32]; 2])> {
+) -> Result<(&'r [u8], &'r [u8])> {
     let rendered = rows
         .get(index)
         .filter(|row| row.hit.q_idx == hsp.q_idx && row.hit.s_idx == hsp.s_idx);
-    match rendered
-        .and_then(|row| Some((row.query_seq.as_deref()?, row.subject_seq.as_deref()?, row)))
-    {
-        Some((query, subject, row)) => Ok((
-            (query.as_bytes(), subject.as_bytes()),
-            [&row.query_stored_gaps, &row.subject_stored_gaps],
-        )),
+    match rendered.and_then(|row| Some((row.query_seq.as_deref()?, row.subject_seq.as_deref()?))) {
+        Some((query, subject)) => Ok((query.as_bytes(), subject.as_bytes())),
         None => anyhow::bail!("unimplemented BLASTP tabular rows of a final HSP"),
     }
 }
@@ -901,13 +899,11 @@ fn hsp_rows<'r>(
 /// its `qcovhsp` by its subject's rule `coverage`, `rows` when a field shows them.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1071-1094
-/// NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:478
-/// The gaps are the alignment's columns that are neither identities nor mismatches, as the
-/// default report's mismatches are the columns of neither (`Hit::gap_letters`); the gap
-/// openings and the identities are the default row's. A protein HSP runs forward on both
-/// sequences: the frames are 1.
+/// The gaps are the alignment's columns that are neither identities nor mismatches
+/// (`BlastpHsp::gap_letters`); the gap openings and the identities are the default row's. A
+/// protein HSP runs forward on both sequences: the frames are 1.
 fn tabular_hsp<'r>(
-    hsp: &BlastpHsp,
+    hsp: &'r BlastpHsp,
     coverage: QueryCoveragePerHsp,
     rows: Option<(&'r [u8], &'r [u8])>,
 ) -> TabularHsp<'r> {
@@ -921,13 +917,12 @@ fn tabular_hsp<'r>(
         score: hsp.raw_score,
         length: hsp.length,
         gap_opens: hsp.gapopen,
-        gaps: usize::try_from(hsp.length as i64 - hsp.num_ident as i64 - hsp.mismatch).unwrap_or(0),
+        gaps: hsp.gap_letters(),
         num_ident: hsp.num_ident,
         q_frame: 1,
         s_frame: 1,
         rows,
-        end_gaps: true,
-        stored_gaps: [&[], &[]],
+        ops: hsp.gap_info.as_deref().unwrap_or_default(),
         // The HSP's query letters, in its context and in its Seq-align.
         qcovhsp: {
             let span = (hsp.q_end + 1 - hsp.q_start) as i32;

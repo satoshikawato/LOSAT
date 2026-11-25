@@ -13,6 +13,8 @@ mod archive_replaced_bytes;
 mod balanced_title;
 #[path = "../blastdb_aliastool_fixtures.rs"]
 mod blastdb_aliastool_fixtures;
+#[path = "../blastdbcheck_fixtures.rs"]
+mod blastdbcheck_fixtures;
 #[path = "../blastdbcmd_alias_keys.rs"]
 mod blastdbcmd_alias_keys;
 #[path = "../blastdbcmd_batch_line_ends.rs"]
@@ -69,6 +71,8 @@ mod library_html_posts;
 mod library_out_taxdb;
 #[path = "../llvm_profile.rs"]
 mod llvm_profile;
+#[path = "../makeblastdb_closed_pipe.rs"]
+mod makeblastdb_closed_pipe;
 #[path = "../makeblastdb_failed_index.rs"]
 mod makeblastdb_failed_index;
 #[path = "../makeblastdb_gi_mask.rs"]
@@ -81,6 +85,8 @@ mod makeblastdb_output_streams;
 mod makeblastdb_past_32_bits;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
+#[path = "../makembindex_closed_pipe.rs"]
+mod makembindex_closed_pipe;
 #[path = "../makembindex_fixtures.rs"]
 mod makembindex_fixtures;
 #[path = "../makeprofiledb_fixtures.rs"]
@@ -145,6 +151,8 @@ mod outfmt5_tblastx;
 mod pairwise_par;
 #[path = "../parse_deflines_subject.rs"]
 mod parse_deflines_subject;
+#[path = "../protein_db_32bit_lengths.rs"]
+mod protein_db_32bit_lengths;
 #[path = "../redo_contain_idx.rs"]
 mod redo_contain_idx;
 #[path = "../report_counts_cli.rs"]
@@ -159,6 +167,10 @@ mod search_environment;
 mod seq_id_first_line;
 #[path = "../seqalign_samples.rs"]
 mod seqalign_samples;
+#[path = "../serial_verify_read.rs"]
+mod serial_verify_read;
+#[path = "../strategy_stream_f1c1.rs"]
+mod strategy_stream_f1c1;
 #[path = "../suite_layout.rs"]
 mod suite_layout;
 #[path = "../syntax_cases_cli.rs"]

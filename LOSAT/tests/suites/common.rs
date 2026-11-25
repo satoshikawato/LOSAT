@@ -89,6 +89,8 @@ mod makeblastdb_output_streams;
 mod makeblastdb_past_32_bits;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
+#[path = "../makembindex_closed_pipe.rs"]
+mod makembindex_closed_pipe;
 #[path = "../makembindex_fixtures.rs"]
 mod makembindex_fixtures;
 #[path = "../makeprofiledb_fixtures.rs"]

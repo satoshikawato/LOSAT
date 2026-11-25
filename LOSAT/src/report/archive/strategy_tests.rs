@@ -145,7 +145,10 @@ fn searchsp_keeps_its_place_and_an_empty_database_gives_zero() {
     export.note_searched(0..1, searched(1_000_000)).unwrap();
     export
         .options()
-        .set_database_filter(None, crate::report::archive::RequestLength::Lengths(None))
+        .set_database_filter(
+            Vec::new(),
+            crate::report::archive::RequestLength::Lengths(None),
+        )
         .unwrap();
     export.write_request(1..2, &request(&queries, &[])).unwrap();
     export.note_searched(1..2, searched(77)).unwrap();
@@ -300,7 +303,7 @@ fn one_options_handle_serves_the_archive_and_the_strategy() {
     handle
         .options()
         .set_database_filter(
-            Some(list),
+            vec![list],
             crate::report::archive::RequestLength::Lengths(None),
         )
         .unwrap();

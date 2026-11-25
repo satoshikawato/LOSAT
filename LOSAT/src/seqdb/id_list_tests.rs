@@ -162,10 +162,15 @@ fn the_lookups_throw_where_ncbis_throw() {
         let thrown = find_id(&[7001], &[], &[], &general(db, text("abc"))).unwrap_err();
         assert_eq!(thrown.get_msg(), GET_ID);
         assert!(!thrown.places_known());
-        let thrown = negative_find_id(&[b"x".to_vec()], &general(db, text("abc"))).unwrap_err();
+        let thrown =
+            negative_find_id(&[], &[b"x".to_vec()], &general(db, text("abc"))).unwrap_err();
         assert_eq!(thrown.get_msg(), GET_ID);
         assert_eq!(
-            negative_find_id(&[], &general(db, text("abc"))),
+            negative_find_id(&[], &[], &general(db, text("abc"))),
+            Ok((false, false))
+        );
+        assert_eq!(
+            negative_find_id(&[7001], &[], &general(db, text("abc"))),
             Ok((false, false))
         );
         assert_eq!(
@@ -174,9 +179,53 @@ fn the_lookups_throw_where_ncbis_throw() {
         );
     }
     assert_eq!(
-        negative_find_id(&[b"abc".to_vec()], &general("ti", text("abc"))),
+        negative_find_id(&[], &[b"abc".to_vec()], &general("ti", text("abc"))),
         Ok((false, false))
     );
+    assert_eq!(
+        negative_find_id(&[7001, 7002], &[], &ParsedSeqId::Gi(7001)),
+        Ok((true, true))
+    );
+    assert_eq!(
+        negative_find_id(&[7001, 7002], &[], &ParsedSeqId::Gi(7003)),
+        Ok((false, true))
+    );
+    assert_eq!(
+        negative_find_id(&[], &[b"abc".to_vec()], &ParsedSeqId::Gi(7001)),
+        Ok((false, false))
+    );
+}
+
+#[test]
+fn an_ipg_list_reads_text_and_binary_with_ncbis_messages() {
+    assert_eq!(read_pig_list(b"1001\n1002").unwrap(), vec![1001]);
+    assert_eq!(
+        read_pig_list(b"1001 0 \r\n2147483649\n").unwrap(),
+        vec![1001, 2_147_483_649]
+    );
+    assert_eq!(read_pig_list(b"4294967297\n").unwrap(), vec![1]);
+    assert_eq!(
+        read_pig_list(&binary(&[0xFFFF_FFFF, 2, 1001, 2_147_483_649])).unwrap(),
+        vec![1001, 2_147_483_649]
+    );
+    assert_eq!(read_pig_list(b"").unwrap_err(), "Specified file is empty.");
+    assert_eq!(
+        read_pig_list(b" 1001\n").unwrap_err(),
+        "Specified file is not a valid GI/TI list."
+    );
+    assert_eq!(
+        read_pig_list(b"1001a\n").unwrap_err(),
+        "Invalid byte in textIPG list [97]."
+    );
+    for bad in [
+        binary(&[0xFFFF_FFFF, 3, 1001, 1002]),
+        binary(&[0xFFFF_FFFE, 1, 1001]),
+    ] {
+        assert_eq!(
+            read_pig_list(&bad).unwrap_err(),
+            "Specified file is not a valid binary IPG file."
+        );
+    }
 }
 
 /// `SiToOid` halves the ids in their order: on ids that a second simplification left out of order

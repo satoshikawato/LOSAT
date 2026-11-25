@@ -36,6 +36,9 @@ pub enum ParamValue {
     IntegerList(Vec<i32>),
     /// `strand-type` (`Blast4-strand-type`: forward 1, reverse 2, both 3).
     StrandType(i32),
+    // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:512,529
+    /// `big-integer-list` (`Blast4-value` choice 12, `SEQUENCE OF BigInt`).
+    BigIntegerList(Vec<i64>),
 }
 
 impl ParamValue {
@@ -50,6 +53,7 @@ impl ParamValue {
             ParamValue::Str(_) => ValueType::String,
             ParamValue::IntegerList(_) => ValueType::IntegerList,
             ParamValue::StrandType(_) => ValueType::StrandType,
+            ParamValue::BigIntegerList(_) => ValueType::BigIntegerList,
         }
     }
 }

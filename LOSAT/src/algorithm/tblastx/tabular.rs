@@ -464,8 +464,8 @@ pub(super) fn write_tblastx_tabular(
                     q_frame,
                     s_frame,
                     rows: rows_read.then_some((qrow.as_slice(), srow.as_slice())),
-                    end_gaps: true,
-                    stored_gaps: [&[], &[]],
+                    // An ungapped HSP: no script, no end gap.
+                    ops: &[],
                     qcovhsp: qcovhsp.of_hsp(
                         i32::try_from(hit.sort_query_end - hit.sort_query_offset)?,
                         i32::try_from(q_high - q_low + 1)?,

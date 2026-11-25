@@ -195,7 +195,10 @@ fn the_search_space_option_carries_over_unsearched_batches() {
             },
             OptionsHandle::default(),
         );
-        handle.options().set_database_filter(None, length).unwrap();
+        handle
+            .options()
+            .set_database_filter(Vec::new(), length)
+            .unwrap();
         handle
     };
     assert_eq!(

@@ -158,6 +158,7 @@ pub(super) fn query_records<'a>(
                 subject: subject_index,
                 q_offset: hsp.hsp.q_start,
                 q_end: hsp.hsp.q_end,
+                q_left_out: i32::try_from(hsp.query_left_out)?,
                 s_offset: hsp.hsp.s_start,
                 s_end,
                 q_frame: hsp.hsp.frame,

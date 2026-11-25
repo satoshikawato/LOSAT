@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.109
+- Version: 1.110
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -747,9 +747,22 @@
   1.104 (line NP item M4b-T3), then 1.106 at the merge of dev a5595ed11 that brought 1.105
   (psiblast line item PS10b), then 1.107 at the merge of dev 22ac798e5 that brought 1.106 (line NP
   item M4b-3c part 2));
-  1.108 2026-11-24 (approved exception 31, the Owner's decision of 2026-11-20 on line RG's question
+  1.108 2026-11-24 (BLASTP, line RG item X-short-bat-2: the rejection of a compressed lookup table
+  whose neighbouring words fill NCBI's overflow banks (decision D3) comes in the search of the query
+  batch whose table fills them (of a split batch, its chunk's table), after the reports of the
+  query batches before, as TBLASTN's of 1.97 (it came before the run's first byte); the three
+  builders of the table name the first of NCBI's tables that fills them; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.107; first 1.99, then 1.100 at
+  the merge of dev of 2026-11-24 that brought 1.99, line RG item X-short-tbx-link, then 1.103 at
+  the merge of dev of 2026-11-25 that brought 1.100 to 1.102, line RG items KC-11d and D5c and
+  psiblast line item PS10e, then 1.104 at the merge of dev of 2026-11-25 that brought 1.103, line
+  RG item K10a, then 1.106 at the merge of dev of 2026-11-25 that brought 1.104 and 1.105, line NP
+  item M4b-T3 and psiblast line item PS10b, then 1.107 at the merge of dev of 2026-11-25 that
+  brought 1.106, line NP item M4b-3c part 2, then 1.108 at the merge of dev of 2026-11-26 that
+  brought 1.107, line NP item M (b));
+  1.109 2026-11-24 (approved exception 31, the Owner's decision of 2026-11-20 on line RG's question
   F2-Q1, 「Q1=C」: an imported strategy's subjects searched once at any `-num_threads`; line RG item
-  F2, `-import_search_strategy`; numbered after 1.107; first 1.70, taking exception 22 at the merge
+  F2, `-import_search_strategy`; numbered after 1.108; first 1.70, taking exception 22 at the merge
   of dev 540759a2f, then 1.71 at the merge of dev 194053478 that brought line RG item D1b-2's 1.70,
   then 1.72 at the merge of dev 1b6e05a0d that brought line DBID item pfoff-3's 1.71, then 1.74 at
   the merge of dev 2e9653a71 that brought line NP items M5a and M5b's 1.72 and line RG item X4b-1's
@@ -771,11 +784,12 @@
   KC-11d, D5c and K10a, psiblast line item PS10e); then 1.106 at the merge of dev f25e2276a that
   brought 1.104 and 1.105 (line NP item M4b-T3, psiblast line item PS10b); then 1.108 and exception 31
   at the merge of dev 5c7e93761 that brought 1.106 and 1.107 and exception 28 (line NP items M4b-3c
-  part 2 and M4a-mdepth));
-  1.109 2026-11-24 (approved exception 32, the Owner's answer of 2026-11-24 00:04 JST, on the board, to
+  part 2 and M4a-mdepth); then 1.109 at the merge of dev df03b20e2 that brought 1.108 (line RG item
+  X-short-bat-2));
+  1.110 2026-11-24 (approved exception 32, the Owner's answer of 2026-11-24 00:04 JST, on the board, to
   line RG's question Q-F2-28 (recommended A), 「Q-F2-28=A」: a negative `WindowSize` and a
   `LongestIntronLength` of an imported strategy whose arithmetic passes `Int4`, and the one-thread
-  result of a negative window; line RG item F2 fix round 3, review 3's R3-B2; numbered after 1.108;
+  result of a negative window; line RG item F2 fix round 3, review 3's R3-B2; numbered after 1.109;
   first 1.87 (then proposed as exception 28 and pending the Owner), then 1.93 and exception 29 at the
   merge of dev ad35fcaee that brought 1.86 to 1.91 and exception 27; then 1.94 at the merge of dev
   2cd5a1906 that brought line NP item O4b2-4's 1.92; then 1.95 at the merge of dev 73242b104 that
@@ -786,7 +800,8 @@
   30 (line RG items X-short-tbx-link, KC-11d, D5c and K10a, psiblast line item PS10e); then 1.107
   at the merge of dev f25e2276a that brought 1.104 and 1.105 (line NP item M4b-T3, psiblast line
   item PS10b); then 1.109 and exception 32 at the merge of dev 5c7e93761 that brought 1.106 and
-  1.107 and exception 28 (line NP items M4b-3c part 2 and M4a-mdepth))
+  1.107 and exception 28 (line NP items M4b-3c part 2 and M4a-mdepth); then 1.110 at the merge of dev
+  df03b20e2 that brought 1.108 (line RG item X-short-bat-2))
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1025,7 +1040,8 @@ Explicit rejections (rule 3):
   stops first.
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.87 at the first query batch NCBI searches), compressed-lookup thresholds that
-  exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
+  exhaust its overflow bank (in BLASTP since version 1.108, as in TBLASTN since 1.97, in the query
+  batch whose table exhausts it, after the reports of the batches before). (`-max_target_seqs` values that make NCBI's preliminary hit
   list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
 
@@ -4591,9 +4607,9 @@ past `Int4`)". Psiblast line item PS10a.
     `-in_pssm` use; their PSSM scores stay within `BLAST_SCORE_MIN..=BLAST_SCORE_MAX` and their
     threshold is an `Int4`, so their sums never leave `Int4` and their output does not change.
 
-## Approved exception 31 (an imported strategy's subjects at more than one thread, version 1.108)
+## Approved exception 31 (an imported strategy's subjects at more than one thread, version 1.109)
 
-Version 1.108, line RG item F2 (DECISIONS F2-Q1). The Owner
+Version 1.109, line RG item F2 (DECISIONS F2-Q1). The Owner
 decided on 2026-11-20 at 20:05 JST, with the words 「Q1=C」 after asking 「重複すること自体バグでは？」 ("is the
 duplication itself not a bug?"), that a search strategy whose subjects are sequences, imported with
 `-num_threads` above 1, gives the output of `-num_threads 1` in every program. Not taken: NCBI's copies
@@ -4631,9 +4647,9 @@ the search itself is valid and its `-num_threads 1` result is deterministic).
     `a_strategys_subjects_keep_the_threads_of_the_command_line`
     (`LOSAT/src/report/archive/read/strategy_tests.rs`) checks that the import keeps `-num_threads 4`.
 
-## Approved exception 32 (a strategy's negative window and intron length past `Int4`, and a negative window at more than one thread, version 1.109)
+## Approved exception 32 (a strategy's negative window and intron length past `Int4`, and a negative window at more than one thread, version 1.110)
 
-Version 1.109, line RG item F2 fix round 3 (review 3, R3-B2; DECISIONS F-Q28). The Owner decided on
+Version 1.110, line RG item F2 fix round 3 (review 3, R3-B2; DECISIONS F-Q28). The Owner decided on
 2026-11-24 at 00:04 JST, on the board, with the words 「Q-F2-28=A」 (option A of line RG's question
 Q-F2-28, the recommended one; proposed 2026-11-23 under the standing instruction of 2026-09-29, restated
 2026-10-07), under the Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22

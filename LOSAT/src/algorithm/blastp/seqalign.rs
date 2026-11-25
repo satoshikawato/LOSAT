@@ -160,6 +160,7 @@ pub(crate) fn query_records<'a>(
                 subject,
                 q_offset: hsp.q_start as i32 - 1 - q_shift,
                 q_end: hsp.q_end as i32 - q_shift,
+                q_left_out: 0,
                 s_offset: hsp.s_start as i32 - 1 - s_shift,
                 s_end: hsp.s_end as i32 - s_shift,
                 q_frame: 0,

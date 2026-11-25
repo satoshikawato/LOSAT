@@ -963,6 +963,11 @@ fn option_text(setter: &Setter) -> String {
                         .collect::<Vec<_>>()
                         .join(","),
                     ParamValue::StrandType(n) => n.to_string(),
+                    ParamValue::BigIntegerList(list) => list
+                        .iter()
+                        .map(i64::to_string)
+                        .collect::<Vec<_>>()
+                        .join(","),
                 };
                 format!("{} {value}", param.name())
             }

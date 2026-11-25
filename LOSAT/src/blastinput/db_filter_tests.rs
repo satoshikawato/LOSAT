@@ -1,9 +1,10 @@
 use super::*;
 
-// Probes E01-E08, F01-F04 of line DI-8 (`search_strategy.cpp:458-469`).
+// Probes E01-E08, F01-F04 of line DI-8 (`search_strategy.cpp:444-498`) and D6 GI/IPG lists.
 #[test]
 fn the_archive_parameter_follows_the_list_option() {
-    use crate::report::archive::options::ParamValue;
+    use crate::report::archive::fields;
+    use crate::report::archive::options::{Param, ParamValue};
     let filter = |taxids: bool, negative: bool| DbFilterArgs {
         taxids: (taxids && !negative).then(|| "1".to_string()),
         negative_taxids: (taxids && negative).then(|| "1".to_string()),
@@ -11,18 +12,109 @@ fn the_archive_parameter_follows_the_list_option() {
         negative_seqidlist: (!taxids && negative).then(|| "f".to_string()),
         ..DbFilterArgs::default()
     };
-    let param = filter(true, false)
-        .archive_parameter(&[9606, 10090])
-        .unwrap();
-    assert_eq!(param.name(), "TaxidList");
-    assert_eq!(param.value, ParamValue::IntegerList(vec![9606, 10090]));
+    assert_eq!(
+        filter(true, false).archive_parameters(&[], &[9606, 10090]),
+        vec![Param::new(
+            fields::TAXID_LIST,
+            ParamValue::IntegerList(vec![9606, 10090]),
+        )]
+    );
     // A missing taxonomy file: the list object of NCBI has no id.
-    let param = filter(true, false).archive_parameter(&[]).unwrap();
-    assert_eq!(param.value, ParamValue::IntegerList(Vec::new()));
-    let param = filter(false, true).archive_parameter(&[]).unwrap();
-    assert_eq!(param.name(), "NegativeTaxidList");
-    assert_eq!(param.value, ParamValue::IntegerList(Vec::new()));
-    assert!(DbFilterArgs::default().archive_parameter(&[]).is_none());
+    assert_eq!(
+        filter(true, false).archive_parameters(&[], &[]),
+        vec![Param::new(
+            fields::TAXID_LIST,
+            ParamValue::IntegerList(Vec::new()),
+        )]
+    );
+    assert_eq!(
+        filter(false, true).archive_parameters(&[], &[]),
+        vec![Param::new(
+            fields::NEGATIVE_TAXID_LIST,
+            ParamValue::IntegerList(Vec::new()),
+        )]
+    );
+    assert!(DbFilterArgs::default()
+        .archive_parameters(&[], &[])
+        .is_empty());
+
+    // Positive and negative GI lists write GiList/NegativeGiList + empty TaxidList/NegativeTaxidList,
+    // and a 0-GI file writes only the empty TaxidList/NegativeTaxidList.
+    let pos_gi = DbFilterArgs {
+        gilist: Some("g.gil".to_string()),
+        ..DbFilterArgs::default()
+    };
+    assert_eq!(
+        pos_gi.archive_parameters(&[101, 102], &[]),
+        vec![
+            Param::new(
+                fields::GI_LIST_INT8,
+                ParamValue::BigIntegerList(vec![101, 102]),
+            ),
+            Param::new(fields::TAXID_LIST, ParamValue::IntegerList(Vec::new())),
+        ]
+    );
+    assert_eq!(
+        pos_gi.archive_parameters(&[], &[]),
+        vec![Param::new(
+            fields::TAXID_LIST,
+            ParamValue::IntegerList(Vec::new()),
+        )]
+    );
+    let neg_gi = DbFilterArgs {
+        negative_gilist: Some("g.gil".to_string()),
+        ..DbFilterArgs::default()
+    };
+    assert_eq!(
+        neg_gi.archive_parameters(&[102, 101], &[]),
+        vec![
+            Param::new(
+                fields::NEGATIVE_GI_LIST_INT8,
+                ParamValue::BigIntegerList(vec![102, 101]),
+            ),
+            Param::new(
+                fields::NEGATIVE_TAXID_LIST,
+                ParamValue::IntegerList(Vec::new()),
+            ),
+        ]
+    );
+
+    // IPG lists write empty TaxidList / NegativeTaxidList; other lists take precedence over IPG.
+    let pos_ipg = DbFilterArgs {
+        ipglist: Some("p.ipg".to_string()),
+        negative_ipglist: Some("n.ipg".to_string()),
+        ..DbFilterArgs::default()
+    };
+    assert_eq!(
+        pos_ipg.archive_parameters(&[], &[]),
+        vec![Param::new(
+            fields::TAXID_LIST,
+            ParamValue::IntegerList(Vec::new()),
+        )]
+    );
+    let neg_ipg = DbFilterArgs {
+        negative_ipglist: Some("n.ipg".to_string()),
+        ..DbFilterArgs::default()
+    };
+    assert_eq!(
+        neg_ipg.archive_parameters(&[], &[]),
+        vec![Param::new(
+            fields::NEGATIVE_TAXID_LIST,
+            ParamValue::IntegerList(Vec::new()),
+        )]
+    );
+    let gi_and_ipg = DbFilterArgs {
+        gilist: Some("g.gil".to_string()),
+        ipglist: Some("p.ipg".to_string()),
+        ..DbFilterArgs::default()
+    };
+    assert_eq!(
+        gi_and_ipg.archive_parameters(&[101], &[]),
+        vec![
+            Param::new(fields::GI_LIST_INT8, ParamValue::BigIntegerList(vec![101])),
+            Param::new(fields::TAXID_LIST, ParamValue::IntegerList(Vec::new())),
+        ]
+    );
 }
 
 #[test]

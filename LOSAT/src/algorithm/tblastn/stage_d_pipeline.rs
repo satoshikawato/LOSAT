@@ -1218,7 +1218,7 @@ fn preliminary_setup_checks(
         "TBLASTN",
     )
     .map_err(|refusal| {
-        anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(refusal))
+        anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::new(refusal))
     })?;
     match min_subject_length {
         None => Err(SetupEngineError::SUBJECT_LENGTH_INVALID.into()),
@@ -1675,8 +1675,10 @@ fn run_local_search_with_redo<R: MatchRedo>(
     // A refusal fails the batch after the reports of the batches before (`ErrorAfterBatchReports`),
     // where NCBI's search ends.
     let fetch_refusal = |failed| -> anyhow::Error {
-        crate::blastinput::app::ErrorAfterBatchReports(FetchExcluded::refusal(failed, "TBLASTN"))
-            .into()
+        crate::blastinput::app::ErrorAfterBatchReports::new(FetchExcluded::refusal(
+            failed, "TBLASTN",
+        ))
+        .into()
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1527
     // An ungapped search has no traceback fetch: its re-evaluation's fetch excluded the subjects
@@ -2001,6 +2003,7 @@ fn run_local_search_with_redo<R: MatchRedo>(
                     gap_letters,
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
+                    query_left_out: 0,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -2328,7 +2331,7 @@ impl<'a> RedoFetchNotes<'a> {
     fn refusal_of(&self, ordinal: u32) -> Option<anyhow::Error> {
         let fetches = self.fetches?;
         Some(
-            crate::blastinput::app::ErrorAfterBatchReports(FetchExcluded::refusal_at(
+            crate::blastinput::app::ErrorAfterBatchReports::new(FetchExcluded::refusal_at(
                 fetches.excluded.db(),
                 ordinal,
                 "TBLASTN",
@@ -2769,7 +2772,7 @@ fn preliminary_profile<'a>(
 /// the batches before (the form of PD-LOSAT-NCBI-DEFECTS 1.40 for a refusal in the middle of a
 /// run).
 fn split_batch_stop(refusal: anyhow::Error) -> anyhow::Error {
-    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(refusal))
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::new(refusal))
 }
 
 /// The setup checks of a split batch (`preliminary_setup_checks`) as its chunks meet them
@@ -3242,7 +3245,7 @@ impl LocalParameterRecipe<'_> {
 #[cold]
 #[inline(never)]
 fn x_masked_pssm_query() -> anyhow::Error {
-    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports(anyhow::anyhow!(
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::new(anyhow::anyhow!(
         "a PSSM query whose letters give no Karlin-Altschul parameters (one that -seg masks completely), with which NCBI BLAST+ 2.17.0's tblastn crashes, is not supported by LOSAT's TBLASTN"
     )))
 }
@@ -4480,6 +4483,7 @@ fn finish_local_ungapped(
                     gap_letters,
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
+                    query_left_out: 0,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -4674,6 +4678,7 @@ fn finish_local_mode0_no_sum_stats(
                     gap_letters,
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
+                    query_left_out: 0,
                 })
             })
             .collect::<Result<Vec<_>>>()?;

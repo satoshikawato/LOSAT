@@ -52,7 +52,7 @@ These are on the list for a later release:
 
 LOSAT does not provide these NCBI programs: `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.
 
-Options that need NCBI's servers or its GI and IPG databases are not available: `-remote` and `-entrez_query` (all programs), `-gilist` and `-negative_gilist`, `-ipglist` and `-negative_ipglist`. `-import_search_strategy` runs in `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`; `psiblast`, `rpsblast` and `rpstblastn` refuse it.
+Options that need NCBI's servers are not available: `-remote` and `-entrez_query` (all programs). `-import_search_strategy` runs in `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`; `psiblast`, `rpsblast` and `rpstblastn` refuse it.
 
 ## How this manual is organised
 

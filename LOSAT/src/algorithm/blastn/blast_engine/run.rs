@@ -6540,6 +6540,7 @@ fn open_search_database(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
                 &args.db_filter,
+                database.list_gis(),
                 database.list_taxids(),
                 &database.statistics(),
                 false,
@@ -9013,7 +9014,8 @@ fn run_in_pool(
             if let Err(error) =
                 database.batch_titles((batch.fetched_utf8, one_by_one), &mut batch_hit_lists, read)
             {
-                let error = match error.downcast::<database::HeaderReadError>() {
+                let error = match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
+                {
                     Ok(failure) => failure.error,
                     // LOSAT's refusal: the warnings of the batches read so far, as for the
                     // other errors of a batch (below).
@@ -9331,10 +9333,12 @@ fn run_in_pool(
                     warnings[start].append(&posts);
                     None
                 }
-                Some(Err(error)) if error.is::<database::HeaderReadError>() => {
+                Some(Err(error))
+                    if error.is::<crate::blastinput::app::ErrorAfterBatchReports>() =>
+                {
                     let failure = error
-                        .downcast::<database::HeaderReadError>()
-                        .expect("the error was checked to be a HeaderReadError");
+                        .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
+                        .expect("the error was checked to be an ErrorAfterBatchReports");
                     fail_batch!(failure.error);
                 }
                 Some(Err(error)) => Some(error),

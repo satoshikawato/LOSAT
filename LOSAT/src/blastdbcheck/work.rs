@@ -16,7 +16,7 @@ use crate::ncbi_exception::NcbiException;
 use crate::seqdb::find::find_blast_dbs;
 use crate::seqdb::taxdb::LazyTaxDb;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
-use crate::writedb::convert::Random;
+use crate::utils::random_gen::NcbiRandom;
 use crate::writedb::time::LocalTime;
 
 use super::alias::alias_file_test;
@@ -222,7 +222,7 @@ fn check(
         })?;
         Ok(Test::Sample {
             n,
-            random: Random::new(seed),
+            random: NcbiRandom::new(seed),
         })
     };
     let mut chosen = args.flag("full");

@@ -1,0 +1,23 @@
+Writing messages to <stdout> at verbosity (Minutiae)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing first 1 and last 1 OIDs.
+
+Testing 2 volume(s).
+ <RUN>/cases/mix45/p5
+  <RUN>/cases/mix45/p5 / EndPoints: <testing 1 OIDs at each end>
+  <RUN>/cases/mix45/p5 / EndPoints:       Status for OID 0: PASS
+  <RUN>/cases/mix45/p5 / EndPoints:       Status for OID 8: PASS
+ <RUN>/cases/mix45/zp4
+  <RUN>/cases/mix45/zp4 / EndPoints: <testing 1 OIDs at each end>
+ Result=SUCCESS. No errors reported for 2 volume(s).
+Testing 1 alias(es).
+ <RUN>/cases/mix45/both5r.pal
+  <RUN>/cases/mix45/both5r.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/mix45/both5r.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objtools/blast/seqdb_reader/seqdblmdbset.cpp", line 225: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::CSeqDBLMDBSet::CSeqDBLMDBSet() - DB list contains both Version 4 and Version 5 dbs
+
+ Result=FAILURE. 1 errors reported in 1 alias(es).
+
+Total errors: 1

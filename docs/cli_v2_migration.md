@@ -187,8 +187,8 @@ From `LOSAT/`:
 cargo test --locked --offline
 cargo clippy --locked --offline --all-targets
 cargo build --release --locked --offline --bin losat
-cargo build --release --locked --offline --bin losat --target wasm32-wasip1 --no-default-features
-cargo build --release --locked --offline --bin losat --target wasm32-wasip1-threads --features wasm-threads
+cargo build --release --locked --offline --bin losat --target wasm32-wasip1 --no-default-features --features no-web-abi-v1
+cargo build --release --locked --offline --bin losat --target wasm32-wasip1-threads --features wasm-threads,no-web-abi-v1
 ```
 
 From the repository root, after building:

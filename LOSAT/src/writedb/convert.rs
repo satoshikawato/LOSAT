@@ -43,11 +43,44 @@ impl Random {
         random
     }
 
-    // NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:222-241
+    // NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:238-241
+    /// `GetRand()`: the next number in `[0, 0x7fffffff]`, the 32 bits of
+    /// `rand_32_bits` without the lowest.
+    pub(crate) fn get_rand(&mut self) -> u32 {
+        self.rand_32_bits() >> 1
+    }
+
+    // NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:251-264
+    // The multiplication of a power of two keeps the high bits; another size
+    // rejects the draws past the last whole multiple of it (the subtraction
+    // wraps in 32 bits, as NCBI's).
+    /// `GetRandIndex` of `size`: a number in `[0, size)`.
+    pub(crate) fn get_rand_index(&mut self, size: u32) -> u32 {
+        if size & size.wrapping_sub(1) == 0 {
+            return ((u64::from(self.rand_32_bits()) * u64::from(size)) >> 32) as u32;
+        }
+        loop {
+            let bits = self.rand_32_bits();
+            let r = bits % size;
+            if bits <= r.wrapping_sub(size) {
+                return r;
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:277-280
+    /// `GetRand` of a range: a number in `[min_value, max_value]`.
+    pub(crate) fn get_rand_range(&mut self, min_value: u32, max_value: u32) -> u32 {
+        min_value
+            .wrapping_add(self.get_rand_index(max_value.wrapping_sub(min_value).wrapping_add(1)))
+    }
+
+    // NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:217-235
     // `m_RJ` and `m_RK` are never negative at the same step (they start 21
     // apart and move together), so the unsigned indices wrap one at a time
     // exactly as the signed ones do.
-    pub(crate) fn get_rand(&mut self) -> u32 {
+    /// `x_GetRand32Bits()`: the next sum of the lagged Fibonacci generator.
+    fn rand_32_bits(&mut self) -> u32 {
         let r = self.state[self.rk].wrapping_add(self.state[self.rj]);
         self.state[self.rk] = r;
         if self.rk == 0 {
@@ -61,7 +94,7 @@ impl Random {
                 self.rj - 1
             };
         }
-        r >> 1
+        r
     }
 }
 

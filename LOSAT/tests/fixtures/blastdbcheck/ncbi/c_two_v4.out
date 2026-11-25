@@ -1,0 +1,25 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing first 1 and last 1 OIDs.
+Testing CDD files' headers for DELTA-BLAST
+
+Testing 2 volume(s).
+ <RUN>/cases/c_two/a1
+  <RUN>/cases/c_two/a1 / CDD_Headers:   [ERROR] caught exception while reading .wcounts freqs header 
+  <RUN>/cases/c_two/a1 / CDD_Headers: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbifile.cpp", line 5754: Error: (CFileException::eMemoryMap) ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory mapped the file must exist: '<RUN>/cases/c_two/a1.wcounts'
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/blast/api/rps_aux.cpp", line 259: Error: (CBlastException::eInvalid) BLAST::ncbi::blast::CRpsMmappedFile::CRpsMmappedFile() - Cannot memory map RPS-BLAST database file: <RUN>/cases/c_two/a1.wcounts
+
+  <RUN>/cases/c_two/a1 / CDD_Headers:   [ERROR] caught exception while reading .obsr freqs header 
+  <RUN>/cases/c_two/a1 / CDD_Headers: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbifile.cpp", line 5754: Error: (CFileException::eMemoryMap) ncbi::CMemoryFileMap::CMemoryFileMap() - To be memory mapped the file must exist: '<RUN>/cases/c_two/a1.obsr'
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/algo/blast/api/rps_aux.cpp", line 259: Error: (CBlastException::eInvalid) BLAST::ncbi::blast::CRpsMmappedFile::CRpsMmappedFile() - Cannot memory map RPS-BLAST database file: <RUN>/cases/c_two/a1.obsr
+
+ <RUN>/cases/c_two/b2
+ Result=FAILURE. 2 errors reported in 2 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 4

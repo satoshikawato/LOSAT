@@ -825,8 +825,7 @@ fn failed_lookups_write_ncbis_catch_row() {
     );
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108 (cited at
-// `row_stop_field`)
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/format_flags.cpp:38-43
 // The default fields (`qaccver saccver ...`): a row whose `saccver` is NCBI's null pointer stops
 // after `qaccver` and its tab; a load that throws stops only at the query's first row
 // (`TabularRows::write_thrown_default` writes the later ones).
@@ -853,11 +852,36 @@ fn default_rows_stop_at_saccver() {
     );
 }
 
-// The end of the run at a stop: the bytes before it, flushed, the reads ended, and LOSAT's
-// refusal naming the subject and the program.
+// The end of the run at a stop: the bytes before it, flushed (`ncbi_flush` and `flush`), the
+// reads ended, and LOSAT's refusal naming the subject and the program.
 #[test]
 fn row_stop_end_writes_the_bytes_before_and_refuses() {
-    let mut out = Vec::new();
+    struct Spy {
+        bytes: Vec<u8>,
+        ncbi_flushed: bool,
+        flushed: bool,
+    }
+    impl std::io::Write for Spy {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.bytes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushed = true;
+            Ok(())
+        }
+    }
+    impl crate::report::ostream::ReportWrite for Spy {
+        fn ncbi_flush(&mut self) -> std::io::Result<()> {
+            self.ncbi_flushed = true;
+            Ok(())
+        }
+    }
+    let mut out = Spy {
+        bytes: Vec::new(),
+        ncbi_flushed: false,
+        flushed: false,
+    };
     let mut ended = false;
     let error = row_stop_end(
         &mut out,
@@ -870,7 +894,9 @@ fn row_stop_end_writes_the_bytes_before_and_refuses() {
         "BLASTN",
         || ended = true,
     );
-    assert_eq!(out, b"q1\t");
+    assert_eq!(out.bytes, b"q1\t");
+    assert!(out.ncbi_flushed);
+    assert!(out.flushed);
     assert!(ended);
     assert!(error.downcast_ref::<FailedLookupRefusal>().is_some());
     let text = error.to_string();

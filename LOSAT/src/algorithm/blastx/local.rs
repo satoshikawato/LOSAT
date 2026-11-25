@@ -1210,8 +1210,6 @@ fn search_database(
     // `InitializeSubject`.
     let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
         outputs.formats.first().map(|format| format.outfmt),
-        crate::blastinput::app::Program::Blastx,
-        crate::report::archive::options::RequestKind::Blastx,
     );
     let database = BlastxDatabase::open_restricted(
         name,

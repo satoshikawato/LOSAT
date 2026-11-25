@@ -315,3 +315,261 @@ fn run_to_file_makes_out_where_the_command_line_does() {
     }
     let _ = fs::remove_dir_all(&dir);
 }
+
+const MULTI_FORMAT_CHILD: &str = "LOSAT_TEST_MULTI_FORMAT_TAXDB_CHILD";
+
+fn run_multi_format_child(case: &str, taxdb_variant: &str, extra_envs: &[(&str, &str)]) {
+    let dir = std::env::temp_dir().join(format!("losat-multi-taxdb-{case}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let taxdb = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/seqdb/taxdb")
+        .join(taxdb_variant);
+    let mut cmd = Command::new(std::env::current_exe().unwrap());
+    cmd.env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", "/nonexistent")
+        .env("BLASTDB", &taxdb)
+        .env(MULTI_FORMAT_CHILD, case)
+        .current_dir(&dir)
+        .args([
+            "library_out_taxdb::multi_format_taxdb_child",
+            "--exact",
+            "--nocapture",
+            "--test-threads",
+            "1",
+        ]);
+    for &(name, value) in extra_envs {
+        cmd.env(name, value);
+    }
+    if let Some(log) = std::env::var_os("LOSAT_BLASTX_WORKER_LOG") {
+        cmd.env("LOSAT_BLASTX_WORKER_LOG", log);
+    }
+    let output = cmd.output().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+    let stdout = text(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("1 passed; 0 failed"),
+        "{case} ({taxdb_variant}):\nstdout:\n{stdout}\nstderr:\n{}",
+        text(&output.stderr)
+    );
+}
+
+/// Multi-format `losat::api::run_collect` with secondary XML2/JSON (`["6", "16"]`, `["5", "16"]`):
+/// - opening-texts taxdb (`bad_magic`): opening texts are written once, not repeated for format 1;
+/// - non-collision `offset_last_past_end` (`tm_cache151`): volume offset error is not repeated;
+/// - cache-collision `offset_last_past_end` (`tm_cache_gi` / `tm_cache_ngi`): 1-query calls in
+///   `blastx` and `blastn` succeed with stdout matching single-format runs and pinned combined
+///   diagnostics, while 2-query `BATCH_SIZE=1` calls refuse batch 2 even for `["5", "16"]`
+///   (confirming `outfmt 5`'s `keeps_scope` does not leak into secondary `16`); `blastp`
+///   `["6", "16"]` / `["5", "16"]` refuse on `tm_cache_gi` (matching `dev`) while `["16", "6"]`
+///   succeeds.
+#[test]
+fn multi_format_library_secondary_xml2_shares_open_and_isolates_collision_scope() {
+    run_multi_format_child("bad_magic", "bad_magic", &[]);
+    run_multi_format_child("tm_cache151", "offset_last_past_end", &[]);
+    run_multi_format_child("collision_q1", "offset_last_past_end", &[]);
+    run_multi_format_child(
+        "collision_q2_b1",
+        "offset_last_past_end",
+        &[("BATCH_SIZE", "1")],
+    );
+}
+
+fn first_fasta_record(path: &Path) -> Vec<u8> {
+    let raw = fs::read(path).unwrap();
+    let second = raw
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|&(i, &b)| b == b'>' && raw[i - 1] == b'\n')
+        .map(|(i, _)| i)
+        .unwrap_or(raw.len());
+    raw[..second].to_vec()
+}
+
+fn run_db_formats(
+    program: losat::api::Program,
+    db: &Path,
+    query: &[u8],
+    formats: &[&str],
+) -> Result<losat::api::Outcome, losat::api::Error> {
+    use losat::api::{read_inputs, run_collect, validate, Inputs};
+    let search = validate(program, &["-num_threads", "1"]).unwrap();
+    let (queries, _) = read_inputs(&search, query, b"").unwrap();
+    run_collect(
+        &search,
+        Inputs::database(&queries, db.to_str().unwrap()),
+        formats,
+    )
+}
+
+fn assert_pair_reports_match(
+    program: losat::api::Program,
+    db: &Path,
+    query: &[u8],
+    first: &str,
+    single_16: &losat::api::Outcome,
+) -> (losat::api::Outcome, losat::api::Outcome) {
+    let single_first = run_db_formats(program, db, query, &[first]).unwrap();
+    let both = run_db_formats(program, db, query, &[first, "16"]).unwrap();
+    assert_eq!(
+        both.reports[0].bytes, single_first.reports[0].bytes,
+        "{program:?} {first}"
+    );
+    assert_eq!(
+        both.reports[1].bytes, single_16.reports[0].bytes,
+        "{program:?} {first} 16"
+    );
+    (single_first, both)
+}
+
+fn assert_cache_refusal(
+    program: losat::api::Program,
+    db: &Path,
+    query: &[u8],
+    formats: &[&str],
+    label: &str,
+) {
+    let err = run_db_formats(program, db, query, formats)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("256-slot taxonomy cache"),
+        "{label} ({program:?} {formats:?}): {err}"
+    );
+}
+
+#[test]
+fn multi_format_taxdb_child() {
+    use losat::api::Program;
+    let Ok(case) = std::env::var(MULTI_FORMAT_CHILD) else {
+        return;
+    };
+    let db_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
+    let prot_q = fs::read(db_dir.join("tm_cache_q.faa")).unwrap();
+    let nucl_q = first_fasta_record(&db_dir.join("tm_cache_ngi.fna"));
+    let offset_msg = "Offset error at end of taxdb file.";
+    let bad_magic_msg = "Tax database file has wrong magic number.";
+
+    match case.as_str() {
+        "bad_magic" => {
+            for (program, db_name, query) in [
+                (Program::Blastp, "tm_cache_gi", prot_q.as_slice()),
+                (Program::Blastn, "tm_cache_ngi", nucl_q.as_slice()),
+            ] {
+                let db = db_dir.join(db_name);
+                let single_16 = run_db_formats(program, &db, query, &["16"]).unwrap();
+                for first in ["6", "5"] {
+                    let (single_first, both) =
+                        assert_pair_reports_match(program, &db, query, first, &single_16);
+                    let diag = text(&both.diagnostics);
+                    assert_eq!(
+                        diag,
+                        text(&single_first.diagnostics),
+                        "{program:?} [{first}, 16] bad_magic diag vs single:\n{diag}"
+                    );
+                    assert_eq!(
+                        diag.matches(bad_magic_msg).count(),
+                        1,
+                        "{program:?} [{first}, 16] bad_magic diag:\n{diag}"
+                    );
+                }
+            }
+        }
+        "tm_cache151" => {
+            // `tm_cache151` has 3 sequences: st1 (99990), st2 (151), st3 (99990) — no cache
+            // collision. Format 0's prefetch emits 1 volume-load error, format 1 shares primary
+            // `volume_lookups` (0 duplicate volume errors) and emits 2 Hit errors (st1, st3) = 3.
+            let db = db_dir.join("tm_cache151");
+            let single_16 = run_db_formats(Program::Blastp, &db, &prot_q, &["16"]).unwrap();
+            for first in ["6", "5"] {
+                let (_, both) =
+                    assert_pair_reports_match(Program::Blastp, &db, &prot_q, first, &single_16);
+                let diag = text(&both.diagnostics);
+                assert_eq!(
+                    diag,
+                    text(&single_16.diagnostics),
+                    "blastp [{first}, 16] tm_cache151 diag vs single 16:\n{diag}"
+                );
+                assert_eq!(
+                    diag.matches(offset_msg).count(),
+                    3,
+                    "blastp [{first}, 16] tm_cache151 diag:\n{diag}"
+                );
+            }
+        }
+        "collision_q1" => {
+            // blastx on tm_cache_gi: 1 query succeeds for ["6","16"] (6 format-0 prefetch lines;
+            // tabular sets `warned` in blastx/local.rs so format 1 writes to `quiet`) and
+            // ["5","16"] (18 lines: 6 format-0 prefetch + 6 format-1 prefetch + 6 format-1 Hit).
+            let db_gi = db_dir.join("tm_cache_gi");
+            let bx_16 = run_db_formats(Program::Blastx, &db_gi, &nucl_q, &["16"]).unwrap();
+            for (first, want_lines) in [("6", 6usize), ("5", 18usize)] {
+                let (_, both) =
+                    assert_pair_reports_match(Program::Blastx, &db_gi, &nucl_q, first, &bx_16);
+                let diag = text(&both.diagnostics);
+                assert_eq!(
+                    diag.matches(offset_msg).count(),
+                    want_lines,
+                    "blastx [{first}, 16] tm_cache_gi diag:\n{diag}"
+                );
+            }
+            // blastn on tm_cache_ngi: 1 query succeeds for ["6","16"] and ["5","16"] with 18
+            // lines (6 format-0 prefetch + 6 format-1 prefetch + 6 format-1 Hit).
+            let db_ngi = db_dir.join("tm_cache_ngi");
+            let bn_16 = run_db_formats(Program::Blastn, &db_ngi, &nucl_q, &["16"]).unwrap();
+            for first in ["6", "5"] {
+                let (_, both) =
+                    assert_pair_reports_match(Program::Blastn, &db_ngi, &nucl_q, first, &bn_16);
+                let diag = text(&both.diagnostics);
+                assert_eq!(
+                    diag.matches(offset_msg).count(),
+                    18,
+                    "blastn [{first}, 16] tm_cache_ngi diag:\n{diag}"
+                );
+            }
+            // blastp on tm_cache_gi: ["6","16"] and ["5","16"] refuse (blastp builds xml2_loads
+            // only when format 0 is XML2, matching dev); ["16","6"] succeeds with 12 lines.
+            for first in ["6", "5"] {
+                assert_cache_refusal(
+                    Program::Blastp,
+                    &db_gi,
+                    &prot_q,
+                    &[first, "16"],
+                    "tm_cache_gi",
+                );
+            }
+            let bp_16_6 = run_db_formats(Program::Blastp, &db_gi, &prot_q, &["16", "6"]).unwrap();
+            assert_eq!(
+                text(&bp_16_6.diagnostics).matches(offset_msg).count(),
+                12,
+                "blastp [16, 6] tm_cache_gi diag:\n{}",
+                text(&bp_16_6.diagnostics)
+            );
+        }
+        "collision_q2_b1" => {
+            // 2 identical queries with BATCH_SIZE=1: secondary `16` resets scope after batch 1
+            // (`keeps_scope = false`), so batch 2 refuses even when format 0 is `5`.
+            let mut two_nucl = nucl_q.clone();
+            two_nucl.extend_from_slice(b"\n");
+            two_nucl.extend_from_slice(&nucl_q);
+            for (program, db_name) in [
+                (Program::Blastx, "tm_cache_gi"),
+                (Program::Blastn, "tm_cache_ngi"),
+            ] {
+                let db = db_dir.join(db_name);
+                for first in ["6", "5"] {
+                    assert_cache_refusal(
+                        program,
+                        &db,
+                        &two_nucl,
+                        &[first, "16"],
+                        "2q BATCH_SIZE=1",
+                    );
+                }
+            }
+        }
+        other => panic!("unknown case {other}"),
+    }
+}

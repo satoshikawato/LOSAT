@@ -4732,8 +4732,6 @@ fn open_search_database(
         Some(name) => {
             let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
                 outputs.formats.first().map(|format| format.outfmt),
-                crate::blastinput::app::Program::Blastp,
-                args.app.request_kind(),
             );
             let database = database::BlastpDatabase::open_restricted(
                 name,

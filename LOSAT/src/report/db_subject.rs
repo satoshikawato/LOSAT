@@ -2776,16 +2776,13 @@ impl FormatThrow {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
     /// Whether NCBI's formatter keeps its scope across the query batches of a run whose first
-    /// format is `outfmt` (`RunThrow::keeps_scope`: BLAST XML, outfmt 5, where
-    /// `CBlastFormat::ResetScopeHistory` returns without emptying the scope).
-    pub fn keeps_scope(
-        outfmt: &str,
-        program: crate::blastinput::app::Program,
-        app: crate::report::archive::options::RequestKind,
-    ) -> bool {
-        Self::of_outfmt(outfmt, program, app, false)
-            .run()
-            .is_some_and(|run| run.keeps_scope)
+    /// format is `outfmt` (`CBlastFormat::ResetScopeHistory` returns without emptying the scope
+    /// only for `eXml`, outfmt 5).
+    pub fn keeps_scope(outfmt: &str) -> bool {
+        crate::blastinput::app::parse_formatting_string(outfmt)
+            .ok()
+            .and_then(|choice| crate::blastinput::app::ReportFormat::from_number(choice.number))
+            == Some(crate::blastinput::app::ReportFormat::Xml)
     }
 
     /// Whether `outfmt` is an XML2 or JSON format (outfmt 13 to 16), whose taxonomy lookups run
@@ -2802,16 +2799,9 @@ impl FormatThrow {
     /// has no output format): whether NCBI's formatter keeps its scope across query batches
     /// ([`Self::keeps_scope`]), and whether any XML2/JSON format in the call is secondary
     /// (`!Self::is_xml2`).
-    pub fn scope_flags(
-        outfmt: Option<&str>,
-        prog: crate::blastinput::app::Program,
-        kind: crate::report::archive::options::RequestKind,
-    ) -> (bool, bool) {
+    pub fn scope_flags(outfmt: Option<&str>) -> (bool, bool) {
         match outfmt {
-            Some(outfmt) => (
-                Self::keeps_scope(outfmt, prog, kind),
-                !Self::is_xml2(outfmt),
-            ),
+            Some(outfmt) => (Self::keeps_scope(outfmt), !Self::is_xml2(outfmt)),
             None => (false, false),
         }
     }

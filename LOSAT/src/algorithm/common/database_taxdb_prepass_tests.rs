@@ -3000,6 +3000,7 @@ fn a_group_of_loads_takes_both_cases_of_a_load_made_or_not() {
         lookups: lookups.to_vec(),
         order: 7,
         name,
+        pins: false,
     };
     // Batch 1: sZ (150) alone; batch 2: sZ again and sQ (150): without `kept`, sZ's blob is
     // loaded or not, and no case writes a text; the slot holds 150 in every case.
@@ -3084,6 +3085,7 @@ fn a_prefetch_loads_each_handle_of_a_sequence() {
             lookups: vec![L, 150],
             order,
             name,
+            pins: true,
         })
     };
     for kept in [false, true] {
@@ -3091,7 +3093,7 @@ fn a_prefetch_loads_each_handle_of_a_sequence() {
             kept,
             ..VolumeLookups::default()
         };
-        let misses = record.prefetch_slots(&loads(), |_| false, true, L).unwrap();
+        let misses = record.prefetch_slots(&loads(), |_| false, L).unwrap();
         assert_eq!(misses[&0], vec![true, false]);
         assert_eq!(misses[&1], vec![true, false]);
         assert!(record.prefetch_from.is_none());
@@ -3100,7 +3102,7 @@ fn a_prefetch_loads_each_handle_of_a_sequence() {
             .all(|blob| blob.sure && blob.in_scope && blob.pinned));
         let after = (record.offset_slots.clone(), record.slot_blobs.clone());
         // Within the same live scope (e.g. outfmt 5 keeping scope), pinned blobs load nothing.
-        let same_scope = record.prefetch_slots(&loads(), |_| false, true, L).unwrap();
+        let same_scope = record.prefetch_slots(&loads(), |_| false, L).unwrap();
         assert_eq!(same_scope[&0], vec![false, false]);
         assert_eq!(same_scope[&1], vec![false, false]);
         // A report read in the same live scope by exact handle 3 hits the first Bioseq's handles.
@@ -3115,7 +3117,7 @@ fn a_prefetch_loads_each_handle_of_a_sequence() {
         (record.offset_slots, record.slot_blobs) = after;
         record.reset_scope();
         let after_reset = (record.offset_slots.clone(), record.slot_blobs.clone());
-        let again = record.prefetch_slots(&loads(), |_| false, true, L);
+        let again = record.prefetch_slots(&loads(), |_| false, L);
         if kept {
             let again = again.unwrap();
             assert_eq!(again[&0], vec![false, false]);
@@ -3509,7 +3511,7 @@ fn the_map_of_a_batch_with_an_unknown_handle_is_unknown() {
 ///   handle hits `Again`;
 /// - when `kept` is true (<= 10 seqs), reading the same handle after a reset re-attaches its blob
 ///   into the new live scope (`in_scope = true`).
-fn scope_slot_load(ordinal: u32, blob: u32, order: u64, name: BlobName) -> SlotLoad {
+fn scope_slot_load(ordinal: u32, blob: u32, order: u64, name: BlobName, pins: bool) -> SlotLoad {
     SlotLoad {
         ordinal,
         blob,
@@ -3517,6 +3519,7 @@ fn scope_slot_load(ordinal: u32, blob: u32, order: u64, name: BlobName) -> SlotL
         lookups: vec![99990, 150],
         order,
         name,
+        pins,
     }
 }
 
@@ -3529,9 +3532,8 @@ fn prefetch_one(
     pins: bool,
 ) -> std::result::Result<rustc_hash::FxHashMap<u32, Vec<bool>>, (usize, SlotUncertain)> {
     lookups.prefetch_slots(
-        &[scope_slot_load(ordinal, blob, order, name)],
+        &[scope_slot_load(ordinal, blob, order, name, pins)],
         |_| false,
-        pins,
         99990,
     )
 }
@@ -3595,8 +3597,6 @@ fn a_batch_reset_clears_live_scope_matches_unless_keeps_scope() {
 /// `TaxdbRun::restart` preserving `keeps_scope`, and `FormatThrow::keeps_scope`.
 #[test]
 fn outfmt_five_pins_prefetched_blobs_across_batches_and_restart_preserves_keeps_scope() {
-    use crate::blastinput::app::Program;
-    use crate::report::archive::options::RequestKind;
     use crate::report::db_subject::FormatThrow;
     const L: i32 = 99990;
     // >20 DB / OBJMGR_* (`kept = false, in_scope_kept = false`), outfmt 5 (`keeps_scope = true`):
@@ -3638,16 +3638,9 @@ fn outfmt_five_pins_prefetched_blobs_across_batches_and_restart_preserves_keeps_
     run.set_keeps_scope(true);
     run.restart();
     assert!(run.volume_lookups.lock().unwrap().keeps_scope);
-    // `FormatThrow::keeps_scope`: true for outfmt 5 alone.
-    for (program, app) in [
-        (Program::Blastp, RequestKind::Blastp),
-        (Program::Blastn, RequestKind::Blastn),
-        (Program::Tblastn, RequestKind::Tblastn),
-        (Program::Tblastx, RequestKind::Tblastx),
-        (Program::Blastx, RequestKind::Blastx),
-    ] {
-        assert!(FormatThrow::keeps_scope("5", program, app));
-    }
+    // `FormatThrow::keeps_scope`: true for outfmt 5 alone (derived directly from `ReportFormat::Xml`).
+    assert!(FormatThrow::keeps_scope("5"));
+    assert!(FormatThrow::keeps_scope("5 "));
     for outfmt in [
         "0",
         "6",
@@ -3659,11 +3652,9 @@ fn outfmt_five_pins_prefetched_blobs_across_batches_and_restart_preserves_keeps_
         "16",
         "17",
         "18",
+        "invalid",
     ] {
-        assert!(
-            !FormatThrow::keeps_scope(outfmt, Program::Blastp, RequestKind::Blastp),
-            "{outfmt}"
-        );
+        assert!(!FormatThrow::keeps_scope(outfmt), "{outfmt}");
     }
 }
 
@@ -3671,16 +3662,13 @@ fn outfmt_five_pins_prefetched_blobs_across_batches_and_restart_preserves_keeps_
 /// - `blob_read` (`!in_prefetch`) requires every `in_scope` exact-handle holder to be `blob_kept`
 ///   (`x_FindBestTSEInIndex` picks the earliest matching TSE);
 /// - `unordered_slot` re-attaches a `Kept` blob to live scope via `touch_same_handle`;
-/// - `TaxdbRun::reset_scope` fast path vs initialized `offset_error_taxid`, and `for_xml2`
+/// - `TaxdbRun::reset_scope` fast path vs initialized `offset_error_taxid`, and `xml2_lookups`
 ///   isolation + `restart`;
-/// - `FormatThrow::scope_flags` (including `Psiblast`, `Rpsblast`, `Rpstblastn`, `"5 "`) and
-///   `FormatThrow::is_xml2`;
+/// - `FormatThrow::scope_flags` and `FormatThrow::is_xml2`;
 /// - `prefetch_slot_plan` sets `pinned` on `tm_gi21` (`keeps_scope = true`) when every segment
 ///   resolves to a non-empty `CBioseq_Handle`.
 #[test]
 fn scope_lifetime_audit_invariants_hold() {
-    use crate::blastinput::app::Program as Prog;
-    use crate::report::archive::options::RequestKind as Kind;
     use crate::report::db_subject::FormatThrow as Throw;
     const L: i32 = 99990;
 
@@ -3726,7 +3714,7 @@ fn scope_lifetime_audit_invariants_hold() {
     let reattached = unordered
         .prefetch_slots(
             &[
-                scope_slot_load(0, 0, 5, by(0)),
+                scope_slot_load(0, 0, 5, by(0), true),
                 SlotLoad {
                     ordinal: 1,
                     blob: 1,
@@ -3734,37 +3722,38 @@ fn scope_lifetime_audit_invariants_hold() {
                     lookups: vec![150],
                     order: 5,
                     name: by(1),
+                    pins: true,
                 },
             ],
             |_| false,
-            true,
             L,
         )
         .unwrap();
     assert_eq!(reattached[&0], vec![false, false]);
     assert_eq!(unordered.blob_read(0, &by(3)), BlobRead::Kept);
 
-    // 3. `TaxdbRun::for_xml2` isolation, `restart`, and `reset_scope` fast path.
+    // 3. `TaxdbRun::reset_scope` fast path and `xml2_lookups` `restart`.
     let mut isolated = TaxdbRun::default();
-    assert!(std::ptr::eq(isolated.for_xml2(), &isolated));
     isolated.set_keeps_scope(true);
     isolated.set_separate_xml2(true);
-    let xml2 = isolated.for_xml2();
-    assert!(!std::ptr::eq(xml2, &isolated));
-    assert!(!xml2.volume_lookups.lock().unwrap().keeps_scope);
-    // Seed an entry in `xml2` and check that `isolated.restart()` clears `xml2` too while keeping
-    // `isolated.keeps_scope == true`.
-    xml2.volume_lookups
-        .lock()
-        .unwrap()
-        .offset_slot(0, 0, &by(0), &[L, 150], L)
-        .unwrap();
-    assert!(!xml2.volume_lookups.lock().unwrap().slot_blobs.is_empty());
+    isolated.note_calls_before(true);
+    {
+        let mut xml2 = isolated
+            .xml2_lookups
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap();
+        assert!(!xml2.keeps_scope);
+        xml2.offset_slot(0, 0, &by(0), &[L, 150], L).unwrap();
+        assert!(!xml2.slot_blobs.is_empty());
+    }
+    assert!(isolated.unrecorded_calls());
     isolated.restart();
     assert!(isolated.volume_lookups.lock().unwrap().keeps_scope);
     assert!(isolated
-        .for_xml2()
-        .volume_lookups
+        .xml2_lookups
+        .get()
+        .unwrap()
         .lock()
         .unwrap()
         .slot_blobs
@@ -3787,18 +3776,12 @@ fn scope_lifetime_audit_invariants_hold() {
     fast.reset_scope();
     assert!(!fast.volume_lookups.lock().unwrap().slot_blobs[&0][0].in_scope);
 
-    // 4. `FormatThrow::scope_flags` across request kinds and `FormatThrow::is_xml2`.
-    for (program, app) in [
-        (Prog::Blastp, Kind::Psiblast),
-        (Prog::Blastp, Kind::Rpsblast),
-        (Prog::Blastx, Kind::Rpstblastn),
-    ] {
-        assert_eq!(Throw::scope_flags(Some("5"), program, app), (true, true));
-        assert_eq!(Throw::scope_flags(Some("5 "), program, app), (true, true));
-        assert_eq!(Throw::scope_flags(Some("6"), program, app), (false, true));
-        assert_eq!(Throw::scope_flags(Some("15"), program, app), (false, false));
-        assert_eq!(Throw::scope_flags(None, program, app), (false, false));
-    }
+    // 4. `FormatThrow::scope_flags` and `FormatThrow::is_xml2`.
+    assert_eq!(Throw::scope_flags(Some("5")), (true, true));
+    assert_eq!(Throw::scope_flags(Some("5 ")), (true, true));
+    assert_eq!(Throw::scope_flags(Some("6")), (false, true));
+    assert_eq!(Throw::scope_flags(Some("15")), (false, false));
+    assert_eq!(Throw::scope_flags(None), (false, false));
     for outfmt in ["13", "14", "15", "16", "15 "] {
         assert!(Throw::is_xml2(outfmt), "{outfmt}");
     }
@@ -3834,5 +3817,246 @@ fn scope_lifetime_audit_invariants_hold() {
         assert!(lookups.slot_blobs[&0][0].in_scope);
     }
     assert!(run_batch(1).text().is_empty());
+    std::fs::remove_dir_all(&cwd).unwrap();
+}
+
+/// Secondary XML2/JSON (`separate_xml2 = true`) shares the run's taxonomy handle, open state,
+/// non-collision volume lookups, and `calls_before`, while isolating only cache-collision scope
+/// state (`xml2_lookups`, `keeps_scope = false`).
+#[test]
+fn separate_xml2_shares_open_and_non_collision_state_and_isolates_collision_scope() {
+    let cwd = empty_cwd("sep_xml2_shared");
+    // 1. Opening-texts taxdb (`bad_magic`): primary prefetch opens `lazy` once, so secondary
+    //    `read_reported_taxonomy` gets empty `notes.open` (opening texts are not repeated).
+    let db_open = db_search("tm_cache151", Some(&variant("bad_magic")), &cwd);
+    let parsed_open = parsed_subjects(&db_open);
+    let mut run_open = TaxdbRun::default();
+    run_open.set_separate_xml2(true);
+    run_open.note_calls_before(true);
+    let first_open = batch_prefetch(
+        &db_open,
+        &run_open,
+        std::iter::empty(),
+        [PrefetchSubject::unflipped(0, Some(&parsed_open[0]))],
+        "BLASTP",
+        &stop_queries(0),
+    )
+    .unwrap();
+    assert!(!first_open.text().is_empty());
+    let ordinals: Vec<u32> = (0..db_open.num_seqs()).collect();
+    let reported: std::collections::BTreeSet<usize> = [0].into_iter().collect();
+    let wrapped_open: Vec<_> = parsed_open.iter().map(Some).collect();
+    let (_, _, _, notes_open) = read_reported_taxonomy(
+        &db_open,
+        &run_open,
+        &ordinals,
+        &reported,
+        &wrapped_open,
+        &|| None,
+        "BLASTP",
+    )
+    .unwrap();
+    assert!(notes_open.open.is_empty());
+    assert!(run_open.unrecorded_calls());
+
+    // 2. Non-collision `offset_last_past_end` (`tm_cache151`): primary prefetch records `Last`, so
+    //    secondary `read_reported_taxonomy` repeats no volume-lookup offset error.
+    let db_nc = db_search("tm_cache151", Some(&variant("offset_last_past_end")), &cwd);
+    let parsed_nc = parsed_subjects(&db_nc);
+    let mut run_nc = TaxdbRun::default();
+    run_nc.set_separate_xml2(true);
+    let first_nc = batch_prefetch(
+        &db_nc,
+        &run_nc,
+        std::iter::empty(),
+        [PrefetchSubject::unflipped(0, Some(&parsed_nc[0]))],
+        "BLASTP",
+        &stop_queries(0),
+    )
+    .unwrap();
+    assert!(!first_nc.text().is_empty());
+    let wrapped_nc: Vec<_> = parsed_nc.iter().map(Some).collect();
+    let (_, _, _, notes_nc) = read_reported_taxonomy(
+        &db_nc,
+        &run_nc,
+        &[0, 1, 2],
+        &[0usize].into_iter().collect(),
+        &wrapped_nc,
+        &|| None,
+        "BLASTP",
+    )
+    .unwrap();
+    assert!(notes_nc.lookups.is_empty());
+
+    // 3. Collision `offset_last_past_end` (`tm_cache_gi`): `keeps_scope = true` + `separate_xml2`:
+    //    primary keeps scope across `reset_scope`, while secondary `placed_load_texts` uses
+    //    `xml2_lookups` (`keeps_scope = false`) so batch 1 succeeds and batch 2 refuses `again`.
+    let db_col = db_search("tm_cache_gi", Some(&variant("offset_last_past_end")), &cwd);
+    let parsed_col = parsed_subjects(&db_col);
+    let mut run_col = TaxdbRun::default();
+    run_col.set_keeps_scope(true);
+    run_col.set_separate_xml2(true);
+    let all_ordinals: Vec<u32> = (0..db_col.num_seqs()).collect();
+    let all_reported: std::collections::BTreeSet<usize> = (0..db_col.num_seqs() as usize).collect();
+    let wrapped_col: Vec<_> = parsed_col.iter().map(Some).collect();
+    let primary_batch = |query: usize| {
+        batch_prefetch(
+            &db_col,
+            &run_col,
+            std::iter::empty(),
+            all_ordinals
+                .iter()
+                .map(|&o| PrefetchSubject::unflipped(o, Some(&parsed_col[o as usize]))),
+            "BLASTP",
+            &stop_queries(query),
+        )
+        .unwrap()
+    };
+    assert!(!primary_batch(0).text().is_empty());
+    run_col.reset_scope();
+    let one_batch = || {
+        Some(vec![XmlBatchLoads {
+            first: 0,
+            prefetch: true,
+            hits: vec![(0..db_col.num_seqs() as usize).collect()],
+        }])
+    };
+    let (_, _, _, notes_col) = read_reported_taxonomy(
+        &db_col,
+        &run_col,
+        &all_ordinals,
+        &all_reported,
+        &wrapped_col,
+        &one_batch,
+        "BLASTP",
+    )
+    .unwrap();
+    assert_eq!(notes_col.placed.batches.len(), 1);
+    assert!(notes_col.open.is_empty());
+    // Primary `volume_lookups` still keeps its scope from batch 1 -> primary batch 2 writes nothing.
+    assert!(primary_batch(1).text().is_empty());
+    // Secondary `xml2_lookups` reset its scope after batch 1 (`keeps_scope = false`) -> batch 2
+    // of secondary XML2 refuses `again`.
+    let sec_b2 = read_reported_taxonomy(
+        &db_col,
+        &run_col,
+        &all_ordinals,
+        &all_reported,
+        &wrapped_col,
+        &one_batch,
+        "BLASTP",
+    );
+    assert!(sec_b2.is_err());
+    std::fs::remove_dir_all(&cwd).unwrap();
+}
+
+/// `prefetch_slot_plan` pins only the prefix of segments preceding the first empty
+/// `CBioseq_Handle` in `CSeq_id::CompareOrdered` order (`CanResolveRange`, seq_map.cpp:1085-1097),
+/// not packed handle order (`load_places`).
+#[test]
+fn prefetch_slot_plan_pins_only_prefix_before_first_empty_handle_in_compare_ordered_order() {
+    use crate::report::db_subject::{FoundInstead, ParsedSubject};
+    use crate::seqid::defline_set::{BlastDefline, DeflineSet};
+    use crate::seqid::model::{ParsedSeqId, PdbSeqId};
+    const L: i32 = 99990;
+
+    // 1. Direct `VolumeLookups::prefetch_slots` with mixed per-load `pins` (including inside
+    //    `unordered_slot` when two loads share an order key).
+    let mut mixed = VolumeLookups {
+        keeps_scope: true,
+        ..VolumeLookups::default()
+    };
+    let loads = [
+        scope_slot_load(0, 0, 5, by(0), true),
+        SlotLoad {
+            ordinal: 1,
+            blob: 1,
+            volume: 0,
+            lookups: vec![150],
+            order: 5,
+            name: by(1),
+            pins: false,
+        },
+    ];
+    mixed.prefetch_slots(&loads, |_| false, L).unwrap();
+    assert!(mixed.slot_blobs[&0][0].pinned);
+    assert!(!mixed.slot_blobs[&1][0].pinned);
+
+    // 2. Real `prefetch_slot_plan` on `tm_gi21` (`gi|1` at ordinal 0, `gi|5` at ordinal 4, `gi|9`
+    //    at ordinal 8; all with taxids in slot 150).
+    let cwd = empty_cwd("partial_pin");
+    let taxdb = variant("offset_last_past_end");
+    let db = db_search("tm_gi21", Some(&taxdb), &cwd);
+    let parsed = parsed_subjects(&db);
+    let make_empty = |id: ParsedSeqId| {
+        ParsedSubject::new(DeflineSet::from(vec![BlastDefline {
+            ids: vec![id],
+            ..BlastDefline::default()
+        }]))
+        .unwrap()
+        .found_instead(Some(FoundInstead::Nothing))
+    };
+
+    // Case A: empty `gi|5` splits `gi|1` (< `gi|5`, pinned) and `gi|9` (> `gi|5`, unpinned).
+    let empty_gi5 = parsed[4].clone().found_instead(Some(FoundInstead::Nothing));
+    let mut run_a = TaxdbRun::default();
+    run_a.set_keeps_scope(true);
+    let loaded_a = [
+        (0u32, Some(&parsed[0])),
+        (4u32, Some(&empty_gi5)),
+        (8u32, Some(&parsed[8])),
+    ];
+    prefetch_slot_plan(&db, &run_a, &loaded_a, None, true, false, "BLASTP").unwrap();
+    {
+        let lookups = run_a.volume_lookups.lock().unwrap();
+        assert!(lookups.slot_blobs[&0][0].pinned);
+        assert!(!lookups.slot_blobs[&8][0].pinned);
+    }
+
+    // Case B: empty `bbs|123` (`e_Gibbsq`, unpacked -> `load_places.order` is `u64::MAX`) vs
+    // `gi|1` (`e_Gi`, packed): under `CSeq_id::CompareOrdered`, `bbs|123` precedes `gi|1`, so
+    // `gi|1` must not be pinned.
+    let empty_bbs = make_empty(ParsedSeqId::Gibbsq(123));
+    let mut run_b = TaxdbRun::default();
+    run_b.set_keeps_scope(true);
+    let loaded_b = [(0u32, Some(&parsed[0])), (1u32, Some(&empty_bbs))];
+    prefetch_slot_plan(&db, &run_b, &loaded_b, None, true, false, "BLASTP").unwrap();
+    assert!(!run_b.volume_lookups.lock().unwrap().slot_blobs[&0][0].pinned);
+
+    // Case C: empty `pdb|1ABC|A` (`e_Pdb`, unpacked) vs `gi|1` (`e_Gi`): `gi|1` precedes
+    // `pdb|1ABC|A` under `CSeq_id::CompareOrdered`, so `gi|1` is pinned.
+    let empty_pdb = make_empty(ParsedSeqId::Pdb(PdbSeqId {
+        mol: b"1ABC".to_vec(),
+        chain: Some(b'A' as i32),
+        rel: None,
+        chain_id: None,
+    }));
+    let mut run_c = TaxdbRun::default();
+    run_c.set_keeps_scope(true);
+    let loaded_c = [(0u32, Some(&parsed[0])), (1u32, Some(&empty_pdb))];
+    prefetch_slot_plan(&db, &run_c, &loaded_c, None, true, false, "BLASTP").unwrap();
+    assert!(run_c.volume_lookups.lock().unwrap().slot_blobs[&0][0].pinned);
+
+    // Case D: `HoldersUnknown` (even on a taxid-free subject that `prefetch_reads` does not
+    // refuse) causes `prefetch_pin_stops` to return `None`, leaving the whole batch unpinned.
+    let unknown = ParsedSubject::new(DeflineSet::from(vec![BlastDefline {
+        ids: vec![ParsedSeqId::Gi(99)],
+        ..BlastDefline::default()
+    }]))
+    .unwrap()
+    .found_instead(Some(FoundInstead::HoldersUnknown {
+        instead: None,
+        why: "unreadable volume".to_string(),
+    }));
+    let mut run_d = TaxdbRun::default();
+    run_d.set_keeps_scope(true);
+    let loaded_d = [(0u32, Some(&parsed[0])), (4u32, Some(&unknown))];
+    assert_eq!(
+        prefetch_pin_stops(&db, &loaded_d, true, "BLASTP").unwrap(),
+        None
+    );
+    prefetch_slot_plan(&db, &run_d, &loaded_d, None, true, false, "BLASTP").unwrap();
+    assert!(!run_d.volume_lookups.lock().unwrap().slot_blobs[&0][0].pinned);
+
     std::fs::remove_dir_all(&cwd).unwrap();
 }

@@ -748,8 +748,6 @@ fn open_search_database(
         Some(name) => {
             let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
                 outputs.formats.first().map(|format| format.outfmt),
-                crate::blastinput::app::Program::Tblastn,
-                crate::report::archive::options::RequestKind::Tblastn,
             );
             let database = super::database::TblastnDatabase::open_restricted(
                 name,

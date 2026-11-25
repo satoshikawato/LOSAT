@@ -2,16 +2,19 @@
 //! `x_ValidateCd`, `x_UpdateDelta` and `x_WrapUpDelta`, writing the weighted residue frequencies
 //! (`.wcounts`) and run-length compressed effective observations (`.obsr`) for each volume.
 //!
-//! Each profile's `.wcounts` and `.obsr` records are streamed to disk during the volume pass so
-//! memory stays bounded on full CDD volumes, and the offset tables at byte 8 of both files are
-//! written at `finish` (on any error makeprofiledb's destructor removes both files). Any ASN.1
-//! reader posts from the volume pass are replayed at `finish` to match NCBI's third read pass in
-//! `x_UpdateDelta`.
+//! Each profile's `.wcounts` and `.obsr` records are streamed to unnamed temporary scratch files
+//! in the temporary directory during the volume pass (matching NCBI's `CTmpFile`s while keeping
+//! memory bounded on full CDD volumes, falling back to memory on WASI where no temporary
+//! directory exists). The final `<name>.wcounts` and `<name>.obsr` files are created only at
+//! `finish` (`x_WrapUpDelta`), after Pass 2 completes and Pass-3 ASN.1 posts / errors are
+//! replayed, so an input profile sharing an output name is not truncated early and a `.wcounts`
+//! open error preserves the protein database files as in NCBI.
 
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
 
+use crate::blastinput::input_files::{temporary_directory, unnamed_temporary_file};
 use crate::core::blast_util::BLASTAA_SIZE;
 use crate::ncbi_app::Diag;
 use crate::report::serial::asn_types::Post;
@@ -35,6 +38,9 @@ const EPSILON: f64 = 0.0001;
 /// Run-length merge tolerance for consecutive `numIndeptObsr` values in `x_UpdateDelta`.
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1665
 const OBSR_MERGE_EPS: f64 = 1e-4;
+
+/// Buffer capacity for the temporary scratch files and final `.wcounts`/`.obsr` outputs.
+const DELTA_IO_BUFFER_BYTES: usize = 1 << 16;
 
 /// Result of `x_CheckDelta` for one profile in `x_CreateDeltaList`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +81,21 @@ impl From<std::io::Error> for DeltaError {
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1674,1688
 pub(super) fn uint4_of(value: f64) -> Option<u32> {
     (value > -1.0 && value < 4_294_967_296.0).then_some(value as u32)
+}
+
+/// Advances a 32-bit delta offset counter (`CurrFreqOffset` or `CurrObsrOffset`) by `added`
+/// entries, adding the buffer length as unsigned and converting back to two's-complement `Int4`
+/// (wrapping modulo 2^32).
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1702-1703
+pub(super) fn advance_offset(current: i32, added: usize) -> i32 {
+    current.wrapping_add(added as i32)
+}
+
+/// Converts `CurrFreqOffset` (an `Int4` entry offset) to the column offset stored in `.wcounts`
+/// by dividing by `BLASTAA_SIZE` with signed truncation toward zero.
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1682,1825
+pub(super) fn freq_record_offset(curr_freq_offset: i32) -> i32 {
+    curr_freq_offset / BLASTAA_SIZE as i32
 }
 
 /// Extracts and validates the `weightedResFreqsPerPos` and `numIndeptObsr` layout for
@@ -139,24 +160,17 @@ fn delta_fields<'a>(
     Ok((freqs, obsr))
 }
 
-/// `x_ValidateCd`: checks column count agreement (`freqs.len() / 28 == obsr.len()`), each
+/// `x_ValidateCd`: checks column count agreement (`freqs.len() / 28 == obsr.len()`), each full
 /// 28-residue column's sum within `kEpsylon` of `1.0`, and every observation `>= 1.0`. Refuses a
-/// partial trailing column whose length is not a multiple of 28, where NCBI increments past
-/// `freqs.end()`.
+/// partial trailing column (`len % 28 != 0`) only when every full column sums within `kEpsylon`
+/// of `1.0`, which is the exact condition under which NCBI's loop reaches the partial tail and
+/// increments past `freqs.end()`.
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1715-1749
 fn validate_cd(freqs: &[f64], obsr: &[f64]) -> Result<bool, DeltaError> {
     if freqs.len() / BLASTAA_SIZE != obsr.len() {
         return Err(DeltaError::Exception(
             b"Number of frequency and observations columns do not match".to_vec(),
         ));
-    }
-    if !freqs.len().is_multiple_of(BLASTAA_SIZE) {
-        return Err(DeltaError::Rps(RpsError::Refused(format!(
-            "a profile whose weightedResFreqsPerPos has {} entries (not a multiple of \
-             {BLASTAA_SIZE}) for -dbtype delta (NCBI's makeprofiledb increments past the end of \
-             the list)",
-            freqs.len()
-        ))));
     }
     for col in freqs.chunks_exact(BLASTAA_SIZE) {
         let mut sum = 0.0f64;
@@ -166,6 +180,14 @@ fn validate_cd(freqs: &[f64], obsr: &[f64]) -> Result<bool, DeltaError> {
         if (sum - 1.0).abs() > EPSILON {
             return Ok(false);
         }
+    }
+    if !freqs.len().is_multiple_of(BLASTAA_SIZE) {
+        return Err(DeltaError::Rps(RpsError::Refused(format!(
+            "a profile whose weightedResFreqsPerPos has {} entries (not a multiple of \
+             {BLASTAA_SIZE}) and every full column sums within {EPSILON} of 1.0 for -dbtype \
+             delta (NCBI's makeprofiledb increments past the end of the list)",
+            freqs.len()
+        ))));
     }
     if obsr.iter().any(|&v| v < 1.0) {
         return Ok(false);
@@ -204,10 +226,53 @@ pub(super) fn check_delta(
     Ok(DeltaCheck::Included)
 }
 
-/// The open `.wcounts` and `.obsr` files of one delta volume (`x_UpdateDelta` / `x_WrapUpDelta`).
+/// Scratch storage for `.wcounts` or `.obsr` payload bytes until `finish` (`x_WrapUpDelta`): an
+/// unnamed temporary file in `TMPDIR` on native targets (as NCBI's `CTmpFile`), or an in-memory
+/// buffer on WASI where no temporary directory exists.
+enum DeltaScratch {
+    File(BufWriter<File>),
+    Mem(Vec<u8>),
+}
+
+impl DeltaScratch {
+    fn file(file: File) -> Self {
+        DeltaScratch::File(BufWriter::with_capacity(DELTA_IO_BUFFER_BYTES, file))
+    }
+
+    fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        match self {
+            DeltaScratch::File(writer) => writer.write_all(bytes),
+            DeltaScratch::Mem(buf) => {
+                buf.extend_from_slice(bytes);
+                Ok(())
+            }
+        }
+    }
+
+    fn copy_to(&mut self, out: &mut BufWriter<File>) -> std::io::Result<()> {
+        match self {
+            DeltaScratch::File(writer) => {
+                writer.flush()?;
+                let file = writer.get_mut();
+                file.seek(SeekFrom::Start(0))?;
+                std::io::copy(file, out)?;
+                Ok(())
+            }
+            DeltaScratch::Mem(buf) => out.write_all(buf),
+        }
+    }
+}
+
+/// The buffered `.wcounts` and `.obsr` state of one delta volume (`x_UpdateDelta` /
+/// `x_WrapUpDelta`), held in temporary scratch files until `finish` creates the output files.
 pub(super) struct DeltaVolume {
-    wcounts: BufWriter<File>,
-    obsr: BufWriter<File>,
+    db_name: Vec<u8>,
+    tmp_freq: Option<DeltaScratch>,
+    tmp_obsr: Option<DeltaScratch>,
+    /// Failure creating the temporary scratch files in `TMPDIR`, held until the start of `finish`
+    /// so any Pass-2 error takes precedence, matching NCBI's `CTmpFile` creation at the start of
+    /// `x_UpdateDelta`.
+    tmp_open_error: Option<DeltaError>,
     freq_offsets: Vec<i32>,
     obsr_offsets: Vec<i32>,
     curr_freq_offset: i32,
@@ -216,42 +281,46 @@ pub(super) struct DeltaVolume {
     /// ASN.1 reader posts captured during the volume pass, replayed at `finish` to match NCBI's
     /// third read pass inside `x_UpdateDelta`.
     deferred_posts: Vec<(usize, Vec<Post>)>,
-    /// First Pass-3 error (e.g. float-to-`Uint4` UB refusal or 32-bit offset overflow), held until
-    /// `finish` so any earlier Pass-2 error is reported first as in NCBI.
+    /// First Pass-3 error (e.g. float-to-`Uint4` UB refusal or scratch write I/O error), held
+    /// until `finish` so any earlier Pass-2 error is reported first as in NCBI.
     deferred_error: Option<(usize, DeltaError)>,
 }
 
-/// Opens `<name>.wcounts` and `<name>.obsr` and writes their magic, record count, and placeholder
-/// offset tables (replaced at `finish`).
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1828-1858
-pub(super) fn open_volume(name: &[u8], num_seqs: usize) -> Result<DeltaVolume, DeltaError> {
-    let open = |extension: &str, message: &'static str| {
-        let path = [name, b".", extension.as_bytes()].concat();
-        File::create(crate::utils::os_bytes::path_of_bytes(&path))
-            .map_err(|_| DeltaError::Rps(RpsError::SeqDb(message)))
+/// Prepares the scratch buffers for one delta volume (`x_UpdateDelta`). Does not create
+/// `<name>.wcounts` or `<name>.obsr` yet; those are opened in `finish` (`x_WrapUpDelta`).
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1570-1580
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3660-3705,5389-5396,6561-6637
+pub(super) fn new_volume(name: &[u8], num_seqs: usize) -> DeltaVolume {
+    let (tmp_obsr, tmp_freq, tmp_open_error) = match temporary_directory() {
+        Some(dir) => match unnamed_temporary_file(&dir, "delta-obsr")
+            .and_then(|obsr| Ok((obsr, unnamed_temporary_file(&dir, "delta-wcounts")?)))
+        {
+            Ok((obsr, freq)) => (
+                Some(DeltaScratch::file(obsr)),
+                Some(DeltaScratch::file(freq)),
+                None,
+            ),
+            Err(error) => (
+                None,
+                None,
+                Some(DeltaError::Rps(RpsError::Refused(format!(
+                    "a temporary directory ('{}') where temporary files for -dbtype delta cannot \
+                     be created ({error}; NCBI's makeprofiledb stops with a message containing \
+                     its process ID)",
+                    dir.display()
+                )))),
+            ),
+        },
+        None => {
+            let mem = || Some(DeltaScratch::Mem(Vec::new()));
+            (mem(), mem(), None)
+        }
     };
-    let mut wcounts = BufWriter::new(open("wcounts", "Failed to open output .wcounts file")?);
-    let mut obsr = BufWriter::new(open("obsr", "Failed to open output .obsr file")?);
-    let count = i32::try_from(num_seqs)
-        .ok()
-        .filter(|&count| count < i32::MAX)
-        .ok_or_else(|| {
-            DeltaError::Rps(RpsError::Refused(format!(
-                "a delta volume of {num_seqs} profiles (NCBI's makeprofiledb counts its offsets \
-                 past its 32-bit integers)"
-            )))
-        })?;
-    let mut header = Vec::with_capacity(8 + 4 * (num_seqs + 1));
-    header.extend_from_slice(&DELTA_MAGIC.to_le_bytes());
-    header.extend_from_slice(&count.to_le_bytes());
-    for i in 0..=count {
-        header.extend_from_slice(&i.to_le_bytes());
-    }
-    wcounts.write_all(&header)?;
-    obsr.write_all(&header)?;
-    Ok(DeltaVolume {
-        wcounts,
-        obsr,
+    DeltaVolume {
+        db_name: name.to_vec(),
+        tmp_freq,
+        tmp_obsr,
+        tmp_open_error,
         freq_offsets: Vec::with_capacity(num_seqs + 1),
         obsr_offsets: Vec::with_capacity(num_seqs + 1),
         curr_freq_offset: 0,
@@ -259,12 +328,12 @@ pub(super) fn open_volume(name: &[u8], num_seqs: usize) -> Result<DeltaVolume, D
         scratch: Vec::new(),
         deferred_posts: Vec::new(),
         deferred_error: None,
-    })
+    }
 }
 
 /// Run-length encodes `obsr` into `(value, count)` `u32` pairs as `x_UpdateDelta` writes them to
 /// `.obsr`, returning `Err` if any `(current + 1.0) * 1000` falls outside C++'s defined `Uint4`
-/// range.
+/// range. Run counts wrap modulo 2^32 as NCBI's unsigned 32-bit run counter does.
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1654-1677
 fn encode_obsr(obsr: &[f64]) -> Result<Vec<u32>, DeltaError> {
     let mut out = Vec::new();
@@ -275,12 +344,7 @@ fn encode_obsr(obsr: &[f64]) -> Result<Vec<u32>, DeltaError> {
         i += 1;
         while i < obsr.len() && (obsr[i] - current).abs() < OBSR_MERGE_EPS {
             i += 1;
-            num = num.checked_add(1).ok_or_else(|| {
-                DeltaError::Rps(RpsError::Refused(
-                    "a profile with 2^32 or more consecutive equal observations for -dbtype delta"
-                        .to_string(),
-                ))
-            })?;
+            num = num.wrapping_add(1);
         }
         let scaled = (current + 1.0) * FIXED_POINT_SCALE_FACTOR;
         let Some(encoded) = uint4_of(scaled) else {
@@ -295,9 +359,27 @@ fn encode_obsr(obsr: &[f64]) -> Result<Vec<u32>, DeltaError> {
     Ok(out)
 }
 
+/// Writes the header (magic, record count, offset table) and copies `scratch` into `out`.
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1841-1863
+fn write_delta_file(
+    out: &mut BufWriter<File>,
+    offsets: &[i32],
+    scratch: &mut DeltaScratch,
+) -> std::io::Result<()> {
+    let num_records = (offsets.len() - 1) as i32;
+    out.write_all(&DELTA_MAGIC.to_le_bytes())?;
+    out.write_all(&num_records.to_le_bytes())?;
+    for offset in offsets {
+        out.write_all(&offset.to_le_bytes())?;
+    }
+    out.flush()?;
+    scratch.copy_to(out)?;
+    out.flush()
+}
+
 impl DeltaVolume {
-    /// Appends one profile's `.wcounts` and `.obsr` records during the volume pass, deferring any
-    /// Pass-3 ASN.1 posts or errors to `finish`.
+    /// Appends one profile's `.wcounts` and `.obsr` records to the scratch buffers during the
+    /// volume pass, deferring any Pass-3 ASN.1 posts or errors to `finish`.
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1582-1707
     pub(super) fn add_profile(
         &mut self,
@@ -306,25 +388,25 @@ impl DeltaVolume {
         seq_size: i32,
         filename: &[u8],
         posts: Vec<Post>,
-    ) -> Result<(), DeltaError> {
+    ) {
         if !posts.is_empty() {
             self.deferred_posts.push((profile_index, posts));
         }
-        if self.deferred_error.is_some() {
-            return Ok(());
+        if self.tmp_open_error.is_some() || self.deferred_error.is_some() {
+            return;
         }
         let (freqs, obsr) = match delta_fields(pssm, seq_size, filename) {
             Ok(fields) => fields,
             Err(error) => {
                 self.deferred_error = Some((profile_index, error));
-                return Ok(());
+                return;
             }
         };
         let obsr_words = match encode_obsr(obsr) {
             Ok(words) => words,
             Err(error) => {
                 self.deferred_error = Some((profile_index, error));
-                return Ok(());
+                return;
             }
         };
         if obsr.len() != freqs.len() / BLASTAA_SIZE {
@@ -339,7 +421,7 @@ impl DeltaVolume {
                     .concat(),
                 ),
             ));
-            return Ok(());
+            return;
         }
         self.scratch.clear();
         self.scratch.reserve((freqs.len() + BLASTAA_SIZE) * 4);
@@ -354,66 +436,56 @@ impl DeltaVolume {
                          result)"
                     ))),
                 ));
-                return Ok(());
+                return;
             };
             self.scratch.extend_from_slice(&encoded.to_le_bytes());
         }
         // Additional column of zeros for compatibility with RPS database.
         self.scratch.extend_from_slice(&[0u8; BLASTAA_SIZE * 4]);
 
-        let freq_entries = freqs.len() + BLASTAA_SIZE;
-        let Some(next_freq_offset) = i32::try_from(freq_entries)
-            .ok()
-            .and_then(|n| self.curr_freq_offset.checked_add(n))
-        else {
-            self.deferred_error = Some((
-                profile_index,
-                DeltaError::Rps(RpsError::Refused(
-                    "a delta volume whose .wcounts entries pass 2^31 (NCBI's makeprofiledb counts \
-                     them past its 32-bit integers)"
-                        .to_string(),
-                )),
-            ));
-            return Ok(());
-        };
-        let Some(next_obsr_offset) = i32::try_from(obsr_words.len())
-            .ok()
-            .and_then(|n| self.curr_obsr_offset.checked_add(n))
-        else {
-            self.deferred_error = Some((
-                profile_index,
-                DeltaError::Rps(RpsError::Refused(
-                    "a delta volume whose .obsr entries pass 2^31 (NCBI's makeprofiledb counts \
-                     them past its 32-bit integers)"
-                        .to_string(),
-                )),
-            ));
-            return Ok(());
-        };
-
-        self.freq_offsets
-            .push(self.curr_freq_offset / BLASTAA_SIZE as i32);
-        self.obsr_offsets.push(self.curr_obsr_offset);
-        self.wcounts.write_all(&self.scratch)?;
+        if let Err(error) = self
+            .tmp_freq
+            .as_mut()
+            .expect("tmp_freq open")
+            .write_all(&self.scratch)
+        {
+            self.deferred_error = Some((profile_index, DeltaError::Rps(RpsError::Io(error))));
+            return;
+        }
         self.scratch.clear();
         self.scratch.reserve(obsr_words.len() * 4);
-        for word in obsr_words {
+        for word in &obsr_words {
             self.scratch.extend_from_slice(&word.to_le_bytes());
         }
-        self.obsr.write_all(&self.scratch)?;
-        self.curr_freq_offset = next_freq_offset;
-        self.curr_obsr_offset = next_obsr_offset;
-        Ok(())
+        if let Err(error) = self
+            .tmp_obsr
+            .as_mut()
+            .expect("tmp_obsr open")
+            .write_all(&self.scratch)
+        {
+            self.deferred_error = Some((profile_index, DeltaError::Rps(RpsError::Io(error))));
+            return;
+        }
+
+        self.freq_offsets
+            .push(freq_record_offset(self.curr_freq_offset));
+        self.obsr_offsets.push(self.curr_obsr_offset);
+        self.curr_freq_offset = advance_offset(self.curr_freq_offset, freqs.len() + BLASTAA_SIZE);
+        self.curr_obsr_offset = advance_offset(self.curr_obsr_offset, obsr_words.len());
     }
 
-    /// Completes `x_UpdateDelta` / `x_WrapUpDelta`: replays Pass-3 ASN.1 posts, raises any
-    /// deferred Pass-3 error, and writes the final offset tables into `.wcounts` and `.obsr`.
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1709-1712,1822-1863
+    /// Completes `x_UpdateDelta` / `x_WrapUpDelta`: checks temporary-file creation, replays Pass-3
+    /// ASN.1 posts, raises any deferred Pass-3 error, then creates `<name>.wcounts` and
+    /// `<name>.obsr` (in NCBI's order) and writes their headers, offset tables, and records.
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1572-1575,1709-1712,1822-1863
     pub(super) fn finish(
         mut self,
         diag: &mut Diag,
         post_fn: impl Fn(&mut Diag, &[Post]),
     ) -> Result<(), DeltaError> {
+        if let Some(error) = self.tmp_open_error.take() {
+            return Err(error);
+        }
         if let Some((fail_index, error)) = self.deferred_error.take() {
             for (idx, posts) in &self.deferred_posts {
                 if *idx <= fail_index {
@@ -426,21 +498,32 @@ impl DeltaVolume {
             post_fn(diag, posts);
         }
         self.freq_offsets
-            .push(self.curr_freq_offset / BLASTAA_SIZE as i32);
+            .push(freq_record_offset(self.curr_freq_offset));
         self.obsr_offsets.push(self.curr_obsr_offset);
 
-        let write_offsets = |file: &mut BufWriter<File>, offsets: &[i32]| -> std::io::Result<()> {
-            file.flush()?;
-            let mut table = Vec::with_capacity(offsets.len() * 4);
-            for offset in offsets {
-                table.extend_from_slice(&offset.to_le_bytes());
-            }
-            file.get_mut().seek(SeekFrom::Start(8))?;
-            file.get_mut().write_all(&table)?;
-            Ok(())
+        let open = |extension: &str, message: &'static str| {
+            let path = [&self.db_name[..], b".", extension.as_bytes()].concat();
+            File::create(crate::utils::os_bytes::path_of_bytes(&path))
+                .map_err(|_| DeltaError::Rps(RpsError::SeqDb(message)))
         };
-        write_offsets(&mut self.wcounts, &self.freq_offsets)?;
-        write_offsets(&mut self.obsr, &self.obsr_offsets)?;
+        let mut wcounts = BufWriter::with_capacity(
+            DELTA_IO_BUFFER_BYTES,
+            open("wcounts", "Failed to open output .wcounts file")?,
+        );
+        let mut obsr = BufWriter::with_capacity(
+            DELTA_IO_BUFFER_BYTES,
+            open("obsr", "Failed to open output .obsr file")?,
+        );
+        write_delta_file(
+            &mut wcounts,
+            &self.freq_offsets,
+            self.tmp_freq.as_mut().expect("tmp_freq open"),
+        )?;
+        write_delta_file(
+            &mut obsr,
+            &self.obsr_offsets,
+            self.tmp_obsr.as_mut().expect("tmp_obsr open"),
+        )?;
         Ok(())
     }
 }

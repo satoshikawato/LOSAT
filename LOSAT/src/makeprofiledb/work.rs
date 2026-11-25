@@ -848,11 +848,8 @@ fn make_vol(
     };
     let mut rps = rps_files::open_volume(&db_name, smps.len(), volume_params)?;
     built.vol_names.push(db_name.clone());
-    let mut delta = if params.op_mode == OpMode::Delta {
-        Some(delta::open_volume(&db_name, smps.len())?)
-    } else {
-        None
-    };
+    let mut delta =
+        (params.op_mode == OpMode::Delta).then(|| delta::new_volume(&db_name, smps.len()));
     let now = LocalTime::now().ok_or_else(|| {
         RunError::Failed("the clock cannot be read for the database's date".to_string())
     })?;
@@ -1042,7 +1039,7 @@ fn add_profiles(
             kappa: final_data.kappa,
         })?;
         if let Some(delta) = delta.as_deref_mut() {
-            delta.add_profile(profile_index, pssm, seq_size, filename, posts)?;
+            delta.add_profile(profile_index, pssm, seq_size, filename, posts);
         }
     }
     Ok(())

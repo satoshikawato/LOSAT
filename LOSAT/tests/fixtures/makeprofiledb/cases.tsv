@@ -236,3 +236,7 @@ D29	-dbtype delta -logfile run.log -max_smp_vol 2 -in in/l_D29.lst -out db
 D30	-dbtype delta -logfile run.log -in in/l_D27.lst -out db
 D31	-dbtype delta -max_smp_vol 2 -in in/l_D29.lst -out db
 D32	-dbtype delta -in in/l_D32.lst -out db
+D33	-dbtype delta -in in/l_D33.lst -out db
+D34	-dbtype delta -exclude_invalid false -in in/l_D33.lst -out db
+D35	-dbtype delta -in in/l_D35.lst -out db
+D36	-dbtype delta -blastdb_version 4 -in in/l_D36.lst -out out/nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn

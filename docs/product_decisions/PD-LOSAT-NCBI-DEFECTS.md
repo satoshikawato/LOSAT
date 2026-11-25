@@ -765,10 +765,11 @@
   `weightedResFreqsPerPos`, where NCBI's `x_CheckDelta` and `x_UpdateDelta` copy into an empty
   `std::list::begin()`; an empty `numIndeptObsr` list, where NCBI dereferences `end()`; a
   `weightedResFreqsPerPos` list whose length is not a multiple of 28 when `len / 28 ==
-  numIndeptObsr.len()`, where `x_ValidateCd` increments past `end()`; and `weightedResFreqsPerPos`
-  or `numIndeptObsr` values whose scaled conversion to `Uint4` is out of range or `NaN`, or a
-  delta volume whose `.wcounts`/`.obsr` offsets pass 2^31; Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; numbered after 1.108)
+  numIndeptObsr.len()` and every full column of 28 sums within 0.0001 of 1.0, where `x_ValidateCd`
+  increments past `end()`; `weightedResFreqsPerPos` or `numIndeptObsr` values whose scaled
+  conversion to `Uint4` is out of range or `NaN`; and a missing or unwritable `TMPDIR` where
+  NCBI's `CTmpFile` stops with a `mkstemp()` message containing its process ID; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.108)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3899,11 +3900,18 @@ file would differ, and NCBI's programs still could not open the database).
     1763-1800`, where NCBI copies into an empty `std::list::begin()`, overwriting the list header
     node; rows `QR16`, `QR17`); an empty `numIndeptObsr` list (`makeprofiledb.cpp:1659, 1803`,
     where NCBI dereferences `end()`; row `QR18`); a `weightedResFreqsPerPos` list whose length is
-    not a multiple of 28 when `len / 28 == numIndeptObsr.len()` (`makeprofiledb.cpp:1720-1740`,
-    where `x_ValidateCd` increments past `end()`; row `QR19`); `weightedResFreqsPerPos` or
-    `numIndeptObsr` values whose scaled conversion `(val * 1000)` or `((val + 1) * 1000)` to
-    `Uint4` is out of range or `NaN` (`makeprofiledb.cpp:1674, 1688`; rows `QR20`-`QR22`); and
-    delta volumes whose `.wcounts` or `.obsr` offsets pass 2^31 (`makeprofiledb.cpp:1702-1703`).
+    not a multiple of 28 when `len / 28 == numIndeptObsr.len()` and every full column of 28 sums
+    within 0.0001 of 1.0 (`makeprofiledb.cpp:1720-1740`, where `x_ValidateCd` increments past
+    `end()`; row `QR19`; when an earlier full column fails the sum check, NCBI returns false
+    deterministically before reaching the partial tail, reproduced in rows `D33`-`D35`);
+    `weightedResFreqsPerPos` or `numIndeptObsr` values whose scaled conversion `(val * 1000)` or
+    `((val + 1) * 1000)` to `Uint4` is out of range or `NaN` (`makeprofiledb.cpp:1674, 1688`; rows
+    `QR20`-`QR22`); and a missing or unwritable temporary directory (`TMPDIR`) when `x_UpdateDelta`
+    creates its two temporary files (`makeprofiledb.cpp:1572-1575`, `ncbifile.cpp:6580-6599`, where
+    NCBI throws `mkstemp() failed for '...'` with the process and thread IDs in the message, which
+    changes from run to run). Delta 32-bit offset wrapping (`CurrFreqOffset += FreqBuff.size()`,
+    `CurrObsrOffset += ObsrBuff.size()`, `Uint4 num++`) is deterministic in NCBI and reproduced
+    with wrapping arithmetic.
 - The readers of GI-indexed masks, a damaged `.nog` (version 1.94, 2026-11-24, line NP item
   M4c-2, review S4 and N8; the rejection of a `MASKLIST` name that is not UTF-8 withdrawn in 1.103; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; the outcomes of a `.nog` cut short that NCBI

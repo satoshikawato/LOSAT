@@ -127,7 +127,7 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
     `NULL` `Seq-id` followed by a missing input file in v5 and v4 (`QR15`, where `Close` throws in
     the unwinding of the input error and NCBI aborts rc 134).
 
-- Rows `D01`-`D32` (row PS14, frozen on 2026-11-26 with the official NCBI BLAST+ 2.17.0
+- Rows `D01`-`D36` (row PS14, frozen on 2026-11-26 with the official NCBI BLAST+ 2.17.0
   `makeprofiledb` and `rpsblast` binaries; each row run twice with zero difference):
   - `D01`-`D07`: `-dbtype delta` on CDD scoremats (`c1`, `c2`, `c3`) in v5 (`D01`), v4 (`D02`),
     `-index false` (`D03`), `-binary` (`D04`, `c1.smp.bin`-`c3.smp.bin`), multi-volume `-max_smp_vol
@@ -152,10 +152,13 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
   - `D28`-`D32`: `-logfile` with exclusions (`D28`), multi-volume alias (`D29`), and Pass-1 error
     (`D30`, matching `std::ofstream` buffered flushing); multi-volume split after exclusion (`D31`,
     4 inputs with 1 excluded -> 1+2 volumes); and Pass-2 duplicate `Seq-id` cleanup (`D32`).
+  - `D33`-`D35`: partial trailing column (29 entries) whose first full column sums to 0 (`d_partial_badcol0.smp`), where NCBI's `x_ValidateCd` returns false at column 0 before reaching the partial tail: default excluded -> `Empty database` (`D33`, rc 1), `-exclude_invalid false` -> valid database (`D34`, rc 0, 244 B `.wcounts`), and followed by `c1.smp` -> exclusion line plus normal `c1` database (`D35`, rc 0).
+  - `D36`: `-blastdb_version 4 -out out/<248 x n>` (Unix `NAME_MAX = 255`: `.rps`/`.freq` open, `.wcounts` fails in `x_WrapUpDelta` after Pass 2 with `Failed to open output .wcounts file`, rc 2, leaving the v4 protein DB files `.pin/.phr/.psq/.psd/.psi/.pog` on disk).
   - `l_QR16.lst`-`l_QR22.lst` (no `cases.tsv` row; tested as refusals alongside `-dbtype cobalt`):
     `byRow TRUE` (`QR16`), `numRows 26` with weighted frequencies (`QR17`), empty `numIndeptObsr`
-    (`QR18`), partial trailing column of 29 entries (`QR19`), and out-of-range / NaN floats
-    (`QR20`-`QR22`: `obsr = -2`, `weightedResFreqsPerPos = -0.5`, `obsr = NaN`).
+    (`QR18`), partial trailing column of 29 entries whose full column sums to 1.0 (`QR19`), and
+    out-of-range / NaN floats (`QR20`-`QR22`: `obsr = -2`, `weightedResFreqsPerPos = -0.5`,
+    `obsr = NaN`).
 
 The whole oracle (248 cases) is compared by `compare.py` of the survey; these rows are the part kept in the
 repository.

@@ -66,7 +66,7 @@ None in the files or the messages of a normal run, or of a run that NCBI's `make
 ## What LOSAT refuses
 
 - `-dbtype cobalt`.
-- With `-dbtype delta`: profiles stored by row (`byRow TRUE`), profiles with `numRows < 28` and non-empty `weightedResFreqsPerPos` (NCBI copies into an empty list's `begin()` iterator), profiles with an empty `numIndeptObsr` list (NCBI dereferences `end()`), profiles whose `weightedResFreqsPerPos` length is not a multiple of 28 when `len / 28 == numIndeptObsr.len()` (NCBI increments past `end()`), and `weightedResFreqsPerPos` / `numIndeptObsr` values whose scaled conversion to `Uint4` is out of range or `NaN` (or delta volumes whose offsets pass 2^31).
+- With `-dbtype delta`: profiles stored by row (`byRow TRUE`), profiles with `numRows < 28` and non-empty `weightedResFreqsPerPos` (NCBI copies into an empty list's `begin()` iterator), profiles with an empty `numIndeptObsr` list (NCBI dereferences `end()`), profiles whose `weightedResFreqsPerPos` length is not a multiple of 28 when `len / 28 == numIndeptObsr.len()` and every full column of 28 sums within `0.0001` of `1.0` (NCBI increments past `end()`), `weightedResFreqsPerPos` / `numIndeptObsr` values whose scaled conversion to `Uint4` is out of range or `NaN`, and a missing or unwritable temporary directory (`TMPDIR`, where NCBI stops with a `mkstemp()` message containing its process ID).
 - `-max_smp_vol 0`, on which NCBI's `makeprofiledb` crashes (division by zero).
 - `-in` naming a directory, on which NCBI's `makeprofiledb` never ends.
 - A profile stored by row (`byRow TRUE`) with more than 28 positions, whose frequency ratios NCBI's `makeprofiledb` reads from outside its data.

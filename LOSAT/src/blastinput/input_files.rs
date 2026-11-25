@@ -268,7 +268,7 @@ fn inflation_directories(path: &std::path::Path) -> impl Iterator<Item = std::pa
 
 /// The directory of temporary files: `temp_dir()`.
 #[cfg(not(target_os = "wasi"))]
-fn temporary_directory() -> Option<std::path::PathBuf> {
+pub(crate) fn temporary_directory() -> Option<std::path::PathBuf> {
     #[allow(clippy::disallowed_methods)] // not WASI: `temp_dir()` is only called off WASI
     Some(std::env::temp_dir())
 }
@@ -277,7 +277,7 @@ fn temporary_directory() -> Option<std::path::PathBuf> {
 /// `library/std/src/sys/pal/wasip1/os.rs:119` of 1.92), where a host gives a module directories
 /// only by its preopens. The WASI command puts the inflated copy beside the input or refuses it.
 #[cfg(target_os = "wasi")]
-fn temporary_directory() -> Option<std::path::PathBuf> {
+pub(crate) fn temporary_directory() -> Option<std::path::PathBuf> {
     None
 }
 
@@ -323,7 +323,7 @@ fn inflate_to_temporary_file(
 /// as soon as it is open, on Windows it is hidden and deleted when its last handle closes
 /// (`FILE_FLAG_DELETE_ON_CLOSE`, shared for reading, writing and deletion so that `try_clone`
 /// and a second `open` of the handle keep working). It is readable and writable.
-fn unnamed_temporary_file(
+pub(crate) fn unnamed_temporary_file(
     directory: &std::path::Path,
     role: &str,
 ) -> std::io::Result<std::fs::File> {

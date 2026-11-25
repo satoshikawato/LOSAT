@@ -377,6 +377,13 @@ fn makeprofiledb_s_lmdb_files_record_the_host_s_page_size() {
 fn makeprofiledb_gives_ncbis_bytes() {
     let mut differ = Vec::new();
     for (name, words) in cases() {
+        // D36 uses a 248-byte basename so `.freq` (253 B) fits Unix `NAME_MAX` (255) while
+        // `.wcounts` (256 B) fails in `x_WrapUpDelta`; on Windows `MAX_PATH` (260) prevents even
+        // `.rps` from opening, so `makeprofiledb_delta_defers_wcounts_creation_until_wrapup`
+        // covers late `.wcounts` failure on every platform.
+        if cfg!(windows) && name == "D36" {
+            continue;
+        }
         let dir = scratch(&name);
         let got = run(&dir, &words);
         let want = expected(&name);
@@ -717,8 +724,9 @@ fn makeprofiledb_refuses_delta_ub_and_cobalt() {
             "QR19",
             "-dbtype delta -in in/l_QR19.lst -out db",
             "Error: a profile whose weightedResFreqsPerPos has 29 entries (not a multiple of 28) \
-             for -dbtype delta (NCBI's makeprofiledb increments past the end of the list) is not \
-             supported by LOSAT's MAKEPROFILEDB\n",
+             and every full column sums within 0.0001 of 1.0 for -dbtype delta (NCBI's \
+             makeprofiledb increments past the end of the list) is not supported by LOSAT's \
+             MAKEPROFILEDB\n",
         ),
         (
             "QR20",
@@ -813,6 +821,155 @@ fn makeprofiledb_delta_handles_non_utf8_paths() {
             String::from_utf8_lossy(&file)
         );
     }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Copies `fixtures()/in` into a fresh `dir` and runs `losat makeprofiledb` with `args` and
+/// optional `TMPDIR` override.
+fn run_makeprofiledb_in(dir: &Path, tmpdir: Option<&Path>, args: &[&str]) -> std::process::Output {
+    let mut cmd = command(Path::new(env!("CARGO_BIN_EXE_losat")), dir);
+    if let Some(tmp) = tmpdir {
+        cmd.env("TMPDIR", tmp);
+    }
+    cmd.arg("makeprofiledb")
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+fn reset_fixture_dir(tag: &str) -> PathBuf {
+    let dir = scratch(tag);
+    let _ = fs::remove_dir_all(&dir);
+    copy_tree(&fixtures().join("in"), &dir.join("in"));
+    dir
+}
+
+#[test]
+fn makeprofiledb_delta_defers_wcounts_creation_until_wrapup() {
+    // Case (a): an input profile named `db.00.wcounts` with `-max_smp_vol 2` and a pre-existing
+    // `db.wcounts` (which `s_DeleteMakeprofileDb` removes, skipping numbered `.00.wcounts`).
+    // NCBI reads `db.00.wcounts` in passes 2 and 3 and truncates it only in `x_WrapUpDelta`.
+    let dir = reset_fixture_dir("delta-wrapup-input-name");
+    fs::write(dir.join("db.wcounts"), b"dummy").unwrap();
+    fs::copy(dir.join("in/c1.smp"), dir.join("db.00.wcounts")).unwrap();
+    fs::write(
+        dir.join("in/l_wrapup.lst"),
+        b"db.00.wcounts\nin/c2.smp\nin/c3.smp\n",
+    )
+    .unwrap();
+    let wrapup_out = run_makeprofiledb_in(
+        &dir,
+        None,
+        &[
+            "-dbtype",
+            "delta",
+            "-max_smp_vol",
+            "2",
+            "-title",
+            "in/l_D01.lst",
+            "-in",
+            "in/l_wrapup.lst",
+            "-out",
+            "db",
+        ],
+    );
+    assert_eq!(
+        wrapup_out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&wrapup_out.stderr)
+    );
+    let want_d05 = expected("D05");
+    assert_eq!(wrapup_out.stdout, want_d05.0);
+    assert_eq!(wrapup_out.stderr, want_d05.1);
+    let mut got_files = String::new();
+    for path in files_below(&dir) {
+        let bytes = as_on_linux(&path, fs::read(dir.join(&path)).unwrap());
+        if let Some(line) = losat_lmdb_line(&path, &bytes) {
+            got_files.push_str(&line);
+            continue;
+        }
+        match masked(&path, &bytes) {
+            Some(m) => got_files.push_str(&format!("{path}\t*\t{:016x}\n", fnv1a64(&m))),
+            None => got_files.push_str(&format!(
+                "{path}\t{}\t{:016x}\n",
+                bytes.len(),
+                fnv1a64(&bytes)
+            )),
+        }
+    }
+    assert_eq!(got_files, want_d05.3);
+    let _ = fs::remove_dir_all(&dir);
+
+    // Case (b) cross-platform: a non-empty directory at `db.wcounts` blocks `File::create` in
+    // `x_WrapUpDelta` after Pass 2 finishes, leaving the v4 protein DB on disk with exit 2.
+    let dir = reset_fixture_dir("delta-wrapup-open-fail");
+    fs::create_dir_all(dir.join("db.wcounts")).unwrap();
+    fs::write(dir.join("db.wcounts/keep"), b"x").unwrap();
+    let fail_out = run_makeprofiledb_in(
+        &dir,
+        None,
+        &[
+            "-dbtype",
+            "delta",
+            "-blastdb_version",
+            "4",
+            "-in",
+            "in/l_D36.lst",
+            "-out",
+            "db",
+        ],
+    );
+    assert_eq!(fail_out.status.code(), Some(2));
+    assert!(fail_out.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&fail_out.stderr),
+        "Error: ERROR: Failed to open output .wcounts file\n"
+    );
+    for ext in [".pin", ".phr", ".psq", ".psd", ".psi", ".pog"] {
+        assert!(dir.join(format!("db{ext}")).is_file(), "missing db{ext}");
+    }
+    for ext in [".rps", ".loo", ".aux", ".freq", ".obsr"] {
+        assert!(!dir.join(format!("db{ext}")).exists(), "unexpected db{ext}");
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn makeprofiledb_delta_refuses_missing_tmpdir_after_pass2() {
+    let dir = reset_fixture_dir("delta-missing-tmpdir");
+    let missing_tmp = dir.join("no_such_tmpdir");
+
+    // When Pass 2 succeeds, missing TMPDIR is refused (NCBI's mkstemp error contains the PID).
+    let refused_out = run_makeprofiledb_in(
+        &dir,
+        Some(&missing_tmp),
+        &["-dbtype", "delta", "-in", "in/l_D36.lst", "-out", "db"],
+    );
+    assert_eq!(refused_out.status.code(), Some(1));
+    assert!(refused_out.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&refused_out.stderr);
+    assert!(
+        stderr.contains("temporary directory")
+            && stderr.contains("not supported by LOSAT's MAKEPROFILEDB"),
+        "unexpected stderr: {stderr}"
+    );
+
+    // When Pass 2 fails (D26: scaling factors do not match), NCBI never enters x_UpdateDelta, so
+    // the Pass-2 error takes precedence over missing TMPDIR.
+    let pass2_out = run_makeprofiledb_in(
+        &dir,
+        Some(&missing_tmp),
+        &["-dbtype", "delta", "-in", "in/l_D26.lst", "-out", "db2"],
+    );
+    assert_eq!(pass2_out.status.code(), Some(1));
+    assert!(pass2_out.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&pass2_out.stderr),
+        "Error: ERROR: Scaling factors do not match\n"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 

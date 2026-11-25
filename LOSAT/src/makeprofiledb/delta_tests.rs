@@ -141,12 +141,72 @@ fn check_delta_refuses_ncbi_ub_shapes() {
         Err(DeltaError::Rps(RpsError::Refused(_)))
     ));
 
-    // Partial trailing column (not multiple of 28, matching obsr.len() == freqs.len() / 28)
+    // Partial trailing column: refused when every full column passes (even if obsr < 1.0, because
+    // NCBI's column loop runs before the obsr < 1.0 check).
     let mut partial = unit_column(1.0);
     partial.push(0.0);
-    let p_partial = sample_pssm(Some(partial), Some(vec![10.0]));
+    let p_partial = sample_pssm(Some(partial.clone()), Some(vec![10.0]));
     assert!(matches!(
         check_delta(&p_partial, 1, b"a.smp", 6.0, true),
         Err(DeltaError::Rps(RpsError::Refused(_)))
     ));
+    let p_partial_low_obsr = sample_pssm(Some(partial), Some(vec![0.5]));
+    assert!(matches!(
+        check_delta(&p_partial_low_obsr, 1, b"a.smp", 0.0, true),
+        Err(DeltaError::Rps(RpsError::Refused(_)))
+    ));
+}
+
+#[test]
+fn validate_cd_partial_column_with_earlier_bad_column_is_not_refused() {
+    // 29 zeros with 1 obsr = 10.0: column 0 sums to 0.0, so NCBI returns false before reaching the
+    // trailing 1-element partial column (no UB).
+    let p_bad0 = sample_pssm(Some(vec![0.0; BLASTAA_SIZE + 1]), Some(vec![10.0]));
+    assert_eq!(
+        check_delta(&p_bad0, 1, b"a.smp", 6.0, true).unwrap(),
+        DeltaCheck::ExcludedInvalidCd
+    );
+    assert_eq!(
+        check_delta(&p_bad0, 1, b"a.smp", 6.0, false).unwrap(),
+        DeltaCheck::Included
+    );
+
+    // 2 full columns + 1 trailing entry: column 0 passes, column 1 fails -> still returns false
+    // without reaching the trailing partial column.
+    let mut two_cols_bad1 = unit_column(1.0);
+    two_cols_bad1.extend_from_slice(&unit_column(0.5));
+    two_cols_bad1.push(0.0);
+    let p_bad1 = sample_pssm(Some(two_cols_bad1), Some(vec![10.0, 10.0]));
+    assert_eq!(
+        check_delta(&p_bad1, 2, b"a.smp", 6.0, true).unwrap(),
+        DeltaCheck::ExcludedInvalidCd
+    );
+    assert_eq!(
+        check_delta(&p_bad1, 2, b"a.smp", 6.0, false).unwrap(),
+        DeltaCheck::Included
+    );
+}
+
+#[test]
+fn delta_offset_arithmetic_wraps_modulo_2_pow_32_like_ncbi() {
+    // Crossing 2^31 wraps Int4 to negative, and freq_record_offset divides by 28 truncating
+    // toward zero, matching NCBI's 32-bit offset counter and column division.
+    assert_eq!(advance_offset(0, 56), 56);
+    assert_eq!(freq_record_offset(56), 2);
+    assert_eq!(freq_record_offset(57), 2);
+
+    let wrapped = advance_offset(i32::MAX - 27, 28);
+    assert_eq!(wrapped, i32::MIN);
+    assert_eq!(freq_record_offset(wrapped), i32::MIN / 28);
+    assert_eq!(freq_record_offset(-27), 0);
+    assert_eq!(freq_record_offset(-28), -1);
+
+    // Crossing 2^32 wraps back to non-negative.
+    assert_eq!(advance_offset(-1, 1), 0);
+    assert_eq!(advance_offset(-10, 38), 28);
+    assert_eq!(freq_record_offset(advance_offset(-10, 38)), 1);
+
+    // Adding more than 2^32 on 64-bit targets takes the low 32 bits.
+    #[cfg(target_pointer_width = "64")]
+    assert_eq!(advance_offset(0, (1usize << 32) + 56), 56);
 }

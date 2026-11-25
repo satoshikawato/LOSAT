@@ -955,11 +955,10 @@ fn the_records_are_kept_only_for_a_writer_after_the_loop() {
     };
     assert_eq!(kept(&[SWITCH, RPTSTREAM, STATS]), "0");
 
-    // LOSAT_X_RPTSTREAM on but refusing the search (a `-dbsize` whose search space could
-    // overflow: `off=search_space`) while the switch acts: the reports are written after the
-    // loop from the records it kept, and the bytes are those without the switch.
-    let mut huge = args.to_vec();
-    huge.extend_from_slice(&["-dbsize", "1200000000000000"]);
+    // LOSAT_X_RPTSTREAM on but refusing the search after the reading (a negative `CHUNK_SIZE`
+    // without a negative `OVERLAP_CHUNK_SIZE`: `off=chunk_size`, which does not split or refuse
+    // the search) while the switch acts: the reports are written after the loop from the records
+    // it kept, and the bytes are those without the switch.
     let stats_line = |stderr: &str, name: &str| -> String {
         stderr
             .lines()
@@ -967,12 +966,16 @@ fn the_records_are_kept_only_for_a_writer_after_the_loop() {
             .unwrap_or_else(|| panic!("no {name} line: {stderr}"))
             .to_string()
     };
-    let refused = blastn(&huge, 4, &[SWITCH, RPTSTREAM, STATS], None);
+    let refused = blastn(
+        &args,
+        4,
+        &[SWITCH, RPTSTREAM, STATS, ("CHUNK_SIZE", "-5")],
+        None,
+    );
     let stderr = String::from_utf8_lossy(&refused.stderr).into_owned();
     let rpt = stats_line(&stderr, "[X_STATS] RPTSTREAM ");
     assert!(
-        rpt.split_whitespace()
-            .any(|word| word == "off=search_space"),
+        rpt.split_whitespace().any(|word| word == "off=chunk_size"),
         "{rpt}"
     );
     let stream = stats_line(&stderr, "[X_STATS] QSTREAM ");
@@ -986,7 +989,12 @@ fn the_records_are_kept_only_for_a_writer_after_the_loop() {
         .and_then(|value| value.parse().ok())
         .unwrap_or_else(|| panic!("{stream}"));
     assert!(kept_records > 0, "{stream}");
-    let zero = blastn(&huge, 4, &[RPTSTREAM, ("LOSAT_X_QSTREAM", "0")], None);
+    let zero = blastn(
+        &args,
+        4,
+        &[RPTSTREAM, ("LOSAT_X_QSTREAM", "0"), ("CHUNK_SIZE", "-5")],
+        None,
+    );
     assert_eq!(refused.status, Some(0), "{stderr}");
     assert!(!refused.report.is_empty(), "{stderr}");
     let without_stats = |stderr: &str| -> String {

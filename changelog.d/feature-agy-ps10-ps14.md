@@ -8,4 +8,4 @@
   inputs where NCBI has undefined or PID-dependent behaviour (`byRow TRUE`, `numRows < 28` with
   weighted frequencies, empty `numIndeptObsr`, partial trailing frequency columns when every full
   column of 28 sums within `0.0001` of `1.0`, out-of-range or `NaN` `Uint4` conversions, and a
-  missing or unwritable `TMPDIR`; `PD-LOSAT-NCBI-DEFECTS` 1.109) are refused explicitly.
+  missing or unwritable `TMPDIR`; `PD-LOSAT-NCBI-DEFECTS` 1.110) are refused explicitly.

@@ -1886,10 +1886,12 @@ fn search(
     let (stream, stores_error) = match &source {
         SubjectSource::Database(database) => {
             let opened = if database.first_oid_read_fails() {
-                Err(crate::algorithm::common::database::PreliminaryReadError(
-                    "Database memory map file error",
+                Err(
+                    crate::algorithm::common::database::PreliminaryReadError::from_static(
+                        "Database memory map file error",
+                    )
+                    .into(),
                 )
-                .into())
             } else {
                 database.x_stream(args.num_threads, db_mask.as_ref())
             };
@@ -3801,7 +3803,9 @@ fn run_batch_loop(
                                     .downcast::<crate::algorithm::common::database::PreliminaryReadError>()
                                     .ok()
                             })
-                            .map(|read_error| crate::blastinput::app::engine_error(read_error.0))
+                            .map(|read_error| {
+                                crate::blastinput::app::engine_error(read_error.as_bytes())
+                            })
                             .into(),
                         Err(error) => error
                             .downcast::<ErrorAfterBatchReports>()
@@ -3855,7 +3859,7 @@ fn run_batch_loop(
                     error.downcast::<crate::algorithm::common::database::PreliminaryReadError>()?;
                 reports.write_before_failed_batch(outputs, done, &warnings)?;
                 batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                return Err(crate::blastinput::app::engine_error(read_error.0));
+                return Err(crate::blastinput::app::engine_error(read_error.as_bytes()));
             }
             Err(error) => match error.downcast::<ErrorAfterBatchReports>() {
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:203-209
@@ -3987,7 +3991,7 @@ fn run_batch_loop(
                     )?;
                     reports.write_before_failed_batch(outputs, done, &warnings)?;
                     batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                    return Err(crate::blastinput::app::engine_error(read_error.0));
+                    return Err(crate::blastinput::app::engine_error(read_error.as_bytes()));
                 }
             }
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-205
@@ -4756,7 +4760,9 @@ impl BatchReports<'_> {
 /// TBLASTX's errors of a query batch's search that come after the reports of the batches before
 /// (`blastinput::app::ErrorAfterBatchReports`, which TBLASTN shares): NCBI's (`run_in_pool`), the
 /// average subject length (`context_cutoffs::context_cutoffs`); and LOSAT's refusals of what the
-/// search meets, an ungapped extension that scores higher past the end of its query frame
+/// search meets, a statistics count of 0 (`common::database::check_setup_count`), a search space
+/// that overflows NCBI's `Int8` (`context_cutoffs::search_space_overflow`), an ungapped extension
+/// that scores higher past the end of its query frame
 /// (`extension::query_batch::refusal`, the Owner's decision of 2026-11-16 on line RG's Q-X2c: "the
 /// results of the query batches before are written"), a one-hit merge of lengths that add up to 0
 /// (`OneHitChunkMerge::refuse`), the ungapped re-evaluation of HSPs on a subject (or its
@@ -5296,7 +5302,7 @@ fn search_query_batch<S: TbxScore>(
         ) {
             Ok(cutoffs) => cutoffs,
             Err(overflow) => {
-                x_read_failure.fail(s_idx, overflow.into());
+                x_read_failure.fail(s_idx, context_cutoffs::search_space_overflow(overflow));
                 subject_emit.emit(st, s_idx);
                 return;
             }

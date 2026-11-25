@@ -1,0 +1,1066 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>RPSTBLASTN 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: rps_mini
+           3 sequences; 560 total letters
+
+
+
+<b>Query=</b> stopq
+
+Length=600
+
+
+***** No hits found *****
+
+
+
+
+
+Effective search space used: 0
+
+
+<b>Query=</b> YP_009220476.1 bt strand=+ flank=0
+
+Length=637
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>19.2</a>    0.14 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>15.4</a>    2.2  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>15.0</a>    2.5  
+
+
+
+For reading frame +1 of query sequence:
+
+Query_2      142  SEIINLTINGVARGNHFNFVNGTLQTRNYGKVYVAGQGTSDSELVKKKGDIILTSLLGDG  321
+XP_000101.1  28   TYLK.IYQQENGGNK.CL..KHS.E..-..                                56
+
+Query_2      322  DHTLNVNKAESKELELYARVYNNTKRDITVDSVSLSPGLNAT  447
+103          54                        S.SN.QTPITRIEE.L..RFI  74
+
+For reading frame +2 of query sequence:
+
+Query_2  158  LPLMV*REGTILTL*MGRYKHETTGKFTWLVRGQATAS**RKKGILS*PRSSVMGTTPST  337
+102      96                      .Y.AE..GKEV.KAR.                           111
+103      11                .VLEKM.NK..DSLLL.                                27
+103      88                                                             C.  89
+103      138  ..I.L                                                         142
+
+Query_2  338  *TRPNLKNWNYTPEYIITQSAISRWTRFRCRLA*MRPVENFLPISLFCTLSQQC  499
+103      103                                         DYF.-EIV.DINM.F  116
+103      90   N.S..MNGMD.F..IV                                        109
+                     \                                              
+                     |                                              
+                  VTAA
+
+For reading frame +3 of query sequence:
+
+Query_2  210  VTNTKLRESLRGWSGDKRQ  266
+102      1    IF.VSVKKVSQ.--....R  17
+
+For reading frame -1 of query sequence:
+
+Query_2      613  TNRCRD*TSYSKDSVC*CHLYPHQRSLRKPKC*SGSFLTLLA*STKQTYWQKILDRSHLS  434
+102          149  S.L.TEIVQ..ETA..                                              167
+                             \                                                
+                             |                                                
+                           DSE
+
+Query_2      433  QATAKPSPP*YRALC<font color="#000000">yyilgriipil*ir</font>PCSR*GCGPHHRGARSR*YPLFSSLTRCRLS  254
+
+Query_2      253  PDQPRKLSRSFVFVTSHLQS*NGSLALHH*W*G*LSLTPRDKHPYLFCL  107
+XP_000101.1  170                                          .NDNNVI.V  178
+
+For reading frame -2 of query sequence:
+
+Query_2      591  PHTQKIVSVSVIYILIKGRSENQSVDPVL  505
+XP_000101.1  117            IVIAALD.T.DQ.MFS.IH  135
+XP_000101.1  139  .Y.NS..KLASKCMIC.              155
+
+For reading frame -3 of query sequence:
+
+Query_2  626  SPTLNKSLPGLNLILKR*CLLVSSISSSKVAPKTKVLIRFFFNTVGLKYKTNLLAENSRP  447
+103      92   ..NM.VTAA.MD                                                  103
+
+Query_2  446  VAFKPGDSETESTVISRFVLLYTRAYNSNSLDSALFTLRVWSPSPRSEVKIISPFFFTNS  267
+
+Query_2  266  LSLVP*PAT*TFP*FRVCNVPFTKLKWFPRATPLMVRLIISDSTG*A<font color="#000000">slsflssflls</font>SI  87
+
+Query_2  86   LVTTMLITTSIKVNPAKMAA*TPHIC  9
+102      115             QI.S.RIETG..YV.  129
+
+
+Lambda      K        H        a         alpha
+   0.317    0.135    0.387    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 87584
+
+
+<b>Query=</b> YP_009220478.1 bt strand=- flank=0
+
+Length=905
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>18.5</a>    0.36 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>15.4</a>    2.9  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>14.6</a>    5.3  
+
+
+
+For reading frame +2 of query sequence:
+
+Query_3      140  YSPNARYFLRLQDLAGCKPMRHRNLLPPQTCPSLNGIKAY<font color="#000000">pdpllprpppslp</font>HYLKIRQ  319
+102          27   WHLDVKD.IDCRKN..NEDL.T.D.F.                                   53
+
+Query_3      320  <font color="#000000">cryrrnlclchhhrlh</font>PSY*RDLAFES<font color="#000000">evegele*v*agelelawavagea</font>NPLQERYQF  499
+
+Query_3      500  LPHPCYFQC*LMVA<font color="#000000">rtrrllpplcrllrlllrrdr</font>WAYSPAHAGRGLRPPCHPPFLSLYP  679
+XP_000101.1  132                                                      S.IHK.L.  139
+
+Query_3      680  FWFFCLK*SWFY*VWT*I*RPPLHRRSIQIGSMITTRTSLLYEFFCTQLSRQKNKSFCRG  859
+XP_000101.1  140  Y                                                             140
+103          87                                               W..NT.PNM.VTAAGM  102
+
+Query_3      860  SYFP  871
+103          103  D...  106
+
+For reading frame +3 of query sequence:
+
+Query_3      84   PYITFASV*HFPGFHRI*GIVRTLDIFYDYRIWLDVSR*GIEIYFLPRHARL*TG*KRIQ  263
+102          126  ..VC.KDTINRKSNQENV..IKSSNL                                    151
+
+Query_3      264  ILFFLVLLHLFPTI*KF<font color="#000000">vnvviveiyvyviiiv</font>FTQAT<font color="#000000">rgtwrssrrwrgswsrcrrgsw</font>  443
+
+Query_3      444  <font color="#000000">swrgrwrg</font>KQTLSRNG<font color="#000000">tsssptrvtssv</font>N*W<font color="#000000">lleledffllf</font>AVFYGSFFVATDGPILRL  623
+XP_000101.1  133                                                         ..HK.  137
+
+Query_3      624  TPAEDCALRV<font color="#000000">illfflfilfgff</font>V*SSRGFIRSGHKYDAHHYTDEAYK*DQ**QQEHHYY  803
+XP_000101.1  97                                                          .GQFF  101
+XP_000101.1  138  L.YTN                                                         142
+
+Query_3      804  TNFFALNYRARKIKAFVEAAI  866
+XP_000101.1  102  .DLVLV.RL.D.G.RI.I..L  122
+
+For reading frame -1 of query sequence:
+
+Query_3  872  RGNSCLYKSFYFSGAIIECKK  810
+102      17   ..AAAI.I.DWHLDVF.D.R.  39
+                             \     
+                             |     
+                            KD
+
+For reading frame -3 of query sequence:
+
+Query_3  453  HANSNSP  433
+103      53   NS...RQ  59
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 127370
+
+
+<b>Query=</b> YP_009220482.1 bt strand=+ flank=1
+
+Length=624
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>18.1</a>    0.28 
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>17.7</a>    0.39 
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>16.9</a>    0.65 
+
+
+
+For reading frame +1 of query sequence:
+
+Query_4      40   NNNQTDELAYGGR<font color="#000000">svlhsshhcvssgsih</font>PACL*TREV*YISH*RAVYR*AAPSHVPLKN  219
+XP_000101.1  169  .D.DNNVICV..                                                  180
+
+Query_4      220  R*A*GYASDTLRFHGLRGRSQSYKNP*APHVH*RSWLGAFLLTSLRGGIPTNKVREGRVR  399
+
+Query_4      400  A*KTFPSGNDPVDRPR  447
+103          143             I...Y  147
+
+For reading frame +2 of query sequence:
+
+Query_4      110  AVALYIRHASKQEKYSTSHINEQFTAKQLPVTYLSKTGKLKDMHLTHSDFMAYVDVHNRT  289
+XP_000101.1  45      .FVK.-.LETR.                                               55
+102          19   .A.I..                                                        24
+
+Query_4      290  KTLKHPMCTDEAGWAHFCLLASAEAYRRIRYGRGEFGPEKHSLAETIQSTVQDMSEPYIT  469
+XP_000101.1  54                                ...C.TGTIVT.A-G.V.EGCTTVS.IKELI  83
+102          101                                 .K.KEVVKARA.FDQ.N.ARIETGT..V   128
+102          167                   .N...IAVNKFVK.                               180
+
+Query_4      470  HIFKKNTDV  496
+XP_000101.1  84   SVLPEVV..  92
+
+For reading frame +3 of query sequence:
+
+Query_4  513  NLYWRRTGTKFVWGTVKRVRRPIICP  590
+102      59   D.FME.VKAGKN.S--------LM..  76
+
+For reading frame -1 of query sequence:
+
+Query_4      537  FRFFSNTDCIPCPSTSVFFLKICVIYGSDISWTVDWIVSARECFSGPNSPLPYLIRRYAS  358
+XP_000101.1  23                                              .A.KST---..KNI.QQ  36
+103          71   L..IE.L.A                                                     79
+
+Query_4      357  AEASKQKC  334
+XP_000101.1  37   ENGGNKH.  44
+
+For reading frame -3 of query sequence:
+
+Query_4  586  QIIGLRTRFTVPHTNFVPVLLQYRLHSVPIYVRILLENMCDIWF*HILDGRLDRFR*GMF  407
+103      125                HIA.AS.E.M.QVL..ML                              142
+103      3    ..MQ..D.LVLEKMK                                               17
+103      91            .S.NM.VTAAGMD.-----------FP.IV...                    112
+
+Query_4  406  FRPELAPPVPYSSVCLRGG**AEMRPTSFVSAHGVLKGFCTIVNVHVSHEI*VCQMHILK  227
+
+Query_4  226  LTCF*EVRDWELLSGKLLVNVRCTILLLFRGMPDV*SHC*RSDG*NEEHSYHHRPVHPFG  47
+103      34                                                .QIVLSEY..I      44
+102      126                                                           .YV  128
+
+Query_4  46   CYYDFI  29
+102      129  .FK.T.  134
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 85680
+
+
+<b>Query=</b> YP_009220483.1 bt strand=- flank=1
+
+Length=864
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>18.5</a>    0.29 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>18.5</a>    0.29 
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>15.8</a>    2.2  
+
+
+
+For reading frame +1 of query sequence:
+
+Query_5      469  FSVLLVLIFFSDADSPK*SSCLMIESTSIVSLFTNS  576
+XP_000101.1  131  ..PIHK.LPYTNSIVKLA.K.MICKIDTKEAP..VR  166
+
+For reading frame +2 of query sequence:
+
+Query_5  332  GSQRRSYWIGICSPSNQV  385
+103      80   EKTNNKT.CTNT..NMN.  97
+
+For reading frame +3 of query sequence:
+
+Query_5      252  IKRV*AGIYRSWKCGPNQLPGLQC*CKVLNADLIGLAYVRHPIKFSDGV*HRSVFGEFNC  431
+102          62   ME..K..KNW.LM.-.HEC...                                        82
+
+Query_5      432  LSLGFLRKVDRLLLRAVSFNIFL*C*FSEVK*LPNDRIHFDSVAFH*LDVALYKLANILV  611
+
+Query_5      612  KPHTV*ISSFSGRCCRACSRYQAVGSIKY  698
+XP_000101.1  62         .VTHA.EVIEG.TTVSSIKELIS  84
+XP_000101.1  139   .Y.NS.VKLASK..KIDTKE          160
+                                \              
+                                |              
+                               MI
+
+For reading frame -1 of query sequence:
+
+Query_5      288  SSCGICQLRLFLSHCDHVEIIRQFY*HRSAIKR*QG*<font color="#000000">sssp**hs</font>SCTRKTGNCCDVTVS  109
+XP_000101.1  149  .K.M..KI                                                      156
+
+Query_5      108  AKYIGEGTVRVPSSTDHCNIVEDDYSVAP  22
+102          96    ..EA..KGKE                    105
+103          120                      .N..MHI..  128
+
+For reading frame -2 of query sequence:
+
+Query_5      791  EQDFDVLELDYSKIIHDITAMLSVAAPPPNSILDASDGLI<font color="#000000">atasatapaae</font>TGNSNRMRL  612
+XP_000101.1  88    EVV..ILI.EGQFFT.LVLVNRL.DKGKRIVIA.L..                        124
+103          161  .DILSE..K.F.                                                  172
+
+Query_5      611  DKDVCQLIERDIELVKSDTIEVDSIIRQLLYFGESASEKNIKTNSTEKEPVYFPKEPKGE  432
+XP_000101.1  22                                MFA.K.TYL...QE.GGN.HCLF          46
+                                                           \                  
+                                                           |                  
+                                                          YQ
+
+Query_5      431  AVKLAKNTPVLDTITKLDWMANICQSNK  348
+102          118  SARIETG..YV...NRKSNQE.V       143
+                             \                
+                             |                
+                           CFK
+XP_000101.1  136       .LL.YTNS.V..ASKCM..KIDT  158
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 121260
+
+
+<b>Query=</b> YP_009220649.1 bt strand=+ flank=2
+
+Length=712
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>18.9</a>    0.21 
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>18.1</a>    0.31 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=3&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>18.1</a>    0.37 
+
+
+
+For reading frame +1 of query sequence:
+
+Query_6      166  CLVCRITWSRRFLPTRSLWVLIW*NITGLKVVMNGSPICQTIA*TTLQDRPRSSSLSLRK  345
+103          144                                                  ...YIGAHITAG  155
+102          37      ..KNAGNED.R..D.FPA..                                       56
+XP_000101.1  151  .MI.K.D--TKEA.                                                162
+
+Query_6      346  QAQTL  360
+103          156  KCR..  160
+
+For reading frame +2 of query sequence:
+
+Query_6      35   TQIVMYDYSQ*MRLLAR**QRGSYL*Y**QV*VRAEESRADRGVVWCVG*RGHADFSRPD  214
+102          153  .E..Q.SD.E                                                    162
+
+Query_6      215  LCGYLYGKI*LV*KWS*TVLRYVKQLPRQHYKTVRGHRVCH*ENKLRL*DEIHEKSNGPH  394
+
+Query_6      395  REVLFLR*PKTKQNQFMVHYSHYNGGNATPPRKFC*GGT  511
+XP_000101.1  160                     EAPFTF..DNDNNVI.V..A  181
+                                          \              
+                                          |              
+                                         VR
+
+For reading frame +3 of query sequence:
+
+Query_6  144  NLELIGVLSGVSDNVVTQISPDQIFVGTYMVKYNWSKSGHERFSDMSNNCLDNITRPSEV  323
+103      15                                  .MKNKTTDSLLLL.VIDE.NQSEY..IDI  46
+                                                                  \       
+                                                                  |       
+                                                                IVL
+102      139  .Q.NV.IIK--.S.LC.E.                                           155
+
+Query_6  324  IESVIKKTSSDFKMKYTRSLMDHTEKYYFSGDQKLSKISSWCTTPITTVGM  476
+103      47   AVASW.NSN.NRQTPI..IEESLGLRFIENL.AEKTNNKT...MNV.AA..  102
+                                                         \       
+                                                         |       
+                                                     NTSPN
+
+For reading frame -2 of query sequence:
+
+Query_6      540  RRGCGRLPFRVPP*QNFLGGVAFPPL*WE*CTMN*FCLVFGHLRNSTSLCGPLD<font color="#000000">fsciss</font>  361
+XP_000101.1  40                                   G.KH..FVK.SLETRYG..           58
+XP_000101.1  54   .Y...                                                         58
+
+Query_6      360  <font color="#000000">*slslfs</font>**QTR*PRTVL*CCLGNCLTYRRTVHDHF*TSYILPYKYPQRSGREKSA*PRY  181
+
+Query_6      180  PTHQTTPRSARDSSART*TCY*YHK*LPLC  91
+XP_000101.1  135                         ..L..YT  141
+
+For reading frame -3 of query sequence:
+
+Query_6  269  PFMTTFRPVIFYHISTHK  216
+103      139  .I.LID..Y.GA..TAG.  156
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 98384
+
+
+<b>Query=</b> YP_009220484.1 bt strand=- flank=2
+
+Length=718
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>19.2</a>    0.14 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>13.9</a>    8.3  
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>13.5</a>    9.7  
+
+
+
+For reading frame +2 of query sequence:
+
+Query_7      182  ACCSICEFGVVDFDGASSFYSYLQAIYPSHI  274
+XP_000101.1  23               .A.K.T---..KN..QQEN  38
+XP_000101.1  149  SK.M..KI                         156
+
+For reading frame +3 of query sequence:
+
+Query_7  81   KPRSGAHFLYEFREPSPGFLLIRLLFLVGWFFQSLVVQFVNLGLSISMALLPFIPICKQY  260
+103      23                                                 .LL..DV.DE.N.-  35
+103      145  R.YI...                                                       151
+
+Query_7  261  ILLIFYEPVDV  293
+103      36   .V.SE.R.I.I  46
+
+For reading frame -1 of query sequence:
+
+Query_7  346  FFDRVVA  326
+102      61   .ME..K.  67
+
+For reading frame -2 of query sequence:
+
+Query_7  219  KSTTPNSQIEQQAIEKT  169
+103      52   .NSNS.R.TPITR..ES  68
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 99330
+
+
+<b>Query=</b> YP_009220489.1 bt strand=+ flank=0
+
+Length=612
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>17.3</a>    0.55 
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>16.5</a>    0.80 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=3&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>15.4</a>    1.9  
+
+
+
+For reading frame +1 of query sequence:
+
+Query_8      100  ETELVLEMAKKEGRYVRSLATMDELEVPEEPATCYTCGYTFIRRRA  237
+102          89   .FKALY.KYEA..KV.KAR.LF.QINSAR.TG.P.V.FKDT.N.KS  138
+                                \              \                
+                                |              |                
+                              GKE              I
+XP_000101.1  97              ..QFFTD.VLVNR.AD                     112
+
+For reading frame +2 of query sequence:
+
+Query_8  8   SWTFPHTNRRL  40
+103      50  ..KNSNS..QT  60
+
+For reading frame +3 of query sequence:
+
+Query_8  531  FNKKSQKGKESTRTW  575
+103      73   .IENLDAE.TNNK..  87
+
+For reading frame -1 of query sequence:
+
+Query_8      516  IRHATEDLTSCAIVANLASL<font color="#000000">wvf*rviwwwvv</font>VLAFCL*<font color="#000000">r*gr*sivirgi</font>GEERCTFRY  337
+102          166               .C....I                                          172
+XP_000101.1  47   VK.SL.TRYG.GT                                                 59
+
+Query_8      336  INQLLKPYRARCIR*QLGVGARFSEDGFPLRRRSSAPDKCIAAGIARGGFFWYFQFIHGC  157
+
+Query_8      156  *RTHVASFLLRHLQDKLSLHPVLVGCPLKVVHIFDIMIINRRFV  25
+103          134                               MLQVLP..L.D.PYI  148
+
+For reading frame -3 of query sequence:
+
+Query_8      88   CRLPVEGRPYLRYYDNQSSICM  23
+XP_000101.1  154  .KIDTKEA.FTVRFG.        169
+XP_000101.1  139          ..TNSIVKLA.K..  152
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 84783
+
+
+<b>Query=</b> YP_009220491.1 bt strand=- flank=0
+
+Length=627
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>15.4</a>    2.1  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>14.2</a>    4.5  
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>13.5</a>    9.4  
+
+
+
+For reading frame +1 of query sequence:
+
+Query_9  148  KVLLPILFHPCTSTTLNGLTLFDILLVIVQMSHSVTLIIVAV*ERNATLVYWVFFGFFHR  327
+103      24   LL..DVI-DE.NQIV.SEYRPI..                                      46
+102      56                                                      ..SDL.ME.  64
+
+Query_9  328  S*WETSSNLPLVHAERQTSMGPVRSSVLIGVTIPKYLIYPIVRRARLAFPTYTVCCKADE  507
+
+Query_9  508  RFPVTKIDLP  537
+103      138   L.IML..R.  146
+
+For reading frame -1 of query sequence:
+
+Query_9      606  QKFAPVI<font color="#000000">ktekkeeerdehd</font>DPLRQIDFRDRKTLICLTANCVSRKRKAGSAHDRVYKVLR  427
+XP_000101.1  129  .M.S.IH                                                       135
+
+Query_9      426  YGNPYKYRRPNRTHRGLALSMDQGEVGTCLPLRPMEETEENPIDKCGVAFLYSNYNEGDG  247
+103          39                                        S.YR...IAVASWKN..S.RQTP  61
+
+Query_9      246  MTHLYNDEEYIKKCKTIE  193
+103          62   I.RI                65
+103          156              ..R.L.  161
+
+For reading frame -2 of query sequence:
+
+Query_9      389  PIEVWRSAWTKGRLELVS  336
+XP_000101.1  13              ..V...T  19
+103          43   ..DIAVAS.           51
+
+For reading frame -3 of query sequence:
+
+Query_9      103  IFKLYFFQRRHGRGIRTQTSHVYQ  32
+XP_000101.1  45   L.VKHSLET.Y.C.TG.IVT.AGE  68
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 86156
+
+
+<b>Query=</b> YP_009220493.1 bt strand=+ flank=1
+
+Length=884
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>16.9</a>    0.98 
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>15.0</a>    4.8  
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>14.6</a>    5.3  
+
+
+
+For reading frame +1 of query sequence:
+
+Query_10     598  IGGSI*YCIV  627
+XP_000101.1  178  V..AEM.AAA  187
+
+For reading frame +2 of query sequence:
+
+Query_10     89   GTGTLSIFGPQMRFSLRDDTIPVLTTKKIFWRGVVEELSWFIRGNTD  229
+XP_000101.1  124  ..SDQQM.S.IHKLLPYTNS.VK.AS.CMICKIDTK.APFTV.FGN.  170
+
+For reading frame -2 of query sequence:
+
+Query_10     727  LYMSIVDMCIAES*NEFTWLQTNHARHEMG*QTIRCNIKWNPQSDVTTPLVKLA*KFPIR  548
+103          25   .LLDVI.E.NQIVLS.Y                                             41
+
+Query_10     547  HIKLRGHMTRR*SHEV*VHGIPSRHYHSTVIRIFSKSFQYISQLIYTLPSVIRAAGVIFR  368
+XP_000101.1  79                                           .KE..SV..E.V          90
+
+Query_10     367  SKVPPLEAIYGPE  329
+102          80      .G.SDVH.E.  89
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 124080
+
+
+<b>Query=</b> YP_009220496.1 bt strand=- flank=1
+
+Length=845
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>16.9</a>    0.91 
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>16.5</a>    1.3  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>16.5</a>    1.4  
+
+
+
+For reading frame +1 of query sequence:
+
+Query_11  40   LLAHQESCGQTKSRCYAPLEL  102
+103       26   ..DVIDE.N.IVLSE.R.IDI  46
+
+For reading frame +2 of query sequence:
+
+Query_11     47   LIRNLADKRKVGATPL*SFGFLDVVWYKHFFL*DPLFCLIIDEKYHTHDIVLLIRDSDDQ  226
+XP_000101.1  93                                         IL...GQFFT.L..VN.LA.KG  114
+XP_000101.1  151                                       .M...T.EAPFT-.RFGN.N.NN  174
+                                                          \                   
+                                                          |                   
+                                                         CK
+102          112  .FDQINSA.IETG..Y--VC.K.TINR.                                  137
+
+Query_11     227  VFCHIIRSLLNLRHKDELFGTGILLVPASPYRAILSYPHDR*GIIDFFYFPIYRINTETV  406
+XP_000101.1  115  K--R.VIAA.DGTSDQQM.SPIHK.L.                                   139
+XP_000101.1  175  .I.                                                           177
+
+Query_11     407  H*NILRGCCAGYIFVLRF*SRFKARRIFEEMKSTTVSSADFTEIV  541
+103          6                        QLRD.LVL.K..NK.TD.LLLLDVI  30
+
+For reading frame -1 of query sequence:
+
+Query_11  125  TIQRPENQSSKG  90
+102       133  ..N.KS..ENV.  144
+
+For reading frame -2 of query sequence:
+
+Query_11     826  VILDKIETIAKRASPSYGSIDVGTAILRRQFMEKIRGKINEETTMEKIMGTKEEREDTIR  647
+103          25   LL..V.DECNQIVLSE.RP..IAV.                                     49
+
+Query_11     646  SIVANVIKENTVKENVTEKIRAMTDKELNDNREFMHDFGKISTGDGGTFHLFEDTPGFES  467
+XP_000101.1  156                        IDT..APFTVR.GN.NDNNVICV..A              181
+102          62                                        MERVKA.KNWSLMCPHEC..LSD  84
+
+Query_11     466  ALKAEYKNVPGATTPKYVSMNSLRIDAINGKIEEVYNPSPIMGIREYGTIRRGRYEENAG  287
+102          85   VHGE.F.AL                                                     93
+
+Query_11     286  SKELVFMTKIEKRPNNVAENLIIR  215
+103          163       ILSEL..DFSVEKDEE...  181
+
+For reading frame -3 of query sequence:
+
+Query_11     549  NLCTISVKSALETVVLFISSKIRLALNLL*KRSTKMYPAQQPLSMFQ*TVSVLMR*MGK*  370
+102          150  ....VQYSDSE..A.CNLA.                                          171
+                      \                                                       
+                      |                                                       
+                     EI
+
+Query_11     369  KKSIIPHLSWGYESMAR*GEAGTRRMPVPK<font color="#000000">sssl*rrlrsd</font>RIMWQKT*SSESRISNTMS  190
+
+Query_11     189  CVWYFSSIMRQKRGSQRKKCLY  124
+XP_000101.1  35             .QENGGN.H..F  46
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 117970
+
+
+<b>Query=</b> YP_009220497.1 bt strand=+ flank=2
+
+Length=909
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>18.9</a>    0.27 
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>18.5</a>    0.35 
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>17.3</a>    0.91 
+
+
+
+For reading frame +1 of query sequence:
+
+Query_12  148  QARKKSGKSSIRLDPKQPLISQRLSTMSRRMALRLAFSKIPLKGWSRRILEITSNLVTSL  327
+102       36   DC..NA.NEDL.                                                  47
+
+Query_12  328  MDGKNLTT*SP*LLVRS*AGRGTLWRSP*QVQKTG*KLLWVAASSAILYS*ITLPDPHLI  507
+103       140                                                             .  140
+
+Query_12  508  MMMTKPRRTITLPYMAGTAKWRSKITKFRIHIAKWRLSIPSRDVR*PSI*SGGATLLTT*  687
+103       141  .LIDR.Y                                                       147
+
+Query_12  688  *RSSPQ*LAIWRAFPRTQMCRHLC  759
+102       74                     ..P.E.  79
+
+For reading frame +2 of query sequence:
+
+Query_12  557  VLQNGDQR  580
+102       9    .S.G..K.  16
+
+For reading frame +3 of query sequence:
+
+Query_12     18   MALQEKDITIGNVSAALRELMYSPTHMQHHDKLNTFLDRNVESSSEEKIRQIVDKIRSQT  197
+XP_000101.1  110  L.DKG.R.V.AALDGTSDQQ.F..I.-----..LPYTNSI.KLA.KCM.CK.DT.EAPF.  164
+102          99                                               A.G.GKEV.KALFD.I  116
+                                                                        \     
+                                                                        |     
+                                                                       AR
+
+Query_12     198  TSDISETVNNVTTNGTAFSLFEDTLEGMVKKNIGDNLQSGDFIDGRKKLNDMKSLATGAI  377
+XP_000101.1  165  VRFGNDND...ICV.G.                                             181
+102          117  N.ARI..-------..PYVC.K..I                                     134
+102          33                                           ....C..               39
+
+Query_12     378  LSRQRDFVAESITGTKDWLKAIMGCGIIRYTVFVNNLARSTLDNDDDKAATYYNTPIYGW  557
+
+Query_12     558  YCKMAIKDYEIPDSYSKVEAEHTVEGRKMTFNI  656
+102          89            .FKAL.E.Y...EV.KA.ALFDQ.  116
+                                       \           
+                                       |           
+                                    GKGK
+
+For reading frame -1 of query sequence:
+
+Query_12  756  KVPAHLRPRKCSPDSQLL  703
+103       147  YIG..ITAG..RTLEDI.  164
+
+For reading frame -2 of query sequence:
+
+Query_12     821  LFVHIQTTHVGLYETIVTIQQQRCLHICVLGNARQIASY*GDDRY*VVNSVAPPLYIEGH  642
+XP_000101.1  22   M.AGKS.YLKNI.QQENGGNK-H..FV                                   47
+
+Query_12     641  LTSLDGMLSLHFAI*IRNFVIFDRHFAVPAIYGS<font color="#000000">vivrrgfviii</font>IKCGSGKVIHEYSIA  462
+
+Query_12     461  DDAATHNSFQPVFCTCYGLRHKVPLPA*DRTSS*GLHVVKFFPSINEVTRLEVISNILLD  282
+103          135                                                    .Q.LPIM.I.  144
+
+Query_12     281  HPFKGIFEKAKRSAIRRDIVDSL  213
+103          145  R.YI.AHIT.GKCRTLE..LSE.  167
+102          90     ..ALY..YEAEGKGKEV.KA   109
+
+For reading frame -3 of query sequence:
+
+Query_12     823  FFSSIYRLLMSASMKQLLQFNNKGACTSASSEMLAR*PVTEGMIVIRLLIVSPRHFILKV  644
+XP_000101.1  130  M..P.HK..                                                     138
+103          83                       ...TW..NT.PN.                             95
+
+Query_12     643  ILRPSTVCSASTLLYESGIS*SLIAILQYQPYMGVL*Y<font color="#000000">vaalssslss</font>VDRARLFTNTV*  464
+
+Query_12     463  RMMPQPIIAFSQSFVPVMDSATKSLCLLKIAPVARDFM  350
+103          124                             MH...ASLEY.  134
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 128310
+
+
+<b>Query=</b> YP_009220507.1 bt strand=- flank=2
+
+Length=706
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>16.2</a>    1.3  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>16.2</a>    1.3  
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>14.2</a>    5.3  
+
+
+
+For reading frame +1 of query sequence:
+
+Query_13  223  WTTLFLYSPISLSRFSKNLAI  285
+103       51   .KNSNSNRQTPIT.IEES.GL  71
+
+For reading frame +2 of query sequence:
+
+Query_13     362  LIDLPRTPYRRRLVECSSTC  421
+XP_000101.1  139         ..TNSI.KLA.K.  151
+103          142  ...R.YIGAHITAGK.RT    159
+
+For reading frame +3 of query sequence:
+
+Query_13     42  ETICGCTT  65
+XP_000101.1  68  .V.E....  75
+
+For reading frame -1 of query sequence:
+
+Query_13  307  PHDNAAAKWLSSLRNAIKI*VNIETKL  227
+103       43   .I.I.V.S.KN.NS.RQTPITR..ES.  69
+
+For reading frame -3 of query sequence:
+
+Query_13  422  SKYSNIQRAASCMAYAVDLLNNHNITSDQFDFMAMTAW  309
+103       14   E.MK.KTTDSLLLLDVI.EC.QIVLSEYRPIDI.VAS.  51
+102       157   Q..DSEET.V.                            167
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 97438
+
+
+<b>Query=</b> YP_009220508.1 bt strand=+ flank=0
+
+Length=585
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>15.0</a>    2.3  
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>15.0</a>    2.7  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>13.5</a>    7.0  
+
+
+
+For reading frame +2 of query sequence:
+
+Query_14     23  LILTAHL  43
+XP_000101.1  3   ...SH..  9
+
+For reading frame +3 of query sequence:
+
+Query_14     102  SSARRGNCITYICVRRNVHKFQLYVLVRNVSRSPGHKRNCHAACASAY*FDRIYRHEDEL  281
+XP_000101.1  73               .TTVSSI.ELIS..PEV.                                90
+XP_000101.1  32                                                      N..QQ.NGG  40
+102          117  N...IETGTP.V.FKDTINR                                          136
+102          16      ...AAAI..                                                  24
+
+Query_14     282  YSKC  293
+XP_000101.1  41   NKH.  44
+
+For reading frame -1 of query sequence:
+
+Query_14  75   DRKSIAARRRGRCAVNMR  22
+103       144  ..PY.G.HTA.K.       157
+                       \         
+                       |         
+                       I
+103       110              .DI..Q  115
+
+For reading frame -3 of query sequence:
+
+Query_14  193  ETLRTRT*SWNLW  155
+102       44   .D....DLFPAI.  56
+
+
+Lambda      K        H        a         alpha
+   0.312    0.129    0.379    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 80472
+
+
+<b>Query=</b> YP_009220514.1 bt strand=- flank=0
+
+Length=472
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>16.2</a>    0.89 
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=2&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>15.4</a>    1.3  
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>14.2</a>    3.9  
+
+
+
+For reading frame +1 of query sequence:
+
+Query_15     424  CLICPLRAEF  453
+XP_000101.1  151  .M..KIDTKE  160
+
+For reading frame +2 of query sequence:
+
+Query_15     107  NYGDWDMLMPPTIDLISVNIDFIFIFFLRVTV<font color="#000000">arrgagstgrrrst</font>E<font color="#000000">lllvlflllvhii</font>  286
+103          83   .NKT.CTNTS.NMNVTAAGM.Y                                        104
+XP_000101.1  81                E....VV.V.L.                                     95
+                                    \                                         
+                                    |                                         
+                                  LPE
+
+Query_15     287  <font color="#000000">lfnvff*</font>PKSLSYLL  331
+103          128         .A..E.M.  135
+
+For reading frame +3 of query sequence:
+
+Query_15  417  LMLFDLPIAGRILLG  461
+103       140  I..I.R..GAH.TA.  155
+                      \       
+                      |       
+                      Y
+
+For reading frame -1 of query sequence:
+
+Query_15  73  GMSAMSKEQVLTMYQ  29
+102       81  .L.DVHG.EFKAL.E  95
+
+For reading frame -3 of query sequence:
+
+Query_15  26  NKPQGAA  6
+102       14  D.RR...  20
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 64020
+
+
+<b>Query=</b> YP_009220601.1 bt strand=+ flank=1
+
+Length=1018
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+<a title="Show report for XP_000101.1" href="https://www.ncbi.nlm.nih.gov/protein/XP_000101.1?report=genbank&log$=prottop&blast_rank=1&RID=" >XP_000101.1 </a>f101 TK-TMK, chimeric thymidine and thymidylate kinas...  <a href=#XP_000101.1>349</a>     2e-124
+CDD:102 f102 ribonucleotide reductase large subunit [White spot s...  <a href=#CDD:102>19.2</a>    0.23  
+CDD:103 f103 DNA polymerase [White spot syndrome virus] residues ...  <a href=#CDD:103>16.9</a>    1.3   
+
+
+
+For reading frame +1 of query sequence:
+
+Query_16     79    PYVCR*IDLPEEHLSTRKRRQQTLPFCQTLS*DQVRLWHGHHRNACWRSHRRMHNCVFHQ  258
+102          126   ....                                                          129
+
+Query_16     259   GANKCFARGSRRYTN**GPILYRPCARQQACR*G*AYSYCGVRWYFGSADVQPHP*TFTV  438
+
+Query_16     439   HQLYCQIGVKMHDL*NRHKRGALYRPFW**Q***CHLCGGCRNVCRRLS*LL*KNQQKEK  618
+XP_000101.1  35                                                            .Q.N  38
+102          16                    .RGAA.I.ISD.                                  27
+
+Query_16     619   *GEVSCLGRRRSLWQEHSSETPTY**KFTVIRRGVYVLSGSVEPHW*VD**LSH*EDRAR  798
+XP_000101.1  39    G.NKH..FVKH..ETRYGCG.G.                                       61
+
+Query_16     799   RSCSALTFQC*SVGGMLQDKTTSRRWNPCSHGQVLL*RYRLLTCPRRRHGRVVFRE**RL  978
+103          7                     .R.RLVLEKMKNKTTDSL..                          26
+
+Query_16     979   TPARPGSTDVASQ  1017
+102          80        ..LS..HGE  88
+
+For reading frame +2 of query sequence:
+
+Query_16     20   MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  199
+XP_000101.1  1    ............................................................  60
+
+Query_16     200  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  379
+XP_000101.1  61   ............................................................  120
+102          29                             LD.K.F.                             35
+
+Query_16     380  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  559
+XP_000101.1  121  ............................................................  180
+103          149                                                             .  149
+
+Query_16     560  AEMYAAACRDCY<font color="#000000">kkinkkknkgk</font>LVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPD  739
+XP_000101.1  181  ..........                                                    190
+102          83                                                  .DVH.E.FKALYE  95
+102          106                                     VVK.RA.FDQI..ARI.TP.V..K.  132
+                                                                     \        
+                                                                     |        
+                                                                    ET
+103          150  .HIT.GK..                                                     158
+
+Query_16     740  RSSHTGKLINDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIV  919
+XP_000101.1  50                                                    SLETR.GC.TG  60
+102          96   KYEAE..                                                       102
+102          137  K.NQ                                                          140
+                  \                                                           
+                  |                                                           
+                  TINR
+
+Query_16     920  FSLARGVDTVEWCSAS  967
+XP_000101.1  61   TIVTHAGEVI.G.TTV  76
+
+For reading frame -1 of query sequence:
+
+Query_16     808  CMIVELYLLSEIVINQLTSVARPIRKAHILPAV*R*IFISK*EFRLSALATAISAFQDN*  629
+XP_000101.1  57   .GTGTIVTHAGE..EGC.T.SSIKELISV..E.VDV.L.DEGQ.-FTD.VL           106
+
+Query_16     628  LPLIFLFVDFFITVTTSGGIHFCTPH<font color="#000000">tddiiiivitkt</font>DGKGRLFCVYFTNHAF*RQFDN  449
+
+Query_16     448  RVGVR*KFMDGAEHLLIRSTI*RRNNYTLTLIGKPVDEHKVGKELALIN*YNVDYL  281
+XP_000101.1  78                                           SI...ISVLPEV..VI  93
+
+For reading frame -2 of query sequence:
+
+Query_16     462  ANLTIELVYGKSLWMGLNIC*SEVPSNAAITIRLPLSASLLTSTRSVKNWP<font color="#000000">ssisitstt</font>  283
+102          58   SD.FM.R.KAGKN.SLM--.PH.C.                                     80
+
+Query_16     282  <font color="#000000">sgktlis</font>SLMEDTVVHPSMTSPACVTM  202
+XP_000101.1  61              TI.T.AGEVIEG.T.V  76
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 143836
+
+
+  Database: rps_mini
+    Posted date:  Nov 21, 2026  5:54 PM
+  Number of letters in database: 560
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

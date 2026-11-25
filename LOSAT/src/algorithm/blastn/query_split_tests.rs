@@ -356,10 +356,17 @@ fn a_negative_chunk_size_splits_only_a_long_enough_batch() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:149,166-170
-// The chunk ranges in `size_t`, where a debug build's `usize` subtraction panicked: -100
-// over -200 make 310 bases 3 chunks, the first covering the batch and the others keeping
-// NCBI's empty bounds, and 248 bases 2 chunks of 25 with a gap of 200 between them; 100 over
-// 95 make 31 bases 6 chunks of 85, below the overlap, the first covering the batch.
+// The chunk ranges in 64-bit `size_t` without debug-build underflow or overflow:
+// - positive pairs with evened chunk size below overlap: (140, 100) on 90 bases (evened 96),
+//   (120, 100) on 40 bases, (101, 100) on 2 bases, and (100, 95) on 31 bases (evened 85) wrap
+//   `chunk_start` past the batch after chunk 0, leaving chunks 1.. empty;
+// - positive pair at the exact overlap boundary (150, 100): 99 bases does not split, 100 bases
+//   gives evened chunk size 100 and stops after chunk 0 leaving chunk 1 empty, 101 bases gives
+//   two non-empty overlapping chunks (0..100 and 0..101, NCBI re-split -> Exception 1);
+// - negative pairs: (-100, -200) on 310 bases wraps `chunk_size` past 310 (chunks 1 and 2 empty),
+//   (-133, -200) on 200 bases and (-132, -200) on 201 bases keep `chunk_size` 1 without wrapping
+//   yet advance `chunk_start` past or to the batch end (chunk 1 empty), while (-100, -200) on 248
+//   bases and (-1, -200) on 930 bases leave 200-base gaps with every chunk holding a query.
 #[test]
 fn the_chunk_ranges_wrap_as_ncbis_size_t() {
     let ranges = |lengths: &[usize], sizes| -> Vec<Vec<(usize, usize)>> {
@@ -384,11 +391,44 @@ fn the_chunk_ranges_wrap_as_ncbis_size_t() {
         ranges(&[248], negative),
         vec![vec![(0, 25)], vec![(225, 248)]]
     );
+    assert_eq!(
+        ranges(&[200], SplitSizes::new(false, Some(-133), Some(-200))),
+        vec![vec![(0, 1)], vec![]]
+    );
+    assert_eq!(
+        ranges(&[201], SplitSizes::new(false, Some(-132), Some(-200))),
+        vec![vec![(0, 1)], vec![]]
+    );
+    assert_eq!(
+        ranges(&[930], SplitSizes::new(false, Some(-1), Some(-200))),
+        vec![
+            vec![(0, 83)],
+            vec![(283, 366)],
+            vec![(566, 649)],
+            vec![(849, 930)],
+        ]
+    );
     let close = SplitSizes::new(false, Some(100), Some(95));
     assert_eq!(
         ranges(&[31], close),
         vec![vec![(0, 31)], vec![], vec![], vec![], vec![], vec![]]
     );
+    assert_eq!(
+        ranges(&[90], SplitSizes::new(false, Some(140), None)),
+        vec![vec![(0, 90)], vec![]]
+    );
+    assert_eq!(
+        ranges(&[40], SplitSizes::new(false, Some(120), None)),
+        vec![vec![(0, 40)], vec![]]
+    );
+    assert_eq!(
+        ranges(&[2], SplitSizes::new(false, Some(101), None)),
+        vec![vec![(0, 2)], vec![]]
+    );
+    let c150 = SplitSizes::new(false, Some(150), None);
+    assert!(split_query_batch(&[99], c150, QueryStrand::Both).is_none());
+    assert_eq!(ranges(&[100], c150), vec![vec![(0, 100)], vec![]]);
+    assert_eq!(ranges(&[101], c150), vec![vec![(0, 100)], vec![(0, 101)]]);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:392-410,604-626

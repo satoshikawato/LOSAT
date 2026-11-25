@@ -2788,3 +2788,10 @@ makeblastdb -in in/nmix_ids.fna -dbtype nucl -parse_seqids -out db/nmix_ids
   reads of `-html`): `rep/.ncbirc` (`[BLASTFMTUTIL]` with `PROTOCOL=https:` twice, `Found multiple ... settings`) and
   `bom/.ncbirc` (the one byte 0xEF, the start of a UTF-8 byte order mark, `Error reading the registry after line 1`,
   survey T2's `bom` file).
+
+- `LOSAT/tests/fasta/xchunk/` (rows `db.xc.*` of `tests/db_search_manifest/blastn.xc.tsv`, line RG
+  item X-chunk): slices of `HBA1` (`ENST00000320868.9`) from `taxfilter/tfn.fna` exercising
+  BLASTN query-chunk stops and step order (`CHUNK_SIZE` / `OVERLAP_CHUNK_SIZE`), including empty
+  chunks (`q_under*`, `q_l100`, `q_neg_empty*`, `q_neg201`), Exception 1 boundary (`q_l101`),
+  negative-pair gaps (`q_neg_gap*`, `q_first`), valid letters only in a gap (`q_gapvalid`),
+  unsearchable batch (`q_alln310`), and a split duplicate-id batch (`q_dup300`).

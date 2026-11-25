@@ -10,6 +10,8 @@
 mod blastn_bn_csr;
 #[path = "../blastn_bn_seed_lists.rs"]
 mod blastn_bn_seed_lists;
+#[path = "../blastn_chunk_stops.rs"]
+mod blastn_chunk_stops;
 #[path = "../blastn_csr_qs_keep.rs"]
 mod blastn_csr_qs_keep;
 #[path = "../blastn_db_cut.rs"]

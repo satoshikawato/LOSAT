@@ -95,11 +95,10 @@ pub struct QueryChunk {
     pub context_offsets: Vec<i32>,
 }
 
-/// The number of query chunks of a batch of `concatenated_query_length` residues, and the
-/// chunk size NCBI then uses.
+/// NCBI's chunk count (`Uint4`) and evened chunk size (`size_t`, 64-bit on every target).
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:123-138
-pub fn calculate_num_chunks(sizes: SplitSizes, concatenated_query_length: usize) -> (usize, usize) {
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:111-139
+fn num_chunks_and_size(sizes: SplitSizes, concatenated_query_length: usize) -> (u32, u64) {
     let overlap_size = sizes.overlap;
     let length = concatenated_query_length as u64;
     // `num_chunks` is a `Uint4` (split_query_aux_priv.cpp:112).
@@ -108,27 +107,38 @@ pub fn calculate_num_chunks(sizes: SplitSizes, concatenated_query_length: usize)
         num_chunks = (length / (sizes.chunk_size - overlap_size)) as u32;
     }
     if num_chunks <= 1 {
-        return (1, concatenated_query_length);
+        return (1, length);
     }
     let chunks = u64::from(num_chunks);
     let mut chunk_size = length.wrapping_add((chunks - 1).wrapping_mul(overlap_size)) / chunks;
     if chunks < chunk_size.wrapping_sub(overlap_size) {
-        chunk_size += 1;
+        chunk_size = chunk_size.wrapping_add(1);
     }
+    (num_chunks, chunk_size)
+}
+
+/// The number of query chunks of a batch of `concatenated_query_length` residues, and the
+/// chunk size NCBI then uses.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:123-138
+pub fn calculate_num_chunks(sizes: SplitSizes, concatenated_query_length: usize) -> (usize, usize) {
+    let (num_chunks, chunk_size) = num_chunks_and_size(sizes, concatenated_query_length);
     (num_chunks as usize, chunk_size as usize)
 }
 
 /// Whether NCBI splits a query batch whose queries have `concatenated_query_length` letters into
 /// chunks (`calculate_num_chunks` gives more than one; `split_query_batch` makes them).
 pub fn splits(sizes: SplitSizes, concatenated_query_length: usize) -> bool {
-    calculate_num_chunks(sizes, concatenated_query_length).0 > 1
+    num_chunks_and_size(sizes, concatenated_query_length).0 > 1
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171
-/// LOSAT's refusal of a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE that splits a query
-/// batch of `program` (LOSAT's name of it; decision D13 of PD-LOSAT-NCBI-DEFECTS): NCBI's chunk
-/// ranges then wrap, and NCBI stops or searches chunks with gaps between them. The one text of
-/// BLASTN's, BLASTX's, BLASTP's, psiblast's and TBLASTN's refusals.
+/// LOSAT's refusal of a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE whose wrapped
+/// chunk ranges leave gaps between chunks that all hold a query (decision D13 of
+/// PD-LOSAT-NCBI-DEFECTS): NCBI searches on and loses the hits in the gaps. Where such a pair
+/// leaves a chunk without a query, `CQuerySplitter::Split` stops first and LOSAT refuses that
+/// empty chunk instead. The one text of BLASTN's, BLASTX's, BLASTP's, psiblast's and TBLASTN's
+/// gap refusals.
 pub fn negative_split_refusal(program: &str) -> String {
     format!(
         "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this query batch with NCBI BLAST+'s chunk ranges wrapped, which is not supported by LOSAT's {program}"
@@ -141,9 +151,11 @@ pub fn negative_split_refusal(program: &str) -> String {
 /// The chunk ranges on the concatenated queries:
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171
-/// A chunk the loop leaves unset keeps the empty range of `SSplitQueryBlkNew`, and has no
-/// query (NCBI then fails to make its query factory, "Empty CBlastQueryVector"); the chunk
-/// size of `calculate_num_chunks` leaves none.
+/// A chunk the loop leaves unset (or gives an empty range at the batch's end) keeps no query,
+/// and NCBI's `CQuerySplitter::Split` then fails to make its query factory with a null-pointer
+/// `CCoreException` before any chunk is set up (an evened chunk size below or equal to a positive
+/// overlap when the batch is no longer than the overlap, or a negative pair whose wrapped range
+/// covers or reaches the batch's end before the last chunk).
 ///
 /// The queries of a chunk, and their parts in it:
 ///
@@ -163,37 +175,43 @@ pub fn split_query_batch(
     strand: QueryStrand,
 ) -> Option<Vec<QueryChunk>> {
     let total_length: usize = lengths.iter().sum();
-    let (num_chunks, chunk_size) = calculate_num_chunks(sizes, total_length);
+    let (num_chunks, chunk_size) = num_chunks_and_size(sizes, total_length);
     if num_chunks <= 1 {
         return None;
     }
-    // NCBI's `size_t` overlap: the variable's value, near 2^64 for a negative OVERLAP_CHUNK_SIZE
-    // (which splits a batch only below a negative CHUNK_SIZE).
-    let overlap_size = sizes.overlap as usize;
+    let total_length_u64 = total_length as u64;
+    let num_chunks_usize = num_chunks as usize;
+    // NCBI's 64-bit `size_t` overlap: near 2^64 for a negative OVERLAP_CHUNK_SIZE (which splits a
+    // batch only below a negative CHUNK_SIZE). Keeping the loop in `u64` preserves that wrap on
+    // 32-bit targets too.
+    let overlap_size = sizes.overlap;
 
-    let mut chunk_ranges = vec![(0usize, 0usize); num_chunks];
-    let mut chunk_start = 0usize;
+    let mut chunk_ranges = vec![(0u64, 0u64); num_chunks_usize];
+    let mut chunk_start = 0u64;
     for (chunk_num, range) in chunk_ranges.iter_mut().enumerate() {
-        let mut chunk_end = chunk_start + chunk_size;
-        if chunk_end >= total_length || chunk_num + 1 == num_chunks {
-            chunk_end = total_length;
+        let mut chunk_end = chunk_start.wrapping_add(chunk_size);
+        if chunk_end >= total_length_u64 || chunk_num + 1 == num_chunks_usize {
+            chunk_end = total_length_u64;
         }
         *range = (chunk_start, chunk_end);
-        // NCBI's `size_t` arithmetic (split_query_cxx.cpp:166): an evened chunk size below a
-        // positive overlap wraps the start past the queries' length at the first chunk (the loop
-        // ends, the chunks after it keep no query); a negative overlap moves the start by the
-        // chunk size plus the overlap's magnitude (gaps between the chunks), or past the length.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:166-170
+        // An evened chunk size below a positive overlap wraps the start past the queries' length at
+        // the first chunk (the loop ends, the chunks after it keep no query); an evened chunk size
+        // equal to the overlap with total length equal to the overlap hits `chunk_end == total` and
+        // ends after chunk 0; a negative overlap moves the start by the chunk size plus the
+        // overlap's magnitude (gaps between chunks, or past/at the batch's end leaving empty chunks).
         chunk_start = chunk_start.wrapping_add(chunk_size.wrapping_sub(overlap_size));
-        if chunk_start > total_length || chunk_end == total_length {
+        if chunk_start > total_length_u64 || chunk_end == total_length_u64 {
             break;
         }
     }
 
     let mut query_ranges = Vec::with_capacity(lengths.len());
-    let mut query_start = 0usize;
+    let mut query_start = 0u64;
     for &length in lengths {
-        query_ranges.push((query_start, query_start + length));
-        query_start += length;
+        let len = length as u64;
+        query_ranges.push((query_start, query_start + len));
+        query_start += len;
     }
 
     let mut chunks: Vec<QueryChunk> = chunk_ranges
@@ -209,9 +227,9 @@ pub fn split_query_batch(
                 let qend = chunk_to as i64 - query_to as i64;
                 let from = qstart.max(0) as usize;
                 let to = if qend >= 0 {
-                    query_to - query_from
+                    (query_to - query_from) as usize
                 } else {
-                    chunk_to - query_from
+                    (chunk_to - query_from) as usize
                 };
                 queries.push(ChunkQuery { query, from, to });
                 let (plus, minus) = strand.searched();
@@ -226,8 +244,9 @@ pub fn split_query_batch(
         })
         .collect();
 
+    let overlap_usize = usize::try_from(overlap_size).unwrap_or(usize::MAX);
     let offsets: Vec<Vec<i32>> = (0..chunks.len())
-        .map(|chunk_num| context_offsets(&chunks, chunk_num, lengths, overlap_size))
+        .map(|chunk_num| context_offsets(&chunks, chunk_num, lengths, overlap_usize))
         .collect();
     for (chunk, offsets) in chunks.iter_mut().zip(offsets) {
         chunk.context_offsets = offsets;

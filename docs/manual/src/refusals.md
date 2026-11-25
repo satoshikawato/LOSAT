@@ -106,6 +106,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-db_hard_mask` on a database whose masks overlap or are stored out of order | Refused. |
 | `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused. |
 | `-window_masker_taxid` with a counts file whose unit size is 17 to 251 | Refused. NCBI's result is undefined. |
+| `CHUNK_SIZE` and `OVERLAP_CHUNK_SIZE` (see [Environment](environment.md)) that split a query batch leaving a piece without a query (NCBI BLAST+ stops in its query splitter before masking or searching any piece), or a negative chunk size above a negative overlap whose pieces leave gaps between them (NCBI BLAST+ searches on and loses the hits there) | Refused after the output of the query batches before (and for the first batch, the prologs of `-outfmt` 0, 15, 16 and 20): for an empty piece before chunk masking, database setup errors and empty-database completion; for gaps where the batch's first piece with searchable query letters would read subjects in hand (with no subject to search, or no such piece, the batch is reported as NCBI BLAST+ reports it). Where every piece holds a query and NCBI BLAST+ would split a piece again, `blastn` searches each piece once (see [Differences from NCBI BLAST+](differences.md#query-chunks-that-ncbi-would-split-again)). |
 
 The message for `-reward 0` with the default penalty of `-task megablast` is:
 

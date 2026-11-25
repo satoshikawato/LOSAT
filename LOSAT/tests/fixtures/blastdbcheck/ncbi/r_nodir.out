@@ -1,0 +1,11 @@
+Writing messages to <stdout> at verbosity (Minutiae)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+By default, testing 200 randomly sampled OIDs.
+
+Finding database volumes.
+Testing 0 volume(s).
+ Result=SUCCESS. No errors reported for 0 volumes.
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).

@@ -100,7 +100,7 @@ jobs:
         run: |
           cd LOSAT
           cargo build --release --locked
-          cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --target-dir target/serial-command --locked
+          cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --features no-web-abi-v1 --target-dir target/serial-command --locked
 
       - name: Package and publish dry runs
         run: |
@@ -234,7 +234,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
 
       - name: Build exact serial-Wasm release artifact
-        run: cd LOSAT && cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --target-dir target/serial-command --locked
+        run: cd LOSAT && cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --features no-web-abi-v1 --target-dir target/serial-command --locked
 
       - name: Assemble, extract, and smoke serial-Wasm artifact
         run: |
@@ -294,7 +294,7 @@ jobs:
         run: |
           cd LOSAT
           cargo build --release --locked
-          cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --target-dir target/serial-command --locked
+          cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --features no-web-abi-v1 --target-dir target/serial-command --locked
 
       - name: Run full integrated certification only when explicitly requested
         run: |

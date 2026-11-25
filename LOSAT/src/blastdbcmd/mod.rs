@@ -117,7 +117,7 @@ fn run_body(
             .bytes("db")
             .unwrap_or(std::borrow::Cow::Borrowed(b"nr"));
         let dbtype = args.value("dbtype").unwrap_or("guess");
-        let (db, _) = match open_database(&name, dbtype, &path, &|_| Ok(())) {
+        let (db, _) = match open_database(&name, dbtype, &path, settings, &|_| Ok(())) {
             Ok(opened) => opened,
             Err(error) => return database_error(diag, error),
         };

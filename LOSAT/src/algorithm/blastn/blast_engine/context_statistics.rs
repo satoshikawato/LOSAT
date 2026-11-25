@@ -376,7 +376,8 @@ fn effective_search_spaces<const UNGAPPED: bool>(
         if let SubjectSource::Database(database) = subjects {
             if database.first_oid_read_fails() {
                 return Err(database_search_error(
-                    database::PreliminaryReadError("Database memory map file error").into(),
+                    database::PreliminaryReadError::from_static("Database memory map file error")
+                        .into(),
                     first_batch,
                     outputs,
                     intro,

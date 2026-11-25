@@ -143,14 +143,28 @@ impl ChunkedBytes {
 
 /// A rendered record of one query, before the sort of the default mode.
 struct Rendered {
-    /// The lesser of `GetSeqStart` and `GetSeqStop` of the query row (row 0), then the Seq-align's e-value: its
-    /// last HSP's (`SortHspByMasterStartAscending`).
-    start: i32,
+    /// The lesser of `GetSeqStart` and `GetSeqStop` of the query row (row 0), or `None` when
+    /// every segment has a negative query start (so `SortHspByMasterStartAscending` throws
+    /// `CDense_seg::GetSeqStop(): Row is empty` when two or more records are sorted), then the
+    /// Seq-align's e-value: its last HSP's (`SortHspByMasterStartAscending`).
+    start: Option<i32>,
     evalue: f64,
     /// The bytes of the record in `Scratch::buf`.
     bytes: std::ops::Range<usize>,
     /// The subject of the record (index into the call's subjects).
     subject: usize,
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:235-237
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1408-1409
+/// `CDense_seg::GetSeqStop(): Row is empty` thrown when `SortHspByMasterStartAscending` sorts
+/// SAM records in default query-reference mode and encounters a Dense-seg whose query row has
+/// no segment with start >= 0 (GCC evaluates `GetSeqStop` before `GetSeqStart` when taking
+/// the minimum of row 0's start and stop).
+#[cold]
+#[inline(never)]
+fn dense_seg_empty_row_stop() -> crate::ncbi_exception::NcbiException {
+    crate::algorithm::blastn::left_of_query::dense_seg_empty_row_stop()
 }
 
 /// Buffers reused from HSP to HSP and from query to query.
@@ -223,7 +237,17 @@ impl SamDocument {
                 self.render(run, query, &subjects[subject], align, letters, &mut scratch)?;
                 scratch.rows.last_mut().expect("a row was rendered").subject = subject;
             }
-            if !self.spec.subject_as_reference {
+            if !self.spec.subject_as_reference && scratch.rows.len() >= 2 {
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1402-1430
+                // `list::sort` compares every element when len >= 2; a record with an empty query
+                // row throws `CDense_seg::GetSeqStop(): Row is empty` before any record of this
+                // query is added to the document (earlier queries stay in `self.body` and are
+                // flushed by `~CSAM_Formatter`).
+                if scratch.rows.iter().any(|row| row.start.is_none()) {
+                    return Err(
+                        crate::cli::NativeError::exception(&dense_seg_empty_row_stop()).into(),
+                    );
+                }
                 // `list::sort` is stable.
                 scratch.rows.sort_by(|a, b| {
                     a.start.cmp(&b.start).then(
@@ -321,10 +345,14 @@ impl SamDocument {
         let lens = segments.lens();
         let strands = segments.strands();
         let offsets = [query_record.offset, subject_record.offset];
+        // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_diag.cpp:72-90
+        // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:910-917
+        // `CDense_diag::OffsetRow` adds the range offset unconditionally (unsigned `TSeqPos`),
+        // whereas `CDense_seg::OffsetRow` only shifts starts >= 0.
         let start_of = |seg: usize, row: usize| -> i32 {
             let start = starts[2 * seg + row];
-            if start >= 0 {
-                start + offsets[row]
+            if !run.gapped || start >= 0 {
+                start.wrapping_add(offsets[row])
             } else {
                 start
             }
@@ -342,11 +370,12 @@ impl SamDocument {
         // `TSeqPos` sums, which wrap at 2^32: an ungapped subject's record adds up all its HSPs,
         // whose diagonals may cover the same letters many times (a long tandem repeat).
         // NCBI reference (598d8ae6): c++/src/objtools/format/cigar_formatter.cpp:164, :324-346
+        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:173-186
         // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:1867-1892
         let ops = &mut scratch.ops;
         ops.clear();
-        let mut ref_range = (i64::MAX, i64::MIN);
-        let mut tgt_range = (i64::MAX, i64::MIN);
+        let mut ref_range: Option<(i64, i64)> = None;
+        let mut tgt_range: Option<(i64, i64)> = None;
         let mut aligned: u32 = 0;
         for idx in 0..numseg {
             let seg = if ref_minus { numseg - idx - 1 } else { idx };
@@ -354,31 +383,46 @@ impl SamDocument {
             let count = lens[seg] as u32;
             let ref_start = start_of(seg, ref_row);
             let tgt_start = start_of(seg, tgt_row);
-            let ref_seq = ref_start != GAP_VALUE;
-            let tgt_seq = tgt_start != GAP_VALUE;
+            // `CAlnMap::GetSegType` treats any start < 0 as a gap, whereas
+            // `CDense_seg::GetAlignLength` without gaps only skips `GAP_VALUE` (`-1`).
+            let ref_seq = ref_start >= 0;
+            let tgt_seq = tgt_start >= 0;
+            if ref_start != GAP_VALUE && tgt_start != GAP_VALUE {
+                aligned = aligned.wrapping_add(count);
+            }
             let kind = if tgt_seq && !ref_seq {
                 b'I'
             } else if !tgt_seq && ref_seq {
                 b'D'
             } else if tgt_seq && ref_seq {
-                aligned = aligned.wrapping_add(count);
                 b'M'
             } else {
                 continue;
             };
             if ref_seq {
-                ref_range.0 = ref_range.0.min(i64::from(ref_start));
-                ref_range.1 = ref_range.1.max(i64::from(ref_start) + len);
+                let (from, to) = (i64::from(ref_start), i64::from(ref_start) + len);
+                ref_range = Some(match ref_range {
+                    Some((r_from, r_to)) => (r_from.min(from), r_to.max(to)),
+                    None => (from, to),
+                });
             }
             if tgt_seq {
-                tgt_range.0 = tgt_range.0.min(i64::from(tgt_start));
-                tgt_range.1 = tgt_range.1.max(i64::from(tgt_start) + len);
+                let (from, to) = (i64::from(tgt_start), i64::from(tgt_start) + len);
+                tgt_range = Some(match tgt_range {
+                    Some((t_from, t_to)) => (t_from.min(from), t_to.max(to)),
+                    None => (from, to),
+                });
             }
             match ops.last_mut() {
                 Some((last, sum)) if *last == kind => *sum = sum.wrapping_add(count),
                 _ => ops.push((kind, count)),
             }
         }
+        // NCBI reference (598d8ae6): c++/include/util/range.hpp:290-309
+        // An empty `CAlnMap::TSignedRange` has `GetFrom() == GetToOpen() == i32::MAX`.
+        let empty_range = (i64::from(i32::MAX), i64::from(i32::MAX));
+        let ref_range = ref_range.unwrap_or(empty_range);
+        let tgt_range = tgt_range.unwrap_or(empty_range);
         // NM: `m_NumDif`, an `int`, adds the count of each operation other than M (`AddSegment`).
         // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:150-157
         let num_dif = ops
@@ -454,7 +498,12 @@ impl SamDocument {
         buf.push(b'\t');
         reference.record.name(buf);
         buf.push(b'\t');
-        push_int(buf, ref_range.0 + 1);
+        // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:193-196
+        // Adding 1 to the reference range start wraps in 32-bit signed `TSignedSeqPos`,
+        // sign-extends to 64-bit, and prints as unsigned `Uint8` (`18446744071562067968` for an
+        // empty reference range).
+        let pos = ((ref_range.0 as i32).wrapping_add(1) as i64) as u64;
+        push_u64(buf, pos);
         buf.extend_from_slice(b"\t255\t");
         if let Some(front) = clip_front {
             push_int(buf, front);
@@ -502,7 +551,7 @@ impl SamDocument {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1402-1430
         let last = align.last().expect("a Seq-align holds an HSP");
         scratch.rows.push(Rendered {
-            start: query_row_start(segments, offsets[0]),
+            start: query_row_start(segments, offsets[0], run.gapped),
             evalue: seqalign_evalue(last.evalue),
             bytes: begin..end,
             subject: 0,
@@ -550,26 +599,40 @@ impl SamDocument {
 /// (unsigned).
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:165-238
-fn query_row_start(segments: &Segments, offset: i32) -> i32 {
+/// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_diag.cpp:72-90
+/// Returns `None` when every segment of row 0 has a start < 0 after applying `offset`, in which
+/// case `CDense_seg::GetSeqStop` and `GetSeqStart` throw `Row is empty`.
+fn query_row_start(segments: &Segments, offset: i32, gapped: bool) -> Option<i32> {
     let starts = segments.starts();
     let lens = segments.lens();
-    let mut rows = (0..lens.len()).filter(|&seg| starts[2 * seg] >= 0);
-    let Some(first) = rows.next() else {
-        return 0;
+    let start_of = |seg: usize| -> i32 {
+        let start = starts[2 * seg];
+        if !gapped || start >= 0 {
+            start.wrapping_add(offset)
+        } else {
+            start
+        }
     };
+    let mut rows = (0..lens.len()).filter(|&seg| start_of(seg) >= 0);
+    let first = rows.next()?;
     let last = rows.next_back().unwrap_or(first);
     let (start_seg, stop_seg) = if segments.strands()[0] == Strand::Minus {
         (last, first)
     } else {
         (first, last)
     };
-    let start = (starts[2 * start_seg] + offset) as u32;
-    let stop = ((starts[2 * stop_seg] + offset + lens[stop_seg]) as u32).wrapping_sub(1);
-    start.min(stop) as i32
+    let start = start_of(start_seg) as u32;
+    let stop = (start_of(stop_seg).wrapping_add(lens[stop_seg]) as u32).wrapping_sub(1);
+    Some(start.min(stop) as i32)
 }
 
 /// Appends the decimal digits of `value`.
 fn push_int(out: &mut Vec<u8>, value: i64) {
+    out.extend_from_slice(value.to_string().as_bytes());
+}
+
+/// Appends the decimal digits of an unsigned `Uint8` (`pos` in `sam_formatter.cpp:193-196`).
+fn push_u64(out: &mut Vec<u8>, value: u64) {
     out.extend_from_slice(value.to_string().as_bytes());
 }
 

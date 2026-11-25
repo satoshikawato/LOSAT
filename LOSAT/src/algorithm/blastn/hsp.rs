@@ -989,6 +989,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: crate::report::ostream::ReportW
     epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
+    left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
 ) -> io::Result<()> {
     let config = OutputConfig::ncbi_compat();
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
@@ -1007,7 +1008,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: crate::report::ostream::ReportW
             Some(warnings) => warnings.subject_read(q_idx, s_idx, writer),
             None => Ok(()),
         };
-        write_query_rows(
+        let written = write_query_rows(
             writer,
             q_idx,
             hit_list_opt.as_ref(),
@@ -1022,7 +1023,20 @@ pub fn write_output_blastn_hitlists_to_writer<W: crate::report::ostream::ReportW
             &mut hsp_index,
             probe.as_deref_mut(),
             &mut read,
-        )?;
+            left_of_record,
+        );
+        if let Err(error) = written {
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:124-127
+            // `~CBlastTabularInfo()` flushes the stream as the exception unwinds out of
+            // `CBlastFormat::PrintOneResultSet`, and no later subject is read.
+            if crate::ncbi_exception::NcbiException::of_io_error(&error).is_some() {
+                writer.ncbi_flush()?;
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    warnings.end_run();
+                }
+            }
+            return Err(error);
+        }
         // `~CBlastTabularInfo` of the query's report flushes the stream.
         writer.ncbi_flush()?;
     }
@@ -1052,6 +1066,7 @@ pub(crate) fn write_query_rows<W: Write>(
     hsp_index: &mut HspIndex,
     mut probe: Option<&mut FormatProbe<'_>>,
     read: crate::report::query_warnings::SubjectReadHook<'_, W>,
+    left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
 ) -> io::Result<()> {
     write_query_header(
         writer,
@@ -1113,6 +1128,7 @@ pub(crate) fn write_query_rows<W: Write>(
             config,
             hsp_index,
             probe.as_deref_mut(),
+            left_of_record,
         )?;
     }
     Ok(())
@@ -1156,8 +1172,19 @@ pub(crate) fn write_hsp_rows<W: Write>(
     config: &OutputConfig,
     hsp_index: &mut HspIndex,
     mut probe: Option<&mut FormatProbe<'_>>,
+    left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
 ) -> io::Result<()> {
     for hsp in hsps {
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-1060
+        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:753-755
+        // Default `std` tabular fields include `pident`/`length`/`mismatch`/`gapopen`, so a `-db`
+        // HSP starting left of its query record throws `CAlnVec::x_GetSeqRightSeg()` here after
+        // earlier rows have been written.
+        if let Some((placements, ungapped)) = left_of_record {
+            if hsp.starts_left_of_record(placements.offset(hsp.q_idx as usize), ungapped) {
+                return Err(super::left_of_query::alnmap_empty_query_row(false).into_io_error());
+            }
+        }
         let query_id = query_ids
             .get(hsp.q_idx as usize)
             .map(|id| id.as_ref())

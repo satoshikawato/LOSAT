@@ -452,24 +452,17 @@ impl DeflineRule {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2036-2049
-    /// The taxid test of a line whose ids passed (`s_IncludeDefline_Taxid`,
-    /// `s_IncludeDefline_NegativeTaxid`): true for a seqid, GI or IPG list and for a list without
-    /// taxids (NCBI tests the taxids only where `GetNumTaxIds` is above 0).
-    fn keeps(&self, defline: &BlastDefline) -> bool {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2036-2039
+    /// The positive user taxid test of a line whose ids passed (`s_IncludeDefline_Taxid`): true
+    /// unless the search's list is a positive taxid list whose `GetNumTaxIds` count is positive.
+    fn keeps_positive_taxid(&self, defline: &BlastDefline) -> bool {
         match self {
-            DeflineRule::Taxids(found) | DeflineRule::NegativeTaxids(found) if found.is_empty() => {
-                true
+            DeflineRule::Taxids(found) if !found.is_empty() => {
+                super::id_list::defline_matches_taxids(defline, found)
             }
-            DeflineRule::Taxids(found) => defline
-                .taxid
-                .into_iter()
-                .chain(defline.links.iter().flatten().copied())
-                .any(|taxid| found.contains(&taxid)),
-            DeflineRule::NegativeTaxids(found) => {
-                defline.tax_ids().iter().any(|taxid| !found.contains(taxid))
-            }
-            DeflineRule::Seqids(_)
+            DeflineRule::Taxids(_)
+            | DeflineRule::NegativeTaxids(_)
+            | DeflineRule::Seqids(_)
             | DeflineRule::NegativeSeqids(_)
             | DeflineRule::Gis(_)
             | DeflineRule::NegativeGis(_)
@@ -477,16 +470,45 @@ impl DeflineRule {
             | DeflineRule::NegativePigs => true,
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2052-2055
+    /// The negative user taxid test of a line (`s_IncludeDefline_NegativeTaxid`), run after the
+    /// alias files' `TAXIDLIST` rescue: true unless the search's list is a negative taxid list
+    /// whose `GetNumTaxIds` count is positive.
+    fn keeps_negative_taxid(&self, defline: &BlastDefline) -> bool {
+        match self {
+            DeflineRule::NegativeTaxids(found) if !found.is_empty() => {
+                defline.tax_ids().iter().any(|taxid| !found.contains(taxid))
+            }
+            DeflineRule::NegativeTaxids(_)
+            | DeflineRule::Taxids(_)
+            | DeflineRule::Seqids(_)
+            | DeflineRule::NegativeSeqids(_)
+            | DeflineRule::Gis(_)
+            | DeflineRule::NegativeGis(_)
+            | DeflineRule::Pigs
+            | DeflineRule::NegativePigs => true,
+        }
+    }
+
+    #[cfg(test)]
+    fn keeps(&self, defline: &BlastDefline) -> bool {
+        self.keeps_positive_taxid(defline) && self.keeps_negative_taxid(defline)
+    }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2016-2054
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2016-2055
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:943-969
 // The id test runs on each line while the volume has a list (`x_HaveIdFilter`: the search's, of
 // any kind, or an alias file's): the line's Seq-ids in their order, each asked of the search's
 // list until one passes it (`have_user`) and of the alias files' lists attached to the volume
 // until one holds one (`have_vol`), the two tests of one id one after the other, until both
 // passed; a line with no Seq-id passes neither. The exceptions of the lookups come in that order.
-// The taxids of the search's list are tested next, on the lines the ids keep.
+// The taxids of a positive user list are tested next, on the lines the ids keep. Then, for any
+// line not yet kept, each alias file's `TAXIDLIST` attached to the volume can rescue the line by
+// matching its `taxid` or `links` (`s_IncludeDefline_Taxid`, seqdbvol.cpp:2041-2049), even when
+// the user list rejected it or the line holds no Seq-id. Finally, a negative user taxid list tests
+// the kept lines (`s_IncludeDefline_NegativeTaxid`, seqdbvol.cpp:2052-2055).
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2059-2066
 // NCBI reads no Seq-id and no title for an OID whose every line is erased (`GetBioseq`
 // returns null, seqdbvol.cpp:1370-1376): its reports leave the sequence's hits out
@@ -499,13 +521,15 @@ impl DeflineRule {
 // RG D1c, R2): the hits leave the reports the same way (`SeqDb::drops_lineless_hits`).
 /// Which of the definition lines of `set` NCBI's filtered header read keeps, in order, under
 /// the search's list rule `rule` and the alias files' lists `lists` attached to the volume
-/// (none: empty): `None` when a seqid rule passes no line; NCBI's exception of a lookup.
+/// (none: empty): `None` when a seqid rule passes no line and no alias taxid list rescues one;
+/// NCBI's exception of a lookup.
 pub(crate) fn line_mask(
     rule: Option<&DeflineRule>,
     lists: &[Arc<super::id_list::AliasIdList>],
     set: &DeflineSet,
 ) -> Result<Option<Vec<bool>>, NcbiException> {
     let mut user_passed_any = false;
+    let has_vol_taxids = lists.iter().any(|list| list.has_taxids());
     let mut mask = Vec::with_capacity(set.deflines.len());
     for defline in &set.deflines {
         // Without a list of its kind a test passes; with one, a line passes it by a Seq-id.
@@ -525,10 +549,21 @@ pub(crate) fn line_mask(
             }
         }
         user_passed_any |= have_user;
-        let keep = have_user && have_vol && rule.is_none_or(|rule| rule.keeps(defline));
+        let mut keep = have_user && have_vol;
+        if keep {
+            keep = rule.is_none_or(|rule| rule.keeps_positive_taxid(defline));
+        }
+        if !keep && has_vol_taxids {
+            keep = lists
+                .iter()
+                .any(|list| list.has_taxids() && list.keeps_taxid(defline));
+        }
+        if keep {
+            keep = rule.is_none_or(|rule| rule.keeps_negative_taxid(defline));
+        }
         mask.push(keep);
     }
-    if rule.is_some_and(DeflineRule::reads_seqids) && !user_passed_any {
+    if rule.is_some_and(DeflineRule::reads_seqids) && !user_passed_any && !mask.contains(&true) {
         return Ok(None);
     }
     Ok(Some(mask))
@@ -551,7 +586,6 @@ fn user_seqids(list: &SeqidList, ids: usize) -> super::alias::UserList<'static> 
         super::alias::UserList::Positive { ids }
     }
 }
-
 /// The definition lines of one sequence in their stored order, as a reader decodes them
 /// (`Volume::deflines`, `defline_taxids`, `defline_set`), shortened by a `DeflineRule`.
 pub(crate) trait DeflineList {
@@ -856,16 +890,23 @@ impl LmdbEntry {
     // duplicates LMDB keeps in a sub-database, makes NCBI's read fail (`Accessions to Oids
     // lookup error`); LOSAT reads its first duplicate like any other key (DI-8 DECISIONS 3,
     // PD-LOSAT-NCBI-DEFECTS).
-    /// The database OID of each of `accs` in this entry (`None`: not found).
-    fn accessions_to_oids(&self, accs: &[Vec<u8>]) -> Result<Vec<Option<u32>>, SeqDbError> {
+    /// Resolves each of `accs` in this entry, passing `(index, database_oid)` for every match to
+    /// `on_oid`.
+    fn visit_accession_oids<S: super::id_list::SeqIdSlice + ?Sized>(
+        &self,
+        accs: &S,
+        mut on_oid: impl FnMut(usize, u32),
+    ) -> Result<(), SeqDbError> {
         self.with_env(|env| {
-            accs.iter()
-                .map(|acc| {
-                    Ok(self
-                        .first_oid(env, acc)?
-                        .and_then(|oid| self.database_oid(oid)))
-                })
-                .collect()
+            for idx in 0..accs.len() {
+                if let Some(oid) = self
+                    .first_oid(env, accs.get(idx))?
+                    .and_then(|oid| self.database_oid(oid))
+                {
+                    on_oid(idx, oid);
+                }
+            }
+            Ok(())
         })
     }
 
@@ -1013,21 +1054,75 @@ fn blast_seq_id_string_plain(id: &ParsedSeqId, with_version: bool) -> Vec<u8> {
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:288-300
 /// One OID for each of `accs`, the last LMDB file that has the key deciding. On an error
 /// `oids` keeps the answers of the files before the one that failed.
-pub(super) fn entries_accessions_to_oids(
+pub(super) fn entries_accessions_to_oids<S: super::id_list::SeqIdSlice + ?Sized>(
     entries: &[LmdbEntry],
-    accs: &[Vec<u8>],
+    accs: &S,
     oids: &mut Vec<Option<u32>>,
 ) -> Result<(), SeqDbError> {
     oids.clear();
     oids.resize(accs.len(), None);
-    for entry in entries {
-        for (slot, oid) in oids.iter_mut().zip(entry.accessions_to_oids(accs)?) {
-            if oid.is_some() {
-                *slot = oid;
+    let Some((first, rest)) = entries.split_first() else {
+        return Ok(());
+    };
+    first.visit_accession_oids(accs, |idx, oid| oids[idx] = Some(oid))?;
+    if !rest.is_empty() {
+        let mut tmp = vec![None; accs.len()];
+        for entry in rest {
+            tmp.fill(None);
+            entry.visit_accession_oids(accs, |idx, oid| tmp[idx] = Some(oid))?;
+            for (slot, oid) in oids.iter_mut().zip(&tmp) {
+                if oid.is_some() {
+                    *slot = *oid;
+                }
             }
         }
     }
     Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:85-89
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:288-300
+/// Resolves each of `accs` across `entries` (the last LMDB file that has a key deciding) and
+/// passes every matched `(index, oid)` to `on_oid`. Streams directly when one entry is present
+/// so large alias `SEQIDLIST`s avoid allocating an intermediate OID buffer.
+fn entries_for_each_accession_oid<S: super::id_list::SeqIdSlice + ?Sized>(
+    entries: &[LmdbEntry],
+    accs: &S,
+    mut on_oid: impl FnMut(usize, u32),
+) -> Result<(), SeqDbError> {
+    match entries {
+        [] => Ok(()),
+        [entry] => entry.visit_accession_oids(accs, on_oid),
+        _ => {
+            let mut oids = Vec::new();
+            entries_accessions_to_oids(entries, accs, &mut oids)?;
+            for (idx, oid) in oids.into_iter().enumerate() {
+                if let Some(oid) = oid {
+                    on_oid(idx, oid);
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:85-89
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:288-300
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:636-647
+/// Resolves `accs` through `entries` and sets matching non-excluded OIDs below `num_oids` in
+/// `f_bits`.
+pub(super) fn entries_accessions_to_bits<S: super::id_list::SeqIdSlice + ?Sized>(
+    entries: &[LmdbEntry],
+    accs: &S,
+    num_oids: u32,
+    excluded: &[(u32, u32)],
+    f_bits: &mut [u64],
+) -> Result<(), SeqDbError> {
+    entries_for_each_accession_oid(entries, accs, |_, oid| {
+        if oid < num_oids && !excluded.iter().any(|&(s, e)| oid >= s && oid < e) {
+            f_bits[(oid / 64) as usize] |= 1u64 << (oid % 64);
+        }
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:91-96
@@ -1125,7 +1220,7 @@ const V4_TAXID_LIST_ERROR: &str = "Taxonomy list is not supported in v4 BLAST db
 /// excludes) entry after entry, each entry's ascending, and the taxids of `tax_ids` the
 /// entries hold (`CSeqDBLMDBSet::TaxIdsToOids`; the found taxids are their union, see
 /// `restrict_taxids`).
-fn entries_tax_oids(
+pub(super) fn entries_tax_oids(
     entries: &[LmdbEntry],
     negative: bool,
     tax_ids: &BTreeSet<i32>,
@@ -1180,7 +1275,7 @@ fn entries_oid_tax_ids(
 
 /// NCBI's text when a taxid list selects no OID of `entries` (`CSeqDBLMDBSet::TaxIdsToOids`,
 /// cited at `SeqDb::restrict_taxids`).
-fn tax_ids_not_found(entries: &[LmdbEntry]) -> Vec<u8> {
+pub(super) fn tax_ids_not_found(entries: &[LmdbEntry]) -> Vec<u8> {
     let names: Vec<Vec<u8>> = entries
         .iter()
         .map(|entry| LmdbEntry::base_name(&entry.lmdb))
@@ -2139,13 +2234,7 @@ impl SeqDb {
             return Ok(words);
         }
         let mut words = vec![0u64; word_count];
-        let mut oids = Vec::new();
-        entries_accessions_to_oids(&entries, ids, &mut oids)?;
-        for oid in oids.into_iter().flatten() {
-            if oid < num_oids {
-                words[(oid / 64) as usize] |= 1u64 << (oid % 64);
-            }
-        }
+        entries_accessions_to_bits(&entries, ids, num_oids, &[], &mut words)?;
         Ok(words)
     }
 
@@ -2258,9 +2347,9 @@ impl SeqDb {
     /// Makes `words` (bit `oid` set for an OID the list includes; `None` for a positive list
     /// left without ids, which clears every OID of NCBI's bit set: every OID stays where that set
     /// is the special all-set, `restrict_seqids`) and the alias files' ranges and lists under the
-    /// search's positive list `user` (`SeqDb::translate_alias_lists`) the database's OID list with
-    /// the iteration range of every OID: the ordinal ids, NCBI's scanned totals and the
-    /// definition lines `rule` keeps.
+    /// search's positive list `user` and rule `rule` (`SeqDb::translate_alias_lists`) the
+    /// database's OID list with the iteration range of every OID: the ordinal ids, NCBI's scanned
+    /// totals and the definition lines `rule` keeps.
     fn apply_filter(
         &mut self,
         words: Option<Vec<u64>>,
@@ -2268,8 +2357,18 @@ impl SeqDb {
         rule: Option<DeflineRule>,
         user: super::alias::UserList<'_>,
     ) -> Result<(), SeqDbError> {
-        if user != super::alias::UserList::None {
-            self.translate_alias_lists(user);
+        let needs_alias_pass = !matches!(user, super::alias::UserList::None)
+            || matches!(
+                rule,
+                Some(
+                    DeflineRule::Seqids(_)
+                        | DeflineRule::NegativeSeqids(_)
+                        | DeflineRule::Taxids(_)
+                        | DeflineRule::NegativeTaxids(_)
+                )
+            );
+        if needs_alias_pass {
+            self.translate_alias_lists(user, rule.as_ref());
         }
         let mut words = words.unwrap_or_else(|| {
             let kept = if self.all_bits_special_set {

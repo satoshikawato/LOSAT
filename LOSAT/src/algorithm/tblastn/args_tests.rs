@@ -416,8 +416,8 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
     ] {
         assert!(parse(extra).is_err(), "{extra:?}");
     }
-    // With a database (`-import_search_strategy` and `-remote` remain refused).
-    for extra in [&["-import_search_strategy", "s.asn"][..], &["-remote"]] {
+    // With a database (`-entrez_query` and `-remote` remain refused).
+    for extra in [&["-entrez_query", "human[orgn]"][..], &["-remote"]] {
         let mut argv = vec!["losat", "tblastn", "-query", "q.faa", "-db", "db"];
         argv.extend_from_slice(extra);
         let error = try_parse_from(argv).unwrap_err().to_string();

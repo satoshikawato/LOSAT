@@ -1,0 +1,2 @@
+Writing messages to <stdout> at verbosity (Summary)
+error: Must specify exactly one of -dir or -db.

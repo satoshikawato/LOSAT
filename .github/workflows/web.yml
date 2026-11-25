@@ -176,13 +176,14 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: 1.92.0
           targets: wasm32-wasip1
+          components: clippy
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
@@ -226,6 +227,12 @@ jobs:
           x_seed_fused::tests x_seed_diag::tests x_seed_fused_clut::tests
           tblastx::x_scan_byte::tests tblastx::x_scan_bf::tests
           x_pair_seed::latest::tests
+      # The WASI command line leaves ABI v1 out (feature `no-web-abi-v1`, line RG item K4i-3d), so it
+      # compiles fewer items than the builds above: an item that only v1 had and that other code now
+      # needs, or one that v1 alone used and that is left unused, fails here before a release build.
+      - name: WASI command line without ABI v1 (clippy)
+        working-directory: LOSAT
+        run: cargo clippy --locked --bin losat --target wasm32-wasip1 --no-default-features --features no-web-abi-v1 -- -D warnings
 
   # The engine adapter (web/adapter) over five jobs that run side by side: the build identity
   # with the certified engine builds (plan TD-6) and the index-scan property tests (TD-8) here;

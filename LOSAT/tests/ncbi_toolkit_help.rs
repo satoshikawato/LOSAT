@@ -168,6 +168,7 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
         ("convert2blastmask", "-out"),
         ("makembindex", "-input"),
         ("blastdb_aliastool", "-out"),
+        ("blastdbcheck", "-db"),
     ]) {
         let xml = run_in(&dir, program, &["-xmlhelp"]);
         assert_eq!(xml.status.code(), Some(0), "{program}");
@@ -182,6 +183,7 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
                 | "convert2blastmask"
                 | "makembindex"
                 | "blastdb_aliastool"
+                | "blastdbcheck"
         ) {
             assert_eq!(xml.stdout, ncbi, "{program}");
         } else {

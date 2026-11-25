@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { browserCountsDeletions } from '../../src/infra/browser/counts-deletions';
+import { browserCountsChanges } from '../../src/infra/browser/counts-changes';
 import { browserExampleDeletions } from '../../src/infra/browser/example-deletions';
 
 // Review of line WQA's sweep, D5 (2026-11-19): Firefox, where the site's data is blocked (cookies
 // blocked), refuses `new BroadcastChannel()` with SecurityError ("The operation is insecure."). The
 // composition root opens the channels of the deletions, so the page did not start at all.
-describe("the deletions told to the site's other tabs", () => {
+describe("the changes told to the site's other tabs", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -22,7 +22,7 @@ describe("the deletions told to the site's other tabs", () => {
   ])('%s: told to no other tab, and nothing throws', (_case, channel) => {
     vi.stubGlobal('BroadcastChannel', channel);
     const examples = browserExampleDeletions();
-    const counts = browserCountsDeletions();
+    const counts = browserCountsChanges();
     examples.announce('pdbaa');
     counts.announce(9606);
     examples.subscribe(() => undefined)();
@@ -33,5 +33,9 @@ describe("the deletions told to the site's other tabs", () => {
     const heard = new Promise<string>((resolve) => browserExampleDeletions().subscribe(resolve));
     browserExampleDeletions().announce('pdbaa');
     expect(await heard).toBe('pdbaa');
+
+    const heardCounts = new Promise<number>((resolve) => browserCountsChanges().subscribe(resolve));
+    browserCountsChanges().announce(562);
+    expect(await heardCounts).toBe(562);
   });
 });

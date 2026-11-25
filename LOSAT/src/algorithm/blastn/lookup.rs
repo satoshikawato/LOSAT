@@ -737,15 +737,16 @@ impl MbLookupTable {
                 None => x_csr(),
             };
         };
-        let mut found = false;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:41-69
+        // (`s_MBLookup`: the walk returns at the first element equal to the offset)
         let mut q_off = head;
         while q_off != 0 {
             if q_off == q_off_1 {
-                found = true;
+                return true;
             }
             q_off = self.next_pos[q_off as usize];
         }
-        found
+        false
     }
 
     // EXPERIMENT (LOSAT_X_DCCSR, LOSAT_X_MB24): as `contains_hit`.

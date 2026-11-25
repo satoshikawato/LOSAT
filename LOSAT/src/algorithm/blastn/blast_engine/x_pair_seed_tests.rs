@@ -595,6 +595,7 @@ fn seed_stage_on_strips_equals_one_scan() {
                                 Some(part::FoldPart {
                                     scratch: &mut scratch,
                                     parts,
+                                    latest: None,
                                 }),
                                 lists,
                             );

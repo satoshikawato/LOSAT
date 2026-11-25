@@ -144,29 +144,24 @@ fn the_genetic_codes_are_those_that_the_parser_takes() {
 }
 
 // Line RG item K4i-3a: describe reads NCBI's argument tables, and the options it lists are those
-// that the command line's clap types convert (until item K4i-3c takes clap out): the names of each
+// that the command line's options read (`from_args`, line RG item K4i-3c): the names of each
 // program's XML but the standard arguments and the arguments refused by name. The value kinds are
 // the tables' types; psiblast's `-out_pssm` and `-out_ascii_pssm`, NCBI's output files, are paths.
 #[test]
-fn the_described_options_are_those_that_the_command_line_converts() {
-    use clap::CommandFactory;
-    let root = crate::cli::Cli::command();
+fn the_described_options_are_those_that_the_command_line_reads() {
     for program in Program::ALL {
-        let command = root
-            .find_subcommand(program.name())
-            .expect("every API program is a command of the CLI");
-        let mut converted: Vec<String> = command
-            .get_arguments()
-            .filter_map(clap::Arg::get_long)
-            .filter(|long| !matches!(*long, "help" | "version"))
-            .map(|long| format!("-{long}"))
+        let tool = crate::cli::reader::tool(program.name())
+            .expect("every API program is a program of the CLI");
+        let mut read: Vec<String> = crate::cli::reader::options_tests::names_read(tool)
+            .into_iter()
+            .map(|name| format!("-{name}"))
             .collect();
         let mut described: Vec<String> = parameters(program)
             .map(|parameter| parameter.flag)
             .collect();
-        converted.sort();
+        read.sort();
         described.sort();
-        assert_eq!(described, converted, "{program}");
+        assert_eq!(described, read, "{program}");
     }
     let kind = |flag: &str| {
         parameters(Program::Psiblast)

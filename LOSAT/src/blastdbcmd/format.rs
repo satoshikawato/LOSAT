@@ -13,6 +13,8 @@ use crate::seqid::{BlastDefline, DeflineSet, ParsedSeqId};
 use crate::report::serial::blastdb::{write_defline_document, write_defline_set_document};
 use crate::report::serial::encoder::Encoder;
 
+use crate::utils::decimal::push_decimal;
+
 use super::bioseq::AsnTextDocument;
 use super::letters::{hash_text, sequence_hash};
 use super::retrieve::{numeric_target, parse_target, Config, Output, Source, Stop};
@@ -41,6 +43,8 @@ pub(super) struct FormatSpec {
     /// (`need_hash`).
     need_seq: bool,
     need_hash: bool,
+    /// The bytes of the line being written, kept from one line to the next.
+    line: std::cell::RefCell<Vec<u8>>,
 }
 
 impl FormatSpec {
@@ -49,8 +53,8 @@ impl FormatSpec {
     /// `%b`, `%d` and `%m`, whose algorithms are `mask_algos`); `Err` is the message of NCBI's
     /// exception. A `%` that ends the text reads the string's terminating NUL as its
     /// specifier, as NCBI's loop does.
-    pub fn parse(spec: &str, mask_algos: Vec<i32>) -> Result<Self, String> {
-        let bytes = spec.as_bytes();
+    pub fn parse(spec: &[u8], mask_algos: Vec<i32>) -> Result<Self, String> {
+        let bytes = spec;
         let mut types = Vec::new();
         let mut separators = Vec::new();
         let mut sp = Vec::new();
@@ -83,6 +87,7 @@ impl FormatSpec {
             mask_algos,
             separators,
             get_defline,
+            line: std::cell::RefCell::default(),
         })
     }
 
@@ -107,7 +112,7 @@ impl FormatSpec {
         source: &Source,
         oid: u32,
         config: &Config,
-        target: Option<&str>,
+        target: Option<&[u8]>,
         out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
         let mut seq = Vec::new();
@@ -124,7 +129,7 @@ impl FormatSpec {
             .map(|&algo| Ok(masks_string(&source.masks(oid, algo)?)))
             .collect::<Result<Vec<String>, Stop>>()?;
         let length = source.length(oid)?;
-        let mut line = Vec::new();
+        let mut line = self.line.borrow_mut();
         let mut print = |defline: Option<&BlastDefline>, line: &mut Vec<u8>| -> Result<(), Stop> {
             line.clear();
             let mut texts = Vec::new();
@@ -216,34 +221,29 @@ impl FormatSpec {
         texts: &mut Vec<String>,
     ) -> Result<(), Stop> {
         let fields = match defline {
-            Some(defline) => Some(DeflineFields::extract(source, defline, &self.types, texts)?),
-            None => None,
+            Some(defline) => DeflineFields::extract(source, defline, &self.types, texts)?,
+            None => DeflineFields::default(),
         };
-        let empty = DeflineFields::default();
-        let fields = fields.as_ref().unwrap_or(&empty);
         let mut masks = masks.iter();
         for (i, &kind) in self.types.iter().enumerate() {
             line.extend_from_slice(&self.separators[i]);
             match kind {
                 b's' => line.extend_from_slice(seq),
-                b'a' => line.extend_from_slice(&fields.accession),
-                b'i' => line.extend_from_slice(&fields.seq_id),
-                b'g' => line.extend_from_slice(fields.gi.as_bytes()),
-                b'o' => line.extend_from_slice(oid.to_string().as_bytes()),
-                b't' => line.extend_from_slice(&fields.title),
+                b'o' => push_decimal(line, i64::from(oid)),
                 b'h' => line.extend_from_slice(hash.as_bytes()),
-                b'l' => line.extend_from_slice(length.to_string().as_bytes()),
-                b'T' => line.extend_from_slice(fields.tax_id.as_bytes()),
-                b'X' => line.extend_from_slice(fields.leaf_node_tax_ids.as_bytes()),
-                b'P' => line.extend_from_slice(fields.pig.as_bytes()),
+                b'l' => push_decimal(line, i64::from(length)),
+                b'a' | b'i' | b'g' | b't' | b'T' | b'P' | b'e' | b'n' => {
+                    if let Some(defline) = defline {
+                        fields.write_defline_field(kind, defline, line);
+                    }
+                }
+                b'X' => line.extend_from_slice(&fields.leaf_node_tax_ids),
                 b'L' => line.extend_from_slice(&fields.common_name),
                 b'C' => line.extend_from_slice(&fields.leaf_node_common_names),
                 b'B' => line.extend_from_slice(&fields.blast_name),
                 b'K' => line.extend_from_slice(&fields.super_kingdom),
                 b'S' => line.extend_from_slice(&fields.scientific_name),
                 b'N' => line.extend_from_slice(&fields.leaf_node_scientific_names),
-                b'e' => line.extend_from_slice(fields.membership.as_bytes()),
-                b'n' => line.extend_from_slice(fields.links.as_bytes()),
                 b'm' => {
                     if let Some(mask) = masks.next() {
                         line.extend_from_slice(mask.as_bytes());
@@ -322,7 +322,7 @@ fn x_get_seq(source: &Source, oid: u32, config: &Config) -> Result<Vec<u8>, Stop
 /// the line's end.
 fn write_asn_deflines(
     set: &DeflineSet,
-    target: Option<&str>,
+    target: Option<&[u8]>,
     out: &mut Output<'_, '_>,
 ) -> Result<(), Stop> {
     match target {
@@ -355,7 +355,10 @@ impl AsnTextDocument for DeflineDocument<'_> {
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:800-819
 /// The definition line of `-target_only` for the `%` formats: the first whose Seq-id
 /// matches the target (`CSeq_id::Match`) or whose GI is the target's number.
-fn extract_target_defline<'a>(set: &'a DeflineSet, target: &str) -> Result<&'a BlastDefline, Stop> {
+fn extract_target_defline<'a>(
+    set: &'a DeflineSet,
+    target: &[u8],
+) -> Result<&'a BlastDefline, Stop> {
     let target_id = parse_target(target)?;
     let number = numeric_target(target);
     for defline in &set.deflines {
@@ -367,28 +370,27 @@ fn extract_target_defline<'a>(set: &'a DeflineSet, target: &str) -> Result<&'a B
             }
         }
     }
-    Err(Stop::Ncbi(format!("Failed to find target id {target}")))
+    Err(Stop::NcbiBytes(
+        [b"Failed to find target id ".as_slice(), target].concat(),
+    ))
 }
 
-/// The strings of `CBlastDeflineUtil::ExtractDataFromBlastDefline` (`results`), those the
-/// format asks for; the others empty.
+/// What `CBlastDeflineUtil::ExtractDataFromBlastDefline` reads of a definition line
+/// (`results`) for the specifiers of the format: the id of `%a` and `%i`, and the taxonomy's
+/// names (whose lookups post their texts before the line and fail before it is written); the
+/// others empty. The fields read from the line itself are written where their specifiers stand
+/// (`write_defline_field`), with no string of their own.
 #[derive(Default)]
-struct DeflineFields {
-    gi: String,
-    seq_id: Vec<u8>,
-    accession: Vec<u8>,
-    title: Vec<u8>,
-    tax_id: String,
+struct DeflineFields<'d> {
+    /// The id that `%a` and `%i` write (`find_best` of `text_score`).
+    best: Option<&'d ParsedSeqId>,
     scientific_name: Vec<u8>,
     common_name: Vec<u8>,
     blast_name: Vec<u8>,
     super_kingdom: Vec<u8>,
-    leaf_node_tax_ids: String,
+    leaf_node_tax_ids: Vec<u8>,
     leaf_node_scientific_names: Vec<u8>,
     leaf_node_common_names: Vec<u8>,
-    membership: String,
-    pig: String,
-    links: String,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:821-827
@@ -400,26 +402,19 @@ fn check_name(name: &[u8]) -> Vec<u8> {
     }
 }
 
-impl DeflineFields {
+impl<'d> DeflineFields<'d> {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:829-957
-    // NCBI reference (598d8ae6): c++/src/objects/blastdb/Blast_def_line.cpp:143-163
-    /// The fields of `defline` that the specifiers `types` read, the texts of their taxonomy
-    /// lookups appended to `texts`. The sum of the memberships is taken in 64 bits (NCBI's
-    /// `int` would overflow: LOSAT does not reproduce that).
+    /// The fields of `defline` that the specifiers `types` read and that need more than the line:
+    /// its best id (a line without Seq-ids is refused here, before the line), the taxonomy's
+    /// names, the texts of their lookups appended to `texts`.
     fn extract(
         source: &Source,
-        defline: &BlastDefline,
+        defline: &'d BlastDefline,
         types: &[u8],
         texts: &mut Vec<String>,
     ) -> Result<Self, Stop> {
         let wants = |kinds: &[u8]| types.iter().any(|t| kinds.contains(t));
         let mut fields = DeflineFields::default();
-        if wants(b"g") {
-            fields.gi = match defline.ids.iter().find_map(ParsedSeqId::gi) {
-                Some(gi) => gi.to_string(),
-                None => NOT_AVAILABLE.to_string(),
-            };
-        }
         if wants(b"ai") {
             let Some(best) = find_best(&defline.ids, text_score) else {
                 // NCBI dereferences the null choice of a definition line without Seq-ids: its
@@ -427,45 +422,33 @@ impl DeflineFields {
                 // D1c-1c-b).
                 return Err(super::retrieve::null_pointer());
             };
-            fasta(best, &mut fields.seq_id);
-            bare(best, &mut fields.accession);
+            fields.best = Some(best);
         }
-        if wants(b"t") {
-            fields.title = match &defline.title {
-                Some(title) => title.clone(),
-                None => NOT_AVAILABLE.as_bytes().to_vec(),
-            };
-        }
-        if wants(b"TLBKS") {
+        if wants(b"LBKS") {
             let tax_id = defline.taxid.unwrap_or(0);
-            fields.tax_id = tax_id.to_string();
-            if wants(b"LBKS") {
-                let (found, lookup_texts) = source.tax_info(tax_id)?;
-                texts.extend(lookup_texts);
-                match found.names() {
-                    Some(names) => {
-                        // A kingdom that NCBI reads past its mapping of taxdb.btd: refused
-                        // where `%K` writes it.
-                        fields.super_kingdom = match &names.super_kingdom {
-                            Ok(kingdom) => check_name(kingdom),
-                            Err(past) if wants(b"K") => {
-                                return Err(past.error("super kingdom").into())
-                            }
-                            Err(_) => Vec::new(),
-                        };
-                        fields.scientific_name = names.scientific_name.clone();
-                        fields.common_name = names.common_name.clone();
-                        fields.blast_name = check_name(&names.blast_name);
-                    }
-                    None => {
-                        for field in [
-                            &mut fields.scientific_name,
-                            &mut fields.common_name,
-                            &mut fields.blast_name,
-                            &mut fields.super_kingdom,
-                        ] {
-                            *field = NOT_AVAILABLE.as_bytes().to_vec();
-                        }
+            let (found, lookup_texts) = source.tax_info(tax_id)?;
+            texts.extend(lookup_texts);
+            match found.names() {
+                Some(names) => {
+                    // A kingdom that NCBI reads past its mapping of taxdb.btd: refused
+                    // where `%K` writes it.
+                    fields.super_kingdom = match &names.super_kingdom {
+                        Ok(kingdom) => check_name(kingdom),
+                        Err(past) if wants(b"K") => return Err(past.error("super kingdom").into()),
+                        Err(_) => Vec::new(),
+                    };
+                    fields.scientific_name = names.scientific_name.clone();
+                    fields.common_name = names.common_name.clone();
+                    fields.blast_name = check_name(&names.blast_name);
+                }
+                None => {
+                    for field in [
+                        &mut fields.scientific_name,
+                        &mut fields.common_name,
+                        &mut fields.blast_name,
+                        &mut fields.super_kingdom,
+                    ] {
+                        *field = NOT_AVAILABLE.as_bytes().to_vec();
                     }
                 }
             }
@@ -505,40 +488,71 @@ impl DeflineFields {
                         }
                     }
                 }
-                fields.leaf_node_tax_ids.push_str(separator);
-                fields.leaf_node_tax_ids.push_str(&tax_id.to_string());
+                fields
+                    .leaf_node_tax_ids
+                    .extend_from_slice(separator.as_bytes());
+                push_decimal(&mut fields.leaf_node_tax_ids, i64::from(tax_id));
                 separator = SEPARATOR;
             }
         }
-        if wants(b"e") {
-            let membership: i64 = defline
-                .memberships
-                .iter()
-                .flatten()
-                .map(|&m| i64::from(m))
-                .sum();
-            fields.membership = membership.to_string();
-        }
-        if wants(b"P") {
-            let pig = defline
-                .other_info
-                .iter()
-                .flatten()
-                .copied()
-                .find(|&value| value != -1)
-                .unwrap_or(-1);
-            fields.pig = pig.to_string();
-        }
-        if wants(b"n") {
-            fields.links = match &defline.links {
-                Some(links) => links
-                    .iter()
-                    .map(|link| format!("{link}{SEPARATOR}"))
-                    .collect(),
-                None => NOT_AVAILABLE.to_string(),
-            };
-        }
         Ok(fields)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:829-957
+    // NCBI reference (598d8ae6): c++/src/objects/blastdb/Blast_def_line.cpp:143-163
+    /// Appends to `line` the field of the specifier `kind` (`%a %i %g %t %T %P %e %n`) read from
+    /// `defline` itself. The sum of the memberships is taken in 64 bits (NCBI's `int` would
+    /// overflow: LOSAT does not reproduce that).
+    fn write_defline_field(&self, kind: u8, defline: &BlastDefline, line: &mut Vec<u8>) {
+        match kind {
+            b'a' => {
+                if let Some(best) = self.best {
+                    bare(best, line);
+                }
+            }
+            b'i' => {
+                if let Some(best) = self.best {
+                    fasta(best, line);
+                }
+            }
+            b'g' => match defline.ids.iter().find_map(ParsedSeqId::gi) {
+                Some(gi) => push_decimal(line, gi),
+                None => line.extend_from_slice(NOT_AVAILABLE.as_bytes()),
+            },
+            b't' => match &defline.title {
+                Some(title) => line.extend_from_slice(title),
+                None => line.extend_from_slice(NOT_AVAILABLE.as_bytes()),
+            },
+            b'T' => push_decimal(line, i64::from(defline.taxid.unwrap_or(0))),
+            b'P' => {
+                let pig = defline
+                    .other_info
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .find(|&value| value != -1)
+                    .unwrap_or(-1);
+                push_decimal(line, i64::from(pig));
+            }
+            b'e' => {
+                let membership: i64 = defline
+                    .memberships
+                    .iter()
+                    .flatten()
+                    .map(|&m| i64::from(m))
+                    .sum();
+                push_decimal(line, membership);
+            }
+            _ => match &defline.links {
+                Some(links) => {
+                    for &link in links {
+                        push_decimal(line, i64::from(link));
+                        line.extend_from_slice(SEPARATOR.as_bytes());
+                    }
+                }
+                None => line.extend_from_slice(NOT_AVAILABLE.as_bytes()),
+            },
+        }
     }
 }
 

@@ -666,7 +666,7 @@ impl BlastCompressedAaLookupTable {
                             );
                             totalhits += numhits;
                         } else {
-                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:373-378
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:403-404
                             s_range[1] = i32::try_from(s)
                                 .expect("NCBI BLAST compressed subject offset fits Int4");
                             return totalhits;
@@ -1443,13 +1443,13 @@ pub(crate) fn compute_compressed_index_u8(
     (index, skip)
 }
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-57
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:55-57
 #[inline(always)]
 pub fn compressed_pv_test(pv: &[u32], index: usize, pv_array_bts: usize) -> bool {
     (pv[index >> pv_array_bts] & (1u32 << (index & PV_ARRAY_MASK))) != 0
 }
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-57
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_lookup.h:49-50
 #[inline(always)]
 pub fn compressed_pv_set(pv: &mut [u32], index: usize, pv_array_bts: usize) {
     pv[index >> pv_array_bts] |= 1u32 << (index & PV_ARRAY_MASK);

@@ -36,7 +36,7 @@ fn x_unpack_ncbi2na_gives_the_resolved_bases() {
     }
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:516-520
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:516-520,1651-1684
 /// A sequence of score-only calls through `XPrelimSubject::score_only` (windows kept across
 /// calls, the whole copy after a fence) gives each call's result on the whole copy and leaves
 /// `max_dist` where the whole-copy calls leave it: hits of a query made of mutated pieces of

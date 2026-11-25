@@ -6,7 +6,6 @@
 //! and [`ReportCounts::validate`].
 
 use crate::blastinput::app::{options_error, output_format};
-use crate::blastinput::value_parsers::ncbi_integer_as;
 
 /// NCBI's default hit list size.
 ///
@@ -25,16 +24,31 @@ pub const DEFAULT_NUM_ALIGNMENTS: usize = 250;
 /// rpsblast); the default is none given. The five programs hand all three to the formatter
 /// (`blastn_app.cpp:251-253` and the others' alike); psiblast and rpsblast only the line length
 /// (`psiblast_app.cpp:502`, `rpsblast_app.cpp:187`): their `report_sort` is none.
-#[derive(clap::Args, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FormattingArgs {
     /// `-line_length`: the width of the pairwise alignment rows (60 when it is not given).
-    #[arg(long = "line_length", value_name = "line_length", value_parser = ncbi_integer_as::<usize>, help = "Line length for formatting alignments; Not applicable for outfmt > 4 [default: 60]")]
     pub line_length: Option<usize>,
     /// `-sorthits` and `-sorthsps` (0 to 4).
-    #[arg(long = "sorthits", value_name = "sort_hits", value_parser = ncbi_integer_as::<u8>, help = "Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage; Not applicable for outfmt > 4")]
     pub sort_hits: Option<u8>,
-    #[arg(long = "sorthsps", value_name = "sort_hsps", value_parser = ncbi_integer_as::<u8>, help = "Sorting option for hps: 0 = Sort by hsp evalue, 1 = Sort by hsp score, 2 = Sort by hsp query start, 3 = Sort by hsp percent identity, 4 = Sort by hsp subject start; Not applicable for outfmt != 0")]
     pub sort_hsps: Option<u8>,
+}
+
+impl FormattingArgs {
+    // No NCBI counterpart: NCBI's programs read `CArgs` where their option handles take each value
+    // (line RG DECISIONS K4i-3-1).
+    /// The options of `args`, the arguments as NCBI's argument reader read them
+    /// (`ncbi_app::args`): each key as given, or its default in NCBI's tables where the option
+    /// has one, each flag whether it was given, and the run's state, which the run fills in at
+    /// its start.
+    pub(crate) fn from_args(
+        args: &crate::ncbi_app::args::Args,
+    ) -> Result<Self, crate::ncbi_app::args::NotConverted> {
+        Ok(FormattingArgs {
+            line_length: args.given_option("line_length")?,
+            sort_hits: args.given_option("sorthits")?,
+            sort_hsps: args.given_option("sorthsps")?,
+        })
+    }
 }
 
 impl FormattingArgs {

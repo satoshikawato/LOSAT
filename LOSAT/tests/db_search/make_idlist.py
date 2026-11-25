@@ -80,7 +80,7 @@ OUT = Path(__file__).resolve().parent / "idlist"
 SOURCES = {"g.faa", "g.map", "n.fna", "n.map", "q.faa", "nq.fna", "tz.faa", "pz.faa", "tq.faa", "cv0.faa",
            "cv1.faa", "ln.faa", "ln.map", "lnq.faa", "lx.faa", "lx.map", "lx2.map", "lxq.faa", "lt.faa", "lt.map",
            "ltq.faa", "lnn.fna", "lnn.map", "lnnq.fna", "lnnq.faa", "lr.faa", "ls.faa", "lrq.faa", "lrqw.faa",
-           "pw.faa", "nw.fna", "pwq.faa", "pwq.fna", "pwk.faa"}
+           "pw.faa", "nw.fna", "pwq.faa", "pwq.fna", "pwk.faa", "lnq2.faa"}
 
 # An absolute path that is not a file: printed as it is, the same on every machine.
 MISSING = "/losat-idlist-fixture-missing/none.txt"
@@ -363,6 +363,7 @@ def build_d1c1b(mk, common):
     for path in OUT.glob("lx2.*"):
         path.unlink()
     back_translate(OUT / "lnq.faa", OUT / "lnq.fna")
+    back_translate(OUT / "lnq2.faa", OUT / "lnq2.fna")
     back_translate(OUT / "lxq.faa", OUT / "lxq.fna")
     run([mk, "-in", "lt.faa", "-dbtype", "prot", "-out", "lt", "-title", "lt", *common, "lt.map",
          "-max_file_sz", "1000B"])

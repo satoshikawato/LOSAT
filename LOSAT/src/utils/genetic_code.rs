@@ -181,7 +181,7 @@ impl GeneticCode {
         Self::try_from_id(id).unwrap_or_else(|error| panic!("{error}"))
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:369-424
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:369-425
     pub fn get(&self, codon: &[u8]) -> u8 {
         if codon.len() != 3 {
             return b'X';

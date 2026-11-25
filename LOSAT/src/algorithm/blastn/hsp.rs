@@ -973,7 +973,7 @@ impl<L: HitListEntry> HitList<L> {
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 #[allow(clippy::too_many_arguments)]
-pub fn write_output_blastn_hitlists_to_writer<W: Write>(
+pub fn write_output_blastn_hitlists_to_writer<W: crate::report::ostream::ReportWrite>(
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut W,
     query_ids: &[Arc<[u8]>],
@@ -1020,6 +1020,8 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
             probe.as_deref_mut(),
             &mut read,
         )?;
+        // `~CBlastTabularInfo` of the query's report flushes the stream.
+        writer.ncbi_flush()?;
     }
     write_tabular_epilog(writer, output_format, epilog)
 }
@@ -1228,7 +1230,7 @@ pub(crate) fn write_hsp_rows<W: Write>(
 }
 
 /// The line after the last query's lines (outfmt 7's count of queries, when `epilog`).
-pub(crate) fn write_tabular_epilog<W: Write>(
+pub(crate) fn write_tabular_epilog<W: crate::report::ostream::ReportWrite + ?Sized>(
     writer: &mut W,
     output_format: BlastnOutputFormat,
     epilog: Option<usize>,
@@ -1240,6 +1242,8 @@ pub(crate) fn write_tabular_epilog<W: Write>(
     if let (BlastnOutputFormat::TabularWithComments, Some(num_queries)) = (output_format, epilog) {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1324
         writeln!(writer, "# BLAST processed {} queries", num_queries)?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
 
     Ok(())

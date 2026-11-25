@@ -309,7 +309,7 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
             raw_score: init_hsp.score, // Original extension score (before reevaluation)
             e_value: f64::INFINITY,
             num_ident: 0, // Will be computed during reevaluation
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4719-4724
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4742-4768
             hsp_list_order,
             ordering_method: 0,
             linked_set: false,
@@ -338,14 +338,14 @@ pub(crate) fn convert_init_hsps_unsorted<const INT4_ENDS: bool>(
 fn sort_converted_hsps_by_score_ncbi(ungapped_hits: &mut [UngappedHit]) {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4719-4775
     //
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1329-1356
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1381
     if !ungapped_hits_is_sorted_by_score_ncbi(ungapped_hits) {
         sort_ungapped_hits_by_score_ncbi(ungapped_hits);
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1329-1356
 // The subject's offset and end are read as NCBI's `Int4` (`UngappedHit::s_start_int4`: below 0 in a
 // chunk's list for an HSP before its chunk; elsewhere below 2^31, where the two orders agree).
 pub(crate) fn score_compare_ungapped_hits_ncbi(a: &UngappedHit, b: &UngappedHit) -> Ordering {

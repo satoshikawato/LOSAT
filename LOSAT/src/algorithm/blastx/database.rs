@@ -174,8 +174,9 @@ impl BlastxDatabase {
     }
 
     /// Whether the batches' fetches of the run may be refused for NCBI's taxonomy cache
-    /// (`shared::TaxdbRun::cache_may_refuse`): outfmt 5's prefetch, and the XML2 and JSON lookups
-    /// (`shared::read_reported_taxonomy`), which an XML run holds its document for.
+    /// (`shared::TaxdbRun::cache_may_refuse`): the prefetch of outfmt 5 and of 13 to 16, or the
+    /// reports' reads where it is off, where NCBI's order of the loads is not known, which an XML
+    /// run holds its document for.
     pub(crate) fn cache_may_refuse(&self) -> bool {
         self.taxdb.cache_may_refuse(&self.db)
     }
@@ -186,8 +187,8 @@ impl BlastxDatabase {
     /// a library call, `local::report_batches`) and the refusal follows no byte:
     /// - with `taxdb.bti` on the search path, a taxonomy database record (`taxdb_may_refuse`),
     ///   or a fetch where NCBI's taxonomy cache would repeat the offset error
-    ///   (`cache_may_refuse`: outfmt 5's prefetch, and the XML2 and JSON lookups of a batch with a
-    ///   subject that has a taxid, `read_reported_taxonomy`);
+    ///   (`cache_may_refuse`: the prefetch of outfmt 5 and of 13 to 16, or the reports' reads
+    ///   where it is off);
     /// - with parsed Seq-ids, one of the batch's subjects (`ReportedSubjects::for_batch`).
     ///
     /// The taxids of every sequence are looked up here, once (DECISIONS 32); the usual run, in

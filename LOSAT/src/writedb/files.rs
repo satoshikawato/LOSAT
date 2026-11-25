@@ -4,7 +4,7 @@
 //! file, the header file and the sequence file, each with NCBI's rule for
 //! "does another sequence fit".
 
-use std::path::Path;
+use crate::utils::os_bytes::path_of_bytes;
 
 use super::ofstream::OfStream;
 use super::WriteDbError;
@@ -14,11 +14,11 @@ use super::WriteDbError;
 pub(crate) struct WriteDbFile {
     /// `m_RealFile`: the `ofstream` of the file, without a file until `Create`.
     stream: OfStream,
-    base_name: String,
+    base_name: Vec<u8>,
     extension: String,
     index: u32,
     use_index: bool,
-    fname: String,
+    fname: Vec<u8>,
     /// `m_Offset`: the stream position, an `unsigned int` in NCBI.
     offset: u32,
     max_file_size: u64,
@@ -30,8 +30,10 @@ pub(crate) struct WriteDbFile {
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:235-257
 /// `CWriteDB_File::MakeShortName`: `base.NN` (two digits, more from volume
 /// 100 on).
-pub(crate) fn make_short_name(base: &str, index: u32) -> String {
-    format!("{base}.{}{}", index / 10, index % 10)
+pub(crate) fn make_short_name(base: &[u8], index: u32) -> Vec<u8> {
+    let mut name = base.to_vec();
+    name.extend_from_slice(format!(".{}{}", index / 10, index % 10).as_bytes());
+    name
 }
 
 impl WriteDbFile {
@@ -40,7 +42,7 @@ impl WriteDbFile {
     // NCBI does not test the stream: a file that cannot be opened (a directory of its name
     // that the removal of the old database could not delete) is written to nowhere and the
     // build goes on, as makeblastdb's (`super::ofstream`).
-    fn create(base_name: &str, extension: &str, index: u32, max_file_size: u64) -> Self {
+    fn create(base_name: &[u8], extension: &str, index: u32, max_file_size: u64) -> Self {
         let mut file = Self::lazy(base_name, extension, index, max_file_size);
         file.create_now();
         file
@@ -48,29 +50,34 @@ impl WriteDbFile {
 
     /// The constructor with `always_create` false: the file is named but created only by
     /// `create_now` (`CWriteDB_File::Create`).
-    pub(crate) fn lazy(base_name: &str, extension: &str, index: u32, max_file_size: u64) -> Self {
+    pub(crate) fn lazy(base_name: &[u8], extension: &str, index: u32, max_file_size: u64) -> Self {
         Self::named(base_name, extension, Some(index), max_file_size)
     }
 
     /// `lazy` with the index -1 (`m_UseIndex` false): the file `<base>.<ext>`, without a
     /// volume number (the offset and index files of a GI mask, `super::gi_mask`).
-    pub(crate) fn lazy_unindexed(base_name: &str, extension: &str, max_file_size: u64) -> Self {
+    pub(crate) fn lazy_unindexed(base_name: &[u8], extension: &str, max_file_size: u64) -> Self {
         Self::named(base_name, extension, None, max_file_size)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:158-195
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:247-257
     // A negative index turns the volume number off; a limit of 0 takes the default one.
-    fn named(base_name: &str, extension: &str, index: Option<u32>, max_file_size: u64) -> Self {
+    fn named(base_name: &[u8], extension: &str, index: Option<u32>, max_file_size: u64) -> Self {
         Self {
             stream: OfStream::new(),
-            base_name: base_name.to_string(),
+            base_name: base_name.to_vec(),
             extension: extension.to_string(),
             index: index.unwrap_or(0),
             use_index: index.is_some(),
-            fname: match index {
-                Some(index) => format!("{}.{extension}", make_short_name(base_name, index)),
-                None => format!("{base_name}.{extension}"),
+            fname: {
+                let mut fname = match index {
+                    Some(index) => make_short_name(base_name, index),
+                    None => base_name.to_vec(),
+                };
+                fname.push(b'.');
+                fname.extend_from_slice(extension.as_bytes());
+                fname
             },
             offset: 0,
             max_file_size: if max_file_size == 0 {
@@ -86,7 +93,7 @@ impl WriteDbFile {
     /// under the current name.
     pub(crate) fn create_now(&mut self) {
         self.created = true;
-        self.stream.open(Path::new(&self.fname));
+        self.stream.open(&path_of_bytes(&self.fname));
     }
 
     /// `m_Created`.
@@ -111,7 +118,7 @@ impl WriteDbFile {
             return Err(WriteDbError::Creation(format!(
                 "{} would pass 4 GiB, which the 32-bit offsets of a BLAST database volume \
                  cannot address",
-                self.fname
+                String::from_utf8_lossy(&self.fname)
             )));
         }
         self.stream.write(data);
@@ -148,7 +155,7 @@ impl WriteDbFile {
         }
     }
 
-    pub(crate) fn filename(&self) -> &str {
+    pub(crate) fn filename(&self) -> &[u8] {
         &self.fname
     }
 
@@ -159,15 +166,21 @@ impl WriteDbFile {
     // build goes on; a source that does not exist (an ISAM file without entries, a `.pog` of a
     // volume without sequences) renames nothing, and an existing file of that name that LOSAT never
     // wrote is renamed as NCBI renames it.
-    fn rename_to(&mut self, new_name: String) {
-        let _ = super::dir_entry::rename_overwrite(Path::new(&self.fname), Path::new(&new_name));
+    fn rename_to(&mut self, new_name: Vec<u8>) {
+        let _ = super::dir_entry::rename_overwrite(
+            &path_of_bytes(&self.fname),
+            &path_of_bytes(&new_name),
+        );
         self.fname = new_name;
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:267-277
     pub(crate) fn rename_single(&mut self) {
         self.use_index = false;
-        self.rename_to(format!("{}.{}", self.base_name, self.extension));
+        let mut name = self.base_name.clone();
+        name.push(b'.');
+        name.extend_from_slice(self.extension.as_bytes());
+        self.rename_to(name);
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:279-304
@@ -181,13 +194,17 @@ impl WriteDbFile {
             return;
         }
         let zeros = "0".repeat(num_digits.saturating_sub(2) as usize);
-        self.rename_to(format!(
-            "{}.{zeros}{}{}.{}",
-            self.base_name,
-            self.index / 10,
-            self.index % 10,
-            self.extension
-        ));
+        let mut name = self.base_name.clone();
+        name.extend_from_slice(
+            format!(
+                ".{zeros}{}{}.{}",
+                self.index / 10,
+                self.index % 10,
+                self.extension
+            )
+            .as_bytes(),
+        );
+        self.rename_to(name);
     }
 }
 
@@ -302,13 +319,16 @@ fn overhead(
 // on Windows).
 /// `x_MakeLmdbName`: the file name of the database's LMDB file, without its
 /// directory.
-pub(crate) fn make_lmdb_name(base_name: &str, protein: bool) -> String {
-    let suffix = if protein { ".pdb" } else { ".ndb" };
-    let name = match base_name.rfind(std::path::MAIN_SEPARATOR) {
+pub(crate) fn make_lmdb_name(base_name: &[u8], protein: bool) -> Vec<u8> {
+    let suffix: &[u8] = if protein { b".pdb" } else { b".ndb" };
+    let name = match base_name
+        .iter()
+        .rposition(|&c| c == std::path::MAIN_SEPARATOR as u8)
+    {
         Some(last_slash) => &base_name[last_slash + 1..],
         None => base_name,
     };
-    format!("{name}{suffix}")
+    [name, suffix].concat()
 }
 
 impl IndexFile {
@@ -319,7 +339,7 @@ impl IndexFile {
     /// new ones for the first volume.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn create(
-        dbname: &str,
+        dbname: &[u8],
         protein: bool,
         title: &[u8],
         date: &[u8],
@@ -337,7 +357,7 @@ impl IndexFile {
         );
         let lmdb_name = match version {
             DbVersion::V4 => Vec::new(),
-            DbVersion::V5 => make_lmdb_name(dbname, protein).into_bytes(),
+            DbVersion::V5 => make_lmdb_name(dbname, protein),
         };
         let OffsetArrays {
             mut hdr,
@@ -498,7 +518,7 @@ pub(crate) struct HeaderFile {
 }
 
 impl HeaderFile {
-    pub(crate) fn create(dbname: &str, protein: bool, index: u32, max_file_size: u64) -> Self {
+    pub(crate) fn create(dbname: &[u8], protein: bool, index: u32, max_file_size: u64) -> Self {
         let file = WriteDbFile::create(
             dbname,
             if protein { "phr" } else { "nhr" },
@@ -545,7 +565,7 @@ pub(crate) struct SequenceFile {
 impl SequenceFile {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_files.cpp:481-487
     pub(crate) fn create(
-        dbname: &str,
+        dbname: &[u8],
         protein: bool,
         index: u32,
         max_file_size: u64,

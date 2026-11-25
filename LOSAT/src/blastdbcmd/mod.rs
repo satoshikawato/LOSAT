@@ -6,8 +6,8 @@
 //! taxids of a database (`taxonomy`: `-tax_info`), its metadata (`metadata`: `-metadata`,
 //! `-metadata_output_prefix`), the databases of a directory (`list`: `-list`,
 //! `-list_outfmt`, `-recursive`, `-remove_redundant_dbs`), `-show_blastdb_search_path`, `-h`,
-//! `-help` and `-version`. Its command line is NCBI's (`args`, NCBI's argument reader), not
-//! clap's: `main` hands it the words after `blastdbcmd`. The masks of `makeblastdb -mask_data`
+//! `-help` and `-version`. Its command line is NCBI's (`args`, NCBI's argument reader): `main`
+//! hands it the words after `blastdbcmd`. The masks of `makeblastdb -mask_data`
 //! are read (`-info`, `-mask_sequence_with`, `%m`). A `-db` of several names is read as NCBI's
 //! reader reads it, as one database (`SeqDb::open_in`).
 
@@ -22,14 +22,13 @@ mod range;
 mod retrieve;
 mod taxonomy;
 
-use crate::wording::DATABASE_ERROR;
 use std::ffi::OsString;
 use std::io::{Read, Write};
 
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{Cin, Ostream};
-use crate::ncbi_app::{Diag, Tool};
+use crate::ncbi_app::{database_error, Diag, Tool};
 use crate::ncbi_str::{int_with_commas, with_commas};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType, TaxidList};
 
@@ -91,10 +90,6 @@ fn run_body(
     out: &mut dyn Write,
     diag: &mut Diag,
 ) -> i32 {
-    let registry = match &settings.blastdb {
-        Ok(value) => value.as_deref(),
-        Err(reason) => return diag.refuse(&refusal(reason)),
-    };
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1179-1180
     let mut out_file = match args.output_file("out", out) {
         Ok(out) => out,
@@ -115,22 +110,22 @@ fn run_body(
     // (`metadata::metadata`): a failed write drops the later ones, and a closed pipe ends the
     // program where SIGPIPE ends NCBI's (`files::Ostream`).
     let mut out = Ostream::new(&mut out_file);
-    let path = match SearchPath::from_environment(registry) {
-        Ok(path) => path,
-        Err(error) => return database_error(diag, error),
-    };
+    let path = SearchPath::from_environment(settings.blastdb.as_deref());
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1181-1184
     if args.given("show_blastdb_search_path") {
         // NCBI inserts the path and ends the line with a flush, so the line goes out in one
         // write.
-        let _ = out.write_all(format!("{}\n", path.as_str()).as_bytes());
+        let _ = out.write_all(&[path.as_bytes(), b"\n"].concat());
         let _ = out.flush();
         return 0;
     }
     if args.given("list") {
         return list::list(args, &path, diag, &mut out);
     }
-    let name = args.value("db").unwrap_or("nr");
+    // The database's name is the bytes of NCBI's `std::string`.
+    let name = args
+        .bytes("db")
+        .unwrap_or(std::borrow::Cow::Borrowed(b"nr"));
     let dbtype = args.value("dbtype").unwrap_or("guess");
     let selected = ["info", "metadata", "tax_info"]
         .into_iter()
@@ -153,7 +148,7 @@ fn run_body(
             }
             Ok(())
         };
-        let (db, _) = match open_database(name, dbtype, &path, &restrict) {
+        let (db, _) = match open_database(&name, dbtype, &path, &restrict) {
             Ok(opened) => opened,
             Err(error) => return database_error(diag, error),
         };
@@ -168,13 +163,13 @@ fn run_body(
             dbtype_protein,
         );
     }
-    let (db, volumes) = match open_database(name, dbtype, &path, &|_| Ok(())) {
+    let (db, volumes) = match open_database(&name, dbtype, &path, &|_| Ok(())) {
         Ok(opened) => opened,
         Err(error) => return database_error(diag, error),
     };
     if !args.given("info") {
         if args.given("metadata") {
-            return metadata::metadata(&db, name, args, &path, diag, out_file);
+            return metadata::metadata(&db, &name, args, &path, diag, out_file);
         }
         if args.given("tax_info") {
             return taxonomy::tax_info(&db, args, diag, &mut out);
@@ -186,7 +181,8 @@ fn run_body(
     // (`SeqDb::date`), with U+FFFD for bytes that are not UTF-8.
     if db.date().contains('\u{fffd}') {
         return diag.refuse(&refusal(&format!(
-            "{name}: the date of the database is not UTF-8 text"
+            "{}: the date of the database is not UTF-8 text",
+            String::from_utf8_lossy(&name)
         )));
     }
     let exact = if args.given("exact_length") {
@@ -242,61 +238,27 @@ fn output_refusal(reason: &str) -> String {
 /// Opens the database `name` (the `-db` value as given, one name or several: blastdbcmd does not
 /// trim it) of the type `dbtype` (`prot`, `nucl`, or `guess`: protein first, then nucleotide),
 /// with the list of its volumes for `-info`, and `prepare`s it (the taxid list of `-target_only`, which NCBI's
-/// constructor applies). With `guess`, an exception of NCBI's reader
-/// (`SeqDbError::is_seqdb_exception`) moves on to the nucleotide database, and the nucleotide
-/// error is the one reported; a refusal of LOSAT's is reported at once, since NCBI may open that
-/// protein database.
+/// constructor applies). `guess` is NCBI's guess of the type (`SeqDb::open_guessing`).
 fn open_database(
-    name: &str,
+    name: &[u8],
     dbtype: &str,
     path: &SearchPath,
     prepare: &dyn Fn(&mut SeqDb) -> Result<(), SeqDbError>,
-) -> Result<(SeqDb, Vec<String>), SeqDbError> {
+) -> Result<(SeqDb, Vec<Vec<u8>>), SeqDbError> {
     let types: &[SeqType] = match dbtype {
         "prot" => &[SeqType::Protein],
         "nucl" => &[SeqType::Nucleotide],
         _ => &[SeqType::Protein, SeqType::Nucleotide],
     };
-    let mut types = types.iter().peekable();
-    loop {
-        let Some(&seqtype) = types.next() else {
-            unreachable!("at least one sequence type is tried");
-        };
+    SeqDb::open_guessing(types, |seqtype| {
         // The alias files' counts fail where NCBI's constructor reaches them, which the list of
         // `-target_only` moves (`SeqDb::check_alias_values`).
-        let opened = SeqDb::open_search_in(name, seqtype, path).and_then(|mut db| {
-            let volumes = SeqDb::info_volumes(name, seqtype, path)?;
-            prepare(&mut db)?;
-            db.check_alias_values()?;
-            Ok((db, volumes))
-        });
-        match opened {
-            Err(error) if types.peek().is_some() && error.is_seqdb_exception() => {}
-            opened => return opened,
-        }
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:247-250
-/// A reader error: NCBI's own (`SeqDbError::ncbi_message`) as `BLAST Database error: <text>`
-/// with exit status 2, another exception of NCBI's (`SeqDbError::ncbi_exception`: an alias
-/// file's value that does not convert) as `Error: <what()>` with exit status 255, else LOSAT's
-/// refusal.
-fn database_error(diag: &mut Diag, error: SeqDbError) -> i32 {
-    if let Some(exception) = error.ncbi_exception() {
-        diag.post_bytes(&[b"Error: ".as_slice(), &exception.what()].concat());
-        return 255;
-    }
-    match error.ncbi_message() {
-        Some(text) => {
-            diag.post_bytes(&[DATABASE_ERROR.as_bytes(), b" ", &text].concat());
-            2
-        }
-        None => diag.refuse(&crate::algorithm::common::database::losat_reader_error(
-            &error, PROGRAM,
-        )),
-    }
+        let mut db = SeqDb::open_search_in(name, seqtype, path)?;
+        let volumes = SeqDb::info_volumes(name, seqtype, path)?;
+        prepare(&mut db)?;
+        db.check_alias_values()?;
+        Ok((db, volumes))
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:533-573
@@ -330,10 +292,12 @@ fn write_info_head(out: &mut Vec<u8>, db: &SeqDb, exact: Option<(u64, u32)>) {
 }
 
 /// The text of `-info` after the filtering algorithms: the `Volumes:` are `volumes`.
-fn write_info_volumes(out: &mut Vec<u8>, volumes: &[String]) {
+fn write_info_volumes(out: &mut Vec<u8>, volumes: &[Vec<u8>]) {
     out.extend_from_slice(b"\nVolumes:\n");
     for volume in volumes {
-        let _ = writeln!(out, "\t{volume}");
+        out.push(b'\t');
+        out.extend_from_slice(volume);
+        out.push(b'\n');
     }
 }
 

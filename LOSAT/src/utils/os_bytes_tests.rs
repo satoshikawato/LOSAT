@@ -9,4 +9,8 @@ fn a_name_that_is_not_utf8_keeps_its_bytes() {
         b"l/d\xe9.pdb"
     );
     assert_eq!(os_str_bytes(OsStr::new("a")).as_ref(), b"a");
+    assert_eq!(
+        path_bytes(&path_of_bytes(b"l/d\xe9.nin")).as_ref(),
+        b"l/d\xe9.nin"
+    );
 }

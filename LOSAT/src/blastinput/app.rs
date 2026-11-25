@@ -150,10 +150,9 @@ impl ErrorAfterBatchReports {
 
     /// The error held, where `error` is an `ErrorAfterBatchReports`, else `error` as it is.
     pub(crate) fn held(error: anyhow::Error) -> anyhow::Error {
-        match error.downcast::<ErrorAfterBatchReports>() {
-            Ok(failure) => failure.error,
-            Err(error) => error,
-        }
+        error
+            .downcast::<Self>()
+            .map_or_else(|error| error, |failure| failure.error)
     }
 }
 

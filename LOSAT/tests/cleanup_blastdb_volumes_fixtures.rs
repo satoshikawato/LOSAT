@@ -639,7 +639,8 @@ fn unlink_failure_flushes_stdout_before_stderr_and_matches_closed_pipe_exit_stat
         let dir = scratch(label);
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("db.pal"), b"DBLIST db.00\n").unwrap();
+        let pal_path = dir.join("db.pal");
+        fs::write(pal_path, b"DBLIST db.00\n").unwrap();
         for v in 0..nvol {
             for ext in ["pin", "phr", "psq"] {
                 let name = if v == 0 {

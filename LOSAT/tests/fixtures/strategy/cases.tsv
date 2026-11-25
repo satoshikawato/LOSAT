@@ -623,6 +623,29 @@ blastp.sub.badgi.stdout	blastp	-	-query tests/fasta/strategy/badgi_p.faa -subjec
 psiblast.pssm.sub.stdout	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c15_scoremat.asn -subject tests/fasta/outfmt11/arch_bp_s.faa -comp_based_stats 0 -outfmt 0 -export_search_strategy -	ncbi	1	-	-
 psiblast.pssm.sub.sameout	psiblast	-	-in_pssm tests/fasta/strategy/pssm_d3_c15_scoremat.asn -subject tests/fasta/outfmt11/arch_bp_s.faa -comp_based_stats 0 -outfmt 0 -out {ss} -export_search_strategy {ss}	ncbi	1	-	-
 tblastn.in_pssm.sub.stdout	tblastn	-	-in_pssm tests/fasta/strategy/pssm_d3_c15_scoremat.asn -subject tests/fasta/outfmt11/arch_tbn_s.fna -outfmt 0 -export_search_strategy -	ncbi	1	-	-
+blastp.sub.pd.join.f16	blastp	-	-query tests/fasta/strategy/order_pdjoin.faa -subject tests/fasta/strategy/order_s.faa -parse_deflines -outfmt 16	ncbi	0	-	-
+blastp.sub.pd.join.b1.f15	blastp	BATCH_SIZE=1	-query tests/fasta/strategy/order_pdjoin.faa -subject tests/fasta/strategy/order_s.faa -parse_deflines -outfmt 15	ncbi	0	-	-
+blastp.sub.pd.join3b.f5	blastp	-	-query tests/fasta/strategy/order_pdjoin3b.faa -subject tests/fasta/strategy/order_s.faa -parse_deflines -outfmt 5	ncbi	0	-	-
+blastp.db.pd.join.f15	blastp	-	-query tests/fasta/strategy/order_pdjoin.faa -db tests/db_search/arch_sprot -parse_deflines -outfmt 15	ncbi	0	-	-
+tblastn.sub.pd.join.f16	tblastn	-	-query tests/fasta/strategy/order_pdjoin.faa -subject tests/fasta/strategy/order_s.fna -parse_deflines -outfmt 16	ncbi	0	-	-
+tblastn.sub.pd.join.b1.f15	tblastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_pdjoin.faa -subject tests/fasta/strategy/order_s.fna -parse_deflines -outfmt 15	ncbi	0	-	-
+tblastn.sub.pd.join3b.f5	tblastn	-	-query tests/fasta/strategy/order_pdjoin3b.faa -subject tests/fasta/strategy/order_s.fna -parse_deflines -outfmt 5	ncbi	0	-	-
+tblastn.db.pd.join.f15	tblastn	-	-query tests/fasta/strategy/order_pdjoin.faa -db tests/db_search/arch_snucl -parse_deflines -outfmt 15	ncbi	0	-	-
+blastx.sub.pd.join.f16	blastx	-	-query tests/fasta/strategy/order_pdjoin.fna -subject tests/fasta/strategy/order_s.faa -parse_deflines -outfmt 16	ncbi	0	-	-
+blastx.sub.pd.join.b1.f15	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_pdjoin.fna -subject tests/fasta/strategy/order_s.faa -parse_deflines -outfmt 15	ncbi	0	-	-
+blastx.sub.pd.join3b.f5	blastx	-	-query tests/fasta/strategy/order_pdjoin3b.fna -subject tests/fasta/strategy/order_s.faa -parse_deflines -outfmt 5	ncbi	0	-	-
+blastx.db.pd.join.f15	blastx	-	-query tests/fasta/strategy/order_pdjoin.fna -db tests/db_search/arch_sprot -parse_deflines -outfmt 15	ncbi	0	-	-
+tblastx.sub.pd.join.f16	tblastx	-	-query tests/fasta/strategy/order_pdjoin.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -outfmt 16	ncbi	0	-	-
+tblastx.sub.pd.join.b1.f15	tblastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_pdjoin.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -outfmt 15	ncbi	0	-	-
+tblastx.sub.pd.join3b.f5	tblastx	-	-query tests/fasta/strategy/order_pdjoin3b.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -outfmt 5	ncbi	0	-	-
+tblastx.db.pd.join.f15	tblastx	-	-query tests/fasta/strategy/order_pdjoin.fna -db tests/db_search/arch_tbx_snucl -parse_deflines -outfmt 15	ncbi	0	-	-
+blastp.sub.pd.join3a.f14	blastp	-	-query tests/fasta/strategy/order_pdjoin3a.faa -subject tests/fasta/strategy/order_s.faa -parse_deflines -outfmt 14 -out {ss}	ncbi	0	-	-
+blastx.sub.pd.join.b1.f13	blastx	BATCH_SIZE=1	-query tests/fasta/strategy/order_pdjoin.fna -subject tests/fasta/strategy/order_s.faa -parse_deflines -outfmt 13 -out {ss}	ncbi	0	-	-
+blastp.sub.pd.join3c.f16	blastp	-	-query tests/fasta/strategy/order_pdjoin3c.faa -subject tests/fasta/strategy/order_s.faa -parse_deflines -outfmt 16	ncbi	0	-	-
+blastp.db.pd.join3c.f5	blastp	-	-query tests/fasta/strategy/order_pdjoin3c.faa -db tests/db_search/arch_sprot -parse_deflines -outfmt 5	ncbi	0	-	-
+blastn.sub.pd.joinpdb.f16	blastn	-	-query tests/fasta/strategy/order_pdjoin_pdb.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -outfmt 16	ncbi	0	-	-
+blastn.sub.pd.joinpdb.b1.f15	blastn	BATCH_SIZE=1	-query tests/fasta/strategy/order_pdjoin_pdb.fna -subject tests/fasta/strategy/order_s.fna -parse_deflines -outfmt 15	ncbi	0	-	-
+blastn.db.pd.joinpdb.f5	blastn	-	-query tests/fasta/strategy/order_pdjoin_pdb.fna -db tests/db_search/arch_snucl -parse_deflines -outfmt 5	ncbi	0	-	-
 blastp.sub.qlocrev.fx	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt x -export_search_strategy {ss}	ncbi	3	-	-
 blastp.sub.qlocrev.fx.plain	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt x	ncbi	1	-	-
 blastp.sub.qlocrev.f99	blastp	-	-query tests/fasta/outfmt11/arch_bp_q.faa -subject tests/fasta/outfmt11/arch_bp_s.faa -query_loc 10-5 -outfmt 99 -export_search_strategy {ss}	ncbi	3	-	-

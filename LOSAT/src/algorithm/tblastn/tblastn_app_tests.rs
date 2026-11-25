@@ -6,7 +6,8 @@ use super::*;
 #[test]
 fn a_read_failed_in_the_search_fails_as_the_check_s_error() {
     let engine = batch_failure(
-        XReadError(PreliminaryReadError("Database memory map file error").into()).into(),
+        XReadError(PreliminaryReadError::from_static("Database memory map file error").into())
+            .into(),
     )
     .expect("the engine error");
     let native = engine

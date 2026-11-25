@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.109
+- Version: 1.110
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -760,10 +760,18 @@
   item M4b-T3 and psiblast line item PS10b, then 1.107 at the merge of dev of 2026-11-25 that
   brought 1.106, line NP item M4b-3c part 2, then 1.108 at the merge of dev of 2026-11-26 that
   brought 1.107, line NP item M (b));
-  1.109 2026-11-26 (exception 31, `losat blastdbcheck` alias count checks and `-ends`/`-stride` OID
+  1.109 2026-11-25 (version 5 alias `SEQIDLIST` combined with a search `-seqidlist` or
+  `-negative_seqidlist`, line RG item D1c-2: explicit rejection, rule 3, when the alias
+  `SEQIDLIST` or the search's `-seqidlist` holds two differently spelled Seq-ids that NCBI's
+  `s_CompareSeqId` treats as equivalent, or two unparseable Seq-ids whose `s_CompareSeqId`
+  exceptions differ, or a Seq-id that posts a warning alongside an unparseable Seq-id, where
+  NCBI's `std::sort` violates strict weak ordering or depends on the C++ library's sort steps;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.108 at
+  the merge of dev that brought 1.108 (line RG item X-short-bat-2); first 1.105, then 1.108);
+  1.110 2026-11-26 (exception 31, `losat blastdbcheck` alias count checks and `-ends`/`-stride` OID
   arithmetic widened beyond NCBI's signed 32-bit/64-bit integer overflow, and empty CDD profile
   files refused under rule 3, line RG-D2 items D2b-2..5; Owner 2026-11-25 17:54 JST, Q-D2b-OV=A;
-  numbered after 1.108)
+  numbered after 1.109 at the merge of dev that brought 1.109 (line RG item D1c-2))
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -4062,6 +4070,45 @@ file would differ, and NCBI's programs still could not open the database).
   the sequence's end, and the index reads them (probes `p3` l93n and l94n, 4294967293 and 4294967294
   letters: SIGSEGV after `creating ....00.idx...`, no file left). LOSAT refuses (exit 1) at that
   sequence.
+- A version 5 alias `SEQIDLIST` combined with a search `-seqidlist` or `-negative_seqidlist`, when
+  the alias `SEQIDLIST` or the search's `-seqidlist` holds two differently spelled Seq-ids that
+  NCBI's `s_CompareSeqId` treats as equivalent, or two unparseable Seq-ids whose `s_CompareSeqId`
+  exceptions differ, or a Seq-id that posts a warning alongside an unparseable Seq-id (version
+  1.109, 2026-11-25, line RG item D1c-2, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07): `s_ProcessSeqIdFilters` (`seqdboidlist.cpp:578-649`) sorts the search's
+  `-seqidlist` (`:592`) and each alias `SEQIDLIST` (`:611`) with `s_CompareSeqId` (`:565-576`),
+  which parses both ids inside the comparator (`CSeq_id` with `fParse_AnyRaw | fParse_ValidLocal`),
+  returns `false` whenever `CSeq_id::Match` succeeds, and falls back to raw byte order otherwise.
+  Because `CSeq_id::Match` is not transitive (for example, `NP_000103` matches both `NP_000103.1`
+  and `NP_000103.2`, while `NP_000103.1` and `NP_000103.2` do not match; similarly `LOC7` and
+  `loc7` bracket unrelated ids in ASCII order), `s_CompareSeqId` is not a strict weak ordering.
+  NCBI's `std::sort` therefore invokes undefined ordering behaviour governed by its C++ library's
+  sort steps, which changes which spelling `std::set_intersection` (`:615`) or
+  `std::set_difference` (`:626`) keeps for case-sensitive LMDB `AccessionsToOids` (observed
+  against NCBI BLAST+ 2.17.0 on database `g` with `NP_000103.2` / `NP_000103` / `NP_000103.1`
+  against `-seqidlist NP_000103` or `NP_000103.1`: NCBI matches `NP_000103.1`, whereas another
+  sort leaves `NP_000103.2` or nothing). For the same reason, when a list of two or more distinct
+  entries contains unparseable ids with different exception messages (observed against NCBI BLAST+
+  2.17.0 on `sp||` / `tr||` / `NP_000103.1`, where `libstdc++` compares entry 2 before entry 1 and
+  throws `tr||`'s `release unreviewed` instead of `sp||`'s `release reviewed`, and on a 0-entry
+  `.bsl` with spaces in its date whose header splits into `Malformatted ID ` and
+  `Malformatted ID PM`) or a warning-posting id alongside an unparseable id, which exception or
+  warning NCBI prints depends on the C++ library's sort steps. Copying a C++ library's sort
+  implementation is barred by `AGENTS.md` rule 4. LOSAT parses all unique entries of each sorted
+  list up front (`seqdb::alias::validate_compare_seqids`) and, in order: (1) refuses if any entry
+  posts a Seq-id warning, (2) refuses if unparseable entries raise two or more distinct exception
+  texts, (3) raises NCBI's `CSeqIdException` when all unparseable entries raise the same exception
+  text, and (4) refuses (exit status 1) if any two distinct spellings match under `CSeq_id::Match`;
+  lists without such pairs have `s_CompareSeqId` equal to raw bytewise `<` and sort identically in
+  every sort. A search `-negative_seqidlist` is sorted by raw `<` in NCBI (`seqdboidlist.cpp:597`),
+  so equivalent pairs inside `-negative_seqidlist` alone are not refused (equivalent pairs inside
+  the alias `SEQIDLIST` remain refused, since `:611` still sorts it with `s_CompareSeqId`), and an
+  alias `SEQIDLIST` without a search seqid list is not sorted and is not refused. Fixture rows
+  `db.il.bp.v5.sq.amb*.rej.6`, `db.il.bp.v5.sq.uamb.rej.6`, `db.il.bp.v5.sq.bad*.rej.6`,
+  `db.il.bp.v5.sqbe.sl.rej.6` (refused), `db.il.bp.v5.sq.slunp.6`, `db.il.bp.v5.sqbe1.sl.6`,
+  `db.il.bp.v5.sq.uns.*`, `db.il.bp.v5.sq.amb1.plain.6`, and `db.il.bp.v5.sq.nslamb.6` of
+  `LOSAT/tests/db_search_manifest/blastp.il.tsv`; unit test
+  `v5_rejects_non_strict_weak_equivalent_seqid_pairs` in `LOSAT/src/seqdb/alias_tests.rs`.
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 
@@ -4546,7 +4593,7 @@ hits into the list that NCBI frees.
     each LOSAT run gave NCBI's output.
 
 31. **`blastdbcheck` alias count checks and `-ends`/`-stride` OID arithmetic past signed 32-bit or
-    64-bit overflow (Owner 2026-11-25 17:54 JST, Q-D2b-OV=A, version 1.109).** NCBI BLAST+ 2.17.0
+    64-bit overflow (Owner 2026-11-25 17:54 JST, Q-D2b-OV=A, version 1.110).** NCBI BLAST+ 2.17.0
     computes `blastdbcheck`'s alias-file count guards (`FIRST_OID`, `LAST_OID`, `MAXOID`, `NSEQ`,
     `LENGTH`, `OIDLIST` combinations in `blastdbcheck.cpp:782-805`) and `-ends`/`-stride` OID bounds
     (`blastdbcheck.cpp:666-682`, `590-605`) in signed 32-bit `int` and 64-bit `Int8`, where

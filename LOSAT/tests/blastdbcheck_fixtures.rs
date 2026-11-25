@@ -37,9 +37,8 @@ const LOSAT_REFUSES: [&str; 8] = [
 ];
 
 /// Rows whose alias files hold keys that LOSAT's database reader refuses until line RG-D reads
-/// them: `MEMB_BIT` (D1d) and `TAXIDLIST` over a version 5 database (D1c-2,
-/// `seqdb::alias::refuse_v5_lists`); `-dir .` of the alias rows meets both.
-const AWAITING_READER: [&str; 4] = ["a_membx", "a_taxmiss", "a_dir", "a_dir_v1"];
+/// them: `MEMB_BIT` (D1d); `-dir .` of the alias rows meets `membx.pal`.
+const AWAITING_READER: [&str; 3] = ["a_membx", "a_dir", "a_dir_v1"];
 
 /// Rows covered by approved exception `Q-D2b-OV=A` (`PD-LOSAT-NCBI-DEFECTS`, Owner decision
 /// 2026-11-25 17:54 JST): NCBI's 32/64-bit signed integer arithmetic overflows and wraps to produce

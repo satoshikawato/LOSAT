@@ -91,7 +91,7 @@ line (the Owner, 2026-11-21).
 `LOSAT_REFUSES` and `AWAITING_READER` in `tests/blastdbcheck_fixtures.rs` name rows where the test expects LOSAT's
 refusal (exit status 1, `Error: ` ... `not supported by LOSAT`) instead of NCBI's bytes: NCBI crashes or never ends
 (`d_p4_psq_zero`, `d_p5_psq_zero`, `c_rps0`, `d_p4_psd_cut`, `r_garbage`, `r_garbage2`, `stride0`, `strideneg`), or
-alias keys that LOSAT's reader does not read yet (`MEMB_BIT`, `TAXIDLIST` over version 5).
+alias keys that LOSAT's reader does not read yet (`MEMB_BIT`).
 `APPROVED_WIDENED_OVERFLOW` (`a_ov1`, `a_ov2`, `ends_intmin`) names rows covered by approved exception 31 of
 `PD-LOSAT-NCBI-DEFECTS` (`Q-D2b-OV=A`), where LOSAT widens signed arithmetic and avoids NCBI's signed overflow.
 NCBI's frozen result stays beside every row for provenance.

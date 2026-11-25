@@ -51,6 +51,8 @@ pub(crate) struct BlastnXml<'a> {
     pub taxdb_notes: crate::algorithm::common::database::TaxdbNotes,
     /// The letters of the subjects, which the rows read.
     pub letters: SubjectLetters<'a>,
+    /// Whether the search is ungapped (`-ungapped`, Dense-diag Seq-aligns).
+    pub ungapped: bool,
     /// Whether the document ends with this call.
     pub epilog: bool,
     /// Every structured format of the call is XML2 or JSON (outfmt 5, which writes every report,
@@ -178,6 +180,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                     }
                 })?;
                 sink.hit(&hit, |hsps| {
+                    let q_offset = xml.query_records.record(q_idx).map_or(0, |r| r.offset);
                     for hsp in lists[range].iter().flat_map(|hsp_list| &hsp_list.hsps) {
                         let identities = read_num_ident(hsp.num_ident as i64, None);
                         if hsps.unaligned([XmlHsp::unaligned(
@@ -187,6 +190,16 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                             identities,
                         )])? {
                             continue;
+                        }
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:249-257
+                        // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:197-199
+                        // An alignment whose query row starts below 0 in record coordinates becomes
+                        // an all-gap row 0 in the Dense-seg, so `GetSeqStart` throws `Row is empty`.
+                        if hsp.starts_left_of_record(q_offset, xml.ungapped) {
+                            return Err(crate::report::blast_xml::CaughtException(
+                                super::left_of_query::dense_seg_empty_row_start(),
+                            )
+                            .into());
                         }
                         xml_rows_into(
                             hsp,

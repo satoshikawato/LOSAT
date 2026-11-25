@@ -523,7 +523,11 @@ fn stat_on_a_closed_pipe_stops_at_once() {
         closed_args.extend(["-output", "idx", "-stat", "/dev/stdout"]);
         let out = makembindex(&bdir.0, &closed_args, closed_pipe());
         assert_eq!(out.status.code(), Some(0), "nmer={first_nmer}");
-        assert_eq!(stderr_text(&out), "creating idx.00.idx...");
+        assert_eq!(
+            stderr_text(&out),
+            "creating idx.00.idx...",
+            "nmer={first_nmer}"
+        );
         let part_bytes = fs::read(bdir.0.join("idx.00.idx")).unwrap();
         assert_eq!(
             part_bytes.len() as u64,

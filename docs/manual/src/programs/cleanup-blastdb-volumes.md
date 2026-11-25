@@ -33,5 +33,6 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 ## Differences from NCBI BLAST+
 
 - **`-version`**: prints `cleanup-blastdb-volumes.py LOSAT 0.2.0` where NCBI's script prints `cleanup-blastdb-volumes.py 1.0`.
-- **Per-volume file order**: NCBI's script relies on Python's `glob.glob`, which emits `.p??`/`.n??` files within a volume in filesystem directory order before `.tar.gz.md5`. LOSAT sorts the `.p??`/`.n??` matches lexicographically per volume before `.tar.gz.md5`, so the output order is deterministic across operating systems and filesystems. The set of files removed and kept is identical.
+- **Python version**: LOSAT matches NCBI BLAST+ 2.17.0's `cleanup-blastdb-volumes.py` running under Python 3.13 (including `argparse` wording and terminal-width wrapping). Under Python 3.12, `argparse` quotes invalid `-dbtype` choices (`(choose from 'prot', 'nucl')`), whereas Python 3.13 and LOSAT print `(choose from prot, nucl)`.
 - **Not a C++ Toolkit application**: like NCBI's `cleanup-blastdb-volumes.py`, this subcommand uses Python `argparse`-style options (exit status `2` on argument errors) and does not take NCBI C++ Toolkit flags such as `-logfile`, `-conffile`, `-dryrun`, `-xmlhelp`, or `-version-full`.
+- **Error inputs**: inputs where NCBI's Python script exits with a Python traceback (status `1`) are listed in [What LOSAT refuses](../refusals.md#cleanup-blastdb-volumespy).

@@ -58,3 +58,9 @@ A16	-	.	--help=1
 A17	-	.	-h=1
 A18	-	.	-dbt prot -db in/quoted -dr -verb
 A19	-	.	-db in/p5 -dbtype nucl -dbtype prot -dry-run
+W01	COLUMNS=40	.	-h
+W02	COLUMNS=60	.	-h
+W03	COLUMNS=120	.	-h
+W04	COLUMNS=200	.	-h
+W05	COLUMNS=40	.	-db x
+W06	COLUMNS=200	.	-db x

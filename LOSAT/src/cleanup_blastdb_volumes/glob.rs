@@ -1,16 +1,17 @@
 //! Pure-Rust byte-path glob matcher reproducing Python's `glob.glob` behavior for
 //! `cleanup-blastdb-volumes.py` (`{db}.*.{ext}in`, `{vol}.p??`, `{vol}.tar.gz.md5`).
 //!
-//! Results are sorted lexicographically by byte path so that volume and file output order is
-//! deterministic across operating systems and filesystems.
+//! `glob` preserves `std::fs::read_dir` order (matching Python `glob.glob`), while `glob_sorted`
+//! sorts using Python's `surrogateescape` code-point order (invalid Unix byte `b` mapped to
+//! `0xDC00 + b`) for the outer `sorted(glob(...))` loop.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py:126,132-133
 
 use crate::utils::os_bytes::{os_str_bytes, path_of_bytes};
 
-/// Returns whether `b` is a path separator on the host OS.
-fn is_sep(b: u8) -> bool {
-    b == b'/' || (cfg!(windows) && b == b'\\')
+/// Returns whether `b` is a path separator for the given OS mode.
+fn is_sep_os(b: u8, windows: bool) -> bool {
+    b == b'/' || (windows && b == b'\\')
 }
 
 /// Returns whether `pattern` contains any glob metacharacter (`*`, `?`, `[`).
@@ -29,8 +30,8 @@ fn is_dir(path: &[u8]) -> bool {
     !path.is_empty() && std::fs::metadata(path_of_bytes(path)).is_ok_and(|m| m.is_dir())
 }
 
-/// Joins a directory prefix (with its original separator, if any) and a child component.
-fn join_with_sep(dir: &[u8], sep: Option<u8>, name: &[u8]) -> Vec<u8> {
+/// Joins a directory prefix (with its separator, if any) and a child component.
+pub(crate) fn join_with_sep(dir: &[u8], sep: Option<u8>, name: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(dir.len() + usize::from(sep.is_some()) + name.len());
     out.extend_from_slice(dir);
     if let Some(s) = sep {
@@ -40,22 +41,42 @@ fn join_with_sep(dir: &[u8], sep: Option<u8>, name: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Returns the length of a Windows drive prefix (`C:`), or 0 otherwise.
-fn drive_prefix_len(path: &[u8]) -> usize {
-    if cfg!(windows) && path.len() >= 2 && path[0].is_ascii_alphabetic() && path[1] == b':' {
-        2
-    } else {
-        0
+/// Returns the length of a Windows drive (`C:`) or UNC (`\\server\share`) prefix, or 0 otherwise.
+fn windows_drive_or_unc_len(path: &[u8]) -> usize {
+    if path.len() >= 2 && path[0].is_ascii_alphabetic() && path[1] == b':' {
+        return 2;
     }
+    if path.len() >= 2
+        && is_sep_os(path[0], true)
+        && is_sep_os(path[1], true)
+        && !path.get(2).is_some_and(|&b| is_sep_os(b, true))
+    {
+        let rest = &path[2..];
+        if let Some(s1) = rest.iter().position(|&b| is_sep_os(b, true)) {
+            let after_host = &rest[s1 + 1..];
+            if !after_host.is_empty() && !is_sep_os(after_host[0], true) {
+                let s2 = after_host
+                    .iter()
+                    .position(|&b| is_sep_os(b, true))
+                    .unwrap_or(after_host.len());
+                return 2 + s1 + 1 + s2;
+            }
+        }
+    }
+    0
 }
 
-/// Splits `pattern` into `(dir_part, separator, base_part)` at the last separator following
-/// Python's `os.path.split` (collapsing redundant trailing separators on non-root directory
-/// prefixes, while keeping root/drive-root prefixes intact).
-fn split_dir_base(pattern: &[u8]) -> (&[u8], Option<u8>, &[u8]) {
-    let drive = drive_prefix_len(pattern);
+/// Splits `pattern` into `(dir_part, join_separator, base_part)` matching Python's `os.path.split`
+/// + `os.path.join` (`posixpath` on Unix, `ntpath` on Windows: Windows joins non-root prefixes
+/// with `\` and collapses multiple root separators after a drive/UNC prefix to one).
+pub(crate) fn split_dir_base_os(pattern: &[u8], windows: bool) -> (&[u8], Option<u8>, &[u8]) {
+    let drive = if windows {
+        windows_drive_or_unc_len(pattern)
+    } else {
+        0
+    };
     let rest = &pattern[drive..];
-    let Some(rel_pos) = rest.iter().rposition(|&b| is_sep(b)) else {
+    let Some(rel_pos) = rest.iter().rposition(|&b| is_sep_os(b, windows)) else {
         if drive > 0 {
             return (&pattern[..drive], None, rest);
         }
@@ -63,20 +84,33 @@ fn split_dir_base(pattern: &[u8]) -> (&[u8], Option<u8>, &[u8]) {
     };
     let pos = drive + rel_pos;
     let after_drive = &pattern[drive..=pos];
-    if after_drive.iter().all(|&b| is_sep(b)) {
-        // Root prefix such as `/`, `//`, `C:\`, `C:\\`: keep intact with no extra separator.
-        (&pattern[..=pos], None, &pattern[pos + 1..])
-    } else {
-        let mut dir_end = pos;
-        while dir_end > drive && is_sep(pattern[dir_end - 1]) {
-            dir_end -= 1;
+    if after_drive.iter().all(|&b| is_sep_os(b, windows)) {
+        if windows {
+            // `ntpath.split`: keep the drive/UNC prefix plus its single root separator (e.g.
+            // `C://p5` -> `("C:/", "p5")`, `/p5` -> `("/", "p5")`, `\\srv\sh\p5` -> `("\\\\srv\\sh\\", "p5")`),
+            // except a bare `//foo` (no share) which `ntpath.split` treats as UNC root with empty
+            // tail.
+            if drive == 0
+                && after_drive.len() >= 2
+                && pattern[pos + 1..].iter().all(|&b| !is_sep_os(b, true))
+            {
+                return (pattern, Some(b'\\'), b"");
+            }
+            return (&pattern[..=drive], None, &pattern[pos + 1..]);
         }
-        (&pattern[..dir_end], Some(pattern[pos]), &pattern[pos + 1..])
+        // `posixpath.split`: root prefix such as `/`, `//`, `///` stays intact with no extra `/`.
+        return (&pattern[..=pos], None, &pattern[pos + 1..]);
     }
+    let mut dir_end = pos;
+    while dir_end > drive && is_sep_os(pattern[dir_end - 1], windows) {
+        dir_end -= 1;
+    }
+    let join_sep = if windows { b'\\' } else { b'/' };
+    (&pattern[..dir_end], Some(join_sep), &pattern[pos + 1..])
 }
 
 /// One element of a filename or glob pattern: a decoded Unicode scalar value, or a raw non-UTF-8
-/// byte on Unix.
+/// byte on Unix (mapped to Python's `surrogateescape` range `U+DC80`–`U+DCFF`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Atom {
     Char(char),
@@ -84,41 +118,40 @@ enum Atom {
 }
 
 impl Atom {
-    /// Normalizes ASCII case on Windows (matching Python `fnmatch` / `os.path.normcase`).
-    fn norm(self) -> Self {
-        if cfg!(windows) {
-            match self {
-                Self::Char(c) => Self::Char(c.to_ascii_lowercase()),
-                Self::Byte(b) => Self::Byte(b.to_ascii_lowercase()),
-            }
-        } else {
-            self
-        }
-    }
-
+    /// Returns Python's `ord()` code point for `self`, placing invalid Unix bytes `b` in the
+    /// `surrogateescape` range `0xDC00 + b` (`U+DC80`–`U+DCFF`).
     fn as_u32(self) -> u32 {
         match self {
             Self::Char(c) => c as u32,
-            Self::Byte(b) => 0x0011_0000 + u32::from(b),
+            Self::Byte(b) => 0xDC00 + u32::from(b),
         }
     }
 }
 
 /// Decodes `bytes` into `Atom`s (valid UTF-8 scalars, with raw `Atom::Byte` for invalid bytes).
-fn to_atoms(bytes: &[u8]) -> Vec<Atom> {
+/// When `fold_case` is true (Windows), valid UTF-8 chunks are Unicode-lowercased via
+/// `str::to_lowercase`, matching Python's `ntpath.normcase`.
+fn to_atoms(bytes: &[u8], fold_case: bool) -> Vec<Atom> {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
+    let push_valid = |s: &str, out: &mut Vec<Atom>| {
+        if fold_case {
+            out.extend(s.to_lowercase().chars().map(Atom::Char));
+        } else {
+            out.extend(s.chars().map(Atom::Char));
+        }
+    };
     while i < bytes.len() {
         match std::str::from_utf8(&bytes[i..]) {
             Ok(valid) => {
-                out.extend(valid.chars().map(Atom::Char));
+                push_valid(valid, &mut out);
                 break;
             }
             Err(err) => {
                 let good = err.valid_up_to();
                 if good > 0 {
                     let prefix = std::str::from_utf8(&bytes[i..i + good]).expect("valid prefix");
-                    out.extend(prefix.chars().map(Atom::Char));
+                    push_valid(prefix, &mut out);
                     i += good;
                 }
                 let bad_len = err.error_len().unwrap_or(1);
@@ -153,20 +186,19 @@ fn match_bracket(pat: &[Atom], p: usize, ch: Atom) -> Option<(bool, usize)> {
     }
     let start = p + 1 + usize::from(negated);
     let body = &pat[start..j];
-    let target = ch.norm();
+    let val = ch.as_u32();
     let mut found = false;
     let mut k = 0;
     while k < body.len() {
         if k + 2 < body.len() && body[k + 1] == Atom::Char('-') {
-            let lo = body[k].norm().as_u32();
-            let hi = body[k + 2].norm().as_u32();
-            let val = target.as_u32();
+            let lo = body[k].as_u32();
+            let hi = body[k + 2].as_u32();
             if lo <= val && val <= hi {
                 found = true;
             }
             k += 3;
         } else {
-            if body[k].norm() == target {
+            if body[k] == ch {
                 found = true;
             }
             k += 1;
@@ -175,10 +207,11 @@ fn match_bracket(pat: &[Atom], p: usize, ch: Atom) -> Option<(bool, usize)> {
     Some((if negated { !found } else { found }, j + 1))
 }
 
-/// Matches a single path component `name` against glob `pattern` (Python `fnmatch` semantics).
-pub(crate) fn fnmatch_bytes(pattern: &[u8], name: &[u8]) -> bool {
-    let pat = to_atoms(pattern);
-    let txt = to_atoms(name);
+/// Matches a single path component `name` against glob `pattern` with explicit case-folding mode
+/// (`true` on Windows for `ntpath.normcase`, `false` on Unix).
+pub(crate) fn fnmatch_bytes_case(pattern: &[u8], name: &[u8], fold_case: bool) -> bool {
+    let pat = to_atoms(pattern, fold_case);
+    let txt = to_atoms(name, fold_case);
     let mut memo = vec![None; (pat.len() + 1) * (txt.len() + 1)];
     fn dp(pat: &[Atom], txt: &[Atom], p: usize, t: usize, memo: &mut [Option<bool>]) -> bool {
         let key = p * (txt.len() + 1) + t;
@@ -199,7 +232,7 @@ pub(crate) fn fnmatch_bytes(pattern: &[u8], name: &[u8]) -> bool {
         {
             matched && dp(pat, txt, next_p, t + 1, memo)
         } else {
-            pat[p].norm() == txt[t].norm() && dp(pat, txt, p + 1, t + 1, memo)
+            pat[p] == txt[t] && dp(pat, txt, p + 1, t + 1, memo)
         };
         memo[key] = Some(ans);
         ans
@@ -207,14 +240,31 @@ pub(crate) fn fnmatch_bytes(pattern: &[u8], name: &[u8]) -> bool {
     dp(&pat, &txt, 0, 0, &mut memo)
 }
 
-/// Expands `pattern` as Python's `glob.glob(pattern)` does and sorts the matching byte paths.
+/// Matches a single path component `name` against glob `pattern` using host OS case sensitivity.
+pub(crate) fn fnmatch_bytes(pattern: &[u8], name: &[u8]) -> bool {
+    fnmatch_bytes_case(pattern, name, cfg!(windows))
+}
+
+/// Compares two raw path byte slices in Python's `surrogateescape` string order (`U+DC80`–`U+DCFF`
+/// for invalid UTF-8 bytes).
+pub(crate) fn cmp_py_path(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
+    to_atoms(a, false)
+        .into_iter()
+        .map(Atom::as_u32)
+        .cmp(to_atoms(b, false).into_iter().map(Atom::as_u32))
+}
+
+/// Expands `pattern` as Python's `sorted(glob.glob(pattern))` does (sorted in Python's
+/// `surrogateescape` code-point order).
 pub(crate) fn glob_sorted(pattern: &[u8]) -> Vec<Vec<u8>> {
-    let mut matches = glob_raw(pattern);
-    matches.sort();
+    let mut matches = glob(pattern);
+    matches.sort_by(|a, b| cmp_py_path(a, b));
     matches
 }
 
-fn glob_raw(pattern: &[u8]) -> Vec<Vec<u8>> {
+/// Expands `pattern` as Python's `glob.glob(pattern)` does, preserving filesystem directory
+/// (`read_dir`) iteration order.
+pub(crate) fn glob(pattern: &[u8]) -> Vec<Vec<u8>> {
     if pattern.is_empty() {
         return Vec::new();
     }
@@ -226,14 +276,11 @@ fn glob_raw(pattern: &[u8]) -> Vec<Vec<u8>> {
         };
     }
 
-    let (dir_part, sep, base_part) = split_dir_base(pattern);
+    let (dir_part, sep, base_part) = split_dir_base_os(pattern, cfg!(windows));
     let dirs: Vec<Vec<u8>> = if dir_part.is_empty() {
         vec![Vec::new()]
     } else if has_magic(dir_part) {
-        glob_raw(dir_part)
-            .into_iter()
-            .filter(|d| is_dir(d))
-            .collect()
+        glob(dir_part).into_iter().filter(|d| is_dir(d)).collect()
     } else {
         vec![dir_part.to_vec()]
     };

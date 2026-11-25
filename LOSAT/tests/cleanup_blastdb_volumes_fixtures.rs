@@ -1,14 +1,15 @@
-//! `losat cleanup-blastdb-volumes.py` against NCBI BLAST+ 2.17.0 `cleanup-blastdb-volumes.py`:
-//! each row of `tests/fixtures/cleanup_blastdb_volumes/cases.tsv` runs in a fresh copy of `in/`
-//! and checks stdout, stderr, exit status, and exact file deletions against the frozen official
-//! NCBI oracle (`ncbi/<row>.{out,err,rc,files}`). NCBI is not run here.
+//! `losat cleanup-blastdb-volumes.py` against NCBI BLAST+ 2.17.0 `cleanup-blastdb-volumes.py`
+//! (run under Python 3.13): each row of `tests/fixtures/cleanup_blastdb_volumes/cases.tsv` runs in
+//! a fresh copy of `in/` and checks stdout, stderr, exit status, and exact file deletions against
+//! the frozen official NCBI oracle (`ncbi/<row>.{out,err,rc,files}`). NCBI is not run here.
 //!
-//! Within each extra volume, NCBI's Python `glob.glob` visits `.p??`/`.n??` files in filesystem
-//! directory order before `.tar.gz.md5`, while LOSAT sorts `.p??`/`.n??` lexicographically per
-//! volume before `.tar.gz.md5`. The comparison below checks both that LOSAT's output is strictly
-//! sorted per volume (with `.tar.gz.md5` last) and that every volume's lines equal NCBI's frozen
-//! lines as a multiset, while volume order, non-verbose `-dry-run`, `-h`, stderr, exit code, and
-//! removed/kept files match byte for byte.
+//! Within each extra volume, both NCBI's Python `glob.glob` (`os.scandir`) and LOSAT visit
+//! `.p??`/`.n??` files in filesystem `read_dir` order before `.tar.gz.md5`. Because each test run
+//! copies `in/` into a fresh directory whose `read_dir` order can differ from the frozen machine's,
+//! the comparison checks both that each volume's lines equal NCBI's frozen lines as a multiset (with
+//! `.tar.gz.md5` last) and that their order strictly matches the test copy's `fs::read_dir` order,
+//! while volume order, non-verbose `-dry-run`, `-h`, `COLUMNS`, stderr, exit code, and removed/kept
+//! files match byte for byte.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -100,6 +101,35 @@ fn listing(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     found
 }
 
+/// Records `fs::read_dir` entry index per `(directory_rel, file_name)` for every directory in
+/// `root`, so the test can verify that per-volume file lines follow the scratch copy's `read_dir`
+/// order.
+fn readdir_positions(root: &Path) -> BTreeMap<String, BTreeMap<String, usize>> {
+    let mut out = BTreeMap::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(at) = stack.pop() {
+        let rel_dir = at
+            .strip_prefix(root)
+            .unwrap()
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        let mut order = BTreeMap::new();
+        for (idx, entry) in fs::read_dir(&at).unwrap().enumerate() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                order.insert(entry.file_name().to_string_lossy().into_owned(), idx);
+            }
+        }
+        out.insert(rel_dir, order);
+    }
+    out
+}
+
 fn normalize_run_dir(dir: &Path) -> String {
     let text = dir.to_string_lossy();
     #[cfg(windows)]
@@ -141,6 +171,7 @@ fn base_command(cwd: &Path, empty_home: &Path) -> Command {
             || text == "USERPROFILE"
             || text == "HOMEDRIVE"
             || text == "HOMEPATH"
+            || text == "COLUMNS"
         {
             cmd.env_remove(&name);
         }
@@ -157,14 +188,40 @@ fn base_command(cwd: &Path, empty_home: &Path) -> Command {
     cmd
 }
 
+/// Resolves a normalized stdout file path (`<RUN>/in/envdb/edb.01.pin` or `in/p5.09.pin`) into
+/// `(rel_dir_under_run, file_name)` to look up its `fs::read_dir` position.
+fn resolve_rel_dir_and_name(raw_path: &str, cwd: &str) -> (String, String) {
+    let stripped = raw_path
+        .strip_prefix("<RUN>/")
+        .or_else(|| raw_path.strip_prefix("./"))
+        .unwrap_or(raw_path);
+    let combined = if raw_path.starts_with("<RUN>/") || cwd == "." {
+        stripped.to_string()
+    } else {
+        format!("{cwd}/{stripped}")
+    };
+    let mut parts: Vec<&str> = combined
+        .split('/')
+        .filter(|p| !p.is_empty() && *p != ".")
+        .collect();
+    let file = parts.pop().unwrap_or_default().to_string();
+    (parts.join("/"), file)
+}
+
 /// Groups consecutive per-file `Will remove <f>` / `Removed <f>` lines belonging to the same
 /// volume stem, keeping volume headers (`Will remove extra volume ...`) and volume order intact.
-/// Returns `(volume_groups, losat_is_sorted_with_md5_last)`.
-fn canonicalize_stdout(bytes: &[u8]) -> (Vec<String>, bool) {
+/// Returns `(canonical_multiset_lines, readdir_order_ok)`. When `positions` is `Some`, checks that
+/// `.p??`/`.n??` lines within each volume appear in the exact `fs::read_dir` order of the test
+/// copy, with `.tar.gz.md5` always last.
+fn canonicalize_stdout(
+    bytes: &[u8],
+    cwd: &str,
+    positions: Option<&BTreeMap<String, BTreeMap<String, usize>>>,
+) -> (Vec<String>, bool) {
     let raw = String::from_utf8_lossy(bytes);
     let lines: Vec<&str> = raw.lines().collect();
     let mut out = Vec::new();
-    let mut sorted_ok = true;
+    let mut order_ok = true;
     let mut i = 0;
     while i < lines.len() {
         let line = lines[i];
@@ -200,30 +257,44 @@ fn canonicalize_stdout(bytes: &[u8]) -> (Vec<String>, bool) {
             group.push(lines[i].to_string());
             i += 1;
         }
-        // Check that non-md5 lines are sorted and md5 (if present) comes last.
         let mut non_md5 = Vec::new();
         let mut md5 = Vec::new();
         let mut seen_md5 = false;
+        let mut last_pos: Option<usize> = None;
         for item in &group {
             if item.ends_with(".tar.gz.md5") {
                 seen_md5 = true;
                 md5.push(item.clone());
             } else {
                 if seen_md5 {
-                    sorted_ok = false;
+                    order_ok = false;
+                }
+                if let Some(pos_map) = positions {
+                    let (rel_dir, file_name) = resolve_rel_dir_and_name(&item[prefix.len()..], cwd);
+                    match pos_map
+                        .get(&rel_dir)
+                        .and_then(|dir_map| dir_map.get(&file_name))
+                    {
+                        Some(&pos) => {
+                            if let Some(prev) = last_pos {
+                                if pos <= prev {
+                                    order_ok = false;
+                                }
+                            }
+                            last_pos = Some(pos);
+                        }
+                        None => order_ok = false,
+                    }
                 }
                 non_md5.push(item.clone());
             }
         }
-        let mut expected_non_md5 = non_md5.clone();
+        let mut expected_non_md5 = non_md5;
         expected_non_md5.sort();
-        if non_md5 != expected_non_md5 {
-            sorted_ok = false;
-        }
         expected_non_md5.extend(md5);
         out.extend(expected_non_md5);
     }
-    (out, sorted_ok)
+    (out, order_ok)
 }
 
 #[test]
@@ -255,6 +326,7 @@ fn cleanup_blastdb_volumes_matches_frozen_ncbi_oracle() {
             }
         }
         let before = listing(&dir);
+        let positions = readdir_positions(&dir);
         let empty_home = dir.join("_empty_home");
         let mut cmd = base_command(&dir.join(&case.cwd), &empty_home);
         for (k, v) in &case.env {
@@ -299,20 +371,20 @@ fn cleanup_blastdb_volumes_matches_frozen_ncbi_oracle() {
             .unwrap();
         let want_files = fs::read_to_string(ncbi_file("files")).unwrap();
 
-        let (got_canon, got_sorted) = canonicalize_stdout(&got_out);
-        let (want_canon, _) = canonicalize_stdout(&want_out);
+        let (got_canon, readdir_ok) = canonicalize_stdout(&got_out, &case.cwd, Some(&positions));
+        let (want_canon, _) = canonicalize_stdout(&want_out, &case.cwd, None);
 
-        let stdout_ok = got_sorted && got_canon == want_canon;
+        let stdout_ok = readdir_ok && got_canon == want_canon;
         if !stdout_ok || got_err != want_err || got_rc != want_rc || files != want_files {
             eprintln!(
-                "--- {}: rc got={} want={} sorted_ok={}\n\
+                "--- {}: rc got={} want={} readdir_ok={}\n\
                  got stdout:  {:?}\nwant stdout: {:?}\n\
                  got stderr:  {:?}\nwant stderr: {:?}\n\
                  got files:\n{}want files:\n{}",
                 case.name,
                 got_rc,
                 want_rc,
-                got_sorted,
+                readdir_ok,
                 String::from_utf8_lossy(&got_out),
                 String::from_utf8_lossy(&want_out),
                 String::from_utf8_lossy(&got_err),
@@ -358,15 +430,21 @@ fn broken_symlinks_in_orphan_volume_are_removed() {
     std::os::unix::fs::symlink("/nonexistent_target", dir.join("db.01.psq")).unwrap();
     std::os::unix::fs::symlink("/nonexistent_target", dir.join("db.01.tar.gz.md5")).unwrap();
 
+    let mut want = String::new();
+    for entry in fs::read_dir(&dir).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == "db.01.pin" || name == "db.01.psq" {
+            want.push_str(&format!("Removed {name}\n"));
+        }
+    }
+    want.push_str("Removed db.01.tar.gz.md5\n");
+
     let out = base_command(&dir, &dir)
         .args(["-db", "db", "-dbtype", "prot"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(0), "broken symlinks: {out:?}");
-    assert_eq!(
-        String::from_utf8(out.stdout).unwrap(),
-        "Removed db.01.pin\nRemoved db.01.psq\nRemoved db.01.tar.gz.md5\n"
-    );
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), want);
     assert!(out.stderr.is_empty());
     assert!(fs::symlink_metadata(dir.join("db.01.psq")).is_err());
     assert!(fs::symlink_metadata(dir.join("db.01.tar.gz.md5")).is_err());
@@ -376,7 +454,7 @@ fn broken_symlinks_in_orphan_volume_are_removed() {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 #[test]
-fn non_utf8_directory_path_works_with_raw_bytes() {
+fn non_utf8_directory_path_and_volume_sort_match_python() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
@@ -386,19 +464,140 @@ fn non_utf8_directory_path_works_with_raw_bytes() {
     fs::create_dir_all(&sub).unwrap();
     fs::write(sub.join("mydb.pal"), b"DBLIST mydb.00\n").unwrap();
     fs::write(sub.join("mydb.00.pin"), b"x").unwrap();
-    fs::write(sub.join("mydb.01.pin"), b"x").unwrap();
+    fs::write(
+        sub.join(OsString::from_vec(b"mydb.\x80.pin".to_vec())),
+        b"x",
+    )
+    .unwrap();
+    fs::write(sub.join("mydb.\u{00e9}.pin"), b"x").unwrap();
+    fs::write(sub.join("mydb.\u{1f600}.pin"), b"x").unwrap();
 
     let out = base_command(&dir, &dir)
         .arg("-db")
         .arg(OsString::from_vec(b"dir_\xff/mydb".to_vec()))
-        .args(["-dbtype", "prot", "-dry-run", "-verbose"])
+        .args(["-dbtype", "prot", "-dry-run"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(0), "non-utf8: {out:?}");
-    assert_eq!(
-        out.stdout,
-        b"Will remove extra volume dir_\xff/mydb.01\nWill remove dir_\xff/mydb.01.pin\n"
-    );
+    let mut expected = Vec::new();
+    expected.extend_from_slice(b"Will remove extra volume dir_\xff/mydb.\xc3\xa9\n");
+    expected.extend_from_slice(b"Will remove extra volume dir_\xff/mydb.\x80\n");
+    expected.extend_from_slice(b"Will remove extra volume dir_\xff/mydb.\xf0\x9f\x98\x80\n");
+    assert_eq!(out.stdout, expected);
     assert!(out.stderr.is_empty());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn closed_pipe_and_dev_full_match_python_buffering() {
+    let dir_small = scratch("full-small");
+    let _ = fs::remove_dir_all(&dir_small);
+    fs::create_dir_all(&dir_small).unwrap();
+    fs::write(dir_small.join("db.pal"), b"DBLIST db.01\n").unwrap();
+    for name in [
+        "db.01.pin",
+        "db.02.pin",
+        "db.02.phr",
+        "db.02.psq",
+        "db.03.pin",
+        "db.03.phr",
+        "db.03.psq",
+    ] {
+        fs::write(dir_small.join(name), b"").unwrap();
+    }
+    let dev_full = fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/full")
+        .unwrap();
+    let out = base_command(&dir_small, &dir_small)
+        .args(["-db", "db", "-dbtype", "prot"])
+        .stdout(Stdio::from(dev_full))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(120));
+    assert_eq!(
+        String::from_utf8(out.stderr).unwrap(),
+        "Exception ignored on flushing sys.stdout:\nOSError: [Errno 28] No space left on device\n"
+    );
+    assert_eq!(fs::read_dir(&dir_small).unwrap().count(), 2);
+    let _ = fs::remove_dir_all(&dir_small);
+
+    // `-h` and `-version` to `/dev/full` fail on exit flush with exit 120.
+    let dir_hv = scratch("full-hv");
+    let _ = fs::remove_dir_all(&dir_hv);
+    fs::create_dir_all(&dir_hv).unwrap();
+    for flag in ["-h", "-version"] {
+        let dev_full = fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/full")
+            .unwrap();
+        let out = base_command(&dir_hv, &dir_hv)
+            .arg(flag)
+            .stdout(Stdio::from(dev_full))
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(120), "{flag}");
+        assert_eq!(
+            String::from_utf8(out.stderr).unwrap(),
+            "Exception ignored on flushing sys.stdout:\nOSError: [Errno 28] No space left on device\n",
+            "{flag}"
+        );
+    }
+    let _ = fs::remove_dir_all(&dir_hv);
+
+    // Output exceeding 8 KiB stops mid-run at exact 8192-byte flush boundary (410th of 600 files).
+    let dir_large = scratch("full-large");
+    let _ = fs::remove_dir_all(&dir_large);
+    fs::create_dir_all(&dir_large).unwrap();
+    fs::write(dir_large.join("db.pal"), b"DBLIST db.0000\n").unwrap();
+    fs::write(dir_large.join("db.0000.pin"), b"").unwrap();
+    for v in 1..=200 {
+        for ext in ["pin", "p01", "p02"] {
+            fs::write(dir_large.join(format!("db.{v:04}.{ext}")), b"").unwrap();
+        }
+    }
+    let dev_full = fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/full")
+        .unwrap();
+    let out = base_command(&dir_large, &dir_large)
+        .args(["-db", "db", "-dbtype", "prot"])
+        .stdout(Stdio::from(dev_full))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("Error: failed to write output:"));
+    assert!(!stderr.contains("Exception ignored"));
+    // 2 kept (`db.pal`, `db.0000.pin`) + 600 - 410 = 192 remaining files (matches Python 3.13).
+    assert_eq!(fs::read_dir(&dir_large).unwrap().count(), 192);
+    let _ = fs::remove_dir_all(&dir_large);
+}
+
+#[cfg(unix)]
+#[test]
+fn removed_cwd_fails_when_config_fallback_runs() {
+    let dir = scratch("removed-cwd");
+    let _ = fs::remove_dir_all(&dir);
+    let gone = dir.join("gone");
+    fs::create_dir_all(&gone).unwrap();
+    let bin = env!("CARGO_BIN_EXE_losat");
+    let out = Command::new("/bin/sh")
+        .arg("-c")
+        .arg("cd \"$1\" && rmdir \"$1\" && exec \"$2\" cleanup-blastdb-volumes.py -db missing -dbtype prot")
+        .arg("sh")
+        .arg(&gone)
+        .arg(bin)
+        .env("HOME", &dir)
+        .env_remove("BLASTDB")
+        .env_remove("NCBI")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("cannot determine current working directory")
+    );
     let _ = fs::remove_dir_all(&dir);
 }

@@ -454,7 +454,17 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 ## cleanup-blastdb-volumes.py
 
-`cleanup-blastdb-volumes.py` runs every option of NCBI BLAST+ 2.17.0's `cleanup-blastdb-volumes.py` (`-db`, `-dbtype`, `-dry-run`, `-verbose`, `-version`, `-h`/`--help`). It is a port of NCBI's Python utility rather than an NCBI C++ Toolkit application, so it does not take C++ Toolkit flags (`-logfile`, `-conffile`, `-dryrun`, `-xmlhelp`, `-version-full`).
+`cleanup-blastdb-volumes.py` runs every option of NCBI BLAST+ 2.17.0's `cleanup-blastdb-volumes.py` (`-db`, `-dbtype`, `-dry-run`, `-verbose`, `-version`, `-h`/`--help`), matching NCBI's script running under Python 3.13. It is a port of NCBI's Python utility rather than an NCBI C++ Toolkit application, so it does not take C++ Toolkit flags (`-logfile`, `-conffile`, `-dryrun`, `-xmlhelp`, `-version-full`).
+
+For the inputs below, NCBI BLAST+ 2.17.0's Python script exits with a Python traceback and status `1`; LOSAT exits with the same status `1` and writes a concise `Error:` message instead of a traceback:
+
+| Input | What happens |
+| :--- | :--- |
+| An alias file (`.pal` or `.nal`) that cannot be opened or read, or contains invalid UTF-8 bytes | `Error: cannot read <path>: ...` or `Error: <path>: invalid UTF-8: ...` (exit status `1`). `DBLIST` lines in preceding 8 KiB chunks are processed first, as Python's text reader does; if buffered standard output also fails to flush on exit, LOSAT writes Python's `Exception ignored on flushing sys.stdout:` message and exits with status `120`. |
+| A `.ncbirc` or `ncbi.ini` file with invalid UTF-8 or a `ConfigParser` syntax, missing-section-header, duplicate-section, duplicate-option, or interpolation error | `Error: <path>: ...` (exit status `1`), where NCBI raises a Python `UnicodeDecodeError` or `configparser.Error` traceback. |
+| A matched volume file that cannot be unlinked (for example, a directory named `db.02.pxx` or a read-only directory) | `Error: cannot remove <path>: ...` (exit status `1`), where NCBI raises a Python `OSError` traceback. |
+| A removed or inaccessible working directory when the database is not found directly or through `BLASTDB` | `Error: cannot determine current working directory: ...` (exit status `1`), where NCBI fails in `os.getcwd()`. |
+| A standard output write failure once output reaches the 8 KiB block buffer (or at a newline on a terminal), such as a closed pipe or full disk after 8 KiB of output | `Error: failed to write output: ...` (exit status `1`), stopping after the same file removal as Python's `BrokenPipeError`/`OSError` traceback. Smaller outputs fail on exit flush with Python's `Exception ignored on flushing sys.stdout:` message and exit status `120`. |
 
 ## Programs LOSAT does not provide
 

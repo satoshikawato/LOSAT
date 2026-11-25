@@ -53,6 +53,144 @@ fn help_and_version_flags() {
 }
 
 #[test]
+fn resolve_columns_follows_python_terminal_size_precedence() {
+    assert_eq!(resolve_columns(None, None), 80);
+    assert_eq!(resolve_columns(Some(""), None), 80);
+    assert_eq!(resolve_columns(Some("abc"), Some(120)), 120);
+    assert_eq!(resolve_columns(Some("0"), Some(120)), 120);
+    assert_eq!(resolve_columns(Some("-5"), Some(120)), 120);
+    assert_eq!(resolve_columns(Some("40.5"), Some(120)), 120);
+    assert_eq!(resolve_columns(Some("  40  "), Some(120)), 40);
+    assert_eq!(resolve_columns(Some("+60"), Some(120)), 60);
+    assert_eq!(resolve_columns(Some("00050"), Some(120)), 50);
+    assert_eq!(
+        resolve_columns(Some("999999999999999999999"), None),
+        usize::MAX
+    );
+    assert_eq!(resolve_columns(None, Some(0)), 80);
+    assert_eq!(resolve_columns(None, Some(100)), 100);
+}
+
+#[test]
+fn help_and_usage_wrap_by_terminal_columns() {
+    // Default 80 columns.
+    assert_eq!(
+        usage_text(80),
+        "usage: cleanup-blastdb-volumes.py [-h] -db DB -dbtype {prot,nucl} [-dry-run]\n\
+         \x20                                 [-version] [-verbose]\n"
+    );
+    // 100 columns fits usage on a single line (98 chars <= 100 - 2).
+    assert_eq!(
+        usage_text(100),
+        "usage: cleanup-blastdb-volumes.py [-h] -db DB -dbtype {prot,nucl} [-dry-run] [-version] [-verbose]\n"
+    );
+    assert_eq!(usage_text(200), usage_text(100));
+    // 99 columns wraps the last token (98 chars > 99 - 2 = 97).
+    assert_eq!(
+        usage_text(99),
+        "usage: cleanup-blastdb-volumes.py [-h] -db DB -dbtype {prot,nucl} [-dry-run] [-version]\n\
+         \x20                                 [-verbose]\n"
+    );
+    // 45 columns puts usage options on the next line indented under "usage: " (7 spaces).
+    assert_eq!(
+        usage_text(45),
+        "usage: cleanup-blastdb-volumes.py\n\
+         \x20      [-h] -db DB -dbtype {prot,nucl}\n\
+         \x20      [-dry-run] [-version] [-verbose]\n"
+    );
+    // 46 columns keeps [-h] on the first line (indent 34).
+    assert_eq!(
+        usage_text(46),
+        "usage: cleanup-blastdb-volumes.py [-h]\n\
+         \x20                                 -db DB\n\
+         \x20                                 -dbtype {prot,nucl}\n\
+         \x20                                 [-dry-run]\n\
+         \x20                                 [-version]\n\
+         \x20                                 [-verbose]\n"
+    );
+    // 40 columns wraps usage and options column.
+    assert_eq!(
+        help_text_for_columns(40),
+        "usage: cleanup-blastdb-volumes.py\n\
+         \x20      [-h] -db DB -dbtype {prot,nucl}\n\
+         \x20      [-dry-run] [-version]\n\
+         \x20      [-verbose]\n\
+         \n\
+         Remove needless BLAST database\n\
+         volumes.\n\
+         \n\
+         options:\n\
+         \x20 -h, --help      show this help\n\
+         \x20                 message and exit\n\
+         \x20 -db DB          BLAST database name\n\
+         \x20 -dbtype {prot,nucl}\n\
+         \x20                 Molecule type\n\
+         \x20 -dry-run        Do not delete any\n\
+         \x20                 files, just list\n\
+         \x20                 them\n\
+         \x20 -version        show program's\n\
+         \x20                 version number and\n\
+         \x20                 exit\n\
+         \x20 -verbose        Increase output\n\
+         \x20                 verbosity\n"
+    );
+    // Extreme narrow width (COLUMNS=1): description/help minimum width is 11.
+    assert_eq!(
+        help_text_for_columns(1),
+        "usage: cleanup-blastdb-volumes.py\n\
+         \x20      [-h]\n\
+         \x20      -db DB\n\
+         \x20      -dbtype {prot,nucl}\n\
+         \x20      [-dry-run]\n\
+         \x20      [-version]\n\
+         \x20      [-verbose]\n\
+         \n\
+         Remove\n\
+         needless\n\
+         BLAST\n\
+         database\n\
+         volumes.\n\
+         \n\
+         options:\n\
+         \x20 -h, --help\n\
+         \x20   show this\n\
+         \x20   help\n\
+         \x20   message and\n\
+         \x20   exit\n\
+         \x20 -db DB\n\
+         \x20   BLAST\n\
+         \x20   database\n\
+         \x20   name\n\
+         \x20 -dbtype {prot,nucl}\n\
+         \x20   Molecule\n\
+         \x20   type\n\
+         \x20 -dry-run\n\
+         \x20   Do not\n\
+         \x20   delete any\n\
+         \x20   files, just\n\
+         \x20   list them\n\
+         \x20 -version\n\
+         \x20   show\n\
+         \x20   program's\n\
+         \x20   version\n\
+         \x20   number and\n\
+         \x20   exit\n\
+         \x20 -verbose\n\
+         \x20   Increase\n\
+         \x20   output\n\
+         \x20   verbosity\n"
+    );
+    // Error usage wraps with `columns` while the error message itself is unwrapped.
+    assert_eq!(
+        parse_with_columns(&os(&["-db", "x"]), 200),
+        ParseOutcome::Error(format!(
+            "{}{PROG}: error: the following arguments are required: -dbtype\n",
+            usage_text(200)
+        ))
+    );
+}
+
+#[test]
 fn valid_options_and_abbreviations() {
     assert_eq!(
         parse(&os(&["-db", "mydb", "-dbtype", "prot"])),
@@ -112,7 +250,8 @@ fn valid_options_and_abbreviations() {
 
 #[test]
 fn error_messages_match_argparse() {
-    let err = |msg: &str| ParseOutcome::Error(format!("{USAGE}{PROG}: error: {msg}\n"));
+    let usage = usage_text(DEFAULT_COLUMNS);
+    let err = |msg: &str| ParseOutcome::Error(format!("{usage}{PROG}: error: {msg}\n"));
 
     let need_both = err("the following arguments are required: -db, -dbtype");
     for words in [&[][..], &["--version"]] {

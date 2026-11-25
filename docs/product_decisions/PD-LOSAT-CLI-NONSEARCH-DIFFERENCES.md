@@ -73,11 +73,10 @@
   1.31 2026-11-24 (`losat makeblastdb`'s
   log in the scope and in exception 10; the Owner's choice of 2026-11-24, `Q-KD-1=A`, line RG
   item KD; numbered after line RG item T6a's 1.30, first 1.30);
-  1.32 2026-11-25 (`losat cleanup-blastdb-volumes.py` in the scope, in exception 10 for a closed
-  pipe on standard output, and in exception 14 for its `-version` line
-  `cleanup-blastdb-volumes.py LOSAT 0.2.0` where NCBI prints `1.0`, plus deterministic per-volume
-  lexicographic sorting of `.p??`/`.n??` before `.tar.gz.md5`; line RG item D2c, RG DECISIONS
-  D2c-1 to D2c-4; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
+  1.32 2026-11-25 (`losat cleanup-blastdb-volumes.py` in the scope and in exception 14 for its
+  `-version` line `cleanup-blastdb-volumes.py LOSAT 0.2.0` where NCBI prints `1.0`; line RG item
+  D2c, RG DECISIONS D2c-1, D2c-2 and D2c-4; Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -287,8 +286,7 @@ BLAST+.
    the same day, item K1b, K1b-3 and K1b-5; version 1.16 the same day, segmasker, item K2, K2-5;
    version 1.18 the same day, convert2blastmask, item K3; version 1.24, 2026-11-21, windowmasker,
    line NP item M5a; version 1.31, 2026-11-24, makeblastdb's log, the Owner's choice, line
-   RG item KD; version 1.32, 2026-11-25, cleanup-blastdb-volumes.py's output, line RG item D2c,
-   RG DECISIONS D2c-1 to D2c-4). A write of NCBI's blastdbcmd 2.17.0,
+   RG item KD). A write of NCBI's blastdbcmd 2.17.0,
    dustmasker 1.0.0, segmasker 1.0.0, windowmasker 1.0.0 or convert2blastmask 2.17.0 to a pipe whose
    reader has closed ends the program by SIGPIPE outside Windows (exit status 141 from the
    shell, no message; exception 5). LOSAT's runtime ignores SIGPIPE (exception 5), so LOSAT

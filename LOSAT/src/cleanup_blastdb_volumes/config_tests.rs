@@ -58,6 +58,51 @@ fn parses_blastdb_setting_and_ignores_empty_file() {
 }
 
 #[test]
+fn python_whitespace_and_unicode_option_names_match_configparser() {
+    // U+001C–U+001F are Python whitespace: trimmed from keys/values and count as indentation.
+    assert_eq!(
+        parse_blastdb_from_ini(
+            "[BLAST]\n\u{001c}BLASTDB = \u{001d}/opt/db\u{001e}\n",
+            "cfg"
+        ),
+        Ok(Some(b"/opt/db".to_vec()))
+    );
+    // Leading U+001C after a 0-indent option makes a continuation line, not a duplicate option.
+    assert_eq!(
+        parse_blastdb_from_ini("[BLAST]\nBLASTDB = /a\n\u{001c}BLASTDB = /b\n", "cfg"),
+        Ok(Some(b"/a\nBLASTDB = /b".to_vec()))
+    );
+    // Equal indent of U+001C produces DuplicateOptionError (both trim to `blastdb`).
+    assert!(parse_blastdb_from_ini(
+        "[BLAST]\n\u{001c}BLASTDB = /a\n\u{001f}BLASTDB = /b\n",
+        "cfg"
+    )
+    .is_err());
+    // Indent is measured in Unicode characters, so 1-char NBSP (2 UTF-8 bytes) is not > 1 space.
+    assert!(parse_blastdb_from_ini("[BLAST]\n k = v1\n\u{00a0}v2\n", "cfg").is_err());
+    assert_eq!(
+        parse_blastdb_from_ini("[BLAST]\n\u{00a0}BLASTDB = /a\n  /b\n", "cfg"),
+        Ok(Some(b"/a\n/b".to_vec()))
+    );
+    // Option names and interpolation keys use Unicode lowercasing.
+    assert_eq!(
+        parse_blastdb_from_ini(
+            "[BLAST]\n\u{00c4} = /opt/db\nBLASTDB = %(\u{00e4})s\n",
+            "cfg"
+        ),
+        Ok(Some(b"/opt/db".to_vec()))
+    );
+    assert!(parse_blastdb_from_ini("[BLAST]\n\u{00c4} = /a\n\u{00e4} = /b\n", "cfg").is_err());
+    assert_eq!(
+        parse_blastdb_from_ini(
+            "[BLAST]\n\u{0130} = /opt/db\nBLASTDB = %(i\u{0307})s\n",
+            "cfg"
+        ),
+        Ok(Some(b"/opt/db".to_vec()))
+    );
+}
+
+#[test]
 fn malformed_ini_returns_error() {
     assert!(parse_blastdb_from_ini("no_section = 1\n", "bad").is_err());
     assert!(parse_blastdb_from_ini("[BLAST]\nnot_an_option\n", "bad").is_err());

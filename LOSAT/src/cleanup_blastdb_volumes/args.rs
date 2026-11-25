@@ -1,5 +1,6 @@
-//! Command-line parser for `cleanup-blastdb-volumes.py`, reproducing Python `argparse`'s options,
-//! prefix abbreviations, error messages, help text, and exit status `2`.
+//! Command-line parser for `cleanup-blastdb-volumes.py`, reproducing Python 3.13 `argparse`'s
+//! options, prefix abbreviations, terminal-width-wrapped usage/help text, error messages, and exit
+//! status `2`.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py:40-41,144-156
 
@@ -7,33 +8,208 @@ use std::ffi::OsString;
 
 use crate::utils::os_bytes::os_str_bytes;
 
+use super::config::py_trim;
+
 /// Program name written in usage, help, version, and error lines.
 pub(crate) const PROG: &str = "cleanup-blastdb-volumes.py";
 
+/// Fallback terminal column count used when `COLUMNS` is unset/invalid and stdout is not a
+/// terminal (Python's default 80-column terminal width).
+pub(crate) const DEFAULT_COLUMNS: usize = 80;
+
+const USAGE_PARTS: [&str; 6] = [
+    "[-h]",
+    "-db DB",
+    "-dbtype {prot,nucl}",
+    "[-dry-run]",
+    "[-version]",
+    "[-verbose]",
+];
+
+const DESCRIPTION_WORDS: [&str; 5] = ["Remove", "needless", "BLAST", "database", "volumes."];
+
+const OPTION_HELP: [(&str, &[&str]); 6] = [
+    (
+        "-h, --help",
+        &["show", "this", "help", "message", "and", "exit"],
+    ),
+    ("-db DB", &["BLAST", "database", "name"]),
+    ("-dbtype {prot,nucl}", &["Molecule", "type"]),
+    (
+        "-dry-run",
+        &[
+            "Do", "not", "delete", "any", "files,", "just", "list", "them",
+        ],
+    ),
+    (
+        "-version",
+        &["show", "program's", "version", "number", "and", "exit"],
+    ),
+    ("-verbose", &["Increase", "output", "verbosity"]),
+];
+
+/// Parses Python's `COLUMNS` environment value (`int(s)` when `> 0`, returning `None` on empty,
+/// non-integer, or non-positive values; huge positive integers saturate to `usize::MAX`).
+fn parse_columns_env(raw: &str) -> Option<usize> {
+    let trimmed = py_trim(raw);
+    if trimmed.is_empty() {
+        return None;
+    }
+    let digits = if let Some(rest) = trimmed.strip_prefix('+') {
+        rest
+    } else if trimmed.starts_with('-') {
+        return None;
+    } else {
+        trimmed
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let trimmed_zeros = digits.trim_start_matches('0');
+    if trimmed_zeros.is_empty() {
+        return None;
+    }
+    Some(trimmed_zeros.parse::<usize>().unwrap_or(usize::MAX))
+}
+
+/// Resolves the terminal column width following Python's terminal-size precedence:
+/// positive `COLUMNS`, else positive stdout terminal width, else `80`.
+pub(crate) fn resolve_columns(columns_env: Option<&str>, stdout_columns: Option<usize>) -> usize {
+    if let Some(cols) = columns_env.and_then(parse_columns_env) {
+        return cols;
+    }
+    if let Some(cols) = stdout_columns.filter(|&c| c > 0) {
+        return cols;
+    }
+    DEFAULT_COLUMNS
+}
+
+/// Greedily packs `words` into lines of at most `max_width` columns (each line takes at least one
+/// item, matching `argparse.HelpFormatter`'s usage and `textwrap` wrapping for our short words).
+fn wrap_items(words: &[&str], max_width: isize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for &word in words {
+        if current.is_empty() {
+            current.push_str(word);
+        } else if (current.len() + 1 + word.len()) as isize <= max_width {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current.push_str(word);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
 // NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py:144-156
-/// Usage line printed by `-h`, `--help`, and argument errors (observed from NCBI BLAST+ 2.17.0).
-pub(crate) const USAGE: &str = "\
-usage: cleanup-blastdb-volumes.py [-h] -db DB -dbtype {prot,nucl} [-dry-run]
-                                  [-version] [-verbose]
-";
+/// Formats the usage banner wrapped for a terminal of `columns` columns (`width = columns - 2`),
+/// matching Python 3.13 `argparse.HelpFormatter`.
+pub(crate) fn usage_text(columns: usize) -> String {
+    let width: isize = (columns.min(isize::MAX as usize) as isize) - 2;
+    let prefix = format!("usage: {PROG}");
+    let joined = USAGE_PARTS.join(" ");
+    if (prefix.len() + 1 + joined.len()) as isize <= width {
+        return format!("{prefix} {joined}\n");
+    }
+
+    let mut out = String::new();
+    // `argparse.HelpFormatter` places options on the next line (indented past `"usage: "`) when
+    // the prefix exceeds 75% of `width` (exact integer check: `4 * prefix.len() > 3 * width`).
+    if width <= 0 || 4 * (prefix.len() as isize) > 3 * width {
+        let indent = "usage: ".len();
+        let line_width = width - indent as isize;
+        out.push_str(&prefix);
+        out.push('\n');
+        let pad = " ".repeat(indent);
+        for line in wrap_items(&USAGE_PARTS, line_width) {
+            out.push_str(&pad);
+            out.push_str(&line);
+            out.push('\n');
+        }
+    } else {
+        let indent = prefix.len() + 1;
+        let line_width = width - indent as isize;
+        let lines = wrap_items(&USAGE_PARTS, line_width);
+        let pad = " ".repeat(indent);
+        for (idx, line) in lines.into_iter().enumerate() {
+            if idx == 0 {
+                out.push_str(&prefix);
+                out.push(' ');
+            } else {
+                out.push_str(&pad);
+            }
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    out
+}
 
 // NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py:41,144-156
-/// Full help text printed by `-h` and `--help` (observed from NCBI BLAST+ 2.17.0).
-const HELP_BODY: &str = "\n\
-Remove needless BLAST database volumes.
+/// Formats the complete `-h` / `--help` text wrapped for a terminal of `columns` columns,
+/// matching Python 3.13 `argparse.HelpFormatter`.
+pub(crate) fn help_text_for_columns(columns: usize) -> String {
+    let width: isize = (columns.min(isize::MAX as usize) as isize) - 2;
+    let mut out = usage_text(columns);
+    out.push('\n');
 
-options:
-  -h, --help           show this help message and exit
-  -db DB               BLAST database name
-  -dbtype {prot,nucl}  Molecule type
-  -dry-run             Do not delete any files, just list them
-  -version             show program's version number and exit
-  -verbose             Increase output verbosity
-";
+    let desc_width = width.max(11);
+    for line in wrap_items(&DESCRIPTION_WORDS, desc_width) {
+        out.push_str(&line);
+        out.push('\n');
+    }
 
-/// Formats the complete `-h` / `--help` text.
+    out.push_str("\noptions:\n");
+    let indent_inc: isize = 2;
+    let max_help_position = 24_isize.min((width - 20).max(indent_inc * 2)) as usize;
+    let max_action_header = OPTION_HELP
+        .iter()
+        .map(|(invoc, _)| 2 + invoc.len())
+        .max()
+        .unwrap_or(0);
+    let help_position = (max_action_header + 2).min(max_help_position);
+    let help_width = (width - help_position as isize).max(11);
+    let help_pad = " ".repeat(help_position);
+
+    for (invoc, help_words) in OPTION_HELP {
+        let hlines = wrap_items(help_words, help_width);
+        if 2 + invoc.len() + 2 <= help_position {
+            let gap = help_position - 2 - invoc.len();
+            out.push_str("  ");
+            out.push_str(invoc);
+            for _ in 0..gap {
+                out.push(' ');
+            }
+            out.push_str(&hlines[0]);
+            out.push('\n');
+            for line in &hlines[1..] {
+                out.push_str(&help_pad);
+                out.push_str(line);
+                out.push('\n');
+            }
+        } else {
+            out.push_str("  ");
+            out.push_str(invoc);
+            out.push('\n');
+            for line in &hlines {
+                out.push_str(&help_pad);
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
+/// Formats the default 80-column `-h` / `--help` text.
+#[cfg(test)]
 pub(crate) fn help_text() -> String {
-    format!("{USAGE}{HELP_BODY}")
+    help_text_for_columns(DEFAULT_COLUMNS)
 }
 
 /// Molecule type selected by `-dbtype`.
@@ -125,22 +301,25 @@ pub(crate) fn version_text() -> String {
     format!("{PROG} {}\n", crate::wording::LOSAT_VERSION)
 }
 
-/// Formats an argument error with the usage banner and program error line.
-fn error_text(message: &str) -> String {
-    format!("{USAGE}{PROG}: error: {message}\n")
+/// Formats an argument error with the wrapped usage banner and program error line.
+fn error_text(columns: usize, message: &str) -> String {
+    format!("{}{PROG}: error: {message}\n", usage_text(columns))
 }
 
 /// Builds a `ParseOutcome::Error` from `message`.
-fn err_outcome(message: &str) -> ParseOutcome {
-    ParseOutcome::Error(error_text(message))
+fn err_outcome(columns: usize, message: &str) -> ParseOutcome {
+    ParseOutcome::Error(error_text(columns, message))
 }
 
 /// Builds a `ParseOutcome::Error` for a flag that does not accept an explicit `=value`.
-fn ignored_arg(flag: &str, val: &[u8]) -> ParseOutcome {
-    err_outcome(&format!(
-        "argument {flag}: ignored explicit argument {}",
-        py_repr(val)
-    ))
+fn ignored_arg(columns: usize, flag: &str, val: &[u8]) -> ParseOutcome {
+    err_outcome(
+        columns,
+        &format!(
+            "argument {flag}: ignored explicit argument {}",
+            py_repr(val)
+        ),
+    )
 }
 
 /// Splits `token` at the first `=` into `(option_part, explicit_value)`.
@@ -158,6 +337,7 @@ fn is_double_dash_help(opt_part: &[u8], explicit_val: Option<&[u8]>) -> bool {
 
 /// Consumes the required value of `-db` or `-dbtype` from `explicit_val` or the following token.
 fn take_value(
+    columns: usize,
     flag: &str,
     explicit_val: Option<&[u8]>,
     raw: &[Vec<u8>],
@@ -172,9 +352,10 @@ fn take_value(
         *i += 2;
         return Ok(val);
     }
-    Err(err_outcome(&format!(
-        "argument {flag}: expected one argument"
-    )))
+    Err(err_outcome(
+        columns,
+        &format!("argument {flag}: expected one argument"),
+    ))
 }
 
 /// Formats `bytes` with Python `%r` string quoting (single quotes unless the string contains `'`
@@ -251,10 +432,10 @@ fn match_single_dash(opt: &[u8]) -> SingleDashMatch {
 }
 
 /// Builds `ParseOutcome::Help` unless an explicit value was supplied (`-h=1`, `--help=1`).
-fn help_or_ignored(val: Option<&[u8]>) -> ParseOutcome {
+fn help_or_ignored(columns: usize, val: Option<&[u8]>) -> ParseOutcome {
     match val {
-        Some(v) => ignored_arg("-h/--help", v),
-        None => ParseOutcome::Help(help_text()),
+        Some(v) => ignored_arg(columns, "-h/--help", v),
+        None => ParseOutcome::Help(help_text_for_columns(columns)),
     }
 }
 
@@ -284,9 +465,16 @@ fn is_optional_token(token: &[u8]) -> bool {
     !token.contains(&b' ')
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py:106-107,144-156
-/// Parses `words` (arguments after the program name) as NCBI's `argparse` parser parses them.
+/// Parses `words` with the default 80-column width.
+#[cfg(test)]
 pub(crate) fn parse(words: &[OsString]) -> ParseOutcome {
+    parse_with_columns(words, DEFAULT_COLUMNS)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py:106-107,144-156
+/// Parses `words` (arguments after the program name) as NCBI's `argparse` parser parses them,
+/// wrapping usage and help output to `columns`.
+pub(crate) fn parse_with_columns(words: &[OsString], columns: usize) -> ParseOutcome {
     let raw: Vec<Vec<u8>> = words
         .iter()
         .map(|w| os_str_bytes(w.as_os_str()).into_owned())
@@ -325,7 +513,7 @@ pub(crate) fn parse(words: &[OsString]) -> ParseOutcome {
         // Double-dash option (`--help` and prefixes `--h`, `--he`, `--hel`, plus `--=<val>`).
         if opt_part.starts_with(b"--") {
             if is_double_dash_help(opt_part, explicit_val) {
-                return help_or_ignored(explicit_val);
+                return help_or_ignored(columns, explicit_val);
             }
             push_extra(token);
             i += 1;
@@ -334,27 +522,30 @@ pub(crate) fn parse(words: &[OsString]) -> ParseOutcome {
 
         // Exact `-h` (handles `-h` and `-h=<val>`).
         if opt_part == b"-h" {
-            return help_or_ignored(explicit_val);
+            return help_or_ignored(columns, explicit_val);
         }
 
         // Single-dash multi-character options and abbreviations.
         let matched = match match_single_dash(opt_part) {
             SingleDashMatch::Exact(opt) | SingleDashMatch::Unique(opt) => opt,
             SingleDashMatch::Ambiguous(candidates) => {
-                return err_outcome(&format!(
-                    "ambiguous option: {} could match {}",
-                    String::from_utf8_lossy(token),
-                    candidates.join(", ")
-                ));
+                return err_outcome(
+                    columns,
+                    &format!(
+                        "ambiguous option: {} could match {}",
+                        String::from_utf8_lossy(token),
+                        candidates.join(", ")
+                    ),
+                );
             }
             SingleDashMatch::None => {
                 // Short-option bundling: `-h<rest>` errors when `<rest>` starts with `-`, and
                 // otherwise dispatches `-h` immediately (`-help`, `-he`, `-hx`, `-h bar`).
                 if let Some(rest) = token.strip_prefix(b"-h") {
                     if rest.starts_with(b"-") {
-                        return ignored_arg("-h/--help", rest);
+                        return ignored_arg(columns, "-h/--help", rest);
                     }
-                    return ParseOutcome::Help(help_text());
+                    return ParseOutcome::Help(help_text_for_columns(columns));
                 }
                 push_extra(token);
                 i += 1;
@@ -365,30 +556,30 @@ pub(crate) fn parse(words: &[OsString]) -> ParseOutcome {
         match matched {
             LongOpt::Version => {
                 if let Some(val) = explicit_val {
-                    return ignored_arg("-version", val);
+                    return ignored_arg(columns, "-version", val);
                 }
                 return ParseOutcome::Version(version_text());
             }
             LongOpt::DryRun => {
                 if let Some(val) = explicit_val {
-                    return ignored_arg("-dry-run", val);
+                    return ignored_arg(columns, "-dry-run", val);
                 }
                 dry_run = true;
                 i += 1;
             }
             LongOpt::Verbose => {
                 if let Some(val) = explicit_val {
-                    return ignored_arg("-verbose", val);
+                    return ignored_arg(columns, "-verbose", val);
                 }
                 verbose += 1;
                 i += 1;
             }
-            LongOpt::Db => match take_value("-db", explicit_val, &raw, &mut i) {
+            LongOpt::Db => match take_value(columns, "-db", explicit_val, &raw, &mut i) {
                 Ok(value) => db = Some(value),
                 Err(outcome) => return outcome,
             },
             LongOpt::DbType => {
-                let value = match take_value("-dbtype", explicit_val, &raw, &mut i) {
+                let value = match take_value(columns, "-dbtype", explicit_val, &raw, &mut i) {
                     Ok(value) => value,
                     Err(outcome) => return outcome,
                 };
@@ -396,10 +587,13 @@ pub(crate) fn parse(words: &[OsString]) -> ParseOutcome {
                     b"prot" => dbtype = Some(DbType::Prot),
                     b"nucl" => dbtype = Some(DbType::Nucl),
                     other => {
-                        return err_outcome(&format!(
-                            "argument -dbtype: invalid choice: {} (choose from prot, nucl)",
-                            py_repr(other)
-                        ));
+                        return err_outcome(
+                            columns,
+                            &format!(
+                                "argument -dbtype: invalid choice: {} (choose from prot, nucl)",
+                                py_repr(other)
+                            ),
+                        );
                     }
                 }
             }
@@ -414,13 +608,19 @@ pub(crate) fn parse(words: &[OsString]) -> ParseOutcome {
         missing.push("-dbtype");
     }
     if !missing.is_empty() {
-        return err_outcome(&format!(
-            "the following arguments are required: {}",
-            missing.join(", ")
-        ));
+        return err_outcome(
+            columns,
+            &format!(
+                "the following arguments are required: {}",
+                missing.join(", ")
+            ),
+        );
     }
     if !extras.is_empty() {
-        return err_outcome(&format!("unrecognized arguments: {}", extras.join(" ")));
+        return err_outcome(
+            columns,
+            &format!("unrecognized arguments: {}", extras.join(" ")),
+        );
     }
 
     ParseOutcome::Run(ParsedArgs {

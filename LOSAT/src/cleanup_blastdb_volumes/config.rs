@@ -6,6 +6,31 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+/// Whether `ch` is whitespace according to Python's `str.isspace()` (Unicode `White_Space` plus
+/// ASCII information separators U+001C–U+001F).
+#[inline]
+pub(crate) fn is_py_space(ch: char) -> bool {
+    ch.is_whitespace() || matches!(ch, '\u{001c}'..='\u{001f}')
+}
+
+/// Trims leading and trailing Python whitespace (`str.strip()`).
+#[inline]
+pub(crate) fn py_trim(s: &str) -> &str {
+    s.trim_matches(is_py_space)
+}
+
+/// Trims trailing Python whitespace (`str.rstrip()`).
+#[inline]
+pub(crate) fn py_trim_end(s: &str) -> &str {
+    s.trim_end_matches(is_py_space)
+}
+
+/// Splits `s` on runs of Python whitespace (`str.split()`).
+#[inline]
+pub(crate) fn py_split_whitespace(s: &str) -> impl Iterator<Item = &str> {
+    s.split(is_py_space).filter(|part| !part.is_empty())
+}
+
 /// Splits `text` on `\r\n`, `\n`, or standalone `\r` (Python universal newlines).
 pub(crate) fn universal_lines(text: &str) -> Vec<&str> {
     let mut out = Vec::new();
@@ -78,7 +103,7 @@ fn interpolate(
             if close == 0 || !after_lparen[close..].starts_with(")s") {
                 return Err(bad_interpolation(raw));
             }
-            let key = after_lparen[..close].to_ascii_lowercase();
+            let key = after_lparen[..close].to_lowercase();
             let val = section
                 .get(&key)
                 .or_else(|| defaults.get(&key))
@@ -113,7 +138,7 @@ pub(crate) fn parse_blastdb_from_ini(
 
     for (idx, line) in universal_lines(text).into_iter().enumerate() {
         let lineno = idx + 1;
-        let trimmed = line.trim();
+        let trimmed = py_trim(line);
         if trimmed.is_empty() {
             if current_section.is_some() && last_option.is_some() {
                 pending_empty_lines += 1;
@@ -124,7 +149,8 @@ pub(crate) fn parse_blastdb_from_ini(
             continue;
         }
 
-        let indent = line.len() - line.trim_start().len();
+        // Python ConfigParser compares leading whitespace counts in Unicode code points.
+        let indent = line.chars().take_while(|&ch| is_py_space(ch)).count();
         if indent > 0
             && last_indent.is_some_and(|prev| indent > prev)
             && current_section.is_some()
@@ -175,11 +201,11 @@ pub(crate) fn parse_blastdb_from_ini(
             .bytes()
             .position(|b| b == b'=' || b == b':')
             .ok_or_else(|| format!("{source_name}:{lineno}: source contains parsing errors"))?;
-        let key = line[..sep_pos].trim().to_ascii_lowercase();
+        let key = py_trim(&line[..sep_pos]).to_lowercase();
         if key.is_empty() {
             return Err(format!("{source_name}:{lineno}: empty option name"));
         }
-        let val = line[sep_pos + 1..].trim().to_string();
+        let val = py_trim(&line[sep_pos + 1..]).to_string();
         let map = section_map_mut(sec_name, &mut defaults, &mut sections);
         if map.contains_key(&key) {
             return Err(format!(
@@ -199,7 +225,7 @@ pub(crate) fn parse_blastdb_from_ini(
     let Some(raw_val) = blast_sec.get("blastdb").or_else(|| defaults.get("blastdb")) else {
         return Ok(None);
     };
-    let value = interpolate(raw_val.trim_end(), blast_sec, &defaults, 1)?;
+    let value = interpolate(py_trim_end(raw_val), blast_sec, &defaults, 1)?;
     Ok(Some(value.into_bytes()))
 }
 

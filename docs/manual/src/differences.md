@@ -270,9 +270,7 @@ Record: [The decision record on blastdbcmd output that NCBI gets wrong](https://
 ### `cleanup-blastdb-volumes.py`
 
 - **Version line.** `-version` writes `cleanup-blastdb-volumes.py LOSAT 0.2.0` where NCBI BLAST+ 2.17.0 writes `cleanup-blastdb-volumes.py 1.0`.
-- **Per-volume file order.** Within each removed volume, LOSAT lists and deletes `.p??` or `.n??` files in lexicographic byte order before `.tar.gz.md5`. NCBI's Python script uses `glob.glob`, whose per-volume order depends on filesystem directory iteration. Volume order, `-dry-run` volume lines, stderr, exit statuses, and the set of removed and kept files match NCBI.
-- **Closed pipe.** When the reader of standard output closes a pipe early, LOSAT stops with exit status 0 where NCBI is ended by SIGPIPE.
-- **Record.** [The decision record on command-line behavior outside the search results](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md), exceptions 10 and 14.
+- **Record.** [The decision record on command-line behavior outside the search results](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md), exception 14.
 
 ## The library
 

@@ -6,7 +6,8 @@ row in a fresh copy of `in/`.
 
 ## Origin
 
-- Program: official NCBI BLAST+ 2.17.0 `cleanup-blastdb-volumes.py` and `makeblastdb`
+- Program: official NCBI BLAST+ 2.17.0 `cleanup-blastdb-volumes.py` (run under Python 3.13,
+  specifically Python 3.13.3; LOSAT matches NCBI's script under Python 3.13) and `makeblastdb`
   (`ncbi-blast-2.17.0+-x64-linux`), run on 2026-11-25 in a fresh directory holding `in/`, with
   `LC_ALL=C TZ=UTC`, standard input `/dev/null`, and a clean `HOME` outside the directory unless
   the row sets `HOME` or `NCBI` explicitly.
@@ -34,12 +35,14 @@ row in a fresh copy of `in/`.
   - `A01`–`A19`: missing required arguments, invalid choices, option-like values, `=` form,
     negative numbers, `-`, unrecognized arguments, `--`, ambiguous prefixes, explicit arguments to
     flags, unambiguous abbreviations, and duplicate `-dbtype`.
+  - `W01`–`W06`: terminal-width wrapping of `-h` and argument-error usage with `COLUMNS=40`, `60`,
+    `120`, and `200`.
 - `-version` is tested directly in `tests/cleanup_blastdb_volumes_fixtures.rs` and
   `tests/entry_names.rs` because LOSAT prints `cleanup-blastdb-volumes.py LOSAT 0.2.0` where NCBI
   prints `cleanup-blastdb-volumes.py 1.0`.
-- Per-volume file order: NCBI's script emits `.p??`/`.n??` files within an extra volume in
-  filesystem directory order (Python `glob.glob`) before `.tar.gz.md5`, whereas LOSAT sorts the
-  `.p??`/`.n??` matches lexicographically per volume before `.tar.gz.md5`. The fixture test checks
-  exact volume order, sorted per-volume `.p??`/`.n??` lines followed by `.tar.gz.md5`, exact match
-  to NCBI's per-volume line sets, exact stderr, exact exit status, and exact file additions /
-  deletions (`ncbi/<row>.files`).
+- Per-volume file order: both NCBI's Python script (`glob.glob` / `os.scandir`) and LOSAT emit
+  `.p??`/`.n??` files within an extra volume in filesystem `read_dir` order before `.tar.gz.md5`.
+  Because each test copies `in/` to a fresh directory whose `read_dir` order can differ from the
+  recording machine's, the fixture test checks exact volume order, exact match to the test copy's
+  `fs::read_dir` order followed by `.tar.gz.md5`, exact match to NCBI's frozen per-volume line
+  sets, exact stderr, exact exit status, and exact file additions / deletions (`ncbi/<row>.files`).

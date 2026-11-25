@@ -190,7 +190,7 @@ pub(crate) fn write_blastn_tabular(
         // `InsertSubjectScores` computes `qcovs` / `qcovus` over the query's pruned hits after the
         // query header and before any row is formatted; a gapped (`Dense-seg`) class N HSP throws
         // `CDense_seg::GetSeqStop(): Row is empty`.
-        if !tab.ungapped {
+        if !tab.ungapped && (needs.qcovs || needs.qcovus) {
             if let Some(exception) = super::left_of_query::gapped_insert_subject_scores_throw(
                 hit_list,
                 q_offset,
@@ -431,8 +431,10 @@ fn uniq_subject_coverage(
     if query_length == 0 {
         return -1;
     }
-    // `uniq_coverage`, an `int`, of the `TSeqPos` length.
-    let covered = uniq_seq_coverage(hsps, q_offset, ungapped) as i32;
+    // `uniq_coverage`, an `int`, of the `TSeqPos` length. Any gapped class N throw was already
+    // raised by `gapped_insert_subject_scores_throw` before the subject loop.
+    let covered = uniq_seq_coverage(hsps, q_offset, ungapped)
+        .expect("gapped qcovus throw handled before subject loop") as i32;
     if covered == 0 {
         return -1;
     }
@@ -652,16 +654,25 @@ fn query_position(hsp: &BlastnHsp, subject_pos: u32, q_offset: usize, ungapped: 
 
 /// `GetUniqSeqCoverage` of one subject's HSPs in the Seq-align order: the query letters that
 /// the HSPs cover, where a part of an HSP whose subject letters an HSP before it covered does
-/// not count (its query positions mapped through the alignment's columns).
+/// not count (its query positions mapped through the alignment's columns). Returns
+/// `Err(dense_seg_empty_row_stop())` when a gapped (`!ungapped`) class N HSP enters a whole-range
+/// `GetSeqRange` branch on row 0 (`first` or an HSP with no subject overlap against earlier HSPs).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4838-4896
+/// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:235-237
 /// A query gap in the column of a part's first or last subject letter gives NCBI the position
-/// -1, which the `TSeqPos` range keeps as 2^32 - 1 (the same arithmetic here). LOSAT's BLASTN
-/// alignments are always gapped Dense-segs (no Dense-diag).
-fn uniq_seq_coverage(hsps: &[BlastnHsp], q_offset: usize, ungapped: bool) -> u32 {
+/// -1, which the `TSeqPos` range keeps as 2^32 - 1 (the same arithmetic here).
+pub(super) fn uniq_seq_coverage(
+    hsps: &[BlastnHsp],
+    q_offset: usize,
+    ungapped: bool,
+) -> std::result::Result<u32, crate::ncbi_exception::NcbiException> {
     let Some((first, rest)) = hsps.split_first() else {
-        return 0;
+        return Ok(0);
     };
+    if !ungapped && first.starts_left_of_record(q_offset, false) {
+        return Err(super::left_of_query::dense_seg_empty_row_stop());
+    }
     let mut subject_ranges = RangeCollection(vec![subject_range(first)]);
     let mut query_ranges = RangeCollection(vec![
         query_range(first, q_offset, ungapped).fix_minus_strand()
@@ -676,6 +687,9 @@ fn uniq_seq_coverage(hsps: &[BlastnHsp], q_offset: usize, ungapped: bool) -> u32
             continue;
         }
         if parts.0[0] == align_subject {
+            if !ungapped && hsp.starts_left_of_record(q_offset, false) {
+                return Err(super::left_of_query::dense_seg_empty_row_stop());
+            }
             query_ranges.combine_with(query_range(hsp, q_offset, ungapped).fix_minus_strand());
             subject_ranges.combine_with(align_subject);
         } else {
@@ -692,7 +706,7 @@ fn uniq_seq_coverage(hsps: &[BlastnHsp], q_offset: usize, ungapped: bool) -> u32
             }
         }
     }
-    query_ranges.covered_length()
+    Ok(query_ranges.covered_length())
 }
 
 #[cfg(test)]

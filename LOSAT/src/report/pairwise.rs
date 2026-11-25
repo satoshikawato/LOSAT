@@ -1211,15 +1211,7 @@ fn write_database_subject_with_left_of_record<W: Write>(
         return Ok(());
     };
     let mut heading_done = part.start > first_shown;
-    let mut heading_skipped: Option<Vec<u8>> = if heading_done {
-        let skipped = title.skipped_id(protein, html);
-        if let Some(html) = html {
-            later_part_posts(html, &skipped, writer, &mut *place)?;
-        }
-        skipped?
-    } else {
-        None
-    };
+    let mut heading_skipped: Option<Vec<u8>> = None;
     let mut seen_shown_in_part = false;
     for idx in part {
         let (hit, hsp_index) = (hits[idx], hsp_indices[idx]);
@@ -1254,15 +1246,19 @@ fn write_database_subject_with_left_of_record<W: Write>(
             }
             heading_done = true;
             seen_shown_in_part = true;
-        } else {
-            if seen_shown_in_part && heading_skipped.is_some() {
-                if let Some(html) = html {
-                    let retried = title.skipped_id(protein, Some(html));
-                    place_heading_posts(html, true, writer, &mut *place)?;
-                    heading_skipped = retried?;
-                }
+        } else if !seen_shown_in_part {
+            let skipped = title.skipped_id(protein, html);
+            if let Some(html) = html {
+                later_part_posts(html, &skipped, writer, &mut *place)?;
             }
+            heading_skipped = skipped?;
             seen_shown_in_part = true;
+        } else if heading_skipped.is_some() {
+            if let Some(html) = html {
+                let retried = title.skipped_id(protein, Some(html));
+                place_heading_posts(html, true, writer, &mut *place)?;
+                heading_skipped = retried?;
+            }
         }
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;

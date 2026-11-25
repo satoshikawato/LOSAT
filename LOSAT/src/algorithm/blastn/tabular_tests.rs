@@ -126,12 +126,15 @@ fn uniq_coverage_skips_subject_letters_covered_before() {
     // Two HSPs on disjoint subject ranges: both query ranges count.
     let a = hsp((1, 100), (1, 100), false, None);
     let b = hsp((201, 300), (201, 300), false, None);
-    assert_eq!(uniq_seq_coverage(&[a.clone(), b], 0, true), 200);
+    assert_eq!(uniq_seq_coverage(&[a.clone(), b], 0, true).unwrap(), 200);
     // A repeat of the query on the same subject letters counts once.
     let repeat = hsp((401, 500), (1, 100), false, None);
-    assert_eq!(uniq_seq_coverage(&[a.clone(), repeat], 0, true), 100);
+    assert_eq!(
+        uniq_seq_coverage(&[a.clone(), repeat], 0, true).unwrap(),
+        100
+    );
     // A partly covered HSP: only its uncovered subject part maps to query letters.
     let partial = hsp((501, 600), (51, 150), false, None);
-    assert_eq!(uniq_seq_coverage(&[a, partial], 0, true), 100 + 50);
+    assert_eq!(uniq_seq_coverage(&[a, partial], 0, true).unwrap(), 100 + 50);
     assert_eq!(uniq_subject_coverage(&[], 100, 0, true), -1);
 }

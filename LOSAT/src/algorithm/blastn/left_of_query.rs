@@ -96,6 +96,11 @@ pub(crate) fn dense_seg_empty_row_stop() -> NcbiException {
 /// row of `hit_list` when a gapped (`Dense-seg`) HSP starts below 0 in record coordinates and
 /// `qcovs` or `qcovus` is requested (`CDense_seg::GetSeqRange` throws `Dense_seg.cpp:235`),
 /// or `None` when `InsertSubjectScores` completes without throwing.
+///
+/// Returns `None` without allocating unless at least one HSP of `hit_list` lies outside its
+/// query context (`outside_query_context`). When `needs_qcovus` is set, delegates to
+/// `tabular::uniq_seq_coverage` so the subject-range subtraction and whole-range throw branch
+/// share one owner with `GetUniqSeqCoverage`.
 pub(crate) fn gapped_insert_subject_scores_throw(
     hit_list: &BlastnHitList,
     q_offset: usize,
@@ -106,28 +111,49 @@ pub(crate) fn gapped_insert_subject_scores_throw(
     if query_length == 0 || (!needs_qcovs && !needs_qcovus) {
         return None;
     }
-    let throws = (needs_qcovs
+    if !hit_list
+        .hsplist_array
+        .iter()
+        .flat_map(|list| &list.hsps)
+        .any(BlastnHsp::outside_query_context)
+    {
+        return None;
+    }
+    gapped_insert_subject_scores_throw_slow(hit_list, q_offset, needs_qcovs, needs_qcovus)
+}
+
+#[cold]
+#[inline(never)]
+fn gapped_insert_subject_scores_throw_slow(
+    hit_list: &BlastnHitList,
+    q_offset: usize,
+    needs_qcovs: bool,
+    needs_qcovus: bool,
+) -> Option<NcbiException> {
+    if needs_qcovs
         && hit_list
             .hsplist_array
             .iter()
             .flat_map(|list| &list.hsps)
-            .any(|hsp| hsp.starts_left_of_record(q_offset, false)))
-        || (needs_qcovus
-            && hit_list.hsplist_array.iter().any(|hsp_list| {
-                let mut covered_subject: Vec<(u32, u32)> = Vec::new();
-                for hsp in &hsp_list.hsps {
-                    let s_from = hsp.s_start.min(hsp.s_end).saturating_sub(1) as u32;
-                    let s_to = hsp.s_start.max(hsp.s_end) as u32;
-                    if !covered_subject.iter().any(|&(a, b)| a < s_to && s_from < b) {
-                        if hsp.starts_left_of_record(q_offset, false) {
-                            return true;
-                        }
-                        covered_subject.push((s_from, s_to));
-                    }
-                }
-                false
-            }));
-    throws.then(dense_seg_empty_row_stop)
+            .any(|hsp| hsp.starts_left_of_record(q_offset, false))
+    {
+        return Some(dense_seg_empty_row_stop());
+    }
+    if needs_qcovus {
+        for hsp_list in &hit_list.hsplist_array {
+            if !hsp_list
+                .hsps
+                .iter()
+                .any(|hsp| hsp.starts_left_of_record(q_offset, false))
+            {
+                continue;
+            }
+            if let Err(exc) = super::tabular::uniq_seq_coverage(&hsp_list.hsps, q_offset, false) {
+                return Some(exc);
+            }
+        }
+    }
+    None
 }
 
 /// `CAlnException::eInvalidDenseg` thrown by `CAlnMap::x_GetSeqLeftSeg` (`left = true`) or
@@ -223,10 +249,13 @@ pub(crate) fn non_empty_record_query_range(
     (to_open > from).then(|| (u64::from(from), u64::from(to_open - 1)))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1520-1534
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1402-1430
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2969-2992
-/// `HspScores` of a BLASTN HSP directly from `BlastnHsp`, matching `HspScores::of` on its
-/// `PairwiseHit` (including class N `TSeqPos` query ranges and signed sort start).
+/// `HspScores` of an unshifted BLASTN HSP directly from `BlastnHsp`, matching `HspScores::of` on
+/// the `PairwiseHit` that `shift_to_records` + `pairwise::Rows::list` will build for it with
+/// query `-query_loc` start `offset` and run mode `ungapped` (including class N `TSeqPos` query
+/// ranges, signed sort start, and ungapped negative-start HSPs lifted to `>= 0` by `offset`).
 pub(crate) fn blastn_hsp_scores(hsp: &BlastnHsp, offset: usize, ungapped: bool) -> HspScores {
     if hsp.starts_left_of_record(offset, ungapped) {
         let (from, len) = record_query_from_len(hsp, offset, ungapped);
@@ -239,12 +268,19 @@ pub(crate) fn blastn_hsp_scores(hsp: &BlastnHsp, offset: usize, ungapped: bool) 
             (hsp.s_start, hsp.s_end),
         );
     }
+    let query = if hsp.outside_query_context() && hsp.seqalign_query_start() < 0 {
+        let start = hsp.record_query_start(offset, ungapped);
+        let len = i64::from(hsp.internal_q_end_0) - i64::from(hsp.internal_q_offset_0);
+        ((start + 1).max(0) as usize, (start + len).max(0) as usize)
+    } else {
+        (hsp.q_start + offset, hsp.q_end + offset)
+    };
     HspScores::of_values(
         hsp.bit_score,
         hsp.e_value,
         hsp.num_ident,
         hsp.length,
-        (hsp.q_start, hsp.q_end),
+        query,
         (hsp.s_start, hsp.s_end),
     )
 }

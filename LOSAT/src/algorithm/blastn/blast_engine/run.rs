@@ -9100,6 +9100,7 @@ fn run_in_pool(
                         .and_then(crate::report::pairwise::PairwiseView::of)
                         .is_some(),
                     gapped: !args.ungapped,
+                    placements: &query_input.placements,
                 };
                 let seq_aligns_of = |hit_lists: &[Option<BlastnHitList>]| -> usize {
                     database::seq_aligns_of(hit_lists, !args.ungapped)
@@ -9899,6 +9900,7 @@ fn write_reports_untimed(
                         args.report_counts,
                     ),
                 ),
+                &ranges.queries.placements,
                 results.batches,
                 written.queries,
                 !args.ungapped,

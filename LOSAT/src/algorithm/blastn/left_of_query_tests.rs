@@ -144,6 +144,12 @@ fn blastn_hsp_scores_handles_left_of_record_and_wrapping() {
     let s1 = blastn_hsp_scores(&hsp, 1201, true);
     assert_eq!((s1.query_from, s1.query_to), (1, 0));
     assert_eq!(s1.query_sort_start, 198);
+
+    // Shifting by 1205 lifts the ungapped HSP to record start 3 (>= 0), matching shift_to_records
+    // (1-based 4..=203 -> 0-based 3..=202).
+    let s2 = blastn_hsp_scores(&hsp, 1205, true);
+    assert_eq!((s2.query_from, s2.query_to), (3, 202));
+    assert_eq!(s2.query_sort_start, 3);
 }
 
 #[test]
@@ -201,4 +207,37 @@ fn gapped_insert_subject_scores_throw_matches_qcovs_and_qcovus() {
     });
     let exc2 = gapped_insert_subject_scores_throw(&list_disjoint, 0, 300, false, true).unwrap();
     assert_eq!(exc2.site().line, 235);
+
+    // Partially covered B (51..=150) adds its uncovered subject range (101..=150) to
+    // `subj_rng_coll`, so class N C (121..=200) is partly covered and goes through `CAlnMap`
+    // without calling `GetSeqRange` on row 0 -> does not throw for `qcovus` (still throws for `qcovs`).
+    let mut list_chained_partial = BlastnHitList::new(10);
+    list_chained_partial.update(BlastnHspList {
+        oid: 0,
+        query_index: 0,
+        hsps: vec![
+            make(0, 100, 1, 100),
+            make(100, 200, 51, 150),
+            make(-500, -420, 121, 200),
+        ],
+        best_evalue: 1e-20,
+    });
+    assert!(
+        gapped_insert_subject_scores_throw(&list_chained_partial, 0, 300, false, true).is_none()
+    );
+    let exc3 =
+        gapped_insert_subject_scores_throw(&list_chained_partial, 0, 300, true, false).unwrap();
+    assert_eq!(exc3.site().line, 235);
+
+    // Class N as the first HSP calls `GetSeqRange` on row 0 immediately -> throws for `qcovus`.
+    let mut list_first_class_n = BlastnHitList::new(10);
+    list_first_class_n.update(BlastnHspList {
+        oid: 0,
+        query_index: 0,
+        hsps: vec![make(-500, -400, 1, 100), make(0, 100, 1, 100)],
+        best_evalue: 1e-20,
+    });
+    let exc4 =
+        gapped_insert_subject_scores_throw(&list_first_class_n, 0, 300, false, true).unwrap();
+    assert_eq!(exc4.site().line, 235);
 }

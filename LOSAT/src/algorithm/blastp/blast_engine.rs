@@ -10584,8 +10584,10 @@ fn search_call<'a>(
     }
     let titles = listed_titles.map(database::ListedTitles::held);
     let utf8 = reads.into_held();
-    // The subjects' statistics borrow the call's values, which the held call takes.
+    // The subjects' statistics and the search-space closure borrow the call's values, which the
+    // held call takes.
     drop(subject_parameters);
+    drop(option_space_of);
     Ok(Some(SearchedCall {
         requested_formats,
         query_ids,
@@ -10851,7 +10853,7 @@ fn prefetch_call<'a>(
         database,
         listed_titles: &listed_titles,
         subject_records,
-        subject_titles: &subject_titles,
+        subject_titles,
         format_plans,
         hit_lists: &hit_lists,
         pairwise_hits: &pairwise_hits,
@@ -11311,7 +11313,7 @@ fn report_call(
         query_valid: &query_valid,
         query_batch_skipped: &query_batch_skipped,
         contexts: &contexts,
-        report_contexts: &report_contexts,
+        report_contexts,
         gapped_params,
         gapped_gumbel,
         search_spaces: &search_spaces,
@@ -11328,7 +11330,7 @@ fn report_call(
         shown_total_letters,
         subjects,
         subject_records,
-        subject_titles: &subject_titles,
+        subject_titles,
         shown_subjects,
         subject_ids: &subject_ids,
         subject_accessions: &subject_accessions,

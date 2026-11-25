@@ -38,8 +38,8 @@ use crate::stats::search_space::SearchSpace;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 
 use super::blast_engine::{
-    blastp_use_matrix_workspace, preliminary_hit_from_local_match_hsp, sw_batch_failed_after_oid,
-    sw_endless_after_oid, FetchExcludedMatch, FetchNotes,
+    blastp_use_matrix_workspace, preliminary_hit_from_local_match_hsp, sw_oid_stop_error,
+    FetchExcludedMatch, FetchNotes,
 };
 use super::gapalign::GapAlignScratch;
 use super::hsp::{blast_compo_early_termination, BlastCompoHeap, BlastpHitList, BlastpHspList};
@@ -50,25 +50,7 @@ use super::kappa::{
 };
 use super::x_prelim_compact::{x_expand_hit_list, XPrelimHsp};
 use super::x_redo_subjects::XRedoSubjects;
-
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-use {
-    super::gapalign::BlastpPreliminaryHsp,
-    super::hsp::COMPO_HEAP_EVALUE_STRETCH,
-    super::kappa::smith_waterman::SwMatchResume,
-    super::kappa::BlastpPostprocessResult,
-    super::x_redo_par::{
-        x_bp_redo_lpt, x_compute_window_lpt, x_lpt_order, x_sw_heap_test, x_window_jobs_per_thread,
-    },
-    crate::core::composition_adjustment::smith_waterman_match::SwRedoFailed,
-    crate::utils::threading::SearchPool,
-    rayon::prelude::*,
-    std::sync::OnceLock,
-    std::time::Instant,
-};
+use crate::utils::threading::SearchPool;
 
 /// One entry in a query batch's OID-ordered preliminary stream (`-comp_based_stats 0 -use_sw_tback`).
 ///
@@ -101,39 +83,19 @@ impl Cbs0Event {
             Self::Kept { q_idx, .. } | Self::Excluded { q_idx, .. } => q_idx,
         }
     }
+}
 
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    #[inline]
-    fn is_kept(self) -> bool {
-        matches!(self, Self::Kept { .. })
-    }
+/// Parallel execution knobs for [`run`] (unused on non-threaded targets).
+pub(crate) struct SwCbs0Par<'a> {
+    pub pool: &'a SearchPool<'a>,
+    pub threads: usize,
+    pub allow_parallel: bool,
+    pub timing: bool,
 }
 
 /// Inputs read by [`run`] for BLASTP `-comp_based_stats 0 -use_sw_tback`.
 pub(crate) struct SwCbs0Search<'a, P> {
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    pub pool: &'a SearchPool<'a>,
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    pub threads: usize,
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    pub allow_parallel: bool,
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    pub timing: bool,
+    pub par: SwCbs0Par<'a>,
     pub contexts: &'a [QueryContext],
     pub query_nomask: fn(&QueryContext) -> &[u8],
     pub search_spaces: &'a [SearchSpace],
@@ -329,23 +291,16 @@ fn run_batch<P>(
 where
     P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
 {
-    #[cfg(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    ))]
-    if search.allow_parallel && search.pool.enabled() && search.threads > 1 {
-        let kept = events.iter().filter(|e| e.is_kept()).count();
-        if kept >= 2 {
-            return run_batch_parallel(
-                search,
-                batch,
-                events,
-                lists,
-                heaps,
-                fetch_notes,
-                unadjusted,
-            );
-        }
+    if par::try_run_batch_parallel(
+        search,
+        batch.clone(),
+        events,
+        lists,
+        heaps,
+        fetch_notes,
+        unadjusted,
+    )? {
+        return Ok(());
     }
     run_batch_serial(
         search,
@@ -445,7 +400,7 @@ where
                     &mut None,
                 );
                 let Some(postprocessed) = sw_status.redone(redone, || {
-                    sw_endless_after_oid(fetch_notes, batch.clone(), heaps, ordinal, q_idx)
+                    sw_oid_stop_error(fetch_notes, batch.clone(), heaps, Some((ordinal, q_idx)))
                 })?
                 else {
                     continue;
@@ -471,19 +426,57 @@ where
     }
 
     if sw_status.failed() {
-        return Err(sw_batch_failed_after_oid(fetch_notes, batch, heaps));
+        return Err(sw_oid_stop_error(fetch_notes, batch, heaps, None));
     }
     Ok(())
 }
 
 // ---- Parallel windows for OID-ordered CBS=0 Smith-Waterman redo ----
 
+#[cfg(any(
+    not(feature = "parallel"),
+    all(target_arch = "wasm32", not(feature = "wasm-threads"))
+))]
+mod par {
+    use super::*;
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn try_run_batch_parallel<P>(
+        search: &SwCbs0Search<'_, P>,
+        _batch: Range<usize>,
+        _events: &[Cbs0Event],
+        _lists: &[Option<BlastpHitList>],
+        _heaps: &mut [BlastCompoHeap],
+        _fetch_notes: &FetchNotes<'_>,
+        _unadjusted: &AdjustedProteinMatrix,
+    ) -> Result<bool> {
+        let _ = (
+            search.par.pool,
+            search.par.threads,
+            search.par.allow_parallel,
+            search.par.timing,
+        );
+        Ok(false)
+    }
+}
+
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod par {
+    use super::super::gapalign::BlastpPreliminaryHsp;
+    use super::super::hsp::COMPO_HEAP_EVALUE_STRETCH;
+    use super::super::kappa::smith_waterman::SwMatchResume;
+    use super::super::kappa::BlastpPostprocessResult;
+    use super::super::x_redo_par::{
+        x_bp_redo_lpt, x_compute_window_lpt, x_lpt_order, x_sw_heap_test, x_window_jobs_per_thread,
+    };
     use super::*;
+    use crate::core::composition_adjustment::smith_waterman_match::SwRedoFailed;
+    use rayon::prelude::*;
+    use std::sync::OnceLock;
+    use std::time::Instant;
 
     /// Maximum matches grouped into one new parallel job.
     const OID_JOB_MATCHES: usize = 4;
@@ -855,7 +848,7 @@ mod par {
                     }
                     remaining_per_q[q_idx - batch.start] -= 1;
                     let Some(postprocessed) = sw_status.redone(result, || {
-                        sw_endless_after_oid(fetch_notes, batch.clone(), heaps, ordinal, q_idx)
+                        sw_oid_stop_error(fetch_notes, batch.clone(), heaps, Some((ordinal, q_idx)))
                     })?
                     else {
                         continue;
@@ -984,7 +977,7 @@ mod par {
         }
 
         if sw_status.failed() {
-            return Err(sw_batch_failed_after_oid(fetch_notes, batch, heaps));
+            return Err(sw_oid_stop_error(fetch_notes, batch, heaps, None));
         }
         Ok(counts)
     }
@@ -1068,7 +1061,8 @@ mod par {
         }
     }
 
-    pub(super) fn run_batch_parallel<P>(
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn try_run_batch_parallel<P>(
         search: &SwCbs0Search<'_, P>,
         batch: Range<usize>,
         events: &[Cbs0Event],
@@ -1076,13 +1070,23 @@ mod par {
         heaps: &mut [BlastCompoHeap],
         fetch_notes: &FetchNotes<'_>,
         unadjusted: &AdjustedProteinMatrix,
-    ) -> Result<()>
+    ) -> Result<bool>
     where
         P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
     {
+        if !search.par.allow_parallel || !search.par.pool.enabled() || search.par.threads <= 1 {
+            return Ok(false);
+        }
+        let kept = events
+            .iter()
+            .filter(|e| matches!(e, Cbs0Event::Kept { .. }))
+            .count();
+        if kept < 2 {
+            return Ok(false);
+        }
         let workspaces: Vec<OnceLock<BlastpKappaQueryWorkspace>> =
             (0..batch.len()).map(|_| OnceLock::new()).collect();
-        let threads = search.threads.max(1);
+        let threads = search.par.threads.max(1);
         let limits = OidLimits {
             jobs: x_window_jobs_per_thread().saturating_mul(threads),
             at_risk_matches: threads.saturating_mul(OID_JOB_MATCHES),
@@ -1094,7 +1098,7 @@ mod par {
             lists,
             heaps,
             limits,
-            search.timing,
+            search.par.timing,
             fetch_notes,
             &mut |heaps, window, carried| {
                 let run_job = |scratch: &mut WorkerScratch, job_indices: &[usize]| {
@@ -1159,7 +1163,7 @@ mod par {
                 };
                 let new_scratch = || WorkerScratch::new(search.matrix);
                 let per_job: Vec<Vec<(usize, OidComputed)>> =
-                    if lpt && search.pool.enabled() && threads > 1 && window.jobs.len() > 1 {
+                    if lpt && search.par.pool.enabled() && threads > 1 && window.jobs.len() > 1 {
                         let costs: Vec<u64> = window
                             .jobs
                             .iter()
@@ -1188,14 +1192,14 @@ mod par {
                             .collect();
                         let order = x_lpt_order(&costs);
                         x_compute_window_lpt(
-                            search.pool,
+                            search.par.pool,
                             threads.min(window.jobs.len()),
                             &order,
                             new_scratch,
                             |scratch, job_idx| run_job(scratch, &window.jobs[job_idx]),
                         )
                     } else {
-                        search.pool.install(|| {
+                        search.par.pool.install(|| {
                             window
                                 .jobs
                                 .par_iter()
@@ -1206,7 +1210,7 @@ mod par {
                 per_job.into_iter().flatten().collect()
             },
         )?;
-        if search.timing {
+        if search.par.timing {
             eprintln!(
                 "[TIMING] x_sw_cbs0: batch={}..{} matches={} windows={} skipped={} wasted={} turned={} continued={} carried_max={} par_s={:.6} replay_s={:.6}",
                 batch.start,
@@ -1222,15 +1226,9 @@ mod par {
                 counts.replay_s,
             );
         }
-        Ok(())
+        Ok(true)
     }
 }
-
-#[cfg(all(
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-use par::run_batch_parallel;
 
 #[cfg(test)]
 #[path = "x_sw_cbs0_tests.rs"]

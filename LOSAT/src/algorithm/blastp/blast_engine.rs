@@ -74,7 +74,7 @@ mod db_masked;
 pub(super) use redo_run::{query_fetch_excluded_reached, sw_batch_failed_after, sw_endless_after};
 pub(super) use {
     database::{FetchExcludedMatch, FetchNotes},
-    redo_run::{sw_batch_failed_after_oid, sw_endless_after_oid},
+    redo_run::sw_oid_stop_error,
 };
 // The errors that the windows' tests expect (`x_redo_par_tests.rs`).
 #[cfg(all(

@@ -1022,35 +1022,31 @@ where
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let allow_parallel = x_redo_par::x_bp_redo_par()
-        && blastp_should_parallelize_stage(
-            "kappa-redo-par",
-            redo.args.num_threads,
-            redo.blastp_num_threads,
-            redo.subjects.len(),
-            x_redo_par::x_matches(preliminary_hit_lists, x_compact_hit_lists),
-        );
-    let search = crate::algorithm::blastp::x_sw_cbs0::SwCbs0Search {
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
+    let par = crate::algorithm::blastp::x_sw_cbs0::SwCbs0Par {
         pool: redo.blastp_parallel_pool,
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
         threads: redo.blastp_num_threads,
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
-        allow_parallel,
-        #[cfg(all(
-            feature = "parallel",
-            any(not(target_arch = "wasm32"), feature = "wasm-threads")
-        ))]
+        allow_parallel: x_redo_par::x_bp_redo_par()
+            && blastp_should_parallelize_stage(
+                "kappa-redo-par",
+                redo.args.num_threads,
+                redo.blastp_num_threads,
+                redo.subjects.len(),
+                x_redo_par::x_matches(preliminary_hit_lists, x_compact_hit_lists),
+            ),
         timing: redo.timing_enabled,
+    };
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
+    let par = crate::algorithm::blastp::x_sw_cbs0::SwCbs0Par {
+        pool: redo.blastp_parallel_pool,
+        threads: 1,
+        allow_parallel: false,
+        timing: false,
+    };
+    let search = crate::algorithm::blastp::x_sw_cbs0::SwCbs0Search {
+        par,
         contexts: redo.contexts,
         query_nomask: query_nomask_sequence,
         search_spaces: redo.search_spaces,
@@ -1077,45 +1073,25 @@ where
 }
 
 /// The error of the batch `batch` whose OID-ordered Smith-Waterman redo (`-comp_based_stats 0
-/// -use_sw_tback`, item X4-c0) failed at its last redone match (`sw_batch_failed`), or LOSAT's
-/// refusal where a fetch before it read an unreadable header.
+/// -use_sw_tback`, item X4-c0) failed at its last redone match (`stop: None`) or does not end
+/// at `Some((ordinal, q_idx))`, or LOSAT's refusal where a fetch before it read an unreadable
+/// header.
 #[cold]
 #[inline(never)]
-pub(in crate::algorithm::blastp) fn sw_batch_failed_after_oid(
+pub(in crate::algorithm::blastp) fn sw_oid_stop_error(
     fetch_notes: &super::database::FetchNotes<'_>,
     batch: std::ops::Range<usize>,
     heaps: &[BlastCompoHeap],
+    stop: Option<(u32, usize)>,
 ) -> anyhow::Error {
-    if let Some(refusal) = fetch_notes.refused_before_failure_oid(heaps, batch.clone(), None) {
-        return refusal;
-    }
-    sw_batch_failed(
-        batch.start,
-        &heaps[batch.start],
-        fetch_notes.fetched_before_failure_oid(heaps, batch, None),
-    )
-}
-
-/// The error of the batch `batch` whose OID-ordered Smith-Waterman redo (`-comp_based_stats 0
-/// -use_sw_tback`, item X4-c0) does not end at `(ordinal, q_idx)` (`sw_endless`), or LOSAT's
-/// refusal where a fetch before it read an unreadable header.
-#[cold]
-#[inline(never)]
-pub(in crate::algorithm::blastp) fn sw_endless_after_oid(
-    fetch_notes: &super::database::FetchNotes<'_>,
-    batch: std::ops::Range<usize>,
-    heaps: &[BlastCompoHeap],
-    ordinal: u32,
-    q_idx: usize,
-) -> anyhow::Error {
-    let stop = Some((ordinal, q_idx));
     if let Some(refusal) = fetch_notes.refused_before_failure_oid(heaps, batch.clone(), stop) {
         return refusal;
     }
-    sw_endless(
-        batch.start,
-        fetch_notes.fetched_before_failure_oid(heaps, batch, stop),
-    )
+    let read = fetch_notes.fetched_before_failure_oid(heaps, batch.clone(), stop);
+    match stop {
+        None => sw_batch_failed(batch.start, &heaps[batch.start], read),
+        Some(_) => sw_endless(batch.start, read),
+    }
 }
 
 /// The error of the batch `batch` whose Smith-Waterman redo failed at its last redone match

@@ -217,7 +217,7 @@ mod par_tests {
                     };
                     let res = eval_case(local_match.oid, q_idx, case, inserts);
                     let Some(post) = sw_status.redone(res, || {
-                        sw_endless_after_oid(&notes, batch.clone(), heaps, ordinal, q_idx)
+                        sw_oid_stop_error(&notes, batch.clone(), heaps, Some((ordinal, q_idx)))
                     })?
                     else {
                         continue;
@@ -240,7 +240,7 @@ mod par_tests {
             }
         }
         if sw_status.failed() {
-            return Err(sw_batch_failed_after_oid(&notes, batch, heaps));
+            return Err(sw_oid_stop_error(&notes, batch, heaps, None));
         }
         Ok(())
     }

@@ -70,3 +70,23 @@ fn a_setup_count_of_zero_fails_the_batch_with_the_refusal() {
     assert!(crate::algorithm::common::database::check_setup_count(100, 0, true, "TBLASTN").is_ok());
     assert!(crate::algorithm::common::database::check_setup_count(0, 0, false, "TBLASTN").is_ok());
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:946-951,975
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-302
+// A search space overflow in a batch's setup fails that batch after the reports of the batches
+// before (`fails_one_batch`, `batch_failure`), with LOSAT's refusal itself (not an engine error).
+#[test]
+fn a_search_space_overflow_fails_the_batch_with_the_refusal() {
+    let overflow = crate::stats::setup::SearchSpaceOverflow {
+        db_length: 1_537_228_672_809_129_301,
+        query_length: 649,
+        program: "TBLASTN".to_string(),
+    };
+    let wrapped: anyhow::Error = ErrorAfterBatchReports::new(overflow.into()).into();
+    assert!(fails_one_batch(&wrapped));
+    let failed = batch_failure(wrapped).expect("the batch's failure");
+    assert!(failed.downcast_ref::<crate::cli::NativeError>().is_none());
+    assert!(failed
+        .to_string()
+        .contains("overflows NCBI BLAST+'s 64-bit effective search space"));
+}

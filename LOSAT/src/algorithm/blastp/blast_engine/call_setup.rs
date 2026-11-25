@@ -131,9 +131,9 @@ pub(super) fn requested_reports(
             if let Some(kind) = blastp_xml2_kind(format.outfmt) {
                 return Ok(BlastpReport::Xml2(kind));
             }
-            // The query-anchored outfmt 1 to 4: BLASTP's (`Program::writes`), rpsblast's too
-            // (item PS15a-2); psiblast refuses them (line PS item PS15b).
-            if let Some(view) = blastp_query_anchored_view(args.app, format.outfmt) {
+            // The query-anchored outfmt 1 to 4: BLASTP's (`Program::writes`), rpsblast's (item
+            // PS15a-2) and psiblast's (item PS15b-2, each round's section).
+            if let Some(view) = blastp_query_anchored_view(format.outfmt) {
                 return Ok(BlastpReport::Pairwise(view));
             }
             // Outfmt 0, and outfmt 6 and 7 of the `std` fields and a tab (`custom_tabular_spec`

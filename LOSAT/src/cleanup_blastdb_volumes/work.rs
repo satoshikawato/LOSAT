@@ -10,10 +10,8 @@ use crate::utils::os_bytes::{os_str_bytes, path_bytes, path_of_bytes};
 use super::args::ParsedArgs;
 use super::config::{get_blastdb_from_ncbi_config, py_split_whitespace};
 use super::glob::{glob, glob_sorted};
+use super::unicode::py_stderr_escape;
 use super::{write_failed, PyStdout};
-
-/// Host path separator byte (`/` on Unix/WASI, `\` on Windows).
-const SEP: u8 = if cfg!(windows) { b'\\' } else { b'/' };
 
 /// Chunk size used by Python 3.13's `TextIOWrapper` when decoding the alias file (`8 KiB`).
 const ALIAS_CHUNK_SIZE: usize = 8192;
@@ -98,57 +96,99 @@ impl Env {
     }
 }
 
-/// Returns whether `b` is a path separator on the host OS.
-fn is_sep(b: u8) -> bool {
-    b == b'/' || (cfg!(windows) && b == b'\\')
+/// Returns whether `b` is a path separator for the given OS mode.
+fn is_sep_os(b: u8, windows: bool) -> bool {
+    b == b'/' || (windows && b == b'\\')
 }
 
-/// Returns the length of a Windows drive prefix (`C:`), or 0 otherwise.
-fn drive_prefix_len(path: &[u8]) -> usize {
-    if cfg!(windows) && path.len() >= 2 && path[0].is_ascii_alphabetic() && path[1] == b':' {
-        2
-    } else {
-        0
+/// Splits a Windows path into `(drive, tail)` following Python 3.13's `ntpath.splitdrive`:
+/// handles both drive prefixes (`C:`) and UNC prefixes (`\\server\share`, `\\?\C:`).
+fn splitdrive_win(path: &[u8]) -> (&[u8], &[u8]) {
+    if path.len() >= 2 {
+        if is_sep_os(path[0], true)
+            && is_sep_os(path[1], true)
+            && !path.get(2).is_some_and(|&b| is_sep_os(b, true))
+        {
+            if let Some(rel1) = path[2..].iter().position(|&b| is_sep_os(b, true)) {
+                let idx1 = 2 + rel1;
+                let after = &path[idx1 + 1..];
+                if let Some(rel2) = after.iter().position(|&b| is_sep_os(b, true)) {
+                    let idx2 = idx1 + 1 + rel2;
+                    return (&path[..idx2], &path[idx2..]);
+                }
+                return (path, b"");
+            }
+            return (b"", path);
+        }
+        if path[1] == b':' {
+            return (&path[..2], &path[2..]);
+        }
     }
+    (b"", path)
 }
 
-/// Returns whether `path` is absolute (matching Python's `os.path.isabs`).
-fn is_abs(path: &[u8]) -> bool {
-    if cfg!(windows) {
-        let drive = drive_prefix_len(path);
-        path.get(drive).is_some_and(|&b| is_sep(b))
-    } else {
-        path.starts_with(b"/")
-    }
-}
-
-/// Joins `dir` and `name` following Python's `os.path.join`.
-pub(crate) fn path_join(dir: &[u8], name: &[u8]) -> Vec<u8> {
-    if is_abs(name) || dir.is_empty() {
-        return name.to_vec();
-    }
-    let name_drive = drive_prefix_len(name);
-    if name_drive > 0 {
-        let dir_drive = drive_prefix_len(dir);
-        if dir_drive == 0 || !dir[0].eq_ignore_ascii_case(&name[0]) {
+/// Joins `dir` and `name` following Python 3.13's `os.path.join` (`posixpath.join` when
+/// `windows == false`, `ntpath.join` when `windows == true`).
+pub(crate) fn path_join_os(dir: &[u8], name: &[u8], windows: bool) -> Vec<u8> {
+    if !windows {
+        if name.starts_with(b"/") || dir.is_empty() {
             return name.to_vec();
         }
-        return path_join(dir, &name[name_drive..]);
+        let mut out = Vec::with_capacity(dir.len() + 1 + name.len());
+        out.extend_from_slice(dir);
+        if !dir.ends_with(b"/") {
+            out.push(b'/');
+        }
+        out.extend_from_slice(name);
+        return out;
     }
-    let mut out = Vec::with_capacity(dir.len() + 1 + name.len());
-    out.extend_from_slice(dir);
-    let drive_only = drive_prefix_len(dir) == dir.len();
-    if !drive_only && !dir.last().is_some_and(|&b| is_sep(b)) {
-        out.push(SEP);
+
+    let (mut r_drive, r_path) = splitdrive_win(dir);
+    let (p_drive, p_path) = splitdrive_win(name);
+    if p_path.first().is_some_and(|&b| is_sep_os(b, true)) {
+        if !p_drive.is_empty() || r_drive.is_empty() {
+            r_drive = p_drive;
+        }
+        let mut out = Vec::with_capacity(r_drive.len() + p_path.len());
+        out.extend_from_slice(r_drive);
+        out.extend_from_slice(p_path);
+        return out;
     }
-    out.extend_from_slice(name);
+    if !p_drive.is_empty() && !p_drive.eq_ignore_ascii_case(r_drive) {
+        return name.to_vec();
+    }
+    if !p_drive.is_empty() {
+        r_drive = p_drive;
+    }
+    let need_sep = if !r_path.is_empty() {
+        !r_path.last().is_some_and(|&b| is_sep_os(b, true))
+    } else {
+        !r_drive.is_empty() && !r_drive.ends_with(b":") && !p_path.is_empty()
+    };
+    let mut out =
+        Vec::with_capacity(r_drive.len() + r_path.len() + usize::from(need_sep) + p_path.len());
+    out.extend_from_slice(r_drive);
+    out.extend_from_slice(r_path);
+    if need_sep {
+        out.push(b'\\');
+    }
+    out.extend_from_slice(p_path);
     out
+}
+
+/// Joins `dir` and `name` following Python's `os.path.join` for the host OS.
+pub(crate) fn path_join(dir: &[u8], name: &[u8]) -> Vec<u8> {
+    path_join_os(dir, name, cfg!(windows))
 }
 
 /// Returns the final path component following Python's `os.path.basename`.
 fn basename(path: &[u8]) -> &[u8] {
-    let rest = &path[drive_prefix_len(path)..];
-    match rest.iter().rposition(|&b| is_sep(b)) {
+    let rest = if cfg!(windows) {
+        splitdrive_win(path).1
+    } else {
+        path
+    };
+    match rest.iter().rposition(|&b| is_sep_os(b, cfg!(windows))) {
         Some(pos) => &rest[pos + 1..],
         None => rest,
     }
@@ -398,11 +438,8 @@ fn process_dblist_line(
         for f in to_rm {
             if !args.dry_run {
                 if let Err(e) = std::fs::remove_file(path_of_bytes(&f)) {
-                    let _ = writeln!(
-                        err,
-                        "Error: cannot remove {}: {e}",
-                        String::from_utf8_lossy(&f)
-                    );
+                    out.flush_before_error();
+                    let _ = writeln!(err, "Error: cannot remove {}: {e}", py_stderr_escape(&f));
                     let _ = err.flush();
                     return Some(1);
                 }
@@ -431,11 +468,12 @@ pub(crate) fn run(
     let db = match find_blastdb(&args.db, args.dbtype.is_prot(), env) {
         Ok(Some(db)) => db,
         Ok(None) => {
-            let _ = err.write_all(b"Cannot find ");
-            let _ = err.write_all(args.dbtype.label().as_bytes());
-            let _ = err.write_all(b" ");
-            let _ = err.write_all(&args.db);
-            let _ = err.write_all(b" BLAST database\n");
+            let _ = writeln!(
+                err,
+                "Cannot find {} {} BLAST database",
+                args.dbtype.label(),
+                py_stderr_escape(&args.db)
+            );
             let _ = err.flush();
             return 1;
         }
@@ -457,7 +495,7 @@ pub(crate) fn run(
             let _ = writeln!(
                 err,
                 "Error: cannot read {}: {e}",
-                String::from_utf8_lossy(&alias_file)
+                py_stderr_escape(&alias_file)
             );
             let _ = err.flush();
             return 1;
@@ -476,19 +514,21 @@ pub(crate) fn run(
             Ok(Some(line)) => line,
             Ok(None) => break,
             Err(AliasReadError::Io(e)) => {
+                out.flush_before_error();
                 let _ = writeln!(
                     err,
                     "Error: cannot read {}: {e}",
-                    String::from_utf8_lossy(&alias_file)
+                    py_stderr_escape(&alias_file)
                 );
                 let _ = err.flush();
                 return 1;
             }
             Err(AliasReadError::Utf8(e)) => {
+                out.flush_before_error();
                 let _ = writeln!(
                     err,
                     "Error: {}: invalid UTF-8: {e}",
-                    String::from_utf8_lossy(&alias_file)
+                    py_stderr_escape(&alias_file)
                 );
                 let _ = err.flush();
                 return 1;

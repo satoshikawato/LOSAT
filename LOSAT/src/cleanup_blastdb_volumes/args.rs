@@ -8,7 +8,7 @@ use std::ffi::OsString;
 
 use crate::utils::os_bytes::os_str_bytes;
 
-use super::config::py_trim;
+use super::unicode::{py_repr, py_stderr_escape, unicode_nd_digit};
 
 /// Program name written in usage, help, version, and error lines.
 pub(crate) const PROG: &str = "cleanup-blastdb-volumes.py";
@@ -16,6 +16,9 @@ pub(crate) const PROG: &str = "cleanup-blastdb-volumes.py";
 /// Fallback terminal column count used when `COLUMNS` is unset/invalid and stdout is not a
 /// terminal (Python's default 80-column terminal width).
 pub(crate) const DEFAULT_COLUMNS: usize = 80;
+
+/// Python 3.13's `sys.int_info.default_max_str_digits` limit for decimal `int()` parsing.
+const PY_INT_MAX_STR_DIGITS: usize = 4300;
 
 const USAGE_PARTS: [&str; 6] = [
     "[-h]",
@@ -48,28 +51,46 @@ const OPTION_HELP: [(&str, &[&str]); 6] = [
     ("-verbose", &["Increase", "output", "verbosity"]),
 ];
 
-/// Parses Python's `COLUMNS` environment value (`int(s)` when `> 0`, returning `None` on empty,
-/// non-integer, or non-positive values; huge positive integers saturate to `usize::MAX`).
+/// Parses Python 3.13's `COLUMNS` environment value (`int(s)` when `> 0`): strips Unicode
+/// `White_Space` (not ASCII U+001C–U+001F), accepts an optional `+` sign, Unicode `Nd` digits, and
+/// single `_` separators between digits, enforces Python's 4300-digit `int()` limit, and saturates
+/// huge positive integers to `usize::MAX`.
 fn parse_columns_env(raw: &str) -> Option<usize> {
-    let trimmed = py_trim(raw);
+    let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
     }
-    let digits = if let Some(rest) = trimmed.strip_prefix('+') {
-        rest
+    let rest = if let Some(after) = trimmed.strip_prefix('+') {
+        after
     } else if trimmed.starts_with('-') {
         return None;
     } else {
         trimmed
     };
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+    let mut val = 0usize;
+    let mut digit_count = 0usize;
+    let mut prev_underscore = false;
+    for ch in rest.chars() {
+        if ch == '_' {
+            if digit_count == 0 || prev_underscore {
+                return None;
+            }
+            prev_underscore = true;
+        } else if let Some(d) = unicode_nd_digit(ch) {
+            prev_underscore = false;
+            digit_count += 1;
+            if digit_count > PY_INT_MAX_STR_DIGITS {
+                return None;
+            }
+            val = val.saturating_mul(10).saturating_add(usize::from(d));
+        } else {
+            return None;
+        }
+    }
+    if digit_count == 0 || prev_underscore || val == 0 {
         return None;
     }
-    let trimmed_zeros = digits.trim_start_matches('0');
-    if trimmed_zeros.is_empty() {
-        return None;
-    }
-    Some(trimmed_zeros.parse::<usize>().unwrap_or(usize::MAX))
+    Some(val)
 }
 
 /// Resolves the terminal column width following Python's terminal-size precedence:
@@ -298,10 +319,59 @@ impl LongOpt {
     }
 }
 
-/// Version line printed by `-version`: LOSAT's version in place of NCBI's script version
+/// Wraps `text` to `max_width` columns matching Python 3.13 `textwrap.fill` (breaking hyphenated
+/// words), used by `argparse.HelpFormatter.add_text` for `-version`.
+fn fill_text(text: &str, max_width: isize) -> String {
+    let mut chunks: Vec<(&str, bool)> = Vec::new();
+    for word in text.split_ascii_whitespace() {
+        let bytes = word.as_bytes();
+        let mut start = 0usize;
+        let mut glued = false;
+        let mut i = 0usize;
+        while i < bytes.len() {
+            if bytes[i] == b'-' && i > start && i + 1 < bytes.len() && bytes[i + 1] != b'-' {
+                chunks.push((&word[start..=i], glued));
+                start = i + 1;
+                glued = true;
+            }
+            i += 1;
+        }
+        if start < bytes.len() {
+            chunks.push((&word[start..], glued));
+        }
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for (chunk, glued) in chunks {
+        if current.is_empty() {
+            current.push_str(chunk);
+        } else {
+            let sep_len = usize::from(!glued);
+            if (current.len() + sep_len + chunk.len()) as isize <= max_width {
+                if !glued {
+                    current.push(' ');
+                }
+                current.push_str(chunk);
+            } else {
+                lines.push(std::mem::take(&mut current));
+                current.push_str(chunk);
+            }
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+/// Version line printed by `-version`, wrapped with `argparse.HelpFormatter`'s width
+/// (`max(columns - 2, 11)`): uses LOSAT's version in place of NCBI's script version
 /// (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 14).
-pub(crate) fn version_text() -> String {
-    format!("{PROG} {}\n", crate::wording::LOSAT_VERSION)
+pub(crate) fn version_text_for_columns(columns: usize) -> String {
+    let raw = format!("{PROG} {}", crate::wording::LOSAT_VERSION);
+    fill_text(&raw, formatter_width(columns).max(11))
 }
 
 /// Formats an argument error with the wrapped usage banner and program error line.
@@ -361,48 +431,26 @@ fn take_value(
     ))
 }
 
-/// Formats `bytes` with Python `%r` string quoting (single quotes unless the string contains `'`
-/// and no `"`).
-fn py_repr(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
-    let use_double = text.contains('\'') && !text.contains('"');
-    let quote = if use_double { '"' } else { '\'' };
-    let mut out = String::with_capacity(text.len() + 2);
-    out.push(quote);
-    for ch in text.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '\t' => out.push_str("\\t"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\'' if !use_double => out.push_str("\\'"),
-            c if (c as u32) < 0x20 || c as u32 == 0x7f => {
-                out.push_str(&format!("\\x{:02x}", c as u32));
-            }
-            c => out.push(c),
-        }
-    }
-    out.push(quote);
-    out
-}
-
-/// Whether `token` matches a negative decimal number (`-1`, `-3.14`, `-.5`), which `argparse`
-/// treats as a positional value rather than an option flag.
+/// Whether `token` matches Python 3.13 `argparse._negative_number_matcher` (`^-\d+$|^-\d*\.\d+$`),
+/// where `\d` matches Unicode `Nd` digits and `$` matches at the end of the string or before a
+/// single trailing `\n`.
 fn is_negative_number(token: &[u8]) -> bool {
-    let Some(rest) = token.strip_prefix(b"-") else {
+    let Ok(text) = std::str::from_utf8(token) else {
+        return false;
+    };
+    let text = text.strip_suffix('\n').unwrap_or(text);
+    let Some(rest) = text.strip_prefix('-') else {
         return false;
     };
     if rest.is_empty() {
         return false;
     }
-    let digits = |s: &[u8]| !s.is_empty() && s.iter().all(u8::is_ascii_digit);
-    if digits(rest) {
+    let all_nd = |s: &str| !s.is_empty() && s.chars().all(|c| unicode_nd_digit(c).is_some());
+    if all_nd(rest) {
         return true;
     }
-    if let Some(dot) = rest.iter().position(|&b| b == b'.') {
-        let head = &rest[..dot];
-        let tail = &rest[dot + 1..];
-        return (head.is_empty() || digits(head)) && digits(tail);
+    if let Some((head, tail)) = rest.split_once('.') {
+        return (head.is_empty() || all_nd(head)) && all_nd(tail);
     }
     false
 }
@@ -489,7 +537,7 @@ pub(crate) fn parse_with_columns(words: &[OsString], columns: usize) -> ParseOut
     let mut verbose = 0usize;
     let mut extras: Vec<String> = Vec::new();
     let mut after_double_dash = false;
-    let mut push_extra = |tok: &[u8]| extras.push(String::from_utf8_lossy(tok).into_owned());
+    let mut push_extra = |tok: &[u8]| extras.push(py_stderr_escape(tok));
 
     let mut i = 0usize;
     while i < raw.len() {
@@ -528,24 +576,38 @@ pub(crate) fn parse_with_columns(words: &[OsString], columns: usize) -> ParseOut
         // Single-dash multi-character options and abbreviations.
         let matched = match match_single_dash(opt_part) {
             SingleDashMatch::Exact(opt) | SingleDashMatch::Unique(opt) => opt,
-            SingleDashMatch::Ambiguous(candidates) => {
+            SingleDashMatch::Ambiguous(mut candidates) => {
+                if opt_part == b"-" {
+                    candidates.splice(0..0, ["-h", "--help"]);
+                }
                 return err_outcome(
                     columns,
                     &format!(
                         "ambiguous option: {} could match {}",
-                        String::from_utf8_lossy(token),
+                        py_stderr_escape(token),
                         candidates.join(", ")
                     ),
                 );
             }
             SingleDashMatch::None => {
-                // Short-option bundling: `-h<rest>` errors when `<rest>` starts with `-`, and
-                // otherwise dispatches `-h` immediately (`-help`, `-he`, `-hx`, `-h bar`).
+                // Short-option bundling: walk `-h<rest>` consuming repeated `h`; `=` right after
+                // `h` or a leading `-` reports an ignored explicit argument, while any other char
+                // or end of token dispatches `-h` immediately (`-help`, `-hx`, `-hhx`, `-hxh=1`).
                 if let Some(rest) = token.strip_prefix(b"-h") {
-                    if rest.starts_with(b"-") {
-                        return ignored_arg(columns, "-h/--help", rest);
+                    let mut tail = rest;
+                    loop {
+                        match tail.first() {
+                            None => return ParseOutcome::Help(help_text_for_columns(columns)),
+                            Some(b'-') => return ignored_arg(columns, "-h/--help", tail),
+                            Some(b'h') => {
+                                tail = &tail[1..];
+                                if let Some(v) = tail.strip_prefix(b"=") {
+                                    return ignored_arg(columns, "-h/--help", v);
+                                }
+                            }
+                            Some(_) => return ParseOutcome::Help(help_text_for_columns(columns)),
+                        }
                     }
-                    return ParseOutcome::Help(help_text_for_columns(columns));
                 }
                 push_extra(token);
                 i += 1;
@@ -558,7 +620,7 @@ pub(crate) fn parse_with_columns(words: &[OsString], columns: usize) -> ParseOut
                 if let Some(val) = explicit_val {
                     return ignored_arg(columns, "-version", val);
                 }
-                return ParseOutcome::Version(version_text());
+                return ParseOutcome::Version(version_text_for_columns(columns));
             }
             LongOpt::DryRun => {
                 if let Some(val) = explicit_val {

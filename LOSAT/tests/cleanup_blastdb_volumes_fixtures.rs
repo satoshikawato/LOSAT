@@ -413,6 +413,37 @@ fn version_prints_losat_version() {
         assert_eq!(String::from_utf8(out.stdout).unwrap(), expected, "{flag}");
         assert!(out.stderr.is_empty(), "{flag}");
     }
+    // `-version` wraps with `COLUMNS` like `argparse.HelpFormatter`.
+    let out_31 = base_command(&dir, &dir)
+        .env("COLUMNS", "31")
+        .arg("-version")
+        .output()
+        .unwrap();
+    assert_eq!(out_31.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(out_31.stdout).unwrap(),
+        format!(
+            "cleanup-blastdb-volumes.py\n{}\n",
+            losat::wording::LOSAT_VERSION
+        )
+    );
+    let out_39 = base_command(&dir, &dir)
+        .env("COLUMNS", "39")
+        .arg("-version")
+        .output()
+        .unwrap();
+    assert_eq!(out_39.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(out_39.stdout).unwrap(),
+        "cleanup-blastdb-volumes.py LOSAT\n0.2.0\n"
+    );
+    let out_40 = base_command(&dir, &dir)
+        .env("COLUMNS", "40")
+        .arg("-version")
+        .output()
+        .unwrap();
+    assert_eq!(out_40.status.code(), Some(0));
+    assert_eq!(String::from_utf8(out_40.stdout).unwrap(), expected);
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -597,5 +628,126 @@ fn removed_cwd_fails_when_config_fallback_runs() {
     assert!(
         String::from_utf8_lossy(&out.stderr).contains("cannot determine current working directory")
     );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn unlink_failure_flushes_stdout_before_stderr_and_matches_closed_pipe_exit_status() {
+    let bin = env!("CARGO_BIN_EXE_losat");
+    let make_db = |label: &str, nvol: usize| {
+        let dir = scratch(label);
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("db.pal"), b"DBLIST db.00\n").unwrap();
+        for v in 0..nvol {
+            for ext in ["pin", "phr", "psq"] {
+                let name = if v == 0 {
+                    format!("db.00.{ext}")
+                } else {
+                    format!("db.{v:03}.{ext}")
+                };
+                fs::write(dir.join(name), b"").unwrap();
+            }
+        }
+        fs::create_dir(dir.join(format!("db.{:03}.pxx", nvol - 3))).unwrap();
+        dir
+    };
+
+    // 1. `2>&1 | cat`: buffered stdout lines precede `Error: cannot remove ...` for both small
+    //    (10 volumes) and multi-chunk (300 volumes) runs.
+    for nvol in [10usize, 300] {
+        let dir = make_db(&format!("unlink-order-{nvol}"), nvol);
+        let out = Command::new("/bin/sh")
+            .arg("-c")
+            .arg("\"$1\" cleanup-blastdb-volumes.py -db db -dbtype prot 2>&1 | cat")
+            .arg("sh")
+            .arg(bin)
+            .current_dir(&dir)
+            .env("HOME", &dir)
+            .env_remove("BLASTDB")
+            .env_remove("NCBI")
+            .output()
+            .unwrap();
+        let text = String::from_utf8(out.stdout).unwrap();
+        let err_pos = text
+            .find("Error: cannot remove ")
+            .expect("error message in merged stream");
+        assert!(err_pos > 0, "nvol={nvol}: error must come after stdout");
+        let after_err = &text[err_pos..];
+        assert!(
+            !after_err.contains("Removed "),
+            "nvol={nvol}: no stdout lines may appear after error: {after_err:?}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // 2. Closed pipe across all four sizes (~600 B, ~6 KiB, ~9 KiB, ~18 KiB):
+    //    <= 4096 B (st_blksize) keeps buffered bytes and exits 120; > 4096 B drops and exits 1.
+    for (nvol, want_rc, want_exc_ignored) in [
+        (10usize, 120i32, true),
+        (100, 1, false),
+        (150, 1, false),
+        (300, 1, false),
+    ] {
+        let dir = make_db(&format!("unlink-pipe-{nvol}"), nvol);
+        let out = Command::new("/bin/bash")
+            .arg("-c")
+            .arg("\"$1\" cleanup-blastdb-volumes.py -db db -dbtype prot 2> err.txt | (exec 0<&-; sleep 0.3); exit \"${PIPESTATUS[0]}\"")
+            .arg("bash")
+            .arg(bin)
+            .current_dir(&dir)
+            .env("HOME", &dir)
+            .env_remove("BLASTDB")
+            .env_remove("NCBI")
+            .output()
+            .unwrap();
+        let err_text = fs::read_to_string(dir.join("err.txt")).unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(want_rc),
+            "nvol={nvol}, err={err_text:?}"
+        );
+        assert_eq!(
+            err_text.contains("Exception ignored on flushing sys.stdout:"),
+            want_exc_ignored,
+            "nvol={nvol}, err={err_text:?}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn stderr_escapes_non_utf8_and_non_printable_arguments_like_python() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let dir = scratch("stderr-escape");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    let out = base_command(&dir, &dir)
+        .arg("-db")
+        .arg(OsString::from_vec(b"zz\x80".to_vec()))
+        .args(["-dbtype", "prot"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8(out.stderr).unwrap(),
+        "Cannot find protein zz\\udc80 BLAST database\n"
+    );
+
+    let out2 = base_command(&dir, &dir)
+        .args(["-db", "x", "-dbtype"])
+        .arg(OsString::from_vec(b"\x80".to_vec()))
+        .output()
+        .unwrap();
+    assert_eq!(out2.status.code(), Some(2));
+    assert!(String::from_utf8(out2.stderr)
+        .unwrap()
+        .ends_with("argument -dbtype: invalid choice: '\\udc80' (choose from prot, nucl)\n"));
+
     let _ = fs::remove_dir_all(&dir);
 }

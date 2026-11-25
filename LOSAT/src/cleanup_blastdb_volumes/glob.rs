@@ -129,14 +129,14 @@ impl Atom {
 }
 
 /// Decodes `bytes` into `Atom`s (valid UTF-8 scalars, with raw `Atom::Byte` for invalid bytes).
-/// When `fold_case` is true (Windows), valid UTF-8 chunks are Unicode-lowercased via
-/// `str::to_lowercase`, matching Python's `ntpath.normcase`.
+/// When `fold_case` is true (Windows), valid UTF-8 chunks are lowercased with a 1-to-1 invariant
+/// mapping matching Python 3.13's Windows `ntpath.normcase` (`LCMapStringEx`).
 fn to_atoms(bytes: &[u8], fold_case: bool) -> Vec<Atom> {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     let push_valid = |s: &str, out: &mut Vec<Atom>| {
         if fold_case {
-            out.extend(s.to_lowercase().chars().map(Atom::Char));
+            out.extend(super::unicode::windows_lowercase(s).chars().map(Atom::Char));
         } else {
             out.extend(s.chars().map(Atom::Char));
         }

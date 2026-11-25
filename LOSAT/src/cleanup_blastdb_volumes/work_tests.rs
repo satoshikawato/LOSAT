@@ -3,7 +3,9 @@ use std::fs;
 use std::io;
 
 use super::*;
-use crate::cleanup_blastdb_volumes::{run_with, run_with_buffering};
+use crate::cleanup_blastdb_volumes::{
+    run_with, run_with_buffering, run_with_buffering_and_blksize,
+};
 use crate::utils::test_dir::TempDir;
 
 fn invoke(words: &[&str], env: &Env) -> (i32, Vec<u8>, Vec<u8>) {
@@ -378,4 +380,139 @@ fn single_volume_without_alias_exits_one_silently() {
     assert!(out.is_empty());
     assert!(err.is_empty());
     assert!(dir.join("sv.01.pin").exists());
+}
+
+#[test]
+fn windows_path_join_matches_ntpath_drive_and_root_rules() {
+    for (a, b, want) in [
+        (
+            b"C:\\dbs".as_slice(),
+            b"\\x.pal".as_slice(),
+            b"C:\\x.pal".as_slice(),
+        ),
+        (b"C:\\dbs", b"/x.pal", b"C:/x.pal"),
+        (b"c:\\dbs", b"C:x.pal", b"C:\\dbs\\x.pal"),
+        (b"C:\\dbs", b"c:x.pal", b"c:\\dbs\\x.pal"),
+        (b"c:\\dbs", b"C:\\x.pal", b"C:\\x.pal"),
+        (b"c:\\dbs", b"D:x.pal", b"D:x.pal"),
+        (b"c:", b"C:x.pal", b"C:x.pal"),
+        (b"c:", b"\\x.pal", b"c:\\x.pal"),
+        (b"C:\\dbs", b"x.pal", b"C:\\dbs\\x.pal"),
+        (b"C:/dbs", b"x.pal", b"C:/dbs\\x.pal"),
+        (b"C:/dbs/", b"x.pal", b"C:/dbs/x.pal"),
+        (b"\\\\srv\\sh\\dbs", b"\\x.pal", b"\\\\srv\\sh\\x.pal"),
+        (b"\\\\srv\\sh", b"x.pal", b"\\\\srv\\sh\\x.pal"),
+        (b"\\\\srv\\sh", b"", b"\\\\srv\\sh"),
+        (b"\\\\srv\\sh\\dbs", b"C:x.pal", b"C:x.pal"),
+        (b"\\dbs", b"\\x.pal", b"\\x.pal"),
+        (b"dbs", b"\\x.pal", b"\\x.pal"),
+        (b"c:\\dbs", b"C:", b"C:\\dbs\\"),
+        (b"c:\\dbs", b"", b"c:\\dbs\\"),
+        (b"C:", b"", b"C:"),
+    ] {
+        assert_eq!(
+            path_join_os(a, b, true),
+            want,
+            "join({:?}, {:?})",
+            String::from_utf8_lossy(a),
+            String::from_utf8_lossy(b)
+        );
+    }
+}
+
+#[test]
+fn unlink_error_flushes_stdout_before_stderr_and_respects_blksize_on_closed_pipe() {
+    // 1. Verify stdout is flushed BEFORE stderr error text on unlink failure.
+    struct SharedSink(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+    impl io::Write for SharedSink {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let dir = TempDir::unique("cleanup-flush-order");
+    fs::write(dir.join("db.pal"), b"DBLIST db.00\n").unwrap();
+    touch_all(&dir, &["db.00.pin", "db.01.pin", "db.02.pin"]);
+    fs::create_dir(dir.join("db.02.pxx")).unwrap();
+    let db_str = dir.join("db").to_str().unwrap().to_string();
+    let args: Vec<OsString> = ["-db", &db_str, "-dbtype", "prot"]
+        .iter()
+        .map(OsString::from)
+        .collect();
+    let shared = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut out = SharedSink(shared.clone());
+    let mut err = SharedSink(shared.clone());
+    let rc =
+        run_with_buffering_and_blksize(&args, &Env::default(), &mut out, false, 4096, &mut err);
+    assert_eq!(rc, 1);
+    let combined = String::from_utf8(shared.borrow().clone()).unwrap();
+    let rm_pos = combined.find("Removed ").expect("Removed line");
+    let err_pos = combined.find("Error: cannot remove ").expect("Error line");
+    assert!(rm_pos < err_pos, "stdout must precede stderr: {combined:?}");
+
+    // 2. Closed pipe + unlink error: <= 4096 bytes kept -> exit 120; > 4096 (< 8192) dropped -> exit 1.
+    for (nvol, want_rc) in [(10usize, 120i32), (100, 1)] {
+        let dir_p = TempDir::unique(&format!("cleanup-pipe-{nvol}"));
+        fs::write(dir_p.join("db.pal"), b"DBLIST db.00\n").unwrap();
+        fs::write(dir_p.join("db.00.pin"), b"").unwrap();
+        for v in 1..nvol {
+            for ext in ["pin", "phr", "psq"] {
+                fs::write(dir_p.join(format!("db.{v:03}.{ext}")), b"").unwrap();
+            }
+        }
+        fs::create_dir(dir_p.join(format!("db.{:03}.pxx", nvol - 1))).unwrap();
+        let db_p = dir_p.join("db").to_str().unwrap().to_string();
+        let args_p: Vec<OsString> = ["-db", &db_p, "-dbtype", "prot"]
+            .iter()
+            .map(OsString::from)
+            .collect();
+        let mut fail_out = FailingWriter {
+            error_kind: io::ErrorKind::BrokenPipe,
+            os_code: None,
+            writes: 0,
+        };
+        let mut err_buf = Vec::new();
+        let got_rc = run_with_buffering_and_blksize(
+            &args_p,
+            &Env::default(),
+            &mut fail_out,
+            false,
+            4096,
+            &mut err_buf,
+        );
+        assert_eq!(
+            got_rc,
+            want_rc,
+            "nvol={nvol}, err={:?}",
+            String::from_utf8_lossy(&err_buf)
+        );
+        let err_s = String::from_utf8(err_buf).unwrap();
+        assert_eq!(
+            err_s.contains("Exception ignored on flushing sys.stdout:"),
+            want_rc == 120
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_non_utf8_db_escapes_bytes_as_surrogateescape_in_stderr() {
+    use std::os::unix::ffi::OsStringExt;
+    let args = vec![
+        OsString::from("-db"),
+        OsString::from_vec(b"zz\x80".to_vec()),
+        OsString::from("-dbtype"),
+        OsString::from("prot"),
+    ];
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let rc = run_with(&args, &Env::default(), &mut out, &mut err);
+    assert_eq!(rc, 1);
+    assert!(out.is_empty());
+    assert_eq!(
+        String::from_utf8(err).unwrap(),
+        "Cannot find protein zz\\udc80 BLAST database\n"
+    );
 }

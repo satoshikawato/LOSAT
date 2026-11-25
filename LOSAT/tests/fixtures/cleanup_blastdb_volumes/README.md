@@ -25,16 +25,17 @@ row in a fresh copy of `in/`.
     subdirectories, `BLASTDB`, `.ncbirc` / `ncbi.ini` (`cfg_*`, with `<RUN>` expanded to the run
     directory), dot-only / multi-dot volume names, and glob metacharacters.
 - Rows (`cases.tsv`, tab-separated `name`, `env`, `cwd`, `args`):
-  - `H01`–`H06`: `-h`, `--help`, `-help`, `--hel`, and help precedence with unknown flags.
+  - `H01`–`H09`: `-h`, `--help`, `-help`, `--hel`, help precedence with unknown flags, and
+    repeated-`h` ignored explicit arguments (`-hh=x`, `-hh=`, `-hh-x`).
   - `P01`–`P06`, `N01`–`N05`: protein and nucleotide v4/v5 dry-run, verbose dry-run, and deletion.
   - `S01`–`S04`: single-volume without alias, wrong molecule type, missing databases.
   - `D01`–`D09`: `DBLIST` quoting, multiple `DBLIST` lines, missing `DBLIST`, subdirs, `./`, dots,
     and glob metacharacters.
   - `E01`–`E10`: `BLASTDB` (single, trailing `/`, colon-separated), `.ncbirc` and `ncbi.ini` in
     working directory, `HOME`, `$NCBI`, lowercase `[blast]`, and `[DEFAULT]` + `[BLAST]`.
-  - `A01`–`A19`: missing required arguments, invalid choices, option-like values, `=` form,
-    negative numbers, `-`, unrecognized arguments, `--`, ambiguous prefixes, explicit arguments to
-    flags, unambiguous abbreviations, and duplicate `-dbtype`.
+  - `A01`–`A21`: missing required arguments, invalid choices, option-like values, `=` form,
+    negative numbers, `-`, unrecognized arguments, `--`, ambiguous prefixes (including `-=x` and
+    `-=`), explicit arguments to flags, unambiguous abbreviations, and duplicate `-dbtype`.
   - `W01`–`W06`: terminal-width wrapping of `-h` and argument-error usage with `COLUMNS=40`, `60`,
     `120`, and `200`.
 - `-version` is tested directly in `tests/cleanup_blastdb_volumes_fixtures.rs` and

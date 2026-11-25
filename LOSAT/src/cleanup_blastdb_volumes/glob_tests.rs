@@ -63,13 +63,19 @@ fn windows_path_joining_and_unicode_case_folding() {
         assert_eq!(got, want_joined, "pat={}", String::from_utf8_lossy(pat));
     }
 
-    // Windows `ntpath.normcase` performs full Unicode lowercasing before `fnmatchcase`.
+    // Windows `ntpath.normcase` uses 1-to-1 invariant lowercasing (`LCMapStringEx`):
+    // U+0130 ('İ') maps to single 'i' (not 'i' + U+0307) and U+03A3 ('Σ') maps to 'σ' (not final 'ς').
     assert!(fnmatch_bytes_case(
         "\u{00c4}.pin".as_bytes(),
         "\u{00e4}.PIN".as_bytes(),
         true
     ));
     assert!(fnmatch_bytes_case(
+        "\u{0130}.pin".as_bytes(),
+        "i.pin".as_bytes(),
+        true
+    ));
+    assert!(!fnmatch_bytes_case(
         "\u{0130}.pin".as_bytes(),
         "i\u{0307}.pin".as_bytes(),
         true
@@ -79,7 +85,7 @@ fn windows_path_joining_and_unicode_case_folding() {
         "\u{03b1}\u{03bf}\u{03c3}.pin".as_bytes(),
         true
     ));
-    assert!(fnmatch_bytes_case(
+    assert!(!fnmatch_bytes_case(
         "\u{0391}\u{039f}\u{03a3}.01.pin".as_bytes(),
         "\u{03b1}\u{03bf}\u{03c2}.01.pin".as_bytes(),
         true

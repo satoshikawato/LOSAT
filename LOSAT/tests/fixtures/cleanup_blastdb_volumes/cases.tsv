@@ -5,6 +5,9 @@ H03	-	.	-help
 H04	-	.	--hel
 H05	-	.	-h -bogus
 H06	-	.	-bogus -h
+H07	-	.	-hh=x
+H08	-	.	-hh=
+H09	-	.	-hh-x
 P01	-	.	-db in/p5 -dbtype prot -dry-run
 P02	-	.	-db in/p5 -dbtype prot -dry-run -verbose
 P03	-	.	-db in/p5 -dbtype prot
@@ -58,6 +61,8 @@ A16	-	.	--help=1
 A17	-	.	-h=1
 A18	-	.	-dbt prot -db in/quoted -dr -verb
 A19	-	.	-db in/p5 -dbtype nucl -dbtype prot -dry-run
+A20	-	.	-=x
+A21	-	.	-=
 W01	COLUMNS=40	.	-h
 W02	COLUMNS=60	.	-h
 W03	COLUMNS=120	.	-h

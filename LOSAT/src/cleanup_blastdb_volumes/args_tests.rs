@@ -63,12 +63,75 @@ fn resolve_columns_follows_python_terminal_size_precedence() {
     assert_eq!(resolve_columns(Some("  40  "), Some(120)), 40);
     assert_eq!(resolve_columns(Some("+60"), Some(120)), 60);
     assert_eq!(resolve_columns(Some("00050"), Some(120)), 50);
+    assert_eq!(resolve_columns(Some("1_00"), Some(120)), 100);
+    assert_eq!(resolve_columns(Some("+1_0_0"), Some(120)), 100);
+    assert_eq!(
+        resolve_columns(Some("\u{0661}\u{0660}\u{0660}"), Some(120)),
+        100
+    );
+    assert_eq!(
+        resolve_columns(Some("\u{0661}_\u{0660}\u{0660}"), Some(120)),
+        100
+    );
+    assert_eq!(resolve_columns(Some("\u{00a0}72\u{00a0}"), Some(120)), 72);
+    assert_eq!(resolve_columns(Some("\x1c72\x1f"), Some(120)), 120);
+    assert_eq!(resolve_columns(Some("1__0"), Some(120)), 120);
+    assert_eq!(resolve_columns(Some("_10"), Some(120)), 120);
+    assert_eq!(resolve_columns(Some("10_"), Some(120)), 120);
+    assert_eq!(resolve_columns(Some("+_10"), Some(120)), 120);
+    assert_eq!(resolve_columns(Some("0_0"), Some(120)), 120);
+    let max_ok = "1".repeat(4300);
+    let too_many = "1".repeat(4301);
+    assert_eq!(resolve_columns(Some(&max_ok), None), usize::MAX);
+    assert_eq!(resolve_columns(Some(&too_many), Some(120)), 120);
     assert_eq!(
         resolve_columns(Some("999999999999999999999"), None),
         usize::MAX
     );
     assert_eq!(resolve_columns(None, Some(0)), 80);
     assert_eq!(resolve_columns(None, Some(100)), 100);
+}
+
+#[test]
+fn version_wraps_with_terminal_columns() {
+    let v = crate::wording::LOSAT_VERSION;
+    // Narrow widths break on hyphens like Python 3.13 `argparse.HelpFormatter`.
+    assert_eq!(
+        version_text_for_columns(1),
+        format!("cleanup-\nblastdb-\nvolumes.py\n{v}\n")
+    );
+    assert_eq!(
+        version_text_for_columns(18),
+        "cleanup-blastdb-\nvolumes.py LOSAT\n0.2.0\n"
+    );
+    assert_eq!(
+        version_text_for_columns(24),
+        format!("cleanup-blastdb-\nvolumes.py {v}\n")
+    );
+    assert_eq!(
+        version_text_for_columns(28),
+        format!("cleanup-blastdb-volumes.py\n{v}\n")
+    );
+    assert_eq!(
+        version_text_for_columns(31),
+        format!("cleanup-blastdb-volumes.py\n{v}\n")
+    );
+    assert_eq!(
+        version_text_for_columns(34),
+        "cleanup-blastdb-volumes.py LOSAT\n0.2.0\n"
+    );
+    assert_eq!(
+        version_text_for_columns(39),
+        "cleanup-blastdb-volumes.py LOSAT\n0.2.0\n"
+    );
+    assert_eq!(
+        version_text_for_columns(40),
+        format!("cleanup-blastdb-volumes.py {v}\n")
+    );
+    assert_eq!(
+        parse_with_columns(&os(&["-version"]), 31),
+        ParseOutcome::Version(format!("cleanup-blastdb-volumes.py\n{v}\n"))
+    );
 }
 
 #[test]
@@ -334,6 +397,37 @@ fn error_messages_match_argparse() {
         parse(&os(&["-h-foo"])),
         err("argument -h/--help: ignored explicit argument '-foo'")
     );
+    for (flag, ignored) in [
+        ("-hh=x", "'x'"),
+        ("-hhh=y", "'y'"),
+        ("-hh=", "''"),
+        ("-hh-", "'-'"),
+        ("-hh-x", "'-x'"),
+    ] {
+        assert_eq!(
+            parse(&os(&[flag])),
+            err(&format!(
+                "argument -h/--help: ignored explicit argument {ignored}"
+            )),
+            "{flag}"
+        );
+    }
+    for flag in ["-hh", "-hhx", "-hxh=1"] {
+        assert_eq!(
+            parse(&os(&[flag])),
+            ParseOutcome::Help(help_text()),
+            "{flag}"
+        );
+    }
+    for flag in ["-=", "-=x"] {
+        assert_eq!(
+            parse(&os(&[flag])),
+            err(&format!(
+                "ambiguous option: {flag} could match -h, --help, -db, -dbtype, -dry-run, -version, -verbose"
+            )),
+            "{flag}"
+        );
+    }
     assert_eq!(
         parse(&os(&["--="])),
         err("argument -h/--help: ignored explicit argument ''")
@@ -346,6 +440,43 @@ fn error_messages_match_argparse() {
         parse(&os(&["-db", "x", "-dbtype", "a'\"b"])),
         err("argument -dbtype: invalid choice: 'a\\'\"b' (choose from prot, nucl)")
     );
+    assert_eq!(
+        parse(&os(&["-db", "x", "-dbtype", "\u{0085}"])),
+        err("argument -dbtype: invalid choice: '\\x85' (choose from prot, nucl)")
+    );
+    assert_eq!(
+        parse(&os(&["-db", "x", "-dbtype", "\u{00ad}"])),
+        err("argument -dbtype: invalid choice: '\\xad' (choose from prot, nucl)")
+    );
+    assert_eq!(
+        parse(&os(&["-db", "x", "-dbtype", "\u{2028}"])),
+        err("argument -dbtype: invalid choice: '\\u2028' (choose from prot, nucl)")
+    );
+    assert_eq!(
+        parse(&os(&["-db", "-\u{0661}\u{0662}", "-dbtype", "prot"])),
+        ParseOutcome::Run(ParsedArgs {
+            db: "-\u{0661}\u{0662}".as_bytes().to_vec(),
+            dbtype: DbType::Prot,
+            dry_run: false,
+            verbose: 0,
+        })
+    );
+    assert_eq!(
+        parse(&os(&["-db", "-5\n", "-dbtype", "prot"])),
+        ParseOutcome::Run(ParsedArgs {
+            db: b"-5\n".to_vec(),
+            dbtype: DbType::Prot,
+            dry_run: false,
+            verbose: 0,
+        })
+    );
+    for not_neg in ["-5\n\n", "-5\r\n", "-1_2"] {
+        assert_eq!(
+            parse(&os(&["-db", not_neg, "-dbtype", "prot"])),
+            need_db_arg,
+            "{not_neg:?}"
+        );
+    }
     assert_eq!(
         parse(&os(&["-db", "-foo bar", "-dbtype", "prot"])),
         ParseOutcome::Run(ParsedArgs {
@@ -384,5 +515,31 @@ fn non_utf8_db_name_bytes_are_preserved() {
             dry_run: false,
             verbose: 0,
         })
+    );
+
+    let usage = usage_text(DEFAULT_COLUMNS);
+    let err = |msg: &str| ParseOutcome::Error(format!("{usage}{PROG}: error: {msg}\n"));
+    assert_eq!(
+        parse(&[
+            OsString::from("-db"),
+            OsString::from("x"),
+            OsString::from("-dbtype"),
+            OsString::from_vec(b"\x80".to_vec()),
+        ]),
+        err("argument -dbtype: invalid choice: '\\udc80' (choose from prot, nucl)")
+    );
+    assert_eq!(
+        parse(&[
+            OsString::from("-db"),
+            OsString::from("x"),
+            OsString::from("-dbtype"),
+            OsString::from("prot"),
+            OsString::from_vec(b"\x80".to_vec()),
+        ]),
+        err("unrecognized arguments: \\udc80")
+    );
+    assert_eq!(
+        parse(&[OsString::from_vec(b"-=\x80".to_vec())]),
+        err("ambiguous option: -=\\udc80 could match -h, --help, -db, -dbtype, -dry-run, -version, -verbose")
     );
 }

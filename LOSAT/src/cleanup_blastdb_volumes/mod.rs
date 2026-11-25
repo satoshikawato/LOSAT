@@ -12,6 +12,7 @@
 mod args;
 mod config;
 mod glob;
+mod unicode;
 mod work;
 
 use std::ffi::OsString;
@@ -23,6 +24,23 @@ pub(crate) use work::Env;
 /// (8 KiB) for non-terminal standard output (pipes and regular files).
 const PY_STDOUT_CHUNK_SIZE: usize = 8192;
 
+/// Queries `st_blksize` of standard output on Unix (falling back to `PY_STDOUT_CHUNK_SIZE`),
+/// matching Python 3.13's `BufferedWriter` buffer size (`4096` on Linux pipes).
+fn detect_stdout_blksize() -> usize {
+    #[cfg(unix)]
+    {
+        rustix::fs::fstat(std::io::stdout())
+            .ok()
+            .and_then(|st| usize::try_from(st.st_blksize).ok())
+            .filter(|&b| b > 1)
+            .unwrap_or(PY_STDOUT_CHUNK_SIZE)
+    }
+    #[cfg(not(unix))]
+    {
+        PY_STDOUT_CHUNK_SIZE
+    }
+}
+
 /// Python 3.13-compatible stdout buffer: 8 KiB block-buffered on pipes/files, line-buffered on a
 /// terminal. Mid-run flush failures stop immediately with exit status `1`, while exit-time flush
 /// failures print Python's `Exception ignored on flushing sys.stdout:` message and exit with
@@ -31,15 +49,17 @@ pub(crate) struct PyStdout<'a> {
     inner: &'a mut dyn Write,
     buf: Vec<u8>,
     line_buffered: bool,
+    raw_blksize: usize,
     failed_mid_run: bool,
 }
 
 impl<'a> PyStdout<'a> {
-    pub(crate) fn new(inner: &'a mut dyn Write, line_buffered: bool) -> Self {
+    pub(crate) fn new(inner: &'a mut dyn Write, line_buffered: bool, raw_blksize: usize) -> Self {
         Self {
             inner,
             buf: Vec::with_capacity(PY_STDOUT_CHUNK_SIZE),
             line_buffered,
+            raw_blksize: raw_blksize.max(1),
             failed_mid_run: false,
         }
     }
@@ -77,6 +97,45 @@ impl<'a> PyStdout<'a> {
         self.maybe_flush(prefix.contains(&b'\n') || path.contains(&b'\n'))?;
         self.buf.push(b'\n');
         self.maybe_flush(true)
+    }
+
+    /// Flushes buffered stdout before printing a traceback-equivalent error message, matching
+    /// Python 3.13's `flush_io` before `PyErr_Print`. Write failures are ignored; if the write
+    /// fails and the pending bytes fit in stdout's `st_blksize` (`BufferedWriter` buffer size),
+    /// they remain queued for `finish_flush` (which exits `120`), whereas larger writes bypass
+    /// `BufferedWriter`'s buffer and are dropped (keeping exit status `1`).
+    pub(crate) fn flush_before_error(&mut self) {
+        if self.failed_mid_run || self.buf.is_empty() {
+            return;
+        }
+        let mut written = 0usize;
+        let res = loop {
+            if written >= self.buf.len() {
+                break self.inner.flush();
+            }
+            match self.inner.write(&self.buf[written..]) {
+                Ok(0) => {
+                    break Err(std::io::Error::new(
+                        std::io::ErrorKind::WriteZero,
+                        "write zero",
+                    ));
+                }
+                Ok(n) => written += n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => break Err(e),
+            }
+        };
+        if written > 0 {
+            self.buf.drain(..written);
+        }
+        match res {
+            Ok(()) => self.buf.clear(),
+            Err(_) => {
+                if self.buf.len() > self.raw_blksize {
+                    self.buf.clear();
+                }
+            }
+        }
     }
 
     /// Flushes any remaining buffered stdout bytes at program exit. Matches Python 3.13's exit
@@ -140,7 +199,8 @@ pub(crate) fn run(words: &[OsString]) -> i32 {
     let mut out = crate::cli::standard_output();
     let mut err = std::io::stderr();
     let line_buffered = std::io::IsTerminal::is_terminal(&std::io::stdout());
-    run_with_buffering(words, &env, &mut out, line_buffered, &mut err)
+    let raw_blksize = detect_stdout_blksize();
+    run_with_buffering_and_blksize(words, &env, &mut out, line_buffered, raw_blksize, &mut err)
 }
 
 /// Runs `cleanup-blastdb-volumes.py` with `words`, `env`, block-buffered `out`, and `err`; returns
@@ -157,9 +217,9 @@ pub(crate) fn run_with(
     run_with_buffering(words, env, out, false, err)
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py:104-141
-/// Runs `cleanup-blastdb-volumes.py` with explicit stdout line-buffering control (true for a
-/// terminal, false for a pipe or file).
+/// Runs `cleanup-blastdb-volumes.py` with explicit stdout line-buffering control and default 8 KiB
+/// `BufferedWriter` block size.
+#[cfg(test)]
 pub(crate) fn run_with_buffering(
     words: &[OsString],
     env: &Env,
@@ -167,8 +227,22 @@ pub(crate) fn run_with_buffering(
     line_buffered: bool,
     err: &mut dyn Write,
 ) -> i32 {
+    run_with_buffering_and_blksize(words, env, out, line_buffered, PY_STDOUT_CHUNK_SIZE, err)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py:104-141
+/// Runs `cleanup-blastdb-volumes.py` with explicit stdout line-buffering control (true for a
+/// terminal, false for a pipe or file) and underlying `BufferedWriter` block size (`st_blksize`).
+pub(crate) fn run_with_buffering_and_blksize(
+    words: &[OsString],
+    env: &Env,
+    out: &mut dyn Write,
+    line_buffered: bool,
+    raw_blksize: usize,
+    err: &mut dyn Write,
+) -> i32 {
     let columns = args::resolve_columns(env.columns.as_deref(), env.stdout_columns);
-    let mut stdout = PyStdout::new(out, line_buffered);
+    let mut stdout = PyStdout::new(out, line_buffered, raw_blksize);
     let rc = match args::parse_with_columns(words, columns) {
         args::ParseOutcome::Help(text) | args::ParseOutcome::Version(text) => {
             match stdout.write_all_text(text.as_bytes()) {

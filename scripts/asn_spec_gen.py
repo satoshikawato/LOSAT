@@ -4,9 +4,10 @@
 A maintainer tool: LOSAT's build does not run it, and users need nothing of it. It reads NCBI's
 ASN.1 modules (`c++/src/objects/**/*.asn`) and the storage overrides of their `.def` files, takes
 the closure of the types that the root types reach (by default NCBI-ScoreMat's
-`PssmWithParameters`, the PSSM file of psiblast and tblastn `-in_pssm`, and NCBI-BlastDL's
-`Blast-db-mask-info`, the mask file of makeblastdb `-mask_data`), and writes the table that LOSAT's
-ASN.1 reader runs on (`report::serial::asn_types`). Its companion check,
+`PssmWithParameters`, the PSSM file of psiblast, tblastn `-in_pssm` and makeprofiledb,
+NCBI-BlastDL's `Blast-db-mask-info`, the mask file of makeblastdb `-mask_data`, and
+NCBI-BlastDL's `Blast-def-line-set`, the binary definition lines of makeprofiledb), and writes
+the table that LOSAT's ASN.1 reader runs on (`report::serial::asn_types`). Its companion check,
 `asn_spec_check.py`, compares the table with the type information that NCBI's datatool generated
 (`*_.cpp`, `*_.hpp`) and must pass whenever the table is regenerated.
 
@@ -707,7 +708,11 @@ def emit(table: Table, roots: list[tuple[str, str]], source: str) -> str:
     return "\n".join(out)
 
 
-DEFAULT_ROOTS = [("NCBI-ScoreMat", "PssmWithParameters"), ("NCBI-BlastDL", "Blast-db-mask-info")]
+DEFAULT_ROOTS = [
+    ("NCBI-ScoreMat", "PssmWithParameters"),
+    ("NCBI-BlastDL", "Blast-db-mask-info"),
+    ("NCBI-BlastDL", "Blast-def-line-set"),
+]
 
 
 def build_table(source: Path, roots: list[tuple[str, str]]) -> Table:

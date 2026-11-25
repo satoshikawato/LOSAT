@@ -1471,6 +1471,7 @@ searchsp = None
 comp_based_stats = "1"
 outfmt = "0"
 show_gis = false
+html = false
 num_descriptions = None
 num_alignments = None
 formatting.line_length = None
@@ -1564,6 +1565,9 @@ mt_mode = None
 [rpsblast -line_length 2]
 - formatting.line_length = None
 + formatting.line_length = 2
+[rpsblast -html]
+- html = false
++ html = true
 [rpsblast -sorthits 2]
 - formatting.sort_hits = None
 + formatting.sort_hits = 2
@@ -1597,6 +1601,7 @@ evalue = None
 comp_based_stats = "1"
 outfmt = "0"
 show_gis = false
+html = false
 num_descriptions = None
 num_alignments = None
 formatting.line_length = None
@@ -1701,6 +1706,9 @@ use_sw_tback = false
 [rpstblastn -line_length 2]
 - formatting.line_length = None
 + formatting.line_length = 2
+[rpstblastn -html]
+- html = false
++ html = true
 [rpstblastn -sorthits 2]
 - formatting.sort_hits = None
 + formatting.sort_hits = 2

@@ -412,6 +412,8 @@ fn bf_scans_equal_the_reference_scans() {
                 offset,
                 length: s_frame.aa_len - offset,
                 overlap: 0,
+                ncbi_length: (s_frame.aa_len - offset) as i32,
+                overlap_past_list: false,
             };
             assert!(fits(chunk.length, window, 3));
             for (g, group) in pp.groups.iter().enumerate() {

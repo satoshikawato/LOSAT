@@ -6,7 +6,8 @@
 //! (`ObjectStream`). The object stack of the table-driven readers: the generic `Value` of any
 //! type (here, read without recursion to any depth), and the typed readers of the callers that
 //! build their own model as they read (`super::typed`: makeblastdb's mask files, the Seq-id model
-//! of `super::seq_id`) run on the same frames, members, pointers and errors. (rpsbproc's reader of
+//! of `super::seq_id`; a nest of a recursive CHOICE read to any depth too, `TypedReader::nest`)
+//! run on the same frames, members, pointers and errors. (rpsbproc's reader of
 //! the BLAST archive, `report::serial::asn_text_reader` with `seqid::asn_text` for its Seq-ids,
 //! and the database deflines' Seq-ids, `seqid::ber::decode_seq_id`, are readers of their own.)
 //!
@@ -47,6 +48,7 @@
 //! not take.
 
 use super::read_xml::{XmlInput, XmlStyle, MISSING_VALUE};
+use super::typed::NestLevel;
 use super::Encoding;
 use super::{resolved, EnumValue, Kind, Member, Storage, Value, DELAYED};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
@@ -186,7 +188,7 @@ impl From<Fail> for ReadError {
     fn from(fail: Fail) -> Self {
         match fail {
             Fail::Eof => ReadError::Eof,
-            Fail::Serial(e) => ReadError::Serial(*e),
+            Fail::Serial(e) => ReadError::Serial(e.exception()),
             Fail::Exception(e) => ReadError::Exception(*e),
             Fail::OutOfMemory => ReadError::OutOfMemory,
             Fail::Std(what) => ReadError::Std(what),
@@ -377,15 +379,6 @@ fn update<I: Input>(inp: I, class: u16, member: &'static Member) -> Read<Value> 
     (value.map_err(ReadError::from), reader.posts.sink)
 }
 
-// NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:122-145
-/// The deepest nesting of object frames that a typed read follows (`ObjectStream::read_typed`):
-/// a typed reader recurses on LOSAT's stack as the type nests (`super::typed`; a `Seq-loc` of
-/// `mix` and `equiv` to any depth), so a frame past it is LOSAT's refusal
-/// (`TypedReader::too_deep`). NCBI's object stream has no such limit (its frames are bounded by
-/// memory: `PushFrameLong` doubles the stack), and the generic `Value` read, which keeps its
-/// values on the heap, has none.
-const TYPED_MAX_DEPTH: usize = 400;
-
 /// Objects one after another from one input (`ObjectStream::read_object`), each read by a new
 /// state of NCBI's stream at the byte after the last one the object before it took (NCBI gives the
 /// bytes its stream did not use back when an object ends, `CIStreamBuffer::Close`,
@@ -452,9 +445,7 @@ impl<I: Input> ObjectStream<I> {
     ) -> Read<T> {
         let reader = &mut self.reader;
         reader.start_object();
-        reader.max_depth = TYPED_MAX_DEPTH;
         let value = reader.document(root, read).map_err(ReadError::from);
-        reader.max_depth = usize::MAX;
         reader.inp.drain_posts(&mut reader.posts);
         (value, std::mem::take(&mut reader.posts.sink))
     }
@@ -548,8 +539,9 @@ pub(crate) struct TypedReader<I: Input, P: PostSink = Vec<Post>> {
     /// The root type of the document being read (`document`), which scopes [`super::class_named`]
     /// to the classes that NCBI's reader builds for that root (`NO_TYPE` outside a document read).
     root: u16,
-    /// The deepest nesting of frames the reader follows (`TYPED_MAX_DEPTH` in a typed read).
-    max_depth: usize,
+    /// The levels of the nest that `typed::nest` reads, outermost first: NCBI's recursion of
+    /// `ReadChoiceSimple` and `ReadContainer` as a list on the heap (`NestLevel`).
+    pub(super) nest: Vec<NestLevel>,
 }
 
 /// A value being read that waits for a value inside it (`TypedReader::read_value`).
@@ -638,14 +630,14 @@ pub(super) fn set_flag_error(fail: Fail, member: &Member) -> Fail {
     match fail {
         Fail::Serial(e) if !member.is_ref() && member.flags & DELAYED == 0 => {
             if e.kind() == MISSING_VALUE {
-                return Fail::serial(e.rethrow(
+                return Fail::serial(e.exception().rethrow(
                     MISSING_VALUE_MEMBER,
                     format!("missing value {}", member.name()),
                 ));
             }
             let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
             let message = format!("error while reading {}", member.name());
-            Fail::serial(e.rethrow_same(file, line, function, message))
+            Fail::serial(e.exception().rethrow_same(file, line, function, message))
         }
         other => other,
     }
@@ -667,7 +659,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
             utf8_once: Utf8TagOnce::default(),
             names,
             root: NO_TYPE,
-            max_depth: usize::MAX,
+            nest: Vec::new(),
         }
     }
 
@@ -680,22 +672,12 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
         self.root = NO_TYPE;
     }
 
-    /// The refusal of a frame past `max_depth`.
-    #[cold]
-    #[inline(never)]
-    fn too_deep(&self) -> Fail {
-        Fail::unsupported(format!(
-            "objects nested more than {} levels deep",
-            self.max_depth
-        ))
-    }
-
-    /// `BEGIN_OBJECT_FRAME` of a frame of `kind` (of the type `ty`, or [`NO_TYPE`]).
+    // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:122-145
+    /// `BEGIN_OBJECT_FRAME` of a frame of `kind` (of the type `ty`, or [`NO_TYPE`]). NCBI's object
+    /// stack has no limit on its frames (`PushFrameLong` doubles the stack, as far as memory
+    /// allows), nor has this one: the frames are on the heap.
     #[inline(always)]
-    pub(super) fn push(&mut self, kind: FrameKind, ty: u16, skip: bool) -> R<()> {
-        if self.frames.len() >= self.max_depth {
-            return Err(self.too_deep());
-        }
+    pub(super) fn push(&mut self, kind: FrameKind, ty: u16, skip: bool) {
         self.frames.push(Frame {
             kind,
             skip,
@@ -705,7 +687,12 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
             num_rows: None,
         });
         self.inp.frame_pushed(kind, ty, self.frames.len());
-        Ok(())
+    }
+
+    /// How many frames the stack holds (`GetStackDepth()`).
+    #[inline(always)]
+    pub(super) fn depth(&self) -> usize {
+        self.frames.len()
     }
 
     /// `END_OBJECT_FRAME` of the top frame after what it holds was read.
@@ -758,7 +745,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     fn leave(&self, frame: Frame, fail: Fail) -> Fail {
         match fail {
             Fail::Serial(mut e) => {
-                e.add_frame_info(frame_name(
+                e.add_frame(frame_name(
                     frame.kind,
                     frame.type_name(),
                     frame.member_name(),
@@ -780,7 +767,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     /// The frames above `depth` left by `fail`, from the top down.
     #[cold]
     #[inline(never)]
-    fn unwind(&mut self, depth: usize, mut fail: Fail) -> Fail {
+    pub(super) fn unwind(&mut self, depth: usize, mut fail: Fail) -> Fail {
         while self.frames.len() > depth {
             let frame = self.pop_frame();
             fail = self.leave(frame, fail);
@@ -806,13 +793,13 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:959-969
     /// The delayed member `member` of the SEQUENCE `class` in its frames (`read_delayed`).
     fn delayed_member(&mut self, class: u16, member: &'static Member) -> R<Value> {
-        self.push(FrameKind::Class, class, false)?;
+        self.push(FrameKind::Class, class, false);
         let value = self.delayed_member_frame(member);
         self.pop(value)
     }
 
     fn delayed_member_frame(&mut self, member: &'static Member) -> R<Value> {
-        self.push(FrameKind::ClassMember, NO_TYPE, false)?;
+        self.push(FrameKind::ClassMember, NO_TYPE, false);
         self.set_member(member);
         let value = self.read_value(member.ty, false);
         self.pop(value)
@@ -822,10 +809,10 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     /// each in a named frame of its own.
     fn document<T>(&mut self, root: u16, read: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
         self.root = root;
-        self.push(FrameKind::Named, root, false)?;
+        self.push(FrameKind::Named, root, false);
         let header = self.file_header(super::type_info(root).name());
         self.pop(header)?;
-        self.push(FrameKind::Named, root, false)?;
+        self.push(FrameKind::Named, root, false);
         let value = read(self);
         self.pop(value)
     }
@@ -948,7 +935,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
                 if name != declared_name.as_bytes() {
                     return Err(self.other_type(&name, declared_name, skip));
                 }
-                self.push(FrameKind::Named, declared, skip)?;
+                self.push(FrameKind::Named, declared, skip);
                 if let Some(top) = self.frames.last_mut() {
                     top.pointer = true;
                 }
@@ -1012,7 +999,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     /// The value of the class `class` after `:name` (`other_type`): read in a named frame of the
     /// class, as `ReadPointer` reads it, to `ReadOtherPointerEnd`.
     fn read_other(&mut self, class: u16) -> R<()> {
-        self.push(FrameKind::Named, class, false)?;
+        self.push(FrameKind::Named, class, false);
         if let Some(top) = self.frames.last_mut() {
             top.pointer = true;
         }
@@ -1181,9 +1168,9 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
                 Value::SeqId(Box::new(id))
             }
             Kind::Sequence(members) => {
-                self.push(FrameKind::Class, target, skip)?;
+                self.push(FrameKind::Class, target, skip);
                 self.inp.begin_class()?;
-                self.push(FrameKind::ClassMember, NO_TYPE, skip)?;
+                self.push(FrameKind::ClassMember, NO_TYPE, skip);
                 return self.next_member(target, members.members(), skip, Vec::new(), 0);
             }
             Kind::Choice(variants) => return self.start_choice(target, variants.members(), skip),
@@ -1308,9 +1295,7 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
                     Kind::Sequence(_) | Kind::Choice(_) | Kind::Enumerated { .. }
                 )
             {
-                if let Err(fail) = self.push(FrameKind::NamedType, ty, skip) {
-                    return Err(self.unwind(self.frames.len() - usize::from(count), fail));
-                }
+                self.push(FrameKind::NamedType, ty, skip);
                 count += 1;
                 if let Err(fail) = self.inp.begin_named() {
                     return Err(self.unwind(self.frames.len() - usize::from(count), fail));
@@ -1412,9 +1397,9 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     /// runs the class's variant hooks before its value (`hooks::pre_read_variant`).
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1482-1501
     fn start_choice(&mut self, ty: u16, variants: &'static [Member], skip: bool) -> R<Step> {
-        self.push(FrameKind::Choice, ty, skip)?;
+        self.push(FrameKind::Choice, ty, skip);
         self.inp.begin_choice()?;
-        self.push(FrameKind::ChoiceVariant, NO_TYPE, skip)?;
+        self.push(FrameKind::ChoiceVariant, NO_TYPE, skip);
         let index = self.inp.begin_variant(variants)?;
         let variant = &variants[index];
         self.set_member(variant);
@@ -1436,11 +1421,11 @@ impl<I: Input, P: PostSink> TypedReader<I, P> {
     // `Input::element_frame`)
     fn start_list(&mut self, element: u16, set: bool, refs: bool, skip: bool) -> R<Step> {
         if I::ARRAY_FRAMES {
-            self.push(FrameKind::Array, NO_TYPE, skip)?;
+            self.push(FrameKind::Array, NO_TYPE, skip);
         }
         self.inp.begin_container(set)?;
         if I::element_frame(element) {
-            self.push(FrameKind::ArrayElement, NO_TYPE, skip)?;
+            self.push(FrameKind::ArrayElement, NO_TYPE, skip);
         }
         let numbers = match resolved(element).kind {
             // The elements of an INTEGER or REAL list are read as the numbers themselves (no
@@ -1774,7 +1759,7 @@ fn enum_error(fail: Fail, skip: bool) -> Fail {
     } else {
         (428, "ncbi::CEnumeratedTypeInfo::ReadEnum")
     };
-    let rethrow = |e: Box<NcbiException>| {
+    let rethrow = |e: NcbiException| {
         e.rethrow_same(
             "src/serial/enumerated.cpp",
             line,
@@ -1783,8 +1768,8 @@ fn enum_error(fail: Fail, skip: bool) -> Fail {
         )
     };
     match fail {
-        Fail::Serial(e) => Fail::serial(rethrow(e)),
-        Fail::Exception(e) => Fail::exception(rethrow(e)),
+        Fail::Serial(e) => Fail::serial(rethrow(e.exception())),
+        Fail::Exception(e) => Fail::exception(rethrow(*e)),
         other => other,
     }
 }

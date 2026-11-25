@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "o5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "p.faa",
+  "number-of-letters": 410,
+  "number-of-sequences": 9,
+  "last-updated": "2023-11-14T22:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 38483,
+  "bytes-to-cache": 580,
+  "files": [
+    "o5.pdb",
+    "o5.phr",
+    "o5.pin",
+    "o5.pot",
+    "o5.psq",
+    "o5.ptf",
+    "o5.pto"
+  ]
+}

@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagePlace } from 'losat/domain';
 import type { HspRecord, ProgramDescription } from 'losat/ports';
-import type { AppState, RunView } from '../../src/application/coordinator';
+import type { AppState, RunView, ToolRunView } from '../../src/application/coordinator';
 import { keptOutputs, noHspReason, ResultsBrowser, type ResultsDeps } from '../../src/application/results';
 import { Store } from '../../src/application/store';
 import { hspTable, out0Range, out6Range, frame, subjectSpan } from '../../src/domain/hsp-table';
@@ -24,12 +24,15 @@ import {
 import {
   approvedExceptions,
   optionKey,
+  toolOptionGrammar,
+  toolOptionKey,
   verificationBadge,
   RANGE_VALUE,
   type BadgeInput,
   type VerificationTable,
 } from '../../src/domain/verification';
 import type { RunRecord, RunSnapshot } from '../../src/domain/run';
+import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import type { FailedOutput } from '../../src/ports/data';
 import { NO_HSP_TEXT } from '../../src/ui/no-hsp-text';
 import { NO_WARNINGS, placeParts, placeText, warningsPlaceParts, warningsPlaceText } from '../../src/ui/message-place-text';
@@ -1110,5 +1113,77 @@ describe('ResultsBrowser', () => {
     const given = setup({ argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-task', 'blastn'] });
     await given.results.open('r1');
     expect(given.results.state.get().loaded!.task).toBe('blastn');
+  });
+
+  it('gives no tool badge when describeTool rejects or is absent, and shows Supported once describeTool succeeds', async () => {
+    // cases.tsv k_obinary_file argv: Supported with -xmlhelp grammar, no key with fallback grammar.
+    const argv = ['windowmasker', '-mk_counts', '-in', 'genome.fa', '-unit', '5', '-sformat', 'obinary', '-out', 'c.counts'];
+    const description = await new FakeEngine().describeTool('windowmasker');
+    const key = toolOptionKey(argv, toolOptionGrammar(description))!;
+    const toolRun: ToolRunView = {
+      snapshot: {
+        kind: 'tool',
+        runId: 't1',
+        number: 1,
+        tool: 'windowmasker',
+        stage: 'mk_counts',
+        argv,
+        directory: [{ name: 'genome.fa', size: 100, origin: { kind: 'pasted' } }],
+        queuedAt: 0,
+      },
+      status: 'completed',
+      record: { runtimePath: 'serial', exitStatus: 0 },
+    };
+    const runs = new Store<AppState>({ runs: [toolRun] });
+    const verification: VerificationTable = {
+      ncbi: '2.17.0',
+      sources: [],
+      programs: {},
+      tools: { windowmasker: { optionSets: [key] } },
+    };
+    const data: ResultsDeps['data'] = {
+      readHitTable: async () => hspTable([]),
+      readOutput: async () => new Uint8Array(),
+      readOutputRange: async () => new Uint8Array(),
+      readDiagnostics: async () => '',
+    };
+
+    let describeCalls = 0;
+    const results = new ResultsBrowser({
+      data,
+      describe: async () => DESCRIPTION,
+      describeTool: async () => {
+        describeCalls++;
+        if (describeCalls === 1) throw new Error('engine busy');
+        return description;
+      },
+      runs,
+      verification,
+    });
+
+    // Rejected describeTool: fallback grammar formats CommandText, but no badge is shown and the rejection is not cached.
+    await results.open('t1');
+    await settle();
+    expect(results.state.get().phase).toBe('ready');
+    expect(results.state.get().grammar).toBeDefined();
+    expect(results.state.get().toolBadge).toBeUndefined();
+
+    // Opening again asks describeTool again; once it resolves with -xmlhelp, the badge is Supported.
+    await results.open('t1');
+    await settle();
+    expect(describeCalls).toBe(2);
+    expect(results.state.get().toolBadge).toMatchObject({ level: 'certified', label: 'Supported' });
+
+    // Without describeTool at all, no badge is shown either.
+    const noDescribe = new ResultsBrowser({
+      data,
+      describe: async () => DESCRIPTION,
+      runs,
+      verification,
+    });
+    await noDescribe.open('t1');
+    await settle();
+    expect(noDescribe.state.get().grammar).toBeDefined();
+    expect(noDescribe.state.get().toolBadge).toBeUndefined();
   });
 });

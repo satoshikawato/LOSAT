@@ -12,9 +12,9 @@ use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::blastp::gapalign::{
     gapped_start_window, protein_identities_from_edit_ops, GapAlignScratch,
 };
-use crate::algorithm::common::translated_chunks::{ChunkLetters, TranslatedChunk};
+use crate::algorithm::common::translated_chunks::{frame_length, ChunkLetters, TranslatedChunk};
 use crate::algorithm::tblastx::translation::{
-    frame_length, translate_frame_into, x_codon_residues, x_codons_into, QueryFrame,
+    translate_frame_into, x_codon_residues, x_codons_into, QueryFrame,
 };
 use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
@@ -138,35 +138,43 @@ fn score_gapped_chunk<S: super::score::TbnScore, const ONE_HIT: bool>(
         }
         let q_start = usize::try_from(hit.q_start - context_offset)
             .context("negative context-local initial query start")?;
-        let s_start = usize::try_from(hit.s_start).context("negative initial subject start")?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3393-3404,3936-3953:
         // Selects the gapped alignment start and runs `s_BlastProtGappedAlignment`.
-        // A negative Int4 length comes only from the one-hit word finder (`-window_size 0`,
-        // aa_ungapped.c:1054,1083); NCBI reads it as Uint4 (`gapped_start_int4`), and its window
-        // may read past the context and the chunk (`x_gapped_start_negative`).
-        let q_gapped_start = if ONE_HIT && hit.length < 0 {
-            x_gapped_start_negative(
-                score,
-                one_hit,
-                query_sequence,
-                frame,
-                chunk,
-                subject_frame,
-                q_start,
-                s_start,
-                hit.length,
-                matrix,
-            )?
+        // An initial alignment starting before its chunk (`-db_soft_mask` with masks stored out of
+        // order) reaches here only with length in 0 to HSP_MAX_WINDOW and its middle in the chunk
+        // (`x_crashes_ncbi` refused the rest): NCBI sets its gapped start to its middle without
+        // reading a letter. A negative Int4 length comes only from the one-hit word finder
+        // (`-window_size 0`, aa_ungapped.c:1054,1083); NCBI reads it as Uint4
+        // (`gapped_start_int4`), and its window may read past the context and the chunk
+        // (`x_gapped_start_negative`).
+        let q_gapped_start = if hit.s_start < 0 {
+            x_gapped_start_before_chunk_middle(q_start, hit)?
         } else {
-            let length = usize::try_from(hit.length).context("negative initial HSP length")?;
-            score.gapped_start(
-                query_sequence,
-                subject_sequence,
-                q_start,
-                length,
-                s_start,
-                matrix,
-            )
+            let s_start = hit.s_start as usize;
+            if ONE_HIT && hit.length < 0 {
+                x_gapped_start_negative(
+                    score,
+                    one_hit,
+                    query_sequence,
+                    frame,
+                    chunk,
+                    subject_frame,
+                    q_start,
+                    s_start,
+                    hit.length,
+                    matrix,
+                )?
+            } else {
+                let length = usize::try_from(hit.length).context("negative initial HSP length")?;
+                score.gapped_start(
+                    query_sequence,
+                    subject_sequence,
+                    q_start,
+                    length,
+                    s_start,
+                    matrix,
+                )
+            }
         };
         let s_gapped_start = x_gapped_subject_start(
             hit.s_seed,
@@ -542,16 +550,50 @@ fn x_score_only_past_chunk<S: super::score::TbnScore>(
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3936-3953 and
-// c++/src/algo/blast/core/blast_gapalign.c:3393-3439
-/// The refusal (PD-LOSAT-NCBI-DEFECTS, rule 3) of a gapped search of a unit that saved an initial
-/// HSP starting before its chunk: a word that its scan found before the chunk (a later range of
-/// masks stored out of order, `common::translated_chunks::scan_lead`) whose one-hit extension (or
-/// a two-hit extension whose word lies wholly before the chunk) scores at the cutoff. NCBI's
-/// gapped start of that HSP reads the subject at its start taken as an unsigned offset (about
-/// 4 GiB past the frame: a segmentation fault, probe M4b-T2 2026-11-23) when the HSP is longer
-/// than HSP_MAX_WINDOW and no gapped HSP found before holds it, and otherwise starts the gapped
-/// alignment before the chunk. LOSAT stops the search there and names the sequence.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3393-3404,3942-3945,
+// 4300-4333
+// An initial alignment starting before its chunk crashes NCBI BLAST+ when:
+// - its length read as Uint4 exceeds HSP_MAX_WINDOW (11), including a negative one-hit length
+//   (`BlastGetStartForGappedAlignment` reads the subject at the start taken as Uint4, about 4 GiB
+//   past the frame); or
+// - its length is at most 11 (so the gapped start is the alignment's middle without reading a
+//   letter), and the subject gapped start still lies before the chunk (`Blast_SemiGappedAlign`
+//   reads the right extension from the subject at that start taken as Uint4).
+/// Whether a gapped search of `hit` crashes NCBI BLAST+ because `hit` starts before its chunk and
+/// either exceeds `HSP_MAX_WINDOW` (11, as `Uint4`, so negative lengths too) or has its middle
+/// before the chunk (PD-LOSAT-NCBI-DEFECTS, rule 3; series NP, M4b-T3).
+pub(super) fn x_crashes_ncbi(hit: &InitHsp) -> bool {
+    hit.s_start < 0
+        && (hit.length < 0
+            || hit.length > HSP_MAX_WINDOW as i32
+            || hit.s_start + hit.length / 2 < 0)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3401-3404
+/// The gapped query start (middle of the initial alignment, read from no letter, matrix and PSSM
+/// alike) of a non-crashing initial alignment that starts before its chunk. Out of line so the
+/// common gapped path keeps its code.
+#[cold]
+#[inline(never)]
+fn x_gapped_start_before_chunk_middle(q_start: usize, hit: &InitHsp) -> Result<usize> {
+    if hit.length < 0 || hit.length > HSP_MAX_WINDOW as i32 {
+        bail!(
+            "LOSAT internal error: negative-start initial alignment of length {} reached gapped scoring",
+            hit.length
+        );
+    }
+    Ok(q_start + (hit.length as usize) / 2)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3393-3413,3936-3953,
+// 4300-4333 and c++/src/algo/blast/core/blast_itree.c:822-831
+/// The refusal (PD-LOSAT-NCBI-DEFECTS, rule 3; series NP, M4b-T3) of a gapped search of a unit
+/// that saved an initial HSP meeting [`x_crashes_ncbi`]: starting before its chunk (`-db_soft_mask`
+/// with masks stored out of order on a frame longer than 5,000,000 residues) and either longer
+/// than `HSP_MAX_WINDOW` (11, as `Uint4`) or with its middle before the chunk. Every gapped HSP
+/// saved in a chunk starts in the chunk, so none contains it; NCBI BLAST+ reads past its buffer
+/// (`BlastGetStartForGappedAlignment` or `Blast_SemiGappedAlign`) and ends with SIGSEGV. LOSAT
+/// stops the search there and names the sequence and frame.
 #[cold]
 #[inline(never)]
 fn x_gapped_start_before_chunk(
@@ -566,7 +608,7 @@ fn x_gapped_start_before_chunk(
         super::x_subject_store::XPrelimSubject::Nt(_) => "the subject".to_owned(),
     };
     anyhow::anyhow!(
-        "TBLASTN: {name}, frame {frame}: an initial alignment of the chunk from residue {} starts before the chunk (-db_soft_mask with masks stored out of order on a frame longer than 5,000,000 residues), where NCBI BLAST+ starts its gapped alignment outside the chunk or reads past its buffer (a segmentation fault), which LOSAT does not support",
+        "TBLASTN: {name}, frame {frame}: an initial alignment of the chunk from residue {} starts before the chunk (-db_soft_mask with masks stored out of order on a frame longer than 5,000,000 residues) and is longer than 11 residues or has its middle before the chunk, where NCBI BLAST+ reads past its buffer (a segmentation fault), which LOSAT does not support",
         chunk_offset + 1
     )
 }
@@ -575,9 +617,11 @@ fn x_gapped_start_before_chunk(
 // c++/src/algo/blast/core/blast_aascan.c:110-113
 /// The subject's gapped start of an initial HSP: its seed (`s_seed`, the chunk's `Uint4` offset,
 /// which holds a seed before the chunk wrapped below 0) moved by the gapped start's distance from
-/// the query's seed, in NCBI's wrapping 32-bit sum, read as `Int4`. A seed at -1 whose HSP starts
-/// in the chunk gives a start in the chunk; a start below 0 is an internal error (an HSP that
-/// starts before the chunk is refused before, `x_gapped_start_before_chunk`).
+/// the query's seed, in NCBI's wrapping 32-bit sum, read as `Int4`. Both a seed at -1 whose HSP
+/// starts in the chunk and a short HSP starting before the chunk whose middle lies in the chunk
+/// (`x_gapped_start_before_chunk_middle`) give a start in the chunk (`>= 0`); a start below 0 is
+/// an internal error (such alignments are refused before by [`x_crashes_ncbi`] and
+/// [`x_gapped_start_before_chunk`]).
 pub(super) fn x_gapped_subject_start(
     s_seed: u32,
     q_gapped_start: i32,
@@ -1154,16 +1198,18 @@ fn x_preliminary_protein_hsps_by_unit<
     };
     #[cfg(feature = "parallel")]
     let new_state = || state_on(None, false);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306,478-498 and
-    // c++/src/algo/blast/core/aa_ungapped.c:516-547
-    // A unit whose scan reads letters before its chunk (masks stored out of order,
-    // `scan_lead`) has hits on diagonals that the units before it in its frame left in the
-    // table less than a window behind them: NCBI's units of a subject run one after another on
-    // one table, so these units do too, in order, on a table made for the subject. Its cells
-    // hold `(last_hit, flag)` as they are (their `last_hit` can fall below 0 there, which a
-    // packed cell does not hold). The table's earlier subjects lie more than a window behind
-    // every hit of the subject's units, as on a new table, while the offset stays below
-    // INT4_MAX / 4 (`Diagonals::finish_frame`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306,478-498,1377 and
+    // c++/src/algo/blast/core/aa_ungapped.c:516-547 and
+    // c++/src/algo/blast/core/blast_extend.c:87-107,162-173
+    // A unit whose scan reads letters before its chunk (masks stored out of order, `scan_lead`)
+    // has hits on diagonals that the units before it in its frame left in the table, and a clear
+    // at INT4_MAX / 4 inside the subject changes which words before a later chunk are extended.
+    // The subject therefore runs its units in order on NCBI's one-thread table at the subject's
+    // start (`XDbStream::lead_start`, `TableStart::New`, series NP, M4b-T3), whose cells hold
+    // `(last_hit, flag)` (their `last_hit` can fall below 0 there, which a packed cell does not
+    // hold). The entries of earlier subjects are never within reach of this subject's hits (each
+    // chunk's words lie at least the window past them), so unwritten entries give NCBI's result
+    // and `two_hit.exit` clears the table where NCBI's clears.
     let x_in_order =
         plan.subject.units.iter().any(|(_, _, ranges)| {
             crate::algorithm::common::translated_chunks::scan_lead(ranges) > 0
@@ -1320,7 +1366,12 @@ fn x_preliminary_protein_hsps_by_unit<
         if hits.is_empty() {
             return Ok(Vec::new());
         }
-        if !UNGAPPED && x_lead > 0 && hits.iter().any(|hit| hit.s_start < 0) {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3393-3404,3942-3945,
+        // 4300-4333 and c++/src/algo/blast/core/blast_itree.c:822-831
+        // Every gapped alignment saved in a chunk starts in the chunk, so an initial alignment
+        // starting before it is never skipped as contained; refuse exactly the alignments on which
+        // NCBI BLAST+ crashes (`x_crashes_ncbi`), in unit order, after the scan with NCBI's table.
+        if !UNGAPPED && x_lead > 0 && hits.iter().any(x_crashes_ncbi) {
             return Err(x_gapped_start_before_chunk(
                 subject,
                 frame.frame,
@@ -1387,6 +1438,14 @@ fn x_preliminary_protein_hsps_by_unit<
     }
     if purged.is_empty() {
         let mut state = state_on(X_UNIT_STATE.take(), x_in_order);
+        if x_in_order {
+            if let super::x_subject_store::XPrelimSubject::Stream(stream, ordinal, _) = subject {
+                let start = stream.lead_start(ordinal, profile.word_size, profile.window)?;
+                state.two_hit.apply_table_start(
+                    crate::algorithm::common::hard_chunk_walk::TableStart::New(start),
+                )?;
+            }
+        }
         for unit in 0..unit_count {
             purged.push(run_unit(&mut state, unit));
         }

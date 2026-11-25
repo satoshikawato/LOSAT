@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "tm_hd_b",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm hd b",
+  "number-of-letters": 130,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-25T00:01:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49534,
+  "bytes-to-cache": 228,
+  "files": [
+    "tm_hd_b.pdb",
+    "tm_hd_b.phr",
+    "tm_hd_b.pin",
+    "tm_hd_b.pog",
+    "tm_hd_b.pos",
+    "tm_hd_b.pot",
+    "tm_hd_b.psq",
+    "tm_hd_b.ptf",
+    "tm_hd_b.pto"
+  ]
+}

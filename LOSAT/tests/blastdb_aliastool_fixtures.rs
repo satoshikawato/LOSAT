@@ -8,13 +8,14 @@
 //!
 //! The rows of alias files that name a seqid or taxid list over a version 5 database
 //! (`AWAITING_V5_LISTS`) are those that LOSAT's reader refuses until line RG-D (D1c-2) reads such
-//! lists, and the row of a `-dblist_file` line that is not UTF-8 (`NOT_UTF8_NAMES`) is LOSAT's
-//! refusal: there LOSAT must refuse and leave no alias file.
+//! lists: there LOSAT must refuse and leave no alias file.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+mod temp_support;
 
 /// `tests/fixtures/blastdb_aliastool`.
 fn fixtures() -> PathBuf {
@@ -26,10 +27,6 @@ fn fixtures() -> PathBuf {
 const AWAITING_V5_LISTS: [&str; 10] = [
     "S02", "S03", "S05", "S07", "S09", "S10", "T01", "T02", "T05", "T06",
 ];
-
-/// The rows of a `-dblist_file` line that is not UTF-8, which LOSAT refuses (NCBI writes its
-/// bytes into the alias file).
-const NOT_UTF8_NAMES: [&str; 1] = ["R08"];
 
 /// The rows of the table: the name and the command-line words.
 fn cases() -> Vec<(String, Vec<String>)> {
@@ -76,8 +73,9 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 }
 
 /// The bytes of a file that holds the run's date with the date replaced by `<DATE>`: the
-/// `MM/DD/YYYY hh:mm:ss` of an alias file's header, and in a binary seqid list its 8-byte size
-/// (zeroed) and its date with the date's length byte; `None` for another file.
+/// `MM/DD/YYYY hh:mm:ss` of an alias file's header, and in a binary seqid list its date
+/// (`temp_support::undated_seqid_list`: its size field zeroed only when it holds the file's
+/// length); `None` for another file.
 fn masked(name: &str, bytes: &[u8]) -> Option<Vec<u8>> {
     if [".pal", ".nal", ".pvl", ".nvl"]
         .iter()
@@ -90,15 +88,8 @@ fn masked(name: &str, bytes: &[u8]) -> Option<Vec<u8>> {
         out.extend_from_slice(&bytes[at + "MM/DD/YYYY hh:mm:ss".len()..]);
         return Some(out);
     }
-    if name.ends_with(".bsl") && bytes.len() > 21 && bytes[0] == 0 {
-        let title_length = u32::from_le_bytes(bytes[17..21].try_into().unwrap()) as usize;
-        let date = 21 + title_length;
-        let date_length = usize::from(bytes[date]);
-        let mut out = vec![0u8; 9];
-        out.extend_from_slice(&bytes[9..date]);
-        out.extend_from_slice(b"<DATE>");
-        out.extend_from_slice(&bytes[date + 1 + date_length..]);
-        return Some(out);
+    if name.ends_with(".bsl") {
+        return temp_support::undated_seqid_list(bytes);
     }
     None
 }
@@ -247,7 +238,7 @@ fn blastdb_aliastool_gives_ncbis_bytes() {
     for (name, words) in cases() {
         let dir = scratch(&name);
         let got = run(&dir, &words);
-        if AWAITING_V5_LISTS.contains(&name.as_str()) || NOT_UTF8_NAMES.contains(&name.as_str()) {
+        if AWAITING_V5_LISTS.contains(&name.as_str()) {
             // LOSAT's refusal, before the alias file is kept.
             let refused = got.2 == 1
                 && got.1.starts_with(b"Error: ")

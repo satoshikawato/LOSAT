@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "tm_hdg_b",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm hdg b",
+  "number-of-letters": 130,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-25T01:16:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49542,
+  "bytes-to-cache": 236,
+  "files": [
+    "tm_hdg_b.pdb",
+    "tm_hdg_b.phr",
+    "tm_hdg_b.pin",
+    "tm_hdg_b.pog",
+    "tm_hdg_b.pos",
+    "tm_hdg_b.pot",
+    "tm_hdg_b.psq",
+    "tm_hdg_b.ptf",
+    "tm_hdg_b.pto"
+  ]
+}

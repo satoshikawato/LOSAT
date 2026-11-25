@@ -441,9 +441,16 @@ function onList(next: string): void {
           <option v-for="choice in choices" :key="choice" :value="choice">{{ choiceLabel(choice) }}</option>
         </select>
       </span>
-      <span v-if="!unread && field.hint && (field.kind !== 'file' || (fileOn && countsBy === 'file'))" class="param-hint">{{ field.hint }}</span>
-      <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
-      <HelpTip v-if="help" :id="id" :label="`About ${field.flag}`" :text="help" />
+      <span v-if="!unread && field.hint && field.kind === 'file' && fileOn && countsBy === 'file'" class="param-hint-line">
+        <span class="param-hint">{{ field.hint }}</span>
+        <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
+        <HelpTip v-if="help" :id="id" :label="`About ${field.flag}`" :text="help" />
+      </span>
+      <template v-else>
+        <span v-if="!unread && field.hint && field.kind !== 'file'" class="param-hint">{{ field.hint }}</span>
+        <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
+        <HelpTip v-if="help" :id="id" :label="`About ${field.flag}`" :text="help" />
+      </template>
       <!-- The line that downloads the counts of the taxonomy ID, under the row's controls (WW2). -->
       <CountsLine v-if="field.kind === 'file' && fileOn && countsBy === 'taxid' && taxid !== undefined && model.counts" :counts="model.counts" :taxid="taxid" :focus-id="`${id}-taxid`" />
     </div>

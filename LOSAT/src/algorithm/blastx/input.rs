@@ -402,7 +402,7 @@ pub(crate) fn parse_fasta_batches(
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:2213-2217
 // Native caller posts each reader event immediately; retained warnings continue
 // to serve the independent B input-state probe. Batch delivery is unchanged.
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub(crate) fn parse_fasta_batches_with_warnings(
     data: &[u8],
     protein: bool,
@@ -1020,12 +1020,12 @@ impl ReaderBatch<'_> {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:310-313
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 struct FastaMemoryLines<'a> {
     remaining: &'a [u8],
 }
 // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:353-381
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 impl<'a> Iterator for FastaMemoryLines<'a> {
     type Item = &'a [u8];
     // NCBI reference (598d8ae6): c++/src/util/line_reader.cpp:353-381

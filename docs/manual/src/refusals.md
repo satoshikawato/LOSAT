@@ -176,7 +176,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback, or with `-ungapped` the ungapped re-evaluation | Refused. NCBI crashes. |
 | `-use_sw_tback` on a query and subject that NCBI never finishes, or on a query batch that NCBI crashes on | Refused, as in `blastp`. See [Rare and pathological inputs](refusals-edge-cases.md#tblastn). |
 | `-db_hard_mask` on a database whose masks overlap or are stored out of order, and `-db_soft_mask` or `-db_hard_mask` on a volume with masks but without the algorithm, or with only the big-endian mask file | Refused, as in `blastn`. A mask that ends past its sequence (`makeblastdb` never writes one) is refused as well. |
-| `-db_soft_mask` on a database sequence of more than about 15,000,000 bases whose masks are stored out of order, when a gapped search finds an alignment that starts in the letters before one of the 5,000,000-letter parts that NCBI BLAST+ searches a reading frame in (mostly with `-window_size 0`) | Refused, naming the database sequence and the reading frame (exit status 1): `Error: TBLASTN: database sequence N, frame F: an initial alignment of the chunk from residue R starts before the chunk (...)`. NCBI crashes when that alignment is longer than 11 letters and no alignment found before holds it; LOSAT refuses the others too. With `-ungapped` the search runs. |
+| `-db_soft_mask` on a database sequence of more than about 15,000,000 bases whose masks are stored out of order, when a gapped search finds an alignment that starts in the letters before one of the 5,000,000-letter parts that NCBI BLAST+ searches a reading frame in (mostly with `-window_size 0`), and that alignment is longer than 11 letters or its middle lies before the part | Refused, naming the database sequence and the reading frame (exit status 1): `Error: TBLASTN: database sequence N, frame F: an initial alignment of the chunk from residue R starts before the chunk (...)`. NCBI BLAST+ crashes on these. Shorter alignments whose middle lies in the part are searched, with NCBI's rows. With `-ungapped` the search runs. |
 | `-in_pssm` | See the next section. |
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#tblastn).
@@ -355,6 +355,23 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#blastdbcmd).
 
+## blastdbcheck
+
+`blastdbcheck` runs every option of its `-help` but `-cdd_delta` (`-xmlhelp` on the command line only).
+
+| Option or input | What happens |
+| :--- | :--- |
+| `-cdd_delta` | Refused (not implemented yet). |
+| `-stride 0` or a negative `-stride` | Refused after the first OID passes. NCBI tests the first OID again and again and never finishes. |
+| `-random` or the default sample of 200 OIDs on a database that includes none of its OIDs (an alias file's OID range or list leaves none) | Refused. NCBI draws OIDs without end. |
+| A database file that is shorter than its index says: a cut index (`.pin`, `.nin`), sequence (`.psq`, `.nsq`) or header (`.phr`, `.nhr`) file of a few bytes or more | Refused when the volume is opened. NCBI reads zeros past the end of the file, from the rest of its last memory page. A sequence file of no bytes, a cut string ISAM file (`.psd`, `.nsd`) and a file found by `-dir` that is not a database index are refused too: NCBI crashes. |
+| An alias file whose `NSEQ`, `LENGTH`, `FIRST_OID`, `LAST_OID`, `MAXOID` or `OIDLIST` values overflow NCBI's arithmetic in its checks (such as `FIRST_OID 65535` with `LAST_OID 65535`), where the result of the overflow decides the check | Refused. C leaves the result undefined. Where the result does not decide the check, the alias file is checked as NCBI checks it. |
+| `-ends` with a value whose distance from the last OID passes the largest 32-bit integer (such as `-ends -2147483648`) | Refused. C leaves the result undefined. |
+| An alias file with `MEMB_BIT`, or with `TAXIDLIST` over a version 5 database | Refused, as in the other programs (see Alias files and database arithmetic above). |
+| `-must_have_taxids` with a sequence whose first definition line has no Seq-id (only a damaged database has one) | Refused. NCBI reads a null reference. |
+| A definition line whose title NCBI reads as a UTF8String, or bytes that NCBI reads as `#` | Refused. NCBI reports each read. |
+| An error report at `-verbosity 3` or 4 whose text LOSAT does not know | Refused. |
+
 ## dustmasker
 
 `dustmasker` runs every option of its `-help` (`-xmlhelp` on the command line only).
@@ -427,8 +444,8 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 | Input | What happens |
 | :--- | :--- |
-| `-binary` | Refused (PSSM files in ASN.1 binary are not read yet). |
 | `-dbtype delta`, `-dbtype cobalt` | Refused. |
+| A query with `iupacna` data holding a byte `>= 0x80` in a pair position (`0..(len & !1)`, before any odd overhang byte) | Refused. NCBI's `makeprofiledb` indexes its `iupacna`-to-`ncbi4na` table with a signed `char` and reads before the table. Bytes `< 0x80`, the final odd overhang byte, and `mol na` (which stops with NCBI's molecule error first) match NCBI. |
 | A query in a nucleotide coding with fewer bytes than its length needs: `ncbi2na` of fewer than a byte per 4 bases, `ncbi4na` of fewer than a byte per 2 bases, `iupacna` four letters or more short of an even length (three of an odd one) | Refused. NCBI's `makeprofiledb` reads past the query's data (its database then depends on memory outside the data, or it crashes). A query of enough bytes is built as NCBI builds it, and with frequency ratios only stops with NCBI's conversion error. |
 | In a profile with frequency ratios only, a query whose `seq-data` is a `gap` | Refused. NCBI's `makeprofiledb` reads past its table of sequence codings. A query in any other coding gets NCBI's result: its conversion error for a nucleotide coding (`ncbi8na` too), the codes of `ncbi8aa`, NCBI's unknown exception for `ncbipna` and `ncbipaa`. |
 | `-max_smp_vol 0` | Refused. NCBI's `makeprofiledb` crashes (division by zero). |
@@ -440,7 +457,8 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | In a profile with frequency ratios only, a query residue that is not one of the 28 protein codes: in `ncbieaa` a character other than a capital letter, `*` or `-` (such as a lower-case letter), in `iupacaa` a character other than a letter, in `ncbistdaa` a code of 28 or more | Refused. NCBI's `makeprofiledb` writes outside its data, and then crashes or gives a result that depends on the residue. A query whose length does not match, or a matrix that NCBI does not know, gets NCBI's error first. |
 | A query without Seq-ids and without descriptors (a version 4 database with `-index true` stops with NCBI's message) | Refused. NCBI's `makeprofiledb` aborts (version 5), or with `-index false` writes the `gnl\|BL_ORD_ID` id past the end of an empty list. |
 | `-index false` with a query whose first binary definition line has no Seq-id | Refused, as above. |
-| Binary definition lines (a `user` object `ASN1_BlastDefLine`) that are damaged or hold characters that NCBI's reader replaces | Refused. NCBI's `makeprofiledb` stops with its ASN.1 reader's error, or replaces the characters and reports each. |
+| Binary definition lines (a `user` object `ASN1_BlastDefLine`) with a `Seq-id` element stated as `NULL` in a version 5 database with no prior sequence written yet and no active taxid map (including `-taxid` or an empty `-taxid_map`) | Refused as a writer-destructor abort after posting `(802.5)`. NCBI's version 5 taxonomy writer aborts on close. With `-taxid_map` (non-empty) or an `org` descriptor, `-blastdb_version 4`, `-index false` when the `NULL` is the first id of the first line, or version 5 after a prior sequence, LOSAT matches NCBI. Damaged binary definition lines and replaced visible characters are read and reported as in NCBI. |
+| `:OtherType` pointers in ASN.1 text or `-binary` profiles and binary definition lines | Refused. NCBI's error depends on which ASN.1 classes the process has registered so far. |
 | A profile stored by row without scores whose query length is 4,294,967,295 letters (`numColumns -1`) | Refused. NCBI's `makeprofiledb` writes before its matrix. |
 | An error after which the database's writer fails again as it closes (a missing input file after the first with an empty `-out` in a version 5 database; a query without definition lines in a version 5 database) | Refused. NCBI's `makeprofiledb` aborts. |
 
@@ -454,12 +472,12 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 ## Programs LOSAT does not provide
 
-`blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `blastdbcheck`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.
+`blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.
 
 ## On the list for a later release
 
 - The programs `deltablast` and `blast_formatter`.
-- `makeprofiledb -binary` and `-dbtype delta` or `cobalt`.
+- `makeprofiledb -dbtype delta` or `cobalt`.
 - `psiblast -phi_pattern`.
 - The `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`.
 - `-html` in `psiblast`, `rpsblast` and `rpstblastn`.

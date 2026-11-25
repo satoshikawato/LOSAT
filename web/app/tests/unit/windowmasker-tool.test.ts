@@ -15,8 +15,16 @@ import {
   type ToolRunResult,
 } from 'losat/ports';
 import { Coordinator, isToolRun, type SearchRequest, type ToolRequest } from '../../src/application/coordinator';
+import { CountsLoader } from '../../src/application/counts';
 import { SearchDraft } from '../../src/application/draft';
 import { ResultsBrowser } from '../../src/application/results';
+import { SessionFiles } from '../../src/application/session-files';
+import { countsLockName, type CountsMadeMeta } from '../../src/domain/counts';
+import { webCountsLocks } from '../../src/infra/browser/counts-locks';
+import { OpfsCountsStore } from '../../src/infra/data/counts-store';
+import { FakeCountsDownloader } from '../../src/infra/fake/fake-counts';
+import type { CountsLocks } from '../../src/ports/counts';
+import { MemoryOpfs } from './support/memory-opfs';
 import { ToolDraft } from '../../src/application/tool-draft';
 import {
   buildWindowMaskerArgv,
@@ -86,7 +94,11 @@ function makeData(store = new MemoryBlockStore()) {
   return { data, store };
 }
 
-function makeCoordinator(engine: EngineGateway & Partial<ToolEngine> = new FakeEngine(), dataWorkerEnded?: Promise<Error>) {
+function makeCoordinator(
+  engine: EngineGateway & Partial<ToolEngine> = new FakeEngine(),
+  dataWorkerEnded?: Promise<Error>,
+  countsLocks?: CountsLocks,
+) {
   const { data, store } = makeData();
   const saved: Array<{ readonly fileName: string; readonly bytes: Uint8Array }> = [];
   const downloader: Downloader = {
@@ -104,6 +116,7 @@ function makeCoordinator(engine: EngineGateway & Partial<ToolEngine> = new FakeE
     newRunId: () => `run-${++id}`,
     digest: sha256Hex,
     ...(dataWorkerEnded === undefined ? {} : { dataWorkerEnded }),
+    ...(countsLocks === undefined ? {} : { countsLocks }),
   });
   return { coordinator, data, store, saved };
 }
@@ -334,6 +347,71 @@ describe('ToolDraft and SearchDraft.useCounts', () => {
     expect(draft.state.get().values.blastn['-window_masker_db']).toBe('wmasker.ascii');
     expect(draft.state.get().files.blastn['-window_masker_db']).toBe(counts);
   });
+
+  it('SearchDraft.useTaxid switches to BLASTN with -window_masker_taxid set', () => {
+    const { data } = makeData();
+    const draft = new SearchDraft({
+      engine: new FakeEngine(),
+      data,
+      enqueueAll: async () => ({ ok: true, runIds: ['r1'] }),
+      fetcher: { fetch: async () => ({ ok: false, reason: 'not-found' }) },
+      now: () => 0,
+      debounceMs: 0,
+    });
+    draft.setProgram('blastp');
+    draft.useTaxid(562);
+    expect(draft.state.get().program).toBe('blastn');
+    expect(draft.state.get().values.blastn['-window_masker_taxid']).toBe('562');
+    expect(draft.state.get().values.blastn['-window_masker_db']).toBe('');
+  });
+
+  it('resolves saved taxonomy-ID counts for -ustat and -in under windowmasker/<taxid>/wmasker.obinary', async () => {
+    const { coordinator, data } = makeCoordinator(new FakeEngine());
+    const savedCounts = new File([new Uint8Array([1, 2, 3, 4])], 'wmasker.obinary');
+    const submitted: ToolRequest[][] = [];
+    const draft = new ToolDraft({
+      engine: new FakeEngine(),
+      data,
+      enqueueToolAll: async (requests) => {
+        submitted.push([...requests]);
+        return coordinator.enqueueToolAll(requests);
+      },
+      readSavedCounts: async (taxid) => (taxid === 562 ? savedCounts : undefined),
+      debounceMs: 0,
+    });
+    draft.ensureLoaded();
+    await sleep(20);
+
+    // Mask stage with saved counts for 562.
+    draft.setStage('mask');
+    draft.setUstatSaved(562, savedCounts.size);
+    draft.setFastaPaste('>q\nACGTACGT\n');
+    expect(draft.previewArgv()).toContain('windowmasker/562/wmasker.obinary');
+    expect((await draft.submit()).ok).toBe(true);
+    const maskReq = submitted[0]![0]!;
+    expect(maskReq.argv).toEqual(['windowmasker', '-ustat', 'windowmasker/562/wmasker.obinary', '-in', 'input.fa']);
+    expect(maskReq.directory.find((d) => d.name === 'windowmasker/562/wmasker.obinary')).toEqual({
+      name: 'windowmasker/562/wmasker.obinary',
+      file: savedCounts,
+      origin: { kind: 'saved', taxid: 562 },
+    });
+
+    // Convert stage with saved counts for 562.
+    draft.setStage('convert');
+    draft.setConvertSaved(562, savedCounts.size);
+    expect((await draft.submit()).ok).toBe(true);
+    const convReq = submitted[1]![0]!;
+    expect(convReq.argv).toEqual(['windowmasker', '-convert', '-in', 'windowmasker/562/wmasker.obinary', '-out', 'wmasker.ascii']);
+    expect(convReq.directory).toEqual([
+      { name: 'windowmasker/562/wmasker.obinary', file: savedCounts, origin: { kind: 'saved', taxid: 562 } },
+    ]);
+
+    // Missing saved counts reports a clear error.
+    draft.setConvertSaved(9999, 10);
+    const missing = await draft.submit();
+    expect(missing.ok).toBe(false);
+    expect(missing.ok ? '' : missing.message).toContain('9999');
+  });
 });
 
 describe('Coordinator single queue and DataService tool storage', () => {
@@ -558,5 +636,704 @@ describe('Coordinator single queue and DataService tool storage', () => {
     expect(store.usage()).toBe(8);
     await data.dropSessionFile(ref.token!);
     expect(store.usage()).toBe(0);
+  });
+
+  it('computes Supported / Not yet supported / Development build badge on tool runs in ResultsBrowser', async () => {
+    const engine = new FakeEngine();
+    const { data } = makeData();
+    let id = 0;
+    const makeCoord = (path: 'serial' | 'fake') =>
+      new Coordinator({
+        engine,
+        data,
+        downloader: { save: () => undefined },
+        now: () => 10_000,
+        newRunId: () => `r-${++id}`,
+        digest: sha256Hex,
+        toolRuntime: { path, engineBuild: path === 'fake' ? 'fake-engine' : 'serial-build' },
+      });
+    const table = {
+      ncbi: '2.17.0',
+      sources: [],
+      programs: {},
+      tools: { windowmasker: { optionSets: [JSON.stringify([['-mk_counts', '']])] } },
+    };
+
+    const serialCoord = makeCoord('serial');
+    const results = new ResultsBrowser({
+      data,
+      describe: (p) => engine.describe(p),
+      describeTool: (t) => engine.describeTool(t),
+      runs: serialCoord.state,
+      verification: table,
+    });
+    const supportedId = (await serialCoord.enqueueTool(sampleMkCountsRequest())).runId!;
+    await waitTerminal(serialCoord, supportedId);
+    await results.open(supportedId);
+    await sleep(20);
+    expect(results.state.get().toolBadge).toMatchObject({ level: 'certified', label: 'Supported' });
+
+    const outsideId = (
+      await serialCoord.enqueueTool({
+        tool: 'windowmasker',
+        stage: 'mk_counts',
+        argv: ['windowmasker', '-mk_counts', '-in', 'a.fa', '-out', 'w.ascii', '-unit', '11'],
+        directory: [{ name: 'a.fa', file: new Blob(['>a\nACGT\n']), origin: { kind: 'picked' } }],
+      })
+    ).runId!;
+    await waitTerminal(serialCoord, outsideId);
+    await results.open(outsideId);
+    await sleep(20);
+    expect(results.state.get().toolBadge).toMatchObject({ level: 'outside', label: 'Not yet supported' });
+
+    const helpId = (
+      await serialCoord.enqueueTool({
+        tool: 'windowmasker',
+        stage: 'mk_counts',
+        argv: ['windowmasker', '-mk_counts', '-h'],
+        directory: [],
+        prints: 'help',
+      })
+    ).runId!;
+    await waitTerminal(serialCoord, helpId);
+    await results.open(helpId);
+    await sleep(20);
+    expect(results.state.get().toolBadge).toBeUndefined();
+
+    const fakeCoord = makeCoord('fake');
+    const fakeResults = new ResultsBrowser({
+      data,
+      describe: (p) => engine.describe(p),
+      describeTool: (t) => engine.describeTool(t),
+      runs: fakeCoord.state,
+      verification: table,
+    });
+    const fakeId = (await fakeCoord.enqueueTool(sampleMkCountsRequest())).runId!;
+    await waitTerminal(fakeCoord, fakeId);
+    await fakeResults.open(fakeId);
+    await sleep(20);
+    expect(fakeResults.state.get().toolBadge).toMatchObject({ level: 'development', label: 'Development build' });
+  });
+
+  it('keeps an inflated .gz session file alive until queued/running tool runs complete or cancel', async () => {
+    const { data } = makeData();
+    const dropped: string[] = [];
+    const origDrop = data.dropSessionFile.bind(data);
+    data.dropSessionFile = async (token: string) => {
+      dropped.push(token);
+      await origDrop(token);
+    };
+
+    const base = new FakeEngine();
+    const gates: Array<() => void> = [];
+    const readContents: string[] = [];
+    const engine = stubEngine(base, {
+      validateTool: (a) => base.validateTool(a),
+      async runTool(argv, opts) {
+        await new Promise<void>((resolve) => gates.push(resolve));
+        if (opts?.signal?.aborted === true) throw new RunCancelledError('tool');
+        for (const entry of opts?.directory ?? []) {
+          readContents.push(`${entry.name}:${await entry.file.text()}`);
+        }
+        return base.runTool(argv, opts);
+      },
+    });
+
+    const sessionFiles = new SessionFiles((token) => void data.dropSessionFile(token).catch(() => undefined));
+    let id = 0;
+    const coordinator = new Coordinator({
+      engine,
+      data,
+      downloader: { save: () => undefined },
+      now: () => 10_000,
+      newRunId: () => `sf-${++id}`,
+      digest: sha256Hex,
+      sessionFiles,
+    });
+    const draft = new ToolDraft({
+      engine,
+      data,
+      enqueueToolAll: (reqs) => coordinator.enqueueToolAll(reqs),
+      isBusy: () => coordinator.isBusy(),
+      sessionFiles,
+      debounceMs: 0,
+    });
+    draft.ensureLoaded();
+    await sleep(20);
+
+    // Case 1: completion after removing .gz from form while run 2 is queued behind run 1.
+    const blockerId = (await coordinator.enqueueTool(sampleMkCountsRequest())).runId!;
+    await sleep(20);
+
+    draft.addFastaFiles([new File([gzipSync('>g1\nACGT\n')], 'g1.fa.gz')]);
+    await sleep(30);
+    const token1 = draft.state.get().fastaFiles[0]!.sessionToken!;
+    const key1 = draft.state.get().fastaFiles[0]!.key;
+    const queuedRes = await draft.submit();
+    expect(queuedRes.ok).toBe(true);
+    const run2Id = queuedRes.runIds![0]!;
+
+    // Remove from form while run 2 is queued -> must NOT drop yet.
+    draft.removeFastaFile(key1);
+    expect(dropped).toEqual([]);
+
+    // Release run 1, then run 2 reads g1.fa and completes -> drops exactly once at completion.
+    await nextGate(gates);
+    await waitTerminal(coordinator, blockerId);
+    expect(dropped).toEqual([]);
+    await nextGate(gates);
+    const run2 = await waitTerminal(coordinator, run2Id);
+    expect(run2.status).toBe('completed');
+    expect(readContents).toContain('g1.fa:>g1\nACGT\n');
+    expect(dropped).toEqual([token1]);
+
+    // Case 2: queued cancel after removing from form drops exactly once.
+    const blocker2 = (await coordinator.enqueueTool(sampleMkCountsRequest())).runId!;
+    await sleep(20);
+    draft.addFastaFiles([new File([gzipSync('>g2\nTGCA\n')], 'g2.fa.gz')]);
+    await sleep(30);
+    const token2 = draft.state.get().fastaFiles[0]!.sessionToken!;
+    const key2 = draft.state.get().fastaFiles[0]!.key;
+    const q2 = (await draft.submit()).runIds![0]!;
+    draft.removeFastaFile(key2);
+    expect(dropped).toEqual([token1]);
+    coordinator.cancel(q2);
+    expect(dropped).toEqual([token1, token2]);
+    await nextGate(gates);
+    await waitTerminal(coordinator, blocker2);
+
+    // Case 3: running cancel after removing from form drops exactly once when run ends.
+    draft.addFastaFiles([new File([gzipSync('>g3\nCCCC\n')], 'g3.fa.gz')]);
+    await sleep(30);
+    const token3 = draft.state.get().fastaFiles[0]!.sessionToken!;
+    const key3 = draft.state.get().fastaFiles[0]!.key;
+    const r3 = (await draft.submit()).runIds![0]!;
+    await sleep(20);
+    draft.removeFastaFile(key3);
+    expect(dropped).toEqual([token1, token2]);
+    coordinator.cancel(r3);
+    await nextGate(gates);
+    expect((await waitTerminal(coordinator, r3)).status).toBe('cancelled');
+    expect(dropped).toEqual([token1, token2, token3]);
+  });
+
+  it('cleans up Data-side staged tool runs when cancelled in preparing or finalizing', async () => {
+    const baseStore = new MemoryBlockStore();
+    let sealGate: Promise<void> | undefined;
+    let releaseSeal: (() => void) | undefined;
+    let sealedWaiting = false;
+    const store: typeof baseStore = Object.assign(Object.create(Object.getPrototypeOf(baseStore)), baseStore, {
+      async create(path: string) {
+        const writer = await baseStore.create(path);
+        return {
+          append: (bytes: Uint8Array) => writer.append(bytes),
+          writeAt: (offset: number, bytes: Uint8Array) => writer.writeAt(offset, bytes),
+          truncate: (length: number) => writer.truncate(length),
+          async seal() {
+            if (path.endsWith('/stdout') && sealGate !== undefined) {
+              sealedWaiting = true;
+              await sealGate;
+            }
+            return writer.seal();
+          },
+        };
+      },
+      read: (path: string, offset: number, length: number) => baseStore.read(path, offset, length),
+      readFile: (path: string, name: string, type?: string) => baseStore.readFile(path, name, type),
+      removeAll: (prefix: string) => baseStore.removeAll(prefix),
+      usage: () => baseStore.usage(),
+      get backend() {
+        return baseStore.backend;
+      },
+    });
+    const { data } = makeData(store);
+
+    let openGate: Promise<void> | undefined;
+    let releaseOpen: (() => void) | undefined;
+    const origOpenToolRun = data.openToolRun.bind(data);
+    data.openToolRun = async (runId: string) => {
+      if (openGate !== undefined) await openGate;
+      return origOpenToolRun(runId);
+    };
+
+    const engine = new FakeEngine();
+    let id = 0;
+    const coordinator = new Coordinator({
+      engine,
+      data,
+      downloader: { save: () => undefined },
+      now: () => 10_000,
+      newRunId: () => `cf-run-${++id}`,
+      digest: sha256Hex,
+    });
+
+    // Case 1: Cancel during preparing (delayed openToolRun).
+    openGate = new Promise<void>((resolve) => {
+      releaseOpen = resolve;
+    });
+    const prepId = (await coordinator.enqueueTool(sampleMkCountsRequest())).runId!;
+    await sleep(20);
+    expect(coordinator.state.get().runs.find((r) => r.snapshot.runId === prepId)?.status).toBe('preparing');
+    coordinator.cancel(prepId);
+    releaseOpen!();
+    openGate = undefined;
+    const prepDone = await waitTerminal(coordinator, prepId);
+    expect(prepDone.status).toBe('cancelled');
+    await sleep(30);
+    expect(baseStore.usage()).toBe(0);
+    await expect(data.readToolOutputRange(prepId, 'stdout', 0, 0)).rejects.toThrow();
+    // Re-opening the same runId succeeds only when DataService holds 0 entries for it.
+    const probe1 = await origOpenToolRun(prepId);
+    probe1.close();
+    await data.deleteRun(prepId);
+
+    // Case 2: Cancel during finalizing (delayed commit seal).
+    const deletedDuringFinalizing: string[] = [];
+    const origDeleteRun = data.deleteRun.bind(data);
+    data.deleteRun = async (runId: string) => {
+      deletedDuringFinalizing.push(runId);
+      return origDeleteRun(runId);
+    };
+    sealGate = new Promise<void>((resolve) => {
+      releaseSeal = resolve;
+    });
+    const finId = (await coordinator.enqueueTool(sampleMkCountsRequest())).runId!;
+    for (let i = 0; i < 40 && !sealedWaiting; i++) await sleep(10);
+    expect(sealedWaiting).toBe(true);
+    expect(coordinator.state.get().runs.find((r) => r.snapshot.runId === finId)?.status).toBe('finalizing');
+    coordinator.cancel(finId);
+    const finDone = await waitTerminal(coordinator, finId);
+    expect(finDone.status).toBe('cancelled');
+    // Port stays open while commit finishes sealing so commit settles and its .then(deleteRun) cleans up.
+    expect(deletedDuringFinalizing).toEqual([]);
+    releaseSeal!();
+    sealGate = undefined;
+    await sleep(40);
+    expect(deletedDuringFinalizing).toEqual([finId]);
+    expect(baseStore.usage()).toBe(0);
+    await expect(data.readToolOutputRange(finId, 'stdout', 0, 0)).rejects.toThrow();
+    const probe2 = await origOpenToolRun(finId);
+    probe2.close();
+    await origDeleteRun(finId);
+  });
+
+  it('re-reads draft state after awaiting validation in ToolDraft.submit()', async () => {
+    const { data } = makeData();
+    let releaseInflate!: () => void;
+    const inflateGate = new Promise<void>((resolve) => {
+      releaseInflate = resolve;
+    });
+    const origInflate = data.inflateToSessionFile.bind(data);
+    data.inflateToSessionFile = async (file: File) => {
+      await inflateGate;
+      return origInflate(file);
+    };
+
+    const base = new FakeEngine();
+    let holdFirstValidate = false;
+    let releaseValidate!: () => void;
+    const validateGate = new Promise<void>((resolve) => {
+      releaseValidate = resolve;
+    });
+    let validateWaiting = false;
+    const engine = stubEngine(base, {
+      async validateTool(argv) {
+        if (holdFirstValidate) {
+          holdFirstValidate = false;
+          validateWaiting = true;
+          await validateGate;
+        }
+        return base.validateTool(argv);
+      },
+    });
+
+    const enqueued: ToolRequest[] = [];
+    const draft = new ToolDraft({
+      engine,
+      data,
+      enqueueToolAll: async (reqs) => {
+        enqueued.push(...reqs);
+        return { ok: true, runIds: reqs.map((_, i) => `sub-${i + 1}`) };
+      },
+      debounceMs: 0,
+    });
+    draft.ensureLoaded();
+    await sleep(20);
+
+    // Start inflating a .gz file (still inflating when submit() is clicked) and trigger a held validation.
+    draft.addFastaFiles([new File([gzipSync('>seq\nACGTACGT\n')], 'late.fa.gz')]);
+    expect(draft.state.get().fastaFiles[0]?.status).toBe('inflating');
+    holdFirstValidate = true;
+    draft.setField('-unit', '6');
+    const submitPromise = draft.submit();
+    for (let i = 0; i < 40 && !validateWaiting; i++) await sleep(10);
+    expect(validateWaiting).toBe(true);
+
+    // While submit() is awaiting validation, finish the inflate AND change -unit to 7.
+    releaseInflate();
+    for (let i = 0; i < 40 && draft.state.get().fastaFiles[0]?.status !== 'ready'; i++) await sleep(10);
+    expect(draft.state.get().fastaFiles[0]?.status).toBe('ready');
+    draft.setField('-unit', '7');
+
+    // Release validation; submit() must build the request from the post-await state (late.fa + -unit 7).
+    releaseValidate();
+    const res = await submitPromise;
+    expect(res.ok).toBe(true);
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]!.argv).toContain('-in');
+    expect(enqueued[0]!.argv).toContain('late.fa');
+    expect(enqueued[0]!.argv).toContain('-unit');
+    expect(enqueued[0]!.argv).toContain('7');
+    expect(enqueued[0]!.argv).not.toContain('6');
+  });
+
+  it('holds submit session-file tokens before buildStageRequests awaits so Remove during combine or -ustat lookup does not drop early', async () => {
+    // Part A: Remove clicked while combineFastaFiles awaits reading the tail byte of an inflated .gz file.
+    const { data } = makeData();
+    const dropped: string[] = [];
+    const origDrop = data.dropSessionFile.bind(data);
+    data.dropSessionFile = async (token: string) => {
+      dropped.push(token);
+      await origDrop(token);
+    };
+
+    let releaseSlice!: () => void;
+    let sliceWaiting = false;
+    const sliceGate = new Promise<void>((resolve) => {
+      releaseSlice = resolve;
+    });
+    const origInflate = data.inflateToSessionFile.bind(data);
+    data.inflateToSessionFile = async (file: File) => {
+      const ref = await origInflate(file);
+      if (ref.token === undefined) return ref;
+      const realFile = ref.file;
+      const origSlice = realFile.slice.bind(realFile);
+      realFile.slice = ((start?: number, end?: number, contentType?: string) => {
+        const sliced = origSlice(start, end, contentType);
+        const origArrayBuffer = sliced.arrayBuffer.bind(sliced);
+        sliced.arrayBuffer = async () => {
+          sliceWaiting = true;
+          await sliceGate;
+          return origArrayBuffer();
+        };
+        return sliced;
+      }) as typeof realFile.slice;
+      return ref;
+    };
+
+    const base = new FakeEngine();
+    const runGates: Array<() => void> = [];
+    const readTexts: string[] = [];
+    const engine = stubEngine(base, {
+      async runTool(argv, opts) {
+        await new Promise<void>((resolve) => runGates.push(resolve));
+        for (const entry of opts?.directory ?? []) {
+          readTexts.push(`${entry.name}:${await entry.file.text()}`);
+        }
+        return base.runTool(argv, opts);
+      },
+    });
+    const sessionFiles = new SessionFiles((token) => void data.dropSessionFile(token).catch(() => undefined));
+    let id = 0;
+    const coordinator = new Coordinator({
+      engine,
+      data,
+      downloader: { save: () => undefined },
+      now: () => 10_000,
+      newRunId: () => `comb-${++id}`,
+      digest: sha256Hex,
+      sessionFiles,
+    });
+    const enqueue = (reqs: readonly ToolRequest[]) => coordinator.enqueueToolAll(reqs);
+    const busy = () => coordinator.isBusy();
+    const draft = new ToolDraft({ engine, data, enqueueToolAll: enqueue, isBusy: busy, sessionFiles, debounceMs: 0 });
+    draft.ensureLoaded();
+    await sleep(20);
+
+    draft.addFastaFiles([
+      new File([gzipSync('>first\nACGT')], 'first.fa.gz'),
+      new File(['>second\nTGCA\n'], 'second.fa'),
+    ]);
+    for (let i = 0; i < 40 && draft.state.get().fastaFiles.some((f) => f.status !== 'ready'); i++) await sleep(10);
+    const firstEntry = draft.state.get().fastaFiles[0]!;
+    const firstTok = firstEntry.sessionToken!;
+    expect(firstTok).toBeDefined();
+
+    const submitCombine = draft.submit();
+    for (let i = 0; i < 40 && !sliceWaiting; i++) await sleep(10);
+    expect(sliceWaiting).toBe(true);
+
+    // User clicks Remove on first.fa.gz while combineFastaFiles is awaiting its tail byte.
+    draft.removeFastaFile(firstEntry.key);
+    expect(dropped).toEqual([]);
+
+    releaseSlice();
+    const combineRes = await submitCombine;
+    expect(combineRes.ok).toBe(true);
+    expect(dropped.length).toBe(0);
+
+    await nextGate(runGates);
+    const combineRun = await waitTerminal(coordinator, combineRes.runIds![0]!);
+    expect(combineRun.status).toBe('completed');
+    expect(readTexts).toContain('combined_input.fa:>first\nACGT\n>second\nTGCA\n');
+    expect(dropped).toEqual([firstTok]);
+
+    // Part B: Remove clicked while Mask stage awaits reading the -ustat saved counts file.
+    let releaseUstat!: () => void;
+    let ustatWaiting = false;
+    const ustatGate = new Promise<void>((resolve) => {
+      releaseUstat = resolve;
+    });
+    const maskDraft = new ToolDraft({
+      engine,
+      data: {
+        inflateToSessionFile: (file) => origInflate(file),
+        dropSessionFile: (token) => data.dropSessionFile(token),
+        getToolOutputFile: (runId, key, name) => data.getToolOutputFile(runId, key, name),
+      },
+      enqueueToolAll: enqueue,
+      isBusy: busy,
+      readSavedCounts: async () => {
+        ustatWaiting = true;
+        await ustatGate;
+        return new File(['counts'], 'wmasker.obinary');
+      },
+      sessionFiles,
+      debounceMs: 0,
+    });
+    maskDraft.ensureLoaded();
+    await sleep(20);
+    maskDraft.setStage('mask');
+    maskDraft.setUstatSaved(562, 6);
+    maskDraft.addFastaFiles([new File([gzipSync('>mask_in\nACGT\n')], 'mask.fa.gz')]);
+    for (let i = 0; i < 40 && maskDraft.state.get().fastaFiles[0]?.status !== 'ready'; i++) await sleep(10);
+    const maskEntry = maskDraft.state.get().fastaFiles[0]!;
+    const maskTok = maskEntry.sessionToken!;
+    expect(maskTok).toBeDefined();
+
+    const submitMask = maskDraft.submit();
+    for (let i = 0; i < 40 && !ustatWaiting; i++) await sleep(10);
+    expect(ustatWaiting).toBe(true);
+
+    maskDraft.removeFastaFile(maskEntry.key);
+    expect(dropped).toEqual([firstTok]);
+
+    releaseUstat();
+    const maskRes = await submitMask;
+    expect(maskRes.ok).toBe(true);
+    expect(dropped.length).toBe(1);
+
+    await nextGate(runGates);
+    const maskRun = await waitTerminal(coordinator, maskRes.runIds![0]!);
+    expect(maskRun.status).toBe('completed');
+    expect(readTexts).toContain('mask.fa:>mask_in\nACGT\n');
+    expect(dropped).toEqual([firstTok, maskTok]);
+  });
+});
+
+describe('tool runs that read saved counts (-ustat from a saved copy)', () => {
+  it('hold the taxonomy ID in shared mode from enqueue until each run ends (completed, or cancelled while queued)', async () => {
+    const opfs = new MemoryOpfs();
+    const finishes: Array<() => void> = [];
+    const engine = stubEngine(new FakeEngine(), {
+      cancel: () => undefined,
+      async runTool() {
+        await new Promise<void>((resolve) => finishes.push(resolve));
+        return { status: 0, stdout: new Blob(), stderr: new Blob(), files: [] };
+      },
+    });
+    const { coordinator } = makeCoordinator(engine, undefined, webCountsLocks(opfs));
+    const held = async () => {
+      await sleep(0);
+      return (await opfs.query()).held.filter((entry) => entry.name === countsLockName(562) && entry.mode === 'shared').length;
+    };
+    const masking = (): ToolRequest => ({
+      tool: 'windowmasker',
+      stage: 'mask',
+      argv: ['windowmasker', '-ustat', 'wmasker.obinary', '-in', 'a.fa', '-out', 'a.out'],
+      directory: [
+        { name: 'wmasker.obinary', file: new Blob([new Uint8Array(4)]), origin: { kind: 'saved', taxid: 562 } },
+        { name: 'a.fa', file: new Blob(['>a\nACGT\n']), origin: { kind: 'picked' } },
+      ],
+    });
+    const first = (await coordinator.enqueueTool(masking())).runId!;
+    const second = (await coordinator.enqueueTool(masking())).runId!;
+    expect(await held()).toBe(2);
+    coordinator.cancel(second);
+    expect(await held()).toBe(1);
+    for (let i = 0; i < 100 && finishes.length === 0; i++) await sleep(1);
+    finishes[0]!();
+    expect((await waitTerminal(coordinator, first)).status).toBe('completed');
+    expect(await held()).toBe(0);
+    // A tool run that reads no saved copy holds nothing.
+    const plain = (await coordinator.enqueueTool(sampleMkCountsRequest())).runId!;
+    expect(await held()).toBe(0);
+    for (let i = 0; i < 100 && finishes.length < 2; i++) await sleep(1);
+    finishes[1]!();
+    await waitTerminal(coordinator, plain);
+  });
+
+  const expectValid = (draft: ToolDraft) => expect(draft.state.get().validation).toEqual({ state: 'ok' });
+  const makeTrackedDraft = (
+    engine: EngineGateway & ToolEngine,
+    data: DataService,
+    coordinator: Coordinator,
+    readSavedCounts?: (taxid: number) => Promise<File | undefined>,
+  ) => {
+    const calls: ToolRequest[][] = [];
+    const draft = new ToolDraft({
+      engine,
+      data,
+      enqueueToolAll: (requests) => {
+        calls.push([...requests]);
+        return coordinator.enqueueToolAll(requests);
+      },
+      ...(readSavedCounts === undefined ? {} : { readSavedCounts }),
+      debounceMs: 0,
+    });
+    return { draft, calls };
+  };
+  const submitAndComplete = async (draft: ToolDraft, coordinator: Coordinator) => {
+    const res = await draft.submit();
+    expect(res.ok).toBe(true);
+    expectValid(draft);
+    expect(draft.state.get().message).toBeUndefined();
+    const run = await waitTerminal(coordinator, res.runIds![0]!);
+    expect(run.status).toBe('completed');
+    return run;
+  };
+  const readyDraft = async (draft: ToolDraft, stage: 'mk_counts' | 'mask', taxid?: number, size?: number) => {
+    draft.ensureLoaded();
+    await sleep(20);
+    if (stage === 'mask') {
+      draft.setStage('mask');
+      if (taxid !== undefined && size !== undefined) draft.setUstatSaved(taxid, size);
+    }
+    draft.addFastaFiles([new File(['>a\nACGT\n'], 'a.fa')]);
+    for (let i = 0; i < 40 && draft.state.get().fastaFiles.some((f) => f.status !== 'ready'); i++) await sleep(10);
+    await draft.runValidationNow();
+    expectValid(draft);
+  };
+
+  it('keeps validation ok on a saved-counts lock refusal so the next submit queues the run', async () => {
+    const opfs = new MemoryOpfs();
+    const counts = new OpfsCountsStore(opfs.root as unknown as FileSystemDirectoryHandle, opfs, undefined, () => Date.UTC(2026, 10, 25));
+    const made: CountsMadeMeta = { run: 1, argv: ['windowmasker', '-mk_counts'], inputs: [], engineBuild: 'test', madeAt: 10_000 };
+    const initTok = (await counts.beginCounts(562, { made, size: 6, from: 0, replace: true }))!;
+    await counts.appendCounts(initTok, new TextEncoder().encode('counts'));
+    await counts.finishCounts(initTok);
+
+    const engine = new FakeEngine();
+    const { coordinator, data } = makeCoordinator(engine, undefined, webCountsLocks(opfs));
+    let writeTok: string | undefined;
+    const { draft, calls } = makeTrackedDraft(engine, data, coordinator, async (taxid) => {
+      const file = (await counts.readCounts(taxid))?.file;
+      // Simulate a writer starting after resolveCountsChoice read the file, before holdCounts runs.
+      if (calls.length === 0 && writeTok === undefined) {
+        writeTok = (await counts.beginCounts(562, { made, size: 6, from: 0, replace: true }))!;
+      }
+      return file;
+    });
+    await readyDraft(draft, 'mask', 562, 6);
+
+    const first = await draft.submit();
+    const busyText = 'The saved counts for 562 are being written or removed. Run again when that ends.';
+    expect(first).toEqual({ ok: false, message: busyText });
+    expect(calls).toHaveLength(1);
+    expectValid(draft);
+    expect(draft.state.get().message).toEqual({ kind: 'error', text: busyText });
+
+    // Release the exclusive lock and click Run LOSAT again without changing any option.
+    await counts.appendCounts(writeTok!, new TextEncoder().encode('counts'));
+    await counts.finishCounts(writeTok!);
+    await submitAndComplete(draft, coordinator);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('still records an argv refusal from enqueueToolAll in validation', async () => {
+    const base = new FakeEngine();
+    let refuseOnEnqueue = false;
+    const engine = stubEngine(base, {
+      validateTool: async (argv) =>
+        refuseOnEnqueue
+          ? { ok: false, message: 'Error: Invalid argument "unit"' }
+          : base.validateTool(argv),
+    });
+    const { coordinator, data } = makeCoordinator(engine);
+    const { draft, calls } = makeTrackedDraft(engine, data, coordinator);
+    await readyDraft(draft, 'mk_counts');
+
+    refuseOnEnqueue = true;
+    const first = await draft.submit();
+    expect(first).toEqual({ ok: false, message: 'Error: Invalid argument "unit"' });
+    expect(calls).toHaveLength(1);
+    expect(draft.state.get().validation).toEqual({ state: 'invalid', message: 'Error: Invalid argument "unit"' });
+    expect(draft.state.get().message).toEqual({ kind: 'error', text: 'Error: Invalid argument "unit"' });
+
+    // Without changing any option, a second submit stops at the recorded argv validation.
+    const second = await draft.submit();
+    expect(second).toEqual({ ok: false, message: 'Error: Invalid argument "unit"' });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('reads the new saved copy on Run again after a Replace invalidated the earlier handle', async () => {
+    const opfs = new MemoryOpfs();
+    const store = new OpfsCountsStore(opfs.root as unknown as FileSystemDirectoryHandle, opfs, undefined, () => Date.UTC(2026, 10, 25));
+    const loader = new CountsLoader({
+      downloader: new FakeCountsDownloader(store, {}),
+      store,
+      draft: { setCounts: () => undefined },
+    });
+    const made1: CountsMadeMeta = { run: 1, argv: ['windowmasker', '-mk_counts'], inputs: [], engineBuild: 'test', madeAt: 10_000 };
+    const made2: CountsMadeMeta = { run: 2, argv: ['windowmasker', '-mk_counts'], inputs: [], engineBuild: 'test', madeAt: 20_000 };
+    expect((await loader.saveMade(562, new File(['v1-counts'], 'v1.obinary'), made1)).ok).toBe(true);
+
+    const seenCounts: string[] = [];
+    const base = new FakeEngine();
+    const engine = stubEngine(base, {
+      async runTool(argv, opts) {
+        const entry = opts?.directory?.find((f) => f.name === 'windowmasker/562/wmasker.obinary');
+        if (entry !== undefined) seenCounts.push(await entry.file.text());
+        return base.runTool(argv, opts);
+      },
+    });
+    const locks = webCountsLocks(opfs);
+    const { coordinator, data } = makeCoordinator(engine, undefined, locks);
+
+    let readCount = 0;
+    const { draft } = makeTrackedDraft(engine, data, coordinator, async (taxid) => {
+      readCount++;
+      const file = (await loader.readSavedFile(taxid))?.file;
+      if (readCount === 1 && file !== undefined) {
+        // Replace the stored copy after resolveCountsChoice opened v1; simulate browser invalidating the old handle.
+        expect((await loader.saveMade(taxid, new File(['v2-replaced-counts!'], 'v2.obinary'), made2, { replace: true })).ok).toBe(true);
+        Object.defineProperty(file, 'slice', { value: () => new Blob([]) });
+      }
+      return file;
+    });
+    await readyDraft(draft, 'mask', 562, 9);
+
+    const first = await draft.submit();
+    const replacedText = 'The saved counts for 562 were replaced or removed after they were chosen. Run again.';
+    expect(first).toEqual({ ok: false, message: replacedText });
+    expectValid(draft);
+    expect(draft.state.get().message).toEqual({ kind: 'error', text: replacedText });
+
+    // Clicking Run LOSAT again without re-choosing reads the replacement copy from storage and succeeds.
+    const run = await submitAndComplete(draft, coordinator);
+    expect(seenCounts).toEqual(['v2-replaced-counts!']);
+    if (isToolRun(run)) {
+      const savedEntry = run.snapshot.directory.find((entry) => entry.name === 'windowmasker/562/wmasker.obinary');
+      expect(savedEntry?.size).toBe('v2-replaced-counts!'.length);
+    }
+
+    // If the saved copy is later removed, Run again reports it cleanly without marking argv invalid.
+    await loader.delete(562);
+    const third = await draft.submit();
+    expect(third).toEqual({
+      ok: false,
+      message: 'The saved counts for taxonomy ID 562 are no longer available.',
+    });
+    expectValid(draft);
   });
 });

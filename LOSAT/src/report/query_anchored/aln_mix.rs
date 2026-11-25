@@ -106,7 +106,8 @@ const BUILD_INFINITE_LOOP_MESSAGE: &str =
 // 255; line PS, PS15b-2 fix 1, `PS/tmp/fix15b2_t0/t2a_s1.1.err`: psiblast `-in_pssm` of the
 // molecule `other`).
 /// Where `x_Merge` throws when no row of a subject's chain is the row of the Dense-seg of a match
-/// of a later pass (`Mix::merge_match`).
+/// of a later pass (`Mix::merge_match`), as for a BLASTN `-db` alignment whose query row starts
+/// below 0 and has no query-row match in the first pass (line RG-X1bq).
 const X_MERGE_PROPER_ROW: ThrowSite = ThrowSite {
     file: "src/objtools/alnmgr/alnmerger.cpp",
     line: 372,

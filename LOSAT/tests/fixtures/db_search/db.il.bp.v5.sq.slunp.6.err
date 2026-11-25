@@ -1,0 +1,4 @@
+Warning: [blastp] To obtain better run time performance, please run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist
+Error: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objects/seq/../seqloc/Textseq_id.cpp", line 129: Error: (CSeqIdException::eFormat) ncbi::objects::CTextseq_id::Set() - Accession and name missing for Textseq-id (but got version 0, release reviewed)
+

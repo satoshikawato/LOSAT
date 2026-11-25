@@ -812,7 +812,8 @@ fn run_inner(
         search_subjects,
         &search_error,
         database.is_none().then_some(&subjects[..]),
-    );
+    )
+    .with_held(held.as_ref());
     // NCBI's scope of the query records at each batch's prefetch (`BatchScopes`).
     let batch_scopes = BatchScopes::new(options.outfmt == 5, database.as_ref());
     let render_batch = |writer: &mut crate::cli::NcbiOstream<'static>,
@@ -1806,6 +1807,7 @@ pub(super) struct BatchTake<'a> {
     strategy: Option<&'a crate::report::archive::strategy::StrategyExport>,
     requests: Option<crate::report::archive::requests::RunRequests<'a>>,
     archive: Option<&'a crate::report::archive::ArchiveHandle>,
+    held: Option<&'a super::blast_xml::HeldOutput>,
     options: &'a super::args::ResolvedOptions,
     subjects: Subjects<'a>,
     search_error: &'a dyn Fn(anyhow::Error) -> anyhow::Error,
@@ -1829,10 +1831,20 @@ impl<'a> BatchTake<'a> {
             strategy,
             requests: strategy.map(|_| archive::requests(request_subjects)),
             archive,
+            held: None,
             options,
             subjects,
             search_error,
         }
+    }
+
+    // No NCBI counterpart: attaches LOSAT's `HeldOutput` so strategy request releases interleave
+    // with held BLASTX/RPSTBLASTN XML/XML2/JSON reports (`HeldOutput::push_posts`).
+    /// Attaches the run's `HeldOutput` so strategy request releases are queued with held
+    /// single-stream XML/XML2/JSON reports (`HeldOutput::push_posts`).
+    pub(super) fn with_held(mut self, held: Option<&'a super::blast_xml::HeldOutput>) -> Self {
+        self.held = held;
+        self
     }
 
     /// Takes the reader batch `queries`, after the `queries_before` queries of the batches
@@ -1862,7 +1874,11 @@ impl<'a> BatchTake<'a> {
             queries,
             queries.first().map(FastaRecord::placement),
         )?;
-        Ok(strategy.write_posts(diagnostics, self.archive)?)
+        let posts = strategy.take_all_posts();
+        if self.held.is_some_and(|held| held.push_posts(posts.clone())) {
+            return Ok(());
+        }
+        Ok(posts.write(diagnostics, self.archive)?)
     }
 
     /// The batch `queries` (after `queries_before` queries) is reported with the results
@@ -2367,6 +2383,14 @@ pub fn run(
                     let _ = crate::report::archive::write_error_archive_after_post(
                         handle, error, &lines, writer,
                     );
+                } else if let Some(lines) = crate::report::archive::silent_end_lines(handle, error)
+                {
+                    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:307-310
+                    // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:232-235
+                    // A run that `CATCH_ALL` ended without a post (`cli::NativeError::silent_end`,
+                    // such as a strategy stream `CIOException::eWrite` fault): write the error
+                    // archive of the messages saved before it.
+                    let _ = crate::report::archive::write_error_archive(handle, &lines, writer);
                 }
             }
             Ok(()) => {

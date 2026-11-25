@@ -279,7 +279,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
   const pasteSubject = (draft: SearchDraft) => draft.setPaste('subject', '>s1\nACGTACGTACGTACGTACGTACGT\n');
   const expectReady = (draft: SearchDraft) => expect(draft.readiness()).toBeUndefined();
   const pickNucDb = (draft: SearchDraft) => draft.setSubjectDatabaseFiles([fileWithRelPath('nucdb/nt.nin', 'nin')]);
-  const submitAndWait = async (draft: SearchDraft, coordinator: Coordinator) => {
+  const submitAndWait = async (draft: SearchDraft, coordinator: Coordinator): Promise<string> => {
     const submitted = await draft.submit();
     expect(submitted.ok).toBe(true);
     const runId = submitted.runIds![0]!;
@@ -308,10 +308,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expectReady(draft);
     expect(memory.data.subject).toEqual({ name: 'nucdb/nt', folder: 'nucdb' });
 
-    const submitted = await draft.submit();
-    expect(submitted.ok).toBe(true);
-    const runId = submitted.runIds![0]!;
-    await waitCompleted(coordinator, runId);
+    const runId = await submitAndWait(draft, coordinator);
 
     const runView = coordinator.state.get().runs.find((r) => r.snapshot.runId === runId)!;
     expect(runView.snapshot.kind !== 'tool' && runView.snapshot.database?.blastdbEnv).toBe('nucdb');
@@ -384,7 +381,8 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     draft.setProgram('blastn');
     await draft.idle();
     expectReady(draft);
-    await submitAndWait(draft, coordinator);
+    const f4RunId = await submitAndWait(draft, coordinator);
+    expect(f4RunId).toMatch(/^run-/);
     expect(runCalls[0]!.argv.slice(-2)).toEqual([FILTERING_DB_FLAG, 'rep/repeats']);
   });
 

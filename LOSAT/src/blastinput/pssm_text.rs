@@ -61,6 +61,18 @@ pub(crate) fn read_pssm_binary(bytes: &[u8]) -> PssmRead {
     ))
 }
 
+/// A `PssmWithParameters` file of makeprofiledb (ASN.1 text, or ASN.1 binary with `-binary`):
+/// the same table-driven reader with `Names::PROFILE` (`own_serial_message` false, because
+/// makeprofiledb prints NCBI's exception text directly).
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1381-1395
+pub(crate) fn read_profile(bytes: &[u8], binary: bool) -> PssmRead {
+    pssm_read(if binary {
+        read_ber_document(bytes, named::PSSMWITHPARAMETERS, Names::PROFILE)
+    } else {
+        read_document(bytes, named::PSSMWITHPARAMETERS, Names::PROFILE)
+    })
+}
+
 /// [`read_pssm`] of the `PssmWithParameters` object in NCBI's XML at the start of `bytes`
 /// (the stream read as `MSerial_Xml`, in the ASN.1 style).
 pub(crate) fn read_pssm_xml(bytes: &[u8]) -> PssmRead {

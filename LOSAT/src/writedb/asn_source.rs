@@ -1435,18 +1435,19 @@ fn generate_asn_title(
         }
     }
 
-    let defline = generate_bioseq_defline(&flags.raw_title, is_aa, false, &facts).map_err(|_| {
-        // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4530-4533
-        WriteDbError::Exception(NcbiException::new(
-            ThrowSite {
-                file: "src/corelib/ncbistr.cpp",
-                line: 4531,
-                kind: "CStringException::eBadArgs",
-                function: Some("ncbi::NStr::HtmlDecode"),
-            },
-            "Unable to guess the source string encoding",
-        ))
-    })?;
+    let defline =
+        generate_bioseq_defline(&flags.raw_title, is_aa, false, &facts).map_err(|_| {
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4530-4533
+            WriteDbError::Exception(NcbiException::new(
+                ThrowSite {
+                    file: "src/corelib/ncbistr.cpp",
+                    line: 4531,
+                    kind: "CStringException::eBadArgs",
+                    function: Some("ncbi::NStr::HtmlDecode"),
+                },
+                "Unable to guess the source string encoding",
+            ))
+        })?;
     if defline.reads_past_end {
         return Err(WriteDbError::Unsupported(
             "a title of punctuation that NCBI's x_CleanAndCompress reads past the end of \

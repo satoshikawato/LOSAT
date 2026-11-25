@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.105
+- Version: 1.106
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -708,7 +708,20 @@
   offset and its clears taken from the database order for such sequences at every thread count,
   rule 4; line NP decision 58, Q1 = B and Q2 = B, 2026-11-23; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.103);
-  1.105 2026-11-25 (`losat makeblastdb -input_type asn1_txt|asn1_bin`, line RG item D3c-4: the
+  1.105 2026-11-25 (rule-3 rejections of `losat makeprofiledb` with ASN.1 text and `-binary` PSSM
+  inputs and binary definition lines, psiblast line item PS10b: a query whose `iupacna` data holds
+  a byte >= 0x80 in a pair position before any final odd overhang byte, where NCBI's
+  `x_ConvertIupacnaTo4na` indexes its static table with a signed `char` and reads before the table;
+  a `Seq-id` element stated as `NULL` inside binary definition lines (`ASN1_BlastDefLine`) when
+  writing a version 5 database with no prior sequence written yet and no active taxid map (including
+  `-taxid` or an empty `-taxid_map`), where NCBI's taxonomy writer aborts on close while
+  `-taxid_map` or an `org` descriptor, `-blastdb_version 4`, `-index false` on the first slot, and
+  version 5 after an earlier profile match NCBI; and `:OtherType` pointers in both ASN.1 text and
+  `-binary` profiles via `Names::PROFILE` as well as binary definition lines, plus host-dependent
+  1 GiB..2^47 lengths, whose NCBI behaviour depends on process registration history or host memory;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.104 at
+  the merge of dev that brought line NP item M4b-T3's 1.104; first 1.104);
+  1.106 2026-11-25 (`losat makeblastdb -input_type asn1_txt|asn1_bin`, line RG item D3c-4: the
   explicit rejections, rule 3, of a nucleotide ASN.1 sequence whose `Seq-data` (`iupacna`,
   `ncbi2na` or `ncbi4na`) is shorter than `Seq-inst.length` asks for (including a `-hash_index`
   read of 1 to 3 packed tail bases past the data, class of 1.86), of `NULL` elements inside
@@ -716,7 +729,7 @@
   `Blast-def-line.seqid` and an empty `Delta-ext` list (class of 1.45 and 1.52), and of a
   punctuation-only Bioseq title that NCBI's `x_CleanAndCompress` reads past the end of (class of
   1.2 and 1.37); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
-  after 1.104)
+  after 1.105 at the merge of dev that brought psiblast line item PS10b's 1.105)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3670,6 +3683,43 @@ file would differ, and NCBI's programs still could not open the database).
     32, with or without a later error such as a negative frequency ratio). A query of the wrong
     length and a matrix that NCBI's engine does not know are NCBI's errors first (fixture rows
     QC02-QC05), and a lower-case IUPACaa query is built (row QC01).
+  - A query in `iupacna` coding holding a byte `>= 0x80` in a pair position before any final odd
+    overhang byte (version 1.105, PS10b; reachable in ASN.1 binary where `StringStore` keeps raw
+    bytes without `#` replacement): `WriteDB_IupacnaToBinary` (`writedb_convert.cpp:590-604`)
+    converts all input bytes through `x_ConvertIupacnaTo4na` (`sequtil_convert_imp.cpp:313-339`),
+    whose pair loop indexes `sm_IupacnaTo4na` with a signed `char` and reads before the static table
+    in `.rodata` (undefined behaviour; fixture inputs `l_QR08.lst`-`l_QR10.lst`, scored and
+    frequency-ratio-only alike). Bytes `< 0x80` (row `B19`), the single odd overhang byte which
+    casts to `Uint1` (row `B18`), and `mol na` (which stops at NCBI's molecule error first, row
+    `B20`) are built or reported as in NCBI.
+  - Binary definition lines (`ASN1_BlastDefLine`) holding a `Seq-id` element stated as `NULL`
+    (version 1.105, PS10b; fixture input `l_QR12.lst` and rows `RB17`-`RB29`): carried to NCBI's
+    exact failing point rather than refused up front. With an active taxid map (a non-empty
+    `-taxid_map` or an earlier/current `org` descriptor without `-taxid`) `FixTaxId` stops before
+    writing with `Attempt to access NULL pointer.` (exit 255, rows `RB19`, `RB20`, `RB27`); with
+    `-index false` when the `NULL` element is the first `Seq-id` of the first definition line,
+    replacing it with `gnl|BL_ORD_ID|<oid>` removes it and builds the database (exit 0, rows `RB24`,
+    `RB25`); otherwise BER serialization in `WriteDb` posts `(802.5)` and fails at the exact BER
+    stream byte offset (`byte N: cannot write unassigned member NULL element while writing container `,
+    exit 255 in `-blastdb_version 4` and in version 5 when an earlier profile has already written an
+    OID; rows `RB17`, `RB18`, `RB21`-`RB23`, `RB26`, `RB28`, `RB29`). Only in version 5 when no OID
+    has been written yet (no `-taxid_map` or an empty map, including `-taxid`), where
+    `~CWriteDB_TaxID` throws `No tax info for any oid` out of its destructor and NCBI aborts
+    (exit 134), or when a later input error unwinds through `~CWriteDB_Impl`'s `Close` (v4 or v5,
+    exit 134), does LOSAT refuse via the writer-destructor-abort refusal below (fixture inputs
+    `l_QR12.lst`, `l_QR15.lst`). Damaged binary definition lines, replaced visible characters (803.7), `NULL`
+    `Blast-def-line` elements (`Attempt to access NULL pointer.`), and huge lengths (`Unknown
+    exception`) match NCBI through the shared table-driven BER reader (fixture rows `RB04`, `RB04m`,
+    `RB04b`, `RB08`-`RB16`).
+  - `:OtherType` pointers and host-dependent 1 GiB..2^47 string or octet lengths in `makeprofiledb`
+    profiles (both ASN.1 text and `-binary`, read through `Names::PROFILE` as `makeblastdb` uses
+    `Names::MASK`) and binary definition lines (version 1.105, PS10b; fixture inputs `l_QR11.lst`,
+    `l_QR13.lst`, `l_QR14.lst`): because `makeprofiledb` prints NCBI's `CSerialException` text
+    directly, whether `:OtherType` prints `class not found` or `incompatible member type` depends
+    on which ASN.1 classes the process has registered so far (for example, on text `:Seq-interval`,
+    NCBI 2.17.0 prints `class not found: Seq-interval`, whereas LOSAT before 1.105 (`Names::PSSM`)
+    erroneously printed `incompatible member type`), so both text and binary `:OtherType` pointers
+    are refused under one rule.
   - A query in a nucleotide coding with fewer bytes than NCBI's writer reads for its length (version
     1.86, PS10d): `ncbi2na` of fewer than `ceil(length / 4)` bytes, `ncbi4na` of fewer than
     `ceil(length / 2)`, `iupacna` whose NCBI4na form and its terminating zero hold fewer than
@@ -3876,7 +3926,7 @@ file would differ, and NCBI's programs still could not open the database).
   the sequence's end, and the index reads them (probes `p3` l93n and l94n, 4294967293 and 4294967294
   letters: SIGSEGV after `creating ....00.idx...`, no file left). LOSAT refuses (exit 1) at that
   sequence.
-- `losat makeblastdb -input_type asn1_txt` and `-input_type asn1_bin` (version 1.105, 2026-11-25,
+- `losat makeblastdb -input_type asn1_txt` and `-input_type asn1_bin` (version 1.106, 2026-11-25,
   line RG item D3c-4, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07):
   (a) a nucleotide `Bioseq` whose `iupacna`, `ncbi2na` or `ncbi4na` `Seq-data` holds fewer bytes or
   letters than `Seq-inst.length` asks for (including a `-hash_index` `CSeqVector` read of 1 to 3

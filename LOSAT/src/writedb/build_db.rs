@@ -14,7 +14,7 @@ use super::asn_source::{
 };
 use super::bioseq::{Bioseq, DeltaFix, ParsedIds};
 use super::convert::{short_nucleotide_data, ShortNucleotideData};
-use super::deflines::{self, NullDeflineElement};
+use super::deflines;
 use super::dir_entry;
 use super::fasta_source::{FastaBioseqSource, SourceErrorKind, Warn};
 use super::mask_data::range_set::address_order_refusal;
@@ -1075,9 +1075,12 @@ impl<'a> BuildDatabase<'a> {
         warn: Warn<'_>,
     ) -> Result<(DeflineSet, bool), WriteDbError> {
         if let Some(bin_hdr) = bioseq.binary_header.take() {
-            let (decoded, posts) = deflines::decode_blast_def_line_set_ber(&bin_hdr);
+            let (decoded, posts) = deflines::decode_binary_deflines_with_names(
+                &bin_hdr,
+                crate::report::serial::asn_input::Names::DEFLINE_HEADER,
+            );
             write_serial_posts(posts, warn, &mut self.utf8_once);
-            let inner = match decoded {
+            let mut decoded = match decoded {
                 Ok(inner) => inner,
                 Err(ReadError::Serial(e) | ReadError::Exception(e)) => {
                     return Err(WriteDbError::Exception(e));
@@ -1091,17 +1094,20 @@ impl<'a> BuildDatabase<'a> {
                     ));
                 }
             };
-            let mut set = inner.map_err(|null| {
-                let where_in = match null {
-                    NullDeflineElement::Defline => "Blast-def-line-set",
-                    NullDeflineElement::SeqId => "Blast-def-line.seqid",
-                };
-                WriteDbError::Unsupported(format!(
-                    "a NULL element in {where_in} (NCBI makeblastdb dereferences a NULL pointer there)"
-                ))
-            })?;
-            deflines::strip_empty_lists(&mut set);
-            return Ok((set, true));
+            if decoded.null_defline {
+                return Err(WriteDbError::Unsupported(
+                    "a NULL element in Blast-def-line-set (NCBI makeblastdb dereferences a NULL pointer there)"
+                        .to_string(),
+                ));
+            }
+            if !decoded.null_seqids.is_empty() {
+                return Err(WriteDbError::Unsupported(
+                    "a NULL element in Blast-def-line.seqid (NCBI makeblastdb dereferences a NULL pointer there)"
+                        .to_string(),
+                ));
+            }
+            deflines::strip_empty_lists(&mut decoded.set);
+            return Ok((decoded.set, true));
         }
         if scan_cfastareader {
             if let Some(field) = bioseq.cfastareader_defline.as_deref() {

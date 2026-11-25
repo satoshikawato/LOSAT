@@ -7,11 +7,12 @@
 
 use super::bioseq::{Bioseq, ParsedIds};
 use super::fasta_source::{fasta_reader_fasta, post_seq_id_warning, Warn};
-use crate::report::serial::asn_input::Names;
+use crate::report::serial::asn_input::{Input, Names, R};
+use crate::report::serial::asn_text_reader::SliceSource;
+use crate::report::serial::asn_types::read::{ObjectStream, TypedReader};
+use crate::report::serial::asn_types::seq_id::read_seq_id;
 use crate::report::serial::asn_types::table::named;
-use crate::report::serial::asn_types::{
-    member_index, members, read_ber_document, Post, ReadError, Value,
-};
+use crate::report::serial::asn_types::{member_index, members, Post, ReadError, Value};
 use crate::report::serial::pssm::Seqdesc;
 use crate::seqid::accguide::{identify_seq_id, parse_flags, F_NUC, F_PROT};
 use crate::seqid::label::content;
@@ -280,31 +281,134 @@ pub(crate) fn deflines_of_bioseq(
 }
 
 /// Why `CWriteDB::ExtractBioseqDeflines` makes no definition lines of a Bioseq.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum BioseqDeflinesError {
     /// No binary definition lines and no ids: NCBI's `CWriteDBException` "Error: No deflines
     /// provided.".
     NoDeflines,
-    /// Binary definition lines (`x_GetBioseqBinaryHeader`) that the decoder of the database
-    /// headers does not read as NCBI's reader does (the reason): BER that it does not decode
-    /// (NCBI's serial error is not reproduced), or a string with bytes that NCBI's reader
-    /// replaces by '#', reporting each.
-    BinaryHeader(String),
+    /// Binary definition lines (`x_GetBioseqBinaryHeader`, `Blast-def-line-set` in ASN.1 BER)
+    /// that NCBI's serial reader stops on (`ReadError`), or refuses (`ReadError::Unsupported`).
+    BinaryHeader(ReadError),
     /// A descriptor stated as `NULL` (`Seqdesc::Empty`, the empty `CRef<CSeqdesc>` of NCBI's
-    /// reader) that NCBI's loop over the descriptors dereferences (`x_GetBioseqBinaryHeader`
-    /// before the binary lines, `x_BuildDeflinesFromBioseq` without them, makeprofiledb's taxid
-    /// loop before the first `org`, `first_org_taxid`): `CObject::ThrowNullPointerException`'s
-    /// `CCoreException`, "Attempt to access NULL pointer." (makeprofiledb 2.17.0, probe D3c-3c
-    /// `probeB`).
+    /// reader) or a `Blast-def-line` element stated as `NULL` in binary definition lines:
+    /// `CObject::ThrowNullPointerException`'s `CCoreException`, "Attempt to access NULL pointer.".
     NullDescriptor,
 }
 
-/// The definition lines of a Bioseq (`ExtractBioseqDeflines`), and whether they are its binary
-/// ones, which NCBI does not encode again there.
+/// The definition lines of a Bioseq (`ExtractBioseqDeflines`), whether they are its binary ones
+/// (which NCBI does not encode again there), and the `(defline_index, slot_index)` positions of
+/// any `Seq-id` elements stated as `NULL` inside binary definition lines.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BioseqDeflines {
     pub(crate) set: DeflineSet,
     pub(crate) binary: bool,
+    pub(crate) null_seqids: Vec<(usize, usize)>,
+}
+
+/// The outcome of [`bioseq_deflines`], together with any diagnostic posts emitted while reading
+/// binary definition lines (`ASN1_BlastDefLine`), even when reading later fails.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BioseqDeflinesRead {
+    pub(crate) result: Result<BioseqDeflines, BioseqDeflinesError>,
+    pub(crate) posts: Vec<Post>,
+}
+
+/// The decoded binary `Blast-def-line-set`, noting empty `CRef<>` elements so the whole BER
+/// object finishes reading (emitting posts and any syntax errors in NCBI's order) before
+/// `s_CheckEmptyLists`, `FixTaxId`, or serialization checks run.
+pub(crate) struct DecodedBinaryDeflines {
+    pub(crate) set: DeflineSet,
+    pub(crate) null_defline: bool,
+    pub(crate) null_seqids: Vec<(usize, usize)>,
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.asn:32-47
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:722-733,777-808
+/// Decodes `Blast-def-line-set` from `header` through the single shared table-driven BER reader
+/// (`report::serial::asn_types`), using `names` for stream refusal wording.
+pub(crate) fn decode_binary_deflines_with_names(
+    header: &[u8],
+    names: Names,
+) -> (Result<DecodedBinaryDeflines, ReadError>, Vec<Post>) {
+    let (mut decoded, posts) = ObjectStream::binary(SliceSource::new(header), names)
+        .read_typed(named::BLAST_DEF_LINE_SET, read_defline_set);
+    if let Ok(ref mut inner) = decoded {
+        inner.set.utf8 = posts.iter().any(|post| matches!(post, Post::Utf8Tag(_)));
+    }
+    (decoded, posts)
+}
+
+/// Decodes `Blast-def-line-set` from `header` with `Names::BINARY_DEFLINES`.
+fn decode_binary_deflines(header: &[u8]) -> (Result<DecodedBinaryDeflines, ReadError>, Vec<Post>) {
+    decode_binary_deflines_with_names(header, Names::BINARY_DEFLINES)
+}
+
+fn read_defline_set<I: Input>(r: &mut TypedReader<I>) -> R<DecodedBinaryDeflines> {
+    let mut deflines = Vec::new();
+    let mut null_defline = false;
+    let mut null_seqids = Vec::new();
+    r.list(named::BLAST_DEF_LINE_SET, |r, element| match element {
+        Some(ty) => {
+            let defline_idx = deflines.len();
+            let defline = read_defline(r, ty, defline_idx, &mut null_seqids)?;
+            deflines.push(defline);
+            Ok(())
+        }
+        None => {
+            null_defline = true;
+            Ok(())
+        }
+    })?;
+    Ok(DecodedBinaryDeflines {
+        set: DeflineSet {
+            deflines,
+            utf8: false,
+        },
+        null_defline,
+        null_seqids,
+    })
+}
+
+fn read_defline<I: Input>(
+    r: &mut TypedReader<I>,
+    ty: u16,
+    defline_idx: usize,
+    null_seqids: &mut Vec<(usize, usize)>,
+) -> R<BlastDefline> {
+    let mut defline = BlastDefline::default();
+    r.class(ty, |r, index, ty| {
+        match index {
+            0 => defline.title = Some(r.text(ty)?),
+            1 => {
+                let mut slot = 0usize;
+                r.list(ty, |r, element| {
+                    match element {
+                        Some(_) => defline.ids.push(read_seq_id(r)?),
+                        None => null_seqids.push((defline_idx, slot)),
+                    }
+                    slot += 1;
+                    Ok(())
+                })?;
+            }
+            2 => defline.taxid = Some(r.integer(ty)? as i32),
+            3 => defline.memberships = Some(read_int4_list(r, ty)?),
+            4 => defline.links = Some(read_int4_list(r, ty)?),
+            _ => defline.other_info = Some(read_int4_list(r, ty)?),
+        }
+        Ok(())
+    })?;
+    Ok(defline)
+}
+
+fn read_int4_list<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<Vec<i32>> {
+    let mut values = Vec::new();
+    r.list(ty, |r, element| {
+        if let Some(ty) = element {
+            values.push(r.integer(ty)? as i32);
+        }
+        Ok(())
+    })?;
+    Ok(values)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1574-1596
@@ -324,32 +428,34 @@ pub(crate) struct BioseqDeflines {
 // `x_BuildDeflinesFromBioseq` over all of them, which runs before the ids are looked at (its test
 // of the ids is always true), so a Bioseq without ids throws there too (makeprofiledb 2.17.0, row
 // NE27 of `tests/fixtures/makeprofiledb`).
-pub(crate) fn bioseq_deflines(
-    ids: &[ParsedSeqId],
-    descr: &[Seqdesc],
-) -> Result<BioseqDeflines, BioseqDeflinesError> {
-    let header = binary_header(descr)?;
+pub(crate) fn bioseq_deflines(ids: &[ParsedSeqId], descr: &[Seqdesc]) -> BioseqDeflinesRead {
+    let header = match binary_header(descr) {
+        Ok(header) => header,
+        Err(error) => {
+            return BioseqDeflinesRead {
+                result: Err(error),
+                posts: Vec::new(),
+            };
+        }
+    };
     if header.is_none() && descr.contains(&Seqdesc::Empty) {
-        return Err(BioseqDeflinesError::NullDescriptor);
+        return BioseqDeflinesRead {
+            result: Err(BioseqDeflinesError::NullDescriptor),
+            posts: Vec::new(),
+        };
     }
     if let Some(header) = header {
-        // The one decoder of `Blast-def-line-set` records (a volume's `.phr`).
-        let set = crate::seqid::ber::decode_full_set(header)
-            .map_err(|error| BioseqDeflinesError::BinaryHeader(error.to_string()))?;
-        if set
-            .deflines
-            .iter()
-            .any(|defline| defline.replaced_title_bytes > 0 || defline.replaced_id_bytes > 0)
-        {
-            return Err(BioseqDeflinesError::BinaryHeader(
-                "a string with bytes that NCBI's reader replaces by '#', reporting each"
-                    .to_string(),
-            ));
-        }
-        // A UTF8String for a VisibleString (`set.utf8`) is read as one: makeprofiledb 2.17.0
-        // writes no warning 803.10 for it and writes the line again with a VisibleString
-        // (probe z_bh1u of line RG item T5d, merge 18, 2026-11-23).
-        return Ok(BioseqDeflines { set, binary: true });
+        let (decoded, posts) = decode_binary_deflines(header);
+        let result = match decoded {
+            Ok(decoded) if decoded.null_defline => Err(BioseqDeflinesError::NullDescriptor),
+            Ok(decoded) => Ok(BioseqDeflines {
+                set: decoded.set,
+                binary: true,
+                null_seqids: decoded.null_seqids,
+            }),
+            Err(error) => Err(BioseqDeflinesError::BinaryHeader(error)),
+        };
+        return BioseqDeflinesRead { result, posts };
     }
     let title = descr
         .iter()
@@ -359,9 +465,17 @@ pub(crate) fn bioseq_deflines(
             Seqdesc::Other(_) | Seqdesc::Empty => None,
         })
         .unwrap_or_default();
-    let set = deflines_of_bioseq(ids.to_vec(), title, &descr_taxids(descr))
-        .ok_or(BioseqDeflinesError::NoDeflines)?;
-    Ok(BioseqDeflines { set, binary: false })
+    let result = deflines_of_bioseq(ids.to_vec(), title, &descr_taxids(descr))
+        .map(|set| BioseqDeflines {
+            set,
+            binary: false,
+            null_seqids: Vec::new(),
+        })
+        .ok_or(BioseqDeflinesError::NoDeflines);
+    BioseqDeflinesRead {
+        result,
+        posts: Vec::new(),
+    }
 }
 
 /// The variant `name` of the `Seqdesc` CHOICE `descriptor`, when it is that variant.
@@ -502,99 +616,6 @@ fn binary_header(descr: &[Seqdesc]) -> Result<Option<&[u8]>, BioseqDeflinesError
         }
     }
     Ok(None)
-}
-
-/// An empty `CRef<>` (`NULL`) inside a decoded `Blast-def-line-set`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NullDeflineElement {
-    /// A `NULL` element in `Blast-def-line-set`.
-    Defline,
-    /// A `NULL` element in `Blast-def-line.seqid`.
-    SeqId,
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:722-733
-/// Decodes an `ASN1_BlastDefLine` binary header (`Blast-def-line-set`) through the table-driven
-/// BER reader (`asn_types::read_ber_document`), preserving NCBI's exact serial exceptions and
-/// diagnostic posts (`Post::BadChar`, `Post::Utf8Tag`). Empty membership and link lists are left
-/// as read so callers that compare with `seqid::ber::decode_full_set` see the exact decoded
-/// fields; [`strip_empty_lists`] mirrors `s_CheckEmptyLists`.
-pub(crate) fn decode_blast_def_line_set_ber(
-    bytes: &[u8],
-) -> (
-    Result<Result<DeflineSet, NullDeflineElement>, ReadError>,
-    Vec<Post>,
-) {
-    let (value, posts) = read_ber_document(bytes, named::BLAST_DEF_LINE_SET, Names::DEFLINE_HEADER);
-    let utf8 = posts.iter().any(|post| matches!(post, Post::Utf8Tag(_)));
-    let decoded = value.map(|root| value_to_defline_set(root, utf8));
-    (decoded, posts)
-}
-
-/// Converts a `Value` read under `named::BLAST_DEF_LINE_SET` into a [`DeflineSet`].
-fn value_to_defline_set(mut root: Value, utf8: bool) -> Result<DeflineSet, NullDeflineElement> {
-    let Value::List(ref mut items) = root else {
-        unreachable!("Blast-def-line-set is a SEQUENCE OF Blast-def-line");
-    };
-    let items = std::mem::take(items);
-    let idx_title = member_index(named::BLAST_DEF_LINE, "title");
-    let idx_seqid = member_index(named::BLAST_DEF_LINE, "seqid");
-    let idx_taxid = member_index(named::BLAST_DEF_LINE, "taxid");
-    let idx_memberships = member_index(named::BLAST_DEF_LINE, "memberships");
-    let idx_links = member_index(named::BLAST_DEF_LINE, "links");
-    let idx_other_info = member_index(named::BLAST_DEF_LINE, "other-info");
-    let mut deflines = Vec::with_capacity(items.len());
-    for mut item in items {
-        if matches!(item, Value::Null) {
-            return Err(NullDeflineElement::Defline);
-        }
-        let Value::Sequence(ref mut fields) = item else {
-            unreachable!("Blast-def-line is a SEQUENCE");
-        };
-        let fields = std::mem::take(fields);
-        let mut defline = BlastDefline::default();
-        for (pos, mut val) in fields {
-            let pos = usize::from(pos);
-            if pos == idx_title {
-                if let Value::Str(ref mut text) = val {
-                    defline.title = Some(std::mem::take(text));
-                }
-            } else if pos == idx_seqid {
-                if let Value::List(ref mut id_vals) = val {
-                    let id_vals = std::mem::take(id_vals);
-                    let mut ids = Vec::with_capacity(id_vals.len());
-                    for id_val in id_vals {
-                        if matches!(id_val, Value::Null) {
-                            return Err(NullDeflineElement::SeqId);
-                        }
-                        if let Some(id) = id_val.into_seq_id() {
-                            ids.push(id);
-                        }
-                    }
-                    defline.ids = ids;
-                }
-            } else if pos == idx_taxid {
-                if let Value::Int(taxid) = val {
-                    defline.taxid = Some(taxid as i32);
-                }
-            } else if pos == idx_memberships {
-                defline.memberships = take_int4s(&mut val).or(defline.memberships);
-            } else if pos == idx_links {
-                defline.links = take_int4s(&mut val).or(defline.links);
-            } else if pos == idx_other_info {
-                defline.other_info = take_int4s(&mut val).or(defline.other_info);
-            }
-        }
-        deflines.push(defline);
-    }
-    Ok(DeflineSet { deflines, utf8 })
-}
-
-fn take_int4s(val: &mut Value) -> Option<Vec<i32>> {
-    match val {
-        Value::Int4s(list) => Some(std::mem::take(list)),
-        _ => None,
-    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:560-589

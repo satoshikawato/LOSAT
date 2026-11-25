@@ -2774,23 +2774,23 @@ impl FormatThrow {
         }
     }
 
+    fn report_format(outfmt: &str) -> Option<crate::blastinput::app::ReportFormat> {
+        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+        ReportFormat::from_number(parse_formatting_string(outfmt).ok()?.number)
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
     /// Whether NCBI's formatter keeps its scope across the query batches of a run whose first
     /// format is `outfmt` (`CBlastFormat::ResetScopeHistory` returns without emptying the scope
     /// only for `eXml`, outfmt 5).
     pub fn keeps_scope(outfmt: &str) -> bool {
-        crate::blastinput::app::parse_formatting_string(outfmt)
-            .ok()
-            .and_then(|choice| crate::blastinput::app::ReportFormat::from_number(choice.number))
-            == Some(crate::blastinput::app::ReportFormat::Xml)
+        Self::report_format(outfmt) == Some(crate::blastinput::app::ReportFormat::Xml)
     }
 
     /// Whether `outfmt` is an XML2 or JSON format (outfmt 13 to 16), whose taxonomy lookups run
     /// through `read_reported_taxonomy`.
     pub fn is_xml2(outfmt: &str) -> bool {
-        crate::blastinput::app::parse_formatting_string(outfmt)
-            .ok()
-            .and_then(|choice| crate::blastinput::app::ReportFormat::from_number(choice.number))
+        Self::report_format(outfmt)
             .and_then(super::blast_xml2::Xml2Kind::of)
             .is_some()
     }

@@ -3985,9 +3985,11 @@ fn prefetch_slot_plan_pins_only_prefix_before_first_empty_handle_in_compare_orde
     // 2. Real `prefetch_slot_plan` on `tm_gi21` (`gi|1` at ordinal 0, `gi|5` at ordinal 4, `gi|9`
     //    at ordinal 8; all with taxids in slot 150).
     let cwd = empty_cwd("partial_pin");
-    let taxdb = variant("offset_last_past_end");
-    let db = db_search("tm_gi21", Some(&taxdb), &cwd);
+    let db = db_search("tm_gi21", Some(&variant("offset_last_past_end")), &cwd);
     let parsed = parsed_subjects(&db);
+    let pinned_blob = |run: &TaxdbRun, ordinal: u32| {
+        run.volume_lookups.lock().unwrap().slot_blobs[&ordinal][0].pinned
+    };
     let make_empty = |id: ParsedSeqId| {
         ParsedSubject::new(DeflineSet::from(vec![BlastDefline {
             ids: vec![id],
@@ -4007,11 +4009,8 @@ fn prefetch_slot_plan_pins_only_prefix_before_first_empty_handle_in_compare_orde
         (8u32, Some(&parsed[8])),
     ];
     prefetch_slot_plan(&db, &run_a, &loaded_a, None, true, false, "BLASTP").unwrap();
-    {
-        let lookups = run_a.volume_lookups.lock().unwrap();
-        assert!(lookups.slot_blobs[&0][0].pinned);
-        assert!(!lookups.slot_blobs[&8][0].pinned);
-    }
+    assert!(pinned_blob(&run_a, 0));
+    assert!(!pinned_blob(&run_a, 8));
 
     // Case B: empty `bbs|123` (`e_Gibbsq`, unpacked -> `load_places.order` is `u64::MAX`) vs
     // `gi|1` (`e_Gi`, packed): under `CSeq_id::CompareOrdered`, `bbs|123` precedes `gi|1`, so
@@ -4021,7 +4020,7 @@ fn prefetch_slot_plan_pins_only_prefix_before_first_empty_handle_in_compare_orde
     run_b.set_keeps_scope(true);
     let loaded_b = [(0u32, Some(&parsed[0])), (1u32, Some(&empty_bbs))];
     prefetch_slot_plan(&db, &run_b, &loaded_b, None, true, false, "BLASTP").unwrap();
-    assert!(!run_b.volume_lookups.lock().unwrap().slot_blobs[&0][0].pinned);
+    assert!(!pinned_blob(&run_b, 0));
 
     // Case C: empty `pdb|1ABC|A` (`e_Pdb`, unpacked) vs `gi|1` (`e_Gi`): `gi|1` precedes
     // `pdb|1ABC|A` under `CSeq_id::CompareOrdered`, so `gi|1` is pinned.
@@ -4035,7 +4034,7 @@ fn prefetch_slot_plan_pins_only_prefix_before_first_empty_handle_in_compare_orde
     run_c.set_keeps_scope(true);
     let loaded_c = [(0u32, Some(&parsed[0])), (1u32, Some(&empty_pdb))];
     prefetch_slot_plan(&db, &run_c, &loaded_c, None, true, false, "BLASTP").unwrap();
-    assert!(run_c.volume_lookups.lock().unwrap().slot_blobs[&0][0].pinned);
+    assert!(pinned_blob(&run_c, 0));
 
     // Case D: `HoldersUnknown` (even on a taxid-free subject that `prefetch_reads` does not
     // refuse) causes `prefetch_pin_stops` to return `None`, leaving the whole batch unpinned.
@@ -4056,7 +4055,7 @@ fn prefetch_slot_plan_pins_only_prefix_before_first_empty_handle_in_compare_orde
         None
     );
     prefetch_slot_plan(&db, &run_d, &loaded_d, None, true, false, "BLASTP").unwrap();
-    assert!(!run_d.volume_lookups.lock().unwrap().slot_blobs[&0][0].pinned);
+    assert!(!pinned_blob(&run_d, 0));
 
     std::fs::remove_dir_all(&cwd).unwrap();
 }

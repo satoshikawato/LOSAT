@@ -14,13 +14,16 @@ export const TMP_DIRECTORY = 'tmp';
 /** Lock name prefix; shared by every release so that an older tab keeps its data. */
 export const SESSION_LOCK_PREFIX = 'losat-web:tmp:';
 
-/** The part of the Web Locks API (`navigator.locks`) that sessions use. */
+/** The part of the Web Locks API (`navigator.locks`) that sessions and saved-counts stores use. */
 export interface SessionLocks {
   request(
     name: string,
-    options: { readonly ifAvailable?: boolean },
+    options: { readonly ifAvailable?: boolean; readonly mode?: 'exclusive' | 'shared' },
     callback: (lock: object | null) => Promise<void>,
   ): Promise<unknown>;
+  query?(): Promise<{
+    readonly held?: ReadonlyArray<{ readonly name?: string; readonly mode?: 'exclusive' | 'shared' }>;
+  }>;
 }
 
 /** The directories of the working sessions (tmp/ in OPFS). */

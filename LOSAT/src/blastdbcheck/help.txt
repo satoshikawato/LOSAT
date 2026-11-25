@@ -1,0 +1,58 @@
+USAGE
+  blastdbcheck [-h] [-help] [-db DbName] [-dbtype molecule_type]
+    [-dir DirName] [-recursive] [-verbosity DefaultKey] [-full]
+    [-stride StrideLength] [-random NumSequences] [-ends NumSequences]
+    [-no_isam] [-legacy] [-must_have_taxids] [-cdd_delta] [-version]
+
+DESCRIPTION
+   BLAST database integrity and validity checking application
+
+OPTIONAL ARGUMENTS
+ -h
+   Print USAGE and DESCRIPTION;  ignore all other parameters
+ -help
+   Print USAGE, DESCRIPTION and ARGUMENTS; ignore all other parameters
+ -version
+   Print version number;  ignore other arguments
+
+ *** Input Options
+ -db <String>
+   Specify a database name.
+    * Incompatible with:  dir, recursive
+ -dbtype <String, `guess', `nucl', `prot'>
+   Molecule type of database
+   Default = `guess'
+ -dir <String>
+   Specify a directory containing one or more databases.
+    * Incompatible with:  db
+ -recursive
+   Specify true to recurse through all dbs in directory tree.
+    * Incompatible with:  db
+
+ *** Output Options
+ -verbosity <Integer, (>=0 and =<4)>
+   0=Quiet, 1=Brief, 2=Summary, 3=Detailed, 4=Minutiae
+   Default = `2'
+
+ *** Test Methods
+ -full
+   If true, test every sequence (warning: may be slow).
+    * Incompatible with:  stride, random, ends
+ -stride <Integer>
+   Check integrity of every Nth sequence.
+    * Incompatible with:  full
+ -random <Integer>
+   Check this many randomly selected sequences.
+    * Incompatible with:  full
+ -ends <Integer>
+   Check this many sequences at each end of the database.
+    * Incompatible with:  full
+ -no_isam
+   Disable ISAM testing.
+ -legacy
+   Enable check for existence of temporary files.
+ -must_have_taxids
+   Require that all sequences in the database have taxid set.
+ -cdd_delta
+   Do aditional tests for a CDD database for DELTA-BLAST
+

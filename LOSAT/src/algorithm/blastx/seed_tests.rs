@@ -98,3 +98,16 @@ fn hard_mask_starts_and_ends_move_the_table() {
     let error = TableEnd::Move(98).apply(&mut d, window).unwrap_err();
     assert_eq!(error.to_string(), "BLASTX diagonal offset exceeds Int4");
 }
+
+// The refusal of a batch whose words fill NCBI's overflow banks comes after the reports of the
+// batches before and is LOSAT's refusal, not an engine error (line RG item X-short-bat-2).
+#[test]
+fn filled_overflow_banks_are_refused_after_the_batches_before() {
+    let error = x_banks_filled(1.0, 5);
+    assert!(error.is::<crate::blastinput::app::ErrorAfterBatchReports>());
+    assert!(super::super::native::search_error_as_is(&error));
+    assert_eq!(
+        error.to_string(),
+        "-threshold 1 with the compressed lookup table of -word_size 5 is not supported by LOSAT's BLASTX: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap"
+    );
+}

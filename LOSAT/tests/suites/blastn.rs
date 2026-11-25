@@ -6,6 +6,8 @@
 // integration tests run natively only (WASI has no `std::env::temp_dir()` or `std::process::id()`)
 #![allow(clippy::disallowed_methods)]
 
+#[path = "../blastn_batch_refusal.rs"]
+mod blastn_batch_refusal;
 #[path = "../blastn_bn_csr.rs"]
 mod blastn_bn_csr;
 #[path = "../blastn_bn_seed_lists.rs"]

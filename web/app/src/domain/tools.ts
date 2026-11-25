@@ -1,8 +1,8 @@
 // Tool descriptors and helpers for CLI tools besides BLAST searches (WW3b DESIGN §1-§2):
 // windowmasker's three stages (-mk_counts, -ustat, -convert), its option filter driven by
-// `-xmlhelp` exclusions, its mapping into ParameterField / ParameterDescription, BLAST database
-// name detection, and output file naming. Nothing here lists windowmasker's option defaults,
-// value lists or ranges: all of those come from `ToolEngine.describeTool('windowmasker')`.
+// `-xmlhelp` exclusions, its mapping into ParameterField / ParameterDescription, and output
+// file naming. Nothing here lists windowmasker's option defaults, value lists or ranges: all
+// of those come from `ToolEngine.describeTool('windowmasker')`.
 import type { PrintedKind, ToolDescription, ToolParameterDescription } from 'losat/domain';
 import { exportPrefix } from './output-format';
 import type { ParameterField } from './programs';
@@ -233,29 +233,6 @@ export function toolPrintsKind(argv: readonly string[]): PrintedKind | null {
     if (WINDOWMASKER_VERSION_FLAGS.has(flag)) return 'version';
   }
   return null;
-}
-
-const BLASTDB_ALIAS_EXT = /\.(?:nal|pal)$/i;
-const BLASTDB_VOLUME_EXT = /(?:\.\d{2,})?\.(?:nin|pin|nsq|psq|nhr|phr|ndb|pdb|not|pot|ntf|ptf|nto|pto|nos|pos)$/i;
-
-const byShortestName = (a: string, b: string) => a.length - b.length || a.localeCompare(b);
-
-/**
- * Finds the BLAST database name among picked/folder file names: an alias file (`.nal`/`.pal`)
- * first, otherwise a volume's base name (stripping the extension and any `.00` volume suffix).
- */
-export function detectBlastDbName(fileNames: readonly string[]): string | undefined {
-  const aliases = fileNames
-    .filter((name) => BLASTDB_ALIAS_EXT.test(name))
-    .map((name) => name.replace(BLASTDB_ALIAS_EXT, ''))
-    .sort(byShortestName);
-  if (aliases.length > 0) return aliases[0];
-
-  const volumes = fileNames
-    .filter((name) => BLASTDB_VOLUME_EXT.test(name))
-    .map((name) => name.replace(BLASTDB_VOLUME_EXT, ''))
-    .sort(byShortestName);
-  return volumes[0];
 }
 
 /** Download file name for a tool run output or file (`runFileName` pattern). */

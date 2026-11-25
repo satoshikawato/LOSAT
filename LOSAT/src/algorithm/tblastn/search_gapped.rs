@@ -1201,17 +1201,19 @@ fn x_preliminary_protein_hsps_by_unit<
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:300-306,478-498,1377 and
     // c++/src/algo/blast/core/aa_ungapped.c:516-547 and
     // c++/src/algo/blast/core/blast_extend.c:87-107,162-173
-    // A unit whose scan reads letters before its chunk (masks stored out of order, `scan_lead`)
-    // has hits on diagonals that the units before it in its frame left in the table, and a clear
-    // at INT4_MAX / 4 inside the subject changes which words before a later chunk are extended.
-    // The subject therefore runs its units in order on NCBI's one-thread table at the subject's
-    // start (`XDbStream::lead_start`, `TableStart::New`, series NP, M4b-T3), whose cells hold
-    // `(last_hit, flag)` (their `last_hit` can fall below 0 there, which a packed cell does not
-    // hold). The entries of earlier subjects are never within reach of this subject's hits (each
-    // chunk's words lie at least the window past them), so unwritten entries give NCBI's result
-    // and `two_hit.exit` clears the table where NCBI's clears.
-    let x_in_order =
-        plan.subject.units.iter().any(|(_, _, ranges)| {
+    // A unit whose scan reads letters before its chunk (`-db_soft_mask` masks stored out of order,
+    // `scan_lead`) or a `-db_hard_mask` subject recorded by `translated_walk` (`hard_start`:
+    // overlapping masks or a sequence that meets unwritten entries / clears inside it) runs all
+    // six frames' units in order on a fresh `(last_hit, flag)` diagonal table initialized to its
+    // `TableStart::New` offset.
+    let hard_start = match subject {
+        super::x_subject_store::XPrelimSubject::Stream(stream, ordinal, _) => {
+            stream.hard_start(ordinal)
+        }
+        super::x_subject_store::XPrelimSubject::Nt(_) => None,
+    };
+    let x_in_order = hard_start.is_some()
+        || plan.subject.units.iter().any(|(_, _, ranges)| {
             crate::algorithm::common::translated_chunks::scan_lead(ranges) > 0
         });
     let run_unit = |state: &mut UnitState<'_, S::Scratch>,
@@ -1348,7 +1350,7 @@ fn x_preliminary_protein_hsps_by_unit<
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:614,807:
         // Right after the scan, before anything that can fail, so that the table is ready for the
         // next unit whatever this one returns.
-        two_hit.exit(chunk.length);
+        two_hit.exit(chunk.ncbi_length);
         if x_around.is_some() {
             two_hit.x_set_around(None);
         }
@@ -1437,30 +1439,83 @@ fn x_preliminary_protein_hsps_by_unit<
         });
     }
     if purged.is_empty() {
-        let mut state = state_on(X_UNIT_STATE.take(), x_in_order);
-        if x_in_order {
-            if let super::x_subject_store::XPrelimSubject::Stream(stream, ordinal, _) = subject {
-                let start = stream.lead_start(ordinal, profile.word_size, profile.window)?;
-                state.two_hit.apply_table_start(
-                    crate::algorithm::common::hard_chunk_walk::TableStart::New(start),
-                )?;
+        let mut state = state_on(
+            if x_in_order {
+                None
+            } else {
+                X_UNIT_STATE.take()
+            },
+            x_in_order,
+        );
+        if let Some(start) = hard_start {
+            use crate::algorithm::common::hard_chunk_walk::{ChunkWork, DiagonalWalk, TableStart};
+            state.two_hit.apply_table_start(TableStart::New(start))?;
+            let mut walk = DiagonalWalk::new(profile.word_size as i32, profile.window, 0, false);
+            walk.start_on_ncbi_table(start);
+            let mut walk_frame: Option<usize> = None;
+            for unit in 0..unit_count {
+                let (frame_index, chunk, _) = &plan.subject.units[unit];
+                if walk_frame != Some(*frame_index) {
+                    walk.frame(plan.subject.frames[*frame_index].aa_len);
+                    walk_frame = Some(*frame_index);
+                }
+                let clears = state.two_hit.offset() >= i32::MAX / 4;
+                let res = match walk.chunk(chunk.offset, chunk.ncbi_length) {
+                    ChunkWork::Words { .. } => run_unit(&mut state, unit),
+                    ChunkWork::OneWord => x_run_one_word_unit::<S, UNGAPPED>(
+                        &plan,
+                        unit,
+                        subject,
+                        queries,
+                        query_frames,
+                        query_sequence,
+                        context_offsets,
+                        total_query_length,
+                        profile,
+                        score,
+                        &mut state.two_hit,
+                        &mut state.pairs,
+                        &mut state.hits,
+                        &mut state.scratch,
+                    ),
+                    ChunkWork::Nothing => {
+                        state.two_hit.exit(chunk.ncbi_length);
+                        Ok(Vec::new())
+                    }
+                };
+                if clears {
+                    walk.clear();
+                }
+                purged.push(res);
+            }
+        } else {
+            if x_in_order {
+                if let super::x_subject_store::XPrelimSubject::Stream(stream, ordinal, _) = subject
+                {
+                    let start = stream.lead_start(ordinal, profile.word_size, profile.window)?;
+                    state.two_hit.apply_table_start(
+                        crate::algorithm::common::hard_chunk_walk::TableStart::New(start),
+                    )?;
+                }
+            }
+            for unit in 0..unit_count {
+                purged.push(run_unit(&mut state, unit));
             }
         }
-        for unit in 0..unit_count {
-            purged.push(run_unit(&mut state, unit));
+        if !x_in_order {
+            let UnitState {
+                two_hit,
+                pairs,
+                hits,
+                scratch,
+            } = state;
+            X_UNIT_STATE.set(Some(XUnitBuffers {
+                diagonals: two_hit.into_table(),
+                pairs,
+                hits,
+                scratch: S::kept_scratch(scratch),
+            }));
         }
-        let UnitState {
-            two_hit,
-            pairs,
-            hits,
-            scratch,
-        } = state;
-        X_UNIT_STATE.set(Some(XUnitBuffers {
-            diagonals: two_hit.into_table(),
-            pairs,
-            hits,
-            scratch: S::kept_scratch(scratch),
-        }));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:581-584,844
     // Replay in NCBI order: the units of a frame are merged one by one (Blast_HSPListsMerge), then
@@ -1480,6 +1535,9 @@ fn x_preliminary_protein_hsps_by_unit<
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
+            if hard_start.is_some() && chunk.overlap_past_list && !per_frame.is_empty() {
+                x_check_hard_merge_overlap(subject, chunk, &per_frame, &unit_hsps)?;
+            }
             per_frame =
                 merge_adjusted_chunk(per_frame, unit_hsps, chunk, profile.hsp_num_max, !UNGAPPED)?;
             #[cfg(test)]
@@ -1513,6 +1571,252 @@ fn x_preliminary_protein_hsps_by_unit<
         });
     }
     Ok(combined)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-505, 516-614
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3827-3953, 4246-4295
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:510-795
+/// Cold two-hit scan and gapped/ungapped stage for a `-db_hard_mask` chunk shorter than the word
+/// (`ChunkWork::OneWord`): scans the single word at the chunk's offset from the frame's stored
+/// letters through `common::hard_chunk_scan::OneWord` on TBLASTN's `(last_hit, flag)` table,
+/// advances the diagonal offset by `chunk.ncbi_length`, and runs either the ungapped list or the
+/// short-chunk gapped stage (refusing with `short_chunk_tree_refusal` where NCBI's interval tree
+/// splits without end).
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn x_run_one_word_unit<S: super::score::TbnScore, const UNGAPPED: bool>(
+    plan: &super::search_seed::XScanPlan,
+    unit: usize,
+    subject: super::x_subject_store::XPrelimSubject<'_>,
+    queries: &[&[u8]],
+    query_frames: &[QueryFrame],
+    query_sequence: &[u8],
+    context_offsets: &[i32],
+    total_query_length: i32,
+    profile: PreliminaryProfile<'_>,
+    score: S,
+    two_hit: &mut super::search_init::XTwoHit<'_>,
+    pairs: &mut Vec<crate::algorithm::tblastx::blast_aascan::BlastOffsetPair>,
+    hits: &mut Vec<InitHsp>,
+    scratch: &mut S::Scratch,
+) -> Result<Vec<(usize, GappedHsp)>> {
+    use crate::algorithm::common::hard_chunk_scan::{
+        short_chunk_tree_refusal, OneWord, WordContext,
+    };
+    let (frame_index, chunk, _) = &plan.subject.units[unit];
+    let frame = &plan.subject.frames[*frame_index];
+    let chunk = *chunk;
+    let chunk_offset = u32::try_from(chunk.offset)?;
+    let word_size_i32 = i32::try_from(profile.word_size)?;
+    anyhow::ensure!(
+        !frame.aa_seq.is_empty(),
+        "TBLASTN: one-word hard chunk reached a frame without residues"
+    );
+    let stored = &frame.aa_seq[1..1 + frame.aa_len];
+    let mut word_letters = Vec::with_capacity(profile.word_size + 1);
+    if chunk.offset < stored.len() {
+        let end = (chunk.offset + profile.word_size).min(stored.len());
+        word_letters.extend_from_slice(&stored[chunk.offset..end]);
+    }
+    word_letters.resize(profile.word_size + 1, 0);
+
+    let lookup_hits = super::search_seed::x_one_word_hits(
+        &plan.lookup,
+        &word_letters,
+        word_size_i32,
+        pairs,
+        plan.pair_capacity,
+    );
+    hits.clear();
+    let (mut ring, offset) = two_hit
+        .pair_ring()
+        .context("TBLASTN: one-word hard chunk requires a Pair diagonal table")?;
+    let test = OneWord {
+        query: query_sequence,
+        letters: &word_letters[..profile.word_size],
+        length: chunk.ncbi_length,
+        word: word_size_i32,
+        window: profile.window,
+        scores: crate::utils::matrix::protein_score_rows(profile.matrix),
+    };
+    test.test_on_with(
+        &mut ring,
+        &lookup_hits,
+        offset,
+        total_query_length,
+        |q, s_letter| score.residue_score(query_sequence, q, s_letter, profile.matrix),
+        |q| {
+            let ctx = context_offsets.partition_point(|&o| o <= q) - 1;
+            WordContext {
+                start: context_offsets[ctx],
+                x_drop: profile.word_xdrop[ctx],
+                cutoff: profile.word_cutoff[ctx],
+            }
+        },
+        |q, seed| {
+            hits.push(InitHsp {
+                frame: frame.frame,
+                chunk_offset,
+                q_seed: q as u32,
+                s_seed: 0,
+                q_start: seed.q_start,
+                s_start: seed.s_start,
+                length: seed.length,
+                score: seed.score,
+            });
+        },
+    );
+    two_hit.exit(chunk.ncbi_length);
+    super::search_init::XTwoHit::sort(hits);
+    if hits.is_empty() {
+        return Ok(Vec::new());
+    }
+    if UNGAPPED {
+        return Ok(ungapped_chunk_hsps(context_offsets, frame.frame, hits));
+    }
+    let s_max = chunk.ncbi_length.saturating_add(1);
+    let mut tree = BlastIntervalTree::new(0, total_query_length + 1, 0, s_max);
+    tree.reset_with_bounds_cells(
+        0,
+        total_query_length + 1,
+        0,
+        s_max,
+        x_grid_cells(hits.len()),
+    );
+    let mut results = Vec::new();
+    let subject_frame_sign = i32::from(frame.frame.signum());
+    for hit in hits.iter() {
+        let context = context_offsets.partition_point(|&o| o <= hit.q_seed as i32) - 1;
+        let context_offset = context_offsets[context];
+        let query_length = i32::try_from(queries[context].len())?;
+        let ctx_query = &query_frames[context].aa_seq[1..1 + queries[context].len()];
+        let initial_tree_hsp = TreeHsp {
+            query_offset: hit.q_start - context_offset,
+            query_end: hit.q_start - context_offset + hit.length,
+            subject_offset: hit.s_start,
+            subject_end: hit.s_start + hit.length,
+            score: hit.score,
+            query_frame: 0,
+            query_length,
+            query_context_offset: context_offset,
+            subject_frame_sign,
+        };
+        if tree.contains_hsp(&initial_tree_hsp, context_offset, 0) {
+            continue;
+        }
+        let q_start = usize::try_from(hit.q_start - context_offset)
+            .context("negative context-local initial query start")?;
+        let s_start = usize::try_from(hit.s_start).context("negative one-word subject start")?;
+        let length = usize::try_from(hit.length).context("negative one-word HSP length")?;
+        let q_gapped_start = score.gapped_start(
+            ctx_query,
+            &word_letters[..profile.word_size],
+            q_start,
+            length,
+            s_start,
+            profile.matrix,
+        );
+        let s_gapped_start = x_gapped_subject_start(
+            hit.s_seed,
+            i32::try_from(q_gapped_start)?,
+            i32::try_from(hit.q_seed)? - context_offset,
+        )?;
+        let letters = usize::try_from(chunk.ncbi_length)
+            .unwrap_or(0)
+            .max(s_gapped_start + 1)
+            .min(word_letters.len());
+        let gapped = score.score_only(
+            ctx_query,
+            &word_letters[..letters],
+            q_gapped_start,
+            s_gapped_start,
+            profile.matrix,
+            profile.gap_open,
+            profile.gap_extend,
+            profile.gap_xdrop,
+            scratch,
+        );
+        if gapped.score >= profile.gapped_cutoff[context] {
+            let saved = GappedHsp {
+                frame: frame.frame,
+                score: gapped.score,
+                q_start: gapped.query_start,
+                q_end: gapped.query_stop,
+                q_gapped_start: i32::try_from(q_gapped_start)?,
+                s_start: gapped.subject_start,
+                s_end: gapped.subject_stop,
+                s_gapped_start: i32::try_from(s_gapped_start)?,
+            };
+            let saved_tree_hsp = TreeHsp {
+                query_offset: saved.q_start,
+                query_end: saved.q_end,
+                subject_offset: saved.s_start,
+                subject_end: saved.s_end,
+                score: saved.score,
+                query_frame: 0,
+                query_length,
+                query_context_offset: context_offset,
+                subject_frame_sign,
+            };
+            if !tree.try_add_hsp(saved_tree_hsp, context_offset) {
+                return Err(short_chunk_tree_refusal(
+                    x_subject_oid(subject),
+                    "TBLASTN",
+                    chunk.ncbi_length,
+                ));
+            }
+            results.push((context, saved));
+        }
+    }
+    Ok(purge_preliminary_common_endpoints(results))
+}
+
+/// Database OID label of `target` for refusal messages (`"0"` for in-memory subjects).
+fn x_subject_oid(target: super::x_subject_store::XPrelimSubject<'_>) -> String {
+    match target {
+        super::x_subject_store::XPrelimSubject::Stream(stream, ordinal, _) => {
+            stream.seqdb().oid(ordinal as u32).to_string()
+        }
+        super::x_subject_store::XPrelimSubject::Nt(_) => "0".to_string(),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2873-2911
+/// Refuses a hard-chunk merge whose overlap NCBI reads past its list of ranges
+/// (`overlap_past_list`) when `merge_joins` would enter NCBI's join loop.
+#[cold]
+#[inline(never)]
+fn x_check_hard_merge_overlap(
+    prelim_subject: super::x_subject_store::XPrelimSubject<'_>,
+    chunk: TranslatedChunk,
+    per_frame: &[(usize, GappedHsp)],
+    unit_hsps: &[(usize, GappedHsp)],
+) -> Result<()> {
+    let hard = crate::core::subject_split::HardChunk {
+        offset: chunk.offset,
+        length: chunk.ncbi_length,
+        residual: 0,
+        full_range: chunk.full_range,
+        range: 0,
+        overlap: chunk.overlap,
+        overlap_past_list: true,
+    };
+    let offset = i32::try_from(chunk.offset)?;
+    if crate::algorithm::common::hard_chunk_scan::merge_joins(
+        &hard,
+        per_frame.iter().map(|(_, h)| h.s_end),
+        unit_hsps.iter().map(|(_, h)| h.s_start + offset),
+    ) {
+        return Err(
+            crate::algorithm::common::hard_chunk_scan::short_chunk_merge_refusal(
+                x_subject_oid(prelim_subject),
+                "TBLASTN",
+            ),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]

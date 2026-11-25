@@ -1058,6 +1058,56 @@ fn x_scan_compressed_call(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:495-505
+/// Scans the single word at the start of a hard chunk shorter than the word (`word_letters` holds
+/// `word_size` residues followed by a sentinel 0) against `lookup` and returns the matching query
+/// offsets in NCBI's scan order.
+#[cold]
+#[inline(never)]
+pub(super) fn x_one_word_hits(
+    lookup: &XPlanLookup,
+    word_letters: &[u8],
+    word_size: i32,
+    pairs: &mut Vec<BlastOffsetPair>,
+    pair_capacity: usize,
+) -> Vec<i32> {
+    let min_cap = match lookup {
+        XPlanLookup::Aa(aa) => pair_capacity.max(aa.longest_chain.max(1) as usize),
+        XPlanLookup::Compressed(_) => pair_capacity.max(1),
+    };
+    if pairs.len() < min_cap {
+        pairs.resize(min_cap, BlastOffsetPair::default());
+    }
+    let cap_i32 = min_cap as i32;
+    let mut out = Vec::new();
+    let range = [(0i32, word_size)];
+    let mut scan_range = [0i32, 0, 0];
+    while scan_range[1] <= scan_range[2] {
+        let hits = match lookup {
+            XPlanLookup::Aa(aa) => {
+                crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject(
+                    aa,
+                    word_letters,
+                    &range,
+                    pairs,
+                    cap_i32,
+                    &mut scan_range,
+                )
+            }
+            XPlanLookup::Compressed(table) => x_scan_compressed_call(
+                table,
+                word_letters,
+                (0, word_size),
+                pairs,
+                cap_i32,
+                &mut scan_range,
+            ),
+        };
+        out.extend(pairs[..hits as usize].iter().map(|p| p.q_off as i32));
+    }
+    out
+}
+
 #[cfg(test)]
 #[path = "search_seed_tests.rs"]
 mod tests;

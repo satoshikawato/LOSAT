@@ -32,9 +32,6 @@ use crate::report::tabular::{DeflineIds, TabularTaxonomy};
 /// one of the record's ids ([`QueryBioseqs`]).
 #[derive(Debug)]
 pub struct QueryBioseq {
-    /// The record as a Bioseq of its ids and title without a Blast-def-line
-    /// (`ParsedSubject::of_record`), whose organism report line it gives (`tax_deflines`).
-    subject: ParsedSubject,
     /// `sseqid`, `sacc` and `saccver` of the record's ids (`ParsedSubject::tabular_ids`).
     tabular: [Vec<u8>; 3],
     /// `sgi`.
@@ -82,7 +79,6 @@ impl QueryBioseq {
         Some(QueryBioseq {
             gi: subject.tabular_gi(),
             tax_deflines: subject.tax_deflines(protein),
-            subject,
             tabular,
             all_ids: ids,
             length: record.length,
@@ -113,11 +109,6 @@ impl QueryBioseq {
     /// subject's.
     pub fn taxonomy(&self) -> TabularTaxonomy {
         TabularTaxonomy::default()
-    }
-
-    /// The record as a parsed subject (`ParsedSubject::of_record`).
-    pub fn subject(&self) -> &ParsedSubject {
-        &self.subject
     }
 
     /// The record's line in the organism report (outfmt 18).

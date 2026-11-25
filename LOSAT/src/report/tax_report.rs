@@ -941,6 +941,7 @@ pub struct TaxReport {
 impl TaxReport {
     /// The reports of the queries `queries` of a batch, of the subjects `subjects`, whose taxids
     /// the lookups `lookups` look up (`organism_report`).
+    #[cfg(test)]
     pub fn new(
         queries: &[TaxQuery<'_>],
         subjects: &dyn TaxSubjects,

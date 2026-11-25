@@ -22,14 +22,6 @@ pub(crate) struct SubjectReportOutcome {
     pub(crate) error: Option<NativeError>,
 }
 
-/// Which `-subject` writer the shared BLASTX/TBLASTN table exercises.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum SubjectReportKind {
-    Xml5,
-    Xml16,
-    Tabular7Qcovs,
-}
-
 fn options(outfmt: &str) -> super::args::ResolvedOptions {
     let cli: crate::cli::Cli = crate::cli::try_parse_from([
         "losat",
@@ -53,22 +45,14 @@ fn options(outfmt: &str) -> super::args::ResolvedOptions {
 }
 
 /// Runs BLASTX's `-subject` mapping (`put_in_report_order(SubjectLoc::Interval)`) and the
-/// requested writer (`Xml5`, `Xml16`, or `Tabular7Qcovs`) on a single gapped HSP with edit script
-/// `ops`.
-pub(crate) fn run_subject_report(
-    ops: Vec<GapEditOp>,
-    kind: SubjectReportKind,
-) -> SubjectReportOutcome {
+/// requested writer (`"5"`, `"16"`, or `"7 qseqid sseqid qcovs"`) on a single gapped HSP with edit
+/// script `ops`.
+pub(crate) fn run_subject_report(ops: Vec<GapEditOp>, outfmt: &str) -> SubjectReportOutcome {
     let [q_len, s_len] = ops.iter().fold([0i32, 0i32], |[q, s], op| match *op {
         Sub(n) => [q + n as i32, s + n as i32],
         Ins(n) => [q + n as i32, s],
         Del(n) => [q, s + n as i32],
     });
-    let outfmt = match kind {
-        SubjectReportKind::Xml5 => "5",
-        SubjectReportKind::Xml16 => "16",
-        SubjectReportKind::Tabular7Qcovs => "7 qseqid sseqid qcovs",
-    };
     let opts = options(outfmt);
     let query = FastaRecord {
         internal_id: "Query_1".into(),
@@ -161,79 +145,77 @@ pub(crate) fn run_subject_report(
     };
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
-    let result = match kind {
-        SubjectReportKind::Xml5 => {
-            let mut sink = OutputSink::Writer(&mut stdout);
-            let mut writer = NcbiOstream::sink(&mut sink).unwrap();
-            let mut doc = BlastXmlWriter::new(0);
-            super::blast_xml::write_blastx_xml(
-                &mut writer,
-                &mut stderr,
-                &mut doc,
-                &opts,
-                &queries,
-                &subjects,
-                &shown,
-                &[batch],
-                0,
-                false,
-                None,
-            )
-            .and_then(|()| {
-                super::blast_xml::write_xml_epilog(&mut writer, &mut stderr, "blastx", 1, None)
-            })
-        }
-        SubjectReportKind::Xml16 => {
-            let mut sink = OutputSink::Writer(&mut stdout);
-            let mut writer = NcbiOstream::sink(&mut sink).unwrap();
-            let mut xml2 = super::blast_xml::xml2_writer(
-                Xml2Kind::Single16,
-                &opts,
-                &subjects,
-                &shown,
-                Box::new(NoSideFiles),
-            );
-            super::blast_xml::write_blastx_xml(
-                &mut writer,
-                &mut stderr,
-                &mut xml2,
-                &opts,
-                &queries,
-                &subjects,
-                &shown,
-                &[batch],
-                0,
-                false,
-                None,
-            )
-            .and_then(|()| {
-                super::blast_xml::write_xml_epilog(
+    let result = {
+        let mut sink = OutputSink::Writer(&mut stdout);
+        let mut writer = NcbiOstream::sink(&mut sink).unwrap();
+        match outfmt {
+            "5" => {
+                let mut doc = BlastXmlWriter::new(0);
+                super::blast_xml::write_blastx_xml(
                     &mut writer,
                     &mut stderr,
-                    "blastx",
-                    1,
-                    Some(&mut xml2),
+                    &mut doc,
+                    &opts,
+                    &queries,
+                    &subjects,
+                    &shown,
+                    &[batch],
+                    0,
+                    false,
+                    None,
                 )
-            })
-        }
-        SubjectReportKind::Tabular7Qcovs => {
-            let spec = opts
-                .tabular_report()
-                .expect("7 qseqid sseqid qcovs has a TabularSpec");
-            let mut sink = OutputSink::Writer(&mut stdout);
-            let mut writer = NcbiOstream::sink(&mut sink).unwrap();
-            super::tabular::write_blastx_tabular(
-                &mut writer,
-                &mut stderr,
-                &opts,
-                spec,
-                &queries,
-                &subjects,
-                &shown,
-                &[batch],
-                None,
-                0,
-            )
+                .and_then(|()| {
+                    super::blast_xml::write_xml_epilog(&mut writer, &mut stderr, "blastx", 1, None)
+                })
+            }
+            "16" => {
+                let mut xml2 = super::blast_xml::xml2_writer(
+                    Xml2Kind::Single16,
+                    &opts,
+                    &subjects,
+                    &shown,
+                    Box::new(NoSideFiles),
+                );
+                super::blast_xml::write_blastx_xml(
+                    &mut writer,
+                    &mut stderr,
+                    &mut xml2,
+                    &opts,
+                    &queries,
+                    &subjects,
+                    &shown,
+                    &[batch],
+                    0,
+                    false,
+                    None,
+                )
+                .and_then(|()| {
+                    super::blast_xml::write_xml_epilog(
+                        &mut writer,
+                        &mut stderr,
+                        "blastx",
+                        1,
+                        Some(&mut xml2),
+                    )
+                })
+            }
+            _ => {
+                let spec = opts
+                    .tabular_report()
+                    .expect("7 qseqid sseqid qcovs has a TabularSpec");
+                super::tabular::write_blastx_tabular(
+                    &mut writer,
+                    &mut stderr,
+                    &opts,
+                    spec,
+                    &queries,
+                    &subjects,
+                    &shown,
+                    &[batch],
+                    None,
+                    0,
+                )
+            }
         }
     };
     let error = match result {

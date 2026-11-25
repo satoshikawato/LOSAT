@@ -108,24 +108,13 @@ fn blastx_and_tblastn_subject_writers_handle_mapped_leading_gaps_identically() {
     ];
 
     for (name, ops, format, expected) in cases {
-        let bx = {
-            use super::blastx::mapped_row_range_tests::{run_subject_report, SubjectReportKind};
-            let kind = match format {
-                Format::Xml5 => SubjectReportKind::Xml5,
-                Format::Xml16 => SubjectReportKind::Xml16,
-                Format::Tabular7Qcovs => SubjectReportKind::Tabular7Qcovs,
-            };
-            run_subject_report(ops.clone(), kind)
+        let outfmt = match format {
+            Format::Xml5 => "5",
+            Format::Xml16 => "16",
+            Format::Tabular7Qcovs => "7 qseqid sseqid qcovs",
         };
-        let tbn = {
-            use super::tblastn::mapped_row_range_tests::{run_subject_report, SubjectReportKind};
-            let kind = match format {
-                Format::Xml5 => SubjectReportKind::Xml5,
-                Format::Xml16 => SubjectReportKind::Xml16,
-                Format::Tabular7Qcovs => SubjectReportKind::Tabular7Qcovs,
-            };
-            run_subject_report(ops.clone(), kind)
-        };
+        let bx = super::blastx::mapped_row_range_tests::run_subject_report(ops.clone(), outfmt);
+        let tbn = super::tblastn::mapped_row_range_tests::run_subject_report(ops.clone(), outfmt);
 
         for (prog, header_tag, stdout, stderr, error) in [
             ("blastx", "# BLASTX ", &bx.stdout, &bx.stderr, &bx.error),

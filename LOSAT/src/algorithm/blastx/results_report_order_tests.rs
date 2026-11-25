@@ -105,10 +105,10 @@ fn put_in_report_order_maps_subject_records_once() {
         ((0, 12), (8, 18), 0, vec![Ins(2), Sub(10)]),
     ];
     let mut subject = batch(made());
-    subject.put_in_report_order(SubjectLoc::Interval);
-    assert_eq!(hsps(&subject), mapped);
-    subject.put_in_report_order(SubjectLoc::Interval);
-    assert_eq!(hsps(&subject), mapped);
+    for _ in 0..2 {
+        subject.put_in_report_order(SubjectLoc::Interval);
+        assert_eq!(hsps(&subject), mapped);
+    }
 
     let mut db = batch(made());
     db.put_in_report_order(SubjectLoc::Whole);

@@ -267,6 +267,7 @@ fn a_row_that_starts_with_a_gap_has_no_range() {
         edit_script: ops,
         ..ungapped(0, 285)
     };
+    let seqids = Some(RowRangeError::SeqidsNotConsistent);
     let starts = gapped(vec![Ins(95), Sub(190)]);
     for rewritten in [false, true] {
         assert_eq!(
@@ -275,18 +276,15 @@ fn a_row_that_starts_with_a_gap_has_no_range() {
         );
         assert_eq!(
             reported_row_range(&starts, AlignRow::Subject, rewritten),
-            Some(RowRangeError::SeqidsNotConsistent)
+            seqids
         );
-        assert_eq!(
-            reported_rows_range(&starts, rewritten),
-            Some(RowRangeError::SeqidsNotConsistent)
-        );
+        assert_eq!(reported_rows_range(&starts, rewritten), seqids);
     }
     let query_first = gapped(vec![Del(3), Sub(190)]);
     for rewritten in [false, true] {
         assert_eq!(
             reported_row_range(&query_first, AlignRow::Query, rewritten),
-            Some(RowRangeError::SeqidsNotConsistent)
+            seqids
         );
         assert_eq!(
             reported_row_range(&query_first, AlignRow::Subject, rewritten),

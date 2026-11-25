@@ -23,20 +23,9 @@ pub(crate) struct SubjectReportOutcome {
     pub(crate) error: Option<NativeError>,
 }
 
-/// Which `-subject` writer the shared BLASTX/TBLASTN table exercises.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum SubjectReportKind {
-    Xml5,
-    Xml16,
-    Tabular7Qcovs,
-}
-
 /// Runs TBLASTN's `-subject` mapping (`put_in_report_order(true)`) and `stage_e_report::render`
-/// (`Xml5`, `Xml16`, or `Tabular7Qcovs`) on a single gapped HSP with edit script `ops`.
-pub(crate) fn run_subject_report(
-    ops: Vec<GapEditOp>,
-    kind: SubjectReportKind,
-) -> SubjectReportOutcome {
+/// (`"5"`, `"16"`, or `"7 qseqid sseqid qcovs"`) on a single gapped HSP with edit script `ops`.
+pub(crate) fn run_subject_report(ops: Vec<GapEditOp>, outfmt: &str) -> SubjectReportOutcome {
     let [q_len, s_len] = ops.iter().fold([0i32, 0i32], |[q, s], op| match *op {
         Sub(n) => [q + n as i32, s + n as i32],
         Ins(n) => [q + n as i32, s],
@@ -134,11 +123,6 @@ pub(crate) fn run_subject_report(
         alpha: 0.7916,
         beta: -3.2,
     }];
-    let outfmt = match kind {
-        SubjectReportKind::Xml5 => "5",
-        SubjectReportKind::Xml16 => "16",
-        SubjectReportKind::Tabular7Qcovs => "7 qseqid sseqid qcovs",
-    };
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let result = {

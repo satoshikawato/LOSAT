@@ -726,6 +726,166 @@ describe('CountsLoader', () => {
     expect(other.state.get().list).toEqual([]);
   });
 
+  function setupTwoTabs(wrapOtherStore?: (store: MemoryCountsStore) => CountsStore) {
+    const channel = new FakeCountsChangeChannel();
+    const one = setup({ channel });
+    const otherDraft = new Map<number, { readonly file: File; readonly origin: CountsOrigin }>();
+    const other = new CountsLoader({
+      downloader: one.downloader,
+      store: wrapOtherStore === undefined ? one.store : wrapOtherStore(one.store),
+      draft: { setCounts: (t, e) => (e === undefined ? otherDraft.delete(t) : otherDraft.set(t, e)) },
+      changes: channel.tab(),
+    });
+    let onStart: (() => void) | undefined;
+    let gate = Promise.resolve();
+    const origAppend = one.store.appendCounts.bind(one.store);
+    one.store.appendCounts = async (token, bytes) => {
+      if (onStart !== undefined) {
+        const notify = onStart;
+        onStart = undefined;
+        notify();
+        await gate;
+      }
+      return origAppend(token, bytes);
+    };
+    const pauseNextAppend = () => {
+      let release!: () => void;
+      gate = new Promise<void>((resolve) => (release = resolve));
+      const started = new Promise<void>((resolve) => (onStart = resolve));
+      return { started, release };
+    };
+    return { channel, one, store: one.store, other, otherDraft, pauseNextAppend };
+  }
+
+  it('tells the other tabs when a Replace fails after it started, so they drop the copy of before', async () => {
+    const tabs = setupTwoTabs();
+    expect(await tabs.one.loader.saveMade(562, new File([bytesOf(300, 1)], 'a.obinary'), madeMeta(1))).toMatchObject({ ok: true });
+    await tabs.other.idle();
+    expect(tabs.otherDraft.get(562)?.file).toBeDefined();
+    expect(tabs.other.state.get().saved[562]).toMatchObject({ complete: true, size: 300, made: madeMeta(1) });
+
+    const full = 'The browser refused to keep the counts: its storage is full.';
+    tabs.store.appendError = new Error(full);
+    const replaced = await tabs.one.loader.saveMade(562, new File([bytesOf(400, 2)], 'b.obinary'), madeMeta(2), { replace: true });
+    await tabs.one.loader.idle();
+    await tabs.other.idle();
+
+    expect(replaced).toEqual({
+      ok: false,
+      reason: 'failed',
+      message: `${full} The counts saved before for 562 are no longer kept.`,
+    });
+    expect(tabs.otherDraft.get(562)?.file).toBeUndefined();
+    expect(tabs.otherDraft.has(562)).toBe(false);
+    expect(tabs.other.state.get().saved[562]).toBeNull();
+    expect(tabs.other.state.get().list).toEqual([]);
+  });
+
+  it('tells the other tabs as soon as a Replace begins so they drop the copy of before while it writes, and read the new copy when it ends', async () => {
+    const { one, other, otherDraft, pauseNextAppend } = setupTwoTabs();
+    expect(await one.loader.saveMade(562, new File([bytesOf(320, 1)], 'a.obinary'), madeMeta(1))).toMatchObject({ ok: true });
+    await other.idle();
+    const before = otherDraft.get(562)?.file;
+    expect(before).toBeInstanceOf(File);
+    expect(other.state.get().saved[562]).toMatchObject({ complete: true, size: 320, made: madeMeta(1) });
+
+    // Pause appendCounts mid-write (same observable state for tab 2 as if tab 1 closed mid-write).
+    const paused = pauseNextAppend();
+    const replacing = one.loader.saveMade(562, new File([bytesOf(450, 2)], 'b.obinary'), madeMeta(2), { replace: true });
+    await paused.started;
+    await other.idle();
+
+    // After begin (while tab 1 is still writing), tab 2 already dropped the file of before and shows no saved copy.
+    expect(otherDraft.size).toBe(0);
+    expect(other.state.get().saved[562]).toBe(null);
+    expect(other.state.get().list).toHaveLength(0);
+
+    // Let the write finish: tab 2 reads the new copy.
+    paused.release();
+    expect(await replacing).toMatchObject({ ok: true, kept: true, copy: { taxid: 562, size: 450, made: madeMeta(2) } });
+    await other.idle();
+    const after = otherDraft.get(562)?.file;
+    expect(after).toBeInstanceOf(File);
+    expect(after).not.toBe(before);
+    expect(otherDraft.get(562)).toMatchObject({ origin: { kind: 'made', taxid: 562, made: madeMeta(2) } });
+    expect(other.state.get().saved[562]).toMatchObject({ complete: true, size: 450, made: madeMeta(2) });
+    expect(other.state.get().list).toMatchObject([{ taxid: 562, size: 450, origin: 'made' }]);
+  });
+
+  it('announces on begin only when replacing (also when overwriting an older-URL copy), and drops a stale read that ends after a newer one', async () => {
+    const readGates: Array<{ readonly release: () => void; readonly value: Promise<unknown> }> = [];
+    const { channel, one, store: memory, other, otherDraft, pauseNextAppend } = setupTwoTabs((base) => ({
+      readCounts: (taxid) => {
+        const value = base.readCounts(taxid);
+        return new Promise((resolve) => readGates.push({ value, release: () => resolve(value) }));
+      },
+      listCounts: () => base.listCounts(),
+      beginCounts: (taxid, start) => base.beginCounts(taxid, start),
+      appendCounts: (token, bytes) => base.appendCounts(token, bytes),
+      finishCounts: (token) => base.finishCounts(token),
+      closeCounts: (token) => base.closeCounts(token),
+      deleteCounts: (taxid) => base.deleteCounts(taxid),
+    }));
+    const announced: number[] = [];
+    channel.tab().subscribe((taxid) => announced.push(taxid));
+
+    const waitForReads = async (count: number) => {
+      for (let i = 0; i < 100 && readGates.length < count; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(readGates).toHaveLength(count);
+    };
+    const drainReads = async (count: number) => {
+      await waitForReads(count);
+      readGates.splice(0).forEach((g) => g.release());
+      await other.idle();
+    };
+
+    // 1. A first save (not replacing) does not announce until it finishes.
+    const firstPause = pauseNextAppend();
+    const firstSave = one.loader.saveMade(562, new File([bytesOf(300, 1)], 'first.obinary'), madeMeta(1));
+    await firstPause.started;
+    expect(announced).toEqual([]);
+    firstPause.release();
+    expect(await firstSave).toMatchObject({ ok: true });
+    expect(announced).toEqual([562]);
+    await drainReads(1);
+
+    // 2. Overwriting an older-URL copy (COUNTS_EXISTS -> begin(true)) announces right after begin and again at finish.
+    const oldTok = (await memory.beginCounts(7227, { url: 'https://example.org/other.obinary', lastModified: LAST_MODIFIED, size: 100, from: 0 }))!;
+    await memory.appendCounts(oldTok, bytesOf(100, 3));
+    await memory.finishCounts(oldTok);
+    announced.length = 0;
+    const oldUrlPause = pauseNextAppend();
+    const overwriteOldUrl = one.loader.saveMade(7227, new File([bytesOf(200, 4)], 'old.obinary'), madeMeta(2));
+    await oldUrlPause.started;
+    expect(announced).toEqual([7227]);
+    oldUrlPause.release();
+    expect(await overwriteOldUrl).toMatchObject({ ok: true });
+    expect(announced).toEqual([7227, 7227]);
+    await drainReads(2);
+
+    // 3. On a fast Replace, if the early announce's readCounts resolves late (undefined) after the finish announce's readCounts,
+    // tab 2 keeps the completed replacement rather than overwriting it with null.
+    const racePause = pauseNextAppend();
+    const replacing = one.loader.saveMade(562, new File([bytesOf(450, 5)], 'r.obinary'), madeMeta(3), { replace: true });
+    await racePause.started;
+    await waitForReads(1);
+    expect(await readGates[0]!.value).toBeUndefined();
+    racePause.release();
+    expect(await replacing).toMatchObject({ ok: true });
+    await waitForReads(2);
+    const expectCompletedReplacement = () => {
+      expect(other.state.get().saved[562]).toMatchObject({ complete: true, size: 450, made: madeMeta(3) });
+      expect(otherDraft.get(562)).toMatchObject({ origin: { kind: 'made', taxid: 562, made: madeMeta(3) } });
+    };
+    // Finish announce's read resolves first (complete 450-byte copy); early announce's read resolves last (undefined).
+    readGates[1]!.release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expectCompletedReplacement();
+    readGates[0]!.release();
+    await other.idle();
+    expectCompletedReplacement();
+  });
+
   it('refuses a save, a Replace, a Delete and a download in place while a queued or running run reads the copy, and keeps the copy', async () => {
     const { loader, downloader, store, draftState } = setup();
     expect(await loader.saveMade(562, new File([bytesOf(300, 1)], 'a.obinary'), madeMeta(1))).toMatchObject({ ok: true });

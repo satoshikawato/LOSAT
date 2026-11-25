@@ -129,6 +129,8 @@ export class CountsLoader {
   private readonly local = new Map<number, { readonly copy: CountsCopy; readonly file: File }>();
   /** The number of the latest read of the list (reloadList): an earlier read that ends later is dropped. */
   private listRead = 0;
+  /** The number of the latest read or state update per taxonomy ID: an earlier read that ends later is dropped. */
+  private readonly taxidRead = new Map<number, number>();
 
   constructor(private readonly deps: CountsDeps) {
     deps.changes?.subscribe((taxid) => this.onRemoteChange(taxid));
@@ -266,6 +268,13 @@ export class CountsLoader {
       return { ok: true, copy, kept: false };
     }
 
+    if (replacing) {
+      // The copy of before is gone (meta incomplete, data truncated): drop it here and tell the other tabs.
+      this.deps.draft.setCounts(taxid, undefined);
+      this.setSaved(taxid, null);
+      this.deps.changes?.announce(taxid);
+    }
+
     try {
       for (let offset = 0; offset < file.size; offset += SAVE_PART_BYTES) {
         const slice = new Uint8Array(await file.slice(offset, Math.min(file.size, offset + SAVE_PART_BYTES)).arrayBuffer());
@@ -284,6 +293,7 @@ export class CountsLoader {
     } catch (error) {
       await this.deps.store.closeCounts(token).catch(() => undefined);
       await this.reread(taxid);
+      this.deps.changes?.announce(taxid);
       await this.reloadList();
       const gone = replacing ? ` The counts saved before for ${taxid} are no longer kept.` : '';
       return { ok: false, reason: 'failed', message: `${messageOf(error)}${gone}` };
@@ -293,6 +303,7 @@ export class CountsLoader {
   private async deleteCopy(taxid: number): Promise<void> {
     await this.deleting.get(taxid);
     // The file goes from the draft first, so that no search is queued with a file about to go.
+    this.nextTaxidRead(taxid);
     this.deps.draft.setCounts(taxid, undefined);
     this.holdInTab(taxid, false);
     if (this.state.get().refusal?.taxid === taxid) this.update({ refusal: undefined });
@@ -324,12 +335,14 @@ export class CountsLoader {
 
   /** Reads the copy from the storage, after a deletion of the ID, and tells the draft whether a whole copy is present. */
   private async reread(taxid: number): Promise<void> {
+    const read = this.nextTaxidRead(taxid);
     await this.deleting.get(taxid);
-    await this.readBack(taxid);
+    if (read !== this.taxidRead.get(taxid)) return;
+    await this.readBack(taxid, read);
   }
 
   /** Reads the copy from the storage and tells the draft whether a whole copy is present. */
-  private async readBack(taxid: number): Promise<void> {
+  private async readBack(taxid: number, read = this.nextTaxidRead(taxid)): Promise<void> {
     const kept = this.local.get(taxid);
     if (kept !== undefined) {
       this.deps.draft.setCounts(taxid, { file: kept.file, origin: originOf(kept.copy) });
@@ -338,6 +351,8 @@ export class CountsLoader {
     }
     try {
       const saved = accepted(await this.deps.store.readCounts(taxid), taxid);
+      // A later read or update started for this ID while this one ran: its state is the newer one.
+      if (read !== this.taxidRead.get(taxid)) return;
       if (saved?.file !== undefined) {
         this.deps.draft.setCounts(taxid, { file: saved.file, origin: originOf(saved.copy) });
       } else {
@@ -345,6 +360,7 @@ export class CountsLoader {
       }
       this.setSaved(taxid, saved?.copy ?? null);
     } catch {
+      if (read !== this.taxidRead.get(taxid)) return;
       this.deps.draft.setCounts(taxid, undefined);
       this.setSaved(taxid, null);
     }
@@ -436,7 +452,14 @@ export class CountsLoader {
     this.update({ inTab });
   }
 
+  private nextTaxidRead(taxid: number): number {
+    const read = (this.taxidRead.get(taxid) ?? 0) + 1;
+    this.taxidRead.set(taxid, read);
+    return read;
+  }
+
   private setSaved(taxid: number, copy: CountsCopy | null): void {
+    this.nextTaxidRead(taxid);
     this.update({ saved: { ...this.state.get().saved, [taxid]: copy } });
   }
 

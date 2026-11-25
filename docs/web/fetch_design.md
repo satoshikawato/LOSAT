@@ -310,7 +310,9 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    - ポートは `readCounts(taxid)`（由来は `downloaded` / `made` の直和）と `listCounts()`（保存済み一覧、WindowMasker の `-ustat` / `-in`
      の選択に並べる）を持つ。ダウンロード側の URL 一致確認は `CountsLoader` に残す。
    - BroadcastChannel `losat-web:windowmasker` は削除だけでなく保存・差し替えでも変更を知らせ（古いタブ互換のため `{deleted: taxid}` の形を維持）、
-     他のタブは OPFS から読み直して BLASTN の行と WindowMasker の選択一覧を更新する。
+     他のタブは持っているファイルを手放して OPFS から読み直し、BLASTN の行と WindowMasker の選択一覧を更新する。
+     差し替えは書き始めた直後（前のコピーが消えた時点）と終わった時（成功だけでなく失敗時も含む）に知らせるため、
+     書き込みの途中で失敗したりタブが閉じられたりしても、他のタブに前のファイルは残らない。
    - 検索への渡し方は取得した counts と同一（`windowmasker/<taxid>/wmasker.obinary`）。Run details は URL 行を出さず
      「`<taxid>`: wmasker.obinary made in this browser by run `<n>` (`<YYYY-MM-DD>`), `<size>`」と SHA-256 を示す。
    - e2e（`tests/e2e/window-masker-save.spec.ts`）：`ascii`・`binary`・`obinary` の各形式で作成・保存した counts による BLASTN

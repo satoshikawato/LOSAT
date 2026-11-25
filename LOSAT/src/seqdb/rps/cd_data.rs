@@ -29,6 +29,8 @@ struct CdFile {
     /// The file's length in bytes when it was opened.
     len: u64,
     num_profiles: usize,
+    /// The file's extension (`.wcounts` or `.obsr`).
+    extension: &'static str,
     /// The file's name in messages (`<volume path><extension>`).
     shown: String,
 }
@@ -39,15 +41,20 @@ impl CdFile {
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:255-264
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:386-400
-    fn open(base: &Path, extension: &str, program: &str) -> Result<Self, RpsOpenError> {
+    fn open(base: &Path, extension: &'static str, program: &str) -> Result<Self, RpsOpenError> {
         let volume = canonical_volume_path(base);
-        let shown = format!("{volume}{extension}");
+        let shown_bytes = [&volume[..], extension.as_bytes()].concat();
+        let shown = String::from_utf8_lossy(&shown_bytes).into_owned();
         let mut path = base.as_os_str().to_os_string();
         path.push(extension);
         let source = FreqSource::open(&PathBuf::from(path)).map_err(|_| {
-            RpsOpenError::Ncbi(format!(
-                "Cannot memory map RPS-BLAST database file: {shown}"
-            ))
+            RpsOpenError::Ncbi(
+                [
+                    b"Cannot memory map RPS-BLAST database file: ",
+                    &shown_bytes[..],
+                ]
+                .concat(),
+            )
         })?;
         let too_short = || {
             RpsOpenError::Refused(format!(
@@ -58,9 +65,14 @@ impl CdFile {
         source.read_at(&mut header, 0).map_err(|_| too_short())?;
         let magic = i32::from_le_bytes([header[0], header[1], header[2], header[3]]);
         if magic != RPS_MAGIC_NUM && magic != RPS_MAGIC_NUM_28 {
-            return Err(RpsOpenError::Ncbi(format!(
-                "RPS BLAST profile file ({shown}) is either corrupt or constructed for an incompatible architecture"
-            )));
+            return Err(RpsOpenError::Ncbi(
+                [
+                    b"RPS BLAST profile file (",
+                    &shown_bytes[..],
+                    b") is either corrupt or constructed for an incompatible architecture",
+                ]
+                .concat(),
+            ));
         }
         let num_profiles = i32::from_le_bytes([header[4], header[5], header[6], header[7]]);
         let num_profiles = usize::try_from(num_profiles).map_err(|_| too_short())?;
@@ -69,6 +81,7 @@ impl CdFile {
             source,
             len,
             num_profiles,
+            extension,
             shown,
         };
         let offsets_end = 8 + 4 * (num_profiles as u64 + 1);
@@ -83,7 +96,7 @@ impl CdFile {
         let inconsistent = || {
             RpsOpenError::Refused(format!(
                 "a profile database whose {} file does not hold the profile of a hit domain (NCBI BLAST+ reads past it) is not supported by LOSAT's {program}",
-                self.shown.rsplit('.').next().map_or(String::new(), |e| format!(".{e}")),
+                self.extension,
             ))
         };
         if oid >= self.num_profiles {
@@ -229,7 +242,9 @@ impl CdHitData<'_> {
             // The columns `from..to` as one read of them reads them: refused where the file ends
             // before `to`; with them, the hit's later columns up to its end that the profile and
             // the file hold.
-            let in_file = files.wcounts.values_from((first + from as u64) * CD_ALPHABET as u64)
+            let in_file = files
+                .wcounts
+                .values_from((first + from as u64) * CD_ALPHABET as u64)
                 / CD_ALPHABET as u64;
             if (to - from) as u64 > in_file {
                 return Err(files.wcounts.shorter(program));

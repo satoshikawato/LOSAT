@@ -2,16 +2,23 @@
 //! owner of a frame's texts (`GetFrameInfo`, which `NCBI_RETHROW_SAME` adds to a `CException`
 //! that leaves the frame, and `GetFrameName`, which `CSerialException::AddFrameInfo` adds to the
 //! exception's frame stack) and of the places of the `END_OBJECT_FRAME` of NCBI's ASN.1 text
-//! reader, and the throws of the object stack itself. The table reader
-//! (`report::serial::asn_types::read`) and the reader of makeblastdb's mask files
-//! (`writedb::mask_info`) keep their stacks of these frames.
+//! reader, and the throws of the object stack itself (with the getter's throw of an unset member,
+//! which with `ExpectedMember`'s is a check of the data that NCBI's settings turn off:
+//! `DataCheck`). The table reader
+//! (`report::serial::asn_types::read`), which reads makeblastdb's mask files too
+//! (`writedb::mask_info`), keeps its stack of these frames.
 
-use crate::ncbi_exception::ThrowSite;
+use crate::ncbi_exception::{NcbiException, ThrowSite};
 
 /// A frame of NCBI's object stack (`CObjectStackFrame::EFrameType`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FrameKind {
     Named,
+    /// The named frame of `ReadNamedType` / `SkipNamedType` around a value of a named type that is
+    /// neither a SEQUENCE, a CHOICE nor an ENUMERATED (`eFrameNamed`; only the XML stream's reader
+    /// pushes it, `asn_input::Input::NAMED_TYPES`), whose `END_OBJECT_FRAME` is in those
+    /// functions rather than in `Read`.
+    NamedType,
     Class,
     ClassMember,
     Choice,
@@ -27,7 +34,7 @@ pub(crate) enum FrameKind {
 /// frame, once `SetTopMemberId` named it) is `member`.
 pub(crate) fn frame_info(kind: FrameKind, type_name: Option<&str>, member: Option<&str>) -> String {
     let kind = match kind {
-        FrameKind::Named => "eFrameNamed",
+        FrameKind::Named | FrameKind::NamedType => "eFrameNamed",
         FrameKind::Class => "eFrameClass",
         FrameKind::ClassMember => "eFrameClassMember",
         FrameKind::Choice => "eFrameChoice",
@@ -59,7 +66,7 @@ pub(crate) fn frame_name<'a>(
     match kind {
         FrameKind::ClassMember | FrameKind::ChoiceVariant => member.unwrap_or(""),
         FrameKind::Array | FrameKind::ArrayElement => "[]",
-        FrameKind::Named => type_name.unwrap_or(""),
+        FrameKind::Named | FrameKind::NamedType => type_name.unwrap_or(""),
         FrameKind::Class | FrameKind::Choice => "",
     }
 }
@@ -86,11 +93,73 @@ pub(crate) const SKIP_FILE_HEADER: ThrowSite = istr_site(
     "CSerialException::eFormatError",
     "ncbi::CObjectIStream::SkipFileHeader",
 );
+/// `ExpectedMember`'s throw of a mandatory member that the input skips (the read check,
+/// `DataCheck::Read`): every reader's (the table reader's, `asn_types::read`; the header records',
+/// `seqid::ber`).
 pub(crate) const EXPECTED_MEMBER: ThrowSite = istr_site(
     1037,
     "CSerialException::eFormatError",
     "ncbi::CObjectIStream::ExpectedMember",
 );
+
+// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:300-307
+// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:317-320
+// NCBI reference (598d8ae6): c++/src/serial/datatool/classstr.cpp:849-855
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:805-810
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:836-842
+// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:300-306
+// The generated getters call `ThrowUnassigned` with the index, so the place is that function's
+// throw (`file_name` and `file_line` are 0). Its function is a `const` method,
+// whose `__PRETTY_FUNCTION__` ends with `const`, not `)`: `ParseCurrFunctName` names no
+// function then.
+/// `ThrowUnassigned`, the throw of the getter of a member that is not set (the get check,
+/// `DataCheck::Get`): every getter's (the PSSM query's feature table, `annot_index::table`;
+/// rpsbproc's).
+pub(crate) const UNASSIGNED_MEMBER: ThrowSite = ThrowSite {
+    file: "src/serial/serialobject.cpp",
+    line: 306,
+    kind: "CUnassignedMember::eGet",
+    function: None,
+};
+
+/// A check of the data of NCBI's serial library that a setting of the process turns off
+/// (`blastinput::ncbi_environment::ReadVerification`): the read of a mandatory member
+/// (`SERIAL_VERIFY_DATA_READ`) and the get of an unset member (`SERIAL_VERIFY_DATA_GET`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DataCheck {
+    Read,
+    Get,
+}
+
+impl DataCheck {
+    /// The check that threw `exception` first (the oldest of its chain, which the frames it left
+    /// rethrew: `NcbiException::first_site`), `None` for an exception of no check. The one test
+    /// of which errors depend on the settings.
+    pub(crate) fn of(exception: &NcbiException) -> Option<DataCheck> {
+        match exception.first_site() {
+            site if site == EXPECTED_MEMBER => Some(DataCheck::Read),
+            site if site == UNASSIGNED_MEMBER => Some(DataCheck::Get),
+            _ => None,
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1206-1219
+/// `ReadPointer`'s check of a value of a named class that is not the declared type (a class of
+/// the module has no parent class: the second throw).
+pub(crate) const READ_POINTER_INCOMPATIBLE: ThrowSite = istr_site(
+    1217,
+    "CSerialException::eFormatError",
+    "ncbi::CObjectIStream::ReadPointer",
+);
+// NCBI reference (598d8ae6): c++/src/serial/classinfob.cpp:244-252
+/// `GetClassInfoByName` of a name that the registry of classes does not hold.
+pub(crate) const CLASS_NOT_FOUND: ThrowSite = ThrowSite {
+    file: "src/serial/classinfob.cpp",
+    line: 251,
+    kind: "CSerialException::eInvalidData",
+    function: Some("ncbi::CClassTypeInfoBase::GetClassInfoByName"),
+};
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:873-880
 // (makeblastdb's streams collect no objects: `m_Objects` is null, checked with makeblastdb
 // 2.17.0 on `@0` and `@1`.)
@@ -124,6 +193,9 @@ pub(crate) fn text_frame_site(kind: FrameKind, skip: bool) -> (&'static str, u32
     const ISTR: &str = "src/serial/objistr.cpp";
     match (kind, skip) {
         (FrameKind::Named, _) => (ISTR, 968, "ncbi::CObjectIStream::Read"),
+        // The text and binary streams read a named type without a frame of its own
+        // (`Input::NAMED_TYPES`).
+        (FrameKind::NamedType, _) => unreachable!("the text stream pushes no named-type frame"),
         (FrameKind::Class, false) => (ASN, 1396, "ncbi::CObjectIStreamAsn::ReadClassSequential"),
         (FrameKind::ClassMember, false) => {
             (ASN, 1393, "ncbi::CObjectIStreamAsn::ReadClassSequential")
@@ -146,11 +218,18 @@ pub(crate) fn text_frame_site(kind: FrameKind, skip: bool) -> (&'static str, u32
 /// The `END_OBJECT_FRAME` of the named frame that `CObjectIStream::ReadPointer`, which the text
 /// stream does not override, puts around a value of the type that `:Type` names (the frame
 /// `GetFrameName` calls by that type): the place of the line that `NCBI_RETHROW_SAME` adds to a
-/// `CException` other than a `CSerialException` passing through it. The mask reader's
-/// (`writedb::mask_info`) frame of `:Type`.
+/// `CException` other than a `CSerialException` passing through it.
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1173-1198
 pub(crate) const READ_POINTER_FRAME_END: (&str, u32, &str) = (
     "src/serial/objistr.cpp",
     1195,
     "ncbi::CObjectIStream::ReadPointer",
+);
+
+/// [`READ_POINTER_FRAME_END`] of `CObjectIStream::SkipPointer`, the skip of a `CRef<>`.
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1256-1270
+pub(crate) const SKIP_POINTER_FRAME_END: (&str, u32, &str) = (
+    "src/serial/objistr.cpp",
+    1267,
+    "ncbi::CObjectIStream::SkipPointer",
 );

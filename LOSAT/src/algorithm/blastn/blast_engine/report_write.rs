@@ -202,8 +202,7 @@ pub(super) fn write_sam(
                     whole: &|rank| lengths[rank],
                 },
                 &mut sam::BlastnSamLetters {
-                    queries: report.queries,
-                    query_placements: &report.ranges.queries.placements,
+                    queries: report.query_records,
                     subjects: sam::SubjectSource::Database(&letters_of),
                 },
             )?;
@@ -234,8 +233,7 @@ pub(super) fn write_sam(
                     },
                 },
                 &mut sam::BlastnSamLetters {
-                    queries: report.queries,
-                    query_placements: &report.ranges.queries.placements,
+                    queries: report.query_records,
                     subjects: sam::SubjectSource::Records(whole_records),
                 },
             )?;
@@ -257,6 +255,8 @@ pub(super) struct XmlDocument<'a> {
     pub(super) only_xml2: bool,
     /// The caller's receiver of the side files of outfmt 13 and 14, if it gives one.
     pub(super) side_sink: Option<&'a crate::report::blast_xml2::SideFileSink>,
+    /// The run's first format, whose prefetch each batch asks (`database::prefetch_format`).
+    pub(super) prefetch: crate::algorithm::common::database::PrefetchFormat,
 }
 
 /// Outfmt 5 (BLAST XML) and 13 to 16 (the XML2 and JSON documents): the structured report of the
@@ -283,6 +283,7 @@ pub(super) fn write_structured_xml(
         kind: xml2_kind,
         only_xml2: xml_only_xml2,
         side_sink,
+        prefetch,
     } = structured;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1444
     // The CBlastOutput document of the queries (`blast_xml`).
@@ -341,6 +342,7 @@ pub(super) fn write_structured_xml(
             report.database_parsed,
             hit_lists,
             report.database_loads,
+            (report.batch_spans, !report.ungapped, prefetch),
         )?,
         _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
     };
@@ -416,6 +418,7 @@ pub(super) fn write_structured_xml(
             mask_char: b'N',
         },
         queries: report.queries,
+        query_records: report.query_records,
         searched_lengths: query_lengths,
         stats: xml_stats,
         messages: xml_messages,

@@ -8,7 +8,8 @@ use std::{cell::RefCell, io::Write, path::Path};
 // The existing CLI v2 parser owns all defaults, lexical/scope validation and
 // code32 rejection. Synthetic paths identify memory input; no file is opened.
 pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
-    // The CLI's `-db` (a database search) waits for stage DB-7 in LOSAT Web, as BLASTP's.
+    // The frozen ABI v1 (plan TD-1) has no database search; LOSAT Web searches a database
+    // through ABI v2.
     if extra
         .iter()
         .any(|key| key.split('=').next().unwrap_or(key) == "-db")
@@ -85,7 +86,7 @@ fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
 // Original bytes are reparsed on each call with this role's gencode/mask
 // options; generic FASTA handles never cache translated or masked search state.
 #[cfg_attr(
-    not(target_arch = "wasm32"),
+    not(losat_web_abi_v1),
     expect(dead_code, reason = "called only by the web ABI (`web_api`, wasm32)")
 )]
 pub(crate) fn run_pair(
@@ -132,8 +133,13 @@ pub(crate) fn run_pair(
         parsed: &no_parsed,
     };
     // The run's decision for a matrix name that NCBI's XML does not know
-    // (`blast_xml::xml_matrix_failure`): none, as ABI v1 writes outfmt 0, 6 and 7 (`v1_outfmt`).
-    let xml_matrix = super::blast_xml::xml_matrix_failure(std::slice::from_ref(&options), true);
+    // (`blast_xml::xml_matrix_failure`): none, as ABI v1 writes outfmt 0, 6 and 7 (`v1_outfmt`);
+    // its query would be the run's without scopes of `-parse_deflines`, which ABI v1 does not read
+    // (`QueryScopes::xml_failing_query`).
+    let xml_matrix = super::blast_xml::xml_matrix_failure(std::slice::from_ref(&options), true)
+        .map(|failure| {
+            crate::blastinput::query_batch::QueryScopes::xml_failing_query(None, failure)
+        });
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:784-788
     super::native::write_empty_subject_warnings(&subjects, &mut *diagnostics.borrow_mut())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254

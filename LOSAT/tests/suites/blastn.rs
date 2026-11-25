@@ -10,6 +10,8 @@
 mod blastn_bn_csr;
 #[path = "../blastn_bn_seed_lists.rs"]
 mod blastn_bn_seed_lists;
+#[path = "../blastn_csr_qs_keep.rs"]
+mod blastn_csr_qs_keep;
 #[path = "../blastn_db_cut.rs"]
 mod blastn_db_cut;
 #[path = "../blastn_db_hard_long.rs"]
@@ -20,6 +22,8 @@ mod blastn_db_search;
 mod blastn_db_soft_long;
 #[path = "../blastn_db_stream.rs"]
 mod blastn_db_stream;
+#[path = "../blastn_dc_latest.rs"]
+mod blastn_dc_latest;
 #[path = "../blastn_dc_qs_ahead.rs"]
 mod blastn_dc_qs_ahead;
 #[path = "../blastn_dc_seed_lean.rs"]

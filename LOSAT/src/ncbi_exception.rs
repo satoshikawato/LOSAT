@@ -25,6 +25,12 @@
 /// and print the same text around it (line NP, M/DECISIONS.md 14).
 pub const NCBI_BUILD_ROOT: &str = "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../..";
 
+// NCBI reference (598d8ae6): c++/include/corelib/ncbiobj.hpp:965-975
+// NCBI reference (598d8ae6): c++/src/corelib/ncbiobj.cpp:1002-1014
+/// The message of NCBI's exception at a read through a `CRef` of no object
+/// (`CObject::ThrowNullPointerException`, `CCoreException::eNullPtr`).
+pub const NULL_POINTER: &str = "Attempt to access NULL pointer.";
+
 /// The build tree that NCBI rpsbproc 0.5.1's reports name: that of its Linux x64 binary of the
 /// 2025-05-13 package (the oracle of `tests/fixtures/rpsbproc`), built apart from BLAST+ on its own
 /// toolkit. Its `ncbireg.cpp` throws at the lines of BLAST+ 2.17.0's (env parity probe I of
@@ -165,6 +171,16 @@ impl NcbiException {
         self.site
     }
 
+    /// The place of the first throw of the chain (the oldest exception, which every rethrow
+    /// keeps as a predecessor): where the error came from.
+    pub(crate) fn first_site(&self) -> ThrowSite {
+        let mut first = self;
+        while let Some(predecessor) = first.predecessor.as_deref() {
+            first = predecessor;
+        }
+        first.site
+    }
+
     /// Whether the exception's class (the `C<class>` of `GetErrCodeString`'s `C<class>::e<code>`)
     /// is `class`: the class that a `catch` of NCBI's matches first (`CEofException`, which
     /// `NCBI_RETHROW_SAME` keeps).
@@ -188,22 +204,28 @@ impl NcbiException {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/exception.cpp:47-61
-    /// `CSerialException::AddFrameInfo` with `frame_info`, which the object stack's `END_OBJECT_FRAME`
-    /// calls with `GetFrameName()` of each frame a `CSerialException` leaves: the frame stack is
-    /// the extra text of the exception's report (`ReportExtra`, ` at <stack>`; a
-    /// `CSerialException` has no other). `NCBI_RETHROW_SAME` (`rethrow_same`) keeps the stack in
-    /// the new exception and freezes a copy in its predecessor, as `AddBacklog` clones it.
-    pub(crate) fn add_frame_info(&mut self, frame_info: &str) {
-        if frame_info.is_empty() {
+    /// `CSerialException::AddFrameInfo` with each of `frame_infos` in turn (the names that the
+    /// object stack's `END_OBJECT_FRAME` gives it, `GetFrameName()`, of the frames a
+    /// `CSerialException` leaves, innermost first): each name that is not empty goes in front of
+    /// the frame stack, after a `.` when the stack has one. The frame stack is the extra text of
+    /// the exception's report (`ReportExtra`, ` at <stack>`; a `CSerialException` has no other).
+    /// `NCBI_RETHROW_SAME` (`rethrow_same`) keeps the stack in the new exception and freezes a copy
+    /// in its predecessor, as `AddBacklog` clones it. The names are added in one pass, in time
+    /// linear in the length of the stack: adding them one by one in front of it, as NCBI does,
+    /// copies the stack once for each frame, quadratic in the depth of a nest.
+    pub(crate) fn add_frame_infos(&mut self, frame_infos: &[&str]) {
+        let mut stack = String::new();
+        for name in frame_infos.iter().rev().filter(|name| !name.is_empty()) {
+            stack.push_str(if stack.is_empty() { " at " } else { "." });
+            stack.push_str(name);
+        }
+        if stack.is_empty() {
             return;
         }
-        let stack = match self.extra.take() {
-            Some(extra) => {
-                let stack = extra.strip_prefix(" at ").unwrap_or(&extra);
-                format!(" at {frame_info}.{stack}")
-            }
-            None => format!(" at {frame_info}"),
-        };
+        if let Some(extra) = self.extra.take() {
+            stack.push('.');
+            stack.push_str(extra.strip_prefix(" at ").unwrap_or(&extra));
+        }
         self.extra = Some(stack.into_boxed_str());
     }
 

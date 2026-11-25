@@ -19,6 +19,8 @@ fn tool(program: &'static str) -> Tool {
         "makembindex" => include_str!("../makembindex/help.txt"),
         "windowmasker" => include_str!("../windowmasker/help.txt"),
         "makeprofiledb" => include_str!("../makeprofiledb/help.txt"),
+        "blastdb_aliastool" => include_str!("../blastdb_aliastool/help.txt"),
+        "blastdbcheck" => include_str!("../blastdbcheck/help.txt"),
         _ => "",
     };
     Tool {
@@ -35,7 +37,7 @@ fn tool(program: &'static str) -> Tool {
 }
 
 /// The programs that run on this reader (`ncbi_app`).
-const ON_THE_READER: [&str; 7] = [
+const ON_THE_READER: [&str; 9] = [
     "blastdbcmd",
     "dustmasker",
     "segmasker",
@@ -43,6 +45,8 @@ const ON_THE_READER: [&str; 7] = [
     "makembindex",
     "windowmasker",
     "makeprofiledb",
+    "blastdb_aliastool",
+    "blastdbcheck",
 ];
 
 fn parse_words(program: &'static str, line: &[&str]) -> Result<Args, ArgsError> {
@@ -86,13 +90,31 @@ fn xml(program: &str) -> String {
     crate::ncbi_xmlhelp::print(program, |_| false).unwrap()
 }
 
-/// `NStr::XmlEncode` undone (`&amp;`, `&lt;`, `&gt;`, `&apos;`, `&quot;`).
+/// `NStr::XmlEncode` undone (`&amp;`, `&lt;`, `&gt;`, `&apos;`, `&quot;`, and the character
+/// references of the characters it writes as numbers, `&#xa;`).
 fn xml_decode(text: &str) -> String {
-    text.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&apos;", "'")
-        .replace("&quot;", "\"")
-        .replace("&amp;", "&")
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('&') {
+        out.push_str(&rest[..at]);
+        let (entity, after) = rest[at + 1..].split_once(';').expect("an entity's end");
+        out.push(match entity {
+            "lt" => '<',
+            "gt" => '>',
+            "apos" => '\'',
+            "quot" => '"',
+            "amp" => '&',
+            // A character reference (`&#xa;`: the line breaks of a comment).
+            _ => entity
+                .strip_prefix("#x")
+                .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+                .and_then(char::from_u32)
+                .unwrap_or_else(|| panic!("an entity: &{entity};")),
+        });
+        rest = after;
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The elements `<key name=...` and `<flag name=...` of `xml`: (tag, name, the element's text).
@@ -239,6 +261,17 @@ fn every_argument_of_the_xml_is_in_its_table() {
                 default,
                 "{program} -{name}"
             );
+            // The argument's comment (its first `<description>`, before a constraint's), which
+            // LOSAT's descriptions give as its help (line RG DECISIONS K4i-3-1), kept for every
+            // program.
+            let comment = element
+                .split_once("<description>")
+                .map(|(_, rest)| xml_decode(rest.split_once("</description>").unwrap().0));
+            assert_eq!(
+                Some(desc.description.get().to_string()),
+                comment,
+                "{program} -{name}"
+            );
             let usage = element.split_once("<constraint").map(|(_, rest)| {
                 let description = rest.split_once("<description>").unwrap().1;
                 xml_decode(description.split_once("</description>").unwrap().0)
@@ -252,18 +285,22 @@ fn every_argument_of_the_xml_is_in_its_table() {
         }
     }
     // The 169 constraints of the 14 programs of line RG item K4i (SURVEY), makembindex's 6,
-    // windowmasker's 16, makeprofiledb's 4 (-blastdb_version, -dbtype, -matrix, -taxid) and
-    // deltablast's 18 (NCBI BLAST+ 2.17.0 `deltablast -xmlhelp`, the file of `ncbi_xmlhelp`:
-    // psiblast's 19 without -msa_master_idx, line PS item PS13a).
-    assert_eq!(constraints, 169 + 6 + 16 + 4 + 18);
+    // windowmasker's 16, makeprofiledb's 4 (-blastdb_version, -dbtype, -matrix, -taxid),
+    // blastdb_aliastool's 3 (-dbtype, -num_volumes, -seqid_dbtype), blastdbcheck's 2 (-dbtype,
+    // -verbosity) and deltablast's 18 (NCBI BLAST+ 2.17.0 `deltablast -xmlhelp`, the file of
+    // `ncbi_xmlhelp`: psiblast's 19 without -msa_master_idx, line PS item PS13a).
+    assert_eq!(constraints, 169 + 6 + 16 + 4 + 3 + 2 + 18);
     // rpsbproc's 8 aliases; the 1,294 entries of the dependencies of the 14 programs,
     // windowmasker's 76 (its 38 exclusions, each in both directions), makembindex's 3,
-    // makeprofiledb's 2 (-taxid and -taxid_map exclude each other) and deltablast's 147 (the same
-    // XML: psiblast's 187 without those of -in_pssm, -in_msa, -msa_master_idx, -ignore_msa_master,
-    // -phi_pattern, -ipglist and -negative_ipglist, with -show_domain_hits and -remote, and
-    // -show_domain_hits and -subject, excluding each other in both directions).
+    // makeprofiledb's 2 (-taxid and -taxid_map exclude each other), blastdb_aliastool's 178
+    // (26 requirements, 76 exclusions each in both directions), blastdbcheck's 10 (exclusions:
+    // -db with -dir and -recursive, -full with -stride, -random and -ends, each both ways) and
+    // deltablast's 147 (the same XML: psiblast's 187 without those of -in_pssm, -in_msa,
+    // -msa_master_idx, -ignore_msa_master, -phi_pattern, -ipglist and -negative_ipglist, with
+    // -show_domain_hits and -remote, and -show_domain_hits and -subject, excluding each other in
+    // both directions).
     assert_eq!(aliases, 8);
-    assert_eq!(dependencies, 1294 + 76 + 3 + 2 + 147);
+    assert_eq!(dependencies, 1294 + 76 + 3 + 2 + 178 + 10 + 147);
 }
 
 /// Which class a constraint is.
@@ -495,9 +532,9 @@ fn the_synopsis_orders_the_errors_of_the_post_check() {
 #[test]
 fn an_alias_is_its_argument() {
     let args = parse_words("rpsbproc", &["--evalue", "0.5", "--data-mode=full"]).unwrap();
-    assert_eq!(args.value("e"), Some("0.5"));
+    assert_eq!(args.bytes("e").as_deref(), Some(b"0.5".as_slice()));
     assert_eq!(args.double("e"), Some(0.5));
-    assert_eq!(args.value("m"), Some("full"));
+    assert_eq!(args.bytes("m").as_deref(), Some(b"full".as_slice()));
     assert!(args.given("e") && args.given("m"));
     assert_eq!(
         messages("rpsbproc", &["--evalue", "0.5", "-e", "1"]),
@@ -621,12 +658,12 @@ fn defaults_and_flags_are_ncbi_s_values() {
     let args = parse_words("dustmasker", &[]).unwrap();
     assert_eq!(args.integer("window"), Some(64));
     assert_eq!(args.value("window"), Some("64"));
-    assert_eq!(args.value("in"), Some("-"));
+    assert_eq!(args.bytes("in").as_deref(), Some(b"-".as_slice()));
     assert!(!args.flag("parse_seqids") && !args.given("in"));
     let args = parse_words("dustmasker", &["-parse_seqids", "-level=3", "-in", "x.fa"]).unwrap();
     assert!(args.flag("parse_seqids"));
     assert_eq!(args.integer("level"), Some(3));
-    assert_eq!(args.value("in"), Some("x.fa"));
+    assert_eq!(args.bytes("in").as_deref(), Some(b"x.fa".as_slice()));
     assert!(args.given("in") && !args.given("window"));
     let args = parse_words("segmasker", &["-locut", "1e"]).unwrap();
     assert_eq!(args.double("locut"), Some(1.0));
@@ -652,7 +689,10 @@ fn every_reader_knows_the_help_flags_and_the_file_arguments() {
     );
     assert_eq!(parse_words(&["-xmlhelp"]).unwrap_err(), ArgsError::XmlHelp);
     let args = parse_words(&["-logfile", "log.txt", "-conffile", "t.ini"]).unwrap();
-    assert_eq!(args.value("logfile"), Some("log.txt"));
+    assert_eq!(
+        args.bytes("logfile").as_deref(),
+        Some(b"log.txt".as_slice())
+    );
     assert_eq!(
         messages(&["-in", "a", "-in", "b"]),
         (
@@ -682,12 +722,13 @@ fn every_reader_knows_the_help_flags_and_the_file_arguments() {
 /// booleans and the integer type of a table (a function or a variable could be a pointer).
 #[test]
 fn the_tables_hold_no_pointer() {
-    const LOWER: [&str; 22] = [
+    const LOWER: [&str; 24] = [
         "name",
         "kind",
         "default",
         "constraint",
         "mandatory",
+        "description",
         "first",
         "count",
         "at",
@@ -699,6 +740,7 @@ fn the_tables_hold_no_pointer() {
         "aliases",
         "dependencies",
         "refusals",
+        "pre_open",
         "with_32",
         "static",
         "true",
@@ -819,6 +861,8 @@ fn the_refusals_and_the_sets_come_from_the_tables() {
         "segmasker",
         "windowmasker",
         "rpsbproc",
+        "blastdb_aliastool",
+        "blastdbcheck",
     ] {
         assert!(!rows.iter().any(|row| row.0 == program), "{program}");
     }
@@ -890,8 +934,80 @@ fn display_orders_are_the_tables_sets() {
     assert_eq!(choices("blastn", "ungapped"), None);
     assert_eq!(choices("blastn", "evalue"), None);
     assert_eq!(choices("blastn", "no_such_option"), None);
-    assert_eq!(default_value("blastn", "task"), Some("megablast"));
-    assert_eq!(default_value("blastp", "task"), Some("blastp"));
-    assert_eq!(default_value("blastp", "evalue"), None);
-    assert_eq!(default_value("blastn", "ungapped"), None);
+    // The defaults that LOSAT's descriptions give (`Described::default`): a key's `<default>`.
+    let default =
+        |program, name| find_desc(arguments(program).unwrap(), name).and_then(Desc::default);
+    assert_eq!(default("blastn", "task"), Some("megablast"));
+    assert_eq!(default("blastp", "task"), Some("blastp"));
+    assert_eq!(default("blastp", "evalue"), None);
+    assert_eq!(default("blastn", "ungapped"), None);
+    assert_eq!(default("blastn", "no_such_option"), None);
+}
+
+// No NCBI counterpart: line RG DECISIONS K4i-3-1 (Q3 = A). LOSAT's descriptions list a program's
+// arguments in the order of the usage line of NCBI's `-help`: each one is in the usage's synopsis,
+// in its order; those refused by name are not listed, the others are.
+#[test]
+fn the_described_arguments_follow_the_usage() {
+    for program in crate::api::Program::ALL {
+        let tool = crate::cli::reader::tool(program.name()).expect("a program on the reader");
+        let listed: Vec<Described> = described(tool).collect();
+        let positions: Vec<usize> = listed
+            .iter()
+            .map(|argument| usage_position(tool.help, argument.name))
+            .collect();
+        assert!(!positions.contains(&usize::MAX), "{program}: {positions:?}");
+        assert!(
+            positions.windows(2).all(|pair| pair[0] < pair[1]),
+            "{program}"
+        );
+        let arguments = arguments(tool.program).expect("its XML");
+        for desc in arguments.descs() {
+            let refused = matches!(refusal(tool.program, desc.name()), Some(Refusal::Read(_)));
+            let shown = listed.iter().any(|argument| argument.name == desc.name());
+            assert_eq!(shown, !refused, "{program} -{}", desc.name());
+        }
+    }
+}
+
+// The body reads a value by its bytes (`Args::bytes`, NCBI's `AsString`), UTF-8 or not, given or
+// the default; a key whose value the reader has made ASCII (a number, a choice of a list) may be
+// read as text too (`Args::value`). Line RG item K10a.
+#[cfg(unix)]
+#[test]
+fn a_value_is_read_by_its_bytes() {
+    use std::os::unix::ffi::OsStringExt;
+    let words = [
+        OsString::from("-in"),
+        OsString::from_vec(b"x\xff.fa".to_vec()),
+    ];
+    let args = parse(&tool("dustmasker"), &words).unwrap();
+    assert_eq!(args.bytes("in").as_deref(), Some(b"x\xff.fa".as_slice()));
+    assert_eq!(args.bytes("window").as_deref(), Some(b"64".as_slice()));
+    assert_eq!(
+        args.bytes("outfmt").as_deref(),
+        Some(b"interval".as_slice())
+    );
+    assert_eq!(args.value("outfmt"), Some("interval"));
+    assert_eq!(args.value("window"), Some("64"));
+}
+
+// A debug build checks that a key read as text is one whose value the reader has made ASCII: a
+// file name is read by its bytes.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "-in is not a key whose value is ASCII")]
+fn a_file_name_read_as_text_is_caught() {
+    let args = parse_words("dustmasker", &["-in", "x.fa"]).unwrap();
+    let _ = args.value("in");
+}
+
+// A debug build checks that a key read by its bytes is an argument of the program by its own name
+// (review F2 of line RG item K10d): a misspelt key would read as absent.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "-taxid_list is not an argument of the program")]
+fn a_misspelt_key_read_by_its_bytes_is_caught() {
+    let args = parse_words("blastdb_aliastool", &["-gi_file_in", "x.txt"]).unwrap();
+    let _ = args.bytes("taxid_list");
 }

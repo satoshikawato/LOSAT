@@ -573,7 +573,7 @@ pub(super) fn pssm_traceback(
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     pool: &crate::utils::threading::SearchPool<'_>,
-    redone: &dyn Fn(&[crate::algorithm::blastp::hsp::BlastCompoHeap]),
+    redone: &dyn Fn(&[crate::algorithm::blastp::hsp::BlastCompoHeap]) -> anyhow::Result<()>,
     sorts_results: bool,
 ) -> Result<Vec<Option<BlastpHitList>>> {
     let psi = args
@@ -660,7 +660,7 @@ fn pssm_redo(
     link: Option<redo1::RedoLink>,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
-    redone: &dyn Fn(&[crate::algorithm::blastp::hsp::BlastCompoHeap]),
+    redone: &dyn Fn(&[crate::algorithm::blastp::hsp::BlastCompoHeap]) -> anyhow::Result<()>,
 ) -> Result<Vec<Option<BlastpHitList>>> {
     let has_lists = preliminary_hit_lists
         .iter()

@@ -148,7 +148,7 @@ pub(crate) const DEFAULT_PROTOCOL: &[u8] = b"https:";
 
 /// The line length of NCBI's prolog (`kFormatLineLength`), at which the references are wrapped.
 ///
-/// NCBI reference (598d8ae6): c++/include/algo/blast/format/blastfmtutil.hpp:57
+/// NCBI reference (598d8ae6): c++/include/algo/blast/format/blast_format.hpp:86
 const FORMAT_LINE_LENGTH: usize = 68;
 
 /// `CBlastFormatUtil::BlastPrintVersionInfo`: `program` in upper case and `version`

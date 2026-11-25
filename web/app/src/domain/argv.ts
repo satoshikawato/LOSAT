@@ -12,6 +12,8 @@ export const RESERVED_FLAGS: readonly string[] = Object.freeze(['-query', '-subj
 /** The CLI's database options: `-db` and the filters of a database search. */
 export const DATABASE_FLAGS: readonly string[] = Object.freeze([
   '-db',
+  '-gilist',
+  '-negative_gilist',
   '-seqidlist',
   '-negative_seqidlist',
   '-taxids',
@@ -20,6 +22,15 @@ export const DATABASE_FLAGS: readonly string[] = Object.freeze([
   '-negative_taxidlist',
   '-no_taxid_expansion',
 ]);
+
+/**
+ * The database IPG filters (`-ipglist`, `-negative_ipglist`): filters of a protein database
+ * search that the CLI of the modes of DATABASE_IPG_PROGRAMS has.
+ */
+export const DATABASE_IPG_FLAGS: readonly string[] = Object.freeze(['-ipglist', '-negative_ipglist']);
+
+/** The modes whose CLI has the database IPG filters (protein database searches: BLASTP and BLASTX). */
+export const DATABASE_IPG_PROGRAMS: readonly ProgramId[] = Object.freeze(['blastp', 'blastx']);
 
 /**
  * The database masks (`-db_soft_mask`, `-db_hard_mask`): filters of a database search that the
@@ -49,7 +60,11 @@ function refusedWord(program: ProgramId, word: string): string | undefined {
   if (RESERVED_FLAGS.includes(flag) || (flag === '-mt_mode' && MT_MODE_PROGRAMS.includes(program))) return `${flag} is managed by LOSAT`;
   if (flag === '-db') return '-db (a database search) is not supported in the browser yet';
   if (program === 'blastn' && flag === '-filtering_db') return '-filtering_db (a BLAST database of repeats) is not supported in the browser yet';
-  if (DATABASE_FLAGS.includes(flag) || (DATABASE_MASK_PROGRAMS.includes(program) && DATABASE_MASK_FLAGS.includes(flag))) {
+  if (
+    DATABASE_FLAGS.includes(flag) ||
+    (DATABASE_MASK_PROGRAMS.includes(program) && DATABASE_MASK_FLAGS.includes(flag)) ||
+    (DATABASE_IPG_PROGRAMS.includes(program) && DATABASE_IPG_FLAGS.includes(flag))
+  ) {
     return `${flag} (a database search filter) is not supported in the browser yet`;
   }
   return undefined;
@@ -260,8 +275,25 @@ export function optionNames(
   });
 }
 
-/** The value of an option in an argv (the word after its last occurrence), or undefined where it is not given. */
+/**
+ * The value of an option in an argv as the engine reads it (NCBI's reader takes `-flag value` and
+ * `-flag=value`): the word after its last occurrence, or the text after `=` where that occurrence is
+ * `-flag=value`; undefined where it is not given.
+ */
 export function optionValue(argv: readonly string[], flag: string): string | undefined {
-  const at = argv.lastIndexOf(flag);
-  return at < 0 || at + 1 >= argv.length ? undefined : argv[at + 1];
+  for (let at = argv.length - 1; at >= 0; at--) {
+    const word = argv[at]!;
+    if (word === flag) return argv[at + 1];
+    if (word.startsWith(`${flag}=`)) return word.slice(flag.length + 1);
+  }
+  return undefined;
+}
+
+/**
+ * The task that the engine runs for an argv: its -task (`-task value` or `-task=value`), else the
+ * default task of the program's options (`describe`'s `default` of -task); undefined for a program
+ * without -task, and where the options are unknown and the argv gives none.
+ */
+export function runTask(argv: readonly string[], options: ReadonlyArray<{ readonly flag: string; readonly defaultValue?: string }>): string | undefined {
+  return optionValue(argv, '-task') ?? options.find((option) => option.flag === '-task')?.defaultValue;
 }

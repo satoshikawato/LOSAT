@@ -37,7 +37,7 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 - `deltablast` writes `0`, `6` and `7`, with `6` and `7` taking a custom field list. Its report shows each round, as `psiblast`'s does.
 - `tblastn` with `-in_pssm` writes `0` to `10` and `20`.
 
-`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` and `makeprofiledb` have their own formats, listed on their pages.
+`rpsbproc` is not a search: it writes its own tab-delimited report (see [rpsbproc](programs/rpsbproc.md)). `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool` and `blastdbcheck` have their own formats, listed on their pages.
 
 ## Pairwise and query-anchored text (0 to 4)
 
@@ -45,7 +45,7 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 
 `-num_descriptions`, `-num_alignments`, `-line_length`, `-sorthits` and `-sorthsps` shape these formats. For formats above `4` they are ignored with a warning, as in NCBI.
 
-With `-html`, `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` write format `0` as the HTML page that NCBI BLAST+ writes: a sequence id with an accession links to its record at NCBI. Formats `1` to `4` with `-html` are not supported yet.
+With `-html`, `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `rpsblast` and `rpstblastn` write formats `0` to `4` as the HTML page that NCBI BLAST+ writes: a sequence id with an accession links to its record at NCBI. Format `18` is written as NCBI's HTML too (see below); the other formats are the same as without `-html`.
 
 ## Tabular and custom fields (6, 7, 10, 20)
 

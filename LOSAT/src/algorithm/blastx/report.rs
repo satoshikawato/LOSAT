@@ -7,7 +7,6 @@ use crate::algorithm::tblastx::report::display_codon;
 use crate::{common::GapEditOp, report::query_warnings::EMPTY_DATABASE_MESSAGE};
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
 use super::empty_rows::SubjectLoc;
-use crate::cli::NativeError;
 use crate::report::query_anchored::MaskSeek;
 use crate::utils::matrix::protein_display_score;
 use anyhow::{ensure, Result};
@@ -536,7 +535,8 @@ impl ShownSubjects<'_> {
 /// already. `stops`: the run stops after this batch (a later batch fails before its search), so
 /// a document that holds each report back never writes the last query's
 /// (`blast_xml::written_queries`). `xml_matrix`: where the run's XML formats fail for a matrix
-/// name NCBI's XML does not know (`blast_xml::xml_matrix_failure`, decided once for the run).
+/// name NCBI's XML does not know (`blast_xml::xml_matrix_failure`, decided once for the run, at the
+/// run's query of `QueryScopes::xml_failing_query`).
 /// `pool`: the run's pool where no search runs on it while the batch is written
 /// (`native::BatchRender`), whose threads format the pairwise reports (`x_pairwise_par::write`).
 pub(crate) fn render_queries(
@@ -550,9 +550,10 @@ pub(crate) fn render_queries(
     queries_before: usize,
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
-    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
+    sort_lists(batches, SubjectLoc::of(shown));
     render_queries_with(
         writer,
         stderr,
@@ -590,17 +591,15 @@ pub(super) struct LocalReport<'a, 'p> {
     pub html_posts: Option<&'a mut dyn Write>,
 }
 
-/// Sorts the HSPs of each list of `batches` by e-value, the order of every report: NCBI sorts each
-/// list's HSPs, on their own ends, before it makes their Seq-aligns (`Hsp::seqalign_ends`).
+/// Puts each batch of `batches`, whose subjects are `loc`'s, in the order of every report
+/// (`BatchResults::put_in_report_order`: sorted by e-value, `-subject`'s HSPs mapped, once).
+/// Each batch's report calls it before any format reads the lists (`render_queries`, the
+/// archive's `native::ArchiveBatch::write`, `run_local`'s batch).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
-pub(super) fn sort_lists(batches: &mut [BatchResults]) {
+pub(super) fn sort_lists(batches: &mut [BatchResults], loc: SubjectLoc) {
     for batch in batches.iter_mut() {
-        for lists in &mut batch.queries {
-            for list in lists {
-                list.sort_evalue();
-            }
-        }
+        batch.put_in_report_order(loc);
     }
 }
 
@@ -657,7 +656,8 @@ fn check_failed_lookups(
     Ok(())
 }
 
-/// `render_queries`, with what `run_local` adds (`local`).
+/// `render_queries`, with what `run_local` adds (`local`), of `batches` whose lists are in the
+/// order of the reports (`sort_lists`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_queries_with(
     writer: &mut crate::cli::NcbiOstream<'_>,
@@ -670,11 +670,10 @@ pub(super) fn render_queries_with(
     queries_before: usize,
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
-    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
-    sort_lists(batches);
     let (probe, first_hsp, made_hits, mut refusal, html_posts) = match local {
         Some(local) => (
             local.probe,
@@ -720,10 +719,9 @@ pub(super) fn render_queries_with(
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-287 (cited at
     // `native::reported_batch`)
     // `-subject`'s prefetch before the batch's reports, as `-db`'s (`native::batch_prefetch`): a
-    // subject's Seq-align whose empty rows the mapper leaves makes it write its warning (a gapped
-    // search has no HSP of length 0).
-    if !options.gapped
-        && SubjectLoc::of(shown) == SubjectLoc::Interval
+    // subject's Seq-align whose empty rows or remaining leading subject gap the mapper leaves
+    // makes it write its warning.
+    if SubjectLoc::of(shown) == SubjectLoc::Interval
         && super::native::batch_prefetch(batches, options, SubjectLoc::Interval).fails
     {
         stderr.write_all(&crate::algorithm::common::database::prefetch_warning(
@@ -736,7 +734,7 @@ pub(super) fn render_queries_with(
             first_hsp, pool, html_posts,
         );
     }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1441
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1444
     // BLAST XML (outfmt 5): the Iterations of the batch's queries; the header comes with the
     // first query of the run and the end of the document with the epilog. The XML2 and JSON
     // documents (outfmt 15 and 16) are the reports of the batch's queries through the run's
@@ -844,7 +842,7 @@ pub(super) fn render_queries_with(
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1578
 #[allow(clippy::too_many_arguments)]
 fn write_pairwise(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     stderr: &mut dyn Write,
     options: &ResolvedOptions,
     queries: &[FastaRecord],
@@ -1117,36 +1115,8 @@ fn write_pairwise(
             ShownSubjects::Database { reported, .. } => reported.loads(),
         },
     )
-    .map_err(empty_rows_stop)?;
+    .map_err(crate::report::pairwise::empty_rows_stop)?;
     Ok(())
-}
-
-/// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0 or at a
-/// row that starts with a gap (`EmptyRowsStop`) is NCBI's exception, `CSeq_align::GetSeqRange`'s
-/// where the sorts or the description table read such a row (after the query's `Length=`;
-/// `empty_rows::row_range_exception`), `CreateDensegFromStdseg` where they or
-/// `-subject`'s alignment section make a Dense-seg of the Seq-loc mapper's rows, or LOSAT's
-/// refusal of a query-anchored section whose merge NCBI frees a segment in (before the call's
-/// first byte); the exception of a subject's load that ends the run (`cli::NativeError::of_writer`,
-/// `x_pairwise_par::alignment_end`); a write error stays.
-fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
-    use crate::report::pairwise::EmptyRowsStop;
-    match error
-        .get_ref()
-        .and_then(|e| e.downcast_ref::<EmptyRowsStop>())
-    {
-        Some(EmptyRowsStop::RowRange(error)) => {
-            NativeError::exception(&super::empty_rows::row_range_exception(*error)).into()
-        }
-        Some(EmptyRowsStop::StdSegLengths) => {
-            NativeError::exception(&super::empty_rows::std_seg_lengths_not_accurate()).into()
-        }
-        Some(EmptyRowsStop::MergeFreesSegment) => super::empty_rows::EmptyRowsRefusal(
-            super::empty_rows::UNPORTED_ANCHORED_FREE.to_string(),
-        )
-        .into(),
-        None => NativeError::of_writer(error),
-    }
 }
 
 /// The hits of the HSPs that the reports of `batches` show (`has_seqalign`), in the order of the
@@ -1456,7 +1426,7 @@ fn pairwise_metadata(
 /// `-html` references where `query_warnings::html_posts_sink` sends them: `html_posts`, else
 /// `diagnostics`.
 pub(crate) fn write_prolog(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
     html_posts: Option<&mut dyn Write>,
     options: &ResolvedOptions,
@@ -1494,14 +1464,14 @@ pub(crate) fn write_prolog(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2223-2245
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2264-2288
 pub(crate) fn write_epilog(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     queries: usize,
     xml2: Option<&mut super::blast_xml::RunXml2>,
-    xml_matrix: Option<crate::report::blast_xml::matrix::XmlMatrixFailure>,
+    xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2204-2212 (cited at
     // `blast_xml::matrix::XmlMatrixFailure`)
@@ -1570,7 +1540,7 @@ pub(crate) fn write_epilog(
         writeln!(writer, "# BLAST processed {queries} queries")?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-        writer.flush().map_err(TabularFlushError)?;
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -1617,27 +1587,6 @@ pub(super) fn query_warning(
     bytes.push(b'\n');
     bytes
 }
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-pub(super) fn tabular_io_error(error: anyhow::Error) -> anyhow::Error {
-    match error.downcast::<std::io::Error>() {
-        Ok(error) => TabularFlushError(error).into(),
-        Err(error) => error,
-    }
-}
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:118-119
-#[derive(Debug)]
-pub(crate) struct TabularFlushError(pub std::io::Error);
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-impl std::fmt::Display for TabularFlushError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-impl std::error::Error for TabularFlushError {}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:123-135
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1036-1042

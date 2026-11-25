@@ -244,6 +244,33 @@ pub(crate) struct PssmAlignment<'a> {
     pub(crate) ops: Option<&'a [GapEditOp]>,
 }
 
+impl<'a> PssmAlignment<'a> {
+    /// The Seq-align of the BLASTP HSP `hsp` (1-based ends), whose query starts `q_shift` letters
+    /// into the query's record (`-query_loc`).
+    pub(crate) fn of_hsp(
+        hsp: &'a crate::algorithm::blastp::hsp::BlastpHsp,
+        q_shift: usize,
+    ) -> Self {
+        PssmAlignment {
+            subject: hsp.s_idx,
+            e_value: crate::report::serial::seqalign::seqalign_evalue(hsp.e_value),
+            q_start: hsp.q_start - 1 + q_shift,
+            s_start: hsp.s_start - 1,
+            q_length: hsp.q_end + 1 - hsp.q_start,
+            ops: hsp.gap_info.as_deref(),
+        }
+    }
+
+    /// The fewest letters of a Bioseq from which NCBI's read of the Seq-align's subject range
+    /// takes letters (`x_GetSubjectSequence`'s `CSeqVector` of that range, cited at `input_msa`):
+    /// the end of the range; a shorter one throws, and the read gets none. The one rule of
+    /// `input_msa` and of LOSAT's refusal of a read held by another sequence
+    /// (`ListedTitles::check_pssm_holds` of BLASTP; review 5 of line DBID pfoff-4, H1).
+    pub(crate) fn subject_end(&self) -> usize {
+        self.s_start + subject_span(self)
+    }
+}
+
 /// The Karlin-Altschul blocks of the round's ancillary data (`CBlastAncillaryData`, the blocks of
 /// the query's context): `kbp_std`, `kbp_gap`, `kbp_psi` and `kbp_gap_psi`. In the first round
 /// the PSI blocks are copies of the standard ones (`kbp_psi` and `kbp_gap_psi` of the search's
@@ -734,7 +761,7 @@ fn input_msa(
                 );
             };
             match subject(alignment.subject)?
-                .filter(|letters| letters.len() >= alignment.s_start + subject_span(alignment))
+                .filter(|letters| letters.len() >= alignment.subject_end())
             {
                 Some(letters) => process_denseg(row, alignment, &letters),
                 None => {

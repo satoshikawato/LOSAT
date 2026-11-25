@@ -27,8 +27,8 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::common::GapEditOp;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, hsp_coverage, taxdb_warning_line, union_length, TabularHsp, TabularKind,
-    TabularNames, TabularQuery, TabularRows, TabularSpec, TabularWriter,
+    coverage_percent, taxdb_warning_line, union_length, QueryCoveragePerHsp, TabularHsp,
+    TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
 use crate::utils::lower_bound::lower_bound_by;
 
@@ -37,8 +37,10 @@ const PROGRAM: &str = "BLASTN";
 /// What the report needs besides the final hit lists.
 pub(crate) struct BlastnTabular<'a> {
     pub spec: &'a TabularSpec,
-    /// The queries of this call (their searched letters, which the rows read).
+    /// The queries of this call.
     pub queries: &'a [FastaRecord],
+    /// The records whose letters the rows read (`pairwise::QueryRecords`).
+    pub query_records: super::pairwise::QueryRecords<'a>,
     /// By query: the shown id (the default outfmt 6 query id), the title (outfmt 7's
     /// `# Query:` line) and the searched length.
     pub query_ids: &'a [Arc<[u8]>],
@@ -46,6 +48,9 @@ pub(crate) struct BlastnTabular<'a> {
     pub searched_lengths: &'a [usize],
     /// The length of the `-query_loc` range as given (NCBI's `m_QueryRange`), `None` without it.
     pub range_length: Option<usize>,
+    /// An ungapped search (`-ungapped`), whose Seq-aligns are Dense-diags (`qcovhsp`,
+    /// `report::tabular::QueryCoveragePerHsp`).
+    pub ungapped: bool,
     /// Outfmt 7's `# Database:` text.
     pub database: &'a str,
     pub subjects: TabularSubjects<'a>,
@@ -98,7 +103,7 @@ pub(crate) fn write_tabular_prolog_warning(
 pub(crate) fn write_blastn_tabular(
     tab: &BlastnTabular<'_>,
     hit_lists: &[Option<BlastnHitList>],
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     mut warnings: Option<&mut QueryWarnings<'_>>,
     mut probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
@@ -173,6 +178,8 @@ pub(crate) fn write_blastn_tabular(
         }
         let Some(hit_list) = hit_list else {
             writer.write_all(&buf)?;
+            // `~CBlastTabularInfo` of the query's report flushes the stream.
+            writer.ncbi_flush()?;
             continue;
         };
         // The query's formatter (`TabularRows`).
@@ -242,6 +249,13 @@ pub(crate) fn write_blastn_tabular(
                     }
                 }));
             }
+            // The subject's `qcovhsp` rule: its rows only divide.
+            let qcovhsp = QueryCoveragePerHsp::of_subject(
+                tab.ungapped,
+                hsp_list.hsps.len(),
+                searched_length as i32,
+                query_length as i32,
+            );
             for hsp in &hsp_list.hsps {
                 // The texts of the row's lookups of the taxonomy database (`x_SetTaxInfoAll`,
                 // `x_SetTaxInfo`) follow the rows before it.
@@ -263,16 +277,17 @@ pub(crate) fn write_blastn_tabular(
                 if needs.rows && !subject.throws() {
                     xml_rows_into(
                         hsp,
-                        tab.queries,
+                        tab.query_records,
                         tab.letters,
                         &mut query_row,
                         &mut subject_row,
                     )
                     .context("BLASTN tabular rows of a final HSP")?;
                 }
+                let span = (hsp.q_end - hsp.q_start + 1) as i32;
                 let row = tabular_hsp(
                     hsp,
-                    searched_length,
+                    qcovhsp.of_hsp(span, span),
                     needs
                         .rows
                         .then_some((query_row.as_slice(), subject_row.as_slice())),
@@ -295,17 +310,19 @@ pub(crate) fn write_blastn_tabular(
             }
         }
         writer.write_all(&buf)?;
+        writer.ncbi_flush()?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236
     if let (TabularKind::Commented, Some(num_queries)) = (spec.kind, tab.epilog) {
         warn(&mut *writer, warnings)?;
         table.epilog(writer, num_queries)?;
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
 
 /// The values of one HSP's row: its Seq-align's coordinates, scores and lengths (`SetFields`),
-/// `rows` when a field shows them.
+/// its `qcovhsp` (`report::tabular::QueryCoveragePerHsp`), `rows` when a field shows them.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1061-1091
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1100-1121
@@ -313,7 +330,7 @@ pub(crate) fn write_blastn_tabular(
 /// identities are the default row's (`write_hsp_rows`).
 fn tabular_hsp<'r>(
     hsp: &BlastnHsp,
-    searched_length: usize,
+    qcovhsp: i32,
     rows: Option<(&'r [u8], &'r [u8])>,
 ) -> TabularHsp<'r> {
     let gaps = hsp.gap_info.as_deref().map_or(0, |ops| {
@@ -337,10 +354,13 @@ fn tabular_hsp<'r>(
         q_frame: 1,
         s_frame: if hsp.s_start > hsp.s_end { -1 } else { 1 },
         rows,
-        // `Blast_HSPGetQueryCoverage` of the HSP's context, which has the searched length.
-        end_gaps: true,
-        stored_gaps: [&[], &[]],
-        qcovhsp: hsp_coverage((hsp.q_end - hsp.q_start + 1) as i32, searched_length as i32),
+        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:288-297
+        // A BLASTN alignment (X-drop or greedy) starts and ends with a substitution, so its rows
+        // have no end gaps: a `-` at a row's end fills a segment past the query's end (an HSP that
+        // NCBI keeps outside its query context, `pairwise::context_letters`), the gap character
+        // (`TabularHsp::ops`: no script).
+        ops: &[],
+        qcovhsp,
     }
 }
 

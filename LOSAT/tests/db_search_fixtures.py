@@ -42,10 +42,10 @@ every machine: NCBI writes the `-db` text into the `[LOCAL_ID] TOOL_URL` link (`
 put the checkout's path into the frozen bytes. Not taken: absolute paths (bytes of one machine); paths relative to
 DIR in the cells (every path of a row is relative to LOSAT/, and every reader of the cells counts on it); a temporary
 directory with copies of the files (absolute paths again); a new column (a new header for every file and every
-reader). A `cwd=` row whose query is a PSSM (`pssm:`, `pssm-gz:`) or standard input (`stdin:`), whose `db` cell is
-`rps-gz:`, whose `files` column is set, or whose `extra_args` names a file under `tests/` (an argument that would
-not be rebased) is refused (`run_dir`; such rows are not needed, and the mechanism stays small). `freeze` and `check`
-refuse to start when LOSAT/.ncbirc exists (NCBI's application and formatter would read it in every row).
+reader). A `cwd=` row whose query is a PSSM (`pssm:`, `pssm-gz:`) or standard input (`stdin:`), whose `files` column
+is set, or whose `extra_args` names a file under `tests/` (an argument that would not be rebased) is refused
+(`run_dir`; such rows are not needed, and the mechanism stays small). An `rps-gz:` db cell is taken: its names are
+databases of the inflated directory, not paths. `freeze` and `check` refuse to start when LOSAT/.ncbirc exists (NCBI's application and formatter would read it in every row).
 
 - kind `ncbi`: the expectation is NCBI's stdout, stderr and exit status (`rc`) of a run with
   `-num_threads 1`, every byte, nothing normalised. The frozen bytes are
@@ -61,7 +61,9 @@ refuse to start when LOSAT/.ncbirc exists (NCBI's application and formatter woul
   NCBI faults; exception 19: a hit list size whose preliminary size passes NCBI's Int4, with the near size
   1073741798; exception 23: BLASTX `-use_sw_tback`'s heap test in e-value mode past NCBI's
   array of a batch's heaps, with the near input that follows each query batch by queries without a hit, where
-  they add no byte: outfmt 6, or a batch that fails and writes nothing). The row has no
+  they add no byte: outfmt 6, or a batch that fails and writes nothing; exception 29: `-db_hard_mask` with
+  overlapping masks after which NCBI's word hits reach diagonal entries of another subject, with the near database
+  that holds a spacer of `X` between the two subjects under an alias with the database's statistics). The row has no
   frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row`). ROW_ID is
   an `ncbi` row of the same outfmt without a near row of its own, and an `ncbi` row takes all of its bytes.
 - a `ncbi` row whose `covers` cell has a part ` | ncbi-valgrind`: the frozen bytes are NCBI's run under valgrind
@@ -76,6 +78,21 @@ refuse to start when LOSAT/.ncbirc exists (NCBI's application and formatter woul
   and with the default 8 MiB a PSSM whose values nest some thousands of levels deep crashes it (SIGSEGV) at a depth
   that the stack limit, the environment and the stack's random start move; its output with a stack large enough
   is the expectation (PD-LOSAT-NCBI-DEFECTS exception 15). `check` runs LOSAT with the caller's limit.
+- a `ncbi` row whose `covers` cell has `device: MODE` (Linux only; line RG item T6a): the run's report goes to a
+  device that fails, and the expectation is NCBI's exit status and stderr and the bytes that reached the device,
+  frozen as <row_id>.out. MODE `stdout-full`: standard output is /dev/full (nothing reaches it); `out-full`:
+  `-out /dev/full`; `fsize=N`: `-out` a file of a temporary directory under `RLIMIT_FSIZE` N with SIGXFSZ ignored
+  (the write past N bytes fails with EFBIG, as `prlimit --fsize`), whose bytes are frozen; `check` limits LOSAT's
+  file to N plus the bytes that LOSAT's words add to those bytes (`device_growth`: LOSAT's version statement,
+  `BLASTN (LOSAT 0.2.0)` where NCBI's is `BLASTN 2.17.0+`, moves the same point of the report that far). Standard
+  output must be empty in the last two (`run_on_device`). `stdout-fsize=N`: standard output is that limited file
+  (no `-out`); `stdout-stderr-fsize=N`: standard output and standard error are that one file (`> file 2>&1`);
+  `stderr-full`: standard error is /dev/full (standard output is the report); `stdout-closed`, `stderr-closed`: a
+  pipe whose reader closed before the start, LOSAT's only (NCBI is ended by SIGPIPE), whose expectation is the
+  `ncbi-near` row of the full device (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 5). `check --library` skips these rows (`library-skip`): the library writes
+  no standard output or standard error of NCBI's, and the `-out` file of its `run_to_file` (the command line's stream,
+  `report::ostream::ReportStream::of_library_file`) is checked against the command line in `tests/library_api.rs`;
+  outside Linux they are `device-skip`.
 - a `ncbi` row whose `covers` cell has `ncbi-copies: PATH [NAME=VALUE ...]` (up to a ` | ` or the end; a "copy row",
   `copies_cell`): the expectation is made from NCBI's run on the oracle query file PATH (relative to LOSAT/) in place
   of the row's query file. In PATH each query that ends a query batch of LOSAT's run (`query_batches`) is followed by
@@ -159,8 +176,11 @@ line), writes the same lines to --out, and exits 0 only when every row is `same`
 `--outfmts 5,13` keeps only the rows whose output format (the number that starts the `outfmt` cell) is one of
 those numbers (`check_wasm_threading.py` runs blastx's XML, XML2 and JSON rows through the WASI commands so).
 With `--library` BIN is `examples/library_command_line`, the same search through the library API: a
-failure's exit status counts as any other failure's, a rejection row writes nothing to stdout there
-too (the library holds its output where the command line holds it), a row whose query the reader refuses is
+failure's exit status counts as any other failure's, a rejection row writes there what the command line
+writes before its refusal (the library writes to its writers as the command line does, and what was
+written before an error stays, `api::run`: nothing for most rows, the prolog for blastx's `db.x2g.*`
+rows, the reports of the query batches before for the refusals at a later query batch, as tblastn's
+`db.xs.tblastn.bat.*`), a row whose query the reader refuses is
 `library-input-error` when the message is the command line's (the library reads the whole query
 before it searches, so the reports of the batches before the error do not exist; so is a rejection
 row whose query has a reader error after the batch that the command line refuses). psiblast's rounds
@@ -177,7 +197,8 @@ formatter, a `cwd=` token or a token of `PROCESS_SETTINGS` (FMTCFG, NCBI, GETURL
 (LOSAT/src/api/mod.rs:78-86: the variables of the command line's switches and diagnostics, and for a database search
 what finds a database, `BLASTDB` and `.ncbirc`, and the batch and archive variables); the formatter's files and
 variables of `-html` (the run directory's `.ncbirc` and FMTCFG file, `$NCBI/<name>`, GETURL_DEBUG) are not among
-them, and `-html` reaches the library's host, LOSAT Web, in T4b (decision T4-1 of line RG).
+them, and the library's host, LOSAT Web, runs `-html` (outfmt 0 to 4 and 18) with an empty environment and a run
+directory of the files that the argv names (docs/web/abi_v2.md §3), so no Web run has them.
 psiblast's alignment queries
 (`-in_msa`, a query cell `msa:PATH`, the library's `Inputs::msa`) run through the library as on the command line.
 `--ncbi-bin` and `--losat` are taken relative to the caller's directory (made absolute before a run starts in
@@ -212,7 +233,8 @@ COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "
 PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx", "psiblast", "deltablast", "rpsblast", "rpstblastn")
 # The caller's variables that `clean_env` drops besides NCBI*, BLAST* and LOSAT_* (each changes NCBI's result).
 NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY", "ARCHIVE_FORMAT",
-            "PRE_FETCH_SEQS_LIMIT", "ADAPTIVE_CBS", "CTOOLKIT_COMPATIBLE", "FMTCFG", "GETURL_DEBUG")
+            "PRE_FETCH_SEQS_LIMIT", "ADAPTIVE_CBS", "CTOOLKIT_COMPATIBLE", "FMTCFG", "GETURL_DEBUG",
+            "SERIAL_VERIFY_DATA_WRITE")
 TIMEOUT = 600
 # The `NAME=VALUE` tokens of `extra_args` that are environment variables of both programs: BLASTDB
 # (the directory of a `taxdb.bti`), the three that cut a query file into batches and chunks, and
@@ -220,7 +242,8 @@ TIMEOUT = 600
 # (the number of Seq-aligns above which NCBI's formatter reads the reported sequences one by one), and
 # BL2SEQ_LEGACY (read for -subject only; a -db search ignores it), OLD_FSC (no Gumbel block, any value), and
 # ADAPTIVE_CBS (the larger preliminary hit list and its trim with composition-based statistics, any value),
-# and those of `PROCESS_SETTINGS`.
+# SERIAL_VERIFY_DATA_WRITE (whether NCBI's object streams check what they write: a list element stated as NULL,
+# the XML report's unset iterations; `ncbi_environment::WriteVerification`), and those of `PROCESS_SETTINGS`.
 # The variables of the `-html` formatter's configuration and of NCBI's registry files: FMTCFG (the name of the
 # formatter's configuration file in the run directory, default `.ncbirc`), NCBI (the directory of `$NCBI/<name>`
 # when the run directory has no such file, and of `$NCBI/.ncbirc`), GETURL_DEBUG (a `REGISTRY: <file>` line on
@@ -230,7 +253,7 @@ TIMEOUT = 600
 # of the file it reads to standard error.)
 PROCESS_SETTINGS = ("FMTCFG", "NCBI", "GETURL_DEBUG", "NCBI_DONT_USE_NCBIRC")
 ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "OVERLAP_CHUNK_SIZE", "ARCHIVE_FORMAT", "PRE_FETCH_SEQS_LIMIT",
-             "BL2SEQ_LEGACY", "OLD_FSC", "ADAPTIVE_CBS", *PROCESS_SETTINGS)
+             "BL2SEQ_LEGACY", "OLD_FSC", "ADAPTIVE_CBS", "SERIAL_VERIFY_DATA_WRITE", *PROCESS_SETTINGS)
 # The tokens whose value is a path relative to LOSAT/, given to the programs relative to the run directory of a
 # `cwd=` row (`rebased`). FMTCFG's value is a name in the run directory, as NCBI reads it, and stays as it is.
 PATH_ENV_NAMES = ("BLASTDB", "NCBI")
@@ -353,9 +376,10 @@ def is_cwd_token(token: str) -> bool:
 
 def run_dir(row: dict[str, str]) -> str | None:
     """DIR of the row's token `cwd=DIR` (relative to LOSAT/), or None: the row runs in LOSAT/. Refuses a second
-    token, an empty or absolute DIR, and the rows the mechanism does not take: a PSSM, alignment, standard-input or `none:` query, an
-    `rps-gz:` db cell, a `files` column, an argument of `extra_args` that names a file under `tests/` (it would
-    reach the program relative to LOSAT/ from DIR)."""
+    token, an empty or absolute DIR, and the rows the mechanism does not take: a PSSM, alignment, standard-input or `none:` query, a
+    `files` column, an argument of `extra_args` that names a file under `tests/` (it would
+    reach the program relative to LOSAT/ from DIR). An `rps-gz:` db cell is taken: its names are databases of the
+    inflated directory (`rps_env`), not paths."""
     tokens = extra_tokens(row)
     dirs = [token.removeprefix(CWD_TOKEN) for token in tokens if is_cwd_token(token)]
     if not dirs:
@@ -363,8 +387,7 @@ def run_dir(row: dict[str, str]) -> str | None:
     where = row.get("row_id", "?")
     if len(dirs) > 1 or not dirs[0] or os.path.isabs(dirs[0]):
         raise SystemExit(f"{where}: one token cwd=DIR, DIR relative to LOSAT/ (got {dirs})")
-    if row["query"].startswith(("pssm:", "pssm-gz:", "msa:", "none:", *STDIN_PREFIXES)) \
-            or rps_cell(row["db"]) is not None or row.get("files"):
+    if row["query"].startswith(("pssm:", "pssm-gz:", "msa:", "none:", *STDIN_PREFIXES)) or row.get("files"):
         raise SystemExit(f"{where}: a cwd= row has a query file, a db or subject: cell and no files column")
     named = [token for token in tokens if token.startswith("tests/")]
     if named:
@@ -470,6 +493,11 @@ def inflate_rps(cell: str, token: bool = False) -> Path:
 def rps_dir_token(row: dict[str, str]) -> bool:
     """Whether the row's outputs name the database's directory, frozen as the token `{db_dir}`."""
     return "path: {db_dir}" in row["covers"]
+
+
+def cwd_dir_token(row: dict[str, str]) -> bool:
+    """Whether the row's outputs name its run directory (`row_cwd`), frozen as the token `{cwd}`."""
+    return "path: {cwd}" in row["covers"]
 
 
 def rps_env(row: dict[str, str], env: dict[str, str], db_dir: Path) -> dict[str, str]:
@@ -1069,6 +1097,104 @@ def ncbi_stack(row: dict[str, str]) -> Callable[[], None] | None:
     return unlimited
 
 
+def device_mode(row: dict[str, str]) -> str | None:
+    """`device: MODE` in the covers cell of `row` (the module's docstring), or None."""
+    _, marker, rest = row["covers"].partition("device: ")
+    return rest.split(" | ")[0].split()[0] if marker else None
+
+
+def run_on_device(row: dict[str, str], command: list[str], env: dict[str, str],
+                  preexec: Callable[[], None] | None = None, growth: int = 0) -> subprocess.CompletedProcess:
+    """The run of `command` with its report on the failing device of `row` (`device_mode`): its `stdout` is the bytes
+    that reached the device (the file of `fsize=N`, else none), or a marker and the bytes where the run wrote to its
+    standard output although the device is `-out`. `growth`: the bytes that LOSAT's words add to the bytes NCBI's run
+    left on the `fsize=N` device (`device_growth`), by which LOSAT's limit is N + growth."""
+    import resource  # POSIX: the device rows run on Linux
+    import signal
+
+    mode = device_mode(row)
+    if mode == "stdout-full":
+        with open("/dev/full", "wb") as full:
+            run = subprocess.run(command, cwd=ENGINE, stdout=full, stderr=subprocess.PIPE, timeout=TIMEOUT,
+                                 env=env, preexec_fn=preexec)
+        run.stdout = b""
+        return run
+    if mode in ("stdout-closed", "stderr-closed"):
+        # A pipe whose reader closed before the start: every write to it fails (EPIPE; LOSAT, whose runtime ignores
+        # SIGPIPE, sees the failed write that the `ncbi-near` row's full device gives NCBI, exception 5).
+        read, write = os.pipe()
+        os.close(read)
+        try:
+            if mode == "stdout-closed":
+                run = subprocess.run(command, cwd=ENGINE, stdout=write, stderr=subprocess.PIPE, timeout=TIMEOUT,
+                                     env=env, preexec_fn=preexec)
+                run.stdout = b""
+            else:
+                run = subprocess.run(command, cwd=ENGINE, stdout=subprocess.PIPE, stderr=write, timeout=TIMEOUT,
+                                     env=env, preexec_fn=preexec)
+                run.stderr = b""
+        finally:
+            os.close(write)
+        return run
+    if mode == "stderr-full":
+        with open("/dev/full", "wb") as full:
+            run = subprocess.run(command, cwd=ENGINE, stdout=subprocess.PIPE, stderr=full, timeout=TIMEOUT,
+                                 env=env, preexec_fn=preexec)
+        run.stderr = b""
+        return run
+    if mode == "out-full":
+        run = subprocess.run([*command, "-out", "/dev/full"], cwd=ENGINE, capture_output=True, timeout=TIMEOUT,
+                             env=env, preexec_fn=preexec)
+        landed = b""
+    elif mode is not None and mode.split("=")[0] in ("fsize", "stdout-fsize", "stdout-stderr-fsize"):
+        kind, _, size = mode.partition("=")
+        limit = int(size) + growth
+        # The limit holds for every file of the process: LOSAT_X_REACH's record (clean_env) would be cut too, and
+        # LOSAT would say so on standard error, so a limited run records no switch paths.
+        env = {k: v for k, v in env.items() if k != "LOSAT_X_REACH"}
+
+        def limited() -> None:
+            if preexec is not None:
+                preexec()
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+
+        with tempfile.TemporaryDirectory(prefix="db_search_device_") as directory:
+            path = Path(directory) / "device.out"
+            if kind == "fsize":
+                run = subprocess.run([*command, "-out", str(path)], cwd=ENGINE, capture_output=True,
+                                     timeout=TIMEOUT, env=env, preexec_fn=limited, restore_signals=False)
+            else:
+                # Standard output (`stdout-fsize`), and standard error with it (`stdout-stderr-fsize`, a shell's
+                # `> file 2>&1`: one open file, one offset), is the limited file.
+                with open(path, "wb") as device:
+                    errors = device if kind == "stdout-stderr-fsize" else subprocess.PIPE
+                    run = subprocess.run(command, cwd=ENGINE, stdout=device, stderr=errors, timeout=TIMEOUT,
+                                         env=env, preexec_fn=limited, restore_signals=False)
+                run.stdout = b""
+                if run.stderr is None:
+                    run.stderr = b""
+            landed = path.read_bytes() if path.exists() else b""
+    else:
+        raise SystemExit(f"{row['row_id']}: unknown device {mode!r}")
+    if run.stdout:
+        landed = b"STANDARD OUTPUT:\n" + run.stdout
+    run.stdout = landed
+    return run
+
+
+def device_growth(row: dict[str, str], landed: bytes, losat_words: Callable[[bytes], bytes]) -> int:
+    """The bytes that LOSAT's words (`losat_words`: the mapping of NCBI's frozen output, AGENTS.md rule 8) add to the
+    bytes that NCBI's run left on the `fsize=N` device of `row` (`landed`, its frozen .out): LOSAT's report states
+    LOSAT's version where NCBI's states `2.17.0+` (`BLASTN (LOSAT 0.2.0)`, `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
+    exception 14), so the same point of the report lies that many bytes further in LOSAT's, and `check` limits
+    LOSAT's file to N plus them: the run fails at the same point of the report as NCBI's, and the bytes on the
+    device are NCBI's in LOSAT's words. 0 for the other devices (nothing reaches them)."""
+    mode = device_mode(row) or ""
+    limited = mode.split("=")[0] in ("fsize", "stdout-fsize", "stdout-stderr-fsize")
+    return len(losat_words(landed)) - len(landed) if limited else 0
+
+
 def format_number(row: dict[str, str]) -> str:
     """The number of the row's output format: the first word of its `outfmt` cell (a custom spec follows it)."""
     return (row["outfmt"].split() or [""])[0]
@@ -1159,25 +1285,34 @@ def freeze(args: argparse.Namespace) -> int:
             xinclude.freeze_pssm(pssms, FROZEN, row["row_id"], xinclude.files_kind(row))
             out = frozen_stdout(row, run.stdout)
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
+        elif device_mode(row):
+            run = run_on_device(row, command, row_env(row, env), ncbi_stack(row))
+            out = run.stdout
+            (FROZEN / f"{row['row_id']}.out").write_bytes(out)
         else:
             run = run_search(command, row, cwd=row_cwd(row), timeout=TIMEOUT, env=row_env(row, env),
                              preexec_fn=ncbi_stack(row))
             refuse_valgrind_messages(row, run.stderr)
             refuse_signal(row, run.returncode)
             out = frozen_stdout(row, run.stdout)
+            if cwd_dir_token(row):
+                out = out.replace(str(row_cwd(row).resolve()).encode(), b"{cwd}")
             (FROZEN / f"{row['row_id']}.out").write_bytes(out)
+        stderr = run.stderr
+        if cwd_dir_token(row):
+            stderr = stderr.replace(str(row_cwd(row).resolve()).encode(), b"{cwd}")
         err = FROZEN / f"{row['row_id']}.err"
-        if run.stderr:
-            err.write_bytes(run.stderr)
+        if stderr:
+            err.write_bytes(stderr)
         else:
             err.unlink(missing_ok=True)
         row.update(rc=str(run.returncode), stdout_sha256=sha256(out), stdout_bytes=str(len(out)),
-                   stderr_sha256=sha256(run.stderr) if run.stderr else "")
+                   stderr_sha256=sha256(stderr) if stderr else "")
         if files:
             row.update(xinclude.observed(written))
         if pssm:
             row.update(xinclude.observed_pssm(pssms, row["row_id"], xinclude.files_kind(row)))
-        print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(out)}\tstderr={len(run.stderr)}"
+        print(f"{row['row_id']}\trc={run.returncode}\tstdout={len(out)}\tstderr={len(stderr)}"
               + (f"\tsides={len(written.sides)}" if files else "")
               + (f"\tpssm_files={len(pssms.files)}" if pssm else ""))
     # The rows whose expectation is a near input's NCBI run (`near_row`) take that row's columns, after it is
@@ -1223,11 +1358,14 @@ def freeze_rps(row: dict[str, str], command: list[str], env: dict[str, str]) -> 
             written = xinclude.run_with_files(command, row["row_id"], row["outfmt"], cwd=row_cwd(row),
                                               timeout=TIMEOUT, env=run_env)
             run = written.run
+        elif device_mode(row):
+            run = run_on_device(row, command, run_env)
         else:
             run = run_search(command, row, cwd=row_cwd(row), timeout=TIMEOUT, env=run_env)
     finally:
         shutil.rmtree(db_dir, ignore_errors=True)
-    refuse_signal(row, run.returncode)
+    if not device_mode(row):
+        refuse_signal(row, run.returncode)
     stdout, stderr = run.stdout, run.stderr
     if rps_dir_token(row):
         stdout = stdout.replace(str(db_dir).encode(), b"{db_dir}")
@@ -1273,8 +1411,9 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     # line RG item F1b-1).
     # A row that sets NCBI's settings of the process for its formatter (`process_settings`: the run directory's
     # `.ncbirc` and FMTCFG file, `$NCBI`, GETURL_DEBUG) is not a library call either: the API's contract
-    # (LOSAT/src/api/mod.rs:78-86) does not name them among what a call reads of its process, and `-html` reaches
-    # the library's host, LOSAT Web, in T4b (decision T4-1 of line RG).
+    # (LOSAT/src/api/mod.rs:78-86) does not name them among what a call reads of its process, and the library's
+    # host, LOSAT Web, runs `-html` with an empty environment and a run directory of the files that the argv names
+    # (docs/web/abi_v2.md §3), so no Web run has them.
     argv = search_argv(row)
     if library and (row["program"] in ("rpsblast", "rpstblastn", "deltablast")
                     or ("-query" in argv and "-in_pssm" in argv)
@@ -1282,23 +1421,32 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
                     or ("-in_msa" not in argv
                         and any(word in xinclude.ALIGNMENT_OPTIONS for word in argv))
                     or "-export_search_strategy" in argv
-                    or query_stdin(row) or process_settings(row)):
+                    or query_stdin(row) or process_settings(row)
+                    or device_mode(row)):
         return "library-skip", ""
+    # The failing devices (/dev/full, RLIMIT_FSIZE with SIGXFSZ ignored) are Linux's.
+    if device_mode(row) and not sys.platform.startswith("linux"):
+        return "device-skip", ""
     if (files or pssm) and query_stdin(row):
         raise SystemExit(f"{row['row_id']}: a row with files reads no query from standard input")
     command = [str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)]
     # An RPS row runs with BLASTDB the inflated database (`inflate_rps`), its files rows as any other.
     db_dir = inflate_rps(row["db"], rps_dir_token(row)) if rps_cell(row["db"]) is not None else None
 
-    def in_losat_words(ncbi: bytes, output: bool = True) -> bytes:
-        """NCBI's frozen bytes in LOSAT's words (AGENTS.md rule 8, `losat_wording`). A row that keeps the
-        database's directory as `{db_dir}` is mapped with this run's directory in the token's place, as
-        NCBI's run wrote it: the mapping re-wraps an ASN.1 text string by its length."""
-        words = losat_wording.losat_output_bytes if output else losat_wording.losat_bytes
-        if db_dir is None or not rps_dir_token(row):
-            return words(ncbi)
-        path = str(db_dir).encode()
-        return words(ncbi.replace(b"{db_dir}", path)).replace(path, b"{db_dir}")
+    def in_losat_words(ncbi: bytes) -> bytes:
+        """NCBI's frozen bytes (standard output or error) in LOSAT's words (AGENTS.md rule 8,
+        `losat_wording.losat_output_bytes`: standard error's posts of a binary archive's stream move with the
+        archive's longer `ident`). A row that keeps the database's directory as `{db_dir}` is mapped with this
+        run's directory in the token's place, as NCBI's run wrote it: the mapping re-wraps an ASN.1 text string
+        by its length."""
+        words = losat_wording.losat_output_bytes
+        if db_dir is not None and rps_dir_token(row):
+            path = str(db_dir).encode()
+            return words(ncbi.replace(b"{db_dir}", path)).replace(path, b"{db_dir}")
+        if cwd_dir_token(row):
+            path = str(row_cwd(row).resolve()).encode()
+            return words(ncbi.replace(b"{cwd}", path)).replace(path, b"{cwd}")
+        return words(ncbi)
 
     run_env = row_env(row, env) if db_dir is None else rps_env(row, env, db_dir)
     try:
@@ -1310,6 +1458,9 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
             pssms = xinclude.run_with_pssm(command, row["row_id"], xinclude.files_kind(row), cwd=row_cwd(row),
                                            env=run_env, timeout=TIMEOUT)
             run = pssms.run
+        elif device_mode(row):
+            landed = (FROZEN / f"{frozen_id(row)}.out").read_bytes()
+            run = run_on_device(row, command, run_env, growth=device_growth(row, landed, in_losat_words))
         else:
             run = run_search(command, row, cwd=row_cwd(row), env=run_env, timeout=TIMEOUT)
     finally:
@@ -1318,6 +1469,10 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     if db_dir is not None and rps_dir_token(row):
         run.stdout = run.stdout.replace(str(db_dir).encode(), b"{db_dir}")
         run.stderr = run.stderr.replace(str(db_dir).encode(), b"{db_dir}")
+    if cwd_dir_token(row):
+        cwd_bytes = str(row_cwd(row).resolve()).encode()
+        run.stdout = run.stdout.replace(cwd_bytes, b"{cwd}")
+        run.stderr = run.stderr.replace(cwd_bytes, b"{cwd}")
     if row["kind"] == "losat-rejection":
         # The library reads the whole query before it searches: a reader error ends the call before
         # the batch that the command line refuses, with the reader's message.
@@ -1327,11 +1482,13 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         problems = []
         if status_differs(run.returncode, int(row["rc"]), library):
             problems.append(f"exit {run.returncode}, expected {row['rc']}")
-        # A refusal follows no byte in either path (the library holds its output where the command
-        # line holds it, BLASTX's XML documents through `blast_xml::documents_may_refuse`); the rows
-        # whose refusal comes after NCBI's reports are psiblast's PSSM file and rounds rows, which the
-        # library skips, and the refusals at a later query batch (`ncbi-near:`), which the library
-        # writes as the command line does.
+        # Both paths write the same bytes before a refusal (the library writes to its writers as the
+        # command line does, BLASTX's XML documents through `blast_xml::documents_may_refuse`, and
+        # keeps what was written before an error, `api::run`): none for most rows; what NCBI wrote
+        # before its failing step for the others, whose stdout cells hold NCBI's frozen stdout or a
+        # near row's (blastx's `db.x2g.*`: the prolog; the refusals at a later query batch, as
+        # tblastn's `db.xs.tblastn.bat.*`: the reports of the query batches before; psiblast's PSSM
+        # file and rounds rows, which the library skips).
         if row["stdout_bytes"]:
             out = expected_stdout(row)
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
@@ -1350,7 +1507,7 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
     err_path = FROZEN / f"{frozen_id(row)}.err"
     err = err_path.read_bytes() if row["stderr_sha256"] else b""
     expected_out_losat = in_losat_words(out)
-    expected_err_losat = in_losat_words(err, output=False)
+    expected_err_losat = in_losat_words(err)
     # The library reads the whole query before it searches: a reader error ends the call there,
     # with the command line's message of it, before the reports of the batches before it.
     if library and run.returncode != 0 and int(row["rc"]) != 0 and run.stdout == b"" \

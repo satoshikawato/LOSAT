@@ -663,6 +663,8 @@ fn test_args_of(task: &str, matrix: Option<&str>) -> ResolvedBlastpArgs {
         app: BlastpApp::Blastp,
         taxdb_setting: None,
         matrix_search: None,
+        write_verification: None,
+        read_verification: Default::default(),
         inclusion_ethresh: None,
         gap_trigger: None,
         sum_stats: false,

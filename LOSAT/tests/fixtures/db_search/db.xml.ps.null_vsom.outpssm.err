@@ -1,0 +1,4 @@
+Error: (802.5) [psiblast] CObjectOStream: error at line 27: PssmWithParameters.pssm.query.seq.annot.E.data.ftable.E.data.variation.somatic-origin.E: cannot write unassigned member NULL element while writing container 
+Error: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrasn.cpp", line 597: Error: (CUnassignedMember::eWrite) ncbi::CObjectOStreamAsn::WriteContainer() - line 27: cannot write unassigned member NULL element while writing container  ( at PssmWithParameters.pssm.query.seq.annot.[].[].data.ftable.[].[].data.variation.somatic-origin.[].[])
+

@@ -3,32 +3,30 @@
 // Costs" Existence: 11 Extension: 1): the select shows the pair that the search uses and
 // writes both fields; its "Other", or a pair outside the list, shows the two fields
 // (ParameterField, inline). A list that the task, the scores or the matrix change gives the row
-// its new default (`setFields`), as NCBI's page does.
+// its new default (`setPair`), as NCBI's page does.
 import { computed, ref, watchEffect } from 'vue';
-import type { DraftState, SearchDraft } from '../application/draft';
-import { knownDefault, pairEntries, pairList, pairValue, writtenValue, type PairRow } from '../domain/parameters';
-import { programById, type ParameterField as Field } from '../domain/programs';
+import { writtenValue, type PairRow } from '../domain/parameters';
+import type { ParameterField as Field } from '../domain/programs';
 import { optionHelp } from './format';
+import type { FormModel } from './form-model';
 import HelpTip from './HelpTip.vue';
 import ParameterField from './ParameterField.vue';
-import { refusal, refusedMark } from './refusal';
+import { REFUSAL_ID, refusedMark } from './refusal';
 
-const props = defineProps<{ draft: SearchDraft; state: DraftState; pair: PairRow; fields: readonly Field[] }>();
+const props = defineProps<{ model: FormModel; pair: PairRow; fields: readonly Field[] }>();
 
 /** The select's entry that shows the two fields. */
 const OTHER = 'other';
 
-const id = computed(() => `param-${props.pair.select.id}`);
-const program = computed(() => programById(props.state.program));
-const options = computed(() => props.state.description?.parameters);
-const values = computed(() => props.state.values[props.state.program]);
-const list = computed(() => pairList(program.value, props.pair, values.value, options.value));
+const prefix = computed(() => props.model.idPrefix ?? 'param');
+const id = computed(() => `${prefix.value}-${props.pair.select.id}`);
+const options = computed(() => props.model.options);
+const values = computed(() => props.model.values);
+const list = computed(() => props.model.pairList?.(props.pair) ?? []);
 /** The pair that the search uses ('' while a default is unknown). */
-const shown = computed(() => pairValue(program.value, props.pair, values.value, options.value));
+const shown = computed(() => props.model.pairValue?.(props.pair) ?? '');
 const changed = computed(() =>
-  props.fields.some(
-    (field) => writtenValue(field, values.value[field.flag], knownDefault(program.value, field.flag, values.value, options.value)) !== undefined,
-  ),
+  props.fields.some((field) => writtenValue(field, values.value[field.flag], props.model.knownDefault(field.flag)) !== undefined),
 );
 
 /** The two fields: chosen with "Other", or holding a pair outside the list. */
@@ -40,9 +38,10 @@ watchEffect(() => {
 const fieldsShown = computed(() => other.value || list.value.length === 0);
 /** A refusal that names one of the two marks the select, or the field shown for that flag (WA2-AX-05). */
 const refused = computed(() => {
-  const named = refusal(props.state)?.flags;
+  const named = props.model.refusal?.flags;
   return named !== undefined && props.pair.flags.some((flag) => named.has(flag));
 });
+const refusalId = computed(() => props.model.refusalId ?? REFUSAL_ID);
 
 const label = (value: string) => props.pair.select.labels?.(value) ?? value;
 /** The two flags' help, a line each, behind the "?" (HelpTip). */
@@ -60,7 +59,7 @@ function onList(next: string): void {
     return;
   }
   other.value = false;
-  props.draft.setFields(pairEntries(program.value, props.pair, next, values.value, options.value));
+  props.model.setPair?.(props.pair, next);
 }
 </script>
 
@@ -74,23 +73,25 @@ function onList(next: string): void {
     </component>
     <div class="param-control">
       <!-- WebKit draws a select's chosen label at its whole length beyond the select's box (S13 screen review H2). -->
-      <span v-if="list.length > 0" class="select-clip">
-        <select
-          :id="id"
-          :value="other ? OTHER : shown"
-          v-bind="refusedMark(refused && !fieldsShown)"
-          :data-testid="id"
-          @change="onList(($event.target as HTMLSelectElement).value)"
-        >
-          <option v-if="shown === ''" value="">Default</option>
-          <option v-for="item in list" :key="item" :value="item">{{ label(item) }}</option>
-          <option :value="OTHER">Other</option>
-        </select>
+      <span v-if="list.length > 0" class="control-tip">
+        <span class="select-clip">
+          <select
+            :id="id"
+            :value="other ? OTHER : shown"
+            v-bind="refusedMark(refused && !fieldsShown, refusalId)"
+            :data-testid="id"
+            @change="onList(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-if="shown === ''" value="">Default</option>
+            <option v-for="item in list" :key="item" :value="item">{{ label(item) }}</option>
+            <option :value="OTHER">Other</option>
+          </select>
+        </span>
+        <HelpTip v-if="help !== '' && !fieldsShown" :id="id" :label="`About ${pair.flags.join(' and ')}`" :text="help" />
       </span>
       <div v-if="fieldsShown" class="param-group">
-        <ParameterField v-for="field in fields" :key="field.flag" :draft="draft" :state="state" :field="field" inline />
+        <ParameterField v-for="field in fields" :key="field.flag" :model="model" :field="field" inline />
       </div>
-      <HelpTip v-if="help !== '' && !fieldsShown" :id="id" :label="`About ${pair.flags.join(' and ')}`" :text="help" />
     </div>
   </div>
 </template>

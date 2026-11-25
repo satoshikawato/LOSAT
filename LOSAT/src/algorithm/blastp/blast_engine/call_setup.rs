@@ -1162,7 +1162,7 @@ pub(super) fn prelim_cutoffs(
         args.comp_based_stats.is_enabled(),
         !args.ungapped,
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1008-1018
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1017
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:926-940
     // `params->prelim_evalue` is `evalue` without a Gumbel block (blast_parameters.c:931-935).

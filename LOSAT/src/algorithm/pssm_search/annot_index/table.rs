@@ -10,6 +10,9 @@ use super::range::{Handle, HandleRangeMap, LiveHandles, Mode, Range};
 use super::view::V;
 use super::{Event, Indexer, Refusal, Stop};
 use crate::ncbi_exception::{NcbiException, Severity, ThrowSite};
+// `ThrowUnassigned`, the getter of a member that is not set: the get check that
+// `SERIAL_VERIFY_DATA_GET` turns off (the refusal of `super::index_entry`).
+use crate::report::serial::object_frame::UNASSIGNED_MEMBER as UNASSIGNED;
 use crate::utils::lower_bound::lower_bound_by;
 
 /// A good feature table's `num-rows` above which NCBI's index depends on the machine's memory
@@ -46,15 +49,6 @@ const fn initialize_site(line: u32) -> ThrowSite {
         function: Some("ncbi::objects::CSeqTableInfo::x_Initialize"),
     }
 }
-
-// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:300-307 (`ThrowUnassigned`, the getter
-// of a member that is not set; the report names no function)
-const UNASSIGNED: ThrowSite = ThrowSite {
-    file: "src/serial/serialobject.cpp",
-    line: 306,
-    kind: "CUnassignedMember::eGet",
-    function: None,
-};
 
 // The generated `ThrowInvalidSelection` of the two CHOICEs (datatool's code in NCBI's build tree;
 // NCBI BLAST+ 2.17.0 reports these places: probes `t30`, `t37`, `t17`, `t74`).
@@ -408,7 +402,7 @@ impl Indexer<'_> {
         };
         let mut sorted_max: u32 = 0;
         for column in table.field("columns").items() {
-            let column = Column(column);
+            let column = Column(column.deref()?);
             if column.field_name() == Some(b"Seq-table location") {
                 if info.table_loc.is_some() {
                     self.post(
@@ -568,7 +562,7 @@ impl Indexer<'_> {
     pub(super) fn index_table(&mut self, info: &TableInfo<'_>) -> Result<(), Stop> {
         if !info.is_feat {
             if let Some(loc) = info.table_loc {
-                let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles);
+                let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles)?;
                 self.map_location(&map, Event::TableLocation, loc)?;
                 self.handles.end_object();
             }
@@ -608,7 +602,7 @@ impl Indexer<'_> {
                     let Some(loc) = self.column_seq_loc(column, row)? else {
                         return Err(self.null_pointer());
                     };
-                    let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles);
+                    let map = HandleRangeMap::of_location(loc, Mode::None, &mut self.handles)?;
                     self.map_location(&map, Event::Row, loc)?;
                     // `key.m_Handle` takes each handle of a non-empty range (mapped).
                     if map.map.iter().any(|(_, hr)| !hr.overlapping().is_empty()) {
@@ -681,7 +675,7 @@ impl Indexer<'_> {
 
 impl TableInfo<'_> {
     // NCBI reference (598d8ae6): c++/src/objmgr/seq_table_info.cpp:972-1005
-    // NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_interval.cpp:125-128
+    // NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_interval.hpp:125-128
     fn is_sorted(&self, sorted_max: u32) -> bool {
         if self.product.is_set {
             return false;
@@ -804,11 +798,12 @@ impl Indexer<'_> {
                     ),
                 )));
             }
+            // An element stated as `NULL` is the row's empty reference, as a row without a value.
             if let Some(element) = usize::try_from(index)
                 .ok()
                 .and_then(|index| list.item(index))
             {
-                return Ok(Some(element));
+                return Ok((!element.is_null()).then_some(element));
             }
         }
         match column.default() {

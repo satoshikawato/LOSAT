@@ -261,8 +261,8 @@ fn saved_code1_link_lists_match_ncbi_score_order_num_and_double_evalue() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:102-114,439,2117-2134,
-// 3100-3109,395-445:
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:411-414,439,676,2123-2129,3100-3109
+// (SCALING_FACTOR and s_RescaleSearch, then BLAST_LinkHsps and Blast_HSPListReapByEvalue in s_HitlistEvaluateAndPurge)
 // Pinned D trace contains the post-redo input and ordered output for
 // query contexts 0 and 1. The unported redo itself is not invoked here.
 #[test]
@@ -1109,6 +1109,7 @@ fn natural_heap_replacement_fixture_matches_ncbi_preliminary_stream() {
                     gap_letters: stats[index].5,
                     edit_script: converted.edit_script,
                     matrix_adjust_rule: converted.matrix_adjust_rule,
+                    query_left_out: 0,
                 }
             })
             .collect();
@@ -1409,8 +1410,8 @@ fn natural_heap_replacement_fixture_matches_ncbi_preliminary_stream() {
             .map(|value| value.parse::<i32>().unwrap())
             .collect::<Vec<_>>()
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:515-526;
-    // c++/src/algo/blast/core/blast_hits.c:767-811,966-989:
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:526-529;
+    // c++/src/algo/blast/core/blast_hits.c:745-836,965-991:
     let report_rows =
         fs::read_to_string(format!("{root}report_payload_20260925/report_fields.tsv")).unwrap();
     let report_rows: Vec<_> = report_rows.lines().collect();

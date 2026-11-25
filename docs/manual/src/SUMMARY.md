@@ -30,6 +30,8 @@
 - [convert2blastmask](programs/convert2blastmask.md)
 - [makembindex](programs/makembindex.md)
 - [makeprofiledb](programs/makeprofiledb.md)
+- [blastdb_aliastool](programs/blastdb_aliastool.md)
+- [blastdbcheck](programs/blastdbcheck.md)
 
 # Libraries and WebAssembly
 

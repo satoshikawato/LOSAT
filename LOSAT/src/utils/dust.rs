@@ -8,45 +8,7 @@
 
 use std::collections::VecDeque;
 
-// NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:241-264
-// NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:217-240
-/// `CRandom` of `CIupac2Ncbi2na_converter` (the random numbers that resolve `N`): one per
-/// `CSymDustMasker`, so the calls of one masker draw from one sequence of numbers.
-pub(crate) struct NcbiLfgRandom {
-    state: [u32; 33],
-    rj: i32,
-    rk: i32,
-}
-
-impl NcbiLfgRandom {
-    pub(crate) fn new() -> Self {
-        Self {
-            state: [
-                0xd53f1852, 0xdfc78b83, 0x4f256096, 0x0e643df7, 0x82c359bf, 0xc7794dfa, 0xd5e9ffaa,
-                0x2c8cb64a, 0x2f07b334, 0xad5a7eb5, 0x96dc0cde, 0x6fc24589, 0xa5853646, 0xe71576e2,
-                0x0dae30df, 0xb09ce711, 0x5e56ef87, 0x4b4b0082, 0x6f4f340e, 0xc5bb17e8, 0xd788d765,
-                0x67498087, 0x9d7aba26, 0x261351d4, 0x411ee7ea, 0x0393a263, 0x2c5a5835, 0xc115fcd8,
-                0x25e9132c, 0xd0c6e906, 0xc2bc5b2d, 0x6c065c98, 0x6e37bd55,
-            ],
-            rj: 12,
-            rk: 32,
-        }
-    }
-
-    #[inline]
-    fn next(&mut self) -> u32 {
-        let r = self.state[self.rk as usize].wrapping_add(self.state[self.rj as usize]);
-        self.state[self.rk as usize] = r;
-        self.rj -= 1;
-        self.rk -= 1;
-        if self.rk < 0 {
-            self.rk = 32;
-        } else if self.rj < 0 {
-            self.rj = 32;
-        }
-        r >> 1
-    }
-}
+use crate::utils::random_gen::NcbiRandom;
 
 /// DUST filter parameters
 #[derive(Debug, Clone)]
@@ -163,13 +125,13 @@ impl DustMasker {
     }
 
     #[inline]
-    fn convert_iupac_to_ncbi2na(base: u8, rng: &mut NcbiLfgRandom) -> u8 {
+    fn convert_iupac_to_ncbi2na(base: u8, rng: &mut NcbiRandom) -> u8 {
         // NCBI reference (598d8ae6): c++/include/algo/dustmask/symdust.hpp:75-84
         match base {
             b'C' | b'c' => 1,
             b'G' | b'g' => 2,
             b'T' | b't' | b'U' | b'u' => 3,
-            b'N' | b'n' => (rng.next() & 0x3) as u8,
+            b'N' | b'n' => (rng.get_rand() & 0x3) as u8,
             _ => 0,
         }
     }
@@ -182,7 +144,7 @@ impl DustMasker {
         if seq.is_empty() {
             return Vec::new();
         }
-        self.mask_range(seq, 0, seq.len() - 1, &mut NcbiLfgRandom::new())
+        self.mask_range(seq, 0, seq.len() - 1, &mut NcbiRandom::default())
     }
 
     /// `CSymDustMasker::operator()` of `seq`, `start` and `stop`: the masked intervals of the
@@ -206,7 +168,7 @@ impl DustMasker {
         seq: &[u8],
         start: usize,
         stop: usize,
-        rng: &mut NcbiLfgRandom,
+        rng: &mut NcbiRandom,
     ) -> Vec<MaskedInterval> {
         if seq.is_empty() {
             return Vec::new();
@@ -236,7 +198,7 @@ impl DustMasker {
         seq: &[u8],
         start: usize,
         stop: usize,
-        rng: &mut NcbiLfgRandom,
+        rng: &mut NcbiRandom,
     ) -> Vec<MaskedInterval> {
         // NCBI's loop test (`GetPos` of the iterator is at most `stop`) as `pos < end` over the letters up to `stop`: the
         // compiler then knows that each `seq[pos]` is in bounds.
@@ -246,12 +208,12 @@ impl DustMasker {
         let mut current_start = start;
         // NCBI reference (598d8ae6): c++/include/algo/dustmask/symdust.hpp:75-84
         // 4 marks the bases that draw a random number.
-        let code = |base: u8, rng: &mut NcbiLfgRandom| -> u8 {
+        let code = |base: u8, rng: &mut NcbiRandom| -> u8 {
             let c = X_BASE_CODE[base as usize];
             if c < 4 {
                 c
             } else {
-                (rng.next() & 0x3) as u8
+                (rng.get_rand() & 0x3) as u8
             }
         };
 
@@ -326,7 +288,7 @@ impl DustMasker {
         seq: &[u8],
         start: usize,
         stop: usize,
-        rng: &mut NcbiLfgRandom,
+        rng: &mut NcbiRandom,
     ) -> Vec<MaskedInterval> {
         let mut result = Vec::new();
         let mut current_start = start;

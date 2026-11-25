@@ -71,7 +71,6 @@ impl RunSetup {
         // that does not parse is left to the formatting handler (`app::early_format_choice`).
         let strategy_file = crate::report::archive::strategy::open_strategy_file(
             args.export_search_strategy.as_deref(),
-            args.out.as_deref(),
             program.upper,
         )?;
         let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
@@ -89,16 +88,10 @@ impl RunSetup {
         archive_slot.clone_from(&archive);
         // The search strategy's request, with the archive's options handle.
         let strategy = strategy_file.map(|file| {
-            crate::report::archive::strategy::StrategyExport::for_run(
+            crate::report::archive::strategy::StrategyExport::for_args(
+                args,
                 file,
-                archive::option_inputs(args),
                 choice.number(),
-                crate::report::archive::strategy::HitlistArgs {
-                    max_target_seqs: args.max_target_seqs.map(|count| count as usize),
-                    num_descriptions: args.num_descriptions,
-                    num_alignments: args.num_alignments,
-                },
-                args.db.as_deref().map(crate::seqdb::db_argument_name),
                 &options_handle,
             )
         });
@@ -257,14 +250,11 @@ impl ArchiveBatch<'_> {
             query_scopes,
         } = self;
         // The BLAST archive (outfmt 11): one document per query batch, written from the
-        // data of outfmt 8's Seq-aligns.
-        for batch in results.iter_mut() {
-            for lists in &mut batch.queries {
-                for list in lists {
-                    list.sort_evalue();
-                }
-            }
-        }
+        // data of outfmt 8's Seq-aligns, in the reports' order (`report::sort_lists`).
+        crate::algorithm::blastx::report::sort_lists(
+            results,
+            crate::algorithm::blastx::empty_rows::SubjectLoc::of_run(database.is_some()),
+        );
         let reported;
         let (subject_names, call_subjects): (_, &[FastaRecord]) =
             match (&database, &pairwise_database) {
@@ -296,7 +286,11 @@ impl ArchiveBatch<'_> {
                             false,
                             false,
                             usize::MAX,
-                            (crate::report::db_subject::FormatThrow::Unread, None),
+                            (
+                                crate::report::db_subject::FormatThrow::Unread,
+                                None,
+                                queries_before,
+                            ),
                         )
                         .map_err(reported_error)?,
                     };

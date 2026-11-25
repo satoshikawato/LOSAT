@@ -31,7 +31,6 @@ use super::{
 };
 use crate::algorithm::blastp::args::{BlastpApp, BlastpCompositionMode, ResolvedBlastpArgs};
 use crate::algorithm::blastp::hsp::BlastpHitList;
-use crate::algorithm::common::database::HeaderReadError;
 use crate::algorithm::psiblast::pssm::{
     ncbistdaa_letters, query_pssm, PssmAlignment, PssmAncillary, PssmQueryRecord, PssmScoring,
     QueryPssm,
@@ -44,6 +43,7 @@ use crate::algorithm::pssm_search::PsiSearch;
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::api::local_blast::ReportOutputs;
 use crate::blastinput::app::CompositionMode;
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::query_batch::QueryBatches;
 use crate::blastinput::seq_range;
@@ -104,8 +104,15 @@ pub(super) fn search_rounds(
     if batches.searched_done == 0 {
         // As `search`: the first batch's stop after the prolog, or the reports of no query.
         if let Some((_, error)) = batches.stop.as_ref() {
-            // The request of a batch that NCBI made a query factory of, before any output.
-            write_stop_request()?;
+            // The request of a batch that NCBI made a query factory of, before any output; NCBI's
+            // stream that throws while it writes the request (`encoder::NullElement`) ends the
+            // run after the prolog (psiblast_app.cpp:506, 340).
+            if let Err(error) = write_stop_request() {
+                if error.is::<crate::cli::NativeError>() {
+                    write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+                }
+                return Err(error);
+            }
             write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
             // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:246-248 (cited at
             // `in_pssm_files`: the loop writes the PSSM of each round at its start, the input PSSM
@@ -131,14 +138,18 @@ pub(super) fn search_rounds(
                             .is_none_or(|stop| stop.after_round_files())
                 });
             if let Some(input) = plan.input.as_ref().filter(|_| search_error) {
-                let (asn, ascii, posts) = input.files(&plan.request)?;
-                write_file_posts(args, &posts, outputs)?;
+                let files = input.files(&plan.request)?;
+                write_file_posts(args, &files.posts, outputs)?;
                 RoundFiles::new(
                     &plan.request,
                     args.out.as_deref().filter(|path| path.as_os_str() != "-"),
                     args.app.ncbi_name(),
                 )
-                .write(asn.as_deref(), ascii.as_deref())?;
+                .write(files.asn.as_deref(), files.ascii.as_deref())?;
+                // NCBI's throw in the ASN.1 file ends the run there, before the search.
+                if let Some(thrown) = files.thrown {
+                    return Err(thrown.into());
+                }
             }
         } else {
             write_reports_without_queries(args, subject_source, subject_label, outputs)?;
@@ -555,7 +566,7 @@ fn round_call_error(
     subject_label: &str,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<anyhow::Error> {
-    let failure = match error.downcast::<HeaderReadError>() {
+    let failure = match error.downcast::<ErrorAfterBatchReports>() {
         Ok(failure) => failure,
         Err(error) => return Ok(error),
     };
@@ -1077,15 +1088,21 @@ fn run_queries(
                             (Some(current), _) => {
                                 write_round_pssm(args, &mut files, current, outputs)?
                             }
-                            (None, Some((asn, ascii, posts))) if round == 1 => {
+                            (None, Some(input)) if round == 1 => {
                                 // NCBI's posts of the bytes replaced in the search strategy request
                                 // (written above, before round 1) come before those of the PSSM
                                 // file that round 1 writes.
                                 super::write_request_posts(args, &mut *outputs.diagnostics)?;
-                                write_file_posts(args, posts, outputs)?;
+                                write_file_posts(args, &input.posts, outputs)?;
                                 // NCBI's prolog comes before the rounds (`PrintProlog`), so before
-                                // a file that cannot be written stops the run here.
-                                let written = files.write(asn.as_deref(), ascii.as_deref());
+                                // a file that cannot be written, or NCBI's throw in it, stops the
+                                // run here.
+                                let written = files
+                                    .write(input.asn.as_deref(), input.ascii.as_deref())
+                                    .and_then(|()| match input.thrown.take() {
+                                        Some(thrown) => Err(thrown.into()),
+                                        None => Ok(()),
+                                    });
                                 if let Err(error) = written {
                                     if calls == 0 {
                                         write_pairwise_prologs(
@@ -1099,7 +1116,7 @@ fn run_queries(
                                 }
                                 // Only the ASCII PSSM is written again (after a round 1 without
                                 // alignments; the ASN.1 text is then made with the write-back).
-                                *asn = None;
+                                input.asn = None;
                             }
                             _ => {}
                         }
@@ -1255,10 +1272,10 @@ fn run_queries(
                     (Some(current), _, _, _) => {
                         write_round_pssm(args, &mut files, current, outputs)?
                     }
-                    (None, Some(input), Some((_, ascii, _)), Some((ungapped, gapped))) => {
+                    (None, Some(input), Some(round_1), Some((ungapped, gapped))) => {
                         let (asn, posts) = input.written_back(&plan.request, ungapped, gapped)?;
                         write_file_posts(args, &posts, outputs)?;
-                        files.write(asn.as_deref(), ascii.as_deref())?;
+                        files.write(asn.as_deref(), round_1.ascii.as_deref())?;
                     }
                     _ => {}
                 }
@@ -1286,6 +1303,11 @@ fn run_queries(
                     Some(crate::algorithm::psiblast::pssm::ancillary_blocks(ancillary).to_vec());
             }
             write_round_pssm(args, &mut files, &last, outputs)?;
+        }
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+        if let Some(database) = subject_source.database() {
+            database.reset_scope();
         }
     }
     if epilog {
@@ -1444,10 +1466,17 @@ fn later_round_report_contexts<'a>(
     std::borrow::Cow::Owned(contexts)
 }
 
-/// `NcbiEndl`, "Search has CONVERGED!" and `NcbiEndl` written to `out_stream` for every report that is not
-/// structured (psiblast's outfmt 0, 6, 7, 10 and 20).
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:525-528
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:556-558
+/// The line `Search has CONVERGED!` between two `NcbiEndl`s, for every report that is not
+/// structured (psiblast's outfmt 0, 6, 7, 10 and 20), on the report's one stream: the
+/// application writes it after the query's rounds, outside the formatter's regions (`Site::Report`:
+/// no `CBlastTabularInfo` lives there, so a failed write there is the application's "BLAST failed
+/// to write output", exit 6), each `NcbiEndl` a line feed and a flush (`ostream::ncbi_endl`). The
+/// next query's report starts in the format's region again (`Site::of_format`).
 fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
     use crate::blastinput::app::ReportFormat;
+    use crate::report::ostream::{ncbi_endl, ReportWrite, Site};
     for format in outputs.formats.iter_mut() {
         let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
         if matches!(
@@ -1460,8 +1489,12 @@ fn write_converged(outputs: &mut ReportOutputs<'_>) -> Result<()> {
                     | ReportFormat::CommaSeparatedValuesWithHeader
             )
         ) {
-            let mut writer = format.sink.open()?;
-            writer.write_all(b"\nSearch has CONVERGED!\n")?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
+            writer.site(Site::Report)?;
+            ncbi_endl(&mut writer)?;
+            writer.write_all(b"Search has CONVERGED!")?;
+            ncbi_endl(&mut writer)?;
+            writer.site(Site::of_format(number))?;
             writer.flush()?;
         }
     }
@@ -1490,7 +1523,7 @@ fn write_round_epilogs(
     };
     for format in outputs.formats.iter_mut() {
         if let Some(spec) = super::super::tabular::custom_tabular_spec(format.outfmt, args.app) {
-            let mut writer = format.sink.open()?;
+            let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
             super::super::tabular::write_tabular_round_epilog(
                 spec,
                 taxdb_found,
@@ -1543,9 +1576,9 @@ fn write_round_epilogs(
             num_descriptions: args.num_descriptions,
             num_alignments: args.num_alignments,
         };
-        let mut writer = format.sink.open()?;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
         crate::report::pairwise::psiblast_round::write_psiblast_epilog(
-            &mut *writer,
+            &mut writer,
             &report,
             pairwise_database.as_ref(),
         )?;
@@ -1899,14 +1932,7 @@ fn next_pssm(
     let q_shift = ranges.query_input.placements.offset(0);
     let alignments: Vec<PssmAlignment<'_>> = hsps
         .iter()
-        .map(|hsp| PssmAlignment {
-            subject: hsp.s_idx,
-            e_value: crate::report::serial::seqalign::seqalign_evalue(hsp.e_value),
-            q_start: hsp.q_start - 1 + q_shift,
-            s_start: hsp.s_start - 1,
-            q_length: hsp.q_end + 1 - hsp.q_start,
-            ops: hsp.gap_info.as_deref(),
-        })
+        .map(|hsp| PssmAlignment::of_hsp(hsp, q_shift))
         .collect();
     let ordinal = ranges.query_input.ordinal(0);
     let record = &ranges.input_records[ordinal];

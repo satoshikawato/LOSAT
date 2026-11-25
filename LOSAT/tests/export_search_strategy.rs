@@ -20,7 +20,14 @@
 //! batch: the file and the standard output are NCBI's of a near input whose reader stops at that
 //! batch (`near:` rows, line WQA D10 round 5, 2026-11-20).
 //! The first batch's request alone when NCBI fails to format that batch in BLAST XML (a matrix
-//! name its XML data does not know). psiblast's request of each query (before its rounds, with the
+//! name its XML data does not know). Under `-parse_deflines` with such a name and without
+//! `-export_search_strategy`, two queries with one id end with NCBI's failure where it comes
+//! before NCBI shows anything that the repeated record's letters decide (the `.pd.xmlmatrix.`
+//! rows, line RG-KB item 7: a repeat in the first query's batch, and with held reports a repeat in
+//! any batch up to that of the first query of another id, a later batch's too where NCBI's set-up
+//! of it, in the first record's letters, passes); a batch whose every searched record is a repeat
+//! longer than its first record stays refused (NCBI's set-up stops at the first record's end:
+//! `CSeqVector_CI: cannot locate segment`). psiblast's request of each query (before its rounds, with the
 //! search space of the query before; `Web_StepNumber`), rpsblast's and rpstblastn's (the profile
 //! database's length and `.aux` costs in the requests after the first; `-mt_mode 1` at 4 and 8
 //! threads writes NCBI's `-num_threads 1` file, DECISIONS F1b-2). A PSSM query's request with
@@ -726,4 +733,82 @@ fn out_is_created_only_where_ncbi_reaches_it() {
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A run of `-html` whose `./.ncbirc` is malformed (`tests/db_search/html/rc/bad`) ends in NCBI's
+/// prolog: `BlastPrintReference`'s registry exception, exit status 255, after the start of the HTML
+/// prolog and before NCBI's first request. With `-export_search_strategy -`, which LOSAT refuses at
+/// that request, BLASTX, BLASTN and TBLASTX write NCBI's standard output (NCBI's prolog, in
+/// LOSAT's words) with exit status 255, as the run without the option does: the exception is NCBI's
+/// error (`cli::native_error_of`), not LOSAT's refusal (line RG F1w review 2, S-b: the held prolog
+/// was dropped and stdout was empty). NCBI's bytes are `html_rcbad/<program>.out`: NCBI BLAST+
+/// 2.17.0's run of the same argv with `-export_search_strategy -` in a folder with that `.ncbirc`
+/// (the same bytes without the option). BLASTP and TBLASTN write their prolog after the request
+/// point, so their refusal still comes first (line T4's `-html` prolog; the handoff
+/// `F/f1w/handoff_T4_html_order.md` of line RG's records).
+#[test]
+fn a_malformed_ncbirc_ends_an_html_run_with_ncbis_prolog() {
+    let folder = engine().join("tests/db_search/html/rc/bad");
+    for (program, query, subject) in [
+        (
+            "blastx",
+            "tests/fasta/outfmt11/arch_bx_q.fna",
+            "tests/fasta/outfmt11/arch_bx_s.faa",
+        ),
+        (
+            "blastn",
+            "tests/fasta/outfmt11/arch_q.fna",
+            "tests/fasta/outfmt11/arch_s.fna",
+        ),
+        (
+            "tblastx",
+            "tests/fasta/outfmt11/arch_tbx_q.fna",
+            "tests/fasta/outfmt11/arch_tbx_s.fna",
+        ),
+    ] {
+        let run = |extra: &[&str]| {
+            let mut command = Command::new(BIN);
+            command
+                .current_dir(&folder)
+                .arg(program)
+                .arg("-query")
+                .arg(engine().join(query))
+                .arg("-subject")
+                .arg(engine().join(subject))
+                .args(["-html", "-num_threads", "1"])
+                .args(extra)
+                .stdin(Stdio::null());
+            for (name, _) in std::env::vars() {
+                if name.starts_with("LOSAT_X_") || name.starts_with("NCBI") {
+                    command.env_remove(name);
+                }
+            }
+            command.output().expect("run losat")
+        };
+        let want = crate::outfmt11_blastx::expected_losat_bytes(
+            std::fs::read(fixtures().join(format!("html_rcbad/{program}.out"))).unwrap(),
+        );
+        let without = run(&[]);
+        let with = run(&["-export_search_strategy", "-"]);
+        for (label, output) in [("without the option", &without), ("with -", &with)] {
+            assert_eq!(
+                output.status.code(),
+                Some(255),
+                "{program} {label}: exit status; stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                output.stdout == want,
+                "{program} {label}: stdout differs ({} bytes, NCBI wrote {}): {}",
+                output.stdout.len(),
+                want.len(),
+                crate::outfmt11_blastx::first_difference(&output.stdout, &want)
+            );
+        }
+        assert_eq!(
+            String::from_utf8_lossy(&with.stderr),
+            String::from_utf8_lossy(&without.stderr),
+            "{program}: stderr"
+        );
+    }
 }

@@ -81,7 +81,7 @@ Not yet supported:
 
 Also refused:
 
-- `-remote`, `-entrez_query`, `-import_search_strategy`, `-gilist` and `-negative_gilist`.
+- `-remote`, `-entrez_query` and `-import_search_strategy`.
 - `-use_sw_tback`.
 - A domain database of several volumes.
 - A `-subject` file with more records than `-max_target_seqs`.

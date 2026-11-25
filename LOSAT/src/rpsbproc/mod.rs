@@ -334,7 +334,7 @@ pub(crate) fn write_stderr_bytes(bytes: &[u8]) {
 /// Writes `text` (help or version) to standard output; a failed write ends LOSAT as a failed
 /// write of the report does (exception 9).
 pub(crate) fn write_stdout(text: &str) {
-    let mut stdout = std::io::stdout().lock();
+    let mut stdout = crate::cli::standard_output();
     if let Err(error) = stdout
         .write_all(text.as_bytes())
         .and_then(|()| stdout.flush())
@@ -576,9 +576,15 @@ fn header_tail(evalue: f64, mode: DataMode, show_families: bool, target: TargetD
 // NCBI reference (598d8ae6): c++/src/objects/seq/Seq_descr.cpp:57-68
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:257-287
 // (`CSerialObject::x_GetVerifyData`, serialobject.cpp:180-221, reads `SERIAL_VERIFY_DATA_GET`
-// the same way; `NO`, `NEVER`, `DEFVALUE` and `DEFVALUE_ALWAYS` turn the checks off: a missing
-// member is no longer a read error, and the getter of an unset member gives its default instead
-// of throwing `CUnassignedMember`. `YES`, `ALWAYS` and other values keep NCBI's default.)
+// the same way; `NO`, `NEVER`, `DEFVALUE` and `DEFVALUE_ALWAYS` turn the checks off
+// (`ncbi_environment::verification_off`): a missing member is no longer a read error, and the
+// getter of an unset member gives its default instead of throwing `CUnassignedMember`. `YES`,
+// `ALWAYS` and other values keep NCBI's default.)
+// rpsbproc refuses the whole run where the other programs refuse only an input that fails a check
+// (`ncbi_environment::ReadVerification`): its readers of the archive and of the BLAST XML report
+// read past members that they do not keep without checking them, where NCBI's check of a
+// missing mandatory member stops the read by default and only posts under these values; a run
+// whose input would pass the check is not told apart from one that would not.
 // `OBJECTS_SEQ_DESCR_ALLOW_EMPTY` lets an empty `Seq-descr` read; LOSAT rejects it with any value
 // when the input is an archive (`xml` false: a BlastOutput document has no `Seq-descr`).
 // The other parameters of the readers are registry entries (`NCBI_CONFIG__SERIAL__...`, which
@@ -596,9 +602,7 @@ fn reader_variable(
         let changes = match name {
             "OBJECTS_SEQ_DESCR_ALLOW_EMPTY" => !xml,
             "SERIAL_VERIFY_DATA_READ" | "SERIAL_VERIFY_DATA_GET" => {
-                ["NO", "NEVER", "DEFVALUE", "DEFVALUE_ALWAYS"]
-                    .iter()
-                    .any(|off| value.eq_ignore_ascii_case(off))
+                crate::blastinput::ncbi_environment::verification_off(&value)
             }
             _ => false,
         };
@@ -747,7 +751,7 @@ fn init(
         }
     };
     header.extend_from_slice(b"\n#Output data file:");
-    let mut out: Box<dyn Write> = Box::new(std::io::stdout());
+    let mut out: Box<dyn Write> = Box::new(crate::cli::standard_output());
     if let Some(outfile) = &args.outfile {
         match std::fs::File::create(outfile) {
             Ok(file) => {

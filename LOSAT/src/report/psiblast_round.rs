@@ -20,6 +20,7 @@ use super::{
     DatabaseHeading, PairwiseConfig, PairwiseDatabase, PairwiseHit,
 };
 use crate::api::local_blast::{FormatProbe, HspIndex};
+use crate::report::ostream::{DisplaySeqalign, ReportWrite};
 use crate::report::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi};
 use crate::report::query_warnings::{no_places, ReportHook, ReportPlace};
 use crate::report::x_pairwise_par::QueryGroup;
@@ -27,7 +28,17 @@ use std::io::{self, Write};
 use std::sync::Arc;
 
 /// The report's writer: the caller's stream behind a type that no default report writes through.
-struct RoundWriter<'w>(&'w mut dyn Write);
+struct RoundWriter<'w>(&'w mut dyn ReportWrite);
+
+impl ReportWrite for RoundWriter<'_> {
+    fn site(&mut self, site: crate::report::ostream::Site) -> io::Result<()> {
+        self.0.site(site)
+    }
+
+    fn ncbi_flush(&mut self) -> io::Result<()> {
+        self.0.ncbi_flush()
+    }
+}
 
 impl Write for RoundWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -61,7 +72,7 @@ pub(crate) struct ReportRound<'a> {
 pub(crate) fn write_psiblast_round_report(
     hits: &[PairwiseHit],
     query_range: std::ops::Range<usize>,
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
     config: &PairwiseConfig,
     queries: &[BlastpPairwiseQuery],
     query_titles: &[Arc<[u8]>],
@@ -83,7 +94,6 @@ pub(crate) fn write_psiblast_round_report(
             writer,
             blastp_family_program(&config.program),
             &report.version,
-            false,
             false,
             false,
             false,
@@ -144,15 +154,17 @@ pub(crate) fn write_psiblast_round_report(
         sections.head(writer, q_idx, group.as_ref(), &mut place)?;
         if let Some(group) = &group {
             // An aligned subject's load may end the run where the view's answer says
-            // (`PairwiseView::after_throw`, as `x_pairwise_par::alignment_end` asks it).
+            // (`PairwiseConfig::after_throw`, as `x_pairwise_par::alignment_end` asks it).
             let aligned = group.aligned(report.num_alignments);
             let end = crate::report::x_pairwise_par::aligned_end(
-                config.view.after_throw(),
+                config.after_throw(),
                 aligned,
                 |s_idx| sections.thrown(s_idx),
             );
+            let mut display = DisplaySeqalign::default();
             for &s_idx in &aligned[..end.map_or(aligned.len(), |(at, _)| at)] {
                 place(ReportPlace::Load(s_idx), &mut *writer)?;
+                display.enter(writer)?;
                 sections.subject(writer, probe.as_deref_mut(), group, s_idx)?;
             }
             if let Some((_, exception)) = end {
@@ -162,6 +174,7 @@ pub(crate) fn write_psiblast_round_report(
                 writer.flush()?;
                 return Err(exception.clone().into_io_error());
             }
+            display.leave(writer)?;
             sections.foot(writer, q_idx)?;
         }
     }
@@ -226,7 +239,7 @@ impl RoundSections<'_> {
     /// `Results from round N`, `\n\n`, the query's header, then "No hits found" and the footer,
     /// or the description table (in two parts after a round whose inclusion set is not empty)
     /// and the blank line after it.
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -248,7 +261,8 @@ impl RoundSections<'_> {
             if query.batch_skipped {
                 write_tblastn_unsearched_query_footer_spacing(writer, false)?;
             } else if !query.valid {
-                writeln!(writer)?;
+                // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+                crate::report::ostream::ncbi_endl(writer)?;
                 writeln!(writer)?;
                 writeln!(writer)?;
                 writeln!(writer, "Effective search space used: 0")?;
@@ -279,9 +293,10 @@ impl RoundSections<'_> {
                 place,
                 // psiblast refuses `-html` (`cli::UNPORTED_PSIBLAST_OWN_ARGS`): the plain table.
                 None,
+                None,
             )?,
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1520-1528
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1540-1545
         writeln!(writer)
     }
 
@@ -320,7 +335,7 @@ impl RoundSections<'_> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:756-848
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:85-87
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:86-87
     /// One part: for the repeat pass the two lines of the Score/E header, then the part's line
     /// and a blank line, then its rows (`write_description_table`'s rows and widths, every row of
     /// the part counted: its `m_NumToShow` is the number of its Seq-aligns). A part without rows
@@ -393,7 +408,7 @@ impl RoundSections<'_> {
     }
 
     /// The alignments of the subject `s_idx` (`BlastpSections::subject`, all its HSPs).
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
@@ -467,7 +482,11 @@ impl RoundSections<'_> {
     }
 
     /// The footer of a query with hits (`BlastpSections::foot`).
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()> {
         let query = &self.queries[q_idx];
         write_blastp_query_footer_spacing(
             writer,
@@ -485,14 +504,15 @@ impl RoundSections<'_> {
 /// footer of `write_blastp_pairwise_report`'s epilog.
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:561-562
 pub(crate) fn write_psiblast_epilog(
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(RoundWriter(writer));
     let writer = &mut buffered;
-    writeln!(writer)?;
-    writeln!(writer)?;
+    // The blank lines before the epilog (blast_format.cpp:2249), each a flush.
+    crate::report::ostream::ncbi_endl(writer)?;
+    crate::report::ostream::ncbi_endl(writer)?;
     // psiblast refuses `-html` (`cli::UNPORTED_PSIBLAST_OWN_ARGS`): the plain epilog.
     super::write_blastp_final_footer(writer, report, database, false)?;
     writer.flush()

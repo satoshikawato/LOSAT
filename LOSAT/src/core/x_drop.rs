@@ -126,7 +126,7 @@ pub(crate) fn kernel_x_drop_value_error(program: &str, option: &str, value: &str
 /// with its own X-drop (`redo_x_dropoff`) and the gap costs scaled by 32, under which every `Int4`
 /// X-drop fits (the quotient stays below 2^26), as rpsblast's engine checks it.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1496
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1499
 pub(crate) fn check_gapped_x_dropoffs(
     program: &str,
     (gap_bits, final_bits): (f64, f64),

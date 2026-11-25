@@ -68,6 +68,29 @@ impl TblastnDatabase {
         self
     }
 
+    /// The database of a call of the run after other calls whose loads its record does not hold
+    /// where `unrecorded` (`shared::TaxdbRun::note_calls_before`: the call's first query is not the
+    /// run's first, `first_query_ordinal` above 0).
+    pub(super) fn after_calls(mut self, unrecorded: bool) -> Self {
+        self.taxdb.note_calls_before(unrecorded);
+        self
+    }
+
+    /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
+    /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
+    /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
+    pub(super) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+        self.taxdb.set_keeps_scope(keeps);
+        self.taxdb.set_separate_xml2(separate_xml2);
+        self
+    }
+
+    /// Mirrors `CBlastFormat::ResetScopeHistory` at the end of a query batch
+    /// (`shared::TaxdbRun::reset_scope`).
+    pub(super) fn reset_scope(&self) {
+        self.taxdb.reset_scope();
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:188-194
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`) with
     /// the command line's errors. The total length is NCBI's `Int8`, which the engine holds as
@@ -146,6 +169,11 @@ impl TblastnDatabase {
         self.db.list_taxids()
     }
 
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(super) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
+    }
+
     /// Whether the first query batch with a valid context fails with NCBI's `Database memory map
     /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
     pub(super) fn first_oid_read_fails(&self) -> bool {
@@ -198,18 +226,22 @@ impl TblastnDatabase {
     }
 
     /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`)
-    /// whose words have `word_size` letters (the shortest subject searched has `word_size * 3 + 2`
-    /// bases).
+    /// for word size `word`, two-hit window `window` (0 for one-hit), and whether the lookup table
+    /// can hold a word with residue 0 (`zero_words`).
     pub(super) fn check_mask_limits(
         &self,
         mask: &crate::blastinput::db_mask::ResolvedMask,
-        word_size: usize,
+        word: i32,
+        window: i32,
+        zero_words: bool,
     ) -> Result<()> {
         mask.check_losat_limits(
             &self.db,
             PROGRAM,
             crate::blastinput::db_mask::HardScan::Translated {
-                min_length: word_size * 3 + 2,
+                word,
+                window,
+                zero_words,
             },
         )
     }
@@ -230,12 +262,24 @@ impl TblastnDatabase {
         let ranks: std::collections::BTreeSet<usize> = reported_ranks(hitlists)
             .filter(|rank| reported.loads.loaded(*rank))
             .collect();
+        // Each query's `Hit`s, its reported subjects in order (`reported_ranks`).
+        let batches = || {
+            let spans = &reported.spans;
+            shared::XmlBatchLoads::of(
+                hitlists.len(),
+                spans,
+                &reported.prefetch,
+                &reported.loads,
+                |query| reported_ranks(std::slice::from_ref(&hitlists[query])).collect(),
+            )
+        };
         let (taxids, taxonomy, parsed_taxonomy, notes) = shared::read_reported_taxonomy(
             &self.db,
             &self.taxdb,
             &reported.ordinals,
             &ranks,
             &reported.parsed,
+            &batches,
             PROGRAM,
         )?;
         Ok(XmlTaxa {
@@ -372,7 +416,7 @@ impl TblastnDatabase {
     }
 
     /// The stop of the prefetch of the batch of `queries` whose reported
-    /// subjects are `subjects` (`prefetch_stop`): NCBI's error (a `shared::HeaderReadError`), or
+    /// subjects are `subjects` (`prefetch_stop`): NCBI's error (a `ErrorAfterBatchReports`), or
     /// LOSAT's refusal (`shared::batch_prefetch`, after the batches before, `before`: the run's
     /// record of what NCBI's BLAST database data loader loaded for them, `LoadedBefore`).
     /// `at_hits`: the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
@@ -500,9 +544,11 @@ impl TblastnDatabase {
         threads: usize,
         mask: Option<&crate::blastinput::db_mask::ResolvedMask>,
     ) -> Result<XDbStream<'_>> {
-        Ok(XDbStream::new(&self.db, threads, PROGRAM)?.with_mask(
-            crate::algorithm::common::db_mask_search::SearchMask::of(mask),
-        ))
+        Ok(XDbStream::new(&self.db, threads, PROGRAM)?
+            .with_mask(crate::algorithm::common::db_mask_search::SearchMask::of(
+                mask,
+            ))
+            .with_hard_starts(mask.and_then(|m| m.translated_starts().cloned())))
     }
 }
 
@@ -549,14 +595,17 @@ pub(super) struct CallReads<'a> {
     excluded: Option<shared::FetchExcluded<'a>>,
     notes: BTreeMap<usize, crate::seqdb::Utf8Reads>,
     utf8: shared::CallUtf8,
+    one_by_one: bool,
 }
 
 impl<'a> CallReads<'a> {
     /// The reads of a call of `database` (`None`: the subjects are records) whose batches
-    /// `batches` makes (each with its searched queries).
+    /// `batches` makes (each with its searched queries), in a run of the first format `format`,
+    /// whose reports may read the reported sequences one by one (`shared::prefetch_may_be_off`).
     pub(super) fn of(
         database: Option<&'a TblastnDatabase>,
         batches: impl FnOnce() -> Vec<crate::blastinput::seq_range::RangedBatch>,
+        format: shared::PrefetchFormat,
     ) -> Self {
         let excluded = database.and_then(fetch_excluded);
         let notes = match excluded {
@@ -571,6 +620,7 @@ impl<'a> CallReads<'a> {
             excluded,
             notes,
             utf8: shared::CallUtf8::default(),
+            one_by_one: shared::prefetch_may_be_off(format),
         }
     }
 
@@ -636,17 +686,25 @@ impl<'a> CallReads<'a> {
             .map(|note| note.at);
         let aligned = drop_unaligned(database, hitlists);
         let earlier = shared::EarlierUtf8::of_batch(range.start, fetched, aligned);
-        let read = read_titles(database, hitlists, range.start, earlier, titles);
+        let read = read_titles(
+            database,
+            hitlists,
+            range.start,
+            (earlier, self.one_by_one),
+            titles,
+        );
         self.utf8.note(
             range.start,
             shared::Utf8Read::of_read(&read, Option::as_ref),
         );
         match read {
             Ok(_) => Ok(None),
-            Err(error) => match error.downcast::<shared::HeaderReadError>() {
-                Ok(failure) => Ok(Some(failure.error)),
-                Err(error) => Err(error),
-            },
+            Err(error) => {
+                match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
+                    Ok(failure) => Ok(Some(failure.error)),
+                    Err(error) => Err(error),
+                }
+            }
         }
     }
 
@@ -696,7 +754,7 @@ impl<'a> CallReads<'a> {
             let Some(hitlists) = results.get(span.clone()) else {
                 break;
             };
-            if shared::prefetch_off(seq_aligns_of(hitlists, reported.gapped)) {
+            if shared::prefetch_off(reported.format, seq_aligns_of(hitlists, reported.gapped)) {
                 for (query, hitlist) in span.clone().zip(hitlists) {
                     let subjects = hitlist.lists().iter().map(|list| {
                         let rank = list.oid as usize;
@@ -788,18 +846,19 @@ pub(super) fn drop_unaligned(
 /// Reads the definition lines of the sequences that the final hit lists `hitlists` of a
 /// query batch name (their subject index is the ordinal id), in NCBI's order (query by query,
 /// in hit-list order) into `titles` (`common::database::read_header`); `first_query` is the
-/// index of the batch's first query. A reader error of NCBI's own is a `HeaderReadError` (it
+/// index of the batch's first query. A reader error of NCBI's own is an `ErrorAfterBatchReports` (it
 /// fails the batch); LOSAT's refusals are errors of their own. The first read of a record with a
 /// UTF8String where a VisibleString is expected (`shared::HeaderReader::first_utf8`) is returned:
-/// NCBI posts its warning there.
+/// NCBI posts its warning there. `one_by_one`: the reports may read the reported sequences one by
+/// one (`shared::HeaderReader::new`).
 pub(super) fn read_titles(
     database: &TblastnDatabase,
     hitlists: &[KappaResultHitList],
     first_query: usize,
-    earlier: shared::EarlierUtf8,
+    (earlier, one_by_one): (shared::EarlierUtf8, bool),
     titles: &mut DatabaseTitles,
 ) -> Result<Option<shared::Utf8Read>> {
-    let headers = shared::HeaderReader::new(&database.db);
+    let headers = shared::HeaderReader::new(&database.db, one_by_one);
     headers.note_earlier(earlier);
     for (index, hitlist) in hitlists.iter().enumerate() {
         for list in hitlist.lists() {
@@ -853,6 +912,14 @@ pub(super) struct ReportedSubjects {
     /// Whether the search is gapped: the Seq-aligns that NCBI's prefetch counts are one for each
     /// HSP, else one for each subject (`seq_aligns_of`).
     pub(super) gapped: bool,
+    /// The searched queries of each batch of the call, numbered from 0 (the whole call as one
+    /// where empty), for NCBI's loads of the XML2 and JSON reports by batch
+    /// (`shared::XmlBatchLoads`).
+    pub(super) spans: Vec<std::ops::Range<usize>>,
+    /// Whether each batch's prefetch is on: the one that `loads` read, for those loads too.
+    pub(super) prefetch: shared::BatchPrefetch,
+    /// The first format, whose prefetch the batches ask (`prefetch_format`).
+    pub(super) format: shared::PrefetchFormat,
 }
 
 impl ReportedSubjects {
@@ -913,9 +980,9 @@ fn reported_ranks(hitlists: &[KappaResultHitList]) -> impl Iterator<Item = usize
 }
 
 /// The first of the query batches `batches` (the searched queries of each) of the final hit lists
-/// `hitlists` (subjects named by ordinal id, before `reported_subjects`) whose prefetch is on (its
-/// Seq-aligns of a nonzero score do not outnumber a positive `PRE_FETCH_SEQS_LIMIT`,
-/// `shared::prefetch_off`) and loads a subject whose lookup fails on a file with NCBI's exception
+/// `hitlists` (subjects named by ordinal id, before `reported_subjects`) whose prefetch is on in a
+/// run of the first format `format` (its Seq-aligns of a nonzero score do not outnumber a positive
+/// `PRE_FETCH_SEQS_LIMIT`, `shared::prefetch_off`) and loads a subject whose lookup fails on a file with NCBI's exception
 /// (`ParsedSubject::prefetch_stops`), with the subjects that batch reports (ordinal id, and the
 /// definition lines of one with parsed Seq-ids, `titles`): NCBI's prefetch stops the run there
 /// (`shared::batch_prefetch`), before that batch's reports. The caller asks it where the first
@@ -924,7 +991,7 @@ pub(super) fn prefetch_stop(
     titles: &DatabaseTitles,
     hitlists: &[KappaResultHitList],
     batches: &[std::ops::Range<usize>],
-    gapped: bool,
+    (format, gapped): (shared::PrefetchFormat, bool),
 ) -> Option<(
     std::ops::Range<usize>,
     Vec<(u32, Option<Arc<ParsedSubject>>)>,
@@ -948,7 +1015,7 @@ pub(super) fn prefetch_stop(
         let seq_aligns = lists()
             .map(|list| shared::subject_seq_aligns(scored(list), gapped))
             .sum();
-        if shared::prefetch_off(seq_aligns) {
+        if shared::prefetch_off(format, seq_aligns) {
             return None;
         }
         let subjects: Vec<(u32, Option<Arc<ParsedSubject>>)> = lists()
@@ -994,11 +1061,9 @@ pub(super) fn seq_aligns_of(hitlists: &[KappaResultHitList], gapped: bool) -> us
 fn parsed_shown(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
 ) -> crate::algorithm::common::database::ParsedShown {
-    let numbers: Vec<i32> = formats
+    let pairwise = formats
         .iter()
-        .map(|format| super::stage_e_report::format_number(format.outfmt))
-        .collect();
-    let pairwise = numbers.iter().any(|number| (0..=4).contains(number));
+        .any(|format| (0..=4).contains(&super::stage_e_report::format_number(format.outfmt)));
     crate::algorithm::common::database::ParsedShown {
         stops_at_failed_lookup: formats.iter().any(|format| {
             matches!(
@@ -1053,33 +1118,54 @@ fn parsed_shown(
             ),
         // NCBI's `s_IsPrefetchFormat` prefetches for every tabular format (cited in
         // `tblastn_app::search`).
-        prefetched: crate::algorithm::common::database::prefetches_subjects(numbers.first().map(
-            |&number| match number {
-                10 | 18 | 20 => 6,
-                number => number,
-            },
-        )) && !crate::algorithm::common::database::prefetch_always_off(),
-        one_by_one: crate::algorithm::common::database::prefetch_may_be_off(),
+        prefetched: shared::prefetches_subjects(Some(prefetch_format(formats)))
+            && !shared::prefetch_always_off(prefetch_format(formats)),
+        one_by_one: shared::prefetch_may_be_off(prefetch_format(formats)),
     }
+}
+
+/// The first of the formats `formats` of a run as NCBI's prefetch of each query batch asks it
+/// (`shared::PrefetchFormat`, the one owner of whether a batch prefetches): outfmt 10, 18 and 20
+/// as the tabular 6, which NCBI prefetches for alike (`s_IsPrefetchFormat`); a run writes at
+/// least one format, outfmt 0 stands for none.
+pub(super) fn prefetch_format(
+    formats: &[crate::api::local_blast::FormatOutput<'_>],
+) -> shared::PrefetchFormat {
+    let number =
+        formats
+            .first()
+            .map_or(crate::blastinput::app::output_format::PAIRWISE, |format| {
+                match super::stage_e_report::format_number(format.outfmt) {
+                    10 | 18 | 20 => 6,
+                    number => number,
+                }
+            });
+    shared::PrefetchFormat::of(
+        number,
+        crate::report::archive::options::RequestKind::Tblastn,
+    )
 }
 
 /// What the formats `formats` do after a subject whose lookup throws where its batch's prefetch is
 /// off (`FormatThrow::of_outfmts`, for `reported_subjects`'s loads), with the call's refusal over
 /// the `-outfmt` values of its other searches, `others` (`FormatThrow::of_search`,
-/// `ReportOutputs::other_outfmts`).
+/// `ReportOutputs::other_outfmts`); `html`: the run has `-html` links (`ResolvedTblastnArgs::html`,
+/// which the writer's `PairwiseConfig::html` gets too).
 pub(super) fn after_throw(
     formats: &[crate::api::local_blast::FormatOutput<'_>],
-    others: &[&str],
+    (others, html): (&[&str], bool),
 ) -> crate::report::db_subject::FormatThrow {
     crate::report::db_subject::FormatThrow::of_outfmts(
         formats.iter().map(|format| format.outfmt),
         crate::blastinput::app::Program::Tblastn,
         crate::report::archive::options::RequestKind::Tblastn,
+        html,
     )
     .of_search(
         others,
         crate::blastinput::app::Program::Tblastn,
         crate::report::archive::options::RequestKind::Tblastn,
+        html,
     )
 }
 
@@ -1136,10 +1222,11 @@ fn pairwise_read_order<'l>(
 /// and where they join hits `refuse_joined_hits`; where only the prefetch reads a subject, a batch
 /// of `batches`, the query ranges of the batches of `hitlists`, whose prefetch is on reports it;
 /// what the formats do after a `Hit` that throws, `after_throw`, with the call's refusal over the
-/// `-outfmt` values of its other searches, `others`, for the one answer of what the reports load,
-/// `hit_loads`, with how the pairwise reports read each query's subjects, `pairwise`). The packed
-/// subjects are read from the database (`SubjectLetters::Stream`, one read each) instead of
-/// cloned from the copy.
+/// `-outfmt` values of its other searches and whether it has `-html` links, `call`, for the one
+/// answer of what the reports load, `hit_loads`, with how the pairwise reports read each query's
+/// subjects, `pairwise`, after the loads of the calls before, whose loads nothing here records,
+/// `TaxdbRun::calls_before`). The packed subjects are read from the database
+/// (`SubjectLetters::Stream`, one read each) instead of cloned from the copy.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn reported_subjects(
     database: &TblastnDatabase,
@@ -1148,7 +1235,7 @@ pub(super) fn reported_subjects(
     stores: super::x_subject_store::SubjectLetters<'_>,
     letters: bool,
     formats: &[crate::api::local_blast::FormatOutput<'_>],
-    others: &[&str],
+    call: (&[&str], bool),
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     batches: &[std::ops::Range<usize>],
     gapped: bool,
@@ -1165,7 +1252,8 @@ pub(super) fn reported_subjects(
     // What the batches read of each subject (a batch whose Seq-aligns outnumber a positive
     // `PRE_FETCH_SEQS_LIMIT` reads nothing of them before its reports, which read them one by
     // one; `shared::BatchPrefetch`, `shared::BatchReads::shown`).
-    let prefetch = shared::BatchPrefetch::of(hitlists.len(), 0, batches, |span| {
+    let format = prefetch_format(formats);
+    let prefetch = shared::BatchPrefetch::of(format, hitlists.len(), 0, batches, |span| {
         seq_aligns_of(&hitlists[span], gapped)
     });
     let reads = prefetch.reads(hitlists.iter().enumerate().flat_map(|(query, hitlist)| {
@@ -1179,7 +1267,7 @@ pub(super) fn reported_subjects(
         Some(ReportedHeader::Parsed(subject)) => Some(subject.as_ref()),
         _ => None,
     };
-    let after = after_throw(formats, others);
+    let after = after_throw(formats, call);
     // A pairwise report's reads, of the subjects' lengths (`pairwise_read_order`), where its
     // batch reads them one by one.
     let pairwise_keys = |query: usize| -> Result<Option<crate::report::db_subject::PairwiseReads>> {
@@ -1208,7 +1296,13 @@ pub(super) fn reported_subjects(
     let pairwise_order = (0..hitlists.len())
         .map(pairwise_keys)
         .collect::<Result<Vec<_>>>()?;
-    let loads = hit_loads(hitlists, &prefetch, after, pairwise_order, titled);
+    let loads = hit_loads(
+        hitlists,
+        &prefetch,
+        (after, database.taxdb.calls_before()),
+        pairwise_order,
+        titled,
+    );
     ordinals.sort_unstable();
     ordinals.dedup();
     for hitlist in hitlists.iter_mut() {
@@ -1331,6 +1425,9 @@ pub(super) fn reported_subjects(
         sources,
         loads,
         gapped,
+        spans: batches.to_vec(),
+        prefetch,
+        format,
     })
 }
 
@@ -1339,16 +1436,22 @@ pub(super) fn reported_subjects(
 /// (`HitLoads::of`, the one answer): `prefetch` tells by query whether its batch reads one by one
 /// (`BatchPrefetch::reads_one_by_one`), `parsed` gives the subject with parsed Seq-ids of a key;
 /// the `Hit`s are those that `blast_xml::prepare`'s reports make (the lists with HSPs), or a
-/// pairwise report's reads (`pairwise_reads[query]`, where given).
+/// pairwise report's reads (`pairwise_reads[query]`, where given). TBLASTN keeps no record of its
+/// loads: the reports are the call's first loads, after `before`, those of the calls before
+/// (`shared::TaxdbRun::calls_before`, `HitLoads::of`).
 fn hit_loads<'p>(
     hitlists: &[KappaResultHitList],
     prefetch: &shared::BatchPrefetch,
-    after: crate::report::db_subject::FormatThrow,
+    (after, before): (
+        crate::report::db_subject::FormatThrow,
+        crate::report::db_subject::LoadsBefore,
+    ),
     pairwise_reads: Vec<Option<crate::report::db_subject::PairwiseReads>>,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
     let mut pairwise_reads = pairwise_reads.into_iter();
     HitLoads::of(
+        before,
         after,
         hitlists.iter().enumerate().map(|(query, hitlist)| {
             let keys = match pairwise_reads.next().flatten() {
@@ -1365,7 +1468,7 @@ fn hit_loads<'p>(
                         .collect(),
                 ),
             };
-            (prefetch.reads_one_by_one(query), keys)
+            (prefetch.report_read(query, 0), keys)
         }),
         parsed,
         // The most identities of a list's HSPs (`reads_subject`).

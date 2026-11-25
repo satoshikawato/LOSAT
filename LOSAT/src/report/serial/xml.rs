@@ -44,13 +44,14 @@ use crate::ncbi_exception::NcbiException;
 use crate::ncbi_str::utf8::{decode_to_ascii, Utf8Error};
 
 /// Whether `type_name`, the name that a writer gives `begin_sequence` or `variant`, stands for an
-/// anonymous ASN.1 type (NCBI's `GetName()` is empty for it): the writers pass the open member's
-/// tag (`Score_value`), which has an underscore, where a named type's name (`Seq-align`) has
-/// none. The object mode writes no tag of its own for it (`begin_object_sequence`, `variant`),
-/// and `encoder::Traced` keeps its `.E` frame (`WillHaveName`).
+/// anonymous ASN.1 type (NCBI's `GetName()` is empty for it): the typed writers pass the open
+/// member's tag (`Score_value`), which has an underscore, and the writer of the type table's
+/// values (`asn_types::write`) the type's empty name, where a named type's name (`Seq-align`)
+/// has neither. The object mode writes no tag of its own for it (`begin_object_sequence`,
+/// `variant`), and `encoder::Traced` keeps its `.E` frame (`WillHaveName`).
 #[inline(always)]
 pub(crate) fn anonymous_type(type_name: &str) -> bool {
-    type_name.contains('_')
+    type_name.is_empty() || type_name.contains('_')
 }
 
 /// What the stream writes at the start and end of a document.
@@ -489,16 +490,7 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
         if !OBJECT && self.thrown.is_some() {
             return;
         }
-        if self.lines_to < self.start {
-            self.lines_to = self.start;
-            self.lines = 0;
-        }
-        self.lines_to = self.lines_to.min(self.out.len());
-        self.lines += self.out[self.lines_to..]
-            .iter()
-            .filter(|&&byte| byte == b'\n')
-            .count() as u64;
-        self.lines_to = self.out.len();
+        self.count_lines();
         let at = self.out.len() - self.start;
         if !OBJECT {
             let erased = u64::from(self.piece == Piece::Fragment);
@@ -653,27 +645,32 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
     }
 
     /// `WriteEnum` and `WriteBool` of the object mode: ` value="x"/>` in place of the `>`
-    /// that closes the innermost open tag (NCBI backs over it, `OpenTagEndBack`).
-    fn value_attribute(&mut self, value: &str) {
+    /// that closes the innermost open tag (NCBI backs over it, `OpenTagEndBack`); `WriteNull`:
+    /// `/>` there (`None`).
+    fn value_attribute(&mut self, value: Option<&str>) {
         if OBJECT && self.pending_elem {
             self.open_element();
         }
         debug_assert_eq!(self.out.last(), Some(&b'>'));
         self.out.pop();
-        self.out.extend_from_slice(b" value=\"");
-        self.out.extend_from_slice(value.as_bytes());
-        self.out.extend_from_slice(b"\"/>");
+        if let Some(value) = value {
+            self.out.extend_from_slice(b" value=\"");
+            self.out.extend_from_slice(value.as_bytes());
+            self.out.push(b'"');
+        }
+        self.out.extend_from_slice(b"/>");
         self.self_closed = true;
     }
 
-    /// `begin_sequence` of the object mode: `<Type>`, unless the type is anonymous (its name,
-    /// the open member's tag, has an underscore), which writes nothing.
+    /// `begin_sequence` of the object mode: `<Type>`, unless the type is anonymous (its name is
+    /// the open member's tag, which has an underscore, or empty), which writes nothing.
     fn begin_object_sequence(&mut self, type_name: &str) {
         if anonymous_type(type_name) {
             debug_assert!(!self.pending_elem);
-            debug_assert_eq!(
-                &self.names[self.marks.last().copied().unwrap_or(0)..],
-                type_name.as_bytes()
+            debug_assert!(
+                type_name.is_empty()
+                    || &self.names[self.marks.last().copied().unwrap_or(0)..]
+                        == type_name.as_bytes()
             );
             self.opened.push(0);
             return;
@@ -683,6 +680,21 @@ impl<'b, const OBJECT: bool> XmlEncoder<'b, OBJECT> {
         self.push_name(&[type_name.as_bytes()]);
         let start = *self.marks.last().expect("just pushed");
         self.open_tag(start);
+    }
+
+    /// Counts the ends of line held after those counted (`lines`, from the bytes held after the
+    /// last hand-on).
+    fn count_lines(&mut self) {
+        if self.lines_to < self.start {
+            self.lines_to = self.start;
+            self.lines = 0;
+        }
+        self.lines_to = self.lines_to.min(self.out.len());
+        self.lines += self.out[self.lines_to..]
+            .iter()
+            .filter(|&&byte| byte == b'\n')
+            .count() as u64;
+        self.lines_to = self.out.len();
     }
 
     fn fail(&mut self, error: SerialError) {
@@ -785,7 +797,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     }
 
     /// `BeginNamedType`: `<Type>` (the object mode).
-    fn begin_named(&mut self, type_name: &str) {
+    fn begin_named(&mut self, type_name: &'static str) {
         if OBJECT {
             self.pending_elem = false;
             self.push_name(&[type_name.as_bytes()]);
@@ -831,9 +843,10 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
             if anonymous_type(type_name) {
                 // An anonymous CHOICE: the member's tag is already open.
                 debug_assert!(!self.pending_elem);
-                debug_assert_eq!(
-                    &self.names[self.marks.last().copied().unwrap_or(0)..],
-                    type_name.as_bytes()
+                debug_assert!(
+                    type_name.is_empty()
+                        || &self.names[self.marks.last().copied().unwrap_or(0)..]
+                            == type_name.as_bytes()
                 );
                 self.opened.push(1);
             } else {
@@ -928,7 +941,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:473-484
     fn enumerated(&mut self, name: &str, _value: i32) {
         if OBJECT {
-            self.value_attribute(name);
+            self.value_attribute(Some(name));
         } else {
             self.fail(SerialError::XmlUnsupported("ENUMERATED value"));
         }
@@ -958,7 +971,7 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
     /// `WriteBool` of the object mode: ` value="true"/>` or ` value="false"/>`.
     fn boolean(&mut self, value: bool) {
         if OBJECT {
-            self.value_attribute(if value { "true" } else { "false" });
+            self.value_attribute(Some(if value { "true" } else { "false" }));
         } else {
             self.fail(SerialError::XmlUnsupported("BOOLEAN"));
         }
@@ -987,17 +1000,67 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         self.write_string::<true>(value);
     }
 
-    /// The XML documents (outfmt 5, 14, 16 and the archive's object mode) have no NULL,
-    /// UTF8String or delayed member (the values of a PSSM file's members, `asn_types::write`:
-    /// psiblast and tblastn `-in_pssm` refuse `-outfmt 11`).
+    /// `WriteNull` of the object mode (a NULL of a PSSM query's parts, `asn_types::write`):
+    /// `/>` in place of the `>` that closes the innermost open tag (`<Seq-loc_null/>`). The
+    /// reports' XML (outfmt 5, 14, 16) has none.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:720-724
     fn null(&mut self) {
-        self.fail(SerialError::Unwritten("a NULL value"));
+        if OBJECT {
+            self.value_attribute(None);
+        } else {
+            self.fail(SerialError::Unwritten("a NULL value"));
+        }
     }
-    fn utf8_str(&mut self, _value: &[u8]) {
-        self.fail(SerialError::Unwritten("a UTF8String"));
+
+    fn null_element(&mut self, _element_type: &str) {
+        self.fail(SerialError::NullElement);
     }
-    fn delayed(&mut self, _text: &[u8]) {
-        self.fail(SerialError::Unwritten("a member read into a delay buffer"));
+
+    /// `WriteString` of a UTF8String (a PSSM query's `User-field` `str`, `asn_types::write`) in
+    /// the object mode: the archive's stream has no encoding, so the string's encoding is the
+    /// stream's (UTF-8) and NCBI checks and writes each byte as a VisibleString's
+    /// (`visible_str`; NCBI 2.17.0 probe X of line RG-F3 PR 2, `é` and the byte 0x01: `é#` and
+    /// the post 803.7). The reports' XML (outfmt 5, 14, 16) has none.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:556-565
+    fn utf8_str(&mut self, value: &[u8]) {
+        if OBJECT {
+            self.write_string::<false>(value);
+        } else {
+            self.fail(SerialError::Unwritten("a UTF8String"));
+        }
+    }
+
+    /// `utf8_str` that writes NCBI's `#` for a control character and records it, as
+    /// `visible_str_replacing`.
+    fn utf8_str_replacing(&mut self, value: &[u8]) {
+        if OBJECT {
+            self.write_string::<true>(value);
+        } else {
+            self.fail(SerialError::Unwritten("a UTF8String"));
+        }
+    }
+
+    /// The member's tag was opened (`member`); the bytes read from XML follow as they were read,
+    /// and the member's closing tag follows them (`CObjectOStream::WriteClassMember` of a buffer of
+    /// its format: `Write` of the buffer's source writes no tag of its own).
+    // NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:919-933
+    fn delayed(&mut self, bytes: &[u8]) {
+        self.out.extend_from_slice(bytes);
+    }
+
+    fn unread_delayed(&mut self) {
+        self.fail(SerialError::Unwritten(
+            "a member read into a delay buffer of another format whose value NCBI reads with an \
+                 error or with a message other than a replaced character",
+        ));
+    }
+
+    fn delayed_posts(&mut self, posts: &[ReplacedChar]) {
+        if let Some(first) = posts.first() {
+            self.fail(SerialError::NonVisibleChar(first.byte));
+        }
     }
 
     /// `WriteBytes` of the object mode: the bytes as upper-case hex digits, unwrapped
@@ -1065,6 +1128,17 @@ impl<const OBJECT: bool> Encoder for XmlEncoder<'_, OBJECT> {
         // `replace` counts again from the bytes held (`encoder::Traced` adds those handed on).
         (self.lines_to, self.lines) = (self.start, 0);
         Ok(())
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:193-196
+    /// The position of NCBI's XML stream in the object mode, the line count of its output buffer:
+    /// 1 + the ends of line held (`encoder::Traced` adds those handed on).
+    fn position(&mut self) -> Option<StreamPosition> {
+        if !OBJECT {
+            return None;
+        }
+        self.count_lines();
+        Some(StreamPosition::Line(1 + self.lines))
     }
 
     fn error(&self) -> Option<SerialError> {

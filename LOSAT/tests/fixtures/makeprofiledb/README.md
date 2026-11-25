@@ -67,6 +67,65 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
   `l_QR06.lst` (`e2_n8` alone: NCBI's process ends as its writer closes, review O6) and `l_QR07.lst` (a gap,
   where NCBI's conversion reads past its table; not run) have no row either. The test checks LOSAT's refusal of
   each.
+- Rows `NE00`-`NE27` (line RG item D3c-3c, run the same way on 2026-11-24 by
+  `remaining-gaps-20261112/D/d3/c3c/tools/run_probeB3.sh`, inputs from `c3c/tools/gen_probeB3.py`, rows added by
+  `c3c/tools/freeze_ne.py`, outside the repository): an element stated as `NULL` in a list of a profile's query.
+  `zs.smp` is `z_bh1.smp` without its binary definition lines; `zs_d1`, `zs_d2`, `zs_d0` hold `descr { NULL }`,
+  `{ title, NULL }` and `{ NULL, title }`: NCBI's loops over the descriptors dereference the element (`Error: ERROR:
+  Attempt to access NULL pointer.`, exit status 255) alone, as the second profile (`NE04`: the files of the volume
+  begun), as the first, with `-taxid`, `-blastdb_version 4`, `-index false`, and with `-max_smp_vol 1` (`NE09`:
+  `Empty database`, exit status 1, no file). `n_bh`, `n_bh0` (`NE10`-`NE12`) are `z_bh1.smp` with `NULL` after and
+  before its binary definition lines (after them only the taxid loop reaches it: `-taxid 5` gives the database);
+  `e_oss_empty_null` (`NE13`, `NE14`) has an empty octet string, so the definition lines are built from the
+  descriptors; `e_bh_org_null`, `e_bh_null_org` (`NE15`, `NE16`) put an organism before or after the `NULL` (the
+  taxid loop stops at the first organism). `NE17`-`NE26` hold a `NULL` element in lists makeprofiledb does not
+  read (Seq-hist ids and assembly, Seq-ext seg and delta, BioSource subtype, a feature's dbxref and qual, a
+  Variation-ref set, population-data and clinical-test, whose deprecation NCBI posts): the database. `NE27`
+  (D3c-3c review R2, `c3c/probeF/mpdb`, run the same way) is `e_noid_oss_null`: a Bioseq with an empty id
+  list whose descriptors hold a title, binary definition lines of an empty octet string and a `NULL`; NCBI
+  builds the definition lines from the descriptors before it looks at the ids, so it dereferences the element
+  there too.
+
+- Rows `B01`-`B22`, `BE01`-`BE12`, `RB04`, `RB04m`, `RB04b`, `RB08`-`RB29` (row PS10b, frozen on
+  2026-11-25 with the official NCBI BLAST+ 2.17.0 `makeprofiledb` and `rpsblast` binaries):
+  - `B01`-`B09`: `-binary` on ASN.1 BER binary PSSMs (`pc`/`pe`/`pf` scored, `c1`/`c2`/`c3` CDD,
+    `fc`/`fe` frequency-ratio-only IMPALA path), multi-volume (`-max_smp_vol 2`), `-index false`,
+    `-blastdb_version 4`, `-scale`/`-threshold`/`-gapopen`/`-gapextend`, `-logfile`, `-dryrun`;
+    `rps/B01.{6,0}` and `rps/B03.{6,0}` are NCBI `rpsblast` outputs on the `-binary`-built DBs.
+  - `B10`-`B22`: short-form definite length (`B10`, valid), long-form definite length (`B11`,
+    reproducing NCBI's `error while reading freqRatios`), `byRow TRUE` (`B12`), binary defline
+    inside binary `.smp` (`B13`), `UTF8String` tag (`B14`, suppressed warning), bad visible chars
+    in binary title (`B15`, 803.7 posts), `StringStore` `ncbieaa`/`iupacaa` bytes `>= 0x80` and
+    `< 0x20` (`B16`, `B17`), odd-length `iupacna` overhang byte `>= 0x80` (`B18`), `iupacna`
+    control byte `< 0x20` (`B19`), `mol na` with `iupacna` `>= 0x80` (`B20`, NCBI molecule error
+    first), `params NULL` (`B21`), BER special REAL `0` / `-0.0` (`B22`).
+  - `BE01`-`BE12`: `-binary` errors (text with `-binary`, binary without `-binary`, mixed binary
+    and text with leftovers, empty, truncated `30 80`, missing mandatory `pssm`, mid-file
+    truncation with leftovers, unknown member `[9]`, bad tag inside `numRows`, huge string 2^63,
+    huge octet string 2^62 with 803.4 post, `@1` pointer overflow).
+  - `RB04`, `RB04m`, `RB04b`, `RB08`-`RB29`: damaged and edge-case binary definition lines
+    (`ASN1_BlastDefLine`) decoded through the shared table-driven BER reader (`Blast-def-line-set`):
+    `0xDEADBEEF` (`RB04`, mid-list `RB04m`, in binary `.smp` `RB04b`), truncated `30` (`RB08`),
+    missing `seqid` (`RB09`), overflowing `taxid` (`RB10`), bad visible chars in title and Seq-id
+    (`RB11`, 803.7 posts), bad visible char followed by syntax error (`RB12`), `NULL`
+    `Blast-def-line` (`RB13`), `UTF8String` tag (`RB14`), huge string 2^63 (`RB15`), `:Blast-def-line`
+    and `:Seq-id` pointer forms with definite length and trailing bytes (`RB16`), and `NULL`
+    `Seq-id` elements carried to NCBI's exact failing point: `-blastdb_version 4` (`RB17`, `RB18`
+    with `-taxid 9606`: 802.5 post + `byte 15` error, rc 255), non-empty `-taxid_map` in v4 and v5
+    (`RB19`, `RB20`: `Attempt to access NULL pointer.`, rc 255), varied `NULL` positions (1st
+    defline 2nd Seq-id `RB21` byte 28; 2nd defline 1st Seq-id `RB22` byte 56; 2nd defline 2nd
+    Seq-id `RB23` byte 69), `-index false` replacing the first slot with `gnl|BL_ORD_ID|0` in v4
+    and v5 (`RB24`, `RB25`: rc 0; 2nd Seq-id `RB26` byte 49), `org` descriptor populating the map
+    in v5 (`RB27`: `Attempt to access NULL pointer.`, rc 255), v5 after a valid profile (`RB28`:
+    802.5 + `byte 15`, rc 255, 9 files), and bad visible char before `NULL` `Seq-id` (`RB29`:
+    803.7 + 802.5 + `byte 17`, rc 255).
+  - `l_QR08.lst`-`l_QR15.lst` (no `cases.tsv` row; tested as refusals): `iupacna` byte `>= 0x80`
+    in pair positions (`QR08`-`QR10`), `:Seq-interval` other-type pointer in binary (`QR11`) and
+    ASN.1 text (`QR14`, where NCBI 2.17.0 prints `class not found: Seq-interval`, rc 255), `NULL`
+    `Seq-id` inside `ASN1_BlastDefLine` in v5 with 0 prior OIDs (`QR12`: none, `-taxid 9606`, and
+    empty `-taxid_map`, where NCBI aborts rc 134), 1 GiB string length past EOF (`QR13`), and
+    `NULL` `Seq-id` followed by a missing input file in v5 and v4 (`QR15`, where `Close` throws in
+    the unwinding of the input error and NCBI aborts rc 134).
 
 The whole oracle (248 cases) is compared by `compare.py` of the survey; these rows are the part kept in the
-repository (about 1.05 MB).
+repository.

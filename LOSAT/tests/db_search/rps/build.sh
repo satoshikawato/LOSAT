@@ -31,6 +31,9 @@
 # xp101.phr, .pin, .pdb and .pos (series D, item D1b-2): rps_mini made with profile 101 under the predicted RefSeq Seq-id
 #   ref|XP_000101.1| (below), which the alias key OID_MASK_TYPE 1 erases; the other files of that build are the same as
 #   rps_mini's, so the rows replace only these four (`rps-gz:rps_mini!phr=xp101.phr.gz...`, gzip -9 -n each).
+# hx.phr, .pin, .pdb and .pos (line RG, item T4c): rps_mini made with profile 101 under ref|XP_000101.1| and a title with < > & and
+#   double quotes, 102 under pdb|1ABC|A, 103 with entities in its title, for the -html rows (below; the other files of that build
+#   are the same as rps_mini's: `rps-gz:rps_mini!phr=hx.phr.gz...`, gzip -9 -n each).
 # xp3v01.phr, .pin, .pdb and .pos (series D, item D1b-2): rps_mini3v.01 made from profile 102 under ref|XP_000102.1|
 #   (below; the other files of that build are the same as rps_mini3v.01's), the second of three volumes searched bare
 #   (`rps-gz:rps_mini3v!01.phr=xp3v01.phr.gz...@om3vrps`).
@@ -42,6 +45,19 @@
 #   the hits of those nine cells not in ascending order (reversed, rotated, first and last swapped; build_wide.py), which
 #   makeprofiledb never writes: the cell-order read of a table like it would lose hits of the later group.
 #
+# rps_odd_* (series PR, item PS10e): three profiles at most each, whose `.psq` letters (their `.pin` length L_pin) differ
+#   from their `.rps` columns L_rps, as makeprofiledb writes them for a scored profile whose seq-data is nucleotide-coded or
+#   has more or fewer letters than its length (make_odd.py writes the profiles, variants of the PS10 oracle's c1 c2 c3 of
+#   tests/fixtures/makeprofiledb/in, and the lists): sc (c2 nucleotide-coded), sc2v (sc with -max_smp_vol 2: volumes .00,
+#   .01 and rps_odd_sc2v.pal), hl (ten copies of c1, then c2 nucleotide-coded), aa1 and aa1s (c1 as 22 A: 6 letters below
+#   28; aa1s alone), p6 p10 p16 p21 p23 p24 (c1 with 6 to 24 letters for 22 columns), p23l p24l p23x3l (the last profile
+#   c3 with 21, 22 and 23 letters for 20 columns), na1 (c1 nucleotide-coded: 6 letters, four of them 28 or more).
+#   makeprofiledb runs in OUT_DIR/odd with -in in/l_<set>.lst -out
+#   rps_odd_<set>, under env -i with TZ=UTC and, when FAKETIME_SO names an LD_PRELOAD shim whose time(), gettimeofday()
+#   and clock_gettime(CLOCK_REALTIME) return $FAKE_TIME (PS10d's probe/tools/faketime.c), the wall clock frozen at
+#   2026-11-21 05:07 UTC (FAKE_TIME=1795237620): a rebuild under the same shim gives the committed bytes.
+#   Usage: build.sh NCBI_BIN OUT_DIR odd    (only these sets; then: gzip -9 -n OUT_DIR/rps_odd_*)
+#
 # Usage: build.sh NCBI_BIN OUT_DIR    (then: gzip -9 -n OUT_DIR/rps_mini*.* and copy the .gz files here)
 set -euo pipefail
 N=$1
@@ -49,6 +65,24 @@ O=$2
 HERE=$(cd "$(dirname "$0")" && pwd)
 LOSAT=$(cd "$HERE/../../.." && pwd)
 mkdir -p "$O"
+build_odd() {
+  local odd="$O/odd" set preload=()
+  mkdir -p "$odd"
+  python3 -I "$HERE/make_odd.py" "$LOSAT/tests/fixtures/makeprofiledb/in" "$odd"
+  [ -n "${FAKETIME_SO:-}" ] && preload=(LD_PRELOAD="$FAKETIME_SO" FAKE_TIME=1795237620)
+  for set in sc sc2v hl aa1 aa1s p6 p10 p16 p21 p23 p24 p23l p24l p23x3l na1; do
+    local extra=()
+    [ "$set" = sc2v ] && extra=(-max_smp_vol 2)
+    (cd "$odd" && env -i PATH=/usr/bin:/bin TZ=UTC LC_ALL=C BLAST_USAGE_REPORT=false HOME="$odd" "${preload[@]}" \
+      "$N/makeprofiledb" -in "in/l_$set.lst" -out "rps_odd_$set" "${extra[@]}" < /dev/null)
+  done
+  mv "$odd"/rps_odd_* "$O/"
+}
+if [ "${3:-}" = odd ]; then
+  build_odd
+  ls -l "$O"
+  exit 0
+fi
 W=$(mktemp -d)
 trap 'rm -rf "$W"' EXIT
 cd "$W"
@@ -178,10 +212,40 @@ echo x102.smp > listxp3v.txt
 mkdir xp3v
 "$N/makeprofiledb" -in listxp3v.txt -out xp3v/rps_mini3v.01 -title rps_mini3v -dbtype rps
 for ext in phr pin pdb pos; do cp "xp3v/rps_mini3v.01.$ext" "$O/xp3v01.$ext"; done
+# hx (line RG, item T4c): rps_mini's three profiles with Seq-ids and titles that -html turns into links and escapes: 101 under
+# `other { accession "XP_000101", version 1 }` (ref|XP_000101.1|) with a title that holds < > & and double quotes, 102 under
+# `pdb { mol "1ABC", chain-id "A" }` (pdb|1ABC|A, its title as rps_mini's), 103 under gnl|CDD|103 with the entities &amp; and
+# &lt;b&gt; in its title. Only the .phr, .pin, .pdb and .pos differ from rps_mini's (hx.*.gz, gzip -9 -n each; built under the name
+# and title rps_mini, as xp101, because the index files name their database; searched as `rps-gz:rps_mini!phr=hx.phr.gz!pin=hx.pin.gz!pdb=hx.pdb.gz!pos=hx.pos.gz`).
+for tag in 101 102 103; do
+  python3 - f$tag.smp x$tag.smp $tag <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+tag = sys.argv[3]
+ids = {"101": 'other {\n          accession "XP_000101",\n          version 1\n        }',
+       "102": 'pdb {\n          mol "1ABC",\n          chain-id "A"\n        }',
+       "103": 'general {\n          db "CDD",\n          tag id 103\n        }'}
+titles = {"101": 'f101 TK-TMK <chimeric> & ""thymidine"" kinase [White spot syndrome virus] residues 1-190',
+          "102": None,
+          "103": 'f103 DNA polymerase &amp; &lt;b&gt; [White spot syndrome virus] residues 1101-1290'}
+new, count = re.subn(r'id \{\s*general \{\s*db "CDD",\s*tag id ' + tag + r'\s*\}\s*\}',
+                     lambda _: 'id {\n        ' + ids[tag] + '\n      }', text, count=1)
+assert count == 1, tag
+if titles[tag]:
+    new, count = re.subn(r'title "(?:[^"]|"")*"', lambda _: 'title "' + titles[tag] + '"', new, count=1)
+    assert count == 1, (tag, "title")
+open(sys.argv[2], "w").write(new)
+PY
+done
+printf '%s\n' x101.smp x102.smp x103.smp > listhx.txt
+mkdir hx
+"$N/makeprofiledb" -in listhx.txt -out hx/rps_mini -title rps_mini -dbtype rps
+for ext in phr pin pdb pos; do cp "hx/rps_mini.$ext" "$O/hx.$ext"; done
 # rps_wide and its table with ungrouped cells.
 python3 "$HERE/build_wide.py" tile f101.smp 700 wide.smp
 echo wide.smp > wide.txt
 "$N/makeprofiledb" -in wide.txt -out "$O/rps_wide" -title rps_wide -dbtype rps -threshold 20 -force
 rm "$O/rps_wide.freq"
 python3 "$HERE/build_wide.py" ungroup "$O/rps_wide.loo" "$O/rps_wide_ug.loo"
+build_odd
 ls -l "$O"

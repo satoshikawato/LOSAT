@@ -132,9 +132,22 @@ impl<'b> JsonEncoder<'b> {
 }
 
 impl Encoder for JsonEncoder<'_> {
+    const STREAM: Option<super::encoder::Stream> = Some(super::encoder::Stream::Json);
+
     /// `m_EnforceWritingDefaults` is set to `true` (the constructor, cited in the module).
     fn writes_defaults(&self) -> bool {
         true
+    }
+
+    /// The document so far (`Traced` follows NCBI's buffer over it).
+    fn held(&self) -> &[u8] {
+        self.out
+    }
+
+    fn hand_on(&mut self, sink: &mut dyn std::io::Write, count: usize) -> std::io::Result<()> {
+        sink.write_all(&self.out[..count])?;
+        self.out.drain(..count);
+        Ok(())
     }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:137-150
@@ -251,10 +264,20 @@ impl Encoder for JsonEncoder<'_> {
     fn null(&mut self) {
         self.unwritten("a NULL value");
     }
+    fn null_element(&mut self, _element_type: &str) {
+        if self.error.is_none() {
+            self.error = Some(SerialError::NullElement);
+        }
+    }
     fn utf8_str(&mut self, _value: &[u8]) {
         self.unwritten("a UTF8String");
     }
-    fn delayed(&mut self, _text: &[u8]) {
+    /// The JSON stream copies no delay buffer (`data_format` is none): `asn_types::write`
+    /// writes the member by its values.
+    fn delayed(&mut self, _bytes: &[u8]) {
+        unreachable!("no delay buffer is of the JSON stream's format")
+    }
+    fn unread_delayed(&mut self) {
         self.unwritten("a member read into a delay buffer");
     }
 

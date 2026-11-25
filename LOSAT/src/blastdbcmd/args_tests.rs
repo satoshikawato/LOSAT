@@ -25,16 +25,19 @@ fn messages(line: &[&str]) -> (&'static str, Vec<String>) {
 #[test]
 fn defaults_fill_the_keys_not_given() {
     let args = parse(&words(&["-db", "db/p5", "-info"])).unwrap();
-    assert_eq!(args.value("db"), Some("db/p5"));
-    assert_eq!(args.value("dbtype"), Some("guess"));
-    assert_eq!(args.value("out"), Some("-"));
+    assert_eq!(args.bytes("db").as_deref(), Some(b"db/p5".as_slice()));
+    assert_eq!(args.bytes("dbtype").as_deref(), Some(b"guess".as_slice()));
+    assert_eq!(args.bytes("out").as_deref(), Some(b"-".as_slice()));
     assert!(args.given("info") && !args.given("exact_length"));
     // `-info` excludes `-outfmt` and `-strand`: no default for them.
-    assert_eq!(args.value("outfmt"), None);
-    assert_eq!(args.value("strand"), None);
+    assert_eq!(args.bytes("outfmt"), None);
+    assert_eq!(args.bytes("strand"), None);
     let args = parse(&words(&["-db=db/p5", "-info"])).unwrap();
-    assert_eq!(args.value("db"), Some("db/p5"));
-    assert_eq!(parse(&words(&["-info"])).unwrap().value("db"), Some("nr"));
+    assert_eq!(args.bytes("db").as_deref(), Some(b"db/p5".as_slice()));
+    assert_eq!(
+        parse(&words(&["-info"])).unwrap().bytes("db").as_deref(),
+        Some(b"nr".as_slice())
+    );
 }
 
 // The texts of NCBI blastdbcmd 2.17.0 (probe B of line BDC, `manifest_b.tsv`; I33, E60, E62).
@@ -213,10 +216,10 @@ fn names_are_checked_and_looked_up_as_ncbi_does() {
     }
     // `-NAME-file` and `-NAME-verbatim` are the argument NAME.
     let args = parse(&words(&["-db-file", "db/p5", "-info-FILE"])).unwrap();
-    assert_eq!(args.value("db"), Some("db/p5"));
+    assert_eq!(args.bytes("db").as_deref(), Some(b"db/p5".as_slice()));
     assert!(args.given("info"));
     let args = parse(&words(&["-db-verbatim=db/p5", "-info"])).unwrap();
-    assert_eq!(args.value("db"), Some("db/p5"));
+    assert_eq!(args.bytes("db").as_deref(), Some(b"db/p5".as_slice()));
     assert_eq!(
         messages(&["-info", "-info-file"]).1,
         ["Argument with this name is defined already: info"]

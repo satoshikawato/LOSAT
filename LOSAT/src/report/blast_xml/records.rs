@@ -131,6 +131,11 @@ pub struct XmlHit<'a> {
     /// `GenerateDefline` threw for the `-subject` record (`SubjectNames::defline_thrown`):
     /// outfmt 5's `Hit_len` is 0.
     pub defline_thrown: bool,
+    /// The exception that the lookup of the database sequence's Seq-align id throws where the
+    /// `Hit` loads it (`SubjectNames::lookup_throws`; the names are those of NCBI's `catch`,
+    /// `SubjectNames::of_thrown`): outfmt 5 writes the `catch`'s `Hit` and HSPs
+    /// (`writer::Xml5Hits`), the XML2 and JSON documents raise it (`CaughtException`).
+    pub lookup_throws: Option<&'a crate::ncbi_exception::NcbiException>,
 }
 
 impl<'a> XmlHit<'a> {
@@ -145,6 +150,7 @@ impl<'a> XmlHit<'a> {
             taxonomy: &names.taxonomy,
             descriptions: &names.descriptions,
             defline_thrown: names.defline_thrown,
+            lookup_throws: names.lookup_throws.as_ref(),
         }
     }
 }
@@ -200,8 +206,9 @@ pub struct XmlHsp<'a> {
     /// subject letters, `-` for a gap, equally long.
     pub qrow: &'a [u8],
     pub srow: &'a [u8],
-    /// The edit script of the rows (`None`: one segment of substitutions over the whole row), which
-    /// gives the Dense-seg segments that the mask loop walks.
+    /// The edit script of the rows (`None`: an ungapped HSP, one segment of substitutions over the
+    /// whole row and no gaps), which gives the Dense-seg segments that the mask loop walks and the
+    /// gaps (`writer::count_hsp`).
     pub ops: Option<&'a [GapEditOp]>,
     /// The 0-based record position of the query row's first residue and how the residues
     /// follow (`hsp::mask_query_row`): 1 for a protein or plus-strand nucleotide row, 3 for a
@@ -209,4 +216,37 @@ pub struct XmlHsp<'a> {
     /// nucleotide of the first residue).
     pub query_first: i32,
     pub query_step: i32,
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:810-849
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203, 1491-1495
+    /// The Seq-align's `num_ident` as `GetAlnScores` reads it: the engine's identities, -1 where
+    /// the Seq-align has no `num_ident` score (psiblast's HSP of 0 identities, whose count NCBI
+    /// sets to -1 before it writes the Seq-align). Outfmt 5 writes it in the `catch` of an HSP
+    /// whose subject's lookup throws; every other HSP counts its identities again from the rows.
+    pub alignment_identities: i32,
+}
+
+impl XmlHsp<'_> {
+    /// An HSP of a `Hit` whose writer does not read its alignment (`HspSink::reads_alignment`:
+    /// the HSPs of a `Hit` whose subject's lookup throws in outfmt 5): its Seq-align scores alone
+    /// (the raw score, the bit score, the e-value as the Seq-align has it, and
+    /// `alignment_identities`), without coordinates, frames or rows.
+    pub fn unaligned(score: i32, bit_score: f64, evalue: f64, alignment_identities: i32) -> Self {
+        XmlHsp {
+            score,
+            bit_score,
+            evalue,
+            query_from: 0,
+            query_to: 0,
+            hit_from: 0,
+            hit_to: 0,
+            query_frame: 0,
+            hit_frame: 0,
+            qrow: &[],
+            srow: &[],
+            ops: None,
+            query_first: 0,
+            query_step: 1,
+            alignment_identities,
+        }
+    }
 }

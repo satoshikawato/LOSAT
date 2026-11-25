@@ -33,6 +33,9 @@ pub enum ParamValue {
     Str(String),
     /// `integer-list`.
     IntegerList(Vec<i32>),
+    // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:512,529
+    /// `big-integer-list` (`Blast4-value` choice 12, `SEQUENCE OF BigInt`).
+    BigIntegerList(Vec<i64>),
 }
 
 /// A recorded parameter (`Blast4-parameter`).
@@ -163,6 +166,22 @@ impl RequestKind {
     /// Whether the handle is an RPS search's.
     fn is_rps(self) -> bool {
         matches!(self, RequestKind::Rpsblast | RequestKind::Rpstblastn)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
+    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_program.h:72-90
+    /// Whether the subject sequences are nucleotide (`Blast_SubjectIsNucleotide`):
+    /// BLASTN, TBLASTN (including PSI-TBLASTN with `-in_pssm`) and TBLASTX search nucleotide
+    /// subjects; BLASTP, PSIBLAST, BLASTX, RPSBLAST and RPSTBLASTN search protein or profile
+    /// databases.
+    pub fn subject_is_nucleotide(self) -> bool {
+        matches!(
+            self,
+            RequestKind::Blastn
+                | RequestKind::Tblastn
+                | RequestKind::PsiTblastn
+                | RequestKind::Tblastx
+        )
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_options.cpp:46-74

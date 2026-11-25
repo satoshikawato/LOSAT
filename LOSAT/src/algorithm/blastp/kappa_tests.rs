@@ -393,9 +393,9 @@ fn evalue_adjust_contexts_of_a_next_query_that_is_not_valid() {
     let error = evalue_adjust_contexts(&contexts, &spaces, &batches, 0, blastp)
         .expect_err("the valid query 1 is followed by a query without a search space");
     let failure = error
-        .downcast::<crate::algorithm::common::database::HeaderReadError>()
+        .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
         .expect("the batch's error");
-    assert_eq!(failure.query, 1);
+    assert_eq!(failure.query, Some(1));
     let text = failure.to_string();
     assert!(text.contains("are not supported by LOSAT's BLASTP for query id1, which"));
     assert!(text.contains("(id2: no residue that can be scored"));
@@ -619,7 +619,7 @@ fn test_redo_preliminary_blastp_hit_preserves_internal_offsets_with_ranges() {
 
 #[test]
 fn test_subject_seg_masks_when_enabled_and_not_near_identical() {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2939-2955
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1625-1637
     let matching_residues = vec![1u8; 80];
     let matching_seq = BlastCompoMatchingSequence::new(0, &matching_residues);
     let subject_range = BlastCompoSequenceRange {

@@ -7,6 +7,10 @@
 //! each volume ([`super::column`]): its metadata maps the volume's algorithm ids to
 //! descriptions; the blob of a sequence holds, per algorithm, a list of ranges.
 //!
+//! A database whose alias file names GI-indexed masks (`MASKLIST`, `makeblastdb -gi_mask`) has
+//! those instead (`gi_mask`, NCBI's `m_UseGiMask`): [`MaskAlgorithms`] dispatches between the two
+//! once, and the reads below take the masks of either.
+//!
 //! The reader of `losat blastdbcmd`, and of BLASTN's `-db_soft_mask` and `-db_hard_mask`
 //! (`blastinput::db_mask`): NCBI's searches read the columns only with a masking algorithm named
 //! by `-db_soft_mask`, `-db_hard_mask` or an imported search strategy (LOSAT refuses the last),
@@ -14,10 +18,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::ncbi_str::string_to_int;
 
 use super::column::{Blob, MASK_DATA_TITLE};
+use super::gi_mask::GiMasks;
 use super::volume::Volume;
 use super::{BlockRange, SeqDb, SeqDbError, SeqLocation};
 
@@ -209,21 +215,37 @@ fn utf8_value<'a>(bytes: &'a [u8], path: &Path) -> Result<&'a str, SeqDbError> {
 }
 
 /// Pads `text` with spaces on the right to `width` bytes (`setw` of `width` with `left` alignment;
-/// text that is longer is not cut).
-fn push_padded(out: &mut String, text: &str, width: usize) {
+/// text that is longer is not cut): the one helper of the names tables of the mask columns and of
+/// the GI masks (`gi_mask`).
+pub(super) fn push_padded(out: &mut String, text: &str, width: usize) {
     out.push_str(text);
     for _ in text.len()..width {
         out.push(' ');
     }
 }
 
-/// The filtering algorithms of a database: `CSeqDB_IdRemapper` with the descriptions
-/// (`GetAvailableMaskAlgorithms`, `GetMaskAlgorithmDetails`, `GetMaskAlgorithmId`).
+/// The filtering algorithms of a database (`GetAvailableMaskAlgorithms`,
+/// `GetMaskAlgorithmDetails`, `GetMaskAlgorithmId`): those of the volumes' mask columns, or the
+/// GI masks that its alias file names (NCBI's `m_UseGiMask`), never both.
+#[derive(Debug, Clone)]
+pub struct MaskAlgorithms {
+    kind: AlgorithmsKind,
+}
+
+#[derive(Debug, Clone)]
+enum AlgorithmsKind {
+    /// The mask columns of the volumes.
+    Columns(ColumnAlgorithms),
+    /// The GI masks of `MASKLIST`.
+    Gi(Arc<GiMasks>),
+}
+
+/// The filtering algorithms of the mask columns: `CSeqDB_IdRemapper` with the descriptions.
 ///
 /// The ids that volumes use for an algorithm may differ from volume to volume; the table
 /// gives each description one database-wide id and remembers each volume's own.
 #[derive(Debug, Clone)]
-pub struct MaskAlgorithms {
+struct ColumnAlgorithms {
     /// `m_NextId`: where the search for an unused id starts.
     next_id: i32,
     /// `m_IdToDesc`, with the file that first stated the description (for messages).
@@ -234,7 +256,7 @@ pub struct MaskAlgorithms {
     real_to_volume: BTreeMap<usize, BTreeMap<i32, i32>>,
 }
 
-impl MaskAlgorithms {
+impl ColumnAlgorithms {
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2167-2171
     fn new() -> Self {
         Self {
@@ -288,7 +310,7 @@ impl MaskAlgorithms {
     /// Builds the table from the mask columns of `volumes` (in database order). Every
     /// volume opens its columns first, as `x_GetColumnId` does, so an error in a later
     /// volume wins over one in an earlier volume's data.
-    pub(super) fn build(volumes: &[Volume]) -> Result<Self, SeqDbError> {
+    fn build(volumes: &[Volume]) -> Result<Self, SeqDbError> {
         for volume in volumes {
             volume.columns()?;
         }
@@ -306,14 +328,16 @@ impl MaskAlgorithms {
 
             // Check for identical algorithm descriptions (should not happen.)
             if let Some(duplicate) = first_duplicate(&metadata) {
-                return Err(SeqDbError::Format {
-                    path: path.to_path_buf(),
-                    message: format!(
-                        "Error: volume ({}) mask data has duplicates value ({})",
-                        volume.base().display(),
-                        duplicate
-                    ),
-                });
+                return Err(SeqDbError::NotFound(
+                    [
+                        b"Error: volume (".as_slice(),
+                        &crate::utils::os_bytes::path_bytes(volume.base()),
+                        b") mask data has duplicates value (",
+                        duplicate.as_bytes(),
+                        b")",
+                    ]
+                    .concat(),
+                ));
             }
 
             for (key, description) in metadata {
@@ -327,82 +351,97 @@ impl MaskAlgorithms {
         Ok(table)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2244-2259
+    /// `RealToVol`: the id the volume `volume` (index in the database) uses for the
+    /// database-wide `algo_id`; `None` where NCBI throws ("Cannot find volume in algorithm
+    /// map." or "Cannot find volume algorithm in algorithm map.").
+    fn volume_algorithm(&self, volume: usize, algo_id: i32) -> Option<i32> {
+        self.real_to_volume.get(&volume)?.get(&algo_id).copied()
+    }
+}
+
+impl MaskAlgorithms {
+    /// The table of the mask columns of `volumes` (`x_BuildMaskAlgorithmList`,
+    /// `ColumnAlgorithms::build`).
+    pub(super) fn build(volumes: &[Volume]) -> Result<Self, SeqDbError> {
+        Ok(Self {
+            kind: AlgorithmsKind::Columns(ColumnAlgorithms::build(volumes)?),
+        })
+    }
+
+    /// The algorithms of the GI masks `masks` (`m_UseGiMask`).
+    pub(super) fn gi(masks: Arc<GiMasks>) -> Self {
+        Self {
+            kind: AlgorithmsKind::Gi(masks),
+        }
+    }
+
+    /// The GI masks, where the database has them instead of mask columns.
+    pub(super) fn gi_masks(&self) -> Option<&GiMasks> {
+        match &self.kind {
+            AlgorithmsKind::Columns(_) => None,
+            AlgorithmsKind::Gi(masks) => Some(masks),
+        }
+    }
+
+    /// `RealToVol` of the mask columns (`ColumnAlgorithms::volume_algorithm`); `None` for GI masks.
+    fn volume_algorithm(&self, volume: usize, algo_id: i32) -> Option<i32> {
+        match &self.kind {
+            AlgorithmsKind::Columns(table) => table.volume_algorithm(volume, algo_id),
+            AlgorithmsKind::Gi(_) => None,
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2173-2180
-    /// The database-wide algorithm ids, ascending.
+    /// The database-wide algorithm ids, ascending (for GI masks 0 to N-1, `GiMasks::ids`).
     pub fn ids(&self) -> Vec<i32> {
-        self.id_to_desc.keys().copied().collect()
+        match &self.kind {
+            AlgorithmsKind::Columns(table) => table.id_to_desc.keys().copied().collect(),
+            AlgorithmsKind::Gi(masks) => masks.ids(),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2261-2268
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2292-2307
     /// `GetMaskAlgorithmId`: the id of the algorithm with this description (item 2 of a
-    /// four-item description; otherwise the whole description, for example `"30:"`), or
-    /// `None` where NCBI throws "Cannot find string algorithm id in algorithm map.".
-    pub fn id_of(&self, name: &str) -> Option<i32> {
-        self.desc_to_id.get(name).copied()
-    }
-
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2344-2378
-    fn parse_details(
-        id: i32,
-        description: &str,
-        source: &Path,
-    ) -> Result<MaskAlgorithm, SeqDbError> {
-        let bad = |message: String| SeqDbError::Format {
-            path: source.to_path_buf(),
-            message,
-        };
-        // `s_RestoreColon`: 0x01 stands for a ':' inside an item.
-        let restore = |item: &str| item.replace('\u{1}', ":");
-        let items = ncbi_split(description);
-        match items.len() {
-            2 => {
-                // `NStr::StringToInt` throws a CStringException on a text that is no
-                // integer; `FindName` with `pid` and false throws on a value the enum lacks.
-                let number = string_to_int(items[0].as_bytes(), 0).map_err(|_| {
-                    bad(format!(
-                        "the program {:?} of the mask algorithm description {description:?} \
-                         is not an integer",
-                        items[0]
-                    ))
-                })?;
-                let name = filter_program_name(number).ok_or_else(|| {
-                    bad(format!(
-                        "the program {number} of the mask algorithm description \
-                         {description:?} is not a Blast-filter-program value"
-                    ))
-                })?;
-                Ok(MaskAlgorithm {
-                    id,
-                    program: items[0].to_string(),
-                    program_name: name.to_string(),
-                    options: restore(items[1]),
-                })
-            }
-            4 => Ok(MaskAlgorithm {
-                id,
-                program: restore(items[0]),
-                program_name: restore(items[2]),
-                options: restore(items[1]),
-            }),
-            _ => Err(bad(
-                "Error in stored mask algorithm description data.".to_string()
-            )),
+    /// four-item description; otherwise the whole description, for example `"30:"`), or the
+    /// text of NCBI's exception: "Cannot find string algorithm id in algorithm map."; for GI
+    /// masks the id of the `MASKLIST` name (`GiMasks::algorithm_id`, whose text lists them).
+    /// `name` is the bytes of NCBI's `std::string`; the descriptions are text, so a name that is
+    /// not UTF-8 matches none of them.
+    pub fn id_of(&self, name: &[u8]) -> Result<i32, Vec<u8>> {
+        match &self.kind {
+            AlgorithmsKind::Columns(table) => std::str::from_utf8(name)
+                .ok()
+                .and_then(|name| table.desc_to_id.get(name))
+                .copied()
+                .ok_or_else(|| b"Cannot find string algorithm id in algorithm map.".to_vec()),
+            AlgorithmsKind::Gi(masks) => masks.algorithm_id(name),
         }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2380-2412
     /// `GetMaskAlgorithmDetails`. An id the database does not have gives NCBI's text
     /// ("Filtering algorithm ID `<id>` is not supported." and the list of algorithms) in
-    /// [`SeqDbError::Range`].
+    /// [`SeqDbError::Range`]. For GI masks the description is the one of the algorithm's index
+    /// file, which is opened here (`GiMasks::description`: its errors, and for an id outside 0 to
+    /// N-1 "Filtering algorithm ID `<id>` does not exist." and the list of names).
     pub fn details(&self, id: i32) -> Result<MaskAlgorithm, SeqDbError> {
-        let Some((description, source)) = self.id_to_desc.get(&id) else {
-            return Err(SeqDbError::Range(format!(
-                "Filtering algorithm ID {id} is not supported.\n{}",
-                self.descriptions()?
-            )));
-        };
-        Self::parse_details(id, description, source)
+        match &self.kind {
+            AlgorithmsKind::Columns(table) => {
+                let Some((description, source)) = table.id_to_desc.get(&id) else {
+                    return Err(SeqDbError::Range(format!(
+                        "Filtering algorithm ID {id} is not supported.\n{}",
+                        self.descriptions()?
+                    )));
+                };
+                parse_details(id, description, source)
+            }
+            AlgorithmsKind::Gi(masks) => {
+                let (description, source) = masks.description(id)?;
+                parse_details(id, &description, &source)
+            }
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2309-2342
@@ -438,13 +477,52 @@ impl MaskAlgorithms {
         }
         Ok(out)
     }
+}
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2244-2259
-    /// `RealToVol`: the id the volume `volume` (index in the database) uses for the
-    /// database-wide `algo_id`; `None` where NCBI throws ("Cannot find volume in algorithm
-    /// map." or "Cannot find volume algorithm in algorithm map.").
-    fn volume_algorithm(&self, volume: usize, algo_id: i32) -> Option<i32> {
-        self.real_to_volume.get(&volume)?.get(&algo_id).copied()
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2344-2378
+/// `s_GetDetails` of the stored description `description` of the algorithm `id` (`source`: the
+/// file that holds it, for LOSAT's errors).
+fn parse_details(id: i32, description: &str, source: &Path) -> Result<MaskAlgorithm, SeqDbError> {
+    let bad = |message: String| SeqDbError::Format {
+        path: source.to_path_buf(),
+        message,
+    };
+    // `s_RestoreColon`: 0x01 stands for a ':' inside an item.
+    let restore = |item: &str| item.replace('\u{1}', ":");
+    let items = ncbi_split(description);
+    match items.len() {
+        2 => {
+            // `NStr::StringToInt` throws a CStringException on a text that is no
+            // integer; `FindName` with `pid` and false throws on a value the enum lacks.
+            let number = string_to_int(items[0].as_bytes(), 0).map_err(|_| {
+                bad(format!(
+                    "the program {:?} of the mask algorithm description {description:?} \
+                     is not an integer",
+                    items[0]
+                ))
+            })?;
+            let name = filter_program_name(number).ok_or_else(|| {
+                bad(format!(
+                    "the program {number} of the mask algorithm description \
+                     {description:?} is not a Blast-filter-program value"
+                ))
+            })?;
+            Ok(MaskAlgorithm {
+                id,
+                program: items[0].to_string(),
+                program_name: name.to_string(),
+                options: restore(items[1]),
+            })
+        }
+        4 => Ok(MaskAlgorithm {
+            id,
+            program: restore(items[0]),
+            program_name: restore(items[2]),
+            options: restore(items[1]),
+        }),
+        _ => Err(bad(
+            "Error in stored mask algorithm description data.".to_string()
+        )),
     }
 }
 
@@ -534,7 +612,7 @@ fn read_ranges_into(
 impl SeqDb {
     /// The filtering algorithms of the database, built from the mask columns of its
     /// volumes the first time they are asked for (`x_BuildMaskAlgorithmList`). Empty for a
-    /// database without mask data.
+    /// database without mask data. With GI masks, their table.
     pub fn mask_algorithms(&self) -> Result<&MaskAlgorithms, SeqDbError> {
         if let Some(table) = self.mask_algorithms.get() {
             return Ok(table);
@@ -558,10 +636,22 @@ impl SeqDb {
     /// reads them (line SW, SW8 DECISIONS 40): unsorted, inverted or past the sequence, so
     /// a caller that indexes letters must check them ([`MaskRanges::Ranges`]).
     pub fn mask_ranges_at(&self, at: SeqLocation, algo_id: i32) -> Result<MaskRanges, SeqDbError> {
+        self.mask_ranges_in(at, algo_id, &mut MaskBlock::default())
+    }
+
+    /// [`SeqDb::mask_ranges_at`] through the caller's `block`, whose buffers (and the name of the
+    /// column's file) are kept from one sequence to the next: the reader of a program that asks
+    /// for the masks of one sequence after another (`blastdbcmd`'s `%m` and
+    /// `-mask_sequence_with`, `makembindex -db_mask`).
+    pub fn mask_ranges_in(
+        &self,
+        at: SeqLocation,
+        algo_id: i32,
+        block: &mut MaskBlock,
+    ) -> Result<MaskRanges, SeqDbError> {
         let SeqLocation {
             volume, vol_oid, ..
         } = at;
-        let mut block = MaskBlock::default();
         self.read_mask_block(
             BlockRange {
                 volume,
@@ -570,7 +660,7 @@ impl SeqDb {
                 first_ordinal: at.id,
             },
             algo_id,
-            &mut block,
+            block,
         );
         match block.ranges(vol_oid) {
             Ok(BlockMasks::NoMaskData) => return Ok(MaskRanges::Ranges(Vec::new())),
@@ -583,7 +673,7 @@ impl SeqDb {
             Err(BlockMaskError::Ranges(error)) => return Err(error),
             Err(BlockMaskError::Read(_)) => {}
         }
-        Err(block.into_read_error(vol_oid))
+        Err(std::mem::take(block).into_read_error(vol_oid))
     }
 
     // No NCBI counterpart (reads only): NCBI maps the column files and its `GetMaskData` points into
@@ -594,18 +684,33 @@ impl SeqDb {
     /// its blobs (`Column::read_blobs`); [`MaskBlock::ranges`] gives each sequence's, with
     /// [`SeqDb::mask_ranges_at`]'s checks and errors in its order (the algorithms' table and the
     /// volume's columns: the error of every sequence of the block).
+    #[inline]
     pub fn read_mask_block(&self, range: BlockRange, algo_id: i32, block: &mut MaskBlock) {
-        if block.read == Some((range, algo_id)) {
-            return;
+        if block.read != Some((range, algo_id)) {
+            self.fill_mask_block(range, algo_id, block);
         }
+    }
+
+    /// [`SeqDb::read_mask_block`] of a block that `block` does not hold: the algorithms' table,
+    /// then the volume's mask column or the GI masks (apart, so that the check of the block held
+    /// stays a short call in the caller).
+    #[inline(never)]
+    fn fill_mask_block(&self, range: BlockRange, algo_id: i32, block: &mut MaskBlock) {
         block.read = Some((range, algo_id));
         block.error = None;
-        block.column = false;
+        block.source = BlockSource::None;
         block.volume_algo = None;
         let algorithms = match self.mask_algorithms() {
             Ok(algorithms) => algorithms,
             Err(error) => {
                 block.error = Some(error);
+                return;
+            }
+        };
+        let table = match &algorithms.kind {
+            AlgorithmsKind::Columns(table) => table,
+            AlgorithmsKind::Gi(masks) => {
+                self.read_gi_mask_block(masks, range, algo_id, block);
                 return;
             }
         };
@@ -617,14 +722,40 @@ impl SeqDb {
                 return;
             }
         };
-        block.column = true;
+        block.source = BlockSource::Column;
         // If there actually is mask data, then we need to do the algorithm translation (the
         // volume's id, read for the blobs that are not empty).
-        block.volume_algo = algorithms.volume_algorithm(range.volume, algo_id);
+        block.volume_algo = table.volume_algorithm(range.volume, algo_id);
         if block.path.as_path() != column.data_path() {
             block.path = column.data_path().to_path_buf();
         }
         column.read_blobs(range.first, range.end, &mut block.blobs);
+    }
+
+    /// [`SeqDb::read_mask_block`] of a database with GI masks: the ranges of every sequence of
+    /// `range`, or its error, into `block`, read by one [`GiMasks::reader`].
+    fn read_gi_mask_block(
+        &self,
+        masks: &GiMasks,
+        range: BlockRange,
+        algo_id: i32,
+        block: &mut MaskBlock,
+    ) {
+        block.source = BlockSource::Gi;
+        block.ranges.clear();
+        block.gi_spans.clear();
+        let mut reader = masks.reader(range.volume, &self.volumes[range.volume], algo_id);
+        for vol_oid in range.first..range.end {
+            let start = block.ranges.len();
+            let span = match reader.ranges_into(vol_oid, &mut block.ranges, &mut block.gi_window) {
+                Ok(()) => Ok(start..block.ranges.len()),
+                Err(error) => {
+                    block.ranges.truncate(start);
+                    Err(error)
+                }
+            };
+            block.gi_spans.push(span);
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:476-492
@@ -662,6 +793,10 @@ impl SeqDb {
     /// without a mask column has no masks, as in NCBI.
     pub fn check_search_masks(&self, algo_id: i32) -> Result<(), SeqDbError> {
         let algorithms = self.mask_algorithms()?;
+        if algorithms.gi_masks().is_some() {
+            // GI masks: no volume algorithm to translate, no byte order to choose.
+            return Ok(());
+        }
         for (index, volume) in self.volumes.iter().enumerate() {
             let Some(column) = volume.mask_column()? else {
                 continue;
@@ -746,13 +881,18 @@ impl SeqDb {
                 let length_bounds = bounds
                     .get_or_insert_with(|| {
                         if protein {
-                            // A protein's length is exact in its index (series NP, M4b).
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+                            // A protein whose NCBI 32-bit length is not positive (`0` or `>= 2^31`)
+                            // is skipped by the search (`s_SeqDbGetSequence` returns error).
                             volume
-                                .x_protein_lengths(run.first, run.end)
+                                .x_protein_lengths_i32(run.first, run.end)
                                 .map(|lengths| {
                                     lengths
                                         .into_iter()
-                                        .map(|length| Some((length as usize, length as usize)))
+                                        .map(|length| {
+                                            (length > 0)
+                                                .then_some((length as usize, length as usize))
+                                        })
                                         .collect()
                                 })
                                 .unwrap_or_default()
@@ -765,10 +905,18 @@ impl SeqDb {
                     .get((vol_oid - run.first) as usize)
                     .copied()
                     .flatten();
+                if protein && length_bounds.is_none() {
+                    if let Ok(len) = self.protein_length_i32(seq_ordinal) {
+                        if len <= 0 {
+                            continue;
+                        }
+                    }
+                }
                 let length = || {
                     if protein {
-                        self.protein_length(seq_ordinal)
+                        self.protein_length_i32(seq_ordinal)
                             .ok()
+                            .filter(|&length| length > 0)
                             .map(|length| length as usize)
                     } else {
                         self.nucleotide_length(seq_ordinal).ok()
@@ -789,6 +937,78 @@ impl SeqDb {
             ordinal = run.end_ordinal();
         }
         None
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1432 (cited at
+    // `algorithm::common::hard_chunk_walk::NcbiWalk`): with one thread the search reads every
+    // included sequence in the order of its id.
+    /// Every sequence that a search of this database reads (by ordinal id: those the list and the
+    /// alias files' ranges include), in that order, with its exact length (for proteins,
+    /// `Volume::x_protein_lengths_i32` once per block of 4,096 sequences, or
+    /// `SeqDb::protein_length_i32` where the block's cannot be read, skipping proteins whose NCBI
+    /// 32-bit length is `<= 0`; for nucleotides, `Volume::nucleotide_length`, index plus last
+    /// byte) and a lazy reader of its stored masks of the filtering algorithm `algo_id`
+    /// ([`SearchedMasks`], which reads the block's masks only when the visitor asks for them),
+    /// until `visit` returns a finding or an error: that finding with the sequence's NCBI OID (as
+    /// `blastdbcmd`'s `%o`) and its volume's path.
+    ///
+    /// No NCBI counterpart: LOSAT's one-thread walk for protein `-db_hard_mask` searches
+    /// (`blastinput::db_mask::ResolvedMask::check_losat_limits`; series NP, M4b-3b) and translated
+    /// `-db_soft_mask` searches (`algorithm::common::x_db_stream::XDbStream::lead_start`; series
+    /// NP, M4b-T3).
+    pub fn searched_sequences<T>(
+        &self,
+        algo_id: i32,
+        mut visit: impl FnMut(u32, usize, &mut SearchedMasks<'_>) -> Result<Option<T>, SeqDbError>,
+    ) -> Result<Option<(u32, PathBuf, T)>, SeqDbError> {
+        const WALK_BLOCK: u32 = 4096;
+        let protein = self.seqtype() == super::SeqType::Protein;
+        let mut block = MaskBlock::default();
+        let mut ordinal = 0u32;
+        let end_ordinal = self.num_seqs();
+        while let Some(run) =
+            self.x_block_range(ordinal, end_ordinal.min(ordinal.saturating_add(WALK_BLOCK)))
+        {
+            let volume = &self.volumes[run.volume];
+            let protein_lengths = protein
+                .then(|| volume.x_protein_lengths_i32(run.first, run.end).ok())
+                .flatten();
+            for vol_oid in run.first..run.end {
+                let seq_ordinal = run.first_ordinal + (vol_oid - run.first);
+                let named_oid = self.volume_starts[run.volume] + vol_oid;
+                let length = if protein {
+                    let signed = match protein_lengths
+                        .as_ref()
+                        .and_then(|lengths| lengths.get((vol_oid - run.first) as usize))
+                    {
+                        Some(&length) => length,
+                        None => self.protein_length_i32(seq_ordinal)?,
+                    };
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+                    // `s_SeqDbGetSequence` returns an error for proteins whose NCBI 32-bit length
+                    // is not positive (`0` or `>= 2^31`), so the search skips them without reading
+                    // masks or advancing the diagonal offset.
+                    if signed <= 0 {
+                        continue;
+                    }
+                    signed as usize
+                } else {
+                    volume.nucleotide_length(vol_oid, named_oid)?
+                };
+                let mut masks = SearchedMasks {
+                    db: self,
+                    run,
+                    vol_oid,
+                    algo_id,
+                    block: &mut block,
+                };
+                if let Some(found) = visit(seq_ordinal, length, &mut masks)? {
+                    return Ok(Some((named_oid, volume.base().to_path_buf(), found)));
+                }
+            }
+            ordinal = run.end_ordinal();
+        }
+        Ok(None)
     }
 
     /// Whether the search reads a blob of the mask column `column` of volume `volume`: one of its
@@ -812,6 +1032,32 @@ impl SeqDb {
     }
 }
 
+/// Lazy reader of a sequence's stored masks during [`SeqDb::searched_sequences`]: reads the
+/// block's mask data on the first request within that block, so sequences whose chunk schedule
+/// does not depend on masks never read them.
+pub struct SearchedMasks<'a> {
+    db: &'a SeqDb,
+    run: BlockRange,
+    vol_oid: u32,
+    algo_id: i32,
+    block: &'a mut MaskBlock,
+}
+
+impl SearchedMasks<'_> {
+    /// The current sequence's stored masks for the walk's algorithm (empty for a sequence without
+    /// mask data; a volume without the algorithm is refused before the search by
+    /// `check_search_masks`).
+    pub fn read(&mut self) -> Result<&[(u32, u32)], SeqDbError> {
+        self.db.read_mask_block(self.run, self.algo_id, self.block);
+        let span = match self.block.ranges_span(self.vol_oid) {
+            Ok(span) => span,
+            Err(Some(error)) => return Err(error),
+            Err(None) => return Err(std::mem::take(self.block).into_read_error(self.vol_oid)),
+        };
+        Ok(&self.block.ranges[span])
+    }
+}
+
 /// The masks of the sequences of one block of a volume for one filtering algorithm
 /// ([`SeqDb::read_mask_block`]), kept with their buffers from one block to the next (a search's
 /// worker keeps one). No NCBI counterpart: NCBI keeps one `TSequenceRanges` per search thread
@@ -822,8 +1068,9 @@ pub struct MaskBlock {
     read: Option<(BlockRange, i32)>,
     /// The error of every sequence of the block: the algorithms' table or the volume's columns.
     error: Option<SeqDbError>,
-    /// Whether the volume has a mask column (none: no sequence has masks).
-    column: bool,
+    /// Where the masks were read from: none (no sequence has masks), the volume's mask column, or
+    /// the GI masks.
+    source: BlockSource,
     /// The volume's own id of the algorithm (`None`: the volume does not have it).
     volume_algo: Option<i32>,
     /// The column's data file, which the errors of the ranges name.
@@ -833,6 +1080,23 @@ pub struct MaskBlock {
     /// The ranges of the last sequence asked for, and the passes of `read_ranges_into`.
     ranges: Vec<(u32, u32)>,
     pass_starts: std::collections::HashSet<i64>,
+    /// With GI masks (`SeqDb::read_gi_mask_block`), each sequence's part of `ranges` (which holds
+    /// the ranges of all the block's sequences), or its error.
+    gi_spans: Vec<Result<std::ops::Range<usize>, SeqDbError>>,
+    /// With GI masks, the bytes of the data file read last (`gi_mask::DataWindow`).
+    gi_window: super::gi_mask::DataWindow,
+}
+
+/// Where a [`MaskBlock`] read its masks from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum BlockSource {
+    /// Nowhere: the volume has no mask column (no sequence has masks), or the read failed.
+    #[default]
+    None,
+    /// The volume's mask column.
+    Column,
+    /// The GI masks of `MASKLIST`.
+    Gi,
 }
 
 /// The masks of a sequence of a [`MaskBlock`].
@@ -841,7 +1105,8 @@ pub enum BlockMasks<'a> {
     /// The sequence has no mask data (its volume has no mask column, or the sequence's blob is
     /// empty): no ranges, and NCBI does not look the algorithm up in the volume.
     NoMaskData,
-    /// The ranges of the sequence's mask data, as stored.
+    /// The ranges of the sequence's mask data, as stored; with GI masks the ranges of its GI
+    /// (none for a GI without masks: NCBI never looks the algorithm up in a volume then).
     Ranges(&'a [(u32, u32)]),
     /// The sequence has mask data but its volume does not know the algorithm
     /// ([`MaskRanges::AlgorithmNotInVolume`]).
@@ -853,7 +1118,8 @@ pub enum BlockMasks<'a> {
 pub enum BlockMaskError<'a> {
     /// The read of the block or of the sequence's blob (the block keeps it).
     Read(&'a SeqDbError),
-    /// The ranges of the sequence's blob.
+    /// The ranges of the sequence's blob; or a LOSAT internal error ([`SeqDbError::Internal`]):
+    /// a sequence outside the block read.
     Ranges(SeqDbError),
 }
 
@@ -876,8 +1142,20 @@ impl MaskBlock {
         if let Some(error) = &self.error {
             return Err(BlockMaskError::Read(error));
         }
-        if !self.column {
-            return Ok(BlockMasks::NoMaskData);
+        match self.source {
+            BlockSource::Column => {}
+            BlockSource::None => return Ok(BlockMasks::NoMaskData),
+            BlockSource::Gi => {
+                let first = self.read.map_or(0, |(range, _)| range.first);
+                return match self.gi_spans.get(vol_oid.wrapping_sub(first) as usize) {
+                    Some(Ok(span)) => Ok(BlockMasks::Ranges(&self.ranges[span.clone()])),
+                    Some(Err(error)) => Err(BlockMaskError::Read(error)),
+                    None => Err(BlockMaskError::Ranges(SeqDbError::Internal(format!(
+                        "LOSAT internal error: the masks of sequence {vol_oid} were asked for \
+                         outside the block read"
+                    )))),
+                };
+            }
         }
         let blob = self.blobs.blob(vol_oid).map_err(BlockMaskError::Read)?;
         if blob.is_empty() {
@@ -898,11 +1176,66 @@ impl MaskBlock {
         Ok(BlockMasks::Ranges(&self.ranges))
     }
 
+    /// Populates `self.ranges` for `vol_oid` when column-backed and returns the span inside
+    /// `self.ranges` holding its masks (`0..0` when there are none or the volume lacks the
+    /// algorithm), `Err(Some(error))` on a format/internal error, or `Err(None)` on a block/blob
+    /// read error (`into_read_error`). Returns no borrow of `self`, so callers can extract an
+    /// owned read error after a read failure.
+    fn ranges_span(&mut self, vol_oid: u32) -> Result<std::ops::Range<usize>, Option<SeqDbError>> {
+        if self.error.is_some() {
+            return Err(None);
+        }
+        match self.source {
+            BlockSource::Column => {}
+            BlockSource::None => return Ok(0..0),
+            BlockSource::Gi => {
+                let first = self.read.map_or(0, |(range, _)| range.first);
+                return match self.gi_spans.get(vol_oid.wrapping_sub(first) as usize) {
+                    Some(Ok(span)) => Ok(span.clone()),
+                    Some(Err(_)) => Err(None),
+                    None => Err(Some(SeqDbError::Internal(format!(
+                        "LOSAT internal error: the masks of sequence {vol_oid} were asked for \
+                         outside the block read"
+                    )))),
+                };
+            }
+        }
+        let Ok(blob) = self.blobs.blob(vol_oid) else {
+            return Err(None);
+        };
+        if blob.is_empty() {
+            return Ok(0..0);
+        }
+        let Some(volume_algo) = self.volume_algo else {
+            return Ok(0..0);
+        };
+        self.ranges.clear();
+        read_ranges_into(
+            blob,
+            volume_algo,
+            &self.path,
+            &mut self.ranges,
+            &mut self.pass_starts,
+        )
+        .map_err(Some)?;
+        Ok(0..self.ranges.len())
+    }
+
     /// The read error that [`MaskBlock::ranges`] gives the sequence `vol_oid` (`Read`), owned.
     pub(crate) fn into_read_error(self, vol_oid: u32) -> SeqDbError {
-        match self.error {
-            Some(error) => error,
-            None => self.blobs.into_error(vol_oid),
+        if let Some(error) = self.error {
+            return error;
         }
+        if self.source == BlockSource::Gi {
+            let first = self.read.map_or(0, |(range, _)| range.first);
+            let at = vol_oid.wrapping_sub(first) as usize;
+            if let Some(Err(error)) = self.gi_spans.into_iter().nth(at) {
+                return error;
+            }
+            return SeqDbError::Internal(format!(
+                "LOSAT internal error: no GI-mask read error for sequence {vol_oid}"
+            ));
+        }
+        self.blobs.into_error(vol_oid)
     }
 }

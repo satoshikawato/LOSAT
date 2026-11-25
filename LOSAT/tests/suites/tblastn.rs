@@ -8,12 +8,18 @@
 
 #[path = "../run_local_tblastn.rs"]
 mod run_local_tblastn;
+#[path = "../t_db_hard_overlap.rs"]
+mod t_db_hard_overlap;
+#[path = "../tblastn_batch_refusal.rs"]
+mod tblastn_batch_refusal;
 #[path = "../tblastn_batch_rule.rs"]
 mod tblastn_batch_rule;
 #[path = "../tblastn_culling.rs"]
 mod tblastn_culling;
 #[path = "../tblastn_db_search.rs"]
 mod tblastn_db_search;
+#[path = "../tblastn_db_soft_lead_start.rs"]
+mod tblastn_db_soft_lead_start;
 #[path = "../tblastn_db_stream.rs"]
 mod tblastn_db_stream;
 #[path = "../tblastn_in_pssm.rs"]
@@ -42,6 +48,8 @@ mod tblastn_subject_store;
 mod tblastn_sw_tback;
 #[path = "../tblastn_ungap.rs"]
 mod tblastn_ungap;
+#[path = "../tblastn_ungapped_short_link.rs"]
+mod tblastn_ungapped_short_link;
 #[path = "../tblastn_unit_xlate.rs"]
 mod tblastn_unit_xlate;
 #[path = "../tblastn_xlate_simd.rs"]

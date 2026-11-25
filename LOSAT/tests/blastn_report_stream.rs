@@ -813,7 +813,7 @@ fn no_hits(dir: &TempDir) -> PathBuf {
 
 /// A database whose header file is missing (`tests/fixtures/outfmt17/db/snucl_nophr`), hit from the
 /// third batch on (eight queries without hits first): NCBI's error of the batch that first reads a
-/// definition line (`HeaderReadError`, exit status 2) after the reports of the batches before, the
+/// definition line (`ErrorAfterBatchReports`, exit status 2) after the reports of the batches before, the
 /// off bytes in every kind of format (until 2026-11-03 the check before the search kept such a
 /// database's reports after the loop).
 #[test]
@@ -1523,31 +1523,42 @@ fn custom_tabular_reports_give_the_off_bytes() {
     }
 }
 
-/// The refusal of NCBI's taxonomy cache (`TaxdbRun::cache_collision`: `tests/db_search/nz_nc`
-/// holds taxid 150 beside 99990, the damaged last entry of `tests/seqdb/taxdb/offset_last_past_end`;
-/// line DBID L1c) is asked where NCBI fetches a subject, one query per batch: `qx` and `qy`
-/// (`nz_qxy.fna`, no hits at `-evalue 1e-3`) are not refused (NCBI looks nothing up, the
-/// manifest's `db.nz.cq.bn.*` rows have its bytes), and `qx` then `q2` (`nz_qx2.fna`) with
-/// `PRE_FETCH_SEQS_LIMIT=0` are refused where `q2`'s report fetches its subjects: with the switch
-/// after `qx`'s report, as the stream's other refusals of a batch's reported subjects, without it
-/// before any report (outfmt 0's prolog is written before the search). Where `q2`'s batch
-/// prefetches them, the run ends as NCBI's (line NP item O4b2-3: the loads of `sI` and `sM`
-/// give the same texts in any order, `common::database::prefetch_slot_plan`; the manifest's
-/// `db.nz.cq.bn.c150.b1.x2.*` rows), with the switch as without it.
+/// A run on a database whose volume holds taxid 150 beside 99990, the damaged last entry of
+/// `tests/seqdb/taxdb/offset_last_past_end` (`TaxdbRun::cache_collision`: `tests/db_search/nz_nc`;
+/// line DBID L1c), one query per batch, where no report reads a sequence of that slot of NCBI's
+/// taxonomy cache (the queries hit `sI` and `sM`, taxids 562 and 10090), ends as NCBI's, with the
+/// switch as without it: `qx` and `qy` (`nz_qxy.fna`, no hits at `-evalue 1e-3`; NCBI looks
+/// nothing up, the manifest's `db.nz.cq.bn.*` rows have its bytes), and `qx` then `q2`
+/// (`nz_qx2.fna`) where `q2`'s batch prefetches its subjects (line NP item O4b2-3,
+/// `common::database::prefetch_slot_plan`; the manifest's `db.nz.cq.bn.c150.b1.x2.*` rows) or
+/// where `PRE_FETCH_SEQS_LIMIT=0` has its report read them one by one (line NP item O4b2-5: the
+/// reads follow the slot in their order, `db.nz.cq.bn.c150.off0.b1.x2.6`; refused at the first
+/// read until then), also with an environment variable of NCBI's object manager
+/// (`OBJMGR_BLOB_CACHE`, which leaves the reads of that slot to LOSAT's refusal,
+/// `common::database::default_object_manager`: none here).
 #[test]
-fn a_taxonomy_cache_refusal_comes_with_the_first_batch_that_fetches() {
+fn a_taxonomy_cache_collision_ends_as_ncbis_where_no_read_takes_its_slot() {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let path = |name: &str| tests.join(name).to_str().unwrap().to_string();
     let db = path("db_search/nz_nc");
     let blastdb = path("seqdb/taxdb/offset_last_past_end");
-    for (outfmt, threads, limit) in [("7", 1, None), ("0", 4, None), ("7", 4, Some("0"))] {
+    for (outfmt, threads, limit, cache) in [
+        ("7", 1, None, None),
+        ("0", 4, None, None),
+        ("7", 4, Some("0"), None),
+        ("7", 4, Some("0"), Some("10")),
+    ] {
         let mut extra = vec![("BATCH_SIZE", "1"), ("BLASTDB", blastdb.as_str())];
         if let Some(limit) = limit {
             extra.push(("PRE_FETCH_SEQS_LIMIT", limit));
         }
-        let what = format!("outfmt {outfmt}, PRE_FETCH_SEQS_LIMIT {limit:?}");
-        let args = |query: &str| -> Vec<String> {
-            [
+        if let Some(cache) = cache {
+            extra.push(("OBJMGR_BLOB_CACHE", cache));
+        }
+        let what =
+            format!("outfmt {outfmt}, PRE_FETCH_SEQS_LIMIT {limit:?}, OBJMGR_BLOB_CACHE {cache:?}");
+        let run = |query: &str| {
+            let args: Vec<String> = [
                 "-task",
                 "blastn",
                 "-dust",
@@ -1562,10 +1573,7 @@ fn a_taxonomy_cache_refusal_comes_with_the_first_batch_that_fetches() {
                 outfmt,
             ]
             .map(String::from)
-            .to_vec()
-        };
-        let run = |query: &str| {
-            let args = args(query);
+            .to_vec();
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
             same_two(&format!("{what}, {query}"), &args, threads, &extra, None)
         };
@@ -1575,43 +1583,24 @@ fn a_taxonomy_cache_refusal_comes_with_the_first_batch_that_fetches() {
             batches == 2 && reason == "none",
             "{what}, no hits: {batches} {reason}"
         );
-        // Without the switch every report is written after the loop: none before the refusal.
         let marker = if outfmt == "0" {
             "Query= "
         } else {
             "# Query: "
         };
-        if limit.is_none() {
-            let (full, (batches, reason)) = run("nz_qx2.fna");
-            assert_eq!(full.status, Some(0), "{what}, qx and q2: {full:?}");
-            assert!(
-                batches == 2 && reason == "none",
-                "{what}, qx and q2: {batches} {reason}"
-            );
-            assert_eq!(
-                String::from_utf8_lossy(&full.report)
-                    .matches(marker)
-                    .count(),
-                2,
-                "{what}, qx and q2: both reports"
-            );
-            continue;
-        }
-        let late = args("nz_qx2.fna");
-        let late: Vec<&str> = late.iter().map(String::as_str).collect();
-        let (off, on, (batches, _)) = refused_late(&what, &late, threads, &extra);
+        let (full, (batches, reason)) = run("nz_qx2.fna");
+        assert_eq!(full.status, Some(0), "{what}, qx and q2: {full:?}");
+        assert!(full.stderr.is_empty(), "{what}, qx and q2: {full:?}");
         assert!(
-            String::from_utf8_lossy(&off.stderr).contains("256-slot taxonomy cache"),
-            "{what}: {}",
-            String::from_utf8_lossy(&off.stderr)
+            batches == 2 && reason == "none",
+            "{what}, qx and q2: {batches} {reason}"
         );
-        assert!(batches >= 1, "{what}");
-        assert!(
-            !String::from_utf8_lossy(&off.report).contains(marker),
-            "{what}: off, no report"
+        assert_eq!(
+            String::from_utf8_lossy(&full.report)
+                .matches(marker)
+                .count(),
+            2,
+            "{what}, qx and q2: both reports"
         );
-        let (qx, _) = run("nz_qx.fna");
-        assert_eq!(qx.status, Some(0), "{what}, qx: {qx:?}");
-        reports_before(&what, &off, &on, &qx.report, &qx.stderr, Some((marker, 1)));
     }
 }

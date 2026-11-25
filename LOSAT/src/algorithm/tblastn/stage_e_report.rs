@@ -23,7 +23,7 @@ use crate::report::pairwise::{
     write_tblastn_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport, PairwiseConfig,
     PairwiseDatabase, PairwiseHit,
 };
-use crate::report::row_letters::{stored_gap_columns, QueryLetters, RowSide};
+use crate::report::row_letters::QueryLetters;
 use crate::sequence::packed_subject::SubjectNt;
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
@@ -272,12 +272,15 @@ fn x_refuse_a_column_of_the_nullb(hitlists: &[KappaResultHitList]) -> Result<()>
 }
 
 /// The ranges of a search as the reports use them: where the searched letters of each
-/// query and subject lie in its record (`-query_loc`, `-subject_loc`), and whether the
-/// reports end with the epilog (a search that stops at a query batch writes none).
+/// query and subject lie in its record (`-query_loc`, `-subject_loc`), whether the
+/// reports end with the epilog (a search that stops at a query batch writes none), and under
+/// `-parse_deflines` the scopes of the queries, whose Seq-ids place the XML failure of a held
+/// report (`query_batch::QueryScopes::xml_failing_query`).
 pub(super) struct ReportRanges<'a> {
     pub queries: &'a crate::blastinput::seq_range::Placements,
     pub subjects: &'a crate::blastinput::seq_range::Placements,
     pub epilog: bool,
+    pub query_scopes: Option<&'a crate::blastinput::query_batch::QueryScopes>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -336,9 +339,9 @@ pub(super) fn render(
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
     // Sorts each HSP list by E-value (`Blast_HSPListSortByEvalue`) during Seq-align conversion.
+    // `-subject`'s Seq-loc mapper maps the HSPs then, once, before any format reads them.
     for hitlist in hitlists.iter_mut() {
-        hitlist.sort_hsps_for_report();
-        hitlist.drop_zero_score_hsps();
+        hitlist.put_in_report_order(matches!(shown, ShownSubjects::Fasta { .. }));
     }
     // A PSSM query's Bioseq letters where they are not its record's, which the reports read; its
     // counts are the rows' where its reports read other letters than its search and a report
@@ -369,10 +372,10 @@ pub(super) fn render(
     //
     // NCBI writes the XML2 and JSON documents' start before the search (`PrintProlog`) and
     // fails for a matrix of its formatting table's that it does not know when it makes a report's
-    // data (`xml_matrix_failure`): that of the run's first query, or of its second where the
-    // report is held (`XmlMatrixFailure::SecondQueryOrEnd`: NCBI's next query of another Seq-id,
-    // the second as LOSAT refuses two queries of one id before any output), in the batch of that
-    // query, or for a run of one query whose report is held
+    // data (`xml_matrix_failure`): that of the run's first query, or where the report is held
+    // (`XmlMatrixFailure::SecondQueryOrEnd`) of NCBI's next query of another Seq-id
+    // (`QueryScopes::xml_failing_query` of the scopes, `ranges.query_scopes`), in the batch of that
+    // query, or for a run whose held report has no such query
     // in `PrintEpilog` (blast_format.cpp:2204-2212, cited at
     // `blast_xml::matrix::XmlMatrixFailure`) unless the run stops before (`ranges.epilog`; the
     // caller writes that stop). The start alone is written then (probe `tblastn_sub_lcmatrix`),
@@ -386,6 +389,9 @@ pub(super) fn render(
         matches!(shown, ShownSubjects::Database { .. }),
         pssm.is_some(),
     )
+    .map(|failure| {
+        crate::blastinput::query_batch::QueryScopes::xml_failing_query(ranges.query_scopes, failure)
+    })
     .filter(|_| !query_records.is_empty())
     {
         for format in outputs.formats.iter_mut() {
@@ -395,7 +401,7 @@ pub(super) fn render(
                 writer.flush()?;
             }
         }
-        let failing = (failure.query() < query_records.len()).then(|| failure.query());
+        let failing = failure.query().filter(|&query| query < query_records.len());
         for posts in query_posts
             .iter()
             .take(failing.map_or(query_records.len(), |query| query + 1))
@@ -943,7 +949,7 @@ pub(super) fn render(
 // CBlastTabularInfo::PrintNumProcessed appends the final query count.
 #[allow(clippy::too_many_arguments)]
 fn write_tabular(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     // The program of outfmt 7's first line (`TBLASTN`, `PSITBLASTN`).
     program: &str,
     comments: bool,
@@ -1065,8 +1071,16 @@ fn write_tabular(
                     oid,
                     (hsp.q_start + 1, hsp.q_end, s_start, s_end),
                 )?;
+                // The columns inside the query row's range (a Smith-Waterman alignment's end gaps
+                // in the query's row are left out), as every table counts them.
+                let counts = crate::report::serial::seqalign::AlignLengths {
+                    length: payload.align_length,
+                    gaps: payload.gap_letters,
+                    gap_opens: payload.gap_opens,
+                }
+                .within_query_range(&payload.edit_script);
                 let percent =
-                    format_percent_identity_ncbi(payload.report_num_ident, payload.align_length, 3);
+                    format_percent_identity_ncbi(payload.report_num_ident, counts.length, 3);
                 let bits = format_bitscore_ncbi(payload.bit_score);
                 let evalue = format_evalue_ncbi_tabular(linked.evalue);
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108:
@@ -1091,9 +1105,9 @@ fn write_tabular(
                     writer,
                     "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                     percent,
-                    payload.align_length,
+                    counts.length,
                     payload.report_mismatches,
-                    payload.gap_opens,
+                    counts.gap_opens,
                     q_start,
                     q_end,
                     s_start,
@@ -1110,12 +1124,16 @@ fn write_tabular(
                 hsp_index += 1;
             }
         }
+        // `~CBlastTabularInfo` of the query's report flushes the stream.
+        writer.ncbi_flush()?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:342
     // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
     // writes no epilog.
     if comments && ranges.epilog {
         writeln!(writer, "# BLAST processed {} queries", query_records.len())?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -1253,7 +1271,7 @@ fn pairwise_hits(
     let mut row_masks = crate::report::query_anchored::HspMasks::default();
     for (q_idx, hitlist) in hitlists.iter().enumerate() {
         let query = query_records[q_idx].seq();
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1541-1557:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1547-1556,1581:
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:294
         // A PSSM query's search (`CPsiBlastImpl::Run`, psiblast_impl.cpp:120-170) never sets the
         // filtered regions: its alignments show no masks. The others show NCBI's list
@@ -1380,15 +1398,10 @@ fn pairwise_hits(
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1765-1810 sets the HSP
                     // linked count; showalign.cpp:3595-3598 prints sum_n.
                     sum_n: Some(linked.num),
+                    // No reader of these rows needs their gap residues (a PSSM query's): their
+                    // end gaps come from the edit script (`pairwise::row_spans`).
                     subject_stored_gaps: Vec::new(),
-                    // A PSSM query's gap residues (`row_letters::stored_gap_columns`).
-                    query_stored_gaps: stored_gap_columns(
-                        query,
-                        b'-',
-                        usize::try_from(hsp.q_start)?,
-                        &payload.edit_script,
-                        RowSide::Query,
-                    ),
+                    query_stored_gaps: Vec::new(),
                     query_case: query_letters.case(),
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:519-531
                     // The Seq-align's `num_ident` (`tabular.rs`, the outfmt 8 / 11 / 12
@@ -1420,7 +1433,7 @@ fn pairwise_hits(
 // AcknowledgeBlastQuery; x_DisplayDeflines; DisplaySeqalign;
 #[allow(clippy::too_many_arguments)]
 fn write_pairwise(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     hits: &[PairwiseHit],
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
@@ -1586,8 +1599,10 @@ fn write_pairwise(
             ShownSubjects::Database { reported, .. } => &reported.loads,
         },
     )
-    // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`).
-    .map_err(crate::cli::NativeError::of_writer)?;
+    // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`); a
+    // sort or the description table may stop at a query row that starts with a gap
+    // (`EmptyRowsStop`, `TblastnSections::head`).
+    .map_err(crate::report::pairwise::empty_rows_stop)?;
     Ok(())
 }
 
@@ -1654,8 +1669,8 @@ pub(super) fn recounts_shown_counts(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:996-1022 (cited at
-// `blastp::blast_engine::build_pairwise_hits`) and c++/include/objtools/align_format/
-// tabular.hpp:543-547
+// `blastp::blast_engine::build_pairwise_hits`) and
+// c++/include/objtools/align_format/tabular.hpp:476-480
 /// The report counts (`report_num_ident`, `report_mismatches`) of the HSPs
 /// of `hitlists`, counted again from their rows (`aligned_sequences`) for a query whose reports
 /// read other letters than its search (`QueryLetters::shows_other_letters`: a PSSM query's Bioseq

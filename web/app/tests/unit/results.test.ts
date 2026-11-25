@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagePlace } from 'losat/domain';
 import type { HspRecord, ProgramDescription } from 'losat/ports';
-import type { AppState, RunView } from '../../src/application/coordinator';
+import type { AppState, RunView, ToolRunView } from '../../src/application/coordinator';
 import { keptOutputs, noHspReason, ResultsBrowser, type ResultsDeps } from '../../src/application/results';
 import { Store } from '../../src/application/store';
 import { hspTable, out0Range, out6Range, frame, subjectSpan } from '../../src/domain/hsp-table';
@@ -24,12 +24,15 @@ import {
 import {
   approvedExceptions,
   optionKey,
+  toolOptionGrammar,
+  toolOptionKey,
   verificationBadge,
   RANGE_VALUE,
   type BadgeInput,
   type VerificationTable,
 } from '../../src/domain/verification';
 import type { RunRecord, RunSnapshot } from '../../src/domain/run';
+import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import type { FailedOutput } from '../../src/ports/data';
 import { NO_HSP_TEXT } from '../../src/ui/no-hsp-text';
 import { NO_WARNINGS, placeParts, placeText, warningsPlaceParts, warningsPlaceText } from '../../src/ui/message-place-text';
@@ -224,15 +227,30 @@ describe('the HSP table and its index', () => {
 });
 
 describe('hitLimits', () => {
+  // The hit list options have no default in NCBI's argument table (BLAST+ tells them given from not
+  // given): describe's `defaults` give the values that the engine resolves, by task.
+  const resolved = (value: string) => ({ resolvedDefault: { byTask: { blastp: value, 'blastp-short': value } } });
   const described = [
-    { flag: '-max_target_seqs', help: 'Maximum number of aligned sequences to keep [default: 500]' },
-    { flag: '-max_hsps', help: 'Maximum number of HSPs per subject' },
+    { flag: '-task', defaultValue: 'blastp' },
+    { flag: '-max_target_seqs', ...resolved('500') },
+    { flag: '-max_hsps' },
   ];
 
   it('reads the limits of the argv, or the default that the engine describes', () => {
     expect(hitLimits(['blastp', '-query', 'q', '-subject', 's'], described)).toEqual({ maxTargetSeqs: 500 });
     expect(hitLimits(['blastp', '-max_target_seqs', '5', '-max_hsps', '2'], described)).toEqual({ maxTargetSeqs: 5, maxHsps: 2 });
-    expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs', help: 'x', defaultValue: '100' }])).toEqual({ maxTargetSeqs: 100 });
+    expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs', defaultValue: '100' }])).toEqual({ maxTargetSeqs: 100 });
+    // The run's task chooses the resolved value: its -task, else the default task; '' for a program without -task.
+    const byTask = [{ flag: '-task', defaultValue: 'blastp' }, { flag: '-max_target_seqs', resolvedDefault: { byTask: { blastp: '500', 'blastp-short': '7' } } }];
+    expect(hitLimits(['blastp', '-task', 'blastp-short'], byTask)).toEqual({ maxTargetSeqs: 7 });
+    expect(hitLimits(['blastp'], byTask)).toEqual({ maxTargetSeqs: 500 });
+    expect(hitLimits(['tblastx'], [{ flag: '-max_target_seqs', resolvedDefault: { byTask: { '': '500' } } }])).toEqual({ maxTargetSeqs: 500 });
+    // -task=blastp-short is the engine's blastp-short (runTask), and the engine's value for the task comes before
+    // NCBI's default, as in the search form (taskDefault).
+    expect(hitLimits(['blastp', '-task=blastp-short'], byTask)).toEqual({ maxTargetSeqs: 7 });
+    const both = [{ flag: '-task', defaultValue: 'blastp' }, { flag: '-max_target_seqs', defaultValue: '500', resolvedDefault: { byTask: { 'blastp-short': '7' } } }];
+    expect(hitLimits(['blastp', '-task', 'blastp-short'], both)).toEqual({ maxTargetSeqs: 7 });
+    expect(hitLimits(['blastp'], both)).toEqual({ maxTargetSeqs: 500 });
   });
 
   // The tabular formats keep -max_target_seqs, else -num_alignments, else the default of -max_target_seqs;
@@ -241,8 +259,8 @@ describe('hitLimits', () => {
   it('reads the hit list sizes of -num_descriptions and -num_alignments', () => {
     const sized = [
       ...described,
-      { flag: '-num_descriptions', help: 'Number of descriptions [default: 500]' },
-      { flag: '-num_alignments', help: 'Number of alignments [default: 250]' },
+      { flag: '-num_descriptions', ...resolved('500') },
+      { flag: '-num_alignments', ...resolved('250') },
     ];
     const limits = (...words: string[]) => hitLimits(['blastp', '-query', 'q', '-subject', 's', ...words], sized);
     // -num_alignments is the tabular formats' hit list; outfmt 0 keeps 500 (the larger of 500 and 3).
@@ -280,7 +298,8 @@ describe('hitLimits', () => {
   });
 
   it('claims no limit that it cannot read', () => {
-    expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs', help: 'Maximum number' }])).toEqual({});
+    // NCBI's help text states a default (Default = `500'), but the limits read no help text.
+    expect(hitLimits(['blastp'], [{ flag: '-max_target_seqs' }])).toEqual({});
     expect(hitLimits(['blastp', '-max_target_seqs', '1e3'], [])).toEqual({});
   });
 });
@@ -418,7 +437,12 @@ const DESCRIPTION: ProgramDescription = {
   formats: [0, 6, 7],
   parameters: [
     { flag: '-task', help: 'Task', takesValue: true, defaultValue: 'megablast' },
-    { flag: '-max_target_seqs', help: 'Maximum number of aligned sequences to keep (default: 500)', takesValue: true },
+    {
+      flag: '-max_target_seqs',
+      help: "Maximum number of aligned sequences to keep \n(value of 5 or more is recommended)\nDefault = `500'",
+      takesValue: true,
+      resolvedDefault: { byTask: { megablast: '500' } },
+    },
     { flag: '-max_hsps', help: 'Maximum number of HSPs per subject', takesValue: true },
   ],
 };
@@ -691,6 +715,21 @@ describe('ResultsBrowser', () => {
     expect(logged.results.state.get().message).toBe(
       'Run 1 failed: LOSAT engine error: The average subject length is too short. It keeps the file of its -logfile, run.log.',
     );
+    // ...and its search strategy file, each under its option (line RG item F1w).
+    const both = setup({
+      status: 'failed',
+      error: 'LOSAT engine error: x',
+      record: {
+        runFiles: [
+          { name: 'out/s.asn', bytes: new Uint8Array(), option: 'export_search_strategy' },
+          { name: 'run.log', bytes: new Uint8Array([65]) },
+        ],
+      },
+    });
+    await both.results.open('r1');
+    expect(both.results.state.get().message).toBe(
+      'Run 1 failed: LOSAT engine error: x. It keeps the file of its -export_search_strategy, out/s.asn. It keeps the file of its -logfile, run.log.',
+    );
     // A failed run keeps the warnings written before its error (line WQA's sweep, D3, 2026-11-19); white space alone is none.
     const warned = setup({
       status: 'failed',
@@ -817,6 +856,18 @@ describe('ResultsBrowser', () => {
     const emptyRun = empty.results.state.get().loaded!.run;
     expect(warningsPlaceText('logfile', '', emptyRun)).toBe(NO_WARNINGS);
     expect(warningsPlaceText('logfile', 'Error: x\n', emptyRun)).toBeUndefined();
+    // The search strategy file is not the file of -logfile: an empty one beside a log that holds warnings says nothing,
+    // and its name is not the log's (line RG item F1w).
+    const strategy = { name: 's.asn', bytes: new Uint8Array(0), option: 'export_search_strategy' } as const;
+    const withStrategy = setup({ record: { messages: 'logfile', runFiles: [strategy, { name: 'run.log', bytes: warning }] } });
+    await withStrategy.results.open('r1');
+    const strategyRun = withStrategy.results.state.get().loaded!.run;
+    expect(warningsPlaceText('logfile', '', strategyRun)).toBe("The run's warnings are in the file of the run's -logfile, run.log, under Outputs.");
+    const strategyOnly = setup({ record: { messages: 'logfile', runFiles: [strategy] } });
+    await strategyOnly.results.open('r1');
+    expect(warningsPlaceText('logfile', '', strategyOnly.results.state.get().loaded!.run)).toBe(
+      "The run's warnings are in the file of the run's -logfile under Outputs.",
+    );
     // Files that are not kept say nothing of what they held.
     const unkept = setup({ record: { messages: 'logfile' } });
     await unkept.results.open('r1');
@@ -1062,5 +1113,77 @@ describe('ResultsBrowser', () => {
     const given = setup({ argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-task', 'blastn'] });
     await given.results.open('r1');
     expect(given.results.state.get().loaded!.task).toBe('blastn');
+  });
+
+  it('gives no tool badge when describeTool rejects or is absent, and shows Supported once describeTool succeeds', async () => {
+    // cases.tsv k_obinary_file argv: Supported with -xmlhelp grammar, no key with fallback grammar.
+    const argv = ['windowmasker', '-mk_counts', '-in', 'genome.fa', '-unit', '5', '-sformat', 'obinary', '-out', 'c.counts'];
+    const description = await new FakeEngine().describeTool('windowmasker');
+    const key = toolOptionKey(argv, toolOptionGrammar(description))!;
+    const toolRun: ToolRunView = {
+      snapshot: {
+        kind: 'tool',
+        runId: 't1',
+        number: 1,
+        tool: 'windowmasker',
+        stage: 'mk_counts',
+        argv,
+        directory: [{ name: 'genome.fa', size: 100, origin: { kind: 'pasted' } }],
+        queuedAt: 0,
+      },
+      status: 'completed',
+      record: { runtimePath: 'serial', exitStatus: 0 },
+    };
+    const runs = new Store<AppState>({ runs: [toolRun] });
+    const verification: VerificationTable = {
+      ncbi: '2.17.0',
+      sources: [],
+      programs: {},
+      tools: { windowmasker: { optionSets: [key] } },
+    };
+    const data: ResultsDeps['data'] = {
+      readHitTable: async () => hspTable([]),
+      readOutput: async () => new Uint8Array(),
+      readOutputRange: async () => new Uint8Array(),
+      readDiagnostics: async () => '',
+    };
+
+    let describeCalls = 0;
+    const results = new ResultsBrowser({
+      data,
+      describe: async () => DESCRIPTION,
+      describeTool: async () => {
+        describeCalls++;
+        if (describeCalls === 1) throw new Error('engine busy');
+        return description;
+      },
+      runs,
+      verification,
+    });
+
+    // Rejected describeTool: fallback grammar formats CommandText, but no badge is shown and the rejection is not cached.
+    await results.open('t1');
+    await settle();
+    expect(results.state.get().phase).toBe('ready');
+    expect(results.state.get().grammar).toBeDefined();
+    expect(results.state.get().toolBadge).toBeUndefined();
+
+    // Opening again asks describeTool again; once it resolves with -xmlhelp, the badge is Supported.
+    await results.open('t1');
+    await settle();
+    expect(describeCalls).toBe(2);
+    expect(results.state.get().toolBadge).toMatchObject({ level: 'certified', label: 'Supported' });
+
+    // Without describeTool at all, no badge is shown either.
+    const noDescribe = new ResultsBrowser({
+      data,
+      describe: async () => DESCRIPTION,
+      runs,
+      verification,
+    });
+    await noDescribe.open('t1');
+    await settle();
+    expect(noDescribe.state.get().grammar).toBeDefined();
+    expect(noDescribe.state.get().toolBadge).toBeUndefined();
   });
 });

@@ -74,6 +74,22 @@ impl HspStrands {
     pub(crate) fn differ(self) -> bool {
         self.query_minus != self.subject_minus
     }
+
+    /// The frame that `s_GetStdsegMasterFrame` reads of a translated query's first Std-seg
+    /// (`query_frame`): the HSP's frame in the query's record (`frame`), or, where the query's row
+    /// starts with a gap (`leading_gap`: the first segment's query interval is empty, so neither
+    /// plus nor a stop), the minus frame that the record's length in nucleotides (`length`) alone
+    /// gives, -(length % 3 + 1): NCBI BLAST+ 2.17.0 shows queries of 570, 571 and 572
+    /// nucleotides under -1, -2 and -3.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:411-438
+    pub(crate) fn master_frame(frame: i8, leading_gap: bool, length: usize) -> i8 {
+        if leading_gap {
+            -((length % 3) as i8 + 1)
+        } else {
+            frame
+        }
+    }
 }
 
 /// One HSP of a section (`Hsps::iter`): its subject's key, its Dense-seg's segments and its rows'
@@ -558,12 +574,12 @@ pub(crate) fn fill_seqid(ids: &[crate::seqid::ParsedSeqId], show_gis: bool, out:
     }
 }
 
-/// Appends the searched letters `from..=to` (positions in the records) of a query whose letters
-/// are `letters` (a record's in upper case, a PSSM query's Bioseq letters as they are:
-/// `row_letters::QueryLetters::get`) and whose searched letters start at the record position
-/// `shift` (the `-query_loc` interval's start; `Placements::offset`): the letters that the
-/// sections of BLASTN's, TBLASTN's and TBLASTX's reports read (`ReportSequences::query_letters`),
-/// as far as the record has them.
+/// Appends the letters `from..=to` (positions in the records) of a query whose letters are
+/// `letters` (a record's in upper case, a PSSM query's Bioseq letters as they are:
+/// `row_letters::QueryLetters::get`) and start at the record position `shift` (the searched
+/// letters of TBLASTN and TBLASTX: the `-query_loc` interval's start, `Placements::offset`;
+/// BLASTN's whole record: 0, `algorithm::blastn::pairwise::QueryRecords`): the letters that the
+/// sections of the reports read (`ReportSequences::query_letters`), as far as the letters go.
 pub(crate) fn query_record_letters(
     letters: crate::report::row_letters::QueryLetters<'_>,
     shift: usize,
@@ -654,12 +670,19 @@ pub(crate) fn aborted_section(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:617-658
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1694-1770
 /// Formats 1 to 4: `eShowIdentity` (`.` for a letter equal to the query's: 1 and 3) and
-/// `eMasterAnchored` (only the query's columns, with the rows' insertions below them: 1 and 2).
+/// `eMasterAnchored` (only the query's columns, with the rows' insertions below them: 1 and 2);
+/// `html`, `eHtml` (`-html`): the rows' masks in NCBI's spans (`output_seq`). Of the HTML of
+/// NCBI's query-anchored rows, only the spans reach the bytes: the rows' id links and anchors need
+/// `eHyperLinkMasterSeqid`, `eHyperLinkSlaveSeqid`, `eShowCheckBox` or `eSequenceRetrieval`, and
+/// the colours `eColorDifferentBases`, none of which a BLAST program sets (`s_SetFlags`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct View {
     pub(crate) identity: bool,
     pub(crate) anchored: bool,
+    pub(crate) html: bool,
 }
 
 /// An error that NCBI's code reaches only with input that a BLAST search does not make.
@@ -1362,6 +1385,7 @@ fn display_row_data_set(
                 aln_start,
                 actual_line_len,
                 prev_stop[row],
+                view.html,
             );
             if view.anchored {
                 display_inserts(
@@ -1386,7 +1410,8 @@ fn display_row_data_set(
 
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1594-1627
 /// (`k_IdStartMargin`, `k_StartSequenceMargin` and `k_SeqStopMargin` are 2, showalign.cpp:96-98;
-/// the `size_t` sum of `maxStartLen` less `startLen`, plus 2, is at least 1.)
+/// the `size_t` sum of `maxStartLen` less `startLen`, plus 2, is at least 1.) `html`: the view's
+/// `eHtml` (`View::html`), which `x_OutputSeq` reads for the row's masks only.
 #[allow(clippy::too_many_arguments)]
 fn display_sequence_line(
     out: &mut Vec<u8>,
@@ -1397,6 +1422,7 @@ fn display_sequence_line(
     j: i64,
     actual_line_len: usize,
     prev_stop: i32,
+    html: bool,
 ) {
     add_space(out, rows.max_id_len - rows.labels[row].len() + 2);
     let empty = (j > 0 && end == prev_stop) || (j == 0 && start == 1 && end == 1);
@@ -1414,7 +1440,7 @@ fn display_sequence_line(
         j as usize,
         actual_line_len,
         rows.masked[row].map(|(index, frame)| (&rows.masks[index][..], frame)),
-        false,
+        html,
     );
     add_space(out, 2);
     if !empty {
@@ -1434,7 +1460,9 @@ fn display_sequence_line(
 /// sets: blast_format.cpp, survey T4 §1.1.)
 ///
 /// Outfmt 0 rows come without masks (their builders lowercase the letters, `HspMasks::lower_row`);
-/// `-html` (T4a2) keeps the lists in a side table indexed like the hits, only under `-html`.
+/// `-html` (T4a2) keeps the lists in a side table indexed like the hits, only under `-html`. The
+/// query-anchored rows (outfmt 1 to 4) come with their masks (`prepare_rows`), under `-html` with
+/// `html` (`View::html`, item T4b of line RG).
 fn output_seq(
     out: &mut Vec<u8>,
     sequence: &[u8],

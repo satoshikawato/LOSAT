@@ -49,12 +49,14 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::MaskedRangeSet;
+use crate::blastinput::ncbi_environment::ReadVerification;
 use crate::ncbi_str::{string_to_int, truncate_spaces_str};
 use crate::report::serial::asn_input::Utf8TagOnce;
-use crate::writedb::build_db::BuildDatabase;
+use crate::report::serial::asn_types::Post;
+use crate::writedb::build_db::{endl, BuildDatabase};
 use crate::writedb::fasta_source::Warn;
 use crate::writedb::makeblastdb::MakedbError;
-use crate::writedb::mask_info::{MaskFileError, MaskFileReader, MaskPost};
+use crate::writedb::mask_info::{MaskFileError, MaskFileReader};
 use crate::writedb::WriteDbError;
 
 /// The values of the options that `x_ProcessMaskData` reads: `None` for an option that was not
@@ -128,13 +130,29 @@ impl MaskDataError {
     ///   for a file it refuses ("Error: NCBI C++ Exception: ..." of a `CException`, status 255;
     ///   "BLAST ran out of memory" of a `std::bad_alloc`, status 4; "Error: ..." of the
     ///   `std::length_error` of a string longer than `std::string` holds, status 255); LOSAT's
-    ///   refusal of a negative algorithm id ("losat makeblastdb: ...", status 1).
+    ///   refusal of a negative algorithm id ("losat makeblastdb: ...", status 1); the closed pipe
+    ///   of a log line ([`WriteDbError::ClosedPipe`], status 0, no message).
     /// * [`MaskFileError::Unsupported`]: NCBI reads the file and LOSAT does not
     ///   (`MakedbError::Unsupported`, status 1).
     /// * [`MaskFileError::EofInContinuation`]: `None`, exactly as NCBI (status 0, nothing is
     ///   printed here; the destructor's message follows).
-    pub(crate) fn into_makedb_error(self) -> Option<MakedbError> {
+    /// * What NCBI's reader throws where a check of the data fails that the run's settings
+    ///   (`read_verification`) turn off, after which NCBI reads on: LOSAT's refusal
+    ///   (`MakedbError::Unsupported`, status 1; `ReadVerification::refused`), at the place of
+    ///   NCBI's error.
+    pub(crate) fn into_makedb_error(
+        self,
+        read_verification: &ReadVerification,
+    ) -> Option<MakedbError> {
         match self {
+            MaskDataError::File(MaskFileError::Ncbi(WriteDbError::Exception(exception))) => Some(
+                match read_verification.refused(&exception, "mask data (-mask_data)") {
+                    Some(refused) => MakedbError::Unsupported(format!(
+                        "{refused} is not supported by LOSAT's makeblastdb"
+                    )),
+                    None => MakedbError::Build(WriteDbError::Exception(exception)),
+                },
+            ),
             MaskDataError::Ncbi(error) | MaskDataError::File(MaskFileError::Ncbi(error)) => {
                 Some(MakedbError::Build(error))
             }
@@ -262,7 +280,11 @@ pub(crate) fn process_mask_data(
             let algo_id = match algo_id {
                 Some(id) => id,
                 None => {
-                    let _ = writeln!(db.log(), "Mask file: {file}");
+                    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:962-963
+                    // The line ends as every line of the log, with a flush (`build_db::endl`),
+                    // where a closed pipe ends the build.
+                    let _ = write!(db.log(), "Mask file: {file}");
+                    endl(db.log())?;
                     let opts = &first_obj.algo_options;
                     let id = if !id_list.is_empty() {
                         db.register_masking_algorithm_id(
@@ -323,10 +345,10 @@ pub(crate) fn process_mask_data(
 /// run's: `BuildDatabase::utf8_once`), whichever file it is in.
 fn write_posts(reader: &mut MaskFileReader, warn: Warn<'_>, utf8_once: &mut Utf8TagOnce) {
     for post in reader.take_posts() {
-        if matches!(post, MaskPost::Utf8Tag(_)) && !utf8_once.first() {
+        if matches!(post, Post::Utf8Tag(_)) && !utf8_once.first() {
             continue;
         }
-        let line = post.line();
+        let line = post.line(Some("makeblastdb"));
         warn(line.strip_suffix(b"\n").unwrap_or(&line));
     }
 }

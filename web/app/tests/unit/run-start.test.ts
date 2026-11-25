@@ -220,11 +220,11 @@ function fakeExports(
 
 describe('the ABI binding of the start and of a registry file', () => {
   it('reads the start JSON of an argv, or the CLI message of one that the engine cannot start', () => {
-    expect(fakeExports().abi.start(['tblastx', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false, prints: null, database: false } });
+    expect(fakeExports().abi.start(['tblastx', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', strategyFile: null, dryRun: true, registerInputs: false, prints: null, database: false } });
     // -parse_deflines: the run's inputs are read together (line WQA's sweep, D7, 2026-11-19).
     expect(fakeExports({ start: '{"conffile":null,"log_file":null,"dry_run":false,"register_inputs":true,"prints":null,"database":false}' }).abi.start(['blastn', '-parse_deflines'])).toEqual({
       ok: true,
-      start: { conffile: null, logFile: null, dryRun: false, registerInputs: true, prints: null, database: false },
+      start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: true, prints: null, database: false },
     });
     expect(fakeExports({ start: 'fail' }).abi.start(['psiblast'])).toEqual({ ok: false, message: 'psiblast is not available in the browser (ABI v2)' });
   });
@@ -368,7 +368,7 @@ describe("the Data worker's validate with the registry file of -conffile", () =>
       ok: false,
       message: 'LOSAT query/options error: bad',
     });
-    expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', dryRun: true, registerInputs: false, prints: null, database: false } });
+    expect(await engine.start(['blastp', '-dryrun'])).toEqual({ ok: true, start: { conffile: 'c.ini', logFile: 'run.log', strategyFile: null, dryRun: true, registerInputs: false, prints: null, database: false } });
   });
 
   // line WQA's D13 round 3, L1, 2026-11-20: the engine sends the data loaders of the argv's registry before its option
@@ -477,6 +477,12 @@ function placeSignal(place: number): Uint8Array {
   return bytes;
 }
 
+/** The value of `option` in `argv`, as the engine's *start* gives it (null when the argv has none). */
+function valueOf(argv: readonly string[], option: string): string | null {
+  const at = argv.indexOf(option);
+  return at < 0 || at + 1 >= argv.length ? null : argv[at + 1]!;
+}
+
 function fakeAbi(
   options: {
     runFiles?: Uint8Array;
@@ -512,10 +518,19 @@ function fakeAbi(
       calls.push(`validate ${argv.join(' ')}`);
       return { ok: true, dataLoaders: options.dataLoaders?.() ?? true };
     },
-    // The start of an argv: -parse_deflines reads the inputs of the run together (line WQA's sweep, D7, 2026-11-19).
+    // The start of an argv: -parse_deflines reads the inputs of the run together (line WQA's sweep, D7, 2026-11-19); the
+    // names of -logfile and -export_search_strategy name the files of stream 8 (line RG item F1w).
     start: (argv: readonly string[]) => ({
       ok: true,
-      start: { conffile: null, logFile: null, dryRun: false, registerInputs: argv.includes('-parse_deflines'), prints: options.printed === undefined ? null : 'help', database: argv.includes('-db') },
+      start: {
+        conffile: null,
+        logFile: valueOf(argv, '-logfile'),
+        strategyFile: valueOf(argv, '-export_search_strategy'),
+        dryRun: false,
+        registerInputs: argv.includes('-parse_deflines'),
+        prints: options.printed === undefined ? null : 'help',
+        database: argv.includes('-db'),
+      },
     }),
     memoryBytes: () => 1,
     register: (_program: string, role: number, _dataLoaders: boolean, bytes: Uint8Array) => {
@@ -657,6 +672,30 @@ describe("the Engine worker's runtime and the files of a run", () => {
     expect('runFiles' in (await runtimeWith(plain.abi).run(next.run, () => undefined))).toBe(false);
     expect(plain.calls.some((call) => call.startsWith('begin') || call.startsWith('file release'))).toBe(false);
     next.close();
+  });
+
+  // line RG item F1w: the file of -export_search_strategy is a file of stream 8 too; the *start* of the argv names
+  // which option made each file, and a file that the argv does not name is the engine's error.
+  it('names each file of stream 8 by the option of the argv that names it', async () => {
+    const strategy = encode('Blast4-request ::= {\n}\n');
+    const both = fakeAbi({ runFiles: storedZip([['out/s.asn', strategy], [LOG.name, LOG.bytes]]) });
+    const run = workerRun(['-export_search_strategy', 'out/s.asn', '-logfile', 'run.log']);
+    expect((await runtimeWith(both.abi).run(run.run, () => undefined)).runFiles).toEqual([
+      { name: 'out/s.asn', bytes: strategy, option: 'export_search_strategy' },
+      LOG,
+    ]);
+    run.close();
+    const failed = fakeAbi({ runFiles: storedZip([['out/s.asn', strategy]]), fail: 'LOSAT engine error: x' });
+    const second = workerRun(['-export_search_strategy', 'out/s.asn']);
+    const error = await runtimeWith(failed.abi)
+      .run(second.run, () => undefined)
+      .catch((e: unknown) => e);
+    expect(runFilesOf(error)).toEqual([{ name: 'out/s.asn', bytes: strategy, option: 'export_search_strategy' }]);
+    second.close();
+    const unnamed = fakeAbi({ runFiles: storedZip([['other.asn', strategy]]) });
+    const third = workerRun(['-export_search_strategy', 'out/s.asn']);
+    await expect(runtimeWith(unnamed.abi).run(third.run, () => undefined)).rejects.toThrow('has a file that the argv does not name: "other.asn"');
+    third.close();
   });
 
   // line WQA's sweep, D7, 2026-11-19: a run of -parse_deflines reads its inputs together for its argv, releases the
@@ -1043,6 +1082,8 @@ describe('the name of a downloaded file of a run', () => {
     expect(runFileName(run, '/dev/stdout')).toBe('losat-run3-tblastx-20261104T111530Z.logfile._dev_stdout');
     expect(runFileName(run, 'logs/')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.logs');
     expect(runFileName(run, 'a/b//')).toBe('losat-run3-tblastx-20261104T111530Z.logfile.a_b');
+    // The file of -export_search_strategy is named by its option (line RG item F1w).
+    expect(runFileName(run, 'out/s.asn', 'export_search_strategy')).toBe('losat-run3-tblastx-20261104T111530Z.export_search_strategy.out_s.asn');
   });
 });
 
@@ -1088,11 +1129,11 @@ describe.skipIf(reactors === undefined)('the start and the files of a run in the
     const { abi } = await instantiateSerial(module!);
     expect(abi.start(['tblastx', '-conffile', 'a.ini', '-conffile=c.ini', '-logfile', 'x.log', '-dryrun'])).toEqual({
       ok: true,
-      start: { conffile: 'c.ini', logFile: 'x.log', dryRun: true, registerInputs: false, prints: null, database: false },
+      start: { conffile: 'c.ini', logFile: 'x.log', strategyFile: null, dryRun: true, registerInputs: false, prints: null, database: false },
     });
     expect(abi.start(['psiblast'])).toMatchObject({ ok: false });
     // The command line's help and version are printed in place of a search (line WQA's D14, 2026-11-20).
-    expect(abi.start(['blastn', '-version', '-dryrun'])).toEqual({ ok: true, start: { conffile: null, logFile: null, dryRun: false, registerInputs: false, prints: 'version', database: false } });
+    expect(abi.start(['blastn', '-version', '-dryrun'])).toEqual({ ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: 'version', database: false } });
     expect(abi.start(['tblastx', '-dryrun', '-h'])).toMatchObject({ ok: true, start: { dryRun: false, prints: 'help' } });
     // -parse_deflines reads the inputs of a run together, but not those of a dry run (line WQA's sweep, D7, 2026-11-19).
     expect(abi.start(['blastn', '-query', 'q', '-subject', 's', '-parse_deflines'])).toMatchObject({ ok: true, start: { registerInputs: true } });

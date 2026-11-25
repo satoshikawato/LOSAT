@@ -132,38 +132,20 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // (`algorithm::blastn::repeat_filter`, line RG item D4) and `-best_hit_overhang` /
     // `-best_hit_score_edge` (series NP O6a).
     ("blastn", "entrez_query", Refused::Read(None)),
-    ("blastn", "gilist", Refused::Read(None)),
     ("blastn", "import_search_strategy", Refused::Read(None)),
-    ("blastn", "negative_gilist", Refused::Read(None)),
     ("blastn", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-2, psiblast's
     // too).
     ("blastp", "entrez_query", Refused::Read(None)),
-    ("blastp", "gilist", Refused::Read(None)),
     ("blastp", "import_search_strategy", Refused::Read(None)),
-    ("blastp", "ipglist", Refused::Read(None)),
-    ("blastp", "negative_gilist", Refused::Read(None)),
-    ("blastp", "negative_ipglist", Refused::Read(None)),
     ("blastp", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
     // `-use_sw_tback` (line RG item X4b-2, #1500).
-    ("blastx", "gilist", Refused::Read(None)),
-    ("blastx", "negative_gilist", Refused::Read(None)),
     ("blastx", "entrez_query", Refused::Read(None)),
-    ("blastx", "ipglist", Refused::Read(None)),
-    ("blastx", "negative_ipglist", Refused::Read(None)),
     ("blastx", "import_search_strategy", Refused::Read(None)),
     ("blastx", "remote", Refused::Read(None)),
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:398-400,503
-    // The PSSM files in ASN.1 binary (psiblast line item PS10b) are refused where the run starts,
-    // after makeprofiledb's `Init` (`makeprofiledb::work::run`).
-    (
-        "makeprofiledb",
-        "binary",
-        Refused::Run("PSSM files in ASN.1 binary"),
-    ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1164
     // PHI-BLAST (PS8; the ASCII and ASN.1 PSSM files are PS2's and PS3's,
     // `algorithm::psiblast::pssm`, `-in_pssm` PS4's, `algorithm::psiblast::in_pssm`, the MSA
@@ -173,12 +155,8 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // `-in_pssm` (items F1b-1 and F1b-2 of line RG).
     ("psiblast", "phi_pattern", Refused::Read(None)),
     ("psiblast", "entrez_query", Refused::Read(None)),
-    ("psiblast", "gilist", Refused::Read(None)),
     ("psiblast", "html", Refused::Read(None)),
     ("psiblast", "import_search_strategy", Refused::Read(None)),
-    ("psiblast", "ipglist", Refused::Read(None)),
-    ("psiblast", "negative_gilist", Refused::Read(None)),
-    ("psiblast", "negative_ipglist", Refused::Read(None)),
     ("psiblast", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/deltablast_args.cpp:44-120
     // deltablast (item PS13a): `-show_domain_hits` and `-query_loc` are item PS13b's, the search
@@ -186,10 +164,8 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // LOSAT does not run (`-html`, the remote options, `-import_search_strategy`).
     ("deltablast", "entrez_query", Refused::Read(None)),
     ("deltablast", "export_search_strategy", Refused::Read(None)),
-    ("deltablast", "gilist", Refused::Read(None)),
     ("deltablast", "html", Refused::Read(None)),
     ("deltablast", "import_search_strategy", Refused::Read(None)),
-    ("deltablast", "negative_gilist", Refused::Read(None)),
     ("deltablast", "query_loc", Refused::Read(None)),
     ("deltablast", "remote", Refused::Read(None)),
     ("deltablast", "show_domain_hits", Refused::Read(None)),
@@ -207,18 +183,16 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (cited at
     // `algorithm::rpsblast::args`)
-    // `-html` (PS15a) and the remote options and `-import_search_strategy` of every program.
+    // The remote options and `-import_search_strategy` of every program.
     ("rpsblast", "entrez_query", Refused::Read(None)),
-    ("rpsblast", "html", Refused::Read(None)),
     ("rpsblast", "import_search_strategy", Refused::Read(None)),
     ("rpsblast", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (cited
     // at `algorithm::rpstblastn::args`)
-    // `-html` (PS15a) and the remote options and `-import_search_strategy` of every program. The
+    // The remote options and `-import_search_strategy` of every program. The
     // composition-based statistics of a later item are refused once per run
     // (`rpstblastn::search::TranslatedRpsSearch::check_options`).
     ("rpstblastn", "entrez_query", Refused::Read(None)),
-    ("rpstblastn", "html", Refused::Read(None)),
     ("rpstblastn", "import_search_strategy", Refused::Read(None)),
     ("rpstblastn", "remote", Refused::Read(None)),
     (
@@ -230,16 +204,12 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
     // `-use_sw_tback` (line RG item X4b-1, #1481).
     ("tblastn", "entrez_query", Refused::Read(None)),
-    ("tblastn", "gilist", Refused::Read(None)),
     ("tblastn", "import_search_strategy", Refused::Read(None)),
-    ("tblastn", "negative_gilist", Refused::Read(None)),
     ("tblastn", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3).
     ("tblastx", "entrez_query", Refused::Read(None)),
-    ("tblastx", "gilist", Refused::Read(None)),
     ("tblastx", "import_search_strategy", Refused::Read(None)),
-    ("tblastx", "negative_gilist", Refused::Read(None)),
     ("tblastx", "remote", Refused::Read(None)),
 ];
 
@@ -293,6 +263,29 @@ struct Argument {
     default: Option<String>,
     constraint: Option<Spec>,
     aliases: Vec<String>,
+    /// `<description>`: the argument's comment, decoded.
+    description: String,
+    /// `<flags><preOpen/>...`: an `eOutputFile` key of `fPreOpen` (blastdb_aliastool's
+    /// `-gi_file_out`), which the reader opens as it reads the word.
+    pre_open: bool,
+}
+
+impl Argument {
+    /// An argument of `name` and `kind` without a default, a constraint, aliases or a comment:
+    /// the help flags and the file arguments that every reader has (`HELP_FLAGS`,
+    /// `FILE_ARGUMENTS`).
+    fn plain(name: &str, kind: &'static str) -> Self {
+        Argument {
+            name: name.to_string(),
+            kind,
+            mandatory: false,
+            default: None,
+            constraint: None,
+            aliases: Vec::new(),
+            description: String::new(),
+            pre_open: false,
+        }
+    }
 }
 
 /// A `Constraint` of `ncbi_app::args`: the classes with a list of values, whose values go to the
@@ -344,27 +337,28 @@ impl Tables {
         format!("Span {{ first: {first}, count: {count} }}")
     }
 
+    // No NCBI counterpart: line RG DECISIONS K4i-3-1. NCBI's `-help` prints each argument's
+    // comment (`<description>`); LOSAT's descriptions of a program (`api::describe`, LOSAT Web's)
+    // give it as the argument's help. The tables keep it for every program.
     /// The Rust of one `Desc`.
-    fn desc(
-        &mut self,
-        name: &str,
-        kind: &str,
-        default: Option<&str>,
-        constraint: Option<&Spec>,
-        mandatory: bool,
-    ) -> String {
-        let name = self.text(name);
-        let default = match default {
+    fn desc(&mut self, argument: &Argument) -> String {
+        let name = self.text(&argument.name);
+        let kind = argument.kind;
+        let mandatory = argument.mandatory;
+        let pre_open = argument.pre_open;
+        let default = match argument.default.as_deref() {
             Some(default) => format!("Some({})", self.text(default)),
             None => "None".to_string(),
         };
-        let constraint = match constraint {
+        let constraint = match argument.constraint.as_ref() {
             Some(constraint) => format!("Some({})", self.constraint(constraint)),
             None => "None".to_string(),
         };
+        let description = self.text(&argument.description);
         format!(
             "Desc {{ name: {name}, kind: Kind::{kind}, default: {default}, constraint: \
-             {constraint}, mandatory: {mandatory} }}"
+             {constraint}, mandatory: {mandatory}, description: {description}, pre_open: \
+             {pre_open} }}"
         )
     }
 
@@ -402,13 +396,7 @@ impl Tables {
     fn program(&mut self, program: &str, arguments: &[Argument], dependencies: &[Dependency]) {
         let first = self.descs.len();
         for argument in arguments {
-            let desc = self.desc(
-                &argument.name,
-                argument.kind,
-                argument.default.as_deref(),
-                argument.constraint.as_ref(),
-                argument.mandatory,
-            );
+            let desc = self.desc(argument);
             self.descs.push(desc);
         }
         let descs = Self::span(first, self.descs.len());
@@ -448,15 +436,16 @@ impl Tables {
         ));
     }
 
-    /// The Rust of the tables.
+    /// The Rust of the tables. The arguments of every application (`HELP_FLAGS`,
+    /// `FILE_ARGUMENTS`), which no XML describes and no description lists, have an empty comment.
     fn write(mut self) -> String {
         let help_flags: Vec<String> = HELP_FLAGS
             .iter()
-            .map(|name| self.desc(name, "Flag", None, None, false))
+            .map(|name| self.desc(&Argument::plain(name, "Flag")))
             .collect();
         let file_arguments: Vec<String> = FILE_ARGUMENTS
             .iter()
-            .map(|(name, kind)| self.desc(name, kind, None, None, false))
+            .map(|(name, kind)| self.desc(&Argument::plain(name, kind)))
             .collect();
         let mut out = String::from(
             "// Generated by LOSAT/build.rs (build/ncbi_args.rs) from LOSAT/src/ncbi_xmlhelp/*.xml.\n\
@@ -663,7 +652,10 @@ fn read_argument<'a>(
         default: None,
         constraint: None,
         aliases: Vec::new(),
+        description: String::new(),
+        pre_open: false,
     };
+    let mut described = false;
     let end = format!("</{tag}>");
     loop {
         let line = lines.next().ok_or_else(|| format!("no {end}"))?;
@@ -677,18 +669,32 @@ fn read_argument<'a>(
             continue;
         }
         match element_of(line) {
-            Some(("description" | "group" | "synopsis", _)) => {}
+            Some(("description", value)) if !described => {
+                argument.description = decode(value)?;
+                described = true;
+            }
+            Some(("group" | "synopsis", _)) => {}
             Some(("default", value)) => argument.default = Some(decode(value)?),
             Some(("alias", value)) => argument.aliases.push(decode(value)?),
             // `fHidden` (makeblastdb's `-randomize`): the argument is read as any other.
             _ if line == "<flags><hidden/></flags>" => {}
             // `fAppend` of makeblastdb's `-logfile`, a standard argument that the tables leave out.
             _ if line == "<flags><append/></flags>" && argument.name == "logfile" => {}
+            // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:744-752
+            // The flags `fPreOpen` and `fBinary` of an `eOutputFile` key (blastdb_aliastool's
+            // `-gi_file_out`): the reader opens the file as it reads the word; LOSAT writes bytes
+            // as they are, so `fBinary` changes nothing.
+            _ if line == "<flags><preOpen/><binary/></flags>" && kind == "OutputFile" => {
+                argument.pre_open = true;
+            }
             _ => return Err(format!("{name}: a line this reader does not know: {line}")),
         }
     }
     if argument.mandatory && argument.default.is_some() {
         return Err(format!("{name}: a mandatory key with a default"));
+    }
+    if !described {
+        return Err(format!("{name}: no <description>"));
     }
     Ok(argument)
 }

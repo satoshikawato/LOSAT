@@ -7,14 +7,14 @@ Questions and answers for the problems people meet most. Each answer is based on
 **What does it look like?**
 
 ```text
-Error: the NCBI BLAST+ option -html is not supported by LOSAT's BLASTN
+Error: the NCBI BLAST+ option -remote is not supported by LOSAT's BLASTN
 ```
 
 The command exits with status 1 and runs nothing. For an output format that NCBI writes and LOSAT does not (in `psiblast`, `deltablast` or `tblastn -in_pssm`), see [Output formats](output-formats.md) and [`psiblast` and `deltablast` refuse some `-outfmt` values](#psiblast-and-deltablast-refuse-some--outfmt-values).
 
 **Why?** LOSAT stops with an error for each option and value it does not implement. It never ignores an option and never runs something else in its place, so a result you get is the result you asked for.
 
-**What can I do?** Look the option up in [What LOSAT refuses](refusals.md) and on the page of your program. Options that need NCBI's servers or its GI and IPG databases (`-remote`, `-entrez_query`, `-gilist`, `-ipglist`) are not available. For an option that is refused, use NCBI BLAST+ for that run. The [Introduction](introduction.md) lists the programs and options planned for a later release.
+**What can I do?** Look the option up in [What LOSAT refuses](refusals.md) and on the page of your program. Options that need NCBI's servers (`-remote`, `-entrez_query`) and `-import_search_strategy` are not available. For an option that is refused, use NCBI BLAST+ for that run. The [Introduction](introduction.md) lists the programs and options planned for a later release.
 
 A different message, NCBI's short usage followed by `Error: Unknown argument: "xyz"` (exit status 1), means the option does not exist. Check the spelling with `losat <program> -help`. LOSAT takes NCBI's single-dash names (`-evalue`, not `--evalue`).
 
@@ -49,7 +49,7 @@ The message is NCBI's; where NCBI starts it with `BLAST Database error:`, LOSAT 
 
 ## A `-seqidlist` warning names `blastdb_aliastool`
 
-With a text file in `-seqidlist` or `-negative_seqidlist`, LOSAT writes NCBI's warning on the standard error (`Warning: [blastp] To obtain better run time performance, please run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist`). The search runs normally. `blastdb_aliastool` is NCBI's tool; LOSAT does not provide it. To get a binary list, run NCBI BLAST+'s `blastdb_aliastool`. LOSAT reads both the text and the binary list.
+With a text file in `-seqidlist` or `-negative_seqidlist`, LOSAT writes NCBI's warning on the standard error (`Warning: [blastp] To obtain better run time performance, please run blastdb_aliastool -seqid_file_in <INPUT_FILE_NAME> -seqid_file_out <OUT_FILE_NAME> and use <OUT_FILE_NAME> as the argument to -seqidlist`). The search runs normally. To get a binary list, run [`losat blastdb_aliastool -seqid_file_in`](programs/blastdb_aliastool.md). LOSAT reads both the text and the binary list.
 
 ## A compressed input fails
 
@@ -117,7 +117,7 @@ Both `rpsblast` and `rpstblastn` search profile databases (`-db`, such as CDD) o
 
 ## `blastn -use_index true` stops with an error
 
-`losat blastn -use_index true` searches with MegaBLAST index files built by `makembindex`. It refuses the search when an index volume is damaged or does not match the database, and a later query batch of an index of only some volumes of `-db` where NCBI BLAST+ writes to memory it has freed (see [What LOSAT refuses](refusals.md#blastn)). Omit `-use_index true` to search without an index.
+`losat blastn -use_index true` searches with MegaBLAST index files built by `makembindex`. It refuses the search when an index volume is damaged or does not match the database (see [What LOSAT refuses](refusals.md#blastn)). Omit `-use_index true` to search without an index.
 
 ## `deltablast`, `rpsblast`, `rpstblastn`, or `rpsbproc` is missing in Python (`pylosat`), Rust (`losat::api`), or LOSAT Web
 

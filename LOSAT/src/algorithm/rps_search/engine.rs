@@ -409,8 +409,8 @@ impl RpsRun<'_> {
         Ok((x_drop_gapped, x_drop_final))
     }
 
-    /// Every query's traced results on the volume `files`, whose consensus letters are
-    /// `consensus` (at the profiles' offsets), in query order, on the scratch of the run's
+    /// Every query's traced results on the volume `files`, whose profiles' `.psq` letters are
+    /// `letters`, in query order, on the scratch of the run's
     /// workers (`workers`): the volume's refusals before the queries' cutoffs (`Err`), else the
     /// queries' results (`RpsVolumeResults`), which a caller reads batch by batch in the order
     /// NCBI's search of a batch meets its errors (the queries search at the same time on several
@@ -418,7 +418,7 @@ impl RpsRun<'_> {
     pub(crate) fn search_volume(
         &self,
         files: &RpsVolumeFiles,
-        consensus: &super::volumes::Consensus<'_>,
+        letters: &super::volumes::ProfileLetters<'_>,
         pool: &crate::utils::threading::SearchPool<'_>,
         workers: &RpsWorkers,
     ) -> Result<RpsVolumeResults> {
@@ -516,10 +516,23 @@ impl RpsRun<'_> {
             .iter()
             .map(|_| std::sync::Mutex::new(None))
             .collect();
+        let redo = self.sbp.filter(|_| self.cbs > 0).map(|sbp| RpsRedoParams {
+            files,
+            sbp,
+            gap_open: files.aux.gap_open,
+            gap_extend: files.aux.gap_extend,
+            x_drop_final_bits: self.x_drop_final_bits,
+            smith_waterman: self.options.use_sw_tback,
+            program: self.program,
+        });
         let traceback = RpsTraceback {
             rows,
             offsets,
-            consensus,
+            // Only the traceback without the redo reads it (`RpsTraceback::row_after`).
+            row_after_rows: redo
+                .is_none()
+                .then(|| super::profile::RowAfter::new(files.row_after_rows())),
+            letters,
             alphabet: files.alphabet,
             scale,
             karlin_k: &files.aux.karlin_k,
@@ -529,15 +542,8 @@ impl RpsRun<'_> {
             gapped: self.gapped,
             expect_value: self.evalue,
             hitlist_size: self.hitlist_size,
-            redo: self.sbp.filter(|_| self.cbs > 0).map(|sbp| RpsRedoParams {
-                files,
-                sbp,
-                gap_open: files.aux.gap_open,
-                gap_extend: files.aux.gap_extend,
-                x_drop_final_bits: self.x_drop_final_bits,
-                smith_waterman: self.options.use_sw_tback,
-                program: self.program,
-            }),
+            redo,
+            program: self.program,
         };
         let prelim_karlin = KarlinParams {
             lambda: self.gapped.lambda / scale,
@@ -695,7 +701,7 @@ impl RpsRun<'_> {
                     .iter()
                     .any(|frame| frame.aa_seq_nomask.is_some())
                 {
-                    formatter_identities(hit_list, query, consensus.letters()?, offsets);
+                    formatter_identities(hit_list, query, |oid| letters.of(oid))?;
                 }
                 finish_volume_list(
                     hit_list,
@@ -733,7 +739,7 @@ impl RpsRun<'_> {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(searched);
             if remaining[q_idx].fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 {
-                let traced = finish_query(scratch, q_idx);
+                let traced = out_of_line(|| finish_query(scratch, q_idx));
                 *results[q_idx]
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(traced);
@@ -764,6 +770,17 @@ impl RpsRun<'_> {
         }
         Ok(take_results(refused, results))
     }
+}
+
+// No NCBI counterpart: a call boundary; it computes no value NCBI computes.
+/// Calls `run` (the rest of a query's search after its last unit, `RpsRun::search_volume`) in a
+/// function of its own that is never inlined, so that the unit's search, whose scan is inlined in
+/// the caller, does not take its code: the scan's registers and stack slots then do not depend on
+/// the traceback's code. A change there had moved them and made the scan's branches mispredict
+/// 3-4 % more (CDD searches 0.9-1.3 % slower; series PR, item PS10e).
+#[inline(never)]
+fn out_of_line<T>(run: impl FnOnce() -> T) -> T {
+    run()
 }
 
 /// The number of units of the query `q_idx` (`search_volume`).

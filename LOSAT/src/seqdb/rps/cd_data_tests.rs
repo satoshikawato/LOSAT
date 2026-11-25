@@ -143,7 +143,10 @@ fn a_hit_in_a_file_cut_short_is_refused_where_its_segment_is() {
         panic!("expected LOSAT's refusal");
     };
     assert!(text.contains("is shorter than its profiles"), "{text}");
-    assert!(matches!(columns(&files, 1, 1, 2), Err(RpsOpenError::Refused(_))));
+    assert!(matches!(
+        columns(&files, 1, 1, 2),
+        Err(RpsOpenError::Refused(_))
+    ));
 }
 
 #[test]
@@ -154,6 +157,7 @@ fn a_missing_file_is_ncbis_error() {
     let Err(RpsOpenError::Ncbi(text)) = CdProfileFiles::open(&base, "DELTABLAST") else {
         panic!("expected NCBI's error");
     };
+    let text = String::from_utf8_lossy(&text);
     assert!(
         text.starts_with("Cannot memory map RPS-BLAST database file: ")
             && text.ends_with("/cd.obsr"),
@@ -163,6 +167,7 @@ fn a_missing_file_is_ncbis_error() {
     let Err(RpsOpenError::Ncbi(text)) = CdProfileFiles::open(&base, "DELTABLAST") else {
         panic!("expected NCBI's error");
     };
+    let text = String::from_utf8_lossy(&text);
     assert!(text.ends_with("/cd.wcounts"), "{text}");
 }
 
@@ -174,6 +179,7 @@ fn a_wrong_magic_number_is_ncbis_error() {
     let Err(RpsOpenError::Ncbi(text)) = CdProfileFiles::open(&base, "DELTABLAST") else {
         panic!("expected NCBI's error");
     };
+    let text = String::from_utf8_lossy(&text);
     assert!(
         text.starts_with("RPS BLAST profile file (")
             && text.ends_with(

@@ -1,0 +1,38 @@
+USAGE
+  losat <COMMAND>
+
+DESCRIPTION
+   Pure-Rust pairwise alignment that matches NCBI BLAST+ on LOSAT's test fixtures, with genetic-code exceptions
+
+Commands:
+  blastx       Translated nucleotide query vs protein subject (blastx)
+  blastn       Pairwise nucleotide alignment (megablast [default], blastn, dc-megablast, blastn-short)
+  blastp       Pairwise protein alignment (blastp)
+  tblastx      Pairwise 6-frame translated nucleotide alignment (tblastx)
+  tblastn      Protein query vs translated nucleotide subject (tblastn)
+  psiblast     Position-Specific Iterated BLAST (psiblast)
+  rpsblast     Reverse Position Specific BLAST (rpsblast)
+  rpstblastn   Translated Reverse Position Specific BLAST (rpstblastn)
+  makeblastdb  makeblastdb: create a BLAST database from a FASTA file (format version 5 by default, 4 with -blastdb_version 4)
+  rpsbproc     Process output from offline rpsblast to annotate sequence with conserved domain information (rpsbproc; its domain hits, sites and motifs of protein and nucleotide queries)
+  help         Print this message or the help of the given subcommand(s)
+
+Options:
+  -help     Print help
+  --version  Print version
+
+
+
+Other programs (losat <program> -help shows each one's options):
+  blastdbcmd         BLAST database client
+  dustmasker         Low complexity region masker based on Symmetric DUST algorithm
+  segmasker          Low complexity region masker based on the SEG algorithm
+  windowmasker       Window based sequence masker
+  convert2blastmask  Convert masking information in lower-case masked FASTA input to file formats suitable for makeblastdb
+  makembindex        Create a BLAST database index.
+  makeprofiledb      Application to create databases for rpsblast, cobalt and deltablast
+  blastdb_aliastool  Application to create BLAST database aliases
+  blastdbcheck       BLAST database integrity and validity checking application
+
+To call the programs by NCBI's names (blastn, makeblastdb, ...), link them with:
+  losat -install-shims [DIR]   (default: the directory of this executable)

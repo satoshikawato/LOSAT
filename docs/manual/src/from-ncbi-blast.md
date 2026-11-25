@@ -12,11 +12,11 @@ Put the program name after `losat` and keep the rest of the command line:
 | `makeblastdb -in p.faa -dbtype prot` | `losat makeblastdb -in p.faa -dbtype prot` |
 | `blastdbcmd -db p_db -info` | `losat blastdbcmd -db p_db -info` |
 
-The programs are `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `deltablast`, `rpsblast`, `rpstblastn`, `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb` and `rpsbproc`.
+The programs are `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `deltablast`, `rpsblast`, `rpstblastn`, `makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck` and `rpsbproc`.
 
 ## Use the NCBI names: `losat --install-shims`
 
-`losat --install-shims [DIR]` makes the 18 program names above in `DIR`. Each name is a link to `losat`, and an executable called by one of these names runs that program. Without `DIR`, the names are made in the folder that holds `losat`.
+`losat --install-shims [DIR]` makes the 20 program names above in `DIR`. Each name is a link to `losat`, and an executable called by one of these names runs that program. Without `DIR`, the names are made in the folder that holds `losat`.
 
 <!-- example: from-ncbi-blast-1 -->
 ```bash
@@ -77,6 +77,6 @@ LOSAT keeps to NCBI's results. A small set of differences is on purpose, and eac
 - In SAM output (`-outfmt 17`), the `CL:` tag of the `@PG` line holds LOSAT's own command line.
 - Where NCBI writes its version, LOSAT writes its own name and version (`BLASTN (LOSAT 0.2.0)` where NCBI writes `BLASTN 2.17.0+`), and its error prefixes say `LOSAT` (`LOSAT engine error:` where NCBI writes `BLAST engine error:`).
 
-LOSAT also refuses what it does not implement. It stops with an error instead of running something else. [What LOSAT refuses](refusals.md) lists every option and value, for example `-remote`, `-entrez_query`, `-gilist` and `-ipglist`. The NCBI programs and helper scripts that LOSAT does not provide are listed in the [Introduction](introduction.md).
+LOSAT also refuses what it does not implement. It stops with an error instead of running something else. [What LOSAT refuses](refusals.md) lists every option and value, for example `-remote`, `-entrez_query` and `-import_search_strategy`. The NCBI programs and helper scripts that LOSAT does not provide are listed in the [Introduction](introduction.md).
 
 If a command that works with NCBI BLAST+ fails or gives different output with LOSAT, and the case is not in those two pages, please report it; see [Troubleshooting](troubleshooting.md).

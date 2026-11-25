@@ -76,7 +76,6 @@ fn rows_text(query: &str, subject: &str, q_start: usize, s_start: usize, line: u
         &hit,
         query,
         subject,
-        [&[], &[]],
         Default::default(),
         None,
         &config,
@@ -85,7 +84,7 @@ fn rows_text(query: &str, subject: &str, q_start: usize, s_start: usize, line: u
     String::from_utf8(out).unwrap()
 }
 
-// showalign.cpp:1209-1216 and 1497-1502 (cited at `end_gap_span` and
+// showalign.cpp:1209-1216 and 1497-1502 (cited at `row_spans` and
 // `write_alignment_with_sequences`): a row's end gaps are spaces, a chunk without the row's
 // letters leaves the row out (the Query row with its middle line), and the next chunk's row
 // shows its first residue's number.
@@ -416,8 +415,12 @@ fn html_description_rows_are_ncbis() {
             true,
             None,
             &mut crate::report::query_warnings::no_places,
-            Some(&report),
+            Some((
+                &report,
+                crate::report::db_subject::AfterThrow::SkipsAlignment { html: true },
+            )),
             &crate::report::db_subject::HitLoads::default(),
+            None,
         )
         .unwrap();
         String::from_utf8(out)
@@ -477,6 +480,7 @@ fn description_table_shows_the_linked_set_column() {
         &mut crate::report::query_warnings::no_places,
         None,
         &crate::report::db_subject::HitLoads::default(),
+        None,
     )
     .unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -545,6 +549,7 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         &mut crate::report::query_warnings::no_places,
         None,
         &crate::report::db_subject::HitLoads::default(),
+        None,
     )
     .unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -595,6 +600,7 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         &mut crate::report::query_warnings::no_places,
         None,
         &crate::report::db_subject::HitLoads::default(),
+        None,
     )
     .unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -640,6 +646,7 @@ fn sorthits_adds_the_total_cover_and_identity_columns() {
         &mut crate::report::query_warnings::no_places,
         None,
         &crate::report::db_subject::HitLoads::default(),
+        None,
     )
     .unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -690,6 +697,7 @@ fn sorthits_refuses_a_last_total_wider_than_its_column() {
             &mut crate::report::query_warnings::no_places,
             None,
             &crate::report::db_subject::HitLoads::default(),
+            None,
         )
         .map(|()| out)
     };
@@ -743,6 +751,7 @@ fn blastx_description_row_is_the_highest_bit_score() {
             None,
             &mut crate::report::query_warnings::no_places,
             None,
+            None,
         )
         .unwrap();
         let text = String::from_utf8(out).unwrap();
@@ -794,6 +803,7 @@ fn blastx_query_warnings_follow_the_reports_before_them() {
             self.1.write_all(&std::mem::take(&mut self.0))
         }
     }
+    impl crate::report::ostream::ReportWrite for Held {}
     let first = tblastx_hit(1);
     let mut empty = tblastx_hit(1);
     empty.hit.q_idx = 2;
@@ -1051,6 +1061,7 @@ fn a_title_of_unknown_encoding_is_unknown_and_its_alignments_are_skipped() {
         &mut crate::report::query_warnings::no_places,
         None,
         &crate::report::db_subject::HitLoads::default(),
+        None,
     )
     .unwrap();
     let row = out.split(|&byte| byte == b'\n').nth(3).unwrap().to_vec();
@@ -1122,7 +1133,10 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
             aligned: 2,
         });
     let loads = HitLoads::of(
-        Some(RunThrow::every_row(AfterThrow::SkipsAlignment)),
+        crate::report::db_subject::LoadsBefore::NONE,
+        Some(RunThrow::every_row(AfterThrow::SkipsAlignment {
+            html: false,
+        })),
         [(true, reads)],
         |key| parsed[key].as_deref(),
         |_, _| 0,
@@ -1157,6 +1171,7 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         &mut crate::report::query_warnings::no_places,
         None,
         &loads,
+        None,
     )
     .unwrap();
     let rows: Vec<&[u8]> = out.split(|&byte| byte == b'\n').skip(3).take(2).collect();
@@ -1170,7 +1185,7 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         "{:?}",
         String::from_utf8_lossy(rows[1])
     );
-    // With `-html` the row's link loads the subject again in the `catch` (`HtmlRows::end_at_thrown`):
+    // With `-html` the row's link loads the subject again in the `catch` (`HtmlRows::end`):
     // the run ends at the second row with the load's exception, after the first row.
     let registry =
         crate::report::formatter_registry::InitConfig::of("blastn", None, false).unwrap();
@@ -1194,8 +1209,9 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         false,
         None,
         &mut crate::report::query_warnings::no_places,
-        Some(&report),
+        Some((&report, AfterThrow::SkipsAlignment { html: true })),
         &loads,
+        None,
     )
     .unwrap_err();
     let exception = crate::ncbi_exception::NcbiException::of_io_error(&error).unwrap();

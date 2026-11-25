@@ -45,6 +45,14 @@ pub(crate) struct BlastpHsp {
 }
 
 impl BlastpHsp {
+    // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:478-478
+    /// The gap columns: the alignment's columns that are neither identities nor mismatches, as
+    /// the default report's mismatches are the columns of neither (`Hit::gap_letters`).
+    #[inline]
+    pub(crate) fn gap_letters(&self) -> usize {
+        usize::try_from(self.length as i64 - self.num_ident as i64 - self.mismatch).unwrap_or(0)
+    }
+
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
     pub(crate) fn from_hit(hit: Hit) -> Self {
         let Hit {
@@ -360,7 +368,7 @@ pub(crate) fn subject_offset_end(s_start: usize, s_end: usize) -> (usize, usize)
     (s_start.saturating_sub(1), s_end)
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1330-1353
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1329-1356
 pub(crate) fn score_compare_hsps<H: HitListHsp>(a: &H, b: &H) -> Ordering {
     let (a_q_start, a_q_end, a_s_start, a_s_end) = a.offsets();
     let (b_q_start, b_q_end, b_s_start, b_s_end) = b.offsets();
@@ -529,7 +537,7 @@ pub(crate) fn hit_list_to_seqalign_order(hit_list: &mut BlastpHitList) {
     hit_list.hsplist_array = kept;
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1739-1748
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1739-1749
 pub(crate) fn update_best_evalue<H: HitListHsp>(list: &mut BlastpHspList<H>) {
     let mut best = i32::MAX as f64;
     for hsp in &list.hsps {
@@ -564,7 +572,7 @@ pub(crate) fn trim_by_max_hsps(list: &mut BlastpHspList, max_hsps_per_subject: u
     crate::core::blast_hits::trim_by_max_hsps(&mut list.hsps, max_hsps_per_subject);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3077-3106
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3077-3107
 fn compare_hsp_lists<H: HitListHsp>(a: &BlastpHspList<H>, b: &BlastpHspList<H>) -> Ordering {
     if a.hsps.is_empty() && b.hsps.is_empty() {
         return Ordering::Equal;
@@ -671,23 +679,99 @@ impl BlastCompoHeap {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-255,257-284
     pub(crate) fn would_insert(&mut self, evalue: f64, score: i32, subject_index: u32) -> bool {
-        if self.n < self.heap_threshold || evalue <= self.ecutoff || evalue < self.worst_evalue {
+        if self.would_insert_before_root(evalue) {
             return true;
         }
         if self.heap_array.is_none() {
             self.convert_to_heap();
         }
+        self.would_replace_root(evalue, score, subject_index)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-255
+    /// The clauses of `would_insert` that need no root: the heap holds fewer lists than its
+    /// threshold, or the E-value is within the cutoff, or below the worst E-value kept.
+    #[inline(always)]
+    fn would_insert_before_root(&self, evalue: f64) -> bool {
+        self.n < self.heap_threshold || evalue <= self.ecutoff || evalue < self.worst_evalue
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:257-284
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:230-247
+    /// The last clause of `would_insert`: the root (`compo_heap_record_compare`'s worst record) is
+    /// worse than the candidate. In the heap form the root is `heap_array[1]`; in the array form it
+    /// is the record of `array[1..=n]` that the comparison puts above every other one, which is the
+    /// root that the conversion (`convert_to_heap`) makes: the comparison reads only the E-value,
+    /// the score and the subject index, and orders distinct keys strictly, so every maximum has the
+    /// root's key.
+    #[inline(always)]
+    fn would_replace_root(&self, evalue: f64, score: i32, subject_index: u32) -> bool {
         let record = BlastCompoHeapRecord {
             best_evalue: evalue,
             best_score: score,
             subject_index,
-            ..Default::default()
+            hsplist: None,
         };
-        let heap_array = self
-            .heap_array
-            .as_ref()
-            .expect("compo heap converted before root comparison");
-        compo_heap_record_compare(&heap_array[1], &record)
+        let root = match (&self.heap_array, &self.array) {
+            (Some(heap_array), _) => &heap_array[1],
+            (None, Some(array)) => array[2..=self.n].iter().fold(&array[1], |root, other| {
+                if compo_heap_record_compare(other, root) {
+                    other
+                } else {
+                    root
+                }
+            }),
+            (None, None) => unreachable!("a compo heap holds its array or its heap array"),
+        };
+        compo_heap_record_compare(root, &record)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:251-276
+    /// The answer of `would_insert` on the heap as it is, without its one side effect: an array
+    /// that has reached the threshold is not turned into its heap form (`convert_to_heap`); the
+    /// same clauses (`would_insert_before_root`, `would_replace_root`, which reads the root of the
+    /// array form). The windows of the parallel redo ask it from many threads on the heaps as a
+    /// window's start left them (`x_redo_par.rs`).
+    // Only the parallel redo's windows ask it (the module `x_redo_par` is compiled where they run).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    pub(crate) fn would_insert_view(&self, evalue: f64, score: i32, subject_index: u32) -> bool {
+        self.would_insert_before_root(evalue)
+            || self.would_replace_root(evalue, score, subject_index)
+    }
+
+    // No NCBI counterpart: a copy for looking ahead; NCBI's heap has none.
+    /// A copy of the heap whose records keep their keys (E-value, score, subject index) but not
+    /// their alignments. `would_insert` and `insert` read and order only the keys, so the copy
+    /// answers and changes as the heap would under the same calls. The parallel redo's windows
+    /// replay a query's carried matches ahead on it (`x_redo_par.rs`).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    pub(crate) fn keys(&self) -> Self {
+        let keys = |records: &Vec<BlastCompoHeapRecord>| {
+            records
+                .iter()
+                .map(|record| BlastCompoHeapRecord {
+                    best_evalue: record.best_evalue,
+                    best_score: record.best_score,
+                    subject_index: record.subject_index,
+                    hsplist: None,
+                })
+                .collect()
+        };
+        Self {
+            n: self.n,
+            heap_threshold: self.heap_threshold,
+            ecutoff: self.ecutoff,
+            worst_evalue: self.worst_evalue,
+            array: self.array.as_ref().map(keys),
+            heap_array: self.heap_array.as_ref().map(keys),
+            x_ends_early: self.x_ends_early,
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:294-352
@@ -957,7 +1041,7 @@ impl<H: HitListHsp> BlastpHitList<H> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3172-3187
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3171-3188
     fn purge(&mut self) {
         let mut index = 0usize;
         while index < self.hsplist_count {
@@ -1008,7 +1092,7 @@ impl<H: HitListHsp> BlastpHitList<H> {
         self.hsplist_count = self.hsplist_array.len();
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:877-892
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:877-893
     pub(crate) fn prune_by_size(&mut self, hitlist_size: usize) {
         if hitlist_size == 0 {
             self.hsplist_array.clear();

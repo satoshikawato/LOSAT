@@ -14,6 +14,7 @@
 pub(crate) mod cdd_input;
 pub(crate) mod engine;
 pub(crate) mod prelim;
+pub(crate) mod profile;
 pub(crate) mod redo;
 pub(crate) mod rescale;
 pub(crate) mod scan;

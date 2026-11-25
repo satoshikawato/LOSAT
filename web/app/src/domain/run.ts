@@ -2,6 +2,7 @@
 // changes; what actually happened is appended to the RunRecord.
 import type { CountsFile, CountsUse, MessagePlace, PrintedKind, ProgramId, RecordKey, RunFile, ShownIds } from 'losat/domain';
 import type { CountsOrigin } from './counts';
+import type { ToolId, WindowMaskerStage } from './tools';
 
 export type RunStatus =
   | 'queued'
@@ -87,6 +88,7 @@ export interface ConffileSnapshot {
 }
 
 export interface RunSnapshot {
+  readonly kind?: 'search';
   readonly runId: string;
   /** 1-based position in this working session, used for display and file names. */
   readonly number: number;
@@ -176,4 +178,73 @@ export interface RunRecord {
 
 export function isTerminal(status: RunStatus): boolean {
   return TERMINAL_STATUSES.has(status);
+}
+
+// --- Tool runs (windowmasker, WW3b DESIGN §3-§4) -------------------------------------------
+
+export type ToolFileOrigin =
+  | { readonly kind: 'picked' }
+  | { readonly kind: 'pasted' }
+  | { readonly kind: 'inflated'; readonly from: string }
+  | { readonly kind: 'combined'; readonly parts: readonly string[] }
+  | { readonly kind: 'made'; readonly runNumber: number }
+  | { readonly kind: 'saved'; readonly taxid: number };
+
+/** Metadata of one file placed in a tool run's working directory (for Run details). */
+export interface ToolDirectoryEntry {
+  readonly name: string;
+  readonly size: number;
+  readonly origin: ToolFileOrigin;
+}
+
+/** One output stream or file kept in session storage for a tool run. */
+export interface ToolOutputEntry {
+  /** Key under which the Data worker keeps this block (`'stdout'`, `'stderr'`, or `'file:0'`, ...). */
+  readonly key: string;
+  /** Name as written in the argv (for example `wmasker.ascii`, `run.log`), or `'stdout'` / `'stderr'`. */
+  readonly name: string;
+  readonly size: number;
+  /** Option(s) that named the file (`'-out'`, `'-logfile'`, `'-out, -logfile'`), if applicable. */
+  readonly option?: string;
+  /** True for the `-out` file of `-mk_counts` and `-convert` (offered to BLASTN and Mask). */
+  readonly isCounts?: true;
+}
+
+export interface ToolRunSnapshot {
+  readonly kind: 'tool';
+  readonly runId: string;
+  /** 1-based position in this working session, shared with search runs. */
+  readonly number: number;
+  readonly tool: ToolId;
+  readonly stage: WindowMaskerStage;
+  readonly argv: readonly string[];
+  readonly directory: readonly ToolDirectoryEntry[];
+  readonly prints?: PrintedKind;
+  readonly queuedAt: number;
+  readonly group?: RunGroup;
+}
+
+export interface ToolRunRecord {
+  readonly exitStatus?: number;
+  readonly stdout?: ToolOutputEntry;
+  readonly stderr?: ToolOutputEntry;
+  readonly files?: readonly ToolOutputEntry[];
+  readonly runtimePath?: 'serial' | 'fake';
+  readonly engineBuild?: string;
+  readonly memory?: {
+    readonly linearBytesBefore: number;
+    readonly linearBytesAfter: number;
+    readonly instanceRuns: number;
+  };
+  readonly startedAt?: number;
+  readonly phaseTimes?: { readonly preparing?: number; readonly running?: number; readonly finalizing?: number };
+  readonly endedAt?: number;
+  readonly error?: string;
+}
+
+export type AnyRunSnapshot = RunSnapshot | ToolRunSnapshot;
+export type AnyRunRecord = RunRecord | ToolRunRecord;
+
+export function isToolSnapshot(snapshot: AnyRunSnapshot): snapshot is ToolRunSnapshot {
+  return snapshot.kind === 'tool';
 }

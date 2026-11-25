@@ -461,7 +461,8 @@ fn working_directory(name: &[u8]) -> Vec<u8> {
 }
 
 /// The path of the file that the output name `name` opens (`file_key`), where `output_name` gives
-/// a file; `None` where the system refuses the name.
+/// a file; `None` where the system refuses the name. A name that a run reads (`-query`, compared
+/// with the strategy file's in `RunFiles::strategy_target`) is at the same path.
 fn output_key(name: &[u8]) -> Option<Vec<u8>> {
     let cwd = working_directory(name);
     Walk::resolve(name, &cwd).map(|path| file_key(&path, &cwd))
@@ -532,9 +533,10 @@ enum OutputName {
     Existing,
 }
 
-/// The devices of `LOST_DEVICES` whose writes a user's system takes and loses (`output_name`):
-/// the null device, `/dev/zero` and the random devices. `/dev/full` fails them; `/dev/ptmx`,
-/// `/dev/fuse` and `/dev/net/tun` give writes to no reader or fail them each in its own way.
+/// The devices of `LOST_DEVICES` whose writes a user's system takes and loses (`output_name`,
+/// `strategy_name`): the null device, `/dev/zero` and the random devices. `/dev/full` fails them;
+/// `/dev/ptmx`, `/dev/fuse` and `/dev/net/tun` give writes to no reader or fail them each in its
+/// own way.
 const DISCARDING_DEVICES: [&[u8]; 4] =
     [b"/dev/null", b"/dev/zero", b"/dev/random", b"/dev/urandom"];
 
@@ -1184,20 +1186,7 @@ fn log_name(name: &[u8]) -> LogName {
     // system: the opened path is none of them nor an ancestor of one.
     let mut directories: Vec<Vec<u8>> = Vec::new();
     if let Some(directory) = &file.directory {
-        if directory.is_empty() || !fits(directory) {
-            return LogName::Unopened;
-        }
-        let mut walk = Walk::at(directory, &cwd);
-        for part in directory.split(|byte| *byte == b'/') {
-            walk.step(part);
-            if walk.refused || directory_at(walk.path()) == Directory::None {
-                return LogName::Unopened;
-            }
-            if directories.last().map(Vec::as_slice) != Some(walk.path()) {
-                directories.push(walk.path().to_vec());
-            }
-        }
-        if directory_at(walk.path()) != Directory::Known {
+        if !walks_to_directory(directory, &cwd, &mut directories) {
             return LogName::Unopened;
         }
     }
@@ -1225,6 +1214,155 @@ fn log_name(name: &[u8]) -> LogName {
         LogName::Nowhere
     } else {
         LogName::File
+    }
+}
+
+/// Whether `directory`, a directory of a name in the working directory `cwd` (`log_name`,
+/// `strategy_name`), is one that the system walks to and the model knows: each directory that its
+/// walk passes may be one of root's that the model does not know, but none that is not there nor
+/// one that the user cannot search, and the directory where it ends is known (`directory_at`). Each
+/// directory passed is added to `directories` (the opened path is none of them nor an ancestor of
+/// one).
+fn walks_to_directory(directory: &[u8], cwd: &[u8], directories: &mut Vec<Vec<u8>>) -> bool {
+    if directory.is_empty() || !fits(directory) {
+        return false;
+    }
+    let mut walk = Walk::at(directory, cwd);
+    for part in directory.split(|byte| *byte == b'/') {
+        walk.step(part);
+        if walk.refused || directory_at(walk.path()) == Directory::None {
+            return false;
+        }
+        if directories.last().map(Vec::as_slice) != Some(walk.path()) {
+            directories.push(walk.path().to_vec());
+        }
+    }
+    directory_at(walk.path()) == Directory::Known
+}
+
+/// What an `-export_search_strategy` name gives for a `Receiver` (`RunFiles::strategy_target`).
+#[derive(Debug, PartialEq, Eq)]
+pub enum StrategyTarget {
+    /// A file of the run under the name as given, which the receiver gets when the run ends.
+    File,
+    /// No file: the writes are lost (the null device; the standard input, which is the null
+    /// device of a command line run without one).
+    Nowhere,
+    /// A name that NCBI cannot open for writing: NCBI's argument error
+    /// (`cli::inaccessible`).
+    Inaccessible,
+    /// The standard output, which is the report's stream (LOSAT Web has no `-out`): LOSAT Web's
+    /// refusal of a strategy file that is also the output (`strategy::open_strategy_file_in`,
+    /// `strategy::create_strategy_file_in`).
+    StandardOutput,
+    /// A file that is not a file of the run: the standard error, a device whose writes fail, a
+    /// file of procfs or of a message queue (LOSAT Web's refusal).
+    System,
+    /// The file of another option of the run, whose bytes the command line's strategy file
+    /// replaces or mixes with its own (LOSAT Web's refusal): `-query`, `-subject`, `-logfile` or
+    /// `-window_masker_db`.
+    OtherFile(&'static str),
+}
+
+/// A file that the run reads or writes besides its strategy file (`RunFiles::strategy_target`):
+/// the option that names it and its name as the command line takes it.
+pub struct RunFileName<'a> {
+    pub option: &'static str,
+    pub name: &'a OsStr,
+}
+
+impl RunFiles {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3532-3535 (cited
+    // at `strategy::create_strategy_file`): an output file (`CArgDescriptions::eOutputFile`), which
+    // NCBI's arguments open as a stream of that name, truncated.
+    /// What the `-export_search_strategy` name `name` gives for a `Receiver`, as the command line
+    /// on Linux opens it for writing (`strategy_name`), in a run whose other files are `others`
+    /// (`StrategyTarget`). LOSAT's own names (`-`) are the strategy module's.
+    pub fn strategy_target(name: &OsStr, others: &[RunFileName<'_>]) -> StrategyTarget {
+        let name = name.as_encoded_bytes();
+        let cwd = working_directory(name);
+        let (target, path) = strategy_name(name, &cwd);
+        if target != StrategyTarget::File {
+            return target;
+        }
+        let Some(path) = path else {
+            return target;
+        };
+        // Each name is read in a working directory of its own depth; their paths compare as the
+        // run's files' (`file_key`).
+        let key = file_key(&path, &cwd);
+        for other in others {
+            let bytes = other.name.as_encoded_bytes();
+            let same = match other.option != "logfile" {
+                // The standard input (`-`) is no file of a name.
+                true => bytes != b"-" && output_key(bytes).is_some_and(|other| other == key),
+                // NCBI's special names (`-`, `/dev/null`) are no file of the run.
+                false => {
+                    special_log_target(Some(other.name)).is_none()
+                        && log_name(bytes) == LogName::File
+                        && log_key(bytes).is_some_and(|other| other == key)
+                }
+            };
+            if same {
+                return StrategyTarget::OtherFile(other.option);
+            }
+        }
+        StrategyTarget::File
+    }
+}
+
+/// What the `-export_search_strategy` name `name` gives on the command line on Linux, in the
+/// working directory `cwd` of the model's host and user (`log_name`; No NCBI counterpart: LOSAT
+/// Web has no file system), and the path that it opens where it is a file. NCBI opens the name as
+/// it is written (no reading of NCBI's, unlike `-logfile`), for writing, creating it: the system
+/// walks its directory (`walks_to_directory`), which must be there, and opens the path where its
+/// user may write it (`opens`); a directory (`.`, `logs/`, `/tmp`), a name that ends in `/`, an
+/// empty name and a name that the system refuses (`fits`, `Walk`) are not opened. Then the standard
+/// output (`/dev/stdout`, `/dev/fd/1`) is the report's stream; the standard input and the devices
+/// of `DISCARDING_DEVICES` take the bytes and keep none; the standard error, the other devices
+/// that a user opens, the files of procfs (`/proc/self/comm`) and message queues (`/dev/mqueue/q`)
+/// are no file of the run; every other name is a file where the user makes files (`/tmp/s.asn`,
+/// `out/s.asn`, `/proc/self/cwd/s.asn`). A folder of the working directory is one that the user
+/// made where a name gives it, as `log_name` reads `-logfile` (`directory_at`), not only one that
+/// holds a file of the run as for a tool's output (`output_name`).
+fn strategy_name(name: &[u8], cwd: &[u8]) -> (StrategyTarget, Option<Vec<u8>>) {
+    if name.is_empty() || !fits(name) || name.ends_with(b"/") {
+        return (StrategyTarget::Inaccessible, None);
+    }
+    let mut directories: Vec<Vec<u8>> = Vec::new();
+    if let Some(slash) = name.iter().rposition(|byte| *byte == b'/') {
+        let directory = if slash == 0 {
+            b"/".as_slice()
+        } else {
+            &name[..slash]
+        };
+        if !walks_to_directory(directory, cwd, &mut directories) {
+            return (StrategyTarget::Inaccessible, None);
+        }
+    }
+    directories.push(cwd.to_vec());
+    let Some(path) = Walk::resolve(name, cwd) else {
+        return (StrategyTarget::Inaccessible, None);
+    };
+    if directories.iter().any(|directory| within(directory, &path)) || !opens(&path) {
+        return (StrategyTarget::Inaccessible, None);
+    }
+    let stream = |descriptor: &[u8]| {
+        [SELF, THREAD]
+            .iter()
+            .any(|process| path.strip_prefix(*process) == Some(descriptor))
+    };
+    if stream(b"/fd/1".as_slice()) {
+        (StrategyTarget::StandardOutput, None)
+    } else if stream(b"/fd/0".as_slice()) || DISCARDING_DEVICES.contains(&path.as_slice()) {
+        (StrategyTarget::Nowhere, None)
+    } else if LOST_DEVICES.contains(&path.as_slice())
+        || within(&path, SELF)
+        || NO_FREE_SPACE.iter().any(|system| within(&path, system))
+    {
+        (StrategyTarget::System, None)
+    } else {
+        (StrategyTarget::File, Some(path))
     }
 }
 

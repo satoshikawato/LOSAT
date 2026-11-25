@@ -42,7 +42,7 @@ use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::{FormatOutput, FormatProbe};
 use crate::blastinput::fasta_reader::FastaRecord;
-use crate::report::blast_xml::matrix::XmlMatrixFailure;
+use crate::blastinput::query_batch::XmlFailingQuery;
 use crate::report::blast_xml::XmlStats;
 use crate::report::blast_xml2::SideFileSink;
 use crate::report::db_subject::ParsedSubject;
@@ -112,6 +112,8 @@ pub(super) struct ReportView<'a> {
     /// What the XML2 and JSON reports do at each subject's `Hit`, by rank
     /// (`ListedTitles::hit_loads`, from `report_prep::prefetch_reported_subjects`).
     pub(super) hit_loads: &'a crate::report::db_subject::HitLoads,
+    /// The XML2 and JSON reports' loads by batch (`report_prep::ReportedPrefetch::xml2_loads`).
+    pub(super) xml2_loads: &'a Option<Vec<crate::algorithm::common::database::XmlBatchLoads>>,
     pub(super) engine_counts: &'a EngineCounts,
     pub(super) pairwise_hits: &'a Option<Arc<Vec<PairwiseHit>>>,
     pub(super) psiblast_hits_found: &'a Option<Vec<usize>>,
@@ -127,7 +129,7 @@ pub(super) struct ReportView<'a> {
     pub(super) filtered_empty: bool,
     /// rpsblast over several volumes (`prelim_run::PrelimRun::rps_multi_volume`).
     pub(super) rps_multi_volume: bool,
-    pub(super) xml_matrix_failure: Option<XmlMatrixFailure>,
+    pub(super) xml_matrix_failure: Option<XmlFailingQuery>,
     pub(super) xml_only_xml2: bool,
     pub(super) x_rows_pool: Option<&'a SearchPool<'a>>,
     pub(super) blastp_parallel_pool: &'a SearchPool<'a>,
@@ -164,7 +166,7 @@ pub(super) fn write_seqalign(
     } = *view;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
     // The Seq-annot of each query with alignments (`seqalign`).
-    let mut writer = format.sink.open()?;
+    let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
     let subjects = match (
         listed_subjects.as_ref(),
         pairwise_database.as_ref(),
@@ -264,7 +266,7 @@ pub(super) fn write_archive(
         }
         context
     };
-    let mut writer = format.sink.open()?;
+    let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
     let subject_names = match (
         listed_subjects.as_ref(),
         pairwise_database.as_ref(),
@@ -467,11 +469,12 @@ pub(super) fn write_xml(
             // report of a `-subject` or psiblast run is made when the next query's
             // results arrive, or in `PrintEpilog`)
             // The report data's constructor throws for the run's first searched query,
-            // or for its second where the report is held (`blastp_xml_matrix_failure`):
+            // or where the report is held for its first of another Seq-id
+            // (`blastp_xml_matrix_failure`, `QueryScopes::xml_failing_query`):
             // in the call of that query, after the reader's messages of the batches up
             // to its own and NCBI's posts of the bytes replaced in their search strategy
             // requests (`query_posts`); a call of the queries before it writes those
-            // and no report. A run of one searched query whose report is held fails at
+            // and no report. A run whose held report has no such query fails at
             // its end (the last call, with the epilog), unless the run's stop
             // (`QueryBatches::stop`, written by `search`) ends it first. The XML2 and
             // JSON prolog is written before the search (`PrintProlog`), once: with the
@@ -486,7 +489,7 @@ pub(super) fn write_xml(
             let first = ranges.searched_base;
             let failing = failure
                 .query()
-                .checked_sub(first)
+                .and_then(|query| query.checked_sub(first))
                 .filter(|&query| query < query_records.len());
             if let Some(warnings) = warnings.as_mut() {
                 for query in 0..failing.map_or(query_records.len(), |query| query + 1) {
@@ -503,7 +506,7 @@ pub(super) fn write_xml(
             return Ok(());
         }
     };
-    let mut writer = format.sink.open()?;
+    let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
     let xml_stats = query_stats();
     // The messages of each query's result: the same ones the warnings of the other
     // formats write (`query_warning_lines`).
@@ -563,7 +566,7 @@ pub(super) fn write_xml(
         crate::algorithm::common::database::TaxdbNotes,
     ) = match (xml2_kind, listed_titles.as_ref(), database) {
         (Some(_), Some(titles), Some(database)) => {
-            titles.read_taxids(database, hit_lists, hit_loads)?
+            titles.read_taxids(database, hit_lists, hit_loads, view.xml2_loads)?
         }
         _ => (Vec::new(), Vec::new(), Vec::new(), Default::default()),
     };
@@ -652,6 +655,7 @@ pub(super) fn write_xml(
         // JSON write no `hits` and add to its message.
         searched: no_alignment_set.iter().map(|&none| !none).collect(),
         program: args.app.name(),
+        program_type: args.app.program_type(),
         epilog: reports.epilog,
         stops: !reports.epilog && reports.last_call,
         only_xml2: xml_only_xml2,
@@ -792,7 +796,7 @@ pub(super) fn write_pairwise(
         ..
     } = *report_view;
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:68,71,90-92
-    let mut writer = format.sink.open()?;
+    let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:187
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:246-248
     // (`args.line_length`: `-line_length`, else 60; `args.sort`: blastp's
@@ -1017,7 +1021,7 @@ pub(super) fn write_pairwise(
             crate::report::pairwise::psiblast_round::write_psiblast_round_report(
                 &rows,
                 window,
-                &mut *writer,
+                &mut writer,
                 &pairwise_config,
                 &pairwise_queries,
                 query_titles,
@@ -1188,6 +1192,7 @@ pub(super) fn write_custom_tabular(
         query_titles,
         searched_lengths: query_lengths,
         range_length: ranges.query_input.range_length,
+        ungapped: args.ungapped,
         database: context
             .database_name
             .as_deref()
@@ -1285,7 +1290,7 @@ pub(super) fn write_text(
         context,
         ..
     } = *view;
-    let mut writer = format.sink.open()?;
+    let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1102-1107
     write_blastp_tabular_hit_lists(
         hit_lists,

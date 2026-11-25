@@ -1,6 +1,5 @@
 //! Shared CLI value grammar; engine configuration remains typed.
 use crate::utils::seg::SegParams;
-use std::path::PathBuf;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:410-420
 #[derive(Debug, Clone, PartialEq)]
@@ -64,95 +63,6 @@ pub fn parse_dust_filtering(value: &str) -> Result<DustSpec, String> {
         window: window as u32 as usize,
         linker: linker as u32 as usize,
     })
-}
-
-/// An integer argument as NCBI reads it (`CArg_Integer`): a decimal number with an
-/// optional sign, or else, for a value that starts with `0x` or `0X`, a hexadecimal number
-/// (no digit after the prefix reads as 0), within the range of `int`.
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:118-129
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:383-390
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:788-791
-/// `CArg_Integer` derives from `CArg_Int8`: `s_StringToInt8` is `ncbi_int8` (its messages),
-/// then the range of `int`.
-pub fn ncbi_integer(value: &str) -> Result<i32, String> {
-    let int8 = ncbi_int8(value)?;
-    i32::try_from(int8).map_err(|_| "Integer value is out of range".to_string())
-}
-
-/// A 64-bit integer argument as NCBI reads it (`CArg_Int8`, such as `-dbsize`): what
-/// `ncbi_integer` reads, without the range of `int`.
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:351-360
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:118-129
-/// `s_StringToInt8` is `ncbi_app::args::string_to_int8` (the one reading of NCBI's integer
-/// arguments). LOSAT's messages: "Integer value is out of range" for a hexadecimal number beyond
-/// `Int8` (every byte after `0x` a hexadecimal digit), "expected an integer" for any other value
-/// that does not read (a byte after `0x` that is not a hexadecimal digit included: NCBI's base
-/// 16 conversion throws on an overflow before it reaches such a byte, ncbistr.cpp:852).
-pub fn ncbi_int8(value: &str) -> Result<i64, String> {
-    crate::ncbi_app::args::string_to_int8(value.as_bytes()).map_err(|_| {
-        let bytes = value.as_bytes();
-        let hexadecimal = bytes
-            .get(..2)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"0x"))
-            && bytes[2..].iter().all(u8::is_ascii_hexdigit);
-        if hexadecimal {
-            "Integer value is out of range".to_string()
-        } else {
-            "expected an integer".to_string()
-        }
-    })
-}
-
-/// A real argument as NCBI reads it (`CArg_Double`): `NStr::StringToDouble` of `value`
-/// with `fDecimalPosixOrLocal` (`ncbi_str::string_to_double_posix_or_local`): the first byte is a
-/// digit, a point, a comma or a sign, glibc's `strtod` reads the number (decimal, hexadecimal,
-/// the infinities, NaN with its sign and `n-char-sequence`) or NCBI's own `StringToDoublePosix`
-/// where it reads further (a mantissa that ends in `e` or `E`, in x87 extended precision, and an
-/// `inf` after a point, `.inf`), and the number ends the value. LOSAT's message for NCBI's conversion error: "expected a number".
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:460-469
-pub fn ncbi_double(value: &str) -> Result<f64, String> {
-    crate::ncbi_str::string_to_double_posix_or_local(value.as_bytes())
-        .map_err(|_| "expected a number".to_string())
-}
-
-/// An integer argument that NCBI's argument reader has read (`ncbi_integer`), in the field's type
-/// `T`: a value of the argument's constraint fits it (`-num_threads`, `-mt_mode`, a genetic code).
-pub fn ncbi_integer_as<T: TryFrom<i32>>(value: &str) -> Result<T, String> {
-    T::try_from(ncbi_integer(value)?).map_err(|_| "Integer value is out of range".to_string())
-}
-
-/// A file argument (`eInputFile`, `eOutputFile`): the bytes of the value, as NCBI's reader keeps
-/// them; `-` is the standard stream, and a file that cannot be opened is reported when it is opened.
-pub fn ncbi_path() -> impl clap::builder::TypedValueParser<Value = PathBuf> {
-    use clap::builder::TypedValueParser;
-    clap::builder::OsStringValueParser::new().map(PathBuf::from)
-}
-
-/// The number of a genetic code argument as `CArgAllowGeneticCodeInteger` converts it
-/// (`NStr::StringToInt` of `value`, flags 0: `ncbi_str::string_to_int`), when it is 0 to 255 and
-/// written without a minus sign; `None` for the other values, for which the messages of LOSAT Web's
-/// ABI v1 say "invalid" (its parsers, `web_v1_argv`) where they say "unsupported" for a number of
-/// that range outside NCBI's codes. NCBI refuses both alike.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:998-1007
-#[cfg(any(target_arch = "wasm32", test))]
-pub(crate) fn genetic_code_number(value: &str) -> Option<u8> {
-    match crate::ncbi_str::string_to_int(value.as_bytes(), 0) {
-        Ok(n) if !value.starts_with('-') => u8::try_from(n).ok(),
-        _ => None,
-    }
-}
-
-/// A Boolean argument (`CArg_Boolean`, read with `NStr::StringToBool`:
-/// `ncbi_str::string_to_bool`).
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:489-497
-pub fn ncbi_boolean(value: &str) -> Result<bool, String> {
-    crate::ncbi_str::string_to_bool(value)
-        .ok_or_else(|| format!("Argument cannot be converted: `{value}'"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:386-407
@@ -232,7 +142,7 @@ impl SegSpec {
 /// The values are used as NCBI's query filter uses them (`SegSpec::params`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:396-406
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub fn parse_seg_filtering(value: &str) -> Result<SegSpec, String> {
     match value {
         "no" => return Ok(SegSpec::No),
@@ -259,7 +169,7 @@ pub fn parse_seg_filtering(value: &str) -> Result<SegSpec, String> {
 
 /// The TBLASTX `-outfmt` value of web ABI v1, which is frozen (plan TD-1): it keeps the
 /// only format that it accepted before TBLASTX outfmt 0 and 7 were ported (session S08).
-#[cfg(target_arch = "wasm32")]
+#[cfg(losat_web_abi_v1)]
 pub fn tblastx_v1_outfmt(value: &str) -> Result<String, String> {
     if value.trim() != "6" {
         return Err(

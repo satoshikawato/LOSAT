@@ -23,8 +23,6 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1606-1626
 
-use std::io::Write;
-
 use anyhow::Result;
 
 use super::blast_engine::TblastxHsp;
@@ -108,6 +106,7 @@ pub(crate) fn query_records_of<'a>(
             subject: subject_records.len() as u32 - 1,
             q_offset: i32::try_from(hit.sort_query_offset)?,
             q_end: i32::try_from(hit.sort_query_end)?,
+            q_left_out: 0,
             s_offset: i32::try_from(hit.sort_subject_offset)?,
             s_end: i32::try_from(hit.sort_subject_end)?,
             q_frame: i8::try_from(hit.query_frame)?,
@@ -132,7 +131,7 @@ pub(crate) fn query_records_of<'a>(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_tblastx_seqalign(
     format: SerialFormat,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     hits: &[TblastxHsp],
     engine: &[(u32, u32)],
     queries: &[FastaRecord],

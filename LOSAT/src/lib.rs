@@ -86,8 +86,14 @@ pub(crate) mod dbindex;
 pub(crate) mod makembindex;
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp: the writer of RPS databases of profiles.
 pub(crate) mod makeprofiledb;
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp: the writer of alias files and of binary
+// GI and seqid lists.
+pub(crate) mod blastdb_aliastool;
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp: the check of BLAST databases and alias files.
+pub(crate) mod blastdbcheck;
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp and c++/src/corelib/ncbiargs.cpp: the application and argument reader of
-// blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask, makembindex and makeprofiledb.
+// blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask, makembindex, makeprofiledb,
+// blastdb_aliastool and blastdbcheck.
 pub(crate) mod ncbi_app;
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
 pub(crate) mod ncbi_exception;
@@ -106,10 +112,11 @@ pub(crate) mod ncbi_xmlhelp;
 // domain annotation of rpsblast's archives.
 pub(crate) mod rpsbproc;
 
-#[cfg(target_arch = "wasm32")]
+// LOSAT Web's ABI v1 (`losat_web_*`): a wasm32 build but the WASI command line's (build.rs).
+#[cfg(losat_web_abi_v1)]
 pub(crate) mod web_api;
 // The words of a request of LOSAT Web's ABI v1 (frozen), read as v1 reads them.
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(losat_web_abi_v1, test))]
 pub(crate) mod web_v1_argv;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:332-349: shared string-valued filtering arguments.

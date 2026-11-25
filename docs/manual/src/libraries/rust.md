@@ -23,6 +23,7 @@ losat = "0.2"
 |:---|:---|:---|
 | `parallel` | on | Searches with more than one thread (`-num_threads`), through Rayon |
 | `wasm-threads` | off | Turns on `parallel` for the `wasm32-wasip1-threads` target |
+| `no-web-abi-v1` | off | Leaves LOSAT Web's ABI v1 (`losat_web_*`) out of a WebAssembly build, as LOSAT builds its WASI command line; no effect on other targets |
 
 Without `parallel` (`default-features = false`), the build has no Rayon and searches on one thread, as the serial WebAssembly builds do. The crate's other features are for LOSAT's own diagnostics.
 
@@ -74,5 +75,5 @@ The numbers of an HSP record are the engine's, not rounded: each field that name
 
 ## Differences from the command line
 
-- The library does not write a search strategy file: it refuses `-export_search_strategy`. The command line writes it.
+- The library does not write a search strategy file: it refuses `-export_search_strategy`. The command line and LOSAT Web write it.
 - Records that you build yourself with `FastaRecord::new` carry no definition line as read. In `-outfmt 11`, their definition line is `>` and the title. Records from `read_fasta` keep it, as the command line does (see [Differences from NCBI BLAST+](../differences.md#the-library)).

@@ -63,10 +63,14 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Tb
     use crate::seqdb::alias::SearchPath;
     let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
-    let search =
-        SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+    let search = SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None);
     let path = tests.join("db_search").join(name);
-    let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+    let db = SeqDb::open_in(
+        path.to_str().unwrap().as_bytes(),
+        SeqType::Nucleotide,
+        &search,
+    )
+    .unwrap();
     TblastxDatabase {
         parsed: db.has_parsed_seqids().unwrap(),
         db,
@@ -124,7 +128,14 @@ fn the_prefetch_looks_up_the_reported_sequences_once_per_run() {
     let text = |database: &TblastxDatabase, ordinals: &[u32]| -> String {
         let ordered: Vec<TblastxHsp> = ordinals.iter().map(|&ordinal| hit_on(ordinal)).collect();
         let mut titles = DatabaseTitles::new();
-        read_titles(database, &ordered, 0, Default::default(), &mut titles).unwrap();
+        read_titles(
+            database,
+            &ordered,
+            0,
+            (Default::default(), true),
+            &mut titles,
+        )
+        .unwrap();
         String::from_utf8(prefetch_messages(database, &ordered, &titles).unwrap()).unwrap()
     };
     let database = open_with_taxdb("x16_ntaxid_99990", Some("offset_last_past_end"), &cwd);

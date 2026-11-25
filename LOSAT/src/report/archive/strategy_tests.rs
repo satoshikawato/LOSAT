@@ -8,25 +8,30 @@ use crate::report::archive::ArchiveHandle;
 #[derive(Clone, Default)]
 struct Sink(Arc<Mutex<Vec<u8>>>);
 
-impl Write for Sink {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 impl StrategySink for Sink {
-    fn truncate(&mut self, len: u64) -> std::io::Result<()> {
-        self.0.lock().unwrap().truncate(len as usize);
+    fn write_request(
+        &mut self,
+        bytes: &[u8],
+        _pieces: &[BufferPiece],
+        posts: &[(u64, Vec<u8>)],
+        diagnostics: &mut dyn Write,
+        archive: Option<&ArchiveHandle>,
+    ) -> std::io::Result<()> {
+        let _ = emit_strategy_posts(posts, None, diagnostics, archive)?;
+        self.0.lock().unwrap().extend_from_slice(bytes);
         Ok(())
     }
 
-    fn can_cut(&self) -> bool {
-        true
+    fn write_partial(
+        &mut self,
+        bytes: &[u8],
+        posts: &[(u64, Vec<u8>)],
+        diagnostics: &mut dyn Write,
+        archive: Option<&ArchiveHandle>,
+    ) -> std::io::Result<()> {
+        let _ = emit_strategy_posts(posts, None, diagnostics, archive)?;
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(())
     }
 }
 
@@ -100,6 +105,7 @@ fn each_batch_is_a_request_with_the_search_space_of_the_batch_before() {
     let (export, sink) = export(None);
     let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
     assert!(export.write_request(0..1, &request(&queries, &[])).unwrap());
+    export.write_posts(&mut std::io::sink(), None).unwrap();
     assert_eq!(sink.text(), FIRST);
     export.note_searched(0..1, searched(817_380)).unwrap();
     for (at, searched) in [(1, None), (2, searched(5)), (3, None)] {
@@ -108,6 +114,7 @@ fn each_batch_is_a_request_with_the_search_space_of_the_batch_before() {
             .unwrap());
         export.note_searched(at..at + 1, searched).unwrap();
     }
+    end_run(Some(&export), Ok(())).unwrap();
     assert_eq!(
         sink.text(),
         [
@@ -138,12 +145,16 @@ fn searchsp_keeps_its_place_and_an_empty_database_gives_zero() {
     export.note_searched(0..1, searched(1_000_000)).unwrap();
     export
         .options()
-        .set_database_filter(None, crate::report::archive::RequestLength::Lengths(None))
+        .set_database_filter(
+            Vec::new(),
+            crate::report::archive::RequestLength::Lengths(None),
+        )
         .unwrap();
     export.write_request(1..2, &request(&queries, &[])).unwrap();
     export.note_searched(1..2, searched(77)).unwrap();
     export.write_request(2..3, &request(&queries, &[])).unwrap();
     export.note_searched(2..3, None).unwrap();
+    end_run(Some(&export), Ok(())).unwrap();
     let all = sink.text();
     let docs: Vec<&str> = all.split("Blast4-request ::= ").skip(1).collect();
     assert_eq!(docs.len(), 3);
@@ -185,6 +196,7 @@ fn a_big_integer_of_minus_two_to_the_63_is_written_as_its_digits() {
         OptionsHandle::default(),
     );
     assert!(dbsize.write_request(0..1, &request(&queries, &[])).unwrap());
+    end_run(Some(&dbsize), Ok(())).unwrap();
     let text = sink.text();
     assert!(text.contains(digits), "{text}");
     let (rps, sink) = export(None);
@@ -200,6 +212,7 @@ fn a_big_integer_of_minus_two_to_the_63_is_written_as_its_digits() {
             .unwrap());
         rps.note_searched(at..at + 1, searched(5)).unwrap();
     }
+    end_run(Some(&rps), Ok(())).unwrap();
     let all = sink.text();
     let docs: Vec<&str> = all.split("Blast4-request ::= ").skip(1).collect();
     assert_eq!(docs.len(), 2);
@@ -221,8 +234,10 @@ fn a_request_written_once_is_not_written_again() {
     assert!(!export.takes(1..2));
     assert!(!export.write_request(0..2, &request(&queries, &[])).unwrap());
     export.note_searched(0..2, searched(9)).unwrap();
+    export.write_posts(&mut std::io::sink(), None).unwrap();
     assert_eq!(sink.text(), FIRST);
     assert!(export.write_request(2..3, &request(&queries, &[])).unwrap());
+    end_run(Some(&export), Ok(())).unwrap();
     assert_eq!(sink.text(), [FIRST.to_string(), with_space(5)].concat());
 }
 
@@ -237,6 +252,7 @@ fn no_request_follows_the_stop() {
     assert!(!export.takes(1..2));
     assert!(!export.write_request(1..2, &request(&queries, &[])).unwrap());
     export.note_searched(1..2, searched(6)).unwrap();
+    end_run(Some(&export), Ok(())).unwrap();
     assert_eq!(sink.text(), FIRST);
 }
 
@@ -287,7 +303,7 @@ fn one_options_handle_serves_the_archive_and_the_strategy() {
     handle
         .options()
         .set_database_filter(
-            Some(list),
+            vec![list],
             crate::report::archive::RequestLength::Lengths(None),
         )
         .unwrap();
@@ -295,6 +311,7 @@ fn one_options_handle_serves_the_archive_and_the_strategy() {
     export.write_request(0..1, &request(&queries, &[])).unwrap();
     export.note_searched(0..1, searched(5)).unwrap();
     export.write_request(1..2, &request(&queries, &[])).unwrap();
+    end_run(Some(&export), Ok(())).unwrap();
     let all = sink.text();
     assert_eq!(all.matches("name \"TaxidList\"").count(), 2, "{all}");
     assert!(all.contains("value big-integer 0\n"), "{all}");
@@ -306,16 +323,20 @@ fn one_options_handle_serves_the_archive_and_the_strategy() {
 }
 
 /// A post of a request that no batch start wrote is LOSAT's internal error at the end of a run
-/// that ends as NCBI's (`Ok` or NCBI's error); a refusal of LOSAT's keeps its text.
+/// that ends as NCBI's (`Ok` or NCBI's error); a refusal of LOSAT's keeps its text. The end lets
+/// the posts go (each run ends once).
 #[test]
 fn a_post_left_at_the_end_of_a_run_is_an_internal_error() {
-    let (export, _) = export(None);
     let queries = [BioseqInput {
         title: b"q caf\xe9",
         defline: std::borrow::Cow::Borrowed(b">q caf\xe9"),
         ..protein("Query_1", b"MWCHWCMWCHWC")
     }];
-    export.write_request(0..1, &request(&queries, &[])).unwrap();
+    let written = || {
+        let (export, _) = export(None);
+        export.write_request(0..1, &request(&queries, &[])).unwrap();
+        export
+    };
     let native = || -> Result<()> {
         Err(crate::cli::NativeError {
             exit: 3,
@@ -324,27 +345,33 @@ fn a_post_left_at_the_end_of_a_run_is_an_internal_error() {
         .into())
     };
     for result in [Ok(()), native()] {
+        let export = written();
         let error = end_run(Some(&export), result).unwrap_err();
         assert!(
             error.to_string().starts_with("LOSAT internal error"),
             "{error}"
         );
+        assert!(export.take_all_posts().is_empty());
     }
-    let refusal = end_run(Some(&export), Err(anyhow::anyhow!("not supported"))).unwrap_err();
-    assert_eq!(refusal.to_string(), "not supported");
+    let export = written();
     assert!(!export.take_all_posts().is_empty());
     end_run(Some(&export), Ok(())).unwrap();
+    let export = written();
+    let refusal = end_run(Some(&export), Err(anyhow::anyhow!("not supported"))).unwrap_err();
+    assert_eq!(refusal.to_string(), "not supported");
+    assert!(export.take_all_posts().is_empty());
+    let export = written();
+    export.take_all_posts();
     let error = end_run(Some(&export), native()).unwrap_err();
     assert!(error.is::<crate::cli::NativeError>());
     end_run(None, Ok(())).unwrap();
 }
 
-/// A request reaches the file where NCBI writes it; the run marks where it reaches each
-/// batch's start (its mark, `Posts::request`); the end of a run that NCBI's error ends cuts the
-/// file back to the requests reached (NCBI wrote the requests up to the batch it stopped at),
-/// and the end of a run without an error keeps them all.
+/// A request reaches the sink where NCBI writes it (`Posts::request` released at each batch's
+/// start): at NCBI's error only the requests reached are written; at `Ok` or a refusal of LOSAT's
+/// every request is written.
 #[test]
-fn requests_after_the_last_batch_start_reached_are_cut_at_ncbis_error() {
+fn requests_after_the_last_batch_start_reached_are_dropped_at_ncbis_error() {
     let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
     let three = |export: &StrategyExport| {
         for at in 0..3 {
@@ -364,100 +391,23 @@ fn requests_after_the_last_batch_start_reached_are_cut_at_ncbis_error() {
     let all = [FIRST.to_string(), with_space(5), with_space(5)].concat();
     let (strategy, sink) = export(None);
     three(&strategy);
-    assert_eq!(sink.text(), all);
-    let marks = strategy.take_posts(usize::MAX);
-    assert_eq!(marks.len(), 3);
-    // The second batch's start reaches the first two requests.
-    marks[1].1.write(&mut std::io::sink(), None).unwrap();
-    let error = end_run(Some(&strategy), native()).unwrap_err();
-    assert!(error.is::<crate::cli::NativeError>());
-    assert_eq!(sink.text(), [FIRST.to_string(), with_space(5)].concat());
-    // A run without an error keeps every request, and so does a refusal of LOSAT's.
-    for result in [Ok(()), Err(anyhow::anyhow!("not supported"))] {
-        let (strategy, sink) = export(None);
-        three(&strategy);
-        let _ = end_run(Some(&strategy), result);
-        assert_eq!(sink.text(), all);
-    }
-}
-
-/// A sink that cannot be cut (a FIFO, a pipe; `can_cut` false) or a file whose cut fails.
-struct Uncut(Sink, bool);
-
-impl Write for Uncut {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.write(bytes)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl StrategySink for Uncut {
-    fn truncate(&mut self, _len: u64) -> std::io::Result<()> {
-        Err(std::io::Error::other("Invalid argument"))
-    }
-
-    fn can_cut(&self) -> bool {
-        self.1
-    }
-}
-
-/// A sink that cannot be cut (review 2 of K4h, M1: `-export_search_strategy` to a FIFO or
-/// `>(gzip > f)`, NCBI 2.17.0 2 requests of 3) gets each request where the run reaches its
-/// batch's start: at NCBI's error it has those, at any other end every one. A regular file whose
-/// cut fails is LOSAT's error.
-#[test]
-fn a_sink_that_cannot_be_cut_gets_only_the_requests_reached() {
-    let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
-    let native = || -> Result<()> {
-        Err(crate::cli::NativeError {
-            exit: 255,
-            message: "Error: x\n".into(),
-        }
-        .into())
-    };
-    let uncut = |cut: bool| {
-        let sink = Sink::default();
-        let export = StrategyExport::new(
-            Box::new(Uncut(sink.clone(), cut)),
-            &OptionInputs::new(Program::Blastp, "blastp"),
-            Some("in/db/bp"),
-            OptionsHandle::default(),
-        );
-        for at in 0..3 {
-            export
-                .write_request(at..at + 1, &request(&queries, &[]))
-                .unwrap();
-            export.note_searched(at..at + 1, searched(5)).unwrap();
-        }
-        (export, sink)
-    };
-    let (strategy, sink) = uncut(false);
     assert_eq!(sink.text(), "");
     let marks = strategy.take_posts(usize::MAX);
+    assert_eq!(marks.len(), 3);
+    // The first batch's start writes the first request; the second reaches the first two.
     marks[0].1.write(&mut std::io::sink(), None).unwrap();
     assert_eq!(sink.text(), FIRST);
     marks[1].1.write(&mut std::io::sink(), None).unwrap();
     let error = end_run(Some(&strategy), native()).unwrap_err();
     assert!(error.is::<crate::cli::NativeError>());
     assert_eq!(sink.text(), [FIRST.to_string(), with_space(5)].concat());
-    let all = [FIRST.to_string(), with_space(5), with_space(5)].concat();
+    // A run without an error writes every request, and so does a refusal of LOSAT's.
     for result in [Ok(()), Err(anyhow::anyhow!("not supported"))] {
-        let (strategy, sink) = uncut(false);
+        let (strategy, sink) = export(None);
+        three(&strategy);
         let _ = end_run(Some(&strategy), result);
         assert_eq!(sink.text(), all);
     }
-    // A regular file that fails to be cut back.
-    let (strategy, sink) = uncut(true);
-    let error = end_run(Some(&strategy), native()).unwrap_err();
-    assert!(!error.is::<crate::cli::NativeError>());
-    assert!(
-        error.to_string().starts_with("LOSAT could not end"),
-        "{error}"
-    );
-    assert_eq!(sink.text(), all);
 }
 
 /// The request of a PSSM query (`RequestQueries::Pssm`) as NCBI BLAST+ 2.17.0 writes it: the
@@ -503,6 +453,7 @@ fn a_pssm_query_is_the_pssm_as_read() {
             lcase_masks: &[],
         };
         assert!(export.write_request(0..1, &request).unwrap());
+        end_run(Some(&export), Ok(())).unwrap();
         assert_eq!(
             sink.text(),
             String::from_utf8(fixture(&format!("fixtures/strategy/{frozen}"))).unwrap(),
@@ -511,9 +462,9 @@ fn a_pssm_query_is_the_pssm_as_read() {
     }
 }
 
-/// `-` and a file that is also `-out` are made (the file emptied) with LOSAT's refusal, which
-/// `check_report_stream` and `write_with` raise; a path that cannot be created is NCBI's
-/// argument error.
+/// `-` is refused at `check_report_stream` / `write_with`; a file (including the same path as
+/// `-out`) is created (emptied) with no refusal; a path that cannot be created is NCBI's argument
+/// error.
 #[test]
 fn the_file_is_created_and_its_refusal_kept() {
     let dir = crate::utils::test_dir::temp_dir().join(format!(
@@ -523,24 +474,15 @@ fn the_file_is_created_and_its_refusal_kept() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("s.asn");
     std::fs::write(&path, b"old").unwrap();
-    let made = create_strategy_file(&path, None, "BLASTP").unwrap();
-    assert!(made.file.is_some() && made.refusal.is_none());
+    let made = create_strategy_file(&path, "BLASTP").unwrap();
+    assert!(matches!(made.target, StrategyTarget::Disk(_)) && made.refusal.is_none());
     assert_eq!(std::fs::read(&path).unwrap(), b"");
-    let dash = create_strategy_file(Path::new("-"), None, "BLASTP").unwrap();
-    assert!(dash.file.is_none());
+    let dash = create_strategy_file(Path::new("-"), "BLASTP").unwrap();
+    assert!(matches!(dash.target, StrategyTarget::None));
     assert!(dash.refusal.as_deref().unwrap().contains("standard output"));
-    std::fs::write(&path, b"old").unwrap();
-    let same = create_strategy_file(&path, Some(&path), "BLASTP").unwrap();
-    assert!(same.refusal.as_deref().unwrap().contains("also the output"));
-    assert_eq!(std::fs::read(&path).unwrap(), b"");
-    let other = dir.join("o.txt");
-    assert!(create_strategy_file(&path, Some(&other), "BLASTP")
-        .unwrap()
-        .refusal
-        .is_none());
     // The refusal comes where the run asks for it, and before any request.
     let export = StrategyExport::for_run(
-        create_strategy_file(Path::new("-"), None, "BLASTP").unwrap(),
+        create_strategy_file(Path::new("-"), "BLASTP").unwrap(),
         OptionInputs::new(Program::Blastp, "blastp"),
         Some(6),
         HitlistArgs::default(),
@@ -552,7 +494,7 @@ fn the_file_is_created_and_its_refusal_kept() {
     assert!(export.write_with(0..1, |_| Ok(())).is_err());
     assert!(check_report_stream(None).is_ok());
     let missing = dir.join("no_such_dir").join("x");
-    let error = create_strategy_file(&missing, None, "BLASTP").unwrap_err();
+    let error = create_strategy_file(&missing, "BLASTP").unwrap_err();
     let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
     assert_eq!(native.exit, 1);
     assert_eq!(
@@ -563,64 +505,259 @@ fn the_file_is_created_and_its_refusal_kept() {
         )
         .as_bytes()
     );
-    // The null device as the strategy file and as `-out`: nothing written there is kept.
+    // The null device as the strategy file: nothing written there is kept.
     #[cfg(unix)]
-    drop(
-        create_strategy_file(
-            Path::new("/dev/null"),
-            Some(Path::new("/dev/null")),
-            "BLASTP",
-        )
-        .unwrap(),
-    );
+    drop(create_strategy_file(Path::new("/dev/null"), "BLASTP").unwrap());
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// The held report stream: the bytes wait, are dropped at the request point and are written
-/// (once, before the next write) when the run ends before it.
+/// A run refused at NCBI's first request (`-`) that ends before it with an exception of NCBI's
+/// that a report's writer carries (the `-html` links' registry, `NcbiException::into_io_error`):
+/// the end takes it for NCBI's error, as the command line's exit does (`cli::NativeError::caught`,
+/// exit status 255), and keeps its text, as it keeps a refusal of LOSAT's (the report stream
+/// writes NCBI's prolog before either as NCBI's stream does: `check_report_stream`).
 #[test]
-fn held_report_stream_waits_for_the_request_point() {
-    fn held(sink: &Sink) -> (ReportHold, HeldReport<Sink>) {
-        let hold = ReportHold::default();
-        (
-            hold.clone(),
-            HeldReport {
-                inner: sink.clone(),
-                hold,
-            },
+fn an_exception_of_ncbis_from_a_writer_ends_the_run_as_ncbis_error() {
+    let exception = || {
+        anyhow::Error::from(
+            crate::ncbi_exception::NcbiException::new(
+                crate::ncbi_exception::ThrowSite {
+                    file: "src/corelib/ncbireg.cpp",
+                    line: 722,
+                    kind: "CRegistryException::eEntry",
+                    function: None,
+                },
+                "Invalid registry entry format",
+            )
+            .into_io_error(),
         )
+    };
+    let error = exception();
+    let native = crate::cli::NativeError::caught(&error).expect("NCBI's error");
+    assert_eq!(native.exit, 255);
+    for error in [exception(), anyhow::anyhow!("a refusal of LOSAT's")] {
+        let export = StrategyExport::for_run(
+            create_strategy_file(Path::new("-"), "BLASTX").unwrap(),
+            OptionInputs::new(Program::Blastx, "blastx"),
+            Some(0),
+            HitlistArgs::default(),
+            None,
+            &OptionsHandle::default(),
+        );
+        let message = error.to_string();
+        let ended = end_run(Some(&export), Err(error)).unwrap_err();
+        assert_eq!(ended.to_string(), message);
     }
-    // Held until the run ends: nothing reaches the stream before.
-    let sink = Sink::default();
-    let (hold, mut stream) = held(&sink);
-    stream.write_all(b"prolog\n").unwrap();
-    stream.flush().unwrap();
-    assert!(sink.0.lock().unwrap().is_empty());
-    // The run ends with NCBI's error: the held bytes, then what the error writes.
-    hold.end(true);
-    stream.write_all(b"error\n").unwrap();
-    assert_eq!(&*sink.0.lock().unwrap(), b"prolog\nerror\n");
-    // The request point refuses the run: no byte ever.
-    let sink = Sink::default();
-    let (hold, mut stream) = held(&sink);
-    stream.write_all(b"prolog\n").unwrap();
-    hold.drop_held();
-    stream.write_all(b"more\n").unwrap();
-    hold.end(true);
-    drop(stream);
-    assert!(sink.0.lock().unwrap().is_empty());
-    // LOSAT's own refusal at the run's end: no byte either.
-    let sink = Sink::default();
-    let (hold, mut stream) = held(&sink);
-    stream.write_all(b"prolog\n").unwrap();
-    hold.end(false);
-    drop(stream);
-    assert!(sink.0.lock().unwrap().is_empty());
-    // A released stream writes its bytes when it is dropped without another write.
-    let sink = Sink::default();
-    let (hold, mut stream) = held(&sink);
-    stream.write_all(b"prolog\n").unwrap();
-    hold.end(true);
-    drop(stream);
-    assert_eq!(&*sink.0.lock().unwrap(), b"prolog\n");
+}
+
+/// The files that a receiver got (LOSAT Web's run files).
+#[derive(Default)]
+struct Received(Mutex<Vec<(Vec<u8>, Vec<u8>)>>);
+
+impl FileReceiver for Received {
+    fn receive(&self, name: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+        self.0.lock().unwrap().push((name.to_vec(), bytes.to_vec()));
+        Ok(())
+    }
+}
+
+impl Received {
+    fn files(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+/// LOSAT Web's strategy file (`RunFiles::Receiver`, line RG's F1w): the receiver gets it under
+/// the name as typed where the run ends (`end_run`, whatever still holds the export), with the bytes
+/// that the command line writes to the file;
+/// a made file dropped before its export (an error after it is made) is the empty file that the
+/// command line leaves; NCBI's error cuts it back as it cuts the command line's file
+/// (`end_run`).
+#[test]
+fn a_receiver_gets_the_file_when_the_export_ends() {
+    let received = Arc::new(Received::default());
+    let files = RunFiles::Receiver(received.clone());
+    let open = |name: &str| create_strategy_file_in(&files, Path::new(name), "BLASTP", &[]);
+    let export = |file| {
+        StrategyExport::for_run(
+            file,
+            OptionInputs::new(Program::Blastp, "blastp"),
+            None,
+            HitlistArgs::default(),
+            Some("in/db/bp"),
+            &OptionsHandle::default(),
+        )
+    };
+    let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+    let made = export(open("out/s.asn").unwrap());
+    assert!(!made.refused());
+    assert!(made.write_request(0..1, &request(&queries, &[])).unwrap());
+    // The run's end hands the file over, while a clone of the export is still held; the drop
+    // gives it no second time.
+    let kept = made.clone();
+    end_run(Some(&made), Ok(())).unwrap();
+    assert_eq!(
+        received.files(),
+        [(b"out/s.asn".to_vec(), FIRST.as_bytes().to_vec())]
+    );
+    drop((made, kept));
+    assert_eq!(received.files().len(), 1);
+    // An error after the file is made: the file, empty.
+    received.0.lock().unwrap().clear();
+    drop(open("s.asn").unwrap());
+    assert_eq!(received.files(), [(b"s.asn".to_vec(), Vec::new())]);
+    // NCBI's error before the batch's start was reached: the request is cut away.
+    received.0.lock().unwrap().clear();
+    let cut = export(open("s.asn").unwrap());
+    assert!(cut.write_request(0..1, &request(&queries, &[])).unwrap());
+    let native = crate::cli::inaccessible("query", Path::new("q"));
+    assert!(end_run(Some(&cut), Err(native)).is_err());
+    drop(cut);
+    assert_eq!(received.files(), [(b"s.asn".to_vec(), Vec::new())]);
+    // A run that ends with the posts of a request not taken (an error between the request and its
+    // batch's start) still gives the file at its end.
+    received.0.lock().unwrap().clear();
+    let early = export(open("s.asn").unwrap());
+    assert!(early.write_request(0..1, &request(&queries, &[])).unwrap());
+    let refusal = anyhow::anyhow!("a refusal of LOSAT's");
+    assert!(end_run(Some(&early), Err(refusal)).is_err());
+    drop(early);
+    assert_eq!(
+        received.files(),
+        [(b"s.asn".to_vec(), FIRST.as_bytes().to_vec())]
+    );
+    // A file that does not reach the run's files is the run's internal error, not a run without
+    // it; a refusal of LOSAT's keeps its own text.
+    struct Closed;
+    impl FileReceiver for Closed {
+        fn receive(&self, _name: &[u8], _bytes: &[u8]) -> std::io::Result<()> {
+            Err(std::io::Error::other("the archive was closed"))
+        }
+    }
+    let closed = RunFiles::Receiver(Arc::new(Closed));
+    let lost = |result: Result<()>| {
+        let file = create_strategy_file_in(&closed, Path::new("s.asn"), "BLASTP", &[]);
+        end_run(Some(&export(file.unwrap())), result)
+            .unwrap_err()
+            .to_string()
+    };
+    let error = lost(Ok(()));
+    assert!(
+        error.starts_with("LOSAT internal error: the -export_search_strategy file did not reach")
+            && error.contains("the archive was closed"),
+        "{error}"
+    );
+    assert_eq!(
+        lost(Err(anyhow::anyhow!("a refusal of LOSAT's"))),
+        "a refusal of LOSAT's"
+    );
+}
+
+/// The names that LOSAT Web reads otherwise than as a file of the run (`RunFiles::strategy_target`):
+/// NCBI's error at once where the command line cannot open the name; the command line's refusals of
+/// `-` and of the standard output, raised at NCBI's first request with the report held; no file for
+/// the null device; LOSAT Web's refusal, at the same point, of the standard error and of the file of
+/// another option of the run, which names that option.
+#[test]
+fn a_receiver_refuses_what_the_command_line_refuses_or_has_no_file_for() {
+    let received = Arc::new(Received::default());
+    let files = RunFiles::Receiver(received.clone());
+    let query = [RunFileName {
+        option: "query",
+        name: std::ffi::OsStr::new("q.fa"),
+    }];
+    let open = |name: &str| create_strategy_file_in(&files, Path::new(name), "BLASTX", &query);
+    let error = open("/etc/s.asn").unwrap_err();
+    let native = error.downcast_ref::<crate::cli::NativeError>().unwrap();
+    assert_eq!(native.exit, 1);
+    assert_eq!(
+        native.message,
+        b"Command line argument error: Argument \"export_search_strategy\". File is not accessible:  `/etc/s.asn'\n"
+    );
+    for (name, refusal) in [
+        ("-", "-export_search_strategy - (the search strategy on the standard output, between the parts of the report) is not supported by LOSAT's BLASTX; give a file name"),
+        ("/dev/stdout", "an -export_search_strategy file that is also the output (-out or the standard output) is not supported by LOSAT's BLASTX: NCBI writes both through separate streams and the file's bytes follow the order of their flushes"),
+        ("/dev/stderr", "-export_search_strategy /dev/stderr (a device or a file of the system, where the run has no file) is not supported in the browser; give a file name of the run's own"),
+        ("./q.fa", "-export_search_strategy ./q.fa (the file of -query too, whose bytes the command line's strategy file replaces or mixes with its own) is not supported in the browser; give a file name of the run's own"),
+    ] {
+        let file = open(name).unwrap();
+        assert_eq!(file.refusal.as_deref(), Some(refusal), "{name}");
+        let export = StrategyExport::for_run(
+            file,
+            OptionInputs::new(Program::Blastx, "blastx"),
+            Some(0),
+            HitlistArgs::default(),
+            None,
+            &OptionsHandle::default(),
+        );
+        assert!(export.refused(), "{name}");
+        let error = check_report_stream(Some(&export)).unwrap_err();
+        assert_eq!(error.to_string(), refusal);
+    }
+    let null = open("/dev/null").unwrap();
+    assert!(matches!(null.target, StrategyTarget::None) && null.refusal.is_none());
+    drop(null);
+    assert!(received.files().is_empty());
+}
+
+/// A panic (LOSAT's own failure; the release profile aborts) ends the run's strategy file as a
+/// refusal of LOSAT's ends it (`install_panic_hook`): every live export is kept for the hook
+/// (`HOLDING`), whose writing gives its sink every request made, even while a request is being
+/// made.
+#[test]
+fn a_panic_writes_the_requests_held() {
+    let queries = [protein("Query_1", b"MWCHWCMWCHWC")];
+    let made = || {
+        let (export, sink) = export(None);
+        for at in 0..3 {
+            export
+                .write_request(at..at + 1, &request(&queries, &[]))
+                .unwrap();
+            export.note_searched(at..at + 1, searched(5)).unwrap();
+        }
+        (export, sink)
+    };
+    let kept = |export: &StrategyExport| {
+        HOLDING
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|shared| shared.upgrade().is_some_and(|s| Arc::ptr_eq(&s, &export.0)))
+    };
+    let (strategy, sink) = made();
+    assert!(kept(&strategy));
+    assert_eq!(sink.text(), "");
+    // A panic while a request is made (the export's state locked): the requests made before it
+    // are written (the hook does not take that lock), the one being made is not held yet. Only
+    // this export: other tests' exports of the process stay as they are.
+    let all = [FIRST.to_string(), with_space(5), with_space(5)].concat();
+    strategy
+        .write_with(3..4, |write| {
+            write_held_of(&[Arc::downgrade(&strategy.0)]);
+            assert_eq!(sink.text(), all);
+            write(&request(&queries, &[]))
+        })
+        .unwrap();
+    assert_eq!(sink.text(), all);
+    // The run's end after it writes the request made since, and nothing twice.
+    let _ = end_run(Some(&strategy), Ok(()));
+    let all = [all, with_space(5)].concat();
+    assert_eq!(sink.text(), all);
+    // Every lock that the hook takes was given back (`hook_lock`): a panic after it waits for none
+    // that its own thread holds.
+    assert_eq!(HOOK_LOCKS.get(), 0);
+}
+
+/// The panic hook of a thread that holds one of the hook's locks (a panic inside such a step)
+/// returns at once instead of waiting for it (`write_held_at_panic`, `hook_lock`), and the count
+/// of such locks goes back to none when the lock is given back.
+#[test]
+fn the_panic_hook_does_not_wait_for_a_lock_its_own_thread_holds() {
+    let lock = Mutex::new(());
+    {
+        let _held = hook_lock(&lock);
+        assert_eq!(HOOK_LOCKS.get(), 1);
+        write_held_at_panic();
+    }
+    assert_eq!(HOOK_LOCKS.get(), 0);
 }

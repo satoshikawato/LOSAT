@@ -66,7 +66,7 @@
 
 ## 2. 方針
 
-- **P1 検索条件は argv 1 本。** CLI と同じ NCBI の引数の読み手で読み（2026-11-23、線 RG の K4i-2b から。それまでは clap）、clap は読んだ引数を型にするだけ（`cli::try_parse_from`）。NCBI のオプション互換の実装を 1 か所に保つ。ABI v2 §7 と同じ。
+- **P1 検索条件は argv 1 本。** CLI と同じ NCBI の引数の読み手で読み（2026-11-23、線 RG の K4i-2b から。それまでは clap）、読んだ引数を各 program の option の型が自分で読む（`from_args`、`cli::try_parse_from`。2026-11-24、線 RG の K4i-3c から。それまでは clap が型にしていた）。NCBI のオプション互換の実装を 1 か所に保つ。ABI v2 §7 と同じ。
 - **P2 入力はメモリ上の FASTA か、`-db` の path。** メモリ入力は LOSAT 自前の `FastaRecord` を公開して受け、CLI / adapter と同じ reader（`FastaInputSource` と `ReaderConfig`）で読む。`-db` はファイルシステムのあるホストだけ（ネイティブ）。
 - **P3 出力は、要求した outfmt ごとのバイト列 + HSP レコード + 診断。** HSP レコードの項目は ABI v2 §8 と同じ。バイト列は CLI の出力と一致する（§6）。
 - **P4 公開面は `api` だけ（§10.2）。** 他のモジュールは `#[doc(hidden)]` を付け、semver の保証外と README に書く。`pub(crate)` 化は別の線（dead-code 警告が今は `allow(warnings)` で隠れていて、一斉に出る）。（2026-11-07 注: 保守者の決定で、段 P-V1〜P-V5 として段ごとに `pub(crate)` にする。§14）
@@ -90,7 +90,7 @@ pub mod api {
 
     /// API で使える program。blastx は LIB-1b から（§5）。psiblast と makedb は CLI のみ（§8）。
     pub enum Program { Blastn, Blastp, Tblastn, Tblastx, Blastx }
-    /// program の option と outfmt の一覧（adapter の describe.rs を移す。choices は NCBI の引数の表、既定値は NCBI の XML の `<default>`、help と takes_value は clap の定義から。2026-11-23）。
+    /// program の option と outfmt の一覧（adapter の describe.rs を移す。choices は NCBI の引数の表、既定値は NCBI の XML の `<default>`、2026-11-23。2026-11-24 の線 RG K4i-3a から、option の一覧・順（`-help` の usage 行の順）・種類・takes_value・help（NCBI の option の説明文を LOSAT の言葉で）も NCBI の引数の表から。clap は読まない）。
     pub fn describe(program: Program) -> Description;
 
     /// argv を CLI と同じ読み手で検証した結果。失敗は `Error::Argv`、文言は CLI が標準エラーに書くものそのまま（2026-11-23。NCBI の短い usage、`=` 72 個の行、空行、NCBI の 2 つの post。LOSAT が走らせない NCBI の option の断りは `Error: ` を除いた文）。
@@ -143,7 +143,7 @@ ABI v2 §7 を基にするが、入力の渡し方が違う。
 
 - `lib.rs` の `api` 以外の `pub mod` に `#[doc(hidden)]` を付ける。項目は今までどおり使えるが、docs.rs に出ず、semver の保証外（README と crate の doc に書く）。`api` が再 export する `FastaRecord` 等は `blastinput` の中にあるので、再 export の側だけを文書化する（これは rustdoc に出なかった。`FastaRecord` は §14.1 の P-D1 で crate 直下の private module に移した）。
 - 進捗バーは `ReportOutputs` に `progress: Option<...>` を足して CLI（`main.rs`）だけが渡すか、indicatif を optional dependency にして CLI の feature だけで有効にする（LIB-1 で決める）。
-- `anyhow::Error` は `api::Error` に包む。`clap` は argv が API なので必須 dependency のまま。
+- `anyhow::Error` は `api::Error` に包む。argv が API だが、2026-11-24（線 RG の K4i-3c）から argv は NCBI の引数の読み手と各 option の型の `from_args` が読み、native の build（CLI・library・pylosat）は `clap` を link しない。`clap` が残るのは LOSAT Web の凍結した ABI v1（wasm32、`web_v1_argv`）とその test だけ（derive feature 無し）。
 
 ## 4. 配布の 3 チャネル
 
@@ -584,5 +584,5 @@ CLI は query を batch ごとに読む（`CBlastInput::GetNextSeqBatch`、`blas
 |---|---|
 | 引数の誤り | `Error::Argv`（Python は `ArgumentError`）。`message()` は CLI が標準エラーに書くものそのまま（`cli.stderr == [error.message(), b"\n"]`）：NCBI の短い usage、`=` 72 個の行、空行、`Error: <message>` と `Error:  <message>`（2 つ目は NCBI の `(CArgException::eX) ` を除く。PD-LOSAT-CLI-NONSEARCH-DIFFERENCES 例外 12）。`-logfile` のある呼び出しでは CLI と同じく usage、`Error in command-line arguments. See error logs for more details.`、`=` の行が誤りで、2 つの post は `-logfile` の file に書く。`validate` は file を開かないので、`-logfile` の無い CLI の形（post を含む）を返す（K4i-2b round 2）。CLI の終了状態は 1（clap の時は 2） |
 | 断り | LOSAT が走らせない NCBI の option は、NCBI の読み手が命令行を受け取った後で `the NCBI BLAST+ option -NAME is not supported by LOSAT's PROGRAM`（理由があれば ` (why)`）。`Error::Argv` で、文は `Error: ` を除いたもの |
-| `describe` | choices は NCBI の引数の表（flag に choices は無い）、既定値は NCBI の XML の `<default>`（blastx・tblastx の `-evalue` は既定なし。help は `[default: 10]`）、`-template_type`・`-template_length` の choices は describe から。help・takes_value・引数の一覧は clap のまま（K4i-3 まで） |
+| `describe` | choices は NCBI の引数の表（flag に choices は無い）、既定値は NCBI の XML の `<default>`（`-evalue` は既定なし。NCBI の説明文が `Default = 10` と書く）、`-template_type`・`-template_length` の choices は describe から。help・takes_value・引数の一覧と順も NCBI の引数の表から（K4i-3a、2026-11-24。help は NCBI の説明文、順は `-help` の usage 行の順） |
 | Web | ABI v2 の検証の文は CLI の標準エラーの bytes（usage、`=` 72 個の行、post）か断りの文。form は post が挙げる欄に印を付ける。ABI v1（凍結）は自分の parser と文言のまま |

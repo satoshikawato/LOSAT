@@ -23,12 +23,12 @@ On the v0.2.0 release test set, LOSAT writes the same output as NCBI BLAST+ 2.17
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="benchmarks/v0.2.0/figures/fig1_standard_workloads_dark.png">
-    <img alt="Wall time and peak memory of LOSAT 0.2.0 and NCBI BLAST+ 2.17.0 in 12 search modes, 1 and 16 threads" src="benchmarks/v0.2.0/figures/fig1_standard_workloads.png" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="benchmarks/v0.2.0/figures/fig1_suite_overview_dark.png">
+    <img alt="Wall-time speedup (16 and 1 threads) and peak memory as LOSAT's share of BLAST+ for LOSAT 0.2.0 vs NCBI BLAST+ 2.17.0 across all 12 search modes and 3 utilities" src="benchmarks/v0.2.0/figures/fig1_suite_overview.png" width="100%">
   </picture>
 </p>
 
-*Twelve search modes on a dual Xeon Gold 6338 workstation (64 cores), LOSAT at commit `93ca2f652` against NCBI BLAST+ 2.17.0. At 16 threads LOSAT was faster in all twelve: 629 times on `tblastx` (4.72 s against 2,970.75 s), 1.7 to 18.3 times on ten other modes, and 1.02 times on `psiblast`. Where the subject is a FASTA file, LOSAT ran `-subject` and NCBI BLAST+ `-db` on a database made from the same file. Inputs, commands and every number: [benchmarks/v0.2.0](benchmarks/v0.2.0/README.md).*
+*All twelve search modes and three single-threaded utilities (`makeblastdb`, `rpsbproc`) on a dual Xeon Gold 6338 workstation (64 cores), LOSAT at commit `93ca2f652` against NCBI BLAST+ 2.17.0 and `rpsbproc` 0.5.1. At 16 threads LOSAT was faster in all twelve search modes: 1.02× on `psiblast`, 1.7× to 18.3× on ten modes, and 629× on `tblastx` (4.72 s vs 2,971 s), using 4.1% (1/24.6) to 77% (1/1.3) of BLAST+'s peak resident memory. Where the subject is a FASTA file, LOSAT ran `-subject` and NCBI BLAST+ ran `-db` on a database made from the same file. Inputs, commands, and every number: [benchmarks/v0.2.0](benchmarks/v0.2.0/README.md).*
 
 ---
 
@@ -137,6 +137,8 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `convert2blastmask` | Turns lower-case masked FASTA into mask files for `makeblastdb` | mask files, intervals | [convert2blastmask](docs/manual/src/programs/convert2blastmask.md) |
 | `makembindex` | Builds the MegaBLAST index of a nucleotide database | index files | [makembindex](docs/manual/src/programs/makembindex.md) |
 | `makeprofiledb` | Builds profile databases for `rpsblast` and `rpstblastn` (such as CDD) from PSSM files | | [makeprofiledb](docs/manual/src/programs/makeprofiledb.md) |
+| `blastdb_aliastool` | Makes alias files that combine databases or keep a list of their sequences; converts GI and sequence id lists to binary lists | alias files, binary lists | [blastdb_aliastool](docs/manual/src/programs/blastdb_aliastool.md) |
+| `blastdbcheck` | Checks BLAST databases for damage: files, sequences, ISAM indexes, alias files, taxonomy ids | report | [blastdbcheck](docs/manual/src/programs/blastdbcheck.md) |
 | `rpsbproc` | Annotates conserved domains, sites and motifs from RPS-BLAST results, as NCBI's `rpsbproc` 0.5.1 | domain report | [rpsbproc](docs/manual/src/programs/rpsbproc.md) |
 
 `rpsbproc` reads `-outfmt 11` archives, which LOSAT's `rpsblast` and `rpstblastn` write as NCBI BLAST+'s do: `losat rpsblast -query proteins.faa -db Cdd -outfmt 11 | losat rpsbproc -d cdd_data` ([rpsbproc](docs/manual/src/programs/rpsbproc.md)).
@@ -149,12 +151,12 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="benchmarks/v0.2.0/figures/fig3_downstream_tools_dark.png">
-    <img alt="Time of the BLAST steps of published tools with LOSAT 0.2.0 and with NCBI BLAST+ 2.17.0" src="benchmarks/v0.2.0/figures/fig3_downstream_tools.png" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="benchmarks/v0.2.0/figures/fig2_real_pipelines_dark.png">
+    <img alt="Wall-time speedup and peak memory as LOSAT's share of BLAST+ for large reference workflows and published bioinformatics tools with LOSAT 0.2.0 vs NCBI BLAST+ 2.17.0" src="benchmarks/v0.2.0/figures/fig2_real_pipelines.png" width="100%">
   </picture>
 </p>
 
-[benchmarks/v0.2.0](benchmarks/v0.2.0/README.md) has all four figures (standard searches, scaling with threads, queries and database size, published tools, WebAssembly), the inputs, and the measured values as TSV files.
+[benchmarks/v0.2.0](benchmarks/v0.2.0/README.md) has all six figures (all 12 search modes and 3 utilities, large reference workflows and published tools, scaling with database size, query volume and threads, exact BLAST+ parity vs. heuristic aligners on UniRef50 and SILVA 144, WebAssembly, and LOSAT v0.1.0 to v0.2.0), the inputs, and the measured values as TSV files.
 
 ---
 
@@ -174,7 +176,7 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
   - [Introduction](docs/manual/src/introduction.md) • [Quick start](docs/manual/src/quick-start.md) • [Common workflows](docs/manual/src/workflows.md) • [Installation](docs/manual/src/installation.md)
   - [Coming from NCBI BLAST+](docs/manual/src/from-ncbi-blast.md) • [Upgrading from LOSAT v0.1](docs/manual/src/from-losat-v0-1.md) • [Threads, speed and memory](docs/manual/src/performance.md)
   - [Differences from NCBI BLAST+](docs/manual/src/differences.md) • [What LOSAT refuses](docs/manual/src/refusals.md) • [Databases](docs/manual/src/databases.md) • [Output formats](docs/manual/src/output-formats.md) • [Environment variables](docs/manual/src/environment.md) • [LOSAT Web](docs/manual/src/web.md)
-- **Not in v0.2.0:** `deltablast -show_domain_hits`, `-query_loc`, `-export_search_strategy` and the output formats other than `0`, `6` and `7`, `makeprofiledb -binary` and `-dbtype delta` or `cobalt`, `blast_formatter`, `psiblast -phi_pattern`, and `-html` with `-outfmt 1` to `4` or in `psiblast`, `deltablast`, `rpsblast` and `rpstblastn`; options that need NCBI's servers or its GI and IPG lists (`-remote`, `-entrez_query`, `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`) and `-import_search_strategy`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
+- **Not in v0.2.0:** `deltablast -show_domain_hits`, `-query_loc`, `-export_search_strategy` and the output formats other than `0`, `6` and `7`, `makeprofiledb -dbtype delta` or `cobalt`, `blast_formatter`, `psiblast -phi_pattern`, and `-html` in `psiblast` and `deltablast`; options that need NCBI's servers (`-remote`, `-entrez_query`) and `-import_search_strategy`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
 - [v0.2.0 release record](docs/release/v0.2.0.md) • [Contributing](CONTRIBUTING.md)
 
 ## Citation & References

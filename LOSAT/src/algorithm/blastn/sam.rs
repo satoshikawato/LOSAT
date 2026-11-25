@@ -11,9 +11,9 @@
 use anyhow::{Context, Result};
 
 use super::hsp::BlastnHitList;
+use super::pairwise::QueryRecords;
 use super::x_subject_store::SubjectLetters;
 use crate::blastinput::app::Program;
-use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::Placements;
 use crate::report::record::{HspRecord, QueryNames, RunRecord, SubjectNames, SubjectRecord};
 use crate::report::sam::{SamDocument, SamId, SamLetters, SamRow, SamSequence};
@@ -107,6 +107,7 @@ pub(crate) fn add_blastn_sam(
                     subject,
                     q_offset: hsp.internal_q_offset_0,
                     q_end: hsp.internal_q_end_0,
+                    q_left_out: 0,
                     s_offset: hsp.internal_s_offset_0 as i32,
                     s_end: hsp.internal_s_end_0 as i32,
                     q_frame: if hsp.query_frame < 0 { -1 } else { 1 },
@@ -152,9 +153,9 @@ pub(crate) enum SubjectSource<'a> {
 
 /// The letters of the queries and the subjects for SEQ.
 pub(crate) struct BlastnSamLetters<'a> {
-    /// The searched query records (with `-query_loc`, the interval's letters).
-    pub queries: &'a [FastaRecord],
-    pub query_placements: &'a Placements,
+    /// The query records (with `-query_loc`, their input records, whole: NCBI's `CSeqVector` of
+    /// the query's Bioseq, sam_formatter.cpp:222-233).
+    pub queries: QueryRecords<'a>,
     pub subjects: SubjectSource<'a>,
 }
 
@@ -169,13 +170,13 @@ impl SamLetters for BlastnSamLetters<'_> {
     ) -> Result<()> {
         match row {
             SamRow::Query => {
-                let offset = self.query_placements.offset(index);
-                let record = self.queries[index].seq();
-                let letters = from
-                    .checked_sub(offset)
-                    .zip(to.checked_sub(offset))
-                    .and_then(|(from, to)| record.get(from..to))
-                    .context("a SAM record lies outside the searched query letters")?;
+                // `from` and `to` are record positions within the record's length
+                // (`SamDocument::query`).
+                let letters = self
+                    .queries
+                    .record(index)
+                    .and_then(|record| record.letters.get(from..to))
+                    .context("a SAM record lies outside its query's record")?;
                 out.extend(letters.iter().map(u8::to_ascii_uppercase));
             }
             SamRow::Subject => match &self.subjects {

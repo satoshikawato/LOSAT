@@ -1,1 +1,1 @@
-BLAST Database error: No alias or index file found for protein database [cdd_delta] in search path [/home/losatbench/losat-bench/src/tree_ps12c/LOSAT::]. Please verify the spelling of the BLAST database and its molecule type.
+BLAST Database error: No alias or index file found for protein database [cdd_delta] in search path [{cwd}::]. Please verify the spelling of the BLAST database and its molecule type.

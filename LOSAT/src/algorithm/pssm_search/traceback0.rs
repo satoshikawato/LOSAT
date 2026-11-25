@@ -556,7 +556,6 @@ pub(crate) fn final_hsp(
         gap_info: Some(edit_script),
         num_positives,
         comp_adjustment_method: 0,
-        phi_occurrence: 0,
     }
 }
 

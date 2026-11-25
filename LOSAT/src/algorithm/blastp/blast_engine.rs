@@ -1541,7 +1541,6 @@ pub(super) fn blastp_hsp_from_preliminary(hit: &BlastpPreliminaryHsp, e_value: f
         num_positives: 0,
         // Blast_HSPInit callocs the HSP: no composition adjustment yet.
         comp_adjustment_method: 0,
-        phi_occurrence: 0,
     }
 }
 
@@ -9944,29 +9943,17 @@ fn run_call(
     } = extent;
     // psiblast `-phi_pattern` (item PS8a): each query's PHI-BLAST setup (`phi_hooks::phi_call`),
     // whose errors follow the reports of the queries before (`phi_setup_error`).
-    let phi_call = phi_hooks::phi_call(
-        &args,
+    let mut phi_call = start_phi_call(
+        &call_in,
         query_frames,
+        subject_source,
+        subject_label,
+        outputs,
+        &requested_formats,
         &query_batches,
-        phi_hooks::PhiLimits::new(&requested_formats, subject_source),
+        &query_batch_skipped,
         eff_db_length,
         i64::from(num_subjects),
-        |query, text| {
-            phi_setup_error(
-                &args,
-                query_records,
-                subject_source,
-                subject_label,
-                outputs,
-                blastp_parallel_pool,
-                ranges,
-                reports,
-                &query_batches,
-                &query_batch_skipped,
-                query,
-                text,
-            )
-        },
     )?;
     let call_statistics = call_setup::CallStatistics {
         args: &args,
@@ -10322,7 +10309,7 @@ fn run_call(
     // `-comp_based_stats 0`: the ordinary traceback (blast_traceback.c:1500-1723) takes every
     // preliminary list here, so the composition-based redo below finds none; its hit lists
     // replace the redo's after it.
-    let ordinary_hit_lists = if let Some(phi) = phi_call.as_ref() {
+    let ordinary_hit_lists = if let Some(phi) = phi_call.as_mut() {
         // psiblast `-phi_pattern`: the PHI-BLAST traceback (`phi_hooks::phi_traceback`).
         Some(phi_hooks::phi_traceback(
             phi,
@@ -10625,17 +10612,8 @@ fn run_call(
     // The requested output formats; only the reporting depends on the format, the search above
     // does not.
     let format_plans: &[BlastpReport] = &requested_formats;
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-986
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
-    // The final hits in record coordinates and lengths, which the reports print
-    // (`shift_hsp_to_records`); the rows are made from them (`rows_of`).
-    for hit_list in hit_lists.iter_mut().flatten() {
-        for hsp_list in &mut hit_list.hsplist_array {
-            for hsp in &mut hsp_list.hsps {
-                shift_hsp_to_records(hsp, ranges);
-            }
-        }
-    }
+    // Final hits in record coordinates (`shift_hsp_to_records`) and PHI-BLAST per-occurrence split.
+    shift_and_split_hit_lists(&mut hit_lists, ranges, phi_call.as_mut());
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:271-327
     // The rendered rows of the HSPs of the queries `window` (`PairwiseHit`, in the order of the
     // lists): each row is read from the searched letters, so its hit moves back from the records
@@ -10648,38 +10626,18 @@ fn run_call(
     // psiblast's later rounds: the reports read the record's letters
     // (`psi_round::report_contexts`).
     let report_contexts = psi_round::report_contexts(&args, &contexts, query_records);
-    // The rows of the hit lists `lists` of the queries from `first` (PHI-BLAST's: one query's
-    // lists of an occurrence, `phi_hooks::occurrence_list`).
+    let row_inputs = RowBuildInputs {
+        engine_counts: &engine_counts,
+        ranges,
+        report_contexts: &report_contexts,
+        subjects,
+        matrix: args.scoring.matrix,
+        shown_queries: ShownQueries::of(query_records, &args, phi_call.as_ref()),
+        shown_subjects,
+        x_rows_pool,
+    };
     let rows_of_lists =
-        |lists: &[Option<BlastpHitList>], first: usize| -> Result<Vec<PairwiseHit>> {
-            let mut hits = collect_hits_and_methods_from_hit_lists(lists, first, &engine_counts);
-            for (hit, _, _, _) in hits.iter_mut() {
-                let q_shift = ranges.query_input.placements.offset(hit.q_idx as usize);
-                let s_shift = ranges.subject_placements.offset(hit.s_idx as usize);
-                hit.q_start -= q_shift;
-                hit.q_end -= q_shift;
-                hit.s_start -= s_shift;
-                hit.s_end -= s_shift;
-            }
-            let mut rows = build_pairwise_hits(
-                hits,
-                &report_contexts,
-                subjects,
-                args.scoring.matrix,
-                true,
-                ShownQueries::of(query_records, &args, phi_call.as_ref()),
-                shown_subjects,
-                x_rows_pool,
-            )?;
-            for row in rows.iter_mut() {
-                let s_idx = row.hit.s_idx as usize;
-                shift_to_records(&mut row.hit, ranges);
-                row.subject_length = row
-                    .subject_length
-                    .map(|searched| ranges.subject_placements.length(s_idx, searched));
-            }
-            Ok(rows)
-        };
+        |lists: &[Option<BlastpHitList>], first: usize| row_inputs.build(lists, first);
     let rows_of = |window: std::ops::Range<usize>| -> Result<Vec<PairwiseHit>> {
         let end = window.end.min(hit_lists.len());
         let first = window.start.min(end);
@@ -11346,6 +11304,119 @@ fn too_long_subject_refusal(what: &str, length: usize) -> anyhow::Error {
         "{what} has {length} residues; a subject longer than {} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTP",
         crate::core::subject_split::MAX_DBSEQ_LEN
     )
+}
+
+/// Starts PHI-BLAST's call (`phi_hooks::phi_call`), routing any setup error through
+/// `phi_setup_error`.
+#[allow(clippy::too_many_arguments)]
+fn start_phi_call<'s, 'a>(
+    call_in: &call_setup::CallSetup<'s, 'a>,
+    query_frames: &[Vec<QueryFrame>],
+    subject_source: BlastpSubjectSource<'_>,
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+    requested_formats: &[BlastpReport],
+    query_batches: &[seq_range::RangedBatch],
+    query_batch_skipped: &[bool],
+    db_length: i64,
+    db_num_seqs: i64,
+) -> Result<Option<phi_hooks::PhiCall<'s>>> {
+    phi_hooks::phi_call(
+        call_in.args,
+        query_frames,
+        query_batches,
+        phi_hooks::PhiLimits::new(requested_formats, subject_source),
+        db_length,
+        db_num_seqs,
+        |query, text| {
+            phi_setup_error(
+                call_in.args,
+                call_in.query_records,
+                subject_source,
+                subject_label,
+                outputs,
+                call_in.blastp_parallel_pool,
+                call_in.ranges,
+                call_in.reports,
+                query_batches,
+                query_batch_skipped,
+                query,
+                text,
+            )
+        },
+    )
+}
+
+/// Shifts final hit coordinates into record coordinates (`shift_hsp_to_records`) and, for
+/// PHI-BLAST, splits each query's final hit list by pattern occurrence (`PHIBlast_HSPResultsSplit`).
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-986
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1970-1973
+fn shift_and_split_hit_lists(
+    hit_lists: &mut [Option<BlastpHitList>],
+    ranges: &BlastpRanges<'_>,
+    phi_call: Option<&mut phi_hooks::PhiCall<'_>>,
+) {
+    for hit_list in hit_lists.iter_mut().flatten() {
+        for hsp_list in &mut hit_list.hsplist_array {
+            for hsp in &mut hsp_list.hsps {
+                shift_hsp_to_records(hsp, ranges);
+            }
+        }
+    }
+    if let Some(phi) = phi_call {
+        phi.split_occurrences(hit_lists, ranges);
+    }
+}
+
+/// Shared inputs for rendering pairwise alignment rows (`PairwiseHit`) from final hit lists.
+struct RowBuildInputs<'a> {
+    engine_counts: &'a super::seqalign::EngineCounts,
+    ranges: &'a BlastpRanges<'a>,
+    report_contexts: &'a [QueryContext],
+    subjects: &'a [EncodedProtein],
+    matrix: ScoringMatrix,
+    shown_queries: ShownQueries<'a>,
+    shown_subjects: ShownSubjects<'a>,
+    x_rows_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
+}
+
+impl RowBuildInputs<'_> {
+    /// Renders pairwise alignment rows (`PairwiseHit`) for `lists` starting at query `first`,
+    /// shifting coordinates back to searched letters for alignment rendering and back to record
+    /// coordinates afterwards.
+    fn build(&self, lists: &[Option<BlastpHitList>], first: usize) -> Result<Vec<PairwiseHit>> {
+        let mut hits = collect_hits_and_methods_from_hit_lists(lists, first, self.engine_counts);
+        for (hit, _, _, _) in hits.iter_mut() {
+            let q_shift = self
+                .ranges
+                .query_input
+                .placements
+                .offset(hit.q_idx as usize);
+            let s_shift = self.ranges.subject_placements.offset(hit.s_idx as usize);
+            hit.q_start -= q_shift;
+            hit.q_end -= q_shift;
+            hit.s_start -= s_shift;
+            hit.s_end -= s_shift;
+        }
+        let mut rows = build_pairwise_hits(
+            hits,
+            self.report_contexts,
+            self.subjects,
+            self.matrix,
+            true,
+            self.shown_queries,
+            self.shown_subjects,
+            self.x_rows_pool,
+        )?;
+        for row in rows.iter_mut() {
+            let s_idx = row.hit.s_idx as usize;
+            shift_to_records(&mut row.hit, self.ranges);
+            row.subject_length = row
+                .subject_length
+                .map(|searched| self.ranges.subject_placements.length(s_idx, searched));
+        }
+        Ok(rows)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-250

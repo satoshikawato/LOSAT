@@ -595,7 +595,6 @@ fn test_hsp(s_idx: u32, raw_score: i32) -> BlastpHsp {
         gap_info: None,
         num_positives: 10,
         comp_adjustment_method: 0,
-        phi_occurrence: 0,
     }
 }
 

@@ -197,7 +197,6 @@ fn hsp(frame: i32, score: i32, q: (usize, usize), s: (usize, usize)) -> BlastpHs
         }),
         num_positives: 9,
         comp_adjustment_method: 0,
-        phi_occurrence: 0,
     }
 }
 

@@ -795,7 +795,6 @@ fn make_local_match_hsp(preliminary_hsp: &BlastpPreliminaryHsp) -> BlastpHsp {
         gap_info: None,
         num_positives: 0,
         comp_adjustment_method: 0,
-        phi_occurrence: 0,
     }
 }
 

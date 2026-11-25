@@ -105,7 +105,9 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   24,334-letter record made of BDT63125.1, BDT61687.1, BDT63580.1 and BDV50172.1 (the wsv360-like proteins of the
   `tests/fasta/` virus sets, longest first), long enough for blastp's query split, which NCBI never applies to
   PHI-BLAST; `ps8_x21000p.faa`: 21,000 `X`, then the letters of `ps8_c2c.faa`, in one record; `ps8_s_bdt63125.faa`:
-  BDT63125.1 alone.
+  BDT63125.1 alone. For the `db.phi.cull.*` and `db.phi.bh.*` rows (PR #1654 R2): `ps8_cull_q.faa` (two-domain
+  synthetic query) and `ps8_cull_s.faa` (three synthetic subjects, with pattern `tests/fixtures/phi/cwh.pat`
+  `C-W-x(2)-H-C`), exercising preliminary culling and best-hit HSP drops under `-max_target_seqs 1`.
 - `ps15b2_othr_*.faa` (line PS, PS15b-2 fix 1): subjects of the molecule-`other` PSSM
   `tests/fixtures/pssm/ps15b2_tk_other_stdaa.asn.gz` (rows `db.ps15b2.p.othr.*`), from `tk.faa`: `del100` without
   letter 101 (a query letter against a gap of the subject on a query row of its own: NCBI 2.17.0's merge writes

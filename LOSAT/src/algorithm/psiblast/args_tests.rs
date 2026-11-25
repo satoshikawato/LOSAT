@@ -227,10 +227,15 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
     ] {
         assert_eq!(with_pattern(format), Ok(()), "outfmt {format}");
     }
-    assert_eq!(
-        with_pattern("3"),
-        Err("output format 3 is not supported by LOSAT's PSIBLAST yet".to_string())
-    );
+    for format in ["1", "2", "3", "4", "15", "16", "18"] {
+        assert_eq!(
+            with_pattern(format),
+            Err(format!(
+                "output format {format} is not supported by LOSAT's PSIBLAST yet"
+            )),
+            "phi outfmt {format}"
+        );
+    }
     // NCBI's own error of the format string comes first (NCBI 2.17.0 `psiblast -outfmt 99`:
     // "Error: Formatting choice is out of range", exit 255).
     assert!(parse(&["-outfmt", "99"])

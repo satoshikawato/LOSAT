@@ -32,7 +32,6 @@ fn hsp(oid: u32, e_value: f64) -> BlastpHsp {
         gap_info: None,
         num_positives: 6,
         comp_adjustment_method: 2,
-        phi_occurrence: 0,
     }
 }
 

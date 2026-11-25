@@ -38,13 +38,6 @@ pub(crate) struct BlastpHsp {
     /// statistics) or 2 (compositional matrix adjustment), set from the redone
     /// alignment's matrix adjustment rule (`kappa.rs`).
     pub comp_adjustment_method: u8,
-    // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:142-143
-    /// PHI-BLAST (psiblast `-phi_pattern`): the query occurrence of the pattern that the HSP
-    /// aligns (`BlastHSP::pat_info->index`; `phi_search::engine::PhiHsp::occurrence`), which
-    /// splits the results by occurrence for the reports (`blast_engine/phi_hooks.rs`); 0 outside
-    /// PHI-BLAST. A query has at most 20,000 occurrences (the arrays of NCBI's scans,
-    /// `phi_search::scan`), and the field takes the struct's padding.
-    pub phi_occurrence: u16,
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:135-138
     /// The size of the HSP's linked set with sum statistics (psiblast's `-sum_stats true`,
     /// `core::link_hsps`), 1 otherwise; above 1 the report shows it in parentheses after `Expect`.
@@ -109,7 +102,6 @@ impl BlastpHsp {
             gap_info,
             num_positives,
             comp_adjustment_method: 0,
-            phi_occurrence: 0,
             num: 1,
         }
     }

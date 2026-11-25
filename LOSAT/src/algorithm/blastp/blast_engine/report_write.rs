@@ -1044,18 +1044,27 @@ pub(super) fn write_pairwise(
                 // the report has no pattern block and no hits.
                 let search = phi.call.search_of(batch);
                 let occurrences = search.map_or(&[][..], |search| &search.occurrences[..]);
+                let occ_lists = phi.call.occurrence_lists(batch.searched);
                 let mut occurrence_hits = Vec::with_capacity(occurrences.len());
                 for occurrence in 0..occurrences.len() {
-                    let list = [super::phi_hooks::occurrence_list(
-                        hit_lists[batch.searched].as_ref(),
-                        occurrence,
-                    )];
-                    let mut rows = (phi.rows_of_lists)(&list, batch.searched)?;
+                    let mut rows = match occ_lists.get(occurrence) {
+                        Some(slot @ Some(_)) => {
+                            (phi.rows_of_lists)(std::slice::from_ref(slot), batch.searched)?
+                        }
+                        _ => Vec::new(),
+                    };
                     // The rows' query masks as the other reports' (`set_row_masks`); psiblast
                     // refuses `-html`, so no spans are kept.
                     if let Some(query_masks) = phi_query_masks.as_deref() {
-                        let no_masks = Default::default();
-                        set_row_masks(&mut rows, Some(query_masks), [&no_masks, &no_masks], None);
+                        if !rows.is_empty() {
+                            let no_masks = Default::default();
+                            set_row_masks(
+                                &mut rows,
+                                Some(query_masks),
+                                [&no_masks, &no_masks],
+                                None,
+                            );
+                        }
                     }
                     occurrence_hits.push(rows);
                 }
@@ -1433,13 +1442,13 @@ pub(super) fn write_custom_tabular(
             let searched = batch.searched;
             let result_queries = phi.call.result_queries(batch);
             let unsearched = phi.call.search_of(batch).is_none();
+            let occ_lists = if unsearched {
+                &[][..]
+            } else {
+                phi.call.occurrence_lists(searched)
+            };
             let lists: Vec<Option<BlastpHitList>> = (0..result_queries.len())
-                .map(|occurrence| {
-                    super::phi_hooks::occurrence_list(
-                        hit_lists[searched].as_ref().filter(|_| !unsearched),
-                        occurrence,
-                    )
-                })
+                .map(|occurrence| occ_lists.get(occurrence).cloned().flatten())
                 .collect();
             let results = lists.len();
             // The rows of a result are made from its query's values, then carry the result's
@@ -1554,7 +1563,7 @@ pub(super) fn write_custom_tabular(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2034-2067
 /// psiblast `-phi_pattern` (item PS8a): outfmt 6 and 7 of the `std` fields, the tabular report
 /// of each query occurrence of each batch in turn (`write_blastp_tabular_hit_lists` of the
-/// occurrence's part of the list of the batch's query with letters, `phi_hooks::occurrence_list`,
+/// occurrence's part of the list of the batch's query with letters, `PhiCall::occurrence_lists`,
 /// under the id and title of the batch's first query, `PhiBatch`; outfmt 7 with its whole header
 /// each time), then outfmt 7's last line, whose count of the formatted queries PHI-BLAST's report
 /// leaves at 0. Each batch's messages come first (`PhiCall::result_warnings`). Without NCBI's
@@ -1576,7 +1585,6 @@ pub(super) fn write_phi_text(
         query_titles,
         subject_ids,
         subject_accessions,
-        hit_lists,
         context,
         ..
     } = *view;
@@ -1589,23 +1597,30 @@ pub(super) fn write_phi_text(
         }
         writer.write_all(&phi.result_warnings(batch, result_warnings))?;
         let no_set = phi.search_of(batch).is_none();
+        let occ_lists = if no_set {
+            &[][..]
+        } else {
+            phi.occurrence_lists(batch.searched)
+        };
         for (occurrence, q_idx) in phi.result_queries(batch).into_iter().enumerate() {
-            let mut part = [super::phi_hooks::occurrence_list(
-                hit_lists[batch.searched].as_ref().filter(|_| !no_set),
-                occurrence,
-            )];
-            // The rows' query is the batch's first (its id), whose letters they show.
-            if batch.shows_gaps() {
-                for hsp in part.iter_mut().flatten().flat_map(|list| {
-                    list.hsplist_array
-                        .iter_mut()
-                        .flat_map(|hsp_list| hsp_list.hsps.iter_mut())
-                }) {
-                    hsp.q_idx = q_idx as u32;
+            let rewritten;
+            let part: &[Option<BlastpHitList>] = match occ_lists.get(occurrence) {
+                Some(Some(list)) if batch.shows_gaps() => {
+                    // The rows' query is the batch's first (its id), whose letters they show.
+                    let mut copy = list.clone();
+                    for hsp_list in &mut copy.hsplist_array {
+                        for hsp in &mut hsp_list.hsps {
+                            hsp.q_idx = q_idx as u32;
+                        }
+                    }
+                    rewritten = [Some(copy)];
+                    &rewritten
                 }
-            }
+                Some(slot) => std::slice::from_ref(slot),
+                None => &[None],
+            };
             write_blastp_tabular_hit_lists(
-                &part,
+                part,
                 outfmt,
                 &mut writer,
                 query_ids,

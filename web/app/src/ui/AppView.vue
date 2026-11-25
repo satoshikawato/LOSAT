@@ -64,10 +64,13 @@ const tab = computed<MainTab>({
     navigation.choose(value);
   },
 });
-// Load windowmasker's `-xmlhelp` lazily on the first visit to the WindowMasker tab so startup on
-// Search does not issue extra engine calls.
+// Load windowmasker's `-xmlhelp` and saved counts list lazily on the first visit to the
+// WindowMasker tab so startup on Search does not issue extra worker calls.
 watchEffect(() => {
-  if (shown.value === 'windowmasker') props.toolDraft.ensureLoaded();
+  if (shown.value === 'windowmasker') {
+    props.toolDraft.ensureLoaded();
+    props.counts.refreshList();
+  }
 });
 const searchPanel = ref<InstanceType<typeof SearchPanel>>();
 const resultsPanel = ref<InstanceType<typeof ResultsPanel>>();
@@ -124,6 +127,14 @@ async function showMakeCounts(): Promise<void> {
 /** "Use in BLASTN" on a counts output: selects the file in BLASTN's repeats row and focuses it (DESIGN §3). */
 async function useCountsInBlastn(file: File): Promise<void> {
   props.draft.useCounts(file);
+  tab.value = 'search';
+  await nextTick();
+  await searchPanel.value?.focusRepeats();
+}
+
+/** "Use in BLASTN" after saving counts for a taxonomy ID: selects `-window_masker_taxid N` in BLASTN (DESIGN §3). */
+async function useTaxidInBlastn(taxid: number): Promise<void> {
+  props.draft.useTaxid(taxid);
   tab.value = 'search';
   await nextTick();
   await searchPanel.value?.focusRepeats();
@@ -254,8 +265,10 @@ onUnmounted(() => {
         :coordinator="coordinator"
         :results="results"
         :runs="state.runs"
+        :counts="counts"
         @search="showSearch"
         @use-in-blastn="useCountsInBlastn"
+        @use-taxid-in-blastn="useTaxidInBlastn"
         @mask-with-counts="maskWithCounts"
       />
       <WindowMaskerPanel
@@ -265,6 +278,7 @@ onUnmounted(() => {
         :aria-labelledby="MAIN_TABS[2].id"
         :draft="toolDraft"
         :coordinator="coordinator"
+        :counts="counts"
         @submitted="openResults"
       />
     </section>

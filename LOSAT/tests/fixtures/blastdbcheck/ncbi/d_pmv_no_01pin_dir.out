@@ -1,0 +1,15 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Using `full' mode: every OID will be tested.
+
+Finding database volumes.
+  [ERROR] could not find all volume or alias files referenced in "./pmv", [skipped]
+Testing 1 volume(s).
+ <RUN>/cases/d_pmv_no_01pin/pmv.00
+ Result=SUCCESS. No errors reported for 1 volumes.
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 1

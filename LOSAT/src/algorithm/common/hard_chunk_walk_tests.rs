@@ -705,3 +705,136 @@ fn sequences_whose_hits_meet_other_entries_are_kept_apart() {
     assert_eq!(DiagonalWalk::apart(3, 40, 240, &forward, None), None);
     assert_eq!(DiagonalWalk::apart(3, 40, 240, &[], None), None);
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,804-855,
+// 1318-1331,1368-1369,1429
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107,162-173
+/// `NcbiWalk::translated` on the frozen 284 Mbp layouts (fillers 10, 40,000,000, 15 x 15,000,000,
+/// and 3,434,890 or 3,434,889 bases before a 15,300,000-base lead sequence with T2 masks): exact
+/// one-thread start offsets at windows 0 and 40, skipped 10-base subject, clear after L's first
+/// chunk in B0 vs second chunk in B2, and skipped no-range chunk.
+#[test]
+fn ncbi_walk_translated_matches_frozen_layouts_and_clears() {
+    use crate::algorithm::common::translated_chunks::translated_soft_mask_exits;
+    use crate::core::subject_split::{complement_masks, HardSplitState};
+    use std::borrow::Cow;
+
+    let t2_masks: &[(u32, u32)] = &[
+        (14_999_400, 14_999_850),
+        (14_999_880, 15_180_000),
+        (3_000_000, 3_300_000),
+    ];
+
+    let exits_for = |length: usize, masks: &[(u32, u32)]| -> (Vec<usize>, bool) {
+        let mut exits = Vec::new();
+        let mut ranges = Vec::new();
+        let mut split = HardSplitState::default();
+        let lead = translated_soft_mask_exits(length, 3, &mut exits, &mut split, || {
+            complement_masks(masks, length, &mut ranges);
+            Ok::<_, anyhow::Error>(Cow::Borrowed(ranges.as_slice()))
+        })
+        .unwrap();
+        (exits, lead)
+    };
+
+    for (last_filler, want_w0, want_w40, clears_on_first) in [
+        (3_434_890usize, 536_870_912i32, 536_875_512i32, true),
+        (3_434_889usize, 536_870_910i32, 536_875_510i32, false),
+    ] {
+        for (window, want_offset) in [(0i32, want_w0), (40i32, want_w40)] {
+            let mut walk = NcbiWalk::new(3, window);
+            // 10-base subject (< 3 * 3 + 2 = 11): skipped with no exits.
+            let (short_exits, short_lead) = exits_for(10, &[]);
+            assert!(short_exits.is_empty());
+            assert!(!short_lead);
+            assert_eq!(
+                walk.translated(short_exits),
+                NcbiStart {
+                    offset: window,
+                    cleared: false,
+                }
+            );
+            assert_eq!(walk.here().offset, window);
+
+            let (filler40, lead40) = exits_for(40_000_000, &[]);
+            assert!(!lead40);
+            walk.translated(filler40);
+            for _ in 0..15 {
+                let (filler15, lead15) = exits_for(15_000_000, &[]);
+                assert!(!lead15);
+                walk.translated(filler15);
+            }
+            let (tail_exits, tail_lead) = exits_for(last_filler, &[]);
+            assert!(!tail_lead);
+            walk.translated(tail_exits);
+
+            let (l_exits, l_lead) = exits_for(15_300_000, t2_masks);
+            assert!(l_lead);
+            assert_eq!(l_exits[0], 5_000_000);
+            assert_eq!(l_exits[1], 100_100);
+            let l_start = walk.here();
+            assert_eq!(
+                l_start,
+                NcbiStart {
+                    offset: want_offset,
+                    cleared: false,
+                }
+            );
+
+            if window == 0 {
+                // Step L's first two chunks individually to observe which exit clears the table.
+                let mut step_walk = walk.clone();
+                step_walk.translated([l_exits[0]]);
+                if clears_on_first {
+                    assert_eq!(
+                        step_walk.here(),
+                        NcbiStart {
+                            offset: 0,
+                            cleared: true,
+                        }
+                    );
+                } else {
+                    assert_eq!(
+                        step_walk.here(),
+                        NcbiStart {
+                            offset: want_offset + 5_000_000,
+                            cleared: false,
+                        }
+                    );
+                    step_walk.translated([l_exits[1]]);
+                    assert_eq!(
+                        step_walk.here(),
+                        NcbiStart {
+                            offset: 0,
+                            cleared: true,
+                        }
+                    );
+                }
+            }
+            assert_eq!(walk.translated(l_exits), l_start);
+        }
+    }
+
+    // A chunk without a scan range (SUBJECT_SPLIT_NO_RANGE) emits no exit.
+    let (no_range_exits, no_range_lead) = exits_for(15_300_000, &[(14_999_000, 15_300_000)]);
+    assert!(!no_range_lead);
+    // Positive frames (+1..+3) each skip chunk 2 (the masked tail), while negative frames (-1..-3)
+    // keep both chunks (the mask lies at the head of chunk 1), giving 9 exits instead of 12.
+    assert_eq!(
+        no_range_exits,
+        vec![
+            5_000_000, 5_000_000, 5_000_000, 5_000_000, 100_100, 5_000_000, 100_099, 5_000_000,
+            100_099
+        ]
+    );
+    let mut walk = NcbiWalk::new(3, 0);
+    let expected_sum: i32 = no_range_exits.iter().map(|&l| l as i32).sum();
+    walk.translated(no_range_exits);
+    assert_eq!(
+        walk.here(),
+        NcbiStart {
+            offset: expected_sum,
+            cleared: false,
+        }
+    );
+}

@@ -37,10 +37,17 @@ const time = (ms: number | undefined) => (ms === undefined ? '' : formatDateTime
 const duration = computed(() =>
   record.value.startedAt !== undefined && record.value.endedAt !== undefined ? formatDuration(record.value.endedAt - record.value.startedAt) : '',
 );
-/** The counts of a taxonomy ID: the file's name, the site it came from and the date of the file there. */
+/** The counts of a taxonomy ID: the file's name, its origin and date (downloaded or made in this browser). */
 const countsFile = COUNTS_FILE;
-const countsHost = computed(() => (record.value.windowMasker?.origin === undefined ? '' : new URL(record.value.windowMasker.origin.url).host));
-const countsDate = computed(() => dateOf(record.value.windowMasker?.origin?.lastModified));
+const countsHost = computed(() => {
+  const origin = record.value.windowMasker?.origin;
+  return origin?.kind === 'downloaded' ? new URL(origin.url).host : '';
+});
+const countsDate = computed(() => {
+  const origin = record.value.windowMasker?.origin;
+  if (origin === undefined) return undefined;
+  return origin.kind === 'made' ? new Date(origin.made.madeAt).toISOString().slice(0, 10) : dateOf(origin.lastModified);
+});
 /**
  * What Warnings says besides the diagnostics: where the run's warnings are when they went to the file of its -logfile or
  * nowhere, or that the engine wrote none (line WQA's sweep, D7, 2026-11-20).
@@ -125,15 +132,18 @@ const inputs = computed(() => [
         <template v-if="record.windowMasker">
           <dt>WindowMasker counts</dt>
           <dd data-testid="run-window-masker">
-            <!-- The counts of a taxonomy ID: the ID, the file and where it came from (the Last-Modified when it was downloaded). -->
-            <template v-if="record.windowMasker.origin">
+            <!-- The counts of a taxonomy ID: the ID, the file and where it came from (downloaded or made in this browser). -->
+            <template v-if="record.windowMasker.origin?.kind === 'downloaded'">
               {{ record.windowMasker.origin.taxid }}: {{ countsFile }} from {{ countsHost }}<template v-if="countsDate"> ({{ countsDate }})</template>,
+            </template>
+            <template v-else-if="record.windowMasker.origin?.kind === 'made'">
+              {{ record.windowMasker.origin.taxid }}: {{ countsFile }} made in this browser by run {{ record.windowMasker.origin.made.run }} ({{ countsDate }}),
             </template>
             <template v-else>{{ record.windowMasker.name }},</template>
             {{ formatBytes(record.windowMasker.size) }},
             {{ record.windowMasker.retained ? 'kept from the previous search' : `read for this search in ${formatMillis(record.windowMasker.loadMs)}` }}<br />
             <span class="muted small">SHA-256 {{ record.windowMasker.sha256 }}</span>
-            <template v-if="record.windowMasker.origin"><br /><span class="muted small" data-testid="run-window-masker-url">{{ record.windowMasker.origin.url }}</span></template>
+            <template v-if="record.windowMasker.origin?.kind === 'downloaded'"><br /><span class="muted small" data-testid="run-window-masker-url">{{ record.windowMasker.origin.url }}</span></template>
           </dd>
         </template>
         <template v-if="record.runtimeGeneration !== undefined">

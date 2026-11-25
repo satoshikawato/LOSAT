@@ -13,6 +13,8 @@ mod archive_replaced_bytes;
 mod balanced_title;
 #[path = "../blastdb_aliastool_fixtures.rs"]
 mod blastdb_aliastool_fixtures;
+#[path = "../blastdbcheck_fixtures.rs"]
+mod blastdbcheck_fixtures;
 #[path = "../blastdbcmd_alias_keys.rs"]
 mod blastdbcmd_alias_keys;
 #[path = "../blastdbcmd_batch_line_ends.rs"]
@@ -147,6 +149,8 @@ mod outfmt5_tblastx;
 mod pairwise_par;
 #[path = "../parse_deflines_subject.rs"]
 mod parse_deflines_subject;
+#[path = "../protein_db_32bit_lengths.rs"]
+mod protein_db_32bit_lengths;
 #[path = "../redo_contain_idx.rs"]
 mod redo_contain_idx;
 #[path = "../report_counts_cli.rs"]

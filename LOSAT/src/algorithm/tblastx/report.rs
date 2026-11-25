@@ -1557,8 +1557,9 @@ impl HitFilters<'_> {
     /// and the coverage, which the preliminary reap already applied to these HSPs): the contexts
     /// are the query's frames. The best e-value is not set again, as NCBI's is not. Every HSP here
     /// has a positive length (the one-hit word finder's HSPs of length 0 or less are dropped
-    /// before the re-evaluation, as NCBI's re-evaluation deletes them:
-    /// `link_one_hit_with_int4_ends`), so the `usize` offsets are NCBI's `Int4` ones.
+    /// before the re-evaluation, after its fetch of the subject, as NCBI's re-evaluation deletes
+    /// them: `subject_link::drop_unread_int4_inverted`), so the `usize` offsets are NCBI's `Int4`
+    /// ones.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:858-861
     pub(super) fn subject_besthit(&self, hsps: &mut Vec<TblastxHsp>) {

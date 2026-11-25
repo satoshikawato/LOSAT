@@ -1,0 +1,19 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing every 100-th OID.
+
+Testing 1 volume(s).
+ <RUN>/cases/mix/p5
+ Result=SUCCESS. No errors reported for 1 volume(s).
+Testing 1 alias(es).
+ <RUN>/cases/mix/mix1.pal
+  <RUN>/cases/mix/mix1.pal / AliasFileTest:   [ERROR] unknown keyword encountered: NSEQMAXLEN
+  <RUN>/cases/mix/mix1.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/mix/mix1.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp", line 861: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string '' to Int8 (m_Pos = 0)
+
+ Result=FAILURE. 1 errors reported in 1 alias(es).
+
+Total errors: 2

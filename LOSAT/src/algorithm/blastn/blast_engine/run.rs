@@ -80,7 +80,7 @@ use super::super::scoring::{
 use super::super::seqalign::write_blastn_seqalign;
 use super::super::tracing as blastn_trace;
 use super::super::ungapped;
-use crate::blastinput::app::{self as app, Program};
+use crate::blastinput::app::{self as app, ErrorAfterBatchReports, Program};
 use crate::core::blast_hits::reap_by_query_coverage;
 use crate::report::record::QueryNames;
 // EXPERIMENT (LOSAT_X_BNSTORE): the subjects' letters read from the records or from packed subjects.
@@ -7426,28 +7426,13 @@ fn search(
     x_result
 }
 
-/// An error of a query batch after the first that does not depend on the batch's queries
-/// (the Karlin-Altschul error of the scoring options, or the average subject length;
-/// `search_query_batch`, in `context_statistics`): the first batch with a valid query meets it, and NCBI raises it
-/// after the reports of the batches before, whose queries were all invalid.
-#[derive(Debug)]
-struct ErrorAfterInvalidBatches(anyhow::Error);
-
-impl std::fmt::Display for ErrorAfterInvalidBatches {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for ErrorAfterInvalidBatches {}
-
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:295-312
 /// A database error of a query batch's search (`database::search_blocks`,
 /// `database::traceback_listed`) as NCBI reports it: a sequence file that the preliminary
 /// search cannot read is NCBI's `BLAST engine error` (`database::PreliminaryReadError`,
 /// local_blast.cpp:240-251), one that the traceback cannot read its `BLAST Database
 /// error`. NCBI raises it in the batch's search, after the outfmt 0 prolog and the reports
-/// of the batches before (`ErrorAfterInvalidBatches`; for the first batch, the prolog of a
+/// of the batches before (`ErrorAfterBatchReports`; for the first batch, the prolog of a
 /// file sink is written here, the others were written before the search). LOSAT's
 /// refusals are errors of their own.
 fn database_search_error(
@@ -7465,7 +7450,7 @@ fn database_search_error(
         return error;
     }
     if !first_batch {
-        return ErrorAfterInvalidBatches(error).into();
+        return ErrorAfterBatchReports::new(error).into();
     }
     let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
     match write_pairwise_prologs(outputs, output_formats, intro, shown, false) {
@@ -8790,11 +8775,11 @@ fn run_in_pool(
         };
         let batch = match searched {
             Ok(batch) => batch,
-            Err(error) => match error.downcast::<ErrorAfterInvalidBatches>() {
+            Err(error) => match error.downcast::<ErrorAfterBatchReports>() {
                 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:295-318
                 // The reports of the batches before are written, then the error, which
                 // skips `PrintEpilog` (the outfmt 0 footer and outfmt 7's last line).
-                Ok(ErrorAfterInvalidBatches(error)) => {
+                Ok(ErrorAfterBatchReports { error, .. }) => {
                     // EXPERIMENT (LOSAT_X_CSRQSKEEP): as in `write_reports_before`, the keep frees
                     // the `qs` it holds first. No NCBI counterpart (memory only).
                     if let Some(keep) = &x_lut_keep {
@@ -10452,8 +10437,8 @@ fn refused_batch_setup_error(
     };
     set_up
         .err()
-        .map(|error| match error.downcast::<ErrorAfterInvalidBatches>() {
-            Ok(ErrorAfterInvalidBatches(error)) => error,
+        .map(|error| match error.downcast::<ErrorAfterBatchReports>() {
+            Ok(ErrorAfterBatchReports { error, .. }) => error,
             Err(error) => error,
         })
 }
@@ -10762,6 +10747,16 @@ fn search_query_batch<const UNGAPPED: bool>(
         context_valid: &context_valid,
         search_karlin: &search_karlin,
         query_eff_searchsp: &query_eff_searchsp,
+    })
+    .map_err(|error| {
+        context_statistics::setup_failure(
+            error,
+            first_batch,
+            false,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )
     })?;
 
     // NCBI searches a batch of at least two query chunks chunk by chunk in its preliminary
@@ -10795,20 +10790,28 @@ fn search_query_batch<const UNGAPPED: bool>(
                 posts,
                 (x_keep, last),
             )?;
-            // A batch with a valid context whose chunks have none (the chunks' own masks would
-            // cover the letters that the batch's leave open) meets `BLAST_GapAlignSetUp` first
-            // in the set-up of its traceback, after the chunks:
+            // A batch with a valid context whose chunks have none (for example, under
+            // `-soft_masking false` with `-lcase_masking`, `restrict_masks`'s end extension
+            // covers the batch's remaining non-N base in chunk 0) meets `BLAST_GapAlignSetUp`
+            // first in the set-up of its traceback, after the chunks:
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:231-253
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1831-1837
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback_mt_priv.c:219-226
-            // The greedy set-up refuses there as in a batch that is not split. The check of the
-            // subjects before it (NCBI: `Traceback failed`, exit status 3) is not reproduced: no
-            // input that reaches this was found (line RG D1a-6, review A F1).
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback_mt_priv.c:218-228
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-996
+            // The subject check runs before the greedy set-up there (NCBI: `Traceback failed`,
+            // exit status 3, or SIGFPE for a count of 0; line RG D1a-6, review A F1).
             if let Some((_, false)) = &chunks {
-                if let Some(error) = context_statistics::greedy_setup_refusal(args, false) {
+                if let Some(error) = context_statistics::gap_align_setup_error(
+                    args,
+                    subjects,
+                    &seq_data,
+                    false,
+                    crate::blastinput::app::TRACEBACK_FAILED,
+                ) {
                     return Err(context_statistics::setup_failure(
                         error,
                         first_batch,
+                        false,
                         reborrow_outputs(&mut outputs),
                         intro,
                         &shown,
@@ -11255,7 +11258,16 @@ fn search_query_batch<const UNGAPPED: bool>(
     }
     // An overflow of a subject's search space (`subject_statistics`) is LOSAT's refusal, after the
     // preliminary stage's read errors (the searched blocks' above, the masks' here).
-    subject_space_overflow.check()?;
+    subject_space_overflow.check().map_err(|overflow| {
+        context_statistics::setup_failure(
+            overflow.into(),
+            first_batch,
+            false,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )
+    })?;
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
@@ -11294,7 +11306,16 @@ fn search_query_batch<const UNGAPPED: bool>(
             &shown,
         )
     })?;
-    subject_space_overflow.check()?;
+    subject_space_overflow.check().map_err(|overflow| {
+        context_statistics::setup_failure(
+            overflow.into(),
+            first_batch,
+            false,
+            reborrow_outputs(&mut outputs),
+            intro,
+            &shown,
+        )
+    })?;
     let mut batch = batch_result(hit_lists, Vec::new());
     if let Some(timing) = timing.as_ref() {
         batch.timing = blastn_timing_text(timing.as_ref(), t_search_start, t_total);

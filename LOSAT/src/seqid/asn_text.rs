@@ -1,9 +1,11 @@
 //! The reader of the Seq-id of NCBI's ASN.1 text (`CObjectIStreamAsn` of a `CSeq_id`), every
 //! alternative, as `ber` is its BER reader: the rpsbproc archive reader reads its Seq-ids with it.
+//! Each value is read below the frame `at` that holds it (`asn_text_reader::Frame`), and the
+//! posts of its strings are given to `posts` as they are read (`Reader::string`).
 //! (The PSSM reader, psiblast and tblastn `-in_pssm`, and makeblastdb's mask reader read them with
 //! the table-driven reader, which builds the same model, `report::serial::asn_types::seq_id`.)
 
-use crate::report::serial::asn_text_reader::{AsnSource, Reader, Result};
+use crate::report::serial::asn_text_reader::{AsnSource, Frame, Reader, ReplacedSink, Result};
 use crate::seqid::model::{
     Date, DateStd, Dbtag, GiimportId, IdPat, ObjectId, ParsedSeqId, PatentNumber, PatentSeqId,
     PdbSeqId, TextseqId, SEQ_ID_ALTERNATIVES,
@@ -11,22 +13,31 @@ use crate::seqid::model::{
 
 impl<S: AsnSource> Reader<S> {
     // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:78-80
-    pub(crate) fn object_id(&mut self) -> Result<ObjectId> {
-        Ok(if self.choice(&["id", "str"])? == 0 {
+    pub(crate) fn object_id<K: ReplacedSink + ?Sized>(
+        &mut self,
+        at: &Frame<'_>,
+        posts: &mut K,
+    ) -> Result<ObjectId> {
+        let variant = self.choice(at, &["id", "str"])?;
+        Ok(if variant.index() == 0 {
             ObjectId::Id(self.int4()?)
         } else {
-            ObjectId::Str(self.string()?)
+            ObjectId::Str(self.string(&variant, posts)?)
         })
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:71-73
-    pub(crate) fn dbtag(&mut self) -> Result<Dbtag> {
-        let mut members = self.begin_members()?;
+    pub(crate) fn dbtag<K: ReplacedSink + ?Sized>(
+        &mut self,
+        at: &Frame<'_>,
+        posts: &mut K,
+    ) -> Result<Dbtag> {
+        let mut members = self.begin_members(at, &["db", "tag"])?;
         let (mut db, mut tag) = (None, None);
-        while let Some(index) = self.next_member(&mut members, &["db", "tag"])? {
+        while let Some(index) = self.next_member(&mut members)? {
             match index {
-                0 => db = Some(self.string()?),
-                _ => tag = Some(self.object_id()?),
+                0 => db = Some(self.string(members.at(), posts)?),
+                _ => tag = Some(self.object_id(members.at(), posts)?),
             }
         }
         match (db, tag) {
@@ -36,9 +47,14 @@ impl<S: AsnSource> Reader<S> {
     }
 
     // NCBI reference (598d8ae6): c++/src/objects/general/general.asn:54-65
-    pub(crate) fn date(&mut self) -> Result<Date> {
-        if self.choice(&["str", "std"])? == 0 {
-            return Ok(Date::Str(self.string()?));
+    pub(crate) fn date<K: ReplacedSink + ?Sized>(
+        &mut self,
+        at: &Frame<'_>,
+        posts: &mut K,
+    ) -> Result<Date> {
+        let variant = self.choice(at, &["str", "std"])?;
+        if variant.index() == 0 {
+            return Ok(Date::Str(self.string(&variant, posts)?));
         }
         const NAMES: [&str; 7] = ["year", "month", "day", "season", "hour", "minute", "second"];
         let mut date = DateStd {
@@ -51,8 +67,8 @@ impl<S: AsnSource> Reader<S> {
             second: None,
         };
         let mut year = false;
-        let mut members = self.begin_members()?;
-        while let Some(index) = self.next_member(&mut members, &NAMES)? {
+        let mut members = self.begin_members(&variant, &NAMES)?;
+        while let Some(index) = self.next_member(&mut members)? {
             match index {
                 0 => {
                     date.year = self.int4()?;
@@ -60,7 +76,7 @@ impl<S: AsnSource> Reader<S> {
                 }
                 1 => date.month = Some(self.int4()?),
                 2 => date.day = Some(self.int4()?),
-                3 => date.season = Some(self.string()?),
+                3 => date.season = Some(self.string(members.at(), posts)?),
                 4 => date.hour = Some(self.int4()?),
                 5 => date.minute = Some(self.int4()?),
                 _ => date.second = Some(self.int4()?),
@@ -76,28 +92,33 @@ impl<S: AsnSource> Reader<S> {
     // NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-74
     // NCBI reference (598d8ae6): c++/src/objects/biblio/biblio.asn:119-124
     // `gi` is `TGi`, an `Int8` in NCBI's 64-bit build.
-    pub(crate) fn seq_id(&mut self) -> Result<ParsedSeqId> {
-        let variant = self.choice(&SEQ_ID_ALTERNATIVES)?;
+    pub(crate) fn seq_id<K: ReplacedSink + ?Sized>(
+        &mut self,
+        at: &Frame<'_>,
+        posts: &mut K,
+    ) -> Result<ParsedSeqId> {
+        let at = &self.choice(at, &SEQ_ID_ALTERNATIVES)?;
+        let variant = at.index();
         Ok(match variant {
-            0 => ParsedSeqId::Local(self.object_id()?),
+            0 => ParsedSeqId::Local(self.object_id(at, posts)?),
             1 => ParsedSeqId::Gibbsq(self.int4()?),
             2 => ParsedSeqId::Gibbmt(self.int4()?),
             3 => {
-                let mut members = self.begin_members()?;
+                let mut members = self.begin_members(at, &["id", "db", "release"])?;
                 let mut giim = GiimportId {
                     id: 0,
                     db: None,
                     release: None,
                 };
                 let mut id = false;
-                while let Some(index) = self.next_member(&mut members, &["id", "db", "release"])? {
+                while let Some(index) = self.next_member(&mut members)? {
                     match index {
                         0 => {
                             giim.id = self.int4()?;
                             id = true;
                         }
-                        1 => giim.db = Some(self.string()?),
-                        _ => giim.release = Some(self.string()?),
+                        1 => giim.db = Some(self.string(members.at(), posts)?),
+                        _ => giim.release = Some(self.string(members.at(), posts)?),
                     }
                 }
                 if !id {
@@ -106,30 +127,31 @@ impl<S: AsnSource> Reader<S> {
                 ParsedSeqId::Giim(giim)
             }
             8 => {
-                let mut members = self.begin_members()?;
+                let mut members = self.begin_members(at, &["seqid", "cit"])?;
                 let (mut seqid, mut cit) = (None, None);
-                while let Some(index) = self.next_member(&mut members, &["seqid", "cit"])? {
+                while let Some(index) = self.next_member(&mut members)? {
                     if index == 0 {
                         seqid = Some(self.int4()?);
                         continue;
                     }
-                    let mut members = self.begin_members()?;
+                    let mut members =
+                        self.begin_members(members.at(), &["country", "id", "doc-type"])?;
                     let (mut country, mut number, mut doc_type) = (None, None, None);
-                    while let Some(index) =
-                        self.next_member(&mut members, &["country", "id", "doc-type"])?
-                    {
+                    while let Some(index) = self.next_member(&mut members)? {
                         match index {
-                            0 => country = Some(self.string()?),
+                            0 => country = Some(self.string(members.at(), posts)?),
                             1 => {
-                                let app = self.choice(&["number", "app-number"])? == 1;
-                                let text = self.string()?;
+                                let variant =
+                                    self.choice(members.at(), &["number", "app-number"])?;
+                                let app = variant.index() == 1;
+                                let text = self.string(&variant, posts)?;
                                 number = Some(if app {
                                     PatentNumber::AppNumber(text)
                                 } else {
                                     PatentNumber::Number(text)
                                 });
                             }
-                            _ => doc_type = Some(self.string()?),
+                            _ => doc_type = Some(self.string(members.at(), posts)?),
                         }
                     }
                     let (Some(country), Some(id)) = (country, number) else {
@@ -146,10 +168,10 @@ impl<S: AsnSource> Reader<S> {
                 };
                 ParsedSeqId::Patent(PatentSeqId { seqid, cit })
             }
-            10 => ParsedSeqId::General(self.dbtag()?),
+            10 => ParsedSeqId::General(self.dbtag(at, posts)?),
             11 => ParsedSeqId::Gi(self.int8()?),
             14 => {
-                let mut members = self.begin_members()?;
+                let mut members = self.begin_members(at, &["mol", "chain", "rel", "chain-id"])?;
                 let mut pdb = PdbSeqId {
                     mol: Vec::new(),
                     chain: None,
@@ -157,17 +179,15 @@ impl<S: AsnSource> Reader<S> {
                     chain_id: None,
                 };
                 let mut mol = false;
-                while let Some(index) =
-                    self.next_member(&mut members, &["mol", "chain", "rel", "chain-id"])?
-                {
+                while let Some(index) = self.next_member(&mut members)? {
                     match index {
                         0 => {
-                            pdb.mol = self.string()?;
+                            pdb.mol = self.string(members.at(), posts)?;
                             mol = true;
                         }
                         1 => pdb.chain = Some(self.int4()?),
-                        2 => pdb.rel = Some(self.date()?),
-                        _ => pdb.chain_id = Some(self.string()?),
+                        2 => pdb.rel = Some(self.date(members.at(), posts)?),
+                        _ => pdb.chain_id = Some(self.string(members.at(), posts)?),
                     }
                 }
                 if !mol {
@@ -176,15 +196,14 @@ impl<S: AsnSource> Reader<S> {
                 ParsedSeqId::Pdb(pdb)
             }
             _ => {
-                let mut members = self.begin_members()?;
+                let mut members =
+                    self.begin_members(at, &["name", "accession", "release", "version"])?;
                 let mut id = TextseqId::default();
-                while let Some(index) =
-                    self.next_member(&mut members, &["name", "accession", "release", "version"])?
-                {
+                while let Some(index) = self.next_member(&mut members)? {
                     match index {
-                        0 => id.name = Some(self.string()?),
-                        1 => id.accession = Some(self.string()?),
-                        2 => id.release = Some(self.string()?),
+                        0 => id.name = Some(self.string(members.at(), posts)?),
+                        1 => id.accession = Some(self.string(members.at(), posts)?),
+                        2 => id.release = Some(self.string(members.at(), posts)?),
                         _ => id.version = Some(self.int4()?),
                     }
                 }

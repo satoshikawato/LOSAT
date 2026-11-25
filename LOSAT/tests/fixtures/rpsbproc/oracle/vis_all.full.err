@@ -1,0 +1,58 @@
+Post-RPSBLAST Processing Utility v0.5.1
+-------------------------------------------------------
+Download:
+	ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/
+
+Blast applications download:
+	ftp://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
+
+For more information please refer to the README file
+Error: (803.7) Blast4-archive.request.ident
+Bad char [0x7F] in string at line 3
+2.17.0+
+Error: (803.7) Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.id.E.local.str
+Bad char [0xE9] in string at line 11
+Query_é1
+Error: (803.7) Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.comment
+Bad char [0xE9] in string at line 24
+line2 é end
+Error: (803.7) Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0x1] in string at line 25
+"protein
+Error: (803.7) Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xE9] in string at line 25
+" é
+Error: (803.7) Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.annot.E.name
+Bad char [0xE9] in string at line 36
+aéb
+Error: (803.7) Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.annot.E.desc.E.comment
+Bad char [0x1] in string at line 38
+cd
+Error: (803.7) Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.name
+Bad char [0x7F] in string at line 59
+nm
+Error: (803.7) Blast4-archive.request.body.queue-search.queries.bioseq-set.seq-set.E.seq.descr.E.title
+Bad char [0xE9] in string at line 60
+AAAAAAAAAAAAAAAAAAAéBBBBBBBBBBBBBBBBBBBB
+Error: (803.7) Blast4-archive.request.body.queue-search.algorithm-options.E.value.string-list.E
+Bad char [0xE9] in string at line 77
+aéb
+Error: (803.7) Blast4-archive.request.body.queue-search.algorithm-options.E.value.string-list.E
+Bad char [0xFF] in string at line 79
+ÿz
+Error: (803.7) Blast4-archive.results.alignments.E.segs.denseg.ids.E.local.str
+Bad char [0xE9] in string at line 172
+Query_é1
+Error: (803.7) Blast4-archive.results.search-stats.E
+Bad char [0xE9] in string at line 271
+Length adjustment: 47é
+Error: (803.7) Blast4-archive.messages.E.message
+Bad char [0xE9] in string at line 277
+méssage
+RPSBlast session 0 start...
+Calculating....
+End processing Query tabq1 "pr#otein" #
+End processing Query utf8q2 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA#BBBBBBBBBBBBBBBBBBBB
+RPSBlast session 1 done...
+All done, 2 queries processed
+

@@ -1,0 +1,49 @@
+
+                                          Tax BLAST report                                          
+
+Query= qp1 query protein one
+
+Length=140
+
+                                           Organism Report                                           
+Accession                                   Description                              Score E-value 
+
+                                          Tax BLAST report                                          
+
+Query= qp1 query protein one
+
+Length=140
+
+                                           Organism Report                                           
+Accession                                   Description                              Score E-value 
+
+Search has CONVERGED!
+
+                                          Tax BLAST report                                          
+
+Query= qp2 unrelated protein
+
+Length=45
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                          Tax BLAST report                                          
+
+Query= qp2 unrelated protein
+
+Length=45
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+Search has CONVERGED!
+
+                                          Tax BLAST report                                          
+
+Query= qnone no hits
+
+Length=36
+
+                                           Organism Report                                           
+Accession...  Description... Score... E-value... 

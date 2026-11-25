@@ -147,9 +147,10 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             "the rounds of a masked query run ({masks:?})"
         );
     }
-    // Item PS15b-1: BLAST XML, the Seq-annots and the archive run; the formats of PS15b-2 are
-    // refused.
-    for format in ["5", "8", "9", "11"] {
+    // Items PS15b-1 and PS15b-2: BLAST XML, the Seq-annots, the archive, the query-anchored
+    // reports, the JSON Seq-aligns and the organism report run; the XML2 and JSON documents (the
+    // second part of PS15b-2) are refused.
+    for format in ["1", "2", "3", "4", "5", "8", "9", "11", "12", "18"] {
         assert!(
             parse(&["-outfmt", format])
                 .unwrap()
@@ -158,7 +159,7 @@ fn rounds_run_and_the_later_output_formats_are_refused() {
             "outfmt {format}"
         );
     }
-    for format in ["1", "3", "4", "12", "15", "16", "18"] {
+    for format in ["15", "16"] {
         let error = parse(&["-outfmt", format])
             .unwrap()
             .into_blastp_args()

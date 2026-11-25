@@ -567,9 +567,9 @@ fn list_cut(command: &Commands, number: i32) -> crate::algorithm::blastp::args::
 /// writes it alone: the command line's search depends on the hit list size, which
 /// `-num_descriptions` and `-num_alignments` (without `-max_target_seqs`) can make differ
 /// between the pairwise formats (0 to 4) and the tabular ones, and on how the format's
-/// formatter cuts the hit lists (`list_cut`): psiblast's XML cuts each round's results before
-/// its PSSM (so its rounds can differ from the other formats'), and psiblast's and rpsblast's
-/// archive keeps the uncut lists. Without the count options the sizes are equal, and formats of
+/// formatter cuts the hit lists (`list_cut`): psiblast's XML, XML2 and JSON cut each round's
+/// results before its PSSM (so its rounds can differ from the other formats'), and psiblast's and
+/// rpsblast's archive and organism report keep the uncut lists. Without the count options the sizes are equal, and formats of
 /// one cut are one group in the requested order (the first group's first format is the first
 /// requested one). With them the tabular groups go first because the warnings that the formats
 /// share belong to the first search's diagnostics, and the command line writes the tabular

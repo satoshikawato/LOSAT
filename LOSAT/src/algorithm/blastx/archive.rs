@@ -465,12 +465,7 @@ pub(crate) fn write_blastx_archive(
             SeqalignSubjects::Database { title, .. } => Some(title),
         },
         gapped: call.batch.options.gapped,
-        program_type: call
-            .batch
-            .options
-            .rpstblastn
-            .is_some()
-            .then_some(crate::report::record::ProgramType::RpsTblastn),
+        program_type: call.batch.options.program_type(),
     };
     // `-subject`'s Seq-loc mapper cuts an HSP of length 0 at the first letter of the searched part
     // of a subject with HSPs of letters in two, and makes alignments without scores of a subject

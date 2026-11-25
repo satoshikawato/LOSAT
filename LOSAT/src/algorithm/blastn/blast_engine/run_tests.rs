@@ -2199,3 +2199,86 @@ fn run_local_refuses_database_and_unresolved_filter_inputs() {
         "filtering_db",
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-996
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:231-253
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback_mt_priv.c:218-228
+// `gap_align_setup_error` checks the statistics count 0 first, then the average subject length
+// (using the caller's `subject_error`, e.g. `Traceback failed` for the batch traceback set-up
+// after all split chunks were invalid), and only after that the greedy set-up refusals.
+#[test]
+fn gap_align_setup_error_orders_count_subject_and_greedy_checks() {
+    let parse = |words: &[&str]| {
+        let mut argv = vec!["losat", "blastn", "-query", "q", "-subject", "s"];
+        argv.extend_from_slice(words);
+        crate::cli::try_parse_from(argv).unwrap().blastn()
+    };
+    let prepared = PreparedSubjects {
+        records: &[],
+        stores: None,
+        metadata: SubjectMetadata {
+            db_len_total: 0,
+            db_num_seqs: 0,
+        },
+        packed: Vec::new(),
+    };
+    let subjects = SubjectSource::Prepared(&prepared);
+    let seq_data = |db_len_total: i64, db_num_seqs: i32| SequenceData {
+        queries: &[],
+        query_masks: Vec::new(),
+        db_len_total,
+        db_num_seqs,
+    };
+
+    // Count 0 beats both subject-length and greedy refusals.
+    let mo00 = parse(&[
+        "-task",
+        "megablast",
+        "-reward",
+        "0",
+        "-penalty",
+        "0",
+        "-gapopen",
+        "0",
+        "-gapextend",
+        "0",
+    ]);
+    let count0 = context_statistics::gap_align_setup_error(
+        &mo00,
+        subjects,
+        &seq_data(100, 0),
+        false,
+        crate::blastinput::app::TRACEBACK_FAILED,
+    )
+    .expect("count 0 refused");
+    assert!(count0
+        .to_string()
+        .starts_with(crate::algorithm::common::database::STATISTICS_COUNT_ZERO));
+
+    // Average subject length < 1 beats greedy refusals and uses the caller's engine message.
+    let short = context_statistics::gap_align_setup_error(
+        &mo00,
+        subjects,
+        &seq_data(1, 3),
+        false,
+        crate::blastinput::app::TRACEBACK_FAILED,
+    )
+    .expect("short average subject length fails");
+    let native = short
+        .downcast::<crate::cli::NativeError>()
+        .expect("engine error");
+    assert_eq!(native.exit, 3);
+    assert_eq!(native.message, b"LOSAT engine error: Traceback failed\n");
+
+    // When subjects pass, the greedy set-up refusal fires.
+    let greedy = context_statistics::gap_align_setup_error(
+        &mo00,
+        subjects,
+        &seq_data(1000, 10),
+        false,
+        crate::blastinput::app::TRACEBACK_FAILED,
+    )
+    .expect("matrix-only greedy refused");
+    assert!(greedy.downcast_ref::<crate::cli::NativeError>().is_none());
+    assert!(greedy.to_string().contains("reward 0 and penalty 0"));
+}

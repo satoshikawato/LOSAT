@@ -227,19 +227,19 @@ fn the_switch_acts_where_the_outputs_and_options_allow() {
         checked(true, &scoring, &good, 10, 4000, plain, &mut outputs).err(),
         Some(Off::Scoring)
     );
-    assert_eq!(
-        checked(
-            true,
-            &["-dbsize", "9000000000000000000"],
-            &good,
-            10,
-            4000,
-            plain,
-            &mut outputs
-        )
-        .err(),
-        Some(Off::SearchSpace)
-    );
+    // A `-dbsize` whose product could overflow 64-bit search space still streams: search space
+    // overflow fails the batch after earlier reports (`setup_failure` -> `ErrorAfterBatchReports`)
+    // in both stream on and stream off paths.
+    assert!(checked(
+        true,
+        &["-dbsize", "9000000000000000000"],
+        &good,
+        10,
+        4000,
+        plain,
+        &mut outputs
+    )
+    .is_ok_and(|ready| !ready.one_batch));
     assert_eq!(
         checked(
             true,

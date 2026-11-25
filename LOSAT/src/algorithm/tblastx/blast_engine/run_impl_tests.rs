@@ -962,3 +962,21 @@ fn advance_tblastx_diag_offset_handles_negative_length_and_clear() {
         }
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-185
+// A negative window over overlapping hard masks (negative signed chunk length) moves `WideOffset`
+// back by the chunk length plus window without resetting or losing the carried table, and a
+// >15 Mbp subject (`s_len / 3 > MAX_DBSEQ_LEN`) keeps that carried table across its chunks.
+#[test]
+fn wide_offset_exit_handles_negative_chunk_length_and_long_subject_carry() {
+    let window = -40;
+    let mut cells = vec![DiagStruct::default(); 4];
+    let offset = word_finder::WideOffset::new(window);
+    assert_eq!(offset.get(), -40);
+    // Overlapping hard-mask chunk of signed length -25 moves offset by -25 + (-40).
+    offset.exit(window, &mut cells, -25);
+    assert_eq!(offset.get(), -105);
+    // A 5,000,000-aa chunk of a >15 Mbp subject advances the carried table as in NCBI.
+    offset.exit(window, &mut cells, 5_000_000);
+    assert_eq!(offset.get(), -105 + 5_000_000 - 40);
+}

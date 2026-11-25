@@ -279,6 +279,18 @@ struct BlastpPrelimValues<'a> {
     sum_stats: Option<&'a BlastpSumStats>,
 }
 
+/// One NCBI query batch's carried diagonal table for a negative `-window_size` when a single
+/// `run_call` searches queries from more than one NCBI query batch (ungapped search, a batch
+/// without a searched query, or a call of the batches before a failing later batch).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:36-66,87-106,162-172
+struct NegBatchTable {
+    start: i32,
+    entries: Vec<DiagStruct>,
+    mask: i32,
+    offset: i64,
+}
+
 struct BlastpSubjectScratch {
     offset_pairs: Vec<OffsetPair>,
     diag_array: Vec<DiagStruct>,
@@ -289,6 +301,9 @@ struct BlastpSubjectScratch {
     // the searches with a window of 0 or more and does not move for it.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:36-66,162-172
     neg_offset: i64,
+    // Per-batch carried diagonal tables for a multi-batch call with a negative `-window_size`
+    // (empty for every non-negative window and every single-batch call).
+    neg_batches: Vec<NegBatchTable>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:216-227
     init_hsps: Vec<InitHSP>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
@@ -510,6 +525,7 @@ impl BlastpSubjectScratch {
             ],
             diag_offset: window,
             neg_offset: i64::from(window),
+            neg_batches: Vec::new(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:223-224
             init_hsps: x_ih_pool::own_array(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
@@ -9489,10 +9505,8 @@ fn ungapped_setup_failure(
             }));
         }
     }
-    // An ungapped search, and a negative `-window_size` (whose diagonal offset NCBI moves after
-    // each part of a subject: `negative_window_long_subject`), over a subject longer than NCBI's
-    // part length: LOSAT's refusals.
-    if (args.ungapped || args.window_size < 0) && query_valid.iter().any(|valid| *valid) {
+    // An ungapped search over a subject longer than NCBI's part length: LOSAT's refusal.
+    if args.ungapped && query_valid.iter().any(|valid| *valid) {
         let longest = match subject_source {
             BlastpSubjectSource::Fasta(records) => records
                 .iter()
@@ -9513,11 +9527,9 @@ fn ungapped_setup_failure(
             }
         };
         if let Some((what, length)) = longest {
-            return Some(UngappedSetupFailure::Refusal(if args.ungapped {
-                too_long_subject_refusal(&what, length)
-            } else {
-                negative_window_long_subject(args, &what, length)
-            }));
+            return Some(UngappedSetupFailure::Refusal(too_long_subject_refusal(
+                &what, length,
+            )));
         }
     }
     None
@@ -9828,6 +9840,8 @@ fn run_call(
         diag_mask,
         total_query_span,
         x_soft_subjects,
+        neg_batch_layout,
+        neg_batch_of_ctx,
     } = call_setup::scan_shape(
         &call_in,
         &lookup,
@@ -9877,6 +9891,8 @@ fn run_call(
         timing_enabled,
         timing: &timing,
         tree_without_end: &tree_without_end,
+        neg_batch_layout: &neg_batch_layout,
+        neg_batch_of_ctx: &neg_batch_of_ctx,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1498
     // The preliminary stage (`blast_engine/prelim_run.rs`): the choice of the pool and the call's
@@ -11097,25 +11113,6 @@ fn too_long_subject_refusal(what: &str, length: usize) -> anyhow::Error {
     anyhow::anyhow!(
         "{what} has {length} residues; a subject longer than {} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTP",
         crate::core::subject_split::MAX_DBSEQ_LEN
-    )
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310,476-584
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
-/// LOSAT's refusal of a search with a negative `-window_size` over a subject longer than
-/// `MAX_DBSEQ_LEN`: NCBI searches it in overlapping parts, and the diagonal offset that passes from
-/// a subject to the next moves after each part (`Blast_ExtendWordExit`), which LOSAT's scan of the
-/// whole subject does not do. A window of 0 or more does not read the offset of an earlier part.
-fn negative_window_long_subject(
-    args: &ResolvedBlastpArgs,
-    what: &str,
-    length: usize,
-) -> anyhow::Error {
-    anyhow::anyhow!(
-        "a -window_size of {} with {what} of {length} residues, a subject which NCBI BLAST+ searches in overlapping parts of {} residues, is not supported by LOSAT's {}",
-        args.window_size,
-        crate::core::subject_split::MAX_DBSEQ_LEN,
-        args.app.name()
     )
 }
 

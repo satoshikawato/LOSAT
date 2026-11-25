@@ -134,31 +134,79 @@ fn an_object_index_and_another_class_are_ncbis_errors() {
     }
     // A value of another class: NCBI's `CSerialException` whether or not its process knows the
     // class (psiblast and tblastn report it with their own message, `Names::own_serial_message`).
-    for (text, expected) in [
+    // Lookup is scoped to the classes reachable from the stream's root type: `Date-std` is
+    // reachable from `PDB-seq-id`, while `Object-id`, `Pssm`, `Variation-ref` are reachable from
+    // `PssmWithParameters` (not from `PDB-seq-id`); classes belonging only to other roots in the
+    // table (`Blast4-cutoff`, `Blast4-request`, `Blast-def-line-set`, `Blast-db-mask-info`) are
+    // not reached by `PssmWithParameters`, so NCBI reports `class not found`.
+    for (root, text, expected) in [
         (
-            "PDB-seq-id ::= { mol \"1ABC\", rel :Object-id id 1 }",
+            named::PDB_SEQ_ID,
+            "PDB-seq-id ::= { mol \"1ABC\", rel :Date-std { year 2026 } }",
             "incompatible member type",
         ),
         (
-            "PDB-seq-id ::= { mol \"1ABC\", rel :Pssm { numRows 1, numColumns 1 } }",
+            named::PDB_SEQ_ID,
+            "PDB-seq-id ::= { mol \"1ABC\", rel :Object-id id x }",
+            "class not found: Object-id",
+        ),
+        (
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Object-id id 1 }",
             "incompatible member type",
         ),
         (
-            "PDB-seq-id ::= { mol \"1ABC\", rel :No-such-type id 1 }",
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Pssm { numRows 1, numColumns 1 } }",
+            "incompatible member type",
+        ),
+        (
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :No-such-type id 1 }",
             "class not found: No-such-type",
         ),
-        // The first `CSerialException` inside the value.
+        // Classes in the table for other roots (search strategies, deflines, masks) are not
+        // reachable from `PssmWithParameters` -> "class not found" even when their body has a bad
+        // integer.
         (
-            "PDB-seq-id ::= { mol \"1ABC\", rel :Object-id foo 1 }",
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Blast4-cutoff raw-score x }",
+            "class not found: Blast4-cutoff",
+        ),
+        (
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Blast4-request ident x }",
+            "class not found: Blast4-request",
+        ),
+        (
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Blast-def-line-set { { seqid { local id x } } } }",
+            "class not found: Blast-def-line-set",
+        ),
+        (
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Blast-db-mask-info algo-id x }",
+            "class not found: Blast-db-mask-info",
+        ),
+        // The first `CSerialException` inside a reachable class's value.
+        (
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Object-id foo 1 }",
             "unexpected member",
         ),
     ] {
-        let e = serial(read(named::PDB_SEQ_ID, text));
+        let e = serial(read(root, text));
         assert!(e.contains(expected), "{text}: {e}");
     }
-    let other = other_pointer("Object-id", &[0xa0, 0x80, 0x02, 0x01, 0x05, 0, 0]);
-    let e = serial(ber(named::PDB_SEQ_ID, &pdb_ber(Some(&other))));
+    let other_date_std = other_pointer(
+        "Date-std",
+        &[0x30, 0x80, 0xa0, 0x80, 0x02, 0x02, 0x07, 0xea, 0, 0, 0, 0],
+    );
+    let e = serial(ber(named::PDB_SEQ_ID, &pdb_ber(Some(&other_date_std))));
     assert!(e.contains("incompatible member type"), "{e}");
+    let other_outside = other_pointer("Object-id", &[0xa0, 0x80, 0x02, 0x01, 0x05, 0, 0]);
+    let e = serial(ber(named::PDB_SEQ_ID, &pdb_ber(Some(&other_outside))));
+    assert!(e.contains("class not found: Object-id"), "{e}");
     // A read that posts (a class's `PostRead`) posts only where NCBI knows the class, and so does
     // an error of another kind inside the value (the `CUtilException` of a number in text, which
     // the PSSM reader does not catch): refused.
@@ -168,19 +216,31 @@ fn an_object_index_and_another_class_are_ncbis_errors() {
     };
     assert_eq!(
         refused(read(
-            named::PDB_SEQ_ID,
-            "PDB-seq-id ::= { mol \"1ABC\", rel :Object-id id x }"
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Object-id id x }"
         )),
-        "':Object-id', a value of the type Object-id where a Date belongs (line 1): \
+        "':Object-id', a value of the type Object-id where a PssmParameters belongs (line 1): \
          whether NCBI's reader reads it depends on the types its process has met before"
     );
     assert_eq!(
         refused(read(
-            named::PDB_SEQ_ID,
-            "PDB-seq-id ::= { mol \"1ABC\", rel :Variation-ref { population-data { }, data unknown NULL } }"
+            named::PSSMWITHPARAMETERS,
+            "PssmWithParameters ::= { pssm { numRows 1, numColumns 1 }, params :Variation-ref { population-data { }, data unknown NULL } }"
         )),
-        "':Variation-ref', a value of the type Variation-ref where a Date belongs (line 1): \
+        "':Variation-ref', a value of the type Variation-ref where a PssmParameters belongs (line 1): \
          whether NCBI's reader reads it depends on the types its process has met before"
+    );
+    // Strategy reader (`own_serial_message` false) still refuses `:Type` even for classes outside
+    // its root on an OPTIONAL | REF member (`algorithm-options`).
+    let (res, posts) = read_document(
+        b"Blast4-request ::= { body queue-search { program \"blastp\", service \"plain\", queries seq-loc-list { }, subject database \"d\", algorithm-options :Blast-def-line-set { } } }",
+        named::BLAST4_REQUEST,
+        Names::STRATEGY,
+    );
+    assert!(posts.is_empty());
+    assert!(
+        matches!(res, Err(ReadError::Unsupported(ref msg)) if msg.contains("':Blast-def-line-set'")),
+        "{res:?}"
     );
     // `:[]`: the name's `std::string` of the largest count of bytes.
     assert_eq!(

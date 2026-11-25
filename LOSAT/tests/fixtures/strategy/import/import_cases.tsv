@@ -780,3 +780,40 @@ S3.b.tblastn_matrix80	tblastn	-import_search_strategy {ss}/s3b.tblastn_matrix80.
 S3.b.tblastx_matrix80	tblastx	-import_search_strategy {ss}/s3b.tblastx_matrix80.ss	0	dc74167bf4ab0a5d	d6dbca01209bf9a6
 S3.b.blastp_ws6	blastp	-import_search_strategy {ss}/s3b.blastp_ws6.ss	0	e485101bc37f8f78	1fc42b53917c7075
 S3.b.blastn_from_tblastx_matrix80	blastn	-import_search_strategy {ss}/s3b.tblastx_matrix80.ss	0	dc74167bf4ab0a5d	c7d9e175b47ef7bc
+S4.blastn.short_subj_A	blastn	-import_search_strategy {ss}/s4.blastn.short_subj.ss -subject tests/fixtures/strategy/import/in/short_subj_A.fna -outfmt 6	0	a550e1829a3d0950	884dcc6399dd0647
+S4.blastn.short_subj_B	blastn	-import_search_strategy {ss}/s4.blastn.short_subj.ss -subject tests/fixtures/strategy/import/in/short_subj_B.fna -outfmt 6	0	c947ad93d0cecfa2	884dcc6399dd0647
+S4.blastp.sumstats_neg40.qbig	blastp	-import_search_strategy {ss}/s4.blastp.sumstats_neg40.ss -query tests/db_search/dbmaskp/qbig10000.faa -outfmt 6	0	7a2654ab231950b1	e5bce639ec191b67
+S4.blastp.window_neg40.dbsoft	blastp	-import_search_strategy {ss}/s3.blastp.window_neg40.ss -db tests/db_search/dbmaskp/ps5 -db_soft_mask 21 -outfmt 6	0	a31f5c4a3b7a6ef1	05c29d792843c8f2
+S4.blastp.window_neg40.dbsoft.nt4	blastp	-import_search_strategy {ss}/s3.blastp.window_neg40.ss -db tests/db_search/dbmaskp/ps5 -db_soft_mask 21 -outfmt 6 -num_threads 4	0	a31f5c4a3b7a6ef1	05c29d792843c8f2
+S4.blastp.window_neg40.dbhard	blastp	-import_search_strategy {ss}/s3.blastp.window_neg40.ss -db tests/db_search/dbmaskp/ps5 -db_hard_mask 21 -outfmt 6	0	842c327203c75cbd	05c29d792843c8f2
+S4.blastp.window_neg40.dbhard.nt4	blastp	-import_search_strategy {ss}/s3.blastp.window_neg40.ss -db tests/db_search/dbmaskp/ps5 -db_hard_mask 21 -outfmt 6 -num_threads 4	0	842c327203c75cbd	05c29d792843c8f2
+S4.blastx.window_neg40.dbsoft	blastx	-import_search_strategy {ss}/s3.blastx.window_neg40.ss -db tests/db_search/dbmaskp/ps5 -db_soft_mask 21 -outfmt 6	0	da3f65a55d72a9d1	a747df27a57adef1
+S4.blastx.window_neg40.dbsoft.nt4	blastx	-import_search_strategy {ss}/s3.blastx.window_neg40.ss -db tests/db_search/dbmaskp/ps5 -db_soft_mask 21 -outfmt 6 -num_threads 4	0	da3f65a55d72a9d1	a747df27a57adef1
+S4.tblastn.window_neg1.dbsoft	tblastn	-import_search_strategy {ss}/s3.tblastn.window_neg1.ss -db tests/db_search/dbmask/a5 -db_soft_mask 11 -outfmt 6	0	6d8c0bc67bc66098	46e57087af5cd7cb
+S4.tblastn.window_neg40.dbsoft	tblastn	-import_search_strategy {ss}/s3.tblastn.window_neg40.ss -db tests/db_search/dbmask/a5 -db_soft_mask 11 -outfmt 6	0	6d8c0bc67bc66098	46e57087af5cd7cb
+S4.tblastn.window_neg40.dbsoft.nt4	tblastn	-import_search_strategy {ss}/s3.tblastn.window_neg40.ss -db tests/db_search/dbmask/a5 -db_soft_mask 11 -outfmt 6 -num_threads 4	0	6d8c0bc67bc66098	46e57087af5cd7cb
+S4.tblastn.window_neg40.dbsoft_unsort	tblastn	-import_search_strategy {ss}/s3.tblastn.window_neg40.ss -db tests/db_search/dbmask/edge1 -db_soft_mask 11 -outfmt 6	0	4cb145d2401fe75a	46e57087af5cd7cb
+S4.tblastn.window_neg40.dbsoft_unsort.nt4	tblastn	-import_search_strategy {ss}/s3.tblastn.window_neg40.ss -db tests/db_search/dbmask/edge1 -db_soft_mask 11 -outfmt 6 -num_threads 4	0	4cb145d2401fe75a	46e57087af5cd7cb
+S4.tblastn.window_neg1.dbhard	tblastn	-import_search_strategy {ss}/s3.tblastn.window_neg1.ss -db tests/db_search/dbmask/a5 -db_hard_mask 11 -outfmt 6	0	4cb145d2401fe75a	46e57087af5cd7cb
+S4.tblastn.window_neg40.dbhard	tblastn	-import_search_strategy {ss}/s3.tblastn.window_neg40.ss -db tests/db_search/dbmask/a5 -db_hard_mask 11 -outfmt 6	0	4cb145d2401fe75a	46e57087af5cd7cb
+S4.tblastn.window_neg40.dbhard.nt4	tblastn	-import_search_strategy {ss}/s3.tblastn.window_neg40.ss -db tests/db_search/dbmask/a5 -db_hard_mask 11 -outfmt 6 -num_threads 4	0	4cb145d2401fe75a	46e57087af5cd7cb
+S4.tblastn.window_neg40.dbhard_ov	tblastn	-import_search_strategy {ss}/s3.tblastn.window_neg40.ss -db tests/db_search/dbmask/edge1 -db_hard_mask 12 -outfmt 6	0	654722ecee0f1862	46e57087af5cd7cb
+S4.tblastn.window_neg40.dbhard_ov.nt4	tblastn	-import_search_strategy {ss}/s3.tblastn.window_neg40.ss -db tests/db_search/dbmask/edge1 -db_hard_mask 12 -outfmt 6 -num_threads 4	0	654722ecee0f1862	46e57087af5cd7cb
+S4.tblastx.window_neg1.dbsoft	tblastx	-import_search_strategy {ss}/s3.tblastx.window_neg1.ss -db tests/db_search/dbmask/a5 -db_soft_mask 11 -outfmt 6	0	4bb8270e6939c81a	0939cacf4e0498aa
+S4.tblastx.window_neg40.dbsoft	tblastx	-import_search_strategy {ss}/s3.tblastx.window_neg40.ss -db tests/db_search/dbmask/a5 -db_soft_mask 11 -outfmt 6	0	bca3abefd5e26155	0939cacf4e0498aa
+S4.tblastx.window_neg40.dbsoft.nt4	tblastx	-import_search_strategy {ss}/s3.tblastx.window_neg40.ss -db tests/db_search/dbmask/a5 -db_soft_mask 11 -outfmt 6 -num_threads 4	0	bca3abefd5e26155	0939cacf4e0498aa
+S4.tblastx.window_neg40.dbsoft_unsort	tblastx	-import_search_strategy {ss}/s3.tblastx.window_neg40.ss -db tests/db_search/dbmask/edge1 -db_soft_mask 11 -outfmt 6	0	dad8ad1cb19d1b0e	0939cacf4e0498aa
+S4.tblastx.window_neg40.dbsoft_unsort.nt4	tblastx	-import_search_strategy {ss}/s3.tblastx.window_neg40.ss -db tests/db_search/dbmask/edge1 -db_soft_mask 11 -outfmt 6 -num_threads 4	0	dad8ad1cb19d1b0e	0939cacf4e0498aa
+S4.tblastx.window_neg1.dbhard	tblastx	-import_search_strategy {ss}/s3.tblastx.window_neg1.ss -db tests/db_search/dbmask/a5 -db_hard_mask 11 -outfmt 6	0	bce8c0a8cd93335b	0939cacf4e0498aa
+S4.tblastx.window_neg40.dbhard	tblastx	-import_search_strategy {ss}/s3.tblastx.window_neg40.ss -db tests/db_search/dbmask/a5 -db_hard_mask 11 -outfmt 6	0	894be53a9b497c93	0939cacf4e0498aa
+S4.tblastx.window_neg40.dbhard.nt4	tblastx	-import_search_strategy {ss}/s3.tblastx.window_neg40.ss -db tests/db_search/dbmask/a5 -db_hard_mask 11 -outfmt 6 -num_threads 4	0	894be53a9b497c93	0939cacf4e0498aa
+S4.tblastx.window_neg40.dbhard_ov	tblastx	-import_search_strategy {ss}/s3.tblastx.window_neg40.ss -db tests/db_search/dbmask/edge1 -db_hard_mask 12 -outfmt 6	0	e989ebd463fbb471	0939cacf4e0498aa
+S4.tblastx.window_neg40.dbhard_ov.nt4	tblastx	-import_search_strategy {ss}/s3.tblastx.window_neg40.ss -db tests/db_search/dbmask/edge1 -db_hard_mask 12 -outfmt 6 -num_threads 4	0	e989ebd463fbb471	0939cacf4e0498aa
+S4.blastp.ungapped_neg40.qbig	blastp	-import_search_strategy {ss}/s4.blastp.ungapped_neg40.ss -query tests/db_search/dbmaskp/qbig10000.faa -outfmt 6	0	0f6f2c52d93cd227	e5bce639ec191b67
+S4.blastp.ungapped_neg40.qbig.nt4	blastp	-import_search_strategy {ss}/s4.blastp.ungapped_neg40.ss -query tests/db_search/dbmaskp/qbig10000.faa -outfmt 6 -num_threads 4	0	0f6f2c52d93cd227	e5bce639ec191b67
+S4.blastx.window_neg40.dbhard	blastx	-import_search_strategy {ss}/s3.blastx.window_neg40.ss -db tests/db_search/dbmaskp/ps5n -db_hard_mask 21 -outfmt 6	0	018c18229de7136c	a747df27a57adef1
+S4.blastx.window_neg40.dbhard.nt4	blastx	-import_search_strategy {ss}/s3.blastx.window_neg40.ss -db tests/db_search/dbmaskp/ps5n -db_hard_mask 21 -outfmt 6 -num_threads 4	0	018c18229de7136c	a747df27a57adef1
+S4.blastp.window_neg40.dbhard_ov	blastp	-import_search_strategy {ss}/s3.blastp.window_neg40.ss -db tests/db_search/dbmaskp/ov_atha -db_hard_mask 21 -outfmt 6	0	7336641bdf8bcd1f	05c29d792843c8f2
+S4.blastp.window_neg40.dbhard_ov.nt4	blastp	-import_search_strategy {ss}/s3.blastp.window_neg40.ss -db tests/db_search/dbmaskp/ov_atha -db_hard_mask 21 -outfmt 6 -num_threads 4	0	7336641bdf8bcd1f	05c29d792843c8f2
+S4.blastx.window_neg40.dbhard_ov	blastx	-import_search_strategy {ss}/s3.blastx.window_neg40.ss -db tests/db_search/dbmaskp/ov_atha -db_hard_mask 21 -outfmt 6	0	929c2cfc85800124	a747df27a57adef1
+S4.blastx.window_neg40.dbhard_ov.nt4	blastx	-import_search_strategy {ss}/s3.blastx.window_neg40.ss -db tests/db_search/dbmaskp/ov_atha -db_hard_mask 21 -outfmt 6 -num_threads 4	0	929c2cfc85800124	a747df27a57adef1

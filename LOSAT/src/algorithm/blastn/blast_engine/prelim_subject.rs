@@ -1360,14 +1360,21 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
     combined_prelim_hits
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1432
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1354,1429-1432
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1677
 /// The shortest subject that the preliminary stage searches (the traceback skips the shorter
-/// ones too). NCBI skips only an empty subject; one shorter than a word has no word to scan
-/// (`BlastNaWordFinder`'s scan range ends below its start), so the scan's searches skip it, but
-/// the seeds of a MegaBLAST database index (`indexed`) can run past the end of a short sequence
-/// into the next one of the index's local id, so an indexed search searches it.
-pub(super) fn shortest_subject(effective_word_size: usize, indexed: bool) -> usize {
-    if indexed {
+/// ones too). NCBI skips only an empty subject (`min_subj_seq_length` is 1); one shorter than a
+/// word has no word to scan (`BlastNaWordFinder`'s scan range ends below its start), so a
+/// non-negative window's scan can skip it, but:
+/// - the seeds of a MegaBLAST database index (`indexed`) can run past the end of a short sequence
+///   into the next one of the index's local id, so an indexed search searches it;
+/// - with a negative window (`neg_window < 0`), `BlastNaWordFinder` still calls
+///   `Blast_ExtendWordExit` with the subject length, moving the carried diagonal table's offset by
+///   subject length plus window, which blocks later subjects' words, so any non-empty subject must
+///   reach `collect_subject_prelim` -> `neg_chunk_hits` (which exits on a short chunk while
+///   honoring masks and `-use_index`).
+pub(super) fn shortest_subject(effective_word_size: usize, indexed_or_neg: bool) -> usize {
+    if indexed_or_neg {
         1
     } else {
         effective_word_size
@@ -1468,9 +1475,10 @@ pub(super) fn prelim_subject<const UNGAPPED: bool>(
     if s_len_full
         < shortest_subject(
             effective_word_size,
-            batch
-                .mb_index
-                .is_some_and(|index| index.is_indexed(s_idx as u32)),
+            scan.neg_window < 0
+                || batch
+                    .mb_index
+                    .is_some_and(|index| index.is_indexed(s_idx as u32)),
         )
     {
         if db_masked {

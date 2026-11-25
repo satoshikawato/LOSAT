@@ -30,15 +30,16 @@ use super::{
     blastp_for_each_offset_pair_of, blastp_get_ungapped_hsp_context_with_bounds,
     blastp_restricted_align_enabled, blastp_save_init_hsp, blastp_timing_start,
     blastp_trace_init_hsp_overlaps_target, build_restricted_align_array_into,
-    chain_blastp_init_hsps, extend_preliminary_blastp_hit, ncbi_qsort_init_hsps_by_score,
-    ncbi_qsort_preliminary_hits, preliminary_hits_is_sorted_by_score_ncbi,
-    preliminary_score_compare, preliminary_tree_hsp, prepare_preliminary_hits_for_kappa_in_place,
-    rebuild_preliminary_interval_tree_from_list, remove_preliminary_hits_for_query,
-    should_retry_exact_preliminary_gapped_alignment, split_preliminary_hits_by_query_into,
-    x_bp_tree_max_cells, x_build_compact_preliminary_hsp_list, x_hits_flat, x_ih_pool, x_outlined,
-    x_soft_subject, BlastpContextLookupBounds, BlastpOffsetPairScanMode, BlastpPrelimValues,
-    BlastpRuntimeLookup, BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, BlastpTiming,
-    InitHSP, BLASTP_RESTRICTED_MULT,
+    chain_blastp_init_hsps, compute_diag_table_shape, extend_preliminary_blastp_hit,
+    ncbi_qsort_init_hsps_by_score, ncbi_qsort_preliminary_hits,
+    preliminary_hits_is_sorted_by_score_ncbi, preliminary_score_compare, preliminary_tree_hsp,
+    prepare_preliminary_hits_for_kappa_in_place, rebuild_preliminary_interval_tree_from_list,
+    remove_preliminary_hits_for_query, should_retry_exact_preliminary_gapped_alignment,
+    split_preliminary_hits_by_query_into, x_bp_tree_max_cells,
+    x_build_compact_preliminary_hsp_list, x_hits_flat, x_ih_pool, x_outlined, x_soft_subject,
+    BlastpContextLookupBounds, BlastpOffsetPairScanMode, BlastpPrelimValues, BlastpRuntimeLookup,
+    BlastpSubjectRef, BlastpSubjectResult, BlastpSubjectScratch, BlastpTiming, InitHSP,
+    NegBatchTable, BLASTP_RESTRICTED_MULT,
 };
 use crate::algorithm::blastn::interval_tree::TreeHsp;
 use crate::algorithm::blastp;
@@ -101,6 +102,12 @@ pub(super) struct BlastpPrelimKernel<'a> {
     /// inside the tree's bounds and are in order, so never): the call then stops with an error, as
     /// BLASTX's search does (`blastx::search::subject_hits_with`).
     pub(super) tree_without_end: &'a std::sync::atomic::AtomicBool,
+    /// Per-batch `(start, length)` in `concatenated_query` for a multi-batch call with a negative
+    /// `-window_size` (empty for single-batch calls and non-negative windows).
+    pub(super) neg_batch_layout: &'a [(i32, i32)],
+    /// Maps each context index to its batch index in `neg_batch_layout` (empty when
+    /// `neg_batch_layout` is empty).
+    pub(super) neg_batch_of_ctx: &'a [usize],
 }
 
 /// One subject with letters as `search_subject` hands it to its gapped half (`gapped_subject`): the
@@ -944,6 +951,22 @@ impl BlastpPrelimKernel<'_> {
         if subject.aa_len == 0 {
             return;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310,476-593
+        // A subject longer than `MAX_DBSEQ_LEN` (5,000,000 residues) is searched in overlapping
+        // chunks of `MAX_DBSEQ_LEN` with `DBSEQ_CHUNK_OVERLAP`, moving the carried diagonal offset
+        // after each chunk and merging each chunk's HSPs via `Blast_HSPListsMerge`.
+        if !chunk && subject.aa_len > crate::core::subject_split::MAX_DBSEQ_LEN {
+            self.search_long_subject_in_neg(
+                scratch,
+                s_idx,
+                subject,
+                subject_result,
+                values,
+                scan_ranges,
+            );
+            return;
+        }
+        self.ensure_neg_batches(scratch);
         let word_cutoff_scores = values.word_cutoff_scores;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:114-116,127
         let subject_sequence = &subject.aa_seq[1..];
@@ -952,10 +975,13 @@ impl BlastpPrelimKernel<'_> {
         init_hsps.clear();
         let diag_offset = scratch.neg_offset;
         let matrix = args.scoring.matrix;
+        let multi_batch = !scratch.neg_batches.is_empty();
+        let neg_batch_of_ctx = self.neg_batch_of_ctx;
         let mut ring = DiagRing {
             entries: &mut scratch.diag_array,
             mask: diag_mask,
         };
+        let neg_batches = &mut scratch.neg_batches;
 
         let scan_ungapped_start = blastp_timing_start(timing_enabled);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:772-802
@@ -964,15 +990,32 @@ impl BlastpPrelimKernel<'_> {
                 i32::try_from(pair.q_off).expect("NCBI BLAST query offset must fit in Int4");
             let subject_offset =
                 i32::try_from(pair.s_off).expect("NCBI BLAST subject offset must fit in Int4");
-            let diag_entry = ring.one_hit_entry(query_offset, subject_offset);
-            if neg_window_diff(subject_offset, diag_entry.last_hit(), diag_offset) < 0 {
-                return;
-            }
-            let ctx_idx = blastp_context_idx_for_query_offset_with_bounds(
-                contexts.as_slice(),
-                context_lookup_bounds,
-                query_offset,
-            );
+            let (ctx_idx, diag_entry, batch_offset) = if multi_batch {
+                let ctx_idx = blastp_context_idx_for_query_offset_with_bounds(
+                    contexts.as_slice(),
+                    context_lookup_bounds,
+                    query_offset,
+                );
+                let batch = &mut neg_batches[neg_batch_of_ctx[ctx_idx]];
+                let q_local = query_offset - batch.start;
+                let diag_idx = (subject_offset.wrapping_sub(q_local) & batch.mask) as usize;
+                let diag_entry = &mut batch.entries[diag_idx];
+                if neg_window_diff(subject_offset, diag_entry.last_hit(), batch.offset) < 0 {
+                    return;
+                }
+                (ctx_idx, diag_entry, batch.offset)
+            } else {
+                let diag_entry = ring.one_hit_entry(query_offset, subject_offset);
+                if neg_window_diff(subject_offset, diag_entry.last_hit(), diag_offset) < 0 {
+                    return;
+                }
+                let ctx_idx = blastp_context_idx_for_query_offset_with_bounds(
+                    contexts.as_slice(),
+                    context_lookup_bounds,
+                    query_offset,
+                );
+                (ctx_idx, diag_entry, diag_offset)
+            };
             let x_drop = x_dropoff_per_context[ctx_idx];
             let cutoff = word_cutoff_scores[ctx_idx];
             let Some(ungapped_hit) = extend_one_hit_for(
@@ -1002,7 +1045,7 @@ impl BlastpPrelimKernel<'_> {
             diag_entry.set_last_hit(neg_window_last_hit(
                 ungapped_hit.s_last_off,
                 word_size,
-                diag_offset,
+                batch_offset,
             ));
         };
         if let Some(ranges) = scan_ranges {
@@ -1154,12 +1197,167 @@ impl BlastpPrelimKernel<'_> {
         self.gapped_subject(scratch, s_idx, scanned, subject_result, init_hsps, true)
     }
 
+    /// Lazily initializes per-batch carried diagonal tables for a multi-batch negative-window call.
+    #[inline]
+    fn ensure_neg_batches(&self, scratch: &mut BlastpSubjectScratch) {
+        if self.neg_batch_layout.is_empty() || !scratch.neg_batches.is_empty() {
+            return;
+        }
+        let window = self.window;
+        scratch.neg_batches = self
+            .neg_batch_layout
+            .iter()
+            .map(|&(start, length)| {
+                let (size, mask) = compute_diag_table_shape(length, window);
+                NegBatchTable {
+                    start,
+                    entries: vec![
+                        DiagStruct::default();
+                        usize::try_from(size)
+                            .expect("NCBI BLAST diagonal array size must fit in usize")
+                    ],
+                    mask,
+                    offset: i64::from(window),
+                }
+            })
+            .collect();
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310,476-593
+    /// Searches a subject longer than `MAX_DBSEQ_LEN` (5,000,000 residues) in NCBI's overlapping
+    /// chunks for a negative `-window_size`, advancing the carried diagonal table after each
+    /// searched chunk and merging chunk HSP lists with `Blast_HSPListsMerge`.
+    #[cold]
+    #[inline(never)]
+    fn search_long_subject_in_neg(
+        &self,
+        scratch: &mut BlastpSubjectScratch,
+        s_idx: usize,
+        subject: BlastpSubjectRef<'_>,
+        subject_result: &mut BlastpSubjectResult,
+        values: &BlastpPrelimValues<'_>,
+        scan_ranges: Option<&[(i32, i32)]>,
+    ) {
+        use crate::core::subject_split::{DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
+
+        let residues = &subject.aa_seq[1..=subject.aa_len];
+        let mut next = 0usize;
+        let mut sm_index = 0usize;
+        let mut combined: Vec<BlastpPreliminaryHsp> = Vec::new();
+        let mut chunk_seq: Vec<u8> = Vec::new();
+        let mut chunk_ranges: Vec<(i32, i32)> = Vec::new();
+
+        while next < subject.aa_len {
+            let offset = next;
+            let chunk_len = if offset + MAX_DBSEQ_LEN < subject.aa_len {
+                next = offset + MAX_DBSEQ_LEN - DBSEQ_CHUNK_OVERLAP;
+                MAX_DBSEQ_LEN
+            } else {
+                next = subject.aa_len;
+                subject.aa_len - offset
+            };
+            let chunk_scan_ranges = if let Some(ranges) = scan_ranges {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:280-310
+                let start_pos = offset as i32;
+                let end_pos = (offset + chunk_len) as i32;
+                let mut i = sm_index;
+                while i < ranges.len() && ranges[i].1 < start_pos {
+                    i += 1;
+                }
+                let first = i;
+                while i < ranges.len() && ranges[i].0 < end_pos {
+                    i += 1;
+                }
+                sm_index = i.saturating_sub(1);
+                if i == first {
+                    continue;
+                }
+                chunk_ranges.clear();
+                for &(left, right) in &ranges[first..i] {
+                    chunk_ranges.push((left - start_pos, right - start_pos));
+                }
+                chunk_ranges[0].0 = chunk_ranges[0].0.max(0);
+                let last = chunk_ranges.len() - 1;
+                chunk_ranges[last].1 = chunk_ranges[last].1.min(chunk_len as i32);
+                Some(chunk_ranges.as_slice())
+            } else {
+                None
+            };
+
+            chunk_seq.clear();
+            chunk_seq.push(0);
+            chunk_seq.extend_from_slice(&residues[offset..offset + chunk_len]);
+            chunk_seq.push(0);
+            let chunk_subject = BlastpSubjectRef {
+                aa_seq: &chunk_seq,
+                aa_len: chunk_len,
+            };
+            self.search_subject_in_neg(
+                scratch,
+                s_idx,
+                chunk_subject,
+                subject_result,
+                values,
+                chunk_scan_ranges,
+                true,
+            );
+            if scratch.preliminary_hsp_list.is_empty() {
+                continue;
+            }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:578-591
+            let off_i32 = offset as i32;
+            for hsp in &mut scratch.preliminary_hsp_list {
+                hsp.subject_start += off_i32;
+                hsp.subject_end += off_i32;
+                hsp.gapped_subject_start += off_i32;
+            }
+            let overlap = if offset == 0 {
+                0
+            } else {
+                DBSEQ_CHUNK_OVERLAP as i32
+            };
+            merge_prelim_subject_chunks(
+                &mut combined,
+                &mut scratch.preliminary_hsp_list,
+                off_i32,
+                overlap,
+                !self.args.ungapped,
+            );
+            if self.args.subject_besthit {
+                self.subject_besthit(&mut combined);
+            }
+        }
+        self.subject_lists(
+            scratch,
+            s_idx,
+            subject.aa_len,
+            values,
+            &mut combined,
+            subject_result,
+        );
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-172
     /// `Blast_ExtendWordExit` of a negative window after a subject or hard chunk of `length` letters
     /// (NCBI's `Int4`: negative for a chunk between overlapping masks): the scratch's diagonal
     /// offset moved on, or the table cleared (`neg_window_exit`).
     pub(super) fn neg_window_exit_of(&self, scratch: &mut BlastpSubjectScratch, length: i64) {
+        self.ensure_neg_batches(scratch);
         let window = self.window;
+        if !scratch.neg_batches.is_empty() {
+            for batch in &mut scratch.neg_batches {
+                let (next_offset, cleared) = neg_window_exit(batch.offset, window, length);
+                if cleared {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-106
+                    for diag in &mut batch.entries {
+                        *diag = DiagStruct::default();
+                        diag.set_last_hit(neg_window_cleared_last_hit(window));
+                    }
+                }
+                batch.offset = next_offset;
+            }
+            return;
+        }
         let (next_offset, cleared) = neg_window_exit(scratch.neg_offset, window, length);
         if cleared {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-106
@@ -1914,6 +2112,117 @@ fn neg_window_exit(diag_offset: i64, window: i32, length: i64) -> (i64, bool) {
 /// The `last_hit` of a cleared entry: minus the window, in the entry's 31 bits.
 fn neg_window_cleared_last_hit(window: i32) -> i32 {
     (-i64::from(window)) as i32
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-3035 (`Blast_HSPListsMerge`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2749-2766 (`s_BlastHSPListsCombineByScore`)
+/// Merges a subject chunk's preliminary HSP list `incoming` into `combined` for a split protein
+/// subject (protein split path where `contexts_per_query` is negative and `kHspNumMax` is
+/// `INT4_MAX`).
+fn merge_prelim_subject_chunks(
+    combined: &mut Vec<BlastpPreliminaryHsp>,
+    incoming: &mut Vec<BlastpPreliminaryHsp>,
+    split_offset: i32,
+    chunk_overlap: i32,
+    allow_gap: bool,
+) {
+    if incoming.is_empty() {
+        return;
+    }
+    if combined.is_empty() {
+        combined.append(incoming);
+        return;
+    }
+    let mut hspcnt1 = 0usize;
+    for index1 in 0..combined.len() {
+        if combined[index1].subject_end > split_offset {
+            combined.swap(hspcnt1, index1);
+            hspcnt1 += 1;
+        }
+    }
+    let mut hspcnt2 = 0usize;
+    let overlap_end = i64::from(split_offset) + i64::from(chunk_overlap);
+    for index2 in 0..incoming.len() {
+        if i64::from(incoming[index2].subject_start) < overlap_end {
+            incoming.swap(hspcnt2, index2);
+            hspcnt2 += 1;
+        }
+    }
+    if hspcnt1 > 0 && hspcnt2 > 0 {
+        let mut dropped = vec![false; incoming.len()];
+        for hsp1 in combined.iter_mut().take(hspcnt1) {
+            for index2 in 0..hspcnt2 {
+                if dropped[index2] {
+                    continue;
+                }
+                let hsp2 = &incoming[index2];
+                if hsp1.query_context != hsp2.query_context {
+                    continue;
+                }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1465-1478,1537
+                let end_diag = i64::from(hsp1.query_end) - i64::from(hsp1.subject_end);
+                let start_diag = i64::from(hsp2.query_start) - i64::from(hsp2.subject_start);
+                if (end_diag - start_diag).abs() < 10
+                    && merge_two_prelim_hsps(hsp1, hsp2, allow_gap)
+                {
+                    dropped[index2] = true;
+                }
+            }
+        }
+        let mut idx = 0usize;
+        incoming.retain(|_| {
+            let keep = !dropped[idx];
+            idx += 1;
+            keep
+        });
+    }
+    combined.append(incoming);
+    ncbi_qsort_preliminary_hits(combined, preliminary_score_compare);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1488-1531 (`s_BlastMergeTwoHSPs`)
+fn merge_two_prelim_hsps(
+    hsp1: &mut BlastpPreliminaryHsp,
+    hsp2: &BlastpPreliminaryHsp,
+    allow_gap: bool,
+) -> bool {
+    if !allow_gap
+        && (i64::from(hsp1.subject_start)
+            - i64::from(hsp2.subject_start)
+            - i64::from(hsp1.query_start)
+            + i64::from(hsp2.query_start))
+            != 0
+    {
+        return false;
+    }
+    if hsp1.subject_frame != hsp2.subject_frame {
+        return false;
+    }
+    let contained = |q: i32, s: i32| {
+        hsp1.query_start <= q
+            && hsp1.query_end >= q
+            && hsp1.subject_start <= s
+            && hsp1.subject_end >= s
+    };
+    if !contained(hsp2.query_start, hsp2.subject_start)
+        && !contained(hsp2.query_end, hsp2.subject_end)
+    {
+        return false;
+    }
+    let score_density = f64::from(hsp1.raw_score + hsp2.raw_score)
+        / f64::from((hsp1.query_end - hsp1.query_start) + (hsp2.query_end - hsp2.query_start));
+    hsp1.query_start = hsp1.query_start.min(hsp2.query_start);
+    hsp1.subject_start = hsp1.subject_start.min(hsp2.subject_start);
+    hsp1.query_end = hsp1.query_end.max(hsp2.query_end);
+    hsp1.subject_end = hsp1.subject_end.max(hsp2.subject_end);
+    if hsp2.raw_score > hsp1.raw_score {
+        hsp1.gapped_query_start = hsp2.gapped_query_start;
+        hsp1.gapped_subject_start = hsp2.gapped_subject_start;
+        hsp1.raw_score = hsp2.raw_score;
+    }
+    let merged_score = (score_density * f64::from(hsp1.query_end - hsp1.query_start)) as i32;
+    hsp1.raw_score = merged_score.max(hsp1.raw_score);
+    true
 }
 
 #[cfg(test)]

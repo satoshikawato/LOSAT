@@ -451,6 +451,9 @@ pub(crate) struct TypedReader<I: Input> {
     /// The levels of the nest that `typed::nest` reads, outermost first: NCBI's recursion of
     /// `ReadChoiceSimple` and `ReadContainer` as a list on the heap (`NestLevel`).
     pub(super) nest: Vec<NestLevel>,
+    /// The root type of the document being read (`document`), which scopes `other_type`'s class
+    /// lookup to the types NCBI's reader builds for that root (`NO_TYPE` outside a document).
+    root: u16,
     /// Whether a value of another class than the declared one is being read (`other_type`).
     reading_other: bool,
 }
@@ -562,6 +565,7 @@ impl<I: Input> TypedReader<I> {
             utf8_once: Utf8TagOnce::default(),
             names,
             nest: Vec::new(),
+            root: NO_TYPE,
             reading_other: false,
         }
     }
@@ -731,6 +735,7 @@ impl<I: Input> TypedReader<I> {
     /// `stream >> object` of the root type `root`: `SkipFileHeader`, then `Read` (here `read`),
     /// each in a named frame of its own.
     fn document<T>(&mut self, root: u16, read: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
+        self.root = root;
         self.push(FrameKind::Named, root, false);
         let header = self.file_header(super::type_info(root).name());
         self.pop(header)?;
@@ -875,22 +880,27 @@ impl<I: Input> TypedReader<I> {
     /// psiblast's and tblastn's PSSM reader report with a message of their own
     /// (`Names::own_serial_message`; NCBI 2.17.0 rc 1 for `:Object-id`, `:Pssm`, `:No-such-type`
     /// where params belongs and `:Bioseq` where the query belongs, text and binary, probe
-    /// D3c-3b): there the value is read as the table's class of that name, if any, and the read
-    /// ends with the error. A class outside the table is one that the PSSM's read never builds,
-    /// and nothing before the read builds it: "class not found" (NCBI 2.17.0 with a number that is
-    /// not one inside `:Blast4-cutoff`, `:Seq-submit`, `:Hit`; probe D3c-3b probe9). What NCBI
-    /// does only when it knows the class (a message posted while the value is read, an error of
-    /// another kind inside it: `:Object-id id x` is its exception report, exit status 255, in
-    /// probe9), a value of another class inside it, a skip (`SkipPointer` skips a class it knows
-    /// and stops at another) and the other streams (makeblastdb prints the exception's own text)
-    /// are LOSAT's refusal.
+    /// D3c-3b): there the value is read as the class named `name` if the stream's root type
+    /// (`self.root`, e.g. `PssmWithParameters`) reaches it through members, choices, lists and
+    /// aliases (`class_named_from`), and the read ends with the error. A class not reached by the
+    /// root — even if another root in the table holds it, such as `Blast4-cutoff`,
+    /// `Blast4-request`, `Blast-def-line-set` or `Blast-db-mask-info` while reading a PSSM — is
+    /// one that the read never builds, and nothing before the read builds it: "class not found"
+    /// (NCBI 2.17.0 with a number that is not one inside `:Blast4-cutoff`, `:Blast4-request`,
+    /// `:Blast-def-line-set`, `:Blast-db-mask-info`, `:Seq-submit`, `:Hit`; probe D3c-3b probe9
+    /// and PR #1640 review). What NCBI does only when it knows the class (a message posted while
+    /// the value is read, an error of another kind inside it: `:Object-id id x` is its exception
+    /// report, exit status 255, in probe9), a value of another class inside it, a skip
+    /// (`SkipPointer` skips a class it knows and stops at another) and the other streams
+    /// (makeblastdb and search-strategy import print the exception's own text, so
+    /// `own_serial_message` is false there) are LOSAT's refusal.
     #[cold]
     #[inline(never)]
     fn other_type(&mut self, name: &[u8], declared: &str, skip: bool) -> Fail {
         if skip || !self.names.own_serial_message || self.reading_other {
             return self.other_type_refusal(name, declared);
         }
-        let Some(class) = super::class_named(name) else {
+        let Some(class) = super::class_named_from(self.root, name) else {
             return Fail::serial(NcbiException::new(
                 CLASS_NOT_FOUND,
                 format!("class not found: {}", String::from_utf8_lossy(name)),

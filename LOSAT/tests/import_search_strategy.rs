@@ -253,3 +253,186 @@ fn a_strategy_value_that_losat_does_not_run_is_refused_in_losat_words() {
     }
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(tag: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "losat_import_search_strategy_{tag}_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        Self(dir)
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// PR #1640 review 4 (5.B1): BLASTN with a negative `WindowSize` on a database containing subjects
+/// shorter than the word size (`dbA`: s1, ten 5-base subjects, s3; `dbB`: s1, s3). Each non-empty
+/// short subject must still exit the carried diagonal table (moving its offset by length plus
+/// window), blocking s3 in `dbA` (1 row) while `dbB` reports both s3 and s1 (2 rows), matching
+/// NCBI BLAST+ 2.17.0.
+#[test]
+fn blastn_negative_window_short_subjects_in_database_match_ncbi() {
+    let dir = TempDir::new("bn_short_subj");
+    let ss = fixtures().join("ss/s4.blastn.short_subj.ss");
+    let want_a = frozen(
+        cases()
+            .iter()
+            .find(|c| c.name == "S4.blastn.short_subj_A")
+            .expect("S4.blastn.short_subj_A")
+            .out
+            .as_str(),
+    );
+    let want_b = frozen(
+        cases()
+            .iter()
+            .find(|c| c.name == "S4.blastn.short_subj_B")
+            .expect("S4.blastn.short_subj_B")
+            .out
+            .as_str(),
+    );
+    assert_ne!(want_a, want_b, "A must block s3 while B reports s3 and s1");
+    for (label, fasta, want) in [
+        ("dbA", "short_subj_A.fna", &want_a),
+        ("dbB", "short_subj_B.fna", &want_b),
+    ] {
+        let db = dir.path().join(label);
+        let mk = Command::new(BIN)
+            .current_dir(engine())
+            .args([
+                "makeblastdb",
+                "-in",
+                &format!("tests/fixtures/strategy/import/in/{fasta}"),
+                "-dbtype",
+                "nucl",
+                "-out",
+                db.to_str().expect("utf8"),
+            ])
+            .stdin(Stdio::null())
+            .output()
+            .expect("makeblastdb");
+        assert!(mk.status.success(), "{label} makeblastdb: {mk:?}");
+        for threads in ["1", "4"] {
+            let out = Command::new(BIN)
+                .current_dir(engine())
+                .args([
+                    "blastn",
+                    "-import_search_strategy",
+                    ss.to_str().expect("utf8"),
+                    "-db",
+                    db.to_str().expect("utf8"),
+                    "-outfmt",
+                    "6",
+                    "-num_threads",
+                    threads,
+                ])
+                .stdin(Stdio::null())
+                .output()
+                .expect("blastn");
+            assert_eq!(out.status.code(), Some(0), "{label} t={threads}: {out:?}");
+            assert_eq!(
+                out.stdout, *want,
+                "{label} t={threads}: stdout differs from NCBI 2.17.0"
+            );
+        }
+    }
+}
+
+/// PR #1640 review 4 (5.S1): BLASTP with a negative `WindowSize` (-40) over a subject longer than
+/// `MAX_DBSEQ_LEN` (5,000,500 residues, with motifs in chunk 0, across the 4,999,900..5,000,000
+/// overlap, and in chunk 1, followed by a second subject `s2`) matches NCBI BLAST+ 2.17.0 bytes
+/// for both `-subject` and `-db` at 1 and 4 threads.
+#[test]
+fn blastp_negative_window_searches_subject_over_5m_residues_as_ncbi() {
+    let dir = TempDir::new("bp_long5m");
+    let motif = b"MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
+    let mut seq = vec![b'A'; 5_000_500];
+    for pos in [100usize, 4_999_880, 5_000_200] {
+        seq[pos..pos + motif.len()].copy_from_slice(motif);
+    }
+    let fasta = dir.path().join("long5m.faa");
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&fasta).expect("create long5m.faa");
+        f.write_all(b">long1 5000500 aa\n").expect("write");
+        f.write_all(&seq).expect("write");
+        f.write_all(b"\n>s2 short after long\n").expect("write");
+        f.write_all(motif).expect("write");
+        f.write_all(b"\n").expect("write");
+    }
+    let db = dir.path().join("long5m");
+    let mk = Command::new(BIN)
+        .current_dir(engine())
+        .args([
+            "makeblastdb",
+            "-in",
+            fasta.to_str().expect("utf8"),
+            "-dbtype",
+            "prot",
+            "-out",
+            db.to_str().expect("utf8"),
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("makeblastdb");
+    assert!(mk.status.success(), "makeblastdb: {mk:?}");
+
+    // Frozen NCBI BLAST+ 2.17.0 `-num_threads 1` bytes (identical for `-subject` and `-db`).
+    let want_out = concat!(
+        "lcl|Query_1\tlong1\t100.000\t140\t0\t0\t1\t140\t101\t240\t3.92e-109\t338\n",
+        "lcl|Query_1\tlong1\t100.000\t140\t0\t0\t1\t140\t4999881\t5000020\t3.92e-109\t338\n",
+        "lcl|Query_1\tlong1\t100.000\t140\t0\t0\t1\t140\t5000201\t5000340\t3.92e-109\t338\n",
+        "lcl|Query_1\ts2\t100.000\t140\t0\t0\t1\t140\t1\t140\t1.53e-104\t293\n",
+    );
+    let want_err = concat!(
+        "Warning: [blastp] Overriding database/subject in saved strategy\n",
+        "Warning: [blastp] mt_mode cannot be overridden when using a search strategy\n",
+    );
+    let ss = fixtures().join("ss/s3.blastp.window_neg40.ss");
+    for (flag, target) in [
+        ("-subject", fasta.to_str().expect("utf8")),
+        ("-db", db.to_str().expect("utf8")),
+    ] {
+        for threads in ["1", "4"] {
+            let out = Command::new(BIN)
+                .current_dir(engine())
+                .args([
+                    "blastp",
+                    "-import_search_strategy",
+                    ss.to_str().expect("utf8"),
+                    flag,
+                    target,
+                    "-outfmt",
+                    "6",
+                    "-num_threads",
+                    threads,
+                ])
+                .stdin(Stdio::null())
+                .output()
+                .expect("blastp");
+            assert_eq!(out.status.code(), Some(0), "{flag} t={threads}: {out:?}");
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout),
+                want_out,
+                "{flag} t={threads} stdout"
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&out.stderr),
+                want_err,
+                "{flag} t={threads} stderr"
+            );
+        }
+    }
+}

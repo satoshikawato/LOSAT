@@ -262,11 +262,18 @@ pub(crate) fn type_info(ty: u16) -> &'static TypeInfo {
     &table::TYPES[usize::from(ty)]
 }
 
-/// The class of the table named `name`: a SEQUENCE, a CHOICE or a named SEQUENCE OF or SET OF
+/// The class of the table named `name` that the stream's root type `root` reaches through
+/// members, choices, lists and aliases: a SEQUENCE, a CHOICE or a named SEQUENCE OF or SET OF
 /// (NCBI's implicit class), the types that NCBI's registry of classes holds by their names
-/// (`CClassTypeInfoBase::GetClassInfoByName`; an ENUMERATED or an alias is no class there).
-pub(crate) fn class_named(name: &[u8]) -> Option<u16> {
-    table::TYPES
+/// (`CClassTypeInfoBase::GetClassInfoByName`; an ENUMERATED or an alias is no class there) once
+/// NCBI's reader has built the type information of `root`. A class that the table holds for
+/// another root (such as `Blast4-*` or `Blast-def-line-set` while reading `PssmWithParameters`)
+/// is not built during a read of `root`, so NCBI reports `class not found` for it.
+///
+/// NCBI reference (598d8ae6): c++/src/serial/typeinfo.cpp:365-395
+/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1244-1275
+pub(crate) fn class_named_from(root: u16, name: &[u8]) -> Option<u16> {
+    let target = table::TYPES
         .iter()
         .position(|info| {
             !info.name().is_empty()
@@ -276,7 +283,43 @@ pub(crate) fn class_named(name: &[u8]) -> Option<u16> {
                     Kind::Sequence(_) | Kind::Choice(_) | Kind::List { .. }
                 )
         })
-        .map(|index| u16::try_from(index).expect("the table's index"))
+        .map(|index| u16::try_from(index).expect("the table's index"))?;
+    if usize::from(root) >= table::TYPES.len() {
+        return None;
+    }
+    let mut seen = vec![false; table::TYPES.len()];
+    let mut stack = vec![root];
+    seen[usize::from(root)] = true;
+    while let Some(ty) = stack.pop() {
+        if ty == target {
+            return Some(target);
+        }
+        match type_info(ty).kind {
+            Kind::Sequence(span) | Kind::Choice(span) => {
+                for member in span.members() {
+                    let next = member.ty;
+                    if !seen[usize::from(next)] {
+                        seen[usize::from(next)] = true;
+                        stack.push(next);
+                    }
+                }
+            }
+            Kind::List { element: next, .. } | Kind::Alias(next) => {
+                if !seen[usize::from(next)] {
+                    seen[usize::from(next)] = true;
+                    stack.push(next);
+                }
+            }
+            Kind::Integer(_)
+            | Kind::Enumerated { .. }
+            | Kind::Boolean
+            | Kind::Null
+            | Kind::Real
+            | Kind::String(_)
+            | Kind::Octets => {}
+        }
+    }
+    None
 }
 
 /// The type `ty` with its aliases followed.

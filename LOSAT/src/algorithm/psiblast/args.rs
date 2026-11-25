@@ -192,7 +192,7 @@ impl PsiblastArgs {
             query: args.option_or_default("query")?,
             subject: args.given_option("subject")?,
             db: args.given_option("db")?,
-            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args(args)?,
+            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args_with_ipg(args)?,
             dbsize: args.given_option("dbsize")?,
             show_gis: args.flag("show_gis"),
             parse_deflines: args.flag("parse_deflines"),
@@ -287,7 +287,7 @@ impl PsiblastArgs {
             db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
-            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::reader::named_refusal`).
+            // LOSAT refuses psiblast's `-html` (`cli::reader::named_refusal`).
             html: false,
             parse_deflines: self.parse_deflines,
             id_scope: None,
@@ -338,6 +338,7 @@ impl PsiblastArgs {
             taxdb_setting: None,
             matrix_search: None,
             write_verification: None,
+            read_verification: Default::default(),
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
             scope_refusal: self.scope_refusal.clone(),

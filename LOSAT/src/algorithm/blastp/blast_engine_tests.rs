@@ -526,6 +526,7 @@ fn make_blastp_args() -> BlastpArgs {
         taxdb_setting: None,
         matrix_search: None,
         write_verification: None,
+        read_verification: Default::default(),
         inclusion_ethresh: None,
         gap_trigger: None,
         sum_stats: false,
@@ -2542,6 +2543,53 @@ fn x_query_block_plan_is_kept_without_the_gumbel_block_but_for_a_count_of_0() {
     assert_eq!(plan(&searchsp, &counts_0), None);
     assert_eq!(plan(&old_fsc, &counts_0), None);
     assert!(plan(&gumbel, &counts_0).is_some_and(|blocks| blocks > 1));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:192-201
+// Line RG item X-short-bat-2: the refusal of a compressed table whose words fill NCBI's overflow
+// banks is the failure of the batch of the first table that fills them (`banks_filled_refusal`):
+// a batch that NCBI splits has no table among NCBI's tables (its chunks are searches of their own,
+// whose one table names the chunk's call's first query, made its batch's by
+// `search_split_query_batches`); an ungapped search splits none. One query per batch; the second
+// of 20,000 letters is split at the default chunk size.
+#[test]
+fn banks_filled_refusal_names_the_batch_of_the_table() {
+    let records = x_block_test_records(&[100, 20000, 100, 100]);
+    let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
+    let batches = seq_range::QueryInput::whole(&records).batches(1);
+    assert_eq!(batches.len(), 4);
+    let resolve = |ungapped: bool| {
+        let mut args = make_blastp_args();
+        args.task = "blastp-fast".to_string();
+        // An ungapped search takes no composition adjustment.
+        args.comp_based_stats = "0".to_string();
+        args.ungapped = ungapped;
+        args.resolve().expect("resolved blastp-fast args")
+    };
+    let gapped = resolve(false);
+    let ungapped = resolve(true);
+    let named = |args: &ResolvedBlastpArgs, filled: usize, chunk: bool| {
+        let failure = banks_filled_refusal(args, &batches, &lengths, chunk, BanksFilled(filled))
+            .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
+            .expect("a batch's failure");
+        assert!(
+            failure.error.to_string().contains("1024 overflow banks"),
+            "{}",
+            failure.error
+        );
+        failure.query
+    };
+    for (filled, query) in [(0, 0), (1, 2), (2, 3)] {
+        assert_eq!(named(&gapped, filled, false), Some(query), "table {filled}");
+    }
+    for filled in 0..4 {
+        assert_eq!(
+            named(&ungapped, filled, false),
+            Some(filled),
+            "table {filled}"
+        );
+    }
+    assert_eq!(named(&gapped, 0, true), Some(0));
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the contexts of the search of all queries whose preliminary

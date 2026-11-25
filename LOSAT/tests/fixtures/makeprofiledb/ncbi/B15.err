@@ -1,0 +1,9 @@
+Error: (803.7) PssmWithParameters.pssm.query.seq.descr.E.title
+Bad char [0x1] in string at byte 97
+reviewprofile é01 len 3
+Error: (803.7) PssmWithParameters.pssm.query.seq.descr.E.title
+Bad char [0xC3] in string at byte 97
+review#profile é01 len 3
+Error: (803.7) PssmWithParameters.pssm.query.seq.descr.E.title
+Bad char [0xA9] in string at byte 97
+review#profile #�01 len 3

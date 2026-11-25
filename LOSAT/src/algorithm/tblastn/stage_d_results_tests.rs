@@ -201,3 +201,121 @@ fn saved_local_kappa_pop_hitlist_update_and_reverse_match_ncbi() {
         assert!(updates > 0 && reversed, "{trace}");
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1632-1638
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1568-1580
+/// `-subject`'s records are sorted, then mapped once: an end segment with a gap row goes (its
+/// letters move the starts and leave the columns, gap letters and openings; the query's are kept
+/// as `query_left_out` for the coverage), and a second call, which a report of several formats
+/// makes, neither sorts nor maps again (the script `[Del, Ins, ..]` would lose its `Ins` too).
+/// `-db`'s records are sorted only.
+#[test]
+fn put_in_report_order_maps_subject_records_once() {
+    use crate::common::GapEditOp::{self, Del, Ins, Sub};
+    use crate::core::composition_adjustment::redo_alignment::EMatrixAdjustRule;
+    let entry = |evalue: f64, edit_script: Vec<GapEditOp>| {
+        let [q, s] = edit_script.iter().fold([0, 0], |[q, s], op| match *op {
+            Sub(n) => [q + n as i32, s + n as i32],
+            Ins(n) => [q + n as i32, s],
+            Del(n) => [q, s + n as i32],
+        });
+        let gap_letters = edit_script
+            .iter()
+            .filter(|op| !op.is_sub())
+            .map(|op| op.num() as usize)
+            .sum();
+        let linked = LinkedHsp {
+            context: 0,
+            hsp: GappedHsp {
+                frame: 1,
+                score: 40,
+                q_start: 0,
+                q_end: q,
+                q_gapped_start: 0,
+                s_start: 5,
+                s_end: 5 + s,
+                s_gapped_start: 5,
+            },
+            num: 1,
+            evalue,
+            source_index: 0,
+        };
+        let payload = KappaHspPayload {
+            bit_score: 20.0,
+            num_ident: 10,
+            num_positives: 10,
+            report_num_ident: 10,
+            report_mismatches: 0,
+            align_length: edit_script.iter().map(|op| op.num() as usize).sum(),
+            mismatches: 0,
+            gap_opens: 2,
+            gap_letters,
+            edit_script,
+            matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
+            query_left_out: 0,
+        };
+        (linked, payload)
+    };
+    let made = || {
+        let (a, pa) = entry(1e-3, vec![Del(3), Ins(2), Sub(10)]);
+        let (b, pb) = entry(1e-5, vec![Ins(4), Sub(10), Del(1)]);
+        let mut hit_list = KappaResultHitList::new(500).unwrap();
+        hit_list
+            .update(KappaResultList {
+                oid: 0,
+                hsps: LinkedHspList {
+                    hsps: vec![a, b],
+                    best_evalue: 1e-5,
+                },
+                payloads: vec![pa, pb],
+            })
+            .unwrap();
+        hit_list
+    };
+    type Row = ((i32, i32), (i32, i32), [usize; 4], Vec<GapEditOp>);
+    let rows = |hit_list: &KappaResultHitList| -> Vec<Row> {
+        let list = &hit_list.lists()[0];
+        list.hsps
+            .hsps
+            .iter()
+            .zip(&list.payloads)
+            .map(|(l, p)| {
+                (
+                    (l.hsp.q_start, l.hsp.q_end),
+                    (l.hsp.s_start, l.hsp.s_end),
+                    [p.align_length, p.gap_letters, p.gap_opens, p.query_left_out],
+                    p.edit_script.clone(),
+                )
+            })
+            .collect()
+    };
+    let mapped = vec![
+        ((4, 14), (5, 15), [10, 0, 0, 4], vec![Sub(10)]),
+        ((0, 12), (8, 18), [12, 2, 1, 0], vec![Ins(2), Sub(10)]),
+    ];
+    let mut subject = made();
+    subject.put_in_report_order(true);
+    assert_eq!(rows(&subject), mapped);
+    subject.put_in_report_order(true);
+    assert_eq!(rows(&subject), mapped);
+
+    let mut db = made();
+    db.put_in_report_order(false);
+    assert_eq!(
+        rows(&db),
+        vec![
+            (
+                (0, 14),
+                (5, 16),
+                [15, 5, 2, 0],
+                vec![Ins(4), Sub(10), Del(1)]
+            ),
+            (
+                (0, 12),
+                (5, 18),
+                [15, 5, 2, 0],
+                vec![Del(3), Ins(2), Sub(10)]
+            ),
+        ]
+    );
+}

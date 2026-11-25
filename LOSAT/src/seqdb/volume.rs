@@ -2,7 +2,7 @@
 //! sequences read by position.
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use super::column::{self, Column, MASK_DATA_TITLE};
 use super::file::DbFile;
@@ -12,6 +12,7 @@ use super::header::{
 };
 use super::index::IndexFile;
 use super::{SeqDbError, SeqType, XDbIdxRead};
+use crate::blastinput::ncbi_environment::ReadVerification;
 
 /// One volume of a database (`NAME.pin` / `.psq` / `.phr`, or the `n` files).
 #[derive(Debug)]
@@ -38,6 +39,29 @@ pub struct Volume {
     /// The failure of NCBI's OID list that a search meets at its first read of a sequence
     /// (`Volume::fail_sequence_reads`), none when the list can be built.
     read_failure: Option<super::oid_list::OidListError>,
+    /// The run's settings of NCBI's checks of what it reads (`SeqDb::refuse_unchecked_reads`),
+    /// none for NCBI's default.
+    read_verification: Option<Arc<ReadVerification>>,
+}
+
+/// A header record in LOSAT's refusal of a setting that turns a check of NCBI's reader off
+/// (`ReadVerification::refused`).
+const HEADER_RECORD: &str = "a database header record";
+
+/// `error` of a decode of a header record under `setting` (`SeqDb::refuse_unchecked_reads`):
+/// NCBI's exception of a check that the setting turns off is LOSAT's refusal, any other error
+/// stays. The one place of that choice for every read of a volume's records
+/// (`Volume::with_header_record`, `Volume::visit_headers`).
+#[cold]
+#[inline(never)]
+fn refused_read(setting: &ReadVerification, error: SeqDbError) -> SeqDbError {
+    match &error {
+        SeqDbError::Ncbi(exception) => match setting.refused(exception, HEADER_RECORD) {
+            Some(refused) => SeqDbError::Setting(refused),
+            None => error,
+        },
+        _ => error,
+    }
 }
 
 /// A list's rule for the definition lines of a volume's sequences, with the volume's first OID in
@@ -75,6 +99,18 @@ pub enum VolumeHeader {
     Ordinal(Vec<Defline>),
     /// A record with parsed Seq-ids (`Volume::defline_set`).
     Parsed(crate::seqid::DeflineSet),
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1804
+/// The signed 32-bit length that NCBI's `CSeqDBVol::GetSeqLengthProt` and `x_GetSequence` return
+/// for a protein of `residues` stored bytes: a defined 32-bit signed truncation of the stored
+/// residue count, so a protein of `2^31` or more residues wraps to a negative `i32`. Nucleotide
+/// lengths do not pass through here (their four-bases-per-byte overflow in NCBI is undefined
+/// behaviour and LOSAT keeps them widened).
+#[inline]
+pub(crate) const fn ncbi_protein_length(residues: u32) -> i32 {
+    residues as i32
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:302-323 (cited at
@@ -139,6 +175,7 @@ impl Volume {
             oid_mask_type: 0,
             columns: OnceLock::new(),
             read_failure: None,
+            read_verification: None,
         })
     }
 
@@ -250,6 +287,62 @@ impl Volume {
             .and_then(|bytes| bytes.checked_sub(1))
             .and_then(|residues| u32::try_from(residues).ok())
             .ok_or_else(|| self.index.sequence_changed(oid, 2))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+    /// The signed 32-bit length of protein `oid` (volume-relative) as NCBI's `GetSeqLengthProt`
+    /// returns it ([`ncbi_protein_length`]): `0` for an empty protein and negative for `2^31` or
+    /// more residues.
+    pub fn protein_length_i32(&self, oid: u32) -> Result<i32, SeqDbError> {
+        self.protein_length(oid).map(ncbi_protein_length)
+    }
+
+    fn checked_protein_range(&self, oid: u32) -> Result<(&DbFile, u64, u64), SeqDbError> {
+        assert!(
+            self.index.seqtype == SeqType::Protein,
+            "protein range check of a nucleotide volume"
+        );
+        self.check_range(oid, oid.saturating_add(1))?;
+        let (start, end) = self.index.sequence_range(oid)?;
+        if start < 1 || end <= start {
+            return Err(self.index.sequence_changed(oid, 2));
+        }
+        let file = self.seq_file()?;
+        file.x_check_range(start - 1, end)?;
+        Ok((file, start, end))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1818
+    /// Opens the protein sequence file and validates that protein `oid` (volume-relative) lies
+    /// within the file without reading its bytes: matches NCBI's `x_OpenSeqFile` and mapping
+    /// check before `x_GetSequence` returns a non-positive length.
+    pub fn check_protein_range(&self, oid: u32) -> Result<(), SeqDbError> {
+        self.checked_protein_range(oid).map(|_| ())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1630-1635
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1804
+    /// Reads `len` NCBIstdaa residue bytes starting at residue `offset` of protein `oid`
+    /// (volume-relative) without reading the full sequence: validates the full protein range in
+    /// `.psq` first (matching `x_GetSequence`) and then reads only `[offset..offset + len]`.
+    pub fn read_protein_slice(
+        &self,
+        oid: u32,
+        offset: u64,
+        len: usize,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        let (file, start, end) = self.checked_protein_range(oid)?;
+        let raw_len = end - start - 1;
+        let slice_end = offset
+            .checked_add(len as u64)
+            .filter(|&end_off| end_off <= raw_len)
+            .ok_or_else(|| {
+                SeqDbError::Range(format!(
+                    "protein slice {offset}..+{len} exceeds sequence length {raw_len} in {}",
+                    self.base.display()
+                ))
+            })?;
+        file.read_range(start + offset, start + slice_end)
     }
 
     /// Bytes of the sequence file that a block of the sequences `first..end`
@@ -394,6 +487,23 @@ impl Volume {
         self.read_block_in(first, end, first_ordinal, first_oid, BlockBuffer::New)
     }
 
+    /// Reads the protein sequences `first..end` (volume-relative, non-empty) for a database
+    /// search: any protein whose NCBI 32-bit length ([`ncbi_protein_length`]) is not positive
+    /// (`0` or `>= 2^31` residues, which NCBI's `s_SeqDbGetSequence` skips) has its file range
+    /// validated without allocating its bytes and is represented as an empty `[0, 0]` sentinel
+    /// pair in the returned block.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1804
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:375-378
+    pub fn read_protein_search_block(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+        first_oid: u32,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        self.read_protein_search_block_in(first, end, first_ordinal, first_oid, BlockBuffer::New)
+    }
+
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_block` with the bytes in a buffer of
     /// `File::x_read_range_mapped`.
     pub fn x_read_block_mapped(
@@ -426,6 +536,105 @@ impl Volume {
         )
     }
 
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): [`Self::read_protein_search_block`] with
+    /// the bytes in the worker's buffer `kept` when no sequence in the block has `>= 2^31`
+    /// residues.
+    pub fn x_read_protein_search_block_into(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+        first_oid: u32,
+        kept: &mut Vec<u8>,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        self.read_protein_search_block_in(
+            first,
+            end,
+            first_ordinal,
+            first_oid,
+            BlockBuffer::Given(kept),
+        )
+    }
+
+    fn read_protein_search_block_in(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+        first_oid: u32,
+        buffer: BlockBuffer<'_>,
+    ) -> std::result::Result<SequenceBlock, SeqDbError> {
+        assert!(
+            self.index.seqtype == SeqType::Protein,
+            "protein search block of a nucleotide volume"
+        );
+        self.check_range(first, end)?;
+        let seq_offsets = self.index.sequence_offsets(first, end)?;
+        let all_non_negative = seq_offsets[0] >= 1
+            && seq_offsets.windows(2).all(|pair| {
+                pair[1]
+                    .checked_sub(pair[0])
+                    .and_then(|bytes| bytes.checked_sub(1))
+                    .is_some_and(|residues| ncbi_protein_length(residues) >= 0)
+            });
+        if all_non_negative {
+            return self.read_block_with_offsets(
+                first,
+                first_ordinal,
+                first_oid,
+                seq_offsets,
+                Vec::new(),
+                buffer,
+            );
+        }
+        // Cold path: at least one sequence has NCBI 32-bit length < 0 (>= 2^31 residues) or
+        // non-monotonic offsets. Validate the sequence file range without reading skipped bytes.
+        let changed = || self.index.sequence_changed(first, seq_offsets.len());
+        let file = self.seq_file()?;
+        let data_start = u64::from(seq_offsets[0])
+            .checked_sub(1)
+            .ok_or_else(changed)?;
+        let data_end = u64::from(*seq_offsets.last().expect("non-empty range"));
+        file.x_check_range(data_start, data_end)?;
+        let count = seq_offsets.len() - 1;
+        let mut data = vec![0u8];
+        let mut packed_offsets = Vec::with_capacity(seq_offsets.len());
+        packed_offsets.push(1u32);
+        let mut prev_skipped = false;
+        for i in 0..count {
+            let start = seq_offsets[i];
+            let next = seq_offsets[i + 1];
+            let raw_len = next
+                .checked_sub(start)
+                .and_then(|bytes| bytes.checked_sub(1))
+                .ok_or_else(changed)?;
+            if ncbi_protein_length(raw_len) <= 0 {
+                data.push(0);
+                packed_offsets.push(data.len() as u32);
+                prev_skipped = true;
+            } else {
+                let raw = file.read_range(u64::from(start) - 1, u64::from(next))?;
+                if i == 0 || prev_skipped {
+                    let last = data.len() - 1;
+                    data[last] = raw[0];
+                }
+                data.extend_from_slice(&raw[1..]);
+                packed_offsets.push(data.len() as u32);
+                prev_skipped = false;
+            }
+        }
+        Ok(SequenceBlock {
+            seqtype: SeqType::Protein,
+            first_ordinal,
+            first_oid,
+            path: file.path().to_path_buf(),
+            data,
+            data_start: 0,
+            seq_offsets: packed_offsets,
+            amb_offsets: Vec::new(),
+        })
+    }
+
     fn read_block_in(
         &self,
         first: u32,
@@ -435,9 +644,28 @@ impl Volume {
         buffer: BlockBuffer<'_>,
     ) -> Result<SequenceBlock, SeqDbError> {
         self.check_range(first, end)?;
-        let seqtype = self.index.seqtype;
         let seq_offsets = self.index.sequence_offsets(first, end)?;
         let amb_offsets = self.index.ambiguity_offsets(first, end)?;
+        self.read_block_with_offsets(
+            first,
+            first_ordinal,
+            first_oid,
+            seq_offsets,
+            amb_offsets,
+            buffer,
+        )
+    }
+
+    fn read_block_with_offsets(
+        &self,
+        first: u32,
+        first_ordinal: u32,
+        first_oid: u32,
+        seq_offsets: Vec<u32>,
+        amb_offsets: Vec<u32>,
+        buffer: BlockBuffer<'_>,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        let seqtype = self.index.seqtype;
         // Each sequence's ambiguity data inside its data (checked at open): read from the file,
         // the entries can break it only if the file changed after the open.
         if !self.index.holds_offsets()
@@ -539,6 +767,14 @@ impl Volume {
             .ok_or_else(|| self.index.sequence_changed(first, offsets.len()))
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+    /// [`Self::x_protein_lengths`] as NCBI's signed 32-bit `GetSeqLengthProt` lengths
+    /// ([`ncbi_protein_length`]).
+    pub fn x_protein_lengths_i32(&self, first: u32, end: u32) -> Result<Vec<i32>, SeqDbError> {
+        self.x_protein_lengths(first, end)
+            .map(|lengths| lengths.into_iter().map(ncbi_protein_length).collect())
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2316
     /// The encoded `Blast-def-line-set` of the sequence `oid` (volume-relative;
     /// `with_header_record`'s).
@@ -550,7 +786,24 @@ impl Volume {
     /// path of the header file, which the messages of its decode name: the open file's own, not a
     /// name built again for each record. The record is lent from the thread's buffer of the reads
     /// of a range (`DbFile::with_range`): a read of one header per sequence allocates no record.
+    /// Under a setting that turns a check of NCBI's reader off, `read`'s error is the one
+    /// `refused_read` makes; NCBI's default reads with `read` itself, so that a record that
+    /// decodes costs nothing more than the test of the setting.
     fn with_header_record<T>(
+        &self,
+        oid: u32,
+        read: impl FnOnce(&[u8], &Path) -> Result<T, SeqDbError>,
+    ) -> Result<T, SeqDbError> {
+        match self.read_verification.as_deref() {
+            None => self.read_header_record(oid, read),
+            Some(setting) => self.read_header_record(oid, |record, path| {
+                read(record, path).map_err(|error| refused_read(setting, error))
+            }),
+        }
+    }
+
+    /// `with_header_record`'s read of the record.
+    fn read_header_record<T>(
         &self,
         oid: u32,
         read: impl FnOnce(&[u8], &Path) -> Result<T, SeqDbError>,
@@ -559,6 +812,11 @@ impl Volume {
         let (start, end) = self.index.header_range(oid)?;
         let file = self.hdr_file()?;
         file.with_range(start, end, |record| read(record, file.path()))?
+    }
+
+    /// Sets the run's settings of NCBI's checks of what it reads (`SeqDb::refuse_unchecked_reads`).
+    pub(super) fn refuse_unchecked_reads(&mut self, setting: Arc<ReadVerification>) {
+        self.read_verification = Some(setting);
     }
 
     /// The header of the sequence `oid` (volume-relative) from one read of its record
@@ -800,13 +1058,17 @@ impl Volume {
             .ok_or_else(|| self.no_line_kept(oid))
     }
 
-    /// Whether the volume's rule is a negative seqid list's, also one the version 5 processing
-    /// emptied (`SeqDb::excludes_lineless_at_fetch`).
-    pub(super) fn has_negative_seqid_list(&self) -> bool {
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1909-1946
+    /// Whether the volume's rule fills NCBI's `CSeqDBIdSet` (`x_InitIdSet`): a negative seqid
+    /// list (also one version 5 processing emptied), a positive GI list, or a negative GI list
+    /// (`SeqDb::excludes_lineless_at_fetch`).
+    pub(super) fn has_fetch_exclusion_list(&self) -> bool {
         self.defline_rule.as_ref().is_some_and(|line_rule| {
             matches!(
                 &*line_rule.rule,
                 super::filter::DeflineRule::NegativeSeqids(_)
+                    | super::filter::DeflineRule::Gis(_)
+                    | super::filter::DeflineRule::NegativeGis(_)
             )
         })
     }
@@ -1266,6 +1528,19 @@ impl Volume {
         decode: &dyn Fn(u32, &[u8], &Path) -> Result<T, SeqDbError>,
         visit: &mut dyn FnMut(u32, Result<T, SeqDbError>) -> bool,
     ) -> bool {
+        // As `with_header_record`: under a setting that turns a check of NCBI's reader off, the
+        // records read in a piece decode with `refused_read`'s errors (`single` reads through
+        // `with_header_record`).
+        let refusing;
+        let decode = match self.read_verification.as_deref() {
+            None => decode,
+            Some(setting) => {
+                refusing = move |oid: u32, record: &[u8], path: &Path| {
+                    decode(oid, record, path).map_err(|error| refused_read(setting, error))
+                };
+                &refusing as &dyn Fn(u32, &[u8], &Path) -> Result<T, SeqDbError>
+            }
+        };
         let one_by_one =
             |oids: std::ops::Range<u32>,
              visit: &mut dyn FnMut(u32, Result<T, SeqDbError>) -> bool| {

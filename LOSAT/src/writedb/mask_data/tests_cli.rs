@@ -7,7 +7,7 @@
 //! * `the_command_line_matches_makeblastdb_on_the_cases_of_the_writer_fixtures`: the 36 cases of
 //!   `tests/seqdb/mask_writer` (`expected/<case>.{rc,stderr,stdout}`), and the database each one
 //!   writes (files, algorithms and ranges as NCBI's `blastdbcmd` reads them back).
-//! * `the_command_line_matches_makeblastdb_on_every_mask_parse_file`: the 128 runs of
+//! * `the_command_line_matches_makeblastdb_on_every_mask_parse_file`: the 273 runs of
 //!   `tests/seqdb/mask_parse` (`expected.tsv`, `expected_stdout.tsv`).
 //! * `the_command_line_reaches_the_sequences_that_ncbi_reaches_with_parse_seqids`: a few of the
 //!   cases of `tests/seqdb/mask_ids`, with `-parse_seqids`, in the default format version 5.
@@ -54,7 +54,7 @@ fn run_words(words: &[String], date: &str, dirs: &[&Path]) -> Output {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let status = run_with(
         &args,
-        None,
+        &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
         Some(&now),
         LINUX,
         &mut std::io::empty(),
@@ -328,8 +328,8 @@ fn the_command_line_matches_makeblastdb_on_every_mask_parse_file() {
         }
     }
     assert!(compared > 300, "{compared} rows compared");
-    assert_eq!(classes["Read"], 149);
-    assert_eq!(classes.values().sum::<usize>(), 223);
+    assert_eq!(classes["Read"], 164);
+    assert_eq!(classes.values().sum::<usize>(), 273);
 }
 
 #[test]
@@ -515,7 +515,7 @@ fn a_refused_build_that_meets_a_closed_pipe_leaves_no_database() {
         let mut err = Vec::new();
         let status = run_with(
             &args,
-            None,
+            &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
             Some(&time_of("Oct 20, 2026  1:00 PM")),
             LINUX,
             &mut std::io::empty(),

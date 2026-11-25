@@ -82,12 +82,12 @@ fn failed(message: &str) -> Option<XComputed> {
 }
 
 /// The text of an error of the redo: the batch that the error of a batch's search names
-/// (`HeaderReadError`, as `redo_run::sw_batch_failed` and `redo_run::sw_endless` make it), and the
+/// (`ErrorAfterBatchReports`, as `redo_run::sw_batch_failed` and `redo_run::sw_endless` make it), and the
 /// message.
 fn error_text(result: &Result<()>) -> Option<String> {
     result.as_ref().err().map(|error| {
-        match error.downcast_ref::<crate::algorithm::common::database::HeaderReadError>() {
-            Some(batch) => format!("batch {}: {:#}", batch.query, batch.error),
+        match error.downcast_ref::<crate::blastinput::app::ErrorAfterBatchReports>() {
+            Some(batch) => format!("batch {:?}: {:#}", batch.query, batch.error),
             None => format!("{error:#}"),
         }
     })

@@ -86,6 +86,21 @@ impl BlastxDatabase {
         self
     }
 
+    /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
+    /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
+    /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
+    pub(crate) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+        self.taxdb.set_keeps_scope(keeps);
+        self.taxdb.set_separate_xml2(separate_xml2);
+        self
+    }
+
+    /// Mirrors `CBlastFormat::ResetScopeHistory` at the end of a query batch
+    /// (`shared::TaxdbRun::reset_scope`).
+    pub(crate) fn reset_scope(&self) {
+        self.taxdb.reset_scope();
+    }
+
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     #[cfg(test)]
@@ -132,6 +147,11 @@ impl BlastxDatabase {
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(crate) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
+    }
+
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(crate) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
     }
 
     /// Whether the database has parsed Seq-ids: a batch can then refuse one of its subjects
@@ -283,11 +303,21 @@ impl BlastxDatabase {
         let mut first = 0;
         while first < count {
             let end = count.min(first.saturating_add(X_LENGTHS_PER_READ));
-            let lengths = match self.db.x_protein_lengths(first, end) {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+            // Proteins whose NCBI 32-bit length is <= 0 (`0` or `>= 2^31`) are skipped by the
+            // search and do not contribute to the searchable longest sequence.
+            let lengths = match self.db.x_protein_lengths_i32(first, end) {
                 Ok(lengths) if !lengths.is_empty() => lengths,
                 _ => return self.x_check_stores(),
             };
-            longest = longest.max(lengths.iter().copied().max().unwrap_or(0) as usize);
+            longest = longest.max(
+                lengths
+                    .iter()
+                    .copied()
+                    .map(|len| len.max(0) as usize)
+                    .max()
+                    .unwrap_or(0),
+            );
             first += lengths.len() as u32;
         }
         if longest > MAX_DBSEQ_LEN {
@@ -506,7 +536,7 @@ impl ReportedSubjects {
     /// The titles of the reported sequences of the batches `batches` (one query batch), read
     /// query by query in hit-list order where NCBI's traceback makes the batch's Seq-aligns
     /// (their Seq-ids), before the batch's prefetch: NCBI's reader error stops the run at this
-    /// batch (`HeaderReadError`). A sequence with parsed Seq-ids is read with every Seq-id
+    /// batch (`ErrorAfterBatchReports`). A sequence with parsed Seq-ids is read with every Seq-id
     /// (`shared::read_header`). A title LOSAT does not show as NCBI is its refusal
     /// (`check_reported_title`; with `pairwise`, `StoredTitle::check_shown_source`). The rest of
     /// the batch's reported sequences is `for_batch`. `one_by_one`: the reports may read the

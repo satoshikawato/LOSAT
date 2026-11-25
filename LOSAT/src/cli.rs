@@ -149,6 +149,7 @@ fn entry_program_description(name: &str) -> &'static str {
         "makembindex" => "Create a BLAST database index.",
         "makeprofiledb" => "Application to create databases for rpsblast, cobalt and deltablast",
         "blastdb_aliastool" => "Application to create BLAST database aliases",
+        "blastdbcheck" => "BLAST database integrity and validity checking application",
         _ => "",
     }
 }
@@ -412,8 +413,7 @@ fn usage_name(argv: &[OsString]) -> &str {
 // NCBI keeps the bytes of an option's value.
 /// LOSAT's refusal of the value of `-name` that is not UTF-8 in `program` (its name in LOSAT's
 /// refusals, `MAKEBLASTDB`): NCBI's arguments keep the value's bytes. The one text of it, for the
-/// programs on `cli::reader` (`reader::refusal_after_read`) and of blastdb_aliastool
-/// (`ncbi_app::args::Args::text_values_refusal`).
+/// programs on `cli::reader` (`reader::refusal_after_read`).
 pub(crate) fn non_utf8_value_refusal(program: &str, name: &str) -> String {
     format!(
         "the value of -{name} is not UTF-8; NCBI BLAST+ reads the bytes of an option's value, \
@@ -653,11 +653,9 @@ impl fmt::Display for NativeError {
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:177-184
 impl std::error::Error for NativeError {}
 
-/// Whether `error` is `NativeError::silent_end`.
+/// Whether `error` is `NativeError::silent_end` (including a writer's `StrategyWriteFault`).
 pub(crate) fn is_silent_end(error: &anyhow::Error) -> bool {
-    error
-        .downcast_ref::<NativeError>()
-        .is_some_and(|native| native.exit == 0 && native.message.is_empty())
+    NativeError::caught(error).is_some_and(|native| native.exit == 0 && native.message.is_empty())
 }
 
 impl NativeError {
@@ -755,10 +753,11 @@ impl NativeError {
     /// (`exit_on_native_error`) and in the library's message (`api::error::chain_bytes`), so the
     /// library's bytes are the command line's.
     pub(crate) fn of_writer_exception<E: CaughtError + ?Sized>(error: &E) -> Option<NativeError> {
-        error
-            .find::<std::io::Error>()
-            .and_then(crate::ncbi_exception::NcbiException::of_io_error)
-            .map(NativeError::exception)
+        let io = error.find::<std::io::Error>()?;
+        if crate::report::ostream::is_strategy_write_fault(io) {
+            return Some(NativeError::silent_end());
+        }
+        crate::ncbi_exception::NcbiException::of_io_error(io).map(NativeError::exception)
     }
 
     /// The report with which `CATCH_ALL` ends a run whose error (or one error of whose chain) is

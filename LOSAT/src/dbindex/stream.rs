@@ -243,11 +243,11 @@ impl BlastDbStream {
     pub(crate) fn open(
         dbname: &[u8],
         filter: Filter<'_>,
-        registry: Option<&[u8]>,
+        database: crate::blastinput::ncbi_environment::DatabaseSettings<'_>,
         titles: bool,
     ) -> Result<Self, StreamError> {
         let mut reader =
-            MaskBdbReader::open(dbname, SeqType::Nucleotide, registry, false, super::PROGRAM)
+            MaskBdbReader::open(dbname, SeqType::Nucleotide, database, false, super::PROGRAM)
                 .map_err(bdb_error)?;
         if titles {
             reader.ask_get_title();

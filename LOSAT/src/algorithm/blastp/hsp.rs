@@ -52,6 +52,14 @@ pub(crate) struct BlastpHsp {
 }
 
 impl BlastpHsp {
+    // NCBI reference (598d8ae6): c++/include/objtools/align_format/tabular.hpp:478-478
+    /// The gap columns: the alignment's columns that are neither identities nor mismatches, as
+    /// the default report's mismatches are the columns of neither (`Hit::gap_letters`).
+    #[inline]
+    pub(crate) fn gap_letters(&self) -> usize {
+        usize::try_from(self.length as i64 - self.num_ident as i64 - self.mismatch).unwrap_or(0)
+    }
+
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:125-148
     pub(crate) fn from_hit(hit: Hit) -> Self {
         let Hit {

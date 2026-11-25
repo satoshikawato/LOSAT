@@ -1779,7 +1779,7 @@ fn decodes_over_a_kept_set_give_each_records_own_set() {
         .any(|set| set.deflines.iter().any(|line| line.title.is_none())));
     assert!(alone.iter().any(|set| set.utf8));
     let mut set = DeflineSet::default();
-    let mut read = |at: usize, set: &mut DeflineSet| {
+    let read = |at: usize, set: &mut DeflineSet| {
         decode_full_set_in(&records[at], set).unwrap();
         assert_eq!(*set, alone[at], "record {at}");
     };

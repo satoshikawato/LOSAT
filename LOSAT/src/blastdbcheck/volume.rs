@@ -474,20 +474,24 @@ impl<'a> Volume<'a, '_> {
         Ok(None)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2257-2317
     /// `GetHdr` of the OID at `at`: `None` for a stored header of no bytes, a set of no lines
     /// (`x_GetFilteredHeader`). Where the volume filters its sets NCBI's read of no set throws:
     /// LOSAT refuses it.
     fn header_set(&self, at: SeqLocation, oid: i32) -> Result<Option<DeflineSet>, SeqDbError> {
-        let set = self.db.header_set_at(at)?;
-        if set.is_none() && self.db.filters_header_sets(at) {
-            return Err(SeqDbError::Unsupported {
-                path: path_from_bytes(self.name),
-                message: format!(
-                    "OID {oid}: a stored header of no bytes in a volume whose sets NCBI filters"
-                ),
-            });
+        let mut set = DeflineSet::default();
+        if !self.db.header_set_in(at, &mut set)? {
+            if self.db.filters_header_sets(at) {
+                return Err(SeqDbError::Unsupported {
+                    path: path_from_bytes(self.name),
+                    message: format!(
+                        "OID {oid}: a stored header of no bytes in a volume whose sets NCBI filters"
+                    ),
+                });
+            }
+            return Ok(None);
         }
-        Ok(set)
+        Ok(Some(set))
     }
 
     /// The length of the sequence at `at`, from its bytes (`GetSequence`, `sequence`: a protein's

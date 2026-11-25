@@ -1812,7 +1812,7 @@ fn search(
     // LOSAT's refusals of the masked search (`-db_hard_mask`) come where NCBI starts the search,
     // after its checks.
     if let (SubjectSource::Database(database), Some(mask)) = (&source, db_mask.as_ref()) {
-        database.check_mask_limits(mask, usize::try_from(args.word_size())?)?;
+        database.check_mask_limits(mask, args.word_size(), args.window())?;
     }
     crate::blastinput::app::check_search_environment(
         "TBLASTX",

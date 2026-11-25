@@ -17,6 +17,7 @@ fn unit_results(queries: usize, skipped: bool) -> Vec<BatchResults> {
     let records: Vec<_> = (0..queries).map(|_| record(30)).collect();
     vec![BatchResults {
         query_ordinal: 0,
+        in_report_order: false,
         queries: vec![Vec::new(); queries],
         prepared: super::super::query_setup::prepare_queries(
             &records,

@@ -7,6 +7,7 @@ use super::{
     archive,
     args::{BlastxArgs, ResolvedOptions, SemanticOptionsError},
     database::{BlastxDatabase, ReportedSubjects},
+    empty_rows::SubjectLoc,
     input::FastaRecord,
     input_source::{from_shared_ref, BatchCutter, CutSettings},
     native::{
@@ -794,7 +795,7 @@ fn write_run(
         // search strategy request holds (`take` below).
         batch_take.note_searched(queries, results, queries_before)?;
         // Every format and the hit list read the lists in the order of the reports.
-        report::sort_lists(results);
+        report::sort_lists(results, SubjectLoc::of_run(database.is_some()));
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288 (cited at
         // `native::run_inner`'s batches)
         // A database: the titles of the batch's reported sequences, read in NCBI's traceback
@@ -1169,6 +1170,9 @@ fn search_database(
         check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
     // The database opens after the options are processed and before the query is read, as NCBI's
     // `InitializeSubject`.
+    let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+        outputs.formats.first().map(|format| format.outfmt),
+    );
     let database = BlastxDatabase::open_restricted(
         name,
         &settings,
@@ -1178,11 +1182,13 @@ fn search_database(
         super::args::ProgramName::BLASTX.upper,
     )?
     .showing_gis(args.show_gis)
-    .after_calls(args.first_query_ordinal > 0);
+    .after_calls(args.first_query_ordinal > 0)
+    .keeping_scope(keeps_scope, separate_xml2);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
         args.strategy.as_ref(),
         &args.db_filter,
+        database.list_gis(),
         database.list_taxids(),
         &database.statistics(),
         false,

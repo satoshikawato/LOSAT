@@ -2754,6 +2754,14 @@ fn write_blastp_tabular_hit_lists(
                 rows.found(hsp.s_idx as usize);
                 let subject_id =
                     SubjectIdFields::of(subject_ids, subject_accessions, hsp.s_idx as usize);
+                // The columns inside the query row's range (a Smith-Waterman alignment's end gaps
+                // in the query's row are left out), as every table counts them.
+                let counts = crate::report::serial::seqalign::AlignLengths {
+                    length: hsp.length,
+                    gaps: hsp.gap_letters(),
+                    gap_opens: hsp.gapopen,
+                }
+                .within_query_range(hsp.gap_info.as_deref().unwrap_or_default());
                 crate::report::outfmt6::write_hit_fields_bytes(
                     writer,
                     query_id,
@@ -2761,9 +2769,9 @@ fn write_blastp_tabular_hit_lists(
                     subject_id.accession_version,
                     hsp.identity,
                     hsp.num_ident,
-                    hsp.length,
+                    counts.length,
                     hsp.mismatch,
-                    hsp.gapopen,
+                    counts.gap_opens,
                     hsp.q_start,
                     hsp.q_end,
                     hsp.s_start,
@@ -4779,6 +4787,9 @@ fn open_search_database(
     // open and the output file exists) and before the test for an empty query.
     let database = match resolved.db.as_deref() {
         Some(name) => {
+            let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+                outputs.formats.first().map(|format| format.outfmt),
+            );
             let database = database::BlastpDatabase::open_restricted(
                 name,
                 settings,
@@ -4788,7 +4799,8 @@ fn open_search_database(
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis)
-            .after_calls(args.first_query_ordinal > 0);
+            .after_calls(args.first_query_ordinal > 0)
+            .keeping_scope(keeps_scope, separate_xml2);
             let rps = resolved.rps_search.is_some();
             let database = if rps {
                 rps_hooks::with_units(resolved, database)?
@@ -4811,6 +4823,7 @@ fn open_search_database(
                     args.archive.as_ref(),
                     args.strategy.as_ref(),
                     &args.db_filter,
+                    database.list_gis(),
                     database.list_taxids(),
                     &database.statistics(),
                     false,

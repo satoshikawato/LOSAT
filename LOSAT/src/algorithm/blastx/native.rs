@@ -80,7 +80,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         || error.is::<crate::report::tax_report::TaxReportRefusal>()
         || error.is::<crate::report::tabular::FailedLookupRefusal>()
         || error.is::<crate::algorithm::common::database::ParsedRefusal>()
-        || error.is::<super::empty_rows::EmptyRowsRefusal>()
+        || error.is::<crate::report::pairwise::EmptyRowsRefusal>()
         || error.is::<crate::algorithm::common::database::FetchRefusal>()
     {
         // LOSAT's refusal of a title NCBI's XML crashes on, of the database counts a report
@@ -90,7 +90,7 @@ pub(super) fn report_error(error: anyhow::Error) -> anyhow::Error {
         // row at which NCBI stops (`report::tabular::check_failed_lookups`), of a database
         // sequence that a query-anchored report (outfmt 1 to 4) would show as a query
         // (`ParsedRefusal`, `report::write_pairwise`), or of a report of an ungapped HSP of
-        // length 0 in a form LOSAT does not write (`empty_rows::EmptyRowsRefusal`): not an error
+        // length 0 in a form LOSAT does not write (`report::pairwise::EmptyRowsRefusal`): not an error
         // of NCBI's engine or of its output stream.
         error
     } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
@@ -359,6 +359,8 @@ fn run_inner(
     // options are processed and before the query is read, as NCBI's `InitializeSubject`.
     let database = match args.database_name() {
         Some(name) => {
+            let (keeps_scope, separate_xml2) =
+                crate::report::db_subject::FormatThrow::scope_flags(Some(&args.outfmt));
             let database = BlastxDatabase::open_restricted(
                 name,
                 &settings,
@@ -368,7 +370,8 @@ fn run_inner(
                 program.upper,
             )?
             .showing_gis(args.show_gis)
-            .after_calls(args.first_query_ordinal > 0);
+            .after_calls(args.first_query_ordinal > 0)
+            .keeping_scope(keeps_scope, separate_xml2);
             // RPSTBLASTN: each batch's `EffectiveSearchSpace` option is its last search unit's
             // own (`BatchResults::request_space`), and its units read `-dbsize` themselves
             // (`rps_search::volumes::RpsUnits`): no program of RPS-BLAST takes a list.
@@ -377,6 +380,7 @@ fn run_inner(
                 archive.as_ref(),
                 strategy.as_ref(),
                 &args.db_filter,
+                database.list_gis(),
                 database.list_taxids(),
                 &database.statistics(),
                 false,
@@ -1543,6 +1547,10 @@ pub(super) fn reported_batch(
     if let Some(spec) = options.tabular {
         reported.read_tabular(database, spec, results, options.gapped)?;
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259
+    // NCBI reference (598d8ae6): c++/src/app/blast/rpstblastn_app.cpp:191
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+    database.reset_scope();
     Ok(reported)
 }
 

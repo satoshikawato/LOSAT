@@ -1,102 +1,13 @@
 //! Sequence data of a database volume: the conversions of
 //! `c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp` from a
-//! `CSeq_data` to the bytes of the sequence file, the ambiguity data of a
-//! nucleotide sequence, and the generator (`CRandom`) that picks the base
-//! stored in place of an ambiguous one.
+//! `CSeq_data` to the bytes of the sequence file and the ambiguity data of a
+//! nucleotide sequence (using `utils::random_gen::NcbiRandom` to pick the base
+//! stored in place of an ambiguous one).
 
 use super::bioseq::SeqData;
 use super::fasta_source::pack::iupacna_to_ncbi4na;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-
-// NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:159-165
-// NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:98
-const STATE_SIZE: usize = 33;
-const STATE_OFFSET: usize = 12;
-
-/// `CRandom` with the lagged Fibonacci generator (`eGetRand_LFG`).
-#[derive(Debug, Clone)]
-pub(crate) struct Random {
-    state: [u32; STATE_SIZE],
-    rj: usize,
-    rk: usize,
-}
-
-impl Random {
-    // NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:227-231
-    // NCBI reference (598d8ae6): c++/src/util/random_gen.cpp:296-308
-    pub(crate) fn new(seed: u32) -> Self {
-        let mut state = [0u32; STATE_SIZE];
-        state[0] = seed;
-        for i in 1..STATE_SIZE {
-            state[i] = 1_103_515_245u32
-                .wrapping_mul(state[i - 1])
-                .wrapping_add(12345);
-        }
-        let mut random = Self {
-            state,
-            rj: STATE_OFFSET,
-            rk: STATE_SIZE - 1,
-        };
-        for _ in 0..10 * STATE_SIZE {
-            random.get_rand();
-        }
-        random
-    }
-
-    // NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:238-241
-    /// `GetRand()`: the next number in `[0, 0x7fffffff]`, the 32 bits of
-    /// `rand_32_bits` without the lowest.
-    pub(crate) fn get_rand(&mut self) -> u32 {
-        self.rand_32_bits() >> 1
-    }
-
-    // NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:251-264
-    // The multiplication of a power of two keeps the high bits; another size
-    // rejects the draws past the last whole multiple of it (the subtraction
-    // wraps in 32 bits, as NCBI's).
-    /// `GetRandIndex` of `size`: a number in `[0, size)`.
-    pub(crate) fn get_rand_index(&mut self, size: u32) -> u32 {
-        if size & size.wrapping_sub(1) == 0 {
-            return ((u64::from(self.rand_32_bits()) * u64::from(size)) >> 32) as u32;
-        }
-        loop {
-            let bits = self.rand_32_bits();
-            let r = bits % size;
-            if bits <= r.wrapping_sub(size) {
-                return r;
-            }
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:277-280
-    /// `GetRand` of a range: a number in `[min_value, max_value]`.
-    pub(crate) fn get_rand_range(&mut self, min_value: u32, max_value: u32) -> u32 {
-        min_value
-            .wrapping_add(self.get_rand_index(max_value.wrapping_sub(min_value).wrapping_add(1)))
-    }
-
-    // NCBI reference (598d8ae6): c++/include/util/random_gen.hpp:217-235
-    // `m_RJ` and `m_RK` are never negative at the same step (they start 21
-    // apart and move together), so the unsigned indices wrap one at a time
-    // exactly as the signed ones do.
-    /// `x_GetRand32Bits()`: the next sum of the lagged Fibonacci generator.
-    fn rand_32_bits(&mut self) -> u32 {
-        let r = self.state[self.rk].wrapping_add(self.state[self.rj]);
-        self.state[self.rk] = r;
-        if self.rk == 0 {
-            self.rk = STATE_SIZE - 1;
-            self.rj -= 1;
-        } else {
-            self.rk -= 1;
-            self.rj = if self.rj == 0 {
-                STATE_SIZE - 1
-            } else {
-                self.rj - 1
-            };
-        }
-        r
-    }
-}
+use crate::utils::random_gen::NcbiRandom;
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:141-147
 const MAX_REGION_LENGTH: u32 = 0xFFF;
@@ -128,7 +39,7 @@ impl AmbiguousRegion {
 struct AmbigDataBuilder {
     size: u32,
     regions: Vec<AmbiguousRegion>,
-    random: Random,
+    random: NcbiRandom,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:161-169
@@ -141,7 +52,7 @@ impl AmbigDataBuilder {
         Self {
             size,
             regions: Vec::new(),
-            random: Random::new(size),
+            random: NcbiRandom::new(size),
         }
     }
 
@@ -555,6 +466,26 @@ pub(crate) fn short_nucleotide_data(
         held,
         read,
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:590-604
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:313-339
+// `WriteDB_IupacnaToBinary` converts all `v.size()` bytes of the IUPACna string into NCBI4na. In
+// `x_ConvertIupacnaTo4na`, the pair loop indexes `sm_IupacnaTo4na` with a signed `char` (`*src_i`),
+// so any byte >= 0x80 in positions `0..(v.len() & !1)` reads before the static table (undefined
+// behaviour); the single odd overhang byte casts to `Uint1` and is defined (`0xf0`).
+/// The first byte >= 0x80 (with its 0-based position) in a pair position (`0..(v.len() & !1)`)
+/// of an IUPACna `Seq-data`; `None` for any other coding or when every pair byte is below 0x80.
+pub(crate) fn iupacna_high_byte(seq_data: &SeqData) -> Option<(usize, u8)> {
+    let SeqData::Iupacna(v) = seq_data else {
+        return None;
+    };
+    let pairs_len = v.len() & !1;
+    v[..pairs_len]
+        .iter()
+        .enumerate()
+        .find(|&(_, &byte)| byte >= 0x80)
+        .map(|(index, &byte)| (index, byte))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_general.cpp:80-88

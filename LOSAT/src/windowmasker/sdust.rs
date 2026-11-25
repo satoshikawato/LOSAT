@@ -1,13 +1,14 @@
 //! `-dust T`: `CSDustMasker` (the symmetric DUST masker of windowmasker, run over the parts of
 //! a sequence that WindowMasker did not mask) and `CSeqMasker::MergeMaskInfo`.
 
-use crate::utils::dust::{DustMasker, NcbiLfgRandom};
+use crate::utils::dust::DustMasker;
+use crate::utils::random_gen::NcbiRandom;
 
 /// `CSDustMasker`: one `CSymDustMasker` (window 64, the level of `-dust_level`, linker 1) for
 /// the whole run, so the random numbers that resolve `N` run on from one sequence to the next.
 pub(super) struct SDustMasker {
     duster: DustMasker,
-    rng: NcbiLfgRandom,
+    rng: NcbiRandom,
 }
 
 /// `CWinMaskConfig`'s `dust_window` (64) and `dust_linker` (1).
@@ -25,7 +26,7 @@ impl SDustMasker {
     pub(super) fn new(level: i32) -> Self {
         SDustMasker {
             duster: DustMasker::new(level as u32, DUST_WINDOW as usize, DUST_LINKER),
-            rng: NcbiLfgRandom::new(),
+            rng: NcbiRandom::default(),
         }
     }
 

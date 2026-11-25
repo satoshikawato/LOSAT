@@ -881,13 +881,18 @@ impl SeqDb {
                 let length_bounds = bounds
                     .get_or_insert_with(|| {
                         if protein {
-                            // A protein's length is exact in its index (series NP, M4b).
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+                            // A protein whose NCBI 32-bit length is not positive (`0` or `>= 2^31`)
+                            // is skipped by the search (`s_SeqDbGetSequence` returns error).
                             volume
-                                .x_protein_lengths(run.first, run.end)
+                                .x_protein_lengths_i32(run.first, run.end)
                                 .map(|lengths| {
                                     lengths
                                         .into_iter()
-                                        .map(|length| Some((length as usize, length as usize)))
+                                        .map(|length| {
+                                            (length > 0)
+                                                .then_some((length as usize, length as usize))
+                                        })
                                         .collect()
                                 })
                                 .unwrap_or_default()
@@ -900,10 +905,18 @@ impl SeqDb {
                     .get((vol_oid - run.first) as usize)
                     .copied()
                     .flatten();
+                if protein && length_bounds.is_none() {
+                    if let Ok(len) = self.protein_length_i32(seq_ordinal) {
+                        if len <= 0 {
+                            continue;
+                        }
+                    }
+                }
                 let length = || {
                     if protein {
-                        self.protein_length(seq_ordinal)
+                        self.protein_length_i32(seq_ordinal)
                             .ok()
+                            .filter(|&length| length > 0)
                             .map(|length| length as usize)
                     } else {
                         self.nucleotide_length(seq_ordinal).ok()
@@ -931,9 +944,10 @@ impl SeqDb {
     // included sequence in the order of its id.
     /// Every sequence that a search of this database reads (by ordinal id: those the list and the
     /// alias files' ranges include), in that order, with its exact length (for proteins,
-    /// `Volume::x_protein_lengths` once per block of 4,096 sequences, or `SeqDb::protein_length`
-    /// where the block's cannot be read; for nucleotides, `Volume::nucleotide_length`, index plus
-    /// last byte) and a lazy reader of its stored masks of the filtering algorithm `algo_id`
+    /// `Volume::x_protein_lengths_i32` once per block of 4,096 sequences, or
+    /// `SeqDb::protein_length_i32` where the block's cannot be read, skipping proteins whose NCBI
+    /// 32-bit length is `<= 0`; for nucleotides, `Volume::nucleotide_length`, index plus last
+    /// byte) and a lazy reader of its stored masks of the filtering algorithm `algo_id`
     /// ([`SearchedMasks`], which reads the block's masks only when the visitor asks for them),
     /// until `visit` returns a finding or an error: that finding with the sequence's NCBI OID (as
     /// `blastdbcmd`'s `%o`) and its volume's path.
@@ -957,19 +971,27 @@ impl SeqDb {
         {
             let volume = &self.volumes[run.volume];
             let protein_lengths = protein
-                .then(|| volume.x_protein_lengths(run.first, run.end).ok())
+                .then(|| volume.x_protein_lengths_i32(run.first, run.end).ok())
                 .flatten();
             for vol_oid in run.first..run.end {
                 let seq_ordinal = run.first_ordinal + (vol_oid - run.first);
                 let named_oid = self.volume_starts[run.volume] + vol_oid;
                 let length = if protein {
-                    match protein_lengths
+                    let signed = match protein_lengths
                         .as_ref()
                         .and_then(|lengths| lengths.get((vol_oid - run.first) as usize))
                     {
-                        Some(&length) => length as usize,
-                        None => self.protein_length(seq_ordinal)? as usize,
+                        Some(&length) => length,
+                        None => self.protein_length_i32(seq_ordinal)?,
+                    };
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+                    // `s_SeqDbGetSequence` returns an error for proteins whose NCBI 32-bit length
+                    // is not positive (`0` or `>= 2^31`), so the search skips them without reading
+                    // masks or advancing the diagonal offset.
+                    if signed <= 0 {
+                        continue;
                     }
+                    signed as usize
                 } else {
                     volume.nucleotide_length(vol_oid, named_oid)?
                 };

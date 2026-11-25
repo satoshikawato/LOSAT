@@ -7433,7 +7433,7 @@ fn search(
 /// the reports that NCBI's batch loop has printed (line RG item X-short-bat-2). The one place that
 /// makes the type in BLASTN.
 fn after_batch_reports(error: anyhow::Error) -> anyhow::Error {
-    crate::blastinput::app::ErrorAfterBatchReports(error).into()
+    crate::blastinput::app::ErrorAfterBatchReports::new(error).into()
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:295-312
@@ -8792,7 +8792,7 @@ fn run_in_pool(
                     // prologs that come with them), then the batch's title warnings (it was read
                     // before its search) and the error, which skips `PrintEpilog` (the outfmt 0
                     // footer and outfmt 7's last line): `after_batch_reports`.
-                    Ok(crate::blastinput::app::ErrorAfterBatchReports(error)) => fail_batch!(error),
+                    Ok(failure) => fail_batch!(failure.error),
                     // The warnings of the batches read so far, in NCBI's order (the outfmt 0
                     // prolog of a Karlin-Altschul error of the first batch is written).
                     // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were written
@@ -8864,7 +8864,8 @@ fn run_in_pool(
             if let Err(error) =
                 database.batch_titles((batch.fetched_utf8, one_by_one), &mut batch_hit_lists, read)
             {
-                let error = match error.downcast::<database::HeaderReadError>() {
+                let error = match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
+                {
                     Ok(failure) => failure.error,
                     // LOSAT's refusal: the warnings of the batches read so far, as for the
                     // other errors of a batch (below).
@@ -9182,10 +9183,12 @@ fn run_in_pool(
                     warnings[start].append(&posts);
                     None
                 }
-                Some(Err(error)) if error.is::<database::HeaderReadError>() => {
+                Some(Err(error))
+                    if error.is::<crate::blastinput::app::ErrorAfterBatchReports>() =>
+                {
                     let failure = error
-                        .downcast::<database::HeaderReadError>()
-                        .expect("the error was checked to be a HeaderReadError");
+                        .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
+                        .expect("the error was checked to be an ErrorAfterBatchReports");
                     fail_batch!(failure.error);
                 }
                 Some(Err(error)) => Some(error),
@@ -10397,12 +10400,9 @@ fn refused_batch_setup_error(
             query_keep,
         )
     };
-    set_up.err().map(|error| {
-        match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
-            Ok(crate::blastinput::app::ErrorAfterBatchReports(error)) => error,
-            Err(error) => error,
-        }
-    })
+    set_up
+        .err()
+        .map(crate::blastinput::app::ErrorAfterBatchReports::held)
 }
 
 /// Searches one query batch against the subjects, with the query block, lookup table and

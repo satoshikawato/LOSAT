@@ -104,7 +104,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     // `stats::setup::setup_subject_length`: the total divided by `num_seqs`, cast to `Int4` and
     // then to `Uint4`, is 0 (a negative `NSEQ` passes; one of 2^31 fails).
     if crate::stats::setup::setup_subject_length(total_length, num_seqs as i32, None).is_none() {
-        return Err(ErrorAfterBatchReports(
+        return Err(ErrorAfterBatchReports::new(
             crate::cli::NativeError {
                 exit: 3,
                 message: format!(

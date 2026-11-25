@@ -813,7 +813,7 @@ fn no_hits(dir: &TempDir) -> PathBuf {
 
 /// A database whose header file is missing (`tests/fixtures/outfmt17/db/snucl_nophr`), hit from the
 /// third batch on (eight queries without hits first): NCBI's error of the batch that first reads a
-/// definition line (`HeaderReadError`, exit status 2) after the reports of the batches before, the
+/// definition line (`ErrorAfterBatchReports`, exit status 2) after the reports of the batches before, the
 /// off bytes in every kind of format (until 2026-11-03 the check before the search kept such a
 /// database's reports after the loop).
 #[test]

@@ -53,7 +53,7 @@ fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, any
         return Ok(crate::blastinput::app::engine_error(text.as_bytes()));
     }
     let error = match error.downcast::<ErrorAfterBatchReports>() {
-        Ok(ErrorAfterBatchReports(refusal)) => return Ok(refusal),
+        Ok(failure) => return Ok(failure.error),
         Err(error) => error,
     };
     let error = match error.downcast::<XReadError>() {
@@ -2653,7 +2653,7 @@ fn search(
                     .after_xml_reports(xml_before.as_ref()),
                 first_xml2,
             );
-            match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
+            match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
                 Ok(failure) => failed = Some((span, failure.error)),
                 Err(error) => return Err(error),
             }

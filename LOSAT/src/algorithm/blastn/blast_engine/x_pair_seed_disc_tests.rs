@@ -1835,13 +1835,16 @@ fn hoist_layout(rng: &mut Lcg, form: HoistForm, cover: usize) -> Vec<QueryContex
         lengths
     };
     let long = |rng: &mut Lcg| 20 + rng.below(3000) as usize;
+    // lengths within 1024..1536 keep 2^shift = 1024 with zero crowded blocks (no shift step can
+    // stay below 1 / CROWDED_SHARE)
+    let even = |rng: &mut Lcg| 1024 + rng.below(512) as usize;
     match form {
         HoistForm::Div => {
             let len = [1, 17, 18, 21, 64, 1000][rng.below(6) as usize];
             hoist_contexts(&vec![len; (cover / (len + 1)).clamp(1, 4000)], 0, 0)
         }
         HoistForm::Blocks => {
-            let mut lengths = lengths(rng, &mut |rng, _| long(rng));
+            let mut lengths = lengths(rng, &mut |rng, _| even(rng));
             lengths[0] = lengths[1] + 1;
             hoist_contexts(&lengths, 0, 0)
         }
@@ -1852,22 +1855,25 @@ fn hoist_layout(rng: &mut Lcg, form: HoistForm, cover: usize) -> Vec<QueryContex
                 if (alternate && k % 2 == 1) || (!alternate && rng.below(3) == 0) {
                     0
                 } else {
-                    long(rng)
+                    even(rng)
                 }
             });
-            lengths[0] = long(rng);
+            lengths[0] = even(rng);
             lengths[1] = 0;
             hoist_contexts(&lengths, 0, 0)
         }
         HoistForm::Crowded => {
-            // long contexts with a few of 1 to 4 letters: blocks with two sentinels
-            let lengths = lengths(rng, &mut |rng, k| {
-                if k % 97 == 13 {
-                    1 + rng.below(4) as usize
-                } else {
-                    200 + rng.below(4000) as usize
-                }
-            });
+            // long contexts with three consecutive 1-letter contexts: at shift 3 (block 8) at
+            // least one adjacent pair of sentinels shares a block while crowded_blocks <= blocks/256
+            let mut lengths = Vec::new();
+            let mut sum = 0usize;
+            let need = cover.max(20_000);
+            while sum < need || lengths.len() < 10 {
+                let k = lengths.len();
+                let l = if (3..=5).contains(&k) { 1 } else { even(rng) };
+                sum += l + 1;
+                lengths.push(l);
+            }
             hoist_contexts(&lengths, 0, 0)
         }
         HoistForm::Runs => {

@@ -730,3 +730,314 @@ fn affine_greedy_reverse_equals_forward_on_reversed_pair() {
     }
     assert!(fences >= 20 && runs == 1_200, "fences {fences} runs {runs}");
 }
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:183-267
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:802-1249
+/// Affine greedy alignment with megablast gap costs above 32767 and up to `i32::MAX`:
+/// - costs whose gap penalty exceeds the X-drop converge cleanly without allocating dense tables
+///   or overflowing 32-bit signed integers (matching NCBI's output at non-overflowing costs);
+/// - high-GCD scaled scores with gap costs above 32767 open and extend real gaps identically in
+///   both score-only and traceback modes;
+/// - zero `gap_open` with large `gap_extend` handles equal open and extend step distances.
+#[test]
+fn affine_greedy_handles_gap_costs_above_32767_and_up_to_int_max() {
+    let mut rng = TestRng(0x5A17_9C31_1024_BEEF);
+    let query: Vec<u8> = (0..600).map(|_| rng.below(4) as u8).collect();
+    // 1-base deletion in subject at 250, 1 mismatch at 400, 2-base insertion in subject at 480.
+    let mut subject = Vec::with_capacity(601);
+    subject.extend_from_slice(&query[..250]);
+    subject.extend_from_slice(&query[251..400]);
+    subject.push((query[400] + 1) & 3);
+    subject.extend_from_slice(&query[401..480]);
+    subject.push(2);
+    subject.push(0);
+    subject.extend_from_slice(&query[480..]);
+
+    let mut reused = GreedyAlignScratch::new();
+    let run = |scoring: (i32, i32, i32, i32),
+               x_drop: i32,
+               seed_pos: (i32, i32),
+               scratch: &mut GreedyAlignScratch,
+               traceback: bool| {
+        greedy_gapped_alignment_internal(
+            ContextQuery {
+                buf: &query,
+                start: 0,
+                len: query.len() as i32,
+            },
+            SeqPointer {
+                buf: &subject,
+                start: 0,
+                len: subject.len() as i32,
+            },
+            subject.len(),
+            seed_pos.0,
+            seed_pos.1,
+            scoring.0,
+            scoring.1,
+            scoring.2,
+            scoring.3,
+            x_drop,
+            scratch,
+            traceback,
+        )
+        .expect("affine greedy alignment converges")
+    };
+
+    // High gap costs on 1/-2 (odd reward) and 2/-3 (even reward), up to i32::MAX, plus 0/ge:
+    // none can open a gap across pos 250 within x_drop 54, so all match the exact 250-base block.
+    for (reward, penalty, gap_open, gap_extend, x_drop) in [
+        (1, -2, 32_767, 32_767, 54),
+        (1, -2, 32_768, 32_768, 54),
+        (1, -2, 40_000, 40_000, 54),
+        (1, -2, 40_000, 2, 54),
+        (1, -2, 2, 40_000, 54),
+        (1, -2, 0, 40_000, 54),
+        (1, -2, 1_000_000, 1_000_000, 54),
+        (1, -2, 2_000_000_000, 2_000_000_000, 54),
+        (1, -2, i32::MAX, i32::MAX, 54),
+        (1, -2, i32::MAX, 2, 54),
+        (1, -2, 0, i32::MAX, 54),
+        (2, -3, 40_000, 40_000, 100),
+        (2, -3, i32::MAX, i32::MAX, 100),
+    ] {
+        for traceback in [false, true] {
+            let mut fresh = GreedyAlignScratch::new();
+            let got = run(
+                (reward, penalty, gap_open, gap_extend),
+                x_drop,
+                (120, 120),
+                &mut reused,
+                traceback,
+            );
+            let want = run(
+                (reward, penalty, gap_open, gap_extend),
+                x_drop,
+                (120, 120),
+                &mut fresh,
+                traceback,
+            );
+            assert_eq!(
+                (got.q_start, got.q_end, got.s_start, got.s_end, got.score),
+                (
+                    want.q_start,
+                    want.q_end,
+                    want.s_start,
+                    want.s_end,
+                    want.score
+                ),
+                "reused vs fresh mismatch for {reward}/{penalty} {gap_open}/{gap_extend}"
+            );
+            assert_eq!(
+                (got.q_start, got.q_end, got.s_start, got.s_end, got.score),
+                (0, 250, 0, 250, 250 * reward),
+                "unexpected block for {reward}/{penalty} {gap_open}/{gap_extend}"
+            );
+        }
+    }
+
+    // Scaled high-GCD scoring with gapopen > 32767 opens and extends real gaps across the entire
+    // 600-base pair (598 matches, 1 mismatch, 1bp ins in query, 2bp del in query).
+    // Score = 598 * 1000 - 2000 - (40000 + 2000) - (40000 + 4000) = 510_000.
+    let expected_score = 598 * 1000 - 2000 - (40_000 + 2000) - (40_000 + 2 * 2000);
+    let score_only = run(
+        (1000, -2000, 40_000, 2000),
+        100_000,
+        (300, 299),
+        &mut reused,
+        false,
+    );
+    let with_tb = run(
+        (1000, -2000, 40_000, 2000),
+        100_000,
+        (300, 299),
+        &mut reused,
+        true,
+    );
+    assert_eq!(
+        (
+            score_only.q_start,
+            score_only.q_end,
+            score_only.s_start,
+            score_only.s_end,
+            score_only.score
+        ),
+        (0, 600, 0, 601, expected_score)
+    );
+    assert_eq!(
+        (
+            with_tb.q_start,
+            with_tb.q_end,
+            with_tb.s_start,
+            with_tb.s_end,
+            with_tb.score
+        ),
+        (0, 600, 0, 601, expected_score)
+    );
+    let ops = with_tb.edit_script.expect("traceback edit script");
+    assert!(
+        ops.op_type[..ops.size].contains(&GapAlignOpType::Ins)
+            && ops.op_type[..ops.size].contains(&GapAlignOpType::Del),
+        "expected both Ins and Del in high-GCD gapped alignment: {:?}",
+        &ops.op_type[..ops.size]
+    );
+
+    // Dense 32-bit overflow guard: gap costs <= 32767 with huge max_dist or x_drop
+    // detect i32 overflow and fall back to sparse without panic.
+    assert!(!greedy_sparse::dense_affine_overflows(1000, 54, 1, 2, 5, 2));
+    assert!(greedy_sparse::dense_affine_overflows(
+        30_000, 54, 1, 2, 32_767, 32_767
+    ));
+    assert!(greedy_sparse::dense_affine_overflows(
+        1000,
+        i32::MAX / 2,
+        1,
+        2,
+        32_767,
+        32_767
+    ));
+}
+
+#[test]
+fn sparse_affine_greedy_matches_dense_across_ordinary_gap_costs() {
+    let mut rng = TestRng(0x51A7_E500_1234_ABCD);
+    let scorings = [
+        (1, 2, 5, 2, 30),
+        (1, 2, 2, 2, 40),
+        (2, 3, 5, 2, 60),
+        (2, 3, 0, 4, 50),
+        (1, 3, 1, 1, 25),
+        (4, 5, 6, 4, 80),
+        (5, 4, 10, 6, 100),
+    ];
+    let mut dense_mem = GreedyAffineMem::new();
+    let mut dense_non_affine = GreedyNonAffineMem::new();
+    let mut sparse_mem = None;
+
+    for case in 0..80 {
+        let len = 40 + rng.below(220) as usize;
+        let base_seq: Vec<u8> = (0..len).map(|_| rng.below(4) as u8).collect();
+        let mut s1 = Vec::new();
+        let mut s2 = Vec::new();
+        for &b in &base_seq {
+            let r = rng.below(100);
+            if r < 4 {
+                s1.push(b);
+            } else if r < 8 {
+                s2.push(b);
+                s2.push(rng.below(4) as u8);
+                s1.push(b);
+            } else if r < 18 {
+                s1.push(b);
+                s2.push((b + 1 + rng.below(3) as u8) & 3);
+            } else {
+                s1.push(b);
+                s2.push(b);
+            }
+        }
+        let (reward, mismatch, gap_open, gap_extend, xdrop) = scorings[case % scorings.len()];
+        for reverse in [false, true] {
+            for traceback in [false, true] {
+                let mut q_d = 0;
+                let mut s_d = 0;
+                let mut fence_d = false;
+                let mut seed_d = GreedySeed::default();
+                let mut tb_d = GapPrelimEditBlock::new();
+                let mut max_dist = 16i32;
+                let score_d = loop {
+                    if traceback {
+                        tb_d.reset();
+                    }
+                    let sc = blast_affine_greedy_align(
+                        &s1,
+                        s1.len() as i32,
+                        &s2,
+                        s2.len() as i32,
+                        reverse,
+                        xdrop,
+                        reward,
+                        mismatch,
+                        gap_open,
+                        gap_extend,
+                        &mut q_d,
+                        &mut s_d,
+                        max_dist,
+                        &mut dense_mem,
+                        &mut dense_non_affine,
+                        traceback.then_some(&mut tb_d),
+                        &mut fence_d,
+                        &mut seed_d,
+                    );
+                    if sc >= 0 {
+                        break sc;
+                    }
+                    max_dist *= 2;
+                };
+
+                let mut q_s = 0;
+                let mut s_s = 0;
+                let mut fence_s = false;
+                let mut seed_s = GreedySeed::default();
+                let mut tb_s = GapPrelimEditBlock::new();
+                let score_s = if reverse {
+                    greedy_sparse::blast_affine_greedy_align_sparse::<true>(
+                        &s1,
+                        s1.len() as i32,
+                        &s2,
+                        s2.len() as i32,
+                        xdrop,
+                        reward,
+                        mismatch,
+                        gap_open,
+                        gap_extend,
+                        &mut q_s,
+                        &mut s_s,
+                        &mut sparse_mem,
+                        traceback.then_some(&mut tb_s),
+                        &mut fence_s,
+                        &mut seed_s,
+                    )
+                } else {
+                    greedy_sparse::blast_affine_greedy_align_sparse::<false>(
+                        &s1,
+                        s1.len() as i32,
+                        &s2,
+                        s2.len() as i32,
+                        xdrop,
+                        reward,
+                        mismatch,
+                        gap_open,
+                        gap_extend,
+                        &mut q_s,
+                        &mut s_s,
+                        &mut sparse_mem,
+                        traceback.then_some(&mut tb_s),
+                        &mut fence_s,
+                        &mut seed_s,
+                    )
+                };
+
+                assert_eq!(
+                    (score_s, q_s, s_s, fence_s, seed_s.start_q, seed_s.start_s, seed_s.match_length),
+                    (score_d, q_d, s_d, fence_d, seed_d.start_q, seed_d.start_s, seed_d.match_length),
+                    "dense vs sparse mismatch case={case} rev={reverse} tb={traceback} scoring={:?}",
+                    (reward, mismatch, gap_open, gap_extend, xdrop)
+                );
+                if traceback {
+                    let ops_d: Vec<_> = tb_d.edit_ops[..tb_d.num_ops]
+                        .iter()
+                        .map(|o| (o.op_type, o.num))
+                        .collect();
+                    let ops_s: Vec<_> = tb_s.edit_ops[..tb_s.num_ops]
+                        .iter()
+                        .map(|o| (o.op_type, o.num))
+                        .collect();
+                    assert_eq!(
+                        ops_s, ops_d,
+                        "traceback ops mismatch case={case} rev={reverse}"
+                    );
+                }
+            }
+        }
+    }
+}

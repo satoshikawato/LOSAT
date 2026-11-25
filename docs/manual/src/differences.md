@@ -96,6 +96,13 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **Why.** NCBI's behaviour is a signed overflow, which is undefined in C. LOSAT computes the sizes without overflow.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### Large `-task megablast` gap costs
+
+- **What you see.** `blastn -task megablast` runs with any `-gapopen` and `-gapextend` accepted by the nucleotide Karlin-Altschul tables, including values above 32767 up to 2147483647. Where NCBI BLAST+ 2.17.0 completes without overflowing its 32-bit greedy distance arithmetic or running out of memory in its dense greedy tables (for example `32768/32768`, `40000/40000`, `100000/100000`, or scaled high-GCD scores such as `-reward 1000 -penalty -2000 -gapopen 40000 -gapextend 2000`), LOSAT writes NCBI's output (apart from the version line, which names LOSAT). Where NCBI overflows a signed 32-bit integer or exhausts memory in `s_BlastGreedyAlignMemAlloc` / `BLAST_AffineGreedyAlign` (failing with `BLAST engine error: Unknown error code -1`, crashing with SIGSEGV or `free(): invalid pointer`, or wrapping an odd-reward `2 * gap_open` to a negative penalty), LOSAT computes the affine greedy alignment in 64-bit arithmetic over non-empty distances and writes the alignments of the nearby non-overflowing run.
+- **When.** `blastn -task megablast` without `-no_greedy` with very large `-gapopen` or `-gapextend` values.
+- **Why.** NCBI's failures and wraps are signed 32-bit overflow (undefined behaviour in C) or dense-table memory exhaustion. LOSAT widens the affine greedy arithmetic to 64 bits and stores only non-empty distances.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### `gb`, `emb` and `dbj` ids
 
 - **What you see.** LOSAT prints the id type that is stored. NCBI can print `gb|AF000002.1|` for a sequence stored as `emb|AF000002.1|`.

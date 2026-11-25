@@ -74,9 +74,7 @@ use super::super::query_split::{
     splits, QueryChunk, SplitSizes,
 };
 use super::super::repeat_filter::MasksOutside;
-use super::super::scoring::{
-    check_greedy_gap_costs, check_losat_limits, check_scoring_options, ContextKarlin,
-};
+use super::super::scoring::{check_losat_limits, check_scoring_options, ContextKarlin};
 use super::super::seqalign::write_blastn_seqalign;
 use super::super::tracing as blastn_trace;
 use super::super::ungapped;

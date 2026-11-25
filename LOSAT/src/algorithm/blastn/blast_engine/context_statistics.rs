@@ -23,8 +23,7 @@ use super::{
     QueryContext, SequenceData, ShownSubjects, SubjectSource, FIRST_BATCH_OUTPUTS,
 };
 use crate::algorithm::blastn::scoring::{
-    check_greedy_gap_costs, check_greedy_matrix_only, context_blocks, context_blocks_ungapped,
-    karlin_error,
+    check_greedy_matrix_only, context_blocks, context_blocks_ungapped, karlin_error,
 };
 use crate::report::pairwise::BlastnIntro;
 use crate::wording::ENGINE_ERROR;
@@ -191,19 +190,11 @@ fn karlin_blocks<const UNGAPPED: bool>(
     Ok((context_karlin, round_down_evalue_score))
 }
 
-/// The checks of the set-up on the subjects (a database without sequences, the average subject
-/// length) and on the greedy gap costs, then the blocks the search reads for each context and the
-/// LOSAT's refusals of the greedy set-up of `BLAST_GapAlignSetUp` (`s_BlastGreedyAlignMemAlloc`),
+/// LOSAT's refusal of the greedy set-up of `BLAST_GapAlignSetUp` (`s_BlastGreedyAlignMemAlloc`),
 /// which NCBI reaches with a valid context only (with no valid context, NCBI extends nothing):
-/// gap costs that the tables accept but LOSAT's greedy extension does not (`scoring.rs`;
-/// gapped searches), then matrix-only scoring with the greedy extension, where NCBI divides by
-/// zero or does not end (`check_greedy_matrix_only`; an ungapped search sets it up too).
+/// matrix-only scoring with the greedy extension, where NCBI divides by zero or does not end
+/// (`check_greedy_matrix_only`; an ungapped search sets it up too).
 pub(super) fn greedy_setup_refusal(args: &BlastnArgs, ungapped: bool) -> Option<anyhow::Error> {
-    if !ungapped {
-        if let Err(error) = check_greedy_gap_costs(args) {
-            return Some(error);
-        }
-    }
     check_greedy_matrix_only(args, ungapped).err()
 }
 
@@ -341,9 +332,9 @@ fn effective_search_spaces<const UNGAPPED: bool>(
                 })
         })
         // The greedy set-up after the subjects: NCBI 2.17.0 reports `The average subject
-        // length is too short` (exit status 3) with gap costs or scores that LOSAT refuses for
-        // the greedy extension, also in a split query batch (each chunk checks them,
-        // `CHUNK_SIZE=200`; line RG D1a-6).
+        // length is too short` (exit status 3) with scores that LOSAT refuses for the greedy
+        // extension, also in a split query batch (each chunk checks them, `CHUNK_SIZE=200`;
+        // line RG D1a-6).
         .or_else(|| greedy_setup_refusal(args, UNGAPPED));
         if let Some(error) = setup_error {
             return Err(setup_failure(error, first_batch, outputs, intro, shown));

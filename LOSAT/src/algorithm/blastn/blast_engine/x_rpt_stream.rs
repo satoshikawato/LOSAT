@@ -151,8 +151,8 @@ use crate::stats::NuclValues;
 use crate::utils::dust::MaskedInterval;
 
 use super::{
-    check_greedy_gap_costs, configure_task, record_title, x_debug_output, BlastnArgs,
-    BlastnOutputFormat, QueryBatching, SubjectLetters, SubjectRanges, SubjectSource,
+    configure_task, record_title, x_debug_output, BlastnArgs, BlastnOutputFormat, QueryBatching,
+    SubjectLetters, SubjectRanges, SubjectSource,
 };
 use crate::algorithm::blastn::scoring::check_greedy_matrix_only;
 
@@ -480,8 +480,8 @@ fn check(
     }
     // The scoring of `search_query_batch` (`context_blocks`, called in
     // `context_statistics::karlin_blocks`: `NuclValues::gapped` fails exactly
-    // where `check_gaps` does, for every context) and its greedy gap costs: neither depends on
-    // the queries.
+    // where `check_gaps` does, for every context) and its matrix-only greedy refusal:
+    // neither depends on the queries.
     let config = configure_task(args);
     let spec = NuclScoringSpec {
         reward: config.score_reward,
@@ -492,7 +492,6 @@ fn check(
     if NuclValues::new(spec.reward, spec.penalty)
         .and_then(|values| values.check_gaps(&spec))
         .is_err()
-        || check_greedy_gap_costs(args).is_err()
         || check_greedy_matrix_only(args, args.ungapped).is_err()
     {
         return Err(Off::Scoring);

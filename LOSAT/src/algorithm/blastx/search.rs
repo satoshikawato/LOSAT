@@ -1169,6 +1169,20 @@ fn compute_subject_with<S: super::seed::BxScoring>(
     // `subjects.length(oid)` for every kind of subjects: the residues before the sentinel byte (a
     // database read in blocks then looks the subject up once).
     let subject_length = encoded.len() - 1;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+    // A subject with no searchable letters (`BlastSeqSrcGetSequence` returns <= 0, including
+    // empty proteins and proteins of `>= 2^31` residues) is skipped without scanning or advancing
+    // the diagonal table.
+    if subject_length == 0 && piece.is_none() {
+        #[cfg(feature = "blastx-worker-probe")]
+        worker_probe("finish", oid);
+        return Ok(SubjectComputation {
+            raw: Vec::new(),
+            purged: Vec::new(),
+            containment,
+            prepared_link: None,
+        });
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
     // Worker-local cutoff preparation precedes WordFinder as in NCBI; only
     // adoption/observer notification is replayed on the serial OID collector.

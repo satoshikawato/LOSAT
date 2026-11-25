@@ -148,7 +148,7 @@ Strategy files:
 
 ## tblastn
 
-- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback (with `-ungapped`, the ungapped re-evaluation) makes NCBI read the translation of the subject's frame, which it never makes for a subject this short. NCBI then crashes.
+- A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the traceback (with `-ungapped`, the ungapped re-evaluation) makes NCBI read the translation of the subject's frame, which it never makes for a subject this short. NCBI then crashes. With `-ungapped`, a one-hit alignment of length 0 or less (`-window_size 0`) is deleted there without that read, so a subject whose only alignments are such ones is searched as NCBI searches it.
 - In practice this happens with `-window_size 0`: no frame of such a subject, three letters at most, holds two words that do not overlap.
 - LOSAT writes the results of the query batches before and then stops with the error.
 - With `-window_size 0` (the one-hit word finder) and a low `-threshold`, LOSAT refuses the cases below.
@@ -168,7 +168,7 @@ Strategy files:
 ## tblastx
 
 - With `-window_size 0` and a low `-threshold`, a one-hit ungapped alignment of length 0 or less is refused when it meets another in the overlap of two 5,000,000-letter parts of a subject frame and their lengths add up to 0. NCBI merges them by dividing by that sum, and its result is undefined.
-- An alignment on a subject (or its `-subject_loc` range) of fewer than 12 bases that reaches the ungapped re-evaluation makes NCBI read the translation of the subject's frame and crash.
+- An alignment on a subject (or its `-subject_loc` range) of fewer than 12 bases that reaches the ungapped re-evaluation makes NCBI read the translation of the subject's frame and crash. A one-hit alignment of length 0 or less (`-window_size 0`) is deleted there without that read.
 - `tblastx` first writes in full the reports of the query batches before. NCBI writes them before it crashes, except what its output buffer still holds (with `-outfmt 0`, the end of the last one).
 - An ungapped extension that passes the end of a query frame into the next frame of the query batch and scores higher there is refused, with an `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62; a raw X-drop above 32,768).
 - In the cases checked, NCBI keeps such an alignment in the frame where it started, with query coordinates outside that frame. It writes coordinates past the query or leaves the alignment out of every report.
@@ -294,7 +294,6 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - `-convert` of an `ascii` counts file with units of 17 letters or more is refused. NCBI converts it without an error, but its reverse complement of each unit shifts the 32-bit unit past its width, which is undefined.
 - `-convert` of an `ascii` counts file whose unit size line is 0 (or a multiple of 256, which NCBI reads as 0) to `oascii` or `obinary` is refused. NCBI's search for the size of its hash table never ends. The `ascii` and `binary` outputs of such a file are written as NCBI writes them.
 - A `binary` or `obinary` counts file whose `##pct:` line names 4294967295 or more as its largest count is refused. NCBI then reads past its table of percentages.
-- `-mk_counts -infmt blastdb -fa_list T` with a line of the list that is not UTF-8 text is refused. NCBI opens the database by those bytes; LOSAT opens databases by names of text.
 - The database and serial-writer refusals of `dustmasker` apply to `windowmasker` too.
 
 ## segmasker

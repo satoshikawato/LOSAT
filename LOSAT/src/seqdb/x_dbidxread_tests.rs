@@ -7,6 +7,7 @@ use super::file::DbFile;
 use super::index::IndexFile;
 use super::volume::{held_block_end, Volume};
 use super::*;
+use crate::utils::test_dir::TempDir;
 
 fn fixture_db_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db")
@@ -28,27 +29,6 @@ fn index_files() -> Vec<(PathBuf, SeqType)> {
     files.sort_by(|a, b| a.0.cmp(&b.0));
     assert!(files.len() >= 10, "fixture index files: {files:?}");
     files
-}
-
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(tag: &str) -> Self {
-        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-        let dir = crate::utils::test_dir::temp_dir().join(format!(
-            "losat-dbidxread-{tag}-{}-{}",
-            crate::utils::test_dir::process_id(),
-            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
 }
 
 /// The values an index gives, through its accessors, or the error text.
@@ -108,10 +88,10 @@ fn check_open(bytes: &[u8], path: &Path, seqtype: SeqType, chunks: &[usize]) {
 
 #[test]
 fn open_reads_what_parse_reads() {
-    let dir = TempDir::new("same");
+    let dir = TempDir::unique("dbidxread-same");
     for (source, seqtype) in index_files() {
         let bytes = std::fs::read(&source).unwrap();
-        let path = dir.0.join(source.file_name().unwrap());
+        let path = dir.join(source.file_name().unwrap());
         check_open(&bytes, &path, seqtype, &[1, 2, 3, 7, 1 << 18]);
         // Opened as the other sequence type: the same error.
         let other = match seqtype {
@@ -124,10 +104,10 @@ fn open_reads_what_parse_reads() {
 
 #[test]
 fn open_gives_the_errors_of_parse() {
-    let dir = TempDir::new("errors");
+    let dir = TempDir::unique("dbidxread-errors");
     for (source, seqtype) in index_files() {
         let bytes = std::fs::read(&source).unwrap();
-        let path = dir.0.join(source.file_name().unwrap());
+        let path = dir.join(source.file_name().unwrap());
         // Cut short at every length.
         for cut in 0..bytes.len() {
             check_open(&bytes[..cut], &path, seqtype, &[2, 1 << 18]);
@@ -350,8 +330,8 @@ fn copy_database(name: &str, exts: &[&str], dir: &Path) -> PathBuf {
 
 #[test]
 fn damaged_headers_read_in_ranges_as_one_by_one() {
-    let dir = TempDir::new("headers");
-    let base = copy_database("prot_v4", &["pin", "psq", "phr"], &dir.0);
+    let dir = TempDir::unique("dbidxread-headers");
+    let base = copy_database("prot_v4", &["pin", "psq", "phr"], &dir);
     let phr = base.with_extension("phr");
     let bytes = std::fs::read(&phr).unwrap();
     // The header file cut short (records pass its end), a damaged byte in every record, and no
@@ -539,12 +519,12 @@ fn overwrite_entries(path: &Path, arrays: usize, num_oids: usize, array: usize, 
 
 #[test]
 fn an_index_file_changed_after_the_open_gives_errors_not_panics() {
-    let dir = TempDir::new("changed");
+    let dir = TempDir::unique("dbidxread-changed");
     for (name, exts, seqtype, arrays) in [
         ("prot_v4", ["pin", "psq", "phr"], SeqType::Protein, 2),
         ("nucl_v4", ["nin", "nsq", "nhr"], SeqType::Nucleotide, 3),
     ] {
-        let base = copy_database(name, &exts, &dir.0);
+        let base = copy_database(name, &exts, &dir);
         let index = base.with_extension(exts[0]);
         let pristine = std::fs::read(&index).unwrap();
         let num_oids = Volume::open_as(&base, seqtype, XDbIdxRead::Off)

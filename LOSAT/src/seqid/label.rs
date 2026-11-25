@@ -6,20 +6,19 @@
 //!
 //! Each function appends to `out`; the strings are the bytes the reader gives (`seqid::ber`).
 
-use std::io::Write;
-
 use super::model::{ObjectId, ParsedSeqId, PatentNumber, PatentSeqId, PdbSeqId, TextseqId};
 use super::rank::{find_best, text_score};
 
-/// Appends `value` in decimal (`NStr::NumericToString`, `operator<<`).
-pub(super) fn number(out: &mut Vec<u8>, value: impl std::fmt::Display) {
-    let _ = write!(out, "{value}");
+/// Appends `value` in decimal (`NStr::NumericToString`, `operator<<`;
+/// `utils::decimal::push_decimal`).
+pub(super) fn number(out: &mut Vec<u8>, value: impl Into<i64>) {
+    crate::utils::decimal::push_decimal(out, value.into());
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/general/Object_id.cpp:202-215
 fn object_id(tag: &ObjectId, out: &mut Vec<u8>) {
     match tag {
-        ObjectId::Id(id) => number(out, id),
+        ObjectId::Id(id) => number(out, *id),
         ObjectId::Str(text) => out.extend_from_slice(text),
     }
 }
@@ -76,7 +75,7 @@ pub fn fasta(id: &ParsedSeqId, out: &mut Vec<u8>) {
 fn fasta_content(id: &ParsedSeqId, out: &mut Vec<u8>) {
     match id {
         ParsedSeqId::Local(tag) => object_id(tag, out),
-        ParsedSeqId::Gibbsq(value) | ParsedSeqId::Gibbmt(value) => number(out, value),
+        ParsedSeqId::Gibbsq(value) | ParsedSeqId::Gibbmt(value) => number(out, *value),
         ParsedSeqId::Giim(giim) => number(out, giim.id),
         ParsedSeqId::Patent(patent) => patent_fasta(patent, out),
         ParsedSeqId::General(dbtag) => {
@@ -84,7 +83,7 @@ fn fasta_content(id: &ParsedSeqId, out: &mut Vec<u8>) {
             out.push(b'|');
             object_id(&dbtag.tag, out);
         }
-        ParsedSeqId::Gi(gi) => number(out, gi),
+        ParsedSeqId::Gi(gi) => number(out, *gi),
         ParsedSeqId::Pdb(pdb) => pdb_fasta(pdb, out),
         _ => textseq_fasta(id.textseq().expect("a Textseq-id alternative"), out),
     }
@@ -180,7 +179,7 @@ fn label_content(
     }
     match id {
         ParsedSeqId::Local(tag) => object_id(tag, out),
-        ParsedSeqId::Gibbsq(value) | ParsedSeqId::Gibbmt(value) => number(out, value),
+        ParsedSeqId::Gibbsq(value) | ParsedSeqId::Gibbmt(value) => number(out, *value),
         ParsedSeqId::Giim(giim) => number(out, giim.id),
         ParsedSeqId::General(dbtag) => {
             if !general_db_is_content {
@@ -199,7 +198,7 @@ fn label_content(
             out.push(b'_');
             number(out, patent.seqid);
         }
-        ParsedSeqId::Gi(gi) => number(out, gi),
+        ParsedSeqId::Gi(gi) => number(out, *gi),
         ParsedSeqId::Pdb(pdb) => {
             out.extend_from_slice(&pdb.mol);
             if let Some(chain_id) = &pdb.chain_id {
@@ -260,7 +259,7 @@ fn compose_oslt_label(id: &ParsedSeqId, out: &mut Vec<u8>) {
     let mut upper_from = start;
     match id {
         ParsedSeqId::Giim(giim) => number(out, giim.id),
-        ParsedSeqId::Gibbsq(value) | ParsedSeqId::Gibbmt(value) => number(out, value),
+        ParsedSeqId::Gibbsq(value) | ParsedSeqId::Gibbmt(value) => number(out, *value),
         ParsedSeqId::Pir(text) | ParsedSeqId::Prf(text) => {
             if let Some(name) = text.name.as_ref().or(text.accession.as_ref()) {
                 out.extend_from_slice(name);
@@ -301,7 +300,7 @@ fn compose_oslt_label(id: &ParsedSeqId, out: &mut Vec<u8>) {
                 out.truncate(suffix_start);
             }
         }
-        ParsedSeqId::Gi(gi) => number(out, gi),
+        ParsedSeqId::Gi(gi) => number(out, *gi),
         ParsedSeqId::Local(tag) => object_id(tag, out),
         _ => {
             let text = id.textseq().expect("a Textseq-id alternative");

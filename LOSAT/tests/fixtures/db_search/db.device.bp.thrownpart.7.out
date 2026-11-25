@@ -1,0 +1,5 @@
+# BLASTP 2.17.0+
+# Query: mix2_u qp1 of ids/noacc_v5 (no accession table)
+# Database: tests/db_search/multidb/pa tests/db_search/ids/noacc_v5
+# Fields: query id, subject length, evalue
+# 1 hits found

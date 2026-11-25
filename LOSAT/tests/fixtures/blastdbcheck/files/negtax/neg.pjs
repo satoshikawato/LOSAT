@@ -1,0 +1,23 @@
+{
+  "version": "1.2",
+  "dbname": "neg",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "neg",
+  "number-of-letters": 20,
+  "number-of-sequences": 1,
+  "last-updated": "2023-11-14T22:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 461,
+  "bytes-to-cache": 102,
+  "files": [
+    "neg.phr",
+    "neg.pin",
+    "neg.pnd",
+    "neg.pni",
+    "neg.pog",
+    "neg.psd",
+    "neg.psi",
+    "neg.psq"
+  ]
+}

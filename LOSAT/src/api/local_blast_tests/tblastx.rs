@@ -278,7 +278,7 @@ fn run_local_outputs(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1312-1318
-// The command line's `-word_size` is at least 2 (clap's `protein_word_size`); a caller of
+// The command line's `-word_size` is at least 2 (NCBI's argument reader); a caller of
 // `run_local` that sets the field itself gets the error of NCBI's core. A word size of 0 with
 // `-lcase_masking` and a lowercase subject took the reference scan, whose loop over the first
 // `word_length - 1` letters wrapped and read past the subject.

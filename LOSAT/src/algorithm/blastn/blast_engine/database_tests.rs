@@ -261,14 +261,8 @@ fn entries() -> Vec<(usize, String, String)> {
 }
 
 /// A temporary directory of this test (removed by the test).
-fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let dir = crate::utils::test_dir::temp_dir().join(format!(
-        "losat-blastn-db-{tag}-{}-{:?}",
-        crate::utils::test_dir::process_id(),
-        std::thread::current().id()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn temp_dir(tag: &str) -> crate::utils::test_dir::TempDir {
+    crate::utils::test_dir::TempDir::unique(&format!("blastn-db-{tag}"))
 }
 
 fn test_hsp(s_idx: u32, raw_score: i32) -> BlastnHsp {
@@ -838,7 +832,6 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
         )
     );
     drop(database);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // The reports name the reported sequences by rank (the order of the ordinal ids), with
@@ -998,7 +991,6 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
     );
     assert!(format!("{error:#}").ends_with("not supported by LOSAT's BLASTN"));
     drop(database);
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // The records made on a pool are those made one at a time, and the error is the first one
@@ -1047,10 +1039,14 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
     use crate::seqdb::alias::SearchPath;
     let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
-    let search =
-        SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+    let search = SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None);
     let path = tests.join("db_search").join(name);
-    let mut db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+    let mut db = SeqDb::open_in(
+        path.to_str().unwrap().as_bytes(),
+        SeqType::Nucleotide,
+        &search,
+    )
+    .unwrap();
     db.read_name_records(path.to_str().unwrap(), false).unwrap();
     let parsed_seqids = db.has_parsed_seqids().unwrap();
     BlastnDatabase {
@@ -1108,5 +1104,4 @@ fn the_prefetch_looks_up_the_sequences_with_hsps_once_per_run() {
         text(&database, &[hit_list(vec![(0, 1e-9), (1, 1e-8)], 2)]),
         ""
     );
-    std::fs::remove_dir_all(&cwd).unwrap();
 }

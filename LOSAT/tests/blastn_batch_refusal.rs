@@ -5,7 +5,7 @@
 //! (`blastinput::app::ErrorAfterBatchReports`, line RG item X-short-bat-2); nothing of the refused
 //! batch or of the batches after it is written, at every `-num_threads`, with the reports streamed
 //! batch by batch (`LOSAT_X_RPTSTREAM`, on by default) and without. The single searches are rows
-//! `db.xs.blastn.bat.*` of `tests/db_search_manifest/blastn.tsv`, which hold NCBI's bytes; here
+//! `db.xs.blastn.bat.*` of `tests/db_search_manifest/blastn.xs.tsv`, which hold NCBI's bytes; here
 //! every format of the rows, both report paths, `-db`, and the first batch.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:276-312

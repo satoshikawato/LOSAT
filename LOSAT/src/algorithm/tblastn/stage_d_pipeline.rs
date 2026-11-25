@@ -378,7 +378,7 @@ struct StageDBoundaryTrace {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:72-115;
-// c++/src/algo/blast/format/blast_format.cpp:445-477:
+// c++/src/algo/blast/format/blast_format.cpp:444-479:
 // The report of a batch reads these set-up values only; the search returns them
 // with or without the comparison-only trace above.
 struct LocalBatchSetup {
@@ -388,7 +388,7 @@ struct LocalBatchSetup {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1011-1024;
-// c++/src/algo/blast/format/blast_format.cpp:445-477:
+// c++/src/algo/blast/format/blast_format.cpp:444-479:
 // Formatting consumes the same initial context lengths computed before search.
 #[cfg(test)]
 pub(super) fn run_local_for_report(
@@ -4326,7 +4326,16 @@ fn ungapped_subject_steps(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1162-1164,1234-1235
     // A subject of fewer than 12 bases has no translation, which NCBI reads at NULL + 1
     // (`TargetTranslation::get`).
-    if crate::core::blast_hits::target_translation_never_made(subject.len()) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687-699
+    // The read is the re-evaluation's loop over the HSP's letters, which does not run for an HSP
+    // of length 0 or less (the one-hit word finder's, `-window_size 0`; skipped below): a list of
+    // only such HSPs is deleted unread, and NCBI's search goes on.
+    if crate::core::blast_hits::target_translation_never_made(subject.len())
+        && linked
+            .hsps
+            .iter()
+            .any(|linked| linked.hsp.q_end > linked.hsp.q_start)
+    {
         return Err(crate::core::blast_hits::x_untranslated_frame_refusal(
             "TBLASTN",
             "the ungapped re-evaluation",

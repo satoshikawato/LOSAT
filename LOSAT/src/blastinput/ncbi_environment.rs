@@ -490,14 +490,7 @@ fn unix_program_name(
             app_path = path_env
                 .split(|&byte| byte == b':')
                 .filter(|dir| !dir.is_empty())
-                .map(|dir| {
-                    let mut candidate = dir.to_vec();
-                    if !candidate.ends_with(b"/") {
-                        candidate.push(b'/');
-                    }
-                    candidate.extend_from_slice(base);
-                    candidate
-                })
+                .map(|dir| PathRules::Unix.make_path(dir, base))
                 .find(|candidate| is_file(candidate))
                 .unwrap_or_default();
         }
@@ -532,11 +525,28 @@ impl PathRules {
         Self::Unix
     };
 
-    /// `DIR_SEPARATOR`.
-    fn separator(self) -> u8 {
+    /// `DIR_SEPARATOR` (`CDirEntry::GetPathSeparator`).
+    pub(crate) fn separator(self) -> u8 {
         match self {
             Self::Unix => b'/',
             Self::Windows => b'\\',
+        }
+    }
+
+    /// `DIR_SEPARATOR` as a UTF-8 string slice.
+    fn separator_str(self) -> &'static str {
+        match self {
+            Self::Unix => "/",
+            Self::Windows => "\\",
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/util/util_misc.cpp:141-145
+    /// `kDelim` (path-list delimiter for `g_FindDataFile`): `:` on Unix, `;` on Windows.
+    fn list_delimiter(self) -> u8 {
+        match self {
+            Self::Unix => b':',
+            Self::Windows => b';',
         }
     }
 
@@ -548,6 +558,12 @@ impl PathRules {
     /// Whether `byte` is one of `ALL_SEPARATORS` (`CDirEntry::IsPathSeparator`).
     fn is_separator(self, byte: u8) -> bool {
         self.is_dir_separator(byte) || (self == Self::Windows && byte == b':')
+    }
+
+    /// Whether `path` needs a trailing `DIR_SEPARATOR` (`CDirEntry::AddTrailingPathSeparator`):
+    /// non-empty and not ending with one of `ALL_SEPARATORS`.
+    fn needs_trailing_separator(self, path: &[u8]) -> bool {
+        path.last().is_some_and(|&byte| !self.is_separator(byte))
     }
 
     /// `CDirEntry::DeleteTrailingPathSeparator`: `path` without its trailing `DIR_SEPARATORS`
@@ -562,7 +578,7 @@ impl PathRules {
     /// `CDirEntry::Reset`: the path of the `CDirEntry` made from it, without its trailing separators, but a
     /// lone separator and (Windows) a disk's name of 2 or 3 bytes (`C:`, `C:\`) kept: `//` and
     /// `///` are empty, a path that no directory has.
-    fn reset(self, path: &[u8]) -> &[u8] {
+    pub(crate) fn reset(self, path: &[u8]) -> &[u8] {
         if path.len() == 1 && self.is_separator(path[0]) {
             return path;
         }
@@ -576,7 +592,7 @@ impl PathRules {
     /// `GetDir` of the `CDirEntry` of `path`: the directory of `path` as `reset` leaves it, up to and with
     /// its last separator (`SplitPath`); `./` (Windows `.\`) for a path without one; empty for an
     /// empty one.
-    fn dir(self, path: &[u8]) -> Vec<u8> {
+    pub(crate) fn dir(self, path: &[u8]) -> Vec<u8> {
         let path = self.reset(path);
         match path.iter().rposition(|&byte| self.is_separator(byte)) {
             Some(at) => path[..=at].to_vec(),
@@ -585,6 +601,71 @@ impl PathRules {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-377
+    /// The base and the extension of `path` as `SplitPath` cuts its name (the bytes after its
+    /// last separator) at the name's last `.`: the extension keeps its `.`; a name without one
+    /// has an empty extension.
+    pub(crate) fn base_and_ext(self, path: &[u8]) -> (&[u8], &[u8]) {
+        let name_at = path
+            .iter()
+            .rposition(|&byte| self.is_separator(byte))
+            .map_or(0, |at| at + 1);
+        let name = &path[name_at..];
+        match name.iter().rposition(|&byte| byte == b'.') {
+            Some(dot) => name.split_at(dot),
+            None => (name, &name[name.len()..]),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:455-462
+    /// `CDirEntry::AddTrailingPathSeparator`: `path` with `DIR_SEPARATOR` after it unless it is
+    /// empty or ends with one of `ALL_SEPARATORS`.
+    pub(crate) fn add_trailing_separator(self, path: &[u8]) -> Vec<u8> {
+        let mut path = path.to_vec();
+        if self.needs_trailing_separator(&path) {
+            path.push(self.separator());
+        }
+        path
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:413-430
+    /// `CDirEntry::MakePath` of a directory and a name: the name after the directory with its
+    /// trailing separator (`add_trailing_separator`); the name alone after an empty directory.
+    /// An absolute name is joined as any other.
+    pub(crate) fn make_path(self, dir: &[u8], name: &[u8]) -> Vec<u8> {
+        let mut path = self.add_trailing_separator(dir);
+        path.extend_from_slice(name);
+        path
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:413-430, 455-462
+    /// `make_path` on OS strings: joins `dir` and `name` with `DIR_SEPARATOR` unless `dir` is
+    /// empty or ends with one of `ALL_SEPARATORS`, preserving non-UTF-8 bytes on Unix and WTF-8
+    /// on Windows.
+    fn make_path_os(self, dir: &OsStr, name: &OsStr) -> PathBuf {
+        let mut path = OsString::with_capacity(dir.len() + 1 + name.len());
+        path.push(dir);
+        if self.needs_trailing_separator(dir.as_encoded_bytes()) {
+            path.push(self.separator_str());
+        }
+        path.push(name);
+        PathBuf::from(path)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1330-1378
+    /// Joins OS-string `parts` with `DIR_SEPARATOR` (`CDirEntry::GetPathSeparator`) unconditionally,
+    /// as `BlastFindMatrixPath` appends separators to `BLASTMAT`, `"nt"` and `"data"`.
+    fn join_os(self, parts: &[&OsStr]) -> PathBuf {
+        let sep = OsStr::new(self.separator_str());
+        let mut path = OsString::new();
+        for (index, part) in parts.iter().enumerate() {
+            if index > 0 {
+                path.push(sep);
+            }
+            path.push(part);
+        }
+        PathBuf::from(path)
+    }
     /// `s_Win_IsDiskPath`: `X:` and a separator. A byte past the end is the string's NUL.
     fn is_disk_path(path: &[u8]) -> bool {
         let at = |index: usize| path.get(index).copied().unwrap_or(0);
@@ -628,10 +709,7 @@ impl PathRules {
                 return Some([cwd.get(..3).unwrap_or(cwd), path].concat());
             }
         }
-        let mut joined = crate::ncbi_str::truncate_spaces(cwd).to_vec();
-        if joined.last().is_some_and(|&byte| !self.is_separator(byte)) {
-            joined.push(self.separator());
-        }
+        let mut joined = self.add_trailing_separator(crate::ncbi_str::truncate_spaces(cwd));
         let mut part = crate::ncbi_str::truncate_spaces(path);
         if !joined.is_empty() && part.first() == Some(&self.separator()) {
             part = &part[1..];
@@ -1052,12 +1130,10 @@ pub struct ApplicationSettings {
     /// (`fasta_reader::ReaderConfig::data_loaders`).
     pub data_loaders: bool,
     /// The registry entry `[BLAST] BLASTDB`, the last part of the path where a database
-    /// name is looked for (`seqdb::SearchPath::new`): `Ok(None)` when the registry has no
-    /// such entry, `Ok(Some(value))` with the value NCBI's registry gives. `Err(reason)`
-    /// when a registry file sets the entry to a value that LOSAT does not read as NCBI
-    /// reads it; only a program that opens a database has to refuse to run then, since
-    /// the entry changes nothing else.
-    pub blastdb: Result<Option<String>, String>,
+    /// name is looked for (`seqdb::SearchPath::new`): `None` when the registry has no such
+    /// entry, else the bytes of the value NCBI's registry gives (a `std::string`, UTF-8 or
+    /// not: `utils::os_bytes`).
+    pub blastdb: Option<Vec<u8>>,
     /// The first of `SEQ_ID_RANK_VARIABLES` that is set (with any value). NCBI's choice of the
     /// Seq-ids of a database with parsed Seq-ids depends on it; only a program that opens such
     /// a database has to refuse to run then (`algorithm::common::database::
@@ -1183,7 +1259,7 @@ impl Default for ApplicationSettings {
     fn default() -> Self {
         Self {
             data_loaders: true,
-            blastdb: Ok(None),
+            blastdb: None,
             seq_id_rank_variable: None,
             write_verification: None,
             max_seqid_length: Ok(None),
@@ -1254,44 +1330,36 @@ impl MatrixSearch {
 }
 
 /// `ApplicationSettings::matrix_file` with `is_file` (`CFile::Exists`: a file, links followed)
-/// and `is_dir` (`CDir::Exists`).
+/// and `is_dir` (`CDir::Exists`), using the host platform's `PathRules`.
 fn find_matrix_file(
     name: &str,
     search: &MatrixSearch,
     is_file: &dyn Fn(&Path) -> bool,
     is_dir: &dyn Fn(&Path) -> bool,
 ) -> Result<Option<PathBuf>, String> {
+    find_matrix_file_with_rules(PathRules::HOST, name, search, is_file, is_dir)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1385
+// NCBI reference (598d8ae6): c++/src/util/util_misc.cpp:139-179
+/// `find_matrix_file` under explicit `PathRules` (`PathRules::HOST` at runtime, Unix and Windows
+/// in tests).
+fn find_matrix_file_with_rules(
+    rules: PathRules,
+    name: &str,
+    search: &MatrixSearch,
+    is_file: &dyn Fn(&Path) -> bool,
+    is_dir: &dyn Fn(&Path) -> bool,
+) -> Result<Option<PathBuf>, String> {
     let upper = name.to_ascii_uppercase();
-    // `kDelim` (util_misc.cpp:141-145), `CFile::GetPathSeparator` and the separators of
-    // `AddTrailingPathSeparator` (ncbifile.cpp:105-120, 455-462).
-    let (delimiter, separator, separators): (char, &str, &[u8]) = if cfg!(windows) {
-        (';', "\\", b":/\\")
-    } else {
-        (':', "/", b"/")
-    };
-    let concat = |parts: &[&OsStr]| -> PathBuf {
-        let mut path = OsString::new();
-        parts.iter().for_each(|part| path.push(part));
-        PathBuf::from(path)
-    };
     let found = |path: PathBuf| is_file(&path).then_some(path);
-    // `IsAbsolutePath` (ncbifile.cpp:508-523, `s_Win_IsDiskPath` and `s_Win_IsNetworkPath` on
-    // Windows).
-    let bytes = upper.as_bytes();
-    let slash = |byte: u8| byte == b'/' || byte == b'\\';
-    let absolute = if cfg!(windows) {
-        (bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && slash(bytes[2]))
-            || (bytes.len() >= 2 && slash(bytes[0]) && slash(bytes[1]))
-    } else {
-        bytes.first() == Some(&b'/')
-    };
     let mut dirs: Vec<OsString> = Vec::new();
-    if absolute {
+    if rules.is_absolute(upper.as_bytes()) {
         dirs.push(OsString::new());
     } else {
         if let Some(data_path) = &search.data_path {
             dirs.extend(
-                split_os(data_path, delimiter)
+                split_os(data_path, rules.list_delimiter())
                     .into_iter()
                     .filter(|dir| !dir.is_empty()),
             );
@@ -1302,24 +1370,17 @@ fn find_matrix_file(
             }
         }
     }
+    let upper = OsStr::new(&upper);
     for dir in &dirs {
-        // `MakePath` of `dir` and `name`: a separator between them unless the directory ends with one.
-        let between = match dir.as_encoded_bytes().last() {
-            Some(last) if !separators.contains(last) => separator,
-            _ => "",
-        };
-        let candidate = concat(&[dir, OsStr::new(between), OsStr::new(&upper)]);
-        if let Some(file) = found(candidate) {
+        if let Some(file) = found(rules.make_path_os(dir, upper)) {
             return Ok(Some(file));
         }
     }
-    let separator = OsStr::new(separator);
-    let upper = OsStr::new(&upper);
     if let Some(blastmat) = search.blastmat.as_deref() {
         if is_dir(Path::new(blastmat)) {
             for candidate in [
-                concat(&[blastmat, separator, upper]),
-                concat(&[blastmat, separator, OsStr::new("nt"), separator, upper]),
+                rules.join_os(&[blastmat, upper]),
+                rules.join_os(&[blastmat, OsStr::new("nt"), upper]),
             ] {
                 if let Some(file) = found(candidate) {
                     return Ok(Some(file));
@@ -1327,17 +1388,17 @@ fn find_matrix_file(
             }
         }
     }
-    Ok(found(concat(&[OsStr::new("data"), separator, upper])))
+    Ok(found(rules.join_os(&[OsStr::new("data"), upper])))
 }
 
-/// `value` split at each `delimiter`, empty parts kept.
-fn split_os(value: &OsStr, delimiter: char) -> Vec<OsString> {
+/// `value` split at each ASCII `delimiter`, empty parts kept.
+fn split_os(value: &OsStr, delimiter: u8) -> Vec<OsString> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
         value
             .as_bytes()
-            .split(|&byte| char::from(byte) == delimiter)
+            .split(|&byte| byte == delimiter)
             .map(|part| OsStr::from_bytes(part).to_os_string())
             .collect()
     }
@@ -1345,7 +1406,7 @@ fn split_os(value: &OsStr, delimiter: char) -> Vec<OsString> {
     {
         value
             .to_string_lossy()
-            .split(delimiter)
+            .split(char::from(delimiter))
             .map(OsString::from)
             .collect()
     }
@@ -1455,10 +1516,13 @@ fn max_seqid_length_entry(
 /// cited at `data_loaders_of`); the file reader stores such an entry
 /// (`CMemoryRegistry::x_Set`, ncbireg.cpp:1066-1070: removing it is "historic behavior;
 /// could inappropriately expose entries in lower layers").
-fn blastdb_of(
-    env: Option<Result<String, String>>,
-    files: [Result<Option<String>, String>; 2],
-) -> Result<Option<String>, String> {
+/// The same layers give the parameter `[NCBI] Data` (`MatrixSearch::data`), whose value LOSAT
+/// reads as text: `E` is why a file's value is not read (`Infallible` for `[BLAST] BLASTDB`,
+/// whose bytes are the value).
+fn blastdb_of<T, E>(
+    env: Option<Result<T, E>>,
+    files: [Result<Option<T>, E>; 2],
+) -> Result<Option<T>, E> {
     if let Some(value) = env {
         return value.map(Some);
     }
@@ -2724,7 +2788,15 @@ fn settings_of(
         })
     };
     let env_data_loaders = env("NCBI_CONFIG__BLAST__DATA_LOADERS");
-    let env_blastdb = utf8_variable("NCBI_CONFIG__BLAST__BLASTDB");
+    let bytes = |value: &OsStr| crate::utils::os_bytes::os_str_bytes(value).into_owned();
+    let blastdb_entry = |file: Option<(&Path, &[RegistryEntry])>| {
+        Ok(file
+            .and_then(|(_, entries)| last_value(entries, "BLAST", "BLASTDB").map(<[u8]>::to_vec)))
+    };
+    let Ok(blastdb) = blastdb_of::<Vec<u8>, std::convert::Infallible>(
+        env("NCBI_CONFIG__BLAST__BLASTDB").map(|value| Ok(bytes(&value))),
+        [blastdb_entry(ini), blastdb_entry(ncbirc)],
+    );
     let window_masker_registry = window_masker_path_of(
         utf8_variable("NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH"),
         utf8_variable("WINDOW_MASKER_PATH"),
@@ -2737,13 +2809,7 @@ fn settings_of(
                 file.and_then(|(_, entries)| last_value(entries, "BLAST", "DATA_LOADERS"))
             }),
         ),
-        blastdb: blastdb_of(
-            env_blastdb,
-            [
-                text(ini, "BLAST", "BLASTDB"),
-                text(ncbirc, "BLAST", "BLASTDB"),
-            ],
-        ),
+        blastdb,
         seq_id_rank_variable: SEQ_ID_RANK_VARIABLES
             .into_iter()
             .find(|name| env(name).is_some()),

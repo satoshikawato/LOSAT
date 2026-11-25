@@ -179,17 +179,18 @@ def freeze(args):
         build_argv = ["cargo", "build", "--locked", "--release", "--bin", "losat"]
         if kind != "native":
             build_argv += ["--target", target]
+            # As the release builds the command (feature `no-web-abi-v1`: no LOSAT Web ABI v1).
             build_argv += (
-                ["--no-default-features"]
+                ["--no-default-features", "--features", "no-web-abi-v1"]
                 if kind == "serial"
-                else ["--features", "wasm-threads"]
+                else ["--features", "wasm-threads,no-web-abi-v1"]
             )
         build_argv += ["--target-dir", str(target_dir)]
         artifact["build"] = {
             "target": target,
-            "features": []
+            "features": ["no-web-abi-v1"]
             if kind == "serial"
-            else ["parallel"] + (["wasm-threads"] if kind == "threaded" else []),
+            else ["parallel"] + (["wasm-threads", "no-web-abi-v1"] if kind == "threaded" else []),
             "profile": "release",
             "ordered_argv": build_argv,
             "cwd": str(ROOT / "LOSAT"),

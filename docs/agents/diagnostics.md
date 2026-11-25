@@ -7441,10 +7441,12 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_BXPAR`'s rule: a batch end in a pool of 2+ threads with 2 or more matches, not `-use_sw_tback` in e-value
   mode): the matches ahead are redone as a flow (`utils::xahead`, `runtime/kappa_batch.rs`) instead of in fork-join
   batches of 32 matches per worker. The loop's thread offers the next 32 x workers matches as it walks the stream
-  (the early-termination guess on the heaps as they are then), each worker (one per thread of the pool, as for the
-  batches, at most one per match: the loop's thread keeps one) takes the next match offered,
-  and the loop takes a match's result when it reaches it, redoing other offered matches while one is still being
-  redone; the helpers leave once every match is taken, and a thread with nothing to redo spins, yields, then sleeps
+  (those the early-termination test will let through even after each match already offered whose best E-value is at
+  or below its heap's cutoff has filled that heap; at a match that only those offered matches would end early the
+  offers stop until the loop has passed them, and the `=0` batches end there: `XPending`), each worker (one per
+  thread of the pool, as for the batches, at most one per match: the loop's thread keeps one) takes the next match
+  offered, and the loop takes a match's result when it reaches it, redoing other offered matches while one is still
+  being redone; the helpers leave once every match is taken, and a thread with nothing to redo spins, yields, then sleeps
   50 us at a time (`Ahead::x_new_napping`; a wasm thread keeps yielding). Why: each batch waited at its join for its longest redo; with
   one batch end live the threads stood idle there (BLASTX `-use_sw_tback`, 200 queries of q200k against the 40
   proteins of `ov_atha` at BATCH_SIZE 40000 and 4 threads: 2,103 matches in about 20 batches, 662 s of user time in
@@ -7472,6 +7474,14 @@ Scheduling (each value computed by one thread with the original function; order 
   the second thread now redoes matches). A thread that waits sleeps after spinning and yielding, which keeps the
   system time at 0.3-2.0 s a run where waits that only yield took 6-13 s (BATCH_SIZE 40000, 32 threads); with 16 threads
   on 8 cores the yielding form was 2 % faster (6 of 7 rounds) for 2-6 s more system time a run.
+  The guess counts the matches offered ahead since 2026-11-25 (branch `feature/np-bxredo-fill`, no switch: it changes
+  which matches are offered, not a result). Before, a short hit list let the whole window be offered while the heaps
+  were empty: 1 x 9,000 x 595 `-use_sw_tback -max_target_seqs 3` on 4 CPUs of the workstation (release f6efadb67, 2
+  runs) redid 119-131 matches ahead at 4 threads and 204 at 8 for the 32 the loop redoes, in 0.77-5.16 s of wall time
+  against 0.79 s at one thread (`=0` 4.4-5.8 s), and under `-C instrument-coverage` the test took hours (nightly
+  coverage cancelled at 240 min). With it every match redone ahead in the two short-hit-list rows of
+  `tests/blastx_unit_cap.rs` was one the loop took (12 runs at 2, 4 and 8 threads), that row took 0.48-0.53 s
+  (`=0` 0.52-0.60 s) and 8 x 4,000 x 595 `-max_target_seqs 1` the same 0.06-0.09 s, with the same bytes.
 - `LOSAT_X_BXDIAGKEEP=1` (BLASTX, memory; in the strict set from the pull request that added it, 2026-10-24: on
   unless `=0` or `LOSAT_X_DEFAULT=0`; acts where `LOSAT_X_BXSUBJFLOW` searches a chunk's subjects, and on the chunk
   subject tasks of `LOSAT_X_BXUNITCAP` below, where `-window_size` plus twice the longest subject is at most 2^28):

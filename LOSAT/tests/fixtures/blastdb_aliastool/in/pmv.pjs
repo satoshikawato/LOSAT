@@ -1,0 +1,31 @@
+{
+  "version": "1.2",
+  "dbname": "pmv",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "pmv",
+  "number-of-letters": 410,
+  "number-of-sequences": 9,
+  "last-updated": "2026-11-24T07:00:00",
+  "number-of-volumes": 2,
+  "bytes-total": 51118,
+  "bytes-to-cache": 653,
+  "files": [
+    "pmv.00.phr",
+    "pmv.00.pin",
+    "pmv.00.pnd",
+    "pmv.00.pni",
+    "pmv.00.pog",
+    "pmv.00.psq",
+    "pmv.01.phr",
+    "pmv.01.pin",
+    "pmv.01.pog",
+    "pmv.01.psq",
+    "pmv.pal",
+    "pmv.pdb",
+    "pmv.pos",
+    "pmv.pot",
+    "pmv.ptf",
+    "pmv.pto"
+  ]
+}

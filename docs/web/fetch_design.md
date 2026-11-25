@@ -288,3 +288,44 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
    taxid 562 に `LOSAT/tests/winmask/counts/mg1655_u9.obinary` を返す。Download → 保存 → 検索 → 再読み込みで要求が増えない → Delete、
    切れた応答 → Continue が Range で続きを取り同じ SHA-256、Last-Modified が変わると 0 から、404 / 500 の文、engine の build では native の CLI
    （`WINDOW_MASKER_PATH=<dir>`、`<dir>/562/wmasker.obinary`）と outfmt 0 / 6 / 7 が同じ。
+7. **ブラウザで作った counts の保存（DW-56、2026-11-24、Owner-delegated）**：WindowMasker タブの `-mk_counts` と `-convert` が `-out`
+   ファイルに書いた counts を、利用者が「Save for taxonomy ID」を押したときだけ同じ OPFS 領域（`windowmasker/<taxid>/wmasker.obinary` と
+   `meta.json`）へ保存する（自動保存はしない、REQ-20。通信は一切しない）。
+   - `meta.json` は従来の全フィールドを保ったまま `url: ''`・`lastModified: ''` とし、新しいフィールド
+     `made: {run, argv, inputs: [{name, size}], engineBuild, madeAt}` を書く。`made` が無ければ NCBI からの取得として従来どおり読む。
+     古い版のタブは `url` が一致しないため未取得とみなし、NCBI のファイルと取り違えることはない（Download を押さない限り上書きしない）。
+   - 保存は Web Lock `losat-web:windowmasker:<taxid>` の下で 8 MiB ずつ流し（724 MB の counts をページ JS ヒープに載せない）、
+     同じ ID に既に保存済み（取得済み・途中まで取得・ブラウザ作成のいずれか）があれば `COUNTS_EXISTS` で止めて確認ダイアログ
+     （`ReplaceCountsDialog.vue`）を出す。同じ ID をこのタブまたは別タブが保存・取得中なら、断った操作と分かることだけをその場で言う
+     （このタブが書いているときは `Not saved: this tab is saving / downloading the counts for <taxid>. Save again when it has ended.`、
+     `Not downloaded: this tab is saving / downloading the counts for <taxid>. Download again when it has ended.`、
+     別タブが書いているときは保存か取得か区別できないため `another tab is saving or downloading the counts for <taxid>.`）。
+     このタブが保存している間、BLASTN の Taxonomy ID 行は「Saving the counts made by run `<r>`…」を出し（Download・Delete・Cancel は出さない）、
+     同じ ID への Download は NCBI へ問い合わせる前にその場で断る。一方、Cancel や別 ID への切替えで止めた取得がまだ終了処理を完了していない間に
+     同じ ID の Download / Continue を押した場合は断らず、前の取得が ID を放すまで「Opening the saved counts…」を表示して待ち、その後に取得を始める
+     （待っている間に Cancel された場合は要求を出さずに終える）。差し替えが始まると書いているタブ自身の `-ustat` / `-in` 選択一覧からも
+     置き換え中のコピーを外し、完了後に新しいコピーを並べる。
+     途中で途切れた作成コピー（`complete: false`）は再開せず、次の読み取り時に削除する。
+   - 保存済み counts を読む run（`-window_masker_taxid` の検索、保存済みコピーを `-ustat`・`-in` に選んだ WindowMasker の run）は、
+     待ち行列に入る時から終わるまで（完了・失敗・待ち行列での Cancel・実行中の Cancel）その ID の Web Lock を shared で持ち、
+     その間に差し替え・削除・取得がコピーを変えないようにする。差し替え・削除・取得は同じ lock を exclusive・`ifAvailable` で取り、取れなければその場で
+     「Not replaced: …」・「Not removed: …」・「Not downloaded: …」（`a run that reads the counts for <taxid> was queued or running.`
+     … `when it has ended.`）と操作ごとの文で断る（削除は書き込み中の取得・保存は従来どおり待つ）。
+     待ち行列に入れる時に選んだファイルの最後の 1 byte を読み、選んだ後に差し替え・削除されたコピーは入れずに断る。
+     Web Locks の無いブラウザでは何も持たない（従来どおり）。
+   - 作成コピーの保存は、書き始める前に `navigator.storage.estimate()` を読み、`quota − usage + 置き換える前のコピーの大きさ < 新しい大きさ`
+     なら何も変えずに断る。書き始めた後の失敗は、置き換える前のコピーがもう無いことを文に足す。
+   - ポートは `readCounts(taxid)`（由来は `downloaded` / `made` の直和）と `listCounts()`（保存済み一覧、WindowMasker の `-ustat` / `-in`
+     の選択に並べる）を持つ。ダウンロード側の URL 一致確認は `CountsLoader` に残す。
+   - BroadcastChannel `losat-web:windowmasker` は削除だけでなく保存・差し替えでも変更を知らせ（古いタブ互換のため `{deleted: taxid}` の形を維持）、
+     他のタブは持っているファイルを手放して OPFS から読み直し、BLASTN の行と WindowMasker の選択一覧を更新する。
+     差し替えは書き始めた直後（前のコピーが消えた時点）と終わった時（成功だけでなく失敗時も含む）に知らせるため、
+     書き込みの途中で失敗したりタブが閉じられたりしても、他のタブに前のファイルは残らない。
+     差し替え中、書いているタブは「Saving the counts made by run `<r>`…」（Download・Delete なし）、他のタブは前のコピーを外した未保存表示
+     （Download を押すと `Not downloaded: another tab is saving or downloading the counts for <taxid>. Download again when it has ended.` で断る）になる。
+   - 検索への渡し方は取得した counts と同一（`windowmasker/<taxid>/wmasker.obinary`）。Run details は URL 行を出さず
+     「`<taxid>`: wmasker.obinary made in this browser by run `<n>` (`<YYYY-MM-DD>`), `<size>`」と SHA-256 を示す。
+   - e2e（`tests/e2e/window-masker-save.spec.ts`）：`ascii`・`binary`・`obinary` の各形式で作成・保存した counts による BLASTN
+     `-window_masker_taxid 562` が native CLI（`WINDOW_MASKER_PATH`）と outfmt 0 / 6 / 7・stderr までバイト一致すること、再読み込み後の
+     「Made in this browser」表示と無通信、差し替え・削除・2 タブ間の取得中拒否と変更同期、保存済み counts からの `-ustat` 一致、
+     64 MiB counts の保存でページ JS ヒープ増加が 32 MiB 未満であることを確かめる。

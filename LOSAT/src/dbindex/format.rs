@@ -33,20 +33,26 @@ const SUPER_HEADER_SIZE: u64 = 16;
 impl SuperHeader {
     /// `Save` of the `CIndexSuperHeader` of index format version 1 (`INDEX_FORMAT_VERSION_1`) to
     /// `fname`: the endianness (0, little), the format version (1), the number of sequences and the
-    /// number of volumes, each a 32-bit word. `std::ofstream` reports no failure here
-    /// (`CheckStream` tests `bad()` only, and a stream that did not open is only `fail()`), so none
-    /// is returned.
+    /// number of volumes, each a 32-bit word. A non-pipe failure is not reported (`CheckStream`
+    /// tests `bad()` only, and a stream that did not open is only `fail()`); returns whether the
+    /// write met a closed pipe where SIGPIPE ends NCBI's process (`ncbi_app::files::Ostream`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:196-203
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex.cpp:241-252
-    pub(crate) fn save(&self, fname: &[u8]) {
-        let Ok(file) = std::fs::File::create(crate::utils::os_bytes::path_of_bytes(fname)) else {
-            return;
+    pub(crate) fn save(&self, fname: &[u8]) -> bool {
+        let Ok(mut file) = std::fs::File::create(crate::utils::os_bytes::path_of_bytes(fname))
+        else {
+            return false;
         };
-        let mut out = std::io::BufWriter::new(file);
+        let mut stream = crate::ncbi_app::files::Ostream::new(&mut file);
+        let mut out = std::io::BufWriter::new(&mut stream);
         for word in [0u32, 1, self.num_seq, self.num_vol] {
-            let _ = out.write_all(&word.to_le_bytes());
+            if out.write_all(&word.to_le_bytes()).is_err() {
+                break;
+            }
         }
         let _ = out.flush();
+        drop(out);
+        stream.closed()
     }
 
     /// `GetIndexSuperHeader` of `fname`: the super header in the file `fname`, or `None` where NCBI

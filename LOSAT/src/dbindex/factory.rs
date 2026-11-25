@@ -15,6 +15,7 @@ use std::rc::Rc;
 use super::format::Header;
 use super::stream::{SeqData, SequenceStream, StreamError};
 use super::{code_bits, min_offset, Options, SeqNum, Word, CR};
+use crate::ncbi_app::files::{ends_like_sigpipe, Ostream};
 
 /// `CDbIndex_Factory::MEGABYTE`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1537
@@ -821,11 +822,19 @@ impl OffsetData {
                 self.total = self.total.wrapping_add(1);
             }
         }
-        let mut stats = options
+        // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1408-1436
+        // Each line of `-stat` is flushed at its end; through `Ostream`, a non-pipe write failure
+        // sets the stream bad and drops the rest while the index finishes, whereas a closed pipe
+        // outside Windows ends the run at once (`ends_like_sigpipe`;
+        // PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+        let mut stat_file = options
             .stat_file_name
             .as_deref()
-            .and_then(|name| File::create(crate::utils::os_bytes::path_of_bytes(name)).ok())
-            .map(BufWriter::new);
+            .and_then(|name| File::create(crate::utils::os_bytes::path_of_bytes(name)).ok());
+        let mut stats = stat_file
+            .as_mut()
+            .map(|file| Ostream::new(file as &mut dyn Write));
+        let mut stat_line = Vec::new();
         write_word(os, self.total)?;
         let mut tot: Word = 0;
         for (nmer, &size) in self.sizes.iter().enumerate() {
@@ -838,12 +847,12 @@ impl OffsetData {
             tot = tot.wrapping_add(size);
             if size > 0 {
                 if let Some(stats) = &mut stats {
-                    let _ = writeln!(stats, "{nmer:>10x} {size}");
+                    stat_line.clear();
+                    let _ = writeln!(stat_line, "{nmer:>10x} {size}");
+                    stats.write_all(&stat_line)?;
+                    stats.flush()?;
                 }
             }
-        }
-        if let Some(mut stats) = stats {
-            let _ = stats.flush();
         }
         write_word(os, self.total)?;
         write_word(os, 0)?;
@@ -864,6 +873,10 @@ pub(crate) enum Stop {
     /// (a zero `mult_`), or its offsets come from a shift past an `int`'s width (a stride of
     /// 32768 or more, C++ undefined behaviour).
     NoDefinedIndex,
+    /// A write to `-stat` (or to an index output file) met a closed pipe where SIGPIPE ends
+    /// NCBI's process (`ncbi_app::files::ends_like_sigpipe`; PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+    /// exception 10).
+    ClosedPipe,
 }
 
 impl From<StreamError> for Stop {
@@ -955,10 +968,14 @@ pub(crate) fn make_index(
         start_chunk = 0;
         i = i.wrapping_add(1);
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1735-1755
     // NCBI opens the volume as a binary output stream without exceptions: a file that does not
-    // open, or a write that fails, is not reported.
-    if let Ok(file) = File::create(crate::utils::os_bytes::path_of_bytes(oname)) {
-        let mut os = BufWriter::with_capacity(1 << 20, file);
+    // open, or a non-pipe write failure, is not reported (`Ostream` drops the remaining writes). A
+    // closed pipe on the volume or on `-stat` ends NCBI's process by SIGPIPE (`ends_like_sigpipe`):
+    // stop the run at once (`Stop::ClosedPipe`).
+    let outcome = if let Ok(mut file) = File::create(crate::utils::os_bytes::path_of_bytes(oname)) {
+        let mut stream = Ostream::new(&mut file);
+        let mut os = BufWriter::with_capacity(1 << 20, &mut stream);
         let header = Header::of(
             options.legacy,
             options.hkey_width as Word,
@@ -966,23 +983,38 @@ pub(crate) fn make_index(
             options.ws_hint as Word,
             [start, start_chunk, *stop, stop_chunk],
         );
-        let _ = header
+        header
             .write(&mut os)
             .and_then(|()| offset_data.save(&mut os, options))
             .and_then(|()| subject_map.save(&mut os))
-            .and_then(|()| os.flush());
+            .and_then(|()| os.flush())
     } else {
-        let _ = offset_data.save(&mut std::io::sink(), options);
+        offset_data.save(&mut std::io::sink(), options)
+    };
+    if let Err(error) = outcome {
+        if ends_like_sigpipe(&error) {
+            return Err(Stop::ClosedPipe);
+        }
     }
     if options.idmap {
         let map = [oname, b".map"].concat();
-        if let Ok(file) = File::create(crate::utils::os_bytes::path_of_bytes(&map)) {
-            let mut maps = BufWriter::new(file);
+        if let Ok(mut file) = File::create(crate::utils::os_bytes::path_of_bytes(&map)) {
+            let mut stream = Ostream::new(&mut file);
+            let mut maps = BufWriter::new(&mut stream);
             for id in &idmap {
-                let _ = maps.write_all(id);
-                let _ = maps.write_all(b"\n");
+                if maps
+                    .write_all(id)
+                    .and_then(|()| maps.write_all(b"\n"))
+                    .is_err()
+                {
+                    break;
+                }
             }
             let _ = maps.flush();
+            drop(maps);
+            if stream.closed() {
+                return Err(Stop::ClosedPipe);
+            }
         }
     }
     Ok(())

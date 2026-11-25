@@ -86,6 +86,21 @@ impl BlastxDatabase {
         self
     }
 
+    /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
+    /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
+    /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
+    pub(crate) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+        self.taxdb.set_keeps_scope(keeps);
+        self.taxdb.set_separate_xml2(separate_xml2);
+        self
+    }
+
+    /// Mirrors `CBlastFormat::ResetScopeHistory` at the end of a query batch
+    /// (`shared::TaxdbRun::reset_scope`).
+    pub(crate) fn reset_scope(&self) {
+        self.taxdb.reset_scope();
+    }
+
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     #[cfg(test)]
@@ -132,6 +147,11 @@ impl BlastxDatabase {
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(crate) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
+    }
+
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(crate) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
     }
 
     /// Whether the database has parsed Seq-ids: a batch can then refuse one of its subjects

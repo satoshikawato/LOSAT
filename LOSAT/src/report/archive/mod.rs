@@ -299,8 +299,8 @@ struct DatabaseMasking {
 
 #[derive(Debug)]
 struct DatabaseFilter {
-    /// The `TaxidList` or `NegativeTaxidList` program option.
-    list: Option<options::Param>,
+    /// The `GiList`/`NegativeGiList` and `TaxidList`/`NegativeTaxidList` program options.
+    list: Vec<options::Param>,
     /// How the `EffectiveSearchSpace` option of a searched batch is made.
     request_length: RequestLength,
 }
@@ -325,14 +325,14 @@ pub struct HandleCarry(options::ParamList);
 impl OptionsHandle {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173
     /// What the database's list and statistics make of the requests: its `program-options`
-    /// parameter (`DbFilterArgs::archive_parameter`), and how the `EffectiveSearchSpace` option
+    /// parameter (`DbFilterArgs::archive_parameters`), and how the `EffectiveSearchSpace` option
     /// of a searched batch is made (`RequestLength`, `common::database::note_archive_database_filter`):
     /// for a statistics length that is not positive it is not the search's own value, though the
     /// statistics of the results read the length of OID 0 (`SeqDb::statistics`). Set once per
     /// run, where the database is opened; a second setting is LOSAT's internal error.
     pub fn set_database_filter(
         &self,
-        list: Option<options::Param>,
+        list: Vec<options::Param>,
         request_length: RequestLength,
     ) -> anyhow::Result<()> {
         let set = self.0.filter.set(DatabaseFilter {
@@ -407,8 +407,10 @@ impl OptionsHandle {
         self.0
             .filter
             .get()
-            .and_then(|filter| filter.list.clone())
+            .map(|filter| &filter.list)
             .into_iter()
+            .flatten()
+            .cloned()
             .chain(
                 self.0
                     .masking

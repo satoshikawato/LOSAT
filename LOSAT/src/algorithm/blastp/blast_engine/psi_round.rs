@@ -584,6 +584,11 @@ fn run_queries(
             }
             write_converged(outputs)?;
         }
+        // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:513
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+        if let Some(database) = subject_source.database() {
+            database.reset_scope();
+        }
     }
     if epilog {
         write_round_epilogs(args, subject_source, subject_label, outputs, calls)?;

@@ -825,6 +825,7 @@ impl WindowBatch {
         }
         BatchResults {
             query_ordinal: 0,
+            in_report_order: false,
             queries: self
                 .hit_lists
                 .into_iter()
@@ -921,6 +922,7 @@ fn unsearched_batch(
 ) -> BatchResults {
     BatchResults {
         query_ordinal: 0,
+        in_report_order: false,
         queries: vec![Vec::new(); prepared.original_lengths.len()],
         prepared: prepared.x_for_results(),
         parameters,
@@ -1013,6 +1015,7 @@ fn blastx_hsp(hsp: &BlastpHsp, query_index: usize) -> Hsp {
         positive: hsp.num_positives,
         edit_script: hsp.gap_info.clone().unwrap_or_default(),
         composition_method: i32::from(hsp.comp_adjustment_method),
+        query_left_out: 0,
     }
 }
 

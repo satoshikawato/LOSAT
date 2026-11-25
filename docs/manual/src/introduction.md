@@ -53,7 +53,7 @@ These are on the list for a later release:
 
 LOSAT does not provide these NCBI programs: `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `legacy_blast.pl`, `update_blastdb.pl` and `get_species_taxids.sh`.
 
-Options that need NCBI's servers or its GI and IPG databases are not available: `-remote` and `-entrez_query` (all programs), `-gilist` and `-negative_gilist`, `-ipglist` and `-negative_ipglist`. `-import_search_strategy` is refused.
+Options that need NCBI's servers are not available: `-remote` and `-entrez_query` (all programs). `-import_search_strategy` is refused.
 
 ## How this manual is organised
 

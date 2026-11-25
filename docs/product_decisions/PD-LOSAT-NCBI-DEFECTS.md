@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.107
+- Version: 1.108
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -730,7 +730,7 @@
   decision 77, chosen option 「B: 例外 29 を tblastn/tblastx にも広げ、配列ごとに独立探索する（4 検索統一）」);
   series M decision 46, 2026-11-21, Owner's answer A on overlapping masks; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07, for the shape of the change; numbered after 1.105 at
-  the merge of dev that brought psiblast line item PS10b's 1.105; first 1.105)
+  the merge of dev that brought psiblast line item PS10b's 1.105; first 1.105);
   1.107 2026-11-23 (makeblastdb `-mask_data`, line NP item M (b): exception 28, a mask file whose
   Seq-locs nest deeper than NCBI's stack holds, read to any depth, rule 1, as approved exception 15
   reads a PSSM; approved by the Owner's answer 「Q-MDEPTH=B」 of 2026-11-24 to question Q-MDEPTH; the
@@ -746,7 +746,20 @@
   D5c and K10a, psiblast line item PS10e), then 1.105 at the merge of dev 163323c56 that brought
   1.104 (line NP item M4b-T3), then 1.106 at the merge of dev a5595ed11 that brought 1.105
   (psiblast line item PS10b), then 1.107 at the merge of dev 22ac798e5 that brought 1.106 (line NP
-  item M4b-3c part 2))
+  item M4b-3c part 2));
+  1.108 2026-11-24 (BLASTP, line RG item X-short-bat-2: the rejection of a compressed lookup table
+  whose neighbouring words fill NCBI's overflow banks (decision D3) comes in the search of the query
+  batch whose table fills them (of a split batch, its chunk's table), after the reports of the
+  query batches before, as TBLASTN's of 1.97 (it came before the run's first byte); the three
+  builders of the table name the first of NCBI's tables that fills them; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.107; first 1.99, then 1.100 at
+  the merge of dev of 2026-11-24 that brought 1.99, line RG item X-short-tbx-link, then 1.103 at
+  the merge of dev of 2026-11-25 that brought 1.100 to 1.102, line RG items KC-11d and D5c and
+  psiblast line item PS10e, then 1.104 at the merge of dev of 2026-11-25 that brought 1.103, line
+  RG item K10a, then 1.106 at the merge of dev of 2026-11-25 that brought 1.104 and 1.105, line NP
+  item M4b-T3 and psiblast line item PS10b, then 1.107 at the merge of dev of 2026-11-25 that
+  brought 1.106, line NP item M4b-3c part 2, then 1.108 at the merge of dev of 2026-11-26 that
+  brought 1.107, line NP item M (b))
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -985,7 +998,8 @@ Explicit rejections (rule 3):
   stops first.
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.87 at the first query batch NCBI searches), compressed-lookup thresholds that
-  exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
+  exhaust its overflow bank (in BLASTP since version 1.108, as in TBLASTN since 1.97, in the query
+  batch whose table exhausts it, after the reports of the batches before). (`-max_target_seqs` values that make NCBI's preliminary hit
   list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
 

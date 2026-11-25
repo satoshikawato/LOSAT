@@ -6,6 +6,7 @@
 
 use std::collections::BTreeSet;
 use std::io::{Read, Write};
+#[cfg(not(windows))]
 use std::path::Path;
 
 use super::bioseq::{Bioseq, DeltaFix};
@@ -20,6 +21,7 @@ use super::taxid_set::{seq_id_key, TaxIdSet};
 use super::time::LocalTime;
 use super::writer::{DbVersion, Indices, WriteDb};
 use super::WriteDbError;
+use crate::ncbi_app::files::ends_like_sigpipe;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::asn_input::Utf8TagOnce;
 use crate::seqdb::column::MASK_DATA_TITLE;
@@ -27,14 +29,26 @@ use crate::seqdb::{SeqDbError, SeqType};
 use crate::seqid::model::ObjectId;
 use crate::seqid::rank::{best_rank_score, find_best};
 use crate::seqid::{DeflineSet, ParsedSeqId};
+use crate::utils::os_bytes::path_of_bytes;
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1167-1177
 /// The end of a line of the log, as every line of NCBI's log ends: the new line, then a flush.
 /// The log on standard output (`super::makeblastdb::CoutLog`) is NCBI's `cout`, whose flush
 /// writes what its buffer holds. Its buffer takes the new line, an insertion of one byte, as it
 /// takes `put`'s (`cli::NcbiBuffer`). The other writers of the log (`-logfile`'s file, the
 /// library's) are flushed at each line too.
-pub(crate) fn endl(log: &mut dyn Write) {
-    let _ = log.write_all(b"\n").and_then(|()| log.flush());
+///
+/// A write of the line that found the pipe closed, where SIGPIPE ends NCBI's process
+/// (`ncbi_app::files::ends_like_sigpipe`; NCBI 2.17.0 exits with status 141 at the line's flush),
+/// ends makeblastdb at once: [`WriteDbError::ClosedPipe`] (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+/// exception 10). Each line is made of values computed before its first insertion, so the end of
+/// the line is where NCBI's process ends. Any other failure of the log is not looked at, as
+/// makeblastdb does not read the stream's state.
+pub(crate) fn endl(log: &mut dyn Write) -> Result<(), WriteDbError> {
+    match log.write_all(b"\n").and_then(|()| log.flush()) {
+        Err(error) if ends_like_sigpipe(&error) => Err(WriteDbError::ClosedPipe),
+        _ => Ok(()),
+    }
 }
 
 /// `CBuildDatabase`: a FASTA input (`add_fasta`) or the sequences of existing databases
@@ -43,7 +57,7 @@ pub struct BuildDatabase<'a> {
     is_protein: bool,
     log: &'a mut dyn Write,
     output_db: WriteDb,
-    output_dbname: String,
+    output_dbname: Vec<u8>,
     /// `m_ParseIDs` (`-parse_seqids`).
     parse_ids: bool,
     /// `m_Taxids` (`SetTaxids`).
@@ -73,27 +87,27 @@ pub struct BuildDatabase<'a> {
 /// and empty components go, `..` takes its parent with it. A relative path
 /// stays relative (`.` when nothing is left).
 #[cfg(not(windows))]
-fn normalize_path(path: &str) -> String {
+fn normalize_path(path: &[u8]) -> Vec<u8> {
     if path.is_empty() {
-        return String::new();
+        return Vec::new();
     }
-    let current = path.trim_end_matches('/');
+    let current = &path[..path.iter().rposition(|&c| c != b'/').map_or(0, |at| at + 1)];
     if current.is_empty() {
-        return "/".to_string();
+        return b"/".to_vec();
     }
-    let mut head: Vec<&str> = Vec::new();
-    for next in current.split('/') {
+    let mut head: Vec<&[u8]> = Vec::new();
+    for next in current.split(|&c| c == b'/') {
         if let Some(&last) = head.last() {
-            if last == "." {
+            if last == b"." {
                 if !next.is_empty() {
                     head.pop();
                 }
-            } else if next == "." || next.is_empty() {
+            } else if next == b"." || next.is_empty() {
                 continue;
-            } else if next == ".." {
+            } else if next == b".." {
                 if last.is_empty() {
                     continue;
-                } else if last != ".." {
+                } else if last != b".." {
                     head.pop();
                     continue;
                 }
@@ -101,13 +115,13 @@ fn normalize_path(path: &str) -> String {
         }
         head.push(next);
     }
-    if head.is_empty() || head == [".", ""] {
-        return ".".to_string();
+    if head.is_empty() || head == [b".".as_slice(), b""] {
+        return b".".to_vec();
     }
     if head.len() == 1 && head[0].is_empty() {
-        return "/".to_string();
+        return b"/".to_vec();
     }
-    head.join("/")
+    head.join(&b'/')
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:665-670
@@ -118,15 +132,15 @@ fn normalize_path(path: &str) -> String {
 // from the `PWD` that its host gives (`cli::main_entry`) and which is `/`
 // when the host gives none.
 /// `CDirEntry::CreateAbsolutePath` of `dbname`.
-fn create_absolute_path(dbname: &str) -> String {
+fn create_absolute_path(dbname: &[u8]) -> Vec<u8> {
     // `NormalizePath` leaves no separator at the end of a path that is not a
     // root, so `-out sub/` names the database `sub` on every platform.
     #[cfg(windows)]
     {
-        let absolute = std::path::absolute(dbname)
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| dbname.to_string());
-        dir_entry_path(&absolute).to_string()
+        let absolute = std::path::absolute(path_of_bytes(dbname))
+            .map(|path| path.to_string_lossy().into_owned().into_bytes())
+            .unwrap_or_else(|_| dbname.to_vec());
+        dir_entry_path(&absolute).to_vec()
     }
     #[cfg(not(windows))]
     {
@@ -143,45 +157,50 @@ fn create_absolute_path(dbname: &str) -> String {
 /// space before); the result is normalized, relative when there is no
 /// current directory.
 #[cfg(not(windows))]
-fn absolute_path_in(cwd: Option<&Path>, dbname: &str) -> String {
-    if dbname.starts_with('/') {
+fn absolute_path_in(cwd: Option<&Path>, dbname: &[u8]) -> Vec<u8> {
+    if dbname.starts_with(b"/") {
         return normalize_path(dbname);
     }
-    let cwd = cwd.map(|cwd| cwd.to_string_lossy()).unwrap_or_default();
-    let mut path = crate::ncbi_str::truncate_spaces_str(&cwd).to_string();
-    if !path.is_empty() && !path.ends_with('/') {
-        path.push('/');
+    let cwd = cwd
+        .map(crate::utils::os_bytes::path_bytes)
+        .unwrap_or_default();
+    let mut path = crate::ncbi_str::truncate_spaces(&cwd).to_vec();
+    if !path.is_empty() && !path.ends_with(b"/") {
+        path.push(b'/');
     }
-    let mut part = crate::ncbi_str::truncate_spaces_str(dbname);
+    let mut part = crate::ncbi_str::truncate_spaces(dbname);
     if !path.is_empty() {
-        part = part.strip_prefix('/').unwrap_or(part);
+        part = part.strip_prefix(b"/").unwrap_or(part);
     }
-    path.push_str(part);
+    path.extend_from_slice(part);
     normalize_path(&path)
 }
 
 /// A separator of directory names (`DIR_SEPARATORS`).
-fn is_separator(c: char) -> bool {
-    c == '/' || (cfg!(windows) && c == '\\')
+fn is_separator(c: u8) -> bool {
+    c == b'/' || (cfg!(windows) && c == b'\\')
 }
 
 /// A character that ends the directory part of a path (`ALL_SEPARATORS`).
-fn is_any_separator(c: char) -> bool {
-    is_separator(c) || (cfg!(windows) && c == ':')
+fn is_any_separator(c: u8) -> bool {
+    is_separator(c) || (cfg!(windows) && c == b':')
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:298-313
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:465-472
 /// The path a `CDirEntry` keeps for `path`: without its trailing separators,
 /// unless it is one separator (the root) or, on Windows, a disk name.
-fn dir_entry_path(path: &str) -> &str {
-    if path.len() == 1 && path.starts_with(is_separator) {
+fn dir_entry_path(path: &[u8]) -> &[u8] {
+    if path.len() == 1 && is_separator(path[0]) {
         return path;
     }
-    if cfg!(windows) && (path.len() == 2 || path.len() == 3) && path.as_bytes()[1] == b':' {
+    if cfg!(windows) && (path.len() == 2 || path.len() == 3) && path[1] == b':' {
         return path;
     }
-    path.trim_end_matches(is_separator)
+    &path[..path
+        .iter()
+        .rposition(|&c| !is_separator(c))
+        .map_or(0, |at| at + 1)]
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:4021-4046,4056-4067
@@ -191,20 +210,21 @@ fn dir_entry_path(path: &str) -> &str {
 // directory gets exactly that mode, whatever the umask.
 /// `s_DirCreate` of `path` with `fCreate_Default` and `mode`: makes one directory; `true`
 /// also when it is there already.
-fn dir_create(path: &str) -> bool {
-    match std::fs::create_dir(path) {
+fn dir_create(path: &[u8]) -> bool {
+    let path = path_of_bytes(path);
+    match std::fs::create_dir(&path) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             // `GetType()` does not follow a link: a link to a directory
             // is not a directory here.
-            return std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir());
+            return std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_dir());
         }
         Err(_) => return false,
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).is_ok()
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).is_ok()
     }
     #[cfg(not(unix))]
     {
@@ -218,7 +238,7 @@ fn dir_create(path: &str) -> bool {
 /// `CreatePath` of the `CDir` of `dir`: makes the directory `dir` and its missing
 /// parents, after the path was made absolute and normalized without
 /// following links (`a/b/../c` is `a/c`: `a/b` is not made).
-fn create_path(dir: &str) -> bool {
+fn create_path(dir: &[u8]) -> bool {
     if dir.is_empty() {
         return false;
     }
@@ -226,13 +246,13 @@ fn create_path(dir: &str) -> bool {
     if path.is_empty() {
         return false;
     }
-    if path.ends_with(is_separator) && !(cfg!(windows) && path.len() == 3) {
+    if path.last().is_some_and(|&c| is_separator(c)) && !(cfg!(windows) && path.len() == 3) {
         path.pop();
     }
-    let mut tmp = path.as_str();
-    let mut missed_parts: Vec<&str> = Vec::new();
-    while !tmp.is_empty() && std::fs::symlink_metadata(tmp).is_err() {
-        let Some(pos) = tmp.rfind(is_separator) else {
+    let mut tmp = path.as_slice();
+    let mut missed_parts: Vec<&[u8]> = Vec::new();
+    while !tmp.is_empty() && std::fs::symlink_metadata(path_of_bytes(tmp)).is_err() {
+        let Some(pos) = tmp.iter().rposition(|&c| is_separator(c)) else {
             break;
         };
         missed_parts.push(&tmp[pos + 1..]);
@@ -241,10 +261,10 @@ fn create_path(dir: &str) -> bool {
     if missed_parts.is_empty() {
         return dir_create(&path);
     }
-    let mut p = tmp.to_string();
+    let mut p = tmp.to_vec();
     for part in missed_parts.iter().rev() {
-        p.push(std::path::MAIN_SEPARATOR);
-        p.push_str(part);
+        p.push(std::path::MAIN_SEPARATOR as u8);
+        p.extend_from_slice(part);
         if !dir_create(&p) {
             return false;
         }
@@ -341,23 +361,31 @@ const fn create_directories_site(line: u32) -> ThrowSite {
 }
 
 /// `CBuildDatabase::CreateDirectories`.
-pub(crate) fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
+pub(crate) fn create_directories(dbname: &[u8]) -> Result<(), WriteDbError> {
     let dir_entry = dir_entry_path(dbname);
-    let Some(at) = dir_entry.rfind(is_any_separator) else {
+    let Some(at) = dir_entry.iter().rposition(|&c| is_any_separator(c)) else {
         return Ok(());
     };
     let d = dir_entry_path(&dir_entry[..=at]);
-    let name = d.rfind(is_any_separator).map_or(d, |at| &d[at + 1..]);
-    if !Path::new(d).is_dir() && !create_path(d) {
+    let name = d
+        .iter()
+        .rposition(|&c| is_any_separator(c))
+        .map_or(d, |at| &d[at + 1..]);
+    if !path_of_bytes(d).is_dir() && !create_path(d) {
         return Err(WriteDbError::Exception(NcbiException::new(
             CREATE_PATH_FAILED,
-            format!("Failed to create directory '{name}'"),
+            [b"Failed to create directory '".as_slice(), name, b"'"].concat(),
         )));
     }
     if !check_access_write(d) {
         return Err(WriteDbError::Exception(NcbiException::new(
             NO_WRITE_ACCESS,
-            format!("You do not have write permissions on '{name}'"),
+            [
+                b"You do not have write permissions on '".as_slice(),
+                name,
+                b"'",
+            ]
+            .concat(),
         )));
     }
     Ok(())
@@ -370,16 +398,16 @@ pub(crate) fn create_directories(dbname: &str) -> Result<(), WriteDbError> {
 /// is 0). For a set-user-ID or set-group-ID process glibc compares the mode bits with the effective
 /// ids instead; `access` asks with the real ids there.
 #[cfg(unix)]
-fn check_access_write(path: &str) -> bool {
-    rustix::fs::access(path, rustix::fs::Access::WRITE_OK).is_ok()
+fn check_access_write(path: &[u8]) -> bool {
+    rustix::fs::access(&*path_of_bytes(path), rustix::fs::Access::WRITE_OK).is_ok()
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:1722-1732
 /// `CDirEntry::CheckAccess` for `fWrite` without the rights of the ACL (see
 /// `create_directories`): only whether the path resolves.
 #[cfg(not(unix))]
-fn check_access_write(path: &str) -> bool {
-    std::fs::metadata(path).is_ok()
+fn check_access_write(path: &[u8]) -> bool {
+    std::fs::metadata(path_of_bytes(path)).is_ok()
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:2629-2641
@@ -419,7 +447,7 @@ const LMDB_EXTENSIONS: [&str; 7] = ["db", "os", "ot", "tf", "to", "db-lock", "tf
 //   replaced.
 /// `DeleteBlastDb`: removes the files of the database `dbpath` (and a directory
 /// of one of their names, with its contents); `true` when one was removed.
-pub(crate) fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, WriteDbError> {
+pub(crate) fn delete_blast_db(dbpath: &[u8], is_protein: bool) -> Result<bool, WriteDbError> {
     let letter = if is_protein { 'p' } else { 'n' };
     let seqtype = if is_protein {
         SeqType::Protein
@@ -431,8 +459,9 @@ pub(crate) fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, Wr
         Err(SeqDbError::Unsupported { path, message }) => {
             return Err(WriteDbError::Other(format!(
                 "an existing database is in the way and LOSAT cannot list its files ({}: \
-                 {message}); remove it before building {dbpath}",
-                path.display()
+                 {message}); remove it before building {}",
+                path.display(),
+                String::from_utf8_lossy(dbpath)
             )));
         }
         Err(_) => (Vec::new(), Vec::new()),
@@ -442,27 +471,30 @@ pub(crate) fn delete_blast_db(dbpath: &str, is_protein: bool) -> Result<bool, Wr
     // directory of the name is removed with its contents, a symbolic link is removed and its
     // target kept.
     let mut num_files_removed = 0;
-    let mut remove = |name: &str| {
-        let removed = dir_entry::remove(Path::new(name));
+    let mut remove = |name: &[u8]| {
+        let removed = dir_entry::remove(&path_of_bytes(name));
         num_files_removed += u32::from(removed);
         removed
     };
     for lmdb in LMDB_EXTENSIONS {
-        if !remove(&format!("{dbpath}.{letter}{lmdb}")) {
+        let named = |suffix: String| [dbpath, suffix.as_bytes()].concat();
+        if !remove(&named(format!(".{letter}{lmdb}"))) {
             let mut index = 0u32;
             // The removals of the volume files are not counted by NCBI.
-            while dir_entry::remove(Path::new(&format!(
-                "{dbpath}.{}{}.{letter}{lmdb}",
+            while dir_entry::remove(&path_of_bytes(&named(format!(
+                ".{}{}.{letter}{lmdb}",
                 index / 10,
                 index % 10
-            ))) {
+            )))) {
                 index += 1;
             }
         }
     }
     for file in &db_files {
         for extension in VOLUME_EXTENSIONS {
-            remove(&format!("{file}.{letter}{extension}"));
+            let mut name = file.clone();
+            name.extend_from_slice(format!(".{letter}{extension}").as_bytes());
+            remove(&name);
         }
     }
     for file in &alias_files {
@@ -515,33 +547,35 @@ impl<'a> BuildDatabase<'a> {
         platform: Platform,
         indices: Indices,
     ) -> Result<Self, WriteDbError> {
-        create_directories(dbname)?;
-        let output_dbname = create_absolute_path(dbname);
+        create_directories(dbname.as_bytes())?;
+        // The name is the bytes of NCBI's `std::string`: the current directory's bytes joined with
+        // `-out`, in the log line, the deletion and the files.
+        let output_dbname = create_absolute_path(dbname.as_bytes());
         let mol_type = if is_protein { "Protein" } else { "Nucleotide" };
         let _ = write!(
             log,
             "\n\nBuilding a new DB, current time: {}",
             now.log_time()
         );
-        endl(log);
-        let _ = write!(log, "New DB name:   {output_dbname}");
-        endl(log);
+        endl(log)?;
+        let _ = log
+            .write_all(b"New DB name:   ")
+            .and_then(|()| log.write_all(&output_dbname));
+        endl(log)?;
         // The label and the title are two insertions, then the line's end, as NCBI writes them.
         let _ = log
             .write_all(b"New DB title:  ")
             .and_then(|()| log.write_all(title));
-        endl(log);
+        endl(log)?;
         let _ = write!(log, "Sequence type: {mol_type}");
-        endl(log);
+        endl(log)?;
         if delete_blast_db(&output_dbname, is_protein)? {
-            let _ = write!(
-                log,
-                "Deleted existing {mol_type} BLAST database named {output_dbname}"
-            );
-            endl(log);
+            let _ = write!(log, "Deleted existing {mol_type} BLAST database named ")
+                .and_then(|()| log.write_all(&output_dbname));
+            endl(log)?;
         }
         let _ = write!(log, "Keep MBits: T");
-        endl(log);
+        endl(log)?;
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1119-1132
         // The limit of 1000*1000*1000 that the constructor sets is replaced
         // by makeblastdb before a sequence is added.
@@ -666,7 +700,7 @@ impl<'a> BuildDatabase<'a> {
     }
 
     /// `GetOutputDbName`: the absolute name of the database.
-    pub fn output_dbname(&self) -> &str {
+    pub fn output_dbname(&self) -> &[u8] {
         &self.output_dbname
     }
 
@@ -723,7 +757,7 @@ impl<'a> BuildDatabase<'a> {
                         self.log,
                         "Ignoring gi '{gi}' as it has value larger then 4294967295"
                     );
-                    endl(self.log);
+                    endl(self.log)?;
                     continue;
                 }
                 deflines::localize_other_molecule(&mut parsed.ids, self.is_protein, &mut *warn);
@@ -800,7 +834,7 @@ impl<'a> BuildDatabase<'a> {
                     self.log,
                     "Ignoring sequence '{bioseq_id}' as it has no sequence data"
                 );
-                endl(self.log);
+                endl(self.log)?;
                 continue;
             }
             found = true;
@@ -812,7 +846,7 @@ impl<'a> BuildDatabase<'a> {
                 "Adding sequences from FASTA; added {count} sequences in {} seconds.",
                 format_seconds(start.elapsed().as_secs_f64())
             );
-            endl(self.log);
+            endl(self.log)?;
         }
         Ok(found)
     }
@@ -856,7 +890,9 @@ impl<'a> BuildDatabase<'a> {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1403-1420
     /// `AddFasta`: adds the sequences of one FASTA input. An error ends the
-    /// build and removes its files.
+    /// build and removes its files. A closed pipe at a line of the log (`endl`) ends the build
+    /// at once, without `EndBuild`, as SIGPIPE ends NCBI's process inside `AddSequences` or
+    /// inside the `EndBuild` of its handler, before the files are removed.
     pub fn add_fasta<R: Read>(
         &mut self,
         fasta_file: R,
@@ -869,21 +905,25 @@ impl<'a> BuildDatabase<'a> {
             Ok(false) => Err(WriteDbError::Creation("No sequences added".to_string())),
             Err(error) => Err(error),
         };
-        if result.is_err() {
-            // The error of the build is the one already in hand.
-            let _ = self.end_build(true, warn);
+        match result {
+            Err(error) if !error.is_closed_pipe() => match self.end_build(true, warn) {
+                Err(stop) if stop.is_closed_pipe() => Err(stop),
+                // The error of the build is the one already in hand.
+                _ => Err(error),
+            },
+            result => result,
         }
-        result
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1278-1286
     /// `SetLeafTaxIds` of `taxids` with the second argument true: the leaf taxids of a copied
     /// database's definition lines (`raw_source::scan_leaf_tax_ids`), which the copy adds to a
-    /// line's own.
-    pub(crate) fn set_leaf_tax_ids(&mut self, taxids: LeafTaxIds) {
+    /// line's own. A closed pipe at the log line ends the build there (`endl`).
+    pub(crate) fn set_leaf_tax_ids(&mut self, taxids: LeafTaxIds) -> Result<(), WriteDbError> {
         let _ = write!(self.log, "Keep Leaf Taxids: T");
-        endl(self.log);
+        endl(self.log)?;
         self.leaf_tax_ids = taxids;
+        Ok(())
     }
 
     /// The run's flag of the UTF8String warning, which posts once in a run.
@@ -961,6 +1001,16 @@ impl<'a> BuildDatabase<'a> {
 
         let mut count = 0u64;
         while let Some(raw) = source.next()? {
+            if raw.negative_length {
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:969-988
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:139-149
+                // A negative 32-bit protein length produces a non-empty `CTempString`, so
+                // `x_EditHeaders` runs and `CWriteDB_Impl::AddSequence` publishes the prior
+                // sequence before `std::string::assign` throws `basic_string::_M_create`.
+                let mut headers = raw.deflines;
+                self.edit_raw_headers(&mut headers);
+                return Err(self.output_db.add_raw_negative_length().into());
+            }
             if raw.sequence.is_empty() {
                 return Err(raw_data_error(970, "Error in raw data: no sequence").into());
             }
@@ -1037,7 +1087,7 @@ impl<'a> BuildDatabase<'a> {
                 "Adding sequences from raw db source; added {count} sequences in {} seconds.",
                 format_seconds(start.elapsed().as_secs_f64())
             );
-            endl(self.log);
+            endl(self.log)?;
         }
         Ok(())
     }
@@ -1180,19 +1230,31 @@ impl<'a> BuildDatabase<'a> {
         let erase = erase || close_error.is_some() || refusal.is_some();
         let vols = self.output_db.list_volumes();
         let files = self.output_db.list_files();
-        endl(self.log);
+        // `Remove` of a `CFile` is `CDirEntry::Remove` with `eRecursive`.
+        let remove_files = || {
+            for file in &files {
+                let _ = dir_entry::remove(&path_of_bytes(file));
+            }
+        };
+        // A closed pipe at this line ends the build before the removals (`endl`), where SIGPIPE
+        // ends NCBI's process. A build that LOSAT refuses (`address_order`) loses its files all
+        // the same: a closed database whose masks are in LOSAT's order, where NCBI's is that of
+        // memory addresses, is never left.
+        if let Err(stop) = endl(self.log) {
+            if refusal.is_some() {
+                remove_files();
+            }
+            return Err(stop);
+        }
         let mut success = true;
         if vols.is_empty() {
             let _ = write!(self.log, "No volumes were created.");
-            endl(self.log);
+            endl(self.log)?;
             success = false;
         } else if erase {
-            // `Remove` of a `CFile` is `CDirEntry::Remove` with `eRecursive`.
-            for file in &files {
-                let _ = dir_entry::remove(Path::new(file));
-            }
+            remove_files();
         }
-        endl(self.log);
+        endl(self.log)?;
         if let Some(refusal) = refusal {
             return Err(refusal);
         }

@@ -1758,10 +1758,18 @@ pub fn query_sequence_exception(coding: i32) -> crate::ncbi_exception::NcbiExcep
 }
 
 /// The end of a report at a row that reads the letters of a query whose molecule is `other`
-/// ([`query_sequence_exception`]): what the report holds so far is written (`buffered`) and
-/// flushed, and the exception is the run's error.
-pub fn query_sequence_end(writer: &mut dyn Write, buffered: &[u8], coding: i32) -> anyhow::Error {
-    if let Err(error) = writer.write_all(buffered).and_then(|()| writer.flush()) {
+/// ([`query_sequence_exception`]): what the report holds so far is written (`buffered`), the
+/// exception's unwinding flushes the stream (NCBI's flush, as at `run_end`), and the exception is
+/// the run's error.
+pub fn query_sequence_end(
+    writer: &mut dyn crate::report::ostream::ReportWrite,
+    buffered: &[u8],
+    coding: i32,
+) -> anyhow::Error {
+    if let Err(error) = writer
+        .write_all(buffered)
+        .and_then(|()| writer.ncbi_flush())
+    {
         return error.into();
     }
     crate::cli::NativeError::exception(&query_sequence_exception(coding)).into()
@@ -1769,18 +1777,26 @@ pub fn query_sequence_end(writer: &mut dyn Write, buffered: &[u8], coding: i32) 
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203 (the `CATCH_ALL` of
 // every application, cited at `cli::NativeError::exception`)
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163 (cited at
+// `blastn::tabular::write_blastn_tabular`)
 /// The end of the run at a row whose subject's load throws outside the subject block
-/// (`TabularWriter::ends_run`): writes the report's rows before it, `buffered`, to `writer`,
-/// ends the reads (`end_reads`: `QueryWarnings::end_run`, `ReadCursor::end_run`; NCBI loads
-/// nothing after it) and gives NCBI's exception as the run's error
-/// (`blast_xml::writer::run_ending_exception`: `BLAST Database error: <message>`, exit status 2).
+/// (`TabularWriter::ends_run`): writes the report's rows before it, `buffered`, to `writer`, and
+/// the exception's unwinding runs `~CBlastTabularInfo`, which flushes the stream (NCBI's flush,
+/// the one of the query's end: a device that fails there ends the run as any tabular failure,
+/// not at the exception), ends the reads (`end_reads`: `QueryWarnings::end_run`,
+/// `ReadCursor::end_run`; NCBI loads nothing after it) and gives NCBI's exception as the run's
+/// error (`blast_xml::writer::run_ending_exception`: `BLAST Database error: <message>`, exit
+/// status 2).
 pub fn run_end(
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     buffered: &[u8],
     exception: &crate::ncbi_exception::NcbiException,
     end_reads: impl FnOnce(),
 ) -> anyhow::Error {
-    if let Err(error) = writer.write_all(buffered).and_then(|()| writer.flush()) {
+    if let Err(error) = writer
+        .write_all(buffered)
+        .and_then(|()| writer.ncbi_flush())
+    {
         return error.into();
     }
     end_reads();

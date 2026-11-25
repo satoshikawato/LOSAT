@@ -25,6 +25,12 @@
 //! NCBI's search with an engine error (exit 3) after the reports of the query batches before, and
 //! LOSAT refuses there, after them too (line RG item X-short-tbx review 2, probes on ws
 //! 2026-11-18, whose NCBI bytes the test compares).
+//!
+//! The fetch is made for a list that holds only one-hit HSPs of length 0 or less too, which the
+//! re-evaluation deletes after it unread (blast_engine.c:1480-1497, blast_hits.c:687-699): with
+//! `-matrix PAM30 -threshold 11 -window_size 0`, the query `TGGGATTGG` (W D W) against `bb`
+//! (`TGGTGGTGGTAA`, W W W) gives only an HSP of length -1, whose header NCBI reads all the same
+//! (line RG item X-short-tbx-link-2, probes on ws 2026-11-25, whose NCBI bytes the test compares).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -332,6 +338,112 @@ fn a_header_the_fetch_cannot_read_fails_the_batch_after_the_batches_before() {
         for (outfmt, before) in [("6", ""), ("7", Q8_OUTFMT_7), ("0", Q8_OUTFMT_0)] {
             let case = format!("threads {threads}: q8 then nq, outfmt {outfmt}");
             let batches = search(&q8nq, Some("1"), outfmt);
+            assert_fetch_refused(&batches, &case);
+            // `before` is NCBI's frozen output: LOSAT's is NCBI's in LOSAT's words.
+            assert_eq!(
+                String::from_utf8_lossy(&batches.stdout),
+                String::from_utf8_lossy(&losat::wording::losat_output_bytes(before.as_bytes())),
+                "{case}"
+            );
+        }
+    }
+}
+
+/// NCBI's `-outfmt 0` of `q8` and the database `dbD` of `w12`, `bb`, `z14` and `pad` with PAM30,
+/// before its engine error in the next query batch: the prolog and the report of `q8` with its
+/// footer, no epilog (480 bytes; probe of line RG item X-short-tbx-link-2 on ws, 2026-11-25).
+const Q8_PAM30_OUTFMT_0: &str = concat!(
+    "TBLASTX 2.17.0+\n\n\n",
+    "Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.\n",
+    "Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.\n",
+    "Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of\n",
+    "protein database search programs\", Nucleic Acids Res. 25:3389-3402.\n\n\n\n",
+    "Database: dbD.fna\n",
+    "           4 sequences; 338 total letters\n\n\n\n",
+    "Query= q8\n\n",
+    "Length=8\n\n\n",
+    "***** No hits found *****\n\n\n\n",
+    "Lambda      K        H\n",
+    "   0.340    0.283     1.75 \n\n\n",
+    "Effective search space used: 218\n",
+);
+
+/// A subject whose list after the reap by the preliminary E-value holds only an HSP of length 0
+/// or less still reaches the re-evaluation's fetch, which reads its header under a negative seqid
+/// list: one that cannot be read ends the search there, as NCBI's does (exit 3; LOSAT's refusal),
+/// with sum statistics and without, after the reports of the query batches before. Database
+/// `dbD` of `w12`, `bb` (`TGGTGGTGGTAA`), `z14` and `pad` (300 bases without a word) with parsed
+/// Seq-ids, 8 bytes 0xFF written over the start of `bb`'s header, a negative seqid list of
+/// `z14`; with PAM30, `-threshold 11` and `-window_size 0`, the query `q` (`TGGGATTGG`) leaves
+/// `bb` (and `w12`) only an HSP of length -1. At `-evalue 1` the reap removes it (its linked
+/// E-value is between 1 and 10, NCBI's too: exit 0 at 1, the engine error at 10), so nothing
+/// reads the header; the database undamaged gives no row. LOSAT wrote no row and exited 0 before
+/// this version.
+#[test]
+fn a_list_of_only_alignments_of_length_zero_or_less_reaches_the_fetch() {
+    let temp = TempDir::new("inverted");
+    let dir = temp.0.as_path();
+    let w12 = ("w12", "TGGTGGTGGTTT");
+    makeblastdb(dir, "dbW", &[w12], true);
+    let pad = "TAA".repeat(100);
+    let set = [
+        w12,
+        ("bb", "TGGTGGTGGTAA"),
+        ("z14", "TGGTGGTGGTTTAA"),
+        ("pad", pad.as_str()),
+    ];
+    makeblastdb(dir, "dbD", &set, true);
+    makeblastdb(dir, "dbU", &set, true);
+    let first = std::fs::metadata(dir.join("dbW.nhr")).unwrap().len() as usize;
+    let headers = dir.join("dbD.nhr");
+    let mut bytes = std::fs::read(&headers).unwrap();
+    assert!(bytes.len() > first + 8, "bb's header follows w12's");
+    bytes[first..first + 8].fill(0xFF);
+    std::fs::write(&headers, bytes).unwrap();
+    std::fs::write(dir.join("neg_z14.txt"), "z14\n").unwrap();
+    let q = fasta(dir, "q.fna", &[("q", "TGGGATTGG")]);
+    let q8q = fasta(dir, "q8q.fna", &[("q8", "ATGCATTA"), ("q", "TGGGATTGG")]);
+    for threads in ["1", "4"] {
+        let search = |db: &str, query: &Path, batch_size, extra: &[&str]| {
+            let mut args = vec!["tblastx", "-query", query.to_str().unwrap()];
+            args.extend(["-db", db, "-negative_seqidlist", "neg_z14.txt"]);
+            args.extend(["-window_size", "0", "-seg", "no"]);
+            args.extend(["-matrix", "PAM30", "-threshold", "11"]);
+            args.extend(extra);
+            args.extend(["-num_threads", threads]);
+            losat(dir, batch_size, &args)
+        };
+        let deep = ["-evalue", "1e10", "-outfmt", "6"];
+        for sum_stats in ["true", "false"] {
+            let case = format!("threads {threads}: -sum_stats {sum_stats}");
+            let mut extra = deep.to_vec();
+            extra.extend(["-sum_stats", sum_stats]);
+            let refused = search("dbD", &q, None, &extra);
+            assert_fetch_refused(&refused, &case);
+            assert!(refused.stdout.is_empty(), "{case}");
+        }
+        let reaped = search("dbD", &q, None, &["-evalue", "1", "-outfmt", "6"]);
+        assert_eq!(
+            reaped.status.code(),
+            Some(0),
+            "threads {threads}: -evalue 1"
+        );
+        assert!(reaped.stdout.is_empty(), "threads {threads}: -evalue 1");
+        let undamaged = search("dbU", &q, None, &deep);
+        assert_eq!(
+            undamaged.status.code(),
+            Some(0),
+            "threads {threads}: undamaged"
+        );
+        assert!(undamaged.stdout.is_empty(), "threads {threads}: undamaged");
+        for (outfmt, before) in [("6", ""), ("7", Q8_OUTFMT_7), ("0", Q8_PAM30_OUTFMT_0)] {
+            let case = format!("threads {threads}: q8 then q, outfmt {outfmt}");
+            let batches = search(
+                "dbD",
+                &q8q,
+                Some("1"),
+                &["-evalue", "1e10", "-outfmt", outfmt],
+            );
             assert_fetch_refused(&batches, &case);
             // `before` is NCBI's frozen output: LOSAT's is NCBI's in LOSAT's words.
             assert_eq!(

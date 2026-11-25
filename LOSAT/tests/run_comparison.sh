@@ -147,10 +147,10 @@ if [[ "$RUN_LOSAT_WASM" == 1 || "$RUN_LOSAT_WASM_THREADED" == 1 ]]; then
         cargo --version
     fi
     if [[ "$RUN_LOSAT_WASM" == 1 && "$BUILD_LOSAT_WASM" == 1 ]]; then
-        (cd .. && cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --target-dir target/serial-command)
+        (cd .. && cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --features no-web-abi-v1 --target-dir target/serial-command)
     fi
     if [[ "$RUN_LOSAT_WASM_THREADED" == 1 && "$BUILD_LOSAT_WASM_THREADED" == 1 ]]; then
-        (cd .. && cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command)
+        (cd .. && cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads,no-web-abi-v1 --target-dir target/threaded-command)
     fi
     # Require the exact requested command artifacts; never pick a stale deps/ file.
     # NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176

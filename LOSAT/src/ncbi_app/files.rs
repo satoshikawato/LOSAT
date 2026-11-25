@@ -459,6 +459,14 @@ impl ReportWrite for OutputFile<'_> {
             OutputFile::Refused(reason) => Err(refused_write(reason)),
         }
     }
+
+    fn ncbi_room(&self) -> usize {
+        match self {
+            OutputFile::Stream(stream) => stream.ncbi_room(),
+            OutputFile::Caller(_) => usize::MAX,
+            OutputFile::Refused(_) => 0,
+        }
+    }
 }
 
 /// The error of a write to a refused output (`OutputFile::Refused`).

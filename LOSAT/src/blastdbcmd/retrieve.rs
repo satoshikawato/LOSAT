@@ -458,6 +458,12 @@ impl Output<'_, '_> {
         self.closed()
     }
 
+    /// Bytes fewer than this fit in NCBI's buffer with no write (`ReportWrite::ncbi_room`).
+    #[inline]
+    pub fn ncbi_room(&self) -> usize {
+        self.out.ncbi_room()
+    }
+
     /// NCBI's insertions and flushes `text` (`CutBuffer`), emptied.
     pub fn insertions(&mut self, text: &mut CutBuffer) -> Result<(), Stop> {
         text.write_to(self.out).map_err(Stop::write)

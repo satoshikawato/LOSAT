@@ -5,6 +5,7 @@
 //! `CFastaOstream::WriteSequence`.
 
 use std::collections::HashSet;
+use std::io::Write;
 
 use crate::report::defline::{bioseq_title_from_source, generate_bioseq_defline};
 use crate::report::ostream::CutBuffer;
@@ -113,15 +114,25 @@ impl FastaFormatter {
         if config.strand_minus {
             reverse_complement(&mut letters);
         }
-        let changes = match &masks {
-            Some(masks) => mask_changes(masks, range, letters.len(), config.strand_minus),
-            None => Vec::new(),
+        let width = self.width.max(1) as usize;
+        let seq_bytes = letters.len() + letters.len().div_ceil(width);
+        // When the whole record fits in NCBI's buffer without triggering a write (no flush occurs
+        // inside a FASTA record), every intermediate line insertion and newline put is held whole;
+        // skipping per-line cuts yields the identical buffer state.
+        let written = if units.bytes.len() + seq_bytes < out.ncbi_room() {
+            write_sequence_plain(&letters, width, &mut units.bytes);
+            out.write_all(&units.bytes).map_err(Stop::write)
+        } else {
+            let changes = match &masks {
+                Some(masks) => mask_changes(masks, range, letters.len(), config.strand_minus),
+                None => Vec::new(),
+            };
+            units.end_insertion();
+            write_sequence(&letters, self.width, &changes, &mut units);
+            // `out` writes to a `files::OutputFile` (`retrieve::process`): a failed write does
+            // nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
+            out.insertions(&mut units)
         };
-        units.end_insertion();
-        write_sequence(&letters, self.width, &changes, &mut units);
-        // `out` writes to a `files::OutputFile` (`retrieve::process`): a failed write does
-        // nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
-        let written = out.insertions(&mut units);
         self.units = units;
         written
     }
@@ -441,6 +452,16 @@ fn mask_changes(
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/seq_vector_ci.cpp:56
 const SEQ_VECTOR_CACHE: usize = 1024;
+
+/// Plain FASTA line wrapping without per-line cuts, used only when the whole record is proven to
+/// fit inside NCBI's stream buffer with zero writes (`ReportWrite::ncbi_room`).
+fn write_sequence_plain(letters: &[u8], width: usize, out: &mut Vec<u8>) {
+    out.reserve(letters.len() + letters.len().div_ceil(width));
+    for line in letters.chunks(width) {
+        out.extend_from_slice(line);
+        out.push(b'\n');
+    }
+}
 
 // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:3164-3320
 /// The sequence lines of `CFastaOstream::x_WriteSequence`: lines of `width` letters, the

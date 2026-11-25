@@ -1555,6 +1555,13 @@ pub trait ReportWrite: std::io::Write {
         Ok(())
     }
 
+    /// Bytes fewer than this fit in NCBI's buffer with no device write (`NcbiBuffer::room`):
+    /// a writer whose record contains no flush may skip building per-line cuts and insert the
+    /// record whole (`0` when every cut must be passed).
+    fn ncbi_room(&self) -> usize {
+        0
+    }
+
     /// The insertions `report[from..at]` for each cut `(at, _)` of `cuts`, then `report[..to]`
     /// from the last cut: one region's run of NCBI's insertions (every cut a `Cut::Insertion`,
     /// in increasing order, none past `to`), each one write of the stream (`CutCursor::write`).
@@ -1608,6 +1615,10 @@ impl ReportWrite for ReportStream {
     fn badbit(&mut self) -> std::io::Result<()> {
         lock(&self.0).badbit()
     }
+
+    fn ncbi_room(&self) -> usize {
+        lock(&self.0).room
+    }
 }
 
 impl<W: ReportWrite + ?Sized> ReportWrite for &mut W {
@@ -1629,6 +1640,10 @@ impl<W: ReportWrite + ?Sized> ReportWrite for &mut W {
 
     fn badbit(&mut self) -> std::io::Result<()> {
         (**self).badbit()
+    }
+
+    fn ncbi_room(&self) -> usize {
+        (**self).ncbi_room()
     }
 
     fn insert_cut_run(

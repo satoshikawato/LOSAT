@@ -516,8 +516,26 @@ fn fasta_letters(
     text.clear();
     text.insertion(id);
     text.endl();
+    text.write_to(out)?;
+    if iupac.is_empty() {
+        return Ok(());
+    }
     let mut imask = 0;
     let mut pos = 0u64;
+    let seq_bytes = iupac.len() + iupac.len().div_ceil(LINE);
+    // After the id line's `endl()`, NCBI's buffer is empty; if the entire sequence body fits
+    // within `ncbi_room()`, no line insertion can trigger a write, so per-line cuts are skipped.
+    if seq_bytes < out.ncbi_room() {
+        text.bytes.reserve(seq_bytes);
+        for letters in iupac.chunks(LINE) {
+            let at = text.bytes.len();
+            text.bytes.extend_from_slice(letters);
+            mask_line(&mut text.bytes[at..], pos, mask, &mut imask, hard_masking);
+            text.bytes.push(b'\n');
+            pos += letters.len() as u64;
+        }
+        return out.write_all(&text.bytes);
+    }
     for letters in iupac.chunks(LINE) {
         let at = text.bytes.len();
         text.bytes.extend_from_slice(letters);

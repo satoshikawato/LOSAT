@@ -179,15 +179,43 @@ fn query_workspace_for<P>(search: &SwCbs0Search<'_, P>, q_idx: usize) -> BlastpK
 }
 
 #[inline]
-fn local_match_at(
-    lists: &[Option<BlastpHitList>],
-    q_idx: usize,
-    position: usize,
-) -> &BlastpHspList {
+fn get_m(lists: &[Option<BlastpHitList>], q_idx: usize, pos: usize) -> &BlastpHspList {
     &lists[q_idx]
         .as_ref()
         .expect("a match's query has its preliminary hit list")
-        .hsplist_array[position]
+        .hsplist_array[pos]
+}
+
+#[inline]
+fn ends_early(best_evalue: f64, heaps: &[BlastCompoHeap], batch: &Range<usize>) -> bool {
+    blast_compo_early_termination(best_evalue, &heaps[batch.clone()])
+}
+
+struct QueryRedo<'a> {
+    ws: &'a BlastpKappaQueryWorkspace,
+    params: &'a BlastRedoAlignParams,
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline]
+fn apply_redone(
+    sw_status: &mut SwBatchStatus,
+    redone: Result<super::kappa::BlastpPostprocessResult>,
+    fetch_notes: &FetchNotes<'_>,
+    batch: &Range<usize>,
+    heaps: &mut [BlastCompoHeap],
+    ordinal: u32,
+    q_idx: usize,
+    oid: u32,
+) -> Result<()> {
+    let Some(postprocessed) = sw_status.redone(redone, || {
+        endless_oid_error(fetch_notes, batch, heaps, ordinal, q_idx)
+    })?
+    else {
+        return Ok(());
+    };
+    insert_postprocessed(&mut heaps[q_idx], oid, postprocessed);
+    Ok(())
 }
 
 fn clear_batch_lists(
@@ -261,8 +289,7 @@ fn run_sw_on_match<P>(
     search: &SwCbs0Search<'_, P>,
     q_idx: usize,
     local_match: &BlastpHspList,
-    query_workspace: &BlastpKappaQueryWorkspace,
-    redo_align_params: &BlastRedoAlignParams,
+    qredo: QueryRedo<'_>,
     unadjusted: &AdjustedProteinMatrix,
     scratch: &mut SwScratch,
     resume: Option<&super::kappa::smith_waterman::SwMatchResume>,
@@ -280,14 +307,14 @@ fn run_sw_on_match<P>(
     let subject_raw = subject.residues();
     postprocess_preliminary_hits_smith_waterman(
         &scratch.hits,
-        query_workspace,
+        qredo.ws,
         &mut scratch.composition_workspace,
         (search.query_nomask)(&search.contexts[q_idx]),
         subject_raw,
         search.matrix,
         search.gapped_params,
         search.gapped_gumbel,
-        redo_align_params,
+        qredo.params,
         search.evalue,
         &mut scratch.gap_scratch,
         &mut scratch.range_cache,
@@ -446,14 +473,13 @@ where
                 q_idx,
                 position,
             } => {
-                let m = local_match_at(lists, q_idx, position);
-                if blast_compo_early_termination(m.best_evalue, &heaps[batch.clone()]) {
+                let m = get_m(lists, q_idx, position);
+                if ends_early(m.best_evalue, heaps, &batch) {
                     continue;
                 }
                 let slot = q_idx - batch.start;
-                let query_workspace =
-                    workspaces[slot].get_or_insert_with(|| query_workspace_for(search, q_idx));
-                let redo_align_params = match params_by_q[slot].as_ref() {
+                let ws = workspaces[slot].get_or_insert_with(|| query_workspace_for(search, q_idx));
+                let params = match params_by_q[slot].as_ref() {
                     Some(params) => params,
                     None => {
                         let built = (search.build_redo_align_params)(q_idx)?;
@@ -465,8 +491,7 @@ where
                     search,
                     q_idx,
                     m,
-                    query_workspace,
-                    redo_align_params,
+                    QueryRedo { ws, params },
                     unadjusted,
                     scratch,
                     None,
@@ -475,13 +500,16 @@ where
                     },
                     &mut None,
                 );
-                let Some(postprocessed) = sw_status.redone(redone, || {
-                    endless_oid_error(fetch_notes, &batch, heaps, ordinal, q_idx)
-                })?
-                else {
-                    continue;
-                };
-                insert_postprocessed(&mut heaps[q_idx], m.oid, postprocessed);
+                apply_redone(
+                    &mut sw_status,
+                    redone,
+                    fetch_notes,
+                    &batch,
+                    heaps,
+                    ordinal,
+                    q_idx,
+                    m.oid,
+                )?;
             }
         }
     }
@@ -645,7 +673,7 @@ mod par {
                 may_insert[slot] = 1;
                 continue;
             }
-            let m = local_match_at(lists, q_idx, position);
+            let m = get_m(lists, q_idx, position);
             let inserts = match &computed.result {
                 Ok(postprocessed) => postprocessed.hsp_list.is_some(),
                 Err(error) if error.is::<SwRedoFailed>() => false,
@@ -758,7 +786,7 @@ mod par {
                 Cbs0Event::Kept {
                     q_idx, position, ..
                 } => {
-                    let m = local_match_at(lists, q_idx, position);
+                    let m = get_m(lists, q_idx, position);
                     let ended_now =
                         blast_compo_early_termination(m.best_evalue, &heaps[batch.clone()]);
                     let at_risk =
@@ -828,17 +856,19 @@ mod par {
         for (index, &event) in events.iter().enumerate() {
             let computed = results.next().expect("one result per event");
             match event {
-                Cbs0Event::Excluded { best_evalue, .. } => {
-                    record_excluded(sw_status, best_evalue, &heaps[batch.clone()]);
+                Cbs0Event::Excluded {
+                    best_evalue: ev, ..
+                } => {
+                    record_excluded(sw_status, ev, &heaps[batch.clone()]);
                 }
                 Cbs0Event::Kept {
                     ordinal,
                     q_idx,
                     position,
                 } => {
-                    let m = local_match_at(lists, q_idx, position);
+                    let m = get_m(lists, q_idx, position);
                     let slot = q_idx - batch.start;
-                    if blast_compo_early_termination(m.best_evalue, &heaps[batch.clone()]) {
+                    if ends_early(m.best_evalue, heaps, &batch) {
                         if computed.is_some() {
                             wasted += 1;
                         } else {
@@ -873,13 +903,16 @@ mod par {
                         turned += 1;
                     }
                     remaining_per_q[slot] -= 1;
-                    let Some(postprocessed) = sw_status.redone(result, || {
-                        endless_oid_error(fetch_notes, &batch, heaps, ordinal, q_idx)
-                    })?
-                    else {
-                        continue;
-                    };
-                    insert_postprocessed(&mut heaps[q_idx], m.oid, postprocessed);
+                    apply_redone(
+                        sw_status,
+                        result,
+                        fetch_notes,
+                        &batch,
+                        heaps,
+                        ordinal,
+                        q_idx,
+                        m.oid,
+                    )?;
                 }
             }
         }
@@ -996,8 +1029,7 @@ mod par {
         search: &SwCbs0Search<'_, P>,
         q_idx: usize,
         m: &BlastpHspList,
-        query_workspace: &BlastpKappaQueryWorkspace,
-        redo_align_params: &BlastRedoAlignParams,
+        qredo: QueryRedo<'_>,
         unadjusted: &AdjustedProteinMatrix,
         scratch: &mut SwScratch,
         heap_before: Option<(&BlastCompoHeap, usize)>,
@@ -1009,8 +1041,7 @@ mod par {
             search,
             q_idx,
             m,
-            query_workspace,
-            redo_align_params,
+            qredo,
             unadjusted,
             scratch,
             resume,
@@ -1087,7 +1118,7 @@ mod par {
                         else {
                             continue;
                         };
-                        let m = local_match_at(lists, q_idx, position);
+                        let m = get_m(lists, q_idx, position);
                         let ws = workspaces[q_idx - batch.start]
                             .get_or_init(|| query_workspace_for(search, q_idx));
                         if last_q.as_ref().is_none_or(|(q, _)| *q != q_idx) {
@@ -1106,7 +1137,7 @@ mod par {
                                 }
                             }
                         }
-                        let redo_align_params = &last_q.as_ref().expect("built above").1;
+                        let params = &last_q.as_ref().expect("built above").1;
                         let (heap_before, resume) = match window
                             .continued
                             .binary_search_by_key(&idx, |&(at, _)| at)
@@ -1126,8 +1157,7 @@ mod par {
                             search,
                             q_idx,
                             m,
-                            ws,
-                            redo_align_params,
+                            QueryRedo { ws, params },
                             unadjusted,
                             scratch,
                             heap_before,
@@ -1153,10 +1183,7 @@ mod par {
                                             let q_len = search.contexts[q_idx].aa_len as u64;
                                             let s_len = search
                                                 .subjects
-                                                .aa_len(
-                                                    local_match_at(lists, q_idx, position).oid
-                                                        as usize,
-                                                )
+                                                .aa_len(get_m(lists, q_idx, position).oid as usize)
                                                 .map_or(0, |l| l as u64);
                                             q_len.saturating_mul(s_len)
                                         } else {

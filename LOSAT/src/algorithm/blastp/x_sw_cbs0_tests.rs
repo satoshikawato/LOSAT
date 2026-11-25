@@ -201,7 +201,7 @@ mod par_tests {
                     q_idx,
                     position,
                 } => {
-                    let local_match = local_match_at(lists, q_idx, position);
+                    let local_match = get_m(lists, q_idx, position);
                     if blast_compo_early_termination(local_match.best_evalue, &heaps[batch.clone()])
                     {
                         continue;
@@ -361,7 +361,7 @@ mod par_tests {
                             else {
                                 continue;
                             };
-                            let local_match = local_match_at(&lists, q_idx, position);
+                            let local_match = get_m(&lists, q_idx, position);
                             let case = cases[q_idx][position];
                             let is_cont = window
                                 .continued

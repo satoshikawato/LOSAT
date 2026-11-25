@@ -320,8 +320,8 @@ pub(super) fn aligned_sequences_nullb(
     };
     const NCBISTDAA_TO_AA: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
     let columns = script.iter().map(|op| op.num() as usize).sum();
-    let mut query_string = String::with_capacity(columns);
-    let mut subject_string = String::with_capacity(columns);
+    let mut q_out = String::with_capacity(columns);
+    let mut s_out = String::with_capacity(columns);
     let mut s_emitted = 0usize;
     let push_query = |q: &mut usize, out: &mut String| -> Result<()> {
         let qa = query
@@ -347,27 +347,27 @@ pub(super) fn aligned_sequences_nullb(
         for _ in 0..op.num() {
             match op {
                 GapEditOp::Sub(_) => {
-                    push_query(&mut q, &mut query_string)?;
+                    push_query(&mut q, &mut q_out)?;
                     if s_emitted < backed_subject_res {
-                        push_subject(&mut s, &mut subject_string)?;
+                        push_subject(&mut s, &mut s_out)?;
                     } else {
-                        subject_string.push(tail_char);
+                        s_out.push(tail_char);
                     }
                     s_emitted += 1;
                 }
                 GapEditOp::Del(_) => {
-                    query_string.push('-');
-                    push_subject(&mut s, &mut subject_string)?;
+                    q_out.push('-');
+                    push_subject(&mut s, &mut s_out)?;
                     s_emitted += 1;
                 }
                 GapEditOp::Ins(_) => {
-                    push_query(&mut q, &mut query_string)?;
-                    subject_string.push('-');
+                    push_query(&mut q, &mut q_out)?;
+                    s_out.push('-');
                 }
             }
         }
     }
-    Ok((query_string, subject_string))
+    Ok((q_out, s_out))
 }
 
 #[cfg(test)]

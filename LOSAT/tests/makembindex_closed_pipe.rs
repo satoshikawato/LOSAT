@@ -39,7 +39,44 @@ const STREAM_BLOCK: u64 = 8192;
 const SMALL_FA: &str = ">seq1 first\nACGTACGTACGTAGCTAGCTAGCTAGCATCGATCGATCGATCGATCGTAGCTAGCTAGCTAGCTAGCATGC\n>seq2 second\nTTGACCGGTTAACCGGTTAAGGCCTTAAGGCCTTAAACGTACGTACGTAGCTAGCTAGCATCGATCGATCG\n";
 const TINY_FA: &str = ">t1\nACGTA\n";
 const MV_IDMAP_ARGS: [&str; 6] = ["-input", "mvdb", "-nmer", "8", "-idmap", "true"];
+const N8_NONLEGACY: &[&str] = &["-legacy", "false", "-stride", "1", "-ws_hint", "8"];
 const IDX_DONE_ERR: &str = "creating idx.00.idx...done\ncreating idx.01.idx...removed (empty)\n";
+
+fn assert_stopped_vol0(output: &Output, ctx: &str) {
+    assert_eq!(output.status.code(), Some(0), "{ctx}");
+    assert_eq!(stderr_text(output), "creating idx.00.idx...", "{ctx}");
+}
+
+fn make_fifo(path: &Path) {
+    assert!(Command::new("mkfifo")
+        .arg(path)
+        .status()
+        .expect("mkfifo")
+        .success());
+}
+
+fn run_full_old_style_n8(dir: &Path, input: &str) -> Vec<u8> {
+    let out = makembindex(
+        dir,
+        &[
+            "-old_style_index",
+            "true",
+            "-iformat",
+            "fasta",
+            "-input",
+            input,
+            "-output",
+            "ref",
+            "-nmer",
+            "8",
+        ],
+        Stdio::null(),
+    );
+    assert_eq!(out.status.code(), Some(0), "full old-style build");
+    let bytes = fs::read(dir.join("ref.00.idx")).unwrap();
+    fs::remove_file(dir.join("ref.00.idx")).unwrap();
+    bytes
+}
 
 fn write_small_fa(dir: &Path) {
     fs::write(dir.join("in.fa"), SMALL_FA).unwrap();
@@ -491,7 +528,7 @@ fn stat_on_a_closed_pipe_stops_at_once() {
             "n8-leg0-2045",
             8,
             2045,
-            &["-legacy", "false", "-stride", "1", "-ws_hint", "8"],
+            N8_NONLEGACY,
             "TTTTTTTTTT",
             HEADER_LEN,
         ),
@@ -499,7 +536,7 @@ fn stat_on_a_closed_pipe_stops_at_once() {
             "n8-leg0-2046",
             8,
             2046,
-            &["-legacy", "false", "-stride", "1", "-ws_hint", "8"],
+            N8_NONLEGACY,
             "TTTTTTTTTT",
             HEADER_LEN + STREAM_BLOCK,
         ),
@@ -507,7 +544,7 @@ fn stat_on_a_closed_pipe_stops_at_once() {
             "n8-leg0-2047",
             8,
             2047,
-            &["-legacy", "false", "-stride", "1", "-ws_hint", "8"],
+            N8_NONLEGACY,
             "TTTTTTTTTT",
             HEADER_LEN + STREAM_BLOCK,
         ),
@@ -515,7 +552,7 @@ fn stat_on_a_closed_pipe_stops_at_once() {
             "n8-leg0-6141",
             8,
             6141,
-            &["-legacy", "false", "-stride", "1", "-ws_hint", "8"],
+            N8_NONLEGACY,
             "TTTTTTTTTT",
             HEADER_LEN + 2 * STREAM_BLOCK,
         ),
@@ -523,7 +560,7 @@ fn stat_on_a_closed_pipe_stops_at_once() {
             "n8-leg0-6142",
             8,
             6142,
-            &["-legacy", "false", "-stride", "1", "-ws_hint", "8"],
+            N8_NONLEGACY,
             "TTTTTTTTTT",
             HEADER_LEN + 3 * STREAM_BLOCK,
         ),
@@ -585,8 +622,7 @@ fn stat_on_a_closed_pipe_stops_at_once() {
         let mut closed_args = common;
         closed_args.extend(["-output", "idx", "-stat", "/dev/stdout"]);
         let out = makembindex(&bdir.0, &closed_args, closed_pipe());
-        assert_eq!(out.status.code(), Some(0), "{tag}");
-        assert_eq!(stderr_text(&out), "creating idx.00.idx...", "{tag}");
+        assert_stopped_vol0(&out, tag);
         let part_bytes = fs::read(bdir.0.join("idx.00.idx")).unwrap();
         assert_eq!(
             part_bytes.len() as u64,
@@ -689,26 +725,8 @@ fn stat_pipe_closed_after_first_line_stops_at_once() {
     // far larger than the kernel pipe buffer so closing after line 1 reliably hits EPIPE.
     fs::write(tmp.0.join("big.fa"), pseudo_fasta(1, 250_000)).unwrap();
 
-    let full = makembindex(
-        &tmp.0,
-        &[
-            "-old_style_index",
-            "true",
-            "-iformat",
-            "fasta",
-            "-input",
-            "big.fa",
-            "-output",
-            "ref",
-            "-nmer",
-            "8",
-        ],
-        Stdio::null(),
-    );
-    assert_eq!(full.status.code(), Some(0));
-    let full_bytes = fs::read(tmp.0.join("ref.00.idx")).unwrap();
+    let full_bytes = run_full_old_style_n8(&tmp.0, "big.fa");
     let full_len = full_bytes.len() as u64;
-    fs::remove_file(tmp.0.join("ref.00.idx")).unwrap();
 
     let mut child = losat_cmd(
         &tmp.0,
@@ -786,11 +804,7 @@ fn run_old_style_fifo_case(tag: &str, fasta: &str, fifo_name: &str, expected_fil
     let dir = TempDir::new(tag);
     fs::write(dir.0.join("in.fa"), fasta).unwrap();
     let fifo = dir.0.join(fifo_name);
-    assert!(Command::new("mkfifo")
-        .arg(&fifo)
-        .status()
-        .expect("mkfifo")
-        .success());
+    make_fifo(&fifo);
     let (opened, handle) = spawn_fifo_closer(&fifo);
     let out = makembindex(
         &dir.0,
@@ -812,8 +826,7 @@ fn run_old_style_fifo_case(tag: &str, fasta: &str, fifo_name: &str, expected_fil
     );
     finish_fifo_closer(&fifo, &opened, handle);
     assert!(opened.load(Ordering::SeqCst), "{tag}: FIFO was not opened");
-    assert_eq!(out.status.code(), Some(0), "{tag}");
-    assert_eq!(stderr_text(&out), "creating idx.00.idx...", "{tag}");
+    assert_stopped_vol0(&out, tag);
     assert_eq!(index_files(&dir.0), expected_files, "{tag}");
 }
 
@@ -853,33 +866,10 @@ fn volume_fifo_matches_ncbi_partial_bytes_and_stat_progress() {
     // header, matching NCBI 2.17.0 byte-for-byte (not 44 + 8188 bytes).
     let dir_a = TempDir::new("fifo-case-a");
     fs::write(dir_a.0.join("big.fa"), &big).unwrap();
-    let full = makembindex(
-        &dir_a.0,
-        &[
-            "-old_style_index",
-            "true",
-            "-iformat",
-            "fasta",
-            "-input",
-            "big.fa",
-            "-output",
-            "ref",
-            "-nmer",
-            "8",
-        ],
-        Stdio::null(),
-    );
-    assert_eq!(full.status.code(), Some(0));
-    let expected_header =
-        fs::read(dir_a.0.join("ref.00.idx")).unwrap()[..HEADER_LEN as usize].to_vec();
-    fs::remove_file(dir_a.0.join("ref.00.idx")).unwrap();
+    let expected_header = run_full_old_style_n8(&dir_a.0, "big.fa")[..HEADER_LEN as usize].to_vec();
 
     let fifo_a = dir_a.0.join("idx.00.idx");
-    assert!(Command::new("mkfifo")
-        .arg(&fifo_a)
-        .status()
-        .expect("mkfifo")
-        .success());
+    make_fifo(&fifo_a);
     let opened_a = Arc::new(AtomicBool::new(false));
     let opened_a_flag = Arc::clone(&opened_a);
     let fifo_a_path = fifo_a.clone();
@@ -914,8 +904,7 @@ fn volume_fifo_matches_ncbi_partial_bytes_and_stat_progress() {
     }
     let got_a = reader_a.join().unwrap();
     assert!(opened_a.load(Ordering::SeqCst), "case A FIFO not opened");
-    assert_eq!(out_a.status.code(), Some(0));
-    assert_eq!(stderr_text(&out_a), "creating idx.00.idx...");
+    assert_stopped_vol0(&out_a, "case A");
     assert_eq!(index_files(&dir_a.0), ["idx.00.idx"]);
     assert_eq!(got_a.len() as u64, HEADER_LEN);
     assert_eq!(got_a, expected_header);
@@ -929,11 +918,7 @@ fn volume_fifo_matches_ncbi_partial_bytes_and_stat_progress() {
         let dir_b = TempDir::new("fifo-case-b");
         fs::write(dir_b.0.join("big.fa"), &big).unwrap();
         let fifo_b = dir_b.0.join("idx.00.idx");
-        assert!(Command::new("mkfifo")
-            .arg(&fifo_b)
-            .status()
-            .expect("mkfifo")
-            .success());
+        make_fifo(&fifo_b);
         let opened_b = Arc::new(AtomicBool::new(false));
         let opened_b_flag = Arc::clone(&opened_b);
         let fifo_b_path = fifo_b.clone();
@@ -965,8 +950,7 @@ fn volume_fifo_matches_ncbi_partial_bytes_and_stat_progress() {
         );
         finish_fifo_closer(&fifo_b, &opened_b, reader_b);
         assert!(opened_b.load(Ordering::SeqCst), "case B FIFO not opened");
-        assert_eq!(out_b.status.code(), Some(0));
-        assert_eq!(stderr_text(&out_b), "creating idx.00.idx...");
+        assert_stopped_vol0(&out_b, "case B");
         assert_eq!(index_files(&dir_b.0), ["idx.00.idx"]);
         let stat_text = fs::read_to_string(dir_b.0.join("stat.txt")).unwrap();
         let last_line = stat_text

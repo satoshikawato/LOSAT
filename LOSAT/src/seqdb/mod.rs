@@ -958,7 +958,9 @@ pub fn db_argument_name(value: &str) -> &str {
     crate::ncbi_str::truncate_spaces_str(value)
 }
 
-/// Byte form of [`db_argument_name`]: the `-db` value without ASCII `isspace` bytes at its ends.
+/// The `-db` value without ASCII `isspace` bytes at its ends, as NCBI trims it (`NStr::TruncateSpaces`).
+///
+/// A search program passes the result to [`SeqDb::open_in`].
 pub fn db_argument_name_bytes(value: &[u8]) -> &[u8] {
     crate::ncbi_str::truncate_spaces(value)
 }

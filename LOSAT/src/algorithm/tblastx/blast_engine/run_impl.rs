@@ -2567,7 +2567,7 @@ fn write_tblastx_outputs(
                     );
                     let pairwise_report = crate::report::pairwise::TblastxPairwiseReport {
                         version: crate::wording::REPORT_VERSION.to_string(),
-                        database_name: database.clone().into(),
+                        database_name: database.clone(),
                         // `-db`: the `Database:` lines are the database's (`database` below).
                         // NCBI's `Int8` counts (`PairwiseDatabase`); a FASTA set's records are
                         // held in memory.

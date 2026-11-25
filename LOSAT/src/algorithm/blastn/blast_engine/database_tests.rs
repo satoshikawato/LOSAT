@@ -13,7 +13,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn open(name: &str) -> BlastnDatabase {
-    BlastnDatabase::open(&fixture(name), &ApplicationSettings::default())
+    BlastnDatabase::open(fixture(name), &ApplicationSettings::default())
         .unwrap_or_else(|error| panic!("{name}: {error:#}"))
 }
 
@@ -237,7 +237,7 @@ fn a_seq_id_variable_refuses_a_database_with_parsed_seqids_only() {
         format!("{error:#}"),
         "the environment variable SEQ_ID_PREFER_ACCESSION_OVER_GI, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's BLASTN"
     );
-    BlastnDatabase::open(&path("tests/seqdb/db/nucl_v4"), &settings)
+    BlastnDatabase::open(path("tests/seqdb/db/nucl_v4"), &settings)
         .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
 }
 
@@ -458,7 +458,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
     );
     // A protein database is not found as a nucleotide one.
     for name in ["no_such_database", "prot_v4"] {
-        let Err(error) = BlastnDatabase::open(&fixture(name), &settings) else {
+        let Err(error) = BlastnDatabase::open(fixture(name), &settings) else {
             panic!("{name} opened")
         };
         let (exit, message) = native(error);

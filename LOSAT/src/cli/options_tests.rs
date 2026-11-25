@@ -385,7 +385,7 @@ const GOLDEN: &str = include_str!("../../tests/fixtures/options/golden.txt");
 fn the_options_of_each_program_are_frozen() {
     let mut expected = GOLDEN.lines().filter(|line| !line.starts_with('#'));
     for tool in TOOLS.iter().copied() {
-        let text = golden(tool, |tool, args| options(tool, args));
+        let text = golden(tool, options);
         for (at, line) in text.lines().enumerate() {
             assert_eq!(
                 Some(line),
@@ -413,7 +413,7 @@ const GOLDEN_HEAD: &str = "\
 fn write_the_options_golden() {
     let mut text = GOLDEN_HEAD.to_string();
     for tool in TOOLS.iter().copied() {
-        text += &golden(tool, |tool, args| options(tool, args));
+        text += &golden(tool, options);
     }
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),

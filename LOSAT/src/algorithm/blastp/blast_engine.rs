@@ -7925,7 +7925,7 @@ fn write_reports_without_queries(
             OutputFormat::Pairwise => {
                 let report = BlastpPairwiseReport {
                     version: crate::wording::REPORT_VERSION.to_string(),
-                    database_name: blastp_database_name(args, subject_label).into(),
+                    database_name: blastp_database_name(args, subject_label),
                     database_num_sequences: num_sequences,
                     database_total_letters: total_db_len,
                     // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:194-229

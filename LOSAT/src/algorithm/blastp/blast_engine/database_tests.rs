@@ -18,7 +18,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn open(name: &str) -> BlastpDatabase {
-    BlastpDatabase::open(&fixture(name), &ApplicationSettings::default(), "BLASTP")
+    BlastpDatabase::open(fixture(name), &ApplicationSettings::default(), "BLASTP")
         .unwrap_or_else(|error| panic!("{name}: {error:#}"))
 }
 
@@ -324,7 +324,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
             "LOSAT database error: Database name is required.\n".to_string()
         )
     );
-    let Err(error) = BlastpDatabase::open(&fixture("no_such_database"), &settings, "BLASTP") else {
+    let Err(error) = BlastpDatabase::open(fixture("no_such_database"), &settings, "BLASTP") else {
         panic!("a missing database opened")
     };
     let (exit, message) = native(error);
@@ -337,7 +337,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
     );
     // A database with parsed Seq-ids opens for BLASTP and psiblast.
     for program in ["BLASTP", "PSIBLAST"] {
-        BlastpDatabase::open(&fixture("prot_ids_v4"), &settings, program)
+        BlastpDatabase::open(fixture("prot_ids_v4"), &settings, program)
             .unwrap_or_else(|e| panic!("{program} opens a database with parsed Seq-ids: {e:#}"));
     }
 }

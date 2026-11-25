@@ -903,6 +903,16 @@ impl TabularSpec {
         ])
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
+    /// The warning that the formatter NCBI makes for each query's report of this field list
+    /// writes when it is made (`x_CheckTaxDB`: `checks_taxdb` and no `taxdb.bti` found,
+    /// `taxdb_found`), as `program` (lower case) posts it: the one owner of that rule for the
+    /// report writers and for what a refused report writes before its refusal
+    /// (`FailedLookupRefusal::formatter_warning`).
+    pub fn formatter_warning(&self, taxdb_found: bool, program: &str) -> Option<String> {
+        (self.checks_taxdb() && !taxdb_found).then(|| taxdb_warning_line(program))
+    }
+
     /// Whether the report writes rows of fields: every tabular report but the organism report
     /// (outfmt 18), whose table shows the labels and titles of the subjects' definition lines
     /// (`report::tax_report`, taxFormat.cpp:935-976) and never a row's subject ids (`sseqid`,
@@ -1063,13 +1073,15 @@ pub fn may_stop_at_failed_lookup(spec: Option<&TabularSpec>) -> bool {
 /// one set per query or psiblast round), that NCBI has a result for each row whose subject
 /// lookups fail (`failure`, `None` where they do not): `failed_lookup_stop`'s cases are LOSAT's
 /// refusals, which name the subject (`describe` of its index and failure: what its title or
-/// definition line is) and the program.
+/// definition line is) and the program (upper case; its formatter's warning, `taxdb_found` as
+/// `TabularSpec::formatter_warning` reads it, names it in lower case).
 pub fn check_failed_lookups<S>(
     spec: Option<&TabularSpec>,
     result_sets: impl IntoIterator<Item = S>,
     failure: impl Fn(usize) -> Option<LookupFailure>,
     describe: impl Fn(usize, LookupFailure) -> String,
     program: &str,
+    taxdb_found: bool,
 ) -> anyhow::Result<()>
 where
     S: IntoIterator<Item = usize>,
@@ -1077,8 +1089,11 @@ where
     if !may_stop_at_failed_lookup(spec) {
         return Ok(());
     }
+    let mut rows = Vec::new();
     for (index, set) in result_sets.into_iter().enumerate() {
+        rows.clear();
         for (row, s_idx) in set.into_iter().enumerate() {
+            rows.push(s_idx);
             let Some(failure) = failure(s_idx) else {
                 continue;
             };
@@ -1089,6 +1104,10 @@ where
                         describe(s_idx, failure)
                     ),
                     set: index,
+                    rows,
+                    formatter_warning: spec.and_then(|spec| {
+                        spec.formatter_warning(taxdb_found, &program.to_ascii_lowercase())
+                    }),
                 }
                 .into());
             }
@@ -1102,17 +1121,49 @@ where
 /// `native::report_error`, passes it on as a refusal), with the result set at which NCBI stops
 /// (`set`, 0-based in the order given): a program that checks the result sets of several query
 /// batches at once fails the batch of that set, after the reports of the batches before, as
-/// NCBI's run does.
+/// NCBI's run does, and after what NCBI writes to the standard error of that batch's reports up
+/// to the row (`report::query_warnings::posts_before_stop`: the subjects of the set's rows up to
+/// it, `rows`, and its formatter's warning, `formatter_warning`).
 #[derive(Debug)]
 pub struct FailedLookupRefusal {
     message: String,
     set: usize,
+    /// The subjects of the set's rows up to that row, in order (the row's last), as the result
+    /// sets name them: the rows that NCBI's report of the set makes before it stops, whose reads
+    /// of their subjects come before the stop.
+    rows: Vec<usize>,
+    formatter_warning: Option<String>,
 }
 
 impl FailedLookupRefusal {
     /// The result set (0-based) whose row NCBI has no result for.
     pub fn set(&self) -> usize {
         self.set
+    }
+
+    /// The warning of the formatter that NCBI makes for each query's report of the refused
+    /// field list (`TabularSpec::formatter_warning`), written after each query's posts.
+    pub fn formatter_warning(&self) -> Option<&str> {
+        self.formatter_warning.as_deref()
+    }
+
+    /// What NCBI writes to the standard error of the refused batch's reports before it stops at
+    /// the row (`report::query_warnings::posts_before_stop`), of `posts` and `reads`, the posts
+    /// and subject reads of the batch's queries from its first up to the row's, whose reads name a
+    /// subject as `read_subject` names a subject of the result sets (`rows`).
+    pub fn posts_before_stop(
+        &self,
+        posts: &[crate::report::diag_log::Posts],
+        reads: &[crate::report::query_warnings::QueryReads],
+        read_subject: impl Fn(usize) -> u32,
+    ) -> crate::report::diag_log::Posts {
+        let rows: Vec<u32> = self.rows.iter().map(|&s_idx| read_subject(s_idx)).collect();
+        crate::report::query_warnings::posts_before_stop(
+            posts,
+            reads,
+            &rows,
+            self.formatter_warning(),
+        )
     }
 
     /// The first query of the batch whose report `error` stops (a `FailedLookupRefusal` whose

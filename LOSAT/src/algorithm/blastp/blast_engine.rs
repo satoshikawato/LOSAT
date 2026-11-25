@@ -2541,7 +2541,7 @@ fn check_tabular_lookups(
     loads: &crate::report::db_subject::HitLoads,
     listed_titles: Option<&database::ListedTitles<'_>>,
     subject_records: &[FastaRecord],
-    application: &str,
+    (application, taxdb_found): (&str, bool),
 ) -> Result<()> {
     for (format, outfmt) in formats
         .iter_mut()
@@ -2589,6 +2589,7 @@ fn check_tabular_lookups(
                 ),
             },
             application,
+            taxdb_found,
         );
         format.refusal.check(checked)?;
     }
@@ -2608,6 +2609,9 @@ struct LookupStop<'a> {
     reader: &'a [Vec<u8>],
     /// The texts of each batch's prefetch, with its first query (`PrefetchedSubjects::posts`).
     prefetches: &'a [(usize, crate::report::diag_log::Posts)],
+    /// The texts of the subjects that each query's report reads one by one, by query
+    /// (`ReportedPrefetch::subject_reads`; empty where its warning lines hold them).
+    reads: &'a [crate::report::query_warnings::QueryReads],
     /// The call's first read of a header that holds a UTF8String (`CallTitles::utf8`).
     utf8: Option<&'a database::Utf8Read>,
 }
@@ -2619,17 +2623,17 @@ struct LookupStop<'a> {
 /// batch's reader messages, the posts of its search strategy request and its UTF8String warning
 /// (`utf8`, where the batch's Seq-aligns read the call's first), as NCBI's run does before it
 /// stops (the Owner's form of 2026-11-16 for line RG's Q-X2c), and then what NCBI writes of the
-/// batch's reports up to that row (`database::ErrorAfterPosts`): the batch's prefetch texts and
-/// the own warnings of its queries up to the row's query. Any other error stays.
+/// batch's reports up to that row (`database::ErrorAfterPosts`): the batch's prefetch texts, and
+/// for each of its queries up to the row's its own warnings, its formatter's warning and its
+/// subject reads (`FailedLookupRefusal::posts_before_stop`). Any other error stays.
 fn failed_lookup_batch(error: anyhow::Error, stop: &LookupStop<'_>) -> anyhow::Error {
-    let query = error
-        .downcast_ref::<crate::report::tabular::FailedLookupRefusal>()
-        .and_then(|refusal| {
-            (0..stop.hit_lists.len())
-                .filter(|&query| stop.hit_lists[query].is_some())
-                .nth(refusal.set())
-        });
-    let Some(query) = query else {
+    let Some(refusal) = error.downcast_ref::<crate::report::tabular::FailedLookupRefusal>() else {
+        return error;
+    };
+    let Some(query) = (0..stop.hit_lists.len())
+        .filter(|&query| stop.hit_lists[query].is_some())
+        .nth(refusal.set())
+    else {
         return error;
     };
     let batch = stop
@@ -2652,12 +2656,11 @@ fn failed_lookup_batch(error: anyhow::Error, stop: &LookupStop<'_>) -> anyhow::E
         .filter(|(first, _)| *first == batch.start)
         .map(|(_, posts)| (0, posts.clone()))
         .collect();
-    let mut posts = crate::report::diag_log::Posts::new();
-    for query_posts in
-        crate::report::query_warnings::query_posts(lines, Vec::new(), prefetch, |_| 0, None)
-    {
-        posts.append(&query_posts);
-    }
+    let posts = refusal.posts_before_stop(
+        &crate::report::query_warnings::query_posts(lines, Vec::new(), prefetch, |_| 0, None),
+        stop.reads.get(batch.start..).unwrap_or_default(),
+        |s_idx| s_idx as u32,
+    );
     database::HeaderReadError {
         query,
         error: anyhow::Error::new(database::ErrorAfterPosts { posts, error }),
@@ -10678,7 +10681,10 @@ fn run_call(
         &prefetched.hit_loads,
         listed_titles.as_ref(),
         subject_records,
-        args.app.name(),
+        (
+            args.app.name(),
+            database.map_or(args.subject_taxdb_found, |database| database.taxdb_found()),
+        ),
     )
     .map_err(|error| {
         let (lines, reader) = (&query_warning_lines, reports.reader_warnings);
@@ -10692,6 +10698,7 @@ fn run_call(
                 lines,
                 reader,
                 prefetches,
+                reads: prefetched.subject_reads.queries(),
                 utf8,
             },
         )

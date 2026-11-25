@@ -1181,6 +1181,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         record,
         |s_idx, _| failed_record_title(s_idx, b"Subject_9"),
         "BLASTN",
+        true,
     );
     assert!(result
         .unwrap_err()
@@ -1192,6 +1193,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         record,
         |s_idx, _| failed_record_title(s_idx, b"x"),
         "BLASTN",
+        true,
     )
     .is_ok());
 }
@@ -1238,6 +1240,7 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
         |s_idx| (s_idx == 1).then_some(lineless),
         |s_idx, failure| failed_database_subject(s_idx, None, failure),
         "BLASTP",
+        true,
     );
     assert_eq!(
         result.unwrap_err().to_string(),
@@ -1271,6 +1274,7 @@ fn a_failed_lookup_refusal_names_the_first_query_of_the_batch_it_stops() {
         |s_idx| (s_idx == 1).then_some(lineless),
         |s_idx, failure| failed_database_subject(s_idx, None, failure),
         "TBLASTN",
+        true,
     )
     .unwrap_err();
     assert_eq!(

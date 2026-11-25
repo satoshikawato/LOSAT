@@ -1,5 +1,6 @@
 use super::*;
 use crate::common::Hit;
+use std::io::Write;
 
 fn hit(q_idx: u32, s_idx: u32, length: usize) -> PairwiseHit {
     PairwiseHit::from(Hit {
@@ -57,7 +58,7 @@ impl QuerySections for Marks {
         (crate::report::hit_sort::ReportSort::default(), false)
     }
 
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -74,7 +75,7 @@ impl QuerySections for Marks {
         Ok(())
     }
 
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         _probe: Option<&mut FormatProbe<'_>>,
@@ -108,7 +109,7 @@ impl QuerySections for Marks {
         }
     }
 
-    fn alignments<W: Write>(
+    fn alignments<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -123,7 +124,11 @@ impl QuerySections for Marks {
         Ok(())
     }
 
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()> {
         writeln!(writer, "foot {q_idx}")
     }
 }
@@ -181,7 +186,7 @@ fn pieces_of_any_size_concatenate_to_the_serial_report() {
                 let formatted = format_piece(&marks, groups[piece.query].as_ref(), piece, false);
                 formatted.result.unwrap();
                 assert!(formatted.places.is_empty());
-                joined.extend_from_slice(&formatted.buffer);
+                joined.extend_from_slice(&formatted.buffer.bytes);
             }
             assert_eq!(
                 String::from_utf8(joined).unwrap(),
@@ -251,6 +256,8 @@ fn the_parallel_writer_writes_the_serial_report_in_any_chunks() {
 /// One log of the report and the warnings' texts in the order written.
 #[derive(Clone, Default)]
 struct Log(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl ReportWrite for Log {}
 
 impl Write for Log {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
@@ -539,7 +546,6 @@ fn the_model_of_the_reads_is_the_writers_group() {
                                 descriptions,
                                 alignments,
                             },
-                            html: false,
                         };
                         let model = QueryGroup::read_order(
                             rows.iter().map(|row| (row.hit.s_idx, row)),
@@ -779,11 +785,23 @@ fn the_writers_end_the_run_at_an_aligned_subject_whose_load_throws() {
         _ => None,
     };
     let end = |after, aligned: &[u32]| aligned_end(after, aligned, thrown).map(|(at, _)| at);
-    assert_eq!(end(AfterThrow::SkipsAlignment, &[7, 1]), Some(0));
-    assert_eq!(end(AfterThrow::SkipsAlignment, &[1, 7]), None);
-    assert_eq!(end(AfterThrow::SkipsAlignment, &[9, 7]), None);
-    assert_eq!(end(AfterThrow::EndsAtAlignment, &[1, 9, 7]), Some(1));
-    let at = aligned_end(AfterThrow::EndsAtAlignment, &[1, 7], thrown);
+    assert_eq!(
+        end(AfterThrow::SkipsAlignment { html: false }, &[7, 1]),
+        Some(0)
+    );
+    assert_eq!(
+        end(AfterThrow::SkipsAlignment { html: false }, &[1, 7]),
+        None
+    );
+    assert_eq!(
+        end(AfterThrow::SkipsAlignment { html: false }, &[9, 7]),
+        None
+    );
+    assert_eq!(
+        end(AfterThrow::EndsAtAlignment { html: false }, &[1, 9, 7]),
+        Some(1)
+    );
+    let at = aligned_end(AfterThrow::EndsAtAlignment { html: false }, &[1, 7], thrown);
     assert!(end_here(at, 0).is_ok());
     let error = end_here(at, 1).unwrap_err();
     let carried = crate::ncbi_exception::NcbiException::of_io_error(&error).unwrap();

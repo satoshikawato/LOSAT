@@ -19,12 +19,22 @@ fn lines_are_saved_when_complete() {
     log.feed(b"Warning: [blastn] one\nWar");
     log.feed(b"ning: [blastn]  two\n\n");
     log.post(ERROR, b"BLAST query error: x\n");
+    // A line keeps the severity of its header: a load's taxonomy database error (NCBI BLAST+
+    // 2.17.0 psiblast -outfmt 11: `code 2`).
+    log.feed(b"Error: [psiblast] Error: Tax database file has wrong magic number.\n");
+    log.feed(b"Critical: (110.6) [blastn] x\nFASTA-Reader: y\n");
     assert_eq!(
         log.take(),
         vec![
             (WARNING, b"Warning: [blastn] one".to_vec()),
             (WARNING, b"Warning: [blastn] two".to_vec()),
             (ERROR, b"BLAST query error: x".to_vec()),
+            (
+                ERROR,
+                b"Error: [psiblast] Error: Tax database file has wrong magic number.".to_vec()
+            ),
+            (CRITICAL, b"Critical: (110.6) [blastn] x".to_vec()),
+            (WARNING, b"FASTA-Reader: y".to_vec()),
         ]
     );
     assert!(log.is_empty());

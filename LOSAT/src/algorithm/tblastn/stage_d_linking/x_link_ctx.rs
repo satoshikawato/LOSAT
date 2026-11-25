@@ -1,7 +1,7 @@
 //! No NCBI counterpart (`LOSAT_X_TBNLINKCTX`, strict set; `=0` links every query context in one
 //! pass, as before): the HSPs of a subject are linked one query context at a time.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1048-1060
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1433-1434,1525-1527,1656-1746,1803
 //! NCBI links a subject's list in one pass over every query context: the heads come in sum-score
 //! order whatever their context, and a head's candidates and the set it joins are HSPs of its own
 //! context. Nothing a head does reads or changes another context's HSPs, so each context's HSPs

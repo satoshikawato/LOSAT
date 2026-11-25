@@ -416,7 +416,10 @@ fn html_description_rows_are_ncbis() {
             true,
             None,
             &mut crate::report::query_warnings::no_places,
-            Some(&report),
+            Some((
+                &report,
+                crate::report::db_subject::AfterThrow::SkipsAlignment { html: true },
+            )),
             &crate::report::db_subject::HitLoads::default(),
         )
         .unwrap();
@@ -795,6 +798,7 @@ fn blastx_query_warnings_follow_the_reports_before_them() {
             self.1.write_all(&std::mem::take(&mut self.0))
         }
     }
+    impl crate::report::ostream::ReportWrite for Held {}
     let first = tblastx_hit(1);
     let mut empty = tblastx_hit(1);
     empty.hit.q_idx = 2;
@@ -1121,10 +1125,12 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
             hits: vec![vec![0], vec![1]],
             described: vec![0, 1],
             aligned: 2,
-            html: false,
         });
     let loads = HitLoads::of(
-        Some(RunThrow::every_row(AfterThrow::SkipsAlignment)),
+        crate::report::db_subject::LoadsBefore::NONE,
+        Some(RunThrow::every_row(AfterThrow::SkipsAlignment {
+            html: false,
+        })),
         [(true, reads)],
         |key| parsed[key].as_deref(),
         |_, _| 0,
@@ -1172,7 +1178,7 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         "{:?}",
         String::from_utf8_lossy(rows[1])
     );
-    // With `-html` the row's link loads the subject again in the `catch` (`HtmlRows::end_at_thrown`):
+    // With `-html` the row's link loads the subject again in the `catch` (`HtmlRows::end`):
     // the run ends at the second row with the load's exception, after the first row.
     let registry =
         crate::report::formatter_registry::InitConfig::of("blastn", None, false).unwrap();
@@ -1196,7 +1202,7 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         false,
         None,
         &mut crate::report::query_warnings::no_places,
-        Some(&report),
+        Some((&report, AfterThrow::SkipsAlignment { html: true })),
         &loads,
     )
     .unwrap_err();

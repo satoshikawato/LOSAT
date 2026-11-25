@@ -99,24 +99,18 @@ pub(crate) fn prints_title(outfmt: &str) -> bool {
 }
 
 impl MaskBdbReader {
-    /// A new `CSeqDB` of `name` and the molecule, on the search path of the environment and
-    /// `registry` (the `[BLAST] BLASTDB` of the configuration: `ApplicationSettings::blastdb`,
-    /// `Err` when LOSAT does not read the entry as NCBI does). `program` names LOSAT's program in a
+    /// A new `CSeqDB` of `name` (the bytes of NCBI's `std::string`) and the molecule, on the
+    /// search path of the environment and `registry` (the `[BLAST] BLASTDB` of the
+    /// configuration: `ApplicationSettings::blastdb`). `program` names LOSAT's program in a
     /// refusal.
     pub(crate) fn open(
-        name: &str,
+        name: &[u8],
         molecule: SeqType,
-        registry: Result<Option<&str>, &str>,
+        registry: Option<&[u8]>,
         title_printed: bool,
         program: &'static str,
     ) -> Result<Self, BdbError> {
-        let registry = registry.map_err(|reason| {
-            BdbError::Refused(
-                crate::algorithm::common::database::refusal(reason, program).to_string(),
-            )
-        })?;
-        let path = SearchPath::from_environment(registry)
-            .map_err(|error| database_error(error, program))?;
+        let path = SearchPath::from_environment(registry);
         // `GetNumOIDs`, not the OIDs that the alias files' ranges include.
         let db = SeqDb::open_every_oid_in(name, molecule, &path)
             .map_err(|error| database_error(error, program))?;
@@ -166,7 +160,7 @@ impl MaskBdbReader {
     /// `FindVolumePaths` (with its flag true) of the database opened as `name`: the paths of its
     /// volumes (without extension), each once, in NCBI's order.
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-966
-    pub(crate) fn volume_paths(&self, name: &str) -> Result<Vec<String>, BdbError> {
+    pub(crate) fn volume_paths(&self, name: &[u8]) -> Result<Vec<Vec<u8>>, BdbError> {
         SeqDb::volume_and_alias_paths(name, self.molecule, &self.path)
             .map(|(volumes, _)| volumes)
             .map_err(|error| database_error(error, self.program))
@@ -361,7 +355,7 @@ fn lookup_refusal(oid: u32, error: SeqDbError) -> BdbError {
     ))
 }
 
-// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1785-1813
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:1785-1818
 /// The `eCoding_Iupac` letters of a protein's NCBIstdaa codes (`CSeqVector`'s IUPACaa): the gap
 /// (0) and the stop (25) are the byte 255, as NCBI's table has them (segmasker 2.17.0 writes
 /// them so with `-infmt blastdb -outfmt fasta`, fixture `db_ambig_fasta`).

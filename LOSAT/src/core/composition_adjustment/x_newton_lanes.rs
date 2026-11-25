@@ -322,7 +322,7 @@ macro_rules! lane_vec {
 lane_vec!(F4, M4, 4, 32, [0, 1, 2, 3]);
 lane_vec!(F8, M8, 8, 64, [0, 1, 2, 3, 4, 5, 6, 7]);
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:706-722
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/optimize_target_freq.c:703-743
 // The working arrays of `Blast_OptimizeTargetFrequencies` (and of `x_newton_exact::optimize`) for
 // `V::L` problems, value `k` of lane `l` at `[k][l]`. `d`, `lsp`, `c` are the Cholesky factor in the
 // structured storage of `x_newton_exact::Factor` (lower triangle of `c` only).

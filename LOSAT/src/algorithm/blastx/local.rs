@@ -9,9 +9,8 @@ use super::{
     database::{BlastxDatabase, ReportedSubjects},
     input::FastaRecord,
     native::{
-        archive_error, database_search_error, engine, input_error, options_error, output_error,
-        report_error, reported_batch, run_query_batches, write_empty_subject_warnings,
-        ReportedAsks,
+        archive_error, database_search_error, engine, input_error, options_error, report_error,
+        reported_batch, run_query_batches, write_empty_subject_warnings, ReportedAsks,
     },
     query_setup::BATCH_SIZE,
     report::{self, LocalReport, RecordsParsed, ShownSubjects},
@@ -64,7 +63,7 @@ pub fn run_local(
     // A search of records reads no database: `run_local_database` searches the database of `-db`.
     // `check_options` (LOSAT Web's `validate`) checks `-db` as the command line does (line WQA D12a).
     if args.db.is_some() {
-        bail!("-db (a database search) is not supported in the browser yet");
+        bail!(crate::api::local_blast::RUN_LOCAL_DB_REFUSAL);
     }
     let requested = requested_formats(outputs);
     let (choices, resolutions) = read_options(&args, &requested)?;
@@ -145,7 +144,7 @@ fn search_records(
         options.query_range = query_range;
     }
     // The taxonomy database of the reports, where the command line asks (`native::run`).
-    subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref())?;
+    subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref());
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:213-217
     // Records of an input read to its end; an end that reads past them (blank lines, a reader
     // error) is met in the first batch (`reader_batches`).
@@ -241,28 +240,21 @@ fn search_records(
 pub(super) fn subject_taxonomy(
     resolved: &mut [ResolvedOptions],
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
-) -> Result<()> {
+) {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        "BLASTX",
         resolved.iter().filter_map(|options| options.tabular),
-    )?;
+    );
     for options in resolved {
         options.taxdb_found = taxonomy.found.unwrap_or(false);
         options.subject_taxdb = taxonomy.taxdb.clone();
     }
-    Ok(())
 }
 
 /// A `-db` search's part of `report_batches`.
 struct DatabaseReports<'a> {
     database: &'a BlastxDatabase,
     pairwise: &'a crate::report::pairwise::PairwiseDatabase,
-    /// A call of the library's batches after the first (`api::run_batches`, the arguments'
-    /// `first_query_ordinal`): the calls before searched with a database of their own, whose
-    /// loads the stop of a batch's prefetch here has no record of
-    /// (`common::database::PrefetchQueries::after_unrecorded_calls`).
-    unrecorded_calls: bool,
 }
 
 /// What `report_batches` reports: the checks of the options and of the inputs are done.
@@ -748,11 +740,9 @@ fn write_run(
         if let Some(document) = &mut documents[index] {
             let mut start = Vec::new();
             document.document_mut().start(&mut start);
-            writer.write_all(&start).map_err(output_error)?;
+            writer.write_all(&start)?;
         }
-        if crate::report::pairwise::flushes_after_prolog(options.html.is_some(), false) {
-            writer.flush().map_err(output_error)?;
-        }
+        writer.flush()?;
     }
     // NCBI: a batch size of 0 makes the first batch empty, and its query factory refuses it.
     if batch_size == 0 {
@@ -871,13 +861,12 @@ fn write_run(
                 search_options,
                 asks,
                 results,
-                queries,
+                (queries, queries_before),
                 query_scopes
                     .borrow()
                     .as_ref()
                     .map(|scopes| scopes.numbered_from(queries_before)),
-                &crate::algorithm::common::database::PrefetchQueries::new(0, &scope)
-                    .after_unrecorded_calls(run.unrecorded_calls),
+                &crate::algorithm::common::database::PrefetchQueries::new(0, &scope),
                 &mut *diagnostics,
             )?),
             None => None,
@@ -1013,7 +1002,7 @@ fn write_run(
                     &mut shared,
                 )
                 .map_err(archive_error)
-                .and_then(|()| writer.flush().map_err(output_error));
+                .and_then(|()| writer.flush().map_err(Into::into));
                 // An error of the format's report of the batch fails the call, or this format
                 // alone (`FormatRefusal`), which writes nothing in the later batches. The
                 // archive, as the first format, takes the place of the warnings' writer.
@@ -1049,7 +1038,7 @@ fn write_run(
                 }),
             )
             .map_err(report_error)
-            .and_then(|()| writer.flush().map_err(output_error));
+            .and_then(|()| writer.flush().map_err(Into::into));
             // An error of the format's report of the batch fails the call, or this format alone
             // (`FormatRefusal`), which writes nothing in the later batches.
             let written = refusal.check(rendered)?;
@@ -1134,7 +1123,7 @@ fn write_run(
             xml_matrix,
         )
         .map_err(report_error)
-        .and_then(|()| writer.flush().map_err(output_error));
+        .and_then(|()| writer.flush().map_err(Into::into));
         // An error of the format's epilog fails the call, or this format alone (`FormatRefusal`).
         refusal.check(ended)?;
     }
@@ -1227,7 +1216,8 @@ fn search_database(
         &mut *outputs.diagnostics,
         super::args::ProgramName::BLASTX.upper,
     )?
-    .showing_gis(args.show_gis);
+    .showing_gis(args.show_gis)
+    .after_calls(args.first_query_ordinal > 0);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
         args.strategy.as_ref(),
@@ -1287,7 +1277,15 @@ fn search_database(
             &mut *outputs.diagnostics,
         )?;
         if let Some(mask) = &mask {
-            database.check_mask_limits(mask)?;
+            // Once per word and window of the formats' options (they are the same search's).
+            let mut checked: Vec<(i32, i32)> = Vec::new();
+            for options in &resolved {
+                let scan = (options.word_size, options.window_size);
+                if !checked.contains(&scan) {
+                    database.check_mask_limits(mask, options)?;
+                    checked.push(scan);
+                }
+            }
         }
         for options in &mut resolved {
             options.db_mask = mask.clone();
@@ -1359,7 +1357,6 @@ fn search_database(
             database: Some(DatabaseReports {
                 database: &database,
                 pairwise: &pairwise,
-                unrecorded_calls: args.first_query_ordinal > 0,
             }),
             archive,
             // The search strategy file of LOSAT Web's run (`web_adapter::give_strategy`); the

@@ -216,8 +216,8 @@ fn translated_kappa_seg_bytes_match_ncbi_mask_calls() {
     assert_eq!(compared, 7);
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1172-1208;
-// core/blast_kappa.c:1488-1552,1684-1704
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1181-1211;
+// core/blast_kappa.c:1474-1553,1684-1704
 #[test]
 fn translated_get_range_order_and_seg_match_ncbi_saved_calls() {
     fn decode(hex: &str) -> Vec<u8> {
@@ -440,8 +440,8 @@ fn translated_get_range_order_and_seg_match_ncbi_saved_calls() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1101-1146,1172-1269;
-// core/blast_kappa.c:1475-1552,1896-1957
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1135-1138,1198-1211,1236-1270;
+// core/blast_kappa.c:1474-1553,1898-1950
 #[test]
 fn translated_redo_core_uses_ncbi_hard_seg_mode2_inputs() {
     fn trace_alignment(row: &str) -> Box<BlastCompoAlignment> {
@@ -771,7 +771,7 @@ fn test_blast_redo_one_match_keeps_distinct_alignments_per_query_index() {
         eff_search_space: 1.0,
         words: None,
     };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2939-2955
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3555-3567
     let matching_residues = vec![1u8; 100];
     let matching_seq = BlastCompoMatchingSequence::new(0, &matching_residues);
     let params = BlastRedoAlignParams {
@@ -934,7 +934,7 @@ fn test_find_num_identical_accepts_short_hash_slice_for_9aa_window() {
     let hashes = build_query_word_hashes(&query);
     assert_eq!(hashes.len(), 2);
     assert_eq!(
-        find_num_identical(&query, &hashes, &query, NEAR_IDENTICAL_MAX_SHIFT),
+        find_num_identical(&query[..], &hashes[..], &query, NEAR_IDENTICAL_MAX_SHIFT),
         query.len()
     );
 }
@@ -1062,4 +1062,108 @@ fn near_identical_on_residues_equals_the_table() {
         true_answers += usize::from(want);
     }
     assert!(true_answers > 100, "true answers {true_answers}");
+}
+
+/// The ncbistdaa letters of `text`.
+fn ncbistdaa(text: &str) -> Vec<u8> {
+    text.bytes()
+        .map(crate::utils::matrix::aa_char_to_ncbistdaa)
+        .collect()
+}
+
+/// `test_near_identical_on_copy` of the profile letters `letters` against `subject` over the
+/// alignment `align`: its answer and whether it read past the copy or the words.
+fn walk_on_copy(letters: &[u8], subject: &[u8], align: &BlastCompoAlignment) -> (bool, bool) {
+    let query = BlastCompoSequenceData::from_ncbistdaa(letters);
+    let words = build_query_word_hashes(letters);
+    let read_past = Cell::new(false);
+    let identical = test_near_identical_on_copy(
+        &BlastCompoSequenceData::from_ncbistdaa(subject),
+        0,
+        NearIdenticalCopy::new(&query, &words, &read_past),
+        0,
+        align,
+    );
+    (identical, read_past.get())
+}
+
+// blast_kappa.c:1259-1340 and 944-1100 (cited at `test_near_identical_on_copy`), PS10e's probes
+// T_AA1_q1, Q_P10_q1 and Q_P6_q1: c1's 22 columns aligned with the user query of c1's letters,
+// and the profile's copy of its `.psq` letters: 6 letters 00 00 00 00 00 02 (c1 as 22 A),
+// c1's first 10 (IVLARIDDRL) and first 6 (IVLARI, no word array). NCBI's walk reads past its copy
+// of L_pin + 2 bytes in each (valgrind's invalid reads; SIGSEGV for the null words of P6), as the
+// copy view reports; c1's own 22 letters read nothing past it and answer as the slices' walk.
+#[test]
+fn the_walk_on_a_profile_copy_reports_reads_past_it() {
+    let c1 = ncbistdaa("IVLARIDDRLIHGQVATTWTKE");
+    let align = make_align(100, 0, 22, 0, 22, 0);
+    let (identical, read_past) = walk_on_copy(&c1, &c1, &align);
+    assert!(!read_past);
+    let query = BlastCompoSequenceData::from_ncbistdaa(&c1);
+    let words = build_query_word_hashes(&c1);
+    let on_slices = test_near_identical(
+        &BlastCompoSequenceData::from_ncbistdaa(&c1),
+        0,
+        &query,
+        0,
+        Some(&words),
+        &align,
+    );
+    assert!(identical);
+    assert_eq!(identical, on_slices);
+    for letters in [vec![0, 0, 0, 0, 0, 2], c1[..10].to_vec(), c1[..6].to_vec()] {
+        let (_, read_past) = walk_on_copy(&letters, &c1, &align);
+        assert!(read_past, "{letters:?}");
+    }
+}
+
+// blast_kappa.c:1161-1166 (cited at `CopyWords::missing`): a null word table (fewer than 8
+// letters) stops `s_FindNumIdentical` only at offset 0; from another start NCBI reads the null
+// table plus the start, which the copy view reports. A table of L - 7 words reads past it from
+// word L - 7 on.
+#[test]
+fn the_copy_words_are_missing_only_at_their_start() {
+    let short = BlastCompoSequenceData::from_ncbistdaa(&ncbistdaa("IVLARI"));
+    let read_past = Cell::new(false);
+    let none = NearIdenticalCopy::new(&short, &[], &read_past);
+    assert!(none.words_from(0).missing(20));
+    assert!(!read_past.get());
+    let later = none.words_from(3);
+    assert!(!later.missing(20));
+    assert_eq!(later.word(0), 0);
+    assert!(read_past.get());
+    let letters = ncbistdaa("IVLARIDDRL");
+    let query = BlastCompoSequenceData::from_ncbistdaa(&letters);
+    let words = build_query_word_hashes(&letters);
+    assert_eq!(words.len(), 3);
+    let read_past = Cell::new(false);
+    let copy = NearIdenticalCopy::new(&query, &words, &read_past);
+    let table = copy.words_from(1);
+    assert!(!table.missing(20));
+    assert_eq!(table.word(1), words[2]);
+    assert!(!read_past.get());
+    table.word(2);
+    assert!(read_past.get());
+    // From a start past the table every word is past it.
+    let read_past = Cell::new(false);
+    let copy = NearIdenticalCopy::new(&query, &words, &read_past);
+    assert_eq!(copy.words_from(4).word(0), 0);
+    assert!(read_past.get());
+}
+
+// blast_kappa.c:1671-1708 (cited at `NearIdenticalCopy`): the copy holds the letters and one zero
+// byte after them (index L_pin); index L_pin + 1 on is past NCBI's block.
+#[test]
+fn the_copy_letters_end_after_their_zero_byte() {
+    let letters = ncbistdaa("IVLARI");
+    let query = BlastCompoSequenceData::from_ncbistdaa(&letters);
+    let read_past = Cell::new(false);
+    let copy = NearIdenticalCopy::new(&query, &[], &read_past).letters();
+    let window = copy.window(2, 9).unwrap();
+    assert_eq!(window.len(), 8);
+    assert_eq!(window.at(0), letters[2]);
+    assert_eq!(window.at(4), 0);
+    assert!(!read_past.get());
+    assert_eq!(window.at(5), 0);
+    assert!(read_past.get());
 }

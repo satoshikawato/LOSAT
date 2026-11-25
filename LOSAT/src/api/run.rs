@@ -21,7 +21,8 @@ use super::local_blast::{
     run_local_blastn, run_local_blastp, run_local_blastx, run_local_database_blastn,
     run_local_database_blastp, run_local_database_blastx, run_local_database_tblastn,
     run_local_database_tblastx, run_local_tblastn, run_local_tblastx, with_run_pool,
-    FormatObserver, FormatOutput, HspIndex, OutFile, OutputSink, ReportOutputs, ReportedSubject,
+    FormatObserver, FormatOutput, HspIndex, OutFile, OutputSink, PostsFirst, ReportOutputs,
+    ReportedSubject,
 };
 use super::parts::Parts;
 use super::program::Program;
@@ -715,6 +716,23 @@ fn run_local_entry(
     // How the reading of the query records ended, which the search meets in its batch
     // (`Inputs::query_end`).
     let end = inputs.end();
+    // The BLAST XML report under a `SERIAL_VERIFY_DATA_WRITE` that changes it, refused as on the
+    // command line (`cli::main_entry`), before the search: the call, or the format alone
+    // (`FormatRefusal`).
+    let verification = start.settings().write_verification;
+    for format in outputs.formats.iter_mut() {
+        let number = crate::blastinput::app::parse_formatting_string(format.outfmt)
+            .ok()
+            .map(|choice| choice.number);
+        if let Some(refusal) =
+            crate::blastinput::ncbi_environment::WriteVerification::blast_xml_refusal(
+                verification.as_ref(),
+                number.into_iter(),
+            )
+        {
+            format.refusal.check(Err(anyhow::Error::msg(refusal)))?;
+        }
+    }
     if inputs.database {
         let settings = start.settings();
         return match command {
@@ -765,6 +783,7 @@ fn run_local_entry(
                 args.find_matrix_file(&settings.matrix_search)?;
             }
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Tblastn);
+            args.write_verification = start.settings().write_verification;
             run_local_tblastn(args, query, end, subject, outputs)
         }
         Commands::Blastn(mut args) => {
@@ -815,6 +834,7 @@ fn run_local_entry(
         Commands::Psiblast(args) => {
             let mut args = psiblast_args(args, outputs)?;
             args.taxdb_setting = taxdb_setting(outputs, start, RequestKind::Psiblast);
+            args.write_verification = start.settings().write_verification;
             run_local_blastp(args, query, end, subject, "", "", outputs)
         }
         Commands::Rpsblast(_)
@@ -1055,10 +1075,14 @@ pub fn run_to_file(
         searches(search, inputs, &formats, &start, &mut log)?.1
     };
     let command = start.command();
-    let mut file = OutFile::new(path, out_file_program(search.program()), outfmt);
-    with_run_pool(threads, search.program().name(), || -> Result<(), Error> {
+    let app = search.program().name();
+    let mut file = OutFile::new(path, out_file_program(search.program()), app, outfmt);
+    let posts = file.posts();
+    with_run_pool(threads, app, || -> Result<(), Error> {
         let mut sink = log.sink(&mut *diagnostics, true);
         let result = {
+            // The file's posts, in their place among the run's messages (`PostsFirst`).
+            let mut messages = PostsFirst::new(posts, &mut sink);
             let mut outputs = ReportOutputs {
                 other_outfmts: &[],
                 html_posts: None,
@@ -1067,12 +1091,15 @@ pub fn run_to_file(
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Out(&mut file),
                 }],
-                diagnostics: &mut sink,
+                diagnostics: &mut messages,
                 later_warnings: None,
                 hits: None,
                 observer: None,
             };
-            run_local(command, inputs, &mut outputs, &mut start)
+            let result = run_local(command, inputs, &mut outputs, &mut start);
+            drop(outputs);
+            let _ = messages.drain();
+            result
         };
         result.map(drop).map_err(|error| sink.failed(&error))
     })

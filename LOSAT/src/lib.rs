@@ -86,8 +86,12 @@ pub(crate) mod dbindex;
 pub(crate) mod makembindex;
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp: the writer of RPS databases of profiles.
 pub(crate) mod makeprofiledb;
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp: the writer of alias files and of binary
+// GI and seqid lists.
+pub(crate) mod blastdb_aliastool;
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp and c++/src/corelib/ncbiargs.cpp: the application and argument reader of
-// blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask, makembindex and makeprofiledb.
+// blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask, makembindex, makeprofiledb and
+// blastdb_aliastool.
 pub(crate) mod ncbi_app;
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
 pub(crate) mod ncbi_exception;

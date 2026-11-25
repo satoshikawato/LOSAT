@@ -4,25 +4,31 @@
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is `0`.
 //! It chooses where a discontiguous CSR build's `qs` comes from (the keep's, from an earlier
 //! batch's CSR, or a fresh allocation), not what the build writes there, so the property under test
-//! is that the report and the standard error do not depend on it, and that the kept `qs` is taken
-//! where it has room: with `LOSAT_TIMING`, `[TIMING] x_mb_lut_keep: ... qs_kept= qs_fresh=` counts
-//! the CSR builds that took it and those that allocated theirs, which add up to the search's
-//! discontiguous CSR builds; both are 0 with `=0`. The contiguous CSR builds (`x_bn_csr`) keep
-//! their own `qs`, so a megablast search counts neither on either side. That those bytes equal
-//! NCBI's is the business of the fixture suites.
+//! is that the report and the standard error do not depend on it, that the kept `qs` is taken
+//! where it has room, and that the loop's last batch holds no kept `qs` past its table's build:
+//! with `LOSAT_TIMING`, `[TIMING] x_mb_lut_keep: ... qs_kept= qs_fresh= qs_idle= qs_last=` counts
+//! the CSR builds that took it and those that allocated theirs (which add up to the search's
+//! discontiguous CSR builds), the kept `qs` that the keep freed when it was closed (once the loop's
+//! last tables are built: a last table of chains, which takes none) and the CSRs that freed their
+//! own `qs` because the keep was closed before they were dropped (a last CSR); all four are 0 with
+//! `=0`. The contiguous CSR builds (`x_bn_csr`) keep their own `qs`, so a megablast search counts
+//! none on either side. That those bytes equal NCBI's is the business of the fixture suites.
 //!
 //! The subject is LC738868; `BATCH_SIZE=4000` puts each query record in a batch of its own (a
-//! batch holds whole records). dc-megablast: three records of two genomes each (LC738869 and
-//! LC738870, 594 kb; LC738873 and LC738874, 579 kb; LC738871 and LC738875, 720 kb), each above
-//! the size rule of `LOSAT_X_DCCSR` (a quarter as many positions as the 4^11 cells), so three CSR
-//! builds: the first finds no `qs` kept, the second has fewer words (and positions) than the first
-//! and takes its `qs`, the third has more and allocates its own. At one thread the serial build
-//! (`x_dc_csr::build`, room for the words) runs, at four the pool's (`x_disc_lookup_par`, room for
-//! the positions). The third, in the loop's last batch, frees its `qs` with its table (the keep is
-//! closed then, `Keep::close_qs`). Megablast, the reference side: four pieces of 100,000 letters
-//! from the middles of LC738869, LC738870, LC738873 and LC738874, whose tables of 4^11 cells are
-//! packed CSR heads (`LOSAT_X_BNCSRPACK`) built through the keep (their `offsets`), each
-//! allocating its own `qs` with the switch on as with `=0`.
+//! batch holds whole records). dc-megablast: records of two genomes each (LC738869 and LC738870,
+//! 594 kb; LC738873 and LC738874, 579 kb; LC738871 and LC738875, 720 kb), each above the size rule
+//! of `LOSAT_X_DCCSR` (a quarter as many positions as the 4^11 cells), so a CSR build each: the
+//! first finds no `qs` kept, the second has fewer words (and positions) than the first and takes
+//! its `qs`. At one thread the serial build (`x_dc_csr::build`, room for the words) runs, at four
+//! the pool's (`x_disc_lookup_par`, room for the positions; `parallel=` of `[TIMING]
+//! disc_lookup_csr`). A third record of 720 kb has more and allocates its own `qs`, which, in the
+//! loop's last batch, it frees with its table (`qs_last=1`). A third record of 100,000 letters
+//! instead (the middle of LC738871) is below the size rule: the last batch builds chains, and the
+//! keep frees the `qs` kept from the second batch once that table is built (`qs_idle=1`).
+//! Megablast, the reference side: four pieces of 100,000 letters from the middles of LC738869,
+//! LC738870, LC738873 and LC738874, whose tables of 4^11 cells are packed CSR heads
+//! (`LOSAT_X_BNCSRPACK`) built through the keep (their `offsets`), each allocating its own `qs`
+//! with the switch on as with `=0`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -128,12 +134,15 @@ fn untimed(stderr: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The counters of `[TIMING] x_mb_lut_keep:` that the switch adds, in this order.
+const QS_COUNTERS: [&str; 4] = ["qs_kept=", "qs_fresh=", "qs_idle=", "qs_last="];
+
 /// At one thread and four, with LOSAT_TIMING: the default and `=0` give the same report and the
-/// same standard error but for the `[TIMING]` lines; of the default's `builds` CSR builds
-/// (`[TIMING] <csr> builds=`, all of them through the keep) `qs.0` took the kept `qs` and `qs.1`
-/// allocated theirs through the keep (`qs_kept=`, `qs_fresh=`); `=0` counts neither.
-fn check(task: &str, query: &Path, csr: &str, builds: u64, qs: (u64, u64)) {
-    let (qs_kept, qs_fresh) = qs;
+/// same standard error but for the `[TIMING]` lines; the default and `=0` build `builds` CSR tables
+/// (`[TIMING] <csr> builds=`, all of them through the keep), on the pool at four threads when
+/// `pooled` (`parallel=`); the default's `qs_kept= qs_fresh= qs_idle= qs_last=` read `qs`, and
+/// `=0`'s are all 0.
+fn check(task: &str, query: &Path, csr: &str, builds: u64, pooled: bool, qs: [u64; 4]) {
     for threads in [1, 4] {
         let what = format!("{task} threads {threads}");
         let (expected, expected_stderr) = search(task, query, threads, &[SWITCH_OFF, TIMING]);
@@ -141,23 +150,23 @@ fn check(task: &str, query: &Path, csr: &str, builds: u64, qs: (u64, u64)) {
         let (report, stderr) = search(task, query, threads, &[TIMING]);
         assert!(report == expected, "{what}: the report differs");
         assert_eq!(untimed(&stderr), untimed(&expected_stderr), "{what}");
-        assert_eq!(field(&stderr, csr, "builds="), builds, "{what}:\n{stderr}");
-        assert_eq!(
-            field(&expected_stderr, csr, "builds="),
-            builds,
-            "{what}:\n{expected_stderr}"
-        );
-        assert_eq!(
-            field(&stderr, KEEP, "qs_kept="),
-            qs_kept,
-            "{what}:\n{stderr}"
-        );
-        assert_eq!(
-            field(&stderr, KEEP, "qs_fresh="),
-            qs_fresh,
-            "{what}:\n{stderr}"
-        );
-        for name in ["qs_kept=", "qs_fresh="] {
+        for (side, stderr) in [("", &stderr), (" =0", &expected_stderr)] {
+            assert_eq!(
+                field(stderr, csr, "builds="),
+                builds,
+                "{what}{side}:\n{stderr}"
+            );
+            if pooled {
+                let parallel = if threads > 1 { builds } else { 0 };
+                assert_eq!(
+                    field(stderr, csr, "parallel="),
+                    parallel,
+                    "{what}{side}:\n{stderr}"
+                );
+            }
+        }
+        for (name, count) in QS_COUNTERS.into_iter().zip(qs) {
+            assert_eq!(field(&stderr, KEEP, name), count, "{what}:\n{stderr}");
             assert_eq!(
                 field(&expected_stderr, KEEP, name),
                 0,
@@ -167,11 +176,27 @@ fn check(task: &str, query: &Path, csr: &str, builds: u64, qs: (u64, u64)) {
     }
 }
 
+const DC_CSR: &str = "[TIMING] disc_lookup_csr: ";
+
+/// The dc-megablast query records of two genomes each, joined.
+fn joined(a: &str, b: &str) -> (String, String) {
+    (format!("{a}_{b}"), letters(a) + &letters(b))
+}
+
+/// A record of the 100,000 letters in the middle of a fixture genome.
+fn middle(name: &str) -> (String, String) {
+    let genome = letters(name);
+    let start = genome.len() / 2 - 50_000;
+    (
+        format!("{name}_middle"),
+        genome[start..start + 100_000].to_string(),
+    )
+}
+
 // dc-megablast: three CSR builds of 4^11 cells; the second takes the first one's `qs`, the third
 // (more words) allocates its own and, in the last batch, frees it with its table.
 #[test]
 fn dc_megablast_csr_builds_take_the_kept_qs() {
-    let joined = |a: &str, b: &str| (format!("{a}_{b}"), letters(a) + &letters(b));
     let query = query_file(
         "dc_joined",
         &[
@@ -180,13 +205,23 @@ fn dc_megablast_csr_builds_take_the_kept_qs() {
             joined("LC738871", "LC738875"),
         ],
     );
-    check(
-        "dc-megablast",
-        &query,
-        "[TIMING] disc_lookup_csr: ",
-        3,
-        (1, 2),
+    check("dc-megablast", &query, DC_CSR, 3, true, [1, 2, 0, 1]);
+}
+
+// dc-megablast whose last batch builds chains: two CSR builds (the second takes the first one's
+// `qs`), then a last batch below the size rule, whose table takes no `qs`: the keep frees the one
+// it holds once that table is built, before its scan.
+#[test]
+fn dc_megablast_last_chains_free_the_kept_qs() {
+    let query = query_file(
+        "dc_last_chains",
+        &[
+            joined("LC738869", "LC738870"),
+            joined("LC738873", "LC738874"),
+            middle("LC738871"),
+        ],
     );
+    check("dc-megablast", &query, DC_CSR, 2, true, [1, 1, 1, 0]);
 }
 
 // Megablast, the reference side: four packed CSR heads of 4^11 cells through the keep, each with a
@@ -194,16 +229,9 @@ fn dc_megablast_csr_builds_take_the_kept_qs() {
 #[test]
 fn megablast_csr_builds_keep_their_own_qs() {
     let records: Vec<(String, String)> = ["LC738869", "LC738870", "LC738873", "LC738874"]
-        .iter()
-        .map(|name| {
-            let genome = letters(name);
-            let start = genome.len() / 2 - 50_000;
-            (
-                format!("{name}_middle"),
-                genome[start..start + 100_000].to_string(),
-            )
-        })
+        .into_iter()
+        .map(middle)
         .collect();
     let query = query_file("mb_middles", &records);
-    check("megablast", &query, "[TIMING] x_bn_csr: ", 4, (0, 0));
+    check("megablast", &query, "[TIMING] x_bn_csr: ", 4, false, [0; 4]);
 }

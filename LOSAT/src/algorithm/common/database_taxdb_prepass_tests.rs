@@ -42,9 +42,9 @@ fn database(name: &str, taxdb: Option<&Path>) -> Opened {
         NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&cwd).unwrap();
-    let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
+    let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None);
     let path = root().join("fixtures/outfmt16/db").join(name);
-    let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap();
+    let db = SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search).unwrap();
     Opened { db, cwd }
 }
 
@@ -75,9 +75,9 @@ fn parsed_subjects(db: &SeqDb) -> Vec<crate::report::db_subject::ParsedSubject> 
 /// The database `name` of `tests/db_search` opened with `BLASTDB=taxdb` (`None`: not set),
 /// from the empty current directory `cwd`.
 fn db_search(name: &str, taxdb: Option<&Path>, cwd: &Path) -> SeqDb {
-    let search = SearchPath::new(cwd, taxdb.map(Path::as_os_str), None).unwrap();
+    let search = SearchPath::new(cwd, taxdb.map(Path::as_os_str), None);
     let path = root().join("db_search").join(name);
-    SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap()
+    SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search).unwrap()
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn a_reported_sequence_whose_seq_align_id_finds_another_record_first() {
         ),
     ] {
         let db = db_search(name, None, &cwd);
-        let headers = HeaderReader::new(&db);
+        let headers = HeaderReader::new(&db, false);
         let ReportedHeader::Parsed(subject) = read_header(&headers, 1, 0, "BLASTP").unwrap() else {
             panic!("{name}: a sequence with parsed Seq-ids");
         };
@@ -167,11 +167,11 @@ fn a_later_volume_whose_isam_does_not_open_leaves_the_other_holders_unknown() {
             .collect::<Vec<_>>()
             .join(" ");
         let taxdb = taxdb.map(|variant| root().join("seqdb/taxdb").join(variant));
-        let search = SearchPath::new(&cwd, taxdb.as_deref().map(Path::as_os_str), None).unwrap();
-        SeqDb::open_in(&names, SeqType::Protein, &search).unwrap()
+        let search = SearchPath::new(&cwd, taxdb.as_deref().map(Path::as_os_str), None);
+        SeqDb::open_in(names.as_bytes(), SeqType::Protein, &search).unwrap()
     };
     let subject_of = |db: &SeqDb, ordinal: u32| {
-        let headers = HeaderReader::new(db);
+        let headers = HeaderReader::new(db, false);
         match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
             ReportedHeader::Parsed(subject) => subject,
             _ => panic!("{ordinal}: a sequence with parsed Seq-ids"),
@@ -333,7 +333,7 @@ fn the_same_record_with_other_taxids_is_shown_apart_by_the_reports_of_taxids_onl
     ] {
         let taxdb = taxdb.map(|variant| root().join("seqdb/taxdb").join(variant));
         let db = db_search(name, taxdb.as_deref(), &cwd);
-        let headers = HeaderReader::new(&db);
+        let headers = HeaderReader::new(&db, false);
         let ReportedHeader::Parsed(subject) = read_header(&headers, ordinal, 0, "BLASTP").unwrap()
         else {
             panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
@@ -416,7 +416,7 @@ fn a_seq_align_id_of_any_kind_is_left_to_the_lookup() {
         ),
     ] {
         let db = db_search(name, None, &cwd);
-        let headers = HeaderReader::new(&db);
+        let headers = HeaderReader::new(&db, false);
         let ReportedHeader::Parsed(subject) = read_header(&headers, ordinal, 0, "BLASTP").unwrap()
         else {
             panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
@@ -462,7 +462,7 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
         ("ids/plook_v5", 6, Ok(None)),
     ] {
         let db = db_search(name, None, &cwd);
-        let headers = HeaderReader::new(&db);
+        let headers = HeaderReader::new(&db, false);
         let ReportedHeader::Parsed(subject) = read_header(&headers, ordinal, 0, "BLASTP").unwrap()
         else {
             panic!("{name} {ordinal}: a sequence with parsed Seq-ids");
@@ -492,10 +492,15 @@ fn the_prefetch_reads_a_subject_by_its_seq_align_id_as_ncbis_loader_does() {
     }
     // `lcl|777` before `gi|777`: the formatters do not find the Bioseq, which the prefetch
     // reads as itself; it fails where it asks for the length (a minus-strand alignment).
-    let search = SearchPath::new(&cwd, None, None).unwrap();
+    let search = SearchPath::new(&cwd, None, None);
     let path = root().join("db_search/ids/nrefuse_v5");
-    let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
-    let headers = HeaderReader::new(&db);
+    let db = SeqDb::open_in(
+        path.to_str().unwrap().as_bytes(),
+        SeqType::Nucleotide,
+        &search,
+    )
+    .unwrap();
+    let headers = HeaderReader::new(&db, false);
     let ReportedHeader::Parsed(subject) = read_header(&headers, 0, 0, "TBLASTX").unwrap() else {
         panic!("nrefuse_v5 0: a sequence with parsed Seq-ids");
     };
@@ -543,16 +548,21 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
     std::fs::create_dir_all(&cwd).unwrap();
     let taxdb = root().join("seqdb/taxdb/offset_last_past_end");
     let open = |name: &str, taxdb: Option<&Path>| {
-        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
+        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None);
         let path = root().join("db_search/ids").join(name);
-        SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap()
+        SeqDb::open_in(
+            path.to_str().unwrap().as_bytes(),
+            SeqType::Nucleotide,
+            &search,
+        )
+        .unwrap()
     };
     let offset = "Error: [blastn] Error: Offset error at end of taxdb file.\n";
     let warning = "Warning: [blastn] Error pre-fetching sequence data\n";
     let text = |posts: crate::report::diag_log::Posts| String::from_utf8(posts.text()).unwrap();
     for taxdb in [None, Some(taxdb.as_path())] {
         let db = open("ntag_t5", taxdb);
-        let headers = HeaderReader::new(&db);
+        let headers = HeaderReader::new(&db, false);
         let parsed = |ordinal: u32| match read_header(&headers, ordinal, 0, "BLASTN").unwrap() {
             ReportedHeader::Parsed(subject) => subject,
             _ => panic!("ntag_t5 {ordinal}: a sequence with parsed Seq-ids"),
@@ -646,7 +656,7 @@ fn a_batch_whose_prefetch_fails_writes_ncbis_warning_after_its_texts() {
     // A minus-strand Seq-align of a subject without a Bioseq fails after every load: the
     // texts of the batch, then the warning.
     let db = open("nlook_t4", Some(&taxdb));
-    let headers = HeaderReader::new(&db);
+    let headers = HeaderReader::new(&db, false);
     let parsed = |ordinal: u32| match read_header(&headers, ordinal, 0, "BLASTN").unwrap() {
         ReportedHeader::Parsed(subject) => subject,
         _ => panic!("nlook_t4 {ordinal}: a sequence with parsed Seq-ids"),
@@ -702,7 +712,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     ));
     std::fs::create_dir_all(&cwd).unwrap();
     let open = |names: &[&str]| {
-        let search = SearchPath::new(&cwd, None, None).unwrap();
+        let search = SearchPath::new(&cwd, None, None);
         let list: Vec<String> = names
             .iter()
             .map(|name| {
@@ -714,11 +724,11 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
                     .to_owned()
             })
             .collect();
-        SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap()
+        SeqDb::open_in(list.join(" ").as_bytes(), SeqType::Protein, &search).unwrap()
     };
     let headers_of =
         |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
-            let headers = HeaderReader::new(db);
+            let headers = HeaderReader::new(db, false);
             (0..db.num_seqs())
                 .map(
                     |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
@@ -888,7 +898,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     // A run that reported the holder before (a batch, query or round before; the record of
     // a run that can stop: `lda` has no accession table).
     let loaded = TaxdbRun::default();
-    loaded.note_loaded(&db, || [unparsed, held]);
+    loaded.note_loaded(&db, 0, || [unparsed, held]);
     assert_eq!(loaded.loaded(), [holder]);
     let why = unsure(
         &db,
@@ -903,18 +913,20 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     // A run that reported only sequences without parsed Seq-ids: nothing recorded, NCBI looks
     // the stopping id up (M1).
     let never = TaxdbRun::default();
-    never.note_loaded(&db, || [unparsed]);
+    never.note_loaded(&db, 0, || [unparsed]);
     assert!(never.loaded().is_empty());
     assert_eq!(
         unsure(&db, &never, &[stopping], stop_queries(1), stop, stop_parsed),
         None
     );
     // A call of the library's batches after others, whose reports nothing recorded.
+    let mut after_calls = TaxdbRun::default();
+    after_calls.note_calls_before(true);
     let why = unsure(
         &db,
-        &never,
+        &after_calls,
         &[stopping],
-        stop_queries(1).after_unrecorded_calls(true),
+        stop_queries(1),
         stop,
         stop_parsed,
     )
@@ -941,7 +953,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
         .unwrap() as u32;
     let stopping = PrefetchSubject::unflipped(stop, parsed[stop as usize].as_deref());
     let copied = TaxdbRun::default();
-    copied.note_loaded(&db, || {
+    copied.note_loaded(&db, 0, || {
         [PrefetchSubject::unflipped(
             copy,
             parsed[copy as usize].as_deref(),
@@ -964,7 +976,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     // version 5 database with the accession table) never makes the subjects it is given.
     let closed = open(&["ldp"]);
     let run = TaxdbRun::default();
-    run.note_loaded(&closed, || -> [PrefetchSubject<'_>; 0] {
+    run.note_loaded(&closed, 0, || -> [PrefetchSubject<'_>; 0] {
         panic!("the subjects of a run that cannot stop were made")
     });
     assert!(!run.prefetch_can_stop(&closed));
@@ -973,7 +985,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     let open_gate = open(&["lda", "ldp"]);
     let run = TaxdbRun::default();
     let mut made = 0;
-    run.note_loaded(&open_gate, || {
+    run.note_loaded(&open_gate, 0, || {
         made += 1;
         std::iter::empty()
     });
@@ -987,7 +999,7 @@ fn the_loads_before_a_stopping_lookup_follow_ncbis_order_of_seq_id_handles() {
     let stop = accession(&parsed, "NP_000002.1");
     assert_eq!(db.oid(stop).get(), 3);
     let recorded = TaxdbRun::default();
-    recorded.note_loaded(&db, || {
+    recorded.note_loaded(&db, 0, || {
         [PrefetchSubject::unflipped(2, parsed[2].as_deref())]
     });
     assert_eq!(recorded.loaded(), [2]);
@@ -1117,7 +1129,7 @@ fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
     ));
     std::fs::create_dir_all(&cwd).unwrap();
     let open = |names: &[&str], taxdb: Option<&Path>| {
-        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
+        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None);
         let list: Vec<String> = names
             .iter()
             .map(|name| {
@@ -1129,12 +1141,12 @@ fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
                     .to_owned()
             })
             .collect();
-        SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap()
+        SeqDb::open_in(list.join(" ").as_bytes(), SeqType::Protein, &search).unwrap()
     };
     type Headers = [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>];
     let headers_of =
         |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
-            let headers = HeaderReader::new(db);
+            let headers = HeaderReader::new(db, false);
             (0..db.num_seqs())
                 .map(
                     |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
@@ -1233,7 +1245,7 @@ fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
         // The run that loaded the holder and looked its taxonomy up (its batch's prefetch).
         let looked_up = || {
             let run = TaxdbRun::default();
-            run.note_loaded(&db, || [subject(&parsed, holder)]);
+            run.note_loaded(&db, 0, || [subject(&parsed, holder)]);
             let opened = prefetch_messages(
                 &db,
                 &run,
@@ -1261,7 +1273,7 @@ fn a_batch_with_two_stopping_lookups_ends_at_the_first_that_ncbi_makes() {
         // the texts of opening, which NCBI writes only where it skips the first lookup.
         let fresh = || {
             let run = TaxdbRun::default();
-            run.note_loaded(&db, || [subject(&parsed, holder)]);
+            run.note_loaded(&db, 0, || [subject(&parsed, holder)]);
             run
         };
         for (subjects, what) in [
@@ -1335,7 +1347,7 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
     std::fs::create_dir_all(&cwd).unwrap();
     let bad_magic = root().join("seqdb/taxdb/bad_magic");
     let open = |names: &[&str]| {
-        let search = SearchPath::new(&cwd, Some(bad_magic.as_os_str()), None).unwrap();
+        let search = SearchPath::new(&cwd, Some(bad_magic.as_os_str()), None);
         let list: Vec<String> = names
             .iter()
             .map(|name| {
@@ -1347,12 +1359,12 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
                     .to_owned()
             })
             .collect();
-        SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap()
+        SeqDb::open_in(list.join(" ").as_bytes(), SeqType::Protein, &search).unwrap()
     };
     type Headers = [Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>];
     let headers_of =
         |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
-            let headers = HeaderReader::new(db);
+            let headers = HeaderReader::new(db, false);
             (0..db.num_seqs())
                 .map(
                     |ordinal| match read_header(&headers, ordinal, 0, "BLASTP").unwrap() {
@@ -1543,7 +1555,7 @@ fn the_texts_that_a_cut_report_left_go_to_the_first_asking_load_before_the_stop(
         "BLASTP",
     )
     .unwrap()];
-    run.note_loaded(&db, || [subject(&parsed, holder)]);
+    run.note_loaded(&db, 0, || [subject(&parsed, holder)]);
     let open_text = String::from_utf8(reads[0][0].text.clone()).unwrap();
     let before = XmlCuts::of(true, &cut)
         .reports_before(&reads, &none)
@@ -1587,7 +1599,7 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
     ));
     std::fs::create_dir_all(&cwd).unwrap();
     let bad_magic = root().join("seqdb/taxdb/bad_magic");
-    let search = SearchPath::new(&cwd, Some(bad_magic.as_os_str()), None).unwrap();
+    let search = SearchPath::new(&cwd, Some(bad_magic.as_os_str()), None);
     let list: Vec<String> = ["ldb", "ldd", "ldp"]
         .iter()
         .map(|name| {
@@ -1599,8 +1611,8 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
                 .to_owned()
         })
         .collect();
-    let db = SeqDb::open_in(&list.join(" "), SeqType::Protein, &search).unwrap();
-    let headers = HeaderReader::new(&db);
+    let db = SeqDb::open_in(list.join(" ").as_bytes(), SeqType::Protein, &search).unwrap();
+    let headers = HeaderReader::new(&db, false);
     let parsed: Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> = (0..db
         .num_seqs())
         .map(
@@ -1633,6 +1645,7 @@ fn the_record_before_a_stop_holds_only_what_ncbis_reports_and_prefetches_loaded(
         LoadedBefore {
             hits: std::slice::from_ref(query),
             spans: &[0..1],
+            format: PrefetchFormat::of(6, crate::report::archive::options::RequestKind::Blastp),
             rows: Every,
             cuts,
         }
@@ -1755,16 +1768,16 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
     ));
     std::fs::create_dir_all(&cwd).unwrap();
     let open = |names: &[&str], taxdb: Option<&Path>| {
-        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
+        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None);
         let list: Vec<String> = names
             .iter()
             .map(|name| root().join(name).to_str().unwrap().to_owned())
             .collect();
-        SeqDb::open_in(&list.join(" "), SeqType::Nucleotide, &search).unwrap()
+        SeqDb::open_in(list.join(" ").as_bytes(), SeqType::Nucleotide, &search).unwrap()
     };
     let headers_of =
         |db: &SeqDb| -> Vec<Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>> {
-            let headers = HeaderReader::new(db);
+            let headers = HeaderReader::new(db, false);
             (0..db.num_seqs())
                 .map(
                     |ordinal| match read_header(&headers, ordinal, 0, "BLASTN").unwrap() {
@@ -1963,6 +1976,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                     &[other],
                     &std::collections::BTreeSet::from([0]),
                     &[None::<&crate::report::db_subject::ParsedSubject>],
+                    &|| None,
                     "BLASTN",
                 )
                 .unwrap();
@@ -2087,7 +2101,7 @@ fn a_weak_match_is_refused_where_ncbi_may_read_the_reported_sequences_one_by_one
         for prefetch_off in [false, true] {
             let headers = HeaderReader {
                 prefetch_off,
-                ..HeaderReader::new(&db)
+                ..HeaderReader::new(&db, false)
             };
             let ReportedHeader::Parsed(subject) =
                 read_header(&headers, ordinal, 0, "BLASTP").unwrap()
@@ -2146,7 +2160,7 @@ fn a_stored_ordinal_id_of_another_number_is_not_fetched() {
         ("ids/pord_vx", 7, Err("gnl|BL_ORD_ID|12")),
     ] {
         let db = db_search(name, None, &cwd);
-        let headers = HeaderReader::new(&db);
+        let headers = HeaderReader::new(&db, false);
         match (read_header(&headers, ordinal, 0, "BLASTP").unwrap(), want) {
             (ReportedHeader::Stored(_), Ok(true)) => {}
             (ReportedHeader::Parsed(subject), Ok(false)) => {
@@ -2170,10 +2184,15 @@ fn a_stored_ordinal_id_of_another_number_is_not_fetched() {
         }
     }
     // The first sequence of `nord_v5` holds `gnl|BL_ORD_ID|3`: the database has parsed Seq-ids.
-    let search = SearchPath::new(&cwd, None, None).unwrap();
+    let search = SearchPath::new(&cwd, None, None);
     for name in ["nord_v5", "nord_v4"] {
         let path = root().join("db_search/ids").join(name);
-        let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+        let db = SeqDb::open_in(
+            path.to_str().unwrap().as_bytes(),
+            SeqType::Nucleotide,
+            &search,
+        )
+        .unwrap();
         assert!(db.has_parsed_seqids().unwrap(), "{name}");
         assert!(matches!(
             db.read_header(1).unwrap(),
@@ -2245,10 +2264,10 @@ fn an_empty_stored_title_is_made_from_the_name_of_its_taxid() {
         ),
     ] {
         let taxdb = taxdb.map(variant);
-        let search = SearchPath::new(&cwd, taxdb.as_deref().map(Path::as_os_str), None).unwrap();
+        let search = SearchPath::new(&cwd, taxdb.as_deref().map(Path::as_os_str), None);
         let path = root().join(name);
-        let db = SeqDb::open_in(path.to_str().unwrap(), seq_type, &search).unwrap();
-        let headers = HeaderReader::new(&db);
+        let db = SeqDb::open_in(path.to_str().unwrap().as_bytes(), seq_type, &search).unwrap();
+        let headers = HeaderReader::new(&db, false);
         let ReportedHeader::Stored(stored) = read_header(&headers, 0, 0, "BLASTP").unwrap() else {
             panic!("{name}: a sequence without parsed Seq-ids");
         };
@@ -2412,7 +2431,7 @@ fn real_ncbi_taxdb_walk() {
         return;
     };
     let cwd = crate::utils::test_dir::temp_dir();
-    let search = SearchPath::new(&cwd, Some(&dir), None).unwrap();
+    let search = SearchPath::new(&cwd, Some(&dir), None);
     let taxdb = LazyTaxDb::new(search);
     let entries = taxdb.entry_count().unwrap();
     for _ in 0..3 {
@@ -2803,17 +2822,24 @@ fn a_prefetch_follows_ncbis_order_of_its_loads_in_the_cache_slot() {
 }
 
 /// `read_reported_taxonomy` (XML2 and JSON, line DBID L1d): NCBI fetches every reported
-/// subject, so a run whose volume has the cache collision is refused where a reported subject
-/// has a positive taxid (`nz_rep`: a1 99990, b1 150, c1 99990, d1 without a taxid, e1 -5;
+/// subject, so a run whose volume has the cache collision, whose batches the caller does not
+/// give (`&|| None`; line NP item O4b2-6 follows them where it does), is refused before anything
+/// is opened where a reported subject has a positive taxid (`nz_rep`: a1 99990, b1 150, c1 99990,
+/// d1 without a taxid, e1 -5;
 /// `nz_repo`: a1 to d1 without parsed Seq-ids), and not for d1 or e1 alone or for nothing
 /// reported; the taxonomy databases without the offset error read the same subjects.
 #[test]
 fn the_xml2_lookups_ask_for_the_cache_refusal_where_a_subject_has_a_taxid() {
     let cwd = empty_cwd("xml2_cache");
     let open = |taxdb: &str| {
-        let search = SearchPath::new(&cwd, Some(variant(taxdb).as_os_str()), None).unwrap();
+        let search = SearchPath::new(&cwd, Some(variant(taxdb).as_os_str()), None);
         let path = root().join("db_search/nz_rep");
-        SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap()
+        SeqDb::open_in(
+            path.to_str().unwrap().as_bytes(),
+            SeqType::Nucleotide,
+            &search,
+        )
+        .unwrap()
     };
     let read = |db: &SeqDb, run: &TaxdbRun, ranks: &[usize]| {
         let parsed: Vec<_> = parsed_subjects(db)
@@ -2822,7 +2848,8 @@ fn the_xml2_lookups_ask_for_the_cache_refusal_where_a_subject_has_a_taxid() {
             .collect();
         let ordinals: Vec<u32> = (0..db.num_seqs()).collect();
         let reported: std::collections::BTreeSet<usize> = ranks.iter().copied().collect();
-        read_reported_taxonomy(db, run, &ordinals, &reported, &parsed, "BLASTN").map(|_| ())
+        read_reported_taxonomy(db, run, &ordinals, &reported, &parsed, &|| None, "BLASTN")
+            .map(|_| ())
     };
     let db = open("offset_last_past_end");
     for ranks in [&[0][..], &[1], &[3, 2], &[0, 1, 2, 3]] {
@@ -2847,15 +2874,28 @@ fn the_xml2_lookups_ask_for_the_cache_refusal_where_a_subject_has_a_taxid() {
     }
     // nz_repo: a1 to d1 without parsed Seq-ids (the taxid of the definition line).
     let taxdb = variant("offset_last_past_end");
-    let search = SearchPath::new(&cwd, Some(taxdb.as_os_str()), None).unwrap();
+    let search = SearchPath::new(&cwd, Some(taxdb.as_os_str()), None);
     let path = root().join("db_search/nz_repo");
-    let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+    let db = SeqDb::open_in(
+        path.to_str().unwrap().as_bytes(),
+        SeqType::Nucleotide,
+        &search,
+    )
+    .unwrap();
     let ordinals: Vec<u32> = (0..db.num_seqs()).collect();
     for (ranks, refused) in [(&[0][..], true), (&[1, 3], true), (&[3], false)] {
         let reported: std::collections::BTreeSet<usize> = ranks.iter().copied().collect();
         let run = TaxdbRun::default();
         let no_parsed: &[Option<&crate::report::db_subject::ParsedSubject>] = &[];
-        let result = read_reported_taxonomy(&db, &run, &ordinals, &reported, no_parsed, "BLASTN");
+        let result = read_reported_taxonomy(
+            &db,
+            &run,
+            &ordinals,
+            &reported,
+            no_parsed,
+            &|| None,
+            "BLASTN",
+        );
         assert_eq!(result.is_err(), refused, "{ranks:?}");
         if let Err(error) = result {
             assert!(error.is::<TaxonomyRefusal>(), "{ranks:?} {error:#}");
@@ -2883,24 +2923,191 @@ fn a_read_again_loads_nothing_where_ncbi_keeps_every_sequence() {
         ..VolumeLookups::default()
     };
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, &by(0), &[L, 150], L),
         Ok(vec![true, false])
     );
-    assert_eq!(record.offset_slot(0, 1, 1, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[L], L), Ok(vec![true]));
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, &by(0), &[L, 150], L),
         Ok(vec![false, false])
     );
-    assert_eq!(record.offset_slot(0, 1, 1, &[L], L), Ok(vec![false]));
-    assert_eq!(record.offset_slot(0, 2, 2, &[150], L), Ok(vec![false]));
-    assert_eq!(record.offset_slot(0, 3, 3, &[L], L), Ok(vec![true]));
-    // A read again by another subject's Seq-align id is another blob of NCBI's data loader (the
-    // sequence with that id's handle, review 1 of item O4b2-5, H1): a load or none, as before
-    // item O4b2-5. Sequence 2 by subject 4's id may put 150 in the slot: it holds either.
-    assert_eq!(record.offset_slot(0, 2, 4, &[150], L), Ok(vec![false]));
-    // Sequence 3 again by its own id loads nothing; a first load of `L` after it is not certain.
-    assert_eq!(record.offset_slot(0, 3, 3, &[L], L), Ok(vec![false]));
-    assert!(record.offset_slot(0, 5, 5, &[L], L).is_err());
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[L], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 2, &by(2), &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 3, &by(3), &[L], L), Ok(vec![true]));
+    let after_three = (record.offset_slots.clone(), record.slot_blobs.clone());
+    // A read by another Seq-align id is another blob of NCBI's data loader (the sequence with
+    // that id's handle, review 1 of item O4b2-5, H1), a load of its own where no Bioseq of the
+    // sequence's blobs holds that id (item O4b2-7): sequence 2 by id 4 puts 150 there again.
+    assert_eq!(record.offset_slot(0, 2, &by(4), &[150], L), Ok(vec![false]));
+    // Sequence 3 again by its own id loads nothing; a first load of `L` after it misses.
+    assert_eq!(record.offset_slot(0, 3, &by(3), &[L], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 5, &by(5), &[L], L), Ok(vec![true]));
+    // Where the Bioseq of sequence 2's blob holds id 4, NCBI's scope may give it without a load:
+    // the slot holds either, and the first load of `L` after it is not certain.
+    (record.offset_slots, record.slot_blobs) = after_three;
+    assert_eq!(
+        record.offset_slot(0, 2, &found_in(4, 2), &[150], L),
+        Ok(vec![false])
+    );
+    assert_eq!(record.offset_slot(0, 3, &by(3), &[L], L), Ok(vec![false]));
+    assert!(record.offset_slot(0, 5, &by(5), &[L], L).is_err());
+    // A read by an id whose handle LOSAT does not know (NCBI makes one at each read) is refused.
+    assert_eq!(
+        record.offset_slot(0, 6, &BlobName::default(), &[L], L),
+        Err(SlotUncertain {
+            ordinal: 6,
+            again: false,
+            after: Some(SlotFetch {
+                ordinal: 2,
+                taxid: 150,
+                again: true,
+            }),
+            order: None,
+            unnamed: true,
+        })
+    );
+}
+
+/// The blob name of a read by the Seq-align id `id` ([`BlobName`]): its handle, and a scope key
+/// that its Bioseq holds and by which it finds such a Bioseq.
+fn by(id: u32) -> BlobName {
+    BlobName {
+        handle: Some(id.to_le_bytes().to_vec()),
+        finds: (vec![u64::from(id)], Vec::new()),
+        holds: BioseqKeys {
+            scope: vec![u64::from(id)],
+            ..BioseqKeys::default()
+        },
+    }
+}
+
+/// [`by`] of `id`, which also finds the Bioseq of a read by `other`.
+fn found_in(id: u32, other: u32) -> BlobName {
+    let mut name = by(id);
+    name.finds.0.push(u64::from(other));
+    name
+}
+
+/// `VolumeLookups::unordered_slot`: loads of one key whose order LOSAT does not know, a load that
+/// NCBI may make or not counted both ways (review 1 of item O4b2-3, F2).
+#[test]
+fn a_group_of_loads_takes_both_cases_of_a_load_made_or_not() {
+    const L: i32 = 99990;
+    let load = |ordinal: u32, blob: u32, lookups: &[i32], name: BlobName| SlotLoad {
+        ordinal,
+        blob,
+        volume: 0,
+        lookups: lookups.to_vec(),
+        order: 7,
+        name,
+    };
+    // Batch 1: sZ (150) alone; batch 2: sZ again and sQ (150): without `kept`, sZ's blob is
+    // loaded or not, and no case writes a text; the slot holds 150 in every case.
+    let mut record = VolumeLookups::default();
+    assert_eq!(record.offset_slot(0, 0, &by(0), &[150], L), Ok(vec![false]));
+    let (z, q) = (load(0, 0, &[150], by(0)), load(1, 1, &[150], by(1)));
+    let misses = record.unordered_slot(0, &[&z, &q], L).unwrap();
+    assert_eq!(misses, vec![(0, vec![false]), (1, vec![false])]);
+    assert_eq!(record.offset_slots[&0].holds, SlotHolds::Other);
+    // A (L) and then A again with B (L): A's second load, made or not, comes after L in any
+    // order (the slot holds L): no text.
+    let mut record = VolumeLookups::default();
+    assert_eq!(record.offset_slot(0, 0, &by(0), &[L], L), Ok(vec![true]));
+    let (a, b) = (load(0, 0, &[L], by(0)), load(1, 1, &[L], by(1)));
+    let misses = record.unordered_slot(0, &[&a, &b], L).unwrap();
+    assert_eq!(misses, vec![(0, vec![false]), (1, vec![false])]);
+    assert_eq!(record.offset_slots[&0].holds, SlotHolds::Last);
+    // A (L, 150) and then A again with B (L): A's second load leaves 150 before B or not, which
+    // decides B's miss: refused.
+    let mut record = VolumeLookups::default();
+    assert_eq!(
+        record.offset_slot(0, 0, &by(0), &[L, 150], L),
+        Ok(vec![true, false])
+    );
+    let (a, b) = (load(0, 0, &[L, 150], by(0)), load(1, 1, &[L], by(1)));
+    assert!(record.unordered_slot(0, &[&a, &b], L).is_err());
+    // Where NCBI keeps every sequence, A's second load is none for certain: B misses after A's 150.
+    let mut record = VolumeLookups {
+        kept: true,
+        ..VolumeLookups::default()
+    };
+    assert_eq!(
+        record.offset_slot(0, 0, &by(0), &[L, 150], L),
+        Ok(vec![true, false])
+    );
+    let misses = record.unordered_slot(0, &[&a, &b], L).unwrap();
+    assert_eq!(misses, vec![(0, vec![false, false]), (1, vec![true])]);
+    // Two loads of one sequence by two ids in one group, neither found in the other's Bioseq: two
+    // loads, whose order decides where each looks its lines up in another order (L, 150 and 150,
+    // L: once or twice), and not where both look L up (once).
+    let mut record = VolumeLookups::default();
+    let (one, two) = (load(0, 0, &[L, 150], by(0)), load(1, 0, &[150, L], by(1)));
+    assert!(record.unordered_slot(0, &[&one, &two], L).is_err());
+    let (one, two) = (load(0, 0, &[L], by(0)), load(1, 0, &[L], by(1)));
+    let misses = record.unordered_slot(0, &[&one, &two], L).unwrap();
+    assert_eq!(misses, vec![(0, vec![true]), (1, vec![false])]);
+    // The second id found in the first load's Bioseq: in one prefetch a load of its own all the
+    // same (NCBI's prefetch asks its scope only for ids resolved before it; review 1 of item
+    // O4b2-7, M2).
+    let mut record = VolumeLookups::default();
+    let two = load(1, 0, &[L], found_in(1, 0));
+    let misses = record.unordered_slot(0, &[&one, &two], L).unwrap();
+    assert_eq!(misses, vec![(0, vec![true]), (1, vec![false])]);
+    assert!(record.slot_blobs[&0][1].sure);
+}
+
+/// [`by`] of `id`, whose Bioseq also holds the Seq-ids of `others` (by their handles).
+fn holding(id: u32, others: &[u32]) -> BlobName {
+    let mut name = by(id);
+    name.holds.handles = std::iter::once(id)
+        .chain(others.iter().copied())
+        .map(|id| id.to_le_bytes().to_vec())
+        .collect();
+    name
+}
+
+/// `VolumeLookups::prefetch_slots`: one prefetch loads every handle of a sequence, also one that
+/// the Bioseq of its first load holds (NCBI's prefetch asks its scope only for the ids that it
+/// resolved before, then its loader; review 1 of item O4b2-7, M2), each for certain: a later
+/// batch's prefetch of both loads nothing where NCBI keeps every sequence, and a read of the
+/// reports by an id that the first Bioseq holds may be given it without a load.
+#[test]
+fn a_prefetch_loads_each_handle_of_a_sequence() {
+    const L: i32 = 99990;
+    let loads = || {
+        [(0, 1, holding(0, &[1, 3])), (1, 2, by(1))].map(|(ordinal, order, name)| SlotLoad {
+            ordinal,
+            blob: 0,
+            volume: 0,
+            lookups: vec![L, 150],
+            order,
+            name,
+        })
+    };
+    for kept in [false, true] {
+        let mut record = VolumeLookups {
+            kept,
+            ..VolumeLookups::default()
+        };
+        let misses = record.prefetch_slots(&loads(), |_| false, L).unwrap();
+        assert_eq!(misses[&0], vec![true, false]);
+        assert_eq!(misses[&1], vec![true, false]);
+        assert!(record.prefetch_from.is_none());
+        assert!(record.slot_blobs[&0].iter().all(|blob| blob.sure));
+        let after = (record.offset_slots.clone(), record.slot_blobs.clone());
+        let again = record.prefetch_slots(&loads(), |_| false, L);
+        if kept {
+            let again = again.unwrap();
+            assert_eq!(again[&0], vec![false, false]);
+            assert_eq!(again[&1], vec![false, false]);
+        } else {
+            assert!(again.is_err());
+        }
+        // A read of the reports by id 3, whose handle the first Bioseq holds: given it or loaded.
+        (record.offset_slots, record.slot_blobs) = after;
+        assert_eq!(record.blob_read(0, &by(3)), BlobRead::Again);
+        assert!(record.offset_slot(0, 0, &by(3), &[L, 150], L).is_err());
+    }
 }
 
 /// The bounds of NCBI's object manager: a database of at most 10 sequences keeps every load, of
@@ -2940,95 +3147,99 @@ fn the_slot_of_the_offset_errors_taxid_follows_the_loads() {
     // H1 (cc_m): one load of L, 150, L; again: its own 150 is between.
     let mut record = VolumeLookups::default();
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L, 150, L], L),
+        record.offset_slot(0, 0, &by(0), &[L, 150, L], L),
         Ok(vec![true, false, true])
     );
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L, 150, L], L),
+        record.offset_slot(0, 0, &by(0), &[L, 150, L], L),
         Err(SlotUncertain {
             ordinal: 0,
             again: true,
             after: Some(fetch(0, 150, true)),
             order: None,
+            unnamed: false,
         })
     );
     // M1 (b) (cc_m2): A (L, 150) and B (L), first loads: two texts. Read again, A may put 150
     // there (Either), and B's read again is not certain.
     let mut record = VolumeLookups::default();
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, &by(0), &[L, 150], L),
         Ok(vec![true, false])
     );
-    assert_eq!(record.offset_slot(0, 1, 1, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[L], L), Ok(vec![true]));
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L, 150], L),
+        record.offset_slot(0, 0, &by(0), &[L, 150], L),
         Ok(vec![false, false])
     );
     assert_eq!(
-        record.offset_slot(0, 1, 1, &[L], L),
+        record.offset_slot(0, 1, &by(1), &[L], L),
         Err(SlotUncertain {
             ordinal: 1,
             again: true,
             after: Some(fetch(0, 150, true)),
             order: None,
+            unnamed: false,
         })
     );
     // A first load after such a read again (C of 99990 + 256 * 2 is not L).
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![true]));
-    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
-    assert_eq!(record.offset_slot(0, 2, 2, &[L], L), Ok(vec![true]));
-    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 0, &by(0), &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 2, &by(2), &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 3, 3, &[9606, L + 512, L], L),
+        record.offset_slot(0, 3, &by(3), &[9606, L + 512, L], L),
         Ok(vec![false, false, true])
     );
-    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 4, 4, &[L], L),
+        record.offset_slot(0, 4, &by(4), &[L], L),
         Err(SlotUncertain {
             ordinal: 4,
             again: false,
             after: Some(fetch(1, 150, true)),
             order: None,
+            unnamed: false,
         })
     );
     // M1 (a) (cc_ax): 150 never looked up: L's reads again write nothing.
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 0, &by(0), &[L], L), Ok(vec![true]));
     for _ in 0..3 {
-        assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![false]));
+        assert_eq!(record.offset_slot(0, 0, &by(0), &[L], L), Ok(vec![false]));
     }
     // cc_ac: A (L), C (150), then A again: refused, after C's fetch.
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(0, 0, 0, &[L], L), Ok(vec![true]));
-    assert_eq!(record.offset_slot(0, 1, 1, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(0, 0, &by(0), &[L], L), Ok(vec![true]));
+    assert_eq!(record.offset_slot(0, 1, &by(1), &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 0, 0, &[L], L),
+        record.offset_slot(0, 0, &by(0), &[L], L),
         Err(SlotUncertain {
             ordinal: 0,
             again: true,
             after: Some(fetch(1, 150, false)),
             order: None,
+            unnamed: false,
         })
     );
     // C, then A in another volume (cc_c1 cc_a1), then both again; taxids of other slots.
     let mut record = VolumeLookups::default();
-    assert_eq!(record.offset_slot(1, 0, 0, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(1, 0, &by(0), &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 1, 1, &[L, 9606], L),
+        record.offset_slot(0, 1, &by(1), &[L, 9606], L),
         Ok(vec![true, false])
     );
-    assert_eq!(record.offset_slot(1, 0, 0, &[150], L), Ok(vec![false]));
+    assert_eq!(record.offset_slot(1, 0, &by(0), &[150], L), Ok(vec![false]));
     assert_eq!(
-        record.offset_slot(0, 1, 1, &[L, 9606], L),
+        record.offset_slot(0, 1, &by(1), &[L, 9606], L),
         Ok(vec![false, false])
     );
     assert_eq!(
-        record.offset_slot(0, 5, 5, &[9606, 151], L),
+        record.offset_slot(0, 5, &by(5), &[9606, 151], L),
         Ok(vec![false, false])
     );
-    assert!(!record.slot_loads.contains(&5));
+    assert!(!record.slot_blobs.contains_key(&5));
 }
 
 /// `pssm_load_texts` on `tm_cache150` (st1 99990, st2 150, st3 99990, parsed Seq-ids, one
@@ -3086,6 +3297,82 @@ fn a_database_without_taxids_does_not_hold() {
     let db = database("sprot", Some(&variant("high_bytes_utf8")));
     assert!(db.taxdb_found());
     assert!(!taxdb_may_refuse(&db));
+}
+
+/// Review 3 of line DBID pfoff-4, M1 and L2: the sequences that NCBI may give for a Seq-align id
+/// whose lookup fails on a file, without that lookup (`HeaderReader::failed_holders`), in lists
+/// of `tests/db_search/multidb` beside `pU`, whose unparsed volume makes the lookup of a text id
+/// fail (NCBI BLAST+ 2.17.0 holds or throws as rows `db.pfo.bp.*.held.*` of
+/// `db_search_manifest/blastp.pfo.tsv` show). The data loader gives a sequence it loaded that
+/// holds the id's own handle in any of its definition lines (`Lines::Every`); the scope one that
+/// holds an id it takes for it, or matches it weakly, in the line its load made the Bioseq of (the
+/// line of the sequence's own Seq-align id, `Lines::Loaded`). Holders by their Seq-align ids.
+#[test]
+fn the_scope_holds_the_line_of_a_load_and_the_loader_every_line() {
+    use crate::report::db_subject::{Holders, ParsedSubject};
+    let cwd = empty_cwd("failed_holders");
+    let open = |names: &str| {
+        let search = SearchPath::new(&cwd, None, None);
+        let list: Vec<String> = names
+            .split(' ')
+            .map(|name| {
+                let path = root().join("db_search/multidb").join(name);
+                path.to_str().unwrap().to_owned()
+            })
+            .collect();
+        SeqDb::open_in(list.join(" ").as_bytes(), SeqType::Protein, &search).unwrap()
+    };
+    let subject = |db: &SeqDb, ordinal: u32| -> Option<std::sync::Arc<ParsedSubject>> {
+        match read_header(&HeaderReader::new(db, true), ordinal, 0, "BLASTP").unwrap() {
+            ReportedHeader::Parsed(subject) => Some(subject),
+            _ => None,
+        }
+    };
+    let id = |subject: &ParsedSubject| String::from_utf8(subject.alignment_fasta()).unwrap();
+    let names = |db: &SeqDb, holders: &Holders| match holders {
+        Holders::Listed(listed) => listed
+            .iter()
+            .map(|holder| id(&subject(db, holder.ordinal()).unwrap()))
+            .collect::<Vec<_>>(),
+        Holders::Unknown(why) => panic!("unknown holders: {why}"),
+    };
+    // (list, the failing Seq-align id, the loader's holders, the scope's holders)
+    let cases: [(&str, &str, &[&str], &[&str]); 7] = [
+        // A weak holder (gi|5001|ref|NP_100001.1| for the unversioned id) and one of another type
+        // (gi|5004|emb|NP_100001.1| for ref): the scope's only.
+        ("vpP zzgpP pU", "ref|NP_100001|", &[], &["gi|5001"]),
+        ("epP pP pU", "ref|NP_100001.1|", &[], &["gi|5004"]),
+        // A holder of the id's own handle (gi|7022|gnl|TDB|TAG1): both places.
+        ("gnpF zgpH pU", "gnl|TDB|TAG1", &["gi|7022"], &["gi|7022"]),
+        // zmdpH: gi|7051|ref|XP_900001.1| then gi|7052|ref|NP_100001.1|, loaded by its first
+        // line (its Seq-align id gi|7051): the loader's holder of ref|NP_100001.1| by the second
+        // line, the scope's of nothing (review 3's families mdP, mdV and mdE).
+        ("pP zmdpH pU", "ref|NP_100001.1|", &["gi|7051"], &[]),
+        ("vpP zmdpH pU", "ref|NP_100001|", &[], &[]),
+        ("enpF zmdpH pU", "emb|NP_100001.1|", &[], &[]),
+        // zmgpH: ref|XP_900002.1| then gi|7053|ref|NP_100001.1|, loaded by its second line (the
+        // line of its Seq-align id gi|7053): the scope's weak holder by that line.
+        ("vpP zmgpH pU", "ref|NP_100001|", &[], &["gi|7053"]),
+    ];
+    for (list, failing, loader, scope) in cases {
+        let db = open(list);
+        let failed = (0..db.num_seqs())
+            .filter_map(|ordinal| subject(&db, ordinal))
+            .find(|subject| id(subject) == failing)
+            .unwrap_or_else(|| panic!("{list}: no {failing}"));
+        assert!(
+            matches!(
+                failed.found(),
+                Some(crate::report::db_subject::FoundInstead::Failed(_))
+            ),
+            "{list}: {:?}",
+            failed.found()
+        );
+        let holders = failed.failed_holders();
+        assert_eq!(names(&db, &holders.loader), loader, "{list}: loader");
+        assert_eq!(names(&db, &holders.scope), scope, "{list}: scope");
+    }
+    std::fs::remove_dir_all(&cwd).unwrap();
 }
 
 #[test]
@@ -3161,4 +3448,18 @@ fn a_header_record_cut_before_its_elements_ends_the_search_with_exit_status_0() 
     assert_eq!(native(&[0x3f]), (0, true));
     assert_eq!(native(&[0x30, 0x80]), (255, false));
     assert_eq!(native(&[0x30, 0x80, 0x30, 0x80, 0xbf]), (255, false));
+}
+
+/// `map_unknown`: NCBI's map of a batch's Seq-id handles is unknown with more than 200 distinct
+/// ids, and with any id whose handle LOSAT does not know, whatever the count (NCBI makes one
+/// handle for each of its Seq-aligns; re-review of item O4b2-7, R2-H1).
+#[test]
+fn the_map_of_a_batch_with_an_unknown_handle_is_unknown() {
+    let named = |n: u64| (n, Some(n.to_le_bytes().to_vec()));
+    let keys: Vec<_> = (0..200).map(named).collect();
+    assert_eq!(map_unknown(&keys, 200), None);
+    let keys: Vec<_> = (0..201).map(named).collect();
+    assert_eq!(map_unknown(&keys, 201), Some(MANY_IDS));
+    let keys = [named(1), (u64::MAX, None)];
+    assert_eq!(map_unknown(&keys, 1), Some(UNNAMED_MAP));
 }

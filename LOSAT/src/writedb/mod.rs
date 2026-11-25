@@ -37,6 +37,8 @@
 //! `BuildDatabase` and `WriteDb` as a FASTA input; with `-randomize`, in the order of NCBI's
 //! shuffle (`crate::utils::std_shuffle`).
 
+pub(crate) mod alias_file;
+pub(crate) mod binary_list;
 pub mod bioseq;
 pub mod build_db;
 pub(crate) mod column;
@@ -64,6 +66,7 @@ pub(crate) mod ofstream;
 pub(crate) mod oid_list;
 pub mod platform;
 pub(crate) mod raw_source;
+pub(crate) mod seqidlist_writer;
 pub mod taxid_set;
 pub mod time;
 pub mod volume;
@@ -138,6 +141,11 @@ pub enum WriteDbError {
         path: PathBuf,
         source: std::io::Error,
     },
+    /// A line of the log found the pipe closed where SIGPIPE ends NCBI's process
+    /// (`build_db::endl`): makeblastdb ends at once with exit status 0 and no message, and
+    /// nothing more is read, written, removed or reported (no `EndBuild`, no close of the
+    /// writer, no message of `~CBuildDatabase`; PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+    ClosedPipe,
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:248-259
@@ -149,6 +157,11 @@ pub enum WriteDbError {
 // with the path and the system's message; they are not errors of the database's contents
 // ("BLAST Database creation error").
 impl WriteDbError {
+    /// Whether this is the end at a closed pipe ([`WriteDbError::ClosedPipe`]).
+    pub(crate) fn is_closed_pipe(&self) -> bool {
+        matches!(self, WriteDbError::ClosedPipe)
+    }
+
     /// A creation error with the message `message`, whose bytes are kept when they are not UTF-8.
     pub(crate) fn creation(message: Vec<u8>) -> Self {
         match String::from_utf8(message) {
@@ -191,6 +204,8 @@ impl WriteDbError {
                 format!(": {source}").as_bytes(),
             ]
             .concat(),
+            // Never printed: the run ends without a message (`makeblastdb::finish`).
+            WriteDbError::ClosedPipe => Vec::new(),
         }
     }
 }

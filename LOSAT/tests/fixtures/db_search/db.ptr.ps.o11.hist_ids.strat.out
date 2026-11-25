@@ -1,0 +1,28 @@
+Blast4-archive ::= {
+  request {
+    body get-request-info {
+      request-id "Error"
+    }
+  },
+  results {
+  },
+  messages {
+    {
+      code 2,
+      message "Error: (802.5) [psiblast] CObjectOStream: error at line 26:
+ Blast4-request.body.queue-search.queries.pssm.pssm.query.seq.inst.hist.replac
+es.ids.E: cannot write unassigned member NULL element while writing container"
+    },
+    {
+      code 2,
+      message "Error: NCBI C++ Exception: T0 ""/home/coremake/release_build/bu
+ild/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRele
+ase_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objostrasn.cpp
+"", line 597: Error: (CUnassignedMember::eWrite)
+ ncbi::CObjectOStreamAsn::WriteContainer() - line 26: cannot write unassigned
+ member NULL element while writing container ( at
+ Blast4-request.body.queue-search.queries.pssm.pssm.query.seq.inst.hist.replac
+es.ids.[].[])"
+    }
+  }
+}

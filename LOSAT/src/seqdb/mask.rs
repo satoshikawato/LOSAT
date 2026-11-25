@@ -328,14 +328,16 @@ impl ColumnAlgorithms {
 
             // Check for identical algorithm descriptions (should not happen.)
             if let Some(duplicate) = first_duplicate(&metadata) {
-                return Err(SeqDbError::Format {
-                    path: path.to_path_buf(),
-                    message: format!(
-                        "Error: volume ({}) mask data has duplicates value ({})",
-                        volume.base().display(),
-                        duplicate
-                    ),
-                });
+                return Err(SeqDbError::NotFound(
+                    [
+                        b"Error: volume (".as_slice(),
+                        &crate::utils::os_bytes::path_bytes(volume.base()),
+                        b") mask data has duplicates value (",
+                        duplicate.as_bytes(),
+                        b")",
+                    ]
+                    .concat(),
+                ));
             }
 
             for (key, description) in metadata {
@@ -405,13 +407,15 @@ impl MaskAlgorithms {
     /// four-item description; otherwise the whole description, for example `"30:"`), or the
     /// text of NCBI's exception: "Cannot find string algorithm id in algorithm map."; for GI
     /// masks the id of the `MASKLIST` name (`GiMasks::algorithm_id`, whose text lists them).
-    pub fn id_of(&self, name: &str) -> Result<i32, String> {
+    /// `name` is the bytes of NCBI's `std::string`; the descriptions are text, so a name that is
+    /// not UTF-8 matches none of them.
+    pub fn id_of(&self, name: &[u8]) -> Result<i32, Vec<u8>> {
         match &self.kind {
-            AlgorithmsKind::Columns(table) => table
-                .desc_to_id
-                .get(name)
+            AlgorithmsKind::Columns(table) => std::str::from_utf8(name)
+                .ok()
+                .and_then(|name| table.desc_to_id.get(name))
                 .copied()
-                .ok_or_else(|| "Cannot find string algorithm id in algorithm map.".to_string()),
+                .ok_or_else(|| b"Cannot find string algorithm id in algorithm map.".to_vec()),
             AlgorithmsKind::Gi(masks) => masks.algorithm_id(name),
         }
     }
@@ -608,14 +612,10 @@ fn read_ranges_into(
 impl SeqDb {
     /// The filtering algorithms of the database, built from the mask columns of its
     /// volumes the first time they are asked for (`x_BuildMaskAlgorithmList`). Empty for a
-    /// database without mask data. With GI masks, their table, or LOSAT's refusal of a
-    /// `MASKLIST` name (`alias::gi_mask_list`).
+    /// database without mask data. With GI masks, their table.
     pub fn mask_algorithms(&self) -> Result<&MaskAlgorithms, SeqDbError> {
         if let Some(table) = self.mask_algorithms.get() {
             return Ok(table);
-        }
-        if let Some(refusal) = &self.gi_mask_refusal {
-            return Err(refusal.duplicate());
         }
         let table = MaskAlgorithms::build(&self.volumes)?;
         Ok(self.mask_algorithms.get_or_init(|| table))
@@ -732,13 +732,8 @@ impl SeqDb {
         column.read_blobs(range.first, range.end, &mut block.blobs);
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2520-2523
-    // For each sequence the GI comes first, then `x_Open` of the algorithm, then the lookup.
-    // NCBI keeps the files once opened and opens them again at the next sequence after a failed
-    // opening, which fails again on the same files: the block opens them at its first sequence
-    // whose GI is read, and a failure is the error of every later sequence whose GI is read.
     /// [`SeqDb::read_mask_block`] of a database with GI masks: the ranges of every sequence of
-    /// `range`, or its error, into `block`.
+    /// `range`, or its error, into `block`, read by one [`GiMasks::reader`].
     fn read_gi_mask_block(
         &self,
         masks: &GiMasks,
@@ -749,21 +744,10 @@ impl SeqDb {
         block.source = BlockSource::Gi;
         block.ranges.clear();
         block.gi_spans.clear();
-        let volume = &self.volumes[range.volume];
-        let mut files = None;
+        let mut reader = masks.reader(range.volume, &self.volumes[range.volume], algo_id);
         for vol_oid in range.first..range.end {
             let start = block.ranges.len();
-            let read = masks
-                .seq_gi_key(range.volume, volume, vol_oid)
-                .and_then(
-                    |key| match files.get_or_insert_with(|| masks.open(algo_id)) {
-                        Ok(files) => {
-                            files.ranges_into(key, &mut block.ranges, &mut block.gi_window)
-                        }
-                        Err(error) => Err(error.duplicate()),
-                    },
-                );
-            let span = match read {
+            let span = match reader.ranges_into(vol_oid, &mut block.ranges, &mut block.gi_window) {
                 Ok(()) => Ok(start..block.ranges.len()),
                 Err(error) => {
                     block.ranges.truncate(start);
@@ -935,6 +919,66 @@ impl SeqDb {
                         ))
                     }
                     Err(()) => return None,
+                }
+            }
+            ordinal = run.end_ordinal();
+        }
+        None
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1432 (cited at
+    // `algorithm::common::hard_chunk_walk::NcbiWalk`): with one thread the search reads every
+    // included sequence in the order of its id.
+    /// Every sequence that a search of this protein database reads (by ordinal id: those the list
+    /// and the alias files' ranges include), in that order, with its exact length (the index's,
+    /// `Volume::x_protein_lengths` once per block of 4,096 sequences, or read alone where the
+    /// block's cannot be read) and its masks of the filtering algorithm `algo_id` as stored (empty
+    /// for a sequence without them), until `visit` returns a finding: that finding with the
+    /// sequence's NCBI OID (as `blastdbcmd`'s `%o`) and its volume's path. A sequence whose masks
+    /// or length cannot be read ends the walk without a finding (the search meets that read error
+    /// first, as in [`SeqDb::first_searched_masks`]). No NCBI counterpart: LOSAT's walk before a
+    /// BLASTP or BLASTX search with `-db_hard_mask` (`blastinput::db_mask::ResolvedMask::
+    /// check_losat_limits`; series NP, M4b-3b).
+    pub fn searched_protein_masks<T>(
+        &self,
+        algo_id: i32,
+        mut visit: impl FnMut(u32, usize, &[(u32, u32)]) -> Option<T>,
+    ) -> Option<(u32, PathBuf, T)> {
+        const WALK_BLOCK: u32 = 4096;
+        let mut block = MaskBlock::default();
+        let mut ordinal = 0u32;
+        let end_ordinal = self.num_seqs();
+        while let Some(run) =
+            self.x_block_range(ordinal, end_ordinal.min(ordinal.saturating_add(WALK_BLOCK)))
+        {
+            self.read_mask_block(run, algo_id, &mut block);
+            let volume = &self.volumes[run.volume];
+            let lengths = volume.x_protein_lengths(run.first, run.end).ok();
+            for vol_oid in run.first..run.end {
+                let seq_ordinal = run.first_ordinal + (vol_oid - run.first);
+                let masks = match block.ranges(vol_oid) {
+                    Ok(BlockMasks::Ranges(masks)) => masks,
+                    // No masks; an algorithm not in the volume is refused before
+                    // (`check_search_masks`).
+                    Ok(BlockMasks::NoMaskData | BlockMasks::AlgorithmNotInVolume) => &[],
+                    Err(_) => return None,
+                };
+                let indexed = lengths
+                    .as_ref()
+                    .and_then(|lengths| lengths.get((vol_oid - run.first) as usize));
+                let length = match indexed {
+                    Some(&length) => length as usize,
+                    None => match self.protein_length(seq_ordinal) {
+                        Ok(length) => length as usize,
+                        Err(_) => return None,
+                    },
+                };
+                if let Some(found) = visit(seq_ordinal, length, masks) {
+                    return Some((
+                        self.volume_starts[run.volume] + vol_oid,
+                        volume.base().to_path_buf(),
+                        found,
+                    ));
                 }
             }
             ordinal = run.end_ordinal();

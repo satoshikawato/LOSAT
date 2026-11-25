@@ -1,0 +1,7 @@
+gi|
+|
+lcl|
+gnl|
+pdb|1ABC|XY|Z
+pdb|1ABCD
+ref|NP_1|NP_2|x

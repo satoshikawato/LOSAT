@@ -34,7 +34,7 @@
 //!   in each batch's prefetch, `ReportedSubjects::batch_prefetch`: checked once before the
 //!   first byte, `taxdb_may_refuse`, with the names for XML2 and JSON only), or the run's
 //!   fetches may be refused for NCBI's taxonomy cache (`BlastxDatabase::cache_may_refuse`: outfmt
-//!   5's prefetch, and the XML2 and JSON lookups of a batch that reports a subject with a
+//!   5's prefetch, and the XML2 and JSON reports' loads of a batch that reports a subject with a
 //!   positive taxid, `read_reported_taxonomy`; after the prolog), so that a later batch could
 //!   refuse it,
 //!   the run holds the document in memory (`HeldOutput`; with outfmt 13 and 14 the side files'
@@ -76,7 +76,7 @@ use crate::report::blast_xml2::{
     RunSideFiles, SideFiles, Xml2Document, Xml2Kind, Xml2Run, Xml2Target, Xml2Writer,
 };
 use crate::report::query_warnings::{EMPTY_DATABASE_MESSAGE, INVALID_QUERY_MESSAGE};
-use crate::report::serial::seqalign::seqalign_evalue;
+use crate::report::serial::seqalign::{read_num_ident, seqalign_evalue};
 
 const PROGRAM: &str = "BLASTX";
 
@@ -357,30 +357,118 @@ struct HeldState {
     /// The run's standard error (`HeldOutput::stderr`), and what the run writes there while the
     /// output is held: each text with the length of the held output before it.
     stderr: Option<(Box<dyn Write>, Vec<(usize, Vec<u8>)>)>,
+    /// The command line's report stream behind `inner` (`HeldOutput::with_report`), which takes
+    /// NCBI's regions and flushes (`ostream::ReportWrite`).
+    report: Option<crate::report::ostream::ReportHandle>,
+    /// While the output is held, in the order they were made: the end of each insertion (each
+    /// write, one of NCBI's), the regions and flushes that the formatter declared to the report's
+    /// stream (`ostream::Cut`), at the held output's length then, and the index in the texts
+    /// before which each comes.
+    events: Vec<(usize, usize, crate::report::ostream::Cut)>,
 }
 
 impl HeldState {
     /// Writes the held output with the texts written to standard error while it was held, each
-    /// after the output before it (NCBI's `cerr` flushes `cout` first), and empties both.
+    /// after the output before it (NCBI's `cerr` flushes `cout` first), and empties both: each of
+    /// the held insertions by itself, with the regions and flushes declared between them, in the
+    /// order they were made with the texts (`ostream::CutCursor::write_until`), so that the
+    /// report's stream fails where NCBI's does. Where NCBI's formatter catches a failed insertion
+    /// (`ostream::is_caught_report_write_failure`: an `Iteration` of BLAST XML, whose post the
+    /// stream made), the rest of that region is not written, nor the texts of its reads (NCBI
+    /// makes no later `Hit`), as the cursor skips it; after an exception that ends the run,
+    /// nothing more.
     fn write_held(&mut self) -> std::io::Result<()> {
+        use crate::report::ostream::{is_caught_report_write_failure, Cuts};
         let held = std::mem::take(&mut self.held);
         let texts = self
             .stderr
             .as_mut()
             .map(|(_, texts)| std::mem::take(texts))
             .unwrap_or_default();
+        let events = std::mem::take(&mut self.events);
+        let mut cuts = Cuts::default();
+        cuts.reserve(events.len());
+        // By event: the number of texts written before it.
+        let mut befores = Vec::with_capacity(events.len());
+        for (at, before, cut) in events {
+            cuts.push(at, cut);
+            befores.push(before);
+        }
+        let HeldState {
+            inner,
+            stderr,
+            report,
+            ..
+        } = self;
+        let mut target = HeldTarget {
+            inner: &mut **inner,
+            report: report.as_ref(),
+        };
+        let mut cursor = cuts.cursor();
+        // A failure that NCBI's formatter catches ended its region (the cursor skips the rest).
+        let caught = |written: std::io::Result<()>| match written {
+            Err(error) if is_caught_report_write_failure(&error) => Ok(()),
+            written => written,
+        };
         let mut written = 0;
-        for (at, text) in texts {
-            self.inner.write_all(&held[written..at])?;
-            self.inner.flush()?;
-            written = at;
-            if let Some((stderr, _)) = self.stderr.as_mut() {
-                stderr.write_all(&text)?;
-                stderr.flush()?;
+        for (k, (at, text)) in texts.into_iter().enumerate() {
+            let cuts_end = befores.partition_point(|&before| before <= k);
+            caught(cursor.write_until(&mut target, &held, written, at, cuts_end))?;
+            written = written.max(at);
+            if cursor.skipping() {
+                continue;
+            }
+            // NCBI's writes before the text are made, then the text, whose stream (tied) makes
+            // them first too; where they fail in a caught region, the region ends there and its
+            // texts are not written.
+            let flushed = target.inner.flush().and_then(|()| match stderr.as_mut() {
+                Some((stderr, _)) => stderr.write_all(&text).and_then(|()| stderr.flush()),
+                None => Ok(()),
+            });
+            match flushed {
+                Err(error) if is_caught_report_write_failure(&error) => {
+                    cursor.caught_outside(&mut target)?;
+                }
+                flushed => flushed?,
             }
         }
-        self.inner.write_all(&held[written..])?;
+        caught(cursor.write(&mut target, &held, written, held.len()))?;
+        caught(target.inner.flush())
+    }
+}
+
+/// The held output's writer (`inner`) and its report stream (`report`), which takes NCBI's
+/// regions and flushes: what `HeldState::write_held` writes the held output to.
+struct HeldTarget<'h> {
+    inner: &'h mut dyn Write,
+    report: Option<&'h crate::report::ostream::ReportHandle>,
+}
+
+impl Write for HeldTarget<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.inner.write(bytes)
+    }
+
+    fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        self.inner.write_all(bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
         self.inner.flush()
+    }
+}
+
+impl crate::report::ostream::ReportWrite for HeldTarget<'_> {
+    fn site(&mut self, site: crate::report::ostream::Site) -> std::io::Result<()> {
+        self.report.map_or(Ok(()), |report| report.declare(site))
+    }
+
+    fn ncbi_flush(&mut self) -> std::io::Result<()> {
+        self.report.map_or(Ok(()), |report| report.ncbi_flush())
+    }
+
+    fn resolve_object(&mut self, pieces: &[usize]) -> std::io::Result<()> {
+        self.report.map_or(Ok(()), |report| report.resolve(pieces))
     }
 }
 
@@ -393,7 +481,36 @@ impl HeldOutput {
             discarded: false,
             side,
             stderr: None,
+            report: None,
+            events: Vec::new(),
         })))
+    }
+
+    /// This output before the command line's report stream `report` (`native::run_inner`): the
+    /// regions and flushes that the formatter declares (`ostream::ReportWrite`) go to it, kept in
+    /// order with the bytes while the output is held.
+    pub(super) fn with_report(self, report: crate::report::ostream::ReportHandle) -> Self {
+        self.0.borrow_mut().report = Some(report);
+        self
+    }
+
+    /// A region or flush declared to the report's stream: at once, or held with the output.
+    fn declare(&self, event: crate::report::ostream::Cut) -> std::io::Result<()> {
+        let mut state = self.0.borrow_mut();
+        if state.discarded {
+            return Ok(());
+        }
+        if state.holding {
+            let at = state.held.len();
+            let texts = state.stderr.as_ref().map_or(0, |(_, texts)| texts.len());
+            state.events.push((at, texts, event));
+            return Ok(());
+        }
+        match (event, &state.report) {
+            (crate::report::ostream::Cut::Site(site), Some(report)) => report.declare(site),
+            (crate::report::ostream::Cut::Flush, Some(report)) => report.ncbi_flush(),
+            _ => Ok(()),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:493-500
@@ -494,9 +611,15 @@ impl Write for HeldOutput {
             Ok(bytes.len())
         } else if state.holding {
             state.held.extend_from_slice(bytes);
+            let at = state.held.len();
+            let texts = state.stderr.as_ref().map_or(0, |(_, texts)| texts.len());
+            state
+                .events
+                .push((at, texts, crate::report::ostream::Cut::Insertion));
             Ok(bytes.len())
         } else {
-            state.inner.write(bytes)
+            state.inner.write_all(bytes)?;
+            Ok(bytes.len())
         }
     }
 
@@ -507,6 +630,17 @@ impl Write for HeldOutput {
         } else {
             state.inner.flush()
         }
+    }
+}
+
+/// The formatter's regions and flushes, in order with the held bytes (`HeldOutput::declare`).
+impl crate::report::ostream::ReportWrite for HeldOutput {
+    fn site(&mut self, site: crate::report::ostream::Site) -> std::io::Result<()> {
+        self.declare(crate::report::ostream::Cut::Site(site))
+    }
+
+    fn ncbi_flush(&mut self) -> std::io::Result<()> {
+        self.declare(crate::report::ostream::Cut::Flush)
     }
 }
 
@@ -814,7 +948,7 @@ impl<S: Write> HeldFormats<S> {
                     .and_then(|()| if flushed { sink.flush() } else { Ok(()) });
             if let Err(error) = written {
                 state.discarded = true;
-                return Err(super::native::output_error(error));
+                return Err(error.into());
             }
         }
         Ok(())
@@ -1261,10 +1395,10 @@ pub(super) fn xml_matrix_failure(
 /// other byte NCBI's stream writes or fails at by itself (`report::serial::xml`). A run that stops after
 /// this batch (`stops`) never writes the `-subject` report of its last query, which NCBI holds
 /// back (`written_queries`). NCBI's messages about the taxonomy database go to `diagnostics` at
-/// the first `Hit` that needs them.
+/// the first `Hit` that needs them, those of the batch's prefetch where it begins.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_xml<W: StructuredXml>(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
     document: &mut W,
     options: &ResolvedOptions,
@@ -1397,10 +1531,16 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 if let std::collections::hash_map::Entry::Vacant(slot) =
                     subject_cache.entry(list.oid)
                 {
-                    // A subject whose lookup throws where its `Hit` loads it keeps the
-                    // exception for the `Hit`; one that no report loads gets no names
+                    // A subject whose lookup throws where its `Hit` loads it has the names of
+                    // NCBI's `catch` with the exception; one that no report loads gets no names
                     // (`HitNames::of`).
-                    slot.insert(HitNames::of(loads, list.oid, || {
+                    let parsed = match shown {
+                        ShownSubjects::Database { reported, .. } => {
+                            reported.parsed_subject(list.oid)
+                        }
+                        ShownSubjects::Fasta { .. } => None,
+                    };
+                    slot.insert(HitNames::of(loads, list.oid, parsed, || {
                         subject_names(shown, &subjects[list.oid], list.oid)
                     })?);
                 }
@@ -1448,6 +1588,13 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                 }
                 break;
             };
+            // NCBI's prefetch of the batch, where it begins (`TaxdbPrinter::batch_texts`).
+            let prefetch = taxdb_printer.batch_texts(batch.query_ordinal + qidx);
+            if !prefetch.is_empty() {
+                writer.flush()?;
+                diagnostics.write_all(&prefetch)?;
+                diagnostics.flush()?;
+            }
             let length = query.sequence.len();
             // A record cut to `-query_loc`: `query-len` is the interval's, the coordinates and
             // frames the record's (`RemapToQueryLoc`, `report::alignment`).
@@ -1503,8 +1650,8 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                     // NCBI's messages about the taxonomy database: opening and the volume's
                     // lookup at the first `Hit` that needs them, the lookup of the `Hit` every
                     // time.
-                    posts.hit(sink.position(), first as u32, |texts| {
-                        taxdb_printer.at_names(first, names, texts)
+                    posts.hit(sink.position(), &hit, first as u32, |texts| {
+                        taxdb_printer.at_names((batch.query_ordinal + qidx, first), names, texts)
                     })?;
                     sink.hit(&hit, |hsps| {
                         for list in lists[range]
@@ -1518,6 +1665,17 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                 .iter()
                                 .filter(|hsp| has_seqalign(hsp, options.gapped))
                             {
+                                let identities = read_num_ident(hsp.identity as i64, None);
+                                // The `catch` of an HSP whose subject's lookup throws comes before
+                                // NCBI reads its rows (`HspSink::reads_alignment`).
+                                if hsps.unaligned([XmlHsp::unaligned(
+                                    hsp.hsp.score,
+                                    hsp.bit_score,
+                                    seqalign_evalue(hsp.evalue),
+                                    identities,
+                                )])? {
+                                    continue;
+                                }
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:173-175
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243
                                 // An HSP of length 0 (`empty_rows`): the Dense-seg of `-subject`'s
@@ -1568,6 +1726,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
                                     // strand, where the row runs backwards.
                                     query_first: if plus { query_from - 1 } else { query_to - 1 },
                                     query_step: if plus { 3 } else { -3 },
+                                    alignment_identities: identities,
                                 })?;
                             }
                         }
@@ -1625,7 +1784,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
 /// writer: it writes the report held back by a `-subject` run and the document's end; `program`
 /// names the run's program in its message (`ncbi_exception::error_post_line`).
 pub(super) fn write_xml_epilog(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
     program: &str,
     queries: usize,
@@ -1648,10 +1807,12 @@ pub(super) fn write_xml_epilog(
             });
             (finished, xml2.take_posts())
         }
-        None => (
-            BlastXmlWriter::new(queries).finish(&mut buf).map_err(Err),
-            crate::report::blast_xml::DocumentPosts::default(),
-        ),
+        None => {
+            // The epilog's insertion, line feed and flush (`BlastXmlWriter::finish`'s cuts).
+            let mut document = BlastXmlWriter::new(queries);
+            let finished = document.finish(&mut buf).map_err(Err);
+            (finished, document.take_posts())
+        }
     };
     let post = match finished {
         Ok(()) => None,
@@ -1672,7 +1833,7 @@ pub(super) fn write_xml_epilog(
 fn write_with_posts(
     buf: &[u8],
     posts: crate::report::blast_xml::DocumentPosts,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     let mut hits = crate::report::query_warnings::HitPosts::default();

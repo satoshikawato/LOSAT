@@ -2305,3 +2305,102 @@ fn write_verification_is_read_as_ncbi_reads_its_variable() {
         assert_eq!(refusal(value, &[5]), None, "{value}");
     }
 }
+
+// D3c-3d: `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET` as NCBI BLAST+ 2.17.0 reads them
+// (probe D3c-3d A: the values YES yes ALWAYS NO no NEVER DEFVALUE DefValue_Always maybe and empty
+// on each variable; only the four words, in any case, turn a check off).
+#[test]
+fn read_verification_is_read_as_ncbi_reads_its_variables() {
+    for off in [
+        "NO",
+        "no",
+        "NEVER",
+        "Never",
+        "DEFVALUE",
+        "DEFVALUE_ALWAYS",
+        "DefValue_Always",
+    ] {
+        assert!(verification_off(off), "{off}");
+    }
+    for on in ["YES", "yes", "ALWAYS", "", "maybe", " NO", "NO ", "N"] {
+        assert!(!verification_off(on), "{on:?}");
+    }
+    let of = |read: Option<&str>, get: Option<&str>| {
+        ReadVerification::of(read.map(OsStr::new), get.map(OsStr::new))
+    };
+    assert_eq!(of(None, None), ReadVerification::default());
+    assert_eq!(of(Some("YES"), Some("ALWAYS")), ReadVerification::default());
+    assert_eq!(of(Some(""), Some("maybe")), ReadVerification::default());
+
+    use crate::ncbi_exception::{NcbiException, ThrowSite};
+    use crate::report::serial::object_frame::{EXPECTED_MEMBER, UNASSIGNED_MEMBER};
+    let format_error = ThrowSite::generated("CSerialException::eFormatError");
+    let read = NcbiException::new(EXPECTED_MEMBER, "member numRows expected");
+    let get = NcbiException::new(UNASSIGNED_MEMBER, "C_E_Field_name::Get(): unassigned");
+    let other = NcbiException::new(format_error, "another error");
+    let refused =
+        |setting: &ReadVerification, exception: &NcbiException| setting.refused(exception, "X");
+    let read_off = of(Some("never"), None);
+    assert_eq!(
+        refused(&read_off, &read).as_deref(),
+        Some(
+            "the environment variable SERIAL_VERIFY_DATA_READ=never with X that lacks a mandatory member"
+        )
+    );
+    // The first throw decides: a rethrow of the check is the check's.
+    let rethrown = NcbiException::new(EXPECTED_MEMBER, "member seqid expected")
+        .rethrow(format_error, "at byte 34");
+    assert!(refused(&read_off, &rethrown).is_some());
+    let other_first = other
+        .clone()
+        .rethrow(EXPECTED_MEMBER, "member seqid expected");
+    assert_eq!(refused(&read_off, &other_first), None);
+    assert_eq!(refused(&read_off, &get), None);
+    assert_eq!(refused(&read_off, &other), None);
+    let get_off = of(Some("YES"), Some("DEFVALUE"));
+    assert_eq!(
+        refused(&get_off, &get).as_deref(),
+        Some(
+            "the environment variable SERIAL_VERIFY_DATA_GET=DEFVALUE with X of which NCBI BLAST+ gets a member that is not set"
+        )
+    );
+    assert_eq!(refused(&get_off, &read), None);
+    assert_eq!(refused(&ReadVerification::default(), &read), None);
+    assert_eq!(refused(&ReadVerification::default(), &get), None);
+
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-ncbi-environment-verify-read-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let settings = |pairs: &[(&str, &str)]| {
+        let mut all = vec![("NCBI_CONFIG_PATH".to_string(), dir.display().to_string())];
+        all.extend(pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())));
+        let env = |name: &str| {
+            all.iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| OsString::from(value))
+        };
+        application_settings(
+            "psiblast",
+            all.iter()
+                .map(|(n, v)| (OsString::from(n), OsString::from(v))),
+            &env,
+            &NO_PROCESS,
+        )
+        .map(|settings| settings.read_verification)
+    };
+    assert_eq!(settings(&[]), Ok(ReadVerification::default()));
+    assert_eq!(
+        settings(&[
+            ("SERIAL_VERIFY_DATA_READ", "no"),
+            ("SERIAL_VERIFY_DATA_GET", "yes")
+        ]),
+        Ok(of(Some("no"), None))
+    );
+    assert_eq!(
+        settings(&[("SERIAL_VERIFY_DATA_GET", "DEFVALUE_ALWAYS")]),
+        Ok(of(None, Some("DEFVALUE_ALWAYS")))
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

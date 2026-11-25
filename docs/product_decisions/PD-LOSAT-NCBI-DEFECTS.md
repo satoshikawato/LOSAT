@@ -3696,8 +3696,9 @@ file would differ, and NCBI's programs still could not open the database).
     OID; rows `RB17`, `RB18`, `RB21`-`RB23`, `RB26`, `RB28`, `RB29`). Only in version 5 when no OID
     has been written yet (no `-taxid_map` or an empty map, including `-taxid`), where
     `~CWriteDB_TaxID` throws `No tax info for any oid` out of its destructor and NCBI aborts
-    (exit 134), does LOSAT refuse via the writer-destructor-abort refusal below (fixture input
-    `l_QR12.lst`). Damaged binary definition lines, replaced visible characters (803.7), `NULL`
+    (exit 134), or when a later input error unwinds through `~CWriteDB_Impl`'s `Close` (v4 or v5,
+    exit 134), does LOSAT refuse via the writer-destructor-abort refusal below (fixture inputs
+    `l_QR12.lst`, `l_QR15.lst`). Damaged binary definition lines, replaced visible characters (803.7), `NULL`
     `Blast-def-line` elements (`Attempt to access NULL pointer.`), and huge lengths (`Unknown
     exception`) match NCBI through the shared table-driven BER reader (fixture rows `RB04`, `RB04m`,
     `RB04b`, `RB08`-`RB16`).
@@ -3707,9 +3708,9 @@ file would differ, and NCBI's programs still could not open the database).
     `l_QR13.lst`, `l_QR14.lst`): because `makeprofiledb` prints NCBI's `CSerialException` text
     directly, whether `:OtherType` prints `class not found` or `incompatible member type` depends
     on which ASN.1 classes the process has registered so far (for example, on text `:Seq-interval`,
-    NCBI 2.17.0 prints `class not found: Seq-interval`, whereas `dev`'s `Names::PSSM` erroneously
-    printed `incompatible member type`), so both text and binary `:OtherType` pointers are refused
-    under one rule.
+    NCBI 2.17.0 prints `class not found: Seq-interval`, whereas LOSAT before 1.105 (`Names::PSSM`)
+    erroneously printed `incompatible member type`), so both text and binary `:OtherType` pointers
+    are refused under one rule.
   - A query in a nucleotide coding with fewer bytes than NCBI's writer reads for its length (version
     1.86, PS10d): `ncbi2na` of fewer than `ceil(length / 4)` bytes, `ncbi4na` of fewer than
     `ceil(length / 2)`, `iupacna` whose NCBI4na form and its terminating zero hold fewer than

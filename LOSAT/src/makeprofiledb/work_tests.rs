@@ -1,6 +1,6 @@
 use super::*;
 use crate::report::serial::asn_types::Post;
-use crate::report::serial::encoder::{ReplacedChar, StreamPosition};
+use crate::report::serial::encoder::{NullElement, ReplacedChar, Stream, StreamPosition};
 
 #[test]
 fn read_error_to_run_error_maps_all_variants() {
@@ -61,4 +61,47 @@ fn post_asn_posts_suppresses_utf8_warning_and_writes_errors() {
         text.contains("Error: (803.7) Blast-def-line-set.E.title\nBad char [0x1] in string at byte 20\na\x01b\n"),
         "{text}"
     );
+}
+
+#[test]
+fn aborts_strips_trailing_newline_from_exception_message() {
+    let null = NullElement {
+        stream: Stream::AsnBinary,
+        element_frame: true,
+        trace: "Blast-def-line-set.E.seqid.E".to_string(),
+        position: StreamPosition::Byte(15),
+        frames: Vec::new(),
+    };
+    let then = WriteDbError::Exception(null.exception());
+    assert!(then.message().ends_with(b"\n"));
+    let refused = aborts(
+        RunError::Input(b"in/nope.smp does not exists".to_vec()),
+        &then,
+    );
+    match refused {
+        RunError::Refused(msg) => {
+            assert!(!msg.contains('\n'), "refusal split across lines: {msg:?}");
+            assert_eq!(
+                msg,
+                "an error (INPUT ERROR: in/nope.smp does not exists) after which the database's \
+                 writer stops with another (Error: byte 15: cannot write unassigned member NULL \
+                 element while writing container ; NCBI's makeprofiledb aborts there)"
+            );
+        }
+        other => panic!("expected Refused, got {other:?}"),
+    }
+
+    let plain = WriteDbError::Other("No tax info for any oid".to_string());
+    assert!(!plain.message().ends_with(b"\n"));
+    let refused = aborts(RunError::Exception(b"boom".to_vec()), &plain);
+    match refused {
+        RunError::Refused(msg) => {
+            assert_eq!(
+                msg,
+                "an error (ERROR: boom) after which the database's writer stops with another \
+                 (Error: No tax info for any oid; NCBI's makeprofiledb aborts there)"
+            );
+        }
+        other => panic!("expected Refused, got {other:?}"),
+    }
 }

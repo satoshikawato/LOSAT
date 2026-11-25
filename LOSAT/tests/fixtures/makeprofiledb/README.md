@@ -119,11 +119,13 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
     in v5 (`RB27`: `Attempt to access NULL pointer.`, rc 255), v5 after a valid profile (`RB28`:
     802.5 + `byte 15`, rc 255, 9 files), and bad visible char before `NULL` `Seq-id` (`RB29`:
     803.7 + 802.5 + `byte 17`, rc 255).
-  - `l_QR08.lst`-`l_QR14.lst` (no `cases.tsv` row; tested as refusals): `iupacna` byte `>= 0x80`
+  - `l_QR08.lst`-`l_QR15.lst` (no `cases.tsv` row; tested as refusals): `iupacna` byte `>= 0x80`
     in pair positions (`QR08`-`QR10`), `:Seq-interval` other-type pointer in binary (`QR11`) and
     ASN.1 text (`QR14`, where NCBI 2.17.0 prints `class not found: Seq-interval`, rc 255), `NULL`
     `Seq-id` inside `ASN1_BlastDefLine` in v5 with 0 prior OIDs (`QR12`: none, `-taxid 9606`, and
-    empty `-taxid_map`, where NCBI aborts rc 134), and 1 GiB string length past EOF (`QR13`).
+    empty `-taxid_map`, where NCBI aborts rc 134), 1 GiB string length past EOF (`QR13`), and
+    `NULL` `Seq-id` followed by a missing input file in v5 and v4 (`QR15`, where `Close` throws in
+    the unwinding of the input error and NCBI aborts rc 134).
 
 The whole oracle (248 cases) is compared by `compare.py` of the survey; these rows are the part kept in the
 repository.

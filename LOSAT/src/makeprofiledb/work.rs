@@ -795,11 +795,13 @@ fn aborts(first: RunError, then: &WriteDbError) -> RunError {
     if let RunError::Refused(_) = first {
         return first;
     }
+    let message = then.message();
+    let message = message.strip_suffix(b"\n").unwrap_or(&message);
     RunError::Refused(format!(
         "an error ({}) after which the database's writer stops with another ({}; NCBI's \
          makeprofiledb aborts there)",
         first.text(),
-        String::from_utf8_lossy(&then.message())
+        String::from_utf8_lossy(message)
     ))
 }
 

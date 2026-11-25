@@ -171,6 +171,13 @@ Seq-entry ::= set {
     assert_eq!(bioseqs[0].descr_taxids, vec![9606]);
 }
 
+fn read_fixed_delta(input: &[u8]) -> AsnBioseq {
+    let mut bioseqs = read_text_ok(input);
+    assert_eq!(bioseqs.len(), 1);
+    fix_asn_delta(&mut bioseqs[0]).expect("fix delta");
+    bioseqs.remove(0)
+}
+
 #[test]
 fn fix_asn_delta_packs_ncbi2na_ncbi4na_gap_and_loc_null() {
     let input = b"\
@@ -190,13 +197,11 @@ Seq-entry ::= seq {
   }
 }
 ";
-    let mut bioseqs = read_text_ok(input);
-    assert_eq!(bioseqs.len(), 1);
-    fix_asn_delta(&mut bioseqs[0]).expect("fix delta");
-    assert_eq!(bioseqs[0].length, 9);
+    let bio = read_fixed_delta(input);
+    assert_eq!(bio.length, 9);
     // 0x1B = 00 01 10 11 = A C G T -> 4na: 0x12, 0x48; then 3 N's (0xFF, 0xF?), then 0x12 -> 0xF1, 0x20
     assert_eq!(
-        bioseqs[0].seq_data,
+        bio.seq_data,
         Some(SeqData::Ncbi4na(vec![0x12, 0x48, 0xff, 0xf1, 0x20]))
     );
 }
@@ -217,14 +222,9 @@ Seq-entry ::= seq {
   }
 }
 ";
-    let mut bioseqs = read_text_ok(input);
-    assert_eq!(bioseqs.len(), 1);
-    fix_asn_delta(&mut bioseqs[0]).expect("fix delta");
-    assert_eq!(bioseqs[0].length, 4);
-    assert_eq!(
-        bioseqs[0].seq_data,
-        Some(SeqData::Ncbi4na(vec![0x12, 0x48]))
-    );
+    let bio = read_fixed_delta(input);
+    assert_eq!(bio.length, 4);
+    assert_eq!(bio.seq_data, Some(SeqData::Ncbi4na(vec![0x12, 0x48])));
 }
 
 #[test]

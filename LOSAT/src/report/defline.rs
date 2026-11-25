@@ -249,12 +249,12 @@ impl BioseqFacts {
     fn classify_textseq_acc(
         &mut self,
         accession: Option<&[u8]>,
-        on_warning: &mut dyn FnMut(SeqIdWarning),
+        warn: &mut dyn FnMut(SeqIdWarning),
     ) {
         let Some(acc) = accession else {
             return;
         };
-        let info = identify_accession(acc, parse_flags::DEFAULT, on_warning);
+        let info = identify_accession(acc, parse_flags::DEFAULT, warn);
         if info == (SEQID_REFSEQ | CHROMOSOME | F_NUC) || info == (SEQID_REFSEQ | NCRNA | F_NUC) {
             self.refseq_chromosome_or_ncrna = true;
         } else if info == (SEQID_REFSEQ | MRNA | F_NUC)
@@ -280,14 +280,19 @@ pub(crate) fn bioseq_facts_with_warn(
     let mut facts = BioseqFacts::default();
     for id in ids {
         match id {
-            ParsedSeqId::Tpg(text) | ParsedSeqId::Tpe(text) | ParsedSeqId::Tpd(text) => {
-                facts.third_party = true;
-                facts.classify_textseq_acc(text.accession.as_deref(), on_warning);
-            }
-            ParsedSeqId::Other(text)
+            ParsedSeqId::Tpg(text)
+            | ParsedSeqId::Tpe(text)
+            | ParsedSeqId::Tpd(text)
+            | ParsedSeqId::Other(text)
             | ParsedSeqId::Genbank(text)
             | ParsedSeqId::Embl(text)
             | ParsedSeqId::Ddbj(text) => {
+                if matches!(
+                    id,
+                    ParsedSeqId::Tpg(_) | ParsedSeqId::Tpe(_) | ParsedSeqId::Tpd(_)
+                ) {
+                    facts.third_party = true;
+                }
                 facts.classify_textseq_acc(text.accession.as_deref(), on_warning);
             }
             ParsedSeqId::Pdb(pdb) => {

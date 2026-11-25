@@ -28,6 +28,7 @@ LOSAT is a pure-Rust reimplementation of NCBI BLAST+ 2.17.0. It runs BLAST+ comm
 | `makembindex` | Builds the MegaBLAST index of a nucleotide database |
 | `makeprofiledb` | Builds profile databases for `rpsblast` and `rpstblastn` (such as CDD) from PSSM files |
 | `blastdb_aliastool` | Makes alias files that combine databases or keep a list of their sequences; converts GI and sequence id lists to binary lists |
+| `blastdbcheck` | Checks BLAST databases for damage: files, sequences, ISAM indexes, alias files, taxonomy ids |
 
 Options that need NCBI's servers (`-remote`, `-entrez_query`) or GI lists (`-gilist`), and the few that LOSAT does not run, stop with an error instead of changing the results. See [What LOSAT refuses](https://satoshikawato.github.io/LOSAT/refusals.html).
 

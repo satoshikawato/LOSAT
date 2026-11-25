@@ -66,14 +66,14 @@ compare_sorted() {
 (
   cd "$CRATE_DIR"
   cargo build --release
-  cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --target-dir target/serial-command
+  cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --features no-web-abi-v1 --target-dir target/serial-command
 )
 run_native "$SCRATCH_DIR/native.raw.out"
 run_wasm "$SCRATCH_DIR/wasm_simd.raw.out"
 
 (
   cd "$CRATE_DIR"
-  cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --features tblastx-wasm-scalar --target-dir target/serial-command-scalar
+  cargo build --release --bin losat --target wasm32-wasip1 --no-default-features --features tblastx-wasm-scalar,no-web-abi-v1 --target-dir target/serial-command-scalar
 )
 WASM_BIN="$CRATE_DIR/target/serial-command-scalar/wasm32-wasip1/release/losat.wasm"
 run_wasm "$SCRATCH_DIR/wasm_scalar.raw.out"

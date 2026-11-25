@@ -253,7 +253,7 @@ pub(super) fn write_sam(
         searched_lengths: query_lengths,
         placements: &report.ranges.queries.placements,
     };
-    match (
+    let added = match (
         report.database_ordinals,
         report.database,
         report.database_reader,
@@ -282,7 +282,7 @@ pub(super) fn write_sam(
                     queries: report.query_records,
                     subjects: sam::SubjectSource::Database(&letters_of),
                 },
-            )?;
+            )
         }
         _ => {
             // The records as read with `-subject_loc` (never packed), else the
@@ -313,8 +313,15 @@ pub(super) fn write_sam(
                     queries: report.query_records,
                     subjects: sam::SubjectSource::Records(whole_records),
                 },
-            )?;
+            )
         }
+    };
+    if let Err(error) = added {
+        // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:313-316
+        // `~CSAM_Formatter()` flushes all earlier queries' records accumulated before an
+        // exception unwinds the formatter.
+        target.document.finish(writer)?;
+        return Err(error);
     }
     if target.finish {
         target.document.finish(writer)?;
@@ -504,8 +511,10 @@ pub(super) fn write_structured_xml(
         subjects: xml_subjects,
         taxdb_notes: xml_taxdb_notes,
         letters: report.subjects,
+        ungapped: report.ungapped,
         epilog: report.epilog,
         only_xml2: xml_only_xml2,
+        query_scopes: report.query_scopes,
     };
     match xml2_kind {
         None => crate::algorithm::blastn::blast_xml::write_blastn_xml(
@@ -536,6 +545,7 @@ pub(super) fn write_structured_xml(
                 cbs: 0,
                 query_gencode: None,
                 db_gencode: None,
+                program_type: None,
             };
             let mut document =
                 crate::report::blast_xml2::Xml2Writer::for_run(kind, params, report.out, side_sink);

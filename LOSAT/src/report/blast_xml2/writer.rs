@@ -14,12 +14,33 @@ use crate::report::blast_xml::writer::{
     count_hsp, int_member, real_member, replaced_posts, string_member, DocumentPost, HitSink,
     HitWrite, HspSink, HspWrite, Scratch, StructuredXml,
 };
+use crate::report::record::ProgramType;
 use crate::report::serial::encoder::{Encoder, SerialError};
 use crate::report::serial::json::JsonEncoder;
 use crate::report::serial::xml::XmlEncoder;
 
-use super::framing::{MadeReport, NoSideFiles, RunSideFiles, SideFiles, Xml2Document, Xml2Kind};
+use super::framing::{
+    HeldReport, MadeReport, NoSideFiles, RunSideFiles, SideFiles, Xml2Document, Xml2Kind,
+};
 use super::records::{Xml2Run, Xml2Target};
+
+/// The encoders of the XML2 and JSON documents, whose output's length marks where a report's
+/// `Search` starts and ends (`write_report`, `join_search`).
+trait Xml2Encoder: Encoder {
+    fn written(&self) -> usize;
+}
+
+impl Xml2Encoder for XmlEncoder<'_> {
+    fn written(&self) -> usize {
+        XmlEncoder::written(self)
+    }
+}
+
+impl Xml2Encoder for JsonEncoder<'_> {
+    fn written(&self) -> usize {
+        JsonEncoder::written(self)
+    }
+}
 
 /// `Parameters` (`s_SetBlastXMLParameters`, blastxml2_format.cpp:514-555), members in the order
 /// of blastxml2.asn: the matrix, `expect`, the nucleotide scores, the gap costs of a gapped
@@ -93,12 +114,14 @@ fn write_statistics<E: Encoder>(enc: &mut E, run: &XmlRun<'_>, params: &Xml2Run,
 const UNSEARCHED_SUFFIX: &[u8] = b" \nNo hits found";
 
 /// One `Search`: the query, the hits of `hits`, the statistics and the message
-/// (`s_SetBlastXMLSearch`, blastxml2_format.cpp:579-633).
+/// (`s_SetBlastXMLSearch`, blastxml2_format.cpp:579-633). `masks` are the report's masks, which
+/// the `Search` lists and its HSPs apply (`Xml2Writer::query`, `join_search`).
 fn write_search<E, F>(
     enc: &mut E,
     run: &XmlRun<'_>,
     params: &Xml2Run,
     query: &XmlQuery<'_>,
+    masks: &[crate::report::blast_xml::QueryMask],
     scratch: &mut Scratch,
     start: usize,
     hits: F,
@@ -114,14 +137,11 @@ where
         string_member(enc, "query-title", 1, query.title);
     }
     int_member(enc, "query-len", 2, query.len);
-    // The masks of a query that has any, but not those of a minus frame. A query of a batch that
-    // was not searched lists none: NCBI makes its result without the search, so the masks the
-    // search would have reported (probe: `BATCH_SIZE=10 -lcase_masking`, an N-only query with a
-    // lower-case run) are not there.
-    if query.searched && !query.masks.is_empty() {
+    // The masks, but not those of a minus frame.
+    if !masks.is_empty() {
         enc.member("query-masking", 3);
         enc.begin_list(false);
-        for mask in query.masks.iter().filter(|mask| mask.frame >= 0) {
+        for mask in masks.iter().filter(|mask| mask.frame >= 0) {
             enc.element();
             enc.begin_sequence("Range");
             int_member(enc, "from", 0, mask.from);
@@ -140,7 +160,7 @@ where
                 enc: &mut *enc,
                 run,
                 params,
-                masks: query.masks,
+                masks,
                 scratch: &mut *scratch,
                 hits: 0,
                 start,
@@ -164,18 +184,21 @@ where
     Ok(())
 }
 
-/// The `BlastOutput2` of one query.
+/// The `BlastOutput2` of one query, its `Search` (`write_search` with `masks`) at `search` of the
+/// output: from the call of its list element (a `-subject` search's `bl2seq`) to its end.
 fn write_report<E, F>(
     enc: &mut E,
     run: &XmlRun<'_>,
     params: &Xml2Run,
     query: &XmlQuery<'_>,
+    masks: &[crate::report::blast_xml::QueryMask],
     scratch: &mut Scratch,
     start: usize,
+    search: &mut std::ops::Range<usize>,
     hits: F,
 ) -> Result<()>
 where
-    E: Encoder,
+    E: Xml2Encoder,
     F: FnOnce(&mut HitSink<'_>) -> Result<()>,
 {
     enc.begin_document("BlastOutput2");
@@ -214,17 +237,39 @@ where
     enc.end_member();
     write_parameters(enc, run, params);
     enc.member("results", 5);
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:661-698
+    // A `-subject` search's results are `bl2seq`, an iterative database search's its rounds
+    // (`iterations`, numbered from 1), any other database search's one `search`.
     match params.target {
+        Xml2Target::Database if params.iterative() => {
+            enc.variant("Results", "iterations", 0);
+            enc.begin_list(false);
+            enc.element();
+            enc.begin_sequence("Iteration");
+            int_member(enc, "iter-num", 0, 1);
+            enc.member("search", 1);
+            search.start = enc.written();
+            write_search(enc, run, params, query, masks, scratch, start, hits)?;
+            search.end = enc.written();
+            enc.end_member();
+            enc.end_sequence();
+            enc.end_list();
+            enc.end_variant();
+        }
         Xml2Target::Database => {
             enc.variant("Results", "search", 1);
-            write_search(enc, run, params, query, scratch, start, hits)?;
+            search.start = enc.written();
+            write_search(enc, run, params, query, masks, scratch, start, hits)?;
+            search.end = enc.written();
             enc.end_variant();
         }
         Xml2Target::Subjects(_) => {
             enc.variant("Results", "bl2seq", 2);
             enc.begin_list(false);
+            search.start = enc.written();
             enc.element();
-            write_search(enc, run, params, query, scratch, start, hits)?;
+            write_search(enc, run, params, query, masks, scratch, start, hits)?;
+            search.end = enc.written();
             enc.end_list();
             enc.end_variant();
         }
@@ -334,6 +379,7 @@ impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
             let mut writer = Xml2Hsps {
                 enc: &mut *enc,
                 run: self.run,
+                program_type: self.params.program_type,
                 masks: self.masks,
                 scratch: &mut *self.scratch,
                 hsps: 0,
@@ -352,6 +398,8 @@ impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
 struct Xml2Hsps<'a, E> {
     enc: &'a mut E,
     run: &'a XmlRun<'a>,
+    /// `Xml2Run::program_type`.
+    program_type: Option<ProgramType>,
     masks: &'a [crate::report::blast_xml::QueryMask],
     scratch: &'a mut Scratch,
     hsps: i32,
@@ -381,10 +429,13 @@ impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:159-170
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:247-259
         // A frame is written for a nucleotide sequence of a Std-seg (translated) Seq-align: the
-        // query of blastx, tblastx and rpstblastn (whose profiles are proteins), the subject of
-        // tblastn and tblastx.
-        let query_translated = matches!(program, "blastx" | "tblastx" | "rpstblastn");
-        let subject_translated = matches!(program, "tblastn" | "tblastx");
+        // query of blastx, tblastx and RPSTBLASTN (whose profiles are proteins), the subject of
+        // tblastn, PSI-TBLASTN (tblastn's `-in_pssm`) and tblastx. The program types that the
+        // program name does not name are read as types (`Xml2Run::program_type`).
+        let query_translated = matches!(program, "blastx" | "tblastx")
+            || self.program_type == Some(ProgramType::RpsTblastn);
+        let subject_translated = matches!(program, "tblastn" | "tblastx")
+            || self.program_type == Some(ProgramType::PsiTblastn);
         // The query's regions are applied by the frame of a translated query, else frame 0
         // (blastxml2_format.cpp:211, :253): a nucleotide query's regions of frame 0 are
         // applied too, which outfmt 5 does not do.
@@ -488,14 +539,8 @@ fn xml_report_made(
     thrown: Option<Box<crate::report::serial::xml::XmlThrow>>,
 ) -> Result<MadeReport> {
     match (result, thrown) {
-        (Err(error), thrown)
-            if thrown.is_none()
-                || !matches!(
-                    error.downcast_ref::<SerialError>(),
-                    Some(SerialError::Utf8(_))
-                ) =>
-        {
-            Err(error)
+        (result, thrown) if hands_on_error(&result, thrown.is_some()) => {
+            Err(result.expect_err("an error that the report hands on"))
         }
         (_, thrown) => {
             if let Some(thrown) = &thrown {
@@ -512,20 +557,202 @@ fn xml_report_made(
                 posts: replaced_posts(posts, program, |_| written.next().unwrap_or(0) as usize),
                 ends_run: None,
             };
-            match (kind, thrown) {
-                (Xml2Kind::Single16, Some(thrown)) => {
-                    let exception = thrown.exception();
-                    let message = exception.what_after(exception.get_msg());
-                    made.posts.push(DocumentPost {
-                        at: report.len(),
-                        text: crate::ncbi_exception::error_post_line(None, Some(program), &message),
-                    });
-                }
-                (_, thrown) => made.ends_run = thrown,
+            if let Some(thrown) = thrown {
+                stream_threw(&mut made, kind, program, thrown, report.len());
             }
             Ok(made)
         }
     }
+}
+
+/// The exception `thrown` of the stream of an XML report of outfmt 16 or 14 cut after `at` bytes
+/// (`xml_report_made`): 16 posts it after them, 14 ends the run with it.
+fn stream_threw(
+    made: &mut MadeReport,
+    kind: Xml2Kind,
+    program: &str,
+    thrown: Box<crate::report::serial::xml::XmlThrow>,
+    at: usize,
+) {
+    if kind == Xml2Kind::Single16 {
+        let exception = thrown.exception();
+        let message = exception.what_after(exception.get_msg());
+        made.posts.push(DocumentPost {
+            at,
+            text: crate::ncbi_exception::error_post_line(None, Some(program), &message),
+        });
+    } else {
+        made.ends_run = Some(thrown);
+    }
+}
+
+/// Whether the `result` of a report's writer is an error that the report hands on (`Err`): any
+/// but the UTF-8 error of an XML stream that threw (`thrown`), which cuts the report
+/// (`xml_report_made`).
+fn hands_on_error(result: &Result<()>, thrown: bool) -> bool {
+    result.as_ref().is_err_and(|error| {
+        !thrown
+            || !matches!(
+                error.downcast_ref::<SerialError>(),
+                Some(SerialError::Utf8(_))
+            )
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2376-2378
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:95-110
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:678-686
+// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:829-838 (the comma before an element
+// but the first)
+/// Adds the `Search` of a result that joins the held report `held` (`XmlQuery::joins_held`), as
+/// NCBI writes its accumulated results: one report, each `Search` shown with the id, title and
+/// length of the first and listing and applying its masks (`HeldSearches`), with the result's own
+/// hits, statistics and message. The result's report is made alone in `report` with that label
+/// and its `Search` (its list element, `write_report`'s `search`) goes after the held report's
+/// last, as the stream writes a later element: for JSON after a comma; its posts at their places
+/// and lines there (its other posts are those of the held report's own start and end).
+///
+/// NCBI fills every `Search` of the report before it writes any: a `Search` whose filling raises an
+/// exception that the report function catches (`CaughtException`) fails the whole report, and no
+/// later one is filled (the report's posts, all of its writing, are not made); a stream that threw
+/// in the held report writes no later `Search`.
+fn join_search<H>(
+    held: HeldReport<'_>,
+    kind: Xml2Kind,
+    report: &mut Vec<u8>,
+    params: &Xml2Run,
+    scratch: &mut Scratch,
+    run: &XmlRun<'_>,
+    query: &XmlQuery<'_>,
+    start: usize,
+    hits: H,
+) -> Result<()>
+where
+    H: FnOnce(&mut HitSink<'_>) -> Result<()>,
+{
+    if held.failure.is_some() {
+        return Ok(());
+    }
+    let mut searches = std::mem::take(&mut *held.searches);
+    let shown = XmlQuery {
+        id: &searches.id,
+        title: &searches.title,
+        len: searches.len,
+        stats: query.stats,
+        message: query.message,
+        searched: query.searched,
+        masks: &searches.masks,
+        joins_held: true,
+    };
+    report.clear();
+    let mut search = 0..0;
+    let masks = &searches.masks;
+    let (result, posts, thrown) = match kind {
+        Xml2Kind::Single16 | Xml2Kind::Files14 => {
+            let mut enc = if kind == Xml2Kind::Single16 {
+                XmlEncoder::xml2_report(report)
+            } else {
+                XmlEncoder::xml2_document(report)
+            };
+            let result = write_report(
+                &mut enc,
+                run,
+                params,
+                &shown,
+                masks,
+                scratch,
+                start,
+                &mut search,
+                hits,
+            );
+            (result, enc.take_posts(), enc.take_thrown())
+        }
+        Xml2Kind::Single15 | Xml2Kind::Files13 => {
+            let mut enc = if kind == Xml2Kind::Single15 {
+                JsonEncoder::array_element(report)
+            } else {
+                JsonEncoder::new(report)
+            };
+            let result = write_report(
+                &mut enc,
+                run,
+                params,
+                &shown,
+                masks,
+                scratch,
+                start,
+                &mut search,
+                hits,
+            );
+            (result, Vec::new(), None)
+        }
+    };
+    if hands_on_error(&result, thrown.is_some()) {
+        *held.searches = searches;
+        report.clear();
+        let error = result.expect_err("an error that the report hands on");
+        return match error.downcast::<crate::report::blast_xml::CaughtException>() {
+            Ok(caught) => {
+                *held.failure = Some(caught.0);
+                *held.made = MadeReport::default();
+                Ok(())
+            }
+            Err(error) => Err(error),
+        };
+    }
+    if !searches.cut {
+        let end = search.end.max(search.start);
+        let end = thrown
+            .as_ref()
+            .map_or(end, |thrown| thrown.at.clamp(search.start, end));
+        let lines = |bytes: &[u8]| bytes.iter().filter(|&&byte| byte == b'\n').count() as i64;
+        let line_shift = match posts.is_empty() {
+            true => 0,
+            false => lines(&held.report[..searches.end]) - lines(&report[..search.start]),
+        };
+        let tail = held.report.split_off(searches.end);
+        if matches!(kind, Xml2Kind::Single15 | Xml2Kind::Files13) {
+            held.report.push(b',');
+        }
+        let spliced = held.report.len();
+        held.report.extend_from_slice(&report[search.start..end]);
+        searches.end = held.report.len();
+        let posts: Vec<crate::report::serial::xml::XmlPost> = posts
+            .into_iter()
+            .filter(|post| (search.start..end).contains(&post.at))
+            .map(|mut post| {
+                post.at = spliced + (post.at - search.start);
+                if let crate::report::serial::encoder::StreamPosition::Line(line) =
+                    &mut post.replaced.position
+                {
+                    *line = (*line as i64 + line_shift) as u64;
+                }
+                post
+            })
+            .collect();
+        if thrown.is_none() {
+            held.report.extend_from_slice(&tail);
+        }
+        let written: Vec<u64> = if kind == Xml2Kind::Single16 && !posts.is_empty() {
+            let at: Vec<usize> = posts.iter().map(|post| post.at).collect();
+            crate::report::serial::out_buffer::xml_written_at(held.report, &at, is_string_element)
+        } else {
+            vec![0; posts.len()]
+        };
+        let mut written = written.into_iter();
+        held.made
+            .posts
+            .extend(replaced_posts(posts, run.program, |_| {
+                written.next().unwrap_or(0) as usize
+            }));
+        if let Some(thrown) = thrown {
+            stream_threw(held.made, kind, run.program, thrown, held.report.len());
+            searches.cut = true;
+        }
+    }
+    *held.searches = searches;
+    report.clear();
+    Ok(())
 }
 
 /// The writer of the XML2 and JSON documents of outfmt 16, 15, 14 and 13: one complete report per
@@ -543,7 +770,7 @@ impl Xml2Writer<NoSideFiles> {
     /// way; a run uses `for_run` or `with_document`.
     #[cfg(test)]
     pub fn new(kind: Xml2Kind, params: Xml2Run) -> Self {
-        let delayed = params.target.holds_back();
+        let delayed = params.holds_back();
         Self::with_document(Xml2Document::new(kind, delayed), params)
     }
 }
@@ -558,7 +785,7 @@ impl Xml2Writer<RunSideFiles> {
         out: Option<&std::path::Path>,
         sink: Option<&super::SideFileSink>,
     ) -> Self {
-        let delayed = params.target.holds_back();
+        let delayed = params.holds_back();
         Self::with_document(Xml2Document::for_run(kind, delayed, out, sink), params)
     }
 }
@@ -593,9 +820,33 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
     {
         let (params, scratch) = (&self.params, &mut self.scratch);
         let kind = self.document.kind();
+        if query.joins_held {
+            if let Some(held) = self.document.held_report() {
+                let report = &mut self.report;
+                return join_search(
+                    held,
+                    kind,
+                    report,
+                    params,
+                    scratch,
+                    run,
+                    query,
+                    out.len(),
+                    hits,
+                );
+            }
+        }
+        // The masks that the report lists and applies: a query of a batch that was not searched
+        // lists none, NCBI makes its result without the search, so the masks the search would have
+        // reported (probe: `BATCH_SIZE=10 -lcase_masking`, an N-only query with a lower-case run)
+        // are not there.
+        let masks = if query.searched { query.masks } else { &[] };
+        let mut search = 0..0;
+        let mut threw = false;
         // The report is made after the framing's separator, where the `Hit`s load their subjects
         // (`HitSink::position`: the start of the report written now).
-        self.document
+        let made = self
+            .document
             .report(&mut self.report, out, |start, report| match kind {
                 Xml2Kind::Single16 | Xml2Kind::Files14 => {
                     let mut enc = if kind == Xml2Kind::Single16 {
@@ -603,22 +854,67 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
                     } else {
                         XmlEncoder::xml2_document(report)
                     };
-                    let result = write_report(&mut enc, run, params, query, scratch, start, hits);
+                    let result = write_report(
+                        &mut enc,
+                        run,
+                        params,
+                        query,
+                        masks,
+                        scratch,
+                        start,
+                        &mut search,
+                        hits,
+                    );
                     let posts = enc.take_posts();
                     let thrown = enc.take_thrown();
+                    threw = thrown.is_some();
                     xml_report_made(report, kind, run.program, result, posts, thrown)
                 }
                 Xml2Kind::Single15 => {
                     let mut enc = JsonEncoder::array_element(report);
-                    write_report(&mut enc, run, params, query, scratch, start, hits)
-                        .map(|()| MadeReport::default())
+                    write_report(
+                        &mut enc,
+                        run,
+                        params,
+                        query,
+                        masks,
+                        scratch,
+                        start,
+                        &mut search,
+                        hits,
+                    )
+                    .map(|()| MadeReport::default())
                 }
                 Xml2Kind::Files13 => {
                     let mut enc = JsonEncoder::new(report);
-                    write_report(&mut enc, run, params, query, scratch, start, hits)
-                        .map(|()| MadeReport::default())
+                    write_report(
+                        &mut enc,
+                        run,
+                        params,
+                        query,
+                        masks,
+                        scratch,
+                        start,
+                        &mut search,
+                        hits,
+                    )
+                    .map(|()| MadeReport::default())
                 }
-            })
+            });
+        // The report just made is held: what the results that join it show (`join_search`).
+        if self.document.holds_back() {
+            let held = self.document.held_searches_mut();
+            held.end = search.end;
+            held.cut = threw;
+            held.id.clear();
+            held.id.extend_from_slice(query.id);
+            held.title.clear();
+            held.title.extend_from_slice(query.title);
+            held.len = query.len;
+            held.masks.clear();
+            held.masks.extend_from_slice(masks);
+        }
+        made
     }
 
     fn take_posts(&mut self) -> crate::report::blast_xml::DocumentPosts {
@@ -646,7 +942,7 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
         self.document.holds_back()
     }
 
-    fn unwritten(&mut self, out: &mut Vec<u8>) -> Result<()> {
-        self.document.unwritten(out)
+    fn unwritten(&mut self, out: &mut Vec<u8>, joins_held: bool) -> Result<()> {
+        self.document.unwritten(out, joins_held)
     }
 }

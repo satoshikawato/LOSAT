@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.109
+- Version: 1.111
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -760,7 +760,29 @@
   item M4b-T3 and psiblast line item PS10b, then 1.107 at the merge of dev of 2026-11-25 that
   brought 1.106, line NP item M4b-3c part 2, then 1.108 at the merge of dev of 2026-11-26 that
   brought 1.107, line NP item M (b));
-  1.109 2026-11-24 (a database sequence whose Seq-align id is a pdb id whose handle has another
+  1.109 2026-11-25 (version 5 alias `SEQIDLIST` combined with a search `-seqidlist` or
+  `-negative_seqidlist`, line RG item D1c-2: explicit rejection, rule 3, when the alias
+  `SEQIDLIST` or the search's `-seqidlist` holds two differently spelled Seq-ids that NCBI's
+  `s_CompareSeqId` treats as equivalent, or two unparseable Seq-ids whose `s_CompareSeqId`
+  exceptions differ, or a Seq-id that posts a warning alongside an unparseable Seq-id, where
+  NCBI's `std::sort` violates strict weak ordering or depends on the C++ library's sort steps;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.108 at
+  the merge of dev that brought 1.108 (line RG item X-short-bat-2); first 1.105, then 1.108);
+  1.110 2026-11-24 (BLASTN and BLASTX, line RG item X-short-bat-2: their rejections inside the search
+  of a query batch come after the reports of the query batches before, in NCBI's order: a query
+  chunk without a query (in BLASTN also a negative `CHUNK_SIZE` whose first range covers the batch,
+  in BLASTX every negative pair that splits a batch) and, in BLASTX, a chunk split again, at NCBI's
+  split, before the errors of the database that NCBI meets in a chunk's setup; BLASTN's rejection
+  of a negative pair whose chunks leave gaps (version 1.1) at TBLASTN's step of 1.97, where the
+  search of the batch's first chunk with a valid context would read subjects in hand whose
+  sequences can be read; BLASTX's rejection of an overlap that is not a multiple of 3 only with
+  such subjects (a batch without them is reported, or fails, as NCBI's is); the fetch rejections
+  under a negative seqid list of 1.93 and BLASTX's rejection of the compressed-lookup thresholds
+  that exhaust NCBI's overflow banks (decision D3, LOSAT's rejection with exit status 1, no
+  longer reported as an engine error) after the same reports; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.109; first 1.99, then 1.109 at the merge of dev that brought 1.99 to 1.108,
+  then 1.110 at the merge of dev of 2026-11-26 that brought 1.109, line RG item D1c-2);
+  1.111 2026-11-24 (a database sequence whose Seq-align id is a pdb id whose handle has another
   chain, which NCBI's data loader serves no sequence for: the empty Bioseq handle reproduced in
   every report, rule 2, and the explicit rejections, rule 3, of its tabular `sacc` and `saccver`
   in the class of 1.37, of its printed `-show_gis` description line, whose GI NCBI never sets,
@@ -780,7 +802,8 @@
   K10a's 1.103, line NP item M4b-T3's 1.104 and psiblast line item PS10b's 1.105, then 1.107 at
   the merge of dev 22ac798e5 that brought line NP item M4b-3c part 2's 1.106, then 1.108 at the
   merge of dev f2be0e496 that brought line NP item M (b)'s 1.107, then 1.109 at the merge of dev
-  10f846fa3 that brought line RG item X-short-bat-2's 1.108)
+  10f846fa3 that brought line RG item X-short-bat-2's 1.108, then 1.111 at the merge of dev
+  924bf3be4 that brought line RG item D1c-2's 1.109 and line RG item X-short-bat-2's 1.110)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1017,10 +1040,18 @@ Explicit rejections (rule 3):
   status 0), in BLASTP, psiblast and TBLASTN. A refused batch of two queries with one id that NCBI splits
   gives NCBI's error where its chunks reach the setup's failure, and the refusal where a chunk
   stops first.
+  BLASTX (version 1.110, line RG item X-short-bat-2, rows `db.xs.blastx.bat.*`) refuses a chunk
+  split again and a chunk without a query at NCBI's split, after the reports of the query batches
+  before and before the database's errors of a chunk's setup; every negative pair that splits a
+  BLASTX batch leaves such chunks (BLASTX evens the chunk size to a multiple of 3 and does not
+  adjust it again, so chunk 0 covers the batch). Its rejection of an overlap that is not a
+  multiple of 3, whose chunks NCBI searches out of the query's reading frames, comes after the same
+  reports, only where the batch has subjects in hand whose sequences can be read.
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.87 at the first query batch NCBI searches), compressed-lookup thresholds that
   exhaust its overflow bank (in BLASTP since version 1.108, as in TBLASTN since 1.97, in the query
-  batch whose table exhausts it, after the reports of the batches before). (`-max_target_seqs` values that make NCBI's preliminary hit
+  batch whose table exhausts it, after the reports of the batches before; in BLASTX since version
+  1.110, after the reports of the query batches before, exit status 1). (`-max_target_seqs` values that make NCBI's preliminary hit
   list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
 
@@ -2433,7 +2464,7 @@ file would differ, and NCBI's programs still could not open the database).
   after the host received a chunk of it (BLASTX's later query batch) is discarded by the host at
   the run's signal (`docs/web/abi_v2.md` §5, line RG T7-W).
 - A database sequence whose Seq-align id is a pdb id that its Seq-id handle holds with another
-  chain (version 1.109, 2026-11-24, line RG-KB item 12, Owner-delegated, standing instruction
+  chain (version 1.111, 2026-11-24, line RG-KB item 12, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07). The handle normalizes a pdb id (`CSeq_id_PDB_Info::Normalize`,
   `seq_id_tree.cpp:3381-3464`): where it rebuilds the id (a release date that normalizes, a
   lower-case letter in the molecule, or a chain and chain-id that disagree) the chain becomes the
@@ -2621,13 +2652,23 @@ file would differ, and NCBI's programs still could not open the database).
   rejection (a setting without a practical use; reproducing it would need NCBI's wrapped
   `size_t` arithmetic through the chunk ranges, masks and merge). Where such a pair does
   not split the batch (for example `-1` above `-2147483648`), NCBI searches as without the
-  variables and so does LOSAT (fixtures `env.negative_pair_*`).
+  variables and so does LOSAT (fixtures `env.negative_pair_*`). Since version 1.110 the rejection
+  comes after the reports of the query batches before (line RG item X-short-bat-2, rows
+  `db.xs.blastn.bat.*`): a pair whose first range covers the batch leaves the chunks after it
+  without a query, where NCBI's split stops (the next item); a pair whose chunks all hold a query
+  and leave gaps is refused where the search of the batch's first chunk with a valid context would
+  read subjects in hand whose sequences can be read, after that chunk's setup and the reads of the
+  database that fail before it (TBLASTN's step of 1.97); a batch without such subjects is reported
+  as NCBI reports it.
 
 - A `CHUNK_SIZE`/`OVERLAP_CHUNK_SIZE` pair whose chunk ranges leave a chunk without a
   query (an overlap close to or above the chunk size): NCBI's `CQuerySplitter::Split`
   (`split_query_cxx.cpp:872-880`) or the chunk's search stops with a null-pointer
   `CCoreException`; LOSAT rejects "a query chunk without a query" (round-3 audit: 27
-  oracle cases, the reason holds in all).
+  oracle cases, the reason holds in all). Since version 1.110 the rejection comes where
+  `CQuerySplitter::Split` stops, after the reports of the query batches before and before the
+  setup of any chunk and its read of the database, also with no subject in hand (rows
+  `db.xs.blastn.bat.empty.*`, `db.xs.blastn.bat.ord.empty.*`).
 
 - A version 5 database list (several names in `-db`, or the `DBLIST` of an alias file) that
   mixes databases with and without the accession table (`acc2oid`) of `makeblastdb
@@ -3271,11 +3312,11 @@ file would differ, and NCBI's programs still could not open the database).
   batch's prefetch is off (`DB contains no accession info.`, a version 5 list of databases with
   and without accession tables): the `catch` of the subject block leaves `m_SubjectId` empty
   before any row of the report loaded its subject, and `m_SubjectTaxId` unset; a later such row
-  prints what the last loaded row set. Since version 1.109 (line RG-KB item 12) also the rows of a
+  prints what the last loaded row set. Since version 1.111 (line RG-KB item 12) also the rows of a
   subject whose pdb Seq-align id NCBI's data loader serves no sequence for (rule 2 above): exit
   status 255 after the row's earlier fields, LOSAT's refusal before the batch's report.
 - `-show_gis` with outfmt 0 to 4 over a database sequence whose pdb Seq-align id NCBI's data loader
-  serves no sequence for (version 1.109, 2026-11-24, line RG-KB item 12, Owner-delegated, standing
+  serves no sequence for (version 1.111, 2026-11-24, line RG-KB item 12, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07): the description info of the empty Bioseq handle
   keeps the GI it was allocated with (`x_GetDeflineInfo` sets no GI before `x_FillDeflineAndId`
   returns, `showdefline.cpp:1576-1589`, `:388-394`), which the description line prints when it is
@@ -3287,7 +3328,7 @@ file would differ, and NCBI's programs still could not open the database).
   `-num_descriptions 0`, or where the subject's rank is past it, the output is NCBI's (row
   `db.pdbchain.only.blastp.0g`).
 - A database sequence whose pdb Seq-align id's handle another id of the same sequence holds (rule
-  2 above; version 1.109, 2026-11-24, line RG-KB item 12, reviews 1 and 2, Owner-delegated,
+  2 above; version 1.111, 2026-11-24, line RG-KB item 12, reviews 1 and 2, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07). Where another definition line than the
   Seq-align id's holds it, the reports show that line's title as NCBI's (rule 2 above; review 1
   refused the description line and the organism report, review 2 writes them). Where no definition
@@ -4178,6 +4219,45 @@ file would differ, and NCBI's programs still could not open the database).
   the sequence's end, and the index reads them (probes `p3` l93n and l94n, 4294967293 and 4294967294
   letters: SIGSEGV after `creating ....00.idx...`, no file left). LOSAT refuses (exit 1) at that
   sequence.
+- A version 5 alias `SEQIDLIST` combined with a search `-seqidlist` or `-negative_seqidlist`, when
+  the alias `SEQIDLIST` or the search's `-seqidlist` holds two differently spelled Seq-ids that
+  NCBI's `s_CompareSeqId` treats as equivalent, or two unparseable Seq-ids whose `s_CompareSeqId`
+  exceptions differ, or a Seq-id that posts a warning alongside an unparseable Seq-id (version
+  1.109, 2026-11-25, line RG item D1c-2, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07): `s_ProcessSeqIdFilters` (`seqdboidlist.cpp:578-649`) sorts the search's
+  `-seqidlist` (`:592`) and each alias `SEQIDLIST` (`:611`) with `s_CompareSeqId` (`:565-576`),
+  which parses both ids inside the comparator (`CSeq_id` with `fParse_AnyRaw | fParse_ValidLocal`),
+  returns `false` whenever `CSeq_id::Match` succeeds, and falls back to raw byte order otherwise.
+  Because `CSeq_id::Match` is not transitive (for example, `NP_000103` matches both `NP_000103.1`
+  and `NP_000103.2`, while `NP_000103.1` and `NP_000103.2` do not match; similarly `LOC7` and
+  `loc7` bracket unrelated ids in ASCII order), `s_CompareSeqId` is not a strict weak ordering.
+  NCBI's `std::sort` therefore invokes undefined ordering behaviour governed by its C++ library's
+  sort steps, which changes which spelling `std::set_intersection` (`:615`) or
+  `std::set_difference` (`:626`) keeps for case-sensitive LMDB `AccessionsToOids` (observed
+  against NCBI BLAST+ 2.17.0 on database `g` with `NP_000103.2` / `NP_000103` / `NP_000103.1`
+  against `-seqidlist NP_000103` or `NP_000103.1`: NCBI matches `NP_000103.1`, whereas another
+  sort leaves `NP_000103.2` or nothing). For the same reason, when a list of two or more distinct
+  entries contains unparseable ids with different exception messages (observed against NCBI BLAST+
+  2.17.0 on `sp||` / `tr||` / `NP_000103.1`, where `libstdc++` compares entry 2 before entry 1 and
+  throws `tr||`'s `release unreviewed` instead of `sp||`'s `release reviewed`, and on a 0-entry
+  `.bsl` with spaces in its date whose header splits into `Malformatted ID ` and
+  `Malformatted ID PM`) or a warning-posting id alongside an unparseable id, which exception or
+  warning NCBI prints depends on the C++ library's sort steps. Copying a C++ library's sort
+  implementation is barred by `AGENTS.md` rule 4. LOSAT parses all unique entries of each sorted
+  list up front (`seqdb::alias::validate_compare_seqids`) and, in order: (1) refuses if any entry
+  posts a Seq-id warning, (2) refuses if unparseable entries raise two or more distinct exception
+  texts, (3) raises NCBI's `CSeqIdException` when all unparseable entries raise the same exception
+  text, and (4) refuses (exit status 1) if any two distinct spellings match under `CSeq_id::Match`;
+  lists without such pairs have `s_CompareSeqId` equal to raw bytewise `<` and sort identically in
+  every sort. A search `-negative_seqidlist` is sorted by raw `<` in NCBI (`seqdboidlist.cpp:597`),
+  so equivalent pairs inside `-negative_seqidlist` alone are not refused (equivalent pairs inside
+  the alias `SEQIDLIST` remain refused, since `:611` still sorts it with `s_CompareSeqId`), and an
+  alias `SEQIDLIST` without a search seqid list is not sorted and is not refused. Fixture rows
+  `db.il.bp.v5.sq.amb*.rej.6`, `db.il.bp.v5.sq.uamb.rej.6`, `db.il.bp.v5.sq.bad*.rej.6`,
+  `db.il.bp.v5.sqbe.sl.rej.6` (refused), `db.il.bp.v5.sq.slunp.6`, `db.il.bp.v5.sqbe1.sl.6`,
+  `db.il.bp.v5.sq.uns.*`, `db.il.bp.v5.sq.amb1.plain.6`, and `db.il.bp.v5.sq.nslamb.6` of
+  `LOSAT/tests/db_search_manifest/blastp.il.tsv`; unit test
+  `v5_rejects_non_strict_weak_equivalent_seqid_pairs` in `LOSAT/src/seqdb/alias_tests.rs`.
 
 ## Explicit rejections of a taxonomy record past NCBI's mapping (rule 3, version 1.43)
 

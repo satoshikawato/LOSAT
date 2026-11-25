@@ -124,6 +124,9 @@ pub(super) struct PreparedXml {
     /// (`PsiSearch::bioseq_letters`), which the rows show and the counts compare as they are
     /// (`row_letters::QueryLetters`); a run of such a query has no other.
     query_bioseq: Option<std::sync::Arc<[u8]>>,
+    /// A PSSM query of the molecule `other` (`PsiSearch::query_other_coding`): the first `Hsp`'s
+    /// rows throw (`report::tabular::query_sequence_exception`).
+    query_other_coding: Option<i32>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_results.cpp:82-89,101-103
@@ -216,10 +219,17 @@ pub(super) fn prepare(
     // The reports that the documents write (the one report call, so a run that stops is one
     // without the epilog): a run that stops never writes the `-subject` report of its last query
     // when every document of the call holds it back (`written_queries`; outfmt 5 writes it).
+    let scopes = ranges.query_scopes.map(|scopes| scopes.numbered_from(0));
+    let holds_back = only_xml2
+        && crate::report::blast_xml2::reports_held(
+            matches!(target, Xml2Target::Subjects(_)),
+            values.pssm,
+        );
     let reports = written_queries(
         query_records.len(),
         !ranges.epilog,
-        only_xml2 && target.holds_back(),
+        holds_back,
+        crate::blastinput::query_batch::held_start_of(scopes, query_records.len()),
     );
     let texts = query_records[..reports]
         .iter()
@@ -227,6 +237,22 @@ pub(super) fn prepare(
         .zip(query_validity)
         .enumerate()
         .map(|(q_idx, ((query, hitlist), &valid))| {
+            let messages = query_messages(
+                query.seq(),
+                valid,
+                q_idx < values.identity_warned,
+                values.filtered_empty && !query_batch_skipped[q_idx],
+            );
+            // A query whose names no written result shows (`names_unshown_in`) has its message.
+            if crate::blastinput::query_batch::names_unshown_in(scopes, reports, holds_back, q_idx)
+            {
+                return Ok(names::labelled_query_text(
+                    query.warning_id(),
+                    query.title(),
+                    &messages,
+                    has_hits(hitlist),
+                ));
+            }
             names::query_text(
                 PROGRAM,
                 query.local_id.as_bytes(),
@@ -234,12 +260,7 @@ pub(super) fn prepare(
                 query.believed(),
                 query.title(),
                 true,
-                &query_messages(
-                    query.seq(),
-                    valid,
-                    q_idx < values.identity_warned,
-                    values.filtered_empty && !query_batch_skipped[q_idx],
-                ),
+                &messages,
                 has_hits(hitlist),
             )
         })
@@ -327,6 +348,8 @@ pub(super) fn prepare(
         cbs: values.cbs,
         query_gencode: None,
         db_gencode: Some(values.db_gencode),
+        // PSI-TBLASTN is an iterative search (`ProgramType::is_iterative`): one round.
+        program_type: super::in_pssm::program_type(values.pssm),
     };
     Ok(PreparedXml {
         values,
@@ -358,6 +381,7 @@ pub(super) fn prepare(
         xml2: xml2_run,
         taxa_notes: taxa.notes,
         query_bioseq: pssm.and_then(|psi| psi.bioseq_letters.clone()),
+        query_other_coding: pssm.and_then(|psi| psi.query_other_coding),
     })
 }
 
@@ -497,16 +521,33 @@ impl PreparedXml {
                     warnings.prefetch_lines(&mut *writer, taxdb_printer.batch_texts(q_idx))?;
                 }
             }
+            // How NCBI shows the query's result (`query_batch::XmlShow`).
+            let show = crate::blastinput::query_batch::xml_show_of(
+                ranges.query_scopes.map(|scopes| scopes.numbered_from(0)),
+                q_idx,
+            );
             if q_idx == self.texts.len() {
-                // The held report that is never written (`prepare`, `written_queries`).
-                document.unwritten(&mut buf)?;
-                crate::report::query_warnings::write_document_posts(
+                // The held report that is never written (`prepare`, `written_queries`); the one
+                // held before it is written, or fails (`CaughtException`: its post follows),
+                // unless this result joins it (`XmlShow::joins_held`).
+                let written = document.unwritten(&mut buf, show.joins_held);
+                crate::report::query_warnings::write_document_end(
+                    written,
                     &buf,
-                    document.take_posts(),
+                    &mut *document,
+                    "tblastn",
                     writer,
                     warnings.as_deref_mut(),
                 )?;
                 buf.clear();
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392
+                // Queries whose results join the unwritten held report were still read, exported
+                // and searched before the stopping batch, so their warnings and requests follow.
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    for later in (q_idx + 1)..query_records.len().min(hitlists.len()) {
+                        warnings.before_query(later, &mut *writer)?;
+                    }
+                }
                 break;
             }
             let text = &self.texts[q_idx];
@@ -534,15 +575,18 @@ impl PreparedXml {
                     &mut masks,
                 );
             }
+            // The query whose id, title and length the result shows (`XmlShow::label`).
+            let label = show.label.unwrap_or(q_idx);
             let xml_query = XmlQuery {
-                id: text.query_id(query.local_id.as_bytes()),
-                title: &text.title,
-                len: i32::try_from(query_letters.len())?,
+                id: self.texts[label].query_id(query_records[label].local_id.as_bytes()),
+                title: &self.texts[label].title,
+                len: i32::try_from(query_records[label].seq().len())?,
                 stats: self.stats[q_idx],
                 message: text.message.as_deref(),
                 // Read by XML2 alone.
                 searched: self.searched[q_idx],
                 masks: &masks,
+                joins_held: show.joins_held,
             };
             // What NCBI posts where it loads the subject of each `Hit` (`HitPosts`): the texts of
             // the subjects that the query's report reads one by one
@@ -615,6 +659,15 @@ impl PreparedXml {
                             let subject_seq = subject_letters.nt(oid);
                             let mut translation = TargetTranslation::of(subject_seq, &code);
                             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:280-300
+                                // The rows read the query's letters, which throw for a query of
+                                // the molecule `other`; `s_BlastXMLAddIteration` catches it.
+                                if let Some(coding) = self.query_other_coding {
+                                    return Err(crate::report::blast_xml::CaughtException(
+                                        crate::report::tabular::query_sequence_exception(coding),
+                                    )
+                                    .into());
+                                }
                                 let hsp = &linked.hsp;
                                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243-245
                                 // The start of a row whose range the XML cannot take, the query's
@@ -703,9 +756,11 @@ impl PreparedXml {
             // (`CaughtException`: the `Hit` of a subject whose lookup throws, `HitNames`): the XML2 and
             // JSON documents leave its report out (`Xml2Document::report`), and the post of the
             // exception follows the texts of the loads before it (`HitPosts::caught`). Another failed
-            // query leaves its partial bytes in `buf`, which the error return drops.
+            // query leaves its partial bytes in `buf`, which the error return drops. The post's
+            // prefix is the application's name, `tblastn` under `-in_pssm` too (whose program is
+            // `psitblastn`).
             if let Some(post) =
-                crate::report::blast_xml::writer::caught_post(written, &*document, run.program)?
+                crate::report::blast_xml::writer::caught_post(written, &*document, "tblastn")?
             {
                 posts.caught(post);
             }
@@ -721,23 +776,15 @@ impl PreparedXml {
         }
         if ranges.epilog {
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2230
-            // A `-subject` run's held report that failed (`CaughtException`) is flushed in
-            // `PrintEpilog`: post its message before the document's closing bytes, then write
-            // the epilog and return Ok (exit 0).
-            if let Some(post) = crate::report::blast_xml::writer::caught_post(
-                document.finish(&mut buf),
-                &*document,
-                run.program,
-            )? {
-                if let Some(warnings) = warnings.as_deref_mut() {
-                    writer.flush()?;
-                    warnings.sink.write_all(&post)?;
-                    warnings.sink.flush()?;
-                }
-            }
-            crate::report::query_warnings::write_document_posts(
+            // The held report of a `-subject` or `-in_pssm` run (`Xml2Run::holds_back`) is
+            // written here, or fails (`CaughtException`: post before the document's closing bytes,
+            // then write the epilog and return Ok).
+            let written = document.finish(&mut buf);
+            crate::report::query_warnings::write_document_end(
+                written,
                 &buf,
-                document.take_posts(),
+                &mut *document,
+                "tblastn",
                 writer,
                 warnings,
             )?;

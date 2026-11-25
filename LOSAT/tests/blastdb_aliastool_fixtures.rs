@@ -5,10 +5,6 @@
 //! changed or removed (in `in/` too), its size and FNV-1a digest (`ncbi/<row>.files`; the date of an
 //! alias file and of a binary seqid list replaced by `<DATE>`, its size `*`), frozen from the oracle
 //! of row RG-D2a (2026-11-24; README.md of the directory). NCBI is not run here.
-//!
-//! The rows of alias files that name a seqid or taxid list over a version 5 database
-//! (`AWAITING_V5_LISTS`) are those that LOSAT's reader refuses until line RG-D (D1c-2) reads such
-//! lists: there LOSAT must refuse and leave no alias file.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -21,12 +17,6 @@ mod temp_support;
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/blastdb_aliastool")
 }
-
-/// The rows whose alias file names a seqid or taxid list over a version 5 database, which LOSAT's
-/// reader refuses to open until line RG-D reads them (D1c-2, `seqdb::alias::refuse_v5_lists`).
-const AWAITING_V5_LISTS: [&str; 10] = [
-    "S02", "S03", "S05", "S07", "S09", "S10", "T01", "T02", "T05", "T06",
-];
 
 /// The rows of the table: the name and the command-line words.
 fn cases() -> Vec<(String, Vec<String>)> {
@@ -238,25 +228,6 @@ fn blastdb_aliastool_gives_ncbis_bytes() {
     for (name, words) in cases() {
         let dir = scratch(&name);
         let got = run(&dir, &words);
-        if AWAITING_V5_LISTS.contains(&name.as_str()) {
-            // LOSAT's refusal, before the alias file is kept.
-            let refused = got.2 == 1
-                && got.1.starts_with(b"Error: ")
-                && text(&got.1).contains("not supported by LOSAT")
-                && !got.3.contains(".pal\t");
-            if !refused {
-                eprintln!(
-                    "--- {name}: expected LOSAT's refusal, got status {}\nstderr: {:?}\nfiles:\n{}",
-                    got.2,
-                    text(&got.1),
-                    got.3
-                );
-                differ.push(name);
-            } else {
-                let _ = fs::remove_dir_all(&dir);
-            }
-            continue;
-        }
         let want = expected(&name);
         if got != want {
             eprintln!(

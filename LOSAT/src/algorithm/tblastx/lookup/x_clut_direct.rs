@@ -533,8 +533,9 @@ pub(crate) const X_U16_LETTERS: usize = 1 << 16;
 )]
 pub(crate) enum XFlatBuild<H: XQueryOffset = i32> {
     Table(XFlatCompressedLookup<H>),
-    /// One of NCBI's tables fills its overflow banks (the reference's `Err(())`).
-    Refused,
+    /// One of NCBI's tables fills its overflow banks: the first such table, as the reference
+    /// builder's `Err` names it.
+    Refused(BanksFilled),
     /// More appends than the slices' `u32` offsets take: the reference builder runs instead.
     TooLarge,
 }
@@ -544,7 +545,7 @@ impl XFlatBuild {
     pub(crate) fn x_offsets<H: XQueryOffset>(self) -> XFlatBuild<H> {
         match self {
             XFlatBuild::Table(table) => XFlatBuild::Table(H::x_from_wide(table)),
-            XFlatBuild::Refused => XFlatBuild::Refused,
+            XFlatBuild::Refused(filled) => XFlatBuild::Refused(filled),
             XFlatBuild::TooLarge => XFlatBuild::TooLarge,
         }
     }
@@ -1712,6 +1713,12 @@ fn x_count_ranges(
     ranges
 }
 
+/// The table (index in `tables`) of the entry `range_index` of `x_count_ranges`, a table's
+/// entry: each table's entry follows the segment before it.
+fn x_table_of_range(range_index: usize) -> BanksFilled {
+    BanksFilled(range_index / 2)
+}
+
 /// The count pass's state: the cell of each append in order, (query offset, appends) of each query
 /// offset with any, each cell's count of the appends counted so far, and the overflow cells that
 /// those appends take in the reference's table of all batches.
@@ -1832,7 +1839,7 @@ fn x_flat_with_capacity_of<S: CompressedScores>(
         counted: 0,
         cells: 0,
     };
-    for (range, is_table) in ranges {
+    for (range_index, (range, is_table)) in ranges.into_iter().enumerate() {
         st.count_new();
         let cells_before = st.cells;
         let words_before = range.start > 0;
@@ -1873,7 +1880,7 @@ fn x_flat_with_capacity_of<S: CompressedScores>(
             test(&mut st);
         }
         if refused {
-            return Some(XFlatBuild::Refused);
+            return Some(XFlatBuild::Refused(x_table_of_range(range_index)));
         }
         if too_large {
             return Some(XFlatBuild::TooLarge);
@@ -3654,7 +3661,7 @@ pub(crate) fn x_bp_build_compressed_lookup(
     tables: &[std::ops::Range<usize>],
     pool: &SearchPool<'_>,
     x_flat_args: XFlatArgs<'_>,
-) -> Option<Result<XCompressedLookup, ()>> {
+) -> Option<Result<XCompressedLookup, BanksFilled>> {
     if x_flat_args.x_ahead && (!x_bpclut_on() || !x_pool_builds(pool)) {
         return None;
     }
@@ -3674,7 +3681,7 @@ pub(crate) fn x_bp_build_compressed_lookup(
         x_flat_args,
     )? {
         XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
-        XFlatBuild::Refused => Some(Err(())),
+        XFlatBuild::Refused(filled) => Some(Err(filled)),
         // LOSAT_X_BPLKPAHEAD: a build ahead of its block runs no reference builder; the block
         // builds its table itself (`XFlatArgs::x_ahead`).
         XFlatBuild::TooLarge if x_flat_args.x_ahead => None,
@@ -3743,7 +3750,7 @@ pub(crate) fn x_bp_flat_ahead_table(
         matrix, appends, query, locations, pool, spare, segments,
     )? {
         XFlatBuild::Table(table) => Some(table),
-        XFlatBuild::Refused | XFlatBuild::TooLarge => None,
+        XFlatBuild::Refused(_) | XFlatBuild::TooLarge => None,
     }
 }
 
@@ -3761,7 +3768,7 @@ pub(crate) fn x_tbn_build_compressed_lookup(
     query: &[u8],
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
-) -> Option<Result<XCompressedLookup, ()>> {
+) -> Option<Result<XCompressedLookup, BanksFilled>> {
     x_build_compressed_on(
         word_size,
         scaled_threshold,
@@ -3786,7 +3793,7 @@ pub(crate) fn x_tbn_build_compressed_lookup_of(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     parts: usize,
-) -> Option<Result<XCompressedLookup, ()>> {
+) -> Option<Result<XCompressedLookup, BanksFilled>> {
     let reference = || {
         try_build_compressed_lookup(
             matrix,
@@ -3843,7 +3850,7 @@ pub(crate) fn x_tbn_build_compressed_lookup_of(
     };
     match built? {
         XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
-        XFlatBuild::Refused => Some(Err(())),
+        XFlatBuild::Refused(filled) => Some(Err(filled)),
         XFlatBuild::TooLarge => reference(),
     }
 }
@@ -3867,7 +3874,7 @@ pub(crate) fn x_bx_build_compressed_lookup_of(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     parts: usize,
-) -> Option<Result<XCompressedLookup, ()>> {
+) -> Option<Result<XCompressedLookup, BanksFilled>> {
     if query.len() > X_U16_LETTERS || !x_bpclut_on() {
         return x_tbn_build_compressed_lookup_of(
             matrix,
@@ -3922,7 +3929,7 @@ pub(crate) fn x_bx_build_compressed_lookup_of(
     };
     match built? {
         XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
-        XFlatBuild::Refused => Some(Err(())),
+        XFlatBuild::Refused(filled) => Some(Err(filled)),
         XFlatBuild::TooLarge => try_build_compressed_lookup(
             matrix,
             word_size,
@@ -3956,7 +3963,7 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
     tables: &[std::ops::Range<usize>],
     pool: &SearchPool<'_>,
     x_flat_args: XFlatArgs<'_>,
-) -> Option<Result<XCompressedLookup, ()>> {
+) -> Option<Result<XCompressedLookup, BanksFilled>> {
     if x_flat_args.x_ahead && (!x_bpclut_on() || !x_pool_builds(pool)) {
         return None;
     }
@@ -3976,7 +3983,7 @@ pub(crate) fn x_bp_build_compressed_lookup_of(
             x_flat_args,
         )? {
             XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
-            XFlatBuild::Refused => Some(Err(())),
+            XFlatBuild::Refused(filled) => Some(Err(filled)),
             // LOSAT_X_BPLKPAHEAD: a build ahead of its block runs no reference builder; the block
             // builds its table itself (`XFlatArgs::x_ahead`).
             XFlatBuild::TooLarge if x_flat_args.x_ahead => None,
@@ -4024,7 +4031,7 @@ pub(crate) fn x_bx_build_compressed_lookup<const WORD: usize>(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     parts: usize,
-) -> Option<Result<XBxCompressedLookup, ()>> {
+) -> Option<Result<XBxCompressedLookup, BanksFilled>> {
     let word_size = WORD;
     if query.len() > X_U16_LETTERS {
         return x_build_compressed_on(
@@ -4094,7 +4101,7 @@ pub(crate) fn x_bx_build_compressed_lookup<const WORD: usize>(
     };
     match built? {
         XFlatBuild::Table(table) => Some(Ok(XBxCompressedLookup::Flat(table))),
-        XFlatBuild::Refused => Some(Err(())),
+        XFlatBuild::Refused(filled) => Some(Err(filled)),
         XFlatBuild::TooLarge => reference(),
     }
 }
@@ -4172,7 +4179,7 @@ fn x_build_compressed_on(
     tables: &[std::ops::Range<usize>],
     pooled: bool,
     parts: usize,
-) -> Option<Result<XCompressedLookup, ()>> {
+) -> Option<Result<XCompressedLookup, BanksFilled>> {
     let reference = || {
         try_build_blosum62_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
             .map(|built| built.map(XCompressedLookup::Reference))
@@ -4223,7 +4230,7 @@ fn x_build_compressed_on(
     };
     match built? {
         XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
-        XFlatBuild::Refused => Some(Err(())),
+        XFlatBuild::Refused(filled) => Some(Err(filled)),
         XFlatBuild::TooLarge => reference(),
     }
 }

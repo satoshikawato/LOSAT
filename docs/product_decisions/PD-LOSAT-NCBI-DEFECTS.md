@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.108
+- Version: 1.109
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -747,7 +747,20 @@
   1.104 (line NP item M4b-T3), then 1.106 at the merge of dev a5595ed11 that brought 1.105
   (psiblast line item PS10b), then 1.107 at the merge of dev 22ac798e5 that brought 1.106 (line NP
   item M4b-3c part 2));
-  1.108 2026-11-25 (`losat makeblastdb -input_type asn1_txt|asn1_bin`, line RG item D3c-4: the
+  1.108 2026-11-24 (BLASTP, line RG item X-short-bat-2: the rejection of a compressed lookup table
+  whose neighbouring words fill NCBI's overflow banks (decision D3) comes in the search of the query
+  batch whose table fills them (of a split batch, its chunk's table), after the reports of the
+  query batches before, as TBLASTN's of 1.97 (it came before the run's first byte); the three
+  builders of the table name the first of NCBI's tables that fills them; Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; numbered after 1.107; first 1.99, then 1.100 at
+  the merge of dev of 2026-11-24 that brought 1.99, line RG item X-short-tbx-link, then 1.103 at
+  the merge of dev of 2026-11-25 that brought 1.100 to 1.102, line RG items KC-11d and D5c and
+  psiblast line item PS10e, then 1.104 at the merge of dev of 2026-11-25 that brought 1.103, line
+  RG item K10a, then 1.106 at the merge of dev of 2026-11-25 that brought 1.104 and 1.105, line NP
+  item M4b-T3 and psiblast line item PS10b, then 1.107 at the merge of dev of 2026-11-25 that
+  brought 1.106, line NP item M4b-3c part 2, then 1.108 at the merge of dev of 2026-11-26 that
+  brought 1.107, line NP item M (b));
+  1.109 2026-11-25 (`losat makeblastdb -input_type asn1_txt|asn1_bin`, line RG item D3c-4: the
   explicit rejections, rule 3, of a nucleotide ASN.1 sequence whose `Seq-data` (`iupacna`,
   `ncbi2na` or `ncbi4na`) is shorter than `Seq-inst.length` asks for (including a `-hash_index`
   read of 1 to 3 packed tail bases past the data, class of 1.86), of `NULL` elements inside
@@ -755,8 +768,8 @@
   `Blast-def-line.seqid` and an empty `Delta-ext` list (class of 1.45 and 1.52), and of a
   punctuation-only Bioseq title that NCBI's `x_CleanAndCompress` reads past the end of (class of
   1.2 and 1.37); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
-  after 1.107 at the merge of dev that brought line NP's 1.107 (#1639); first 1.105, then 1.106 and
-  1.107)
+  after 1.108 at the merge of dev that brought line RG item X-short-bat-2's 1.108 (#1644); first
+  1.105, then 1.106, 1.107 and 1.108)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -995,7 +1008,8 @@ Explicit rejections (rule 3):
   stops first.
 - Settings on which NCBI crashes (decision D3): an IDENTITY word size of 5 or 6,
   `-use_sw_tback -ungapped -comp_based_stats 0` (since version 1.87 at the first query batch NCBI searches), compressed-lookup thresholds that
-  exhaust its overflow bank. (`-max_target_seqs` values that make NCBI's preliminary hit
+  exhaust its overflow bank (in BLASTP since version 1.108, as in TBLASTN since 1.97, in the query
+  batch whose table exhausts it, after the reports of the batches before). (`-max_target_seqs` values that make NCBI's preliminary hit
   list size not positive were rejected before version 1.66, approved exception 19.) A query length plus `-window_size` in (2^30, 2^31 - 1], where
   NCBI does not finish (decision D8).
 
@@ -4054,7 +4068,7 @@ file would differ, and NCBI's programs still could not open the database).
   the sequence's end, and the index reads them (probes `p3` l93n and l94n, 4294967293 and 4294967294
   letters: SIGSEGV after `creating ....00.idx...`, no file left). LOSAT refuses (exit 1) at that
   sequence.
-- `losat makeblastdb -input_type asn1_txt` and `-input_type asn1_bin` (version 1.108, 2026-11-25,
+- `losat makeblastdb -input_type asn1_txt` and `-input_type asn1_bin` (version 1.109, 2026-11-25,
   line RG item D3c-4, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07):
   (a) a nucleotide `Bioseq` whose `iupacna`, `ncbi2na` or `ncbi4na` `Seq-data` holds fewer bytes or
   letters than `Seq-inst.length` asks for (including a `-hash_index` `CSeqVector` read of 1 to 3

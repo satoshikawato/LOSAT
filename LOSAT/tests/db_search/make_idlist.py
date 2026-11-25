@@ -56,6 +56,10 @@ Databases (the `.pjs`/`.njs` metadata, with the build's paths and dates, are dro
 - `lm` (D1c-1c-b): `ln` with its first 30 letters made `Q` in every sequence and the SEG masks of `segmasker
   -parse_seqids` (algorithm 21) in the volume, the same lines rewritten without Seq-ids: blastdbcmd's masks of a
   sequence whose front line has none (NCBI's Seq-loc of the masks takes the null best id and throws).
+- `gp` (D6): version 5 of g.faa with parsed Seq-ids, taxids from g.map, and a PIG ISAM (`gp.ppi`, `gp.ppd`)
+  mapping PIGs 1001, 1002, 1005 and 2147483649 (>= 2^31) to OIDs 0, 2, 5 and 10, leaving the other OIDs without
+  a PIG; `gpx` is `gp` again with its `.ppd` 64 zero bytes longer than its index says (uninitialised PIG ISAM).
+  `q_bx.fna` is `q.faa` back-translated (BLASTX).
 
 The list files and alias files are written below (`LISTS`, `ALIASES`). The rows of the -db manifests
 that use them are db.il.*; the blastdbcmd cases A272 on (D/fixtures/make_d1c_blastdbcmd.py).
@@ -142,6 +146,22 @@ LISTS = {
     "tx_a.txt": b"9606\n",
     # An OID list of OIDs 1, 2 and 3 of g.
     "m123.msk": (13).to_bytes(4, "big") + bytes([0b0111_0000, 0]),
+    # CLI -gilist / -negative_gilist / -ipglist / -negative_ipglist (D6).
+    "gi_zero.txt": b"0\n",
+    "gi_dup.txt": b"117\n102\n108\n102\n",
+    "gi_101.txt": b"101\n",
+    "gi_102.txt": b"102\n",
+    "gi_101_102.txt": b"101\n102\n",
+    "gi_long.bin": b"\xff\xff\xff\xfe" + struct.pack(">I", 1) + struct.pack(">Q", 101),
+    "ipg_a.txt": b"2147483649\n1001\n1005\n",
+    "ipg_a.bin": gi_bin([1001, 1005, 2147483649]),
+    "ipg_neg.txt": b"1001\n1002\n",
+    "ipg_all.txt": b"1001\n1002\n1005\n2147483649\n",
+    "ipg_zero.txt": b"0\n",
+    "ipg_unk.txt": b"99999\n",
+    "ipg_alpha.txt": b"1001\nabc\n",
+    "ipg_bad.bin": b"\xff\xff\xff\xfe" + struct.pack(">I", 1) + struct.pack(">Q", 1001),
+    "ipg_empty.txt": b"",
 }
 
 ALIASES = {
@@ -227,6 +247,8 @@ ALIASES = {
     "n_gi.nal": "TITLE gi n\nDBLIST n\nGILIST gi_n.txt\n",
     "n4_sq.nal": "TITLE sq n v4\nDBLIST n4\nSEQIDLIST sq_n.txt\n",
     "n4_gi.nal": "TITLE gi n v4\nDBLIST n4\nGILIST gi_n.txt\n",
+    # PIG ISAM database with an alias GILIST (D6).
+    "gp_gi.pal": "TITLE gp gi\nDBLIST gp\nGILIST gi_b.txt\n",
 }
 
 
@@ -383,6 +405,28 @@ def build_d1c1cb(ncbi: Path):
         (OUT / name).unlink()
 
 
+def pig_isam(base: Path, rows, pad: int = 0):
+    """A numeric PIG ISAM of 4-byte unsigned keys in one page; `pad` zero bytes after the data
+    file's rows, which its index does not count."""
+    rows = sorted(rows)
+    data = b"".join(struct.pack(">II", k, o) for k, o in rows)
+    header = struct.pack(">9i", 1, 0, len(data), len(rows), 1, 256, 0, 0, 0)
+    index = header + struct.pack(">II", rows[0][0], rows[0][1]) + struct.pack(">Ii", 0xFFFFFFFF, 0)
+    base.with_suffix(".ppi").write_bytes(index)
+    base.with_suffix(".ppd").write_bytes(data + bytes(pad))
+
+
+def build_d6(mk, common):
+    """The databases of D6: gp (PIG ISAM with high PIG >= 2^31 and OIDs without PIG), gpx
+    (uninitialised PIG ISAM), and q_bx.fna (back-translated q.faa for BLASTX)."""
+    pig_rows = [(1001, 0), (1002, 2), (1005, 5), (2147483649, 10)]
+    run([mk, "-in", "g.faa", "-dbtype", "prot", "-out", "gp", "-title", "gp", *common, "g.map"])
+    pig_isam(OUT / "gp", pig_rows)
+    run([mk, "-in", "g.faa", "-dbtype", "prot", "-out", "gpx", "-title", "gpx", *common, "g.map"])
+    pig_isam(OUT / "gpx", pig_rows[:2], pad=64)
+    back_translate(OUT / "q.faa", OUT / "q_bx.fna")
+
+
 def main():
     ncbi = Path(sys.argv[1])
     for path in OUT.iterdir():
@@ -411,6 +455,7 @@ def main():
     build_d1c1b(mk, common)
     build_d1c1c(mk)
     build_d1c1cb(ncbi)
+    build_d6(mk, common)
     for path in list(OUT.glob("*.pjs")) + list(OUT.glob("*.njs")):
         path.unlink()
     for name, data in LISTS.items():

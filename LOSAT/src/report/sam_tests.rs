@@ -111,6 +111,7 @@ fn hsp(q: (i32, i32), s: (i32, i32), frame: i8, ident: i32, ops: &[GapEditOp]) -
         subject: 0,
         q_offset: q.0,
         q_end: q.1,
+        q_left_out: 0,
         s_offset: s.0,
         s_end: s.1,
         q_frame: frame,

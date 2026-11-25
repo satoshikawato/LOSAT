@@ -6478,6 +6478,9 @@ fn open_search_database(
     // open and the output file exists) and before the test for an empty query.
     let database = match args.database_name() {
         Some(name) => {
+            let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+                outputs.formats.first().map(|format| format.outfmt),
+            );
             let database = database::BlastnDatabase::open_restricted(
                 name,
                 settings,
@@ -6486,11 +6489,13 @@ fn open_search_database(
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis)
-            .after_calls(args.first_query_ordinal > 0);
+            .after_calls(args.first_query_ordinal > 0)
+            .keeping_scope(keeps_scope, separate_xml2);
             crate::algorithm::common::database::note_archive_database_filter(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
                 &args.db_filter,
+                database.list_gis(),
                 database.list_taxids(),
                 &database.statistics(),
                 false,
@@ -8906,7 +8911,8 @@ fn run_in_pool(
             if let Err(error) =
                 database.batch_titles((batch.fetched_utf8, one_by_one), &mut batch_hit_lists, read)
             {
-                let error = match error.downcast::<database::HeaderReadError>() {
+                let error = match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
+                {
                     Ok(failure) => failure.error,
                     // LOSAT's refusal: the warnings of the batches read so far, as for the
                     // other errors of a batch (below).
@@ -9224,10 +9230,12 @@ fn run_in_pool(
                     warnings[start].append(&posts);
                     None
                 }
-                Some(Err(error)) if error.is::<database::HeaderReadError>() => {
+                Some(Err(error))
+                    if error.is::<crate::blastinput::app::ErrorAfterBatchReports>() =>
+                {
                     let failure = error
-                        .downcast::<database::HeaderReadError>()
-                        .expect("the error was checked to be a HeaderReadError");
+                        .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
+                        .expect("the error was checked to be an ErrorAfterBatchReports");
                     fail_batch!(failure.error);
                 }
                 Some(Err(error)) => Some(error),
@@ -9256,6 +9264,9 @@ fn run_in_pool(
                     (database::prefetch_format(&output_formats), first_rows),
                 );
             }
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+            database.reset_scope();
         }
         // The batch numbers its queries from 0.
         let first = start as u32;

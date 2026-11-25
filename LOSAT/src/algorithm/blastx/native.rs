@@ -55,7 +55,7 @@ pub(crate) fn engine(message: impl fmt::Display) -> anyhow::Error {
 /// `x_db_stream.rs`): NCBI's engine error of a reader error, or LOSAT's refusal as it is.
 fn database_error(kept: anyhow::Error) -> anyhow::Error {
     match kept.downcast::<PreliminaryReadError>() {
-        Ok(PreliminaryReadError(text)) => engine(text),
+        Ok(read_error) => crate::blastinput::app::engine_error(read_error.as_bytes()),
         Err(refusal) => refusal,
     }
 }

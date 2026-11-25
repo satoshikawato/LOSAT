@@ -308,7 +308,11 @@ impl std::fmt::Display for SeqDbError {
             }
             SeqDbError::Unsupported { path, message }
             | SeqDbError::NcbiThrows { path, message } => {
-                write!(f, "{}: unsupported database: {}", path.display(), message)
+                if path.as_os_str().is_empty() {
+                    write!(f, "unsupported database: {message}")
+                } else {
+                    write!(f, "{}: unsupported database: {}", path.display(), message)
+                }
             }
             SeqDbError::NcbiCrashes { path, message } => write!(
                 f,
@@ -666,6 +670,23 @@ impl SeqDbError {
             message if message == TOO_MANY.as_bytes() => Some(TOO_MANY),
             _ => Some("Database memory map file error"),
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:241-256
+    // `CLocalBlast::Run` catches `CSeqDBException` into `Database memory map file error` (or
+    // `Too many open files`), and catches any other `std::exception` (such as `CMemoryFile`'s
+    // `CFileException` on a lazy alias `SEQIDLIST`/`TAXIDLIST` or `CSeqIdException`) into a
+    // `CBlastException` with code `eSystem` carrying its `what` text: engine error, exit status 3.
+    /// The bytes after `BLAST engine error: ` when this error is raised during `CLocalBlast`'s
+    /// preliminary stage: [`Self::ncbi_search_message`], or `what()` of a known NCBI exception
+    /// ([`Self::ncbi_exception`]). `None`: the error is LOSAT's.
+    pub fn ncbi_preliminary_message(&self) -> Option<std::borrow::Cow<'static, [u8]>> {
+        if let Some(text) = self.ncbi_search_message() {
+            return Some(std::borrow::Cow::Borrowed(text.as_bytes()));
+        }
+        self.ncbi_exception()
+            .filter(|exception| exception.places_known())
+            .map(|exception| std::borrow::Cow::Owned(exception.what()))
     }
 
     // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:709-719
@@ -1829,12 +1850,9 @@ impl SeqDb {
         names: Vec<Vec<u8>>,
     ) -> Result<(), SeqDbError> {
         alias::compute_masks(&mut root)?;
-        if self.is_version5() {
-            alias::refuse_v5_lists(&root)?;
-        }
         let tree = ListedTree { root, names };
         let read = self.read_listed_tree(&tree);
-        if alias::reads_id_lists(&tree.root) {
+        if alias::reads_id_lists(&tree.root, self.is_version5()) {
             self.listed_tree = Some(Box::new(tree));
         }
         read
@@ -1855,7 +1873,7 @@ impl SeqDb {
         });
         let num_oids = self.num_oids();
         let scan = alias::needs_totals_scan(root);
-        let oids = match self.tree_oids(tree, alias::UserList::None) {
+        let oids = match self.tree_oids(tree, alias::UserList::None, None) {
             Ok(oids) => oids,
             Err(failure) => {
                 self.oid_list_error = Some(failure);
@@ -1906,11 +1924,12 @@ impl SeqDb {
     }
 
     /// NCBI's OID list of the alias tree `tree` ([`alias::alias_oids`]) under the search's
-    /// positive list `user`.
+    /// Pass 1 positive list `user` and Pass 2 rule `user_rule`.
     fn tree_oids(
         &self,
         tree: &ListedTree,
         user: alias::UserList<'_>,
+        user_rule: Option<&filter::DeflineRule>,
     ) -> Result<alias::AliasOids, oid_list::OidListError> {
         let volumes: Vec<alias::TreeVolume<'_>> = tree
             .names
@@ -1929,6 +1948,8 @@ impl SeqDb {
             self.seqtype,
             self.is_version5(),
             user,
+            user_rule,
+            &|| self.lmdb_entries(),
         )
     }
 
@@ -1939,32 +1960,36 @@ impl SeqDb {
             volume.set_oid_mask_type(mask_type);
         }
         for (at, lists) in std::mem::take(&mut oids.lists).into_iter().enumerate() {
-            if !lists.is_empty() {
-                let start = self.volume_starts[at];
-                self.volumes[at].set_alias_lists(lists, start);
-            }
+            let start = self.volume_starts[at];
+            self.volumes[at].set_alias_lists(lists, start);
         }
         self.all_bits_special_set = oids.all_bits_special_set;
         oids
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:394-466
-    // NCBI's `CSeqDB` opened with a positive list translates the alias files' id lists under it
-    // (`alias::UserList`), when its constructor builds the OID list to scan the totals, after the
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:578-716
+    // NCBI's `CSeqDB` opened with a list translates the alias files' id lists under it
+    // (positive lists in Pass 1; both positive and negative seqid/taxid lists in version 5 Pass 2),
+    // when its constructor builds the OID list to scan the totals, after the
     // list's own resolution: the alias files' OID list is made again under the list. Its failure
     // is the constructor's (`build_oid_list`); the failure without the list stays the reports'
     // where their database scans the totals (`unlisted_oid_list_error`).
-    /// Makes the alias files' OID list again under the search's positive list `user` of a
-    /// database whose alias tree names id lists (`listed_tree`): the alias files' bits and
-    /// iteration range (`filter`), the volumes' id lists and the shape of NCBI's bit set, or the
-    /// failure (`oid_list_error`). Nothing changes for any other database.
-    fn translate_alias_lists(&mut self, user: alias::UserList<'_>) {
+    /// Makes the alias files' OID list again under the search's Pass 1 list `user` and Pass 2 rule
+    /// `user_rule` of a database whose alias tree names id lists (`listed_tree`): the alias files'
+    /// bits and iteration range (`filter`), the volumes' id lists and the shape of NCBI's bit set,
+    /// or the failure (`oid_list_error`). Nothing changes for any other database.
+    fn translate_alias_lists(
+        &mut self,
+        user: alias::UserList<'_>,
+        user_rule: Option<&filter::DeflineRule>,
+    ) {
         let Some(tree) = self.listed_tree.take() else {
             return;
         };
         let unlisted = self.oid_list_error.take();
         self.unlisted_oid_list_error = unlisted.filter(|_| self.oid_list_fails_scan);
-        match self.tree_oids(&tree, user) {
+        match self.tree_oids(&tree, user, user_rule) {
             Ok(oids) => {
                 let oids = self.set_tree_oids(oids);
                 if let Some(words) = oids.words {

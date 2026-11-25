@@ -26,7 +26,7 @@ Choose a task with `-task`. Options you leave out take the default of the task.
 - **Genetic code.** `-query_gencode` (default 1) selects the code that translates the query. It takes the NCBI genetic code numbers 1 to 6, 9 to 16, 21 to 31 and 33. `-strand` (`both`, `plus`, `minus`) limits the frames to one strand.
 - **Subject.** `-subject` takes a protein FASTA file, in the same forms as `-query`. A subject record can have at most 5,000,000 residues. Protein subjects need no genetic code.
 - **Database.** `-db` searches a protein BLAST database written by `makeblastdb` or `losat makeblastdb`, or one of NCBI's downloaded protein databases. Name several databases in one string (`-db "a b"`). `-db` and `-subject` cannot be used together. See [BLAST databases](../databases.md).
-- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist` and `-negative_seqidlist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants). `-db_soft_mask` and `-db_hard_mask` use the masks stored in a database that was built with `makeblastdb -mask_data`, or its GI-indexed masks (`makeblastdb -gi_mask`, ids 0, 1, ... or the names of its alias file's `MASKLIST`; see [Masks](../databases.md#masks)).
+- **Database filters.** With `-db` you can restrict the search with `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist`, `-gilist`, `-negative_gilist`, `-ipglist` and `-negative_ipglist` (`-no_taxid_expansion` keeps a taxid from reaching its descendants). `-db_soft_mask` and `-db_hard_mask` use the masks stored in a database that was built with `makeblastdb -mask_data`, or its GI-indexed masks (`makeblastdb -gi_mask`, ids 0, 1, ... or the names of its alias file's `MASKLIST`; see [Masks](../databases.md#masks)).
 - **Locations.** `-query_loc START-STOP` searches part of the query (positions in nucleotides), and `-subject_loc START-STOP` part of the subject (with `-subject` only). Positions are 1-based and inclusive.
 - **Masking.** SEG is on by default (`12 2.2 2.5`; `-seg no` turns it off). `-lcase_masking` treats lower-case letters of the query as masked.
 
@@ -94,7 +94,7 @@ LOSAT stops with an error for these `blastx` settings instead of running somethi
 - An `-evalue` that is not a finite number.
 - `-matrix IDENTITY` with word sizes 5 to 7 (the default of `-task blastx-fast`), and matrix names that only begin with `IDENTITY`.
 - `-threshold` values that overflow NCBI's word-table buffers when the word size is 5 to 7.
-- `-remote`, `-entrez_query`, `-gilist`, `-ipglist` and `-import_search_strategy`.
+- `-remote`, `-entrez_query` and `-import_search_strategy`.
 - A protein subject of more than 5,000,000 residues, from `-subject` or from a database.
 - `-db_hard_mask` on a database with a sequence whose overlapping or out-of-order masks LOSAT cannot search as NCBI BLAST+ does. One such sequence refuses the whole database. Other databases whose masks overlap, nest or are stored out of order are searched as NCBI BLAST+ searches them, among them the A. thaliana TAIR10 and UniRef50 databases masked by `segmasker`; where NCBI's rows for a sequence depend on the sequences next to it, LOSAT searches it on its own (see [Differences](../differences.md#-db_hard_mask-with-overlapping-masks-that-reach-a-neighbouring-sequence)). See [What LOSAT refuses](../refusals.md#blastx).
 

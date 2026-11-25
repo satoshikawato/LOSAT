@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 import { toProgramDescription } from 'losat';
 import { CUSTOM_OUTPUT, type ProgramId } from 'losat/domain';
 import {
+  DATABASE_IPG_FLAGS,
+  DATABASE_IPG_PROGRAMS,
   DATABASE_MASK_FLAGS,
   DATABASE_MASK_PROGRAMS,
   buildArgv,
@@ -138,6 +140,30 @@ describe('buildArgv', () => {
   it('refuses the database of repeats of BLASTN, also written -flag=value', () => {
     for (const words of [['-filtering_db', 'repeats'], ['-filtering_db=repeats']]) {
       expect(extra('blastn', words)).toThrow(/^-filtering_db \(a BLAST database of repeats\) is not supported in the browser yet$/);
+    }
+  });
+
+  it('refuses the database IPG filters of protein database modes, also written -flag=value', () => {
+    expect(DATABASE_IPG_PROGRAMS).toEqual(['blastp', 'blastx']);
+    for (const program of DATABASE_IPG_PROGRAMS) {
+      for (const flag of DATABASE_IPG_FLAGS) {
+        expect(extra(program, [flag, 'ipgs.txt']), `${program} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
+        expect(extra(program, [`${flag}=ipgs.txt`]), `${program} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
+      }
+    }
+    for (const program of ['blastn', 'tblastn', 'tblastx'] as const) {
+      for (const flag of DATABASE_IPG_FLAGS) {
+        expect(extra(program, [flag, 'ipgs.txt'])(), `${program} ${flag}`).toEqual([program, '-query', 'q.fa', '-subject', 's.fa', flag, 'ipgs.txt']);
+      }
+    }
+  });
+
+  it("lists the database IPG filters in the engine's options of the modes that have them (describe)", () => {
+    const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+    for (const program of PROGRAMS) {
+      const flags = toProgramDescription(described[program.id]).parameters.map((option) => option.flag);
+      const has = DATABASE_IPG_FLAGS.filter((flag) => flags.includes(flag));
+      expect(has, program.id).toEqual(DATABASE_IPG_PROGRAMS.includes(program.id) ? [...DATABASE_IPG_FLAGS] : []);
     }
   });
 

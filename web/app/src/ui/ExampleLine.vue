@@ -76,6 +76,7 @@ const busy = (set: ExampleSet) => {
   const progress = load.value?.id === set.id ? load.value.progress.state : undefined;
   return progress !== undefined && progress !== 'failed';
 };
+const copying = (set: ExampleSet) => state.value.copying === set.id || undefined;
 
 // A set put into the inputs, and a load that failed, are told (with the note on the set, if any).
 watch(
@@ -122,51 +123,53 @@ function remove(set: ExampleSet): void {
 <template>
   <div v-if="sets.length > 0" class="example-line" data-testid="example-line">
     <span class="example-title">Example</span>
-    <ul class="example-sets">
-      <li v-for="set in sets" :key="set.id" :data-testid="`example-${set.id}-row`" :data-example-set="set.id">
-        <button
-          :ref="(element) => keepButton(set.id, element)"
-          type="button"
-          :aria-disabled="busy(set) || undefined"
-          :data-testid="`example-${set.id}`"
-          @click="press(set)"
-        >
-          {{ set.label }}
-        </button>
-        <span class="hint" :data-testid="`example-${set.id}-note`"><LosatLoader v-if="busy(set)" />{{ sentence(set) }}</span>
-        <button
-          v-if="busy(set)"
-          type="button"
-          class="link"
-          :data-testid="`example-${set.id}-cancel`"
-          @click="examples.cancel()"
-        >
-          Cancel
-        </button>
-        <template v-else-if="state.saved[set.id]">
+    <div class="control-tip">
+      <ul class="example-sets">
+        <li v-for="set in sets" :key="set.id" :data-testid="`example-${set.id}-row`" :data-example-set="set.id">
           <button
-            v-if="examples.copyTo"
+            :ref="(element) => keepButton(set.id, element)"
+            type="button"
+            :aria-disabled="busy(set) || undefined"
+            :data-testid="`example-${set.id}`"
+            @click="press(set)"
+          >
+            {{ set.label }}
+          </button>
+          <span class="hint" :data-testid="`example-${set.id}-note`"><LosatLoader v-if="busy(set)" />{{ sentence(set) }}</span>
+          <button
+            v-if="busy(set)"
             type="button"
             class="link"
-            :aria-disabled="state.copying === set.id || undefined"
-            :data-testid="`example-${set.id}-save`"
-            @click="save(set)"
+            :data-testid="`example-${set.id}-cancel`"
+            @click="examples.cancel()"
           >
-            {{ examples.copyTo === 'folder' ? 'Save to folder…' : 'Download' }}
+            Cancel
           </button>
-          <button
-            type="button"
-            class="link"
-            :aria-disabled="state.copying === set.id || undefined"
-            :data-testid="`example-${set.id}-delete`"
-            @click="remove(set)"
-          >
-            Delete
-          </button>
-        </template>
-      </li>
-    </ul>
-    <HelpTip id="example" label="About the examples" :text="help" />
+          <template v-else-if="state.saved[set.id]">
+            <button
+              v-if="examples.copyTo"
+              type="button"
+              class="link"
+              :aria-disabled="copying(set)"
+              :data-testid="`example-${set.id}-save`"
+              @click="save(set)"
+            >
+              {{ examples.copyTo === 'folder' ? 'Save to folder…' : 'Download' }}
+            </button>
+            <button
+              type="button"
+              class="link"
+              :aria-disabled="copying(set)"
+              :data-testid="`example-${set.id}-delete`"
+              @click="remove(set)"
+            >
+              Delete
+            </button>
+          </template>
+        </li>
+      </ul>
+      <HelpTip id="example" label="About the examples" :text="help" />
+    </div>
     <p v-if="load?.progress.state === 'failed'" class="error" data-testid="example-error">
       {{ load.progress.message }}
     </p>

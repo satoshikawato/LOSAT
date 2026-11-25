@@ -60,7 +60,7 @@ pub mod tax_sqlite;
 pub mod taxdb;
 pub mod volume;
 
-pub use filter::{DbList, ListWarning, SeqidList, TaxidList};
+pub use filter::{DbList, GiList, ListWarning, PigList, SeqidList, TaxidList};
 pub(crate) use filter::{DbSequence, Oid, OidMap};
 
 #[cfg(test)]
@@ -279,6 +279,11 @@ pub enum SeqDbError {
         reason: String,
         exception: Box<crate::ncbi_exception::NcbiException>,
     },
+    /// A header record that fails a check of NCBI's reader that the run's settings turn off,
+    /// after which NCBI reads on (`SeqDb::refuse_unchecked_reads`): what LOSAT refuses, a noun
+    /// phrase (`ReadVerification::refused`), which the program's refusal names
+    /// (`algorithm::common::database::losat_reader_error`).
+    Setting(String),
 }
 
 impl std::fmt::Display for SeqDbError {
@@ -288,6 +293,7 @@ impl std::fmt::Display for SeqDbError {
                 f.write_str(&String::from_utf8_lossy(message))
             }
             SeqDbError::Range(message) | SeqDbError::Internal(message) => f.write_str(message),
+            SeqDbError::Setting(refused) => write!(f, "{refused} is not supported by LOSAT"),
             SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
                 write!(f, "{}: {}", path.display(), source)
             }
@@ -381,6 +387,7 @@ impl SeqDbError {
             },
             SeqDbError::Range(message) => SeqDbError::Range(message.clone()),
             SeqDbError::Internal(message) => SeqDbError::Internal(message.clone()),
+            SeqDbError::Setting(refused) => SeqDbError::Setting(refused.clone()),
             SeqDbError::Ncbi(exception) => SeqDbError::Ncbi(exception.clone()),
             SeqDbError::TaxdbThrows {
                 path,
@@ -570,7 +577,8 @@ impl SeqDbError {
             | SeqDbError::Range(_)
             | SeqDbError::Internal(_)
             | SeqDbError::Ncbi(_)
-            | SeqDbError::TaxdbThrows { .. } => None,
+            | SeqDbError::TaxdbThrows { .. }
+            | SeqDbError::Setting(_) => None,
         }
     }
 
@@ -1182,6 +1190,8 @@ pub struct SeqDb {
     positive_list: bool,
     /// `SeqDb::list_taxids`.
     list_taxids: Vec<i32>,
+    /// `SeqDb::list_gis`.
+    list_gis: Vec<i64>,
     /// `SeqDb::name_records`.
     name_records: Vec<NameRecord>,
     /// The LMDB files of a version 5 database for `SeqDb::seqid_lookup`, opened at its first use.
@@ -1421,12 +1431,21 @@ impl SeqDb {
     }
 
     /// The taxids of the search's list object after the volumes opened, ascending, which the
-    /// BLAST archive writes (`DbFilterArgs::archive_parameter`): of a positive list those the
+    /// BLAST archive writes (`DbFilterArgs::archive_parameters`): of a positive list those the
     /// database holds (`CSeqDBLMDBSet::TaxIdsToOids`, `tax_ids.swap` with `rv_tax_ids`), of a
     /// negative list all (`CSearchDatabase::x_InitializeDb` opens the database with a copy of
     /// it). Empty without a taxid list.
     pub fn list_taxids(&self) -> &[i32] {
         &self.list_taxids
+    }
+
+    /// The GIs of the search's list object after the volumes opened, which the BLAST archive and
+    /// search strategy write (`DbFilterArgs::archive_parameters`): sorted ascending (with
+    /// duplicates) for a positive `-gilist` (`InsureOrder` ran when the database opened), in file
+    /// order (with duplicates) for `-negative_gilist` (`CSearchDatabase::x_InitializeDb` opened
+    /// the database with a `CSeqDBIdSet` copy). Empty without a GI list or for a 0-GI file.
+    pub fn list_gis(&self) -> &[i64] {
+        &self.list_gis
     }
 
     /// The search path the database was opened with (`open_in`), none for a database opened
@@ -1763,6 +1782,7 @@ impl SeqDb {
             reports_show_gis: false,
             positive_list: false,
             list_taxids: Vec::new(),
+            list_gis: Vec::new(),
             name_records: Vec::new(),
             lookup_files: OnceLock::new(),
             lookup_isams: OnceLock::new(),
@@ -1890,7 +1910,7 @@ impl SeqDb {
     fn tree_oids(
         &self,
         tree: &ListedTree,
-        user: alias::UserList,
+        user: alias::UserList<'_>,
     ) -> Result<alias::AliasOids, oid_list::OidListError> {
         let volumes: Vec<alias::TreeVolume<'_>> = tree
             .names
@@ -1938,7 +1958,7 @@ impl SeqDb {
     /// database whose alias tree names id lists (`listed_tree`): the alias files' bits and
     /// iteration range (`filter`), the volumes' id lists and the shape of NCBI's bit set, or the
     /// failure (`oid_list_error`). Nothing changes for any other database.
-    fn translate_alias_lists(&mut self, user: alias::UserList) {
+    fn translate_alias_lists(&mut self, user: alias::UserList<'_>) {
         let Some(tree) = self.listed_tree.take() else {
             return;
         };

@@ -1,0 +1,5 @@
+# TBLASTN 2.17.0+
+# Query: f101
+# Database: tests/db_search/swgap/nestp
+# Fields: query id, subject id, % query coverage per subject
+# 15 hits found

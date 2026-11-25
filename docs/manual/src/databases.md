@@ -76,7 +76,7 @@ A `-db` name with a directory (`../data/swissprot`, `/data/blast/nt`) is looked 
 BLASTDB=/data/blast
 ```
 
-The same search path finds the `taxdb` files, the files named by `-seqidlist` and `-taxidlist`, and `taxonomy4blast.sqlite3`. A database that is not found stops the search with NCBI's message, naming the search path.
+The same search path finds the `taxdb` files, the files named by `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist` and `-negative_taxidlist`, and `taxonomy4blast.sqlite3`. A database that is not found stops the search with NCBI's message, naming the search path.
 
 ## Taxonomy
 
@@ -96,7 +96,7 @@ Without `taxdb`, name fields print `N/A` and LOSAT writes NCBI's warning (`Taxon
 A database can hold masks that mark low-complexity or repeat regions, made by `dustmasker`, `segmasker`, `windowmasker` or `convert2blastmask` and added with `makeblastdb -mask_data`. Masks are used in these ways:
 
 - `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx` `-db_soft_mask ID` and `-db_hard_mask ID` search with the masks of one algorithm: words inside a soft mask do not start hits, and a hard mask cuts the masked letters out of the search. `ID` is the numeric id or the name shown by `blastdbcmd -info` under "Available filtering algorithms". The alignments in format 0 to 4 of `blastn`, `blastp` and `blastx` show the masked letters of the database sequence in lower case; `tblastn` and `tblastx` show the translated letters in upper case, as NCBI does. `tblastn` and `tblastx` read each mask in every reading frame at the positions divided by 3, and with `-db_hard_mask` they score the masked bases as ambiguous after the first search, as NCBI does (see [What LOSAT refuses](refusals.md)). With `-db_soft_mask`, `tblastn` and `tblastx` also search a sequence of more than about 15,000,000 bases whose masks are stored out of order, with NCBI BLAST+'s `-num_threads 1` rows at every `-num_threads`.
-- `blastp` and `blastx` with `-db_hard_mask` also search a database whose masks overlap, nest or are stored out of order, as NCBI BLAST+ searches it. `segmasker` writes such masks. Seg-masked proteomes such as A. thaliana TAIR10 and UniRef50 are searched. Where NCBI's rows for a sequence depend on the entries that the sequences next to it leave in its table of diagonals, LOSAT searches that sequence without them, with the same result at every `-num_threads` (see [Differences](differences.md#-db_hard_mask-with-overlapping-masks-that-reach-a-neighbouring-sequence)). A database is refused when one of its sequences has masks that LOSAT cannot search as NCBI does; see [What LOSAT refuses](refusals.md#blastp). `blastn`, `tblastn` and `tblastx` refuse every database whose masks overlap or are stored out of order.
+- `blastp` and `blastx` with `-db_hard_mask` also search a database whose masks overlap, nest or are stored out of order, as NCBI BLAST+ searches it. `segmasker` writes such masks. Seg-masked proteomes such as A. thaliana TAIR10 and UniRef50 are searched. Where NCBI's rows for a sequence depend on the entries that the sequences next to it leave in its table of diagonals, LOSAT searches that sequence without them, with the same result at every `-num_threads` (see [Differences](differences.md#-db_hard_mask-with-overlapping-masks-that-reach-a-neighbouring-sequence)). A database is refused when one of its sequences has masks that LOSAT cannot search as NCBI does; see [What LOSAT refuses](refusals.md#blastp). `tblastn` and `tblastx` also search masks that overlap or nest in the order of their start, searching any sequence whose hits would reach another sequence's entries on its own as `blastp` and `blastx` do (see [Differences](differences.md#-db_hard_mask-with-overlapping-masks-that-reach-a-neighbouring-sequence)), with the same rows at every `-num_threads`, and refuse masks stored out of that order; `blastn` refuses every database whose masks overlap or are stored out of order.
 - `blastdbcmd -mask_sequence_with ID` writes masked letters in lower case, and `-outfmt "%m<ID>"` prints the mask ranges.
 
 See [dustmasker](programs/dustmasker.md), [segmasker](programs/segmasker.md), [windowmasker](programs/windowmasker.md), [convert2blastmask](programs/convert2blastmask.md) and [makeblastdb](programs/makeblastdb.md).
@@ -121,8 +121,7 @@ A database of the wrong molecule type is reported as not found, with NCBI's mess
 ## Search options that use the database
 
 - `-dbsize` and `-searchsp` set the database size used for statistics (with `-db` and `-subject`).
-- `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist` and `-no_taxid_expansion` select sequences, with `-db`.
-- `-gilist`, `-negative_gilist`, `-ipglist` and `-negative_ipglist` need NCBI's GI and IPG databases and are not provided.
+- `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-seqidlist`, `-negative_seqidlist`, `-gilist`, `-negative_gilist` and `-no_taxid_expansion` select sequences, with `-db`. On protein databases (`blastp`, `blastx`, `psiblast`), `-ipglist` and `-negative_ipglist` select or exclude sequences using the local PIG index (`.ppi`/`.ppd`).
 
 ## Differences from NCBI BLAST+
 

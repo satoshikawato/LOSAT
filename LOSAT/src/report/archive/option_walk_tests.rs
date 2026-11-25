@@ -166,6 +166,8 @@ fn hitlist(
 /// The database lists (`DbFilterArgs`): program options of the database (`OptionsHandle`), never
 /// algorithm options.
 const DB_FILTERS: &[Case] = &[
+    ("gilist", &["-gilist", "g.gil"], &[]),
+    ("negative_gilist", &["-negative_gilist", "g.gil"], &[]),
     ("seqidlist", &["-seqidlist", "s.txt"], &[]),
     ("negative_seqidlist", &["-negative_seqidlist", "s.txt"], &[]),
     ("taxids", &["-taxids", "9606"], &[]),
@@ -177,6 +179,12 @@ const DB_FILTERS: &[Case] = &[
         &["-taxids", "9606", "-no_taxid_expansion"],
         &[],
     ),
+];
+
+/// The IPG database lists of protein-database programs (`blastp`, `blastx`, `psiblast`).
+const IPG_FILTERS: &[Case] = &[
+    ("ipglist", &["-ipglist", "p.ipg"], &[]),
+    ("negative_ipglist", &["-negative_ipglist", "p.ipg"], &[]),
 ];
 
 /// The formatting arguments (`FormattingArgs`): the report's only.
@@ -488,7 +496,7 @@ fn every_psiblast_argument_is_recorded_as_ncbi_records_it() {
         program: "psiblast",
         base: &["-query", "q.faa", "-db", "d"],
         default: PSIBLAST_DEFAULT,
-        cases: with(&[PSIBLAST, DB_FILTERS, FORMATTING]),
+        cases: with(&[PSIBLAST, DB_FILTERS, IPG_FILTERS, FORMATTING]),
         inputs: psiblast_inputs,
     });
 }
@@ -505,7 +513,7 @@ fn every_psiblast_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
         base: &["-in_pssm", "p.asn", "-db", "d"],
         default: PSIBLAST_DEFAULT,
         cases: excluding(
-            with(&[PSIBLAST, DB_FILTERS, FORMATTING]),
+            with(&[PSIBLAST, DB_FILTERS, IPG_FILTERS, FORMATTING]),
             &[
                 ("query", &["-query", "q.faa"]),
                 ("query_loc", &["-query_loc", "1-10"]),
@@ -555,6 +563,9 @@ const RPS_COMMON: &[Case] = &[
     ),
     ("outfmt", &["-outfmt", "6"], &[]),
     ("show_gis", &["-show_gis"], &[]),
+    // NCBI's `CFormattingArgs::ExtractAlgorithmOptions` records the hit list size only
+    // (blast_args.cpp:2894-2978): `-html` is the formatter's (`m_IsHTML`), not the request's.
+    ("html", &["-html"], &[]),
     (
         "num_descriptions",
         &["-num_descriptions", "3", "-num_alignments", "2"],

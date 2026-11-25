@@ -15,10 +15,18 @@ use std::rc::Rc;
 use super::format::Header;
 use super::stream::{SeqData, SequenceStream, StreamError};
 use super::{code_bits, min_offset, Options, SeqNum, Word, CR};
+use crate::ncbi_app::files::{ends_like_sigpipe, Ostream};
 
 /// `CDbIndex_Factory::MEGABYTE`.
 // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1537
 const MEGABYTE: u64 = 1024 * 1024;
+
+/// Block size in bytes that NCBI's binary `CNcbiOfstream` writes to an index volume after
+/// `SaveHeader` flushes the 44-byte header (`dbindex_factory.cpp:1633`).
+const INDEX_STREAM_BLOCK: u64 = 8192;
+
+/// Number of 4-byte index words in one [`INDEX_STREAM_BLOCK`].
+const INDEX_BLOCK_WORDS: usize = (INDEX_STREAM_BLOCK / 4) as usize;
 
 /// `CSubjectMap_Factory_Base::CMaskHelper`: an iterator over the masked intervals of a sequence
 /// (the packed locations of its `mask_locs_`, each a list of `(from, to)`), which `In` moves
@@ -821,14 +829,38 @@ impl OffsetData {
                 self.total = self.total.wrapping_add(1);
             }
         }
-        let mut stats = options
+        // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1408-1436
+        // Through `Ostream`, a non-pipe write failure sets the stream bad and drops the rest while
+        // the index finishes, whereas a closed pipe outside Windows ends the run at once
+        // (`ends_like_sigpipe`; PD-LOSAT-CLI-NONSEARCH-DIFFERENCES exception 10).
+        // Buffered `-stat` lines are flushed right before each 8 KiB block boundary of `.NN.idx`
+        // (and once after the loop) so a closed pipe stops in the same 8 KiB block as NCBI's
+        // per-line flush without issuing one write syscall per Nmer.
+        let mut stat_file = options
             .stat_file_name
             .as_deref()
-            .and_then(|name| File::create(crate::utils::os_bytes::path_of_bytes(name)).ok())
-            .map(BufWriter::new);
+            .and_then(|name| File::create(crate::utils::os_bytes::path_of_bytes(name)).ok());
+        let mut stats = stat_file
+            .as_mut()
+            .map(|file| Ostream::new(file as &mut dyn Write));
+        let mut stat_buf = Vec::new();
         write_word(os, self.total)?;
         let mut tot: Word = 0;
+        let flush_stats =
+            |stats: &mut Option<Ostream<'_>>, buf: &mut Vec<u8>| -> std::io::Result<()> {
+                if !buf.is_empty() {
+                    if let Some(stats) = stats {
+                        stats.write_all(buf)?;
+                        stats.flush()?;
+                    }
+                    buf.clear();
+                }
+                Ok(())
+            };
         for (nmer, &size) in self.sizes.iter().enumerate() {
+            if (nmer + 2).is_multiple_of(INDEX_BLOCK_WORDS) {
+                flush_stats(&mut stats, &mut stat_buf)?;
+            }
             if size != 0 {
                 tot = tot.wrapping_add(1);
                 write_word(os, tot)?;
@@ -836,15 +868,11 @@ impl OffsetData {
                 write_word(os, 0)?;
             }
             tot = tot.wrapping_add(size);
-            if size > 0 {
-                if let Some(stats) = &mut stats {
-                    let _ = writeln!(stats, "{nmer:>10x} {size}");
-                }
+            if size > 0 && stats.as_ref().is_some_and(|stream| !stream.bad()) {
+                let _ = writeln!(stat_buf, "{nmer:>10x} {size}");
             }
         }
-        if let Some(mut stats) = stats {
-            let _ = stats.flush();
-        }
+        flush_stats(&mut stats, &mut stat_buf)?;
         write_word(os, self.total)?;
         write_word(os, 0)?;
         let mut later = Vec::new();
@@ -853,6 +881,7 @@ impl OffsetData {
                 self.save_list(nmer, os, &mut later)?;
             }
         }
+        os.flush()?;
         Ok(())
     }
 }
@@ -864,6 +893,10 @@ pub(crate) enum Stop {
     /// (a zero `mult_`), or its offsets come from a shift past an `int`'s width (a stride of
     /// 32768 or more, C++ undefined behaviour).
     NoDefinedIndex,
+    /// A write to `-stat` (or to an index output file) met a closed pipe where SIGPIPE ends
+    /// NCBI's process (`ncbi_app::files::ends_like_sigpipe`; PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+    /// exception 10).
+    ClosedPipe,
 }
 
 impl From<StreamError> for Stop {
@@ -955,10 +988,16 @@ pub(crate) fn make_index(
         start_chunk = 0;
         i = i.wrapping_add(1);
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1735-1755
+    // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/dbindex_factory.cpp:1604-1634
     // NCBI opens the volume as a binary output stream without exceptions: a file that does not
-    // open, or a write that fails, is not reported.
-    if let Ok(file) = File::create(crate::utils::os_bytes::path_of_bytes(oname)) {
-        let mut os = BufWriter::with_capacity(1 << 20, file);
+    // open, or a non-pipe write failure, is not reported (`Ostream` drops the remaining writes).
+    // `SaveHeader` flushes the header to the stream before `OffsetData::Save`, and NCBI's file
+    // buffer writes the words after the header in 8 KiB blocks. Buffering at `INDEX_STREAM_BLOCK`
+    // and discarding the trailing incomplete block on error (`into_parts`) matches both regular
+    // files and named pipes when a closed pipe (`Stop::ClosedPipe`) ends NCBI's process by
+    // SIGPIPE.
+    let outcome = if let Ok(mut file) = File::create(crate::utils::os_bytes::path_of_bytes(oname)) {
         let header = Header::of(
             options.legacy,
             options.hkey_width as Word,
@@ -966,23 +1005,52 @@ pub(crate) fn make_index(
             options.ws_hint as Word,
             [start, start_chunk, *stop, stop_chunk],
         );
-        let _ = header
-            .write(&mut os)
-            .and_then(|()| offset_data.save(&mut os, options))
-            .and_then(|()| subject_map.save(&mut os))
-            .and_then(|()| os.flush());
+        let mut head = Vec::with_capacity(super::format::HEADER_SIZE);
+        let _ = header.write(&mut head);
+        let mut stream = Ostream::new(&mut file);
+        stream
+            .write_all(&head)
+            .and_then(|()| stream.flush())
+            .and_then(|()| {
+                let mut os = BufWriter::with_capacity(INDEX_STREAM_BLOCK as usize, &mut stream);
+                let saved = offset_data
+                    .save(&mut os, options)
+                    .and_then(|()| subject_map.save(&mut os))
+                    .and_then(|()| os.flush());
+                if saved.is_err() {
+                    // Discard the trailing incomplete block rather than flushing it on drop, so
+                    // both regular files and named pipes match NCBI's SIGPIPE-ended process.
+                    let _ = os.into_parts();
+                }
+                saved
+            })
     } else {
-        let _ = offset_data.save(&mut std::io::sink(), options);
+        offset_data.save(&mut std::io::sink(), options)
+    };
+    if let Err(error) = outcome {
+        if ends_like_sigpipe(&error) {
+            return Err(Stop::ClosedPipe);
+        }
     }
     if options.idmap {
         let map = [oname, b".map"].concat();
-        if let Ok(file) = File::create(crate::utils::os_bytes::path_of_bytes(&map)) {
-            let mut maps = BufWriter::new(file);
+        if let Ok(mut file) = File::create(crate::utils::os_bytes::path_of_bytes(&map)) {
+            let mut stream = Ostream::new(&mut file);
+            let mut maps = BufWriter::new(&mut stream);
             for id in &idmap {
-                let _ = maps.write_all(id);
-                let _ = maps.write_all(b"\n");
+                if maps
+                    .write_all(id)
+                    .and_then(|()| maps.write_all(b"\n"))
+                    .is_err()
+                {
+                    break;
+                }
             }
             let _ = maps.flush();
+            drop(maps);
+            if stream.closed() {
+                return Err(Stop::ClosedPipe);
+            }
         }
     }
     Ok(())

@@ -85,6 +85,8 @@ mod makeblastdb_output_streams;
 mod makeblastdb_past_32_bits;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
+#[path = "../makembindex_closed_pipe.rs"]
+mod makembindex_closed_pipe;
 #[path = "../makembindex_fixtures.rs"]
 mod makembindex_fixtures;
 #[path = "../makeprofiledb_fixtures.rs"]
@@ -165,6 +167,10 @@ mod search_environment;
 mod seq_id_first_line;
 #[path = "../seqalign_samples.rs"]
 mod seqalign_samples;
+#[path = "../serial_verify_read.rs"]
+mod serial_verify_read;
+#[path = "../strategy_stream_f1c1.rs"]
+mod strategy_stream_f1c1;
 #[path = "../suite_layout.rs"]
 mod suite_layout;
 #[path = "../syntax_cases_cli.rs"]

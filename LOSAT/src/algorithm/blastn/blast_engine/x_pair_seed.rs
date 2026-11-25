@@ -71,6 +71,11 @@ use std::sync::OnceLock;
 #[path = "x_pair_seed_disc.rs"]
 mod disc;
 
+// EXPERIMENT (LOSAT_X_DCLATEST): the map of each diagonal's latest insert that dc-megablast's
+// strips folds keep instead of the diagonal hash (`disc`, `part`).
+#[path = "x_dc_latest.rs"]
+mod latest;
+
 #[path = "x_pair_seed_na.rs"]
 mod na;
 pub(super) use na::{run as run_na, wants as wants_na, NaInputs};
@@ -1705,6 +1710,7 @@ pub(super) fn run(
     let fold_part = part::partitions(threads).map(|parts| part::FoldPart {
         scratch: fold_scratch,
         parts,
+        latest: None,
     });
     let stats = seed_stage(
         x,

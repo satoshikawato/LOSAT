@@ -27,6 +27,9 @@ use std::sync::OnceLock;
 pub use acc_info::*;
 
 use super::model::ParsedSeqId;
+// The masks of the guide are letters, `_` and `?` (`NStr::MatchesMask`); the loading refuses a mask
+// with `*`, `[` or `\`, and a NUL character of an accession matches nothing.
+use crate::ncbi_str::matches_mask;
 use crate::utils::byte_search::find_byte;
 use crate::utils::byte_search::find_first;
 
@@ -467,29 +470,6 @@ fn with_last_digits(number: u32, (digits, count): (u32, usize)) -> u32 {
         _ => 0,
     };
     cleared + digits
-}
-
-/// `NStr::MatchesMask` of `str` against `mask` (case-sensitive) for the masks of the guide, which are
-/// letters, `_` and `?` (any one character); a NUL character of `str` matches nothing.
-///
-/// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:291-307,359-386
-/// (`CTempString::operator[]` gives NUL past the end.) The loading refuses a mask with `*`,
-/// `[` or `\`.
-fn matches_mask(text: &[u8], mask: &[u8]) -> bool {
-    for (pos, &m) in mask.iter().enumerate() {
-        if m == 0 {
-            break;
-        }
-        let s = text.get(pos).copied().unwrap_or(0);
-        if s == 0 {
-            return false;
-        }
-        if m != b'?' && s != m {
-            return false;
-        }
-    }
-    let end = mask.iter().position(|&m| m == 0).unwrap_or(mask.len());
-    text.get(end).copied().unwrap_or(0) == 0
 }
 
 impl AccGuide {

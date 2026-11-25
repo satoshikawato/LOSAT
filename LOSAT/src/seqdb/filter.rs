@@ -1055,16 +1055,7 @@ fn lookup_file_error(error: SeqDbError) -> SeqDbError {
 }
 
 fn missing_file(path: &Path) -> SeqDbError {
-    SeqDbError::NotFound(
-        [
-            b"File ".as_slice(),
-            &crate::utils::os_bytes::path_bytes(path)[..],
-            b" not found. If you renamed any BLAST database files, please use original file \
-         names, and makeblastdb to rename the database. If you deleted any BLAST database files, \
-         you need to recreate the database.",
-        ]
-        .concat(),
-    )
+    super::missing_lmdb_file(path)
 }
 
 /// A lookup file names an OID the database does not have.
@@ -1840,20 +1831,18 @@ impl SeqDb {
 
     /// Whether NCBI turns a hit on `ordinal` into a Seq-align: false where the database's list
     /// or its erasure of model lines (`OID_MASK_TYPE`) keeps the sequence but none of its
-    /// definition lines; the reader's error where a tag cannot be read as NCBI's header read
-    /// adjusts it. True without either.
+    /// definition lines, and where no line it keeps holds a Seq-id (an edited header; the lists
+    /// erase such lines); the reader's error where a tag cannot be read as NCBI's header read
+    /// adjusts it.
     pub fn keeps_line(&self, ordinal: u32) -> Result<bool, SeqDbError> {
         self.line_read(ordinal).map(|(kept, _)| kept)
     }
 
     /// [`SeqDb::keeps_line`], read as NCBI's `GetSeqIDs` reads the header, with whether the
     /// record holds a UTF8String where a VisibleString is expected (NCBI's read then posts its
-    /// warning, `Utf8Reads`): false where the reads cannot drop every line, which leaves the
-    /// record unread (`Volume::line_read`).
+    /// warning, `Utf8Reads`): false where the volume filters no line, whose walk of the record
+    /// reads no string (`Volume::line_read`).
     pub fn line_read(&self, ordinal: u32) -> Result<(bool, bool), SeqDbError> {
-        if self.filter.is_none() {
-            return Ok((true, false));
-        }
         let at = self.find_volume(ordinal)?;
         self.volumes[at.volume].line_read(at.vol_oid)
     }
@@ -1943,7 +1932,7 @@ impl SeqDb {
         let mut ids: Vec<Vec<u8>> = Vec::with_capacity(list.file.ids.len());
         for id in &list.file.ids {
             ids.push(isam::simplify_accession_for_isam(id).map_err(|error| {
-                SeqDbError::Unsupported {
+                SeqDbError::NcbiThrows {
                     path: self.volumes[0].base().to_path_buf(),
                     message: format!(
                         "the id {} of the seqid list throws in NCBI's SeqDB_SimplifyAccession: {}",
@@ -1955,13 +1944,16 @@ impl SeqDb {
         }
         let string_isam = |at: usize| -> Result<isam::StringIsam, SeqDbError> {
             let base = self.volumes[at].base();
-            let name = base.to_string_lossy();
-            if !isam::StringIsam::index_exists(&name, protein) {
+            if !isam::StringIsam::index_exists(base, protein) {
                 return Err(SeqDbError::NotFound(
-                    format!("SI list specified but no ISAM file found for SI in {name}").into(),
+                    [
+                        b"SI list specified but no ISAM file found for SI in ".as_slice(),
+                        &crate::utils::os_bytes::path_bytes(base),
+                    ]
+                    .concat(),
                 ));
             }
-            isam::StringIsam::open_volume(&name, protein)
+            isam::StringIsam::open_volume(base, protein)
         };
         let num_oids = self.volume_starts[self.volumes.len()];
         let word_count = (num_oids as usize).div_ceil(64);

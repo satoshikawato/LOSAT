@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<!DOCTYPE BlastOutput PUBLIC "-//NCBI//NCBI BlastOutput/EN" "http://www.ncbi.nlm.nih.gov/dtd/NCBI_BlastOutput.dtd">
+<BlastOutput>
+  <BlastOutput_program>blastp</BlastOutput_program>
+  <BlastOutput_version>BLASTP 2.17.0+</BlastOutput_version>
+  <BlastOutput_reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</BlastOutput_reference>
+  <BlastOutput_db>tests/db_search/multidb/pf3p tests/db_search/multidb/pf3u</BlastOutput_db>
+  <BlastOutput_query-ID>Query_1</BlastOutput_query-ID>
+  <BlastOutput_query-def>pfo_r a query whose report ends the run</BlastOutput_query-def>
+  <BlastOutput_query-len>150</BlastOutput_query-len>
+  <BlastOutput_param>
+    <Parameters>
+      <Parameters_matrix>BLOSUM62</Parameters_matrix>
+      <Parameters_expect>1e-10</Parameters_expect>
+      <Parameters_gap-open>11</Parameters_gap-open>
+      <Parameters_gap-extend>1</Parameters_gap-extend>
+      <Parameters_filter>F</Parameters_filter>
+    </Parameters>
+  </BlastOutput_param>
+<BlastOutput_iterations>
+<Iteration>
+  <Iteration_iter-num>1</Iteration_iter-num>
+  <Iteration_query-ID>Query_1</Iteration_query-ID>
+  <Iteration_query-def>pfo_r a query whose report ends the run</Iteration_query-def>
+  <Iteration_query-len>150</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>ref|XP_810001.1|</Hit_id>
+  <Hit_def>Unknown</Hit_def>
+  <Hit_accession>Unknown</Hit_accession>
+  <Hit_len>0</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>123.635</Hsp_bit-score>
+      <Hsp_score>309</Hsp_score>
+      <Hsp_evalue>1.53715e-41</Hsp_evalue>
+      <Hsp_query-from>0</Hsp_query-from>
+      <Hsp_query-to>0</Hsp_query-to>
+      <Hsp_hit-from>0</Hsp_hit-from>
+      <Hsp_hit-to>0</Hsp_hit-to>
+      <Hsp_identity>58</Hsp_identity>
+      <Hsp_qseq></Hsp_qseq>
+      <Hsp_hseq></Hsp_hseq>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>2</Statistics_db-num>
+      <Statistics_db-len>245</Statistics_db-len>
+      <Statistics_hsp-len>19</Statistics_hsp-len>
+      <Statistics_eff-space>27117</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+<Iteration>
+  <Iteration_iter-num>2</Iteration_iter-num>
+  <Iteration_query-ID>Query_2</Iteration_query-ID>
+  <Iteration_query-def>pfo_e bsub&apos;s letters, a later batch whose prefetch is on</Iteration_query-def>
+  <Iteration_query-len>95</Iteration_query-len>
+<Iteration_hits>
+<Hit>
+  <Hit_num>1</Hit_num>
+  <Hit_id>gnl|BL_ORD_ID|1</Hit_id>
+  <Hit_def>bsub pfoff-3 a subject with a taxid</Hit_def>
+  <Hit_accession>1</Hit_accession>
+  <Hit_len>95</Hit_len>
+  <Hit_hsps>
+    <Hsp>
+      <Hsp_num>1</Hsp_num>
+      <Hsp_bit-score>202.216</Hsp_bit-score>
+      <Hsp_score>513</Hsp_score>
+      <Hsp_evalue>3.16116e-74</Hsp_evalue>
+      <Hsp_query-from>1</Hsp_query-from>
+      <Hsp_query-to>95</Hsp_query-to>
+      <Hsp_hit-from>1</Hsp_hit-from>
+      <Hsp_hit-to>95</Hsp_hit-to>
+      <Hsp_query-frame>0</Hsp_query-frame>
+      <Hsp_hit-frame>0</Hsp_hit-frame>
+      <Hsp_identity>95</Hsp_identity>
+      <Hsp_positive>95</Hsp_positive>
+      <Hsp_gaps>0</Hsp_gaps>
+      <Hsp_align-len>95</Hsp_align-len>
+      <Hsp_qseq>EECSRDAVFYDGYKRSAFHRVWLECKSNDYVGCHMWEFSFTCFFPQSFGIAPHPATFVEGMFCSEVNCQWLDWCGREEGCAQLKRIHVHKWAKTM</Hsp_qseq>
+      <Hsp_hseq>EECSRDAVFYDGYKRSAFHRVWLECKSNDYVGCHMWEFSFTCFFPQSFGIAPHPATFVEGMFCSEVNCQWLDWCGREEGCAQLKRIHVHKWAKTM</Hsp_hseq>
+      <Hsp_midline>EECSRDAVFYDGYKRSAFHRVWLECKSNDYVGCHMWEFSFTCFFPQSFGIAPHPATFVEGMFCSEVNCQWLDWCGREEGCAQLKRIHVHKWAKTM</Hsp_midline>
+    </Hsp>
+  </Hit_hsps>
+</Hit>
+</Iteration_hits>
+  <Iteration_stat>
+    <Statistics>
+      <Statistics_db-num>2</Statistics_db-num>
+      <Statistics_db-len>245</Statistics_db-len>
+      <Statistics_hsp-len>16</Statistics_hsp-len>
+      <Statistics_eff-space>16827</Statistics_eff-space>
+      <Statistics_kappa>0.041</Statistics_kappa>
+      <Statistics_lambda>0.267</Statistics_lambda>
+      <Statistics_entropy>0.14</Statistics_entropy>
+    </Statistics>
+  </Iteration_stat>
+</Iteration>
+</BlastOutput_iterations>
+</BlastOutput>
+

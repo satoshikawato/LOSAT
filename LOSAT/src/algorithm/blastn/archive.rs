@@ -6,7 +6,6 @@
 //! the document, this module gathers what it holds from the hit lists, the query masks and
 //! the Karlin-Altschul blocks that BLASTN keeps for its other formats.
 
-use std::io::Write;
 use std::ops::Range;
 
 use anyhow::Result;
@@ -33,6 +32,23 @@ use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryNames, RunRecord, SubjectNames, SubjectRecord};
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
 use crate::utils::dust::MaskedInterval;
+
+/// What a BLASTN run's arguments give its search strategy's requests
+/// (`strategy::StrategyExport::for_args`): the archive's recorded options (`-dust` as given), the counts
+/// of the `HitlistSize` and the database of `-db`.
+impl crate::report::archive::strategy::StrategyArgs for BlastnArgs {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+        crate::report::archive::strategy::StrategyInputs {
+            inputs: option_inputs(self, self.dust_filtering.as_deref()),
+            counts: crate::report::archive::strategy::HitlistArgs {
+                max_target_seqs: self.max_target_seqs,
+                num_descriptions: self.num_descriptions,
+                num_alignments: self.num_alignments,
+            },
+            database: self.database_name(),
+        }
+    }
+}
 
 /// The recorded options of a BLASTN run (`options::algorithm_options`'s inputs). `dust` is
 /// the `-dust` value as given (`BlastnArgs::resolve_dust` consumes it).
@@ -471,7 +487,7 @@ pub(crate) fn write_blastn_archives(
     call: &ArchiveCall<'_>,
     warnings: &mut QueryWarnings<'_>,
     first_context: &dyn Fn(usize) -> Result<FirstContext>,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Blastn,

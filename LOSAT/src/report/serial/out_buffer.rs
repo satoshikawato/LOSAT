@@ -30,6 +30,8 @@ pub enum Stream {
     AsnBinary,
     /// `CObjectOStreamXml`.
     Xml,
+    /// `CObjectOStreamJson`.
+    Json,
 }
 
 impl Stream {
@@ -37,13 +39,13 @@ impl Stream {
     ///
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:64-69
     /// NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:84-87
-    /// (`CObjectOStreamAsnBinary` sets none: `m_BackLimit` is 0 in the `COStreamBuffer`
-    /// constructor, util/strbuffer.cpp:783-796.)
-    fn back_limit(self) -> usize {
+    /// (`CObjectOStreamAsnBinary` and `CObjectOStreamJson` set none: `m_BackLimit` is 0 in the
+    /// `COStreamBuffer` constructor, util/strbuffer.cpp:783-796.)
+    pub(crate) fn back_limit(self) -> usize {
         match self {
             Stream::AsnText => 80,
             Stream::Xml => 1,
-            Stream::AsnBinary => 0,
+            Stream::AsnBinary | Stream::Json => 0,
         }
     }
 
@@ -62,6 +64,8 @@ impl Stream {
         match self {
             Stream::AsnText | Stream::AsnBinary => !matches!(byte, 0x20..=0x7e),
             Stream::Xml => matches!(byte, 0x01..=0x08 | 0x0b | 0x0c | 0x0e..=0x1f),
+            // The JSON stream escapes a control byte (`\u00XX`) and writes the others.
+            Stream::Json => false,
         }
     }
 }
@@ -103,8 +107,12 @@ pub(super) struct OutBuffer {
     used: usize,
     /// The bytes of the document written to the output (`m_BufferPos`).
     written: u64,
-    /// The bytes that the buffer held when it first wrote to the output (`first_write`).
-    first_write: Option<usize>,
+    /// The size of each write of the buffer to the output (the `write` of `m_Output` with
+    /// `count` bytes of `m_Buffer`), in order: NCBI's insertions of the document into the
+    /// report's stream (`pieces`).
+    pieces: Vec<usize>,
+    /// The stream's position at the first of them (`first_write`).
+    first_write: Option<u64>,
 }
 
 impl OutBuffer {
@@ -114,8 +122,15 @@ impl OutBuffer {
             capacity: 4096,
             used: 0,
             written: 0,
+            pieces: Vec::new(),
             first_write: None,
         }
+    }
+
+    /// The writes of the buffer to its output so far (`FlushBuffer`, `EndOfWrite`), each one
+    /// insertion of NCBI's into the output stream: the sizes, in order.
+    pub(super) fn pieces(&self) -> &[usize] {
+        &self.pieces
     }
 
     /// The bytes of the document that NCBI has written to its output.
@@ -123,17 +138,27 @@ impl OutBuffer {
         self.written
     }
 
-    /// The bytes at the start of the document that the buffer held when it first wrote to its
-    /// output (a `FlushBuffer` with bytes to write, or the end of the document), `None` before:
-    /// all that an output stream that has failed gets of the document (the object manager's
-    /// messages after its diagnostic stream failed, `pssm_search::annot_index`). The write to
-    /// such a stream throws before the buffer changes, and the object stream's destructor writes
-    /// what the buffer holds with the stream's state cleared (`Close`, `DefaultFlush`, `Flush`).
-    ///
-    /// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:893-897
-    /// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:317-336
-    /// NCBI reference (598d8ae6): c++/src/util/strbuffer.cpp:910-918
-    pub(super) fn first_write(&self) -> Option<usize> {
+    /// `EndOfWrite`'s `FlushBuffer()`: the buffer is written whole.
+    fn end_of_write(&mut self) {
+        if self.used > 0 {
+            self.note_first_write(self.used);
+            self.pieces.push(self.used);
+        }
+        self.written += self.used as u64;
+        self.used = 0;
+    }
+
+    /// Notes the stream's position at the buffer's first write to its output (`GetStreamPos` at
+    /// that `FlushBuffer`: the bytes put into the buffer by then, `used`).
+    fn note_first_write(&mut self, used: usize) {
+        if self.first_write.is_none() {
+            self.first_write = Some(self.written + used as u64);
+        }
+    }
+
+    /// The stream's position at the buffer's first write to its output: where NCBI posts the
+    /// write fault of a document written into a failed stream (`archive::writer`'s error archive).
+    pub(super) fn first_write(&self) -> Option<u64> {
         self.first_write
     }
 
@@ -143,10 +168,12 @@ impl OutBuffer {
         if self.used < leave {
             return;
         }
-        if self.used > leave && self.first_write.is_none() {
-            self.first_write = Some(self.used);
+        let count = self.used - leave;
+        if count > 0 {
+            self.note_first_write(self.used);
+            self.pieces.push(count);
         }
-        self.written += (self.used - leave) as u64;
+        self.written += count as u64;
         self.used = leave;
     }
 
@@ -237,12 +264,32 @@ impl OutBuffer {
         posts: &[usize],
         written: &mut Vec<u64>,
     ) {
-        if piece == Piece::End {
-            // `EndOfWrite`'s `FlushBuffer`, then the separator.
-            if self.used > 0 && self.first_write.is_none() {
-                self.first_write = Some(self.used);
+        if piece == Piece::End && self.stream == Stream::Json {
+            // `EndBlock` and `PutEol`, then `EndOfWrite`'s `FlushBuffer()`.
+            self.json_markup(bytes);
+            if self.used > 0 {
+                self.pieces.push(self.used);
             }
-            self.written += (self.used + bytes.len()) as u64;
+            self.written += self.used as u64;
+            self.used = 0;
+            return;
+        }
+        if piece == Piece::End && self.stream == Stream::AsnText {
+            // NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:941-945
+            // `EndOfWrite`'s `FlushBuffer()` writes the document, then the auto-separator (`\n`,
+            // objostrasn.cpp:70-71) is a write of its own.
+            self.end_of_write();
+            self.used = bytes.len();
+            self.end_of_write();
+            return;
+        }
+        if piece == Piece::End {
+            let count = self.used + bytes.len();
+            if count > 0 {
+                self.note_first_write(count);
+                self.pieces.push(count);
+            }
+            self.written += count as u64;
             self.used = 0;
             return;
         }
@@ -255,7 +302,79 @@ impl OutBuffer {
             Stream::AsnText => self.asn_text(piece, bytes, posts, written),
             Stream::AsnBinary => self.asn_binary(piece, bytes, posts, written),
             Stream::Xml => self.xml(piece, bytes, posts, written),
+            Stream::Json => self.json(piece, bytes),
         }
+    }
+
+    /// The calls of `CObjectOStreamJson` (objostrjson.cpp): `PutChar` of each bracket, comma,
+    /// colon and space and of each byte of a key or string (`x_WriteString`, `WriteEncodedChar`),
+    /// `PutString` of an escape and of a keyword value (a number, `true`, `false`,
+    /// `WriteKeywordValue`), `PutEol` (`Reserve` of one byte) and the indentation (`Skip`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/serial/objostrjson.cpp:797-809
+    /// (`x_WriteString`, `WriteEscapedChar` and `NameSeparator` are quoted at
+    /// `json::JsonEncoder`.)
+    fn json(&mut self, piece: Piece, bytes: &[u8]) {
+        match piece {
+            Piece::Header | Piece::Markup | Piece::End => self.json_markup(bytes),
+            Piece::Str | Piece::Enum if bytes.first() == Some(&b'"') => {
+                self.json_string(bytes);
+            }
+            Piece::Number | Piece::Real | Piece::Bool | Piece::Enum => self.put_string(bytes.len()),
+            Piece::Str | Piece::Octets | Piece::Raw => self.skip_ones(bytes.len()),
+        }
+    }
+
+    /// JSON markup: an end of line and its indentation, a key in quotes, and single bytes.
+    fn json_markup(&mut self, bytes: &[u8]) {
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'\n' => {
+                    self.skip(1);
+                    i += 1;
+                    let indent = bytes[i..].iter().take_while(|&&b| b == b' ').count();
+                    self.skip(indent);
+                    i += indent;
+                }
+                b'"' => i += self.json_string(&bytes[i..]),
+                _ => {
+                    self.skip(1);
+                    i += 1;
+                }
+            }
+        }
+    }
+
+    /// A string in quotes at the start of `bytes` (`x_WriteString`): its bytes written.
+    fn json_string(&mut self, bytes: &[u8]) -> usize {
+        self.skip(1);
+        let mut i = 1;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'"' => {
+                    self.skip(1);
+                    return i + 1;
+                }
+                b'\\' if bytes.get(i + 1) == Some(&b'u') => {
+                    // `PutString` of the escape's first four characters (`\u00`), then a
+                    // `PutChar` for each of its two hex digits.
+                    self.skip(4);
+                    self.skip(1);
+                    self.skip(1);
+                    i += 6;
+                }
+                b'\\' => {
+                    self.skip(2);
+                    i += 2;
+                }
+                _ => {
+                    self.skip(1);
+                    i += 1;
+                }
+            }
+        }
+        i
     }
 
     /// The calls of `CObjectOStreamAsn` (objostrasn.cpp).
@@ -561,10 +680,98 @@ pub(crate) fn xml_written_at(
 ) -> Vec<u64> {
     let mut buffer = OutBuffer::new(Stream::Xml);
     let mut written = Vec::with_capacity(posts.len());
+    xml_calls(
+        &mut buffer,
+        document,
+        posts,
+        &mut written,
+        is_string,
+        posts.len(),
+    );
+    written.resize(posts.len(), buffer.written());
+    written
+}
+
+/// NCBI's writes of its buffer of the whole `document` of its XML stream in its standard-XML mode
+/// (an outfmt 14 side file: the declaration and the root's start tag with its attributes, at the
+/// start of the buffer, then a document as `xml_written_at` takes it), each one insertion into
+/// the stream's output, the last `EndOfWrite`'s.
+pub(crate) fn xml_pieces(document: &[u8], is_string: impl Fn(&[u8]) -> bool) -> Vec<usize> {
+    let mut buffer = OutBuffer::new(Stream::Xml);
+    // The file header and the root's start tag (`WriteFileHeader`, the root's `OpenTag` with its
+    // namespace attributes): well below the buffer's 4,096 bytes.
+    let root = document
+        .windows(b"<BlastOutput2".len())
+        .position(|window| window == b"<BlastOutput2")
+        .and_then(|at| {
+            document[at..]
+                .iter()
+                .position(|&b| b == b'>')
+                .map(|end| at + end + 1)
+        })
+        .unwrap_or(0);
+    buffer.skip(root);
+    xml_calls(
+        &mut buffer,
+        &document[root..],
+        &[],
+        &mut Vec::new(),
+        is_string,
+        usize::MAX,
+    );
+    buffer.end_of_write();
+    buffer.pieces
+}
+
+/// NCBI's writes of its buffer of the whole `document` of its JSON stream (`CObjectOStreamJson`:
+/// an outfmt 13 side file, or 12's and 15's objects), taken back from the bytes: an end of line
+/// and its indentation, strings in quotes (`json_string`), single bytes of markup, and a keyword
+/// value (a number, `true`, `false`) as one `PutString`; the last write is `EndOfWrite`'s.
+pub(crate) fn json_pieces(document: &[u8]) -> Vec<usize> {
+    let mut buffer = OutBuffer::new(Stream::Json);
+    let mut i = 0;
+    while i < document.len() {
+        match document[i] {
+            b'\n' => {
+                buffer.skip(1);
+                i += 1;
+                let indent = document[i..].iter().take_while(|&&b| b == b' ').count();
+                buffer.skip(indent);
+                i += indent;
+            }
+            b'"' => i += buffer.json_string(&document[i..]),
+            b'{' | b'}' | b'[' | b']' | b',' | b':' | b' ' => {
+                buffer.skip(1);
+                i += 1;
+            }
+            _ => {
+                let value = document[i..]
+                    .iter()
+                    .take_while(|&&b| !matches!(b, b',' | b'\n' | b']' | b'}'))
+                    .count();
+                buffer.put_string(value);
+                i += value;
+            }
+        }
+    }
+    buffer.end_of_write();
+    buffer.pieces
+}
+
+/// The calls of NCBI's XML stream for `document` (see `xml_written_at`), with what it had written
+/// at each of `posts` in `written`, until `limit` of them are known.
+fn xml_calls(
+    buffer: &mut OutBuffer,
+    document: &[u8],
+    posts: &[usize],
+    written: &mut Vec<u64>,
+    is_string: impl Fn(&[u8]) -> bool,
+    limit: usize,
+) {
     let mut next_post = 0;
     let mut i = 0;
     let mut tag: &[u8] = &[];
-    while i < document.len() && written.len() < posts.len() {
+    while i < document.len() && written.len() < limit {
         let start = i;
         // The tags (ends of line with their indentation, opening and closing tags).
         loop {
@@ -602,14 +809,12 @@ pub(crate) fn xml_written_at(
             here.push(posts[next_post] - start);
             next_post += 1;
         }
-        buffer.put(piece, &document[start..text_end], &here, &mut written);
+        buffer.put(piece, &document[start..text_end], &here, written);
         i = text_end.max(i);
         if i == start {
             break;
         }
     }
-    written.resize(posts.len(), buffer.written());
-    written
 }
 
 #[cfg(test)]

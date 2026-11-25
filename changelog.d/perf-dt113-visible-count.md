@@ -1,0 +1,1 @@
+- blastdbcmd and the other programs that read database titles: the check of each title's characters (the bytes that become `#`) takes fewer steps, with the same output and memory. On 300,000 human proteins, `blastdbcmd -entry all` takes 6 % less time with `-outfmt "%a %l %T"` and 4 % less for FASTA output.

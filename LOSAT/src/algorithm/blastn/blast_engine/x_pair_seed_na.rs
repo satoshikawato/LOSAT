@@ -380,7 +380,7 @@ fn fold_na_t<const PT: bool, const TRACK: bool>(
         let s_end_pos = s_end + diag_offset as usize;
         let off_found = false;
 
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:908-919
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:898-921
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:268-269
         // NCBI's `query` is the concatenated query and `q_off` an offset in it
         // (na_ungapped.c:164-206 too): a walk that does not stop at the context's sentinel (a
@@ -698,6 +698,7 @@ pub(in super::super) fn run(
     let fold_part = part::partitions(threads).map(|parts| part::FoldPart {
         scratch: fold_scratch,
         parts,
+        latest: None,
     });
     let stats = seed_stage(
         x,

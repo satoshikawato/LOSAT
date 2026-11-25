@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MessagePlace } from 'losat/domain';
 import type { HspRecord, ProgramDescription } from 'losat/ports';
-import type { AppState, RunView } from '../../src/application/coordinator';
+import type { AppState, RunView, ToolRunView } from '../../src/application/coordinator';
 import { keptOutputs, noHspReason, ResultsBrowser, type ResultsDeps } from '../../src/application/results';
 import { Store } from '../../src/application/store';
 import { hspTable, out0Range, out6Range, frame, subjectSpan } from '../../src/domain/hsp-table';
@@ -24,12 +24,15 @@ import {
 import {
   approvedExceptions,
   optionKey,
+  toolOptionGrammar,
+  toolOptionKey,
   verificationBadge,
   RANGE_VALUE,
   type BadgeInput,
   type VerificationTable,
 } from '../../src/domain/verification';
 import type { RunRecord, RunSnapshot } from '../../src/domain/run';
+import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import type { FailedOutput } from '../../src/ports/data';
 import { NO_HSP_TEXT } from '../../src/ui/no-hsp-text';
 import { NO_WARNINGS, placeParts, placeText, warningsPlaceParts, warningsPlaceText } from '../../src/ui/message-place-text';
@@ -712,6 +715,21 @@ describe('ResultsBrowser', () => {
     expect(logged.results.state.get().message).toBe(
       'Run 1 failed: LOSAT engine error: The average subject length is too short. It keeps the file of its -logfile, run.log.',
     );
+    // ...and its search strategy file, each under its option (line RG item F1w).
+    const both = setup({
+      status: 'failed',
+      error: 'LOSAT engine error: x',
+      record: {
+        runFiles: [
+          { name: 'out/s.asn', bytes: new Uint8Array(), option: 'export_search_strategy' },
+          { name: 'run.log', bytes: new Uint8Array([65]) },
+        ],
+      },
+    });
+    await both.results.open('r1');
+    expect(both.results.state.get().message).toBe(
+      'Run 1 failed: LOSAT engine error: x. It keeps the file of its -export_search_strategy, out/s.asn. It keeps the file of its -logfile, run.log.',
+    );
     // A failed run keeps the warnings written before its error (line WQA's sweep, D3, 2026-11-19); white space alone is none.
     const warned = setup({
       status: 'failed',
@@ -838,6 +856,18 @@ describe('ResultsBrowser', () => {
     const emptyRun = empty.results.state.get().loaded!.run;
     expect(warningsPlaceText('logfile', '', emptyRun)).toBe(NO_WARNINGS);
     expect(warningsPlaceText('logfile', 'Error: x\n', emptyRun)).toBeUndefined();
+    // The search strategy file is not the file of -logfile: an empty one beside a log that holds warnings says nothing,
+    // and its name is not the log's (line RG item F1w).
+    const strategy = { name: 's.asn', bytes: new Uint8Array(0), option: 'export_search_strategy' } as const;
+    const withStrategy = setup({ record: { messages: 'logfile', runFiles: [strategy, { name: 'run.log', bytes: warning }] } });
+    await withStrategy.results.open('r1');
+    const strategyRun = withStrategy.results.state.get().loaded!.run;
+    expect(warningsPlaceText('logfile', '', strategyRun)).toBe("The run's warnings are in the file of the run's -logfile, run.log, under Outputs.");
+    const strategyOnly = setup({ record: { messages: 'logfile', runFiles: [strategy] } });
+    await strategyOnly.results.open('r1');
+    expect(warningsPlaceText('logfile', '', strategyOnly.results.state.get().loaded!.run)).toBe(
+      "The run's warnings are in the file of the run's -logfile under Outputs.",
+    );
     // Files that are not kept say nothing of what they held.
     const unkept = setup({ record: { messages: 'logfile' } });
     await unkept.results.open('r1');
@@ -1083,5 +1113,77 @@ describe('ResultsBrowser', () => {
     const given = setup({ argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa', '-task', 'blastn'] });
     await given.results.open('r1');
     expect(given.results.state.get().loaded!.task).toBe('blastn');
+  });
+
+  it('gives no tool badge when describeTool rejects or is absent, and shows Supported once describeTool succeeds', async () => {
+    // cases.tsv k_obinary_file argv: Supported with -xmlhelp grammar, no key with fallback grammar.
+    const argv = ['windowmasker', '-mk_counts', '-in', 'genome.fa', '-unit', '5', '-sformat', 'obinary', '-out', 'c.counts'];
+    const description = await new FakeEngine().describeTool('windowmasker');
+    const key = toolOptionKey(argv, toolOptionGrammar(description))!;
+    const toolRun: ToolRunView = {
+      snapshot: {
+        kind: 'tool',
+        runId: 't1',
+        number: 1,
+        tool: 'windowmasker',
+        stage: 'mk_counts',
+        argv,
+        directory: [{ name: 'genome.fa', size: 100, origin: { kind: 'pasted' } }],
+        queuedAt: 0,
+      },
+      status: 'completed',
+      record: { runtimePath: 'serial', exitStatus: 0 },
+    };
+    const runs = new Store<AppState>({ runs: [toolRun] });
+    const verification: VerificationTable = {
+      ncbi: '2.17.0',
+      sources: [],
+      programs: {},
+      tools: { windowmasker: { optionSets: [key] } },
+    };
+    const data: ResultsDeps['data'] = {
+      readHitTable: async () => hspTable([]),
+      readOutput: async () => new Uint8Array(),
+      readOutputRange: async () => new Uint8Array(),
+      readDiagnostics: async () => '',
+    };
+
+    let describeCalls = 0;
+    const results = new ResultsBrowser({
+      data,
+      describe: async () => DESCRIPTION,
+      describeTool: async () => {
+        describeCalls++;
+        if (describeCalls === 1) throw new Error('engine busy');
+        return description;
+      },
+      runs,
+      verification,
+    });
+
+    // Rejected describeTool: fallback grammar formats CommandText, but no badge is shown and the rejection is not cached.
+    await results.open('t1');
+    await settle();
+    expect(results.state.get().phase).toBe('ready');
+    expect(results.state.get().grammar).toBeDefined();
+    expect(results.state.get().toolBadge).toBeUndefined();
+
+    // Opening again asks describeTool again; once it resolves with -xmlhelp, the badge is Supported.
+    await results.open('t1');
+    await settle();
+    expect(describeCalls).toBe(2);
+    expect(results.state.get().toolBadge).toMatchObject({ level: 'certified', label: 'Supported' });
+
+    // Without describeTool at all, no badge is shown either.
+    const noDescribe = new ResultsBrowser({
+      data,
+      describe: async () => DESCRIPTION,
+      runs,
+      verification,
+    });
+    await noDescribe.open('t1');
+    await settle();
+    expect(noDescribe.state.get().grammar).toBeDefined();
+    expect(noDescribe.state.get().toolBadge).toBeUndefined();
   });
 });

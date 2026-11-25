@@ -1,0 +1,1655 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/nz_pc"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F"
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "q1",
+          "query_len": 60,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "lcl|sZ_nz_pc"
+                }
+              ],
+              "len": 83,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 73.9442,
+                  "score": 180,
+                  "evalue": 3.62855e-24,
+                  "identity": 0,
+                  "positive": 60,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 2,
+                  "hit_to": 61,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 8.50786e-23,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 6,
+                  "hit_to": 65,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++++++  ++"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 8.50786e-23,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 8,
+                  "hit_to": 67,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++++  ++++"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 8.50786e-23,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 10,
+                  "hit_to": 69,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++  ++++++"
+                },
+                {
+                  "num": 5,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 8.50786e-23,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 12,
+                  "hit_to": 71,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++  ++++++++"
+                },
+                {
+                  "num": 6,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 8.50786e-23,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 14,
+                  "hit_to": 73,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++  ++++++++++"
+                },
+                {
+                  "num": 7,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 8.50786e-23,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 16,
+                  "hit_to": 75,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++  ++++++++++++"
+                },
+                {
+                  "num": 8,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 8.50786e-23,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 18,
+                  "hit_to": 77,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++  ++++++++++++++"
+                },
+                {
+                  "num": 9,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 8.50786e-23,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 20,
+                  "hit_to": 79,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++  ++++++++++++++++"
+                },
+                {
+                  "num": 10,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 8.50786e-23,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 22,
+                  "hit_to": 81,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++  ++++++++++++++++++"
+                },
+                {
+                  "num": 11,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 8.50786e-23,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 24,
+                  "hit_to": 83,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++  ++++++++++++++++++++"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "sM_nz_pc",
+                  "accession": "sM_nz_pc",
+                  "title": "subject sM",
+                  "taxid": 10090,
+                  "sciname": "Mus musculus"
+                }
+              ],
+              "len": 141,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 73.9442,
+                  "score": 180,
+                  "evalue": 1.56189e-23,
+                  "identity": 0,
+                  "positive": 60,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 2,
+                  "hit_to": 61,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "lcl|sN_nz_pc"
+                }
+              ],
+              "len": 41,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 1.86876e-15,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 1,
+                  "query_to": 40,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 1.86876e-15,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 3,
+                  "query_to": 42,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 1.86876e-15,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 5,
+                  "query_to": 44,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 1.86876e-15,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 7,
+                  "query_to": 46,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 5,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 1.86876e-15,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 9,
+                  "query_to": 48,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 6,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 1.86876e-15,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 11,
+                  "query_to": 50,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 7,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 1.86876e-15,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 13,
+                  "query_to": 52,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 8,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 1.86876e-15,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 15,
+                  "query_to": 54,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 9,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 1.86876e-15,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 17,
+                  "query_to": 56,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 10,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 1.86876e-15,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 19,
+                  "query_to": 58,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 11,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 1.86876e-15,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 21,
+                  "query_to": 60,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 4,
+            "db_len": 326,
+            "hsp_len": 14,
+            "eff_space": 12420,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/nz_pc"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F"
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "q2",
+          "query_len": 140,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "sM_nz_pc",
+                  "accession": "sM_nz_pc",
+                  "title": "subject sM",
+                  "taxid": 10090,
+                  "sciname": "Mus musculus"
+                }
+              ],
+              "len": 141,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 184.882,
+                  "score": 468,
+                  "evalue": 7.08838e-66,
+                  "identity": 60,
+                  "positive": 120,
+                  "query_from": 1,
+                  "query_to": 140,
+                  "hit_from": 2,
+                  "hit_to": 141,
+                  "align_len": 160,
+                  "gaps": 40,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFDDDDDDDDDDDDDDDDDDDD--------------------FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY--------------------WWWWWWWWWWWWWWWWWWWWFFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++                                        FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "sI_nz_pc",
+                  "accession": "sI_nz_pc",
+                  "title": "subject sI",
+                  "taxid": 562,
+                  "sciname": "Escherichia coli"
+                }
+              ],
+              "len": 61,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 139.428,
+                  "score": 350,
+                  "evalue": 5.77425e-49,
+                  "identity": 60,
+                  "positive": 60,
+                  "query_from": 81,
+                  "query_to": 140,
+                  "hit_from": 2,
+                  "hit_to": 61,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC",
+                  "hseq": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC",
+                  "midline": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "lcl|sZ_nz_pc"
+                }
+              ],
+              "len": 83,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 73.9442,
+                  "score": 180,
+                  "evalue": 6.4285e-23,
+                  "identity": 0,
+                  "positive": 60,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 2,
+                  "hit_to": 61,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 6,
+                  "hit_to": 65,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++++++  ++"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 8,
+                  "hit_to": 67,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++++  ++++"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 10,
+                  "hit_to": 69,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++  ++++++"
+                },
+                {
+                  "num": 5,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 12,
+                  "hit_to": 71,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++  ++++++++"
+                },
+                {
+                  "num": 6,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 14,
+                  "hit_to": 73,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++  ++++++++++"
+                },
+                {
+                  "num": 7,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 16,
+                  "hit_to": 75,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++  ++++++++++++"
+                },
+                {
+                  "num": 8,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 18,
+                  "hit_to": 77,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++  ++++++++++++++"
+                },
+                {
+                  "num": 9,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 20,
+                  "hit_to": 79,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++  ++++++++++++++++"
+                },
+                {
+                  "num": 10,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 22,
+                  "hit_to": 81,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++  ++++++++++++++++++"
+                },
+                {
+                  "num": 11,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 24,
+                  "hit_to": 83,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++  ++++++++++++++++++++"
+                },
+                {
+                  "num": 12,
+                  "bit_score": 12.6974,
+                  "score": 21,
+                  "evalue": 5.41556,
+                  "identity": 4,
+                  "positive": 4,
+                  "query_from": 123,
+                  "query_to": 133,
+                  "hit_from": 53,
+                  "hit_to": 63,
+                  "align_len": 11,
+                  "gaps": 0,
+                  "qseq": "YNYFIEIAYTC",
+                  "hseq": "YVYVYVYVYCC",
+                  "midline": "Y Y     Y C"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "lcl|sN_nz_pc"
+                }
+              ],
+              "len": 41,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 1,
+                  "query_to": 40,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 3,
+                  "query_to": 42,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 5,
+                  "query_to": 44,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 7,
+                  "query_to": 46,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 5,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 9,
+                  "query_to": 48,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 6,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 11,
+                  "query_to": 50,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 7,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 13,
+                  "query_to": 52,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 8,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 15,
+                  "query_to": 54,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 9,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 17,
+                  "query_to": 56,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 10,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 19,
+                  "query_to": 58,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 11,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 21,
+                  "query_to": 60,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 4,
+            "db_len": 326,
+            "hsp_len": 20,
+            "eff_space": 29520,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/nz_pc"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F"
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_3",
+          "query_title": "q3",
+          "query_len": 60,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "sI_nz_pc",
+                  "accession": "sI_nz_pc",
+                  "title": "subject sI",
+                  "taxid": 562,
+                  "sciname": "Escherichia coli"
+                }
+              ],
+              "len": 61,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 139.428,
+                  "score": 350,
+                  "evalue": 2.31514e-50,
+                  "identity": 60,
+                  "positive": 60,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 2,
+                  "hit_to": 61,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC",
+                  "hseq": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC",
+                  "midline": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "sM_nz_pc",
+                  "accession": "sM_nz_pc",
+                  "title": "subject sM",
+                  "taxid": 10090,
+                  "sciname": "Mus musculus"
+                }
+              ],
+              "len": 141,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 139.428,
+                  "score": 350,
+                  "evalue": 2.48441e-49,
+                  "identity": 60,
+                  "positive": 60,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 82,
+                  "hit_to": 141,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC",
+                  "hseq": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC",
+                  "midline": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "lcl|sZ_nz_pc"
+                }
+              ],
+              "len": 83,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 12.6974,
+                  "score": 21,
+                  "evalue": 2.11835,
+                  "identity": 4,
+                  "positive": 4,
+                  "query_from": 43,
+                  "query_to": 53,
+                  "hit_from": 53,
+                  "hit_to": 63,
+                  "align_len": 11,
+                  "gaps": 0,
+                  "qseq": "YNYFIEIAYTC",
+                  "hseq": "YVYVYVYVYCC",
+                  "midline": "Y Y     Y C"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 11.1566,
+                  "score": 17,
+                  "evalue": 7.78457,
+                  "identity": 4,
+                  "positive": 5,
+                  "query_from": 37,
+                  "query_to": 51,
+                  "hit_from": 61,
+                  "hit_to": 75,
+                  "align_len": 15,
+                  "gaps": 0,
+                  "qseq": "WSCSRQYNYFIEIAY",
+                  "hseq": "YCCVYVYVYVYVYVY",
+                  "midline": "+ C   Y Y     Y"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 4,
+            "db_len": 326,
+            "hsp_len": 14,
+            "eff_space": 12420,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/nz_pc"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F"
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_4",
+          "query_title": "q4",
+          "query_len": 140,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "sI_nz_pc",
+                  "accession": "sI_nz_pc",
+                  "title": "subject sI",
+                  "taxid": 562,
+                  "sciname": "Escherichia coli"
+                }
+              ],
+              "len": 61,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 139.428,
+                  "score": 350,
+                  "evalue": 5.77425e-49,
+                  "identity": 60,
+                  "positive": 60,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 2,
+                  "hit_to": 61,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC",
+                  "hseq": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC",
+                  "midline": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "sM_nz_pc",
+                  "accession": "sM_nz_pc",
+                  "title": "subject sM",
+                  "taxid": 10090,
+                  "sciname": "Mus musculus"
+                }
+              ],
+              "len": 141,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 139.428,
+                  "score": 350,
+                  "evalue": 6.20019e-48,
+                  "identity": 60,
+                  "positive": 60,
+                  "query_from": 1,
+                  "query_to": 60,
+                  "hit_from": 82,
+                  "hit_to": 141,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC",
+                  "hseq": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC",
+                  "midline": "FFYEQYGQLGRYMGGALKMCSDSWGSGVPESKVQCTWSCSRQYNYFIEIAYTCHTDPLPC"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 73.9442,
+                  "score": 180,
+                  "evalue": 2.77894e-22,
+                  "identity": 0,
+                  "positive": 60,
+                  "query_from": 81,
+                  "query_to": 140,
+                  "hit_from": 2,
+                  "hit_to": 61,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
+                }
+              ]
+            },
+            {
+              "num": 3,
+              "description": [
+                {
+                  "id": "lcl|sZ_nz_pc"
+                }
+              ],
+              "len": 83,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 73.9442,
+                  "score": 180,
+                  "evalue": 6.4285e-23,
+                  "identity": 0,
+                  "positive": 60,
+                  "query_from": 81,
+                  "query_to": 140,
+                  "hit_from": 2,
+                  "hit_to": 61,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 81,
+                  "query_to": 140,
+                  "hit_from": 6,
+                  "hit_to": 65,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++++++  ++"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 81,
+                  "query_to": 140,
+                  "hit_from": 8,
+                  "hit_to": 67,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++++  ++++"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 81,
+                  "query_to": 140,
+                  "hit_from": 10,
+                  "hit_to": 69,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++++  ++++++"
+                },
+                {
+                  "num": 5,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 81,
+                  "query_to": 140,
+                  "hit_from": 12,
+                  "hit_to": 71,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++++  ++++++++"
+                },
+                {
+                  "num": 6,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 81,
+                  "query_to": 140,
+                  "hit_from": 14,
+                  "hit_to": 73,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++++  ++++++++++"
+                },
+                {
+                  "num": 7,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 81,
+                  "query_to": 140,
+                  "hit_from": 16,
+                  "hit_to": 75,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++++  ++++++++++++"
+                },
+                {
+                  "num": 8,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 81,
+                  "query_to": 140,
+                  "hit_from": 18,
+                  "hit_to": 77,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++++  ++++++++++++++"
+                },
+                {
+                  "num": 9,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 81,
+                  "query_to": 140,
+                  "hit_from": 20,
+                  "hit_to": 79,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++++  ++++++++++++++++"
+                },
+                {
+                  "num": 10,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 81,
+                  "query_to": 140,
+                  "hit_from": 22,
+                  "hit_to": 81,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++  ++++++++++++++++++"
+                },
+                {
+                  "num": 11,
+                  "bit_score": 70.4774,
+                  "score": 171,
+                  "evalue": 1.45213e-21,
+                  "identity": 0,
+                  "positive": 58,
+                  "query_from": 81,
+                  "query_to": 140,
+                  "hit_from": 24,
+                  "hit_to": 83,
+                  "align_len": 60,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYCCVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++  ++++++++++++++++++++"
+                },
+                {
+                  "num": 12,
+                  "bit_score": 21.1718,
+                  "score": 43,
+                  "evalue": 0.00564897,
+                  "identity": 4,
+                  "positive": 24,
+                  "query_from": 43,
+                  "query_to": 100,
+                  "hit_from": 53,
+                  "hit_to": 83,
+                  "align_len": 58,
+                  "gaps": 27,
+                  "qseq": "YNYFIEIAYTCHTDPLPCDDDDDDDDDDDDDDDDDDDDIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "YVYVYVYVYCC---------------------------VYVYVYVYVYVYVYVYVYVY",
+                  "midline": "Y Y     Y C                           ++++++++++++++++++++"
+                }
+              ]
+            },
+            {
+              "num": 4,
+              "description": [
+                {
+                  "id": "lcl|sN_nz_pc"
+                }
+              ],
+              "len": 41,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 81,
+                  "query_to": 120,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 83,
+                  "query_to": 122,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 3,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 85,
+                  "query_to": 124,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 4,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 87,
+                  "query_to": 126,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 5,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 89,
+                  "query_to": 128,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 6,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 91,
+                  "query_to": 130,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 7,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 93,
+                  "query_to": 132,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 8,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 95,
+                  "query_to": 134,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 9,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 97,
+                  "query_to": 136,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 10,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 99,
+                  "query_to": 138,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                },
+                {
+                  "num": 11,
+                  "bit_score": 50.8322,
+                  "score": 120,
+                  "evalue": 2.30836e-14,
+                  "identity": 0,
+                  "positive": 40,
+                  "query_from": 101,
+                  "query_to": 140,
+                  "hit_from": 2,
+                  "hit_to": 41,
+                  "align_len": 40,
+                  "gaps": 0,
+                  "qseq": "IFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIFIF",
+                  "hseq": "VYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVYVY",
+                  "midline": "++++++++++++++++++++++++++++++++++++++++"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 4,
+            "db_len": 326,
+            "hsp_len": 20,
+            "eff_space": 29520,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

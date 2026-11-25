@@ -8,7 +8,8 @@ use std::{cell::RefCell, io::Write, path::Path};
 // The existing CLI v2 parser owns all defaults, lexical/scope validation and
 // code32 rejection. Synthetic paths identify memory input; no file is opened.
 pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
-    // The CLI's `-db` (a database search) waits for stage DB-7 in LOSAT Web, as BLASTP's.
+    // The frozen ABI v1 (plan TD-1) has no database search; LOSAT Web searches a database
+    // through ABI v2.
     if extra
         .iter()
         .any(|key| key.split('=').next().unwrap_or(key) == "-db")
@@ -85,7 +86,7 @@ fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
 // Original bytes are reparsed on each call with this role's gencode/mask
 // options; generic FASTA handles never cache translated or masked search state.
 #[cfg_attr(
-    not(target_arch = "wasm32"),
+    not(losat_web_abi_v1),
     expect(dead_code, reason = "called only by the web ABI (`web_api`, wasm32)")
 )]
 pub(crate) fn run_pair(

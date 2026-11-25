@@ -24,6 +24,91 @@ use crate::algorithm::blastx::x_timing::{self, End as XEnd};
 use crate::algorithm::common::database::{FetchMarks, FetchedUtf8, HeaderReadError, Utf8Read};
 use crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus;
 
+/// No NCBI counterpart (scheduling only): EXPERIMENT (LOSAT_X_BXREDOFLOW, in the strict set: on
+/// unless `=0`), the matches redone ahead as a flow instead of in fork-join batches (see
+/// `kappa_redo_batch`). It acts wherever the batches would run (LOSAT_X_BXPAR's rule: a pool of
+/// two or more threads, two or more matches, no recording observer, not e-value mode of
+/// `-use_sw_tback`), and has no rule of its own; its workers are the batches': one per thread of
+/// the pool.
+#[cfg(feature = "parallel")]
+fn x_redo_flow() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXREDOFLOW"))
+}
+
+/// No NCBI counterpart (scheduling only): the guess of which matches the redo makes ahead (the flow's
+/// offers and `=0`'s batches, `kappa_redo_batch`), with the matches offered ahead of the loop that
+/// it counts. A match is offered when the loop's early termination test (`CompoHeap::early`) will
+/// let it reach its redo even after the matches offered before it have filled their heaps: each
+/// offered match whose best E-value is at or below its heap's cutoff (`CompoHeap::x_counts_ahead`)
+/// counts as one more entry there, from the loop's match on (`CompoHeap::x_early_ahead`). A match
+/// that only those counted matches would end early is "not yet": nothing at or past it is offered
+/// until the loop has passed them and the heaps themselves decide. Why: with a short hit list a few
+/// inserts fill the heaps, while the heaps were empty when the whole window was offered (1 x 9,000
+/// x 595 `-use_sw_tback -max_target_seqs 3`: the loop redoes 32 of 205 matches; the flow redid
+/// 130 ahead at 4 threads and 204 at 8, its loop up to 6 times one thread's; with the matches
+/// counted, the 31 or 32 that the loop takes, in 0.6 times one thread's time). With a long hit
+/// list (the default 500) the counted matches do not reach a heap's threshold but at its very end,
+/// so the matches offered are those of the heaps as they are. The guess changes the time only: the
+/// loop tests and redoes every match in stream order.
+#[cfg(feature = "parallel")]
+struct XPending {
+    /// Per query: the counted matches offered from the loop's match on.
+    queries: Vec<usize>,
+    /// Per match: whether it is counted in `queries`.
+    counted: Vec<bool>,
+}
+
+#[cfg(feature = "parallel")]
+impl XPending {
+    fn new(queries: usize, matches: usize) -> Self {
+        Self {
+            queries: vec![0; queries],
+            counted: vec![false; matches],
+        }
+    }
+
+    /// The loop is at match `index` of `matches`: the match before it, inserted or skipped, is no
+    /// longer ahead of the loop.
+    fn at(&mut self, index: usize, matches: &[HspList]) {
+        if let Some(before) = index.checked_sub(1) {
+            if std::mem::take(&mut self.counted[before]) {
+                self.queries[matches[before].query_index] -= 1;
+            }
+        }
+    }
+
+    /// The guess for match `index`, `list` (`excluded`: `-use_sw_tback`'s fetch excludes its
+    /// subject, so it is never redone), on `heaps` as they are now: `Some(true)` offer it (and
+    /// count it), `Some(false)` the loop will skip it, `None` not yet (see `XPending`).
+    fn offer(
+        &mut self,
+        index: usize,
+        list: &HspList,
+        excluded: bool,
+        heaps: &[CompoHeap],
+    ) -> Option<bool> {
+        let e = list.best_evalue;
+        if excluded {
+            return Some(false);
+        }
+        if !CompoHeap::x_early_ahead(e, heaps, &self.queries) {
+            if heaps[list.query_index].x_counts_ahead(e) {
+                self.queries[list.query_index] += 1;
+                self.counted[index] = true;
+            }
+            return Some(true);
+        }
+        // Early on the heaps as they are: it stays so (no insert takes an entry away, `early`).
+        // Otherwise only the counted matches would end it early: not yet.
+        if CompoHeap::early(e, heaps) {
+            Some(false)
+        } else {
+            None
+        }
+    }
+}
+
 /// What the kappa branch of `batch_end` reads and writes of the batch: the batch with the
 /// parameters of its contexts, the Kappa state, the stream the matches are read from, and the
 /// queries' hit lists with the heaps that fill them (`heaps`) and the inactive ones (`inactive_heaps`,
@@ -40,11 +125,17 @@ pub(super) struct KappaBatch<'a> {
     pub(super) heaps: &'a mut [CompoHeap],
     pub(super) inactive_heaps: &'a mut [CompoHeap],
     /// The subjects of the stream whose header holds a UTF8String where a VisibleString is
-    /// expected (`FetchExcluded::retain_noting`: with the query of the list, its best E-value and
-    /// whether it has HSPs), the lists left in the stream (query and subject, in the stream's
-    /// order) where there is one, and the first that the redo fetches (`redo_fetched`; the
-    /// Smith-Waterman redo's, `sw_fetched`, which reads its own stream's).
-    pub(super) fetched: (&'a [FetchedRead], &'a [(usize, usize)], &'a mut Option<u32>),
+    /// expected and those whose header cannot be read (`FetchExcluded::retain_noting`: with the
+    /// query of the list, its best E-value and whether it has HSPs), the lists left in the stream
+    /// (query and subject, in the stream's order) where there is one, and the first of the former
+    /// that the redo fetches (`redo_fetched`; the Smith-Waterman redo's, `sw_fetched`, which reads
+    /// its own stream's). A fetch of one of the latter is LOSAT's refusal (`fetch_refused`).
+    pub(super) fetched: (
+        &'a [FetchedRead],
+        &'a [FetchedRead],
+        &'a [(usize, usize)],
+        &'a mut Option<u32>,
+    ),
 }
 
 /// A subject of the batch's lists whose header holds a UTF8String where a VisibleString is
@@ -116,6 +207,19 @@ fn redo_fetched(
 }
 
 impl Runtime<'_> {
+    /// LOSAT's refusal of the search whose redo fetches the sequence `ordinal`, whose header
+    /// cannot be read: NCBI's search ends there (`FetchExcluded::refusal_at`).
+    #[cold]
+    #[inline(never)]
+    fn fetch_refused(&self, ordinal: u32) -> anyhow::Error {
+        match self.subjects.seqdb() {
+            Some(db) => {
+                crate::algorithm::common::database::FetchExcluded::refusal_at(db, ordinal, "BLASTX")
+            }
+            None => anyhow::anyhow!("a fetch of sequence {ordinal} without a database"),
+        }
+    }
+
     /// `error`, which fails the batch after its Smith-Waterman redo fetched `fetched` (the first
     /// of the batch's fetches that read a header with a UTF8String where a VisibleString is
     /// expected, `sw_fetched`): NCBI posted its warning before the error (rows
@@ -173,7 +277,7 @@ impl Runtime<'_> {
             queries,
             heaps,
             inactive_heaps,
-            fetched: (fetched_reads, fetched_order, fetched_first),
+            fetched: (fetched_reads, fetched_unreadable, fetched_order, fetched_first),
         } = args;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3392-3424
         let x_t = x_timing::lap();
@@ -187,7 +291,9 @@ impl Runtime<'_> {
         // The subjects whose header holds a UTF8String where a VisibleString is expected come
         // from the same read of the headers (`sw_reads`), with the stream's lists, where there is
         // one (`sw_stream`: query and subject, markers too).
-        let (marks, sw_reads, do_link_hsps) = if SW {
+        // Those whose header cannot be read stay in the stream (`sw_unreadable`): a fetch of one
+        // is LOSAT's refusal (`fetch_refused`).
+        let (marks, sw_reads, sw_unreadable, do_link_hsps) = if SW {
             let excluded = self
                 .subjects
                 .seqdb()
@@ -197,15 +303,12 @@ impl Runtime<'_> {
                 &matches,
                 |list| u32::try_from(list.oid).ok(),
                 |list| (list.query_index, list.best_evalue, !list.hsps.is_empty()),
-            )
-            .map_err(|failed| {
-                crate::algorithm::common::database::FetchExcluded::refusal(failed, "BLASTX")
-            })?;
-            (marks, reads, state.do_link_hsps())
+            );
+            (marks, reads.utf8, reads.unreadable, state.do_link_hsps())
         } else {
-            (FetchMarks::default(), Vec::new(), false)
+            (FetchMarks::default(), Vec::new(), Vec::new(), false)
         };
-        let sw_stream: Vec<(usize, usize)> = if sw_reads.is_empty() {
+        let sw_stream: Vec<(usize, usize)> = if sw_reads.is_empty() && sw_unreadable.is_empty() {
             Vec::new()
         } else {
             matches
@@ -232,6 +335,10 @@ impl Runtime<'_> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3499-3502
         // One Kappa state per pool thread, as NCBI keeps one NRrecord, redo_align_params and
         // matrix per thread.
+        // EXPERIMENT (LOSAT_X_BXREDOFLOW): the form of the redo made ahead (below); a test's
+        // observer may choose it (`RuntimeObserver::x_redo_flow`).
+        #[cfg(feature = "parallel")]
+        let x_flow = self.observer.x_redo_flow().unwrap_or_else(x_redo_flow);
         #[cfg(feature = "parallel")]
         let x_workers = if x_bx_par_rule(|| {
             self.observer.x_passive()
@@ -241,6 +348,10 @@ impl Runtime<'_> {
                 && matches.len() > 1
                 && !reads_heaps
         }) {
+            // The workers of the flow and of the batches: one per thread of the pool (at most one
+            // per match). Not the share the cap leaves a batch of one task for its subject flow
+            // (`x_bx_mem::flow_threads`): a redo that ends a search alone would keep that share
+            // (4 of 32 threads at the end of q200k `-use_sw_tback`, 2.5 times the batches' time).
             (0..x_kappa_workers(rayon::current_num_threads(), matches.len()))
                 .map(|_| {
                     Ok(std::sync::Mutex::new(XKappaWorker(state.x_for_thread(
@@ -269,186 +380,293 @@ impl Runtime<'_> {
             matches.len(),
             !x_workers.is_empty(),
         );
+        // EXPERIMENT (LOSAT_X_BXREDOFLOW, in the strict set: on unless `=0`): the matches ahead
+        // are redone as a flow (`utils::xahead`) instead of in the fork-join batches below: the
+        // loop's thread offers the next `x_batch` matches as it walks the stream (those the guess
+        // `XPending` lets through, up to the first it cannot tell yet; the batches take the same
+        // guess), each worker takes the next one offered, and the loop takes a match's result when
+        // it reaches it (redoing other offered matches while one is still being redone). No
+        // thread waits for the longest match of a batch. The workers (`x_kappa_workers`: one per
+        // thread of the pool, at most one per match) are the loop's thread's and one per helper.
+        // A thread with nothing to redo spins, yields, then sleeps 50 us at a time
+        // (`Ahead::x_new_napping`). A match's result does not depend on who redoes it or when
+        // (`x_speculate_match`), so the schedule changes the time only.
+        #[cfg(feature = "parallel")]
+        let (x_workers, mut x_own, x_helpers) = if !x_workers.is_empty() && x_flow {
+            let mut all = x_workers
+                .into_iter()
+                .map(|worker| worker.into_inner().unwrap_or_else(|p| p.into_inner()));
+            let own = all.next();
+            (Vec::new(), own, all.collect::<Vec<_>>())
+        } else {
+            (x_workers, None, Vec::new())
+        };
+        #[cfg(feature = "parallel")]
+        let x_ahead = x_own
+            .is_some()
+            .then(|| crate::utils::xahead::Ahead::x_new_napping(x_batch));
+        #[cfg(feature = "parallel")]
+        let (x_options, x_subjects, x_db_length) = (self.options, self.subjects, self.db_length);
+        // No NCBI counterpart: the flow's redo of one match ahead, by the statements of the
+        // batches' (`x_speculate_match`).
+        #[cfg(feature = "parallel")]
+        let x_compute = |index: usize, worker: &mut XKappaWorker| {
+            x_speculate_match(
+                &mut worker.0,
+                &matches[index],
+                batch,
+                full,
+                x_options,
+                x_subjects,
+                x_db_length,
+            )
+        };
         // No NCBI counterpart: counters of speculative results used and matches redone in
         // order; it does not change any value NCBI computes.
         let mut x_reused = 0usize;
         let mut x_serial = 0usize;
+        // No NCBI counterpart (scheduling only): the guess of the matches made ahead, with the
+        // matches offered ahead of the loop that it counts (`XPending`), and (`=0`) the match where
+        // the next batch starts and the first match of the batch in `speculated`.
+        #[cfg(feature = "parallel")]
+        let mut x_pending = XPending::new(heaps.len(), matches.len());
+        #[cfg(feature = "parallel")]
+        let (mut x_batch_at, mut x_batch_from) = (0usize, 0usize);
         let x_t_loop = x_timing::lap();
-        for (match_index, list) in matches.iter().enumerate() {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
-            // A batch of the following matches is redone ahead of time on the pool. The early-
-            // termination test (BlastCompo_EarlyTermination) is evaluated here on the heaps as
-            // they are now, and again, in stream order, below; a result is used only when the
-            // second test agrees.
-            #[cfg(feature = "parallel")]
-            if !x_workers.is_empty() && match_index % x_batch == 0 {
-                use rayon::prelude::*;
-                let batch_lists = &matches[match_index..(match_index + x_batch).min(matches.len())];
-                // Early termination only becomes true as the heaps fill. A list that the fetch
-                // excludes is never redone (`-use_sw_tback`'s markers).
-                let wanted: Vec<bool> = batch_lists
-                    .iter()
-                    .enumerate()
-                    .map(|(position, list)| {
-                        !(CompoHeap::early(list.best_evalue, heaps)
-                            || (SW && marks.excluded(match_index + position)))
-                    })
-                    .collect();
-                let (options, subjects, db_length) = (self.options, self.subjects, self.db_length);
-                let full = &full;
-                let workers = &x_workers;
-                let x_t = x_timing::lap();
-                // One worker per thread: the thread's own. One per match (fewer matches than
-                // threads, so this batch holds them all): the match's own.
-                let per_thread = workers.len() == rayon::current_num_threads();
-                speculated = batch_lists
-                    .par_iter()
-                    .zip(wanted.par_iter())
-                    .enumerate()
-                    .map(|(position, (list, &wanted))| {
-                        if !wanted {
-                            return None;
+        let mut x_walk = || -> Result<()> {
+            for (match_index, list) in matches.iter().enumerate() {
+                #[cfg(feature = "parallel")]
+                x_pending.at(match_index, &matches);
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
+                // The flow offers the matches up to `x_batch` past this one that it has not offered
+                // yet, with the guess (`XPending`) on the heaps as they are now; it stops at the
+                // first match the guess cannot tell yet and goes on from there at a later match.
+                #[cfg(feature = "parallel")]
+                if let Some(ahead) = &x_ahead {
+                    ahead.x_announce_while(match_index, matches.len(), |next| {
+                        x_pending.offer(next, &matches[next], SW && marks.excluded(next), heaps)
+                    });
+                }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
+                // A batch of the following matches is redone ahead of time on the pool. The early-
+                // termination test (BlastCompo_EarlyTermination) is guessed here on the heaps as
+                // they are now (`XPending`), and evaluated, in stream order, below; a result is
+                // used only when the second test lets the match reach its redo.
+                #[cfg(feature = "parallel")]
+                if !x_workers.is_empty() && match_index == x_batch_at {
+                    use rayon::prelude::*;
+                    let window = &matches[match_index..(match_index + x_batch).min(matches.len())];
+                    // The batch ends before the first match the guess cannot tell yet; the next
+                    // batch starts there when the loop reaches it (every match before it then
+                    // done). The first match is always told: nothing is counted ahead of it.
+                    let mut wanted: Vec<bool> = Vec::with_capacity(window.len());
+                    for (position, list) in window.iter().enumerate() {
+                        let index = match_index + position;
+                        match x_pending.offer(index, list, SW && marks.excluded(index), heaps) {
+                            Some(offered) => wanted.push(offered),
+                            None => break,
                         }
-                        let slot = if per_thread {
-                            rayon::current_thread_index().unwrap_or(0) % workers.len()
-                        } else {
-                            position % workers.len()
-                        };
-                        let mut guard = workers[slot].lock().expect("BLASTX redo worker state");
-                        x_speculate_match(
-                            &mut guard.0,
-                            list,
-                            batch,
-                            full,
-                            options,
-                            subjects,
-                            db_length,
-                        )
-                    })
-                    .collect();
-                x_timing::end(XEnd::KappaSpec, x_t);
-            }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1580
-            let early = CompoHeap::early(list.best_evalue, heaps);
-            self.observer.early(list.best_evalue, heaps.len(), early);
-            if SW {
-                // The early termination test, then the fetch, which may exclude the subject: a
-                // list that reaches the fetch sets the batch's status (`SwBatchStatus`).
-                if !sw_status.reaches_redo(early, marks.excluded(match_index)) {
+                    }
+                    let batch_lists = &window[..wanted.len()];
+                    (x_batch_at, x_batch_from) = (match_index + wanted.len().max(1), match_index);
+                    let (options, subjects, db_length) =
+                        (self.options, self.subjects, self.db_length);
+                    let full = &full;
+                    let workers = &x_workers;
+                    let x_t = x_timing::lap();
+                    // One worker per thread: the thread's own. One per match (fewer matches than
+                    // threads, so this batch holds them all): the match's own.
+                    let per_thread = workers.len() == rayon::current_num_threads();
+                    speculated = batch_lists
+                        .par_iter()
+                        .zip(wanted.par_iter())
+                        .enumerate()
+                        .map(|(position, (list, &wanted))| {
+                            if !wanted {
+                                return None;
+                            }
+                            let slot = if per_thread {
+                                rayon::current_thread_index().unwrap_or(0) % workers.len()
+                            } else {
+                                position % workers.len()
+                            };
+                            let mut guard = workers[slot].lock().expect("BLASTX redo worker state");
+                            x_speculate_match(
+                                &mut guard.0,
+                                list,
+                                batch,
+                                full,
+                                options,
+                                subjects,
+                                db_length,
+                            )
+                        })
+                        .collect();
+                    x_timing::end(XEnd::KappaSpec, x_t);
+                }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1580
+                let early = CompoHeap::early(list.best_evalue, heaps);
+                self.observer.early(list.best_evalue, heaps.len(), early);
+                // The early termination test, then (`-use_sw_tback`) the fetch, which may exclude
+                // the subject: a list that reaches the fetch sets the batch's status
+                // (`SwBatchStatus`).
+                let skipped = if SW {
+                    !sw_status.reaches_redo(early, marks.excluded(match_index))
+                } else {
+                    early
+                };
+                if skipped {
+                    // The flow's workers need not redo it.
+                    #[cfg(feature = "parallel")]
+                    if let Some(ahead) = &x_ahead {
+                        ahead.skip(match_index);
+                    }
                     continue;
                 }
-            } else if early {
-                continue;
-            }
-            #[cfg(feature = "parallel")]
-            let x_ready = if x_workers.is_empty() {
-                None
-            } else {
-                speculated[match_index % x_batch].take()
-            };
-            #[cfg(not(feature = "parallel"))]
-            let x_ready: Option<(HspList, i32, Option<XMatrixLeft>)> = None;
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3626
-            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1234
-            // Dispatch point: the reference path is the else branch, which redoes the match in
-            // stream order (Blast_RedoOneMatch). A speculative result is taken instead only
-            // when it was computed without reading its predecessor's matrix; its matrix, if it
-            // leaves one, is handed on.
-            let (output, best_score) = if let Some((output, best_score, matrix)) = x_ready {
-                x_reused += 1;
-                if let Some(matrix) = matrix {
-                    state.x_set_matrix(Some(*matrix));
-                }
-                if SW {
-                    // A match redone ahead ended (a failed or endless redo is redone here).
-                    sw_status.redone(Ok(()), || sw_endless(do_link_hsps))?;
-                }
-                (output, best_score)
-            } else {
-                x_serial += 1;
-                let x_t = x_timing::lap();
-                let encoded = self.subjects.read_searched(list.oid, self.options)?;
-                let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
-                let redone = if SW {
-                    // NCBI's heap test in e-value mode, with the subject's OID
-                    // (`matchingSeq->index`), on the heap that the window's query context
-                    // indexes (`CompoHeap::would_insert_at`).
-                    let oid = list.oid;
-                    let result = state.redo_list_tested(
-                        &input,
-                        batch,
-                        &encoded,
-                        &mut |context, evalue, score| {
-                            Ok(CompoHeap::would_insert_at(
-                                heaps, context, evalue, score, oid,
-                            ))
-                        },
-                    );
-                    match sw_status
-                        .redone(result, || sw_endless(do_link_hsps))
-                        .map_err(|error| {
-                            self.sw_failed_after(
-                                error,
-                                sw_fetched(&sw_reads, &sw_stream, heaps, match_index),
-                            )
-                        })? {
-                        Some(redone) => redone,
-                        None => continue,
-                    }
+                #[cfg(feature = "parallel")]
+                let x_ready = if let Some(ahead) = &x_ahead {
+                    let x_t = x_timing::lap();
+                    let own = x_own.as_mut().expect("the flow's loop keeps a redo worker");
+                    let ready = ahead.take(match_index, own, &x_compute).flatten();
+                    x_timing::end(XEnd::KappaSpec, x_t);
+                    ready
+                } else if x_workers.is_empty() {
+                    None
                 } else {
-                    state.redo_list_observed(&input, batch, &encoded)?
+                    speculated
+                        .get_mut(match_index - x_batch_from)
+                        .and_then(Option::take)
                 };
-                let finalized = finalize_redone(
-                    &redone,
-                    batch,
-                    full,
-                    self.options,
-                    &encoded,
-                    self.db_length,
-                    list.query_index,
-                    list.oid,
-                    self.observer,
-                );
-                x_timing::end(XEnd::KappaSerial, x_t);
-                finalized?
-            };
-            if output.hsps.is_empty() {
-                continue;
-            }
-            // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275
-            let heap = &mut heaps[list.query_index];
-            let e = output.best_evalue;
-            let insert = heap.would_insert(e, best_score, list.oid);
-            self.observer.heap(
-                list.query_index + inactive_heaps.len(),
-                "WOULD",
-                e,
-                best_score,
-                list.oid as i64,
-                i64::from(insert),
-                heap,
-            );
-            if insert {
-                let discarded = heap.insert(HeapEntry {
-                    list: output,
-                    best_score,
-                });
+                #[cfg(not(feature = "parallel"))]
+                let x_ready: Option<(HspList, i32, Option<XMatrixLeft>)> = None;
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3625-3626
+                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1234
+                // Dispatch point: the reference path is the else branch, which redoes the match in
+                // stream order (Blast_RedoOneMatch). A speculative result is taken instead only
+                // when it was computed without reading its predecessor's matrix; its matrix, if it
+                // leaves one, is handed on.
+                let (output, best_score) = if let Some((output, best_score, matrix)) = x_ready {
+                    x_reused += 1;
+                    if let Some(matrix) = matrix {
+                        state.x_set_matrix(Some(*matrix));
+                    }
+                    if SW {
+                        // A match redone ahead ended (a failed or endless redo is redone here).
+                        sw_status.redone(Ok(()), || sw_endless(do_link_hsps))?;
+                    }
+                    (output, best_score)
+                } else {
+                    x_serial += 1;
+                    let x_t = x_timing::lap();
+                    let encoded = self.subjects.read_searched(list.oid, self.options)?;
+                    let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
+                    let redone = if SW {
+                        // NCBI's heap test in e-value mode, with the subject's OID
+                        // (`matchingSeq->index`), on the heap that the window's query context
+                        // indexes (`CompoHeap::would_insert_at`).
+                        let oid = list.oid;
+                        let result = state.redo_list_tested(
+                            &input,
+                            batch,
+                            &encoded,
+                            &mut |context, evalue, score| {
+                                Ok(CompoHeap::would_insert_at(
+                                    heaps, context, evalue, score, oid,
+                                ))
+                            },
+                        );
+                        match sw_status
+                            .redone(result, || sw_endless(do_link_hsps))
+                            .map_err(|error| {
+                                // A fetch before this match that read a header that cannot be
+                                // read ended NCBI's search there.
+                                match sw_fetched(&sw_unreadable, &sw_stream, heaps, match_index) {
+                                    Some(ordinal) => self.fetch_refused(ordinal),
+                                    None => self.sw_failed_after(
+                                        error,
+                                        sw_fetched(&sw_reads, &sw_stream, heaps, match_index),
+                                    ),
+                                }
+                            })? {
+                            Some(redone) => redone,
+                            None => continue,
+                        }
+                    } else {
+                        state.redo_list_observed(&input, batch, &encoded)?
+                    };
+                    let finalized = finalize_redone(
+                        &redone,
+                        batch,
+                        full,
+                        self.options,
+                        &encoded,
+                        self.db_length,
+                        list.query_index,
+                        list.oid,
+                        self.observer,
+                    );
+                    x_timing::end(XEnd::KappaSerial, x_t);
+                    finalized?
+                };
+                if output.hsps.is_empty() {
+                    continue;
+                }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:252-275
+                let heap = &mut heaps[list.query_index];
+                let e = output.best_evalue;
+                let insert = heap.would_insert(e, best_score, list.oid);
                 self.observer.heap(
                     list.query_index + inactive_heaps.len(),
-                    "INSERT",
+                    "WOULD",
                     e,
                     best_score,
                     list.oid as i64,
-                    discarded.as_ref().map_or(-1, |h| h.list.oid as i64),
+                    i64::from(insert),
                     heap,
                 );
+                if insert {
+                    let discarded = heap.insert(HeapEntry {
+                        list: output,
+                        best_score,
+                    });
+                    self.observer.heap(
+                        list.query_index + inactive_heaps.len(),
+                        "INSERT",
+                        e,
+                        best_score,
+                        list.oid as i64,
+                        discarded.as_ref().map_or(-1, |h| h.list.oid as i64),
+                        heap,
+                    );
+                }
             }
+            Ok(())
+        };
+        // The loop on this thread; with the flow, its helpers on the pool's other threads.
+        #[cfg(feature = "parallel")]
+        crate::utils::xahead::with_helpers(x_ahead.as_ref(), x_helpers, &x_compute, &mut x_walk)?;
+        #[cfg(not(feature = "parallel"))]
+        x_walk()?;
+        #[cfg(feature = "parallel")]
+        if let Some(ahead) = &x_ahead {
+            x_timing::end_add(XEnd::Ahead, ahead.counts().0);
         }
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2493-2513
         // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/compo_heap.c:444-464
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3775-3779
         // The status of the last match the redo reached fails the batch.
+        // A fetch of the redo that read a header that cannot be read ended NCBI's search before.
+        let refused = if SW {
+            sw_fetched(&sw_unreadable, &sw_stream, heaps, usize::MAX)
+        } else if !fetched_unreadable.is_empty() {
+            redo_fetched(fetched_unreadable, fetched_order, heaps)
+        } else {
+            None
+        };
+        if let Some(ordinal) = refused {
+            return Err(self.fetch_refused(ordinal));
+        }
         if SW && sw_status.failed() {
             let error = sw_batch_failed(heaps.first().is_some_and(|heap| !heap.entries.is_empty()));
             return Err(
@@ -516,3 +734,7 @@ impl Runtime<'_> {
         Ok(x_t_finish)
     }
 }
+
+#[cfg(all(test, feature = "parallel"))]
+#[path = "kappa_batch_tests.rs"]
+mod tests;

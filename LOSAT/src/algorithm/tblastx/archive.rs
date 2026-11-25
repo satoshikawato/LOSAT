@@ -1,7 +1,7 @@
 //! TBLASTX's BLAST archive (outfmt 11): the request options from the arguments, the archive of
 //! each query batch from the batch's report data, and the error archive.
 //!
-//! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:198
+//! NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-199
 //! One archive per query batch (the reader's batch, `BATCH_SIZE` letters, 10002 by default),
 //! written after the batch's search. LOSAT's TBLASTX searches the batches first and writes every
 //! format at the end, from the hits of all of them (`write_tblastx_outputs`), so the archives are
@@ -20,7 +20,6 @@
 //! +1: 0 when that context is not valid), which is the `EffectiveSearchSpace` option of the
 //! batch (`SplitQuery_SetEffectiveSearchSpace`, `BlastOptions` memento: the first context).
 
-use std::io::Write;
 use std::ops::Range;
 
 use anyhow::Result;
@@ -43,6 +42,23 @@ use crate::report::archive::{
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
+
+/// What a TBLASTX run's arguments give its search strategy's requests
+/// (`strategy::StrategyExport::for_args`): the archive's recorded options, the counts
+/// of the `HitlistSize` and the database of `-db`.
+impl crate::report::archive::strategy::StrategyArgs for TblastxArgs {
+    fn strategy_inputs(&self) -> crate::report::archive::strategy::StrategyInputs<'_> {
+        crate::report::archive::strategy::StrategyInputs {
+            inputs: option_inputs(self),
+            counts: crate::report::archive::strategy::HitlistArgs {
+                max_target_seqs: self.max_target_seqs,
+                num_descriptions: self.num_descriptions,
+                num_alignments: self.num_alignments,
+            },
+            database: self.database_name(),
+        }
+    }
+}
 
 /// The recorded options of a TBLASTX run (`options::algorithm_options`'s inputs), from the
 /// arguments as given: a value is recorded only when it was given or the class of its argument
@@ -342,7 +358,7 @@ pub(super) fn write_tblastx_archives(
     handle: &ArchiveHandle,
     data: &ArchiveData<'_>,
     warnings: &mut QueryWarnings<'_>,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastx,

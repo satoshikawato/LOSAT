@@ -27,10 +27,7 @@ use super::empty_rows::{
     SubjectLoc, TabularEmptyRow,
 };
 use super::input::FastaRecord;
-use super::report::{
-    alignment, has_seqalign, query_endpoints, query_warning, tabular_io_error, ShownSubjects,
-    TabularFlushError,
-};
+use super::report::{alignment, has_seqalign, query_endpoints, query_warning, ShownSubjects};
 use super::runtime::BatchResults;
 use crate::algorithm::common::tabular::FailedValues;
 use crate::cli::NativeError;
@@ -346,7 +343,8 @@ fn subject_values<'a>(
 /// the rows. A database's refusals of the fields come before (`ReportedSubjects::read_tabular`,
 /// `native::run`); each row's texts of the taxonomy database's lookups follow the rows before
 /// it (`report::tabular::TabularNames::row_messages`). An error writing a query's report is the
-/// stream failure of NCBI's formatter (`report::TabularFlushError`).
+/// stream failure of NCBI's formatter (`ostream::ReportWriteFailure`), at the flush of each
+/// query's `CBlastTabularInfo` where its writes were held.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_blastx_tabular(
     writer: &mut crate::cli::NcbiOstream<'_>,
@@ -379,7 +377,7 @@ pub(super) fn write_blastx_tabular(
     );
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1316
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1311
     let database: Vec<u8> = match shown {
         ShownSubjects::Fasta { path, .. } => crate::report::pairwise::subject_set_name(path),
         ShownSubjects::Database { name, .. } => name.as_bytes().to_vec(),
@@ -459,7 +457,7 @@ pub(super) fn write_blastx_tabular(
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1034-1043
                 // The length against which `hsp_percent_coverage` counts an HSP's residues in its
                 // frame (`qcovhsp`): a third of the searched letters in a gapped search, the
-                // searched letters in an ungapped one (blast_seqalign.cpp:1381-1384).
+                // searched letters in an ungapped one (blast_seqalign.cpp:1382-1383).
                 let coverage_length = if options.gapped {
                     searched_length as i32 / 3
                 } else {
@@ -804,10 +802,9 @@ pub(super) fn write_blastx_tabular(
                     reads.before_query(1, &mut *writer, &mut *stderr)?;
                 }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
-                writer.flush().map_err(TabularFlushError)?;
+                crate::report::ostream::ReportWrite::ncbi_flush(writer)?;
                 Ok(())
-            })()
-            .map_err(tabular_io_error)?;
+            })()?;
         }
     }
     Ok(())

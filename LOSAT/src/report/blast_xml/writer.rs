@@ -153,6 +153,9 @@ pub struct DocumentPosts {
     /// header, a 14 side file) or of the making of a 13 or 14 side file's report
     /// (`Xml2Document::failed`) (`run_ending_exception`).
     pub ends_run: Option<Box<crate::ncbi_exception::NcbiException>>,
+    /// Where NCBI's insertions into the report's stream end, and its regions and flushes, at
+    /// offsets of the output buffers (`ostream::Cuts`; BLAST XML's, `BlastXmlWriter`).
+    pub cuts: crate::report::ostream::Cuts,
 }
 
 /// The marker error with which outfmt 5's hit level stops the program's hits of a query whose
@@ -366,6 +369,12 @@ pub trait HitWrite {
 /// The HSP-level call of a structured writer behind `HspSink`.
 pub trait HspWrite {
     fn hsp(&mut self, hsp: &XmlHsp<'_>) -> Result<()>;
+
+    /// Whether the writer reads the coordinates, frames and rows of the HSPs of the `Hit` being
+    /// written (`HspSink::reads_alignment`).
+    fn reads_alignment(&self) -> bool {
+        true
+    }
 }
 
 /// The state of a document: the number of queries formatted so far (NCBI's
@@ -410,12 +419,22 @@ impl StructuredXml for BlastXmlWriter {
     where
         F: FnOnce(&mut HitSink<'_>) -> Result<()>,
     {
+        use crate::report::ostream::{Cut, Site};
         if self.iterations == 0 {
+            // The header is written outside the `try` of the queries (`Site::Report`).
+            let header = out.len();
             if let Some(thrown) = write_header(out, run, query, &mut self.posts.posts)? {
                 // No `Iteration` and no `Hit` of the query is made: the run ends after the posts.
                 self.posts.ends_run = Some(Box::new(thrown.exception()));
                 return Ok(());
             }
+            // `serial_xml_start`, then the `<BlastOutput_iterations>` line: two insertions into
+            // `out_stream`.
+            self.posts.cuts.push(header, Cut::Site(Site::Report));
+            self.posts.cuts.push(
+                out.len() - b"\n<BlastOutput_iterations>".len(),
+                Cut::Insertion,
+            );
         }
         self.iterations += 1;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:572-589
@@ -459,26 +478,38 @@ impl StructuredXml for BlastXmlWriter {
         }
         tail.extend_from_slice(&out[head_end..]);
         out.truncate(head_end);
+        // The `Iteration`'s insertions, in the `try` (`Site::XmlIteration`): `serial_xml_start`,
+        // `"\n<Iteration_hits>\n"`, each `Hit` (`Xml5Hits`), `"</Iteration_hits>"` and
+        // `serial_xml_end`.
+        // The `Iteration`'s regions, its parts and (most often) its `Hit`s, in one allocation.
+        self.posts.cuts.reserve(32);
+        self.posts.cuts.push(start, Cut::Site(Site::XmlIteration));
+        self.posts.cuts.push(out.len(), Cut::Insertion);
         out.extend_from_slice(b"\n<Iteration_hits>\n");
+        self.posts.cuts.push(out.len(), Cut::Insertion);
         let mut writer = Xml5Hits {
             run,
             masks: query.masks,
             out: &mut *out,
             scratch: &mut self.scratch,
             posts: &mut self.posts.posts,
+            cuts: &mut self.posts.cuts,
             hits: 0,
         };
         let result = hits(&mut HitSink::new(&mut writer));
         match result {
             Ok(()) => {
                 out.extend_from_slice(b"</Iteration_hits>");
+                self.posts.cuts.push(out.len(), Cut::Insertion);
                 out.extend_from_slice(&tail);
+                self.posts.cuts.push(out.len(), Cut::Site(Site::Report));
             }
             // A `Hit` threw: the `Iteration` ends after the hits before it (no
             // `</Iteration_hits>`, no tail), no later `Hit` is made (nor its subject loaded), and
             // the run goes on.
             Err(error) if error.downcast_ref::<IterationThrew>().is_some() => {
                 self.posts.cut = true;
+                self.posts.cuts.push(out.len(), Cut::Site(Site::Report));
             }
             Err(error) => {
                 // An exception that `s_BlastXMLAddIteration` catches (`CaughtException`) leaves
@@ -514,11 +545,16 @@ impl StructuredXml for BlastXmlWriter {
     /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2243
     /// (`m_SerialXmlEnd` is set by the first formatted query, blastxml_format.cpp:755-763.)
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<()> {
+        use crate::report::ostream::{Cut, Site};
+        // `m_SerialXmlEnd` and `endl` into `m_Outfile`: an insertion, the line feed and a flush, outside
+        // the queries' `try`.
+        self.posts.cuts.push(out.len(), Cut::Site(Site::Report));
         if self.iterations > 0 {
-            out.extend_from_slice(b"\n</BlastOutput_iterations>\n</BlastOutput>\n\n");
-        } else {
-            out.push(b'\n');
+            out.extend_from_slice(b"\n</BlastOutput_iterations>\n</BlastOutput>\n");
+            self.posts.cuts.push(out.len(), Cut::Insertion);
         }
+        out.push(b'\n');
+        self.posts.cuts.push(out.len(), Cut::Flush);
         Ok(())
     }
 }
@@ -572,6 +608,33 @@ impl<'a> HspSink<'a> {
     pub fn hsp(&mut self, hsp: &XmlHsp<'_>) -> Result<()> {
         self.inner.hsp(hsp)
     }
+
+    /// Whether the writer reads the alignment of each HSP of the `Hit` being written (its
+    /// coordinates, frames and rows): not in outfmt 5's `Hit` of a subject whose lookup throws,
+    /// whose HSPs NCBI writes with their Seq-align scores alone (`Xml5Hsps`). The program then
+    /// hands each HSP as `XmlHsp::unaligned` (`HspSink::unaligned`), and reads nothing of the
+    /// subject for it (its letters, its rows, the checks of its rows).
+    pub fn reads_alignment(&self) -> bool {
+        self.inner.reads_alignment()
+    }
+
+    /// Where the writer does not read the alignments of the `Hit` being written
+    /// (`reads_alignment`): writes the HSPs `unaligned` (each `XmlHsp::unaligned`, made as they
+    /// are written) and returns true, so that the program reads nothing of the subject for them;
+    /// false, writing nothing, where the program writes each HSP with its alignment. The one
+    /// answer of every program's outfmt 5 adapter (review 1 of line DBID pfoff-4, L3).
+    pub fn unaligned<'h>(
+        &mut self,
+        unaligned: impl IntoIterator<Item = XmlHsp<'h>>,
+    ) -> Result<bool> {
+        if self.reads_alignment() {
+            return Ok(false);
+        }
+        for hsp in unaligned {
+            self.hsp(&hsp)?;
+        }
+        Ok(true)
+    }
 }
 
 /// The hit level of outfmt 5: one `Hit` object per subject, written alone and joined into the
@@ -582,6 +645,8 @@ struct Xml5Hits<'a> {
     out: &'a mut Vec<u8>,
     scratch: &'a mut Scratch,
     posts: &'a mut Vec<DocumentPost>,
+    /// Each `Hit` is one insertion (`out_str` into `out_stream`).
+    cuts: &'a mut crate::report::ostream::Cuts,
     hits: i32,
 }
 
@@ -607,9 +672,16 @@ impl HitWrite for Xml5Hits<'_> {
             string_member(&mut enc, "id", 1, hit.id);
             string_member(&mut enc, "def", 2, query_def(hit.title));
             string_member(&mut enc, "accession", 3, hit.accession);
-            // NCBI's catch of a `-subject` record whose `GenerateDefline` threw writes 0
-            // (`SubjectNames::of_unknown`, blastxml_format.cpp:399-407).
-            let len = if hit.defline_thrown { 0 } else { hit.len };
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:376-407
+            // NCBI's catch writes 0: of a `-subject` record whose `GenerateDefline` threw
+            // (`SubjectNames::of_unknown`), and of a database sequence whose lookup of its
+            // Seq-align id throws (`SubjectNames::of_thrown`), whose HSPs are the catch's too.
+            let thrown = hit.lookup_throws.is_some();
+            let len = if hit.defline_thrown || thrown {
+                0
+            } else {
+                hit.len
+            };
             int_member(&mut enc, "len", 4, len);
             enc.member("hsps", 5);
             enc.begin_list(false);
@@ -619,6 +691,7 @@ impl HitWrite for Xml5Hits<'_> {
                 hit: &mut enc,
                 scratch,
                 hsps: 0,
+                thrown,
             };
             hsps(&mut HspSink::new(&mut writer))?;
             enc.end_list();
@@ -647,19 +720,23 @@ impl HitWrite for Xml5Hits<'_> {
         })();
         if result.is_ok() {
             self.out.extend_from_slice(&hit_buf);
+            self.cuts
+                .push(self.out.len(), crate::report::ostream::Cut::Insertion);
         }
         scratch.hit = hit_buf;
         result
     }
 }
 
-/// The HSP level of outfmt 5.
+/// The HSP level of outfmt 5. `thrown`: the `Hit`'s subject's lookup throws
+/// (`XmlHit::lookup_throws`), so each HSP's lookup in NCBI's `try` throws too.
 struct Xml5Hsps<'a, 'o> {
     run: &'a XmlRun<'a>,
     masks: &'a [QueryMask],
     hit: &'a mut XmlEncoder<'o>,
     scratch: &'a mut Scratch,
     hsps: i32,
+    thrown: bool,
 }
 
 /// The Dense-seg segments of an edit script as inclusive column ranges (`GetAlnStart` /
@@ -742,8 +819,16 @@ pub(crate) fn count_hsp(
 }
 
 impl HspWrite for Xml5Hsps<'_, '_> {
+    fn reads_alignment(&self) -> bool {
+        !self.thrown
+    }
+
     fn hsp(&mut self, hsp: &XmlHsp<'_>) -> Result<()> {
         self.hsps += 1;
+        if self.thrown {
+            self.thrown_hsp(hsp);
+            return Ok(());
+        }
         let run = self.run;
         let scratch = &mut *self.scratch;
         let counts = count_hsp(
@@ -776,6 +861,32 @@ impl HspWrite for Xml5Hsps<'_, '_> {
         string_member(enc, "midline", 19, &scratch.midline);
         enc.end_sequence();
         Ok(())
+    }
+}
+
+impl Xml5Hsps<'_, '_> {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:114-164
+    /// The `Hsp` that the `catch` of its subject's lookup adds (the HSP of a `Hit` whose
+    /// subject's lookup throws, `thrown`): its number, the Seq-align's scores as `GetAlnScores`
+    /// reads them (the bit score and the e-value rounded to six digits as every HSP's), the four
+    /// coordinates 0, the Seq-align's `num_ident` (`XmlHsp::alignment_identities`) and empty rows;
+    /// no frames, positives, gaps, length or midline.
+    fn thrown_hsp(&mut self, hsp: &XmlHsp<'_>) {
+        let enc = &mut *self.hit;
+        enc.element();
+        enc.begin_sequence("Hsp");
+        int_member(enc, "num", 0, self.hsps);
+        real_member(enc, "bit-score", 1, round6(hsp.bit_score));
+        real_member(enc, "score", 2, f64::from(hsp.score));
+        real_member(enc, "evalue", 3, round6(hsp.evalue));
+        int_member(enc, "query-from", 4, 0);
+        int_member(enc, "query-to", 5, 0);
+        int_member(enc, "hit-from", 6, 0);
+        int_member(enc, "hit-to", 7, 0);
+        int_member(enc, "identity", 12, hsp.alignment_identities);
+        string_member(enc, "qseq", 17, b"");
+        string_member(enc, "hseq", 18, b"");
+        enc.end_sequence();
     }
 }
 

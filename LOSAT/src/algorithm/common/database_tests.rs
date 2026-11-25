@@ -263,8 +263,10 @@ fn a_stored_protein_title_from_any_source_ends_in_its_own_text() {
 fn each_batch_prefetches_by_its_own_seq_aligns() {
     // Seq-aligns of the queries 0 to 4 of a call.
     let counts = [2, 1, 0, 3, 1];
-    let of = |limit, first, batches: &[std::ops::Range<usize>]| {
-        let prefetch = BatchPrefetch::at(limit, counts.len(), first, batches, |span| {
+    use crate::report::archive::options::RequestKind;
+    let table = PrefetchFormat::of(6, RequestKind::Blastp);
+    let of_format = |limit, format, first, batches: &[std::ops::Range<usize>]| {
+        let prefetch = BatchPrefetch::at(limit, format, counts.len(), first, batches, |span| {
             counts[span].iter().sum()
         });
         // A query of no batch (`None`, taken both ways) shows as `true`.
@@ -272,6 +274,8 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
             .map(|query| prefetch.batch_of(query).unwrap_or(true))
             .collect::<Vec<_>>()
     };
+    let of =
+        |limit, first, batches: &[std::ops::Range<usize>]| of_format(limit, table, first, batches);
     let every = vec![true; counts.len() + 1];
     // No limit and `INT_MAX`: every batch prefetches; 0 or below: none does.
     for limit in [None, Some(i32::MAX)] {
@@ -298,11 +302,54 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
         of(Some(1), 10, &[3..10, 10..11, 11..13, 13..15]),
         [false, true, true, false, false, true]
     );
+    // Review 5 of line DBID pfoff-4, M2 and H2: the Seq-annots and psiblast's archive prefetch
+    // only at `INT_MAX`, whatever the count; the other applications' archive never.
+    for outfmt in [8, 9, 12] {
+        for app in [RequestKind::Blastp, RequestKind::Psiblast] {
+            let format = PrefetchFormat::of(outfmt, app);
+            for limit in [None, Some(4), Some(7), Some(0)] {
+                assert_eq!(
+                    of_format(limit, format, 0, &[0..2, 2..5]),
+                    [false; 6],
+                    "{outfmt} {app:?} {limit:?}"
+                );
+            }
+            assert_eq!(of_format(Some(i32::MAX), format, 0, &[0..2, 2..5]), every);
+        }
+    }
+    let archive = |app| PrefetchFormat::of(11, app);
+    assert_eq!(
+        of_format(None, archive(RequestKind::Psiblast), 0, &[0..2, 2..5]),
+        [false; 6]
+    );
+    assert_eq!(
+        of_format(Some(i32::MAX), archive(RequestKind::Psiblast), 0, &[0..2]),
+        every
+    );
+    for app in [
+        RequestKind::Blastp,
+        RequestKind::Rpsblast,
+        RequestKind::Tblastn,
+    ] {
+        assert_eq!(
+            of_format(Some(i32::MAX), archive(app), 0, &[0..2]),
+            [false; 6]
+        );
+    }
+    // The XML2 and JSON formats prefetch as outfmt 0 does.
+    for outfmt in [0, 5, 7, 13, 16, 17, 18] {
+        let format = PrefetchFormat::of(outfmt, RequestKind::Psiblast);
+        assert_eq!(
+            of_format(Some(3), format, 0, &[0..2, 2..5]),
+            of(Some(3), 0, &[0..2, 2..5])
+        );
+        assert_eq!(of_format(None, format, 0, &[]), every);
+    }
     // Line DBID weakbatch: what the batches read of each subject they report, by ordinal id:
     // 7 in both batches, 8 in the first (3 Seq-aligns, on under limit 3), 9 in the second
     // (4, off), whose reports read it one by one.
     let sum = |span: std::ops::Range<usize>| counts[span].iter().sum();
-    let reads = BatchPrefetch::at(Some(3), 5, 0, &[0..2, 2..5], sum).reads([
+    let reads = BatchPrefetch::at(Some(3), table, 5, 0, &[0..2, 2..5], sum).reads([
         (0, 7),
         (4, 7),
         (1, 8),
@@ -311,12 +358,16 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
     assert!(reads.prefetched(7) && reads.one_by_one(7));
     assert!(reads.prefetched(8) && !reads.one_by_one(8));
     assert!(!reads.prefetched(9) && reads.one_by_one(9));
-    let every = BatchPrefetch::at(None, 5, 0, &[0..2, 2..5], sum).reads([(3, 9)]);
+    let every = BatchPrefetch::at(None, table, 5, 0, &[0..2, 2..5], sum).reads([(3, 9)]);
     assert!(every.prefetched(9) && !every.one_by_one(9));
-    let none = BatchPrefetch::at(Some(0), 5, 0, &[0..2, 2..5], sum).reads([(0, 7)]);
+    let none = BatchPrefetch::at(Some(0), table, 5, 0, &[0..2, 2..5], sum).reads([(0, 7)]);
     assert!(!none.prefetched(7) && none.one_by_one(7));
+    // Review 5 of line DBID pfoff-4, H3: psiblast's outfmt 8 reads its subjects one by one.
+    let seq_annot = PrefetchFormat::of(8, RequestKind::Psiblast);
+    let annot = BatchPrefetch::at(None, seq_annot, 5, 0, &[0..2, 2..5], sum).reads([(3, 9)]);
+    assert!(!annot.prefetched(9) && annot.one_by_one(9));
     // Review 1 M1: a query of no batch (5, beyond the call's 5) is taken both ways.
-    let beyond = BatchPrefetch::at(Some(3), 5, 0, &[0..2, 2..5], sum).reads([(5, 6)]);
+    let beyond = BatchPrefetch::at(Some(3), table, 5, 0, &[0..2, 2..5], sum).reads([(5, 6)]);
     assert!(beyond.prefetched(6) && beyond.one_by_one(6));
     let shown = ParsedShown {
         prefetched: true,
@@ -327,6 +378,12 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
     assert!(prefetch_off_at(Some(1), 2) && !prefetch_off_at(Some(2), 2));
     assert!(prefetch_off_at(Some(0), 0) && !prefetch_off_at(Some(i32::MAX), usize::MAX));
     assert!(!prefetch_off_at(None, usize::MAX));
+    // The format's part of the rule (`PrefetchFormat::reads_at`) and its one-by-one question.
+    assert!(table.reads_at(None) && table.reads_at(Some(0)));
+    assert!(!seq_annot.reads_at(None) && !seq_annot.reads_at(Some(1)));
+    assert!(seq_annot.reads_at(Some(i32::MAX)));
+    assert!(!table.runs_at(Some(0), 0) && !seq_annot.runs_at(None, 0));
+    assert!(table.runs_at(None, usize::MAX) && seq_annot.runs_at(Some(i32::MAX), usize::MAX));
 }
 
 // Review 3 of line DBID loadord, H2 (kit cases `P.off.*`): NCBI's data loader holds what a
@@ -335,19 +392,29 @@ fn each_batch_prefetches_by_its_own_seq_aligns() {
 // read (`6 qseqid evalue`: nothing).
 #[test]
 fn a_batch_loads_its_seq_aligns_subjects_or_what_its_reports_read() {
+    use crate::report::archive::options::RequestKind;
     use crate::report::tabular::SubjectFetch::{Every, Never, WithIdentities};
     use BatchLoads::{Prefetched, Read};
+    let table = PrefetchFormat::of(6, RequestKind::Blastp);
     for rows in [Every, Never, WithIdentities] {
         // No limit, `INT_MAX`, a batch of no more Seq-aligns than the limit: the prefetch.
-        assert_eq!(batch_loads_at(None, 4, rows), Prefetched);
-        assert_eq!(batch_loads_at(Some(i32::MAX), 4, rows), Prefetched);
-        assert_eq!(batch_loads_at(Some(4), 4, rows), Prefetched);
+        assert_eq!(batch_loads_at(None, table, 4, rows), Prefetched);
+        assert_eq!(batch_loads_at(Some(i32::MAX), table, 4, rows), Prefetched);
+        assert_eq!(batch_loads_at(Some(4), table, 4, rows), Prefetched);
         // Above the limit, or a limit of 0: the reports' rows. Review 6, H1: a prefetch-off
         // batch whose rows read every subject is not a prefetched one (psiblast's prefetch
         // reads its traceback beyond `-max_target_seqs`, its reports the cut lists).
-        assert_eq!(batch_loads_at(Some(2), 4, rows), Read(rows));
-        assert_eq!(batch_loads_at(Some(0), 0, rows), Read(rows));
-        assert_ne!(batch_loads_at(Some(2), 4, rows), Prefetched);
+        assert_eq!(batch_loads_at(Some(2), table, 4, rows), Read(rows));
+        assert_eq!(batch_loads_at(Some(0), table, 0, rows), Read(rows));
+        assert_ne!(batch_loads_at(Some(2), table, 4, rows), Prefetched);
+        // Review 5 of line DBID pfoff-4, H2: psiblast's outfmt 8 and 11 load only what their
+        // reports read (nothing) and the PSSM, but at `INT_MAX`.
+        for outfmt in [8, 11] {
+            let format = PrefetchFormat::of(outfmt, RequestKind::Psiblast);
+            assert_eq!(batch_loads_at(None, format, 4, rows), Read(rows));
+            assert_eq!(batch_loads_at(Some(4), format, 4, rows), Read(rows));
+            assert_eq!(batch_loads_at(Some(i32::MAX), format, 4, rows), Prefetched);
+        }
         // Review 7, L2: where the prefetched set is the reported set, the loads read every
         // reported subject where the prefetch ran, else what the rows read.
         assert_eq!(Prefetched.reported_rows(), Every);
@@ -363,6 +430,7 @@ fn a_batch_loads_its_seq_aligns_subjects_or_what_its_reports_read() {
         LoadedBefore {
             hits: &hits,
             spans: &[0..2, 2..4, 4..6],
+            format: table,
             rows: Never,
             cuts,
         }
@@ -456,7 +524,7 @@ fn a_copy_has_the_same_letters_and_definition_lines_but_for_taxids() {
             }
             _ => panic!("parsed Seq-ids"),
         };
-        HeaderReader::new(db).copy_of(&subject, a, b)
+        HeaderReader::new(db, false).copy_of(&subject, a, b)
     };
     // pjoin_ax: a (r1 0, r2 1, r3 2), x (r1 3, r3 4).
     let ax = open("pjoin_ax");
@@ -784,4 +852,54 @@ fn a_taxonomy_file_that_throws_is_a_refusal_that_the_prefetch_alone_catches() {
             "{outfmts:?}"
         );
     }
+}
+
+// Line RG D1c-1c (review 2 G2 of D1c-1b): under a negative seqid list, a list of a redo's stream
+// whose subject's header cannot be read (lr's sequence 1, `gnl|BL_ORD_ID|xyz` in its second
+// volume, a string tag that NCBI's read of a later volume cannot make an OID of) stays in the
+// stream, marked as kept and noted as unreadable, so that the redo tests its early termination
+// as NCBI's does; the ordinary traceback, which fetches every subject, still fails at it, and the
+// refusal of a fetch that reaches it gives the read's error.
+#[test]
+fn an_unreadable_header_stays_in_the_redo_stream_and_ends_the_traceback() {
+    let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/idlist/lr");
+    let mut db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+    let mut warnings = Vec::new();
+    let list = crate::seqdb::SeqidList {
+        negative: true,
+        file: crate::seqdb::seqidlist::read_si_list(b"gi|102\n", &mut warnings).unwrap(),
+    };
+    db.restrict(&crate::seqdb::DbList::Seqids(list), &mut Vec::new())
+        .unwrap();
+    assert!(db.excludes_lineless_at_fetch());
+    let fetch = FetchExcluded::of(&db).expect("a negative seqid list");
+    // The stream's order: the strong subject, the weak one, the filler.
+    let stream = [2u32, 1, 0];
+    let (marks, reads) = fetch.marks_noting(&stream, |&ordinal| Some(ordinal), |&ordinal| ordinal);
+    assert!((0..stream.len()).all(|index| !marks.excluded(index)));
+    assert!(reads.utf8.is_empty());
+    let unreadable: Vec<_> = reads
+        .unreadable
+        .iter()
+        .map(|(read, noted)| (read.index, read.kept, read.before, read.ordinal, *noted))
+        .collect();
+    assert_eq!(unreadable, [(1, true, 1, 1, 1)]);
+    // The ordinary traceback fetches every subject: the read fails, the items stay as they were.
+    let mut items = stream.to_vec();
+    let (ordinal, _) = fetch
+        .retain(&mut items, |&ordinal| Some(ordinal))
+        .unwrap_err();
+    assert_eq!((ordinal, items.as_slice()), (1, stream.as_slice()));
+    // A composition-based redo's stream keeps the list.
+    let mut items = stream.to_vec();
+    let reads = fetch.retain_noting(&mut items, |&ordinal| Some(ordinal), |_| ());
+    assert_eq!(
+        (items.as_slice(), reads.unreadable.len()),
+        (stream.as_slice(), 1)
+    );
+    let refusal = FetchExcluded::refusal_at(&db, 1, "BLASTP").to_string();
+    assert!(
+        refusal.contains("those of sequence 1 cannot be read") && refusal.contains("string tag"),
+        "{refusal}"
+    );
 }

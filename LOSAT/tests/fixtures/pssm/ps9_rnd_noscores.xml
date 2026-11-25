@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+<!DOCTYPE PssmWithParameters PUBLIC "-//NCBI//NCBI ScoreMat/EN" "NCBI_ScoreMat.dtd">
+<PssmWithParameters>
+  <PssmWithParameters_pssm>
+    <Pssm>
+      <Pssm_isProtein value="true"/>
+      <Pssm_numRows>28</Pssm_numRows>
+      <Pssm_numColumns>30</Pssm_numColumns>
+      <Pssm_byRow value="false"/>
+      <Pssm_query>
+        <Seq-entry>
+          <Seq-entry_seq>
+            <Bioseq>
+              <Bioseq_id>
+                <Seq-id>
+                  <Seq-id_local>
+                    <Object-id>
+                      <Object-id_str>Query_1</Object-id_str>
+                    </Object-id>
+                  </Seq-id_local>
+                </Seq-id>
+              </Bioseq_id>
+              <Bioseq_descr>
+                <Seq-descr>
+                  <Seqdesc>
+                    <Seqdesc_title>rnd random</Seqdesc_title>
+                  </Seqdesc>
+                </Seq-descr>
+              </Bioseq_descr>
+              <Bioseq_inst>
+                <Seq-inst>
+                  <Seq-inst_repr value="raw"/>
+                  <Seq-inst_mol value="aa"/>
+                  <Seq-inst_length>30</Seq-inst_length>
+                  <Seq-inst_seq-data>
+                    <Seq-data>
+                      <Seq-data_ncbistdaa>
+                        <NCBIstdaa>0C1414080E0A0F031610140D0C0806140F030E16100714120C080A14160F</NCBIstdaa>
+                      </Seq-data_ncbistdaa>
+                    </Seq-data>
+                  </Seq-inst_seq-data>
+                </Seq-inst>
+              </Bioseq_inst>
+            </Bioseq>
+          </Seq-entry_seq>
+        </Seq-entry>
+      </Pssm_query>
+    </Pssm>
+  </PssmWithParameters_pssm>
+  <PssmWithParameters_params>
+    <PssmParameters>
+      <PssmParameters_pseudocount>0</PssmParameters_pseudocount>
+      <PssmParameters_rpsdbparams>
+        <FormatRpsDbParameters>
+          <FormatRpsDbParameters_matrixName>BLOSUM62</FormatRpsDbParameters_matrixName>
+          <FormatRpsDbParameters_gapOpen>11</FormatRpsDbParameters_gapOpen>
+          <FormatRpsDbParameters_gapExtend>1</FormatRpsDbParameters_gapExtend>
+        </FormatRpsDbParameters>
+      </PssmParameters_rpsdbparams>
+    </PssmParameters>
+  </PssmWithParameters_params>
+</PssmWithParameters>

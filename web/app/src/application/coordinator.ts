@@ -17,6 +17,7 @@ import {
   type FastaReader,
   type PrintedKind,
   type ProgramId,
+  runFileOption,
   type RunFile,
   type RunOutput,
 } from 'losat/domain';
@@ -54,10 +55,12 @@ import {
 } from '../domain/run';
 import { isCountsOutputFile, toolFileOptionLabel } from '../domain/tool-argv';
 import { toolOutputFileName, type ToolId, type WindowMaskerStage } from '../domain/tools';
+import type { CountsLocks } from '../ports/counts';
 import type { DataGateway, KeptRun, ResultSetRef, RunInput, StorageInfo } from '../ports/data';
 import type { Downloader } from '../ports/download';
 import { failureText } from './availability';
 import { registryName, unreadableConffile } from './conffile';
+import type { SessionFiles } from './session-files';
 import { Store } from './store';
 import { ToolStorageSink } from './tool-storage-sink';
 
@@ -118,6 +121,8 @@ export interface ToolRequest {
   readonly argv: readonly string[];
   readonly directory: readonly ToolDirectoryFile[];
   readonly prints?: PrintedKind;
+  /** OPFS-backed inflated session file tokens read by this run (directly or inside combined_input.fa). */
+  readonly sessionTokens?: readonly string[];
 }
 
 export interface SearchRunView {
@@ -166,10 +171,26 @@ export interface CoordinatorDeps {
   readonly digest: (bytes: Uint8Array) => Promise<string>;
   /** Settles when the Data worker could not start or ended, with the error of its calls from then on. */
   readonly dataWorkerEnded?: Promise<Error>;
+  /** Runtime path and build identifier recorded on completed/failed tool runs. */
+  readonly toolRuntime?: { readonly path: 'serial' | 'fake'; readonly engineBuild: string };
+  /** Shared holder tracker for inflated session files used by WindowMasker tool runs. */
+  readonly sessionFiles?: SessionFiles;
+  /**
+   * The taxonomy IDs' locks on saved counts: a run that reads a saved copy holds its ID's lock in shared mode from
+   * enqueue to its end, so that Replace, Delete and a download of that ID refuse while it is queued or running.
+   * Without it (a browser without Web Locks), runs hold nothing, as before.
+   */
+  readonly countsLocks?: CountsLocks;
 }
 
-/** Whether a request was queued, or why not (a refusal of its argv is the validation's). */
-type Queued = { readonly ok: true } | { readonly ok: false; readonly message: string };
+/**
+ * Whether a request was queued, or why not: `'argv'` for an invalid or unstartable request (the engine's
+ * validation or start, or missing/unreadable inputs), `'counts'` for a transient saved-counts lock or
+ * replaced-file refusal (`holdCounts`, not a property of the draft's argv).
+ */
+type Queued =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: 'argv' | 'counts'; readonly message: string };
 export type EnqueueResult = Queued & { readonly runId?: string };
 export type EnqueueAllResult = Queued & { readonly runIds?: readonly string[] };
 
@@ -199,6 +220,8 @@ export class Coordinator {
   private readonly conffiles = new Map<string, Blob>();
   /** Working directory files held for queued/running tool runs; cleared when the run finishes or is cancelled. */
   private readonly toolDirectories = new Map<string, readonly DirectoryFile[]>();
+  /** The releases of the saved-counts locks that each queued or running run holds (holdCounts), by run. */
+  private readonly countsHolds = new Map<string, () => void>();
   private active: string | undefined;
   /**
    * Ends the active run's wait for its search or for the commit of its results with an error: a cancel while its results
@@ -227,7 +250,7 @@ export class Coordinator {
    * group ID, and `cancelGroup` cancels them together.
    */
   async enqueueAll(requests: readonly SearchRequest[]): Promise<EnqueueAllResult> {
-    if (requests.length === 0) return { ok: false, message: 'There is nothing to search.' };
+    if (requests.length === 0) return { ok: false, reason: 'argv', message: 'There is nothing to search.' };
     // One at a time: a made input is named by its run's number and time, which are known before the argv is built (`inputName`) and
     // must stay the run's own until its snapshot is made.
     const turn = this.enqueueTurn.then(() => this.enqueueInTurn(requests));
@@ -243,7 +266,7 @@ export class Coordinator {
 
   /** Validates every tool request and queues them together in the single queue shared with searches. */
   async enqueueToolAll(requests: readonly ToolRequest[]): Promise<EnqueueAllResult> {
-    if (requests.length === 0) return { ok: false, message: 'There is nothing to run.' };
+    if (requests.length === 0) return { ok: false, reason: 'argv', message: 'There is nothing to run.' };
     const turn = this.enqueueTurn.then(() => this.enqueueToolInTurn(requests));
     this.enqueueTurn = turn.then(() => undefined, () => undefined);
     return turn;
@@ -256,7 +279,7 @@ export class Coordinator {
 
   private async enqueueToolInTurn(requests: readonly ToolRequest[]): Promise<EnqueueAllResult> {
     if (this.deps.engine.validateTool === undefined || this.deps.engine.runTool === undefined) {
-      return { ok: false, message: 'This engine does not support running tools.' };
+      return { ok: false, reason: 'argv', message: 'This engine does not support running tools.' };
     }
     const directories: Array<readonly DirectoryFile[]> = [];
     // `WasmEngine.validateTool` executes on the Engine worker behind any active run (`inTurn`).
@@ -270,9 +293,9 @@ export class Coordinator {
         try {
           verdict = await this.deps.engine.validateTool(request.argv, { directory });
         } catch (error) {
-          return { ok: false, message: uncheckedOptions(error) };
+          return { ok: false, reason: 'argv', message: uncheckedOptions(error) };
         }
-        if (!verdict.ok) return verdict;
+        if (!verdict.ok) return { ok: false, reason: 'argv', message: verdict.message };
       }
       directories.push(directory);
     }
@@ -296,12 +319,22 @@ export class Coordinator {
         ...(groupId === undefined ? {} : { group: Object.freeze({ groupId, position: index + 1, size: requests.length }) }),
       }),
     );
+    const refused = await this.holdCounts(
+      snapshots.flatMap((snapshot, index) =>
+        requests[index]!.directory.flatMap((entry) =>
+          entry.origin.kind === 'saved' ? [{ runId: snapshot.runId, taxid: entry.origin.taxid, file: entry.file }] : [],
+        ),
+      ),
+    );
+    if (refused !== undefined) return { ok: false, reason: 'counts', message: refused };
     this.nextNumber += snapshots.length;
     this.setRuns([
       ...this.state.get().runs,
       ...snapshots.map((snapshot): ToolRunView => ({ snapshot, status: 'queued', record: {} })),
     ]);
     for (const [index, snapshot] of snapshots.entries()) {
+      const tokens = requests[index]!.sessionTokens;
+      if (tokens !== undefined && tokens.length > 0) this.deps.sessionFiles?.set(`run:${snapshot.runId}`, tokens);
       this.toolDirectories.set(snapshot.runId, directories[index]!);
       this.queue.push(snapshot.runId);
     }
@@ -331,7 +364,7 @@ export class Coordinator {
         subjectName = inputName(request.subject, 'subject', run);
         argv = buildArgv({ program: request.program, queryName, subjectName, parameters: request.parameters, extra: request.extra ?? [] });
       } catch (error) {
-        return { ok: false, message: errorMessage(error) };
+        return { ok: false, reason: 'argv', message: errorMessage(error) };
       }
       // NCBI's application start first: the name of the registry file that the argv reads, and
       // whether the run is a dry run (line RG E1w-3b).
@@ -339,9 +372,9 @@ export class Coordinator {
       try {
         start = await this.deps.engine.start(argv);
       } catch (error) {
-        return { ok: false, message: uncheckedOptions(error) };
+        return { ok: false, reason: 'argv', message: uncheckedOptions(error) };
       }
-      if (!start.ok) return start;
+      if (!start.ok) return { ok: false, reason: 'argv', message: start.message };
       let conffile: Prepared['conffile'];
       const { dryRun, prints } = start.start;
       // The file chosen for the argv's -conffile, under its name (`registryName`: none for `-conffile=`).
@@ -354,16 +387,16 @@ export class Coordinator {
           const { file, sha256 } = await read;
           conffile = { snapshot: Object.freeze({ name: conffileName, fileName: chosen.name, size: file.size, sha256 }), file };
         } catch (error) {
-          return { ok: false, message: unreadableConffile(conffileName, chosen.name, error) };
+          return { ok: false, reason: 'argv', message: unreadableConffile(conffileName, chosen.name, error) };
         }
       }
       let validation: ValidationResult;
       try {
         validation = await this.deps.engine.validate(argv, conffile === undefined ? undefined : { name: conffile.snapshot.name, file: conffile.file });
       } catch (error) {
-        return { ok: false, message: uncheckedOptions(error) };
+        return { ok: false, reason: 'argv', message: uncheckedOptions(error) };
       }
-      if (!validation.ok) return validation;
+      if (!validation.ok) return { ok: false, reason: 'argv', message: validation.message };
       prepared.push({ request, number, queuedAt, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders: validation.dataLoaders });
     }
 
@@ -395,7 +428,7 @@ export class Coordinator {
         query = prints !== null ? await this.noInput(queryName) : await this.snapshotInput('Query', request.query, queryName, reader('query'), made);
         subject = prints !== null ? await this.noInput(subjectName) : await this.snapshotInput('Subject', request.subject, subjectName, reader('subject'), made);
       } catch (error) {
-        return { ok: false, message: failureText(error) };
+        return { ok: false, reason: 'argv', message: failureText(error) };
       }
       const title = request.title?.trim();
       // The run reads the file under the name that its argv gives the option.
@@ -431,6 +464,14 @@ export class Coordinator {
       );
       conffiles.push(conffile?.file);
     }
+    const refused = await this.holdCounts(
+      snapshots.flatMap((snapshot, index) => {
+        const taxid = snapshot.windowMasker?.origin?.taxid;
+        const file = prepared[index]!.request.windowMasker;
+        return taxid === undefined || file === undefined ? [] : [{ runId: snapshot.runId, taxid, file }];
+      }),
+    );
+    if (refused !== undefined) return { ok: false, reason: 'counts', message: refused };
     // The numbers that the names were made with are taken only now, so that a request that fails leaves no gap.
     this.nextNumber += snapshots.length;
     const numbered = snapshots;
@@ -467,6 +508,8 @@ export class Coordinator {
       this.queue.splice(queuedIndex, 1);
       this.conffiles.delete(runId);
       this.toolDirectories.delete(runId);
+      this.deps.sessionFiles?.release(`run:${runId}`);
+      this.releaseCounts(runId);
       if (isToolRun(view)) {
         this.updateTool(runId, { status: 'cancelled', record: { ...view.record, endedAt: this.deps.now() } });
       } else {
@@ -508,8 +551,9 @@ export class Coordinator {
   }
 
   /**
-   * Saves a file that a run made besides its outputs (RunRecord.runFiles: the file of `-logfile`), its
-   * bytes as the engine wrote them, named by runFileName. A failed run keeps its files too.
+   * Saves a file that a run made besides its outputs (RunRecord.runFiles: the file of `-logfile`, the
+   * search strategy file of `-export_search_strategy`), its bytes as the engine wrote them, named by
+   * runFileName. A failed run keeps its files too.
    */
   async exportRunFile(runId: string, index: number): Promise<void> {
     const view = this.findSearch(runId);
@@ -517,7 +561,7 @@ export class Coordinator {
     if (view === undefined || file === undefined) throw new Error('the run has no such file');
     const { number, program, argv, queuedAt } = view.snapshot;
     const task = await this.taskOf(view.snapshot);
-    this.deps.downloader.save(runFileName({ number, program, task, queuedAt, argv }, file.name), file.bytes, 'text/plain');
+    this.deps.downloader.save(runFileName({ number, program, task, queuedAt, argv }, file.name, runFileOption(file)), file.bytes, 'text/plain');
   }
 
   /**
@@ -715,6 +759,49 @@ export class Coordinator {
     }
   }
 
+  /**
+   * Takes, for runs about to be queued, the shared lock of each taxonomy ID whose saved counts they read, and checks
+   * that each such file can still be read (a copy replaced or removed after it was chosen cannot). From then until a
+   * run ends, Replace, Delete and a download of that ID refuse (the counts store takes the lock exclusive with
+   * `ifAvailable`), in this tab and the others. Returns why the runs cannot be queued, having let go what it took, or
+   * undefined when each run holds its locks. Without `countsLocks`, runs hold nothing.
+   */
+  private async holdCounts(uses: ReadonlyArray<{ readonly runId: string; readonly taxid: number; readonly file: Blob }>): Promise<string | undefined> {
+    const locks = this.deps.countsLocks;
+    if (locks === undefined || uses.length === 0) return undefined;
+    const taken: Array<{ readonly runId: string; readonly release: () => void }> = [];
+    const refuse = (message: string): string => {
+      for (const { release } of taken) release();
+      return message;
+    };
+    for (const { runId, taxid, file } of uses) {
+      const release = await locks.holdShared(taxid);
+      if (release === undefined) return refuse(`The saved counts for ${taxid} are being written or removed. Run again when that ends.`);
+      taken.push({ runId, release });
+      if (!(await readable(file))) return refuse(`The saved counts for ${taxid} were replaced or removed after they were chosen. Run again.`);
+    }
+    for (const { runId, release } of taken) {
+      const before = this.countsHolds.get(runId);
+      this.countsHolds.set(
+        runId,
+        before === undefined
+          ? release
+          : () => {
+              before();
+              release();
+            },
+      );
+    }
+    return undefined;
+  }
+
+  /** Lets go the saved-counts locks of a run that ended or left the queue. */
+  private releaseCounts(runId: string): void {
+    const release = this.countsHolds.get(runId);
+    this.countsHolds.delete(runId);
+    release?.();
+  }
+
   private pump(): void {
     if (this.active !== undefined) return;
     const next = this.queue.shift();
@@ -834,6 +921,7 @@ export class Coordinator {
       this.stopActive = undefined;
       // The run's registry file goes with its run; the snapshot keeps its name, size and SHA-256.
       this.conffiles.delete(runId);
+      this.releaseCounts(runId);
       this.cancelRequested.delete(runId);
       this.active = undefined;
       void this.refreshStorage();
@@ -855,12 +943,20 @@ export class Coordinator {
     stopped.catch(() => undefined);
     const controller = new AbortController();
     this.toolAbort = controller;
+    let staged = false;
+    let committing = false;
     let sink: ToolStorageSink | undefined;
     try {
       this.updateTool(runId, { status: 'preparing', record: { startedAt, phaseTimes: { preparing: startedAt } } });
-      const port = await Promise.race([this.deps.data.openToolRun(runId), stopped]);
+      // Same order as search's openRun: wait for openToolRun instead of racing it so a cancel in
+      // preparing always closes the port and deletes the staged tool run on the Data side.
+      const port = await this.deps.data.openToolRun(runId);
+      staged = true;
+      if (stop !== undefined) {
+        port.close();
+        throw stop;
+      }
       sink = new ToolStorageSink(port);
-      if (stop !== undefined) throw stop;
       const runningAt = this.deps.now();
       this.updateTool(runId, { status: 'running', record: { phaseTimes: { preparing: startedAt, running: runningAt } } });
       const runTool = this.deps.engine.runTool;
@@ -877,7 +973,13 @@ export class Coordinator {
         status: 'finalizing',
         record: { phaseTimes: { preparing: startedAt, running: runningAt, finalizing: finalizingAt } },
       });
-      const summary = await Promise.race([sink.commit(), stopped]);
+      committing = true;
+      const commit = sink.commit();
+      const summary = await Promise.race([commit, stopped]).catch((error: unknown) => {
+        // Outputs sealed after the run ended are deleted (same order as search's commitRun).
+        void commit.then(() => this.deps.data.deleteRun(runId)).catch(() => undefined);
+        throw error;
+      });
       const stdout: ToolOutputEntry = Object.freeze({ key: 'stdout', name: 'stdout', size: summary.stdoutSize });
       const stderr: ToolOutputEntry = Object.freeze({ key: 'stderr', name: 'stderr', size: summary.stderrSize });
       const files: ToolOutputEntry[] = summary.files.map((file) => {
@@ -899,14 +1001,17 @@ export class Coordinator {
           stdout,
           stderr,
           files: Object.freeze(files),
+          ...(this.deps.toolRuntime === undefined
+            ? {}
+            : { runtimePath: this.deps.toolRuntime.path, engineBuild: this.deps.toolRuntime.engineBuild }),
           ...(result.status === 0 ? {} : { error: `Exit status ${result.status}` }),
         },
       });
     } catch (error) {
       const cancelled = error instanceof RunCancelledError || this.cancelRequested.has(runId);
-      sink?.fail(error);
-      void sink?.discard().catch(() => undefined);
-      void this.deps.data.deleteRun(runId).catch(() => undefined);
+      if (!committing) sink?.fail(error);
+      // When committing is in progress, leave the port open so commit settles and its .then(deleteRun) removes the run.
+      if (staged && !committing) void this.deps.data.deleteRun(runId).catch(() => undefined);
       this.updateTool(runId, {
         status: cancelled ? 'cancelled' : 'failed',
         record: {
@@ -918,6 +1023,8 @@ export class Coordinator {
       this.stopActive = undefined;
       this.toolAbort = undefined;
       this.toolDirectories.delete(runId);
+      this.deps.sessionFiles?.release(`run:${runId}`);
+      this.releaseCounts(runId);
       this.cancelRequested.delete(runId);
       this.active = undefined;
       void this.refreshStorage();
@@ -959,6 +1066,8 @@ export class Coordinator {
   }
 
   private update(runId: string, change: Partial<Omit<SearchRunView, 'snapshot'>>): void {
+    // A run that ends lets go of the saved counts before it is shown as ended, so that a Replace pressed then is not refused.
+    if (change.status !== undefined && isTerminal(change.status)) this.releaseCounts(runId);
     this.setRuns(
       this.state.get().runs.map((run) =>
         run.snapshot.runId === runId && !isToolRun(run)
@@ -969,6 +1078,7 @@ export class Coordinator {
   }
 
   private updateTool(runId: string, change: Partial<Omit<ToolRunView, 'snapshot'>>): void {
+    if (change.status !== undefined && isTerminal(change.status)) this.releaseCounts(runId);
     this.setRuns(
       this.state.get().runs.map((run) =>
         run.snapshot.runId === runId && isToolRun(run)
@@ -1032,4 +1142,18 @@ function errorMessage(error: unknown): string {
 /** Why the engine could not check the options of a request: a part of LOSAT that is unavailable is said as the page says it. */
 function uncheckedOptions(error: unknown): string {
   return isUnavailable(error) ? failureText(error) : `The options could not be checked: ${errorMessage(error)}`;
+}
+
+/**
+ * Whether a file chosen earlier can still be read: its last byte is read. A file of the browser's storage that was
+ * written or removed since it was opened refuses to be read (or, where the browser reads the current file, comes
+ * shorter).
+ */
+async function readable(file: Blob): Promise<boolean> {
+  if (file.size === 0) return true;
+  try {
+    return (await file.slice(file.size - 1, file.size).arrayBuffer()).byteLength === 1;
+  } catch {
+    return false;
+  }
 }

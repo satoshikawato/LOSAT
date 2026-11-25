@@ -1,0 +1,26 @@
+{
+  "version": "1.2",
+  "dbname": "zmgpH",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "zmgpH",
+  "number-of-letters": 140,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-23T18:37:00",
+  "number-of-volumes": 1,
+  "bytes-total": 49725,
+  "bytes-to-cache": 238,
+  "files": [
+    "zmgpH.pdb",
+    "zmgpH.phr",
+    "zmgpH.pin",
+    "zmgpH.pnd",
+    "zmgpH.pni",
+    "zmgpH.pog",
+    "zmgpH.pos",
+    "zmgpH.pot",
+    "zmgpH.psq",
+    "zmgpH.ptf",
+    "zmgpH.pto"
+  ]
+}

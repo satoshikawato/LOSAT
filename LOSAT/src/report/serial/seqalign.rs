@@ -33,6 +33,7 @@ use std::io::Write;
 
 use crate::blastinput::app::Program;
 use crate::common::GapEditOp;
+use crate::report::ostream::{ReportWrite, Site};
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryNames, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::seqid::SeqId;
@@ -90,6 +91,38 @@ pub(crate) fn seqalign_evalue(evalue: f64) -> f64 {
         evalue
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203, 1490-1496
+/// The `num_ident` score of an HSP's Seq-align (`s_AddScoresToSeqAlign`), from the engine's
+/// identities `num_ident` of a search of `program_type` (`RunRecord::program_type`): the count,
+/// none where it is below 0, and none for psiblast's (`ProgramType::PsiBlast`, every round) count
+/// of 0, which NCBI sets to -1 before it adds the scores of a gapped HSP (psiblast's searches are
+/// gapped; PSI-TBLASTN's keep their 0). The one owner of that rule: the Seq-annot formats and the
+/// archive write the score (`write_seq_align_gapped`), BLAST XML's `catch` reads it back
+/// (`read_num_ident`).
+pub(crate) fn seq_align_num_ident(
+    num_ident: i64,
+    program_type: Option<crate::report::record::ProgramType>,
+) -> Option<i32> {
+    let psiblast = program_type == Some(crate::report::record::ProgramType::PsiBlast);
+    if num_ident < 0 || (psiblast && num_ident == 0) {
+        None
+    } else {
+        Some(i32::try_from(num_ident).unwrap_or(i32::MAX))
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:810-849
+/// The `num_ident` of an HSP's Seq-align as `GetAlnScores` reads it back (BLAST XML's `catch` of
+/// an HSP whose subject's lookup throws, `blast_xml::XmlHsp::alignment_identities`): the score
+/// that the Seq-align has (`seq_align_num_ident`), or -1 where it has none.
+pub(crate) fn read_num_ident(
+    num_ident: i64,
+    program_type: Option<crate::report::record::ProgramType>,
+) -> i32 {
+    seq_align_num_ident(num_ident, program_type).unwrap_or(-1)
+}
+
 pub(crate) const GAP_VALUE: i32 = -1;
 const BLAST_ALIGNMENT_DIM: i32 = 2;
 
@@ -1556,19 +1589,12 @@ fn write_seq_align_gapped<E: Encoder>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1252-1260
     enc.member("score", 2);
     enc.begin_list(true);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1490-1496
-    // psiblast's Seq-aligns (`eBlastTypePsiBlast`, every round) leave out a `num_ident` of 0.
-    let psiblast_no_identity = HspRecord {
-        num_ident: -1,
+    // psiblast's Seq-aligns leave out a `num_ident` of 0 (`seq_align_num_ident`).
+    let hsp = HspRecord {
+        num_ident: seq_align_num_ident(i64::from(hsp.num_ident), run.program_type).unwrap_or(-1),
         ..*hsp
     };
-    let hsp = match run.program_type {
-        Some(crate::report::record::ProgramType::PsiBlast) if hsp.num_ident == 0 => {
-            &psiblast_no_identity
-        }
-        _ => hsp,
-    };
-    write_score_list(enc, hsp, coverage_query_length(run, query.searched_length));
+    write_score_list(enc, &hsp, coverage_query_length(run, query.searched_length));
     enc.end_list();
     enc.end_member();
     enc.member("segs", 3);
@@ -1780,6 +1806,11 @@ pub fn write_query(
 /// `diagnostics`; a document without one is written as before.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:268-279
+///
+/// Each document is one object of NCBI's object stream on the report's stream
+/// (`ostream::Site::Serial`): its bytes, then `~CObjectOStream`'s flush. The plain document is
+/// inserted whole; where its device write fails, NCBI's pieces of it (`document_pieces`) decide
+/// NCBI's end.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_query_to(
     format: SerialFormat,
@@ -1788,25 +1819,83 @@ pub(crate) fn write_query_to(
     subjects: &[SubjectRecord<'_>],
     hsps: &[HspRecord<'_>],
     buf: &mut Vec<u8>,
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
     diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
     buf.clear();
+    let document = QueryDocument {
+        run,
+        query,
+        subjects,
+        hsps,
+    };
     match write_query(format, run, query, subjects, hsps, buf) {
-        Ok(true) => writer.write_all(buf)?,
+        Ok(true) => {
+            writer.site(Site::Serial { whole: true })?;
+            match writer.write_all(buf).and_then(|()| writer.ncbi_flush()) {
+                Err(error) if crate::report::ostream::is_undecided_report_write_failure(&error) => {
+                    writer.resolve_object(&document_pieces(format, &document))?;
+                }
+                written => written?,
+            }
+            writer.site(Site::Report)?;
+        }
         Ok(false) => {}
         Err(SeqAlignError::Serial(SerialError::NonVisibleChar(byte))) => {
-            let document = QueryDocument {
-                run,
-                query,
-                subjects,
-                hsps,
-            };
+            writer.site(Site::Serial { whole: false })?;
             write_query_posting(format, byte, &document, buf, writer, diagnostics)?;
+            writer.ncbi_flush()?;
+            writer.site(Site::Report)?;
         }
         Err(error) => return Err(error.into()),
     }
     Ok(())
+}
+
+/// `document_pieces` of one query's document (for the tests).
+#[cfg(test)]
+pub(super) fn query_pieces(
+    format: SerialFormat,
+    run: &RunRecord<'_>,
+    query: &QueryRecord<'_>,
+    subjects: &[SubjectRecord<'_>],
+    hsps: &[HspRecord<'_>],
+) -> Vec<usize> {
+    document_pieces(
+        format,
+        &QueryDocument {
+            run,
+            query,
+            subjects,
+            hsps,
+        },
+    )
+}
+
+/// NCBI's insertions of `document` into the report's stream (`Traced::pieces`): the writes of
+/// its object stream's buffer, from a second encoding of it; none for a stream without a model of
+/// its buffer.
+#[cold]
+#[inline(never)]
+fn document_pieces(format: SerialFormat, document: &QueryDocument<'_, '_>) -> Vec<usize> {
+    fn pieces<E: Encoder>(mut enc: Traced<E>, document: &QueryDocument<'_, '_>) -> Vec<usize> {
+        write_seq_annot(
+            &mut enc,
+            document.run,
+            document.query,
+            document.subjects,
+            document.hsps,
+        );
+        enc.pieces().to_vec()
+    }
+    let mut bytes = Vec::new();
+    match format {
+        SerialFormat::AsnText => pieces(Traced::new(AsnTextEncoder::new(&mut bytes), 0), document),
+        SerialFormat::AsnBinary => {
+            pieces(Traced::new(AsnBinaryEncoder::new(&mut bytes), 0), document)
+        }
+        SerialFormat::Json => pieces(Traced::new(JsonEncoder::new(&mut bytes), 0), document),
+    }
 }
 
 /// The records of one query's Seq-annot.
@@ -1838,7 +1927,7 @@ fn write_query_posting(
     byte: u8,
     document: &QueryDocument<'_, '_>,
     buf: &mut Vec<u8>,
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
     diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
     buf.clear();
@@ -1868,7 +1957,7 @@ fn write_query_posting(
 fn write_traced<E: Encoder>(
     mut enc: E,
     document: &QueryDocument<'_, '_>,
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
 ) -> anyhow::Result<()> {
     write_seq_annot(
         &mut enc,
@@ -1894,7 +1983,7 @@ pub(crate) fn write_hit_list_seqaligns<'a, L>(
     run: &RunRecord<'_>,
     hit_lists: &'a [Option<L>],
     queries: &QueryNames<'_>,
-    writer: &mut dyn Write,
+    writer: &mut dyn ReportWrite,
     warnings: &mut QueryWarnings<'_>,
     mut records: impl FnMut(usize, &'a L, &mut Vec<SubjectRecord<'a>>, &mut Vec<HspRecord<'a>>),
 ) -> anyhow::Result<()> {

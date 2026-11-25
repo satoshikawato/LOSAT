@@ -420,7 +420,7 @@ describe("knownDefault: the defaults that the engine resolves (describe's defaul
     expect(knownDefault(blastx, '-threshold', { '-task': 'blastx-fast', '-word_size': '5' }, bx)).toEqual({ defaultValue: '19.3' });
   });
 
-  it("is the clap default where the engine resolves none", () => {
+  it("is the described default where the engine resolves none", () => {
     expect(knownDefault(blastp, '-comp_based_stats', {}, bp)).toEqual({ defaultValue: '2' });
     expect(knownDefault(tblastx, '-evalue', {}, [valueOption('-evalue', '10')])).toEqual({ defaultValue: '10' });
     expect(knownDefault(tblastx, '-evalue', {}, undefined)).toBeUndefined();

@@ -82,6 +82,8 @@ pub(crate) struct Ahead<R> {
     /// Whether a helper leaves once every index of the loop is claimed (`x_new_leaving`), instead
     /// of waiting for the owner to finish.
     leave: bool,
+    /// Whether a wait with nothing to do sleeps after spinning and yielding (`x_new_napping`).
+    naps: bool,
     /// The next index a helper looks at.
     cursor: Padded<AtomicUsize>,
     finished: AtomicBool,
@@ -123,7 +125,7 @@ impl<R> Ahead<R> {
     // No NCBI counterpart: makes an empty ring of `window` slots; it does not change any value
     // NCBI computes.
     pub(crate) fn new(window: usize) -> Self {
-        Self::x_with(window, false)
+        Self::x_with(window, false, false)
     }
 
     // No NCBI counterpart: scheduling only. A helper that leaves frees its thread for other work
@@ -134,11 +136,26 @@ impl<R> Ahead<R> {
         expect(dead_code, reason = "used only with the parallel feature")
     )]
     pub(crate) fn x_new_leaving(window: usize) -> Self {
-        Self::x_with(window, true)
+        Self::x_with(window, true, false)
     }
 
-    // No NCBI counterpart: the constructor of both (scheduling only).
-    fn x_with(window: usize, leave: bool) -> Self {
+    // No NCBI counterpart: scheduling only. For a loop whose values take milliseconds (BLASTX's
+    // composition redo, `blastx/runtime/kappa_batch.rs`): a helper or the owner that waits sleeps
+    // 50 us at a time once it has spun and yielded (`x_idle`), so that a long wait does not keep
+    // a core in `sched_yield` (6 to 13 s of system time in 13 to 18 s of wall time, q200k
+    // `-use_sw_tback` at BATCH_SIZE 40000 and 32 threads), while a value is ready again within
+    // 50 us, little beside one value's time.
+    /// `x_new_leaving(window)` whose waits nap.
+    #[cfg_attr(
+        not(feature = "parallel"),
+        expect(dead_code, reason = "used only with the parallel feature")
+    )]
+    pub(crate) fn x_new_napping(window: usize) -> Self {
+        Self::x_with(window, true, true)
+    }
+
+    // No NCBI counterpart: the constructor of the three (scheduling only).
+    fn x_with(window: usize, leave: bool, naps: bool) -> Self {
         let window = window.max(2);
         Self {
             cells: (0..window)
@@ -152,6 +169,7 @@ impl<R> Ahead<R> {
             announced: Padded(AtomicUsize::new(0)),
             total: Padded(AtomicUsize::new(usize::MAX)),
             leave,
+            naps,
             cursor: Padded(AtomicUsize::new(0)),
             finished: AtomicBool::new(false),
             evaluated: AtomicU64::new(0),
@@ -170,14 +188,18 @@ impl<R> Ahead<R> {
     /// Owner, at index `at`: offer the indexes of `[at, at + window)` below
     /// `len` that have not been offered yet. `wanted(j)` is the owner's guess,
     /// with what it knows now, whether index `j` will need its value.
-    pub(crate) fn announce(&self, at: usize, len: usize, wanted: impl FnMut(usize) -> bool) {
-        self.x_announce_until(at, len, len, wanted);
+    pub(crate) fn announce(&self, at: usize, len: usize, mut wanted: impl FnMut(usize) -> bool) {
+        self.x_announce_while(at, len, |next| Some(wanted(next)));
     }
 
     // No NCBI counterpart (scheduling only): `announce` of a loop of `len` indexes that offers none
     // at or past `until` yet (the flow across BLASTX chunks offers the tasks of the loop's chunk and
     // the next one only, `blastx/x_subject_flow.rs` `run_chunks`). Helpers that leave do so once
     // every index below `len` is claimed, as with `announce`.
+    #[cfg_attr(
+        not(any(feature = "parallel", test)),
+        expect(dead_code, reason = "used only with the parallel feature or tests")
+    )]
     pub(crate) fn x_announce_until(
         &self,
         at: usize,
@@ -185,14 +207,30 @@ impl<R> Ahead<R> {
         len: usize,
         mut wanted: impl FnMut(usize) -> bool,
     ) {
+        self.x_announce_while(at, len, |next| (next < until).then(|| wanted(next)));
+    }
+
+    // No NCBI counterpart (scheduling only): `announce` whose guess may also say "not yet"
+    // (`guess(j)` = `None`): the offers stop at that index, which with the later ones stays
+    // unoffered until a later call, made when the owner knows more, offers or closes it (the
+    // composition redo's matches redone ahead, `blastx/runtime/kappa_batch.rs`, which stops where
+    // only its matches still on offer would end the redo early). The loop's length stays `len`, so
+    // helpers that leave wait while the offers are stopped. `announce` and `x_announce_until` are
+    // this loop with a guess that says "not yet" never or from `until` on.
+    pub(crate) fn x_announce_while(
+        &self,
+        at: usize,
+        len: usize,
+        mut guess: impl FnMut(usize) -> Option<bool>,
+    ) {
         self.total.0.store(len, Ordering::Release);
-        let end = at.saturating_add(self.cells.len()).min(len).min(until);
+        let end = at.saturating_add(self.cells.len()).min(len);
         let mut next = self.announced.0.load(Ordering::Relaxed);
         while next < end {
-            let state = if wanted(next) {
-                State::Open
-            } else {
-                State::Closed
+            let state = match guess(next) {
+                Some(true) => State::Open,
+                Some(false) => State::Closed,
+                None => return,
             };
             // The cell's previous index is below `at`: the owner is done with it.
             *lock(self.cell(next)) = Cell { index: next, state };
@@ -277,12 +315,7 @@ impl<R> Ahead<R> {
                     {
                         return;
                     }
-                    idle = idle.saturating_add(1);
-                    if idle < 128 {
-                        std::hint::spin_loop();
-                    } else {
-                        std::thread::yield_now();
-                    }
+                    self.x_idle(&mut idle);
                 }
             }
         }
@@ -334,15 +367,23 @@ impl<R> Ahead<R> {
                     idle = 0;
                     self.evaluate(other, scratch, compute);
                 }
-                None => {
-                    idle = idle.saturating_add(1);
-                    if idle < 128 {
-                        std::hint::spin_loop();
-                    } else {
-                        std::thread::yield_now();
-                    }
-                }
+                None => self.x_idle(&mut idle),
             }
+        }
+    }
+
+    // No NCBI counterpart (scheduling only): one step of a wait with nothing to claim, of a helper
+    // (`work`) or of the owner (`take`): spin, then yield; with `naps` (`x_new_napping`), after 64
+    // yields, sleep 50 us at a time. A wasm thread keeps yielding: `std::thread::sleep` panics
+    // under the browser's WASI shim (`blastn/blast_engine/x_bnstream.rs`, `pause`).
+    fn x_idle(&self, idle: &mut u32) {
+        *idle = idle.saturating_add(1);
+        if *idle < 128 {
+            std::hint::spin_loop();
+        } else if !self.naps || *idle < 128 + 64 || cfg!(target_arch = "wasm32") {
+            std::thread::yield_now();
+        } else {
+            std::thread::sleep(std::time::Duration::from_micros(50));
         }
     }
 

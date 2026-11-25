@@ -8,8 +8,9 @@
 // finished shows its status here (RunStatus) until it completes. Every view follows one
 // selection, held by the HSP's identity (application/results.ts).
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
-import { CUSTOM_OUTPUT, type RunOutput } from 'losat/domain';
+import { CUSTOM_OUTPUT, runFileOption, type RunOutput } from 'losat/domain';
 import { isToolRun, type AnyRunView, type Coordinator, type RunView, type SessionCountsEntry } from '../application/coordinator';
+import type { CountsLoader } from '../application/counts';
 import { OutputSaver } from '../application/outputs';
 import { keptOutputsWritten, noHspReason, type HspId, type ResultsBrowser } from '../application/results';
 import { recordName } from '../domain/dataset';
@@ -43,15 +44,17 @@ import VerificationBadge from './VerificationBadge.vue';
 
 export type ResultsView = 'hits' | 'dotplot' | 'details' | 'outputs';
 
-const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly AnyRunView[] }>();
+const props = defineProps<{ coordinator: Coordinator; results: ResultsBrowser; runs: readonly AnyRunView[]; counts?: CountsLoader | undefined }>();
 /** "Run a search" of the empty results page, or tool output actions ("Use in BLASTN", "Mask with these counts"). */
 const emit = defineEmits<{
   search: [];
   'use-in-blastn': [file: File];
+  'use-taxid-in-blastn': [taxid: number];
   'mask-with-counts': [entry: SessionCountsEntry];
 }>();
 /** The tab shown. The main view keeps it, so that another run, or the results shown again, open on the same tab. */
 const view = defineModel<ResultsView>('view', { default: 'hits' });
+const toolSection = ref<'outputs' | 'details'>('outputs');
 const state = useStore(props.results.state);
 const heading = ref<HTMLElement>();
 const alignments = ref<InstanceType<typeof AlignmentsView>>();
@@ -110,7 +113,7 @@ const downloads = computed(() => {
     if (input?.from !== undefined) items.push({ key: `input-${role}`, input: role, label: `${input.name} (-${role})`, testid: `results-download-${role}` });
   }
   (loaded.value?.run.record.runFiles ?? []).forEach((file, index) =>
-    items.push({ key: `file-${index}`, runFile: index, label: `${file.name} (-logfile)`, testid: `results-download-run-file-${index}` }),
+    items.push({ key: `file-${index}`, runFile: index, label: `${file.name} (-${runFileOption(file)})`, testid: `results-download-run-file-${index}` }),
   );
   return items;
 });
@@ -180,6 +183,12 @@ watch([() => state.value.runId, () => state.value.phase], () => {
   downloadsOpen.value = false;
   saver.reset();
 });
+watch(
+  () => state.value.runId,
+  () => {
+    toolSection.value = 'outputs';
+  },
+);
 
 // With no run chosen, show the newest completed run (or failed tool run that wrote outputs).
 watch(
@@ -304,6 +313,7 @@ async function toAlignments(id: HspId): Promise<void> {
             <dt>Tool</dt>
             <dd class="results-program">
               <span data-testid="results-program">WindowMasker · {{ windowMaskerStageById(selectedTool.snapshot.stage).label }}</span>
+              <VerificationBadge v-if="state.toolBadge" :badge="state.toolBadge" compact @details="toolSection = 'details'" />
             </dd>
             <dt>Options</dt>
             <dd class="run-inputs" data-testid="results-run-options">
@@ -410,10 +420,14 @@ async function toAlignments(id: HspId): Promise<void> {
       <ToolRunView
         v-if="state.phase === 'ready' && state.toolRun"
         :key="state.toolRun.snapshot.runId"
+        v-model:section="toolSection"
         :coordinator="coordinator"
         :run="state.toolRun"
+        :counts="counts"
+        :badge="state.toolBadge"
         :takes-value="state.grammar?.takesValue"
         @use-in-blastn="emit('use-in-blastn', $event)"
+        @use-taxid-in-blastn="emit('use-taxid-in-blastn', $event)"
         @mask-with-counts="emit('mask-with-counts', $event)"
       />
 

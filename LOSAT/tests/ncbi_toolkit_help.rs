@@ -164,11 +164,12 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
         ">n\nATGAAAGTGCTGGCGGCGGGCATTGTGGCGCTGCTGCTGGCGGCGGGCTGCAGCAGCCATAAA\n",
     )
     .unwrap();
-    for (program, value_option) in PROGRAMS
-        .iter()
-        .copied()
-        .chain([("convert2blastmask", "-out"), ("makembindex", "-input")])
-    {
+    for (program, value_option) in PROGRAMS.iter().copied().chain([
+        ("convert2blastmask", "-out"),
+        ("makembindex", "-input"),
+        ("blastdb_aliastool", "-out"),
+        ("blastdbcheck", "-db"),
+    ]) {
         let xml = run_in(&dir, program, &["-xmlhelp"]);
         assert_eq!(xml.status.code(), Some(0), "{program}");
         assert!(xml.stderr.is_empty(), "{program}");
@@ -181,6 +182,8 @@ fn xmlhelp_writes_ncbis_xml_without_the_refused_arguments() {
                 | "windowmasker"
                 | "convert2blastmask"
                 | "makembindex"
+                | "blastdb_aliastool"
+                | "blastdbcheck"
         ) {
             assert_eq!(xml.stdout, ncbi, "{program}");
         } else {

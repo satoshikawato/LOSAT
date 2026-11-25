@@ -552,11 +552,20 @@ impl Core {
                 } if before.room() > 0 && !self.defers() => (block - before.held()).min(written),
                 _ => written,
             };
-            self.emit(&buf[..fill])?;
             if fill < written {
+                self.emit(&buf[..fill])?;
+                if self.bad {
+                    self.update_room();
+                    return Ok(());
+                }
+                self.pending.push(write);
                 self.emit(&buf[fill..written])?;
+            } else {
+                self.emit(&buf[..written])?;
             }
-            self.held.extend_from_slice(&buf[written..]);
+            if !self.bad {
+                self.held.extend_from_slice(&buf[written..]);
+            }
         }
         self.update_room();
         Ok(())
@@ -593,15 +602,11 @@ impl Core {
         to: usize,
     ) -> std::io::Result<()> {
         let defers = self.defers();
-        let segments = cuts
-            .iter()
-            .map(|&(end, cut)| (end, cut == Cut::Put))
-            .chain([(to, false)]);
-        let Some(mut buffer) = self.model().filter(|_| !self.bad && defers) else {
+        let Some(mut buffer) = self.model().filter(|_| !self.bad) else {
             let mut at = from;
-            for (end, put) in segments {
-                let end = end.max(at);
-                if put && end == at + 1 {
+            for &(cut_end, cut) in cuts.iter().chain(&[(to, Cut::Insertion)]) {
+                let end = cut_end.max(at);
+                if cut == Cut::Put && end == at + 1 {
                     self.put(&report[at..end])?;
                 } else {
                     self.insert(&report[at..end])?;
@@ -610,6 +615,13 @@ impl Core {
             }
             return Ok(());
         };
+        if !defers {
+            return self.insert_cut_run_immediate(report, from, cuts, to, buffer);
+        }
+        let segments = cuts
+            .iter()
+            .map(|&(end, cut)| (end, cut == Cut::Put))
+            .chain([(to, false)]);
         let start = self.inserted;
         let mut at = from;
         // The bytes of the run that NCBI's buffer has written at its last write in the run.
@@ -651,6 +663,91 @@ impl Core {
                     self.emit(&[])?;
                 }
             }
+        }
+        self.update_room();
+        Ok(())
+    }
+
+    /// Non-deferred path of [`Core::insert_cut_run`]: tracks NCBI's buffer in registers across
+    /// segments and copies or emits only at NCBI's actual write boundaries and once for the tail,
+    /// preserving the exact device write boundaries of calling `insert`/`put` per segment.
+    fn insert_cut_run_immediate(
+        &mut self,
+        report: &[u8],
+        from: usize,
+        cuts: &[(usize, Cut)],
+        to: usize,
+        mut buffer: NcbiBuffer,
+    ) -> std::io::Result<()> {
+        if self.out > 0 {
+            self.sync()?;
+            if self.bad {
+                return Ok(());
+            }
+        }
+        let start = self.inserted;
+        let mut at = from;
+        let mut chunk_start = from;
+        for &(cut_end, cut) in cuts.iter().chain(&[(to, Cut::Insertion)]) {
+            let end = cut_end.max(at);
+            let n = end - at;
+            if n == 0 {
+                continue;
+            }
+            let before = buffer;
+            if cut == Cut::Put && n == 1 {
+                buffer.sputc(&report[..end]);
+            } else {
+                buffer.sputn(n, &report[..end]);
+            }
+            let kept = buffer.held();
+            if kept != before.held() + n {
+                let written = n - kept;
+                let write_end = at + written;
+                let seg_start = start + (at - from) as u64;
+                self.inserted = start + (end - from) as u64;
+                self.buffer = Some(buffer);
+                let object = matches!(
+                    self.site,
+                    Site::Serial { whole: true } | Site::Xml2Report { .. }
+                )
+                .then(|| self.object_start.unwrap_or((before, seg_start)));
+                let mut write = self.write_here(false, object);
+                write.end = self.inserted - kept as u64;
+                self.out = self.held.len();
+                let extra = &report[chunk_start..write_end];
+                let fill = match before.stream() {
+                    NcbiStdio::Cout {
+                        block,
+                        lines: false,
+                    } if before.room() > 0 => (block - before.held()).min(written),
+                    _ => written,
+                };
+                self.pending.push(write);
+                if fill < written {
+                    let first_len = (at - chunk_start) + fill;
+                    self.emit(&extra[..first_len])?;
+                    if self.bad {
+                        self.update_room();
+                        return Ok(());
+                    }
+                    self.pending.push(write);
+                    self.emit(&extra[first_len..])?;
+                } else {
+                    self.emit(extra)?;
+                }
+                if self.bad {
+                    self.update_room();
+                    return Ok(());
+                }
+                chunk_start = write_end;
+            }
+            at = end;
+        }
+        self.inserted = start + (to - from) as u64;
+        self.buffer = Some(buffer);
+        if chunk_start < to {
+            self.held.extend_from_slice(&report[chunk_start..to]);
         }
         self.update_room();
         Ok(())
@@ -1682,6 +1779,13 @@ impl ReportWrite for CutBuffer {
 }
 
 impl CutBuffer {
+    /// Empties bytes and cuts while keeping their allocated capacities.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.bytes.clear();
+        self.cuts.0.clear();
+    }
+
     /// An insertion of NCBI's of `bytes` (`operator<<` of a string or a number): its end is cut.
     #[inline]
     pub fn insertion(&mut self, bytes: &[u8]) {

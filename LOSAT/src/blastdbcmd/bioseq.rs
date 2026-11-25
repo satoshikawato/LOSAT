@@ -311,8 +311,8 @@ fn write_pieces<D: AsnTextDocument>(
     let mut enc = Traced::new(AsnTextEncoder::new(&mut again), 0);
     document.write(&mut enc);
     let mut at = 0;
-    for &piece in enc.pieces() {
-        let end = (at + piece).min(text.len());
+    for piece in enc.pieces() {
+        let end = (at + piece.size).min(text.len());
         out.write_all(&text[at..end])?;
         at = end;
     }

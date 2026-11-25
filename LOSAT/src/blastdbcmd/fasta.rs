@@ -27,8 +27,8 @@ pub(super) struct FastaFormatter {
     /// `CFastaOstream::m_PreviousWholeIds`: the FASTA strings of the ids written without a
     /// range.
     previous_whole_ids: HashSet<Vec<u8>>,
-    /// The bytes of the record being written, kept from one sequence to the next.
-    text: Vec<u8>,
+    /// The record being written, kept from one sequence to the next (bytes and NCBI insertion cuts).
+    units: CutBuffer,
 }
 
 impl FastaFormatter {
@@ -37,7 +37,7 @@ impl FastaFormatter {
             width,
             long_seqids,
             previous_whole_ids: HashSet::new(),
-            text: Vec::new(),
+            units: CutBuffer::default(),
         }
     }
 
@@ -87,17 +87,17 @@ impl FastaFormatter {
         if no_ids && (range.is_some() || masks.as_ref().is_some_and(|masks| !masks.is_empty())) {
             return Err(super::retrieve::null_pointer());
         }
-        let mut text = std::mem::take(&mut self.text);
-        text.clear();
+        let mut units = std::mem::take(&mut self.units);
+        units.clear();
         // NCBI's insertion of the definition lines into m_Out (the long header
         // of `CFastaOstream::Write` is taken as one too, LOSAT's form of it).
         if self.long_seqids {
             // The Bioseq's first source, from every line the filter keeps (the target's first),
             // names the organism of a title made from it: the long header's alone.
             let source_taxid = set.first_source_taxid(target_seqid);
-            self.long_header(source, shown, source_taxid, range, config, &mut text)?;
+            self.long_header(source, shown, source_taxid, range, config, &mut units.bytes)?;
         } else {
-            short_header(shown, range, config, &mut text)?;
+            short_header(shown, range, config, &mut units.bytes)?;
         }
         let mut letters = source.fasta_letters(oid, range)?;
         // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:463-477
@@ -117,16 +117,12 @@ impl FastaFormatter {
             Some(masks) => mask_changes(masks, range, letters.len(), config.strand_minus),
             None => Vec::new(),
         };
-        let mut units = CutBuffer {
-            bytes: text,
-            cuts: Default::default(),
-        };
         units.end_insertion();
         write_sequence(&letters, self.width, &changes, &mut units);
         // `out` writes to a `files::OutputFile` (`retrieve::process`): a failed write does
         // nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
         let written = out.insertions(&mut units);
-        self.text = units.bytes;
+        self.units = units;
         written
     }
 
@@ -417,7 +413,7 @@ fn mask_changes(
         .filter_map(|&(first, second)| {
             let start = (first as usize).max(from);
             let end = (second as usize).min(from + len);
-            (start < end).then_some((start - from, end - from))
+            (start < end).then(|| (start - from, end - from))
         })
         .collect();
     spans.sort_unstable();

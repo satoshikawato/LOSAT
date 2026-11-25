@@ -477,6 +477,15 @@ impl Write for OpenedFile {
         }
     }
 
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        match self {
+            OpenedFile::Disk(file) => file.write_vectored(bufs),
+            OpenedFile::Shared(file) => file.write_vectored(bufs),
+            OpenedFile::Discard => Ok(bufs.iter().map(|b| b.len()).sum()),
+            OpenedFile::Full => Err(io::Error::from(io::ErrorKind::StorageFull)),
+        }
+    }
+
     fn flush(&mut self) -> io::Result<()> {
         match self {
             OpenedFile::Disk(file) => file.flush(),

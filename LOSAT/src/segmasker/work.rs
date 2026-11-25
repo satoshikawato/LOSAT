@@ -220,9 +220,7 @@ fn writer(outfmt: &str, window: i32, locut: f64, hicut: f64) -> MaskWriter {
     };
     match outfmt {
         "interval" => MaskWriter::Interval,
-        "fasta" => MaskWriter::Fasta {
-            hard_masking: false,
-        },
+        "fasta" => MaskWriter::fasta(false),
         "seqloc_asn1_bin" => MaskWriter::SeqLoc(Serial::AsnBinary),
         "seqloc_asn1_text" => MaskWriter::SeqLoc(Serial::AsnText),
         "seqloc_xml" => MaskWriter::SeqLoc(Serial::Xml),

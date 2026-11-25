@@ -7,17 +7,19 @@ fn fasta_letters_follow_ncbis_one_step_mask_iterator() {
     // its letter 3 is masked; a third interval right after is reached only at its own
     // positions.
     let mut out = CutBuffer::default();
+    let mut buf = CutBuffer::default();
     fasta_letters(
         b">x",
         b"ACGTACGT",
         &[(0, 1), (3, 3), (4, 5)],
         false,
+        &mut buf,
         &mut out,
     )
     .unwrap();
     assert_eq!(out.bytes, b">x\nacGtacGT\n");
     let mut out = CutBuffer::default();
-    fasta_letters(b">x", &[b'A'; 61], &[(59, 60)], true, &mut out).unwrap();
+    fasta_letters(b">x", &[b'A'; 61], &[(59, 60)], true, &mut buf, &mut out).unwrap();
     assert_eq!(
         &out.bytes[..],
         [&b">x\n"[..], &[b'A'; 59][..], b"N\nN\n"].concat()
@@ -107,7 +109,8 @@ fn fasta_letters_masked_by_line_equal_the_per_letter_walk() {
                     bytes: b">x\n".to_vec(),
                     cuts: Default::default(),
                 };
-                fasta_letters(b">x", &iupac, &mask, hard_masking, &mut out).unwrap();
+                let mut buf = CutBuffer::default();
+                fasta_letters(b">x", &iupac, &mask, hard_masking, &mut buf, &mut out).unwrap();
                 let out = out.bytes;
                 let want = [
                     &b">x\n"[..],

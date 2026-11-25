@@ -363,7 +363,7 @@ impl CallerOutput<'_> {
         if self.bad {
             return Ok(());
         }
-        let outcome = self.out.write_all(buf);
+        let outcome = self.out.write_all(buf).and_then(|()| self.out.flush());
         self.result(outcome)
     }
 

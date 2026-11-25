@@ -81,7 +81,11 @@ pub(crate) enum MaskWriter {
     /// `CMaskWriterTabular`.
     Tabular,
     /// `CMaskWriterFasta` (`-hard_masking`: `N` instead of lower case).
-    Fasta { hard_masking: bool },
+    Fasta {
+        hard_masking: bool,
+        /// Reusable buffer across records.
+        buffer: CutBuffer,
+    },
     /// `CMaskWriterSeqLoc`.
     SeqLoc(Serial),
     /// `CMaskWriterBlastDbMaskInfo`.
@@ -102,6 +106,14 @@ pub(crate) struct MaskInfoWriter {
 }
 
 impl MaskWriter {
+    /// `CMaskWriterFasta` (`-hard_masking`: `N` instead of lower case).
+    pub(crate) fn fasta(hard_masking: bool) -> Self {
+        MaskWriter::Fasta {
+            hard_masking,
+            buffer: CutBuffer::default(),
+        }
+    }
+
     /// The `CMaskWriterBlastDbMaskInfo` constructor (stream, format, algorithm id, filtering
     /// program and algorithm options);
     /// `serial` is `None` for the format `interval`.
@@ -161,9 +173,12 @@ impl MaskWriter {
                 }
                 text.write_to(out)?;
             }
-            MaskWriter::Fasta { hard_masking } => {
+            MaskWriter::Fasta {
+                hard_masking,
+                buffer,
+            } => {
                 let id = id_to_string(seq, parsed_id)?;
-                fasta_letters(&id, seq.iupac, mask, *hard_masking, out)?;
+                fasta_letters(&id, seq.iupac, mask, *hard_masking, buffer, out)?;
             }
             MaskWriter::SeqLoc(serial) => {
                 // NCBI reference (598d8ae6): c++/src/objtools/seqmasks_io/mask_writer_seqloc.cpp:61-90
@@ -493,11 +508,12 @@ fn fasta_letters(
     iupac: &[u8],
     mask: &[(u32, u32)],
     hard_masking: bool,
+    text: &mut CutBuffer,
     out: &mut dyn ReportWrite,
 ) -> io::Result<()> {
     const LINE: usize = 60;
     const BLOCK: usize = 1 << 16;
-    let mut text = CutBuffer::default();
+    text.clear();
     text.insertion(id);
     text.endl();
     let mut imask = 0;

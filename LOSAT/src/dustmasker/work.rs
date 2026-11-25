@@ -158,9 +158,7 @@ fn writer(options: &Options<'_>) -> Result<MaskWriter, Failure> {
     Ok(match options.outfmt {
         "interval" => MaskWriter::Interval,
         "acclist" => MaskWriter::Tabular,
-        "fasta" => MaskWriter::Fasta {
-            hard_masking: options.hard_masking,
-        },
+        "fasta" => MaskWriter::fasta(options.hard_masking),
         "seqloc_asn1_bin" => MaskWriter::SeqLoc(Serial::AsnBinary),
         "seqloc_asn1_text" => MaskWriter::SeqLoc(Serial::AsnText),
         "seqloc_xml" => MaskWriter::SeqLoc(Serial::Xml),

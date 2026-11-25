@@ -154,6 +154,7 @@ pub(crate) fn write_phi_round_report(
             number: 1,
             found_before: None,
         },
+        anchored: None,
     };
     // Each occurrence's group, its HSPs numbered over the query's report.
     let mut first_index: HspIndex = 0;

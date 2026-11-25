@@ -459,33 +459,16 @@ impl PsiblastArgs {
         if crate::blastinput::app::ncbi_refuses_format(&choice, Program::Blastp, out) {
             return Ok(());
         }
-        if let Some(format) = ReportFormat::from_number(choice.number) {
-            let runs = matches!(
-                format,
-                ReportFormat::Pairwise
-                    | ReportFormat::Xml
-                    | ReportFormat::Tabular
-                    | ReportFormat::TabularWithComments
-                    | ReportFormat::AsnText
-                    | ReportFormat::AsnBinary
-                    | ReportFormat::CommaSeparatedValues
-                    | ReportFormat::ArchiveFormat
-                    | ReportFormat::CommaSeparatedValuesWithHeader
-            );
-            // With a pattern: PHI-BLAST's reports (`report_write::write_phi_report`), and formats
-            // 8, 9 and 12, which reach NCBI's engine error; 5 and 11 are `phi_limits`'.
-            let phi_runs = matches!(
-                format,
-                ReportFormat::Pairwise
-                    | ReportFormat::Tabular
-                    | ReportFormat::TabularWithComments
-                    | ReportFormat::CommaSeparatedValues
-                    | ReportFormat::CommaSeparatedValuesWithHeader
-                    | ReportFormat::AsnText
-                    | ReportFormat::AsnBinary
-                    | ReportFormat::JsonSeqalign
-            );
-            if !(runs || phi && phi_runs) {
+        if ReportFormat::from_number(choice.number).is_some() {
+            // With a pattern: PHI-BLAST's reports (`report_write::write_phi_report`), formats
+            // 8, 9 and 12 (which reach NCBI's engine error), and 5 and 11 (`phi_limits`).
+            // Without a pattern: `writes_outfmt` (0..=12, 18, 20).
+            let allowed = if phi {
+                matches!(choice.number, 0 | 5..=12 | 20)
+            } else {
+                writes_outfmt(choice.number)
+            };
+            if !allowed {
                 bail!(
                     "output format {} is not supported by LOSAT's PSIBLAST yet",
                     choice.number
@@ -494,6 +477,16 @@ impl PsiblastArgs {
         }
         Ok(())
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:265-287
+/// Whether LOSAT's psiblast writes the output format `number` for its queries (FASTA, `-in_pssm`
+/// and `-in_msa`, at any `-num_iterations`, `-db` and `-subject`): the one rule of the command
+/// line's refusal (`PsiblastArgs::check_outfmt`). NCBI writes every round through the formatter of
+/// the format (`WriteArchive`, or `PrintOneResultSet` with the round's number); LOSAT writes all
+/// but the XML2 and JSON documents of outfmt 13 to 16 (item PS15b-2 of line PS, its second part).
+pub(crate) fn writes_outfmt(number: i32) -> bool {
+    matches!(number, 0..=12 | 18 | 20)
 }
 
 #[cfg(test)]

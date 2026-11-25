@@ -154,6 +154,7 @@ fn params(target: Xml2Target) -> Xml2Run {
         cbs: 2,
         query_gencode: None,
         db_gencode: None,
+        program_type: None,
     }
 }
 
@@ -232,6 +233,42 @@ fn an_unsearched_query_lists_no_masks() {
             .unwrap();
         writer.finish(&mut out).unwrap();
         assert_eq!(String::from_utf8(out).unwrap(), expected);
+    }
+}
+
+// Line PS, PS15b-2: an iterative search (`Xml2Run::iterative`, tblastn `-in_pssm`) holds its
+// report until the epilog as a `-subject` search does, and a database search's results are its
+// rounds (`iterations`: one round, `iter-num` 1, then the `Search`).
+#[test]
+fn an_iterative_database_report_is_held_and_lists_its_round() {
+    let message = invalid_message();
+    let run = run(None, "");
+    for (kind, round) in [
+        (
+            Xml2Kind::Single16,
+            "<iterations>\n            <Iteration>\n              <iter-num>1</iter-num>\n              <search>\n                <Search>",
+        ),
+        (
+            Xml2Kind::Single15,
+            "\"iterations\": [\n          {\n            \"iter_num\": 1,\n            \"search\": {",
+        ),
+    ] {
+        let iterative = Xml2Run {
+            program_type: Some(crate::report::record::ProgramType::PsiTblastn),
+            ..params(Xml2Target::Database)
+        };
+        assert!(iterative.holds_back() && !params(Xml2Target::Database).holds_back());
+        let mut writer = Xml2Writer::new(kind, iterative);
+        let mut out = Vec::new();
+        writer
+            .query(&run, &invalid_query(&message), &mut out, |_| {
+                panic!("a query of an unsearched batch has no hits")
+            })
+            .unwrap();
+        assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+        writer.finish(&mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains(round), "{kind:?}: {text}");
     }
 }
 
@@ -1461,13 +1498,59 @@ fn a_failed_report_keeps_its_separator_and_fails_where_it_is_written() {
         String::from_utf8(out).unwrap(),
         "{\n\"BlastOutput2\": [\n,\n{\n  a\n}\n]\n}\n"
     );
-    // `-subject`: the held failed report in the epilog: the failure after the document's end.
+    // `-subject`: the held failed report in the epilog: the failure returned after the
+    // document's end, its post marked before the end (`DocumentPosts::caught_at`).
     let mut doc = Xml2Document::new(Xml2Kind::Single16, true);
     let mut out = Vec::new();
     fail(&mut doc, &mut out).unwrap();
     assert!(caught(doc.epilog(&mut out)));
+    assert_eq!(doc.take_posts().caught_at, Some(framing::header16().len()));
     assert_eq!(
         String::from_utf8(out).unwrap(),
         format!("{}</BlastXML2>\n", framing::header16())
     );
+    // outfmt 15: after the separator of the held report, before the end.
+    let mut doc = Xml2Document::new(Xml2Kind::Single15, true);
+    let mut out = Vec::new();
+    put(&mut doc, b"{\n  a\n}\n", &mut out).unwrap();
+    fail(&mut doc, &mut out).unwrap();
+    assert!(caught(doc.epilog(&mut out)));
+    let text = String::from_utf8(out).unwrap();
+    let at = doc.take_posts().caught_at.unwrap();
+    assert_eq!(
+        (&text[..at], &text[at..]),
+        ("{\n\"BlastOutput2\": [\n{\n  a\n}\n,\n", "]\n}\n")
+    );
+    // The post goes there; without the mark, after the report.
+    let mut posts = crate::report::blast_xml::DocumentPosts {
+        caught_at: Some(3),
+        ..Default::default()
+    };
+    assert_eq!(posts.place_caught(b"E\n".to_vec()), None);
+    assert_eq!(
+        (posts.posts[0].at, &posts.posts[0].text[..]),
+        (3, &b"E\n"[..])
+    );
+    assert_eq!(posts.place_caught(b"F\n".to_vec()), Some(b"F\n".to_vec()));
+}
+
+// Line PS, PS15b-2 fix 1 (S1): the run's program type is the one owner of an iterative search
+// (`ProgramType::is_iterative`, NCBI's `IsIterativeSearch`): psiblast and PSI-TBLASTN.
+#[test]
+fn the_program_type_decides_an_iterative_search() {
+    use crate::report::record::ProgramType;
+    for (program_type, iterative) in [
+        (None, false),
+        (Some(ProgramType::PsiBlast), true),
+        (Some(ProgramType::PsiTblastn), true),
+        (Some(ProgramType::RpsBlast), false),
+        (Some(ProgramType::RpsTblastn), false),
+    ] {
+        let run = Xml2Run {
+            program_type,
+            ..params(Xml2Target::Database)
+        };
+        assert_eq!(run.iterative(), iterative, "{program_type:?}");
+        assert_eq!(run.holds_back(), iterative, "{program_type:?}");
+    }
 }

@@ -106,3 +106,11 @@ The oracle is NCBI BLAST+ 2.17.0 `psiblast ... -num_threads 1`.
   `tests/fasta/` virus sets, longest first), long enough for blastp's query split, which NCBI never applies to
   PHI-BLAST; `ps8_x21000p.faa`: 21,000 `X`, then the letters of `ps8_c2c.faa`, in one record; `ps8_s_bdt63125.faa`:
   BDT63125.1 alone.
+- `ps15b2_othr_*.faa` (line PS, PS15b-2 fix 1): subjects of the molecule-`other` PSSM
+  `tests/fixtures/pssm/ps15b2_tk_other_stdaa.asn.gz` (rows `db.ps15b2.p.othr.*`), from `tk.faa`: `del100` without
+  letter 101 (a query letter against a gap of the subject on a query row of its own: NCBI 2.17.0's merge writes
+  through a null row, SIGSEGV), `cover` that subject and letters 2-300 (another subject's block opens that row: NCBI
+  answers), `t2a_s1` letters 1-121 with a `W` after letter 61 (a later pass finds no row of its HSP), `t2a` that
+  subject and letters 101-192 with a `W` after letter 132 (with `-evalue 1e-10`, the two HSPs order their shared
+  segments in two ways), `tk195` letters 195-313 (at `-num_iterations 2`, round 2's two HSPs leave a segment's
+  start behind its row's end when NCBI orders the segments: NCBI reads past the row's end, `CObject is corrupted`).

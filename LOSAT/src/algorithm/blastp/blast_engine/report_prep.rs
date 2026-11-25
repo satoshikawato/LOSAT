@@ -542,8 +542,8 @@ pub(super) fn prefetch_reported_subjects(
     // Outfmt 0 to 4 (`blastp_pairwise_view_of`): NCBI's `PrintOneResultSet` sorts the hits by
     // `-sorthits` and writes the description lines before the alignments in all five
     // (blast_format.cpp:1523-1541), so they read the subjects in one order.
-    let pairwise_first = first_report
-        .is_some_and(|format| blastp_pairwise_view_of(args.app, format as i32).is_some());
+    let pairwise_first =
+        first_report.is_some_and(|format| blastp_pairwise_view_of(format as i32).is_some());
     // The query records that NCBI's scope holds at the prefetch of the batch of the searched
     // queries `span` (`shared::PrefetchQueries`, made only where the batch stops): psiblast's round
     // of a query gives its query's batch (`BlastpReports::prefetch_scope`); the PSSM's query of

@@ -618,7 +618,8 @@ pub(super) fn reported_hsps(batches: &[BatchResults], gapped: bool) -> usize {
 /// LOSAT's refusals of the tabular report (`options.tabular`, `None`: the default fields) of the
 /// batches' rows whose subject lookup fails where NCBI has no result
 /// (`report::tabular::check_failed_lookups`; each query of a batch is a result set), with the
-/// query (its index in the batch's queries) whose row NCBI stops at.
+/// query (its index in `queries`, the call's: the batch's `query_ordinal` and the set) whose row
+/// NCBI stops at.
 fn check_failed_lookups(
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
@@ -656,6 +657,7 @@ fn check_failed_lookups(
                 }
             },
             options.program().upper,
+            options.taxdb_found,
         )
         .map_err(|error| {
             let set = error
@@ -669,10 +671,12 @@ fn check_failed_lookups(
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1450-1452
 /// What NCBI writes to `stderr` before it stops at the tabular row of the query `stop` (its index
-/// in the batch's queries) that LOSAT refuses: the batch's warning of `-subject`'s prefetch, then
-/// each query's warnings up to `stop`, as the tabular report writes them before each query's rows
-/// (`tabular::write_blastx_tabular`; the batch's reader messages and `-db` prefetch texts came
-/// before the report).
+/// in `queries`) that LOSAT refuses (`error`): the batch's warning of `-subject`'s prefetch, then
+/// for each query up to `stop` what the tabular report writes to the standard error of its report
+/// (`tabular::write_blastx_tabular`: its warnings and fetch texts, its formatter's warning, its
+/// subject reads; `FailedLookupRefusal::posts_before_stop`, whose reads name a subject by its
+/// `oid`). The batch's reader messages and `-db` prefetch texts came before the report.
+#[allow(clippy::too_many_arguments)]
 fn posts_before_lookup_stop(
     stderr: &mut dyn Write,
     options: &ResolvedOptions,
@@ -680,7 +684,11 @@ fn posts_before_lookup_stop(
     shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
     stop: usize,
+    error: &anyhow::Error,
 ) -> Result<()> {
+    let Some(refusal) = error.downcast_ref::<crate::report::tabular::FailedLookupRefusal>() else {
+        return Ok(());
+    };
     if !options.gapped
         && SubjectLoc::of(shown) == SubjectLoc::Interval
         && super::native::batch_prefetch(batches, options, SubjectLoc::Interval).fails
@@ -689,20 +697,22 @@ fn posts_before_lookup_stop(
             options.program().lower,
         ))?;
     }
+    let (mut posts, mut reads) = (Vec::new(), Vec::new());
     for batch in batches {
         for qidx in 0..batch.queries.len() {
             let ordinal = batch.query_ordinal + qidx;
             if ordinal > stop {
-                return Ok(());
+                break;
             }
-            stderr.write_all(&query_warning(
-                options,
-                &queries[ordinal],
-                batch.search_skipped,
-            ))?;
-            stderr.write_all(shown.query_fetches(ordinal))?;
+            let mut text = query_warning(options, &queries[ordinal], batch.search_skipped);
+            text.extend_from_slice(shown.query_fetches(ordinal));
+            posts.push(crate::report::diag_log::Posts::of_lines(text));
+            reads.push(shown.query_reads(ordinal).clone());
         }
     }
+    refusal
+        .posts_before_stop(&posts, &reads, |oid| oid as u32)
+        .write(stderr, None)?;
     Ok(())
 }
 
@@ -773,7 +783,9 @@ pub(super) fn render_queries_with(
             Ok(false) => return Ok(()),
             Err(error) => {
                 if let Some(stop) = stop {
-                    posts_before_lookup_stop(stderr, options, queries, shown, batches, stop)?;
+                    posts_before_lookup_stop(
+                        stderr, options, queries, shown, batches, stop, &error,
+                    )?;
                 }
                 return Err(error);
             }

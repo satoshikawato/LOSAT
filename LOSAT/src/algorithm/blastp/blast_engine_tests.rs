@@ -3010,6 +3010,7 @@ fn a_failed_lookup_fails_its_batch_after_the_posts_up_to_its_query() {
             |s_idx| (s_idx == 1).then_some(lineless),
             |s_idx, failure| crate::report::tabular::failed_database_subject(s_idx, None, failure),
             "BLASTP",
+            true,
         )
         .unwrap_err()
     };
@@ -3057,6 +3058,7 @@ fn a_failed_lookup_fails_its_batch_after_the_posts_up_to_its_query() {
             lines: &lines,
             reader: &reader,
             prefetches: &prefetches,
+            reads: &[],
             utf8: Some(&utf8),
         };
         let failure = failed_lookup_batch(refusal(), &stop)
@@ -3086,6 +3088,7 @@ fn a_failed_lookup_fails_its_batch_after_the_posts_up_to_its_query() {
         lines: &lines,
         reader: &reader,
         prefetches: &prefetches,
+        reads: &[],
         utf8: None,
     };
     let other = failed_lookup_batch(anyhow::anyhow!("another error"), &stop);

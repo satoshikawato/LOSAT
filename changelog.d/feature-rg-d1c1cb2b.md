@@ -8,7 +8,10 @@
   `rpstblastn`.
 - Database searches: where LOSAT refuses a tabular row at which NCBI BLAST+ stops or prints an uninitialised
   number (`sallacc` above; `sacc`, `saccver` or `staxid` of a sequence whose lookup fails), the reports of
-  the query batches before it are written first, as NCBI writes them, and then the warnings that NCBI
-  writes of the failing batch before that row (its reader messages and the warnings of its queries up to
-  the row's); `blastp`, `psiblast`, `tblastn` and `tblastx` wrote no report before the refusal, and no
-  program wrote all of those warnings.
+  the query batches before it are written first, as NCBI writes them, and then the messages that NCBI
+  writes of the failing batch before that row (its reader messages, and for its queries up to the row's
+  their warnings, the taxonomy database warning of a taxonomy name field and, with the prefetch off, the
+  messages of reading the subjects up to the row); `blastp`, `psiblast`, `tblastn` and `tblastx` wrote no
+  report before the refusal, nor did `blastn` where it writes its reports after the search (with
+  `-dbsize` near NCBI's 64-bit bound or a negative `CHUNK_SIZE`), and no program wrote all of those
+  messages.

@@ -1,4 +1,5 @@
 use super::*;
+use crate::report::tabular::taxdb_warning_line;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786: every tabular kind goes to `CBlastTabularInfo`; LOSAT's
 // default 6 and 7 (the `std` fields with a tab) keep `stage_e_report::write_tabular`.

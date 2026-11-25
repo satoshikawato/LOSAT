@@ -1557,8 +1557,9 @@ pub enum StrategyTarget {
     /// A name that NCBI cannot open for writing: NCBI's argument error
     /// (`cli::inaccessible`).
     Inaccessible,
-    /// The standard output, which is the report's stream (LOSAT Web has no `-out`): LOSAT's
-    /// refusal of a strategy file that is also the output (`strategy::create_strategy_file`).
+    /// The standard output, which is the report's stream (LOSAT Web has no `-out`): LOSAT Web's
+    /// refusal of a strategy file that is also the output (`strategy::open_strategy_file_in`,
+    /// `strategy::create_strategy_file_in`).
     StandardOutput,
     /// A file that is not a file of the run: the standard error, a device whose writes fail, a
     /// file of procfs or of a message queue (LOSAT Web's refusal).

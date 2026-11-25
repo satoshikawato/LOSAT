@@ -255,7 +255,6 @@ pub fn open_strategy_file(
     crate::report::archive::strategy::open_strategy_file_in(
         run_files,
         files.strategy,
-        None,
         files.label,
         &others,
     )

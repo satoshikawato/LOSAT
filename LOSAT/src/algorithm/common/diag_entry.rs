@@ -1,8 +1,9 @@
 //! The diagonal table's entry of the protein word finders (NCBI's `DiagStruct`; TBLASTX, BLASTP,
 //! BLASTX and the programs built on them) and the two-hit diagonal test of one hit on it
-//! ([`x_test_hit`]), shared by BLASTP's scans and the one word of a hard chunk shorter than the
-//! word (`common::hard_chunk_scan::OneWord`, BLASTP and BLASTX); the entry of a hit's diagonal
-//! in a search's table ([`DiagTable`]: one ring, [`DiagRing`], or NCBI's ring of each query batch,
+//! ([`x_test_hit`], generic over [`DiagCell`]), shared by BLASTP's scans and the one word of a
+//! hard chunk shorter than the word (`common::hard_chunk_scan::OneWord`, BLASTP, BLASTX, TBLASTN
+//! and TBLASTX); the entry of a hit's diagonal in a search's table ([`DiagTable`]: one ring,
+//! [`DiagRing`], TBLASTN's `(last_hit, flag)` ring, or NCBI's ring of each query batch,
 //! `common::query_batch_tables::QueryBatchTables`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-180
@@ -95,6 +96,64 @@ impl DiagStruct {
     }
 }
 
+/// A cell of a two-hit diagonal table ([`DiagStruct`], or TBLASTN's `(last_hit, flag)` cell)
+/// exposing the four operations of NCBI's per-hit diagonal test ([`x_test_hit`],
+/// `common::hard_chunk_scan::OneWord::test_on`).
+pub(crate) trait DiagCell {
+    /// Return the flag (0 or 1).
+    fn flag(&self) -> u32;
+    /// Set the flag (0 or 1).
+    fn set_flag(&mut self, flag: u32);
+    /// Return `last_hit`.
+    fn last_hit(&self) -> i32;
+    /// Set `last_hit`.
+    fn set_last_hit(&mut self, value: i32);
+}
+
+impl DiagCell for DiagStruct {
+    #[inline(always)]
+    fn flag(&self) -> u32 {
+        DiagStruct::flag(self)
+    }
+
+    #[inline(always)]
+    fn set_flag(&mut self, flag: u32) {
+        DiagStruct::set_flag(self, flag);
+    }
+
+    #[inline(always)]
+    fn last_hit(&self) -> i32 {
+        DiagStruct::last_hit(self)
+    }
+
+    #[inline(always)]
+    fn set_last_hit(&mut self, value: i32) {
+        DiagStruct::set_last_hit(self, value);
+    }
+}
+
+impl DiagCell for (i32, bool) {
+    #[inline(always)]
+    fn flag(&self) -> u32 {
+        u32::from(self.1)
+    }
+
+    #[inline(always)]
+    fn set_flag(&mut self, flag: u32) {
+        self.1 = (flag & 1) != 0;
+    }
+
+    #[inline(always)]
+    fn last_hit(&self) -> i32 {
+        self.0
+    }
+
+    #[inline(always)]
+    fn set_last_hit(&mut self, last_hit: i32) {
+        self.0 = last_hit;
+    }
+}
+
 /// The diagonal test of one word hit as NCBI applies it before an extension, on the hit's own
 /// entry. Returns `Some((last_hit, diff))` when the hit needs the rest of the test.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552
@@ -104,8 +163,8 @@ impl DiagStruct {
 // LOSAT_X_BPDIAG's batches compute the same wrapping values per lane, and their tests compare
 // with this function on offsets whose sum passes 2^31 - 1.
 #[inline(always)]
-pub(crate) fn x_test_hit(
-    entry: &mut DiagStruct,
+pub(crate) fn x_test_hit<C: DiagCell>(
+    entry: &mut C,
     subject_offset: i32,
     diag_offset: i32,
     window: i32,
@@ -141,25 +200,29 @@ pub(crate) fn x_test_hit(
 /// first offset of the hit's query batch in the concatenated query, from which NCBI's search of
 /// that batch counts its query offsets (the context test reads them,
 /// `aa_ungapped.c:566-573`). One ring for the queries of one NCBI batch ([`DiagRing`], batch start
-/// 0), or NCBI's ring of each batch where a search holds several
-/// (`common::query_batch_tables::QueryBatchTables`).
+/// 0), TBLASTN's `(last_hit, flag)` ring, or NCBI's ring of each batch where a search holds
+/// several (`common::query_batch_tables::QueryBatchTables`).
 pub(crate) trait DiagTable {
+    /// The cell stored in this table.
+    type Cell: DiagCell;
     /// The entry of the two-hit hit at query offset `q` and subject offset `s`, and the first
     /// offset of its query batch.
-    fn two_hit_entry(&mut self, q: i32, s: i32) -> (&mut DiagStruct, i32);
+    fn two_hit_entry(&mut self, q: i32, s: i32) -> (&mut Self::Cell, i32);
     /// The entry of the one-hit hit at query offset `q` and subject offset `s`.
-    fn one_hit_entry(&mut self, q: i32, s: i32) -> &mut DiagStruct;
+    fn one_hit_entry(&mut self, q: i32, s: i32) -> &mut Self::Cell;
 }
 
 /// One ring of diagonal entries (`mask`: its length less one) whose queries are one NCBI query
-/// batch from offset 0: the table of a search of one batch (BLASTX's unit, BLASTP's call where the
-/// scan shares it).
+/// batch from offset 0: the table of a search of one batch (BLASTX's unit, TBLASTX's frame loop,
+/// BLASTP's call where the scan shares it).
 pub(crate) struct DiagRing<'a> {
     pub(crate) entries: &'a mut [DiagStruct],
     pub(crate) mask: i32,
 }
 
 impl DiagTable for DiagRing<'_> {
+    type Cell = DiagStruct;
+
     #[inline(always)]
     fn two_hit_entry(&mut self, q: i32, s: i32) -> (&mut DiagStruct, i32) {
         (

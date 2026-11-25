@@ -2105,6 +2105,21 @@ fn the_fold_in_registers_makes_the_steps_of_the_fold_on_the_map() {
                     let got = reg_agrees_in_every_instance(&x0, &seeds, &offsets, &mut rng, &at);
                     if w == 40 {
                         assert!(got.hits > 20, "{at}: too few hits {got:?}");
+                        if case_no == 1 {
+                            // also cover below-cutoff extensions on real scan seeds
+                            let high_cutoffs = vec![10_000; c.contexts.len()];
+                            let x_hi = Inputs {
+                                cutoff_scores: &high_cutoffs,
+                                ..x0
+                            };
+                            cover = cover.sum(reg_agrees_in_every_instance(
+                                &x_hi,
+                                &seeds,
+                                &offsets,
+                                &mut rng,
+                                &format!("{at} high-cutoff"),
+                            ));
+                        }
                     }
                     cover = cover.sum(got);
                 }

@@ -667,9 +667,16 @@ fn the_redo_flow_gives_the_report_of_one_thread() {
         redo_counts(&query, &args, 4, &[("LOSAT_X_BXREDOFLOW", "0")]).3,
         0
     );
-    // Early termination with the flow: the loop's test in stream order skipped some matches
-    // (reused + serial < matches), and the flow redid ahead matches the loop then did not take
-    // (ahead > reused, summed over 2, 4 and 8 threads: how many depends on the threads' timing).
+    // Early termination with the flow, in the two rows with a short hit list: the loop's test in
+    // stream order skipped some matches (reused + serial < matches), and the flow redid ahead only
+    // matches that the filling heaps still let through (`XPending` of runtime/kappa_batch.rs: each
+    // match offered ahead with a best E-value at or below the cutoff counts as an entry of its
+    // query's heap). The matches it redid ahead and the loop did not take (ahead - reused) are at
+    // most one per thread: none in each of 12 runs on 4 CPUs (2, 4 and 8 threads, twice). The guess
+    // on the heaps as they were (empty when the whole window was offered) left up to 36 / 101 / 173
+    // of 1 x 9,000 at 2 / 4 / 8 threads, where the loop redoes 32 of 205 matches (up to 6 times one
+    // thread's time, hours under `-C instrument-coverage`), and 167 and 339 of 8 x 4,000 at 8
+    // threads. The flow still redid ahead matches that the loop took (reused, summed).
     for (pieces, length, extra) in [
         (1, 9_000, &["-use_sw_tback", "-max_target_seqs", "3"][..]),
         (8, 4_000, &["-max_target_seqs", "1"][..]),
@@ -677,19 +684,23 @@ fn the_redo_flow_gives_the_report_of_one_thread() {
         let (query, set) = inputs_from(&dir, 0, pieces, length, 595);
         let mut args = vec!["-subject", set.to_str().unwrap(), "-outfmt", "6"];
         args.extend_from_slice(extra);
-        let (mut reused, mut ahead) = (0, 0);
+        let mut reused = 0;
         for threads in [2, 4, 8] {
             let counts = redo_counts(&query, &args, threads, &[]);
             assert!(
                 counts.1 + counts.2 < counts.0,
                 "{pieces} x {length} {extra:?}, {threads} threads: no early termination {counts:?}"
             );
+            assert!(
+                counts.3 <= counts.1 + u64::from(threads),
+                "{pieces} x {length} {extra:?}, {threads} threads: the flow redid ahead matches \
+                 the loop left {counts:?} (matches, reused, serial, ahead)"
+            );
             reused += counts.1;
-            ahead += counts.3;
         }
         assert!(
-            ahead > reused,
-            "{pieces} x {length} {extra:?}: the flow redid no match ahead that the loop left"
+            reused > 0,
+            "{pieces} x {length} {extra:?}: the flow redid no match ahead that the loop took"
         );
     }
     let _ = std::fs::remove_dir_all(&dir);

@@ -355,11 +355,12 @@ impl ResolvedMask {
 
 /// The walk of a BLASTP or BLASTX search of `db` with `-db_hard_mask` (the filtering algorithm
 /// `algo_id`, the word `word`, the window `window`; `zero_words` as in `HardScan::Protein`) over
-/// every sequence that it searches, in the order of the search (`SeqDb::searched_protein_masks`):
+/// every sequence that it searches, in the order of the search (`SeqDb::searched_sequences`):
 /// NCBI's one-thread offsets (`NcbiWalk`) with the sequences that the search starts on a new
 /// table and whether a sequence is kept apart (`HardStarts::keeps_apart`), and the first sequence
 /// whose masks LOSAT refuses (`HardMaskShape::of_scan`, at the place that the walk gives it),
-/// after which the table is not complete (the search does not run).
+/// after which the table is not complete (the search does not run). A sequence whose masks or
+/// length cannot be read ends the walk without a finding (the search meets that read error first).
 fn protein_walk(
     db: &SeqDb,
     algo_id: i32,
@@ -376,28 +377,40 @@ fn protein_walk(
     let mut starts = HardStarts::default();
     let mut plan = crate::algorithm::common::db_mask_search::SubjectPlan::default();
     let mut chunks = Vec::new();
-    let found = db.searched_protein_masks(algo_id, |ordinal, length, masks| {
-        if masks.is_empty() {
-            if let Some(start) = walk.plain(length) {
-                starts.push(ordinal, start);
+    let found = db
+        .searched_sequences(algo_id, |ordinal, length, masks| {
+            let masks = masks.read()?;
+            if masks.is_empty() {
+                if let Some(start) = walk.plain(length) {
+                    starts.push(ordinal, start);
+                }
+                return Ok(None);
             }
-            return None;
-        }
-        // The search's chunker (`db_mask_search::SubjectPlan`), so that the walk and the search
-        // read the same chunks.
-        plan.start_hard(masks, length);
-        plan.hard_chunks(&mut chunks);
-        let (start, reads_back) = walk.masked(length, &chunks);
-        if let Some(start) = start {
-            starts.push(ordinal, start);
-        } else if reads_back {
-            starts.push_reads_back();
-        }
-        // The length is exact: never read.
-        HardMaskShape::of_scan(masks, Some((length, length)), &|| Some(length), scan, start)
-            .ok()
-            .flatten()
-    });
+            // The search's chunker (`db_mask_search::SubjectPlan`), so that the walk and the search
+            // read the same chunks.
+            plan.start_hard(masks, length);
+            plan.hard_chunks(&mut chunks);
+            let (start, reads_back) = walk.masked(length, &chunks);
+            if let Some(start) = start {
+                starts.push(ordinal, start);
+            } else if reads_back {
+                starts.push_reads_back();
+            }
+            // The length is exact: never read.
+            Ok(
+                HardMaskShape::of_scan(
+                    masks,
+                    Some((length, length)),
+                    &|| Some(length),
+                    scan,
+                    start,
+                )
+                .ok()
+                .flatten(),
+            )
+        })
+        .ok()
+        .flatten();
     (starts, found)
 }
 

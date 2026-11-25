@@ -23,6 +23,6 @@ INTEGER and a BOOLEAN; `D/d3/c3a/probe/ber_src/e1r.asn`); the others change its 
 08:59:18`, run under `TZ=UTC`) comparison fixtures for `losat makeblastdb -input_type asn1_txt` and
 `-input_type asn1_bin`, read by `src/writedb/makeblastdb_asn1_tests.rs`. `in/` holds compact ASN.1 text/binary,
 compressed (`.gz`, `.bz2`, `.zst`), mask and taxid-map inputs supplementing the top-level files above;
-`ncbi_2_17_0_manifest.tsv` records 81 runs with their exit codes, normalized standard output, unmodified raw NCBI
+`ncbi_2_17_0_manifest.tsv` records 82 runs with their exit codes, normalized standard output, unmodified raw NCBI
 standard error (mapped through `crate::wording::losat_bytes` by the test), and SHA-256 digests of every output
 database file after masking only the creation timestamp in `.nin`/`.pin` and `"last-updated"` in `.njs`/`.pjs`.

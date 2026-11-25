@@ -286,14 +286,7 @@ impl WriteDb {
     // of FASTA input do not have (a copied database's may).
     /// `SetDeflines`: the definition lines of the sequence added last.
     pub fn set_deflines(&mut self, mut deflines: DeflineSet) {
-        for defline in &mut deflines.deflines {
-            if defline.memberships.as_ref().is_some_and(Vec::is_empty) {
-                defline.memberships = None;
-            }
-            if defline.links.as_ref().is_some_and(Vec::is_empty) {
-                defline.links = None;
-            }
-        }
+        super::deflines::strip_empty_lists(&mut deflines);
         self.pending_deflines = Some(deflines);
     }
 

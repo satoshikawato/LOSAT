@@ -19,6 +19,11 @@
 //! the end of the string there (approved exception 2 of PD-LOSAT-NCBI-DEFECTS).
 
 use crate::ncbi_str::replace_in_place;
+use crate::seqid::accguide::{
+    identify_accession, parse_flags, SeqIdWarning, CHROMOSOME, CON, F_NUC, F_PREDICTED, F_PROT,
+    MRNA, NCRNA, SEQID_REFSEQ, UNIQUE,
+};
+use crate::seqid::model::{ParsedSeqId, PatentNumber};
 
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:3431-3446
 const TPA_PREFIXES: [&str; 14] = [
@@ -103,6 +108,10 @@ pub struct BioseqFacts {
     /// `m_IsNM`: an accession of a RefSeq mRNA (`NM_`, `XM_`), whose empty title NCBI makes with
     /// `x_SetTitleFromNM` and then from the source, unless `local_annots_only` (`source_title`).
     pub refseq_mrna: bool,
+    /// `m_IsNZ`: an accession of a RefSeq contig (`NT_`, `NZ_...`).
+    pub refseq_contig: bool,
+    /// `m_IsWP`: an accession of a RefSeq unique protein (`WP_...`).
+    pub refseq_unique_prot: bool,
     /// `m_IsPDB`, `m_PDBChainID` and `m_PDBChain`: whether a `pdb` id was seen and its chain.
     pub pdb: Option<(Vec<u8>, i32)>,
     /// `m_IsPatent`, `m_PatentSequence`, `m_PatentCountry` and `m_PatentNumber`.
@@ -235,6 +244,77 @@ impl BioseqFacts {
             ..Self::default()
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:760-787
+    fn classify_textseq_acc(
+        &mut self,
+        accession: Option<&[u8]>,
+        on_warning: &mut dyn FnMut(SeqIdWarning),
+    ) {
+        let Some(acc) = accession else {
+            return;
+        };
+        let info = identify_accession(acc, parse_flags::DEFAULT, on_warning);
+        if info == (SEQID_REFSEQ | CHROMOSOME | F_NUC) || info == (SEQID_REFSEQ | NCRNA | F_NUC) {
+            self.refseq_chromosome_or_ncrna = true;
+        } else if info == (SEQID_REFSEQ | MRNA | F_NUC)
+            || info == (SEQID_REFSEQ | MRNA | F_NUC | F_PREDICTED)
+        {
+            self.refseq_mrna = true;
+        } else if info == (SEQID_REFSEQ | CON | F_NUC) {
+            self.refseq_contig = true;
+        } else if info == (SEQID_REFSEQ | UNIQUE | F_PROT) {
+            self.refseq_unique_prot = true;
+        }
+    }
+}
+
+/// `BioseqFacts` of the Seq-ids `ids` of a Bioseq, posting any `CSeq_id::IdentifyAccession`
+/// warnings through `on_warning`.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/create_defline.cpp:745-832
+pub(crate) fn bioseq_facts_with_warn(
+    ids: &[ParsedSeqId],
+    on_warning: &mut dyn FnMut(SeqIdWarning),
+) -> BioseqFacts {
+    let mut facts = BioseqFacts::default();
+    for id in ids {
+        match id {
+            ParsedSeqId::Tpg(text) | ParsedSeqId::Tpe(text) | ParsedSeqId::Tpd(text) => {
+                facts.third_party = true;
+                facts.classify_textseq_acc(text.accession.as_deref(), on_warning);
+            }
+            ParsedSeqId::Other(text)
+            | ParsedSeqId::Genbank(text)
+            | ParsedSeqId::Embl(text)
+            | ParsedSeqId::Ddbj(text) => {
+                facts.classify_textseq_acc(text.accession.as_deref(), on_warning);
+            }
+            ParsedSeqId::Pdb(pdb) => {
+                let (chain_id, chain) = facts.pdb.get_or_insert_with(|| (Vec::new(), 0));
+                if let Some(id) = &pdb.chain_id {
+                    *chain_id = id.clone();
+                } else if let Some(value) = pdb.chain {
+                    *chain = value;
+                }
+            }
+            ParsedSeqId::Patent(patent) => {
+                let number = match &patent.cit.id {
+                    PatentNumber::Number(number) | PatentNumber::AppNumber(number) => {
+                        number.clone()
+                    }
+                };
+                facts.patent = Some((patent.seqid, patent.cit.country.clone(), number));
+            }
+            _ => {}
+        }
+    }
+    facts
+}
+
+/// `BioseqFacts` of the Seq-ids `ids` of a Bioseq, discarding accession-guide warnings.
+pub(crate) fn bioseq_facts(ids: &[ParsedSeqId]) -> BioseqFacts {
+    bioseq_facts_with_warn(ids, &mut |_| {})
 }
 
 /// `GenerateDefline` of a Bioseq with the title `title` and the facts `ids` (`BioseqFacts`):

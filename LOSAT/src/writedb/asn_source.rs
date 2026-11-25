@@ -11,12 +11,13 @@ use std::io::Read;
 use std::sync::{Arc, OnceLock};
 
 use super::bioseq::SeqData;
+use super::deflines::best_non_local_rank;
 use super::fasta_source::pack::Ncbi4naBuilder;
 use super::fasta_source::{post_seq_id_warning, Warn};
 use super::WriteDbError;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::defline::{
-    generate_bioseq_defline, protein_title_suffix_adjustable, BioseqFacts,
+    bioseq_facts_with_warn, generate_bioseq_defline, protein_title_suffix_adjustable,
 };
 use crate::report::serial::asn_ber_reader::BerReader;
 use crate::report::serial::asn_input::{Names, TextInput, Utf8TagOnce};
@@ -24,15 +25,11 @@ use crate::report::serial::asn_text_reader::StreamSource;
 use crate::report::serial::asn_types::read::{ObjectStream, Post, ReadError};
 use crate::report::serial::asn_types::table::named;
 use crate::report::serial::asn_types::{member_index, members, Value};
-use crate::seqid::accguide::{
-    identify_accession, parse_flags, CHROMOSOME, CON, DIVISION_MASK, F_MASTER, F_NUC, F_PREDICTED,
-    F_PROT, MRNA, NCRNA, SEQID_REFSEQ, TSA, UNIQUE, WGS,
-};
 use crate::seqid::label;
 use crate::seqid::mask_handle::{
     handle_seq_id, mask_handle_key, mask_info_key, GiimTree, TreeHandle,
 };
-use crate::seqid::model::{ParsedSeqId, PatentNumber};
+use crate::seqid::model::ParsedSeqId;
 use crate::seqid::rank::{best_rank_score, find_best};
 
 /// Cached ASN.1 table member indices used while walking `Seq-entry` / `Bioseq-set` trees.
@@ -1079,13 +1076,7 @@ fn extract_cfastareader_defline(descr: &[Value]) -> Option<Vec<u8>> {
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/Bioseq.cpp:292-325
 fn extract_hist_old_id(hist: &Value, bio_ids: &[ParsedSeqId]) -> Option<ParsedSeqId> {
-    let best_local = find_best(bio_ids, |id| {
-        if matches!(id, ParsedSeqId::Local(_)) {
-            i32::MAX - 1
-        } else {
-            best_rank_score(id)
-        }
-    })?;
+    let best_local = find_best(bio_ids, best_non_local_rank)?;
     if !matches!(best_local, ParsedSeqId::Local(_)) {
         return None;
     }
@@ -1294,9 +1285,8 @@ pub(crate) fn fix_asn_delta(bioseq: &mut AsnBioseq) -> Result<(), WriteDbError> 
             .ok_or(WriteDbError::OutOfMemory)?;
     }
 
-    let reserve_letters = total_letters.max(bioseq.length as usize);
     let mut builder =
-        Ncbi4naBuilder::with_letters(reserve_letters).map_err(|_| WriteDbError::OutOfMemory)?;
+        Ncbi4naBuilder::with_letters(total_letters).map_err(|_| WriteDbError::OutOfMemory)?;
     for item in items {
         match item {
             AsnDeltaItem::LocNull => builder.push_run(0x0f, 1),
@@ -1341,63 +1331,17 @@ fn generate_asn_title(
     let is_seg = repr == 3;
     let is_map = repr == 7;
     let is_delta = repr == 8;
-    let is_virtual = repr == 1;
 
-    let mut facts = BioseqFacts::default();
-    let mut is_wp = false;
-    let mut is_nz = false;
-    let mut wgs_master = false;
-    let mut tsa_master = false;
-    for id in ids {
-        match id {
-            ParsedSeqId::Tpg(_) | ParsedSeqId::Tpe(_) | ParsedSeqId::Tpd(_) => {
-                facts.third_party = true;
-                classify_textseq_acc(
-                    id,
-                    is_virtual,
-                    &mut facts,
-                    &mut is_wp,
-                    &mut is_nz,
-                    &mut wgs_master,
-                    &mut tsa_master,
-                    warn,
-                );
-            }
-            ParsedSeqId::Other(_)
-            | ParsedSeqId::Genbank(_)
-            | ParsedSeqId::Embl(_)
-            | ParsedSeqId::Ddbj(_) => {
-                classify_textseq_acc(
-                    id,
-                    is_virtual,
-                    &mut facts,
-                    &mut is_wp,
-                    &mut is_nz,
-                    &mut wgs_master,
-                    &mut tsa_master,
-                    warn,
-                );
-            }
-            ParsedSeqId::Pdb(pdb) => {
-                let chain_id = pdb.chain_id.clone().unwrap_or_default();
-                let chain = if chain_id.is_empty() {
-                    pdb.chain.unwrap_or(0)
-                } else {
-                    0
-                };
-                facts.pdb = Some((chain_id, chain));
-            }
-            ParsedSeqId::Patent(pat) => {
-                let number = match &pat.cit.id {
-                    PatentNumber::Number(n) | PatentNumber::AppNumber(n) => n.clone(),
-                };
-                facts.patent = Some((pat.seqid, pat.cit.country.clone(), number));
-            }
-            _ => {}
-        }
-    }
+    let mut facts = bioseq_facts_with_warn(ids, &mut |w| {
+        post_seq_id_warning(w, warn);
+    });
 
-    let flags = scan_defline_descriptors(bio_descr, &ancestors, facts.pdb.is_some(), is_wp);
+    let flags = scan_defline_descriptors(
+        bio_descr,
+        &ancestors,
+        facts.pdb.is_some(),
+        facts.refseq_unique_prot,
+    );
     facts.has_source = flags.has_source;
     facts.taxname = flags
         .taxname
@@ -1406,10 +1350,10 @@ fn generate_asn_title(
         .map(Arc::from);
 
     let main_trimmed = trim_end_slice(&flags.raw_title, b".,;~ ");
-    let has_explicit = !flags.reconstruct && !main_trimmed.is_empty();
+    let has_explicit = !main_trimmed.is_empty();
 
-    // Check prefix / suffix / reconstruct triggers that belong to D3c-5/D3c-6.
-    if flags.reconstruct || flags.molinfo_tech_unsupported {
+    // Check prefix / suffix triggers that belong to D3c-5/D3c-6.
+    if flags.molinfo_tech_unsupported {
         return Err(title_refusal("MolInfo tech prefix/suffix title generation"));
     }
     if flags.is_unverified {
@@ -1421,7 +1365,7 @@ fn generate_asn_title(
     if facts.third_party && flags.has_tpa_keyword {
         return Err(title_refusal("TPA keyword title prefix generation"));
     }
-    if is_wp && flags.is_multispecies {
+    if facts.refseq_unique_prot && flags.is_multispecies {
         return Err(title_refusal("MULTISPECIES WP title prefix generation"));
     }
     if flags.is_pseudogene {
@@ -1451,7 +1395,7 @@ fn generate_asn_title(
         }
     } else {
         // Empty title path: check D3c-5/D3c-6 generators before delegating to report::defline.
-        if is_na && flags.has_autodef && !is_nz {
+        if is_na && flags.has_autodef && !facts.refseq_contig {
             return Err(title_refusal("AutoDef title generation"));
         }
         if facts.pdb.is_some() {
@@ -1491,12 +1435,7 @@ fn generate_asn_title(
         }
     }
 
-    let raw_for_defline = if flags.reconstruct {
-        b"".as_slice()
-    } else {
-        &flags.raw_title
-    };
-    let defline = generate_bioseq_defline(raw_for_defline, is_aa, false, &facts).map_err(|_| {
+    let defline = generate_bioseq_defline(&flags.raw_title, is_aa, false, &facts).map_err(|_| {
         // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:4530-4533
         WriteDbError::Exception(NcbiException::new(
             ThrowSite {
@@ -1522,50 +1461,9 @@ fn title_refusal(feature: &str) -> WriteDbError {
     WriteDbError::Unsupported(format!("{feature} is not supported by LOSAT's makeblastdb"))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn classify_textseq_acc(
-    id: &ParsedSeqId,
-    is_virtual: bool,
-    facts: &mut BioseqFacts,
-    is_wp: &mut bool,
-    is_nz: &mut bool,
-    wgs_master: &mut bool,
-    tsa_master: &mut bool,
-    warn: Warn<'_>,
-) {
-    let Some(acc) = id.textseq().and_then(|t| t.accession.as_deref()) else {
-        return;
-    };
-    let info = identify_accession(acc, parse_flags::DEFAULT, &mut |w| {
-        post_seq_id_warning(w, warn);
-    });
-    let div = info & DIVISION_MASK;
-    if div == WGS {
-        if info & F_MASTER != 0 {
-            *wgs_master = true;
-        }
-    } else if div == TSA {
-        if info & F_MASTER != 0 && is_virtual {
-            *tsa_master = true;
-        }
-    } else if info == (SEQID_REFSEQ | CHROMOSOME | F_NUC) || info == (SEQID_REFSEQ | NCRNA | F_NUC)
-    {
-        facts.refseq_chromosome_or_ncrna = true;
-    } else if info == (SEQID_REFSEQ | MRNA | F_NUC)
-        || info == (SEQID_REFSEQ | MRNA | F_NUC | F_PREDICTED)
-    {
-        facts.refseq_mrna = true;
-    } else if info == (SEQID_REFSEQ | CON | F_NUC) {
-        *is_nz = true;
-    } else if info == (SEQID_REFSEQ | UNIQUE | F_PROT) {
-        *is_wp = true;
-    }
-}
-
 #[derive(Default)]
 struct DeflineFlags {
     raw_title: Vec<u8>,
-    reconstruct: bool,
     molinfo_tech_unsupported: bool,
     is_complete: bool,
     is_unverified: bool,
@@ -1645,12 +1543,7 @@ fn scan_defline_descriptors(
                     Some(Value::Enum(v)) => *v,
                     _ => 0,
                 };
-                if matches!(tech, 14 | 15 | 18) {
-                    flags.reconstruct = true;
-                    flags.molinfo_tech_unsupported = true;
-                    needed &= !F_TITLE;
-                    flags.raw_title.clear();
-                } else if matches!(tech, 2 | 3 | 4 | 16 | 20 | 23 | 24) {
+                if matches!(tech, 2 | 3 | 4 | 14 | 15 | 16 | 18 | 20 | 23 | 24) {
                     flags.molinfo_tech_unsupported = true;
                 }
                 if matches!(comp, 2..=5) {

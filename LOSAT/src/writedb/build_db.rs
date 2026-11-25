@@ -1106,7 +1106,7 @@ impl<'a> BuildDatabase<'a> {
         if scan_cfastareader {
             if let Some(field) = bioseq.cfastareader_defline.as_deref() {
                 if let Some(set) = deflines::second_parse_field(field, bioseq.is_aa, warn) {
-                    if deflines::use_fasta_reader_deflines_for(
+                    if deflines::use_fasta_reader_deflines(
                         &bioseq.ids,
                         bioseq.hist_old_id.as_ref(),
                         &set,

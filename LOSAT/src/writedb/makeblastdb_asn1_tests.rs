@@ -389,7 +389,7 @@ fn all_frozen_ncbi_2_17_0_asn1_cases_match_byte_for_byte() {
         assert_eq!(actual_files, expected_files, "case {name}: DB files differ");
         checked += 1;
     }
-    assert!(checked >= 80, "expected >= 80 frozen cases, got {checked}");
+    assert!(checked >= 82, "expected >= 82 frozen cases, got {checked}");
 }
 
 #[test]

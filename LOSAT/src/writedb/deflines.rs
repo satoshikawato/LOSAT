@@ -180,37 +180,43 @@ fn parse_second_ids(
     Ok(vec![id])
 }
 
-/// `CBioseq::GetNonLocalId()` of a FASTA Bioseq: its best id by `s_BestNonLocalRank` if
-/// that is not local, else the non-local row of its Seq-hist alignment (an id with a
-/// range).
+/// `s_BestNonLocalRank`: ranks every non-local Seq-id by `best_rank_score` and local ids last.
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/Bioseq.cpp:281-289
+pub(crate) fn best_non_local_rank(id: &ParsedSeqId) -> i32 {
+    if matches!(id, ParsedSeqId::Local(_)) {
+        i32::MAX - 1
+    } else {
+        best_rank_score(id)
+    }
+}
+
+/// `CBioseq::GetNonLocalId()` of a Bioseq: its best id by `s_BestNonLocalRank` if that is not
+/// local, else the non-local row paired with its local id in `Seq-hist.assembly`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/Bioseq.cpp:280-323
-/// The alignment of `CFastaReader::xCreateAlignment` has the generated `lcl|N` as its
-/// first row and the replaced id as its second; the generated id is the Bioseq's only id
-/// (the edits of `AddSequences` keep local ids), so the second row is returned when it is
-/// not local.
-fn non_local_id(parsed: &ParsedIds) -> Option<&ParsedSeqId> {
-    let score = |id: &ParsedSeqId| {
-        if matches!(id, ParsedSeqId::Local(_)) {
-            i32::MAX - 1
-        } else {
-            best_rank_score(id)
-        }
-    };
-    let best = find_best(&parsed.ids, score)?;
+fn non_local_id<'a>(
+    ids: &'a [ParsedSeqId],
+    hist_old_id: Option<&'a ParsedSeqId>,
+) -> Option<&'a ParsedSeqId> {
+    let best = find_best(ids, best_non_local_rank)?;
     if !matches!(best, ParsedSeqId::Local(_)) {
         return Some(best);
     }
-    let old = parsed.hist_old_id.as_ref()?;
-    let generated = parsed.ids.first()?;
+    let old = hist_old_id?;
+    let generated = ids.first()?;
     (generated == best && !matches!(old, ParsedSeqId::Local(_))).then_some(old)
 }
 
 /// `s_UseFastaReaderDeflines` of the bioseq and its deflines (`long_seqid` false).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:736-762
-fn use_fasta_reader_deflines(parsed: &ParsedIds, deflines: &DeflineSet) -> bool {
-    match non_local_id(parsed) {
+pub(crate) fn use_fasta_reader_deflines(
+    ids: &[ParsedSeqId],
+    hist_old_id: Option<&ParsedSeqId>,
+    deflines: &DeflineSet,
+) -> bool {
+    match non_local_id(ids, hist_old_id) {
         None | Some(ParsedSeqId::Prf(_)) | Some(ParsedSeqId::Pir(_)) => true,
         Some(_) => deflines.deflines.iter().any(|defline| {
             find_best(&defline.ids, best_rank_score)
@@ -234,7 +240,7 @@ pub fn extract_bioseq_deflines(bioseq: &Bioseq, warn: Warn<'_>) -> DeflineSet {
         .as_ref()
         .expect("a Bioseq read with -parse_seqids");
     if let Some(deflines) = second_parse(parsed, bioseq.is_aa, warn) {
-        if use_fasta_reader_deflines(parsed, &deflines) {
+        if use_fasta_reader_deflines(&parsed.ids, parsed.hist_old_id.as_ref(), &deflines) {
             return deflines;
         }
     }
@@ -601,38 +607,6 @@ pub(crate) fn strip_empty_lists(set: &mut DeflineSet) {
         if defline.links.as_ref().is_some_and(Vec::is_empty) {
             defline.links = None;
         }
-    }
-}
-
-/// `s_UseFastaReaderDeflines` for any Bioseq given its `ids` and optional `hist_old_id`.
-pub(crate) fn use_fasta_reader_deflines_for(
-    ids: &[ParsedSeqId],
-    hist_old_id: Option<&ParsedSeqId>,
-    deflines: &DeflineSet,
-) -> bool {
-    let score = |id: &ParsedSeqId| {
-        if matches!(id, ParsedSeqId::Local(_)) {
-            i32::MAX - 1
-        } else {
-            best_rank_score(id)
-        }
-    };
-    let non_local = match find_best(ids, score) {
-        Some(best) if !matches!(best, ParsedSeqId::Local(_)) => Some(best),
-        Some(best) => match (ids.first(), hist_old_id) {
-            (Some(first), Some(old)) if first == best && !matches!(old, ParsedSeqId::Local(_)) => {
-                Some(old)
-            }
-            _ => None,
-        },
-        None => None,
-    };
-    match non_local {
-        None | Some(ParsedSeqId::Prf(_)) | Some(ParsedSeqId::Pir(_)) => true,
-        Some(_) => deflines.deflines.iter().any(|defline| {
-            find_best(&defline.ids, best_rank_score)
-                .is_some_and(|id| !matches!(id, ParsedSeqId::Local(_)))
-        }),
     }
 }
 

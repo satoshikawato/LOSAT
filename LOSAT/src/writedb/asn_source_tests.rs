@@ -202,6 +202,32 @@ Seq-entry ::= seq {
 }
 
 #[test]
+fn fix_asn_delta_does_not_over_reserve_huge_declared_length() {
+    let input = b"\
+Seq-entry ::= seq {
+  id { local str \"d_huge\" },
+  descr { title \"huge declared length\" },
+  inst {
+    repr delta,
+    mol dna,
+    length 2147483647,
+    ext delta {
+      literal { length 4, seq-data ncbi2na '1B'H }
+    }
+  }
+}
+";
+    let mut bioseqs = read_text_ok(input);
+    assert_eq!(bioseqs.len(), 1);
+    fix_asn_delta(&mut bioseqs[0]).expect("fix delta");
+    assert_eq!(bioseqs[0].length, 4);
+    assert_eq!(
+        bioseqs[0].seq_data,
+        Some(SeqData::Ncbi4na(vec![0x12, 0x48]))
+    );
+}
+
+#[test]
 fn fix_asn_delta_rejects_protein_and_iupacna_with_exact_ncbi_errors() {
     let prot_delta = b"\
 Seq-entry ::= seq {

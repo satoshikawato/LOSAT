@@ -602,6 +602,28 @@ impl NcbiStart {
     }
 }
 
+/// What [`NcbiWalk::translated_masked`] learns of one searched translated sequence across its six
+/// reading frames' hard chunks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct TranslatedStart {
+    /// `Some` where NCBI's one-thread search starts the sequence on a table whose unwritten
+    /// entries its hits meet, or clears the table inside it (`TableStart::New`).
+    pub(crate) ncbi: Option<NcbiStart>,
+    /// How far the lowest chunk that reads a word that can hit lies below the sequence's start.
+    pub(crate) below_start: i64,
+    /// How far the sequence's entries lie past its end (relative to the offset after its last
+    /// chunk).
+    pub(crate) past_end: i64,
+    /// Whether a chunk of the sequence reads back into an earlier chunk's entries.
+    pub(crate) reads_back: bool,
+    /// Whether a chunk of the sequence lies within reach of entries written by earlier sequences
+    /// since the table was made or cleared.
+    pub(crate) reaches_written: bool,
+    /// The offset in its frame of the first one word past its frame's sentinel that can change a
+    /// result (only when `zero_words` is true).
+    pub(crate) word_past_end: Option<usize>,
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1432
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 476-500
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66, 87-107, 162-173
@@ -633,28 +655,9 @@ impl NcbiStart {
 ///   first sequence whose scan reads before a chunk: the [`NcbiStart`] of each searched sequence
 ///   across its six frames' searched chunks, so that every lead sequence starts at NCBI's
 ///   one-thread offset and cleared state at every thread count.
-/// What [`NcbiWalk::translated_masked`] learns of one searched translated sequence across its six
-/// reading frames' hard chunks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) struct TranslatedStart {
-    /// `Some` where NCBI's one-thread search starts the sequence on a table whose unwritten
-    /// entries its hits meet, or clears the table inside it (`TableStart::New`).
-    pub(crate) ncbi: Option<NcbiStart>,
-    /// How far the lowest chunk that reads a word that can hit lies below the sequence's start.
-    pub(crate) below_start: i64,
-    /// How far the sequence's entries lie past its end (relative to the offset after its last
-    /// chunk).
-    pub(crate) past_end: i64,
-    /// Whether a chunk of the sequence reads back into an earlier chunk's entries.
-    pub(crate) reads_back: bool,
-    /// Whether a chunk of the sequence lies within reach of entries written by earlier sequences
-    /// since the table was made or cleared.
-    pub(crate) reaches_written: bool,
-    /// The offset in its frame of the first one word past its frame's sentinel that can change a
-    /// result (only when `zero_words` is true).
-    pub(crate) word_past_end: Option<usize>,
-}
-
+/// - For `-db_hard_mask` translated searches ([`NcbiWalk::translated_masked`], series NP, M4b-3c
+///   part 2), when any sequence has a negative frame chunk: the [`TranslatedStart`] of each
+///   searched sequence across its six frames' hard chunks.
 #[derive(Debug, Clone)]
 pub(crate) struct NcbiWalk {
     word: i32,

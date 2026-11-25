@@ -4,13 +4,8 @@ import { resolve } from 'node:path';
 import { toProgramDescription } from 'losat';
 import { CUSTOM_OUTPUT, type ProgramId } from 'losat/domain';
 import {
-  DATABASE_IPG_FLAGS,
-  DATABASE_IPG_PROGRAMS,
-  DATABASE_MASK_FLAGS,
-  DATABASE_MASK_PROGRAMS,
   buildArgv,
   commandWords,
-  DATABASE_FLAGS,
   optionNames,
   optionValue,
   refusedFields,
@@ -21,6 +16,7 @@ import {
   userArgv,
   toShellCommand,
 } from '../../src/domain/argv';
+import { ALL_DB_FILTER_FLAGS, FILTERING_DB_FLAG } from '../../src/domain/blast-db';
 import { PROGRAMS } from '../../src/domain/programs';
 
 describe('buildArgv', () => {
@@ -114,73 +110,54 @@ describe('buildArgv', () => {
     },
   );
 
-  it('refuses the database options, also written -flag=value, as the browser build cannot search a database', () => {
+  it('builds a database search argv with -db when databaseName is given', () => {
+    const argv = buildArgv({
+      program: 'blastn',
+      queryName: 'q.fa',
+      databaseName: 'mydb/nt_small',
+      parameters: [
+        ['-seqidlist', 'ids.txt'],
+        ['-filtering_db', 'repeats/rep'],
+      ],
+    });
+    expect(argv).toEqual(['blastn', '-query', 'q.fa', '-db', 'mydb/nt_small', '-seqidlist', 'ids.txt', '-filtering_db', 'repeats/rep']);
+    expect(userArgv({ argv })).toEqual(argv);
+    expect(userArgv({ argv, prints: 'version' })).toEqual(['blastn', '-seqidlist', 'ids.txt', '-filtering_db', 'repeats/rep']);
+  });
+
+  it('directs -db typed in Additional options to the Subject control, and lets database filter options pass through to the engine (WQA D12b + RG-D4 W2)', () => {
     for (const program of PROGRAMS) {
-      expect(extra(program.id, ['-db', 'nt']), program.id).toThrow(/^-db \(a database search\) is not supported in the browser yet$/);
-      for (const flag of DATABASE_FLAGS.slice(1)) {
-        expect(extra(program.id, [`${flag}=x`]), `${program.id} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
+      expect(extra(program.id, ['-db', 'nt']), program.id).toThrow(/^-db is set in the form: Subject$/);
+      expect(extra(program.id, ['-db=nt']), program.id).toThrow(/^-db is set in the form: Subject$/);
+      for (const flag of ALL_DB_FILTER_FLAGS) {
+        expect(extra(program.id, [flag, 'x'])(), `${program.id} ${flag}`).toEqual([program.id, '-query', 'q.fa', '-subject', 's.fa', flag, 'x']);
       }
     }
+    expect(extra('blastn', [FILTERING_DB_FLAG, 'repeats'])()).toEqual(['blastn', '-query', 'q.fa', '-subject', 's.fa', FILTERING_DB_FLAG, 'repeats']);
   });
 
-  // The database masks of every mode's CLI: their parser would name -subject, which the browser
-  // sets itself (WA-FM-04).
-  it('refuses the database masks of every mode, also written -flag=value', () => {
-    expect(DATABASE_MASK_PROGRAMS).toEqual(['blastn', 'blastp', 'blastx', 'tblastn', 'tblastx']);
-    for (const program of DATABASE_MASK_PROGRAMS) {
-      for (const flag of DATABASE_MASK_FLAGS) {
-        expect(extra(program, [flag, '11']), `${program} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
-        expect(extra(program, [`${flag}=dust`]), `${program} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
-      }
-    }
-  });
-
-  // BLASTN's -filtering_db searches a BLAST database of repeats: the engine reads it from the run's directory, but the
-  // form has no input for its files yet (D4-W2, with WQA D12b; Owner 2026-11-22).
-  it('refuses the database of repeats of BLASTN, also written -flag=value', () => {
-    for (const words of [['-filtering_db', 'repeats'], ['-filtering_db=repeats']]) {
-      expect(extra('blastn', words)).toThrow(/^-filtering_db \(a BLAST database of repeats\) is not supported in the browser yet$/);
-    }
-  });
-
-  it('refuses the database IPG filters of protein database modes, also written -flag=value', () => {
-    expect(DATABASE_IPG_PROGRAMS).toEqual(['blastp', 'blastx']);
-    for (const program of DATABASE_IPG_PROGRAMS) {
-      for (const flag of DATABASE_IPG_FLAGS) {
-        expect(extra(program, [flag, 'ipgs.txt']), `${program} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
-        expect(extra(program, [`${flag}=ipgs.txt`]), `${program} ${flag}`).toThrow(`${flag} (a database search filter) is not supported in the browser yet`);
-      }
-    }
-    for (const program of ['blastn', 'tblastn', 'tblastx'] as const) {
-      for (const flag of DATABASE_IPG_FLAGS) {
-        expect(extra(program, [flag, 'ipgs.txt'])(), `${program} ${flag}`).toEqual([program, '-query', 'q.fa', '-subject', 's.fa', flag, 'ipgs.txt']);
-      }
-    }
-  });
-
-  it("lists the database IPG filters in the engine's options of the modes that have them (describe)", () => {
+  it("lists the database options in each mode's engine description (describe)", () => {
     const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
+    const commonDbFlags = [
+      '-db',
+      '-gilist',
+      '-negative_gilist',
+      '-seqidlist',
+      '-negative_seqidlist',
+      '-taxids',
+      '-taxidlist',
+      '-negative_taxids',
+      '-negative_taxidlist',
+      '-no_taxid_expansion',
+      '-db_soft_mask',
+      '-db_hard_mask',
+    ];
     for (const program of PROGRAMS) {
       const flags = toProgramDescription(described[program.id]).parameters.map((option) => option.flag);
-      const has = DATABASE_IPG_FLAGS.filter((flag) => flags.includes(flag));
-      expect(has, program.id).toEqual(DATABASE_IPG_PROGRAMS.includes(program.id) ? [...DATABASE_IPG_FLAGS] : []);
-    }
-  });
-
-  it("lists the database masks in the engine's options of the modes that have them (describe)", () => {
-    const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
-    for (const program of PROGRAMS) {
-      const flags = toProgramDescription(described[program.id]).parameters.map((option) => option.flag);
-      const has = DATABASE_MASK_FLAGS.filter((flag) => flags.includes(flag));
-      expect(has, program.id).toEqual(DATABASE_MASK_PROGRAMS.includes(program.id) ? [...DATABASE_MASK_FLAGS] : []);
-    }
-  });
-
-  it("lists the database options of every mode's engine (describe)", () => {
-    const described = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../src/infra/fake/describe.json'), 'utf8')) as Record<string, unknown>;
-    for (const program of PROGRAMS) {
-      const flags = toProgramDescription(described[program.id]).parameters.map((option) => option.flag);
-      expect(flags, program.id).toEqual(expect.arrayContaining([...DATABASE_FLAGS]));
+      expect(flags, program.id).toEqual(expect.arrayContaining(commonDbFlags));
+      const ipg = ['-ipglist', '-negative_ipglist'].filter((flag) => flags.includes(flag));
+      expect(ipg, program.id).toEqual(program.id === 'blastp' || program.id === 'blastx' ? ['-ipglist', '-negative_ipglist'] : []);
+      if (program.id === 'blastn') expect(flags).toContain(FILTERING_DB_FLAG);
     }
   });
 

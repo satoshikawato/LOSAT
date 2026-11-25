@@ -57,7 +57,7 @@ const warningsPlace = computed(() => warningsPlaceParts(props.loaded.messages, p
 const noWarnings = computed(() => warningsPlace.value?.[0]?.text === NO_WARNINGS);
 const inputs = computed(() => [
   { role: 'Query', input: snapshot.value.query },
-  { role: 'Subject', input: snapshot.value.subject },
+  ...(snapshot.value.database === undefined ? [{ role: 'Subject', input: snapshot.value.subject }] : []),
 ]);
 </script>
 
@@ -88,6 +88,31 @@ const inputs = computed(() => [
             <!-- The file of the command is not the user's as given: what it is made of, and which records it leaves out (line WQA's D22, 2026-11-23). -->
             <template v-if="worthSaying(input.from)"><span :data-testid="`run-input-${role.toLowerCase()}-from`">From {{ fromText(input.from) }}</span><br /></template>
             <span class="muted small">SHA-256 {{ input.sha256 }}</span>
+          </dd>
+        </template>
+        <template v-if="searched && snapshot.database">
+          <dt>Database</dt>
+          <dd data-testid="run-database">
+            <code>{{ snapshot.database.name }}</code> ({{ snapshot.database.kind }}, {{ formatCount(snapshot.database.fileCount) }}
+            {{ snapshot.database.fileCount === 1 ? 'file' : 'files' }}, {{ formatBytes(snapshot.database.totalBytes) }}<template
+              v-if="snapshot.database.taxdb || snapshot.database.sqlite"
+            >,
+              {{ [snapshot.database.taxdb ? 'taxdb' : '', snapshot.database.sqlite ? 'taxonomy4blast.sqlite3' : ''].filter(Boolean).join(' + ') }}</template
+            >)
+            <template v-if="snapshot.database.filterFiles && snapshot.database.filterFiles.length > 0">
+              <br />
+              <span class="muted small" data-testid="run-database-filters">
+                Filter lists:
+                {{ snapshot.database.filterFiles.map((f) => `${f.flag} ${f.name} (${formatBytes(f.size)})`).join(', ') }}
+              </span>
+            </template>
+          </dd>
+        </template>
+        <template v-if="searched && snapshot.filteringDb">
+          <dt>Repeats database</dt>
+          <dd data-testid="run-filtering-db">
+            <code>{{ snapshot.filteringDb.name }}</code> ({{ formatCount(snapshot.filteringDb.fileCount) }}
+            {{ snapshot.filteringDb.fileCount === 1 ? 'file' : 'files' }}, {{ formatBytes(snapshot.filteringDb.totalBytes) }})
           </dd>
         </template>
         <template v-if="snapshot.conffile">

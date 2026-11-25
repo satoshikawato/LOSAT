@@ -91,24 +91,26 @@ function onConffile(event: Event): void {
           <span v-if="extraChanged" class="visually-hidden">, changed from the default</span>
         </label>
         <div class="param-control">
-          <input
-            :id="`${prefix}-extra`"
-            class="extra-options"
-            type="text"
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false"
-            :value="extra"
-            v-bind="refusedMark(extraRefused, refusalId)"
-            :data-testid="`${prefix}-extra`"
-            @input="model.setExtra(($event.target as HTMLInputElement).value)"
-          />
-          <HelpTip
-            v-if="model.extraHelp"
-            :id="`${prefix}-extra`"
-            label="About Additional options"
-            :text="model.extraHelp"
-          />
+          <span class="control-tip">
+            <input
+              :id="`${prefix}-extra`"
+              class="extra-options"
+              type="text"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              :value="extra"
+              v-bind="refusedMark(extraRefused, refusalId)"
+              :data-testid="`${prefix}-extra`"
+              @input="model.setExtra(($event.target as HTMLInputElement).value)"
+            />
+            <HelpTip
+              v-if="model.extraHelp"
+              :id="`${prefix}-extra`"
+              label="About Additional options"
+              :text="model.extraHelp"
+            />
+          </span>
         </div>
       </div>
       <!-- The file that -conffile names, chosen as the counts file of a row is (ParameterField): the search reads it under that name. -->

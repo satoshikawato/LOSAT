@@ -29,6 +29,7 @@ const option = computed(() => options.value?.find((o) => o.flag === props.field.
 const values = computed(() => props.model.values);
 const value = computed(() => values.value[props.field.flag]);
 const text = computed(() => (typeof value.value === 'string' ? value.value : ''));
+const shownText = computed(() => (value.value === undefined ? (fallback.value ?? '') : text.value));
 const known = computed(() => props.model.knownDefault(props.field.flag));
 const fallback = computed(() => known.value?.defaultValue);
 /** The field of the same row that names the counts by a taxonomy ID, where the engine describes it (WW2). */
@@ -118,6 +119,18 @@ const help = computed(() => optionHelp(option.value?.help));
 const showHint = computed(
   () => !unread.value && Boolean(props.field.hint) && (props.field.kind !== 'file' || (fileOn.value && countsBy.value === 'file')),
 );
+/** Whether the taxonomy ID row's missing-ID sentence is shown alongside its "?". */
+const showTaxidMissing = computed(
+  () =>
+    !unread.value &&
+    props.field.kind === 'file' &&
+    fileOn.value &&
+    countsBy.value === 'taxid' &&
+    taxid.value === undefined &&
+    Boolean(props.field.file?.taxid?.missing),
+);
+/** Whether a sentence precedes "?" in this row (sharing the single `.hint-line` form). */
+const showSentenceTip = computed(() => showHint.value || showTaxidMissing.value);
 
 const defaultLabel = computed(() => {
   const engineDefault = option.value?.defaultValue;
@@ -132,6 +145,10 @@ const gencodes = computed((): readonly number[] => {
 
 function set(next: string | boolean): void {
   props.model.setField(props.field.flag, next);
+}
+
+function onInput(event: Event): void {
+  set((event.target as HTMLInputElement).value);
 }
 
 /** A value chosen in a select or a checkbox: the default empties the field (it follows the task again). */
@@ -209,253 +226,253 @@ function onList(next: string): void {
     </component>
     <div class="param-control">
       <span v-if="unread" class="muted" :data-testid="`${id}-unread`">Not read.</span>
-      <div v-else-if="field.kind === 'radio'" class="radios" role="radiogroup" :aria-labelledby="`${id}-label`" v-bind="mark()" :data-testid="id">
-        <label v-for="choice in choices" :key="choice" class="radio">
-          <input
-            type="radio"
-            :name="id"
-            :value="choice"
-            :checked="checked === choice"
-            :data-testid="`${id}-${choice}`"
-            @change="set(choice)"
-          />
-          {{ choiceLabel(choice) }}
-        </label>
-      </div>
-      <template v-else-if="field.kind === 'filter'">
-        <input
-          :id="id"
-          type="checkbox"
-          :checked="filterOn"
-          v-bind="mark(!(filterOn || filterEditing))"
-          :data-testid="id"
-          @change="toggleFilter(($event.target as HTMLInputElement).checked)"
-        />
-        <label v-if="inline" :id="`${id}-label`" class="param-label" :for="id">
-          <span v-if="changed" class="changed-mark" aria-hidden="true">♦</span>
-          {{ field.label }} <span class="flag">{{ field.flag }}</span>
-          <span v-if="changed" class="visually-hidden">, changed from the default</span>
-        </label>
-        <!-- The filter's arguments (the CLI's value), as NCBI's "Species-specific repeats" has its select after the box. -->
-        <template v-if="filterOn || filterEditing">
-          <input
-            :id="`${id}-value`"
-            type="text"
-            autocomplete="off"
-            spellcheck="false"
-            :value="value === undefined ? (fallback ?? '') : text"
-            :placeholder="fallback === 'no' ? '' : (fallback ?? '')"
-            :aria-labelledby="`${id}-label ${id}-value-name`"
-            v-bind="mark()"
-            :data-testid="`${id}-value`"
-            @input="set(($event.target as HTMLInputElement).value)"
-            @focus="filterEditing = true"
-            @blur="filterEditing = false"
-          />
-          <span :id="`${id}-value-name`" class="visually-hidden">arguments</span>
-        </template>
-      </template>
-      <template v-else-if="field.kind === 'file'">
-        <span class="param-check-head">
+      <template v-else>
+        <!-- Controls that precede the trailing control-tip group (staying in fixed slots so toggling never drops focus). -->
+        <template v-if="field.kind === 'filter'">
           <input
             :id="id"
             type="checkbox"
-            :checked="fileOn"
-            v-bind="mark(!fileOn)"
+            :checked="filterOn"
+            v-bind="mark(!(filterOn || filterEditing))"
             :data-testid="id"
-            @change="toggleFile(($event.target as HTMLInputElement).checked)"
+            @change="toggleFilter(($event.target as HTMLInputElement).checked)"
           />
           <label v-if="inline" :id="`${id}-label`" class="param-label" :for="id">
             <span v-if="changed" class="changed-mark" aria-hidden="true">♦</span>
-            {{ field.label }} <span class="flag">{{ shownFlag }}</span>
+            {{ field.label }} <span class="flag">{{ field.flag }}</span>
             <span v-if="changed" class="visually-hidden">, changed from the default</span>
           </label>
-        </span>
-        <!-- How the counts are named, as NCBI's "Species-specific repeats" has its select after the box (WW2): a taxonomy ID, or a file of the user's. -->
-        <span v-if="fileOn && taxidField" class="select-clip">
-          <select :value="countsBy" aria-label="Name the counts by" :data-testid="`${id}-by`" @change="chooseCountsBy(($event.target as HTMLSelectElement).value)">
-            <option value="taxid">Taxonomy ID</option>
-            <option value="file">Counts file</option>
-          </select>
-        </span>
-        <template v-if="fileOn && countsBy === 'taxid'">
-          <input
-            :id="`${id}-taxid`"
-            type="text"
-            inputmode="numeric"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder="9606"
-            aria-label="Taxonomy ID"
-            :value="taxidText"
-            v-bind="mark()"
-            :data-testid="`${id}-taxid`"
-            @input="onTaxid"
-          />
-          <span v-if="taxid === undefined" class="file-missing" role="status" :data-testid="`${id}-missing`">{{ field.file?.taxid?.missing }}</span>
         </template>
-        <!-- The file of the option, chosen beside the box as NCBI's "Species-specific repeats" has its select. -->
-        <span v-else-if="fileOn" class="file-pick">
-          <button type="button" :data-testid="`${id}-choose`" @click="fileInput?.click()">{{ chosenFile ? 'Change file…' : 'Choose file…' }}</button>
-          <!-- Opened by the button: out of the accessibility tree, as the inputs' file field (WA2-AX-13). -->
-          <input
-            ref="fileInput"
-            class="visually-hidden"
-            type="file"
-            tabindex="-1"
-            aria-hidden="true"
-            :aria-label="field.file?.label"
-            :data-testid="`${id}-file`"
-            @change="onFile"
-          />
-          <span v-if="chosenFile" class="file-name" :data-testid="`${id}-name`">
-            {{ field.file?.label }}: {{ chosenFile.name }} ({{ formatBytes(chosenFile.size) }})
+        <template v-else-if="field.kind === 'file'">
+          <span class="param-check-head">
+            <input
+              :id="id"
+              type="checkbox"
+              :checked="fileOn"
+              v-bind="mark(!fileOn)"
+              :data-testid="id"
+              @change="toggleFile(($event.target as HTMLInputElement).checked)"
+            />
+            <label v-if="inline" :id="`${id}-label`" class="param-label" :for="id">
+              <span v-if="changed" class="changed-mark" aria-hidden="true">♦</span>
+              {{ field.label }} <span class="flag">{{ shownFlag }}</span>
+              <span v-if="changed" class="visually-hidden">, changed from the default</span>
+            </label>
           </span>
-          <span v-else class="file-missing" role="status" :data-testid="`${id}-missing`">{{ field.file?.missing }}</span>
-          <button
-            v-if="model.onMakeCounts"
-            type="button"
-            class="link"
-            :data-testid="`${id}-make-counts`"
-            @click="model.onMakeCounts()"
-          >
-            Make counts…
-          </button>
+          <!-- How the counts are named, as NCBI's "Species-specific repeats" has its select after the box (WW2): a taxonomy ID, or a file of the user's. -->
+          <span v-if="fileOn && taxidField" class="select-clip">
+            <select :value="countsBy" aria-label="Name the counts by" :data-testid="`${id}-by`" @change="chooseCountsBy(($event.target as HTMLSelectElement).value)">
+              <option value="taxid">Taxonomy ID</option>
+              <option value="file">Counts file</option>
+            </select>
+          </span>
+        </template>
+        <input
+          v-else-if="field.kind === 'file-text'"
+          :id="id"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          :value="shownText"
+          :placeholder="fallback ?? ''"
+          v-bind="mark()"
+          :data-testid="id"
+          @input="onInput"
+        />
+        <!-- The row's trailing control and its "?" (when no sentence precedes "?") wrap together so "?" never starts a line alone. -->
+        <span class="control-tip">
+          <div v-if="field.kind === 'radio'" class="radios" role="radiogroup" :aria-labelledby="`${id}-label`" v-bind="mark()" :data-testid="id">
+            <label v-for="choice in choices" :key="choice" class="radio">
+              <input
+                type="radio"
+                :name="id"
+                :value="choice"
+                :checked="checked === choice"
+                :data-testid="`${id}-${choice}`"
+                @change="set(choice)"
+              />
+              {{ choiceLabel(choice) }}
+            </label>
+          </div>
+          <!-- The filter's arguments (the CLI's value), as NCBI's "Species-specific repeats" has its select after the box. -->
+          <template v-else-if="field.kind === 'filter'">
+            <template v-if="filterOn || filterEditing">
+              <input
+                :id="`${id}-value`"
+                type="text"
+                autocomplete="off"
+                spellcheck="false"
+                :value="shownText"
+                :placeholder="fallback === 'no' ? '' : (fallback ?? '')"
+                :aria-labelledby="`${id}-label ${id}-value-name`"
+                v-bind="mark()"
+                :data-testid="`${id}-value`"
+                @input="onInput"
+                @focus="filterEditing = true"
+                @blur="filterEditing = false"
+              />
+              <span :id="`${id}-value-name`" class="visually-hidden">arguments</span>
+            </template>
+          </template>
+          <template v-else-if="field.kind === 'file'">
+            <input
+              v-if="fileOn && countsBy === 'taxid'"
+              :id="`${id}-taxid`"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="9606"
+              aria-label="Taxonomy ID"
+              :value="taxidText"
+              v-bind="mark()"
+              :data-testid="`${id}-taxid`"
+              @input="onTaxid"
+            />
+            <!-- The file of the option, chosen beside the box as NCBI's "Species-specific repeats" has its select. -->
+            <span v-else-if="fileOn" class="file-pick">
+              <button type="button" :data-testid="`${id}-choose`" @click="fileInput?.click()">{{ chosenFile ? 'Change file…' : 'Choose file…' }}</button>
+              <!-- Opened by the button: out of the accessibility tree, as the inputs' file field (WA2-AX-13). -->
+              <input
+                ref="fileInput"
+                class="visually-hidden"
+                type="file"
+                tabindex="-1"
+                aria-hidden="true"
+                :aria-label="field.file?.label"
+                :data-testid="`${id}-file`"
+                @change="onFile"
+              />
+              <span v-if="chosenFile" class="file-name" :data-testid="`${id}-name`">
+                {{ field.file?.label }}: {{ chosenFile.name }} ({{ formatBytes(chosenFile.size) }})
+              </span>
+              <span v-else class="file-missing" role="status" :data-testid="`${id}-missing`">{{ field.file?.missing }}</span>
+              <button
+                v-if="model.onMakeCounts"
+                type="button"
+                class="link"
+                :data-testid="`${id}-make-counts`"
+                @click="model.onMakeCounts()"
+              >
+                Make counts…
+              </button>
+            </span>
+          </template>
+          <template v-else-if="field.kind === 'file-text'">
+            <button type="button" :data-testid="`${id}-choose`" @click="fileInput?.click()">Choose file…</button>
+            <input
+              ref="fileInput"
+              class="visually-hidden"
+              type="file"
+              tabindex="-1"
+              aria-hidden="true"
+              :aria-label="`Choose file for ${field.flag}`"
+              :data-testid="`${id}-file`"
+              @change="onFile"
+            />
+          </template>
+          <template v-else-if="asCheckbox">
+            <input
+              :id="id"
+              type="checkbox"
+              :checked="boxChecked"
+              v-bind="mark()"
+              :data-testid="id"
+              @change="
+                field.kind === 'flag'
+                  ? set(($event.target as HTMLInputElement).checked)
+                  : choose(($event.target as HTMLInputElement).checked ? 'true' : 'false')
+              "
+            />
+            <!-- NCBI's checkboxes of a row ("Mask") carry their names after the box. -->
+            <label v-if="inline" :id="`${id}-label`" class="param-label" :for="id">
+              <span v-if="changed" class="changed-mark" aria-hidden="true">♦</span>
+              {{ field.label }} <span class="flag">{{ field.flag }}</span>
+              <span v-if="changed" class="visually-hidden">, changed from the default</span>
+            </label>
+          </template>
+          <template v-else-if="list.length > 0">
+            <span class="select-clip">
+              <select
+                :id="id"
+                :value="other ? OTHER : shown"
+                v-bind="mark(!other)"
+                :data-testid="id"
+                @change="onList(($event.target as HTMLSelectElement).value)"
+              >
+                <option v-if="shown === ''" value="">Default</option>
+                <option v-for="item in list" :key="item" :value="item">{{ item }}</option>
+                <option :value="OTHER">Other</option>
+              </select>
+            </span>
+            <input
+              v-if="other"
+              :id="`${id}-other`"
+              ref="otherInput"
+              type="text"
+              :inputmode="field.inputMode ?? 'text'"
+              autocomplete="off"
+              spellcheck="false"
+              :value="text"
+              :placeholder="fallback ?? ''"
+              :aria-labelledby="`${id}-label`"
+              v-bind="mark()"
+              :data-testid="`${id}-other`"
+              @input="onInput"
+            />
+          </template>
+          <template v-else-if="field.kind === 'text'">
+            <input
+              :id="id"
+              type="text"
+              :inputmode="field.inputMode ?? 'text'"
+              autocomplete="off"
+              spellcheck="false"
+              :value="shownText"
+              :placeholder="fallback ?? ''"
+              v-bind="mark()"
+              :data-testid="id"
+              @input="onInput"
+            />
+          </template>
+          <!-- WebKit draws a select's chosen label at its whole length beyond the select's box, which
+               made a phone's page wider than its screen (S13 screen review H2): the span clips it. -->
+          <span v-else class="select-clip">
+            <select
+              v-if="field.kind === 'gencode'"
+              :id="id"
+              :value="text"
+              v-bind="mark()"
+              :data-testid="id"
+              @change="set(($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">{{ defaultLabel }}</option>
+              <option v-for="code in gencodes" :key="code" :value="String(code)">{{ geneticCodeLabel(code) }}</option>
+            </select>
+            <select
+              v-else
+              :id="id"
+              :value="defaultChosen ? shown : text"
+              v-bind="mark()"
+              :data-testid="id"
+              @change="defaultChosen || (field.kind === 'boolean' && field.select === true) ? choose(($event.target as HTMLSelectElement).value) : set(($event.target as HTMLSelectElement).value)"
+            >
+              <option v-if="!defaultChosen" value="">{{ defaultLabel }}</option>
+              <option v-for="choice in choices" :key="choice" :value="choice">{{ choiceLabel(choice) }}</option>
+            </select>
+          </span>
+          <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
+          <HelpTip v-if="help && !showSentenceTip" :id="id" :label="`About ${field.flag}`" :text="help" />
         </span>
-      </template>
-      <template v-else-if="field.kind === 'file-text'">
-        <input
-          :id="id"
-          type="text"
-          autocomplete="off"
-          spellcheck="false"
-          :value="value === undefined ? (fallback ?? '') : text"
-          :placeholder="fallback ?? ''"
-          v-bind="mark()"
-          :data-testid="id"
-          @input="set(($event.target as HTMLInputElement).value)"
-        />
-        <button type="button" :data-testid="`${id}-choose`" @click="fileInput?.click()">Choose file…</button>
-        <input
-          ref="fileInput"
-          class="visually-hidden"
-          type="file"
-          tabindex="-1"
-          aria-hidden="true"
-          :aria-label="`Choose file for ${field.flag}`"
-          :data-testid="`${id}-file`"
-          @change="onFile"
-        />
-      </template>
-      <template v-else-if="asCheckbox">
-        <input
-          :id="id"
-          type="checkbox"
-          :checked="boxChecked"
-          v-bind="mark()"
-          :data-testid="id"
-          @change="
-            field.kind === 'flag'
-              ? set(($event.target as HTMLInputElement).checked)
-              : choose(($event.target as HTMLInputElement).checked ? 'true' : 'false')
-          "
-        />
-        <!-- NCBI's checkboxes of a row ("Mask") carry their names after the box. -->
-        <label v-if="inline" :id="`${id}-label`" class="param-label" :for="id">
-          <span v-if="changed" class="changed-mark" aria-hidden="true">♦</span>
-          {{ field.label }} <span class="flag">{{ field.flag }}</span>
-          <span v-if="changed" class="visually-hidden">, changed from the default</span>
-        </label>
-      </template>
-      <template v-else-if="list.length > 0">
-        <span class="select-clip">
-          <select
-            :id="id"
-            :value="other ? OTHER : shown"
-            v-bind="mark(!other)"
-            :data-testid="id"
-            @change="onList(($event.target as HTMLSelectElement).value)"
-          >
-            <option v-if="shown === ''" value="">Default</option>
-            <option v-for="item in list" :key="item" :value="item">{{ item }}</option>
-            <option :value="OTHER">Other</option>
-          </select>
+        <span v-if="showSentenceTip" class="hint-line">
+          <span v-if="showHint" class="param-hint">{{ field.hint }}</span>
+          <span v-else class="file-missing" role="status" :data-testid="`${id}-missing`">{{ field.file?.taxid?.missing }}</span>
+          <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
+          <HelpTip v-if="help" :id="id" :label="`About ${field.flag}`" :text="help" />
         </span>
-        <input
-          v-if="other"
-          :id="`${id}-other`"
-          ref="otherInput"
-          type="text"
-          :inputmode="field.inputMode ?? 'text'"
-          autocomplete="off"
-          spellcheck="false"
-          :value="text"
-          :placeholder="fallback ?? ''"
-          :aria-labelledby="`${id}-label`"
-          v-bind="mark()"
-          :data-testid="`${id}-other`"
-          @input="set(($event.target as HTMLInputElement).value)"
-        />
+        <!-- The line that downloads the counts of the taxonomy ID, under the row's controls (WW2). -->
+        <CountsLine v-if="field.kind === 'file' && fileOn && countsBy === 'taxid' && taxid !== undefined && model.counts" :counts="model.counts" :taxid="taxid" :focus-id="`${id}-taxid`" />
       </template>
-      <template v-else-if="field.kind === 'text'">
-        <input
-          :id="id"
-          type="text"
-          :inputmode="field.inputMode ?? 'text'"
-          autocomplete="off"
-          spellcheck="false"
-          :value="value === undefined ? (fallback ?? '') : text"
-          :placeholder="fallback ?? ''"
-          v-bind="mark()"
-          :data-testid="id"
-          @input="set(($event.target as HTMLInputElement).value)"
-        />
-      </template>
-      <!-- WebKit draws a select's chosen label at its whole length beyond the select's box, which
-           made a phone's page wider than its screen (S13 screen review H2): the span clips it. -->
-      <span v-else class="select-clip">
-        <select
-          v-if="field.kind === 'gencode'"
-          :id="id"
-          :value="text"
-          v-bind="mark()"
-          :data-testid="id"
-          @change="set(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">{{ defaultLabel }}</option>
-          <option v-for="code in gencodes" :key="code" :value="String(code)">{{ geneticCodeLabel(code) }}</option>
-        </select>
-        <select
-          v-else-if="defaultChosen"
-          :id="id"
-          :value="shown"
-          v-bind="mark()"
-          :data-testid="id"
-          @change="choose(($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="choice in choices" :key="choice" :value="choice">{{ choiceLabel(choice) }}</option>
-        </select>
-        <select
-          v-else
-          :id="id"
-          :value="text"
-          v-bind="mark()"
-          :data-testid="id"
-          @change="field.kind === 'boolean' && field.select === true ? choose(($event.target as HTMLSelectElement).value) : set(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">{{ defaultLabel }}</option>
-          <option v-for="choice in choices" :key="choice" :value="choice">{{ choiceLabel(choice) }}</option>
-        </select>
-      </span>
-      <span v-if="showHint" class="hint-line">
-        <span class="param-hint">{{ field.hint }}</span>
-        <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
-        <HelpTip v-if="help" :id="id" :label="`About ${field.flag}`" :text="help" />
-      </span>
-      <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
-      <HelpTip v-else-if="help" :id="id" :label="`About ${field.flag}`" :text="help" />
-      <!-- The line that downloads the counts of the taxonomy ID, under the row's controls (WW2). -->
-      <CountsLine v-if="field.kind === 'file' && fileOn && countsBy === 'taxid' && taxid !== undefined && model.counts" :counts="model.counts" :taxid="taxid" :focus-id="`${id}-taxid`" />
     </div>
   </div>
 </template>

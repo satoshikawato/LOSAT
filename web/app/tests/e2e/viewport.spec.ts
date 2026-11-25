@@ -50,89 +50,138 @@ for (const width of WIDTHS) {
 }
 
 const NARROW_WIDTHS = [320, 390, 768] as const;
+const TIP_WIDTHS = [320, 390, 768, 850, 900] as const;
 const COUNTS_FIXTURE = 'LOSAT/tests/winmask/counts/mg1655_u9.obinary';
 
-interface SentenceTipMeasurement {
+interface HelpTipMeasurement {
   readonly id: string;
   readonly btnLeft: number;
   readonly btnTop: number;
   readonly btnBottom: number;
-  readonly lastRight: number;
-  readonly lastTop: number;
-  readonly lastBottom: number;
+  readonly prevRight: number;
+  readonly prevTop: number;
+  readonly prevBottom: number;
   readonly overlapsY: boolean;
   readonly followsX: boolean;
 }
 
 /**
- * Checks every visible "?" (HelpTip) that follows a sentence on the current view: the button sits on
- * the same line box as the last line of the sentence (or its trailing inline link, such as Delete),
- * never orphaned alone on the next line.
+ * Checks every visible "?" (`.help-toggle`) on the current view: it shares a line with the content
+ * right before it (for a sentence, the last rect of `Range.getClientRects()` over its text; for a
+ * control, the control's bounding rect), so no "?" ever starts a line alone.
  */
-async function measureSentenceHelpTips(page: Page): Promise<SentenceTipMeasurement[]> {
+async function measureAllHelpTips(page: Page): Promise<{ readonly scrollWidth: number; readonly clientWidth: number; readonly tips: readonly HelpTipMeasurement[] }> {
   return page.evaluate(() => {
-    const tips = new Set<Element>();
-    for (const selector of [
-      '.hint-line .help-tip',
-      '.param-hint-line .help-tip',
-      '.param-control .param-hint ~ .help-tip',
-      '.counts-line .help-tip',
-      '.fetch-row .help-tip',
-      '[data-kind="conffile"] .help-tip',
-    ]) {
-      for (const el of document.querySelectorAll(selector)) tips.add(el);
-    }
-    const results: SentenceTipMeasurement[] = [];
-    for (const tip of tips) {
-      const btn = tip.querySelector('button');
-      if (btn === null) continue;
-      const br = btn.getBoundingClientRect();
-      if (br.width === 0 || br.height === 0) continue;
+    const isVisibleElement = (el: Element): boolean => {
+      if (el.classList.contains('visually-hidden')) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0.5 && r.height > 0.5;
+    };
 
-      const wrapper = tip.closest('.hint-line, .param-hint-line');
-      let startNode: Node | null = null;
-      if (wrapper !== null) {
-        startNode = wrapper.firstChild;
+    const lastRangeRect = (start: Node, endBefore?: Node): DOMRect | undefined => {
+      const range = document.createRange();
+      if (endBefore !== undefined) {
+        range.setStartBefore(start);
+        range.setEndBefore(endBefore);
       } else {
-        const parent = tip.parentElement;
-        if (parent !== null) {
-          startNode =
-            parent.querySelector('.param-hint') ??
-            parent.querySelector('.hint') ??
-            parent.querySelector('.file-missing') ??
-            parent.querySelector('.file-name') ??
-            tip.previousElementSibling;
+        range.selectNodeContents(start);
+      }
+      return [...range.getClientRects()].filter((r) => r.width > 0.5 && r.height > 0.5).at(-1);
+    };
+
+    const findPrecedingElement = (node: Element): Element | null => {
+      let cur: Element | null = node.previousElementSibling;
+      while (cur !== null && !isVisibleElement(cur)) cur = cur.previousElementSibling;
+      if (cur !== null) return cur;
+      const parent = node.parentElement;
+      if (parent !== null && parent.classList.contains('control-tip')) {
+        return findPrecedingElement(parent);
+      }
+      return null;
+    };
+
+    const tips: HelpTipMeasurement[] = [];
+    for (const btn of document.querySelectorAll('.help-toggle')) {
+      const br = btn.getBoundingClientRect();
+      if (br.width < 0.5 || br.height < 0.5) continue;
+      const tip = btn.closest('.help-tip') ?? btn;
+      const wrapper = tip.closest('.hint-line, .param-hint-line');
+
+      let prevRect: DOMRect | undefined;
+      if (wrapper !== null && wrapper.firstChild !== null && wrapper.firstChild !== tip) {
+        prevRect = lastRangeRect(wrapper.firstChild, tip);
+      } else {
+        const prev = findPrecedingElement(tip);
+        if (prev !== null) {
+          if (prev.matches('.param-hint, .hint, .file-missing, .file-name')) {
+            prevRect = lastRangeRect(prev);
+          } else if (prev.matches('.file-pick')) {
+            const children = [...prev.children].filter(isVisibleElement);
+            const lastChild = children.at(-1);
+            if (lastChild !== undefined) {
+              prevRect = lastChild.matches('.file-missing, .file-name, .hint')
+                ? lastRangeRect(lastChild)
+                : lastChild.getBoundingClientRect();
+            }
+          } else {
+            prevRect = prev.getBoundingClientRect();
+          }
         }
       }
-      if (startNode === null || startNode === tip) continue;
 
-      const range = document.createRange();
-      range.setStartBefore(startNode);
-      range.setEndBefore(tip);
-      const last = [...range.getClientRects()].filter((r) => r.width > 0.5 && r.height > 0.5).at(-1);
-      if (last === undefined) continue;
+      if (prevRect === undefined) {
+        tips.push({
+          id: btn.getAttribute('data-testid') ?? btn.getAttribute('aria-label') ?? 'help-tip',
+          btnLeft: br.left,
+          btnTop: br.top,
+          btnBottom: br.bottom,
+          prevRight: 0,
+          prevTop: 0,
+          prevBottom: 0,
+          overlapsY: false,
+          followsX: false,
+        });
+        continue;
+      }
 
-      results.push({
+      tips.push({
         id: btn.getAttribute('data-testid') ?? btn.getAttribute('aria-label') ?? 'help-tip',
         btnLeft: br.left,
         btnTop: br.top,
         btnBottom: br.bottom,
-        lastRight: last.right,
-        lastTop: last.top,
-        lastBottom: last.bottom,
-        overlapsY: Math.min(br.bottom, last.bottom) > Math.max(br.top, last.top),
-        followsX: br.left >= last.right - 1,
+        prevRight: prevRect.right,
+        prevTop: prevRect.top,
+        prevBottom: prevRect.bottom,
+        overlapsY: Math.min(br.bottom, prevRect.bottom) > Math.max(br.top, prevRect.top),
+        followsX: br.left >= prevRect.right - 1,
       });
     }
-    return results;
+    return {
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+      tips,
+    };
   });
 }
 
-function expectSentenceHelpTipsInline(tips: readonly SentenceTipMeasurement[], context: string): void {
-  expect(tips.length, `${context}: expected at least one sentence HelpTip`).toBeGreaterThan(0);
-  for (const tip of tips) {
-    expect(tip.overlapsY, `${context}: ${tip.id} should overlap the sentence's last line vertically (btn ${tip.btnTop.toFixed(1)}..${tip.btnBottom.toFixed(1)} vs last ${tip.lastTop.toFixed(1)}..${tip.lastBottom.toFixed(1)})`).toBe(true);
-    expect(tip.followsX, `${context}: ${tip.id} should sit after the sentence's last line (btnLeft ${tip.btnLeft.toFixed(1)} vs lastRight ${tip.lastRight.toFixed(1)})`).toBe(true);
+function expectAllHelpTipsShareLine(
+  measured: { readonly scrollWidth: number; readonly clientWidth: number; readonly tips: readonly HelpTipMeasurement[] },
+  context: string,
+  requireAtLeastOne = true,
+): void {
+  expect(measured.scrollWidth, `${context}: page should not overflow horizontally`).toBeLessThanOrEqual(measured.clientWidth);
+  if (requireAtLeastOne) {
+    expect(measured.tips.length, `${context}: expected at least one visible HelpTip`).toBeGreaterThan(0);
+  }
+  for (const tip of measured.tips) {
+    expect(
+      tip.overlapsY,
+      `${context}: ${tip.id} should overlap its preceding content vertically (btn ${tip.btnTop.toFixed(1)}..${tip.btnBottom.toFixed(1)} vs prev ${tip.prevTop.toFixed(1)}..${tip.prevBottom.toFixed(1)})`,
+    ).toBe(true);
+    expect(
+      tip.followsX,
+      `${context}: ${tip.id} should sit after its preceding content (btnLeft ${tip.btnLeft.toFixed(1)} vs prevRight ${tip.prevRight.toFixed(1)})`,
+    ).toBe(true);
   }
 }
 
@@ -164,6 +213,11 @@ async function openWmTab(page: Page): Promise<void> {
   await expect(page.getByTestId('wm-panel')).toHaveAttribute('data-describe', 'ready', { timeout: 60_000 });
 }
 
+async function openWmOptions(page: Page): Promise<void> {
+  const wmToggle = page.getByTestId('wm-options-toggle');
+  if ((await wmToggle.getAttribute('aria-expanded')) !== 'true') await wmToggle.click();
+}
+
 async function saveMadeCounts562(page: Page, runNumber: number): Promise<void> {
   await openWmTab(page);
   if (runNumber === 1) {
@@ -185,8 +239,8 @@ async function startWithSavedCounts562(page: Page): Promise<void> {
   await expect(page.getByTestId('tool-save-status')).toBeVisible({ timeout: 30_000 });
 }
 
-async function forNarrowWidths(page: Page, check: (width: (typeof NARROW_WIDTHS)[number]) => Promise<void>): Promise<void> {
-  for (const width of NARROW_WIDTHS) {
+async function forWidths(page: Page, widths: readonly number[], check: (width: number) => Promise<void>): Promise<void> {
+  for (const width of widths) {
     await page.setViewportSize({ width, height: 844 });
     await page.evaluate(() => document.fonts.ready);
     await check(width);
@@ -215,11 +269,13 @@ async function selectTaxidMade562(page: Page): Promise<void> {
   await expect(page.getByTestId('counts-note')).toContainText(/Made in this (?:browser|tab only)/);
 }
 
-const checkTipsAtNarrowWidths = (page: Page, label: string): Promise<void> =>
-  forNarrowWidths(page, async (width) => expectSentenceHelpTipsInline(await measureSentenceHelpTips(page), `${label} at ${width} px`));
+const checkAllTipsAtWidths = (page: Page, label: string, requireAtLeastOne = true): Promise<void> =>
+  forWidths(page, TIP_WIDTHS, async (width) =>
+    expectAllHelpTipsShareLine(await measureAllHelpTips(page), `${label} at ${width} px`, requireAtLeastOne),
+  );
 
 const checkWmCheckboxAtNarrowWidths = (page: Page, label: string): Promise<void> =>
-  forNarrowWidths(page, (width) => expectWmCheckboxSharesLine(page, `${label} at ${width} px`));
+  forWidths(page, NARROW_WIDTHS, (width) => expectWmCheckboxSharesLine(page, `${label} at ${width} px`));
 
 test('at 320, 390 and 768 px the Replace dialog leaves at least 12 px on each side', async ({ page }) => {
   test.setTimeout(180_000);
@@ -227,7 +283,7 @@ test('at 320, 390 and 768 px the Replace dialog leaves at least 12 px on each si
   await saveMadeCounts562(page, 2);
   await expect(page.getByTestId('replace-counts-dialog')).toBeVisible();
 
-  await forNarrowWidths(page, async (width) => {
+  await forWidths(page, NARROW_WIDTHS, async (width) => {
     const gaps = await page.evaluate(() => {
       const r = document.querySelector('[data-testid="replace-counts-dialog"]')!.getBoundingClientRect();
       return {
@@ -244,30 +300,45 @@ test('at 320, 390 and 768 px the Replace dialog leaves at least 12 px on each si
   await expect(page.getByTestId('replace-counts-dialog')).not.toBeVisible();
 });
 
-test('at 320, 390 and 768 px every "?" after a sentence stays on the sentence\'s last line', async ({ page }) => {
-  test.setTimeout(180_000);
+test('at 320, 390, 768, 850 and 900 px every visible "?" shares a line with its preceding content', async ({ page }) => {
+  test.setTimeout(240_000);
   await startWithSavedCounts562(page);
+  await checkAllTipsAtWidths(page, 'WindowMasker -mk_counts run page', false);
 
   await openWmTab(page);
+  await page.getByTestId('wm-stage-mk_counts').check();
+  await openWmOptions(page);
+  await checkAllTipsAtWidths(page, 'WindowMasker Make counts');
+
   await page.getByTestId('wm-stage-mask').check();
-  const wmToggle = page.getByTestId('wm-options-toggle');
-  if ((await wmToggle.getAttribute('aria-expanded')) !== 'true') await wmToggle.click();
-  await checkTipsAtNarrowWidths(page, 'WindowMasker Mask');
+  await openWmOptions(page);
+  await checkAllTipsAtWidths(page, 'WindowMasker Mask');
+
+  await page.getByTestId('wm-stage-convert').check();
+  await openWmOptions(page);
+  await checkAllTipsAtWidths(page, 'WindowMasker Convert counts');
 
   await openBlastnParameters(page);
   await page.getByTestId('query-input').fill('NM_000001.1');
   await expect(page.getByTestId('query-fetch-row')).toBeVisible();
   await page.getByTestId('param-extra').fill('-conffile test.ini');
   await expect(page.getByTestId('param-conffile')).toBeVisible();
-  await selectTaxidMade562(page);
-  await checkTipsAtNarrowWidths(page, 'BLASTN Taxonomy ID made');
+  await checkAllTipsAtWidths(page, 'BLASTN WindowMasker unchecked');
+
+  await page.getByTestId('param-window_masker_db').check();
+  await expect(page.getByTestId('param-window_masker_db-missing')).toBeVisible();
+  await checkAllTipsAtWidths(page, 'BLASTN Taxonomy ID empty');
+
+  await page.getByTestId('param-window_masker_db-taxid').fill('562');
+  await expect(page.getByTestId('counts-note')).toContainText(/Made in this (?:browser|tab only)/);
+  await checkAllTipsAtWidths(page, 'BLASTN Taxonomy ID made');
 
   await page.getByTestId('param-window_masker_db-taxid').fill('9606');
   await expect(page.getByTestId('counts-note')).toContainText('Downloads wmasker.obinary for 9606');
-  await checkTipsAtNarrowWidths(page, 'BLASTN Taxonomy ID unsaved');
+  await checkAllTipsAtWidths(page, 'BLASTN Taxonomy ID unsaved');
 
   await attachCountsFixture(page);
-  await checkTipsAtNarrowWidths(page, 'BLASTN Counts file');
+  await checkAllTipsAtWidths(page, 'BLASTN Counts file');
 });
 
 test('at 320, 390 and 768 px the WindowMasker row checkbox shares a line with its name', async ({ page }) => {

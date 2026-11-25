@@ -792,7 +792,8 @@ input[type='radio'] {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.param-control > input[type='text'] {
+.param-control > input[type='text'],
+.param-control > .control-tip > input[type='text'] {
   width: 16em;
   max-width: 100%;
 }
@@ -802,6 +803,7 @@ input[type='radio'] {
    the focus ring. */
 .select-clip {
   display: block;
+  min-width: 0;
   max-width: 100%;
   overflow: hidden;
   padding: 3px;
@@ -833,7 +835,8 @@ input[type='radio'] {
   padding: 2px 6px;
 }
 
-.parameter-form .param-inline .param-control > input[type='text'] {
+.parameter-form .param-inline .param-control > input[type='text'],
+.parameter-form .param-inline .param-control > .control-tip > input[type='text'] {
   width: 5em;
 }
 
@@ -857,6 +860,7 @@ input[type='radio'] {
 }
 
 .parameter-form .param-check .param-label {
+  flex: 0 2 auto;
   min-width: 0;
 }
 
@@ -1296,18 +1300,21 @@ textarea {
   background: var(--bg);
 }
 
-.parameter-form .param-control > input[type='text'] {
+.parameter-form .param-control > input[type='text'],
+.parameter-form .param-control > .control-tip > input[type='text'] {
   width: 8em;
 }
 
-.parameter-form .param-control > input[inputmode='text'] {
+.parameter-form .param-control > input[inputmode='text'],
+.parameter-form .param-control > .control-tip > input[inputmode='text'] {
   width: 12em;
 }
 
 /* "Additional options" holds a command line's options (DW-42), with its "?" beside it on a phone too. */
-.parameter-form .param-control > input.extra-options[type='text'] {
+.parameter-form .param-control > input.extra-options[type='text'],
+.parameter-form .param-control > .control-tip > input.extra-options[type='text'] {
   width: 36em;
-  max-width: calc(100% - 2.5em);
+  max-width: 100%;
   box-sizing: border-box;
 }
 
@@ -1322,11 +1329,14 @@ textarea {
 
 /* A sentence and its trailing "?" (and any inline link between them) flow inline together;
    reserving the "?" width in padding-right with a matching negative margin-right gives the "?"
-   zero extra advance width so it never wraps alone onto the next line at any width. */
+   zero extra advance width so it never wraps alone onto the next line at any width.
+   At desktop widths (>800 px), the "?" sits 8 px after the text inside an inline-flex box one
+   line high (1lh) aligned to the top of the line box, matching the centered 8 px layout of
+   option rows without expanding the line height. */
 .hint-line {
   box-sizing: border-box;
   min-width: 0;
-  --hint-tip-space: 26px;
+  --hint-tip-space: 28px;
 }
 
 .hint-line:has(.help-tip) {
@@ -1339,21 +1349,42 @@ textarea {
 }
 
 .hint-line > .help-tip {
-  margin-left: 6px;
+  margin-top: calc((1lh - 20px) / 2);
+  margin-left: 8px;
   margin-right: calc(-1 * var(--hint-tip-space));
-  vertical-align: middle;
+  vertical-align: top;
+}
+
+/* A control and its trailing "?" wrap together so a "?" never starts a line alone. */
+.control-tip {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: inherit;
+  gap: inherit;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.control-tip > :not(.help-tip) {
+  min-width: 0;
+}
+
+.control-tip > input[type='checkbox'] {
+  flex: none;
 }
 
 /* A checkbox of a row with a file chosen beside it (BLASTN's WindowMasker counts): the box and its
-   name stay together on the first line, followed by the controls and the hint on its own line. */
+   name stay together on the first line; when checked, the controls wrap after it and the counts
+   file hint takes its own line. */
 .parameter-form .param-inline[data-kind='file'] .param-control {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
   gap: 4px 8px;
 }
 
-.parameter-form .param-inline[data-kind='file'] .hint-line {
+.parameter-form .param-inline[data-kind='file'] .param-control:has(.select-clip, .file-pick, input[type='text']) {
+  flex-wrap: wrap;
+}
+
+.parameter-form .param-inline[data-kind='file'] .hint-line:has(> .param-hint) {
   flex: 1 0 100%;
 }
 
@@ -2396,7 +2427,16 @@ pre.range-text {
   }
 
   .hint-line {
-    --hint-tip-space: 30px;
+    --hint-tip-space: 32px;
+  }
+
+  .hint-line > .help-tip {
+    margin-top: 0;
+    vertical-align: middle;
+  }
+
+  .parameter-form .param-check-head {
+    align-items: flex-start;
   }
 
   .region-bar {

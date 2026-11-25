@@ -49,8 +49,9 @@ const AWAITING_ZERO_PAGE: [&str; 6] = [
 /// Rows of an alias file whose count checks overflow a signed integer in NCBI's binary, where
 /// the overflow's result (undefined in C) decides the check; LOSAT must refuse them (as above)
 /// until the Owner decides the exception (Q-D2B-OV). An overflow that decides nothing gives NCBI's
-/// result (a_ov3).
-const AWAITING_Q_D2B_OV: [&str; 2] = ["a_ov1", "a_ov2"];
+/// result (a_ov3). `-dir .` of the alias rows (`a_dir`, `a_dir_v1`) now gets past `membx.pal`
+/// and `taxmiss.pal` and meets `ov1.pal`.
+const AWAITING_Q_D2B_OV: [&str; 4] = ["a_ov1", "a_ov2", "a_dir", "a_dir_v1"];
 
 /// Rows of `-cdd_delta`, which LOSAT refuses until row RG-D2b ports its test of a CDD database's
 /// headers (the next PR of the row).

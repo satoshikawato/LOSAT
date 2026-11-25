@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.31 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
+- Version: 1.32 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -72,7 +72,9 @@
   instruction);
   1.31 2026-11-24 (`losat makeblastdb`'s
   log in the scope and in exception 10; the Owner's choice of 2026-11-24, `Q-KD-1=A`, line RG
-  item KD; numbered after line RG item T6a's 1.30, first 1.30)
+  item KD; numbered after line RG item T6a's 1.30, first 1.30);
+  1.32 2026-11-25 (`losat makembindex` in the scope and in exception 10; line RG item KD, RG
+  DECISIONS KD-mbi-pipe-1; Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -85,8 +87,8 @@ The command-line behaviour of every LOSAT program (BLASTN, BLASTP, TBLASTN, TBLA
 BLASTX, since version 1.10 `losat rpsbproc`, NCBI's rpsbproc 0.5.1, whose report takes the
 place of a search result, since version 1.13 `losat blastdbcmd` and `losat dustmasker`, and
 since version 1.16 `losat segmasker`, since version 1.18 `losat convert2blastmask` and since
-version 1.24 `losat windowmasker`, whose outputs do, and since version 1.31 the log of `losat
-makeblastdb`) that is not part of a search result: argument parsing, help text, thread
+version 1.24 `losat windowmasker`, whose outputs do, since version 1.31 the log of `losat
+makeblastdb`, and since version 1.32 `losat makembindex`) that is not part of a search result: argument parsing, help text, thread
 warnings, since version 1.27 the memory used with more than 64 threads, output-write failures, memory exhaustion and, since version 1.22, BLASTN's progress
 bar on a terminal, and since version 1.25 the statement of the running program's version in every
 output, search results included (exception 14). Search results, their outfmt
@@ -277,12 +279,12 @@ BLAST+.
    write its report, it stops with `rpsbproc failed to write output` (exit status 4), where
    NCBI's rpsbproc 0.5.1 drops the writes and continues with exit status 0.
 10. **Closed pipe in blastdbcmd's, dustmasker's, segmasker's, windowmasker's and convert2blastmask's output,
-   in makeblastdb's log, and in every program's version and help**
+   in makeblastdb's log, in makembindex's `-show_filters`, `-stat` and index outputs that are named pipes, and in every program's version and help**
    (version 1.13, 2026-11-13, Owner-delegated; line RG, item K1, RG DECISIONS K1-8; version 1.14
    the same day, item K1b, K1b-3 and K1b-5; version 1.16 the same day, segmasker, item K2, K2-5;
    version 1.18 the same day, convert2blastmask, item K3; version 1.24, 2026-11-21, windowmasker,
    line NP item M5a; version 1.31, 2026-11-24, makeblastdb's log, the Owner's choice, line
-   RG item KD). A write of NCBI's blastdbcmd 2.17.0,
+   RG item KD; version 1.32, 2026-11-25, makembindex, Owner-delegated, line RG item KD). A write of NCBI's blastdbcmd 2.17.0,
    dustmasker 1.0.0, segmasker 1.0.0, windowmasker 1.0.0 or convert2blastmask 2.17.0 to a pipe whose
    reader has closed ends the program by SIGPIPE outside Windows (exit status 141 from the
    shell, no message; exception 5). LOSAT's runtime ignores SIGPIPE (exception 5), so LOSAT
@@ -343,6 +345,28 @@ BLAST+.
    refuses. With `-logfile` naming a file nothing goes to the standard output, and the build runs
    to its end in both. On Windows the log's write fails without a signal and the build goes on, as
    NCBI's does.
+   Since version 1.32 the same holds for `losat makembindex` (probes against NCBI BLAST+ 2.17.0
+   makembindex, 2026-11-25). A normal `makembindex` build writes progress (`creating ...`, `done`,
+   `removed (empty)`) only to standard error and nothing to standard output, so a closed standard-output
+   pipe finishes the full index with exit status 0 in both NCBI and LOSAT. `-show_filters` writes
+   filter descriptions to standard output (`mkindex_app.cpp:236-240`): on a closed pipe outside
+   Windows, NCBI 2.17.0 is ended by SIGPIPE (141) and LOSAT exits with status 0 and no extra
+   message (earlier warnings on standard error stay; a missing database fails with exit status 3
+   before writing; `/dev/full` exits with status 0 in both). `-stat` flushes each non-empty word
+   count line (`dbindex_factory.cpp:1408-1436`), and `.NN.idx` writes 8 KiB blocks after the
+   44-byte header (`dbindex_factory.cpp:1604-1634`). Index outputs (`.NN.idx`, `.map`, `.shd`)
+   also write through `Ostream`: when `-stat` meets a closed pipe outside Windows (such as `-stat
+   /dev/stdout` with standard output closed, or a pipe whose reader closes mid-run), NCBI 2.17.0 is
+   ended by SIGPIPE at that line, leaving the current `.NN.idx` incomplete and writing no `done`,
+   no `.map`, no `.shd`, and no later index or database volumes; LOSAT flushes `-stat` at each
+   8 KiB `.NN.idx` block boundary, so it stops in the same 8 KiB block with exit status 0 and no
+   message, leaving the same incomplete `.NN.idx` bytes (the 44-byte header followed by the
+   complete 8 KiB blocks, for both regular files and named pipes) and the same files as NCBI. When
+   an index output (`.NN.idx`, `.map`, or `.shd`) is a named pipe whose reader closes early outside
+   Windows, NCBI 2.17.0 is ended by SIGPIPE and LOSAT stops at once with exit status 0 and no
+   message, leaving the same files and `-stat` progress as NCBI. When a volume has no
+   indexed words (so `-stat` receives no write) or `-stat` hits a non-pipe write failure
+   (`/dev/full`, or a closed pipe on Windows), the index completes with exit status 0 in both.
    Functions: `ncbi_app::files::Ostream` (one stream of `-out` for each program;
    `ends_like_sigpipe`, `flush_before_diagnostic`), `dustmasker::work::run`
    (`Failure::ClosedPipe`), `segmasker::work::run_masks` (`Failure::ClosedPipe`), `windowmasker::work`
@@ -350,12 +374,21 @@ BLAST+.
    (`Failure::ClosedPipe`), `blastdbcmd::retrieve::process` (`Stop::ClosedPipe`, `Run::post`),
    `blastdbcmd/metadata.rs` (`writedb::metadata::write_metadata`, `writedb::cout`),
    `taxonomy.rs`, `list.rs` and `mod.rs`; `writedb::build_db::endl` (`WriteDbError::ClosedPipe`)
-   and `writedb::makeblastdb::CoutLog` for makeblastdb's log. Tests:
+   and `writedb::makeblastdb::CoutLog` for makeblastdb's log; `makembindex::work::run`
+   (`Failure::ClosedPipe`), `dbindex::factory::make_index` (`Stop::ClosedPipe`) and
+   `dbindex::format::SuperHeader::save` for makembindex. Tests:
    `tests/makeblastdb_closed_pipe.rs` (`a_closed_pipe_at_the_first_line_makes_no_file`,
    `an_old_database_of_the_name_is_left_as_it_was`, `logfile_builds_with_the_pipe_closed`,
-   `a_logfile_that_is_the_closed_pipe_makes_no_file`) and `writedb/tests.rs`
-   (`a_closed_pipe_ends_the_build_at_its_line`). Release-notes sentence: When the reader of `losat
-   blastdbcmd`'s, `losat dustmasker`'s, `losat segmasker`'s, `losat windowmasker`'s or `losat convert2blastmask`'s output, or of `losat makeblastdb`'s log, closes the pipe early, LOSAT stops at once with
+   `a_logfile_that_is_the_closed_pipe_makes_no_file`), `writedb/tests.rs`
+   (`a_closed_pipe_ends_the_build_at_its_line`), `tests/makembindex_closed_pipe.rs`
+   (`normal_index_builds_complete_with_a_closed_stdout_pipe`,
+   `show_filters_help_and_version_on_a_closed_pipe_end_silently`,
+   `stat_on_a_closed_pipe_stops_at_once`, `stat_pipe_closed_after_first_line_stops_at_once`,
+   `volume_and_idmap_named_fifos_stop_at_once`,
+   `volume_fifo_matches_ncbi_partial_bytes_and_stat_progress`), `makembindex/tests.rs`
+   (`show_filters_on_a_closed_pipe_ends_silently`) and `dbindex/format_tests.rs`
+   (`super_header_save_reports_closed_pipe_and_ignores_other_write_errors`). Release-notes sentence: When the reader of `losat
+   blastdbcmd`'s, `losat dustmasker`'s, `losat segmasker`'s, `losat windowmasker`'s or `losat convert2blastmask`'s output, of `losat makeblastdb`'s log, or of `losat makembindex`'s `-show_filters`, `-stat`, or index outputs that are named pipes closes the pipe early, LOSAT stops at once with
    exit status 0, where NCBI's programs are ended by SIGPIPE (141).
 11. **BLASTN's progress bar on a terminal** (version 1.22, 2026-11-20, recorded for the v0.2.0
    release on the Owner's choice of 2026-11-20; the Owner approved this text the same day, with no

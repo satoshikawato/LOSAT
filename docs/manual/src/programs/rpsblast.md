@@ -69,7 +69,7 @@ Every format is the bytes of NCBI BLAST+ 2.17.0 `rpsblast -num_threads 1`, at an
 
 ## What LOSAT refuses
 
-Not yet supported: `-html`; `rpsblast` runs on the command line only (not in the Rust library, `pylosat`, or LOSAT Web).
+Not yet supported: `rpsblast` runs on the command line only (not in the Rust library, `pylosat`, or LOSAT Web).
 
 Also refused:
 

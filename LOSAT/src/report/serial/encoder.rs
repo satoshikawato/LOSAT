@@ -257,9 +257,8 @@ impl NullElement {
             self.site(),
             format!("{}: {}", self.position, Self::MESSAGE),
         );
-        for frame in self.frames.iter().rev() {
-            exception.add_frame_info(frame);
-        }
+        let names: Vec<&str> = self.frames.iter().rev().map(String::as_str).collect();
+        exception.add_frame_infos(&names);
         exception
     }
 }

@@ -272,11 +272,7 @@ impl Volume {
         self.protein_length(oid).map(ncbi_protein_length)
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1818
-    /// Opens the protein sequence file and validates that protein `oid` (volume-relative) lies
-    /// within the file without reading its bytes: matches NCBI's `x_OpenSeqFile` and mapping
-    /// check before `x_GetSequence` returns a non-positive length.
-    pub fn check_protein_range(&self, oid: u32) -> Result<(), SeqDbError> {
+    fn checked_protein_range(&self, oid: u32) -> Result<(&DbFile, u64, u64), SeqDbError> {
         assert!(
             self.index.seqtype == SeqType::Protein,
             "protein range check of a nucleotide volume"
@@ -287,7 +283,41 @@ impl Volume {
             return Err(self.index.sequence_changed(oid, 2));
         }
         let file = self.seq_file()?;
-        file.x_check_range(start - 1, end)
+        file.x_check_range(start - 1, end)?;
+        Ok((file, start, end))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1818
+    /// Opens the protein sequence file and validates that protein `oid` (volume-relative) lies
+    /// within the file without reading its bytes: matches NCBI's `x_OpenSeqFile` and mapping
+    /// check before `x_GetSequence` returns a non-positive length.
+    pub fn check_protein_range(&self, oid: u32) -> Result<(), SeqDbError> {
+        self.checked_protein_range(oid).map(|_| ())
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1630-1635
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1804
+    /// Reads `len` NCBIstdaa residue bytes starting at residue `offset` of protein `oid`
+    /// (volume-relative) without reading the full sequence: validates the full protein range in
+    /// `.psq` first (matching `x_GetSequence`) and then reads only `[offset..offset + len]`.
+    pub fn read_protein_slice(
+        &self,
+        oid: u32,
+        offset: u64,
+        len: usize,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        let (file, start, end) = self.checked_protein_range(oid)?;
+        let raw_len = end - start - 1;
+        let slice_end = offset
+            .checked_add(len as u64)
+            .filter(|&end_off| end_off <= raw_len)
+            .ok_or_else(|| {
+                SeqDbError::Range(format!(
+                    "protein slice {offset}..+{len} exceeds sequence length {raw_len} in {}",
+                    self.base.display()
+                ))
+            })?;
+        file.read_range(start + offset, start + slice_end)
     }
 
     /// Bytes of the sequence file that a block of the sequences `first..end`
@@ -482,7 +512,8 @@ impl Volume {
     }
 
     /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): [`Self::read_protein_search_block`] with
-    /// the bytes in the worker's buffer `kept` when every sequence in the block is searchable.
+    /// the bytes in the worker's buffer `kept` when no sequence in the block has `>= 2^31`
+    /// residues.
     pub fn x_read_protein_search_block_into(
         &self,
         first: u32,
@@ -514,13 +545,14 @@ impl Volume {
         );
         self.check_range(first, end)?;
         let seq_offsets = self.index.sequence_offsets(first, end)?;
-        let all_positive = seq_offsets.windows(2).all(|pair| {
-            pair[1]
-                .checked_sub(pair[0])
-                .and_then(|bytes| bytes.checked_sub(1))
-                .is_some_and(|residues| ncbi_protein_length(residues) > 0)
-        });
-        if all_positive {
+        let all_non_negative = seq_offsets[0] >= 1
+            && seq_offsets.windows(2).all(|pair| {
+                pair[1]
+                    .checked_sub(pair[0])
+                    .and_then(|bytes| bytes.checked_sub(1))
+                    .is_some_and(|residues| ncbi_protein_length(residues) >= 0)
+            });
+        if all_non_negative {
             return self.read_block_with_offsets(
                 first,
                 first_ordinal,
@@ -530,8 +562,8 @@ impl Volume {
                 buffer,
             );
         }
-        // Cold path: at least one sequence has NCBI 32-bit length <= 0 (empty or >= 2^31).
-        // Validate offset monotonicity and the sequence file range without reading skipped bytes.
+        // Cold path: at least one sequence has NCBI 32-bit length < 0 (>= 2^31 residues) or
+        // non-monotonic offsets. Validate the sequence file range without reading skipped bytes.
         let changed = || self.index.sequence_changed(first, seq_offsets.len());
         let file = self.seq_file()?;
         let data_start = u64::from(seq_offsets[0])

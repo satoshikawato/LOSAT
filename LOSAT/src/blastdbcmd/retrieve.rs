@@ -267,7 +267,7 @@ impl<'a> Source<'a> {
         })
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1619-1635
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1607-1636
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:1153-1158
     /// The letters of `GetSequenceAsString` of `oid`, with `range` when one is given (`-outfmt %s`,
     /// `%h`): iupacaa with the byte 255 for a gap or stop, or the IUPAC letters of a nucleotide.
@@ -286,15 +286,18 @@ impl<'a> Source<'a> {
                             "Error: region beyond sequence range.".to_string(),
                         ));
                     }
-                    if i64::from(end) - i64::from(begin) < 1 {
-                        return Err(no_seq());
+                    // Open-ended `-range N-` on a `2^31 + k` protein clips `to` to `length - 1`,
+                    // so `end == base_length == -2^31 + k`; 32-bit `end - begin` wraps positive
+                    // for `N >= k + 2` and reads only the requested tail slice from `.psq`.
+                    let slice_len = end.wrapping_sub(begin);
+                    if slice_len >= 1 {
+                        let stdaa = self.db.read_protein_slice_at(
+                            at,
+                            u64::from(from),
+                            slice_len as usize,
+                        )?;
+                        return Ok(protein_string_letters(&stdaa));
                     }
-                    return Err(Stop::refused(format!(
-                        "range {}-{} on protein OID {oid} with signed length {base_length} \
-                         (NCBI reads before the sequence mapping)",
-                        u64::from(from) + 1,
-                        u64::from(to) + 1
-                    )));
                 }
                 return Err(no_seq());
             }

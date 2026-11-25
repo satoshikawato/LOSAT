@@ -2553,6 +2553,17 @@ impl SeqDb {
         self.volumes[at.volume].check_protein_range(at.vol_oid)
     }
 
+    /// Reads `len` NCBIstdaa bytes from residue `offset` of the protein at `at` without reading
+    /// the whole sequence (`Volume::read_protein_slice`).
+    pub fn read_protein_slice_at(
+        &self,
+        at: SeqLocation,
+        offset: u64,
+        len: usize,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        self.volumes[at.volume].read_protein_slice(at.vol_oid, offset, len)
+    }
+
     /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): `read_block` with the bytes in the
     /// buffer that a worker keeps from one block to the next, `kept` (`Volume::x_read_block_into`;
     /// a block of 1 MiB or more that `kept` does not hold, in a buffer of `utils::x_mapped::X_BYTES`);

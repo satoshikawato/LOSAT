@@ -13,6 +13,10 @@ use std::process::{Command, Output};
 const BIN: &str = env!("CARGO_BIN_EXE_losat");
 const TWO_POW_31: u64 = 1u64 << 31;
 const AA_PATTERN: &str = "ACDEFGHIKLMNPQRSTVWY";
+/// NCBIstdaa encoding of `AA_PATTERN` (`ACDEFGHIKLMNPQRSTVWY`).
+const AA_PATTERN_STDAA: [u8; 20] = [
+    1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22,
+];
 const COMBINED_DBS: [&str; 4] = ["dba", "dba0", "db_mix1", "db_mix2"];
 const SEARCH_PROGS: [(&str, &str); 2] = [("blastp", "q.fa"), ("blastx", "qn.fa")];
 const ERR_NO_SEQ: &str = "Error: [blastdbcmd] Error: could not get sequence or range.\n";
@@ -45,16 +49,31 @@ fn losat(dir: &Path, args: &[&str]) -> Output {
     let mut command = Command::new(BIN);
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
-        if text.starts_with("LOSAT_") || text.starts_with("NCBI_") || text.starts_with("BLAST") {
+        // Keep `LOSAT_BLASTX_WORKER_LOG` so `--all-features` (`blastx-worker-probe`) runs stay valid.
+        if (text.starts_with("LOSAT_") && text != "LOSAT_BLASTX_WORKER_LOG")
+            || text.starts_with("NCBI_")
+            || text.starts_with("BLAST")
+        {
             command.env_remove(&name);
         }
     }
-    command
+    let temp_worker_log = std::env::var_os("LOSAT_BLASTX_WORKER_LOG")
+        .is_none()
+        .then(|| {
+            let path = dir.join(".blastx_worker.log");
+            command.env("LOSAT_BLASTX_WORKER_LOG", &path);
+            path
+        });
+    let out = command
         .env("NCBI_CONFIG_PATH", dir)
         .current_dir(dir)
         .args(args)
         .output()
-        .unwrap()
+        .unwrap();
+    if let Some(path) = temp_worker_log {
+        let _ = fs::remove_file(path);
+    }
+    out
 }
 
 fn out_str(bytes: &[u8]) -> std::borrow::Cow<'_, str> {
@@ -77,23 +96,32 @@ fn assert_rc_err(out: &Output, rc: i32, err: &str, label: &str) {
     );
 }
 
-fn make_sparse_file(path: &Path, prefix: &[u8], total_len: u64, tail: &[u8]) {
+/// Writes a sparse file of `total_len` bytes with `prefix` at offset 0 and `tail` at the end.
+/// Returns `false` if Windows `fsutil sparse setflag` fails so callers skip rather than writing
+/// multi-gigabyte real files.
+fn make_sparse_file(path: &Path, prefix: &[u8], total_len: u64, tail: &[u8]) -> bool {
     {
         let mut f = File::create(path).unwrap();
         f.write_all(prefix).unwrap();
     }
     #[cfg(windows)]
     {
-        let _ = Command::new("fsutil")
+        let ok = Command::new("fsutil")
             .args(["sparse", "setflag"])
             .arg(path)
-            .output();
+            .output()
+            .is_ok_and(|out| out.status.success());
+        if !ok {
+            let _ = fs::remove_file(path);
+            return false;
+        }
     }
     let mut f = OpenOptions::new().write(true).open(path).unwrap();
     f.seek(SeekFrom::Start(total_len - tail.len() as u64))
         .unwrap();
     f.write_all(tail).unwrap();
     assert_eq!(fs::metadata(path).unwrap().len(), total_len);
+    true
 }
 
 fn make_prot_db(dir: &Path, name: &str, fasta: &str) {
@@ -131,8 +159,8 @@ fn load_pin_and_psq(
 }
 
 /// Patches a single-sequence 300-residue protein volume to `new_len` residues (`0` or `>= 2^31`)
-/// using a sparse `.psq` file.
-fn patch_single_prot_db(dir: &Path, name: &str, new_len: u64) {
+/// using a sparse `.psq` file, placing `tail_residues` immediately before the trailing sentinel.
+fn patch_single_prot_db(dir: &Path, name: &str, new_len: u64, tail_residues: &[u8]) -> bool {
     let (pin_path, psq_path, mut pin, t, num, total) = load_pin_and_psq(dir, name, 16);
     let s0 = u32::from_be_bytes(pin[t + 8..t + 12].try_into().unwrap());
     let s1 = u32::from_be_bytes(pin[t + 12..t + 16].try_into().unwrap());
@@ -142,17 +170,22 @@ fn patch_single_prot_db(dir: &Path, name: &str, new_len: u64) {
     if new_len == 0 {
         fs::write(&psq_path, [0u8, 0u8]).unwrap();
     } else {
-        make_sparse_file(&psq_path, &psq[..301], new_len + 2, &[0u8]);
+        let mut tail = tail_residues.to_vec();
+        tail.push(0u8);
+        if !make_sparse_file(&psq_path, &psq[..301], new_len + 2, &tail) {
+            return false;
+        }
     }
     pin[t - 12..t - 4].copy_from_slice(&(new_len as i64).to_le_bytes());
     pin[t - 4..t].copy_from_slice(&(new_len as u32).to_be_bytes());
     pin[t + 12..t + 16].copy_from_slice(&((new_len + 2) as u32).to_be_bytes());
     fs::write(&pin_path, pin).unwrap();
+    true
 }
 
 /// Patches a two-sequence protein volume (`[big(300), small(400)]` or `[small(400), big(300)]`)
 /// so the 300-residue entry has `2^31` residues in a sparse `.psq`.
-fn patch_mixed_prot_db(dir: &Path, name: &str, big_first: bool) {
+fn patch_mixed_prot_db(dir: &Path, name: &str, big_first: bool) -> bool {
     let (pin_path, psq_path, mut pin, t, num, total) = load_pin_and_psq(dir, name, 24);
     let s0 = u32::from_be_bytes(pin[t + 12..t + 16].try_into().unwrap());
     let s1 = u32::from_be_bytes(pin[t + 16..t + 20].try_into().unwrap());
@@ -167,19 +200,24 @@ fn patch_mixed_prot_db(dir: &Path, name: &str, big_first: bool) {
         tail.extend_from_slice(&psq[s1 as usize..s2 as usize]);
         let new_s1 = s0 as u64 + TWO_POW_31 + 1;
         let end = new_s1 + (s2 - s1) as u64;
-        make_sparse_file(&psq_path, &psq[..s1 as usize - 1], end, &tail);
+        if !make_sparse_file(&psq_path, &psq[..s1 as usize - 1], end, &tail) {
+            return false;
+        }
         pin[t + 16..t + 20].copy_from_slice(&(new_s1 as u32).to_be_bytes());
         end
     } else {
         assert_eq!(s2 - s1 - 1, 300);
         let end = s1 as u64 + TWO_POW_31 + 1;
-        make_sparse_file(&psq_path, &psq[..s2 as usize - 1], end, &[0u8]);
+        if !make_sparse_file(&psq_path, &psq[..s2 as usize - 1], end, &[0u8]) {
+            return false;
+        }
         end
     };
     pin[t + 20..t + 24].copy_from_slice(&(new_s2 as u32).to_be_bytes());
     pin[t - 12..t - 4].copy_from_slice(&new_total.to_le_bytes());
     pin[t - 4..t].copy_from_slice(&(TWO_POW_31 as u32).to_be_bytes());
     fs::write(&pin_path, pin).unwrap();
+    true
 }
 
 fn write_oidlist(path: &Path, num_oids: u32) {
@@ -231,7 +269,7 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn build(tag: &str) -> Self {
+    fn build(tag: &str) -> Option<Self> {
         let dir = TempDir::new(tag);
         let big = AA_PATTERN.repeat(15);
         let small = format!(
@@ -252,32 +290,45 @@ impl Fixture {
         .unwrap();
 
         make_prot_db(&dir.0, "dbh", &big_fa);
-        patch_single_prot_db(&dir.0, "dbh", TWO_POW_31);
+        if !patch_single_prot_db(&dir.0, "dbh", TWO_POW_31, &AA_PATTERN_STDAA) {
+            return None;
+        }
+
+        make_prot_db(&dir.0, "dbg", &big_fa);
+        if !patch_single_prot_db(&dir.0, "dbg", TWO_POW_31 + 10, &AA_PATTERN_STDAA) {
+            return None;
+        }
 
         make_prot_db(&dir.0, "db0", &big_fa);
-        patch_single_prot_db(&dir.0, "db0", 0);
+        assert!(patch_single_prot_db(&dir.0, "db0", 0, &[]));
 
         make_prot_db(&dir.0, "dbs", &small_fa);
 
         make_prot_db(&dir.0, "dbz", &big_fa);
-        patch_single_prot_db(&dir.0, "dbz", TWO_POW_31);
+        if !patch_single_prot_db(&dir.0, "dbz", TWO_POW_31, &[]) {
+            return None;
+        }
 
         make_prot_db(&dir.0, "dbz0", &big_fa);
-        patch_single_prot_db(&dir.0, "dbz0", 0);
+        assert!(patch_single_prot_db(&dir.0, "dbz0", 0, &[]));
 
         make_prot_db(
             &dir.0,
             "db_mix1",
             &format!(">big\n{big}\n>small\n{small}\n"),
         );
-        patch_mixed_prot_db(&dir.0, "db_mix1", true);
+        if !patch_mixed_prot_db(&dir.0, "db_mix1", true) {
+            return None;
+        }
 
         make_prot_db(
             &dir.0,
             "db_mix2",
             &format!(">small\n{small}\n>big\n{big}\n"),
         );
-        patch_mixed_prot_db(&dir.0, "db_mix2", false);
+        if !patch_mixed_prot_db(&dir.0, "db_mix2", false) {
+            return None;
+        }
 
         fs::write(dir.0.join("dba.pal"), "TITLE dba\nDBLIST dbh dbs\n").unwrap();
         fs::write(dir.0.join("dba0.pal"), "TITLE dba0\nDBLIST db0 dbs\n").unwrap();
@@ -306,7 +357,7 @@ impl Fixture {
         )
         .unwrap();
 
-        Self { dir }
+        Some(Self { dir })
     }
 
     fn run(&self, args: &[&str]) -> Output {
@@ -316,11 +367,14 @@ impl Fixture {
 
 #[test]
 fn blastdbcmd_and_segmasker_match_ncbi_32bit_protein_lengths() {
-    let fx = Fixture::build("cmd-seg");
+    let Some(fx) = Fixture::build("cmd-seg") else {
+        return;
+    };
 
     // -info and -info -exact_length
     for (db, total, longest) in [
         ("dbh", "2,147,483,648", "0"),
+        ("dbg", "2,147,483,658", "0"),
         ("dba", "2,147,484,048", "400"),
         ("db0", "0", "0"),
         ("dba0", "400", "400"),
@@ -349,6 +403,7 @@ fn blastdbcmd_and_segmasker_match_ncbi_32bit_protein_lengths() {
     // %o %l
     for (db, expected) in [
         ("dbh", "0 -2147483648\n"),
+        ("dbg", "0 -2147483638\n"),
         ("db0", "0 0\n"),
         ("dba", "0 -2147483648\n1 400\n"),
         ("dba0", "0 0\n1 400\n"),
@@ -398,12 +453,27 @@ fn blastdbcmd_and_segmasker_match_ncbi_32bit_protein_lengths() {
     for (db, fmt, range, expected_err) in [
         ("dbh", "%s", None, ERR_NO_SEQ),
         ("dbh", "%o %h", None, ERR_NO_SEQ),
+        ("dbg", "%s", None, ERR_NO_SEQ),
         ("db0", "%s", None, ERR_NO_SEQ),
         ("db0", "%o %h", None, ERR_NO_SEQ),
         ("dba", "%s", None, ERR_NO_SEQ),
+        ("dbh", "%s", Some("0-"), ERR_NO_SEQ),
         ("dbh", "%s", Some("1-10"), ERR_BEYOND),
         ("dbh", "%s", Some("1-1"), ERR_BEYOND),
         ("dbh", "%s", Some("1-"), ERR_NO_SEQ),
+        ("dbg", "%s", Some("0-"), ERR_NO_SEQ),
+        ("dbg", "%s", Some("1-10"), ERR_BEYOND),
+        ("dbg", "%s", Some("2147483646-2147483647"), ERR_BEYOND),
+        ("dbg", "%s", Some("1-"), ERR_NO_SEQ),
+        ("dbg", "%s", Some("5-"), ERR_NO_SEQ),
+        ("dbg", "%s", Some("11-"), ERR_NO_SEQ),
+        (
+            "dbg",
+            "%s",
+            Some("2147483649-2147483650"),
+            "Error: [blastdbcmd] Cannot convert string '2147483649' to int, overflow\n",
+        ),
+        ("db0", "%s", Some("0-"), ERR_NO_SEQ),
         ("db0", "%s", Some("1-10"), ERR_NO_SEQ),
         ("db0", "%s", Some("1-"), ERR_NO_SEQ),
         ("db0", "%s", Some("10-20"), ERR_NO_SEQ),
@@ -431,6 +501,38 @@ fn blastdbcmd_and_segmasker_match_ncbi_32bit_protein_lengths() {
             ),
             (Some(1), 0, expected_err),
             "{args:?}"
+        );
+    }
+
+    // Open-ended `-range N-` on `2^31 + k` proteins with `N >= k + 2` wraps `end - begin`
+    // positive in 32-bit `int` and prints the exact tail residues matching NCBI 2.17.0.
+    for (db, range, expected_seq) in [
+        ("dbg", "2147483647-", "KLMNPQRSTVWY\n"),
+        ("dbg", "2147483640-", "CDEFGHIKLMNPQRSTVWY\n"),
+        ("dbh", "2147483647-", "WY\n"),
+        ("dbh", "2147483646-", "VWY\n"),
+    ] {
+        let out = fx.run(&[
+            "blastdbcmd",
+            "-db",
+            db,
+            "-dbtype",
+            "prot",
+            "-entry",
+            "all",
+            "-outfmt",
+            "%s",
+            "-range",
+            range,
+        ]);
+        assert_eq!(
+            (
+                out.status.code(),
+                out_str(&out.stdout).as_ref(),
+                out_str(&out.stderr).as_ref()
+            ),
+            (Some(0), expected_seq, ""),
+            "{db} -range {range}"
         );
     }
 
@@ -481,7 +583,9 @@ fn blastdbcmd_and_segmasker_match_ncbi_32bit_protein_lengths() {
 
 #[test]
 fn blastp_blastx_psiblast_skip_non_positive_32bit_proteins() {
-    let fx = Fixture::build("search");
+    let Some(fx) = Fixture::build("search") else {
+        return;
+    };
 
     // Empty / 2^31-only DBs produce no hits with rc 0 for gapped searches
     for db in ["dbh", "db0", "dbh_ol"] {
@@ -677,7 +781,9 @@ fn blastp_blastx_psiblast_skip_non_positive_32bit_proteins() {
 
 #[test]
 fn makeblastdb_raw_copy_matches_ncbi_errors_and_partial_close() {
-    let fx = Fixture::build("remk");
+    let Some(fx) = Fixture::build("remk") else {
+        return;
+    };
 
     // Failing at OID 0 creates no output DB files
     for (db, rc, err) in [

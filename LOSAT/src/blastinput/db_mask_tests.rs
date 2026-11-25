@@ -940,7 +940,7 @@ fn protein_shapes_of_the_hard_masks() {
 /// `DiagonalWalk::start`), `WordPastEnd` where a short chunk's one word read past the sentinel can
 /// change a result; `PartsOutOfOrder` where a chunk that can hold
 /// alignments starts before the end of an earlier one, `Inverted` for a mask that ends before it
-/// starts; in the other programs `Unsorted` for every overlap, as before.
+/// starts; in BLASTN `Unsorted` for every overlap, as before.
 #[test]
 fn protein_shapes_of_overlapping_masks() {
     let two_hit = HardScan::Protein {

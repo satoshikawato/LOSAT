@@ -1083,7 +1083,7 @@ describe('Coordinator', () => {
   });
 });
 
-// --- saved counts held by the runs that read them (PR #1597 review, finding 3) ----------------------
+// --- saved counts held by the runs that read them -------------------------------------------------
 
 describe('the saved counts of a taxonomy ID, held by the runs that read them', () => {
   const TAXID = 562;

@@ -301,12 +301,14 @@ WF-2 で確定した中身と持ち方は §9（表に SHA-256 は持たない�
      `Not downloaded: this tab is saving / downloading the counts for <taxid>. Download again when it has ended.`、
      別タブが書いているときは保存か取得か区別できないため `another tab is saving or downloading the counts for <taxid>.`）。
      このタブが保存している間、BLASTN の Taxonomy ID 行は「Saving the counts made by run `<r>`…」を出し（Download・Delete・Cancel は出さない）、
-     同じ ID への Download は NCBI へ問い合わせる前にその場で断る。差し替えが始まると書いているタブ自身の `-ustat` / `-in` 選択一覧からも
+     同じ ID への Download は NCBI へ問い合わせる前にその場で断る。一方、Cancel や別 ID への切替えで止めた取得がまだ終了処理を完了していない間に
+     同じ ID の Download / Continue を押した場合は断らず、前の取得が ID を放すまで「Opening the saved counts…」を表示して待ち、その後に取得を始める
+     （待っている間に Cancel された場合は要求を出さずに終える）。差し替えが始まると書いているタブ自身の `-ustat` / `-in` 選択一覧からも
      置き換え中のコピーを外し、完了後に新しいコピーを並べる。
      途中で途切れた作成コピー（`complete: false`）は再開せず、次の読み取り時に削除する。
    - 保存済み counts を読む run（`-window_masker_taxid` の検索、保存済みコピーを `-ustat`・`-in` に選んだ WindowMasker の run）は、
-     待ち行列に入る時から終わるまで（完了・失敗・待ち行列での Cancel・実行中の Cancel）その ID の Web Lock を shared で持つ
-     （PR #1597 の review、指摘 3）。差し替え・削除・取得は同じ lock を exclusive・`ifAvailable` で取り、取れなければその場で
+     待ち行列に入る時から終わるまで（完了・失敗・待ち行列での Cancel・実行中の Cancel）その ID の Web Lock を shared で持ち、
+     その間に差し替え・削除・取得がコピーを変えないようにする。差し替え・削除・取得は同じ lock を exclusive・`ifAvailable` で取り、取れなければその場で
      「Not replaced: …」・「Not removed: …」・「Not downloaded: …」（`a run that reads the counts for <taxid> was queued or running.`
      … `when it has ended.`）と操作ごとの文で断る（削除は書き込み中の取得・保存は従来どおり待つ）。
      待ち行列に入れる時に選んだファイルの最後の 1 byte を読み、選んだ後に差し替え・削除されたコピーは入れずに断る。

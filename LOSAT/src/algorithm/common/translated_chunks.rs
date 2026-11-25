@@ -5,6 +5,20 @@
 //! without `tblastx` depending on `tblastn`.
 
 use anyhow::{bail, Result};
+use std::borrow::Cow;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:804-805
+/// The six translated subject reading frames in NCBI's search order (+1, +2, +3, -1, -2, -3).
+pub(crate) const NCBI_FRAMES: [i8; 6] = [1, 2, 3, -1, -2, -3];
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1216-1218
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1299-1308
+/// The number of residues of frame `frame` (+1..+3, -1..-3) of a nucleotide sequence of `len`
+/// bases, or `None` where the sequence has no codon in that frame (or `frame` is invalid).
+pub(crate) fn frame_length(len: usize, frame: i8) -> Option<usize> {
+    let i = usize::from(frame.unsigned_abs()).checked_sub(1)?;
+    (i < 3 && i + 3 <= len).then(|| (len - i) / 3)
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-264:
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:54:
@@ -335,6 +349,65 @@ pub(crate) fn translated_db_mask_chunks(
     }
     split.end();
     Ok(calls)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310,478-483,804-830,
+// 1318-1331,1368-1369,1429
+// A subject shorter than three times the word size plus two bases is skipped without entering the
+// frame loop (no word-finder exits). For any other subject, a frame of at most `MAX_DBSEQ_LEN`
+// residues is not chunked (`s_GetNextSubjectChunk` takes the unchunked branch and never returns
+// `SUBJECT_SPLIT_NO_RANGE`), so it always has one exit of its full frame length and no negative
+// scan lead. Longer frames are chunked by `translated_db_mask_chunks` (which omits
+// `SUBJECT_SPLIT_NO_RANGE` chunks) and a chunk whose scan range begins before it has `scan_lead`
+// above zero.
+/// The chunk lengths that NCBI's word finder exits on across the six frames of a `-db_soft_mask`
+/// translated subject of `length` bases in a search of word size `word` (pushed onto `exits`,
+/// cleared first), and whether any chunk's scan reads letters before the chunk (`scan_lead` above
+/// zero).
+///
+/// For a subject shorter than `3 * word + 2` bases, `exits` is left empty and `false` is returned
+/// without calling `nucleotide_ranges`. For a subject whose frame +1 has at most `MAX_DBSEQ_LEN`
+/// (5,000,000) residues, `exits` receives the six frame lengths and `false` is returned without
+/// calling `nucleotide_ranges`. Otherwise `nucleotide_ranges` supplies the complement ranges of
+/// the subject's stored masks (as `XDbStream::mask_ranges`), and each frame's chunks come from
+/// [`translated_db_mask_chunks`].
+pub(crate) fn translated_soft_mask_exits<'a, E>(
+    length: usize,
+    word: usize,
+    exits: &mut Vec<usize>,
+    split: &mut crate::core::subject_split::HardSplitState,
+    nucleotide_ranges: impl FnOnce() -> std::result::Result<Cow<'a, [(i32, i32)]>, E>,
+) -> std::result::Result<bool, E>
+where
+    E: From<anyhow::Error>,
+{
+    exits.clear();
+    let min_length = word.saturating_mul(3).saturating_add(2);
+    if length < min_length {
+        return Ok(false);
+    }
+    let neg_first = length / 3;
+    if neg_first <= crate::core::subject_split::MAX_DBSEQ_LEN {
+        for frame in NCBI_FRAMES {
+            if let Some(fl) = frame_length(length, frame) {
+                exits.push(fl);
+            }
+        }
+        return Ok(false);
+    }
+    let ranges = nucleotide_ranges()?;
+    let mut lead = false;
+    for frame in NCBI_FRAMES {
+        let Some(fl) = frame_length(length, frame) else {
+            continue;
+        };
+        let calls = translated_db_mask_chunks(&ranges, false, frame, fl, neg_first, split)?;
+        for (chunk, scan) in calls {
+            exits.push(chunk.length);
+            lead |= scan_lead(&scan) > 0;
+        }
+    }
+    Ok(lead)
 }
 
 #[cfg(test)]

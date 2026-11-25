@@ -304,6 +304,13 @@ impl DiagLog {
         std::mem::take(&mut self.saved)
     }
 
+    /// `messages`, taken by an archive whose write failed, saved again before the later ones
+    /// (the exception skips the archive's `ResetMessages`).
+    pub fn restore(&mut self, mut messages: Vec<Message>) {
+        messages.append(&mut self.saved);
+        self.saved = messages;
+    }
+
     /// Whether no message is waiting for an archive.
     pub fn is_empty(&self) -> bool {
         self.saved.is_empty()

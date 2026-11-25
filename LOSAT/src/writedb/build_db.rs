@@ -21,6 +21,7 @@ use super::taxid_set::{seq_id_key, TaxIdSet};
 use super::time::LocalTime;
 use super::writer::{DbVersion, Indices, WriteDb};
 use super::WriteDbError;
+use crate::ncbi_app::files::ends_like_sigpipe;
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::report::serial::asn_input::Utf8TagOnce;
 use crate::seqdb::column::MASK_DATA_TITLE;
@@ -30,13 +31,24 @@ use crate::seqid::rank::{best_rank_score, find_best};
 use crate::seqid::{DeflineSet, ParsedSeqId};
 use crate::utils::os_bytes::path_of_bytes;
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1167-1177
 /// The end of a line of the log, as every line of NCBI's log ends: the new line, then a flush.
 /// The log on standard output (`super::makeblastdb::CoutLog`) is NCBI's `cout`, whose flush
 /// writes what its buffer holds. Its buffer takes the new line, an insertion of one byte, as it
 /// takes `put`'s (`cli::NcbiBuffer`). The other writers of the log (`-logfile`'s file, the
 /// library's) are flushed at each line too.
-pub(crate) fn endl(log: &mut dyn Write) {
-    let _ = log.write_all(b"\n").and_then(|()| log.flush());
+///
+/// A write of the line that found the pipe closed, where SIGPIPE ends NCBI's process
+/// (`ncbi_app::files::ends_like_sigpipe`; NCBI 2.17.0 exits with status 141 at the line's flush),
+/// ends makeblastdb at once: [`WriteDbError::ClosedPipe`] (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+/// exception 10). Each line is made of values computed before its first insertion, so the end of
+/// the line is where NCBI's process ends. Any other failure of the log is not looked at, as
+/// makeblastdb does not read the stream's state.
+pub(crate) fn endl(log: &mut dyn Write) -> Result<(), WriteDbError> {
+    match log.write_all(b"\n").and_then(|()| log.flush()) {
+        Err(error) if ends_like_sigpipe(&error) => Err(WriteDbError::ClosedPipe),
+        _ => Ok(()),
+    }
 }
 
 /// `CBuildDatabase`: a FASTA input (`add_fasta`) or the sequences of existing databases
@@ -545,25 +557,25 @@ impl<'a> BuildDatabase<'a> {
             "\n\nBuilding a new DB, current time: {}",
             now.log_time()
         );
-        endl(log);
+        endl(log)?;
         let _ = log
             .write_all(b"New DB name:   ")
             .and_then(|()| log.write_all(&output_dbname));
-        endl(log);
+        endl(log)?;
         // The label and the title are two insertions, then the line's end, as NCBI writes them.
         let _ = log
             .write_all(b"New DB title:  ")
             .and_then(|()| log.write_all(title));
-        endl(log);
+        endl(log)?;
         let _ = write!(log, "Sequence type: {mol_type}");
-        endl(log);
+        endl(log)?;
         if delete_blast_db(&output_dbname, is_protein)? {
             let _ = write!(log, "Deleted existing {mol_type} BLAST database named ")
                 .and_then(|()| log.write_all(&output_dbname));
-            endl(log);
+            endl(log)?;
         }
         let _ = write!(log, "Keep MBits: T");
-        endl(log);
+        endl(log)?;
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1119-1132
         // The limit of 1000*1000*1000 that the constructor sets is replaced
         // by makeblastdb before a sequence is added.
@@ -745,7 +757,7 @@ impl<'a> BuildDatabase<'a> {
                         self.log,
                         "Ignoring gi '{gi}' as it has value larger then 4294967295"
                     );
-                    endl(self.log);
+                    endl(self.log)?;
                     continue;
                 }
                 deflines::localize_other_molecule(&mut parsed.ids, self.is_protein, &mut *warn);
@@ -822,7 +834,7 @@ impl<'a> BuildDatabase<'a> {
                     self.log,
                     "Ignoring sequence '{bioseq_id}' as it has no sequence data"
                 );
-                endl(self.log);
+                endl(self.log)?;
                 continue;
             }
             found = true;
@@ -834,7 +846,7 @@ impl<'a> BuildDatabase<'a> {
                 "Adding sequences from FASTA; added {count} sequences in {} seconds.",
                 format_seconds(start.elapsed().as_secs_f64())
             );
-            endl(self.log);
+            endl(self.log)?;
         }
         Ok(found)
     }
@@ -878,7 +890,9 @@ impl<'a> BuildDatabase<'a> {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1403-1420
     /// `AddFasta`: adds the sequences of one FASTA input. An error ends the
-    /// build and removes its files.
+    /// build and removes its files. A closed pipe at a line of the log (`endl`) ends the build
+    /// at once, without `EndBuild`, as SIGPIPE ends NCBI's process inside `AddSequences` or
+    /// inside the `EndBuild` of its handler, before the files are removed.
     pub fn add_fasta<R: Read>(
         &mut self,
         fasta_file: R,
@@ -891,21 +905,25 @@ impl<'a> BuildDatabase<'a> {
             Ok(false) => Err(WriteDbError::Creation("No sequences added".to_string())),
             Err(error) => Err(error),
         };
-        if result.is_err() {
-            // The error of the build is the one already in hand.
-            let _ = self.end_build(true, warn);
+        match result {
+            Err(error) if !error.is_closed_pipe() => match self.end_build(true, warn) {
+                Err(stop) if stop.is_closed_pipe() => Err(stop),
+                // The error of the build is the one already in hand.
+                _ => Err(error),
+            },
+            result => result,
         }
-        result
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1278-1286
     /// `SetLeafTaxIds` of `taxids` with the second argument true: the leaf taxids of a copied
     /// database's definition lines (`raw_source::scan_leaf_tax_ids`), which the copy adds to a
-    /// line's own.
-    pub(crate) fn set_leaf_tax_ids(&mut self, taxids: LeafTaxIds) {
+    /// line's own. A closed pipe at the log line ends the build there (`endl`).
+    pub(crate) fn set_leaf_tax_ids(&mut self, taxids: LeafTaxIds) -> Result<(), WriteDbError> {
         let _ = write!(self.log, "Keep Leaf Taxids: T");
-        endl(self.log);
+        endl(self.log)?;
         self.leaf_tax_ids = taxids;
+        Ok(())
     }
 
     /// The run's flag of the UTF8String warning, which posts once in a run.
@@ -983,6 +1001,16 @@ impl<'a> BuildDatabase<'a> {
 
         let mut count = 0u64;
         while let Some(raw) = source.next()? {
+            if raw.negative_length {
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:969-988
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:139-149
+                // A negative 32-bit protein length produces a non-empty `CTempString`, so
+                // `x_EditHeaders` runs and `CWriteDB_Impl::AddSequence` publishes the prior
+                // sequence before `std::string::assign` throws `basic_string::_M_create`.
+                let mut headers = raw.deflines;
+                self.edit_raw_headers(&mut headers);
+                return Err(self.output_db.add_raw_negative_length().into());
+            }
             if raw.sequence.is_empty() {
                 return Err(raw_data_error(970, "Error in raw data: no sequence").into());
             }
@@ -1059,7 +1087,7 @@ impl<'a> BuildDatabase<'a> {
                 "Adding sequences from raw db source; added {count} sequences in {} seconds.",
                 format_seconds(start.elapsed().as_secs_f64())
             );
-            endl(self.log);
+            endl(self.log)?;
         }
         Ok(())
     }
@@ -1202,19 +1230,31 @@ impl<'a> BuildDatabase<'a> {
         let erase = erase || close_error.is_some() || refusal.is_some();
         let vols = self.output_db.list_volumes();
         let files = self.output_db.list_files();
-        endl(self.log);
-        let mut success = true;
-        if vols.is_empty() {
-            let _ = write!(self.log, "No volumes were created.");
-            endl(self.log);
-            success = false;
-        } else if erase {
-            // `Remove` of a `CFile` is `CDirEntry::Remove` with `eRecursive`.
+        // `Remove` of a `CFile` is `CDirEntry::Remove` with `eRecursive`.
+        let remove_files = || {
             for file in &files {
                 let _ = dir_entry::remove(&path_of_bytes(file));
             }
+        };
+        // A closed pipe at this line ends the build before the removals (`endl`), where SIGPIPE
+        // ends NCBI's process. A build that LOSAT refuses (`address_order`) loses its files all
+        // the same: a closed database whose masks are in LOSAT's order, where NCBI's is that of
+        // memory addresses, is never left.
+        if let Err(stop) = endl(self.log) {
+            if refusal.is_some() {
+                remove_files();
+            }
+            return Err(stop);
         }
-        endl(self.log);
+        let mut success = true;
+        if vols.is_empty() {
+            let _ = write!(self.log, "No volumes were created.");
+            endl(self.log)?;
+            success = false;
+        } else if erase {
+            remove_files();
+        }
+        endl(self.log)?;
         if let Some(refusal) = refusal {
             return Err(refusal);
         }

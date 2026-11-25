@@ -779,14 +779,8 @@ fn strategy_target_reads_logfile_against_runs_files() {
         name: std::ffi::OsStr::new("out/x.asn"),
     }];
     let without_out = RunFiles::Receiver(Arc::new(WithRegistered(Vec::new())));
-    let file = create_strategy_file_in(
-        &without_out,
-        Path::new("out/x.asn"),
-        None,
-        "TBLASTX",
-        &others,
-    )
-    .unwrap();
+    let file =
+        create_strategy_file_in(&without_out, Path::new("out/x.asn"), "TBLASTX", &others).unwrap();
     assert!(
         file.refusal.is_none(),
         "without folder `out`, -logfile out/x.asn is unopened so strategy is a file: {:?}",
@@ -796,8 +790,7 @@ fn strategy_target_reads_logfile_against_runs_files() {
 
     let with_out = RunFiles::Receiver(Arc::new(WithRegistered(vec![b"out/keep".to_vec()])));
     let refused =
-        create_strategy_file_in(&with_out, Path::new("out/x.asn"), None, "TBLASTX", &others)
-            .unwrap();
+        create_strategy_file_in(&with_out, Path::new("out/x.asn"), "TBLASTX", &others).unwrap();
     assert_eq!(
         refused.refusal.as_deref(),
         Some(

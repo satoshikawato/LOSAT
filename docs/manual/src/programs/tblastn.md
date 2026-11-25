@@ -51,7 +51,7 @@ This matters when your subject FASTA uses a non-standard code, for example a mit
   - Values that are negative, infinite (`PLUS-INFINITY`) or not a number (`NOT-A-NUMBER`) are used as NCBI BLAST+ uses them (E-values `0.0`, bit scores `inf` or `-1.0`). A query whose Seq-inst omits `length` stops with NCBI BLAST+'s query set-up error (`Warning: Cannot get sequence length `, exit status 3). A query whose Seq-inst `length` is one less than its letters is searched as its first `length` letters. A PSSM of frequency ratios only whose `length` is one less than its letters or more stops with NCBI BLAST+'s PSSM engine error (exit status 3). With a gapped Lambda so small that NCBI BLAST+'s search for the hit-saving cutoff passes 32-bit integers (such as 1e-9), or a gapped Lambda below 0, the report has no hits (see [Differences from NCBI BLAST+](../differences.md#-in_pssm-with-a-very-small-or-negative-gapped-lambda)).
 - As in NCBI, `-comp_based_stats` has no effect, alignments are linked only with `-sum_stats true`, and `-task tblastn-fast` changes nothing. The word size is 2 to 4 and the matrix is one of the standard ones.
 - The subjects are translated with genetic code 1 whatever `-db_gencode` says. LOSAT still checks the value.
-- The report formats are 0 to 10 and 20. Formats 12 to 16 and 18 are not yet supported.
+- Every report format but 11 is written. A PSSM whose query has the molecule `other` is searched as a protein, as in NCBI; NCBI's alignment display cannot read its letters, so LOSAT writes what NCBI writes: the line `Sequence with id ... no longer exists in database...alignment skipped` for each alignment of `-outfmt 0`, empty query-anchored sections, BLAST XML that ends at the query's first alignment with NCBI's error, XML2 and JSON documents without the query's report and with NCBI's error (outfmt 15 and 16; outfmt 13 and 14 leave their files empty and exit with status 255), and tabular reports that stop at the first row whose fields read the query's letters (the default fields among them) with NCBI's exception and exit status 255.
 - Also refused with `-in_pssm`:
   - `-ungapped`;
   - `-use_sw_tback` on a search that finds an alignment, where NCBI fails, crashes, never finishes or writes rows that change from one run to the next (a search that finds nothing runs);
@@ -107,7 +107,7 @@ For every option: `losat tblastn -help`.
 | 18 | Organism report |
 | 20 | Comma-separated values with header lines |
 
-With `-in_pssm`, 0 to 10 and 20 work.
+With `-in_pssm`, every format but 11 works.
 
 Formats 6, 7, 10 and 20 write twelve fields by default: `qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore`. A custom list changes them, for example `-outfmt "6 qseqid sseqid pident sframe evalue"`; `delim=` sets the separator. [Output formats](../output-formats.md) describes each format.
 

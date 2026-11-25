@@ -305,6 +305,34 @@ pub(crate) fn protein_row_segments(hit: &crate::common::Hit, segments: &mut Segm
     collect_seq_align_data(&record, 0, 0, false, false, segments);
 }
 
+/// The Dense-seg segment of a BLASTN `-db` HSP whose Seq-align query start `query_start` lies
+/// below 0 in record coordinates (`CreateDensegFromDendiag`, align_format_util.cpp:1149-1208):
+/// one segment with the negative query start (which `CAlnMix` treats as a gap on row 0) and the
+/// positive subject start.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1149-1208
+pub(crate) fn nucleotide_left_of_record_segments(
+    hit: &crate::common::Hit,
+    (query_start, query_len): (i32, u32),
+    segments: &mut Segments,
+) -> crate::report::query_anchored::HspStrands {
+    let minus = hit.query_frame < 0;
+    let s_low = hit.s_start.min(hit.s_end) as i32 - 1;
+    segments.starts.clear();
+    segments.lens.clear();
+    segments.strands.clear();
+    segments.starts.extend([query_start, s_low]);
+    segments.lens.push(query_len as i32);
+    segments.strands.extend([
+        if minus { Strand::Minus } else { Strand::Plus },
+        Strand::Plus,
+    ]);
+    crate::report::query_anchored::HspStrands {
+        query_minus: minus,
+        ..Default::default()
+    }
+}
+
 /// The Dense-seg segments of a BLASTN hit whose coordinates are in its records (`Hit::q_start` to
 /// `q_end` on the query's plus strand; `s_start` above `s_end` for a minus-strand HSP), and whether
 /// its rows' strands differ (a minus-strand HSP: the query row on the minus strand, the subject's
@@ -1613,9 +1641,23 @@ fn write_seq_align_dendiag<E: Encoder>(
         enc.member("starts", 2);
         enc.begin_list(false);
         enc.element();
-        enc.int(q_start + query.offset);
+        // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:51-59
+        // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_diag.cpp:72-90
+        // `Dense-diag.starts` stores unsigned `TSeqPos` (`u32`): a start below 0 after
+        // `OffsetRow` wraps modulo 2^32.
+        let q_pos = q_start.wrapping_add(query.offset);
+        if q_pos < 0 {
+            enc.big_int(i64::from(q_pos as u32));
+        } else {
+            enc.int(q_pos);
+        }
         enc.element();
-        enc.int(s_start + subject.offset);
+        let s_pos = s_start.wrapping_add(subject.offset);
+        if s_pos < 0 {
+            enc.big_int(i64::from(s_pos as u32));
+        } else {
+            enc.int(s_pos);
+        }
         enc.end_list();
         enc.end_member();
         enc.member("len", 3);

@@ -1517,19 +1517,22 @@ fn run_local_search_with_redo<R: MatchRedo>(
                         "TBLASTN",
                     )
                 })
-                .collect::<Result<_, _>>()?,
+                .collect::<Result<_, _>>()
+                .map_err(search_space_overflow)?,
         ),
         _ => None,
     };
     let preliminary_parameters = match (&option_spaces, profile.subject_set.database) {
-        (Some(spaces), Some(database)) if database.gumbel_db_length <= 0 => recipe.parameters(
-            stats_nt,
-            Some(spaces),
-            LocalParameterCall::Initial {
-                min_subject_length: min_subject_length.unwrap_or(0),
-                composition_based_stats: compo_adjust_mode.ncbi_value(),
-            },
-        )?,
+        (Some(spaces), Some(database)) if database.gumbel_db_length <= 0 => recipe
+            .parameters(
+                stats_nt,
+                Some(spaces),
+                LocalParameterCall::Initial {
+                    min_subject_length: min_subject_length.unwrap_or(0),
+                    composition_based_stats: compo_adjust_mode.ncbi_value(),
+                },
+            )
+            .map_err(search_space_overflow)?,
         _ => parameters.clone(),
     };
     let link = preliminary_parameters.link;
@@ -2872,8 +2875,9 @@ impl BatchSplit {
     /// which the caller runs first (NCBI's `BLAST_CalcEffLengths`, blast_setup.c:946-951, before
     /// the division at :975), refuses first where NCBI's search space overflows: with a count of 0
     /// as well, that LOSAT refusal takes the place of this one for a run that NCBI does not
-    /// finish. It is not a batch failure, so it comes before the reports of the batches before,
-    /// which NCBI writes before it crashes (line RG D1a-6, review A F2). The setup's read of OID 0
+    /// finish, and fails the batch after the reports of the batches before
+    /// (`search_space_overflow`, `ErrorAfterBatchReports`), matching NCBI's partial output before
+    /// the batch stops (line RG D1a-6, review A F2). The setup's read of OID 0
     /// (`read_fails` of `ReadFails::Setup`) comes before these checks: a batch searched whole on
     /// such a database fails with that read's error (`tblastn_app::search`), with `-searchsp` or
     /// `OLD_FSC` too (NCBI 2.17.0, rows `db.ak.tbn.e0nseq.sp.6`, `.fsc.6`; line RG item X-short-bat
@@ -3250,6 +3254,19 @@ fn x_masked_pssm_query() -> anyhow::Error {
     )))
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:946-951,1001-1014
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-302
+/// Wraps a batch's search space overflow (`SearchSpaceOverflow`) so that it fails the batch after
+/// the reports of the batches before (`ErrorAfterBatchReports`), matching NCBI's partial output
+/// before the batch stops.
+#[cold]
+#[inline(never)]
+fn search_space_overflow(overflow: crate::stats::setup::SearchSpaceOverflow) -> anyhow::Error {
+    anyhow::Error::new(crate::blastinput::app::ErrorAfterBatchReports::new(
+        overflow.into(),
+    ))
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:614-654,964-1024:
 // Initializes hit-saving parameters (`BlastHitSavingParametersNew`): the score block,
 // effective lengths and cutoffs of a query set. `eff_searchsp_override` is the options'
@@ -3532,7 +3549,9 @@ fn query_set_setup<'a>(
             }
         }
     };
-    let parameters = recipe.parameters(inputs.total_nt, eff_searchsp_override, call)?;
+    let parameters = recipe
+        .parameters(inputs.total_nt, eff_searchsp_override, call)
+        .map_err(search_space_overflow)?;
     let gapped_by_context = recipe.gapped.clone();
     Ok(QuerySetSetup {
         working_frames,
@@ -3827,13 +3846,16 @@ fn run_preliminary_subjects_into(
         let x_inputs;
         let inputs = match inputs.update {
             Some(update) if subject.len() >= update.min_length => {
-                x_update = update.recipe.parameters(
-                    update.dbsize_nt.unwrap_or(subject.len() as i64),
-                    Some(update.option_spaces),
-                    LocalParameterCall::Update {
-                        subject_length: i32::try_from(subject.len())?,
-                    },
-                )?;
+                x_update = update
+                    .recipe
+                    .parameters(
+                        update.dbsize_nt.unwrap_or(subject.len() as i64),
+                        Some(update.option_spaces),
+                        LocalParameterCall::Update {
+                            subject_length: i32::try_from(subject.len())?,
+                        },
+                    )
+                    .map_err(search_space_overflow)?;
                 x_arrays = ContextCutoffArrays::of(&x_update);
                 x_inputs = PreliminaryInputs {
                     search: PreliminaryProfile {

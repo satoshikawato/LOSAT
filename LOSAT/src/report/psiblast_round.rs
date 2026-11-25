@@ -2,8 +2,10 @@
 //! `write_blastp_pairwise_report` with the round's number in its head and, after the first round,
 //! the description table in two parts, the subjects used in the PSSM's model and found again and
 //! those found for the first time (`CBlastFormat::x_DisplayDeflines` with the previous round's
-//! inclusion set). The round driver (`blastp::blast_engine::psi_round`) writes the epilog after the
-//! last round; this writer never does.
+//! inclusion set). The query-anchored reports of outfmt 1 to 4 are the same report with the one
+//! section of their view in place of each subject's alignments (item PS15b-2). The round driver
+//! (`blastp::blast_engine::psi_round`) writes the epilog after the last round; this writer never
+//! does.
 //!
 //! The writer is a child of `pairwise` and uses its parts. It writes through a type of its own
 //! (`RoundWriter`), so that every generic part it calls is an instance of its own and the default
@@ -67,6 +69,8 @@ pub(crate) struct ReportRound<'a> {
 /// round), whose `hits` are those queries' (the rows of a window of queries,
 /// `pairwise::write_blastp_pairwise_window`): the prolog when `prolog` is set (the run's first
 /// round) and the window starts the report, each query's warnings, then its section. No epilog.
+/// `anchored`: the sequences of the query-anchored section of outfmt 1 to 4 (`config.view`;
+/// `None` for outfmt 0).
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:278-286
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn write_psiblast_round_report(
@@ -86,6 +90,7 @@ pub(crate) fn write_psiblast_round_report(
     mut warnings: Option<&mut super::super::query_warnings::QueryWarnings<'_>>,
     prolog: bool,
     round: ReportRound<'_>,
+    anchored: Option<&dyn crate::report::query_anchored::ReportSequences>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(RoundWriter(writer));
     let writer = &mut buffered;
@@ -129,6 +134,7 @@ pub(crate) fn write_psiblast_round_report(
         subject_sources,
         loads,
         round,
+        anchored,
     };
     for (q_idx, query_hits) in query_range.zip(&hits_by_query) {
         // The query's warnings come before its preamble, after the report written so far
@@ -164,8 +170,12 @@ pub(crate) fn write_psiblast_round_report(
             let mut display = DisplaySeqalign::default();
             for &s_idx in &aligned[..end.map_or(aligned.len(), |(at, _)| at)] {
                 place(ReportPlace::Load(s_idx), &mut *writer)?;
-                display.enter(writer)?;
-                sections.subject(writer, probe.as_deref_mut(), group, s_idx)?;
+                // The query-anchored section's merge loads every aligned subject before its
+                // first byte (`x_pairwise_par::write_serial`'s rule).
+                if sections.anchored.is_none() {
+                    display.enter(writer)?;
+                    sections.subject(writer, probe.as_deref_mut(), group, s_idx)?;
+                }
             }
             if let Some((_, exception)) = end {
                 if let Some(warnings) = warnings.as_deref_mut() {
@@ -173,6 +183,12 @@ pub(crate) fn write_psiblast_round_report(
                 }
                 writer.flush()?;
                 return Err(exception.clone().into_io_error());
+            }
+            // The query-anchored section is written in `DisplaySeqalign`'s region after the loads,
+            // as `x_pairwise_par::write_serial` writes it; without an alignment there is none.
+            if sections.anchored.is_some() && !aligned.is_empty() {
+                display.enter(writer)?;
+                sections.alignments(writer, q_idx, group)?;
             }
             display.leave(writer)?;
             sections.foot(writer, q_idx)?;
@@ -194,6 +210,8 @@ struct RoundSections<'a> {
     /// The loads of the report's subjects, by subject index (`BlastpSections::loads`).
     loads: &'a crate::report::db_subject::HitLoads,
     round: ReportRound<'a>,
+    /// The sequences of the query-anchored section (outfmt 1 to 4); `None` for outfmt 0.
+    anchored: Option<&'a dyn crate::report::query_anchored::ReportSequences>,
 }
 
 impl RoundSections<'_> {
@@ -426,6 +444,9 @@ impl RoundSections<'_> {
                 probe,
                 DatabaseHeading::Skipped(&id),
                 true,
+                self.parsed_subjects,
+                None,
+                s_idx,
                 &group.subject_hits[&s_idx],
                 &group.subject_hit_indices[&s_idx],
                 0..hsps,
@@ -453,6 +474,9 @@ impl RoundSections<'_> {
                 probe,
                 heading,
                 true,
+                self.parsed_subjects,
+                None,
+                s_idx,
                 &group.subject_hits[&s_idx],
                 &group.subject_hit_indices[&s_idx],
                 0..hsps,
@@ -482,6 +506,25 @@ impl RoundSections<'_> {
                 write_alignment(writer, hit, None, config)
             },
         )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
+    /// The query-anchored section of the query's aligned subjects (`BlastpSections::alignments`);
+    /// nothing for outfmt 0, whose subjects' alignments `subject` writes.
+    fn alignments<W: Write>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+        group: &QueryGroup<'_>,
+    ) -> io::Result<()> {
+        if self.anchored.is_none() {
+            return Ok(());
+        }
+        super::write_anchored_section(writer, self.config, self.anchored, q_idx, |sequences| {
+            super::blastp_section_hsps(self.report.num_alignments, group, |s_idx| {
+                sequences.subject_is_query(q_idx, s_idx)
+            })
+        })
     }
 
     /// The footer of a query with hits (`BlastpSections::foot`).

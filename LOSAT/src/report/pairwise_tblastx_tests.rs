@@ -171,6 +171,7 @@ fn tblastx_hit(sum_n: i32) -> PairwiseHit {
         query_stored_gaps: Vec::new(),
         query_case: Default::default(),
         seqalign_num_ident: 60,
+        query_left_of_record: false,
     }
 }
 
@@ -1228,6 +1229,9 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         None,
         DatabaseHeading::loaded(parsed[1].as_deref().unwrap(), false, 2, true),
         false,
+        &parsed,
+        None,
+        1,
         &hits[&1],
         &[1, 2],
         0..2,
@@ -1404,6 +1408,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
                     number: 2,
                     found_before,
                 },
+                None,
             )
             .unwrap();
         };
@@ -1527,6 +1532,7 @@ fn an_unreadable_query_writes_one_line_for_each_hsp_with_the_subjects_id() {
                 number,
                 found_before: None,
             },
+            None,
         )
         .unwrap();
         String::from_utf8(out).unwrap()
@@ -1683,6 +1689,7 @@ fn psiblast_round_two_part_table_shows_zero_when_all_bit_scores_are_negative() {
             number: 2,
             found_before: Some(&[true, false, false]),
         },
+        None,
     )
     .unwrap();
     let text = String::from_utf8(out).unwrap();

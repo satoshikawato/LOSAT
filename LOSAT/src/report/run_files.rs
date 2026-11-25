@@ -40,7 +40,7 @@ pub trait FileReceiver: Send + Sync {
 
     /// The names of files that the run opens for reading (whether present in `/work` or missing),
     /// besides `registered_files` (line WQA D19 round R2): e.g. a `-db` search's list files
-    /// (`-seqidlist`, `-negative_seqidlist`, `-taxidlist`, `-negative_taxidlist`) and a tool's
+    /// (`-gilist`, `-ipglist`, `-seqidlist`, `-taxidlist` and their negatives) and a tool's
     /// input files (`-in`, `-ustat`, `-ids`, `-exclude_ids`). Kept apart from `registered_files`
     /// so a missing input does not make its parent folders present; only matched when `log_name`
     /// would otherwise make a new file (`LogName::File { key }`).

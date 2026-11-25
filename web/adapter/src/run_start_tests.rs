@@ -843,10 +843,10 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
     assert_eq!(strat_files[0].0, "-query");
     assert!(strat_files[0].1.contains("Blast4-request"));
 
-    // Round R2 finding 2: `-db` list files accepted by LOSAT Web (`-seqidlist`,
-    // `-negative_seqidlist`, `-taxidlist`, `-negative_taxidlist`) are created and read back by
-    // the CLI when named by `-logfile` while missing, so LOSAT Web refuses them at `validate` and
-    // `run`, without making missing parent folders present.
+    // Round R2 finding 2: `-db` list files accepted by LOSAT Web (`-gilist`, `-ipglist`,
+    // `-seqidlist`, `-taxidlist` and their negatives) are created and read back by the CLI when
+    // named by `-logfile` while missing, so LOSAT Web refuses them at `validate` and `run`,
+    // without making missing parent folders present.
     let db_path = format!(
         "{}/../../LOSAT/tests/windowmasker/db/wm",
         env!("CARGO_MANIFEST_DIR")
@@ -856,6 +856,8 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
         ("-negative_seqidlist", "d19-r2-miss-nsl.txt"),
         ("-taxidlist", "d19-r2-miss-tl.txt"),
         ("-negative_taxidlist", "d19-r2-miss-ntl.txt"),
+        ("-gilist", "d19-r2-miss-gl.txt"),
+        ("-negative_gilist", "d19-r2-miss-ngl.txt"),
     ] {
         let words = [
             "blastn",
@@ -871,6 +873,32 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
             missing,
         ];
         let want = refusal("blastn", missing);
+        assert_eq!(validate(&words).unwrap_err(), want, "{opt}: validate");
+        assert_eq!(run_db_of(&words).0.unwrap_err(), want, "{opt}: run");
+    }
+    // `-ipglist` and `-negative_ipglist` are options of the protein searches.
+    let protein_db = format!(
+        "{}/../../LOSAT/tests/db_search/acbs",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    for (opt, missing) in [
+        ("-ipglist", "d19-r2-miss-il.txt"),
+        ("-negative_ipglist", "d19-r2-miss-nil.txt"),
+    ] {
+        let words = [
+            "blastp",
+            "-query",
+            "q.fa",
+            "-db",
+            &protein_db,
+            opt,
+            missing,
+            "-num_threads",
+            "1",
+            "-logfile",
+            missing,
+        ];
+        let want = refusal("blastp", missing);
         assert_eq!(validate(&words).unwrap_err(), want, "{opt}: validate");
         assert_eq!(run_db_of(&words).0.unwrap_err(), want, "{opt}: run");
     }

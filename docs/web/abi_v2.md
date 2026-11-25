@@ -556,8 +556,9 @@ search's registered `-query`, `-subject`, kind-2 registry files and BLASTN kind-
 files, inside or outside the working directory): a `-logfile` whose folder inside the working directory
 is missing or is a file, or that names a folder of the run, keeps its messages on stream 3 with no file;
 a `-logfile` that names an existing file of the run (inside or outside the working directory) or a file
-the run opens for reading even when that file is missing (a `-db` search's `-seqidlist`,
-`-negative_seqidlist`, `-taxidlist` or `-negative_taxidlist`, or `windowmasker`'s `-in`, `-ustat`,
+the run opens for reading even when that file is missing (a `-db` search's `-gilist`,
+`-negative_gilist`, `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist` or
+`-negative_taxidlist`, or `windowmasker`'s `-in`, `-ustat`,
 `-ids` or `-exclude_ids`, without making missing parent folders present), and a `windowmasker` `-out`
 that names an existing file or a missing input the command line reads after opening `-out` (`-in` of
 `-mk_counts`, `-ustat` of masking), are refused (in both `validate` and `run`/`losat_web2_tool`, exit

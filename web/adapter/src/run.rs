@@ -498,9 +498,10 @@ struct SearchRunFiles {
 ///   `-window_masker_taxid` (`windowmasker/<taxid>/wmasker.obinary`) when registered as kind 1,
 ///   and the kind-2 registry files of `registry` that this run's start reads (`.ncbirc`, and
 ///   without a version word either the registered file of `-conffile` or `<program>.ini`);
-/// - `read`: with `-db`, the list files accepted by LOSAT Web (`-seqidlist`,
-///   `-negative_seqidlist`, `-taxidlist`, `-negative_taxidlist`), kept apart from `registered` so
-///   a missing list file does not make its parent folders present.
+/// - `read`: with `-db`, the list files of its filters (`-gilist`, `-negative_gilist`,
+///   `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist`,
+///   `-negative_taxidlist`), kept apart from `registered` so a missing list file does not make
+///   its parent folders present.
 fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry) -> SearchRunFiles {
     use losat::web_adapter::{preparse, scan_program_argv, Preparsed, RegistryFiles as _};
     use std::path::Path;
@@ -549,7 +550,8 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
             "window_masker_db" if is_blastn => push_counts(&mut registered, value),
             "window_masker_taxid" if is_blastn => push_taxid(&mut registered, value),
             "db" => has_db = true,
-            "seqidlist" | "negative_seqidlist" | "taxidlist" | "negative_taxidlist" => {
+            "gilist" | "negative_gilist" | "ipglist" | "negative_ipglist" | "seqidlist"
+            | "negative_seqidlist" | "taxidlist" | "negative_taxidlist" => {
                 if !value.is_empty() {
                     list_files.push(value.as_bytes().to_vec());
                 }

@@ -1,0 +1,5 @@
+TITLE t
+DBLIST rpstax
+TAXIDLIST rpstax.txl
+NSEQ 3
+LENGTH 560

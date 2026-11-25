@@ -7441,7 +7441,7 @@ fn database_search_error(
     shown: &ShownSubjects,
 ) -> anyhow::Error {
     let error = match error.downcast::<database::PreliminaryReadError>() {
-        Ok(read_error) => crate::blastinput::app::engine_error(read_error.0),
+        Ok(read_error) => crate::blastinput::app::engine_error(read_error.as_bytes()),
         Err(error) => error,
     };
     if !error.is::<crate::cli::NativeError>() {

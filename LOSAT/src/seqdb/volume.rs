@@ -636,14 +636,14 @@ impl Volume {
         self.oid_mask_type != 0
     }
 
-    /// Attaches the alias files' id lists that reach this volume (`SeqDb::read_alias_tree`);
-    /// `volume_start` is the volume's first OID in the database.
+    /// Attaches the alias files' id lists that reach this volume (`SeqDb::read_alias_tree`), or
+    /// clears them when `lists` is empty; `volume_start` is the volume's first OID in the database.
     pub(super) fn set_alias_lists(
         &mut self,
         lists: Vec<std::sync::Arc<super::id_list::AliasIdList>>,
         volume_start: u32,
     ) {
-        self.alias_lines = Some(AliasLines {
+        self.alias_lines = (!lists.is_empty()).then_some(AliasLines {
             lists,
             volume_start,
         });
@@ -813,8 +813,9 @@ impl Volume {
 
     /// Whether the volume's reads keep a line with a Seq-id of the sequence `oid`
     /// (volume-relative; `SeqDb::line_read`): false where the list's rule or the alias files'
-    /// lists keep none or the erasure of model lines leaves none (each erases the lines without
-    /// a Seq-id), and where the volume filters no line, where none of its lines holds a Seq-id
+    /// lists keep none with a Seq-id (an alias `TAXIDLIST` can rescue a line without a Seq-id,
+    /// which still gives `GetSeqIDs` nothing) or the erasure of model lines leaves none, and where
+    /// the volume filters no line, where none of its lines holds a Seq-id
     /// (`header::holds_a_seqid`); the reader's error for a tag that NCBI's read cannot adjust
     /// (NCBI's `GetSeqIDs` of the Seq-align throws there), LOSAT's refusal of `filtered_mask`.
     /// With it, whether the record holds a UTF8String where a VisibleString is expected
@@ -826,9 +827,11 @@ impl Volume {
             return Ok((kept, false));
         }
         let set = self.with_header_record(oid, decode_full)?;
-        let kept = self
-            .filtered_mask(oid, &set)?
-            .is_some_and(|mask| mask.contains(&true));
+        let kept = self.filtered_mask(oid, &set)?.is_some_and(|mask| {
+            mask.iter()
+                .zip(&set.deflines)
+                .any(|(&keep, defline)| keep && !defline.ids.is_empty())
+        });
         Ok((kept, set.utf8))
     }
 

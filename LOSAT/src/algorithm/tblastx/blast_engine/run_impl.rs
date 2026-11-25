@@ -1794,10 +1794,12 @@ fn search(
     let (stream, stores_error) = match &source {
         SubjectSource::Database(database) => {
             let opened = if database.first_oid_read_fails() {
-                Err(crate::algorithm::common::database::PreliminaryReadError(
-                    "Database memory map file error",
+                Err(
+                    crate::algorithm::common::database::PreliminaryReadError::from_static(
+                        "Database memory map file error",
+                    )
+                    .into(),
                 )
-                .into())
             } else {
                 database.x_stream(args.num_threads, db_mask.as_ref())
             };
@@ -3709,7 +3711,9 @@ fn run_batch_loop(
                                     .downcast::<crate::algorithm::common::database::PreliminaryReadError>()
                                     .ok()
                             })
-                            .map(|read_error| crate::blastinput::app::engine_error(read_error.0))
+                            .map(|read_error| {
+                                crate::blastinput::app::engine_error(read_error.as_bytes())
+                            })
                             .into(),
                         Err(error) => error
                             .downcast::<ErrorAfterBatchReports>()
@@ -3763,7 +3767,7 @@ fn run_batch_loop(
                     error.downcast::<crate::algorithm::common::database::PreliminaryReadError>()?;
                 reports.write_before_failed_batch(outputs, done, &warnings)?;
                 batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                return Err(crate::blastinput::app::engine_error(read_error.0));
+                return Err(crate::blastinput::app::engine_error(read_error.as_bytes()));
             }
             Err(error) => match error.downcast::<ErrorAfterBatchReports>() {
                 // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:203-209
@@ -3895,7 +3899,7 @@ fn run_batch_loop(
                     )?;
                     reports.write_before_failed_batch(outputs, done, &warnings)?;
                     batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                    return Err(crate::blastinput::app::engine_error(read_error.0));
+                    return Err(crate::blastinput::app::engine_error(read_error.as_bytes()));
                 }
             }
             // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:197-205

@@ -1083,3 +1083,45 @@ fn ordinals_in_names_the_ordinals_of_an_oid_range() {
     assert_eq!(OidMap::unrestricted().ordinals_in(3, 7), 3..7);
     assert_eq!(OidMap::unrestricted().ordinals_in(7, 3), 7..7);
 }
+
+/// Alias `TAXIDLIST` rescues a line rejected by a search list (or with no Seq-id) before a
+/// negative user taxid list runs (`seqdbvol.cpp:2036-2055`).
+#[test]
+fn alias_taxid_list_rescues_lines_before_negative_user_taxids() {
+    let local = |name: &str| ParsedSeqId::Local(crate::seqid::model::ObjectId::Str(name.into()));
+    let line = |ids: Vec<ParsedSeqId>, taxid: i32| BlastDefline {
+        ids,
+        taxid: Some(taxid),
+        ..BlastDefline::default()
+    };
+    let set = DeflineSet {
+        deflines: vec![
+            line(vec![local("a")], 9606),
+            line(vec![local("b")], 10090),
+            line(vec![], 9606),
+        ],
+        utf8: false,
+    };
+    let alias_tx = Arc::new(super::super::id_list::AliasIdList {
+        taxids: [9606, 10090].into_iter().collect(),
+        ..Default::default()
+    });
+    // Positive user seqid list matching only `b` (or matching nothing): alias TAXIDLIST still
+    // rescues every line whose taxid is in the alias list, so `line_mask` returns `Some`.
+    let pos_seq = DeflineRule::Seqids(vec![b"b".to_vec()]);
+    assert_eq!(
+        line_mask(Some(&pos_seq), std::slice::from_ref(&alias_tx), &set).unwrap(),
+        Some(vec![true, true, true])
+    );
+    let pos_none = DeflineRule::Seqids(vec![b"other".to_vec()]);
+    assert_eq!(
+        line_mask(Some(&pos_none), std::slice::from_ref(&alias_tx), &set).unwrap(),
+        Some(vec![true, true, true])
+    );
+    // Negative user taxid list runs AFTER alias TAXIDLIST rescue, so 10090 is removed.
+    let neg_tax = DeflineRule::NegativeTaxids([10090].into_iter().collect());
+    assert_eq!(
+        line_mask(Some(&neg_tax), &[alias_tx], &set).unwrap(),
+        Some(vec![true, false, true])
+    );
+}

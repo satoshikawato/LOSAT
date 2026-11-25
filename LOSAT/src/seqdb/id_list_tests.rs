@@ -196,3 +196,35 @@ fn find_si_halves_the_ids_in_their_order() {
     assert!(find_si(&unsorted, b"p10102.1"));
     assert!(find_si(&unsorted, b"np_000103.1"));
 }
+
+#[test]
+fn a_taxid_list_is_a_set_of_int4_numbers() {
+    let set = read_tax_id_list(b"9606\n10090\n9606\n2147483648\n").unwrap();
+    assert_eq!(
+        set.into_iter().collect::<Vec<_>>(),
+        vec![
+            ListNumber::Value(9606),
+            ListNumber::Value(10090),
+            ListNumber::Past,
+        ]
+    );
+    assert_eq!(
+        read_tax_id_list(&binary(&[0xFFFF_FFFF, 1, 562]))
+            .unwrap()
+            .into_iter()
+            .collect::<Vec<_>>(),
+        vec![ListNumber::Value(562)]
+    );
+    assert_eq!(
+        read_tax_id_list(&binary(&[0xFFFF_FFFF, 2, 562])).unwrap_err(),
+        "Specified file is not a valid binary Tax Id List file."
+    );
+    assert_eq!(
+        read_tax_id_list(b"9606,\n").unwrap_err(),
+        "Invalid byte in textTAXID list [44]."
+    );
+    assert_eq!(
+        read_tax_id_list(b"9606").unwrap(),
+        std::collections::BTreeSet::new()
+    );
+}

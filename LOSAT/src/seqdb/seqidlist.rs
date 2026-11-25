@@ -135,6 +135,33 @@ const MEMORY_MAP_MISSING: ThrowSite = ThrowSite {
     function: Some("ncbi::CMemoryFileMap::CMemoryFileMap"),
 };
 
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5748-5755
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5886-5947
+// Constructing `CMemoryFile` throws `CFileException::eMemoryMap` at line 5754 when `path` is not
+// an existing regular file (a missing file or a directory), and at line 5945 / 5650 when opening
+// or mapping fails; an empty regular file leaves the mapped pointer null and length 0.
+/// Reads `path` as NCBI's `CMemoryFile` maps it: empty regular file as `Vec::new()`, missing path
+/// or directory as `CFileException::eMemoryMap` (`MEMORY_MAP_MISSING`), and open/map failure as
+/// `memory_file_exception` ([`SeqDbError::Ncbi`]), else the reader's own I/O error.
+pub(super) fn read_memory_file(path: &[u8]) -> Result<Vec<u8>, SeqDbError> {
+    let file_path = crate::utils::os_bytes::path_of_bytes(path);
+    if !super::alias::exists(&file_path) {
+        return Err(SeqDbError::Ncbi(NcbiException::new(
+            MEMORY_MAP_MISSING,
+            super::oid_list::not_a_file(path),
+        )));
+    }
+    let map_err = |error: SeqDbError| match error.memory_file_exception() {
+        Some(exception) => SeqDbError::Ncbi(exception),
+        None => error,
+    };
+    let file = super::file::DbFile::open(&file_path).map_err(map_err)?;
+    if file.is_empty() {
+        return Ok(Vec::new());
+    }
+    file.read_all().map_err(map_err)
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:453-462
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqidlist_reader.cpp:122-130
 // The file is looked for on the database search path (`SeqDB_ResolveDbPath`). A file that is not
@@ -151,17 +178,10 @@ pub(crate) fn read_resolved(name: &[u8], path: &SearchPath) -> Result<Vec<u8>, S
     let Some(file) = path.resolve_file(name) else {
         return Err(SeqDbError::Ncbi(NcbiException::new(
             MEMORY_MAP_MISSING,
-            "To be memory mapped the file must exist: ''",
+            super::oid_list::not_a_file(b""),
         )));
     };
-    let file = crate::utils::os_bytes::path_from_bytes(file);
-    std::fs::read(&file).map_err(|source| {
-        let error = SeqDbError::Open { path: file, source };
-        match error.memory_file_exception() {
-            Some(exception) => SeqDbError::Ncbi(exception),
-            None => error,
-        }
-    })
+    read_memory_file(&file)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/seqidlist_writer.cpp:145-183

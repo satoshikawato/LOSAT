@@ -143,7 +143,7 @@ fn setup_failure(error: anyhow::Error) -> anyhow::Error {
         Err(error) => error,
     };
     match error.downcast::<PreliminaryReadError>() {
-        Ok(read) => crate::blastinput::app::engine_error(read.0),
+        Ok(read) => crate::blastinput::app::engine_error(read.as_bytes()),
         Err(error) => error,
     }
 }
@@ -172,7 +172,9 @@ impl SetupFailures {
         if database.is_some_and(BlastpDatabase::first_oid_read_fails) {
             return Self {
                 read_fails: Some(ReadFails::Setup),
-                read_error: Some(PreliminaryReadError("Database memory map file error").into()),
+                read_error: Some(
+                    PreliminaryReadError::from_static("Database memory map file error").into(),
+                ),
                 checks: Ok(()),
             };
         }

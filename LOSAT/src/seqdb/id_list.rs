@@ -1,11 +1,15 @@
-//! The numeric id list files of the alias files' `GILIST` and `TILIST` keys, read as NCBI's
-//! `SeqDB_ReadMemoryGiList` and `SeqDB_ReadMemoryTiList` read them: a binary list (its first byte 0xFF: a marker word, the big-endian count, then one
+//! The numeric id list files of the alias files' `GILIST`, `TILIST` and `TAXIDLIST` keys, read as
+//! NCBI's `SeqDB_ReadMemoryGiList`, `SeqDB_ReadMemoryTiList` and `SeqDB_ReadMemoryTaxIdList` read
+//! them: a binary list (its first byte 0xFF: a marker word, the big-endian count, then one
 //! big-endian id per word) or a text list (decimal numbers, each ended by a space, a line feed or
 //! a carriage return). The one owner of their layout, and of the lists the alias files attach to
 //! the volumes they reach for NCBI's filtered header read (`AliasIdList`), and of NCBI's lookups of
-//! a Seq-id in a list (`find_id`, `negative_find_id`).
+//! a Seq-id or taxid in a list (`find_id`, `negative_find_id`, `defline_matches_taxids`).
+
+use std::collections::BTreeSet;
 
 use crate::ncbi_exception::NcbiException;
+use crate::seqid::defline_set::BlastDefline;
 use crate::seqid::model::ObjectId;
 use crate::seqid::ParsedSeqId;
 
@@ -52,7 +56,8 @@ impl IdListKind {
 
 /// An id list of the alias files as NCBI attaches it to a volume it reaches
 /// (`CSeqDBVol::AttachVolumeGiList`): the ids its filtered header read finds a definition line's
-/// Seq-ids in (`CSeqDBGiList::FindId`, [`find_id`]), each kind in NCBI's order.
+/// Seq-ids in (`CSeqDBGiList::FindId`, [`find_id`]), each kind in NCBI's order, and the taxids of
+/// a version 5 `TAXIDLIST` (`s_IncludeDefline_Taxid`, [`defline_matches_taxids`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AliasIdList {
     /// The GIs of a `GILIST`.
@@ -60,8 +65,11 @@ pub(crate) struct AliasIdList {
     /// The TIs of a `TILIST`, as NCBI's unsigned `TTi` (a number past `Int8` is none).
     pub tis: Vec<u64>,
     /// The Seq-id strings of a `SEQIDLIST`, as the last translation left them, in its order (out
-    /// of order where a second simplification changed one after the sort).
+    /// of order where a second simplification changed one after the sort; sorted for a version 5
+    /// text list, file order for a version 5 binary list).
     pub sis: Vec<Vec<u8>>,
+    /// The taxids of a version 5 `TAXIDLIST` (`GetTaxIdsList`).
+    pub taxids: BTreeSet<i32>,
 }
 
 impl AliasIdList {
@@ -69,6 +77,26 @@ impl AliasIdList {
     pub(crate) fn find_id(&self, id: &ParsedSeqId) -> Result<bool, NcbiException> {
         find_id(&self.gis, &self.tis, &self.sis, id)
     }
+
+    /// Whether the list holds taxids (positive `GetNumTaxIds` count).
+    pub(crate) fn has_taxids(&self) -> bool {
+        !self.taxids.is_empty()
+    }
+
+    /// Whether `defline`'s taxid or links hold one of this list's taxids (`s_IncludeDefline_Taxid`).
+    pub(crate) fn keeps_taxid(&self, defline: &BlastDefline) -> bool {
+        defline_matches_taxids(defline, &self.taxids)
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1910-1925
+/// `s_IncludeDefline_Taxid`: whether `defline`'s `taxid` or `links` hold a taxid in `taxids`.
+pub(crate) fn defline_matches_taxids(defline: &BlastDefline, taxids: &BTreeSet<i32>) -> bool {
+    defline
+        .taxid
+        .into_iter()
+        .chain(defline.links.iter().flatten().copied())
+        .any(|taxid| taxids.contains(&taxid))
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp:957-968
@@ -353,6 +381,29 @@ pub(crate) fn read_ti_list(bytes: &[u8]) -> Result<Vec<ListNumber>, String> {
     read_text(bytes, "TI", |elem, digit| {
         widened_step(elem, digit, i64::MAX)
     })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1080-1121
+// A binary list's ids are big-endian `Int4`s; a text list's number is an `Int4` (widened past
+// `i32::MAX` to avoid C++ signed overflow UB, `ListNumber::Past`).
+/// The taxids of a taxid list file (`SeqDB_ReadMemoryTaxIdList`), as the set NCBI keeps;
+/// NCBI's `CSeqDBException` text for a file that is not one.
+pub(crate) fn read_tax_id_list(bytes: &[u8]) -> Result<BTreeSet<ListNumber>, String> {
+    if binary_kind(bytes)?.is_some() {
+        let words = bytes.len() / 4;
+        let num_taxids = words - 2;
+        if word(bytes, 0) != 0xFFFF_FFFF || word(bytes, 1) as i32 != num_taxids as i32 {
+            return Err("Specified file is not a valid binary Tax Id List file.".to_string());
+        }
+        return Ok((2..words)
+            .map(|at| ListNumber::Value(i64::from(word(bytes, at) as i32)))
+            .collect());
+    }
+    Ok(read_text(bytes, "TAXID", |elem, digit| {
+        widened_step(elem, digit, i64::from(i32::MAX))
+    })?
+    .into_iter()
+    .collect())
 }
 
 #[cfg(test)]

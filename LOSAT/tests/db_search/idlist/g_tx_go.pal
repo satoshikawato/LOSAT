@@ -1,0 +1,4 @@
+TITLE tx oidlist
+DBLIST g
+TAXIDLIST tx_a.txt
+OIDLIST m123.msk

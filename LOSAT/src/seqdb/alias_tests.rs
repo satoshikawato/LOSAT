@@ -202,3 +202,107 @@ fn the_stored_header_keeps_the_lines_the_type_erases() {
     let db = open("ompy", SeqType::Protein).unwrap();
     assert!((0..8).all(|oid| !db.erases_a_line_of_oid(oid).unwrap()));
 }
+
+#[test]
+fn v5_compare_seq_id_and_set_ops_match_ncbi_semantics() {
+    use super::{compare_seq_id, merge_sort_by_result, set_difference_by, set_intersection_by};
+
+    let cmp = |a: &[u8], b: &[u8]| compare_seq_id(a, b, b"test.txt");
+
+    // Versioned vs unversioned: equal under s_CompareSeqId (neither is less than the other).
+    assert!(!cmp(b"NP_000103.1", b"NP_000103").unwrap());
+    assert!(!cmp(b"NP_000103", b"NP_000103.1").unwrap());
+    // Distinct versions order lexicographically.
+    assert!(cmp(b"NP_000103.1", b"NP_000103.2").unwrap());
+    assert!(!cmp(b"NP_000103.2", b"NP_000103.1").unwrap());
+    // Local ids compare case-insensitively under CSeq_id::Compare.
+    assert!(!cmp(b"loc7", b"LOC7").unwrap());
+    assert!(!cmp(b"LOC7", b"loc7").unwrap());
+    // Unparseable FASTA form raises NCBI's CSeqIdException error.
+    assert!(cmp(b"sp||", b"NP_000103.1").is_err());
+
+    // Stable merge sort with compare_seq_id, then set intersection and difference.
+    // Because compare_seq_id falls back to raw byte order for non-equivalent ids, "LOC7" sorts
+    // before "NP_000103" while "loc7" sorts after "P10102.1" (matching NCBI's std::set_intersection
+    // quirk in db.il.bp.v5.sq.slloc.6).
+    let mut a = vec![
+        b"NP_000118.1".to_vec(),
+        b"NP_000103".to_vec(),
+        b"LOC7".to_vec(),
+    ];
+    let mut b = vec![
+        b"loc7".to_vec(),
+        b"NP_000103.1".to_vec(),
+        b"P10102.1".to_vec(),
+    ];
+    let mut less = |x: &[u8], y: &[u8]| compare_seq_id(x, y, b"test.txt");
+    merge_sort_by_result(&mut a, &mut less).unwrap();
+    merge_sort_by_result(&mut b, &mut less).unwrap();
+
+    let inter = set_intersection_by(&a, &b, &mut less).unwrap();
+    assert_eq!(inter, vec![b"NP_000103".to_vec()]);
+    // Single-element case-different local ids compare equal directly.
+    assert_eq!(
+        set_intersection_by(&[b"LOC7".to_vec()], &[b"loc7".to_vec()], &mut less).unwrap(),
+        vec![b"LOC7".to_vec()]
+    );
+
+    let diff = set_difference_by(&a, &b, &mut less).unwrap();
+    assert_eq!(diff, vec![b"LOC7".to_vec(), b"NP_000118.1".to_vec()]);
+}
+
+#[test]
+fn v5_alias_seqidlist_and_taxidlist_filter_oids_and_lines() {
+    let idlist = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/idlist");
+    let open_id = |name: &str, seqtype: SeqType| {
+        SeqDb::open(idlist.join(name).to_str().unwrap(), seqtype).unwrap()
+    };
+
+    // v5 SEQIDLIST selects the same OIDs and keeps only matching deflines.
+    let db_sq = open_id("g_sq", SeqType::Protein);
+    assert_eq!(lines(&db_sq), [(0, 1), (1, 1), (6, 1), (13, 1)]);
+    assert!(db_sq.drops_lineless_hits());
+
+    // Binary .bsl SEQIDLIST selects the exact same OIDs and lines as text.
+    let db_sqb = open_id("g_sqb", SeqType::Protein);
+    assert_eq!(lines(&db_sqb), [(0, 1), (1, 1), (6, 1), (13, 1)]);
+
+    // v5 TAXIDLIST selects OIDs with taxid 9606 and keeps only taxid-9606 deflines.
+    let db_tx = open_id("g_tx", SeqType::Protein);
+    let tx_oids: Vec<u32> = (0..db_tx.num_seqs()).map(|i| db_tx.oid(i).get()).collect();
+    assert_eq!(tx_oids, [0, 1, 3, 5, 6, 7, 10, 13]);
+    assert_eq!(db_tx.defline_set(0).unwrap().deflines.len(), 1);
+    assert!(db_tx.drops_lineless_hits());
+
+    // Combined SEQIDLIST + TAXIDLIST in one node ORs OIDs into Pass 2's f_bits and keeps lines
+    // matching either list (OID 0 keeps both its P10102.1 and taxid-9606 lines).
+    let db_sq_tx = open_id("g_sq_tx", SeqType::Protein);
+    assert_eq!(
+        lines(&db_sq_tx),
+        [
+            (0, 2),
+            (1, 1),
+            (3, 1),
+            (5, 1),
+            (6, 1),
+            (7, 1),
+            (10, 1),
+            (13, 1)
+        ]
+    );
+
+    // Version 5 TAXIDLIST over mismatched lookup/header taxids (lx): selects OIDs 1, 2, 3,
+    // erases every line of OIDs 1 and 2, and marks them as dropped hits.
+    let db_lx = open_id("lx_tx", SeqType::Protein);
+    assert_eq!(lines(&db_lx), [(1, 0), (2, 0), (3, 1)]);
+    assert!(!db_lx.keeps_line(0).unwrap());
+    assert!(!db_lx.keeps_line(1).unwrap());
+    assert!(db_lx.keeps_line(2).unwrap());
+
+    // Nucleotide v5 SEQIDLIST (LMDB acc2oid is case-sensitive, so lowercase ab000207.1 misses)
+    // and TAXIDLIST.
+    let db_nsq = open_id("n_sq", SeqType::Nucleotide);
+    assert_eq!(lines(&db_nsq), [(1, 1)]);
+    let db_ntx = open_id("n_tx", SeqType::Nucleotide);
+    assert_eq!(lines(&db_ntx), [(0, 1), (2, 1), (3, 1)]);
+}

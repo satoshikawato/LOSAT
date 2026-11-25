@@ -134,7 +134,7 @@ impl<'a> Subjects<'a> {
         };
         let error = sequence_file_read_error(stream.db.seqdb(), "BLASTX")?;
         Some(match error.downcast::<PreliminaryReadError>() {
-            Ok(PreliminaryReadError(text)) => super::native::engine(text),
+            Ok(read_error) => crate::blastinput::app::engine_error(read_error.as_bytes()),
             Err(refusal) => refusal,
         })
     }

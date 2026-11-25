@@ -20,6 +20,7 @@ fn hsp(
         length,
         query_from: query.0,
         query_to: query.1,
+        query_sort_start: query.0.min(query.1) as i64,
         subject_from: subject,
     }
 }

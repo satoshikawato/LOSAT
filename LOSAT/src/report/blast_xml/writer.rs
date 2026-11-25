@@ -337,9 +337,10 @@ pub trait StructuredXml {
 
     /// Takes the place of the report of the last query of a run that stops, which the document
     /// holds back and never writes (`holds_back`): that report is not made, and `out` gets what
-    /// the document writes when it arrives (the report held before it).
-    fn unwritten(&mut self, out: &mut Vec<u8>) -> Result<()> {
-        let _ = out;
+    /// the document writes when it arrives (the report held before it, unless the query's result
+    /// joins it, `joins_held`: `XmlQuery::joins_held`).
+    fn unwritten(&mut self, out: &mut Vec<u8>, joins_held: bool) -> Result<()> {
+        let _ = (out, joins_held);
         anyhow::bail!("the document writes the report of every query")
     }
 
@@ -355,18 +356,20 @@ pub trait StructuredXml {
 
 /// How many of the `queries` of a report call have reports that the documents write, and so have
 /// texts (titles, messages, the names of their hits' subjects) that NCBI's writer must be able
-/// to write: all of them, except the last when the run stops after this call (`stops`: no epilog
-/// and no later report call follow it) and the documents hold that report back (`holds_back`:
-/// `StructuredXml::holds_back`, `Xml2Run::holds_back`).
+/// to write: all of them, except those of the last report when the run stops after this call
+/// (`stops`: no epilog and no later report call follow it) and the documents hold that report back
+/// (`holds_back`: `StructuredXml::holds_back`, `Xml2Run::holds_back`). That report starts at the
+/// call's query `held_start` (the last query, or the first of the queries before it whose results
+/// it joins, `XmlQuery::joins_held`; 0 where it starts in an earlier call).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2389
 /// A `-subject` report is written when the next query's results arrive, or in the epilog
 /// (`PrintEpilog`, blast_format.cpp:2206-2219), which a run that a later batch stops never
 /// reaches: NCBI never makes the last formatted query's report, so it never fails on a title
 /// there, and LOSAT refuses none of that report's texts.
-pub fn written_queries(queries: usize, stops: bool, holds_back: bool) -> usize {
+pub fn written_queries(queries: usize, stops: bool, holds_back: bool, held_start: usize) -> usize {
     if stops && holds_back {
-        queries.saturating_sub(1)
+        held_start.min(queries.saturating_sub(1))
     } else {
         queries
     }

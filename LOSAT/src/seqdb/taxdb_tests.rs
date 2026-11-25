@@ -1019,3 +1019,24 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
     assert_eq!(db.open_messages(), [MSG_WRONG_MAGIC]);
     mode(&dir.join("taxdb.btd"), 0o644);
 }
+
+#[test]
+fn lookup_files_includes_bti_and_paired_btd_when_bti_exists() {
+    let dir = TempDir::unique("taxdb-lookup-files");
+    let dir_bytes = dir.as_os_str().as_encoded_bytes();
+    let has_path = |list: &[Vec<u8>], path: &std::path::Path| {
+        let want = path.as_os_str().as_encoded_bytes();
+        list.iter().any(|p| p.as_slice() == want)
+    };
+    // Without taxdb.bti in `dir`, only taxdb.bti is listed (not taxdb.btd).
+    let without = super::lookup_files(Some(dir_bytes));
+    let dir_bti = dir.join("taxdb.bti");
+    let dir_btd = dir.join("taxdb.btd");
+    assert!(without.iter().any(|p| p == b"taxdb.bti"));
+    assert!(has_path(&without, &dir_bti));
+    assert!(!has_path(&without, &dir_btd));
+    // Once taxdb.bti exists in `dir`, its paired taxdb.btd is listed too.
+    std::fs::write(&dir_bti, [0u8; 32]).unwrap();
+    let with = super::lookup_files(Some(dir_bytes));
+    assert!(has_path(&with, &dir_btd));
+}

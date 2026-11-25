@@ -1409,7 +1409,7 @@ impl SeqDb {
     pub fn taxdb_found(&self) -> bool {
         self.search_path
             .as_ref()
-            .is_some_and(|path| path.resolve_file(b"taxdb.bti").is_some())
+            .is_some_and(|path| path.resolve_file(taxdb::INDEX_FILE.as_bytes()).is_some())
     }
 
     /// Whether the reports of the search show the headers it reads with `-show_gis`.

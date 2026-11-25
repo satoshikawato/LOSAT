@@ -132,21 +132,25 @@ pub(crate) fn check_in(
 
 // No NCBI counterpart: LOSAT Web reads `-logfile` and `-out` against the input names the run
 // opens for reading, so a write name equal to a missing input is refused instead of diverging
-// from the command line, which creates the file and then reads it back (line WQA D19 round R2).
+// from the command line, which creates the file and then reads it back (line WQA D19 round R2,
+// D19b).
 /// The input file names that a `windowmasker` run with `words` opens for reading:
 /// `(for_logfile, for_out)`.
 /// - `for_logfile`: every file that the run opens after the application start opens `-logfile`:
-///   `-in` (unless `-` or `-infmt blastdb`; split on `,` for `-mk_counts` without `-fa_list true`),
-///   `-ustat` (in masking mode), `-ids` and `-exclude_ids` (when not `-convert`).
+///   `-in` (split via `counts::file_list` for `-mk_counts`, including the `-fa_list true` list file
+///   and every entry read from it; for `-infmt blastdb`, the database lookup files from
+///   `seqdb::alias::database_lookup_files`), `-ustat` (in masking mode), `-ids` and `-exclude_ids`
+///   (when not `-convert`).
 /// - `for_out`: the subset that the command line opens and reads after opening `-out` in a way
-///   that changes the run when the file is missing: `-in` (split on `,`, unless `-` or
-///   `-infmt blastdb`) of `-mk_counts` without `-fa_list true`, and `-ustat` of masking.
+///   that changes the run when the file is missing: every input/database entry of `-mk_counts`
+///   (comma-separated or read from `-fa_list true`, FASTA or `-infmt blastdb`), and `-ustat` of
+///   masking.
 pub(crate) fn read_files<S: AsRef<OsStr>>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     let mut mk_counts = false;
     let mut convert = false;
     let mut fa_list = false;
     let mut infmt_blastdb = false;
-    let mut input: Option<Vec<u8>> = None;
+    let mut input: Option<OsString> = None;
     let mut ustat: Option<Vec<u8>> = None;
     let mut ids: Option<Vec<u8>> = None;
     let mut exclude_ids: Option<Vec<u8>> = None;
@@ -160,7 +164,7 @@ pub(crate) fn read_files<S: AsRef<OsStr>>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec
                 .unwrap_or(false);
         }
         ("infmt", Some(v)) => infmt_blastdb = v == "blastdb",
-        ("in", Some(v)) => input = Some(v.as_encoded_bytes().to_vec()),
+        ("in", Some(v)) => input = Some(v.to_os_string()),
         ("ustat", Some(v)) => ustat = Some(v.as_encoded_bytes().to_vec()),
         ("ids", Some(v)) => ids = Some(v.as_encoded_bytes().to_vec()),
         ("exclude_ids", Some(v)) => exclude_ids = Some(v.as_encoded_bytes().to_vec()),
@@ -179,15 +183,43 @@ pub(crate) fn read_files<S: AsRef<OsStr>>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec
         }
     };
     if let Some(ref raw_in) = input {
-        if !infmt_blastdb {
-            if mk_counts && !convert && !fa_list {
-                for part in raw_in.split(|&b| b == b',') {
-                    push_in(&mut for_log, part);
-                    push_in(&mut for_out, part);
-                }
-            } else {
-                push_in(&mut for_log, raw_in);
+        let blastdb = (infmt_blastdb && !convert)
+            .then(|| {
+                crate::blastinput::ncbi_environment::ApplicationStart::of_process(PROGRAM, words)
+                    .settings()
+                    .ok()
+                    .and_then(|s| s.blastdb)
+            })
+            .flatten();
+        if mk_counts && !convert {
+            if fa_list {
+                push_in(&mut for_log, raw_in.as_encoded_bytes());
             }
+            for entry in counts::file_list(raw_in, fa_list) {
+                if infmt_blastdb {
+                    for path in crate::seqdb::alias::database_lookup_files(
+                        &entry,
+                        crate::seqdb::SeqType::Nucleotide,
+                        blastdb.as_deref(),
+                    ) {
+                        push_path(&mut for_log, &path);
+                        push_path(&mut for_out, &path);
+                    }
+                } else {
+                    push_in(&mut for_log, &entry);
+                    push_in(&mut for_out, &entry);
+                }
+            }
+        } else if infmt_blastdb && !convert {
+            for path in crate::seqdb::alias::database_lookup_files(
+                raw_in.as_encoded_bytes(),
+                crate::seqdb::SeqType::Nucleotide,
+                blastdb.as_deref(),
+            ) {
+                push_path(&mut for_log, &path);
+            }
+        } else {
+            push_in(&mut for_log, raw_in.as_encoded_bytes());
         }
     }
     if !mk_counts && !convert {

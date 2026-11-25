@@ -920,6 +920,341 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
     let (res, streams) = run_db_of(&missing_list_dir);
     assert!(res.is_err(), "missing seqidlist fails search");
     assert_eq!(run_files(&streams), None, "no log file in missing folder");
+
+    // D19b (item 2): database lookup files (`.nal`/`.nin`, `.pal`/`.pin`, `index.alx`,
+    // `-filtering_db`, multi-name `-db`, `taxdb.bti`) are refused at both `validate` and `run`
+    // without making missing parent folders present; control `-logfile run.log` returns hits.
+    let nucl_db = "../../LOSAT/tests/db_search/arch_tbx_snucl";
+    let nucl_nal = format!("{nucl_db}.nal");
+    let prot_db = "../../LOSAT/tests/db_search/arch_sprot";
+    let prot_pal = format!("{prot_db}.pal");
+    let multi_db = format!("{nucl_db} d19b-second-db");
+    for (label, program, words, named, is_db) in [
+        (
+            "nucl db -logfile .nal",
+            "blastn",
+            vec![
+                "blastn",
+                "-task",
+                "blastn",
+                "-query",
+                "q.fa",
+                "-db",
+                nucl_db,
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                &nucl_nal,
+            ],
+            nucl_nal.as_str(),
+            true,
+        ),
+        (
+            "prot db -logfile .pal",
+            "blastp",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                prot_db,
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                &prot_pal,
+            ],
+            prot_pal.as_str(),
+            true,
+        ),
+        (
+            "missing prot db -logfile .pin",
+            "blastp",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                "d19b-miss-prot",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "d19b-miss-prot.pin",
+            ],
+            "d19b-miss-prot.pin",
+            true,
+        ),
+        (
+            "filtering_db -logfile .nal",
+            "blastn",
+            vec![
+                "blastn",
+                "-query",
+                "q.fa",
+                "-subject",
+                "s.fa",
+                "-filtering_db",
+                nucl_db,
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                &nucl_nal,
+            ],
+            nucl_nal.as_str(),
+            false,
+        ),
+        (
+            "multi -db second -logfile .nal",
+            "blastn",
+            vec![
+                "blastn",
+                "-query",
+                "q.fa",
+                "-db",
+                &multi_db,
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "d19b-second-db.nal",
+            ],
+            "d19b-second-db.nal",
+            true,
+        ),
+        (
+            "db -logfile index.alx",
+            "blastn",
+            vec![
+                "blastn",
+                "-query",
+                "q.fa",
+                "-db",
+                "d19b-miss-nucl",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "index.alx",
+            ],
+            "index.alx",
+            true,
+        ),
+        (
+            "db -outfmt sscinames -logfile taxdb.bti",
+            "blastp",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                prot_db,
+                "-outfmt",
+                "6 qseqid sseqid sscinames",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "taxdb.bti",
+            ],
+            "taxdb.bti",
+            true,
+        ),
+    ] {
+        let want = refusal(program, named);
+        assert_eq!(validate(&words).unwrap_err(), want, "{label}: validate");
+        let run_err = if is_db {
+            run_db_of(&words).0.unwrap_err()
+        } else {
+            run_of(&words).0.unwrap_err()
+        };
+        assert_eq!(run_err, want, "{label}: run");
+    }
+    // Control: `-db` with `-logfile run.log` succeeds and returns hits.
+    let db_ctrl = [
+        "blastn",
+        "-task",
+        "blastn",
+        "-query",
+        "q.fa",
+        "-db",
+        nucl_db,
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "run.log",
+    ];
+    validate(&db_ctrl).unwrap();
+    let (res, streams) = run_db_of(&db_ctrl);
+    res.unwrap();
+    assert!(
+        !stream_text(&streams, 6).is_empty(),
+        "db control returns hits on outfmt 6"
+    );
+    assert_eq!(
+        run_files(&streams),
+        Some(vec![("run.log".to_string(), String::new())])
+    );
+    // Controls that CLI does NOT read back when the companion file is absent:
+    // `-logfile taxdb.btd` without `taxdb.bti`, and `-logfile taxonomy4blast.sqlite3` without one
+    // on the search path.
+    for (label, words) in [
+        (
+            "taxdb.btd without taxdb.bti",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                prot_db,
+                "-outfmt",
+                "6 qseqid sseqid sscinames",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "taxdb.btd",
+            ],
+        ),
+        (
+            "taxonomy4blast.sqlite3 when absent",
+            vec![
+                "blastp",
+                "-query",
+                "q.fa",
+                "-db",
+                prot_db,
+                "-taxids",
+                "9606",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                "1",
+                "-logfile",
+                "taxonomy4blast.sqlite3",
+            ],
+        ),
+    ] {
+        validate(&words).unwrap();
+        let (res, _) = run_db_of(&words);
+        res.unwrap_or_else(|e| panic!("{label}: {e}"));
+    }
+    // Missing parent folder of a missing `-db` must NOT become present.
+    let missing_db_dir = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-db",
+        "d19b-nosub/x",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "d19b-nosub/run.log",
+    ];
+    validate(&missing_db_dir).unwrap();
+    let (res, streams) = run_db_of(&missing_db_dir);
+    assert!(res.is_err(), "missing db fails search");
+    assert_eq!(run_files(&streams), None, "no log file in missing folder");
+
+    // Existing alias file (`DBLIST v1`) refuses `-logfile v1.nal`; existing `taxdb.bti` in a
+    // registry `BLASTDB` folder refuses its paired `taxdb.btd`; existing `taxonomy4blast.sqlite3`
+    // in a registry `BLASTDB` folder refuses `-logfile taxonomy4blast.sqlite3` when `-taxids`
+    // expands descendants.
+    struct CleanDir(std::path::PathBuf);
+    impl Drop for CleanDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let tmp_dir = std::env::temp_dir().join(format!("losat-d19b-search-{}", std::process::id()));
+    let _clean = CleanDir(tmp_dir.clone());
+    if tmp_dir.exists() {
+        std::fs::remove_dir_all(&tmp_dir).unwrap();
+    }
+    std::fs::create_dir_all(&tmp_dir).unwrap();
+    std::fs::write(tmp_dir.join("x.nal"), b"TITLE t\nDBLIST v1\n").unwrap();
+    std::fs::write(tmp_dir.join("taxdb.bti"), [0u8; 32]).unwrap();
+    let sqlite_fixture = format!(
+        "{}/../../LOSAT/tests/db_search/taxfilter/taxonomy4blast.sqlite3",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    std::fs::copy(&sqlite_fixture, tmp_dir.join("taxonomy4blast.sqlite3")).unwrap();
+    let alias_db = tmp_dir.join("x");
+    let v1_nal = tmp_dir.join("v1.nal");
+    let alias_db_str = alias_db.to_str().unwrap();
+    let v1_nal_str = v1_nal.to_str().unwrap();
+    let alias_words = [
+        "blastn",
+        "-query",
+        "q.fa",
+        "-db",
+        alias_db_str,
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-logfile",
+        v1_nal_str,
+    ];
+    assert_eq!(
+        validate(&alias_words).unwrap_err(),
+        refusal("blastn", v1_nal_str),
+        "alias sub-entry v1.nal: validate"
+    );
+    let blastdb_ini = format!("[BLAST]\nBLASTDB={}\n", tmp_dir.display());
+    let _tax_conf = Registered::new("d19b_tax_conf.ini", blastdb_ini.as_bytes());
+    let btd_path = tmp_dir.join("taxdb.btd");
+    let btd_str = btd_path.to_str().unwrap();
+    let btd_words = [
+        "blastp",
+        "-conffile",
+        "d19b_tax_conf.ini",
+        "-query",
+        "q.fa",
+        "-db",
+        prot_db,
+        "-outfmt",
+        "6 qseqid sseqid sscinames",
+        "-num_threads",
+        "1",
+        "-logfile",
+        btd_str,
+    ];
+    assert_eq!(
+        validate(&btd_words).unwrap_err(),
+        refusal("blastp", btd_str),
+        "paired taxdb.btd when taxdb.bti exists: validate"
+    );
+    let sqlite_shadow_words = [
+        "blastp",
+        "-conffile",
+        "d19b_tax_conf.ini",
+        "-query",
+        "q.fa",
+        "-db",
+        prot_db,
+        "-taxids",
+        "9605",
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "1",
+        "-logfile",
+        "taxonomy4blast.sqlite3",
+    ];
+    assert_eq!(
+        validate(&sqlite_shadow_words).unwrap_err(),
+        refusal("blastp", "taxonomy4blast.sqlite3"),
+        "taxonomy4blast.sqlite3 shadowing BLASTDB: validate"
+    );
 }
 
 /// `registered_run_files` uses one reader regardless of whether the argv parses (line WQA D19

@@ -71,6 +71,50 @@ const ENTRY_LEN: u64 = 8;
 /// seqdbtax.cpp: `TAX_DB_MAGIC_NUMBER`.
 const MAGIC: u32 = 0x8739;
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbtax.cpp:125-145
+/// Index file name of NCBI's taxonomy database (`SeqDB_ResolveDbPath` of `"taxdb.bti"`).
+pub(crate) const INDEX_FILE: &str = "taxdb.bti";
+
+/// Data file path paired with a `taxdb.bti` index path (`seqdbtax.cpp:133-135`: same path ending
+/// in `d`).
+fn data_name_for(index_name: &[u8]) -> Vec<u8> {
+    let mut data_name = index_name.to_vec();
+    data_name.pop();
+    data_name.push(b'd');
+    data_name
+}
+
+// No NCBI counterpart: LOSAT Web reads `-logfile` against the taxonomy files that a `-db` search
+// checks or opens (`INDEX_FILE`, and its paired `.btd` when `INDEX_FILE` already exists), so
+// `-logfile` cannot suppress the missing-taxdb warning or feed itself into `TaxDb::open` (line
+// WQA D19b).
+/// Taxonomy database file names that a `-db` search checks or opens in the working directory (and
+/// in each directory of `blastdb`, if given), keeping relative paths relative so `run_files`
+/// matches them without making missing parent folders present.
+pub(crate) fn lookup_files(blastdb: Option<&[u8]>) -> Vec<Vec<u8>> {
+    use crate::utils::os_bytes::path_of_bytes;
+    let index = INDEX_FILE.as_bytes();
+    let mut out = vec![index.to_vec()];
+    if super::alias::exists(std::path::Path::new(INDEX_FILE)) {
+        out.push(data_name_for(index));
+    }
+    if let Some(dirs) = blastdb {
+        for dir in super::alias::split_search_dirs(dirs) {
+            let idx = super::alias::combine_path(&super::alias::fix_delimiters(dir), index);
+            if !out.contains(&idx) {
+                out.push(idx.clone());
+            }
+            if super::alias::exists(&path_of_bytes(&idx)) {
+                let data = data_name_for(&idx);
+                if !out.contains(&data) {
+                    out.push(data);
+                }
+            }
+        }
+    }
+    out
+}
+
 /// `ERR_POST` text (seqdbtax.cpp:`CTaxDBFileInfo::CTaxDBFileInfo`): the magic number is wrong.
 pub const MSG_WRONG_MAGIC: &str = "Error: Tax database file has wrong magic number.";
 /// `ERR_POST` text (seqdbtax.cpp:`GetTaxNames`): the last entry begins after the end of `taxdb.btd`.
@@ -216,12 +260,10 @@ impl TaxDb {
                 messages,
             })
         };
-        let Some(index_name) = search.resolve_file(b"taxdb.bti") else {
+        let Some(index_name) = search.resolve_file(INDEX_FILE.as_bytes()) else {
             return missing(Vec::new());
         };
-        let mut data_name = index_name.clone();
-        data_name.pop();
-        data_name.push(b'd');
+        let data_name = data_name_for(&index_name);
         let index_path = crate::utils::os_bytes::path_from_bytes(index_name);
         let data_path = crate::utils::os_bytes::path_from_bytes(data_name);
         if !super::alias::exists(&index_path) || !super::alias::exists(&data_path) {

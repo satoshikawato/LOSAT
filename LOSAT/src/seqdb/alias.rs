@@ -145,6 +145,15 @@ const UNSUPPORTED_KEYS: [&str; 1] = ["MEMB_BIT"];
 /// The alias keys whose value is a path (`compute_masks`).
 const PATH_KEYS: [&str; 5] = ["OIDLIST", "GILIST", "TILIST", "SEQIDLIST", "TAXIDLIST"];
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:232-262
+/// Extensions that `s_SeqDB_DBExists` (`SearchPath::find`) checks for a database name, in NCBI's
+/// lookup order: alias file (`.nal`/`.pal`) before index file (`.nin`/`.pin`).
+const DB_LOOKUP_EXTNS: [&str; 2] = ["al", "in"];
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:48
+/// Group alias file name checked before an alias file or volume (`kSeqDBGroupAliasFileName`).
+const GROUP_ALIAS_FILE: &[u8] = b"index.alx";
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:160-182
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3204-3216
 /// `CSeqDBAtlas::DoesFileExist`: `path` is a regular file, or a symbolic link
@@ -195,7 +204,7 @@ fn remove_extn(s: &[u8]) -> &[u8] {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:284-295
-fn fix_delimiters(name: &[u8]) -> Vec<u8> {
+pub(super) fn fix_delimiters(name: &[u8]) -> Vec<u8> {
     name.iter()
         .map(|&byte| {
             if byte == b'/' || byte == b'\\' {
@@ -208,7 +217,7 @@ fn fix_delimiters(name: &[u8]) -> Vec<u8> {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:140-181
-fn combine_path(one: &[u8], two: &[u8]) -> Vec<u8> {
+pub(super) fn combine_path(one: &[u8], two: &[u8]) -> Vec<u8> {
     if two.is_empty() {
         return one.to_vec();
     }
@@ -474,17 +483,14 @@ impl SearchPath {
     // ("exact"). A file exists when it is a regular file (`exists`).
     /// The first directory of the path that holds `dbname`, joined with it.
     fn find(&self, dbname: &[u8], seqtype: Option<SeqType>) -> Option<Vec<u8>> {
-        self.path
-            .split(|&byte| byte == path_splitter())
-            .filter(|road| !road.is_empty())
+        split_search_dirs(&self.path)
             .map(|road| combine_path(&fix_delimiters(road), dbname))
             .find(|attempt| {
                 let base = path_of_bytes(attempt);
                 match seqtype {
-                    Some(seqtype) => {
-                        exists(&with_extension(&base, seqtype, "al"))
-                            || exists(&with_extension(&base, seqtype, "in"))
-                    }
+                    Some(seqtype) => DB_LOOKUP_EXTNS
+                        .iter()
+                        .any(|ext| exists(&with_extension(&base, seqtype, ext))),
                     None => exists(&base),
                 }
             })
@@ -709,7 +715,7 @@ impl Resolver<'_> {
     /// Rejects the group alias file that NCBI would consult for the alias
     /// file or volume `base`.
     fn reject_group_alias(&self, base: &[u8]) -> Result<(), SeqDbError> {
-        let aset_path = combine_path(dir_name(base), b"index.alx");
+        let aset_path = combine_path(dir_name(base), GROUP_ALIAS_FILE);
         let found = match self.search {
             Some(search) => search.find(&aset_path, None),
             None => exists(&path_of_bytes(&aset_path)).then_some(aset_path),
@@ -889,6 +895,100 @@ impl Resolver<'_> {
 fn push_unique(names: &mut Vec<Vec<u8>>, name: Vec<u8>) {
     if !names.contains(&name) {
         names.push(name);
+    }
+}
+
+/// Non-empty directory entries of a `BLASTDB`-formatted path list (`SearchPath::find`,
+/// `database_lookup_files`, `taxdb::lookup_files`).
+pub(super) fn split_search_dirs(raw: &[u8]) -> impl Iterator<Item = &[u8]> {
+    raw.split(|&byte| byte == path_splitter())
+        .filter(|road| !road.is_empty())
+}
+
+// No NCBI counterpart: LOSAT Web reads `-logfile` and `windowmasker -out` against the file names
+// that `resolve_in` checks or opens for `dbname`, so a write name equal to a missing
+// alias/index/group-alias file is refused instead of diverging from the command line, which
+// creates the file and then reads it back (line WQA D19b).
+/// File names that [`resolve_in`] checks or opens for `dbname` (`seqtype`) in the run's working
+/// directory (and in each directory of `blastdb`, if given), keeping relative paths relative so
+/// `run_files` matches them without making missing parent folders present.
+pub(crate) fn database_lookup_files(
+    dbname: &[u8],
+    seqtype: SeqType,
+    blastdb: Option<&[u8]>,
+) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut visited = Vec::new();
+    for raw in split_quoted(dbname, false) {
+        let name = fix_delimiters(raw);
+        if name.is_empty() {
+            continue;
+        }
+        let skip_local = name.contains(&SEPARATOR);
+        collect_lookup_files(&name, seqtype, skip_local, &mut visited, &mut out);
+        if let Some(dirs) = blastdb {
+            for dir in split_search_dirs(dirs) {
+                let combined = combine_path(&fix_delimiters(dir), &name);
+                collect_lookup_files(&combined, seqtype, skip_local, &mut visited, &mut out);
+            }
+        }
+    }
+    out
+}
+
+/// Collects `GROUP_ALIAS_FILE` and `DB_LOOKUP_EXTNS` candidate file names for `base`, plus the
+/// targets of `DBLIST` and `PATH_KEYS` when `base`'s alias file already exists on disk.
+fn collect_lookup_files(
+    base: &[u8],
+    seqtype: SeqType,
+    skip_local: bool,
+    visited: &mut Vec<Vec<u8>>,
+    out: &mut Vec<Vec<u8>>,
+) {
+    let dir = dir_name(base);
+    push_unique(out, combine_path(dir, GROUP_ALIAS_FILE));
+    let base_path = path_of_bytes(base);
+    for ext in DB_LOOKUP_EXTNS {
+        let candidate = with_extension(&base_path, seqtype, ext);
+        push_unique(out, path_bytes(&candidate).into_owned());
+    }
+    let alias_path = with_extension(&base_path, seqtype, DB_LOOKUP_EXTNS[0]);
+    if !exists(&alias_path) {
+        return;
+    }
+    let alias_bytes = path_bytes(&alias_path).into_owned();
+    if visited.contains(&alias_bytes) {
+        return;
+    }
+    visited.push(alias_bytes);
+    let Ok(bytes) = std::fs::read(&alias_path) else {
+        return;
+    };
+    let values = read_values(&bytes);
+    let mut dblist: &[u8] = &[];
+    for (key, value) in &values {
+        if key.as_slice() == b"DBLIST" {
+            dblist = value;
+        } else if PATH_KEYS.iter().any(|k| k.as_bytes() == key.as_slice()) && !value.is_empty() {
+            push_unique(out, combine_path(dir, &fix_delimiters(value)));
+        }
+    }
+    for raw_entry in split_quoted(dblist, false) {
+        let entry = fix_delimiters(raw_entry);
+        if entry.is_empty() || (dir_name(&entry).is_empty() && base_name(&entry) == base_name(base))
+        {
+            continue;
+        }
+        if !skip_local && !dir_name(&entry).is_empty() {
+            let local = with_extension(
+                &path_of_bytes(base_name(&entry)),
+                seqtype,
+                DB_LOOKUP_EXTNS[1],
+            );
+            push_unique(out, path_bytes(&local).into_owned());
+        }
+        let sub_base = combine_path(dir, &entry);
+        collect_lookup_files(&sub_base, seqtype, skip_local, visited, out);
     }
 }
 

@@ -202,3 +202,58 @@ fn the_stored_header_keeps_the_lines_the_type_erases() {
     let db = open("ompy", SeqType::Protein).unwrap();
     assert!((0..8).all(|oid| !db.erases_a_line_of_oid(oid).unwrap()));
 }
+
+#[test]
+fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
+    use super::database_lookup_files;
+    // Plain nucleotide and protein names yield group alias + alias + index in lookup order.
+    assert_eq!(
+        database_lookup_files(b"x", SeqType::Nucleotide, None),
+        vec![b"index.alx".to_vec(), b"x.nal".to_vec(), b"x.nin".to_vec()]
+    );
+    assert_eq!(
+        database_lookup_files(b"p5", SeqType::Protein, None),
+        vec![
+            b"index.alx".to_vec(),
+            b"p5.pal".to_vec(),
+            b"p5.pin".to_vec()
+        ]
+    );
+    // Multiple quoted names with spaces.
+    assert_eq!(
+        database_lookup_files(b"\"sub dir/x1\" x2", SeqType::Nucleotide, None),
+        vec![
+            b"sub dir/index.alx".to_vec(),
+            b"sub dir/x1.nal".to_vec(),
+            b"sub dir/x1.nin".to_vec(),
+            b"index.alx".to_vec(),
+            b"x2.nal".to_vec(),
+            b"x2.nin".to_vec(),
+        ]
+    );
+    // Existing alias file expands DBLIST and stops on mutual recursion.
+    let dir = crate::utils::test_dir::TempDir::unique("losat-d19b-alias");
+    std::fs::write(
+        dir.join("a.nal"),
+        b"TITLE a\nDBLIST b v1\nSEQIDLIST ids.txt\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("b.nal"), b"TITLE b\nDBLIST a\n").unwrap();
+    let base = dir.join("a");
+    let got = database_lookup_files(
+        base.as_os_str().as_encoded_bytes(),
+        SeqType::Nucleotide,
+        None,
+    );
+    let has = |name: &str| {
+        let full = dir.join(name);
+        got.iter()
+            .any(|p| p.as_slice() == full.as_os_str().as_encoded_bytes())
+    };
+    assert!(has("a.nal"));
+    assert!(has("b.nal"));
+    assert!(has("v1.nal"));
+    assert!(has("v1.nin"));
+    assert!(has("ids.txt"));
+    assert!(has("index.alx"));
+}

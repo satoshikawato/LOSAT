@@ -6,6 +6,16 @@ const ALPHABETS: [Alphabet; 3] = [
     Alphabet::Nucleotide,
 ];
 
+fn xorshift64() -> impl FnMut() -> u64 {
+    let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+    move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    }
+}
+
 /// The residue test of each alphabet is its switch's (`actions()[byte] >= RESIDUE_MIN`) for every
 /// byte, and the switch stores a residue as the byte in upper case.
 #[test]
@@ -58,13 +68,7 @@ fn residue_runs_match_the_byte_by_byte_scan() {
                 }
             }
         }
-        let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
-        let mut next = move || {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state
-        };
+        let mut next = xorshift64();
         const RESIDUES: &[u8] = b"ACGTNacgtnRYKMBDHVWSUEFILPQXZ*-";
         for _ in 0..3000 {
             let len = (next() % 300) as usize;
@@ -147,13 +151,7 @@ fn data_line_counts_match_the_loop() {
                 }
             }
         }
-        let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
-        let mut next = move || {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state
-        };
+        let mut next = xorshift64();
         const BYTES: &[u8] = b"ACGTNacgtnRYKMBDHVWSUEFILPQXZ*- ;0912\t";
         for _ in 0..5000 {
             let len = (next() % 71) as usize;

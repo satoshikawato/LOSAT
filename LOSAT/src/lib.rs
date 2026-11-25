@@ -89,9 +89,11 @@ pub(crate) mod makeprofiledb;
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp: the writer of alias files and of binary
 // GI and seqid lists.
 pub(crate) mod blastdb_aliastool;
+// NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp: the check of BLAST databases and alias files.
+pub(crate) mod blastdbcheck;
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp and c++/src/corelib/ncbiargs.cpp: the application and argument reader of
-// blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask, makembindex, makeprofiledb and
-// blastdb_aliastool.
+// blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask, makembindex, makeprofiledb,
+// blastdb_aliastool and blastdbcheck.
 pub(crate) mod ncbi_app;
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiexpt.cpp: the reports of NCBI's exceptions (`CException::what()`).
 pub(crate) mod ncbi_exception;

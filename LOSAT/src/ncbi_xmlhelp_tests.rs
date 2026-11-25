@@ -214,7 +214,7 @@ fn the_library_refuses_xmlhelp() {
         &mut dyn std::io::Write,
         &mut dyn std::io::Write,
     ) -> i32;
-    let readers: [(&str, RunWith); 8] = [
+    let readers: [(&str, RunWith); 9] = [
         ("BLASTDBCMD", crate::blastdbcmd::run_with),
         ("DUSTMASKER", crate::dustmasker::run_with),
         ("SEGMASKER", crate::segmasker::run_with),
@@ -223,6 +223,7 @@ fn the_library_refuses_xmlhelp() {
         ("MAKEMBINDEX", crate::makembindex::run_with),
         ("MAKEPROFILEDB", crate::makeprofiledb::run_with),
         ("BLASTDB_ALIASTOOL", crate::blastdb_aliastool::run_with),
+        ("BLASTDBCHECK", crate::blastdbcheck::run_with),
     ];
     for (shown, run_with) in readers {
         let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -242,7 +243,7 @@ fn the_library_refuses_xmlhelp() {
 }
 
 // The readers of blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask,
-// makembindex, makeprofiledb and blastdb_aliastool (`ncbi_app`) read every argument of NCBI's XML (none is refused by name; their
+// makembindex, makeprofiledb, blastdb_aliastool and blastdbcheck (`ncbi_app`) read every argument of NCBI's XML (none is refused by name; their
 // XML is NCBI's whole but for makeprofiledb's `-binary`, which its run refuses, `Refusal::Run`): the
 // argument with a value `1` for a key, then `-h`, writes the usage or an
 // error of the value, never NCBI's
@@ -255,7 +256,7 @@ fn the_ncbi_readers_read_every_argument_of_the_xml() {
         &mut dyn std::io::Write,
         &mut dyn std::io::Write,
     ) -> i32;
-    let readers: [(&str, RunWith); 8] = [
+    let readers: [(&str, RunWith); 9] = [
         ("blastdbcmd", crate::blastdbcmd::run_with),
         ("dustmasker", crate::dustmasker::run_with),
         ("segmasker", crate::segmasker::run_with),
@@ -264,6 +265,7 @@ fn the_ncbi_readers_read_every_argument_of_the_xml() {
         ("makembindex", crate::makembindex::run_with),
         ("makeprofiledb", crate::makeprofiledb::run_with),
         ("blastdb_aliastool", crate::blastdb_aliastool::run_with),
+        ("blastdbcheck", crate::blastdbcheck::run_with),
     ];
     for (program, run_with) in readers {
         for (name, flag) in ncbi_argument_names(program) {

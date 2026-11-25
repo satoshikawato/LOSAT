@@ -1055,16 +1055,7 @@ fn lookup_file_error(error: SeqDbError) -> SeqDbError {
 }
 
 fn missing_file(path: &Path) -> SeqDbError {
-    SeqDbError::NotFound(
-        [
-            b"File ".as_slice(),
-            &crate::utils::os_bytes::path_bytes(path)[..],
-            b" not found. If you renamed any BLAST database files, please use original file \
-         names, and makeblastdb to rename the database. If you deleted any BLAST database files, \
-         you need to recreate the database.",
-        ]
-        .concat(),
-    )
+    super::missing_lmdb_file(path)
 }
 
 /// A lookup file names an OID the database does not have.

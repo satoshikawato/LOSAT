@@ -645,22 +645,18 @@ fn read_profile(
     let read = crate::blastinput::pssm_text::read_profile(&bytes, binary);
     post_asn_posts(diag, &read.posts);
     use crate::blastinput::pssm_text::PssmReadError;
-    match read.result {
-        Ok(pssm) => Ok(pssm),
-        Err(PssmReadError::Ncbi(error)) => Err(read_error_to_run_error(
-            error,
-            "PssmWithParameters",
-            |what| {
-                format!(
-                    "a profile that LOSAT's PSSM reader does not read ({}: {what})",
-                    String::from_utf8_lossy(filename)
-                )
-            },
-        )),
-        Err(PssmReadError::Refused(what)) => Err(RunError::Refused(format!(
+    let refuse = |what: String| {
+        format!(
             "a profile that LOSAT's PSSM reader does not read ({}: {what})",
             String::from_utf8_lossy(filename)
-        ))),
+        )
+    };
+    match read.result {
+        Ok(pssm) => Ok(pssm),
+        Err(PssmReadError::Ncbi(error)) => {
+            Err(read_error_to_run_error(error, "PssmWithParameters", refuse))
+        }
+        Err(PssmReadError::Refused(what)) => Err(RunError::Refused(refuse(what))),
     }
 }
 
@@ -732,6 +728,7 @@ fn make_vol(
         Platform::host(),
         indices,
     );
+    output_db.set_diag_prefix(None);
     output_db.set_max_file_size(MAX_FILE_SIZE);
     let result = add_profiles(params, diag, &mut rps, &mut output_db, smps);
     // `output_db->Close()` after the loop, or the writer's destructor in the unwinding of an
@@ -920,7 +917,7 @@ fn add_to_database(
     let Some(SeqEntry::Seq(query)) = &pssm_w_parameters.pssm.query else {
         unreachable!("check_input_scoremat found the query's Bioseq");
     };
-    let mut deflines = match &query.descr {
+    let (mut deflines, null_seqids) = match &query.descr {
         Some(descr) => {
             let read = bioseq_deflines(&query.ids, descr);
             post_asn_posts(diag, &read.posts);
@@ -937,26 +934,24 @@ fn add_to_database(
                     })
                 }
                 BioseqDeflinesError::NullDescriptor => null_descriptor(),
-                BioseqDeflinesError::NullSeqId => RunError::Refused(
-                    "binary definition lines (a user object ASN1_BlastDefLine) with a Seq-id \
-                     element stated as NULL (NCBI's version 5 writer aborts on it)"
-                        .to_string(),
-                ),
             })?;
             // The binary definition lines are not encoded again here (`bin_hdr` is kept).
             if !extracted.binary {
                 output_db.post_extracted_deflines(&extracted.set);
                 post_writer(diag, params.stdout, output_db);
             }
-            extracted.set
+            (extracted.set, extracted.null_seqids)
         }
-        None => DeflineSet {
-            deflines: vec![BlastDefline {
-                ids: query.ids.clone(),
-                ..BlastDefline::default()
-            }],
-            utf8: false,
-        },
+        None => (
+            DeflineSet {
+                deflines: vec![BlastDefline {
+                    ids: query.ids.clone(),
+                    ..BlastDefline::default()
+                }],
+                utf8: false,
+            },
+            Vec::new(),
+        ),
     };
     if !params.user_taxids {
         let first_id = query.ids.first();
@@ -976,7 +971,13 @@ fn add_to_database(
             }
         }
     }
-    params.taxids.fix_tax_id(&mut deflines);
+    if params
+        .taxids
+        .fix_tax_id_checked(&mut deflines, &null_seqids)
+        .is_err()
+    {
+        return Err(null_descriptor());
+    }
     let inst = &query.inst;
     let seq_data = inst.seq_data.as_ref().map(|data| match data {
         SeqData::Iupacna(letters) => bioseq::SeqData::Iupacna(letters.clone()),
@@ -1009,7 +1010,7 @@ fn add_to_database(
     let added = output_db.add_sequence(bioseq);
     post_writer(diag, params.stdout, output_db);
     added?;
-    output_db.set_deflines(deflines);
+    output_db.set_deflines_with_null_seqids(deflines, null_seqids);
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:590-604
     // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:313-339
     // Before `WriteDB_Ncbi4naToBinary`, `WriteDB_IupacnaToBinary` runs `x_ConvertIupacnaTo4na` on

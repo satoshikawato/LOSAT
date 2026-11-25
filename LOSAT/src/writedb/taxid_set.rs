@@ -247,6 +247,33 @@ impl TaxIdSet {
             defline.taxid = Some(self.select_best_taxid(defline));
         }
     }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/taxid_set.cpp:84-136
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/multisource_util.cpp:162-172
+    /// `FixTaxId` when binary definition lines may carry `NULL` `Seq-id` elements
+    /// (`null_seqids`: sorted `(defline_index, slot_index)` pairs). When the global taxid is
+    /// unset and the map is non-empty, `x_SelectBestTaxid` calls `GetDeflineKeys`, which
+    /// dereferences every `Seq-id` of the definition line before checking the map and throws
+    /// `Attempt to access NULL pointer.` (`Err(())`) on the first definition line containing a
+    /// `NULL` `Seq-id`. Otherwise `GetDeflineKeys` is not called and `fix_tax_id` sets each
+    /// line's taxid without touching its `Seq-id`s.
+    pub(crate) fn fix_tax_id_checked(
+        &mut self,
+        deflines: &mut DeflineSet,
+        null_seqids: &[(usize, usize)],
+    ) -> Result<(), ()> {
+        if null_seqids.is_empty() || self.global_taxid != 0 || self.map.is_empty() {
+            self.fix_tax_id(deflines);
+            return Ok(());
+        }
+        for (idx, defline) in deflines.deflines.iter_mut().enumerate() {
+            if null_seqids.iter().any(|&(d, _)| d == idx) {
+                return Err(());
+            }
+            defline.taxid = Some(self.select_best_taxid(defline));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

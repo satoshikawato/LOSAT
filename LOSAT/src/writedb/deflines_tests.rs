@@ -222,7 +222,7 @@ fn decode_binary_deflines_reads_valid_and_reports_ncbi_errors_and_posts() {
     let (res, posts) = decode_binary_deflines(&good);
     assert!(posts.is_empty());
     let decoded = res.unwrap();
-    assert!(!decoded.null_defline && !decoded.null_seqid);
+    assert!(!decoded.null_defline && decoded.null_seqids.is_empty());
     assert_eq!(decoded.set.deflines.len(), 1);
     let line = &decoded.set.deflines[0];
     assert_eq!(line.title.as_deref(), Some(b"hello".as_slice()));
@@ -269,11 +269,24 @@ fn decode_binary_deflines_reads_valid_and_reports_ncbi_errors_and_posts() {
     ));
     assert!(matches!(res, Err(ReadError::Serial(_))));
 
-    // NULL Blast-def-line element vs NULL Seq-id element.
+    // NULL Blast-def-line element vs NULL Seq-id elements at various positions.
     let null_def = seq(&[&[0x05, 0x00]]);
     let decoded = decode_binary_deflines(&null_def).0.unwrap();
     assert!(decoded.null_defline);
     let null_id = seq(&[&seq(&[&ctx(1, &seq(&[&[0x05, 0x00]]))])]);
     let decoded = decode_binary_deflines(&null_id).0.unwrap();
-    assert!(!decoded.null_defline && decoded.null_seqid);
+    assert!(!decoded.null_defline);
+    assert_eq!(decoded.null_seqids, [(0, 0)]);
+    let null_multi = seq(&[
+        &seq(&[&ctx(1, &seq(&[&local_str(b"id1"), &[0x05, 0x00]]))]),
+        &seq(&[&ctx(
+            1,
+            &seq(&[&[0x05, 0x00], &local_str(b"id2"), &[0x05, 0x00]]),
+        )]),
+    ]);
+    let decoded = decode_binary_deflines(&null_multi).0.unwrap();
+    assert!(!decoded.null_defline);
+    assert_eq!(decoded.null_seqids, [(0, 1), (1, 0), (1, 2)]);
+    assert_eq!(decoded.set.deflines[0].ids.len(), 1);
+    assert_eq!(decoded.set.deflines[1].ids.len(), 1);
 }

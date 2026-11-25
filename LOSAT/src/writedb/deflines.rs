@@ -287,18 +287,16 @@ pub(crate) enum BioseqDeflinesError {
     /// reader) or a `Blast-def-line` element stated as `NULL` in binary definition lines:
     /// `CObject::ThrowNullPointerException`'s `CCoreException`, "Attempt to access NULL pointer.".
     NullDescriptor,
-    /// A `Seq-id` element stated as `NULL` inside `Blast-def-line.seqid` in binary definition
-    /// lines: NCBI's version 5 writer aborts on it as it closes (`No tax info for any oid`), and
-    /// LOSAT's `BlastDefline` holds typed `ParsedSeqId` values.
-    NullSeqId,
 }
 
-/// The definition lines of a Bioseq (`ExtractBioseqDeflines`), and whether they are its binary
-/// ones, which NCBI does not encode again there.
+/// The definition lines of a Bioseq (`ExtractBioseqDeflines`), whether they are its binary ones
+/// (which NCBI does not encode again there), and the `(defline_index, slot_index)` positions of
+/// any `Seq-id` elements stated as `NULL` inside binary definition lines.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BioseqDeflines {
     pub(crate) set: DeflineSet,
     pub(crate) binary: bool,
+    pub(crate) null_seqids: Vec<(usize, usize)>,
 }
 
 /// The outcome of [`bioseq_deflines`], together with any diagnostic posts emitted while reading
@@ -311,11 +309,11 @@ pub(crate) struct BioseqDeflinesRead {
 
 /// The decoded binary `Blast-def-line-set`, noting empty `CRef<>` elements so the whole BER
 /// object finishes reading (emitting posts and any syntax errors in NCBI's order) before
-/// `s_CheckEmptyLists` / serialization checks run.
+/// `s_CheckEmptyLists`, `FixTaxId`, or serialization checks run.
 struct DecodedBinaryDeflines {
     set: DeflineSet,
     null_defline: bool,
-    null_seqid: bool,
+    null_seqids: Vec<(usize, usize)>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/blastdb/blastdb.asn:32-47
@@ -330,11 +328,11 @@ fn decode_binary_deflines(header: &[u8]) -> (Result<DecodedBinaryDeflines, ReadE
 fn read_defline_set<I: Input>(r: &mut TypedReader<I>) -> R<DecodedBinaryDeflines> {
     let mut deflines = Vec::new();
     let mut null_defline = false;
-    let mut null_seqid = false;
+    let mut null_seqids = Vec::new();
     r.list(named::BLAST_DEF_LINE_SET, |r, element| match element {
         Some(ty) => {
-            let (defline, has_null_id) = read_defline(r, ty)?;
-            null_seqid |= has_null_id;
+            let defline_idx = deflines.len();
+            let defline = read_defline(r, ty, defline_idx, &mut null_seqids)?;
             deflines.push(defline);
             Ok(())
         }
@@ -349,26 +347,29 @@ fn read_defline_set<I: Input>(r: &mut TypedReader<I>) -> R<DecodedBinaryDeflines
             utf8: false,
         },
         null_defline,
-        null_seqid,
+        null_seqids,
     })
 }
 
-fn read_defline<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<(BlastDefline, bool)> {
+fn read_defline<I: Input>(
+    r: &mut TypedReader<I>,
+    ty: u16,
+    defline_idx: usize,
+    null_seqids: &mut Vec<(usize, usize)>,
+) -> R<BlastDefline> {
     let mut defline = BlastDefline::default();
-    let mut null_seqid = false;
     r.class(ty, |r, index, ty| {
         match index {
             0 => defline.title = Some(r.text(ty)?),
             1 => {
-                r.list(ty, |r, element| match element {
-                    Some(_) => {
-                        defline.ids.push(read_seq_id(r)?);
-                        Ok(())
+                let mut slot = 0usize;
+                r.list(ty, |r, element| {
+                    match element {
+                        Some(_) => defline.ids.push(read_seq_id(r)?),
+                        None => null_seqids.push((defline_idx, slot)),
                     }
-                    None => {
-                        null_seqid = true;
-                        Ok(())
-                    }
+                    slot += 1;
+                    Ok(())
                 })?;
             }
             2 => defline.taxid = Some(r.integer(ty)? as i32),
@@ -378,7 +379,7 @@ fn read_defline<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<(BlastDefline, b
         }
         Ok(())
     })?;
-    Ok((defline, null_seqid))
+    Ok(defline)
 }
 
 fn read_int4_list<I: Input>(r: &mut TypedReader<I>, ty: u16) -> R<Vec<i32>> {
@@ -429,10 +430,10 @@ pub(crate) fn bioseq_deflines(ids: &[ParsedSeqId], descr: &[Seqdesc]) -> BioseqD
         let (decoded, posts) = decode_binary_deflines(header);
         let result = match decoded {
             Ok(decoded) if decoded.null_defline => Err(BioseqDeflinesError::NullDescriptor),
-            Ok(decoded) if decoded.null_seqid => Err(BioseqDeflinesError::NullSeqId),
             Ok(decoded) => Ok(BioseqDeflines {
                 set: decoded.set,
                 binary: true,
+                null_seqids: decoded.null_seqids,
             }),
             Err(error) => Err(BioseqDeflinesError::BinaryHeader(error)),
         };
@@ -447,7 +448,11 @@ pub(crate) fn bioseq_deflines(ids: &[ParsedSeqId], descr: &[Seqdesc]) -> BioseqD
         })
         .unwrap_or_default();
     let result = deflines_of_bioseq(ids.to_vec(), title, &descr_taxids(descr))
-        .map(|set| BioseqDeflines { set, binary: false })
+        .map(|set| BioseqDeflines {
+            set,
+            binary: false,
+            null_seqids: Vec::new(),
+        })
         .ok_or(BioseqDeflinesError::NoDeflines);
     BioseqDeflinesRead {
         result,

@@ -518,13 +518,17 @@ fn posted_date_masked(text: &str) -> String {
     out
 }
 
-// `in/l_QR08.lst`-`in/l_QR13.lst` (row PS10b): binary PSSM and binary defline inputs where
-// NCBI's run has no defined result or depends on process state. QR08-QR10: `iupacna` byte >= 0x80
-// in a pair position (0..(v.len() & !1)), where NCBI's `x_ConvertIupacnaTo4na` indexes its table
-// with a signed `char` and reads before the table (odd overhang `B18` and bytes < 0x80 `B19` are
-// defined, and `mol na` `B20` stops with NCBI's molecule error first). QR11: `:Seq-interval`
-// pointer of another type than `PssmParameters`. QR12: `NULL` `Seq-id` inside `ASN1_BlastDefLine`
-// (NCBI's v5 writer aborts on it). QR13: 1 GiB string length past EOF (host-dependent memory).
+// `in/l_QR08.lst`-`in/l_QR14.lst` (row PS10b): PSSM and binary defline inputs where NCBI's run
+// has no defined result or depends on process state. QR08-QR10: `iupacna` byte >= 0x80 in a pair
+// position before any final odd overhang byte, where NCBI's `x_ConvertIupacnaTo4na` indexes its
+// table with a signed `char` and reads before the table (odd overhang `B18` and bytes < 0x80 `B19`
+// are defined, and `mol na` `B20` stops with NCBI's molecule error first). QR11 and QR14:
+// `:Seq-interval` pointer of another type than `PssmParameters` (binary and ASN.1 text; via
+// `Names::PROFILE`). QR12: `NULL` `Seq-id` inside `ASN1_BlastDefLine` in version 5 with 0 prior
+// OIDs (default, `-taxid 9606`, and empty `-taxid_map`, where NCBI's `~CWriteDB_TaxID` aborts
+// after posting 802.5; v4, non-empty `-taxid_map`, `org`, `-index false` on the first slot, and
+// v5 after a prior profile are frozen in `RB17`-`RB29`). QR13: 1 GiB string length past EOF
+// (host-dependent memory).
 #[test]
 fn makeprofiledb_refuses_binary_and_iupacna_high_byte_defects() {
     let iupacna_err = |byte: &str, pos: usize| {
@@ -534,28 +538,41 @@ fn makeprofiledb_refuses_binary_and_iupacna_high_byte_defects() {
              before the table) is not supported by LOSAT's MAKEPROFILEDB\n"
         )
     };
+    let other_si_err = |file: &str, at: &str| {
+        format!(
+            "Error: a profile that LOSAT's PSSM reader does not read ({file}: \
+             ':Seq-interval', a value of the type Seq-interval where a PssmParameters belongs \
+             ({at}): whether makeprofiledb reads it depends on the types its process has met \
+             before) is not supported by LOSAT's MAKEPROFILEDB\n"
+        )
+    };
+    let qr12_v5_abort = "Error: (802.5) CObjectOStream: error at byte 15: \
+        Blast-def-line-set.E.seqid.E: cannot write unassigned member NULL element while writing \
+        container \nError: an error (ERROR: byte 15: cannot write unassigned member NULL element \
+        while writing container ) after which the database's writer stops with another (Error: No \
+        tax info for any oid; NCBI's makeprofiledb aborts there) is not supported by LOSAT's \
+        MAKEPROFILEDB\n"
+        .to_string();
     let cases = [
-        ("QR08", "-binary", iupacna_err("0x80", 0)),
-        ("QR09", "-binary", iupacna_err("0x80", 3)),
-        ("QR10", "-binary", iupacna_err("0x80", 0)),
+        ("QR08", "QR08", "-binary", iupacna_err("0x80", 0)),
+        ("QR09", "QR09", "-binary", iupacna_err("0x80", 3)),
+        ("QR10", "QR10", "-binary", iupacna_err("0x80", 0)),
         (
             "QR11",
+            "QR11",
             "-binary",
-            "Error: a profile that LOSAT's PSSM reader does not read (in/b_other_si.smp.bin: \
-             ':Seq-interval', a value of the type Seq-interval where a PssmParameters belongs \
-             (byte 1250): whether makeprofiledb reads it depends on the types its process has met \
-             before) is not supported by LOSAT's MAKEPROFILEDB\n"
-                .to_string(),
+            other_si_err("in/b_other_si.smp.bin", "byte 1250"),
         ),
+        ("QR12_v5", "QR12", "", qr12_v5_abort.clone()),
+        ("QR12_tid", "QR12", "-taxid 9606", qr12_v5_abort.clone()),
         (
+            "QR12_tmap_empty",
             "QR12",
-            "",
-            "Error: binary definition lines (a user object ASN1_BlastDefLine) with a Seq-id \
-             element stated as NULL (NCBI's version 5 writer aborts on it) is not supported by \
-             LOSAT's MAKEPROFILEDB\n"
-                .to_string(),
+            "-taxid_map in/tmap_empty.txt",
+            qr12_v5_abort,
         ),
         (
+            "QR13",
             "QR13",
             "-binary",
             "Error: a profile that LOSAT's PSSM reader does not read (in/b_str_1g.smp.bin: a \
@@ -564,9 +581,15 @@ fn makeprofiledb_refuses_binary_and_iupacna_high_byte_defects() {
              not supported by LOSAT's MAKEPROFILEDB\n"
                 .to_string(),
         ),
+        (
+            "QR14",
+            "QR14",
+            "",
+            other_si_err("in/t_other_si.smp", "line 201"),
+        ),
     ];
-    for (list, extra, expected_err) in cases {
-        let dir = scratch(list);
+    for (tag, list, extra, expected_err) in cases {
+        let dir = scratch(tag);
         let argstr = if extra.is_empty() {
             format!("-in in/l_{list}.lst -out db")
         } else {
@@ -581,7 +604,7 @@ fn makeprofiledb_refuses_binary_and_iupacna_high_byte_defects() {
                 status
             ),
             ("".into(), expected_err.into(), 1),
-            "{list}"
+            "{tag}"
         );
         let _ = fs::remove_dir_all(&dir);
     }

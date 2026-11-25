@@ -86,7 +86,7 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
   builds the definition lines from the descriptors before it looks at the ids, so it dereferences the element
   there too.
 
-- Rows `B01`-`B22`, `BE01`-`BE12`, `RB04`, `RB04m`, `RB04b`, `RB08`-`RB16` (row PS10b, frozen on
+- Rows `B01`-`B22`, `BE01`-`BE12`, `RB04`, `RB04m`, `RB04b`, `RB08`-`RB29` (row PS10b, frozen on
   2026-11-25 with the official NCBI BLAST+ 2.17.0 `makeprofiledb` and `rpsblast` binaries):
   - `B01`-`B09`: `-binary` on ASN.1 BER binary PSSMs (`pc`/`pe`/`pf` scored, `c1`/`c2`/`c3` CDD,
     `fc`/`fe` frequency-ratio-only IMPALA path), multi-volume (`-max_smp_vol 2`), `-index false`,
@@ -103,16 +103,27 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
     and text with leftovers, empty, truncated `30 80`, missing mandatory `pssm`, mid-file
     truncation with leftovers, unknown member `[9]`, bad tag inside `numRows`, huge string 2^63,
     huge octet string 2^62 with 803.4 post, `@1` pointer overflow).
-  - `RB04`, `RB04m`, `RB04b`, `RB08`-`RB16`: damaged and edge-case binary definition lines
+  - `RB04`, `RB04m`, `RB04b`, `RB08`-`RB29`: damaged and edge-case binary definition lines
     (`ASN1_BlastDefLine`) decoded through the shared table-driven BER reader (`Blast-def-line-set`):
     `0xDEADBEEF` (`RB04`, mid-list `RB04m`, in binary `.smp` `RB04b`), truncated `30` (`RB08`),
     missing `seqid` (`RB09`), overflowing `taxid` (`RB10`), bad visible chars in title and Seq-id
     (`RB11`, 803.7 posts), bad visible char followed by syntax error (`RB12`), `NULL`
     `Blast-def-line` (`RB13`), `UTF8String` tag (`RB14`), huge string 2^63 (`RB15`), `:Blast-def-line`
-    and `:Seq-id` pointer forms with definite length and trailing bytes (`RB16`).
-  - `l_QR08.lst`-`l_QR13.lst` (no `cases.tsv` row; tested as refusals): `iupacna` byte `>= 0x80`
-    in pair positions (`QR08`-`QR10`), `:Seq-interval` other-type pointer (`QR11`), `NULL`
-    `Seq-id` inside `ASN1_BlastDefLine` (`QR12`), and 1 GiB string length past EOF (`QR13`).
+    and `:Seq-id` pointer forms with definite length and trailing bytes (`RB16`), and `NULL`
+    `Seq-id` elements carried to NCBI's exact failing point: `-blastdb_version 4` (`RB17`, `RB18`
+    with `-taxid 9606`: 802.5 post + `byte 15` error, rc 255), non-empty `-taxid_map` in v4 and v5
+    (`RB19`, `RB20`: `Attempt to access NULL pointer.`, rc 255), varied `NULL` positions (1st
+    defline 2nd Seq-id `RB21` byte 28; 2nd defline 1st Seq-id `RB22` byte 56; 2nd defline 2nd
+    Seq-id `RB23` byte 69), `-index false` replacing the first slot with `gnl|BL_ORD_ID|0` in v4
+    and v5 (`RB24`, `RB25`: rc 0; 2nd Seq-id `RB26` byte 49), `org` descriptor populating the map
+    in v5 (`RB27`: `Attempt to access NULL pointer.`, rc 255), v5 after a valid profile (`RB28`:
+    802.5 + `byte 15`, rc 255, 9 files), and bad visible char before `NULL` `Seq-id` (`RB29`:
+    803.7 + 802.5 + `byte 17`, rc 255).
+  - `l_QR08.lst`-`l_QR14.lst` (no `cases.tsv` row; tested as refusals): `iupacna` byte `>= 0x80`
+    in pair positions (`QR08`-`QR10`), `:Seq-interval` other-type pointer in binary (`QR11`) and
+    ASN.1 text (`QR14`, where NCBI 2.17.0 prints `class not found: Seq-interval`, rc 255), `NULL`
+    `Seq-id` inside `ASN1_BlastDefLine` in v5 with 0 prior OIDs (`QR12`: none, `-taxid 9606`, and
+    empty `-taxid_map`, where NCBI aborts rc 134), and 1 GiB string length past EOF (`QR13`).
 
 The whole oracle (248 cases) is compared by `compare.py` of the survey; these rows are the part kept in the
 repository.

@@ -191,3 +191,16 @@ RB13	-in in/l_bhnull.lst -out db
 RB14	-in in/l_bhutf8.lst -out db
 RB15	-in in/l_bhhuge.lst -out db
 RB16	-in in/l_bhptr.lst -out db
+RB17	-blastdb_version 4 -in in/l_QR12.lst -out db
+RB18	-blastdb_version 4 -taxid 9606 -in in/l_QR12.lst -out db
+RB19	-blastdb_version 4 -taxid_map in/tmap_nullid.txt -in in/l_QR12.lst -out db
+RB20	-taxid_map in/tmap_nullid.txt -in in/l_QR12.lst -out db
+RB21	-blastdb_version 4 -in in/l_bhnullid_s2.lst -out db
+RB22	-blastdb_version 4 -in in/l_bhnullid_d2.lst -out db
+RB23	-blastdb_version 4 -in in/l_bhnullid_d2s2.lst -out db
+RB24	-blastdb_version 4 -index false -in in/l_QR12.lst -out db
+RB25	-index false -in in/l_QR12.lst -out db
+RB26	-blastdb_version 4 -index false -in in/l_bhnullid_s2.lst -out db
+RB27	-in in/l_bhnullid_org.lst -out db
+RB28	-in in/l_bhnullid_after.lst -out db
+RB29	-blastdb_version 4 -in in/l_bhnullid_badvis.lst -out db

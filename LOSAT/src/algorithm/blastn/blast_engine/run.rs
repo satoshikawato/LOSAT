@@ -6296,7 +6296,6 @@ pub fn run(
     // (`app::early_format_choice`).
     let strategy_file = crate::report::archive::strategy::open_strategy_file(
         args.export_search_strategy.as_deref(),
-        args.out.as_deref(),
         "BLASTN",
     )?;
     let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
@@ -6446,6 +6445,14 @@ pub fn run(
                         &lines,
                         &mut report,
                     );
+                } else if let Some(lines) = crate::report::archive::silent_end_lines(handle, error)
+                {
+                    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:329-332
+                    // A run that `CATCH_ALL` ended without a post (`cli::NativeError::silent_end`,
+                    // such as a strategy stream `CIOException::eWrite` fault): write the error
+                    // archive of the messages saved before it.
+                    let _ =
+                        crate::report::archive::write_error_archive(handle, &lines, &mut report);
                 }
             }
             Ok(()) => {

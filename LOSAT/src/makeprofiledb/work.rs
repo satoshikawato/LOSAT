@@ -4,7 +4,7 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
-use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::blastinput::ncbi_environment::{ApplicationSettings, ReadVerification};
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{self, Cin, OutputFile};
 use crate::ncbi_app::Diag;
@@ -177,6 +177,10 @@ struct Params<'a> {
     db_ver: DbVersion,
     taxids: TaxIdSet,
     user_taxids: bool,
+    /// The run's `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET`
+    /// (`ApplicationSettings::read_verification`), which the read of each profile checks
+    /// (`read_profile`).
+    read_verification: ReadVerification,
 }
 
 impl Params<'_> {
@@ -310,6 +314,7 @@ fn init<'a>(
         db_ver,
         taxids,
         user_taxids,
+        read_verification: ReadVerification::default(),
     })
 }
 
@@ -342,6 +347,7 @@ pub(super) fn run(
         Ok(params) => params,
         Err(status) => return status,
     };
+    params.read_verification = settings.read_verification.clone();
     if let Some(refusal) = refusal(args) {
         return diag.refuse(&refusal);
     }
@@ -607,17 +613,23 @@ fn post_asn_posts(diag: &mut Diag, posts: &[Post]) {
 
 /// Maps an ASN.1 [`ReadError`] of root type `root_type` to makeprofiledb's `Run` error: a
 /// `CSerialException` or `CException`'s newest `GetMsg()`, the root object's `Frame type=` for
-/// `CEofException`, `Unknown` for `std::exception`, and `Refused` for LOSAT's reader limits.
+/// `CEofException`, `Unknown` for `std::exception`, and `Refused` for LOSAT's reader limits or
+/// a check turned off by `read_verification` (`ReadVerification::refused`).
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1878-1904
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
 fn read_error_to_run_error(
     error: ReadError,
     root_type: &str,
+    input: &str,
+    read_verification: &ReadVerification,
     refuse: impl FnOnce(String) -> String,
 ) -> RunError {
     match error {
-        ReadError::Serial(exception) | ReadError::Exception(exception) => {
-            RunError::Exception(exception.get_msg().to_vec())
-        }
+        ReadError::Serial(exception) => match read_verification.refused(&exception, input) {
+            Some(refused) => RunError::Refused(refused),
+            None => RunError::Exception(exception.get_msg().to_vec()),
+        },
+        ReadError::Exception(exception) => RunError::Exception(exception.get_msg().to_vec()),
         ReadError::Eof => RunError::Exception(
             format!(" Frame type= eFrameNamed, Object type= {root_type}").into_bytes(),
         ),
@@ -634,10 +646,14 @@ fn read_error_to_run_error(
 // `byte N: ...`), the frame of the root object for an input that ends in it (`CEofException`),
 // the message of the newest exception of the reader's stack; a `std::exception` is the handler's
 // unknown one.
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
+// A mandatory member that the profile skips is NCBI's read error unless `SERIAL_VERIFY_DATA_READ`
+// turns the check off, which LOSAT refuses there (`read_verification`, `ReadVerification::refused`).
 fn read_profile(
     path: &Path,
     filename: &[u8],
     binary: bool,
+    read_verification: &ReadVerification,
     diag: &mut Diag,
 ) -> Result<PssmWithParameters, RunError> {
     // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1386-1395
@@ -655,9 +671,13 @@ fn read_profile(
     };
     match read.result {
         Ok(pssm) => Ok(pssm),
-        Err(PssmReadError::Ncbi(error)) => {
-            Err(read_error_to_run_error(error, "PssmWithParameters", refuse))
-        }
+        Err(PssmReadError::Ncbi(error)) => Err(read_error_to_run_error(
+            error,
+            "PssmWithParameters",
+            "a profile (-in)",
+            read_verification,
+            refuse,
+        )),
         Err(PssmReadError::Refused(what)) => Err(RunError::Refused(refuse(what))),
     }
 }
@@ -820,7 +840,13 @@ fn add_profiles(
         if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
             return Err(RunError::Input([filename, b" does not exists"].concat()));
         }
-        let mut pssm_w_parameters = read_profile(&path, filename, params.binary, diag)?;
+        let mut pssm_w_parameters = read_profile(
+            &path,
+            filename,
+            params.binary,
+            &params.read_verification,
+            diag,
+        )?;
         let sm = check_input_scoremat(&pssm_w_parameters, filename)?;
         // `seq_size`, the `int` of `GetQueryLength()`: negative past `INT_MAX` (`query_length`).
         let seq_size = query_length(&pssm_w_parameters);
@@ -929,14 +955,18 @@ fn add_to_database(
                 BioseqDeflinesError::NoDeflines => {
                     RunError::Exception(b"Error: No deflines provided.".to_vec())
                 }
-                BioseqDeflinesError::BinaryHeader(error) => {
-                    read_error_to_run_error(error, "Blast-def-line-set", |what| {
+                BioseqDeflinesError::BinaryHeader(error) => read_error_to_run_error(
+                    error,
+                    "Blast-def-line-set",
+                    "binary definition lines (ASN1_BlastDefLine)",
+                    &params.read_verification,
+                    |what| {
                         format!(
                             "binary definition lines (a user object ASN1_BlastDefLine) that \
                              LOSAT's reader does not read ({what})"
                         )
-                    })
-                }
+                    },
+                ),
                 BioseqDeflinesError::NullDescriptor => null_descriptor(),
             })?;
             // The binary definition lines are not encoded again here (`bin_hdr` is kept).

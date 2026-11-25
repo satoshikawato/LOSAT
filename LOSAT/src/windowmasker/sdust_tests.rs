@@ -19,7 +19,7 @@ fn a_sequence_without_masks_is_dusted_whole() {
     let mut masker = SDustMasker::new(20);
     let whole = masker.mask(data, &[]);
     let direct = DustMasker::new(20, 64, 1)
-        .mask_range(data, 0, data.len(), &mut NcbiLfgRandom::new())
+        .mask_range(data, 0, data.len(), &mut NcbiRandom::default())
         .into_iter()
         .map(|interval| (interval.start as u32, (interval.end - 1) as u32))
         .collect::<Vec<_>>();

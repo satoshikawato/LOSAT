@@ -10,10 +10,11 @@
 use std::sync::OnceLock;
 
 use crate::core::blast_encoding::{
-    encode_iupac_to_blastna, iupacna_to_ncbi4na, resolve_ncbi4na_base, NcbiRandom,
+    encode_iupac_to_blastna, iupacna_to_ncbi4na, resolve_ncbi4na_base,
 };
 use crate::seqdb::volume::AmbiguityRun;
 use crate::utils::dust::MaskedInterval;
+use crate::utils::random_gen::NcbiRandom;
 
 /// ncbi4na code -> IUPAC letter (NCBI's `NCBI4NA_TO_IUPACNA`, upper case).
 const NCBI4NA_TO_IUPACNA: [u8; 16] = *b"-ACMGRSVTWYHKDBN";

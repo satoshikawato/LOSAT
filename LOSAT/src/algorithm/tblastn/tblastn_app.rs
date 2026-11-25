@@ -55,7 +55,7 @@ fn batch_failure(error: anyhow::Error) -> std::result::Result<anyhow::Error, any
         return Ok(crate::blastinput::app::engine_error(text.as_bytes()));
     }
     let error = match error.downcast::<ErrorAfterBatchReports>() {
-        Ok(ErrorAfterBatchReports(refusal)) => return Ok(refusal),
+        Ok(failure) => return Ok(failure.error),
         Err(error) => error,
     };
     let error = match error.downcast::<XReadError>() {
@@ -749,6 +749,9 @@ fn open_search_database(
     // `Query is Empty!` (as BLASTN's).
     let database = match args.database_name() {
         Some(name) => {
+            let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+                outputs.formats.first().map(|format| format.outfmt),
+            );
             let database = super::database::TblastnDatabase::open_restricted(
                 name,
                 settings,
@@ -757,7 +760,8 @@ fn open_search_database(
                 outputs.diagnostics,
             )?
             .showing_gis(args.show_gis)
-            .after_calls(args.first_query_ordinal > 0);
+            .after_calls(args.first_query_ordinal > 0)
+            .keeping_scope(keeps_scope, separate_xml2);
             if !joins_scope {
                 return Ok(Some(database));
             }
@@ -765,6 +769,7 @@ fn open_search_database(
                 args.archive.as_ref(),
                 args.strategy.as_ref(),
                 &args.db_filter,
+                database.list_gis(),
                 database.list_taxids(),
                 &database.statistics(),
                 true,
@@ -2544,6 +2549,7 @@ fn search(
                     {
                         // No prefetch; no fetch writes without `taxdb.bti` or such a lookup.
                         if !taxdb_found && !database.scope_utf8_seen() {
+                            database.reset_scope();
                             continue;
                         }
                         let rows = first_rows;
@@ -2578,11 +2584,13 @@ fn search(
                             }
                             rows_open(shown)?;
                         }
+                        database.reset_scope();
                         continue;
                     }
                     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
                     // A batch without Seq-aligns prefetches no sequence.
                     if seq_aligns == 0 {
+                        database.reset_scope();
                         continue;
                     }
                     let prefetched = |query: usize| {
@@ -2625,6 +2633,9 @@ fn search(
                     if !messages.is_empty() {
                         prefetch_posts.push((span.start, messages));
                     }
+                    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+                    database.reset_scope();
                 }
             }
         }
@@ -2655,7 +2666,7 @@ fn search(
                     .after_xml_reports(xml_before.as_ref()),
                 first_xml2,
             );
-            match error.downcast::<crate::algorithm::common::database::HeaderReadError>() {
+            match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
                 Ok(failure) => failed = Some((span, failure.error)),
                 Err(error) => return Err(error),
             }

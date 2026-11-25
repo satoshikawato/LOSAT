@@ -174,7 +174,9 @@ fn karlin_blocks<const UNGAPPED: bool>(
             // with a valid query would have raised the error), and NCBI has written their
             // reports (`run_in_pool`).
             if !first_batch {
-                return Err(ErrorAfterBatchReports(karlin_error(&message, empty_queries)).into());
+                return Err(
+                    ErrorAfterBatchReports::new(karlin_error(&message, empty_queries)).into(),
+                );
             }
             // The prolog of a file sink (the others were written before the search).
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
@@ -291,7 +293,7 @@ pub(super) fn setup_failure(
     shown: &ShownSubjects,
 ) -> anyhow::Error {
     if !first_batch {
-        return ErrorAfterBatchReports(error).into();
+        return ErrorAfterBatchReports::new(error).into();
     }
     // In `refused_batch_setup_error` (`setup_only`), a refusal that is not NCBI's `NativeError`
     // gives way to the scope refusal, whose `fail_batch!` writes the prologs itself.

@@ -1,0 +1,73 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/rps/nest.faa).
+           1 sequences; 380 total letters
+
+
+
+Query= f101n
+
+Length=570
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+nest_101                                                              394     4e-144
+
+
+
+For reading frame +1 of query sequence:
+
+Query_1    1    MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  180
+Subject_1  96   ............................................................  155
+Subject_1  96   ............................................................  155
+
+Query_1    181  TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  360
+Subject_1  156  ............................................................  215
+Subject_1  156  ............................................................  215
+Subject_1  287                                      ........................  310
+
+Query_1    361  ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  540
+Subject_1  216  ............................................................  275
+Subject_1  216  ............................................................  275
+Subject_1  311  ............................................................  370
+
+Query_1    541  AEMYAAACRD  570
+Subject_1  276  ..........  285
+Subject_1  276  ..........  285
+Subject_1  371  ..........  380
+
+For reading frame +2 of query sequence:
+
+Query_1    494  CGSGTITIIM*SVWEG  541
+Subject_1  57   ..T...VTHAGE.I..  72
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 58575
+
+
+  Database: User specified sequence set (Input: tests/fasta/rps/nest.faa).
+    Posted date:  Unknown
+  Number of letters in database: 380
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

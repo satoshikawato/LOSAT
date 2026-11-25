@@ -22,6 +22,7 @@ use super::{
     BlastnArgs, ContextKarlin, KarlinParams, NuclScoringSpec, QueryBatching, QueryContext,
     SequenceData, ShownSubjects, SubjectSource, FIRST_BATCH_OUTPUTS,
 };
+use crate::algorithm::blastn::query_split::{ReadFails, SetupCheckFailure, UnmetChecks};
 use crate::algorithm::blastn::scoring::{
     check_greedy_gap_costs, check_greedy_matrix_only, context_blocks, context_blocks_ungapped,
     karlin_error,
@@ -230,21 +231,176 @@ pub(super) fn setup_failure(
     }
 }
 
-/// Checks of `BLAST_GapAlignSetUp` on the subjects and greedy extension parameters: OID 0 read
-/// of a database without sequences, statistics count of 0 (refusal), average subject length
-/// (`SUBJECT_LENGTH_TOO_SHORT` in the preliminary stage, `TRACEBACK_FAILED` in traceback setup
-/// when no chunk of a split batch had a valid context), and greedy setup refusals.
+/// Where a `-db` search first fails to read the database in a split query batch (`SplitBatchSteps`):
+/// `ReadFails::Setup` when the volume has no sequences (`SeqDb::first_oid_read_fails`: OID 0 in
+/// `BLAST_GapAlignSetUp`, blast_setup.c:925-937), or `ReadFails::Search` when a sequence file
+/// cannot be opened in the preliminary stage.
+pub(super) fn split_read_fails(subjects: SubjectSource<'_>) -> Option<ReadFails> {
+    let SubjectSource::Database(database) = subjects else {
+        return None;
+    };
+    if database.first_oid_read_fails() {
+        Some(ReadFails::Setup)
+    } else if database.sequence_file_read_error().is_some() {
+        Some(ReadFails::Search)
+    } else {
+        None
+    }
+}
+
+/// The read error corresponding to `split_read_fails(subjects)` when `SplitBatchSteps::before_read`
+/// returns `ChunkStep::End`.
+pub(super) fn split_read_error(subjects: SubjectSource<'_>) -> Option<anyhow::Error> {
+    let SubjectSource::Database(database) = subjects else {
+        return None;
+    };
+    if database.first_oid_read_fails() {
+        Some(database::PreliminaryReadError("Database memory map file error").into())
+    } else {
+        database.sequence_file_read_error()
+    }
+}
+
+/// The checks of `BLAST_GapAlignSetUp` on the subjects and greedy extension parameters after the
+/// OID 0 read: a statistics count of 0 (refusal, rule 3), the average subject length (NCBI's
+/// engine error `SUBJECT_LENGTH_TOO_SHORT` in the preliminary stage, `Traceback failed` via
+/// `UnmetChecks::TracebackFailed` in traceback setup when no chunk of a split batch had a valid
+/// context), and the greedy set-up refusals.
 ///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-993
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:475-480
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-939
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-993
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-219
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:310-314
+///
+/// The subject set has no BLAST database statistics, and BLASTN has no Gumbel block
+/// (blast_setup.c:475-480): a batch with a valid context stops NCBI when the subjects have fewer
+/// letters than subjects (subjects without letters count with none). A batch without a valid
+/// context is not searched (`CheckInternalData`), so it does not.
+pub(super) fn gap_align_setup_checks(
+    args: &BlastnArgs,
+    subjects: SubjectSource<'_>,
+    ungapped: bool,
+) -> std::result::Result<(), SetupCheckFailure> {
+    let metadata = subjects.metadata();
+    let total_length = metadata.db_len_total;
+    let (total_length, num_seqs) = if total_length > 0 {
+        (total_length, metadata.db_num_seqs)
+    } else {
+        // A database with a total length of 0 holds sequences without letters only:
+        // the length of its first sequence (`BlastSeqSrcGetSeqLen` of ordinal id 0) is 0.
+        (
+            subjects.prepared().map_or(0, |prepared| {
+                if prepared.records.is_empty() {
+                    0
+                } else {
+                    prepared.letters().len(0)
+                }
+            }) as i64,
+            1,
+        )
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+    // A count of 0 (of a positive total) is the division by 0 where NCBI crashes, LOSAT's refusal
+    // (`common::database::check_setup_count`, D1a-5 of line RG, rule 3) at this batch, after the
+    // reports of the batches before (NCBI's output before its crash in the tabular formats), as
+    // the error below; a run whose batches have no valid context does not reach it and is reported
+    // as NCBI's. Else `stats::setup::setup_subject_length`: the total divided by `num_seqs`, cast
+    // to `Int4` and then to `Uint4`, is 0 (a negative `NSEQ` passes; one of 2^31 fails).
+    if let Err(error) = crate::algorithm::common::database::check_setup_count(
+        total_length,
+        num_seqs,
+        false,
+        "BLASTN",
+    ) {
+        return Err(SetupCheckFailure::Refusal(error));
+    }
+    if crate::stats::setup::setup_subject_length(total_length, num_seqs, None).is_none() {
+        return Err(SetupCheckFailure::Engine(anyhow::Error::from(
+            crate::cli::NativeError {
+                exit: 3,
+                message: format!(
+                    "{ENGINE_ERROR} {}\n",
+                    crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT
+                )
+                .into(),
+            },
+        )));
+    }
+    // `BLAST_GapAlignSetUp` of this batch or chunk: the subjects first, then the greedy set-up
+    // below (blast_setup.c:969-979 before :993, `BLAST_GapAlignStructNew`).
+    // The greedy set-up after the subjects: NCBI 2.17.0 reports `The average subject length is too
+    // short` (exit status 3) with gap costs or scores that LOSAT refuses for the greedy extension,
+    // also in a split query batch (each chunk checks them, `CHUNK_SIZE=200`; line RG D1a-6).
+    if let Some(error) = greedy_setup_refusal(args, ungapped) {
+        return Err(SetupCheckFailure::Refusal(error));
+    }
+    Ok(())
+}
+
+/// Formats `SplitBatchSteps::unmet_checks()` for BLASTN's traceback setup after every chunk of a
+/// split batch had no valid context: NCBI's `Traceback failed` (exit 3) for an engine setup error,
+/// or the preserved refusal (count of 0, greedy setup).
+///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:231-253
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1831-1837
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback_mt_priv.c:219-226
+pub(super) fn traceback_setup_error(
+    unmet: UnmetChecks,
+    first_batch: bool,
+    outputs: BatchOutputs<'_, '_>,
+    intro: BlastnIntro,
+    shown: &ShownSubjects,
+) -> anyhow::Error {
+    let error = match unmet {
+        UnmetChecks::TracebackFailed => anyhow::Error::from(crate::cli::NativeError {
+            exit: 3,
+            message: format!(
+                "{ENGINE_ERROR} {}\n",
+                crate::blastinput::app::TRACEBACK_FAILED
+            )
+            .into(),
+        }),
+        UnmetChecks::Refusal(refusal) => refusal,
+    };
+    setup_failure(error, first_batch, outputs, intro, shown)
+}
+
+/// Checks of `BLAST_GapAlignSetUp` on the subjects and greedy extension parameters for a batch
+/// searched whole (`!split`):
+/// - The subject set has no BLAST database statistics, and BLASTN has no Gumbel block
+///   (blast_setup.c:475-480): a batch with a valid context stops NCBI when the subjects have fewer
+///   letters than subjects (subjects without letters count with none). A batch without a valid
+///   context is not searched (`CheckInternalData`), so it does not.
+/// - A database without sequences (makeblastdb builds none; a volume whose index holds none) has a
+///   total length of 0 (unless an alias file's LENGTH or STATS_TOTLEN gives one:
+///   `SeqDb::first_oid_read_fails`), so the setup asks its reader for the length of OID 0, which
+///   it does not have: NCBI's search stage reports the reader's error as a database file that
+///   cannot be read (local_blast.cpp:240-251). Shown with the oracle (campaign dbsearch-20261012,
+///   `$BUILD_ROOT/dbsearch/db4/smoke/empty`: the nucleotide fixture's index with no sequence): the
+///   outfmt 0 prolog, then `BLAST engine error: Database memory map file error`, exit status 3,
+///   for outfmt 0, 6 and 7.
+/// - A split batch checks these in its chunks (`ContextInputs::split`, via `SplitBatchSteps`): the
+///   first chunk with a valid context stops NCBI there, after the masks of the chunks up to it
+///   (NCBI BLAST+ 2.17.0 on 2026-11-12, line NP M3c review `c3`: `CHUNK_SIZE=600` and subjects
+///   with fewer letters than subjects post the registry of `-window_masker_taxid` for the batch
+///   and for chunk 0, then `The average subject length is too short`), while OID 0 reads stop at
+///   chunk 0 before its validity (`blast_setup.c:933`), and a split batch with no valid chunk
+///   meets the checks in traceback setup (`traceback_setup_error`). The search spaces of the batch
+///   (`SplitQuery_SetEffectiveSearchSpace`) check nothing.
+/// - Count of 0 (rule 3, `check_setup_count`, line RG D1a-5) and greedy setup after the subjects
+///   (line RG D1a-6): see `gap_align_setup_checks`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:475-480
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-993
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-219
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:310-314
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:448-458
 #[allow(clippy::too_many_arguments)]
 pub(super) fn check_gap_align_setup(
     args: &BlastnArgs,
     subjects: SubjectSource<'_>,
-    seq_data: &SequenceData<'_>,
     ungapped: bool,
-    traceback: bool,
     first_batch: bool,
     outputs: BatchOutputs<'_, '_>,
     intro: BlastnIntro,
@@ -261,48 +417,14 @@ pub(super) fn check_gap_align_setup(
             ));
         }
     }
-    let total_length = seq_data.db_len_total;
-    let (total_length, num_seqs) = if total_length > 0 {
-        (total_length, seq_data.db_num_seqs)
-    } else {
-        // A database with a total length of 0 holds sequences without letters only:
-        // the length of its first sequence (`BlastSeqSrcGetSeqLen` of ordinal id 0) is 0.
-        (
-            subjects.prepared().map_or(0, |prepared| {
-                if prepared.records.is_empty() {
-                    0
-                } else {
-                    prepared.letters().len(0)
-                }
-            }) as i64,
-            1,
-        )
-    };
-    let subject_length_error = if traceback {
-        crate::blastinput::app::TRACEBACK_FAILED
-    } else {
-        crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT
-    };
-    let setup_error = crate::algorithm::common::database::check_setup_count(
-        total_length,
-        num_seqs,
-        false,
-        "BLASTN",
-    )
-    .err()
-    .or_else(|| {
-        crate::stats::setup::setup_subject_length(total_length, num_seqs, None)
-            .is_none()
-            .then(|| {
-                anyhow::Error::from(crate::cli::NativeError {
-                    exit: 3,
-                    message: format!("{ENGINE_ERROR} {subject_length_error}\n").into(),
-                })
-            })
-    })
-    .or_else(|| greedy_setup_refusal(args, ungapped));
-    if let Some(error) = setup_error {
-        return Err(setup_failure(error, first_batch, outputs, intro, shown));
+    if let Err(failure) = gap_align_setup_checks(args, subjects, ungapped) {
+        return Err(setup_failure(
+            failure.into_error(),
+            first_batch,
+            outputs,
+            intro,
+            shown,
+        ));
     }
     Ok(())
 }
@@ -336,20 +458,10 @@ fn effective_search_spaces<const UNGAPPED: bool>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:215-219
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:310-314
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:448-458
-    // A split batch checks these in each valid chunk (`ContextInputs::split`), or in traceback
-    // setup when no chunk had a valid context (`search_query_batch`).
-    if any_valid_context && !split {
-        check_gap_align_setup(
-            args,
-            subjects,
-            seq_data,
-            UNGAPPED,
-            false,
-            first_batch,
-            outputs,
-            intro,
-            shown,
-        )?;
+    // A split batch checks these through `SplitBatchSteps` in `search_query_chunks` /
+    // `refused_batch_setup_error` (`BatchStage::ChunkPrelim` and `ContextInputs::split`).
+    if any_valid_context && !split && !matches!(stage, BatchStage::ChunkPrelim { .. }) {
+        check_gap_align_setup(args, subjects, UNGAPPED, first_batch, outputs, intro, shown)?;
     }
     let search_karlin: Vec<ContextKarlin> = {
         let fallback = context_karlin

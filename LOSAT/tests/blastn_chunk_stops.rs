@@ -16,6 +16,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+// Matches `algorithm::blastn::query_split::{empty_chunk_refusal, negative_split_refusal}`
+// (`algorithm` is `pub(crate)`, so integration tests assert the rendered message directly).
 const EMPTY_CHUNK: &str = "a query chunk without a query is not supported by LOSAT's BLASTN";
 const NEGATIVE_GAPS: &str =
     "a negative CHUNK_SIZE above a negative OVERLAP_CHUNK_SIZE splits this \
@@ -469,5 +471,67 @@ fn window_masker_registry_loads_follow_ncbis_split_step_order() {
         count_posts(&gap.stderr),
         4,
         "negative gap refuses after chunk 0 masking: {gap_err}"
+    );
+
+    // `q_gapvalid` (no chunk has a valid context, only the gap does):
+    // - on `e_nF` (OID 0 read fails in `BLAST_GapAlignSetUp` before context check), chunk 0 stops
+    //   before chunk 1 is masked (4 posts total, matching NCBI 2.17.0);
+    // - on `avg2p32` (average subject length check is reached only after context check), both
+    //   chunks are masked and skipped, and traceback setup fails with `Traceback failed` (5 posts).
+    let q_gapvalid = manifest_path("tests/fasta/xchunk/q_gapvalid.fna");
+    let db_enf = manifest_path("tests/db_search/aliaskeys/e_nF");
+    let db_avg = manifest_path("tests/db_search/dbcounts/avg2p32");
+
+    let gv_enf = run_blastn(
+        &[
+            "-task",
+            "blastn",
+            "-db",
+            db_enf.to_str().unwrap(),
+            "-query",
+            q_gapvalid.to_str().unwrap(),
+            "-window_masker_taxid",
+            "9606",
+            "-outfmt",
+            "7",
+        ],
+        &[("CHUNK_SIZE", "-100"), ("OVERLAP_CHUNK_SIZE", "-200")],
+        Some(&dir.0),
+    );
+    assert_eq!(gv_enf.status.code(), Some(3));
+    let gv_enf_err = String::from_utf8_lossy(&gv_enf.stderr);
+    assert!(
+        gv_enf_err.contains("Database memory map file error"),
+        "{gv_enf_err}"
+    );
+    assert_eq!(
+        count_posts(&gv_enf.stderr),
+        4,
+        "gapvalid e_nF stops in chunk 0 OID 0 read before chunk 1 masking: {gv_enf_err}"
+    );
+
+    let gv_avg = run_blastn(
+        &[
+            "-task",
+            "blastn",
+            "-db",
+            db_avg.to_str().unwrap(),
+            "-query",
+            q_gapvalid.to_str().unwrap(),
+            "-window_masker_taxid",
+            "9606",
+            "-outfmt",
+            "7",
+        ],
+        &[("CHUNK_SIZE", "-100"), ("OVERLAP_CHUNK_SIZE", "-200")],
+        Some(&dir.0),
+    );
+    assert_eq!(gv_avg.status.code(), Some(3));
+    let gv_avg_err = String::from_utf8_lossy(&gv_avg.stderr);
+    assert!(gv_avg_err.contains("Traceback failed"), "{gv_avg_err}");
+    assert_eq!(
+        count_posts(&gv_avg.stderr),
+        5,
+        "gapvalid avg2p32 masks both chunks before traceback setup fails: {gv_avg_err}"
     );
 }

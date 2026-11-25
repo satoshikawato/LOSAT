@@ -14,7 +14,7 @@
 //! on the error paths that come after the reports of earlier batches (a reader error, a batch of
 //! queries without letters, a header file that cannot be read), and with `-db`. Where the switch
 //! must not act (a search space that could overflow; scoring options without Karlin-Altschul
-//! values; a negative `CHUNK_SIZE`; the debug output) the `[X_STATS]` line names why and the bytes
+//! values; the debug output) the `[X_STATS]` line names why and the bytes
 //! are the same too. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
 //! streamed alike. Where LOSAT refuses a sequence that a later batch reports (a stored title,
 //! ambiguity data, a parsed Seq-id, a taxonomy record, a subject's id), the switch writes the

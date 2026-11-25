@@ -468,8 +468,6 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | Input | What happens |
 | :--- | :--- |
 | An alias file of `-seqidlist` or `-taxidlist` over a version 5 database | Refused when the new alias file is opened to count its sequences, and the alias file is removed: LOSAT does not yet read these lists over a version 5 database (see Alias files and database arithmetic above). Over a version 4 database they are written as NCBI's. |
-| A value that is not UTF-8 of any option but `-gi_file_out` and `-logfile` | Refused, after NCBI's own argument errors and `-dryrun`. The error names the option. NCBI reads the bytes. `-gi_file_out` and `-logfile` take such a name and write that file, as NCBI's. |
-| A line of `-dblist_file` that is not UTF-8 | Refused before the alias file is written. NCBI writes the name's bytes into the alias file. The lines of `-vdblist_file` are written as they are, as NCBI's. |
 
 ## Programs LOSAT does not provide
 

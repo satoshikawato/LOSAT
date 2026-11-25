@@ -119,7 +119,7 @@ pub fn search_database_read_files(
         | crate::api::Program::Tblastx => crate::seqdb::SeqType::Nucleotide,
     };
     let mut out = Vec::new();
-    let mut push_db = |db: &str, db_type: crate::seqdb::SeqType| {
+    let push_db = |out: &mut Vec<Vec<u8>>, db: &str, db_type: crate::seqdb::SeqType| {
         let trimmed = crate::seqdb::db_argument_name(db);
         out.extend(crate::seqdb::alias::database_lookup_files(
             trimmed.as_bytes(),
@@ -128,7 +128,7 @@ pub fn search_database_read_files(
         ));
     };
     for db in dbs {
-        push_db(db, seqtype);
+        push_db(&mut out, db, seqtype);
     }
     if !dbs.is_empty() {
         out.extend(crate::seqdb::taxdb::lookup_files(blastdb.as_deref()));
@@ -141,7 +141,7 @@ pub fn search_database_read_files(
         }
     }
     for fdb in filtering_dbs {
-        push_db(fdb, crate::seqdb::SeqType::Nucleotide);
+        push_db(&mut out, fdb, crate::seqdb::SeqType::Nucleotide);
     }
     out
 }

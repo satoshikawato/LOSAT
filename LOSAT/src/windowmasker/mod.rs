@@ -145,7 +145,7 @@ pub(crate) fn check_in(
 ///   that changes the run when the file is missing: every input/database entry of `-mk_counts`
 ///   (comma-separated or read from `-fa_list true`, FASTA or `-infmt blastdb`), and `-ustat` of
 ///   masking.
-pub(crate) fn read_files<S: AsRef<OsStr>>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+pub(crate) fn read_files<S: AsRef<OsStr> + Clone>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     let mut mk_counts = false;
     let mut convert = false;
     let mut fa_list = false;

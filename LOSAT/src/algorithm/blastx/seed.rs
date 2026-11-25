@@ -496,7 +496,7 @@ fn x_compressed_lookup(
     }
     .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?
     .map(Lookup::Compressed)
-    .map_err(|()| {
+    .map_err(|_| {
         anyhow::anyhow!(
             "-threshold {threshold} with the compressed lookup table of -word_size {word} is not supported by LOSAT's BLASTX: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap"
         )
@@ -728,7 +728,7 @@ impl Lookup {
                     XCompressedLookup::Flat(table) => XBxCompressedLookup::Wide(table),
                 }))
             })
-            .map_err(|()| {
+            .map_err(|_| {
                 anyhow::anyhow!(
                     "-threshold {} with the compressed lookup table of -word_size {word} is not supported by LOSAT's BLASTX: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
                     options.threshold

@@ -396,7 +396,7 @@ impl TblastnDatabase {
     }
 
     /// The stop of the prefetch of the batch of `queries` whose reported
-    /// subjects are `subjects` (`prefetch_stop`): NCBI's error (a `shared::HeaderReadError`), or
+    /// subjects are `subjects` (`prefetch_stop`): NCBI's error (a `ErrorAfterBatchReports`), or
     /// LOSAT's refusal (`shared::batch_prefetch`, after the batches before, `before`: the run's
     /// record of what NCBI's BLAST database data loader loaded for them, `LoadedBefore`).
     /// `at_hits`: the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
@@ -679,10 +679,12 @@ impl<'a> CallReads<'a> {
         );
         match read {
             Ok(_) => Ok(None),
-            Err(error) => match error.downcast::<shared::HeaderReadError>() {
-                Ok(failure) => Ok(Some(failure.error)),
-                Err(error) => Err(error),
-            },
+            Err(error) => {
+                match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
+                    Ok(failure) => Ok(Some(failure.error)),
+                    Err(error) => Err(error),
+                }
+            }
         }
     }
 
@@ -824,7 +826,7 @@ pub(super) fn drop_unaligned(
 /// Reads the definition lines of the sequences that the final hit lists `hitlists` of a
 /// query batch name (their subject index is the ordinal id), in NCBI's order (query by query,
 /// in hit-list order) into `titles` (`common::database::read_header`); `first_query` is the
-/// index of the batch's first query. A reader error of NCBI's own is a `HeaderReadError` (it
+/// index of the batch's first query. A reader error of NCBI's own is an `ErrorAfterBatchReports` (it
 /// fails the batch); LOSAT's refusals are errors of their own. The first read of a record with a
 /// UTF8String where a VisibleString is expected (`shared::HeaderReader::first_utf8`) is returned:
 /// NCBI posts its warning there. `one_by_one`: the reports may read the reported sequences one by

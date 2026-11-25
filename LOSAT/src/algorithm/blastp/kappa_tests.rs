@@ -393,9 +393,9 @@ fn evalue_adjust_contexts_of_a_next_query_that_is_not_valid() {
     let error = evalue_adjust_contexts(&contexts, &spaces, &batches, 0, blastp)
         .expect_err("the valid query 1 is followed by a query without a search space");
     let failure = error
-        .downcast::<crate::algorithm::common::database::HeaderReadError>()
+        .downcast::<crate::blastinput::app::ErrorAfterBatchReports>()
         .expect("the batch's error");
-    assert_eq!(failure.query, 1);
+    assert_eq!(failure.query, Some(1));
     let text = failure.to_string();
     assert!(text.contains("are not supported by LOSAT's BLASTP for query id1, which"));
     assert!(text.contains("(id2: no residue that can be scored"));

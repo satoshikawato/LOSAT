@@ -73,32 +73,103 @@ pub fn query_error(message: &str) -> anyhow::Error {
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275,289-291,300-302 (TBLASTX's
 // loop is the same, tblastx_app.cpp:176-207)
+// NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
 /// An error of a query batch's search that comes after the reports of the batches before, for
 /// every program: NCBI searches a batch and prints its reports before it reads the next one, so
 /// when the search of a batch stops NCBI has printed the reports of the batches before, without
-/// the epilog. The error held is the run's error as it is: NCBI's own (`engine_error`, exit 3) or
-/// LOSAT's refusal of a step where NCBI crashes, does not finish or stops (exit 1). The batch loop
-/// that meets it writes those reports (for the first batch, the prologs), then the failing batch's
-/// reader messages and search strategy posts, and returns the error it holds, its message
-/// unchanged: TBLASTX's (`tblastx::blast_engine::run_impl`, the X2c form, the Owner's decision of
-/// 2026-11-16 on line RG's Q-X2c: "the results of the query batches before are written") and
-/// TBLASTN's (`tblastn::tblastn_app::batch_failure`). Any other refusal of a batch's search comes
-/// before the run's first byte. A tabular row at which NCBI stops in a batch's report
-/// (`report::tabular::FailedLookupRefusal`) comes after the reports of the batches before too,
-/// then what NCBI writes to stderr of the failing batch before that row (its reader messages, its
-/// search strategy posts, its UTF8String warning, its prefetch texts, and for each of its queries up
-/// to the row's the query's own warnings, its formatter's taxdb warning and its subject reads up to
-/// the row: `FailedLookupRefusal::posts_before_stop`): TBLASTN, TBLASTX and BLASTN off its report
-/// stream, which check every batch's rows at once, write those reports first
+/// the epilog. The one type of that concept (line RG item X-short-bat-2, X4's Q2): the error held
+/// is the run's error as it is, NCBI's own (`engine_error`, exit 3; a reader error of a header file
+/// that the batch's hit lists reach, `common::database::stored_title`, rpsblast's profile
+/// sequences read by a batch's traceback, a lookup that fails on a file in a batch's prefetch, a
+/// `-use_sw_tback` redo whose batch's last redone match fails, `Traceback failed`) or LOSAT's
+/// refusal of a step where NCBI crashes, does not finish or stops (exit 1: a fetch of a header
+/// that cannot be read under a negative seqid list, a Smith-Waterman redo without end, a query
+/// chunk split again or without a query, a compressed table that fills NCBI's overflow banks).
+/// The batch loop that meets it writes those reports (for the first batch, the prologs), then the
+/// failing batch's reader messages and search strategy posts, then NCBI's warning of `utf8` where
+/// the run has not posted it, and returns the error it holds, its message unchanged: TBLASTX's
+/// (`tblastx::blast_engine::run_impl`, the X2c form, the Owner's decision of 2026-11-16 on line
+/// RG's Q-X2c: "the results of the query batches before are written"), TBLASTN's
+/// (`tblastn::tblastn_app::batch_failure`), BLASTX's (`blastx::native`), BLASTN's titles and
+/// prefetch, and BLASTP's, psiblast's and rpsblast's (`blastp::blast_engine::search`, which
+/// searches all batches together and then the batches before the failing one again alone, so it
+/// needs `query`). Any other refusal of a batch's search comes before the run's first byte. A
+/// tabular row at which NCBI stops in a batch's report (`report::tabular::FailedLookupRefusal`)
+/// comes after the reports of the batches before too, then what NCBI writes to stderr of the
+/// failing batch before that row (its reader messages, its search strategy posts, its UTF8String
+/// warning, its prefetch texts, and for each of its queries up to the row's the query's own
+/// warnings, its formatter's taxdb warning and its subject reads up to the row:
+/// `FailedLookupRefusal::posts_before_stop`): TBLASTN, TBLASTX and BLASTN off its report stream,
+/// which check every batch's rows at once, write those reports first
 /// (`FailedLookupRefusal::batch_start`), then those posts; BLASTP and PSIBLAST fail that query's
-/// batch (`common::database::HeaderReadError`, whose `ErrorAfterPosts` holds the posts after the
-/// batch's own); BLASTX and BLASTN on its stream check each batch's rows when they write them.
+/// batch (`ErrorAfterBatchReports`, whose `common::database::ErrorAfterPosts` holds the posts after
+/// the batch's own); BLASTX and BLASTN on its stream check each batch's rows when they write them.
 #[derive(Debug)]
-pub(crate) struct ErrorAfterBatchReports(pub(crate) anyhow::Error);
+pub(crate) struct ErrorAfterBatchReports {
+    pub(crate) error: anyhow::Error,
+    /// The first query of the failing batch (in the numbering of the search call that raised
+    /// it), where the raising step knows it: a driver that searches all batches together
+    /// (BLASTP's `search`) reads it; a loop that searches one batch at a time has the batch in
+    /// hand (`None` there).
+    pub(crate) query: Option<usize>,
+    /// The first UTF8String that the batch's reads before the failure (in NCBI's order), or the
+    /// failed read itself before its failure, took for a VisibleString
+    /// (`common::database::HeaderReader::first_utf8`): NCBI posted its warning before the error
+    /// (`common::database::Utf8Read::post`).
+    pub(crate) utf8: Option<crate::algorithm::common::database::Utf8Read>,
+}
+
+impl ErrorAfterBatchReports {
+    /// `error` of the batch that a loop searching one batch at a time has in hand.
+    #[cold]
+    pub(crate) fn new(error: anyhow::Error) -> Self {
+        Self {
+            error,
+            query: None,
+            utf8: None,
+        }
+    }
+
+    /// `error` of the batch whose first query is `query`.
+    #[cold]
+    pub(crate) fn of_batch(query: usize, error: anyhow::Error) -> Self {
+        Self {
+            error,
+            query: Some(query),
+            utf8: None,
+        }
+    }
+
+    /// `error` of a batch that fails after NCBI's reads of its Seq-aligns' headers (its
+    /// prefetch), with `read`, the first of those reads that met a UTF8String (`first_utf8`),
+    /// where it is the failure of a named batch (`query`) without one: NCBI posted its warning
+    /// before the failure.
+    pub(crate) fn after_reads(
+        error: anyhow::Error,
+        read: Option<&crate::algorithm::common::database::Utf8Read>,
+    ) -> anyhow::Error {
+        match error.downcast::<ErrorAfterBatchReports>() {
+            Ok(mut failure) => {
+                if failure.query.is_some() && failure.utf8.is_none() {
+                    failure.utf8 = read.cloned();
+                }
+                anyhow::Error::new(failure)
+            }
+            Err(error) => error,
+        }
+    }
+
+    /// The error held, where `error` is an `ErrorAfterBatchReports`, else `error` as it is.
+    pub(crate) fn held(error: anyhow::Error) -> anyhow::Error {
+        error
+            .downcast::<Self>()
+            .map_or_else(|error| error, |failure| failure.error)
+    }
+}
 
 impl std::fmt::Display for ErrorAfterBatchReports {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.error)
     }
 }
 

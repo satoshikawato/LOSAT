@@ -370,23 +370,26 @@ fn prepare_search_block(
 ) -> Result<()> {
     let sequences = block.len();
     let invalid = holds_non_residue_byte(block.protein_bytes());
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
     // A well-formed block holds one sentinel byte before its first sequence and one
-    // after every sequence.
+    // after every sequence. Sequences with NCBI 32-bit length <= 0 (empty or >= 2^31) are
+    // skipped by NCBI and stored as `[0, 0]`.
     let sentinels_in_place = (0..sequences).all(|i| {
         let with_sentinels = block.protein_with_sentinels(i);
-        (i > 0 || with_sentinels[0] == NCBISTDAA_GAP)
-            && with_sentinels[with_sentinels.len() - 1] == NCBISTDAA_GAP
+        with_sentinels.len() == 2
+            || (with_sentinels[0] == NCBISTDAA_GAP
+                && with_sentinels[with_sentinels.len() - 1] == NCBISTDAA_GAP)
     });
     if !invalid && sentinels_in_place {
         return Ok(());
     }
     for i in 0..sequences {
+        let with_sentinels = block.protein_with_sentinels(i);
+        if with_sentinels.len() == 2 {
+            continue;
+        }
         let ordinal = block.first_ordinal() + i as u32;
-        shared::check_protein_sequence(
-            block.protein_with_sentinels(i),
-            || oids.oid(ordinal),
-            program,
-        )?;
+        shared::check_protein_sequence(with_sentinels, || oids.oid(ordinal), program)?;
     }
     bail!("a database block is not well-formed, which is not supported by LOSAT's {program}")
 }
@@ -411,7 +414,7 @@ fn holds_non_residue_byte(bytes: &[u8]) -> bool {
 /// name `program`.
 fn read_search_block(db: &SeqDb, range: BlockRange, program: &str) -> Result<SequenceBlock> {
     let block = db
-        .read_block(range)
+        .read_protein_search_block(range)
         .map_err(|error| shared::search_read_error(error, program))?;
     prepare_search_block(&block, db.oid_map(), program)?;
     Ok(block)
@@ -454,15 +457,18 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
         return diag_offset;
     };
     for bounds in offsets.windows(2) {
-        // The sequence and the sentinel byte after it.
-        let subject_length = (bounds[1] - bounds[0]).saturating_sub(1);
-        if subject_length == 0 {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+        // The sequence and the sentinel byte after it; proteins whose NCBI 32-bit length is <= 0
+        // (`0` or `>= 2^31`) are skipped and do not advance the diagonal offset.
+        let subject_length =
+            crate::seqdb::ncbi_protein_length((bounds[1] - bounds[0]).saturating_sub(1));
+        if subject_length <= 0 {
             continue;
         }
         if diag_offset >= i32::MAX / 4 {
             diag_offset = window;
         } else {
-            diag_offset += subject_length as i32 + window;
+            diag_offset += subject_length + window;
         }
     }
     diag_offset
@@ -2349,13 +2355,26 @@ impl ListedTitles<'_> {
                 match scope.letters() {
                     Some(blob) if blob == ordinal => {}
                     Some(other) => {
-                        let letters = database
+                        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:443-451
+                        // `CSeqDBVol::GetBioseq` returns a null Bioseq when the signed 32-bit
+                        // `x_GetSequence` length is less than 1 (zero or 2^31 or more), so
+                        // `CSeqVector` throws and `x_GetSubjectSequence` yields an empty sequence.
+                        let len = database
                             .db
-                            .read_sequence(other)
-                            .map_err(|error| shared::database_error(error, self.program))?
-                            .protein(0)
-                            .to_vec();
-                        reads.read.insert(rank, Some(letters));
+                            .protein_length_i32(other)
+                            .map_err(|error| shared::database_error(error, self.program))?;
+                        if len < 1 {
+                            reads.read.insert(rank, None);
+                        } else {
+                            let letters = database
+                                .db
+                                .read_sequence(other)
+                                .map_err(|error| shared::database_error(error, self.program))?
+                                .protein(0)
+                                .to_vec();
+                            reads.read.insert(rank, Some(letters));
+                        }
                     }
                     None => {
                         reads.read.insert(rank, None);
@@ -2479,11 +2498,16 @@ impl ListedTitles<'_> {
                 // A holder whose letters end before every included Seq-align's range: each read
                 // throws and warns, as LOSAT's.
                 if let Some(holder) = holder {
+                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+                    // Clamp non-positive signed 32-bit `GetSeqLengthProt` lengths to 0; `GetBioseq`
+                    // returns a null Bioseq when the length is less than 1, so every range read
+                    // throws and warns.
                     let letters = database
                         .db
-                        .protein_length(holder.ordinal())
+                        .protein_length_i32(holder.ordinal())
                         .map_err(|error| shared::database_error(error, self.program))?;
-                    if usize::try_from(letters).unwrap_or(usize::MAX) < reach {
+                    if usize::try_from(letters.max(0)).unwrap_or(usize::MAX) < reach {
                         continue;
                     }
                 }

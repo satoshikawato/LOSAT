@@ -87,6 +87,7 @@ pub use alias::SearchPath;
 pub use column::ColumnBlock;
 pub use header::Defline;
 pub use mask::{BlockMasks, MaskAlgorithm, MaskAlgorithms, MaskBlock, MaskRanges, NameMaskError};
+pub(crate) use volume::ncbi_protein_length;
 pub use volume::{AmbiguityRun, NucleotideAmbiguity, SequenceBlock, Volume, VolumeHeader};
 #[cfg(test)]
 pub use volume::{BLASTNA_SENTINEL, FENCE_SENTRY};
@@ -1132,7 +1133,7 @@ pub struct SeqDb {
     included_length: OnceLock<u64>,
     /// The length of OID 0 of the volumes, which the statistics read when their total length
     /// is not positive (`statistics_numbers`); `None` when it is.
-    first_oid_length: Option<u64>,
+    first_oid_length: Option<i64>,
     /// The walks of the alias tree, with the exception of each one whose value does not
     /// convert (`check_alias_values`).
     alias_totals: alias::AliasTotals,
@@ -1661,6 +1662,7 @@ impl SeqDb {
         let mut num_oids: u64 = 0;
         let mut total_length: u64 = 0;
         let mut max_length: u32 = 0;
+        let mut protein_max_length: i32 = 0;
         for volume_name in &tree.volumes {
             let volume = Volume::open(&path_of_bytes(volume_name), seqtype)?;
             volume_starts.push(num_oids as u32);
@@ -1680,7 +1682,22 @@ impl SeqDb {
                     path: volume.base().to_path_buf(),
                     message: "the total length of the volumes overflows".to_string(),
                 })?;
-            max_length = max_length.max(volume.index().max_length);
+            // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:557-560
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvolset.hpp:514-523
+            // Each volume's `GetMaxLength()` returns `m_MaxLen` as a signed `int`, and the volume
+            // set starts its maximum at `0`, so a protein volume whose longest sequence wraps
+            // negative (`>= 2^31`) contributes `0` rather than its unsigned length. Nucleotide
+            // volumes keep the widened length.
+            match seqtype {
+                SeqType::Protein => {
+                    protein_max_length =
+                        protein_max_length.max(ncbi_protein_length(volume.index().max_length));
+                    max_length = protein_max_length as u32;
+                }
+                SeqType::Nucleotide => {
+                    max_length = max_length.max(volume.index().max_length);
+                }
+            }
             volumes.push(volume);
         }
         volume_starts.push(num_oids as u32);
@@ -1968,8 +1985,18 @@ impl SeqDb {
         // OID 0 is the first OID of the first volume that has any.
         if let Some(volume) = self.volumes.iter().find(|volume| volume.num_oids() > 0) {
             self.first_oid_length = Some(match self.seqtype {
-                SeqType::Protein => u64::from(volume.protein_length(0)?),
-                SeqType::Nucleotide => volume.nucleotide_length(0, 0)? as u64,
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:932-938
+                // `BlastSeqSrcGetSeqLen` returns NCBI's signed 32-bit `GetSeqLengthProt`; any
+                // negative length becomes `-1`.
+                SeqType::Protein => {
+                    let len = volume.protein_length_i32(0)?;
+                    if len < 0 {
+                        -1
+                    } else {
+                        i64::from(len)
+                    }
+                }
+                SeqType::Nucleotide => volume.nucleotide_length(0, 0)? as i64,
             });
         }
         Ok(())
@@ -2195,8 +2222,7 @@ impl SeqDb {
             (total, request_count)
         } else {
             match self.first_oid_length {
-                // A length of OID 0 is below 2^32 (a volume's `Uint4`).
-                Some(length) => (length as i64, 1),
+                Some(length) => (length, 1),
                 None => (0, 0),
             }
         };
@@ -2509,6 +2535,23 @@ impl SeqDb {
         self.volumes[range.volume].x_protein_lengths(range.first, range.end)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+    /// [`Self::x_protein_lengths`] as NCBI's signed 32-bit `GetSeqLengthProt` lengths
+    /// (`Volume::x_protein_lengths_i32`).
+    pub fn x_protein_lengths_i32(
+        &self,
+        first_ordinal: u32,
+        end_ordinal: u32,
+    ) -> Result<Vec<i32>, SeqDbError> {
+        let Some(range) = self.x_block_range(first_ordinal, end_ordinal) else {
+            return Err(SeqDbError::Range(format!(
+                "ordinal ids {first_ordinal}..{end_ordinal} are not a non-empty range of the database ({} sequences)",
+                self.num_seqs()
+            )));
+        };
+        self.volumes[range.volume].x_protein_lengths_i32(range.first, range.end)
+    }
+
     /// Reads the sequences of `range` with one positioned read.
     pub fn read_block(&self, range: BlockRange) -> Result<SequenceBlock, SeqDbError> {
         let Some(volume) = self.volumes.get(range.volume) else {
@@ -2523,6 +2566,40 @@ impl SeqDb {
             range.end,
             range.first_ordinal,
             self.volume_starts[range.volume] + range.first,
+        )
+    }
+
+    fn volume_and_first_oid(&self, range: BlockRange) -> Result<(&Volume, u32), SeqDbError> {
+        let Some(volume) = self.volumes.get(range.volume) else {
+            return Err(SeqDbError::Range(format!(
+                "volume {} is outside the database ({} volumes)",
+                range.volume,
+                self.volumes.len()
+            )));
+        };
+        Ok((volume, self.volume_starts[range.volume] + range.first))
+    }
+
+    /// Reads the protein sequences of `range` for a search (`Volume::read_protein_search_block`),
+    /// validating `.psq` ranges without allocating bytes for proteins whose NCBI 32-bit length is
+    /// not positive (`<= 0`).
+    pub fn read_protein_search_block(
+        &self,
+        range: BlockRange,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        let (volume, first_oid) = self.volume_and_first_oid(range)?;
+        volume.read_protein_search_block(range.first, range.end, range.first_ordinal, first_oid)
+    }
+
+    /// Reads the one protein sequence `ordinal` for a search, skipping byte reads when its NCBI
+    /// 32-bit length is not positive (`Volume::read_protein_search_block`).
+    pub fn read_protein_search_sequence(&self, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
+        let at = self.find_volume(ordinal)?;
+        self.volumes[at.volume].read_protein_search_block(
+            at.vol_oid,
+            at.vol_oid + 1,
+            at.id,
+            self.location_oid(&at),
         )
     }
 
@@ -2575,6 +2652,40 @@ impl SeqDb {
         self.volumes[at.volume].protein_length(at.vol_oid)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+    /// The signed 32-bit length of protein `ordinal` as NCBI's `GetSeqLengthProt` returns it
+    /// (`Volume::protein_length_i32`).
+    pub fn protein_length_i32(&self, ordinal: u32) -> Result<i32, SeqDbError> {
+        self.protein_length_i32_at(self.find_volume(ordinal)?)
+    }
+
+    /// [`SeqDb::protein_length_i32`] of the protein at `at`.
+    pub fn protein_length_i32_at(&self, at: SeqLocation) -> Result<i32, SeqDbError> {
+        self.volumes[at.volume].protein_length_i32(at.vol_oid)
+    }
+
+    /// Validates that the sequence file opens and covers protein `ordinal` without reading its
+    /// bytes (`Volume::check_protein_range`).
+    pub fn check_protein_range(&self, ordinal: u32) -> Result<(), SeqDbError> {
+        self.check_protein_range_at(self.find_volume(ordinal)?)
+    }
+
+    /// [`SeqDb::check_protein_range`] of the protein at `at`.
+    pub fn check_protein_range_at(&self, at: SeqLocation) -> Result<(), SeqDbError> {
+        self.volumes[at.volume].check_protein_range(at.vol_oid)
+    }
+
+    /// Reads `len` NCBIstdaa bytes from residue `offset` of the protein at `at` without reading
+    /// the whole sequence (`Volume::read_protein_slice`).
+    pub fn read_protein_slice_at(
+        &self,
+        at: SeqLocation,
+        offset: u64,
+        len: usize,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        self.volumes[at.volume].read_protein_slice(at.vol_oid, offset, len)
+    }
+
     /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): `read_block` with the bytes in the
     /// buffer that a worker keeps from one block to the next, `kept` (`Volume::x_read_block_into`;
     /// a block of 1 MiB or more that `kept` does not hold, in a buffer of `utils::x_mapped::X_BYTES`);
@@ -2596,6 +2707,23 @@ impl SeqDb {
             range.end,
             range.first_ordinal,
             self.volume_starts[range.volume] + range.first,
+            kept,
+        )
+    }
+
+    /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): [`Self::read_protein_search_block`] into
+    /// the worker's buffer `kept` (`Volume::x_read_protein_search_block_into`).
+    pub fn x_read_protein_search_block_into(
+        &self,
+        range: BlockRange,
+        kept: &mut Vec<u8>,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        let (volume, first_oid) = self.volume_and_first_oid(range)?;
+        volume.x_read_protein_search_block_into(
+            range.first,
+            range.end,
+            range.first_ordinal,
+            first_oid,
             kept,
         )
     }

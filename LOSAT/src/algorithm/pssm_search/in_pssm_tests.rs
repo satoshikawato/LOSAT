@@ -1242,7 +1242,7 @@ fn a_query_with_one_letter_more_than_its_length_is_searched_as_its_first_letters
 #[test]
 fn a_ratios_only_pssm_of_another_length_gets_the_engines_error_where_ncbi_stays_in_its_buffer() {
     use crate::report::serial::pssm::SeqEntry;
-    let with_length = |length: u32| {
+    let with_length = |length: Option<u32>| {
         let mut pssm = crate::blastinput::pssm_text::read_pssm_with_parameters(&gunzip(
             "pssm/ps5_ratio30_noparams.asn.gz",
         ))
@@ -1251,11 +1251,11 @@ fn a_ratios_only_pssm_of_another_length_gets_the_engines_error_where_ncbi_stays_
             panic!("the PSSM's query");
         };
         assert_eq!(query.inst.length, Some(30));
-        query.inst.length = Some(length);
+        query.inst.length = length;
         psi_search_and_object(pssm, PssmReader::PSIBLAST)
     };
     for length in [29, 31, 32, 60, 255, 1000, 65_536] {
-        let (search, file) = with_length(length).unwrap_or_else(|error| panic!("{error}"));
+        let (search, file) = with_length(Some(length)).unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(
             search.scores_error.as_deref(),
             Some(RATIOS_COLUMNS_ERROR),
@@ -1264,15 +1264,16 @@ fn a_ratios_only_pssm_of_another_length_gets_the_engines_error_where_ncbi_stays_
         assert!(!file.valid, "{length}");
     }
     for (length, words) in [
-        (28, "at least two letters more"),
-        (0, "at least two letters more"),
-        (1 << 30, "depending on the host's memory"),
-        (u32::MAX, "depending on the host's memory"),
+        (None, "has no length"),
+        (Some(28), "at least two letters more"),
+        (Some(0), "at least two letters more"),
+        (Some(1 << 30), "depending on the host's memory"),
+        (Some(u32::MAX), "depending on the host's memory"),
     ] {
         let Err(error) = with_length(length) else {
-            panic!("{length}");
+            panic!("{length:?}");
         };
-        assert!(error.to_string().contains(words), "{length}: {error}");
+        assert!(error.to_string().contains(words), "{length:?}: {error}");
     }
 }
 

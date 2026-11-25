@@ -435,15 +435,7 @@ impl RedoMatch<'_> {
             hsp.e_value = self.stats.e_value(hsp.align.score, &run.karlin, m, n);
             best_evalue = best_evalue.min(hsp.e_value);
         }
-        redone.retain(|hsp| hsp.e_value <= self.expect_value || hsp.e_value.is_nan());
-        let first = redone.first()?;
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687
-        // The list's best E-value must be at most `-evalue`: NaN E-values (a PSSM whose gapped
-        // block gives them) pass the reaping above but leave it at `INT4_MAX`.
-        if best_evalue > self.expect_value {
-            return None;
-        }
-        let best_score = first.align.score;
+        let best_score = self.reap_by_expect(&mut redone, best_evalue)?;
         let template = &hsps[0];
         let mut hsp_list = BlastpHspList {
             oid,

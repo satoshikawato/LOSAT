@@ -3773,7 +3773,7 @@ pub struct BlastnPairwiseReport {
 /// (`SortColumnValues::of`).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4261-4309
-fn shown_hsp<'a>(hits: &[&'a PairwiseHit]) -> Option<&'a PairwiseHit> {
+pub(super) fn shown_hsp<'a>(hits: &[&'a PairwiseHit]) -> Option<&'a PairwiseHit> {
     let mut shown: Option<&PairwiseHit> = None;
     for &hit in hits {
         if hit.hit.bit_score > shown.map_or(0.0, |shown| shown.hit.bit_score) {
@@ -3785,7 +3785,7 @@ fn shown_hsp<'a>(hits: &[&'a PairwiseHit]) -> Option<&'a PairwiseHit> {
 
 /// The bit score and E-value that the description table shows for a subject whose shown HSP is
 /// `shown` (`shown_hsp`): 0.0 and 0.0 without one.
-fn table_scores(shown: Option<&PairwiseHit>) -> (f64, f64) {
+pub(super) fn table_scores(shown: Option<&PairwiseHit>) -> (f64, f64) {
     shown.map_or((0.0, 0.0), |hit| (hit.hit.bit_score, hit.hit.e_value))
 }
 

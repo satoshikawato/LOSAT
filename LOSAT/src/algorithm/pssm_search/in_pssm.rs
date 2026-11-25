@@ -841,20 +841,18 @@ pub(crate) fn psi_search_and_object_of(
     // error). A shorter `length` writes past the buffer (valgrind's invalid write for 27 and 28
     // of 30 and 396 of 398; NCBI crashes for 0 and 1), and one of `RATIOS_LENGTH_HOST_MEMORY` or
     // more asks for a buffer whose allocation depends on the host's memory: both refused below.
-    let ratios_length_error = ratios_only
-        && reads_values
-        && !letters.is_empty()
-        && letters.len() as i64 != length
+    let ratios_length_mismatch =
+        ratios_only && reads_values && !letters.is_empty() && letters.len() as i64 != length;
+    let ratios_length_error = ratios_length_mismatch
         && length >= letters.len() as i64 - 1
         && (1..RATIOS_LENGTH_HOST_MEMORY).contains(&length);
-    if ratios_only
-        && reads_values
-        && !letters.is_empty()
-        && letters.len() as i64 != length
-        && !ratios_length_error
-    {
-        return Err(reader.refuse(if length < letters.len() as i64 - 1 {
+    if ratios_length_mismatch && !ratios_length_error {
+        return Err(reader.refuse(if query.inst.length.is_none() {
+            "a PSSM of frequency ratios only whose query Seq-inst has no length (NCBI BLAST+ 2.17.0 writes outside its query buffer or crashes)".to_string()
+        } else if length < letters.len() as i64 - 1 {
             "a PSSM of frequency ratios only whose query has at least two letters more than its Seq-inst's length (NCBI BLAST+ 2.17.0 writes outside its query buffer)".to_string()
+        } else if length < 1 {
+            "a PSSM of frequency ratios only whose query Seq-inst has length 0 (NCBI BLAST+ 2.17.0 crashes)".to_string()
         } else {
             format!("a PSSM of frequency ratios only whose Seq-inst's length is {length} (NCBI BLAST+ 2.17.0's query buffer of that length, {RATIOS_LENGTH_HOST_MEMORY} letters or more, is allocated or not depending on the host's memory)")
         }));

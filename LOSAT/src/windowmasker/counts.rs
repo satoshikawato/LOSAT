@@ -158,7 +158,8 @@ pub(super) struct GenomeInput<'r, 'd, 'w> {
     files: Vec<Vec<u8>>,
     database: bool,
     lists: &'r IdLists,
-    registry: Option<&'r [u8]>,
+    /// The settings of the database reader (`ApplicationSettings::database`).
+    reader_settings: crate::blastinput::ncbi_environment::DatabaseSettings<'r>,
     diag: &'d mut Diag<'w>,
     /// What the last read posted (`GenomeSource::repeat_posts`).
     posts: Vec<u8>,
@@ -194,7 +195,7 @@ impl GenomeInput<'_, '_, '_> {
     fn read_files(&mut self, f: &mut RecordFn<'_>) -> Result<(), Failure> {
         for name in &self.files {
             let mut source: Box<dyn SequenceSource> = if self.database {
-                database_source(name, self.registry, false)?
+                database_source(name, self.reader_settings, false)?
             } else {
                 let file = File::open(path_from_bytes(name.as_slice()))
                     .map_err(|_| Failure::Ncbi(read_error()))?;
@@ -347,7 +348,7 @@ fn make_counts(
         files,
         database,
         lists,
-        registry: settings.blastdb.as_deref(),
+        reader_settings: settings.database(),
         diag: &mut *diag,
         posts: Vec::new(),
         taxonomy: None,

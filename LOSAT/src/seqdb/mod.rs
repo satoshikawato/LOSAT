@@ -279,6 +279,11 @@ pub enum SeqDbError {
         reason: String,
         exception: Box<crate::ncbi_exception::NcbiException>,
     },
+    /// A header record that fails a check of NCBI's reader that the run's settings turn off,
+    /// after which NCBI reads on (`SeqDb::refuse_unchecked_reads`): what LOSAT refuses, a noun
+    /// phrase (`ReadVerification::refused`), which the program's refusal names
+    /// (`algorithm::common::database::losat_reader_error`).
+    Setting(String),
 }
 
 impl std::fmt::Display for SeqDbError {
@@ -288,6 +293,7 @@ impl std::fmt::Display for SeqDbError {
                 f.write_str(&String::from_utf8_lossy(message))
             }
             SeqDbError::Range(message) | SeqDbError::Internal(message) => f.write_str(message),
+            SeqDbError::Setting(refused) => write!(f, "{refused} is not supported by LOSAT"),
             SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
                 write!(f, "{}: {}", path.display(), source)
             }
@@ -381,6 +387,7 @@ impl SeqDbError {
             },
             SeqDbError::Range(message) => SeqDbError::Range(message.clone()),
             SeqDbError::Internal(message) => SeqDbError::Internal(message.clone()),
+            SeqDbError::Setting(refused) => SeqDbError::Setting(refused.clone()),
             SeqDbError::Ncbi(exception) => SeqDbError::Ncbi(exception.clone()),
             SeqDbError::TaxdbThrows {
                 path,
@@ -570,7 +577,8 @@ impl SeqDbError {
             | SeqDbError::Range(_)
             | SeqDbError::Internal(_)
             | SeqDbError::Ncbi(_)
-            | SeqDbError::TaxdbThrows { .. } => None,
+            | SeqDbError::TaxdbThrows { .. }
+            | SeqDbError::Setting(_) => None,
         }
     }
 

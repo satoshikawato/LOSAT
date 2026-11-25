@@ -443,10 +443,9 @@ impl PsiblastArgs {
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:265-287
 /// Whether LOSAT's psiblast writes the output format `number` for its queries (FASTA, `-in_pssm`
 /// and `-in_msa`, at any `-num_iterations`, `-db` and `-subject`): the one rule of the command
-/// line's refusal (`PsiblastArgs::check_outfmt`) and of a PSSM query's
-/// (`in_pssm::check_in_pssm_options`). NCBI writes every round through the formatter of the
-/// format (`WriteArchive`, or `PrintOneResultSet` with the round's number); LOSAT writes all but
-/// the XML2 and JSON documents of outfmt 13 to 16 (item PS15b-2 of line PS, its second part).
+/// line's refusal (`PsiblastArgs::check_outfmt`). NCBI writes every round through the formatter of
+/// the format (`WriteArchive`, or `PrintOneResultSet` with the round's number); LOSAT writes all
+/// but the XML2 and JSON documents of outfmt 13 to 16 (item PS15b-2 of line PS, its second part).
 pub(crate) fn writes_outfmt(number: i32) -> bool {
     matches!(number, 0..=12 | 18 | 20)
 }

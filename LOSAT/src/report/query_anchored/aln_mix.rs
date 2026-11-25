@@ -42,7 +42,9 @@
 //! comes after `x_Merge`, and where a segment's start on a row lies behind that row's walk at its
 //! end, NCBI reads past the end of the row's starts (`MixError::NcbiReadsPastEnd`); a match whose
 //! walk on its query row finds the next start before its own position takes a length below zero
-//! (`MixError::NcbiWrapsLength`). `super::write_unreadable_section` refuses each of them.
+//! (`MixError::NcbiWrapsLength`). `super::write_unreadable_section` reproduces `NcbiThrows`
+//! (`NcbiException::into_io_error`, exit 255) and refuses the undefined-behavior, crash, freed,
+//! and length-wrap ends.
 //!
 //! Strands and widths (lines RG T3b and T3c). A row's strand is set where it gets its first start.
 //! The query's (the refseq of the first pass) is plus with `fPreserveRows`
@@ -139,8 +141,8 @@ pub(crate) enum MixError {
     /// byte, and the application's `CATCH_ALL` ends the run with `Error: NCBI C++ Exception` (exit
     /// 255). Only the query's own Bioseq added with `fForceTranslation` (TBLASTX) gets there
     /// (`Mix::merge_match`, `Mix::build`), and a query read at the width 3 whose letters are a
-    /// protein's (module doc); `super::write_section` fails with it
-    /// (`NcbiException::into_io_error`), `super::write_unreadable_section` refuses it.
+    /// protein's (module doc); `super::write_section` and `super::write_unreadable_section` fail
+    /// with it (`NcbiException::into_io_error`).
     NcbiThrows(NcbiException),
     /// NCBI frees a segment that it still reads, where a write into a row's map replaces the last
     /// `CRef` of a segment (a `CAlnMixStarts` holds its segments by `CRef`, `m_Segments` by raw

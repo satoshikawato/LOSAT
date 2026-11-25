@@ -5046,8 +5046,10 @@ pub fn run_local(
 /// input PSSM's files that NCBI would write back in a way LOSAT does not (`-out_pssm`,
 /// `-out_ascii_pssm`, written in round 1, which a run stopped before its search never reaches),
 /// are refused here, once the database is opened (NCBI's error of a database it cannot open comes
-/// first) and before any output; so are LOSAT's limits of the PSSM search for each requested
-/// format (`check_in_pssm_options`) and the PSSM files of the rounds that LOSAT cannot write as NCBI does
+/// first) and before any output; so are LOSAT's limits on the PSSM's query annotations and archive
+/// members for the requested formats (`check_in_pssm_options`; unsupported `-outfmt` numbers are
+/// refused earlier by `PsiblastArgs::check_outfmt`) and the PSSM files of the rounds that LOSAT
+/// cannot write as NCBI does
 /// (`check_pssm_files`, checked as a FASTA query's).
 ///
 /// The query is the PSSM's Bioseq as the reports show it (`PsiSearch::query_record`); with

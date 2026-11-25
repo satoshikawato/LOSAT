@@ -57,7 +57,9 @@ pub struct PairwiseConfig {
     /// A query whose sequence NCBI's alignment display cannot read (psiblast's and tblastn's PSSM
     /// query of the molecule `other`): the alignments of outfmt 0 are one line each, the
     /// query-anchored section of outfmt 1 to 4 a line feed where NCBI's merge of its HSPs
-    /// returns, and refused where that merge throws (`query_anchored::write_unreadable_section`).
+    /// returns, fails with NCBI's `CAlnException` where that merge throws, and is refused where
+    /// that merge reads past a row's end, crashes, reads freed memory, or wraps a segment length
+    /// (`query_anchored::write_unreadable_section`).
     /// `None` for every other report.
     pub unreadable_query: Option<UnreadableQuery>,
 }
@@ -4787,7 +4789,8 @@ fn write_anchored_section<W: Write>(
     };
     // A query whose sequence the display cannot read (`UnreadableQuery`): NCBI merges its HSPs
     // as a nucleotide query's (its Bioseq is not a protein), then each merged frame's display
-    // throws and is caught; where the merge throws, LOSAT refuses
+    // throws and is caught; where the merge throws `CAlnException`, LOSAT reproduces it, and where
+    // it hits undefined behavior, crashes, or wraps a segment length, LOSAT refuses
     // (`query_anchored::write_unreadable_section`).
     if config.unreadable_query.is_some() {
         let mut hsps = hsps_of(sequences);

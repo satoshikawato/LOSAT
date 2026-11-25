@@ -830,18 +830,24 @@ pub(crate) fn write_section<W: Write + ?Sized>(
 /// whose `x_PrepareRowData` reads the query's letters as the alignment's first step and throws
 /// (`pairwise::UnreadableQuery`), caught by the group's `try`: the section is that line feed.
 /// Where a merge fails (`Merge` is outside the `try`), NCBI's run ends there, before the section's
-/// first byte: with the merge's exception (`aln_mix::MixError::NcbiThrows`, exit status 255), with
-/// `CObjectException` where `Build` reads past the end of a row's starts
-/// (`aln_mix::MixError::NcbiReadsPastEnd`, exit status 255), with SIGSEGV where it writes through a
-/// null row (`aln_mix::MixError::NcbiNullSecondRow`; its output then stops where its stream last
-/// flushed), with a read of freed memory where `FillUnalignedRegions` replaces the last reference
-/// to a segment that `x_CreateDenseg` then reads (`aln_mix::MixError::NcbiFreesSegment`: the rows
-/// of the widths 3 and 1 can leave a fill's start on a start of the row), or with a segment length
-/// below zero where a match's walk finds the next start before its own position
-/// (`aln_mix::MixError::NcbiWrapsLength`: NCBI then runs forever or goes on with lengths near
-/// 2^32). That is an NCBI failure without a checkable valid result (AGENTS.md rule 3), so LOSAT
-/// refuses there (`UnreadableMergeRefusal`), after the bytes of the report before the section,
-/// which NCBI writes before its failure. The merge reads the HSPs' positions and lengths only (no
+/// first byte:
+/// - With the merge's own `CAlnException` (`aln_mix::MixError::NcbiThrows`, exit status 255),
+///   which is deterministic from the HSP coordinates (`X_MERGE_START_ITERATOR`,
+///   `X_MERGE_PROPER_ROW`, `BUILD_INFINITE_LOOP`). LOSAT reproduces it through
+///   `NcbiException::into_io_error` as `write_section` does (`cli::NativeError::of_writer`), after
+///   the bytes of the report before the section.
+/// - With `CObjectException` where `Build` reads past the end of a row's starts
+///   (`aln_mix::MixError::NcbiReadsPastEnd`, exit status 255, undefined behavior), with SIGSEGV
+///   where it writes through a null row (`aln_mix::MixError::NcbiNullSecondRow`; its output then
+///   stops where its stream last flushed), with a read of freed memory where
+///   `FillUnalignedRegions` replaces the last reference to a segment that `x_CreateDenseg` then
+///   reads (`aln_mix::MixError::NcbiFreesSegment`: the rows of the widths 3 and 1 can leave a
+///   fill's start on a start of the row), or with a segment length below zero where a match's walk
+///   finds the next start before its own position (`aln_mix::MixError::NcbiWrapsLength`: NCBI then
+///   runs forever or goes on with lengths near 2^32). Those four are NCBI failures without a
+///   checkable valid result (AGENTS.md rule 3), so LOSAT refuses there (`UnreadableMergeRefusal`),
+///   after the bytes of the report before the section, which NCBI writes before its failure.
+/// The merge reads the HSPs' positions and lengths only (no
 /// `fCalcScore`), so the encoding of the PSSM's sequence plays no part. A PSSM query is never one
 /// of the subjects' Bioseqs (only a FASTA query record is, `subject_is_query_record`), so
 /// `MixError::NcbiAborts` stays an internal error.
@@ -862,9 +868,8 @@ pub(crate) fn write_unreadable_section<W: Write + ?Sized>(
     };
     let (merged, num_distinct_frames) = match merge_groups(hsps) {
         Ok(merged) => merged,
-        Err(aln_mix::MixError::NcbiThrows(_) | aln_mix::MixError::NcbiReadsPastEnd) => {
-            return refusal(MergeFailure::Exception)
-        }
+        Err(aln_mix::MixError::NcbiThrows(exception)) => return Err(exception.into_io_error()),
+        Err(aln_mix::MixError::NcbiReadsPastEnd) => return refusal(MergeFailure::ReadsPastEnd),
         Err(aln_mix::MixError::NcbiNullSecondRow) => return refusal(MergeFailure::Crash),
         Err(aln_mix::MixError::NcbiFreesSegment) => return refusal(MergeFailure::Freed),
         Err(aln_mix::MixError::NcbiWrapsLength) => return refusal(MergeFailure::Wraps),
@@ -882,13 +887,12 @@ pub(crate) fn write_unreadable_section<W: Write + ?Sized>(
 }
 
 /// How NCBI BLAST+ 2.17.0 ends where its merge of the HSPs of a query that its display cannot
-/// read fails (`write_unreadable_section`).
+/// read hits undefined behavior, crashes, or wraps a segment length (`write_unreadable_section`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MergeFailure {
-    /// An uncaught `CAlnException` (`aln_mix::MixError::NcbiThrows`), or `CObjectException`
-    /// where `Build` reads past the end of a row's starts (`aln_mix::MixError::NcbiReadsPastEnd`);
-    /// exit status 255.
-    Exception,
+    /// `CObjectException` where `Build` reads past the end of a row's starts
+    /// (`aln_mix::MixError::NcbiReadsPastEnd`, undefined behavior; exit status 255).
+    ReadsPastEnd,
     /// SIGSEGV (`aln_mix::MixError::NcbiNullSecondRow`).
     Crash,
     /// A read of memory that NCBI has freed (`aln_mix::MixError::NcbiFreesSegment`), whose result
@@ -900,11 +904,11 @@ pub(crate) enum MergeFailure {
 }
 
 /// LOSAT's refusal of the query-anchored section (outfmt 1 to 4) of a query that NCBI's display
-/// cannot read, where NCBI's merge of its HSPs fails (`write_unreadable_section`): NCBI BLAST+
-/// 2.17.0 stops there (`failure`). It travels as the `io::Error` of the report's writes (`error`),
-/// which the programs pass on as LOSAT's error, not as NCBI's exception or a failed write
-/// (`cli::NativeError::of_writer`, `cli::ReportStream::finish`), so the run stops with this text
-/// and exit status 1.
+/// cannot read, where NCBI's merge of its HSPs fails without a checkable result
+/// (`write_unreadable_section`): NCBI BLAST+ 2.17.0 stops there (`failure`). It travels as the
+/// `io::Error` of the report's writes (`error`), which the programs pass on as LOSAT's error, not
+/// as NCBI's exception or a failed write (`cli::NativeError::of_writer`,
+/// `cli::ReportStream::finish`), so the run stops with this text and exit status 1.
 #[derive(Debug)]
 pub(crate) struct UnreadableMergeRefusal {
     /// The program, in LOSAT's words (`PSIBLAST`).
@@ -923,7 +927,9 @@ impl UnreadableMergeRefusal {
 impl std::fmt::Display for UnreadableMergeRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let end = match self.failure {
-            MergeFailure::Exception => "stops with a C++ exception",
+            MergeFailure::ReadsPastEnd => {
+                "reads past the end of a row's starts and stops with a C++ exception"
+            }
             MergeFailure::Crash => "crashes",
             MergeFailure::Freed => "reads memory that it has freed",
             MergeFailure::Wraps => "computes a segment length below zero",

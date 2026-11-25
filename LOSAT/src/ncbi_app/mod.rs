@@ -444,8 +444,8 @@ pub(crate) fn run(
         words,
         (&mut std::io::stdin(), &mut out, &mut err),
         body,
-        // The command line's `-xmlhelp`: NCBI's XML without the arguments that LOSAT refuses
-        // (of the programs of `ncbi_app`, makeprofiledb's `-binary` at its run, `ncbi_xmlhelp_tests`).
+        // The command line's `-xmlhelp`: NCBI's XML without any refused arguments (none of the
+        // `ncbi_app` programs refuses an argument by name or at the run, `ncbi_xmlhelp_tests`).
         (start, Some(crate::cli::xml_help_text)),
         &RunFiles::Disk,
     );

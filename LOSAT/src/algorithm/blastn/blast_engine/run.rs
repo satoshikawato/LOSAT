@@ -9022,9 +9022,14 @@ fn run_in_pool(
         if let (SubjectSource::Database(database), Some(scopes)) = (source, query_scopes.as_ref()) {
             let searched = batch_records.searched();
             let record = |query: usize| {
-                crate::report::query_bioseq::QueryRecordRef::of(
-                    searched.get(query.checked_sub(start)?)?,
-                )
+                // `batch_records.batch_queries()` drops `record.sequence` under `LOSAT_X_BNQPACK`,
+                // so read the query length from `lengths` (set before the search).
+                let record = searched.get(query.checked_sub(start)?)?;
+                Some(crate::report::query_bioseq::QueryRecordRef {
+                    believed: record.believed()?,
+                    title: &record.title,
+                    length: *lengths.get(query)?,
+                })
             };
             let run = crate::report::query_bioseq::SeenRun {
                 shows: output_formats

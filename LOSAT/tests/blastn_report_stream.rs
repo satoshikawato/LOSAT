@@ -1123,12 +1123,13 @@ fn a_database_with_parsed_seqids_gives_the_off_bytes() {
         .collect();
     std::fs::write(&renamed, lines.join("\n") + "\n").unwrap();
     let renamed = renamed.to_str().unwrap();
-    for (queries, outfmt, threads) in [
-        (renamed, "6", 4),
-        (renamed, "0", 1),
-        (renamed, "17", 4),
-        (late_reversed, "7", 4),
-        (late_reversed, "0", 1),
+    for (queries, outfmt, threads, refused) in [
+        (renamed, "6", 4, false),
+        (renamed, "0", 1, false),
+        (renamed, "17", 4, false),
+        (late_reversed, "7", 4, false),
+        (late_reversed, "7 qseqid sseqid sseq", 4, true),
+        (late_reversed, "0", 1, true),
     ] {
         let path = ids("nucl_v5");
         let mut args = [
@@ -1146,7 +1147,7 @@ fn a_database_with_parsed_seqids_gives_the_off_bytes() {
         ];
         let what = format!("-parse_deflines {queries} outfmt {outfmt}");
         let extra = [("BATCH_SIZE", "1500")];
-        if queries == late_reversed {
+        if refused {
             let (off, on, (batches, _)) = refused_late(&what, &args, threads, &extra);
             args[3] = nohit;
             let (eight, _) = same_two(&what, &args, threads, &extra, None);

@@ -88,11 +88,20 @@ fn notes_the_query_of_the_span_that_holds_the_id() {
 fn a_pdb_query_holds_the_chains_of_its_handle() {
     let queries = [(believed("pdb|1AB1|A"), &b"pdb query"[..], 46)];
     let mut seen = QueryBioseqs::default();
-    // A sequence stored as pdb 1AB1 with another chain: the scope key is the handle.
+    // A sequence stored as pdb 1AB1 with chain 321 (no chain-id): its handle normalizes chain
+    // 321 (0x141) to 'A' (65), matching the query `pdb|1AB1|A`.
+    let mut chain_321_keys = Vec::new();
+    let chain_321 = crate::seqid::model::SeqId::Pdb(crate::seqid::model::PdbSeqId {
+        mol: b"1AB1".to_vec(),
+        chain: Some(321),
+        rel: None,
+        chain_id: None,
+    });
+    crate::seqid::defline_set::scope_keys(&chain_321, &mut chain_321_keys);
     seen.note(
         0,
         3,
-        &keys("pdb|1AB1|B"),
+        &chain_321_keys,
         0..usize::MAX,
         0..usize::MAX,
         records(&queries),

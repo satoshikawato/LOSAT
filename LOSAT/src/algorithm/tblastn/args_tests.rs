@@ -416,8 +416,8 @@ fn ncbi_checks_and_losat_limits_are_explicit() {
     ] {
         assert!(parse(extra).is_err(), "{extra:?}");
     }
-    // With a database (`-gilist` excludes `-subject` in NCBI's reader).
-    for extra in [&["-gilist", "ids.gil"][..], &["-remote"]] {
+    // With a database (`-import_search_strategy` and `-remote` remain refused).
+    for extra in [&["-import_search_strategy", "s.asn"][..], &["-remote"]] {
         let mut argv = vec!["losat", "tblastn", "-query", "q.faa", "-db", "db"];
         argv.extend_from_slice(extra);
         let error = try_parse_from(argv).unwrap_err().to_string();

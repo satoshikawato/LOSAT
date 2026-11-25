@@ -223,3 +223,51 @@ fn a_list_isam_needs_oids_and_an_index_of_the_data_length() {
         Some(Opened::Uninitialized)
     ));
 }
+
+#[test]
+fn a_negative_scan_marks_excluded_oids_visible_and_unlisted_oids_included() {
+    let dir = temp_dir("negative_scan");
+    // OID 0 has GIs 10 and 20; OID 1 has GI 30; OID 2 has GI 40 (outside vol_end=2? no, vol_end=10).
+    let rows = [(10, 0), (20, 0), (30, 1), (40, 2), (50, 3)];
+    let base = write_isam(&dir, &rows, false, 2);
+    let isam = opened(&base);
+    let mut out = super::super::isam::NegativeOids::new();
+    // Exclude GI 10 (OID 0 still has unlisted GI 20 -> stays included!) and GI 30 (OID 1 only has GI 30 -> excluded!).
+    isam.negative_scan(10, 14, &[10, 30, 99], &mut out).unwrap();
+    assert!(out.get_oid_status(10));
+    assert!(!out.get_oid_status(11));
+    assert!(out.get_oid_status(12));
+    assert!(out.get_oid_status(13));
+}
+
+#[test]
+fn list_isam_pig_opens_ppi_and_ppd_when_both_exist() {
+    let dir = temp_dir("pig_open");
+    let base = write_isam(&dir, &[(1001, 0), (1002, 1)], false, 256);
+    assert!(
+        NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Pig, 2)
+            .unwrap()
+            .is_none()
+    );
+    std::fs::copy(
+        with_extension(&base, SeqType::Protein, "ni"),
+        with_extension(&base, SeqType::Protein, "pi"),
+    )
+    .unwrap();
+    std::fs::copy(
+        with_extension(&base, SeqType::Protein, "nd"),
+        with_extension(&base, SeqType::Protein, "pd"),
+    )
+    .unwrap();
+    let Some(Opened::Ready(isam)) =
+        NumericIsam::open_for_list(&base, SeqType::Protein, ListIsam::Pig, 2).unwrap()
+    else {
+        panic!("PIG ISAM not ready");
+    };
+    let mut ids = list(&[1001, 1002, 9999]);
+    isam.ids_to_oids(5, &mut ids).unwrap();
+    assert_eq!(
+        ids.iter().map(|id| id.oid).collect::<Vec<_>>(),
+        vec![Some(5), Some(6), None]
+    );
+}

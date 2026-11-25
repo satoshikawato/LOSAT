@@ -2414,6 +2414,13 @@ impl ParsedSubject {
         self.resolution.found.as_ref()
     }
 
+    /// Whether unrecorded-call holders for this subject could not be listed
+    /// (`Holders::Unknown`).
+    pub fn holders_unknown(&self) -> bool {
+        self.resolution.unrecorded.loader.unknown().is_some()
+            || self.resolution.unrecorded.scope.unknown().is_some()
+    }
+
     /// The subject as the outfmt 0 report of a run with or without `-show_gis` shows it.
     pub fn showing_gis(mut self, show_gis: bool) -> Self {
         self.show_gis = show_gis;
@@ -4190,6 +4197,38 @@ impl FormatThrow {
         match parsed_outfmt(outfmt, app) {
             Some((format, spec)) => Self::of(format, spec.as_ref(), program, html),
             None => FormatThrow::Refused(ThrowRefusal::Format),
+        }
+    }
+
+    fn report_format(outfmt: &str) -> Option<crate::blastinput::app::ReportFormat> {
+        use crate::blastinput::app::{parse_formatting_string, ReportFormat};
+        ReportFormat::from_number(parse_formatting_string(outfmt).ok()?.number)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2295-2314
+    /// Whether NCBI's formatter keeps its scope across the query batches of a run whose first
+    /// format is `outfmt` (`CBlastFormat::ResetScopeHistory` returns without emptying the scope
+    /// only for `eXml`, outfmt 5).
+    pub fn outfmt_keeps_scope(outfmt: &str) -> bool {
+        Self::report_format(outfmt) == Some(crate::blastinput::app::ReportFormat::Xml)
+    }
+
+    /// Whether `outfmt` is an XML2 or JSON format (outfmt 13 to 16), whose taxonomy lookups run
+    /// through `read_reported_taxonomy`.
+    pub fn is_xml2(outfmt: &str) -> bool {
+        Self::report_format(outfmt)
+            .and_then(super::blast_xml2::Xml2Kind::of)
+            .is_some()
+    }
+
+    /// `(keeps_scope, separate_xml2)` for the first format `outfmt` of a run (`None` when a call
+    /// has no output format): whether NCBI's formatter keeps its scope across query batches
+    /// ([`Self::outfmt_keeps_scope`]), and whether any XML2/JSON format in the call is secondary
+    /// (`!Self::is_xml2`).
+    pub fn scope_flags(outfmt: Option<&str>) -> (bool, bool) {
+        match outfmt {
+            Some(outfmt) => (Self::outfmt_keeps_scope(outfmt), !Self::is_xml2(outfmt)),
+            None => (false, false),
         }
     }
 

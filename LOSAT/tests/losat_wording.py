@@ -202,6 +202,20 @@ def _xmlhelp_version(out: bytearray, text: bytes, i: int) -> int | None:
     return m.end() if m else None
 
 
+_BAD_CHAR_LINE = re.compile(rb"Bad char \[0x([0-9A-F]{1,2})\] in string at (?:line|byte) [0-9]+[\n ]")
+
+
+def _quoted_piece(text: bytes, i: int) -> int | None:
+    """The end of a byte post's line and of the piece it quotes at `i`, when the piece (up to the next
+    line end) holds the byte (`wording::quoted_piece`), or None."""
+    m = _BAD_CHAR_LINE.match(text, i)
+    if not m:
+        return None
+    end = text.find(b"\n", m.end())
+    end = len(text) if end < 0 else end
+    return end if int(m.group(1), 16) in text[m.end():end] else None
+
+
 def losat_bytes(text: bytes) -> bytes:
     """LOSAT's text of NCBI's `text` (`wording::losat_bytes`)."""
     needles = (NCBI_USER_MANUAL_FOOTER, _HEADER, _NCBI_POSITION, b"::", NCBI_VERSION, b" error:", _RPSBPROC_TITLE,
@@ -211,6 +225,13 @@ def losat_bytes(text: bytes) -> bytes:
     out = bytearray()
     i = 0
     while i < len(text):
+        if text.startswith(b"B", i) and (not out or out[-1:] in (b"\n", b" ")):
+            # The piece that a byte's post quotes (the input's bytes) is copied as it is.
+            end = _quoted_piece(text, i)
+            if end is not None:
+                out += text[i:end]
+                i = end
+                continue
         if text.startswith(NCBI_VERSION, i) and out.endswith(bytes([_BER_VISIBLE_STRING, len(NCBI_VERSION)])):
             out[-1] = len(LOSAT_VERSION)
             out += LOSAT_VERSION

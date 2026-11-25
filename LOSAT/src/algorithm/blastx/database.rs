@@ -304,7 +304,7 @@ impl BlastxDatabase {
     /// (`-db_hard_mask`, where the hard-chunk loop splits and merges them).
     pub(crate) fn x_open_stream_with_long(&self, allow_long: bool) -> Result<usize> {
         if self.db.first_oid_read_fails() {
-            return Err(PreliminaryReadError("Database memory map file error").into());
+            return Err(PreliminaryReadError::from_static("Database memory map file error").into());
         }
         let count = self.db.num_seqs();
         let mut longest = 0;
@@ -359,7 +359,7 @@ pub(super) fn x_check_whole(db: &SeqDb, allow_long: bool) -> Result<usize> {
 /// `x_check_whole` of a run of the program `program` (`BlastxDatabase::program`).
 fn x_check_whole_named(db: &SeqDb, program: &str, allow_long: bool) -> Result<usize> {
     if db.first_oid_read_fails() {
-        return Err(PreliminaryReadError("Database memory map file error").into());
+        return Err(PreliminaryReadError::from_static("Database memory map file error").into());
     }
     let mut longest = 0;
     let mut first_too_long = None;

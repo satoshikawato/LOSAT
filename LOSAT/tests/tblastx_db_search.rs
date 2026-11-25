@@ -547,5 +547,52 @@ fn each_query_batch_is_reported_where_no_refusal_can_follow() {
     );
     assert!(String::from_utf8_lossy(&output.stderr)
         .contains("by which NCBI BLAST+'s formatters do not find the sequence"));
+    // A search space overflow in a later batch (`aliaskeys/n_nseq1_l62p3` with `alln_q.fna`,
+    // `BATCH_SIZE=1`) streams (`off=none`) and writes the exact bytes of the off path (reports of
+    // earlier batches, then the overflow refusal).
+    let overflow = |extra: &[(&str, &str)]| {
+        let mut command = losat();
+        command
+            .args([
+                "tblastx",
+                "-query",
+                "tests/fasta/rps/alln_q.fna",
+                "-db",
+                "tests/db_search/aliaskeys/n_nseq1_l62p3",
+                "-outfmt",
+                "7",
+            ])
+            .env("BATCH_SIZE", "1")
+            .env("LOSAT_X_STATS", "1")
+            .current_dir(manifest);
+        for (name, value) in extra {
+            command.env(name, value);
+        }
+        let out = command.output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        let off = stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("[X_STATS] TBXRPTSTREAM off="))
+            .and_then(|rest| rest.split(' ').next())
+            .unwrap_or("")
+            .to_string();
+        let clean_err: Vec<String> = stderr
+            .lines()
+            .filter(|line| !line.starts_with("[X_STATS] TBXRPTSTREAM "))
+            .map(str::to_string)
+            .collect();
+        (off, out.status.code(), out.stdout, clean_err)
+    };
+    let (stream_off, stream_rc, stream_out, stream_err) = overflow(&[]);
+    let (kept_off, kept_rc, kept_out, kept_err) =
+        overflow(&[("LOSAT_DEBUG_REPORT_STREAM_TEST", "1")]);
+    assert_eq!(stream_off, "none");
+    assert_eq!(kept_off, "debug");
+    assert_eq!(stream_rc, Some(1));
+    assert_eq!(
+        (stream_rc, &stream_out, &stream_err),
+        (kept_rc, &kept_out, &kept_err)
+    );
+    assert!(!stream_out.is_empty());
     std::fs::remove_dir_all(&dir).unwrap();
 }

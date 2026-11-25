@@ -35,9 +35,9 @@ import {
   toolFileOptionLabel,
   toolValidationSummary,
 } from '../../src/domain/tool-argv';
+import { primaryBlastDbName } from '../../src/domain/blast-db';
 import {
   decodeUtf8Preview,
-  detectBlastDbName,
   stageOptionParameters,
 } from '../../src/domain/tools';
 import { DataService } from '../../src/infra/data/data-service';
@@ -222,9 +222,9 @@ describe('windowmasker domain helpers', () => {
   });
 
   it('detects BLAST database names preferring alias files over volume files', () => {
-    expect(detectBlastDbName(['db/wm.nin', 'db/wm.nsq', 'db/wm.nhr'])).toBe('db/wm');
-    expect(detectBlastDbName(['db/vol.00.nin', 'db/vol.01.nin', 'db/all.nal'])).toBe('db/all');
-    expect(detectBlastDbName(['plain.fa', 'ids.txt'])).toBeUndefined();
+    expect(primaryBlastDbName(['db/wm.nin', 'db/wm.nsq', 'db/wm.nhr'])).toBe('db/wm');
+    expect(primaryBlastDbName(['db/vol.00.nin', 'db/vol.01.nin', 'db/all.nal'])).toBe('db/all');
+    expect(primaryBlastDbName(['plain.fa', 'ids.txt'])).toBeUndefined();
   });
 
   it('decodes UTF-8 preview slices safely across multi-byte boundaries and rejects binary', () => {

@@ -287,6 +287,12 @@ fn archive_messages_are_wrapped_again_as_ncbi_wraps_them() {
                 continue;
             };
             search = end;
+            // A message with a byte outside 0x20..0x7E was not written by an archive writer
+            // (NCBI's and LOSAT's write `#` there): a hand-made input of the rpsbproc fixtures
+            // (`root/vis_all.asn`), which says nothing of the wraps.
+            if !value.iter().all(|b| (b' '..=b'~').contains(b)) {
+                continue;
+            }
             // A frozen `{db_dir}` stands for a path of the length the rows were frozen with
             // (`db_search_fixtures.py` `inflate_rps`): the wraps of NCBI's bytes are those of
             // the whole path.

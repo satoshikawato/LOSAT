@@ -2730,3 +2730,114 @@ pre.range-text {
 .replace-dialog-actions .primary-action {
   width: auto;
 }
+
+/* Local BLAST database picker (-db and BLASTN -filtering_db, WQA D12b + RG-D4 W2). */
+.subject-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.subject-source-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.subject-db-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.db-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.db-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.db-picker-found {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.db-select-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.db-select-row label {
+  font-weight: 600;
+}
+
+.db-single,
+.db-meta,
+.db-privacy,
+.db-status,
+.db-reload,
+.db-mismatch {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.db-privacy {
+  font-size: 0.88em;
+}
+
+.db-filters {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.db-filters > summary {
+  padding: 8px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.db-filter-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.db-filter-rows .param-row {
+  margin: 0;
+}
+
+.parameter-form .param-row[data-kind='database'] {
+  align-items: start;
+}
+
+.parameter-form .param-row[data-kind='database'] .param-control {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.parameter-form .param-row[data-kind='database'] .db-picker {
+  margin-top: 6px;
+}

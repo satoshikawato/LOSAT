@@ -688,7 +688,9 @@ impl<'a> XDbStream<'a> {
                 ),
                 self.program,
             ),
-            Some(_) => shared::PreliminaryReadError("Database memory map file error").into(),
+            Some(_) => {
+                shared::PreliminaryReadError::from_static("Database memory map file error").into()
+            }
         };
         Err(XReadError(error).into())
     }

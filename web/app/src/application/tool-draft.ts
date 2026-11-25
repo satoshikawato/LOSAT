@@ -6,12 +6,18 @@
 import type { DirectoryFile, ToolDescription } from 'losat/domain';
 import { isUnavailable, type ToolEngine, type ToolValidation } from 'losat/ports';
 import { splitOptions } from '../domain/argv';
+import {
+  duplicateRunFileMessage,
+  normalizeRunPath,
+  pickedFilePath,
+  primaryBlastDbName,
+  RunDirectoryBuilder,
+} from '../domain/blast-db';
 import { countsName } from '../domain/counts';
 import type { FieldValue, FormValues } from '../domain/parameters';
 import { buildWindowMaskerArgv, toolCommandWords, toolValidationSummary } from '../domain/tool-argv';
 import {
   defaultCountsOutName,
-  detectBlastDbName,
   stageOptionParameters,
   toolPrintsKind,
   type WindowMaskerStage,
@@ -210,9 +216,13 @@ export class ToolDraft {
       this.setField(flag, '');
       return;
     }
-    const name = normalizeEntryName(file.name);
+    const name = normalizeRunPath(file.name);
+    if (name === undefined) {
+      this.set({ runFilesError: `Invalid file name: "${file.name}".` });
+      return;
+    }
     if (kept.some((entry) => entry.name === name)) {
-      this.set({ runFilesError: `A file named "${name}" is already in the run directory.` });
+      this.set({ runFilesError: duplicateRunFileMessage(name) });
       return;
     }
     const entry: ToolExtraFile = { key: `rf-${this.nextKey++}`, name, size: file.size, file, flag };
@@ -256,7 +266,11 @@ export class ToolDraft {
     const existing = new Set(this.state.get().fastaFiles.map((entry) => entry.name));
     const added: ToolInputFile[] = [];
     for (const file of files) {
-      const entryName = normalizeEntryName(file.name);
+      const entryName = normalizeRunPath(file.name);
+      if (entryName === undefined) {
+        this.reportError(`Invalid file name: "${file.name}".`);
+        continue;
+      }
       if (existing.has(entryName)) {
         this.reportError(`A file named "${entryName}" is already added.`);
         continue;
@@ -359,31 +373,36 @@ export class ToolDraft {
   addRunFiles(files: readonly File[], relativeNames?: readonly string[]): void {
     if (files.length === 0) return;
     const state = this.state.get();
-    const existing = new Set(state.runFiles.map((entry) => entry.name));
+    const builder = new RunDirectoryBuilder();
+    for (const entry of state.runFiles) builder.add(entry.name, entry.file);
     const added: ToolExtraFile[] = [];
-    let duplicate: string | undefined;
+    let duplicateError: string | undefined;
     for (let i = 0; i < files.length; i++) {
       const file = files[i]!;
-      const rawName = relativeNames?.[i] || (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-      const name = normalizeEntryName(rawName);
-      if (name === '') continue;
-      if (existing.has(name)) {
-        duplicate ??= name;
+      const name = pickedFilePath(file, relativeNames?.[i]);
+      if (name === undefined) continue;
+      if (builder.has(name)) {
+        duplicateError ??= duplicateRunFileMessage(name);
         continue;
       }
-      existing.add(name);
+      try {
+        builder.add(name, file);
+      } catch (error) {
+        duplicateError ??= errorMessage(error);
+        continue;
+      }
       added.push({ key: `rf-${this.nextKey++}`, name, size: file.size, file });
     }
     const nextRunFiles = Object.freeze([...state.runFiles, ...added]);
     let nextBlastDbIn = state.blastDbIn;
     if (!state.blastDbInEdited || state.blastDbIn.trim() === '') {
-      const detected = detectBlastDbName(nextRunFiles.map((entry) => entry.name));
+      const detected = primaryBlastDbName(nextRunFiles.map((entry) => entry.name));
       if (detected !== undefined) nextBlastDbIn = detected;
     }
     this.set({
       runFiles: nextRunFiles,
       blastDbIn: nextBlastDbIn,
-      runFilesError: duplicate === undefined ? undefined : `A file named "${duplicate}" is already in the run directory.`,
+      runFilesError: duplicateError,
       message: undefined,
     });
     this.scheduleValidation();
@@ -868,27 +887,21 @@ function savedCountsChoice(taxid: number, size: number): ToolCountsChoice {
 }
 
 function fileCountsChoice(file: File | undefined): ToolCountsChoice {
-  return file === undefined ? { kind: 'none' } : { kind: 'file', file, name: normalizeEntryName(file.name), size: file.size };
+  return file === undefined
+    ? { kind: 'none' }
+    : { kind: 'file', file, name: normalizeRunPath(file.name) ?? file.name, size: file.size };
 }
 
-/** Normalizes a picked or folder-relative entry name for the run directory. */
-export function normalizeEntryName(raw: string): string {
-  let name = raw.replaceAll('\\', '/').trim();
-  while (name.startsWith('./')) name = name.slice(2);
-  while (name.startsWith('/')) name = name.slice(1);
-  return name;
-}
-
-/** Ensures no two files in a tool run directory share a name. */
+/** Ensures no two different files in a tool run directory claim the same path. */
 function assembleDirectory(entries: readonly ToolDirectoryFile[]): readonly ToolDirectoryFile[] {
-  const seen = new Set<string>();
+  const builder = new RunDirectoryBuilder();
+  const kept: ToolDirectoryFile[] = [];
   for (const entry of entries) {
-    if (seen.has(entry.name)) {
-      throw new Error(`Two files in the run directory have the same name: "${entry.name}".`);
-    }
-    seen.add(entry.name);
+    const existed = builder.has(entry.name);
+    builder.add(entry.name, entry.file);
+    if (!existed) kept.push(entry);
   }
-  return Object.freeze(entries);
+  return Object.freeze(kept);
 }
 
 /**

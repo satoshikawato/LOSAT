@@ -1208,7 +1208,7 @@ fn protein_shapes_of_random_masks() {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 805-830
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1538
-/// `HardMaskShape::of_scan`, `translated_walked`, and the new refusal shapes for
+/// `HardMaskShape::of_scan`, `translated_walked`, and the new refusal shape for
 /// `HardScan::Translated` (series NP, M4b-3c part 2): masks that overlap or nest in start order
 /// (and equal starts) are accepted, out-of-start-order and inverted masks stay refused as
 /// `Unsorted`, `PastEnd` checks every mask's end (not only the last), BLASTN still refuses every

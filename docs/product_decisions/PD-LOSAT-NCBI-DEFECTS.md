@@ -714,7 +714,7 @@
   narrowed to masks out of the order of their start, NCBI's never-ending gapped search, a frame
   searched whole past overlapping masks and approved exception 29 extended to TBLASTN and TBLASTX
   (Owner's decision of 2026-11-25 17:54 JST on question Q-3C2-STALE = B of line NP's series M,
-  decision 77, words 「B: 例外 29 を tblastn/tblastx にも広げ、配列ごとに独立探索する（4 検索統一）」);
+  decision 77, chosen option 「B: 例外 29 を tblastn/tblastx にも広げ、配列ごとに独立探索する（4 検索統一）」);
   series M decision 46, 2026-11-21, Owner's answer A on overlapping masks; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07, for the shape of the change; numbered after 1.104)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the

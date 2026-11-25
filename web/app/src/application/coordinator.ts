@@ -1010,7 +1010,8 @@ export class Coordinator {
     } catch (error) {
       const cancelled = error instanceof RunCancelledError || this.cancelRequested.has(runId);
       if (!committing) sink?.fail(error);
-      if (staged) void this.deps.data.deleteRun(runId).catch(() => undefined);
+      // When committing is in progress, leave the port open so commit settles and its .then(deleteRun) removes the run.
+      if (staged && !committing) void this.deps.data.deleteRun(runId).catch(() => undefined);
       this.updateTool(runId, {
         status: cancelled ? 'cancelled' : 'failed',
         record: {

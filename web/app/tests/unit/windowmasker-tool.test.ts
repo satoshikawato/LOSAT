@@ -888,6 +888,12 @@ describe('Coordinator single queue and DataService tool storage', () => {
     await data.deleteRun(prepId);
 
     // Case 2: Cancel during finalizing (delayed commit seal).
+    const deletedDuringFinalizing: string[] = [];
+    const origDeleteRun = data.deleteRun.bind(data);
+    data.deleteRun = async (runId: string) => {
+      deletedDuringFinalizing.push(runId);
+      return origDeleteRun(runId);
+    };
     sealGate = new Promise<void>((resolve) => {
       releaseSeal = resolve;
     });
@@ -898,14 +904,17 @@ describe('Coordinator single queue and DataService tool storage', () => {
     coordinator.cancel(finId);
     const finDone = await waitTerminal(coordinator, finId);
     expect(finDone.status).toBe('cancelled');
+    // Port stays open while commit finishes sealing so commit settles and its .then(deleteRun) cleans up.
+    expect(deletedDuringFinalizing).toEqual([]);
     releaseSeal!();
     sealGate = undefined;
     await sleep(40);
+    expect(deletedDuringFinalizing).toEqual([finId]);
     expect(baseStore.usage()).toBe(0);
     await expect(data.readToolOutputRange(finId, 'stdout', 0, 0)).rejects.toThrow();
     const probe2 = await origOpenToolRun(finId);
     probe2.close();
-    await data.deleteRun(finId);
+    await origDeleteRun(finId);
   });
 
   it('re-reads draft state after awaiting validation in ToolDraft.submit()', async () => {

@@ -3,6 +3,55 @@ use crate::algorithm::blastx::args::ProgramName;
 use crate::algorithm::blastx::input::{scope_records, shown_ids};
 use crate::blastinput::input_files::InputFile;
 use crate::blastinput::seq_range::RecordPlacement;
+use std::path::Path;
+
+/// The records of `data` (a query, or with `protein` a subject), read as the command line reads
+/// them, the whole input as one batch (`BatchCutter`).
+pub(crate) fn parse_fasta(data: &[u8], protein: bool, lowercase: bool) -> Result<Vec<FastaRecord>> {
+    let config = if protein {
+        ReaderConfig::subject("BLASTX", true, false)
+    } else {
+        ReaderConfig::query("BLASTX", false, false)
+    };
+    let mut source = FastaInputSource::from_bytes(data, config);
+    let mut kept = Vec::new();
+    if source.end() {
+        return Ok(kept);
+    }
+    let mut cutter = BatchCutter::new(CutSettings {
+        range: None,
+        keep_whole: false,
+        around: 0,
+        keep_skipped: false,
+        batch_size: usize::MAX,
+        count: None,
+        blank_batch: true,
+    });
+    while !source.end() {
+        match source.next_sequence_upper(lowercase, &mut |_| Ok(())) {
+            Ok((record, masks)) => {
+                let record = from_upper(record, masks);
+                kept.push(record.clone());
+                cutter.add(record, &mut |_| Ok(()))?;
+            }
+            Err(ReadError::Parse {
+                code: ParseErrorCode::Eof,
+                ..
+            }) => break,
+            Err(error) => return Err(error.into_app_error()),
+        }
+    }
+    cutter.finish(&mut |_| Ok(()))?;
+    Ok(kept)
+}
+
+/// The records of the file `path`.
+pub(crate) fn read_fasta(path: &Path, protein: bool, lowercase: bool) -> Result<Vec<FastaRecord>> {
+    let data = anyhow::Context::with_context(std::fs::read(path), || {
+        format!("cannot read BLASTX input {}", path.display())
+    })?;
+    parse_fasta(&data, protein, lowercase)
+}
 
 /// The directory of this test's files (removed at its end).
 fn dir(tag: &str) -> std::path::PathBuf {
@@ -302,38 +351,76 @@ fn a_cut_clips_and_moves_the_lower_case_masks() {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1082-1090
-// The record of the shared reader (lower case where the mask lies, a `>?` gap in a masked run
-// too) as BLASTX holds it: upper case, the mask as intervals only with `-lcase_masking`, the
-// rest of the record as it was.
+// Both `next_sequence_upper` + `from_upper` and `next_sequence` + `from_shared_ref` produce
+// identical BLASTX records (upper-case letters, identical mask intervals over `>?` gaps, U->T,
+// protein `*`, trailing gaps, and empty masks without `-lcase_masking`).
 #[test]
 fn the_adapter_makes_upper_case_letters_and_masks() {
-    let read = |data: &[u8]| {
-        let mut source =
-            FastaInputSource::from_bytes(data, ReaderConfig::query("BLASTX", false, false));
+    let read_shared = |data: &[u8], protein: bool| {
+        let cfg = if protein {
+            ReaderConfig::subject("BLASTX", true, false)
+        } else {
+            ReaderConfig::query("BLASTX", false, false)
+        };
+        let mut source = FastaInputSource::from_bytes(data, cfg);
         source.next_sequence(&mut |_| Ok(())).unwrap()
     };
-    // The gap `>?5` lies in the run that `gt` continues: one interval over the gap.
-    let shared = read(b">r0 t\nac\n>?5\ngtAC\n");
-    assert_eq!(shared.sequence, b"acnnnnngtAC");
-    let masked = from_shared(shared.clone(), true);
-    assert_eq!(masked.sequence, b"ACNNNNNGTAC");
-    assert_eq!(masked.lowercase_masks, vec![(0, 8)]);
-    assert_eq!(masked.internal_id, "Query_1");
-    assert_eq!(masked.title, b"r0 t");
-    let unmasked = from_shared(shared.clone(), false);
-    assert_eq!(unmasked.sequence, b"ACNNNNNGTAC");
-    assert!(unmasked.lowercase_masks.is_empty());
-    // Two runs, one at each end.
-    let two = from_shared(read(b">q\nacgTTTTaaaCCgg\n"), true);
-    assert_eq!(two.lowercase_masks, vec![(0, 2), (7, 9), (12, 13)]);
-    // A record without lower case.
-    let plain = from_shared(read(b">q\nACGT\n"), true);
-    assert_eq!(plain.sequence, b"ACGT");
-    assert!(plain.lowercase_masks.is_empty());
-    // The library's record that a caller keeps.
-    let again = from_shared_ref(&shared, true).unwrap();
-    assert_eq!(again.sequence, masked.sequence);
-    assert_eq!(again.lowercase_masks, masked.lowercase_masks);
+    let read_upper = |data: &[u8], protein: bool, keep_masks: bool| {
+        let cfg = if protein {
+            ReaderConfig::subject("BLASTX", true, false)
+        } else {
+            ReaderConfig::query("BLASTX", false, false)
+        };
+        let mut source = FastaInputSource::from_bytes(data, cfg);
+        let (record, masks) = source
+            .next_sequence_upper(keep_masks, &mut |_| Ok(()))
+            .unwrap();
+        from_upper(record, masks)
+    };
+    for (data, protein, expected_seq, expected_masks) in [
+        // The gap `>?5` lies in the run that `gt` continues: one interval over the gap.
+        (
+            &b">r0 t\nac\n>?5\ngtAC\n"[..],
+            false,
+            &b"ACNNNNNGTAC"[..],
+            vec![(0, 8)],
+        ),
+        // Trailing gap in a masked run.
+        (b">r1\nac\n>?5\n", false, b"ACNNNNN", vec![(0, 6)]),
+        // Gap between masked and unmasked, and between unmasked and masked.
+        (b">r2\nac\n>?5\nAC\n", false, b"ACNNNNNAC", vec![(0, 6)]),
+        (b">r3\nAC\n>?5\nac\n", false, b"ACNNNNNAC", vec![(7, 8)]),
+        // U->T under masking.
+        (b">r4\nuuAC\n", false, b"TTAC", vec![(0, 1)]),
+        // Two runs, one at each end.
+        (
+            b">q\nacgTTTTaaaCCgg\n",
+            false,
+            b"ACGTTTTAAACCGG",
+            vec![(0, 2), (7, 9), (12, 13)],
+        ),
+        // A record without lower case.
+        (b">q\nACGT\n", false, b"ACGT", vec![]),
+        // Protein with `*` splitting masked runs.
+        (b">p\nac*gt\n", true, b"AC*GT", vec![(0, 1), (3, 4)]),
+    ] {
+        let shared = read_shared(data, protein);
+        let masked_upper = read_upper(data, protein, true);
+        let masked_ref = from_shared_ref(&shared, true).unwrap();
+        assert_eq!(masked_upper.sequence, expected_seq);
+        assert_eq!(masked_upper.lowercase_masks, expected_masks);
+        assert_eq!(masked_ref.sequence, masked_upper.sequence);
+        assert_eq!(masked_ref.lowercase_masks, masked_upper.lowercase_masks);
+        assert_eq!(masked_ref.internal_id, masked_upper.internal_id);
+        assert_eq!(masked_ref.title, masked_upper.title);
+
+        let unmasked_upper = read_upper(data, protein, false);
+        let unmasked_ref = from_shared_ref(&shared, false).unwrap();
+        assert_eq!(unmasked_upper.sequence, expected_seq);
+        assert!(unmasked_upper.lowercase_masks.is_empty());
+        assert_eq!(unmasked_ref.sequence, unmasked_upper.sequence);
+        assert!(unmasked_ref.lowercase_masks.is_empty());
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:130-133

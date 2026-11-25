@@ -1,6 +1,6 @@
 //! BLASTX's reading of FASTA input: the readers of the other programs
 //! (`blastinput::fasta_reader`, NCBI's `CBlastFastaInputSource`) read the records, an adapter
-//! gives each its BLASTX form (`from_shared`), and one batch cutter (`BatchCutter`) makes the
+//! gives each its BLASTX form (`from_upper` / `from_shared_ref`), and one batch cutter (`BatchCutter`) makes the
 //! reader batches of the command line (`QueryStream`) and of the library (`local::reader_batches`).
 //! RPSTBLASTN reads its queries through the same stream.
 use anyhow::Result;
@@ -14,19 +14,23 @@ use crate::blastinput::query_batch::BatchCount;
 use crate::blastinput::seq_range::{record_interval, RecordInterval, SequenceRange};
 
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1082-1090
-/// BLASTX's record of a record that the shared reader read (`fasta_reader::FastaRecord`): the
-/// residues in upper case and, with `-lcase_masking` (`lowercase`), the lowercase mask's
-/// intervals, which the shared reader keeps as the case of the residues (a `>?` gap inside a
-/// masked interval, too); the local id, the title's bytes and the source are moved. The reader's
-/// messages are dropped: they were written as the record was read.
-pub(crate) fn from_shared(record: fasta_reader::FastaRecord, lowercase: bool) -> FastaRecord {
-    adapt(
-        record.local_id,
-        record.title,
-        record.sequence,
-        record.source,
-        lowercase,
-    )
+/// BLASTX's record from the shared reader's `FastaInputSource::next_sequence_upper`: the residues
+/// are already in upper case and the lowercase mask intervals (only when `-lcase_masking` is set)
+/// come directly from the reader without a lowercase-and-rescan round trip; the local id, title
+/// bytes, and source are moved.
+pub(crate) fn from_upper(
+    record: fasta_reader::FastaRecord,
+    lowercase_masks: Vec<(i32, i32)>,
+) -> FastaRecord {
+    FastaRecord {
+        internal_id: record.local_id,
+        title: record.title,
+        sequence: record.sequence,
+        lowercase_masks,
+        source: record.source,
+        around: None,
+        skipped: None,
+    }
 }
 
 /// `from_shared` of a record that the caller keeps (the library's records, which the reader of
@@ -376,8 +380,8 @@ pub(crate) fn read_source_batches<R: Read>(
     }
     let mut cutter = BatchCutter::new(settings);
     while !source.end() {
-        match next_record(source, warn) {
-            Ok(Some(record)) => cutter.add(from_shared(record, lowercase), deliver)?,
+        match next_record(source, lowercase, warn) {
+            Ok(Some(record)) => cutter.add(record, deliver)?,
             Ok(None) => break,
             Err(Failure::Write(written)) => return Err(written),
             Err(Failure::Reader(failure)) => return Err(error(failure)),
@@ -399,17 +403,18 @@ enum Failure {
 /// or the error of `warn` where the messages could not be written.
 fn next_record<R: Read>(
     source: &mut FastaInputSource<R>,
+    lowercase: bool,
     warn: &mut dyn FnMut(&[u8]) -> Result<()>,
-) -> std::result::Result<Option<fasta_reader::FastaRecord>, Failure> {
+) -> std::result::Result<Option<FastaRecord>, Failure> {
     let mut written = None;
-    let read = source.next_sequence(&mut |message| {
+    let read = source.next_sequence_upper(lowercase, &mut |message| {
         warn(message).map_err(|error| {
             written = Some(error);
             std::io::Error::other("a reader message was not written")
         })
     });
     match read {
-        Ok(record) => Ok(Some(record)),
+        Ok((record, masks)) => Ok(Some(from_upper(record, masks))),
         Err(_) if written.is_some() => Err(Failure::Write(written.take().expect("checked"))),
         Err(ReadError::Parse {
             code: ParseErrorCode::Eof,
@@ -423,13 +428,7 @@ fn next_record<R: Read>(
 /// The records of LOSAT Web's ABI v1 input `data` (a subject), as the readers of the other programs
 /// read bytes in memory (`FastaInputSource::from_bytes`), without the data loaders. A reader error
 /// is the reader's message as it is (ABI v1 is frozen).
-#[cfg_attr(
-    all(not(target_arch = "wasm32"), not(test)),
-    expect(
-        dead_code,
-        reason = "called only by the web ABI (`web::run_pair`, wasm32)"
-    )
-)]
+#[cfg(any(losat_web_abi_v1, test))]
 pub(crate) fn read_web_subjects(
     data: &[u8],
     lowercase: bool,
@@ -439,8 +438,8 @@ pub(crate) fn read_web_subjects(
         FastaInputSource::from_bytes(data, ReaderConfig::subject("BLASTX", true, false));
     let mut records = Vec::new();
     while !source.end() {
-        match next_record(&mut source, warn) {
-            Ok(Some(record)) => records.push(from_shared(record, lowercase)),
+        match next_record(&mut source, lowercase, warn) {
+            Ok(Some(record)) => records.push(record),
             Ok(None) => break,
             Err(Failure::Write(written)) => return Err(written),
             Err(Failure::Reader(failure)) => return Err(failure.into()),
@@ -451,13 +450,7 @@ pub(crate) fn read_web_subjects(
 
 /// The query batches of LOSAT Web's ABI v1 input `data` (`read_source_batches`): no data loaders, the
 /// reader's message as it is for an error, and blank lines alone give no batch (ABI v1 is frozen).
-#[cfg_attr(
-    all(not(target_arch = "wasm32"), not(test)),
-    expect(
-        dead_code,
-        reason = "called only by the web ABI (`web::run_pair`, wasm32)"
-    )
-)]
+#[cfg(any(losat_web_abi_v1, test))]
 pub(crate) fn read_web_queries(
     data: &[u8],
     lowercase: bool,
@@ -487,70 +480,7 @@ pub(crate) fn read_web_queries(
 }
 
 #[cfg(test)]
-pub(crate) use test_reads::{parse_fasta, read_fasta};
-
-/// The reads of the tests: the records of bytes or of a file as the command line reads them.
-#[cfg(test)]
-mod test_reads {
-    use super::*;
-    use std::path::Path;
-
-    /// The records of `data` (a query, or with `protein` a subject), read as the command line reads
-    /// them, the whole input as one batch (`BatchCutter`).
-    pub(crate) fn parse_fasta(
-        data: &[u8],
-        protein: bool,
-        lowercase: bool,
-    ) -> Result<Vec<FastaRecord>> {
-        let config = if protein {
-            ReaderConfig::subject("BLASTX", true, false)
-        } else {
-            ReaderConfig::query("BLASTX", false, false)
-        };
-        let mut source = FastaInputSource::from_bytes(data, config);
-        let mut kept = Vec::new();
-        if source.end() {
-            return Ok(kept);
-        }
-        let mut cutter = BatchCutter::new(CutSettings {
-            range: None,
-            keep_whole: false,
-            around: 0,
-            keep_skipped: false,
-            batch_size: usize::MAX,
-            count: None,
-            blank_batch: true,
-        });
-        while !source.end() {
-            match source.next_sequence(&mut |_| Ok(())) {
-                Ok(record) => {
-                    let record = from_shared(record, lowercase);
-                    kept.push(record.clone());
-                    cutter.add(record, &mut |_| Ok(()))?;
-                }
-                Err(ReadError::Parse {
-                    code: ParseErrorCode::Eof,
-                    ..
-                }) => break,
-                Err(error) => return Err(error.into_app_error()),
-            }
-        }
-        cutter.finish(&mut |_| Ok(()))?;
-        Ok(kept)
-    }
-
-    /// The records of the file `path`.
-    pub(crate) fn read_fasta(
-        path: &Path,
-        protein: bool,
-        lowercase: bool,
-    ) -> Result<Vec<FastaRecord>> {
-        let data = anyhow::Context::with_context(std::fs::read(path), || {
-            format!("cannot read BLASTX input {}", path.display())
-        })?;
-        parse_fasta(&data, protein, lowercase)
-    }
-}
+pub(crate) use tests::{parse_fasta, read_fasta};
 
 #[cfg(test)]
 #[path = "input_source_tests.rs"]

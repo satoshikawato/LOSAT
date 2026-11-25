@@ -16,7 +16,7 @@ use crate::algorithm::blastx::args::{
 };
 use crate::algorithm::blastx::database::{BlastxDatabase, ReportedSubjects};
 use crate::algorithm::blastx::input::FastaRecord;
-use crate::algorithm::blastx::input_source::from_shared;
+use crate::algorithm::blastx::input_source::from_upper;
 use crate::algorithm::blastx::runtime::BatchResults;
 use crate::algorithm::blastx::subjects::Subjects;
 use crate::algorithm::blastx::{archive, seqalign};
@@ -175,7 +175,7 @@ pub(super) fn read_subjects(
     )
     .map_err(early_archive_error)?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:221-247
-    // The subjects are read as the other programs' are (`fasta_reader::read_subjects_map`), each
+    // The subjects are read as the other programs' are (`fasta_reader::read_subjects_upper`), each
     // record's messages as it is read, and each is given its BLASTX form as it is read.
     let subjects = match subject_file {
         Some(subject_file) => {
@@ -186,11 +186,12 @@ pub(super) fn read_subjects(
                     .with_parse_deflines(args.parse_deflines),
             );
             source.set_id_scope(id_scope.clone());
-            fasta_reader::read_subjects_map(
+            fasta_reader::read_subjects_upper(
                 &mut source,
                 subject_range.as_ref(),
+                args.lcase_masking,
                 &mut |message| stderr.write_all(message),
-                |record| Ok(from_shared(record, args.lcase_masking)),
+                |record, masks| Ok(from_upper(record, masks)),
             )
             .map_err(early_archive_error)?
         }

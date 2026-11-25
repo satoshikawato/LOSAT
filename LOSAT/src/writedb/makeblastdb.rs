@@ -41,9 +41,11 @@ use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 /// Arguments of `losat makeblastdb`, under makeblastdb's names.
 #[derive(Debug, Clone)]
 pub struct MakedbArgs {
-    /// Input FASTA file (`-` is standard input), or the input databases of -input_type blastdb
+    /// Input FASTA or ASN.1 file (`-` is standard input), or the input databases of -input_type
+    /// blastdb
     pub input: String,
-    /// Type of the data specified in input_file (fasta and blastdb are supported)
+    /// Type of the data specified in input_file (fasta, blastdb, asn1_txt and asn1_bin are
+    /// supported)
     pub input_type: String,
     /// Molecule type of target db
     pub dbtype: String,

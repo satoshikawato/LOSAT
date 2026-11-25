@@ -321,7 +321,7 @@ pub struct HandleCarry(options::ParamList);
 impl OptionsHandle {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:164-173
     /// What the database's list and statistics make of the requests: its `program-options`
-    /// parameter (`DbFilterArgs::archive_parameter`), and how the `EffectiveSearchSpace` option
+    /// parameter (`DbFilterArgs::archive_parameters`), and how the `EffectiveSearchSpace` option
     /// of a searched batch is made (`RequestLength`, `common::database::note_archive_database_filter`):
     /// for a statistics length that is not positive it is not the search's own value, though the
     /// statistics of the results read the length of OID 0 (`SeqDb::statistics`). Set once per

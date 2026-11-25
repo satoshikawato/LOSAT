@@ -68,9 +68,9 @@ impl DbFilterArgs {
         Self::from_args_inner(args, false)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:54
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:74
-    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:54
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:63
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:64
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/psiblast_args.cpp:59
     /// The options of `args` for a protein-database search program (`blastp`, `blastx`,
     /// `psiblast`), which enables `-ipglist` and `-negative_ipglist` via
     /// `SetIPGFilteringSupport`.
@@ -108,8 +108,9 @@ impl DbFilterArgs {
     }
 }
 
-/// The names of the options of `DbFilterArgs`, for the `-subject_loc` exclusions of LOSAT Web's
-/// ABI v1, which keeps its own parser (`web_v1_argv`; the other readers are NCBI's).
+/// The frozen set of `DbFilterArgs` options from LOSAT Web's ABI v1 (which keeps its own parser
+/// `web_v1_argv` and does not accept `-gilist`, `-negative_gilist`, `-ipglist`, or
+/// `-negative_ipglist`), used for v1 `-subject_loc` exclusions.
 #[cfg(any(losat_web_abi_v1, test))]
 pub const DB_FILTER_OPTIONS: [&str; 7] = [
     "seqidlist",

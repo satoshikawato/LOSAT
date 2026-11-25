@@ -1423,7 +1423,7 @@ impl SeqDb {
     }
 
     /// The taxids of the search's list object after the volumes opened, ascending, which the
-    /// BLAST archive writes (`DbFilterArgs::archive_parameter`): of a positive list those the
+    /// BLAST archive writes (`DbFilterArgs::archive_parameters`): of a positive list those the
     /// database holds (`CSeqDBLMDBSet::TaxIdsToOids`, `tax_ids.swap` with `rv_tax_ids`), of a
     /// negative list all (`CSearchDatabase::x_InitializeDb` opens the database with a copy of
     /// it). Empty without a taxid list.

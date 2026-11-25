@@ -1011,6 +1011,7 @@ impl Volume {
             .ok_or_else(|| self.no_line_kept(oid))
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1909-1946
     /// Whether the volume's rule fills NCBI's `CSeqDBIdSet` (`x_InitIdSet`): a negative seqid
     /// list (also one version 5 processing emptied), a positive GI list, or a negative GI list
     /// (`SeqDb::excludes_lineless_at_fetch`).

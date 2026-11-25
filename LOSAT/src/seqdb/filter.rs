@@ -1731,6 +1731,8 @@ impl SeqDb {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2501-2551
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2553-2580
     /// Opens the numeric ISAM of `kind` (`what`: `"GI"` or `"IPG"`) for volume `at`, or returns
     /// NCBI's missing-ISAM or batch-mode error (`seqdbvol.cpp:2504-2538`, `2558-2568`).
     fn numeric_isam(

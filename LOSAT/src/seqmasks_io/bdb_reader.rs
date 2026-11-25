@@ -252,14 +252,25 @@ impl MaskBdbReader {
                 Vec::new(),
                 Some(self.db.nucleotide_ambiguity(oid).map_err(error)?),
             ),
-            SeqType::Protein => (
-                self.db
-                    .read_sequence(oid)
-                    .map_err(error)?
-                    .protein(0)
-                    .to_vec(),
-                None,
-            ),
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+            // NCBI reference (598d8ae6): c++/src/app/segmasker/segmasker.cpp:228-232
+            // `GetBioseq` returns no Bioseq when the signed 32-bit protein length is below 1
+            // (`0` or `>= 2^31` residues), after opening `.psq` via `x_GetSequence`.
+            SeqType::Protein => {
+                if self.db.protein_length_i32(oid).map_err(error)? < 1 {
+                    self.db.check_protein_range(oid).map_err(error)?;
+                    (Vec::new(), None)
+                } else {
+                    (
+                        self.db
+                            .read_sequence(oid)
+                            .map_err(error)?
+                            .protein(0)
+                            .to_vec(),
+                        None,
+                    )
+                }
+            }
         };
         let has_letters = ambiguity
             .as_ref()

@@ -89,7 +89,7 @@ impl AliasIdList {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1910-1925
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1910-1941
 /// `s_IncludeDefline_Taxid`: whether `defline`'s `taxid` or `links` hold a taxid in `taxids`.
 pub(crate) fn defline_matches_taxids(defline: &BlastDefline, taxids: &BTreeSet<i32>) -> bool {
     defline

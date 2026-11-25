@@ -205,7 +205,9 @@ fn the_stored_header_keeps_the_lines_the_type_erases() {
 
 #[test]
 fn v5_compare_seq_id_and_set_ops_match_ncbi_semantics() {
-    use super::{compare_seq_id, merge_sort_by_result, set_difference_by, set_intersection_by};
+    use super::{
+        compare_seq_id, reject_equivalent_seqid_pair, set_difference_by, set_intersection_by,
+    };
 
     let cmp = |a: &[u8], b: &[u8]| compare_seq_id(a, b, b"test.txt");
 
@@ -221,10 +223,8 @@ fn v5_compare_seq_id_and_set_ops_match_ncbi_semantics() {
     // Unparseable FASTA form raises NCBI's CSeqIdException error.
     assert!(cmp(b"sp||", b"NP_000103.1").is_err());
 
-    // Stable merge sort with compare_seq_id, then set intersection and difference.
-    // Because compare_seq_id falls back to raw byte order for non-equivalent ids, "LOC7" sorts
-    // before "NP_000103" while "loc7" sorts after "P10102.1" (matching NCBI's std::set_intersection
-    // quirk in db.il.bp.v5.sq.slloc.6).
+    // Lists without differently spelled equivalent ids pass the strict-weak-ordering guard and
+    // sort uniquely by bytewise `<` (matching NCBI's std::sort + set_intersection/set_difference).
     let mut a = vec![
         b"NP_000118.1".to_vec(),
         b"NP_000103".to_vec(),
@@ -235,10 +235,12 @@ fn v5_compare_seq_id_and_set_ops_match_ncbi_semantics() {
         b"NP_000103.1".to_vec(),
         b"P10102.1".to_vec(),
     ];
-    let mut less = |x: &[u8], y: &[u8]| compare_seq_id(x, y, b"test.txt");
-    merge_sort_by_result(&mut a, &mut less).unwrap();
-    merge_sort_by_result(&mut b, &mut less).unwrap();
+    reject_equivalent_seqid_pair(&a, b"test.txt", "an alias file's SEQIDLIST").unwrap();
+    reject_equivalent_seqid_pair(&b, b"test.txt", "the search's -seqidlist").unwrap();
+    a.sort();
+    b.sort();
 
+    let mut less = |x: &[u8], y: &[u8]| compare_seq_id(x, y, b"test.txt");
     let inter = set_intersection_by(&a, &b, &mut less).unwrap();
     assert_eq!(inter, vec![b"NP_000103".to_vec()]);
     // Single-element case-different local ids compare equal directly.
@@ -249,6 +251,118 @@ fn v5_compare_seq_id_and_set_ops_match_ncbi_semantics() {
 
     let diff = set_difference_by(&a, &b, &mut less).unwrap();
     assert_eq!(diff, vec![b"LOC7".to_vec(), b"NP_000118.1".to_vec()]);
+}
+
+#[test]
+fn v5_rejects_non_strict_weak_equivalent_seqid_pairs() {
+    use super::reject_equivalent_seqid_pair;
+
+    let check = |ids: &[&[u8]]| {
+        let owned: Vec<Vec<u8>> = ids.iter().map(|s| s.to_vec()).collect();
+        reject_equivalent_seqid_pair(&owned, b"test.txt", "an alias file's SEQIDLIST")
+    };
+
+    // Unversioned + versioned pairs (all three permutations from the review probe), case-variant
+    // local/accession pairs, cross-database accession pairs, and chainless/chained PDB pairs must
+    // be explicitly refused.
+    for pair in [
+        &[
+            b"NP_000103".as_slice(),
+            b"NP_000103.1".as_slice(),
+            b"NP_000103.2".as_slice(),
+        ][..],
+        &[b"NP_000103.2", b"NP_000103", b"NP_000103.1"],
+        &[b"NP_000103.1", b"NP_000103.2", b"NP_000103"],
+        &[b"LOC7", b"loc7"],
+        &[b"NP_000103.1", b"np_000103.1"],
+        &[b"gb|AB000001.1|", b"emb|AB000001.1|"],
+        &[b"pdb|1ABC|A", b"pdb|1ABC|"],
+        &[b"123", b"gi|123"],
+        &[b"loc7", b"lcl|loc7"],
+    ] {
+        let err = check(pair).unwrap_err();
+        let text = err.to_error().to_string();
+        assert!(
+            text.contains("holds two differently spelled Seq-ids"),
+            "unexpected error for {pair:?}: {text}"
+        );
+    }
+
+    // Distinct versions without the unversioned form, unsorted non-equivalent ids, bare GI vs
+    // local integer (`123` parses as GI under `fParse_AnyRaw`), single-entry lists, and identical
+    // bytewise duplicates (even unparseable ones, where s_CompareSeqId short-circuits id1 == id2)
+    // are allowed.
+    for ok in [
+        &[][..],
+        &[b"NP_000103".as_slice()],
+        &[b"NP_000118.1", b"NP_000103.1"],
+        &[b"NP_000103.2", b"NP_000103.1", b"LOC7"],
+        &[b"123", b"lcl|123"],
+        &[b"NP_000103.1", b"NP_000103.1"],
+        &[b"sp||", b"sp||"],
+    ] {
+        assert!(check(ok).is_ok(), "unexpected refusal for {ok:?}");
+    }
+
+    // An unparseable token alongside another distinct token raises NCBI's CSeqIdException.
+    for unparseable in [
+        &[b"sp||".as_slice(), b"NP_000103.1".as_slice()][..],
+        &[b"NP_000103", b"NP_000103.1", b"sp||"],
+    ] {
+        let err = check(unparseable).unwrap_err().to_error();
+        assert!(err.ncbi_exception().is_some(), "{unparseable:?}: {err}");
+    }
+
+    // End-to-end SeqDb::restrict_seqids checks over the idlist fixtures:
+    // 1. Without a search seqid list, an alias SEQIDLIST with equivalent spellings opens normally.
+    let idlist = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/idlist");
+    let open_id =
+        |name: &str| SeqDb::open(idlist.join(name).to_str().unwrap(), SeqType::Protein).unwrap();
+    let read_list = |name: &str, negative: bool| {
+        let bytes = std::fs::read(idlist.join(name)).unwrap();
+        let mut warns = Vec::new();
+        let file = super::super::seqidlist::read_si_list(&bytes, &mut warns).unwrap();
+        super::super::filter::SeqidList { negative, file }
+    };
+    for alias in ["g_sqamb0", "g_sqamb1", "g_sqamb2"] {
+        let db = open_id(alias);
+        assert_eq!(lines(&db), [(1, 1)], "{alias}");
+        // 2. With -seqidlist or -negative_seqidlist, the ambiguous alias SEQIDLIST is refused.
+        for (list_name, negative) in [
+            ("u_np103v.txt", false),
+            ("u_np103_1.txt", false),
+            ("u_np103_2.txt", false),
+            ("u_p10102.txt", true),
+        ] {
+            let mut db = open_id(alias);
+            let mut warnings = Vec::new();
+            let err = db
+                .restrict_seqids(&read_list(list_name, negative), &mut warnings)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("an alias file's SEQIDLIST holds two differently spelled Seq-ids"),
+                "{alias} + {list_name} (neg={negative}): {err}"
+            );
+        }
+    }
+    // 3. Clean alias SEQIDLIST + ambiguous -seqidlist is refused, while ambiguous
+    // -negative_seqidlist succeeds (NCBI sorts negative_seqidlist with bytewise `<`).
+    let mut db = open_id("g_sq");
+    let mut warnings = Vec::new();
+    let err = db
+        .restrict_seqids(&read_list("u_np103_amb.txt", false), &mut warnings)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("the search's -seqidlist holds two differently spelled Seq-ids"),
+        "{err}"
+    );
+    let mut db = open_id("g_sq");
+    let mut warnings = Vec::new();
+    db.restrict_seqids(&read_list("u_np103_amb.txt", true), &mut warnings)
+        .unwrap();
+    assert_eq!(lines(&db), [(0, 1), (6, 1), (13, 1)]);
 }
 
 #[test]

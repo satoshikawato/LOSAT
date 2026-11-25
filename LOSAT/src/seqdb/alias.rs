@@ -1616,6 +1616,7 @@ fn is_positive_user(user: Option<&super::filter::DeflineRule>) -> bool {
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbgilistset.cpp:417-423,447-461
 /// Whether Pass 1 volumes translate an alias file's list (`m_UserList` empty or `mixed_ids` set).
 fn user_translates_pass1(user: Option<&super::filter::DeflineRule>) -> bool {
     match user {
@@ -2019,7 +2020,10 @@ fn set_bits(words: &mut [u64], from: u64, to: u64) {
     }
 }
 
-/// Clears the bits `[from, to)` of `words` (nothing when `to <= from`).
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:746
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:376-408
+/// Clears the bits `[from, to)` of `words` (nothing when `to <= from`), matching
+/// `CSeqDB_BitSet::AssignBitRange` with `false`.
 fn clear_bits(words: &mut [u64], from: u64, to: u64) {
     if to <= from {
         return;
@@ -2077,22 +2081,18 @@ fn attach_and_excluded(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:565-576
-/// `s_CompareSeqId`: compares two Seq-id strings using `CSeq_id` with flags `fParse_AnyRaw` and
-/// `fParse_ValidLocal`; identical strings or matching `CSeq_id`s compare equivalent (`false`),
-/// otherwise bytewise lexicographical order.
-fn compare_seq_id(id1: &[u8], id2: &[u8], list_path: &[u8]) -> Result<bool, OidListError> {
-    if id1 == id2 {
-        return Ok(false);
-    }
+/// Parses one Seq-id string as `s_CompareSeqId` parses it (`fParse_AnyRaw` and
+/// `fParse_ValidLocal`), returning NCBI's `CSeqIdException` on parse failure and refusing tokens
+/// that post a Seq-id warning.
+fn parse_compare_seq_id(
+    id: &[u8],
+    list_path: &[u8],
+) -> Result<crate::seqid::ParsedSeqId, OidListError> {
     let flags = crate::seqid::accguide::parse_flags::ANY_RAW
         | crate::seqid::accguide::parse_flags::VALID_LOCAL;
     let mut warnings = Vec::new();
-    let parse = |text: &[u8], warnings: &mut Vec<_>| {
-        crate::seqid::parse::seq_id_from_text(text, flags, &mut |w| warnings.push(w))
-            .map_err(|error| OidListError::reader(SeqDbError::Ncbi(error.exception())))
-    };
-    let seq1 = parse(id1, &mut warnings)?;
-    let seq2 = parse(id2, &mut warnings)?;
+    let parsed = crate::seqid::parse::seq_id_from_text(id, flags, &mut |w| warnings.push(w))
+        .map_err(|error| OidListError::reader(SeqDbError::Ncbi(error.exception())))?;
     if let Some(warning) = warnings.first() {
         return Err(OidListError::reader(SeqDbError::Unsupported {
             path: path_from_bytes(list_path),
@@ -2103,47 +2103,92 @@ fn compare_seq_id(id1: &[u8], id2: &[u8], list_path: &[u8]) -> Result<bool, OidL
             ),
         }));
     }
+    Ok(parsed)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:565-576
+/// `s_CompareSeqId`: compares two Seq-id strings using `CSeq_id` with flags `fParse_AnyRaw` and
+/// `fParse_ValidLocal`; identical strings or matching `CSeq_id`s compare equivalent (`false`),
+/// otherwise bytewise lexicographical order.
+fn compare_seq_id(id1: &[u8], id2: &[u8], list_path: &[u8]) -> Result<bool, OidListError> {
+    if id1 == id2 {
+        return Ok(false);
+    }
+    let seq1 = parse_compare_seq_id(id1, list_path)?;
+    let seq2 = parse_compare_seq_id(id2, list_path)?;
     if crate::seqid::defline_set::compare(&seq1, &seq2) == crate::seqid::defline_set::Sic::Yes {
         return Ok(false);
     }
     Ok(id1 < id2)
 }
 
-/// Top-down merge sort of `items` under a fallible strict-weak comparator `less`.
-fn merge_sort_by_result<F>(items: &mut [Vec<u8>], less: &mut F) -> Result<(), OidListError>
-where
-    F: FnMut(&[u8], &[u8]) -> Result<bool, OidListError>,
-{
-    let n = items.len();
-    if n <= 1 {
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:565-576,592,611
+/// Rejects `items` when it contains two differently spelled Seq-ids that `s_CompareSeqId` treats
+/// as equivalent (`CSeq_id::Match`). Because `CSeq_id::Match` is not transitive (for example,
+/// `NP_000103` matches both `NP_000103.1` and `NP_000103.2`), sorting such a list with
+/// `s_CompareSeqId` violates strict weak ordering and NCBI's result depends on the C++ library's
+/// sort steps (`PD-LOSAT-NCBI-DEFECTS`, rule 3). When this check succeeds on a list with at least
+/// two distinct spellings, every unique entry has parsed cleanly and `s_CompareSeqId` agrees with
+/// raw bytewise order on `items`.
+fn reject_equivalent_seqid_pair(
+    items: &[Vec<u8>],
+    list_path: &[u8],
+    list_kind: &str,
+) -> Result<(), OidListError> {
+    if items.len() <= 1 {
         return Ok(());
     }
-    let mid = n / 2;
-    merge_sort_by_result(&mut items[..mid], less)?;
-    merge_sort_by_result(&mut items[mid..], less)?;
-    let mut merged = Vec::with_capacity(n);
-    let (mut i, mut j) = (0, mid);
-    while i < mid && j < n {
-        if less(&items[j], &items[i])? {
-            merged.push(std::mem::take(&mut items[j]));
-            j += 1;
-        } else {
-            merged.push(std::mem::take(&mut items[i]));
-            i += 1;
+    let mut seen: rustc_hash::FxHashSet<&[u8]> =
+        rustc_hash::FxHashSet::with_capacity_and_hasher(items.len(), Default::default());
+    let mut unique: Vec<&[u8]> = Vec::with_capacity(items.len());
+    for item in items {
+        let bytes = item.as_slice();
+        if seen.insert(bytes) {
+            unique.push(bytes);
         }
     }
-    for slot in &mut items[i..mid] {
-        merged.push(std::mem::take(slot));
+    if unique.len() <= 1 {
+        return Ok(());
     }
-    for slot in &mut items[j..n] {
-        merged.push(std::mem::take(slot));
+    let mut parsed: Vec<(&[u8], crate::seqid::ParsedSeqId)> = Vec::with_capacity(unique.len());
+    for bytes in unique {
+        parsed.push((bytes, parse_compare_seq_id(bytes, list_path)?));
     }
-    items.swap_with_slice(&mut merged);
+    let mut buckets: rustc_hash::FxHashMap<u64, Vec<usize>> =
+        rustc_hash::FxHashMap::with_capacity_and_hasher(parsed.len(), Default::default());
+    let mut keys = Vec::new();
+    for (idx, (bytes, seq)) in parsed.iter().enumerate() {
+        keys.clear();
+        crate::seqid::defline_set::match_keys(seq, &mut keys);
+        for &key in &keys {
+            let bucket = buckets.entry(key).or_default();
+            for &prev in bucket.iter() {
+                if crate::seqid::defline_set::compare(&parsed[prev].1, seq)
+                    == crate::seqid::defline_set::Sic::Yes
+                {
+                    return Err(OidListError::reader(SeqDbError::Unsupported {
+                        path: path_from_bytes(list_path),
+                        message: format!(
+                            "{list_kind} holds two differently spelled Seq-ids (`{}` and `{}`) \
+                             that NCBI's `s_CompareSeqId` treats as equivalent; combining a \
+                             version 5 alias SEQIDLIST with a search seqid list then depends on \
+                             the C++ library's sort order",
+                            String::from_utf8_lossy(parsed[prev].0),
+                            String::from_utf8_lossy(bytes),
+                        ),
+                    }));
+                }
+            }
+            bucket.push(idx);
+        }
+    }
     Ok(())
 }
 
-/// Sorted set intersection of `lhs` and `rhs` under a fallible strict-weak comparator `less`
-/// (keeps matching elements from `lhs`, matching `std::set_intersection`).
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:612-622
+/// Sorted set intersection of `lhs` and `rhs` under a fallible comparator `less`
+/// (keeps matching elements from `lhs`, matching `std::set_intersection` in
+/// `s_ProcessSeqIdFilters`).
 fn set_intersection_by<F>(
     lhs: &[Vec<u8>],
     rhs: &[Vec<u8>],
@@ -2168,8 +2213,9 @@ where
     Ok(out)
 }
 
-/// Sorted set difference `lhs \ rhs` under a fallible strict-weak comparator `less` (matching
-/// `std::set_difference`).
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:623-633
+/// Sorted set difference of `lhs` and `rhs` under a fallible comparator `less` (matching
+/// `std::set_difference` in `s_ProcessSeqIdFilters`).
 fn set_difference_by<F>(
     lhs: &[Vec<u8>],
     rhs: &[Vec<u8>],
@@ -2198,7 +2244,10 @@ where
     Ok(out)
 }
 
-/// Returns a reference to cached LMDB entries, opening them lazily on first Pass 2 lookup.
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:636,707
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:288-333
+/// Returns a reference to cached LMDB entries, opening them lazily on first Pass 2 lookup
+/// (`AccessionsToOids` or `TaxIdsToOids`).
 fn ensure_lmdb_entries<'e>(
     slot: &'e mut Option<Vec<super::filter::LmdbEntry>>,
     lmdb: &dyn Fn() -> Result<Vec<super::filter::LmdbEntry>, SeqDbError>,
@@ -2235,7 +2284,11 @@ fn process_seqid_filters(
         _ => Vec::new(),
     };
     if !user_accs.is_empty() {
-        merge_sort_by_result(&mut user_accs, &mut |a, b| compare_seq_id(a, b, fnames[0]))?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:592
+        // Once `reject_equivalent_seqid_pair` passes, `s_CompareSeqId` reduces to bytewise `<` on
+        // `user_accs`, so `sort` yields the unique order independent of sort algorithm.
+        reject_equivalent_seqid_pair(&user_accs, fnames[0], "the search's -seqidlist")?;
+        user_accs.sort();
     }
     let neg_user_accs: &[Vec<u8>] = match user {
         Some(super::filter::DeflineRule::NegativeSeqids(ids)) if !ids.is_empty() => ids.as_slice(),
@@ -2271,7 +2324,11 @@ fn process_seqid_filters(
             continue;
         }
         if !user_accs.is_empty() || !neg_user_accs.is_empty() {
-            merge_sort_by_result(&mut accs, &mut |a, b| compare_seq_id(a, b, fname))?;
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:611
+            // Once `reject_equivalent_seqid_pair` passes, `s_CompareSeqId` reduces to bytewise `<`
+            // on `accs`, so `sort` yields the unique order independent of sort algorithm.
+            reject_equivalent_seqid_pair(&accs, fname, "an alias file's SEQIDLIST")?;
+            accs.sort();
             if !user_accs.is_empty() {
                 accs = set_intersection_by(&accs, &user_accs, &mut |a, b| {
                     compare_seq_id(a, b, fname)

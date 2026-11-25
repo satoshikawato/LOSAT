@@ -1477,8 +1477,11 @@ and version 5 `TAXIDLIST` (text, past `i32::MAX`, unknown, empty, non-numeric, m
 ranges, `OIDLIST`, nested/sibling/bare aliases, multi-volume `gm`, `ln`, `lx`, and user search lists). The rows are
 `db.il.*` (every search program; `rps/ilmiss.pal`, `ilmissw.pal`, `ilv5sqm.pal`, `ilv5sqmw.pal`, `ilv5txm.pal`,
 `ilv5txmw.pal`, `ilv5sq.pal`, `ilv5sqw2.pal`, `ilv5txw.pal` over `rps_mini` and `rpstax`) and blastdbcmd's cases
-A272-A366 and A447 on (`tests/blastdbcmd_alias_keys.rs`). `u_np101.txt`, `u_p10102.txt`, `u_np103.txt`, `u_np103v.txt`
-and `u_1abc.txt` are the searches' own `-seqidlist` files beside the alias files' lists.
+A272-A366 and A447 on (`tests/blastdbcmd_alias_keys.rs`). `u_np101.txt`, `u_p10102.txt`, `u_np103.txt`, `u_np103v.txt`,
+`u_np103_1.txt`, `u_np103_2.txt`, `u_np103_amb.txt` and `u_1abc.txt` are the searches' own `-seqidlist` files beside the
+alias files' lists (`g_sqamb0`/`g_sqamb1`/`g_sqamb2` hold `NP_000103`, `NP_000103.1` and `NP_000103.2` in three orders
+for the rule-3 strict-weak-ordering refusal rows; `g_squns` holds `NP_000118.1` and `NP_000103.1` unsorted without an
+equivalent pair).
 
 ## Ungapped nucleotide databases (line NP, O4a-1)
 

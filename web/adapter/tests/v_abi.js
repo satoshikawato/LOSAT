@@ -1470,7 +1470,7 @@ async function checkLogfileRunFiles(engine, native, scratch) {
         if (c.cliAppends) {
           const beforeBytes = fs.readFileSync(c.cliAppends);
           const cli = nativeOnPipes(native, [...words, "-out", "o.txt"], cliDir);
-          assert.equal(cli.status, 0, `${label}: native CLI: ${cli.stderr}`);
+          assert.equal(cli.status, 0, `${label}: native CLI append: ${cli.stderr}`);
           const afterBytes = fs.readFileSync(c.cliAppends);
           assert.ok(
             afterBytes.length > beforeBytes.length && afterBytes.subarray(0, beforeBytes.length).equals(beforeBytes),

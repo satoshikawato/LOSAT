@@ -452,6 +452,24 @@ fn an_argument_error_posts_to_the_runs_logfile() {
     }
 }
 
+/// Registers the WindowMasker counts fixture `mg1655_u9.obinary` as kind 1 under `name`.
+fn register_counts(name: &str) -> u32 {
+    let counts_bytes = std::fs::read(format!(
+        "{}/../../LOSAT/tests/winmask/counts/mg1655_u9.obinary",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    let handle = crate::files::begin(
+        crate::files::KIND_WINDOW_MASKER_COUNTS,
+        name,
+        counts_bytes.len(),
+    )
+    .unwrap();
+    crate::files::chunk(handle, &counts_bytes).unwrap();
+    crate::files::end(handle).unwrap();
+    handle
+}
+
 /// The search's file receiver sees `-query`, `-subject` (unless `-`), registered kind-2 registry
 /// files read by the run's start (`.ncbirc`, `-conffile`, `<program>.ini`), and registered kind-1
 /// `-window_masker_db` counts files (line WQA D19): their parent folders allow `-logfile`, the
@@ -555,19 +573,7 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
         refusal("tblastx", "sub/d19_conf.ini")
     );
     // BLASTN `-window_masker_db wm/d19.obinary` (kind 1): creates folder `wm` and file `wm/d19.obinary`.
-    let counts_bytes = std::fs::read(format!(
-        "{}/../../LOSAT/tests/winmask/counts/mg1655_u9.obinary",
-        env!("CARGO_MANIFEST_DIR")
-    ))
-    .unwrap();
-    let wm_handle = crate::files::begin(
-        crate::files::KIND_WINDOW_MASKER_COUNTS,
-        "wm/d19.obinary",
-        counts_bytes.len(),
-    )
-    .unwrap();
-    crate::files::chunk(wm_handle, &counts_bytes).unwrap();
-    crate::files::end(wm_handle).unwrap();
+    let wm_handle = register_counts("wm/d19.obinary");
     let wm_base = [
         "blastn",
         "-query",
@@ -690,11 +696,7 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
         "/tmp/d19_r1_abs.ini",
     );
     // Absolute registered `-window_masker_db` (kind 1).
-    let kind_wm = crate::files::KIND_WINDOW_MASKER_COUNTS;
-    let abs_wm_handle =
-        crate::files::begin(kind_wm, "/tmp/d19_r1_abs.obinary", counts_bytes.len()).unwrap();
-    crate::files::chunk(abs_wm_handle, &counts_bytes).unwrap();
-    crate::files::end(abs_wm_handle).unwrap();
+    let abs_wm_handle = register_counts("/tmp/d19_r1_abs.obinary");
     let abs_wm_words = [
         "blastn",
         "-query",
@@ -750,20 +752,8 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
 /// registered names for blastn (with `-window_masker_taxid`), tblastx, and psiblast.
 #[test]
 fn registered_run_files_uses_one_reader_regardless_of_parse() {
-    let counts_bytes = std::fs::read(format!(
-        "{}/../../LOSAT/tests/winmask/counts/mg1655_u9.obinary",
-        env!("CARGO_MANIFEST_DIR")
-    ))
-    .unwrap();
     let taxid_path = format!("{}/9606/wmasker.obinary", crate::files::WINDOW_MASKER_PATH);
-    let handle = crate::files::begin(
-        crate::files::KIND_WINDOW_MASKER_COUNTS,
-        &taxid_path,
-        counts_bytes.len(),
-    )
-    .unwrap();
-    crate::files::chunk(handle, &counts_bytes).unwrap();
-    crate::files::end(handle).unwrap();
+    let handle = register_counts(&taxid_path);
     let registry = crate::files::registry_files();
 
     let blastn_base = [

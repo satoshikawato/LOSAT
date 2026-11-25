@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 use crate::utils::os_bytes::{os_str_bytes, path_bytes, path_from_bytes, path_of_bytes};
 
 use super::file::DbFile;
-use super::id_list::{AliasIdList, IdListKind};
+use super::id_list::{AliasIdList, IdListKind, PackedStrings, SeqIdSlice};
 use super::oid_list::{self, OidListError, OidListFile};
 use super::volume::with_extension;
 use super::{SeqDbError, SeqType};
@@ -1501,34 +1501,16 @@ pub(super) fn has_filters(node: &AliasNode) -> bool {
 }
 
 /// Whether the alias tree under `node` names an id list that NCBI's OID list translates
-/// (`GILIST`, `TILIST`, `SEQIDLIST`; no pass of a version 4 database reads `TAXIDLIST`, and a
-/// version 5 one refuses it): its translation then depends on the search's positive list
-/// ([`UserList`]).
-pub(super) fn reads_id_lists(node: &AliasNode) -> bool {
+/// (`GILIST`, `TILIST`, `SEQIDLIST`, and on a version 5 database `TAXIDLIST`): its translation
+/// then depends on the search's list ([`super::filter::DeflineRule`]).
+pub(super) fn reads_id_lists(node: &AliasNode, version5: bool) -> bool {
     node.lists
         .iter()
-        .any(|list| !matches!(list.kind, IdListKind::TaxId))
-        || node.subnodes.iter().any(reads_id_lists)
-}
-
-/// LOSAT's refusal of a `SEQIDLIST` or `TAXIDLIST` of the alias tree under `node` over a version 5
-/// database, which NCBI reads in a second pass over the volumes (seqdboidlist.cpp:718-760) that
-/// LOSAT does not make yet.
-pub(super) fn refuse_v5_lists(node: &AliasNode) -> Result<(), SeqDbError> {
-    if let Some(list) = node
-        .lists
-        .iter()
-        .find(|list| matches!(list.kind, IdListKind::Si | IdListKind::TaxId))
-    {
-        return Err(SeqDbError::Unsupported {
-            path: path_from_bytes(node.this_name.as_deref().unwrap_or(b"-")),
-            message: format!(
-                "alias file key {} over a version 5 database is not supported",
-                list.kind.key()
-            ),
-        });
-    }
-    node.subnodes.iter().try_for_each(refuse_v5_lists)
+        .any(|list| version5 || !matches!(list.kind, IdListKind::TaxId))
+        || node
+            .subnodes
+            .iter()
+            .any(|sub| reads_id_lists(sub, version5))
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1510-1556
@@ -1592,8 +1574,12 @@ pub(super) struct TreeVolume<'a> {
 /// The OIDs that the alias tree `root` includes and the shape of NCBI's bit set of them:
 /// `volumes` are the volumes in NCBI's order, of the sequence type `seqtype`, `version5` whether
 /// NCBI reads the database as version 5 (`IsBlastDBVersion5`), `user` the search's positive list
-/// as NCBI holds it ([`UserList`]). The OID list files and the id lists are read once each
-/// (`files`, [`ListSet`]), in NCBI's order ([`volume_set`]): the first that fails is the error.
+/// as Pass 1 (`CSeqDBGiListSet`) holds it ([`UserList`]), `user_rule` the search's list rule as
+/// Pass 2 reads its Seq-ids and taxids ([`super::filter::DeflineRule`]), and `lmdb` the database's
+/// LMDB entries (opened only when version 5 Pass 2 reads a `SEQIDLIST` or `TAXIDLIST`). The OID
+/// list files and the id lists are read once each (`files`, [`ListSet`]), in NCBI's order
+/// ([`volume_set`], then Pass 2 [`v5_list_filters`]): the first that fails is the error.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn alias_oids(
     root: &AliasNode,
     volumes: &[TreeVolume<'_>],
@@ -1601,6 +1587,8 @@ pub(super) fn alias_oids(
     seqtype: SeqType,
     version5: bool,
     user: UserList<'_>,
+    user_rule: Option<&super::filter::DeflineRule>,
+    lmdb: &dyn Fn() -> Result<Vec<super::filter::LmdbEntry>, SeqDbError>,
 ) -> Result<AliasOids, OidListError> {
     let mut words = has_filters(root).then(|| vec![0u64; (num_oids as usize).div_ceil(64)]);
     let mut all = Shape::new(0, u64::from(num_oids), Special::None);
@@ -1613,10 +1601,19 @@ pub(super) fn alias_oids(
     };
     let mut mask_types = vec![0u32; volumes.len()];
     let mut attached = vec![Vec::new(); volumes.len()];
-    for ((volume, mask_type), attached) in volumes.iter().zip(&mut mask_types).zip(&mut attached) {
+    let mut v5_root_lists: Vec<&[AliasList]> = vec![&[]; volumes.len()];
+    for (vol_idx, ((volume, mask_type), attached)) in volumes
+        .iter()
+        .zip(&mut mask_types)
+        .zip(&mut attached)
+        .enumerate()
+    {
         let Some(node) = specialize(root, volume.name) else {
             continue;
         };
+        if version5 {
+            v5_root_lists[vol_idx] = node.lists;
+        }
         let frame = Frame {
             start: u64::from(volume.start),
             end: u64::from(volume.end),
@@ -1643,7 +1640,7 @@ pub(super) fn alias_oids(
         .into_iter()
         .map(|list| std::sync::Arc::new(list.attached()))
         .collect();
-    let lists = attached
+    let mut vol_lists: Vec<Vec<std::sync::Arc<AliasIdList>>> = attached
         .into_iter()
         .map(|mut at: Vec<usize>| {
             at.sort_unstable();
@@ -1651,11 +1648,26 @@ pub(super) fn alias_oids(
             at.into_iter().map(|at| made[at].clone()).collect()
         })
         .collect();
+    if version5 {
+        if let Some(words) = &mut words {
+            if v5_list_filters(
+                volumes,
+                &v5_root_lists,
+                num_oids,
+                user_rule,
+                lmdb,
+                words,
+                &mut vol_lists,
+            )? {
+                all.special = Special::None;
+            }
+        }
+    }
     Ok(AliasOids {
         words,
         all_bits_special_set: all.special == Special::AllSet,
         mask_types,
-        lists,
+        lists: vol_lists,
     })
 }
 
@@ -1823,7 +1835,7 @@ impl LoadedList<'_> {
                 mut sorted,
             } => {
                 super::isam::insure_order(&mut ids, &mut sorted);
-                list.sis = ids.into_iter().map(|id| id.si).collect();
+                list.sis = PackedStrings::from_vecs(ids.into_iter().map(|id| id.si));
             }
         }
         list
@@ -2051,9 +2063,9 @@ impl<'a> ListSet<'a, '_> {
 // `FIRST_OID` keeps no OID and a negative `LAST_OID` is no upper bound, as `bound` reads them.
 // After the OID list come the node's id lists, `GILIST`, `TILIST` and `SEQIDLIST` in that order
 // (seqdboidlist.cpp:211-269): each a bit array of the OIDs its ids are found in (`ListSet`), the
-// list attached to the volume. A version 5 database reads `SEQIDLIST` in another pass, and no
-// pass of the tree reads `TAXIDLIST` (refused on a version 5 database, `refuse_v5_lists`; on a
-// version 4 one NCBI reads it nowhere, probe b2_v4_tx_info of line RG D1c).
+// list attached to the volume. On a version 5 database, `SEQIDLIST` and `TAXIDLIST` are read in
+// Pass 2 ([`v5_list_filters`]); on a version 4 database, NCBI reads `TAXIDLIST` nowhere (probe
+// b2_v4_tx_info of line RG D1c).
 /// NCBI's bit set of the OIDs of one volume (`frame`) that the specialised tree `node` keeps
 /// (`CSeqDBOIDList::x_ComputeFilters`); `reach` holds the files read so far and takes the
 /// volume's `OID_MASK_TYPE`, set by each OID list read, and the id lists the volume attaches.
@@ -2171,6 +2183,775 @@ fn set_bits(words: &mut [u64], from: u64, to: u64) {
         words[word] |= ones;
         at += span;
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:746
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.cpp:376-408
+/// Clears the bits `[from, to)` of `words` (nothing when `to <= from`), matching
+/// `CSeqDB_BitSet::AssignBitRange` with `false`.
+fn clear_bits(words: &mut [u64], from: u64, to: u64) {
+    if to <= from {
+        return;
+    }
+    let mut at = from;
+    while at < to {
+        let word = (at / 64) as usize;
+        let bit = at % 64;
+        let span = (64 - bit).min(to - at);
+        let ones = if span == 64 {
+            u64::MAX
+        } else {
+            ((1u64 << span) - 1) << bit
+        };
+        words[word] &= !ones;
+        at += span;
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:544-563
+/// `s_AddFilterFile`: records that `vol` uses the filter file `name`, preserving first-seen file
+/// order.
+fn add_filter_file<'a>(
+    name: &'a [u8],
+    vol: &'a [u8],
+    fnames: &mut Vec<&'a [u8]>,
+    fnames_vols: &mut Vec<Vec<&'a [u8]>>,
+) {
+    if let Some(pos) = fnames.iter().position(|&existing| existing == name) {
+        fnames_vols[pos].push(vol);
+    } else {
+        fnames.push(name);
+        fnames_vols.push(vec![vol]);
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:520-542
+/// `s_GetFilteredOidRange`: attaches `list` to every volume named in `vols`, and returns the
+/// `[start, end)` OID ranges of all other volumes (`excluded_vols`).
+fn attach_and_excluded(
+    volumes: &[TreeVolume<'_>],
+    vols: &[&[u8]],
+    list: std::sync::Arc<AliasIdList>,
+    vol_lists: &mut [Vec<std::sync::Arc<AliasIdList>>],
+) -> Vec<(u32, u32)> {
+    let mut excluded = Vec::new();
+    for (idx, volume) in volumes.iter().enumerate() {
+        if vols.contains(&volume.name) {
+            vol_lists[idx].push(std::sync::Arc::clone(&list));
+        } else {
+            excluded.push((volume.start, volume.end));
+        }
+    }
+    excluded
+}
+
+const ALIAS_SEQIDLIST_KIND: &str = "an alias file's SEQIDLIST";
+const USER_SEQIDLIST_KIND: &str = "the search's -seqidlist";
+const USER_NEG_SEQIDLIST_KIND: &str = "the search's -negative_seqidlist";
+
+fn optional_path(list_path: Option<&[u8]>) -> PathBuf {
+    list_path.map(path_from_bytes).unwrap_or_default()
+}
+
+fn display_seqid_token(bytes: &[u8]) -> String {
+    if bytes.iter().all(|&b| (0x20..0x7f).contains(&b)) {
+        String::from_utf8_lossy(bytes).into_owned()
+    } else {
+        bytes.escape_ascii().to_string()
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:565-576
+/// Parses one Seq-id string as `s_CompareSeqId` parses it (`fParse_AnyRaw` and
+/// `fParse_ValidLocal`), returning NCBI's `CSeqIdException` on parse failure and refusing tokens
+/// that post a Seq-id warning.
+fn parse_compare_seq_id(
+    id: &[u8],
+    list_path: Option<&[u8]>,
+    list_kind: &str,
+) -> Result<crate::seqid::ParsedSeqId, OidListError> {
+    let flags = crate::seqid::accguide::parse_flags::ANY_RAW
+        | crate::seqid::accguide::parse_flags::VALID_LOCAL;
+    let mut warnings = Vec::new();
+    let parsed = crate::seqid::parse::seq_id_from_text(id, flags, &mut |w| warnings.push(w))
+        .map_err(|error| OidListError::reader(SeqDbError::Ncbi(error.exception())))?;
+    if let Some(warning) = warnings.first() {
+        return Err(OidListError::reader(SeqDbError::Unsupported {
+            path: optional_path(list_path),
+            message: format!(
+                "comparing seqids of {list_kind} with a search list posts a Seq-id warning (`{}`)",
+                String::from_utf8_lossy(&warning.message)
+            ),
+        }));
+    }
+    Ok(parsed)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:565-576
+/// `s_CompareSeqId`: compares two Seq-id strings using `CSeq_id` with flags `fParse_AnyRaw` and
+/// `fParse_ValidLocal`; identical strings or matching `CSeq_id`s compare equivalent (`false`),
+/// otherwise bytewise lexicographical order.
+fn compare_seq_id(
+    id1: &[u8],
+    path1: Option<&[u8]>,
+    kind1: &str,
+    id2: &[u8],
+    path2: Option<&[u8]>,
+    kind2: &str,
+) -> Result<bool, OidListError> {
+    if id1 == id2 {
+        return Ok(false);
+    }
+    let seq1 = parse_compare_seq_id(id1, path1, kind1)?;
+    let seq2 = parse_compare_seq_id(id2, path2, kind2)?;
+    if crate::seqid::defline_set::compare(&seq1, &seq2) == crate::seqid::defline_set::Sic::Yes {
+        return Ok(false);
+    }
+    Ok(id1 < id2)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:565-576,592,611
+/// Scans all unique entries of a bytewise-sorted list `items` (with at least two distinct entries)
+/// as `s_CompareSeqId` parses them, collecting compact `(match_key, index)` pairs while checking
+/// in order: (1) any Seq-id warning (refused), (2) two or more distinct exception texts (refused),
+/// (3) one common exception text (raised as NCBI's `CSeqIdException`).
+fn scan_compare_seqids<S: SeqIdSlice + ?Sized>(
+    items: &S,
+    list_path: Option<&[u8]>,
+    list_kind: &str,
+) -> Result<Vec<(u64, u32)>, OidListError> {
+    let flags = crate::seqid::accguide::parse_flags::ANY_RAW
+        | crate::seqid::accguide::parse_flags::VALID_LOCAL;
+    let mut first_warning: Option<Vec<u8>> = None;
+    let mut first_exc: Option<(usize, crate::ncbi_exception::NcbiException, Vec<u8>)> = None;
+    let mut second_exc_idx: Option<usize> = None;
+    let mut key_entries: Vec<(u64, u32)> = Vec::new();
+    let mut tmp_keys: Vec<u64> = Vec::new();
+    for idx in 0..items.len() {
+        let bytes = items.get(idx);
+        if idx > 0 && bytes == items.get(idx - 1) {
+            continue;
+        }
+        let mut item_warning: Option<Vec<u8>> = None;
+        let parsed = crate::seqid::parse::seq_id_from_text(bytes, flags, &mut |w| {
+            if item_warning.is_none() {
+                item_warning = Some(w.message);
+            }
+        });
+        if first_warning.is_none() {
+            if let Some(warn_msg) = item_warning {
+                first_warning = Some(warn_msg);
+                key_entries = Vec::new();
+            }
+        }
+        match parsed {
+            Ok(seq) if first_warning.is_none() && first_exc.is_none() => {
+                tmp_keys.clear();
+                crate::seqid::defline_set::match_keys(&seq, &mut tmp_keys);
+                let idx_u32 = u32::try_from(idx).map_err(|_| {
+                    OidListError::reader(SeqDbError::Unsupported {
+                        path: optional_path(list_path),
+                        message: format!("{list_kind} has more than u32::MAX entries"),
+                    })
+                })?;
+                for &k in &tmp_keys {
+                    key_entries.push((k, idx_u32));
+                }
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let exc = error.exception();
+                let c_what = crate::cli::c_string(&exc.ncbi_what()).to_vec();
+                match &first_exc {
+                    None => {
+                        key_entries = Vec::new();
+                        first_exc = Some((idx, exc, c_what));
+                    }
+                    Some((_, _, prev_what)) => {
+                        if second_exc_idx.is_none() && *prev_what != c_what {
+                            second_exc_idx = Some(idx);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(warn_msg) = first_warning {
+        return Err(OidListError::reader(SeqDbError::Unsupported {
+            path: optional_path(list_path),
+            message: format!(
+                "comparing seqids of {list_kind} with a search list posts a Seq-id warning (`{}`)",
+                String::from_utf8_lossy(&warn_msg)
+            ),
+        }));
+    }
+    if let (Some((first_idx, _, _)), Some(second_idx)) = (&first_exc, second_exc_idx) {
+        return Err(OidListError::reader(SeqDbError::Unsupported {
+            path: optional_path(list_path),
+            message: format!(
+                "{list_kind} holds Seq-ids (`{}` and `{}`) that fail NCBI's `s_CompareSeqId` with \
+                 different exceptions; combining a version 5 alias SEQIDLIST with a search seqid \
+                 list then depends on the C++ library's sort order",
+                display_seqid_token(items.get(*first_idx)),
+                display_seqid_token(items.get(second_idx)),
+            ),
+        }));
+    }
+    if let Some((_, exc, _)) = first_exc {
+        return Err(OidListError::reader(SeqDbError::Ncbi(exc)));
+    }
+    Ok(key_entries)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:565-576,592,611
+/// Rejects a bytewise-sorted list `items` when it contains warnings, multiple distinct
+/// `s_CompareSeqId` exceptions, or two differently spelled Seq-ids that `s_CompareSeqId` treats
+/// as equivalent (`CSeq_id::Match`). Only key-colliding runs are re-parsed, keeping peak memory
+/// linear in the number of `(u64, u32)` keys rather than holding all parsed Seq-ids at once.
+fn validate_compare_seqids<S: SeqIdSlice + ?Sized>(
+    items: &S,
+    list_path: Option<&[u8]>,
+    list_kind: &str,
+) -> Result<(), OidListError> {
+    if items.len() <= 1 || items.get(0) == items.get(items.len() - 1) {
+        return Ok(());
+    }
+    let mut key_entries = scan_compare_seqids(items, list_path, list_kind)?;
+    key_entries.sort_unstable();
+    let mut run_start = 0;
+    while run_start < key_entries.len() {
+        let key = key_entries[run_start].0;
+        let mut run_end = run_start + 1;
+        while run_end < key_entries.len() && key_entries[run_end].0 == key {
+            run_end += 1;
+        }
+        if run_end - run_start >= 2 {
+            let mut parsed_run: Vec<(usize, crate::seqid::ParsedSeqId)> =
+                Vec::with_capacity(run_end - run_start);
+            for &(_, idx_u32) in &key_entries[run_start..run_end] {
+                let idx = idx_u32 as usize;
+                if parsed_run
+                    .last()
+                    .is_some_and(|&(prev_idx, _)| prev_idx == idx)
+                {
+                    continue;
+                }
+                let seq = parse_compare_seq_id(items.get(idx), list_path, list_kind)?;
+                for &(prev_idx, ref prev_seq) in &parsed_run {
+                    if crate::seqid::defline_set::compare(prev_seq, &seq)
+                        == crate::seqid::defline_set::Sic::Yes
+                    {
+                        return Err(OidListError::reader(SeqDbError::Unsupported {
+                            path: optional_path(list_path),
+                            message: format!(
+                                "{list_kind} holds two differently spelled Seq-ids (`{}` and \
+                                 `{}`) that NCBI's `s_CompareSeqId` treats as equivalent; \
+                                 combining a version 5 alias SEQIDLIST with a search seqid list \
+                                 then depends on the C++ library's sort order",
+                                display_seqid_token(items.get(prev_idx)),
+                                display_seqid_token(items.get(idx)),
+                            ),
+                        }));
+                    }
+                }
+                parsed_run.push((idx, seq));
+            }
+        }
+        run_start = run_end;
+    }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:612-622
+/// Sorted set intersection of `lhs` and `rhs` under fallible directional comparators `less_lr`
+/// and `less_rl` (keeps matching elements from `lhs`, matching `std::set_intersection` in
+/// `s_ProcessSeqIdFilters`).
+fn set_intersection_by<'a, L, R, F, G>(
+    lhs: &'a L,
+    rhs: &R,
+    less_lr: &mut F,
+    less_rl: &mut G,
+) -> Result<Vec<&'a [u8]>, OidListError>
+where
+    L: SeqIdSlice + ?Sized,
+    R: SeqIdSlice + ?Sized,
+    F: FnMut(&[u8], &[u8]) -> Result<bool, OidListError>,
+    G: FnMut(&[u8], &[u8]) -> Result<bool, OidListError>,
+{
+    let mut out = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    while i < lhs.len() && j < rhs.len() {
+        let a = lhs.get(i);
+        let b = rhs.get(j);
+        if less_lr(a, b)? {
+            i += 1;
+        } else if less_rl(b, a)? {
+            j += 1;
+        } else {
+            out.push(a);
+            i += 1;
+            j += 1;
+        }
+    }
+    Ok(out)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:623-633
+/// Sorted set difference of `lhs` and `rhs` under fallible directional comparators `less_lr` and
+/// `less_rl` (matching `std::set_difference` in `s_ProcessSeqIdFilters`).
+fn set_difference_by<'a, L, R, F, G>(
+    lhs: &'a L,
+    rhs: &R,
+    less_lr: &mut F,
+    less_rl: &mut G,
+) -> Result<Vec<&'a [u8]>, OidListError>
+where
+    L: SeqIdSlice + ?Sized,
+    R: SeqIdSlice + ?Sized,
+    F: FnMut(&[u8], &[u8]) -> Result<bool, OidListError>,
+    G: FnMut(&[u8], &[u8]) -> Result<bool, OidListError>,
+{
+    set_difference_by_get(lhs.len(), |idx| lhs.get(idx), rhs, less_lr, less_rl)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:623-633
+fn set_difference_by_get<'a, R, LGet, F, G>(
+    lhs_len: usize,
+    lhs_get: LGet,
+    rhs: &R,
+    less_lr: &mut F,
+    less_rl: &mut G,
+) -> Result<Vec<&'a [u8]>, OidListError>
+where
+    R: SeqIdSlice + ?Sized,
+    LGet: Fn(usize) -> &'a [u8],
+    F: FnMut(&[u8], &[u8]) -> Result<bool, OidListError>,
+    G: FnMut(&[u8], &[u8]) -> Result<bool, OidListError>,
+{
+    let mut out = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    while i < lhs_len {
+        if j >= rhs.len() {
+            out.extend((i..lhs_len).map(&lhs_get));
+            break;
+        }
+        let a = lhs_get(i);
+        let b = rhs.get(j);
+        if less_lr(a, b)? {
+            out.push(a);
+            i += 1;
+        } else if less_rl(b, a)? {
+            j += 1;
+        } else {
+            i += 1;
+            j += 1;
+        }
+    }
+    Ok(out)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:636,707
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:288-333
+/// Returns a reference to cached LMDB entries, opening them lazily on first Pass 2 lookup
+/// (`AccessionsToOids` or `TaxIdsToOids`).
+fn ensure_lmdb_entries<'e>(
+    slot: &'e mut Option<Vec<super::filter::LmdbEntry>>,
+    lmdb: &dyn Fn() -> Result<Vec<super::filter::LmdbEntry>, SeqDbError>,
+) -> Result<&'e [super::filter::LmdbEntry], OidListError> {
+    if slot.is_none() {
+        *slot = Some(lmdb().map_err(OidListError::reader)?);
+    }
+    Ok(slot.as_deref().expect("lmdb entries loaded"))
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:610-635
+/// Validates a sorted alias `SEQIDLIST` against `s_CompareSeqId` and applies the search's
+/// `-seqidlist` intersection and/or `-negative_seqidlist` difference, borrowing slices from
+/// `sorted_accs`.
+fn filter_alias_seqids<'a>(
+    sorted_accs: &'a PackedStrings,
+    fname: &[u8],
+    user_accs: &[Vec<u8>],
+    neg_user_accs: &[Vec<u8>],
+) -> Result<Vec<&'a [u8]>, OidListError> {
+    validate_compare_seqids(sorted_accs, Some(fname), ALIAS_SEQIDLIST_KIND)?;
+    let mut matched: Option<Vec<&'a [u8]>> = None;
+    if !user_accs.is_empty() {
+        let common = set_intersection_by(
+            sorted_accs,
+            user_accs,
+            &mut |a, b| {
+                compare_seq_id(
+                    a,
+                    Some(fname),
+                    ALIAS_SEQIDLIST_KIND,
+                    b,
+                    None,
+                    USER_SEQIDLIST_KIND,
+                )
+            },
+            &mut |b, a| {
+                compare_seq_id(
+                    b,
+                    None,
+                    USER_SEQIDLIST_KIND,
+                    a,
+                    Some(fname),
+                    ALIAS_SEQIDLIST_KIND,
+                )
+            },
+        )?;
+        if common.is_empty() {
+            return Ok(common);
+        }
+        matched = Some(common);
+    }
+    if !neg_user_accs.is_empty() {
+        let mut less_lr = |a: &[u8], b: &[u8]| {
+            compare_seq_id(
+                a,
+                Some(fname),
+                ALIAS_SEQIDLIST_KIND,
+                b,
+                None,
+                USER_NEG_SEQIDLIST_KIND,
+            )
+        };
+        let mut less_rl = |b: &[u8], a: &[u8]| {
+            compare_seq_id(
+                b,
+                None,
+                USER_NEG_SEQIDLIST_KIND,
+                a,
+                Some(fname),
+                ALIAS_SEQIDLIST_KIND,
+            )
+        };
+        let diff = match &matched {
+            Some(prev) => set_difference_by_get(
+                prev.len(),
+                |idx| prev[idx],
+                neg_user_accs,
+                &mut less_lr,
+                &mut less_rl,
+            )?,
+            None => set_difference_by(sorted_accs, neg_user_accs, &mut less_lr, &mut less_rl)?,
+        };
+        return Ok(diff);
+    }
+    Ok(matched.unwrap_or_default())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:578-654
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1476-1491
+/// `s_ProcessSeqIdFilters`: reads each version 5 alias `SEQIDLIST` file, attaches it to its
+/// volumes before any intersection/difference with the search's seqid list, resolves remaining
+/// accessions through LMDB `AccessionsToOids`, and sets matching OIDs of included volumes in
+/// `f_bits`.
+#[allow(clippy::too_many_arguments)]
+fn process_seqid_filters(
+    fnames: &[&[u8]],
+    fnames_vols: &[Vec<&[u8]>],
+    volumes: &[TreeVolume<'_>],
+    num_oids: u32,
+    user: Option<&super::filter::DeflineRule>,
+    lmdb: &dyn Fn() -> Result<Vec<super::filter::LmdbEntry>, SeqDbError>,
+    entries_slot: &mut Option<Vec<super::filter::LmdbEntry>>,
+    f_bits: &mut [u64],
+    vol_lists: &mut [Vec<std::sync::Arc<AliasIdList>>],
+) -> Result<(), OidListError> {
+    if fnames.is_empty() {
+        return Ok(());
+    }
+    let mut user_accs = match user {
+        Some(super::filter::DeflineRule::Seqids(ids)) if !ids.is_empty() => ids.clone(),
+        Some(
+            super::filter::DeflineRule::Seqids(_)
+            | super::filter::DeflineRule::NegativeSeqids(_)
+            | super::filter::DeflineRule::Taxids(_)
+            | super::filter::DeflineRule::NegativeTaxids(_)
+            | super::filter::DeflineRule::Gis(_)
+            | super::filter::DeflineRule::NegativeGis(_)
+            | super::filter::DeflineRule::Pigs
+            | super::filter::DeflineRule::NegativePigs,
+        )
+        | None => Vec::new(),
+    };
+    if !user_accs.is_empty() {
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:592
+        // Sort bytewise first so validation runs order-independently without extra hash sets;
+        // once `validate_compare_seqids` passes, `s_CompareSeqId` reduces to bytewise `<`.
+        user_accs.sort_unstable();
+        validate_compare_seqids(user_accs.as_slice(), None, USER_SEQIDLIST_KIND)?;
+    }
+    let neg_user_accs: &[Vec<u8>] = match user {
+        Some(super::filter::DeflineRule::NegativeSeqids(ids)) if !ids.is_empty() => ids.as_slice(),
+        Some(
+            super::filter::DeflineRule::NegativeSeqids(_)
+            | super::filter::DeflineRule::Seqids(_)
+            | super::filter::DeflineRule::Taxids(_)
+            | super::filter::DeflineRule::NegativeTaxids(_)
+            | super::filter::DeflineRule::Gis(_)
+            | super::filter::DeflineRule::NegativeGis(_)
+            | super::filter::DeflineRule::Pigs
+            | super::filter::DeflineRule::NegativePigs,
+        )
+        | None => &[],
+    };
+    for (fname, vols) in fnames.iter().zip(fnames_vols) {
+        let file = {
+            let bytes = super::seqidlist::read_memory_file(fname).map_err(OidListError::reader)?;
+            let mut warnings = Vec::new();
+            let file = super::seqidlist::read_si_list_packed(&bytes, &mut warnings)
+                .map_err(|text| OidListError::reader(SeqDbError::NotFound(text.into_bytes())))?;
+            if let Some(warning) = warnings.first() {
+                return Err(OidListError::reader(SeqDbError::Unsupported {
+                    path: path_from_bytes(*fname),
+                    message: format!(
+                        "the seqid list of an alias file's SEQIDLIST has a token NCBI reports \
+                         (`{}`)",
+                        warning.trim()
+                    ),
+                }));
+            }
+            file
+        };
+        let is_v4 = file.info.is_v4;
+        let mut ids = file.ids;
+        // Binary `.bsl` keeps `in_order = true` (stored order); text lists sort on first `FindSi`.
+        if is_v4 {
+            ids.sort_unstable();
+        }
+        let has_user_filter = !user_accs.is_empty() || !neg_user_accs.is_empty();
+        // When a binary `.bsl` is intersected/differenced with a search list, `attached` keeps
+        // stored file order while the sorted view clones only the span index (sharing the bytes).
+        let mut sorted_binary = if !is_v4 && has_user_filter && !ids.is_empty() {
+            let mut sorted = ids.clone();
+            sorted.sort_unstable();
+            Some(sorted)
+        } else {
+            None
+        };
+        let attached = std::sync::Arc::new(AliasIdList {
+            sis: ids,
+            ..Default::default()
+        });
+        let excluded =
+            attach_and_excluded(volumes, vols, std::sync::Arc::clone(&attached), vol_lists);
+        if attached.sis.is_empty() {
+            continue;
+        }
+        if has_user_filter {
+            let sorted_ref = sorted_binary.as_ref().unwrap_or(&attached.sis);
+            let matched = filter_alias_seqids(sorted_ref, fname, &user_accs, neg_user_accs)?;
+            if matched.is_empty() {
+                continue;
+            }
+            let entries = ensure_lmdb_entries(entries_slot, lmdb)?;
+            super::filter::entries_accessions_to_bits(
+                entries,
+                matched.as_slice(),
+                num_oids,
+                &excluded,
+                f_bits,
+            )
+            .map_err(OidListError::reader)?;
+            drop(matched);
+            sorted_binary.take();
+        } else {
+            let entries = ensure_lmdb_entries(entries_slot, lmdb)?;
+            super::filter::entries_accessions_to_bits(
+                entries,
+                &attached.sis,
+                num_oids,
+                &excluded,
+                f_bits,
+            )
+            .map_err(OidListError::reader)?;
+        }
+    }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:656-716
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1080-1121
+/// `s_ProcessTaxIdFilters`: reads each version 5 alias `TAXIDLIST` file, attaches it to its
+/// volumes before any intersection/difference with the search's taxid list, resolves remaining
+/// taxids through LMDB `TaxIdsToOids` (failing with `Taxonomy ID(s) not found...` when no OID
+/// matches), and sets matching OIDs of included volumes in `f_bits`.
+#[allow(clippy::too_many_arguments)]
+fn process_taxid_filters(
+    fnames: &[&[u8]],
+    fnames_vols: &[Vec<&[u8]>],
+    volumes: &[TreeVolume<'_>],
+    num_oids: u32,
+    user: Option<&super::filter::DeflineRule>,
+    lmdb: &dyn Fn() -> Result<Vec<super::filter::LmdbEntry>, SeqDbError>,
+    entries_slot: &mut Option<Vec<super::filter::LmdbEntry>>,
+    f_bits: &mut [u64],
+    vol_lists: &mut [Vec<std::sync::Arc<AliasIdList>>],
+) -> Result<(), OidListError> {
+    if fnames.is_empty() {
+        return Ok(());
+    }
+    let user_taxids = match user {
+        Some(super::filter::DeflineRule::Taxids(found)) if !found.is_empty() => Some(found),
+        Some(
+            super::filter::DeflineRule::Taxids(_)
+            | super::filter::DeflineRule::NegativeTaxids(_)
+            | super::filter::DeflineRule::Seqids(_)
+            | super::filter::DeflineRule::NegativeSeqids(_)
+            | super::filter::DeflineRule::Gis(_)
+            | super::filter::DeflineRule::NegativeGis(_)
+            | super::filter::DeflineRule::Pigs
+            | super::filter::DeflineRule::NegativePigs,
+        )
+        | None => None,
+    };
+    let neg_user_taxids = match user {
+        Some(super::filter::DeflineRule::NegativeTaxids(found)) if !found.is_empty() => Some(found),
+        Some(
+            super::filter::DeflineRule::NegativeTaxids(_)
+            | super::filter::DeflineRule::Taxids(_)
+            | super::filter::DeflineRule::Seqids(_)
+            | super::filter::DeflineRule::NegativeSeqids(_)
+            | super::filter::DeflineRule::Gis(_)
+            | super::filter::DeflineRule::NegativeGis(_)
+            | super::filter::DeflineRule::Pigs
+            | super::filter::DeflineRule::NegativePigs,
+        )
+        | None => None,
+    };
+    for (fname, vols) in fnames.iter().zip(fnames_vols) {
+        let bytes = super::seqidlist::read_memory_file(fname).map_err(OidListError::reader)?;
+        let raw = super::id_list::read_tax_id_list(&bytes)
+            .map_err(|text| OidListError::reader(SeqDbError::NotFound(text.into_bytes())))?;
+        let raw_non_empty = !raw.is_empty();
+        let mut has_past = false;
+        let mut taxids = std::collections::BTreeSet::new();
+        for number in raw {
+            match number {
+                super::id_list::ListNumber::Value(value) => {
+                    taxids.insert(value as i32);
+                }
+                super::id_list::ListNumber::Past => has_past = true,
+            }
+        }
+        let attached = std::sync::Arc::new(AliasIdList {
+            taxids: taxids.clone(),
+            ..Default::default()
+        });
+        let excluded = attach_and_excluded(volumes, vols, attached, vol_lists);
+        if !raw_non_empty {
+            continue;
+        }
+        if let Some(user_set) = user_taxids {
+            taxids.retain(|taxid| user_set.contains(taxid));
+            has_past = false;
+            if taxids.is_empty() {
+                continue;
+            }
+        }
+        if let Some(neg_set) = neg_user_taxids {
+            taxids.retain(|taxid| !neg_set.contains(taxid));
+            if taxids.is_empty() && !has_past {
+                continue;
+            }
+        }
+        let entries = ensure_lmdb_entries(entries_slot, lmdb)?;
+        let (oids, _) = super::filter::entries_tax_oids(entries, false, &taxids)
+            .map_err(OidListError::reader)?;
+        if oids.is_empty() {
+            return Err(OidListError::reader(SeqDbError::NotFound(
+                super::filter::tax_ids_not_found(entries),
+            )));
+        }
+        for oid in oids {
+            if oid >= num_oids || excluded.iter().any(|&(s, e)| oid >= s && oid < e) {
+                continue;
+            }
+            f_bits[(oid / 64) as usize] |= 1u64 << (oid % 64);
+        }
+    }
+    Ok(())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:101-107
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdboidlist.cpp:718-761
+/// Version 5 Pass 2 (`CSeqDBOIDList::x_ComputeFilters` overload for `CSeqDBLMDBSet`): scans only
+/// the root filters (`v5_root_lists`) of each volume's specialized tree for `SEQIDLIST` and
+/// `TAXIDLIST`, clears `f_bits` for those volumes, unions the OIDs resolved by
+/// `process_seqid_filters` and `process_taxid_filters`, and intersects `words` with `f_bits`.
+/// Returns `true` when at least one v5 `SEQIDLIST` or `TAXIDLIST` was applied (making NCBI's
+/// `m_AllBits` a bit array, not `Special::AllSet`).
+fn v5_list_filters<'a>(
+    volumes: &[TreeVolume<'a>],
+    v5_root_lists: &[&'a [AliasList]],
+    num_oids: u32,
+    user: Option<&super::filter::DeflineRule>,
+    lmdb: &dyn Fn() -> Result<Vec<super::filter::LmdbEntry>, SeqDbError>,
+    words: &mut [u64],
+    vol_lists: &mut [Vec<std::sync::Arc<AliasIdList>>],
+) -> Result<bool, OidListError> {
+    let mut seqid_fnames: Vec<&'a [u8]> = Vec::new();
+    let mut seqid_vols: Vec<Vec<&'a [u8]>> = Vec::new();
+    let mut taxid_fnames: Vec<&'a [u8]> = Vec::new();
+    let mut taxid_vols: Vec<Vec<&'a [u8]>> = Vec::new();
+    let mut cleared: Vec<(u64, u64)> = Vec::new();
+    for (volume, root_lists) in volumes.iter().zip(v5_root_lists) {
+        let mut vol_cleared = false;
+        for list in *root_lists {
+            match list.kind {
+                IdListKind::Si => {
+                    add_filter_file(&list.path, volume.name, &mut seqid_fnames, &mut seqid_vols);
+                    vol_cleared = true;
+                }
+                IdListKind::TaxId => {
+                    add_filter_file(&list.path, volume.name, &mut taxid_fnames, &mut taxid_vols);
+                    vol_cleared = true;
+                }
+                IdListKind::Gi | IdListKind::Ti => {}
+            }
+        }
+        if vol_cleared {
+            cleared.push((u64::from(volume.start), u64::from(volume.end)));
+        }
+    }
+    if seqid_fnames.is_empty() && taxid_fnames.is_empty() {
+        return Ok(false);
+    }
+    let mut f_bits = vec![0u64; (num_oids as usize).div_ceil(64)];
+    set_bits(&mut f_bits, 0, u64::from(num_oids));
+    for (start, end) in cleared {
+        clear_bits(&mut f_bits, start, end);
+    }
+    let mut entries_slot = None;
+    process_seqid_filters(
+        &seqid_fnames,
+        &seqid_vols,
+        volumes,
+        num_oids,
+        user,
+        lmdb,
+        &mut entries_slot,
+        &mut f_bits,
+        vol_lists,
+    )?;
+    process_taxid_filters(
+        &taxid_fnames,
+        &taxid_vols,
+        volumes,
+        num_oids,
+        user,
+        lmdb,
+        &mut entries_slot,
+        &mut f_bits,
+        vol_lists,
+    )?;
+    for (word, kept) in words.iter_mut().zip(&f_bits) {
+        *word &= kept;
+    }
+    Ok(true)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbbitset.hpp:104-114

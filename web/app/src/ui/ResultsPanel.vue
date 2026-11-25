@@ -213,11 +213,12 @@ function runLabel(run: AnyRunView): string {
           : ` (${run.status === 'queued' ? 'waiting' : run.status})`;
     return `Run ${number} · WindowMasker · ${windowMaskerStageById(stage).label}${status}`;
   }
-  const { number, program, query, subject, prints } = run.snapshot;
+  const { number, program, query, subject, database, prints } = run.snapshot;
   const status = run.status === 'completed' ? '' : ` (${run.status === 'queued' ? 'waiting' : run.status})`;
   // The inputs are named as the user gave them (a compressed file by its own name), a file that LOSAT made by what it is made of. A run that prints the command line's help
   // or version reads none, so it names none (line WQA's D21, the review of D20's F2, 2026-11-23).
-  const files = prints === undefined ? ` · ${inputLabel(query)} vs ${inputLabel(subject)}` : '';
+  const target = database !== undefined ? `${database.name} (database)` : inputLabel(subject);
+  const files = prints === undefined ? ` · ${inputLabel(query)} vs ${target}` : '';
   return `Run ${number} · ${programById(program).label}${files}${status}`;
 }
 
@@ -352,7 +353,11 @@ async function toAlignments(id: HspId): Promise<void> {
                 <dt>Query Length</dt>
                 <dd data-testid="results-query-length">{{ withUnit(formatCount(selectedSearch.snapshot.query.records[0]!.length), units.query) }}</dd>
               </template>
-              <template v-if="selectedSearch.snapshot.subject.records.length === 1">
+              <template v-if="selectedSearch.snapshot.database">
+                <dt>Database</dt>
+                <dd data-testid="results-database">{{ selectedSearch.snapshot.database.name }}</dd>
+              </template>
+              <template v-else-if="selectedSearch.snapshot.subject.records.length === 1">
                 <dt>Subject ID</dt>
                 <dd data-testid="results-subject-id">{{ recordName(selectedSearch.snapshot.subject.records[0]!.id, 'subject', 0, selectedSearch.record.shownIds) }}</dd>
                 <dt>Subject Length</dt>

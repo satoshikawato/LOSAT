@@ -6,18 +6,19 @@ LOSAT Web is an in-browser graphical interface for local sequence searches built
 
 ## Key properties
 
-- **Data stays on your machine.** Queries, subject FASTA files, headers and alignments never leave your browser over the network.
+- **Data stays on your machine.** Queries, subject FASTA files, local BLAST databases, headers and alignments never leave your browser over the network. Local database folders are read in place from your device without uploading or copying whole volumes into WebAssembly memory.
 - **Same search engine.** LOSAT Web calls the WebAssembly build (`losat` npm package) of the same Rust engine used by the `losat` command line. Pairwise (`-outfmt 0`) and tabular (`-outfmt 6`, `7`) reports come directly from the engine's output bytes.
 - **GUI features vs. NCBI output.** Graphic Summary, Descriptions, job queueing, sequence extraction, and CSV/JSON/session exports are LOSAT Web features labelled as LOSAT Web formats. Each run shows an exportable reproduction recipe so you can repeat the exact search with `losat` on the command line.
 - **Per-run status badge.** Each search reports **Supported** when its program, task and options were compared against NCBI BLAST+ on LOSAT's test fixtures in the browser runtime; other combinations are labelled **Not yet supported**.
 
 ## What runs in LOSAT Web
 
-- **Programs:** `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
-- **Subjects:** FASTA subjects (`-subject`) loaded locally in the browser.
+- **Programs:** `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`, plus the `windowmasker` tool tab (`-mk_counts`, `-convert`, `-ustat`).
+- **Subjects:** FASTA subjects (`-subject`) and local BLAST databases (`-db`) opened from a folder (with multi-file fallback). Database searches auto-discover valid `.nal`/`.pal`, `.nin`/`.pin` and multi-volume databases matching the selected program's molecule type, mount optional `taxdb.*` and `taxonomy4blast.sqlite3` files in the folder, and accept database filter options including list files (`-seqidlist`, `-negative_seqidlist`, `-taxidlist`, `-negative_taxidlist`, `-gilist`, `-negative_gilist`, and `-ipglist`/`-negative_ipglist` for protein databases) as well as `-taxids`, `-negative_taxids`, `-no_taxid_expansion`, `-db_soft_mask` and `-db_hard_mask`. After a page reload, browsers do not keep folder handles, so LOSAT Web asks you to choose the folder again.
+- **Repeats filtering in BLASTN:** local nucleotide repeats databases (`-filtering_db`), WindowMasker counts files (`-window_masker_db`), and downloaded or browser-made taxonomy ID counts (`-window_masker_taxid`).
 - **Not available in LOSAT Web:**
-  - BLAST database searches (`-db`), `-filtering_db`, and `-window_masker_taxid` (other than `0`);
-  - PSI-BLAST (`psiblast`), RPS programs (`rpsblast`, `rpstblastn`), `rpsbproc`, and database tools (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex`);
+  - Remote NCBI options (`-remote`, `-entrez_query`);
+  - PSI-BLAST (`psiblast`), RPS programs (`rpsblast`, `rpstblastn`), `rpsbproc`, and database tools other than `windowmasker` (`makeblastdb`, `blastdbcmd`, `dustmasker`, `segmasker`, `convert2blastmask`, `makembindex`, `makeprofiledb`, `blastdb_aliastool`, `blastdbcheck`);
   - `tblastn -in_pssm`.
 
 ## Threads in the browser

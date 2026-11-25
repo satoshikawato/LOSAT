@@ -48,12 +48,18 @@ impl ListedSubjects {
             Default::default()
         };
         let ordinals = listed_ordinals(hit_lists, x_compact_hit_lists);
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+        // No NCBI counterpart: cached subject lengths for LOSAT's redo and reports; NCBI's
+        // `GetSeqLengthProt` is a signed 32-bit `int` and the preliminary loop skips subjects with
+        // non-positive length, so clamping non-positive lengths to 0 preserves every listed length.
         let x_lengths = ordinals
             .iter()
             .map(|&ordinal| {
                 database
                     .db
-                    .protein_length(ordinal)
+                    .protein_length_i32(ordinal)
+                    .map(|len| len.max(0) as u32)
                     .map_err(|error| database_error(error, database.program))
             })
             .collect::<Result<Vec<u32>>>()?;

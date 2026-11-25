@@ -307,9 +307,11 @@ impl TblastnArgs {
         use crate::blastinput::seq_range;
         let mut args = self;
         args.id_scope = args.parse_deflines.then(Default::default);
-        // The run's `SERIAL_VERIFY_DATA_WRITE`, which `-in_pssm`'s reader reads
-        // (`TblastnArgs::write_verification`).
+        // The run's `SERIAL_VERIFY_DATA_WRITE`, `SERIAL_VERIFY_DATA_READ` and
+        // `SERIAL_VERIFY_DATA_GET`, which `-in_pssm`'s reader reads
+        // (`TblastnArgs::write_verification`, `read_verification`).
         args.write_verification = settings.write_verification.clone();
+        args.read_verification = settings.read_verification.clone();
         // NCBI's score block looks for the file of an ungapped search's `-matrix` that its tables
         // do not have when it sets up a batch (`TblastnArgs::find_matrix_file`); the search
         // refuses it there (`args::check_search_limits`).
@@ -323,7 +325,6 @@ impl TblastnArgs {
         // (`app::early_format_choice`).
         let strategy_file = crate::report::archive::strategy::open_strategy_file(
             args.export_search_strategy.as_deref(),
-            args.out.as_deref(),
             "TBLASTN",
         )?;
         let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
@@ -1235,6 +1236,7 @@ pub fn run_local_database(
     // The file of an unknown `-matrix`, as the command line's `run_io` looks it up.
     args.find_matrix_file(&settings.matrix_search)?;
     args.write_verification = settings.write_verification.clone();
+    args.read_verification = settings.read_verification.clone();
     report_formats(outputs, &args)?;
     let archive_requested = outputs
         .formats
@@ -1642,10 +1644,19 @@ fn search(
     } else {
         0
     };
-    // LOSAT's refusals of the masked search (`-db_hard_mask`; series NP, M4b PR 2) come where NCBI
-    // starts the search, after its checks.
+    // LOSAT's refusals of the masked search (`-db_hard_mask`; series NP, M4b PR 2 and M4b-3c part
+    // 2) come where NCBI starts the search, after its checks.
     if let (Some(database), Some(mask)) = (database, resolved.db_mask.as_ref()) {
-        database.check_mask_limits(mask, usize::try_from(resolved.word_size)?)?;
+        let zero_words = searched_queries
+            .iter()
+            .any(|record| record.seq().contains(&b'-'))
+            || pssm.as_deref().is_some_and(|psi| {
+                psi.pssm
+                    .rows
+                    .iter()
+                    .any(|row| row[0] > crate::utils::matrix::BLAST_SCORE_MIN)
+            });
+        database.check_mask_limits(mask, resolved.word_size, resolved.window_size, zero_words)?;
     }
     app::check_search_environment("TBLASTN", database.is_none())?;
     let subjects = subject_records;

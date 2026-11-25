@@ -1,0 +1,155 @@
+RPSBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: in/l_D01.lst
+           3 sequences; 60 total letters
+
+
+
+Query= c1
+
+Length=22
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:237975 cd00001, PTS_IIB_man, PTS_IIB, PTS system, Mannose/sor...  43.4    4e-14
+
+
+>CDD:237975 cd00001, PTS_IIB_man, PTS_IIB, PTS system, Mannose/sorbose specific 
+IIB subunit. The bacterial phosphoenolpyruvate: sugar 
+phosphotransferase system (PTS) is a multi-protein system involved 
+in the regulation of a variety of metabolic and transcriptional 
+processes. This family is one of four structurally 
+and functionally distinct group IIB PTS system cytoplasmic 
+enzymes, necessary for the uptake of carbohydrates across 
+the cytoplasmic membrane and their phosphorylation. The active 
+site histidine receives a phosphate group from the IIA subunit 
+and transfers it to the substrate.
+Length=22
+
+ Score = 43.4 bits (103),  Expect = 4e-14, Method: Composition-based stats.
+ Identities = 22/22 (100%), Positives = 22/22 (100%), Gaps = 0/22 (0%)
+
+Query  1   IVLARIDDRLIHGQVATTWTKE  22
+           IVLARIDDRLIHGQVATTWTKE
+Sbjct  1   IVLARIDDRLIHGQVATTWTKE  22
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.136    0.418    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0835    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1320
+
+
+Query= c2
+
+Length=18
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:237976 cd00002, YbaK_deacylase, This CD includes cysteinyl-tR...  33.2    3e-10
+
+
+>CDD:237976 cd00002, YbaK_deacylase, This CD includes cysteinyl-tRNA(Pro) 
+deacylases from Haemophilus influenzae and Escherichia coli 
+and other related bacterial proteins. These trans-acting, single-domain 
+proteins are homologs of ProX and also the cis-acting 
+prolyl-tRNA synthetase (ProRS) inserted (INS) editing 
+domain.  The bacterial amino acid trans-editing enzyme YbaK 
+is a deacylase that hydrolyzes cysteinyl-tRNA(Pro)'s mischarged 
+by prolyl-tRNA synthetase.   YbaK also hydrolyzes glycyl-tRNA's, 
+alanyl-tRNA's, seryl-tRNA's, and prolyl-tRNA's.  YbaK 
+is homologous to the INS domain of prolyl-tRNA synthetase 
+(ProRS) as well as the trans-editing enzyme ProX of Aeropyrum 
+pernix which hydrolyzes alanyl-tRNA's and glycyl-tRNA's.
+Length=18
+
+ Score = 33.2 bits (77),  Expect = 3e-10, Method: Composition-based stats.
+ Identities = 18/18 (100%), Positives = 18/18 (100%), Gaps = 0/18 (0%)
+
+Query  1   KTPAIRLLDKAKIPYELH  18
+           KTPAIRLLDKAKIPYELH
+Sbjct  1   KTPAIRLLDKAKIPYELH  18
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.140    0.408    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1080
+
+
+Query= c3
+
+Length=20
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+CDD:237977 cd00003, PNPsynthase, Pyridoxine 5'-phosphate (PNP) sy...  37.9    5e-12
+
+
+>CDD:237977 cd00003, PNPsynthase, Pyridoxine 5'-phosphate (PNP) synthase 
+domain; pyridoxal 5'-phosphate is the active form of vitamin 
+B6 that acts as an essential, ubiquitous coenzyme in amino 
+acid metabolism. In bacteria, formation of pyridoxine 5'-phosphate 
+is a step in the biosynthesis of vitamin B6. PNP synthase, 
+a homooctameric enzyme, catalyzes the final step in PNP 
+biosynthesis, the condensation of 1-amino-acetone 3-phosphate 
+and 1-deoxy-D-xylulose 5-phosphate. PNP synthase adopts 
+a TIM barrel topology, intersubunit contacts are mediated by 
+three ''extra'' helices, generating a tetramer of symmetric 
+dimers with shared active sites; the open state has been proposed 
+to accept substrates and to release products, while most 
+of the catalytic events are likely to occur in the closed 
+state; a hydrophilic channel running through the center of 
+the barrel was identified as the essential structural feature 
+that enables PNP synthase to release water molecules produced 
+during the reaction from the closed, solvent-shielded active 
+site.
+Length=20
+
+ Score = 37.9 bits (89),  Expect = 5e-12, Method: Composition-based stats.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+
+Query  1   RLGVNIDHVATLRNARGTNY  20
+           RLGVNIDHVATLRNARGTNY
+Sbjct  1   RLGVNIDHVATLRNARGTNY  20
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.137    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 1200
+
+
+  Database: in/l_D01.lst
+    Posted date:  Nov 25, 2026  4:43 PM
+  Number of letters in database: 60
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Window for multiple hits: 40

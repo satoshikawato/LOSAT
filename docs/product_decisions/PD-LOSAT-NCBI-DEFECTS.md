@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.108
+- Version: 1.109
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -759,7 +759,16 @@
   RG item K10a, then 1.106 at the merge of dev of 2026-11-25 that brought 1.104 and 1.105, line NP
   item M4b-T3 and psiblast line item PS10b, then 1.107 at the merge of dev of 2026-11-25 that
   brought 1.106, line NP item M4b-3c part 2, then 1.108 at the merge of dev of 2026-11-26 that
-  brought 1.107, line NP item M (b))
+  brought 1.107, line NP item M (b));
+  1.109 2026-11-26 (rule-3 rejections of `losat makeprofiledb -dbtype delta`, psiblast line item
+  PS14: profiles stored by row (`byRow TRUE`) or with `numRows < 28` and non-empty
+  `weightedResFreqsPerPos`, where NCBI's `x_CheckDelta` and `x_UpdateDelta` copy into an empty
+  `std::list::begin()`; an empty `numIndeptObsr` list, where NCBI dereferences `end()`; a
+  `weightedResFreqsPerPos` list whose length is not a multiple of 28 when `len / 28 ==
+  numIndeptObsr.len()`, where `x_ValidateCd` increments past `end()`; and `weightedResFreqsPerPos`
+  or `numIndeptObsr` values whose scaled conversion to `Uint4` is out of range or `NaN`, or a
+  delta volume whose `.wcounts`/`.obsr` offsets pass 2^31; Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07; numbered after 1.108)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3884,6 +3893,17 @@ file would differ, and NCBI's programs still could not open the database).
     past `int` are written as NCBI writes them (rule 2: rows RL01 to RL04, RL06 and RL07).
   - A volume whose offsets or positions pass 2^31, or whose word table passes `Int4` bytes: NCBI's
     counters of them are `Int4`, and the files hold 32-bit fields, so no valid file can be defined.
+  - With `-dbtype delta` (version 1.109, 2026-11-26, psiblast line item PS14, Owner-delegated,
+    standing instruction 2026-09-29, restated 2026-10-07): profiles stored by row (`byRow TRUE`) or
+    with `numRows < 28` and non-empty `weightedResFreqsPerPos` (`makeprofiledb.cpp:1610-1647,
+    1763-1800`, where NCBI copies into an empty `std::list::begin()`, overwriting the list header
+    node; rows `QR16`, `QR17`); an empty `numIndeptObsr` list (`makeprofiledb.cpp:1659, 1803`,
+    where NCBI dereferences `end()`; row `QR18`); a `weightedResFreqsPerPos` list whose length is
+    not a multiple of 28 when `len / 28 == numIndeptObsr.len()` (`makeprofiledb.cpp:1720-1740`,
+    where `x_ValidateCd` increments past `end()`; row `QR19`); `weightedResFreqsPerPos` or
+    `numIndeptObsr` values whose scaled conversion `(val * 1000)` or `((val + 1) * 1000)` to
+    `Uint4` is out of range or `NaN` (`makeprofiledb.cpp:1674, 1688`; rows `QR20`-`QR22`); and
+    delta volumes whose `.wcounts` or `.obsr` offsets pass 2^31 (`makeprofiledb.cpp:1702-1703`).
 - The readers of GI-indexed masks, a damaged `.nog` (version 1.94, 2026-11-24, line NP item
   M4c-2, review S4 and N8; the rejection of a `MASKLIST` name that is not UTF-8 withdrawn in 1.103; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; the outcomes of a `.nog` cut short that NCBI

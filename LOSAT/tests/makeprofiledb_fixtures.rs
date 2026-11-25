@@ -1,12 +1,12 @@
-//! `losat makeprofiledb` against NCBI BLAST+ 2.17.0 makeprofiledb (`-dbtype rps`): each row of
-//! `tests/fixtures/makeprofiledb/cases.tsv` runs in its own copy of `in/` and gives NCBI's standard
-//! output, standard error (in LOSAT's words, `losat::wording`) and exit status
-//! (`ncbi/<row>.{out,err,rc}`) and, for each file the run wrote, its size and FNV-1a digest
-//! (`ncbi/<row>.files`; the date of a `.pin` or `.pal` file replaced by `<DATE>`, its size `*`;
-//! on Windows the files read back to Linux's, `as_on_linux`; where LMDB's pages are not Linux's
-//! 4096 bytes, as on macOS on Apple silicon, an LMDB file is checked for whole pages of the
-//! host's size, `losat_lmdb_line` and `ncbi_lmdb_line`),
-//! frozen from the oracle of row PS10a (2026-11-21; README.md of the directory). NCBI is not run
+//! `losat makeprofiledb` against NCBI BLAST+ 2.17.0 makeprofiledb (`-dbtype rps` and
+//! `-dbtype delta`): each row of `tests/fixtures/makeprofiledb/cases.tsv` runs in its own copy of
+//! `in/` and gives NCBI's standard output, standard error (in LOSAT's words, `losat::wording`)
+//! and exit status (`ncbi/<row>.{out,err,rc}`) and, for each file the run wrote, its size and
+//! FNV-1a digest (`ncbi/<row>.files`; the date of a `.pin` or `.pal` file replaced by `<DATE>`,
+//! its size `*`; on Windows the files read back to Linux's, `as_on_linux`; where LMDB's pages are
+//! not Linux's 4096 bytes, as on macOS on Apple silicon, an LMDB file is checked for whole pages
+//! of the host's size, `losat_lmdb_line` and `ncbi_lmdb_line`), frozen from the oracle of row
+//! PS10a (2026-11-21; README.md of the directory) and subsequent PS10/PS14 rows. NCBI is not run
 //! here. Then `losat rpsblast` on databases that `losat makeprofiledb` built gives NCBI rpsblast's
 //! bytes on NCBI makeprofiledb's databases (`rps/`).
 
@@ -677,28 +677,170 @@ fn makeprofiledb_binary_handles_non_utf8_paths() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-// `rps/<row>.<fmt>`: NCBI rpsblast 2.17.0 `-query q3.faa -db db/db -outfmt <fmt>` on the database
+// `in/l_QR16.lst`-`in/l_QR22.lst` (row PS14): `-dbtype cobalt` and `-dbtype delta` inputs where
+// NCBI BLAST+ 2.17.0 has undefined behaviour: `byRow TRUE` (`QR16`) and `numRows < 28` with
+// weighted residue frequencies (`QR17`) copy into an empty `std::list::begin()` (overwriting the
+// list header node), empty `numIndeptObsr` (`QR18`) dereferences `end()`, a partial trailing
+// column (`QR19`, length not a multiple of 28) increments past `freqs.end()`, and out-of-range or
+// NaN floats (`QR20`-`QR22`) convert to `Uint4` with undefined behaviour.
+#[test]
+fn makeprofiledb_refuses_delta_ub_and_cobalt() {
+    let cases = [
+        (
+            "cobalt",
+            "-dbtype cobalt -in in/l_D01.lst -out db",
+            "Error: -dbtype cobalt (only -dbtype rps and -dbtype delta are built) is not \
+             supported by LOSAT's MAKEPROFILEDB\n",
+        ),
+        (
+            "QR16",
+            "-dbtype delta -in in/l_QR16.lst -out db",
+            "Error: a profile stored by row (byRow TRUE) for -dbtype delta (NCBI's makeprofiledb \
+             copies the transposed weighted residue frequencies into an empty list's begin \
+             iterator) is not supported by LOSAT's MAKEPROFILEDB\n",
+        ),
+        (
+            "QR17",
+            "-dbtype delta -in in/l_QR17.lst -out db",
+            "Error: a profile with numRows 26 (fewer than 28) and weighted residue frequencies \
+             for -dbtype delta (NCBI's makeprofiledb copies them into an empty list's begin \
+             iterator) is not supported by LOSAT's MAKEPROFILEDB\n",
+        ),
+        (
+            "QR18",
+            "-dbtype delta -in in/l_QR18.lst -out db",
+            "Error: a profile with an empty numIndeptObsr list for -dbtype delta (NCBI's \
+             makeprofiledb dereferences the end iterator of the empty list) is not supported by \
+             LOSAT's MAKEPROFILEDB\n",
+        ),
+        (
+            "QR19",
+            "-dbtype delta -in in/l_QR19.lst -out db",
+            "Error: a profile whose weightedResFreqsPerPos has 29 entries (not a multiple of 28) \
+             for -dbtype delta (NCBI's makeprofiledb increments past the end of the list) is not \
+             supported by LOSAT's MAKEPROFILEDB\n",
+        ),
+        (
+            "QR20",
+            "-dbtype delta -obsr_threshold -10 -exclude_invalid false -in in/l_QR20.lst -out db",
+            "Error: a numIndeptObsr value of -2 for -dbtype delta (NCBI's conversion of (-2 + 1) * \
+             1000 to a 32-bit unsigned integer has no defined result) is not supported by LOSAT's \
+             MAKEPROFILEDB\n",
+        ),
+        (
+            "QR21",
+            "-dbtype delta -exclude_invalid false -in in/l_QR21.lst -out db",
+            "Error: a weightedResFreqsPerPos value of -0.5 for -dbtype delta (NCBI's conversion of \
+             -0.5 * 1000 to a 32-bit unsigned integer has no defined result) is not supported by \
+             LOSAT's MAKEPROFILEDB\n",
+        ),
+        (
+            "QR22",
+            "-dbtype delta -in in/l_QR22.lst -out db",
+            "Error: a numIndeptObsr value of NaN for -dbtype delta (NCBI's conversion of (NaN + 1) \
+             * 1000 to a 32-bit unsigned integer has no defined result) is not supported by LOSAT's \
+             MAKEPROFILEDB\n",
+        ),
+    ];
+    for (tag, argstr, expected_err) in cases {
+        let dir = scratch(tag);
+        let words = words(argstr);
+        let (out, got, status, _) = run(&dir, &words);
+        assert_eq!(
+            (
+                String::from_utf8_lossy(&out),
+                String::from_utf8_lossy(&got),
+                status
+            ),
+            ("".into(), expected_err.into(), 1),
+            "{tag}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn makeprofiledb_delta_handles_non_utf8_paths() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let dir = scratch("delta-nonutf8");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("in")).unwrap();
+    let smp_bytes = fs::read(fixtures().join("in/c1.smp")).unwrap();
+    let bad_name = OsStr::from_bytes(b"delta_\xff_name.smp");
+    fs::write(dir.join("in").join(bad_name), &smp_bytes).unwrap();
+    fs::write(dir.join("in/list.lst"), b"in/delta_\xff_name.smp\n").unwrap();
+    let out_name = OsStr::from_bytes(b"db_\xfe_delta");
+    let output = command(Path::new(env!("CARGO_BIN_EXE_losat")), &dir)
+        .args([
+            OsStr::new("makeprofiledb"),
+            OsStr::new("-dbtype"),
+            OsStr::new("delta"),
+            OsStr::new("-in"),
+            OsStr::new("in/list.lst"),
+            OsStr::new("-out"),
+            out_name,
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+    for ext in [
+        b".wcounts".as_slice(),
+        b".obsr",
+        b".rps",
+        b".loo",
+        b".aux",
+        b".freq",
+        b".pin",
+        b".phr",
+        b".psq",
+    ] {
+        let mut file = b"db_\xfe_delta".to_vec();
+        file.extend_from_slice(ext);
+        assert!(
+            dir.join(OsStr::from_bytes(&file)).is_file(),
+            "missing output file {:?}",
+            String::from_utf8_lossy(&file)
+        );
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// `rps/<row>.<fmt>`: NCBI rpsblast 2.17.0 `-query <query> -db db/db -outfmt <fmt>` on the database
 // NCBI makeprofiledb built for the row (survey rows R01 and R05, 2026-11-21; QC01, a query of
 // lower-case IUPACaa letters, 2026-11-23; B01 and B03, ASN.1 binary score and frequency-ratio
-// profiles, 2026-11-25), its output in LOSAT's words; the database's build date (outfmt 0's
-// `Posted date:`) is the day of the run.
+// profiles, 2026-11-25; D01 and D04, text and binary `-dbtype delta` profiles, 2026-11-26), its
+// output in LOSAT's words; the database's build date (outfmt 0's `Posted date:`) is the day of
+// the run.
 #[test]
 fn rpsblast_on_losat_databases_gives_ncbis_bytes() {
-    for (row, case) in [
-        ("R01", "O00"),
-        ("R05", "S_f2"),
-        ("QC01", "QC01"),
-        ("B01", "B01"),
-        ("B03", "B03"),
+    for (row, case, query) in [
+        ("R01", "O00", "q3.faa"),
+        ("R05", "S_f2", "q3.faa"),
+        ("QC01", "QC01", "q3.faa"),
+        ("B01", "B01", "q3.faa"),
+        ("B03", "B03", "q3.faa"),
+        ("D01", "D01", "qcdd.faa"),
+        ("D04", "D04", "qcdd.faa"),
     ] {
         let (_, words) = cases().into_iter().find(|(name, _)| name == case).unwrap();
         let dir = scratch(&format!("rps-{row}"));
         let (_, err, status, _) = run(&dir, &words);
         assert_eq!(status, 0, "{}", String::from_utf8_lossy(&err));
-        fs::copy(fixtures().join("rps/q3.faa"), dir.join("q3.faa")).unwrap();
+        fs::copy(fixtures().join(format!("rps/{query}")), dir.join(query)).unwrap();
         for fmt in ["6", "0"] {
             let output = command(Path::new(env!("CARGO_BIN_EXE_losat")), &dir)
-                .args(["rpsblast", "-query", "q3.faa", "-db", "db", "-outfmt", fmt])
+                .args(["rpsblast", "-query", query, "-db", "db", "-outfmt", fmt])
                 .stdin(Stdio::null())
                 .output()
                 .unwrap();

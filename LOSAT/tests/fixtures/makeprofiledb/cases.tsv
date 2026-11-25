@@ -204,3 +204,35 @@ RB26	-blastdb_version 4 -index false -in in/l_bhnullid_s2.lst -out db
 RB27	-in in/l_bhnullid_org.lst -out db
 RB28	-in in/l_bhnullid_after.lst -out db
 RB29	-blastdb_version 4 -in in/l_bhnullid_badvis.lst -out db
+D01	-dbtype delta -in in/l_D01.lst -out db
+D02	-dbtype delta -blastdb_version 4 -in in/l_D01.lst -out db
+D03	-dbtype delta -index false -in in/l_D01.lst -out db
+D04	-dbtype delta -binary -title T -in in/l_D04.lst -out db
+D05	-dbtype delta -max_smp_vol 2 -in in/l_D01.lst -out db
+D06	-dbtype delta -taxid 9606 -in in/l_D01.lst -out db
+D07	-dbtype delta -taxid_map in/d_tax.map -in in/l_D01.lst -out db
+D08	-dbtype delta -in in/l_D08.lst -out db
+D09	-dbtype delta -in in/l_D09.lst -out db
+D10	-dbtype delta -in in/l_D10.lst -out db
+D11	-dbtype delta -exclude_invalid false -in in/l_D10.lst -out db
+D12	-dbtype delta -in in/l_D12.lst -out db
+D13	-dbtype delta -exclude_invalid false -in in/l_D12.lst -out db
+D14	-dbtype delta -obsr_threshold 0 -in in/l_D14.lst -out db
+D15	-dbtype delta -obsr_threshold 0 -exclude_invalid false -in in/l_D14.lst -out db
+D16	-dbtype delta -obsr_threshold -10 -exclude_invalid false -in in/l_D16.lst -out db
+D17	-dbtype delta -in in/l_D17.lst -out db
+D18	-dbtype delta -obsr_threshold 10000 -in in/l_D01.lst -out db
+D19	-dbtype delta -blastdb_version 4 -obsr_threshold 10000 -in in/l_D01.lst -out db
+D20	-dbtype delta -max_smp_vol -1 -obsr_threshold 10000 -in in/l_D01.lst -out db
+D21	-dbtype delta -in in/l_D21.lst -out db
+D22	-dbtype delta -exclude_invalid false -in in/l_D21.lst -out db
+D23	-dbtype delta -obsr_threshold 100 -in in/l_D23.lst -out db
+D24	-dbtype delta -in in/l_D24.lst -out db
+D25	-dbtype delta -in in/l_D25.lst -out db
+D26	-dbtype delta -in in/l_D26.lst -out db
+D27	-dbtype delta -in in/l_D27.lst -out db
+D28	-dbtype delta -logfile run.log -in in/l_D28.lst -out db
+D29	-dbtype delta -logfile run.log -max_smp_vol 2 -in in/l_D29.lst -out db
+D30	-dbtype delta -logfile run.log -in in/l_D27.lst -out db
+D31	-dbtype delta -max_smp_vol 2 -in in/l_D29.lst -out db
+D32	-dbtype delta -in in/l_D32.lst -out db

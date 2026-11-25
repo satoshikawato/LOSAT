@@ -26,7 +26,7 @@ LOSAT is written in pure Rust. Searching and building databases need nothing els
 | Databases and masks | [`segmasker`](programs/segmasker.md) | Finds low-complexity regions in protein sequences. |
 | Databases and masks | [`convert2blastmask`](programs/convert2blastmask.md) | Turns lower-case masking in FASTA into masking information for `makeblastdb`. |
 | Databases and masks | [`makembindex`](programs/makembindex.md) | Builds the MegaBLAST index of a nucleotide database. |
-| Databases and masks | [`makeprofiledb`](programs/makeprofiledb.md) | Builds a profile database for `rpsblast` and `rpstblastn` (such as CDD) from PSSM files. |
+| Databases and masks | [`makeprofiledb`](programs/makeprofiledb.md) | Builds a profile database for `rpsblast`, `rpstblastn` and DELTA-BLAST (such as CDD) from PSSM files (`-dbtype rps` and `-dbtype delta`). |
 | Databases and masks | [`blastdb_aliastool`](programs/blastdb_aliastool.md) | Makes alias files that combine databases or keep a list of their sequences; converts GI and sequence id lists to binary lists. |
 | Databases and masks | [`blastdbcheck`](programs/blastdbcheck.md) | Checks BLAST databases for damage: files, sequences, ISAM indexes, alias files, taxonomy ids. |
 | Domain annotation | [`rpsbproc`](programs/rpsbproc.md) | Annotates conserved domains, sites and motifs from the `-outfmt 11` results of `rpsblast` and `rpstblastn` (see its page). |
@@ -45,7 +45,7 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 
 These are on the list for a later release:
 
-- the programs `deltablast` and `blast_formatter`, and `makeprofiledb -dbtype delta` and `-dbtype cobalt`;
+- the programs `deltablast` and `blast_formatter`, and `makeprofiledb -dbtype cobalt`;
 - `psiblast -phi_pattern`;
 - the `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`;
 - `-html` in `psiblast`.

@@ -127,5 +127,35 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
     `NULL` `Seq-id` followed by a missing input file in v5 and v4 (`QR15`, where `Close` throws in
     the unwinding of the input error and NCBI aborts rc 134).
 
+- Rows `D01`-`D32` (row PS14, frozen on 2026-11-26 with the official NCBI BLAST+ 2.17.0
+  `makeprofiledb` and `rpsblast` binaries; each row run twice with zero difference):
+  - `D01`-`D07`: `-dbtype delta` on CDD scoremats (`c1`, `c2`, `c3`) in v5 (`D01`), v4 (`D02`),
+    `-index false` (`D03`), `-binary` (`D04`, `c1.smp.bin`-`c3.smp.bin`), multi-volume `-max_smp_vol
+    2` (`D05`), `-taxid 9606` (`D06`), and `-taxid_map` (`D07`); `rps/D01.{6,0}` and
+    `rps/D04.{6,0}` are NCBI `rpsblast` outputs with `rps/qcdd.faa` on the built delta databases.
+  - `D08`-`D09`: missing `weightedResFreqsPerPos` (`D08`, `pc.smp`, rc 1) and missing
+    `numIndeptObsr` (`D09`, rc 1).
+  - `D10`-`D17`: `-obsr_threshold` exact boundary `5.0 + 1.0 == 6.0` vs `4.9999 + 1.0 < 6.0`
+    (`D10`, and still excluded with `-exclude_invalid false` in `D11`), `x_ValidateCd` column-sum
+    epsilon `1.0001` vs `1.00011` (`D12` excluded with NCBI's `it conatins an invalid CD `, `D13`
+    kept with `-exclude_invalid false`), `obsr < 1.0` at `-obsr_threshold 0` (`D14` excluded, `D15`
+    kept), `-obsr_threshold -10 -exclude_invalid false` with `obsr = -0.5` (`D16`, valid `Uint4`
+    `500`), and `.obsr` run-length compression boundaries relative to run head with
+    `obsr.len() != seq_size` (`D17`).
+  - `D18`-`D20`: all profiles excluded via `-obsr_threshold 10000` in v5 (`D18`), v4 (`D19`), and
+    `-max_smp_vol -1` (`D20`): `Empty database`, rc 1, no files left.
+  - `D21`-`D23`: column count mismatch (`D21`, and still rc 255 with `-exclude_invalid false` in
+    `D22`), and mismatch skipped when excluded earlier by `-obsr_threshold 100` (`D23`).
+  - `D24`-`D27`: frequency-ratio-only delta profile (`D24`), bad visible characters (`803.7`: 1x
+    for excluded, 3x for included across NCBI's three read passes, `D25`), Pass-2 scaling mismatch
+    cleaning up `.wcounts`/`.obsr`/RPS files (`D26`), and Pass-1 error after exclusion (`D27`).
+  - `D28`-`D32`: `-logfile` with exclusions (`D28`), multi-volume alias (`D29`), and Pass-1 error
+    (`D30`, matching `std::ofstream` buffered flushing); multi-volume split after exclusion (`D31`,
+    4 inputs with 1 excluded -> 1+2 volumes); and Pass-2 duplicate `Seq-id` cleanup (`D32`).
+  - `l_QR16.lst`-`l_QR22.lst` (no `cases.tsv` row; tested as refusals alongside `-dbtype cobalt`):
+    `byRow TRUE` (`QR16`), `numRows 26` with weighted frequencies (`QR17`), empty `numIndeptObsr`
+    (`QR18`), partial trailing column of 29 entries (`QR19`), and out-of-range / NaN floats
+    (`QR20`-`QR22`: `obsr = -2`, `weightedResFreqsPerPos = -0.5`, `obsr = NaN`).
+
 The whole oracle (248 cases) is compared by `compare.py` of the survey; these rows are the part kept in the
 repository.

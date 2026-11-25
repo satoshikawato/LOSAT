@@ -280,7 +280,7 @@ impl PsiblastArgs {
             db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
-            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::reader::named_refusal`).
+            // LOSAT refuses psiblast's `-html` (`cli::reader::named_refusal`).
             html: false,
             parse_deflines: self.parse_deflines,
             id_scope: None,
@@ -331,6 +331,7 @@ impl PsiblastArgs {
             taxdb_setting: None,
             matrix_search: None,
             write_verification: None,
+            read_verification: Default::default(),
             inclusion_ethresh: Some(self.inclusion_ethresh),
             first_query_ordinal: self.first_query_ordinal,
             scope_refusal: self.scope_refusal.clone(),

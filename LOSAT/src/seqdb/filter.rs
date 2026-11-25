@@ -1466,6 +1466,25 @@ impl SeqDb {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
+    /// Reads the header records under the run's `SERIAL_VERIFY_DATA_READ` (`setting`): where a
+    /// record fails NCBI's check of a mandatory member (NCBI's exception, `SeqDbError::Ncbi`) and
+    /// the setting turns the check off, NCBI posts the member as missing and reads on, which LOSAT
+    /// refuses at that read (`SeqDbError::Setting`, `ReadVerification::refused`). Every program
+    /// that reads the definition lines of a database calls it after the open.
+    pub fn refuse_unchecked_reads(
+        &mut self,
+        setting: &crate::blastinput::ncbi_environment::ReadVerification,
+    ) {
+        if !setting.turns_read_check_off() {
+            return;
+        }
+        let setting = Arc::new(setting.clone());
+        for volume in &mut self.volumes {
+            volume.refuse_unchecked_reads(Arc::clone(&setting));
+        }
+    }
+
     /// `x_CheckOrFindOID` of `next` (`OidFilter::check_or_find`; without an OID list every OID of
     /// the volumes passes): whether `next`, moved to the first OID from it on that NCBI's list
     /// holds, passes NCBI's checks of the iteration range. Builds the list

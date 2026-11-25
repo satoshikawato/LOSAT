@@ -621,6 +621,8 @@ app = Blastp
 taxdb_setting = None
 matrix_search = None
 write_verification = None
+read_verification.read = None
+read_verification.get = None
 inclusion_ethresh = None
 gap_trigger = None
 sum_stats = false
@@ -1086,6 +1088,8 @@ ungapped = false
 in_pssm = None
 archive = None
 write_verification = None
+read_verification.read = None
+read_verification.get = None
 strategy = None
 tabular_taxdb = None
 subject_taxdb = None
@@ -1549,6 +1553,7 @@ searchsp = None
 comp_based_stats = "1"
 outfmt = "0"
 show_gis = false
+html = false
 num_descriptions = None
 num_alignments = None
 formatting.line_length = None
@@ -1642,6 +1647,9 @@ mt_mode = None
 [rpsblast -line_length 2]
 - formatting.line_length = None
 + formatting.line_length = 2
+[rpsblast -html]
+- html = false
++ html = true
 [rpsblast -sorthits 2]
 - formatting.sort_hits = None
 + formatting.sort_hits = 2
@@ -1675,6 +1683,7 @@ evalue = None
 comp_based_stats = "1"
 outfmt = "0"
 show_gis = false
+html = false
 num_descriptions = None
 num_alignments = None
 formatting.line_length = None
@@ -1779,6 +1788,9 @@ use_sw_tback = false
 [rpstblastn -line_length 2]
 - formatting.line_length = None
 + formatting.line_length = 2
+[rpstblastn -html]
+- html = false
++ html = true
 [rpstblastn -sorthits 2]
 - formatting.sort_hits = None
 + formatting.sort_hits = 2

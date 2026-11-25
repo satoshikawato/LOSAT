@@ -6865,7 +6865,12 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
         app::formatting_handler_check(&choice, Program::Blastn)?;
         outfmts.push(choice.number);
     }
-    args.html_links = app::html_links(args.html, Program::Blastn, args.database_name(), &outfmts)?;
+    args.html_links = app::html_links(
+        args.html,
+        crate::report::archive::options::RequestKind::Blastn,
+        args.database_name(),
+        &outfmts,
+    )?;
     // The hit list size and the counts of the pairwise report, with the formatting
     // handler's warnings (`ExtractAlgorithmOptions`), once for the run.
     let (counts, warnings) = crate::algorithm::blastn::scoring::report_counts_of(args, &outfmts)?;

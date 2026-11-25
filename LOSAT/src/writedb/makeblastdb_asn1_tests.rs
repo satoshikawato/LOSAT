@@ -710,34 +710,43 @@ fn asn1_read_and_get_verification_refusal_matches_ncbi_contract() {
         ..Default::default()
     };
 
+    const READ_REFUSAL: &str =
+        "SERIAL_VERIFY_DATA_READ=NO with ASN.1 input (-input_type asn1_txt|asn1_bin) that lacks a mandatory member is not supported by LOSAT's makeblastdb";
+    const GET_REFUSAL: &str =
+        "SERIAL_VERIFY_DATA_GET=NO with ASN.1 input (-input_type asn1_txt|asn1_bin) of which NCBI BLAST+ gets a member that is not set is not supported by LOSAT's makeblastdb";
+    const UNSET_LEN_ERR: &str =
+        "CSeq_inst::GetLength(): Attempt to get unassigned member NCBI-Sequence::Seq-inst.length";
+    let norm_dir =
+        |out: &[u8], dir: &TempDir| String::from_utf8_lossy(out).replace(&dir_string(dir), "<D>");
+
     let cases: [(&str, &str, &[u8], &str, &str); 4] = [
         (
             "txt_missing_repr",
             "asn1_txt",
             &txt_no_repr,
             "member repr expected",
-            "SERIAL_VERIFY_DATA_READ=NO with ASN.1 input (-input_type asn1_txt|asn1_bin) that lacks a mandatory member is not supported by LOSAT's makeblastdb",
+            READ_REFUSAL,
         ),
         (
             "bin_missing_repr",
             "asn1_bin",
             &bin_no_repr,
             "member repr expected",
-            "SERIAL_VERIFY_DATA_READ=NO with ASN.1 input (-input_type asn1_txt|asn1_bin) that lacks a mandatory member is not supported by LOSAT's makeblastdb",
+            READ_REFUSAL,
         ),
         (
             "txt_unset_length",
             "asn1_txt",
             &txt_no_len,
-            "CSeq_inst::GetLength(): Attempt to get unassigned member NCBI-Sequence::Seq-inst.length",
-            "SERIAL_VERIFY_DATA_GET=NO with ASN.1 input (-input_type asn1_txt|asn1_bin) of which NCBI BLAST+ gets a member that is not set is not supported by LOSAT's makeblastdb",
+            UNSET_LEN_ERR,
+            GET_REFUSAL,
         ),
         (
             "bin_unset_length",
             "asn1_bin",
             &bin_no_len,
-            "CSeq_inst::GetLength(): Attempt to get unassigned member NCBI-Sequence::Seq-inst.length",
-            "SERIAL_VERIFY_DATA_GET=NO with ASN.1 input (-input_type asn1_txt|asn1_bin) of which NCBI BLAST+ gets a member that is not set is not supported by LOSAT's makeblastdb",
+            UNSET_LEN_ERR,
+            GET_REFUSAL,
         ),
     ];
 
@@ -776,25 +785,22 @@ fn asn1_read_and_get_verification_refusal_matches_ncbi_contract() {
             err_u_str.contains(ncbi_substr),
             "{label} unset err: {err_u_str}"
         );
+        let norm_u = norm_dir(&out_u, &dir_u);
 
         let dir_o = TempDir::unique(&format!("asn1-rv-other-{label}"));
         let (rc_o, out_o, err_o) =
             run_case_with_settings(&make_words(&dir_o), MakedbEnv::default(), other, bytes);
         assert_eq!(rc_o, rc_u, "{label} other var rc");
         assert_eq!(err_o, err_u, "{label} other var err");
-        assert_eq!(
-            String::from_utf8_lossy(&out_o).replace(&dir_string(&dir_o), "<D>"),
-            String::from_utf8_lossy(&out_u).replace(&dir_string(&dir_u), "<D>"),
-            "{label} other var out"
-        );
+        assert_eq!(norm_dir(&out_o, &dir_o), norm_u, "{label} other var out");
 
         let dir_r = TempDir::unique(&format!("asn1-rv-refuse-{label}"));
         let (rc_r, out_r, err_r) =
             run_case_with_settings(&make_words(&dir_r), MakedbEnv::default(), matching, bytes);
         assert_refusal(label, rc_r, &err_r, refusal_substr);
         assert_eq!(
-            String::from_utf8_lossy(&out_r).replace(&dir_string(&dir_r), "<D>"),
-            String::from_utf8_lossy(&out_u).replace(&dir_string(&dir_u), "<D>"),
+            norm_dir(&out_r, &dir_r),
+            norm_u,
             "{label} refused out must match unset out"
         );
     }

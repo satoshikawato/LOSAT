@@ -6200,11 +6200,10 @@ impl TaxdbRun {
     /// ([`SeqDb::visit_defline_set_taxids`] in ranges of [`crate::seqdb::HEADER_RANGE_SEQS`]), made
     /// only for such a damaged taxonomy database and once for the run; a header whose taxids do
     /// not decode is left to the lookups of the batches, which fail on it where it is reported.
-    /// `(path of taxdb.bti, reason)` of the refusal of the fetches whose order LOSAT does not
-    /// follow there, made as a reader's refusal ([`TaxonomyRefusal`]) where NCBI fetches
-    /// ([`TaxdbRun::refuse_cache_collision`]); a batch's prefetch ([`prefetch_slot_plan`]) and the
-    /// reports' reads ([`load_read_texts`]) follow NCBI's order, the XML2 and JSON reports' too
-    /// (they prefetch as the other formats, [`prefetches_subjects`]).
+    /// `(path of taxdb.bti, reason)` for the taxonomy cache collision, where a batch's prefetch
+    /// ([`prefetch_slot_plan`]) and the reports' reads ([`load_read_texts`]) follow NCBI's order,
+    /// the XML2 and JSON reports' too (they prefetch as the other formats,
+    /// [`prefetches_subjects`]), and refuse what that order does not decide.
     fn cache_collision(&self, db: &SeqDb) -> Option<&(std::path::PathBuf, String)> {
         self.collision
             .get_or_init(|| {
@@ -6239,22 +6238,6 @@ impl TaxdbRun {
     /// queries, which make every batch's lookups before the first byte.
     pub(crate) fn cache_may_refuse(&self, db: &SeqDb) -> bool {
         self.cache_collision(db).is_some()
-    }
-
-    /// LOSAT's refusal of a fetch of the run where NCBI's taxonomy cache would repeat the offset
-    /// error ([`TaxdbRun::cache_collision`]), as a reader's refusal ([`TaxonomyRefusal`]) that names
-    /// `program`; `Ok` for any other run. The callers ask it only where NCBI fetches a subject.
-    fn refuse_cache_collision(&self, db: &SeqDb, program: &str) -> Result<()> {
-        match self.cache_collision(db) {
-            Some((path, message)) => Err(taxdb_error(
-                SeqDbError::Unsupported {
-                    path: path.clone(),
-                    message: message.clone(),
-                },
-                program,
-            )),
-            None => Ok(()),
-        }
     }
 
     /// The open of the database by the rows of a query batch whose report looks names up, made

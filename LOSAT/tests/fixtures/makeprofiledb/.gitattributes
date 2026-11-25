@@ -1,0 +1,7 @@
+# Binary and raw-byte NCBI fixtures: no line-ending conversion.
+*.bin binary
+*.err -text
+*.out -text
+rps/* binary
+ncbi/B15.err -diff
+ncbi/RB11.err -diff

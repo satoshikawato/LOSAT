@@ -14,7 +14,7 @@ use crate::seqdb::{SeqDb, SeqDbError, SeqLocation, SeqType};
 use crate::seqid::defline_set::{compare, Sic};
 use crate::seqid::DeflineSet;
 use crate::utils::os_bytes::{path_bytes, path_from_bytes};
-use crate::writedb::convert::Random;
+use crate::utils::random_gen::NcbiRandom;
 
 use super::log::{Log, Stop, BRIEF, DETAILS, MINUTIAE};
 use super::path::{entries_base, FileParts};
@@ -38,7 +38,7 @@ pub(super) enum Test {
     /// `CStrideTest` of every `N`-th OID (`-full`: 1, `-stride N`).
     Stride(i32),
     /// `CSampleTest` of `n` OIDs drawn by `random`, which every volume's draws go on with.
-    Sample { n: i32, random: Random },
+    Sample { n: i32, random: NcbiRandom },
     /// `CEndsTest` of `N` OIDs at each end.
     Ends(i32),
 }
@@ -326,7 +326,7 @@ impl<'a> Volume<'a, '_> {
         log: &mut Log<'_>,
         prefix: &[u8],
         n: i32,
-        random: &mut Random,
+        random: &mut NcbiRandom,
         seen: &mut Seen,
     ) -> Result<u32, Escape> {
         let max = i32::try_from(self.db.num_oids()).unwrap_or(i32::MAX);

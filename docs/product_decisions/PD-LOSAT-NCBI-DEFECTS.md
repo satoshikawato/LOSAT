@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.103
+- Version: 1.104
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -700,7 +700,15 @@
   the merge of dev of 2026-11-24 that brought 1.99, line RG item X-short-tbx-link, then 1.101 at the
   merge of dev of 2026-11-25 that brought 1.100, line RG item KC-11d, then 1.102 at the merge of
   dev of 2026-11-25 that brought 1.101, line RG item D5c, then 1.103 at the merge of
-  dev of 2026-11-25 that brought 1.102, psiblast line item PS10e)
+  dev of 2026-11-25 that brought 1.102, psiblast line item PS10e);
+  1.104 2026-11-25 (rule-3 rejections of `losat makeprofiledb` with `-binary` ASN.1 BER PSSM inputs
+  and binary definition lines, psiblast line item PS10b: a query whose `iupacna` data holds a byte
+  >= 0x80 in a pair position `0..(v.len() & !1)`, where NCBI's `x_ConvertIupacnaTo4na` indexes its
+  static table with a signed `char` and reads before the table; a `Seq-id` element stated as `NULL`
+  inside binary definition lines (`ASN1_BlastDefLine`), where NCBI's version 5 writer aborts as it
+  closes; and `:OtherType` pointers and host-dependent 1 GiB..2^47 lengths in profiles and binary
+  definition lines, whose NCBI behaviour depends on process registration history or host memory;
+  Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.103)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3647,6 +3655,24 @@ file would differ, and NCBI's programs still could not open the database).
     32, with or without a later error such as a negative frequency ratio). A query of the wrong
     length and a matrix that NCBI's engine does not know are NCBI's errors first (fixture rows
     QC02-QC05), and a lower-case IUPACaa query is built (row QC01).
+  - A query in `iupacna` coding holding a byte `>= 0x80` in a pair position `0..(v.len() & !1)`
+    (version 1.104, PS10b; reachable in ASN.1 binary where `StringStore` keeps raw bytes without
+    `#` replacement): `WriteDB_IupacnaToBinary` (`writedb_convert.cpp:590-604`) converts all
+    `v.size()` bytes through `x_ConvertIupacnaTo4na` (`sequtil_convert_imp.cpp:313-339`), whose pair
+    loop indexes `sm_IupacnaTo4na` with a signed `char` (`*src_i`) and reads before the static table
+    in `.rodata` (undefined behaviour; fixture inputs `l_QR08.lst`-`l_QR10.lst`, scored and
+    frequency-ratio-only alike). Bytes `< 0x80` (row `B19`), the single odd overhang byte which
+    casts to `Uint1` (row `B18`), and `mol na` (which stops at NCBI's molecule error first, row
+    `B20`) are built or reported as in NCBI.
+  - Binary definition lines (`ASN1_BlastDefLine`) holding a `Seq-id` element stated as `NULL`
+    (version 1.104, PS10b; fixture input `l_QR12.lst`): NCBI's version 5 writer aborts on it as it
+    closes (`No tax info for any oid`), and LOSAT's `BlastDefline` holds typed `ParsedSeqId` values.
+    Damaged binary definition lines, replaced visible characters (803.7), `NULL` `Blast-def-line`
+    elements (`Attempt to access NULL pointer.`), and huge lengths (`Unknown exception`) match NCBI
+    through the shared table-driven BER reader (fixture rows `RB04`, `RB04m`, `RB04b`, `RB08`-`RB16`).
+    As in `makeblastdb` (`Names::MASK`), `:OtherType` pointers and host-dependent 1 GiB..2^47
+    string or octet lengths in profiles and binary definition lines are refused (fixture inputs
+    `l_QR11.lst`, `l_QR13.lst`).
   - A query in a nucleotide coding with fewer bytes than NCBI's writer reads for its length (version
     1.86, PS10d): `ncbi2na` of fewer than `ceil(length / 4)` bytes, `ncbi4na` of fewer than
     `ceil(length / 2)`, `iupacna` whose NCBI4na form and its terminating zero hold fewer than

@@ -242,8 +242,8 @@ fn the_library_refuses_xmlhelp() {
 }
 
 // The readers of blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask,
-// makembindex, makeprofiledb and blastdb_aliastool (`ncbi_app`) read every argument of NCBI's XML (none is refused by name; their
-// XML is NCBI's whole but for makeprofiledb's `-binary`, which its run refuses, `Refusal::Run`): the
+// makembindex, makeprofiledb and blastdb_aliastool (`ncbi_app`) read every argument of NCBI's XML
+// (none is refused by name or at the run; their XML is NCBI's whole): the
 // argument with a value `1` for a key, then `-h`, writes the usage or an
 // error of the value, never NCBI's
 // `Unknown argument` or a refusal.

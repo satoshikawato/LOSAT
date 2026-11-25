@@ -86,5 +86,33 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
   builds the definition lines from the descriptors before it looks at the ids, so it dereferences the element
   there too.
 
+- Rows `B01`-`B22`, `BE01`-`BE12`, `RB04`, `RB04m`, `RB04b`, `RB08`-`RB16` (row PS10b, frozen on
+  2026-11-25 with the official NCBI BLAST+ 2.17.0 `makeprofiledb` and `rpsblast` binaries):
+  - `B01`-`B09`: `-binary` on ASN.1 BER binary PSSMs (`pc`/`pe`/`pf` scored, `c1`/`c2`/`c3` CDD,
+    `fc`/`fe` frequency-ratio-only IMPALA path), multi-volume (`-max_smp_vol 2`), `-index false`,
+    `-blastdb_version 4`, `-scale`/`-threshold`/`-gapopen`/`-gapextend`, `-logfile`, `-dryrun`;
+    `rps/B01.{6,0}` and `rps/B03.{6,0}` are NCBI `rpsblast` outputs on the `-binary`-built DBs.
+  - `B10`-`B22`: short-form definite length (`B10`, valid), long-form definite length (`B11`,
+    reproducing NCBI's `error while reading freqRatios`), `byRow TRUE` (`B12`), binary defline
+    inside binary `.smp` (`B13`), `UTF8String` tag (`B14`, suppressed warning), bad visible chars
+    in binary title (`B15`, 803.7 posts), `StringStore` `ncbieaa`/`iupacaa` bytes `>= 0x80` and
+    `< 0x20` (`B16`, `B17`), odd-length `iupacna` overhang byte `>= 0x80` (`B18`), `iupacna`
+    control byte `< 0x20` (`B19`), `mol na` with `iupacna` `>= 0x80` (`B20`, NCBI molecule error
+    first), `params NULL` (`B21`), BER special REAL `0` / `-0.0` (`B22`).
+  - `BE01`-`BE12`: `-binary` errors (text with `-binary`, binary without `-binary`, mixed binary
+    and text with leftovers, empty, truncated `30 80`, missing mandatory `pssm`, mid-file
+    truncation with leftovers, unknown member `[9]`, bad tag inside `numRows`, huge string 2^63,
+    huge octet string 2^62 with 803.4 post, `@1` pointer overflow).
+  - `RB04`, `RB04m`, `RB04b`, `RB08`-`RB16`: damaged and edge-case binary definition lines
+    (`ASN1_BlastDefLine`) decoded through the shared table-driven BER reader (`Blast-def-line-set`):
+    `0xDEADBEEF` (`RB04`, mid-list `RB04m`, in binary `.smp` `RB04b`), truncated `30` (`RB08`),
+    missing `seqid` (`RB09`), overflowing `taxid` (`RB10`), bad visible chars in title and Seq-id
+    (`RB11`, 803.7 posts), bad visible char followed by syntax error (`RB12`), `NULL`
+    `Blast-def-line` (`RB13`), `UTF8String` tag (`RB14`), huge string 2^63 (`RB15`), `:Blast-def-line`
+    and `:Seq-id` pointer forms with definite length and trailing bytes (`RB16`).
+  - `l_QR08.lst`-`l_QR13.lst` (no `cases.tsv` row; tested as refusals): `iupacna` byte `>= 0x80`
+    in pair positions (`QR08`-`QR10`), `:Seq-interval` other-type pointer (`QR11`), `NULL`
+    `Seq-id` inside `ASN1_BlastDefLine` (`QR12`), and 1 GiB string length past EOF (`QR13`).
+
 The whole oracle (248 cases) is compared by `compare.py` of the survey; these rows are the part kept in the
-repository (about 1.2 MB).
+repository.

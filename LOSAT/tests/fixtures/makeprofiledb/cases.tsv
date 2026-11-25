@@ -145,3 +145,49 @@ NE24	-in in/l_zs_varset.lst -out db
 NE25	-in in/l_zs_pop.lst -out db
 NE26	-in in/l_zs_clin.lst -out db
 NE27	-in in/l_e_noid_oss_null.lst -out db
+B01	-binary -in in/l_bp3.lst -out db
+B02	-binary -in in/l_bc3.lst -out db
+B03	-binary -in in/l_bf2.lst -out db
+B04	-binary -in in/l_bp3.lst -out db -max_smp_vol 2
+B05	-binary -in in/l_bp3.lst -out db -index false
+B06	-binary -in in/l_bp3.lst -out db -blastdb_version 4
+B07	-binary -in in/l_bp3.lst -out db -scale 200 -threshold 10.5 -gapopen 10 -gapextend 2
+B08	-binary -in in/l_bp3.lst -out db -logfile mpdb.log
+B09	-binary -in in/l_bp3.lst -out db -dryrun
+B10	-binary -in in/l_bsdef.lst -out db
+B11	-binary -in in/l_bldef.lst -out db
+B12	-binary -in in/l_bbyrow.lst -out db
+B13	-binary -in in/l_bbh1.lst -out db
+B14	-binary -in in/l_butf8.lst -out db
+B15	-binary -in in/l_bbadvis.lst -out db
+B16	-binary -in in/l_bstorehi.lst -out db
+B17	-binary -in in/l_biupacaa_hi.lst -out db
+B18	-binary -in in/l_bna_ovh.lst -out db
+B19	-binary -in in/l_bna_ctrl.lst -out db
+B20	-binary -in in/l_bna_molna_hi.lst -out db
+B21	-binary -in in/l_bnullp.lst -out db
+B22	-binary -in in/l_breal0.lst -out db
+BE01	-binary -in in/l_p3.lst -out db
+BE02	-in in/l_bp3.lst -out db
+BE03	-binary -in in/l_bmix.lst -out db
+BE04	-binary -in in/l_bempty.lst -out db
+BE05	-binary -in in/l_b3080.lst -out db
+BE06	-binary -in in/l_b30800000.lst -out db
+BE07	-binary -in in/l_btrunc_mid.lst -out db
+BE08	-binary -in in/l_bunk.lst -out db
+BE09	-binary -in in/l_bbadtag.lst -out db
+BE10	-binary -in in/l_bstr2p63.lst -out db
+BE11	-binary -in in/l_boct2p62.lst -out db
+BE12	-binary -in in/l_bpat.lst -out db
+RB04	-in in/l_bhbad.lst -out db
+RB04m	-in in/l_bhbad_mid.lst -out db
+RB04b	-binary -in in/l_bbhbad.lst -out db
+RB08	-in in/l_bheof30.lst -out db
+RB09	-in in/l_bhmissid.lst -out db
+RB10	-in in/l_bhovftax.lst -out db
+RB11	-in in/l_bhbadvis.lst -out db
+RB12	-in in/l_bhbaderr.lst -out db
+RB13	-in in/l_bhnull.lst -out db
+RB14	-in in/l_bhutf8.lst -out db
+RB15	-in in/l_bhhuge.lst -out db
+RB16	-in in/l_bhptr.lst -out db

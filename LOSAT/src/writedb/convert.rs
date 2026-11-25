@@ -524,6 +524,26 @@ pub(crate) fn short_nucleotide_data(
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:590-604
+// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:313-339
+// `WriteDB_IupacnaToBinary` converts all `v.size()` bytes of the IUPACna string into NCBI4na. In
+// `x_ConvertIupacnaTo4na`, the pair loop indexes `sm_IupacnaTo4na` with a signed `char` (`*src_i`),
+// so any byte >= 0x80 in positions `0..(v.len() & !1)` reads before the static table (undefined
+// behaviour); the single odd overhang byte casts to `Uint1` and is defined (`0xf0`).
+/// The first byte >= 0x80 (with its 0-based position) in a pair position (`0..(v.len() & !1)`)
+/// of an IUPACna `Seq-data`; `None` for any other coding or when every pair byte is below 0x80.
+pub(crate) fn iupacna_high_byte(seq_data: &SeqData) -> Option<(usize, u8)> {
+    let SeqData::Iupacna(v) = seq_data else {
+        return None;
+    };
+    let pairs_len = v.len() & !1;
+    v[..pairs_len]
+        .iter()
+        .enumerate()
+        .find(|&(_, &byte)| byte >= 0x80)
+        .map(|(index, &byte)| (index, byte))
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_general.cpp:80-88
 /// `WriteDB_FindSequenceLength`: the number of letters of a sequence in the
 /// form of the sequence file (`seq` is not empty).

@@ -153,7 +153,7 @@ fn a_descriptor_stated_as_null_makes_no_definition_lines() {
         vec![Seqdesc::Empty, Seqdesc::Title(b"t".to_vec())],
     ] {
         assert_eq!(
-            bioseq_deflines(&[], &descr),
+            bioseq_deflines(&[], &descr).result,
             Err(BioseqDeflinesError::NullDescriptor),
             "{descr:?}"
         );
@@ -164,4 +164,116 @@ fn a_descriptor_stated_as_null_makes_no_definition_lines() {
         );
     }
     assert_eq!(first_org_taxid(&[Seqdesc::Title(b"t".to_vec())]), Ok(None));
+}
+
+#[test]
+fn blast_def_line_table_members_match_reader_order() {
+    let names: Vec<&str> = members(named::BLAST_DEF_LINE)
+        .iter()
+        .map(|member| member.name())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "title",
+            "seqid",
+            "taxid",
+            "memberships",
+            "links",
+            "other-info"
+        ]
+    );
+}
+
+#[test]
+fn decode_binary_deflines_reads_valid_and_reports_ncbi_errors_and_posts() {
+    let tlv = |tag: u8, body: &[u8]| -> Vec<u8> {
+        let mut out = vec![tag];
+        if tag & 0x20 != 0 {
+            out.push(0x80);
+            out.extend_from_slice(body);
+            out.extend_from_slice(&[0, 0]);
+        } else {
+            assert!(body.len() < 128);
+            out.push(body.len() as u8);
+            out.extend_from_slice(body);
+        }
+        out
+    };
+    let seq = |parts: &[&[u8]]| -> Vec<u8> {
+        let body: Vec<u8> = parts.iter().flat_map(|p| p.iter().copied()).collect();
+        tlv(0x30, &body)
+    };
+    let ctx = |n: u8, body: &[u8]| tlv(0xA0 | n, body);
+    let vis = |b: &[u8]| tlv(0x1A, b);
+    let int = |v: i32| tlv(0x02, &v.to_be_bytes());
+    let local_str = |s: &[u8]| ctx(0, &ctx(1, &vis(s)));
+
+    // Full valid Blast-def-line with every optional field + trailing bytes.
+    let mut good = seq(&[&seq(&[
+        &ctx(0, &vis(b"hello")),
+        &ctx(1, &seq(&[&local_str(b"id1")])),
+        &ctx(2, &int(9606)),
+        &ctx(3, &seq(&[&int(1)])),
+        &ctx(4, &seq(&[&int(2), &int(3)])),
+        &ctx(5, &seq(&[&int(4)])),
+    ])]);
+    good.extend_from_slice(&[0xDE, 0xAD]);
+    let (res, posts) = decode_binary_deflines(&good);
+    assert!(posts.is_empty());
+    let decoded = res.unwrap();
+    assert!(!decoded.null_defline && !decoded.null_seqid);
+    assert_eq!(decoded.set.deflines.len(), 1);
+    let line = &decoded.set.deflines[0];
+    assert_eq!(line.title.as_deref(), Some(b"hello".as_slice()));
+    assert_eq!(
+        line.ids,
+        [ParsedSeqId::Local(ObjectId::Str(b"id1".to_vec()))]
+    );
+    assert_eq!(line.taxid, Some(9606));
+    assert_eq!(line.memberships.as_deref(), Some([1].as_slice()));
+    assert_eq!(line.links.as_deref(), Some([2, 3].as_slice()));
+    assert_eq!(line.other_info.as_deref(), Some([4].as_slice()));
+
+    // RB04 (`0xDEADBEEF`): exact NCBI serial exception text.
+    let (res, posts) = decode_binary_deflines(&[0xDE, 0xAD, 0xBE, 0xEF]);
+    assert!(posts.is_empty());
+    let Err(ReadError::Serial(exc)) = res else {
+        panic!("expected ReadError::Serial for RB04");
+    };
+    assert_eq!(
+        exc.get_msg(),
+        b"byte 0: unexpected tag: private/30 (222), should be constructed/None (32)"
+    );
+
+    // Truncated at root (0x30 -> Eof) vs inside element (0x30 0x80 -> Serial).
+    assert!(matches!(
+        decode_binary_deflines(&[0x30]).0,
+        Err(ReadError::Eof)
+    ));
+    let Err(ReadError::Serial(exc)) = decode_binary_deflines(&[0x30, 0x80]).0 else {
+        panic!("expected ReadError::Serial for 30 80");
+    };
+    assert_eq!(exc.get_msg(), b"byte 2:  Frame type= eFrameArrayElement");
+
+    // Bad visible chars followed by an error: posts emitted before the error.
+    let bad_then_err = seq(&[
+        &seq(&[&ctx(0, &vis(b"a\x01b")), &ctx(1, &seq(&[&local_str(b"x")]))]),
+        &seq(&[&ctx(9, &int(1))]),
+    ]);
+    let (res, posts) = decode_binary_deflines(&bad_then_err);
+    assert_eq!(posts.len(), 1);
+    assert!(matches!(
+        &posts[0],
+        Post::BadChar(r) if r.trace == "Blast-def-line-set.E.title" && r.byte == 1
+    ));
+    assert!(matches!(res, Err(ReadError::Serial(_))));
+
+    // NULL Blast-def-line element vs NULL Seq-id element.
+    let null_def = seq(&[&[0x05, 0x00]]);
+    let decoded = decode_binary_deflines(&null_def).0.unwrap();
+    assert!(decoded.null_defline);
+    let null_id = seq(&[&seq(&[&ctx(1, &seq(&[&[0x05, 0x00]]))])]);
+    let decoded = decode_binary_deflines(&null_id).0.unwrap();
+    assert!(!decoded.null_defline && decoded.null_seqid);
 }

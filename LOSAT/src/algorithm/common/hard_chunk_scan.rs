@@ -1,7 +1,7 @@
 //! The one word that NCBI's two-hit scan reads in a hard chunk shorter than the word, in a
-//! protein database sequence with `-db_hard_mask` whose masks overlap or nest (BLASTP and BLASTX;
-//! series NP, M4b-3b; the walk of the chunks' diagonal offsets is
-//! `algorithm::common::hard_chunk_walk::DiagonalWalk`). Here is what both programs share:
+//! database sequence with `-db_hard_mask` whose masks overlap or nest (BLASTP and BLASTX, series
+//! NP M4b-3b; TBLASTN and TBLASTX, M4b-3c part 2; the walk of the chunks' diagonal offsets is
+//! `algorithm::common::hard_chunk_walk::DiagonalWalk`). Here is what those programs share:
 //!
 //! - [`OneWord`]: the two-hit test of that word, which saves its seeds as NCBI's word finder does
 //!   (the chunk's ungapped hits, from the stored letters past the chunk), which then go through
@@ -10,9 +10,12 @@
 //!   them, which only such a chunk's HSPs can meet;
 //! - [`short_chunk_tree_refusal`] and [`short_chunk_merge_refusal`]: LOSAT's refusals of a
 //!   sequence where NCBI's gapped stage of such a chunk never ends, and where its merge would
-//!   join such a chunk's HSPs with another's (not yet ported).
+//!   join such a chunk's HSPs with another's across an overlap read past the list (or in BLASTP
+//!   and BLASTX, not yet ported).
 
-use super::diag_entry::{batch_context_distance, x_test_hit, DiagRing, DiagStruct, DiagTable};
+use super::diag_entry::{
+    batch_context_distance, x_test_hit, DiagCell, DiagRing, DiagStruct, DiagTable,
+};
 use crate::utils::matrix::ScoreRows;
 
 /// The scores and the cutoffs of the context of a hit's query offset, which the two-hit test of
@@ -95,6 +98,32 @@ impl OneWord<'_> {
         hits: &[i32],
         offset: i32,
         context: impl Fn(i32) -> WordContext,
+        save: impl FnMut(i32, OneWordSeed),
+    ) {
+        self.test_on_with(
+            table,
+            hits,
+            offset,
+            self.query.len() as i32,
+            |q, s| self.scores.score(self.query[q as usize], s),
+            context,
+            save,
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-510, 519-606
+    /// [`OneWord::test_on`] where `score_at` scores concatenated query offset `q`
+    /// (bounded by `query_len`) against a subject residue: used where the query is held
+    /// per context (TBLASTX) or scored from a PSSM's rows (TBLASTN `-in_pssm`).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn test_on_with(
+        &self,
+        table: &mut impl DiagTable,
+        hits: &[i32],
+        offset: i32,
+        query_len: i32,
+        score_at: impl Fn(i32, u8) -> i32,
+        context: impl Fn(i32) -> WordContext,
         mut save: impl FnMut(i32, OneWordSeed),
     ) {
         for &q in hits {
@@ -109,7 +138,13 @@ impl OneWord<'_> {
                 entry.set_last_hit(offset);
                 continue;
             }
-            let seed = self.extend(last_hit.wrapping_add(self.word), q, found.x_drop);
+            let seed = self.extend_with(
+                last_hit.wrapping_add(self.word),
+                q,
+                found.x_drop,
+                query_len,
+                &score_at,
+            );
             if seed.score >= found.cutoff {
                 save(q, seed);
             }
@@ -138,11 +173,29 @@ impl OneWord<'_> {
     /// The two-hit extension (`s_BlastAaExtendTwoHit`) of the hit at query offset `q_right_off`
     /// and subject offset 0 whose first hit ends at `s_left_off` (signed), with the X-drop
     /// `x_drop`.
+    #[cfg(test)]
     pub(crate) fn extend(&self, s_left_off: i32, q_right_off: i32, x_drop: i32) -> OneWordSeed {
-        let score_at = |q: i32, s: i32| {
-            self.scores
-                .score(self.query[q as usize], self.letters[s as usize])
-        };
+        self.extend_with(
+            s_left_off,
+            q_right_off,
+            x_drop,
+            self.query.len() as i32,
+            &|q, s| self.scores.score(self.query[q as usize], s),
+        )
+    }
+
+    /// The two-hit extension (`s_BlastAaExtendTwoHit`) of the hit at query offset `q_right_off`
+    /// and subject offset 0 whose first hit ends at `s_left_off` (signed), with the X-drop
+    /// `x_drop`, the query's length `query_len` and the residue scorer `score_at`.
+    fn extend_with(
+        &self,
+        s_left_off: i32,
+        q_right_off: i32,
+        x_drop: i32,
+        query_len: i32,
+        score_at: &impl Fn(i32, u8) -> i32,
+    ) -> OneWordSeed {
+        let score_at = |q: i32, s: i32| score_at(q, self.letters[s as usize]);
         let (mut left_score, mut right_d, mut score) = (0, 0, 0);
         for i in 0..self.word {
             score += score_at(q_right_off + i, i);
@@ -172,7 +225,7 @@ impl OneWord<'_> {
         let (mut right_score, mut s_last_off, mut right_len) = (0, s_right_off, 0);
         let right_extend = left_d >= s_right_off - s_left_off;
         if right_extend {
-            let n = (self.length - s_right_off).min(self.query.len() as i32 - q_right_off);
+            let n = (self.length - s_right_off).min(query_len - q_right_off);
             let (mut walk, mut best, mut best_i) = (left_score, left_score, -1);
             let mut i = 0;
             while i < n {

@@ -99,13 +99,17 @@ impl<'a> PyStdout<'a> {
         self.maybe_flush(true)
     }
 
+    fn has_pending(&self) -> bool {
+        !self.failed_mid_run && !self.buf.is_empty()
+    }
+
     /// Flushes buffered stdout before printing a traceback-equivalent error message, matching
     /// Python 3.13's `flush_io` before `PyErr_Print`. Write failures are ignored; if the write
     /// fails and the pending bytes fit in stdout's `st_blksize` (`BufferedWriter` buffer size),
     /// they remain queued for `finish_flush` (which exits `120`), whereas larger writes bypass
     /// `BufferedWriter`'s buffer and are dropped (keeping exit status `1`).
     pub(crate) fn flush_before_error(&mut self) {
-        if self.failed_mid_run || self.buf.is_empty() {
+        if !self.has_pending() {
             return;
         }
         let mut written = 0usize;

@@ -272,7 +272,7 @@ pub(crate) fn py_stderr_escape(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
 
     let mut out = String::with_capacity(bytes.len());
-    for_each_surrogateescape(bytes, |item| match item {
+    for_each_surrogateescape(bytes, |elem| match elem {
         Ok(ch) => out.push(ch),
         Err(b) => {
             let _ = write!(out, "\\udc{b:02x}");

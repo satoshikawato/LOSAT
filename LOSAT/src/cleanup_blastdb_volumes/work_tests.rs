@@ -420,6 +420,14 @@ fn windows_path_join_matches_ntpath_drive_and_root_rules() {
     }
 }
 
+fn prot_db_args(dir: &std::path::Path, name: &str) -> Vec<OsString> {
+    let db_path = dir.join(name).to_str().unwrap().to_string();
+    ["-db", &db_path, "-dbtype", "prot"]
+        .iter()
+        .map(OsString::from)
+        .collect()
+}
+
 #[test]
 fn unlink_error_flushes_stdout_before_stderr_and_respects_blksize_on_closed_pipe() {
     // 1. Verify stdout is flushed BEFORE stderr error text on unlink failure.
@@ -437,11 +445,7 @@ fn unlink_error_flushes_stdout_before_stderr_and_respects_blksize_on_closed_pipe
     fs::write(dir.join("db.pal"), b"DBLIST db.00\n").unwrap();
     touch_all(&dir, &["db.00.pin", "db.01.pin", "db.02.pin"]);
     fs::create_dir(dir.join("db.02.pxx")).unwrap();
-    let db_str = dir.join("db").to_str().unwrap().to_string();
-    let args: Vec<OsString> = ["-db", &db_str, "-dbtype", "prot"]
-        .iter()
-        .map(OsString::from)
-        .collect();
+    let args = prot_db_args(&dir, "db");
     let shared = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let mut out = SharedSink(shared.clone());
     let mut err = SharedSink(shared.clone());
@@ -464,11 +468,7 @@ fn unlink_error_flushes_stdout_before_stderr_and_respects_blksize_on_closed_pipe
             }
         }
         fs::create_dir(dir_p.join(format!("db.{:03}.pxx", nvol - 1))).unwrap();
-        let db_p = dir_p.join("db").to_str().unwrap().to_string();
-        let args_p: Vec<OsString> = ["-db", &db_p, "-dbtype", "prot"]
-            .iter()
-            .map(OsString::from)
-            .collect();
+        let args_p = prot_db_args(&dir_p, "db");
         let mut fail_out = FailingWriter {
             error_kind: io::ErrorKind::BrokenPipe,
             os_code: None,
@@ -507,12 +507,13 @@ fn missing_non_utf8_db_escapes_bytes_as_surrogateescape_in_stderr() {
         OsString::from("-dbtype"),
         OsString::from("prot"),
     ];
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let rc = run_with(&args, &Env::default(), &mut out, &mut err);
+    let mut out_bytes = Vec::new();
+    let mut err_bytes = Vec::new();
+    let rc = run_with(&args, &Env::default(), &mut out_bytes, &mut err_bytes);
     assert_eq!(rc, 1);
-    assert!(out.is_empty());
+    assert!(out_bytes.is_empty());
     assert_eq!(
-        String::from_utf8(err).unwrap(),
+        String::from_utf8(err_bytes).unwrap(),
         "Cannot find protein zz\\udc80 BLAST database\n"
     );
 }

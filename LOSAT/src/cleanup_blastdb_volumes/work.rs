@@ -101,30 +101,77 @@ fn is_sep_os(b: u8, windows: bool) -> bool {
     b == b'/' || (windows && b == b'\\')
 }
 
-/// Splits a Windows path into `(drive, tail)` following Python 3.13's `ntpath.splitdrive`:
-/// handles both drive prefixes (`C:`) and UNC prefixes (`\\server\share`, `\\?\C:`).
-fn splitdrive_win(path: &[u8]) -> (&[u8], &[u8]) {
-    if path.len() >= 2 {
-        if is_sep_os(path[0], true)
-            && is_sep_os(path[1], true)
-            && !path.get(2).is_some_and(|&b| is_sep_os(b, true))
-        {
-            if let Some(rel1) = path[2..].iter().position(|&b| is_sep_os(b, true)) {
-                let idx1 = 2 + rel1;
-                let after = &path[idx1 + 1..];
-                if let Some(rel2) = after.iter().position(|&b| is_sep_os(b, true)) {
-                    let idx2 = idx1 + 1 + rel2;
-                    return (&path[..idx2], &path[idx2..]);
-                }
-                return (path, b"");
-            }
-            return (b"", path);
+/// Splits a Windows path into `(drive, root, tail)` following Python 3.13's `ntpath.splitroot`.
+fn splitroot_win(path: &[u8]) -> (&[u8], &[u8], &[u8]) {
+    let sep = |b: u8| is_sep_os(b, true);
+    if path.first().is_some_and(|&b| sep(b)) {
+        if path.get(1).is_some_and(|&b| sep(b)) {
+            let unc = path.len() >= 8
+                && sep(path[0])
+                && sep(path[1])
+                && path[2] == b'?'
+                && sep(path[3])
+                && path[4..7].eq_ignore_ascii_case(b"UNC")
+                && sep(path[7]);
+            let start = if unc { 8 } else { 2 };
+            let Some(idx) = path[start..]
+                .iter()
+                .position(|&b| sep(b))
+                .map(|r| start + r)
+            else {
+                return (path, b"", b"");
+            };
+            let Some(idx2) = path[idx + 1..]
+                .iter()
+                .position(|&b| sep(b))
+                .map(|r| idx + 1 + r)
+            else {
+                return (path, b"", b"");
+            };
+            return (&path[..idx2], &path[idx2..idx2 + 1], &path[idx2 + 1..]);
         }
-        if path[1] == b':' {
-            return (&path[..2], &path[2..]);
-        }
+        return (b"", &path[..1], &path[1..]);
     }
-    (b"", path)
+    if path.get(1) == Some(&b':') {
+        if path.get(2).is_some_and(|&b| sep(b)) {
+            return (&path[..2], &path[2..3], &path[3..]);
+        }
+        return (&path[..2], b"", &path[2..]);
+    }
+    (b"", b"", path)
+}
+
+/// Splits a Windows path into `(drive, root + tail)` following Python 3.13's `ntpath.splitdrive`.
+fn splitdrive_win(path: &[u8]) -> (&[u8], &[u8]) {
+    let (drive, _, _) = splitroot_win(path);
+    (&path[..drive.len()], &path[drive.len()..])
+}
+
+/// Splits `path` into `(head, tail)` following Python 3.13's `os.path.split`
+/// (`posixpath.split` when `windows == false`, `ntpath.split` when `windows == true`).
+pub(crate) fn path_split_os(path: &[u8], windows: bool) -> (&[u8], &[u8]) {
+    if !windows {
+        let i = path.iter().rposition(|&b| b == b'/').map_or(0, |p| p + 1);
+        let mut head = &path[..i];
+        let tail = &path[i..];
+        if !head.is_empty() && !head.iter().all(|&b| b == b'/') {
+            while let Some(stripped) = head.strip_suffix(b"/") {
+                head = stripped;
+            }
+        }
+        return (head, tail);
+    }
+    let (drive, root, rest) = splitroot_win(path);
+    let base = drive.len() + root.len();
+    let i = rest
+        .iter()
+        .rposition(|&b| is_sep_os(b, true))
+        .map_or(0, |p| p + 1);
+    let mut head_end = base + i;
+    while head_end > base && is_sep_os(path[head_end - 1], true) {
+        head_end -= 1;
+    }
+    (&path[..head_end], &rest[i..])
 }
 
 /// Joins `dir` and `name` following Python 3.13's `os.path.join` (`posixpath.join` when
@@ -163,7 +210,9 @@ pub(crate) fn path_join_os(dir: &[u8], name: &[u8], windows: bool) -> Vec<u8> {
     let need_sep = if !r_path.is_empty() {
         !r_path.last().is_some_and(|&b| is_sep_os(b, true))
     } else {
-        !r_drive.is_empty() && !r_drive.ends_with(b":") && !p_path.is_empty()
+        !r_drive.is_empty()
+            && !matches!(r_drive.last(), Some(b':' | b'\\' | b'/'))
+            && !p_path.is_empty()
     };
     let mut out =
         Vec::with_capacity(r_drive.len() + r_path.len() + usize::from(need_sep) + p_path.len());
@@ -181,17 +230,14 @@ pub(crate) fn path_join(dir: &[u8], name: &[u8]) -> Vec<u8> {
     path_join_os(dir, name, cfg!(windows))
 }
 
+/// Returns the final path component following Python 3.13's `os.path.basename` for the given OS.
+fn basename_os(path: &[u8], windows: bool) -> &[u8] {
+    path_split_os(path, windows).1
+}
+
 /// Returns the final path component following Python's `os.path.basename`.
 fn basename(path: &[u8]) -> &[u8] {
-    let rest = if cfg!(windows) {
-        splitdrive_win(path).1
-    } else {
-        path
-    };
-    match rest.iter().rposition(|&b| is_sep_os(b, cfg!(windows))) {
-        Some(pos) => &rest[pos + 1..],
-        None => rest,
-    }
+    basename_os(path, cfg!(windows))
 }
 
 /// Whether `path` exists, following symbolic links (matching Python's `os.path.exists`).

@@ -409,6 +409,32 @@ fn windows_path_join_matches_ntpath_drive_and_root_rules() {
         (b"c:\\dbs", b"C:", b"C:\\dbs\\"),
         (b"c:\\dbs", b"", b"c:\\dbs\\"),
         (b"C:", b"", b"C:"),
+        // Python 3.13 `ntpath.splitroot` extended UNC (`\\?\UNC\server\share`), shareless /
+        // triple-separator UNC prefixes, and trailing-separator drives (`\\.\`, `\\`).
+        (
+            b"\\\\?\\UNC\\srv\\share\\dbs",
+            b"\\foo",
+            b"\\\\?\\UNC\\srv\\share\\foo",
+        ),
+        (
+            b"\\\\?\\unc\\srv\\share\\dbs",
+            b"/foo",
+            b"\\\\?\\unc\\srv\\share/foo",
+        ),
+        (
+            b"\\\\?\\UNC\\srv\\share",
+            b"foo",
+            b"\\\\?\\UNC\\srv\\share\\foo",
+        ),
+        (b"C:\\\\", b"\\\\", b"\\\\"),
+        (b"C:\\\\", b"\\\\srv", b"\\\\srv"),
+        (b"C:\\\\", b"\\\\\\x", b"\\\\\\x"),
+        (b"\\\\srv", b"x.pal", b"\\\\srv\\x.pal"),
+        (b"\\\\\\x", b"y", b"\\\\\\x\\y"),
+        (b"\\\\.\\", b"share.c:", b"\\\\.\\share.c:"),
+        (b"\\\\", b"foo", b"\\\\foo"),
+        (b"//", b"foo", b"//foo"),
+        (b"\\\\?\\UNC\\", b"foo", b"\\\\?\\UNC\\foo"),
     ] {
         assert_eq!(
             path_join_os(a, b, true),
@@ -416,6 +442,25 @@ fn windows_path_join_matches_ntpath_drive_and_root_rules() {
             "join({:?}, {:?})",
             String::from_utf8_lossy(a),
             String::from_utf8_lossy(b)
+        );
+    }
+
+    for (path, want_base) in [
+        (b"\\\\?\\UNC\\srv\\share\\dbs".as_slice(), b"dbs".as_slice()),
+        (b"\\\\?\\UNC\\srv\\share", b""),
+        (b"\\\\srv", b""),
+        (b"\\\\", b""),
+        (b"\\\\\\x", b""),
+        (b"\\\\\\x\\y", b"y"),
+        (b"\\\\.\\", b""),
+        (b"\\\\.\\share.c:", b""),
+        (b"C:\\dbs\\db.01.pin", b"db.01.pin"),
+    ] {
+        assert_eq!(
+            basename_os(path, true),
+            want_base,
+            "basename({:?})",
+            String::from_utf8_lossy(path)
         );
     }
 }

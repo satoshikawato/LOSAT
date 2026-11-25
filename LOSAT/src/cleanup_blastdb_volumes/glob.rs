@@ -9,10 +9,7 @@
 
 use crate::utils::os_bytes::{os_str_bytes, path_of_bytes};
 
-/// Returns whether `b` is a path separator for the given OS mode.
-fn is_sep_os(b: u8, windows: bool) -> bool {
-    b == b'/' || (windows && b == b'\\')
-}
+use super::work::{path_join_os, path_split_os};
 
 /// Returns whether `pattern` contains any glob metacharacter (`*`, `?`, `[`).
 fn has_magic(pattern: &[u8]) -> bool {
@@ -28,85 +25,6 @@ fn lexists(path: &[u8]) -> bool {
 /// Whether `path` is an existing directory (following symlinks, matching Python's `os.path.isdir`).
 fn is_dir(path: &[u8]) -> bool {
     !path.is_empty() && std::fs::metadata(path_of_bytes(path)).is_ok_and(|m| m.is_dir())
-}
-
-/// Joins a directory prefix (with its separator, if any) and a child component.
-pub(crate) fn join_with_sep(dir: &[u8], sep: Option<u8>, name: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(dir.len() + usize::from(sep.is_some()) + name.len());
-    out.extend_from_slice(dir);
-    if let Some(s) = sep {
-        out.push(s);
-    }
-    out.extend_from_slice(name);
-    out
-}
-
-/// Returns the length of a Windows drive (`C:`) or UNC (`\\server\share`) prefix, or 0 otherwise.
-fn windows_drive_or_unc_len(path: &[u8]) -> usize {
-    if path.len() >= 2 && path[0].is_ascii_alphabetic() && path[1] == b':' {
-        return 2;
-    }
-    if path.len() >= 2
-        && is_sep_os(path[0], true)
-        && is_sep_os(path[1], true)
-        && !path.get(2).is_some_and(|&b| is_sep_os(b, true))
-    {
-        let rest = &path[2..];
-        if let Some(s1) = rest.iter().position(|&b| is_sep_os(b, true)) {
-            let after_host = &rest[s1 + 1..];
-            if !after_host.is_empty() && !is_sep_os(after_host[0], true) {
-                let s2 = after_host
-                    .iter()
-                    .position(|&b| is_sep_os(b, true))
-                    .unwrap_or(after_host.len());
-                return 2 + s1 + 1 + s2;
-            }
-        }
-    }
-    0
-}
-
-/// Splits `pattern` into `(dir_part, join_separator, base_part)` matching Python's `os.path.split`
-/// and `os.path.join` (`posixpath` on Unix, `ntpath` on Windows: Windows joins non-root prefixes
-/// with `\` and collapses multiple root separators after a drive/UNC prefix to one).
-pub(crate) fn split_dir_base_os(pattern: &[u8], windows: bool) -> (&[u8], Option<u8>, &[u8]) {
-    let drive = if windows {
-        windows_drive_or_unc_len(pattern)
-    } else {
-        0
-    };
-    let rest = &pattern[drive..];
-    let Some(rel_pos) = rest.iter().rposition(|&b| is_sep_os(b, windows)) else {
-        if drive > 0 {
-            return (&pattern[..drive], None, rest);
-        }
-        return (b"", None, pattern);
-    };
-    let pos = drive + rel_pos;
-    let after_drive = &pattern[drive..=pos];
-    if after_drive.iter().all(|&b| is_sep_os(b, windows)) {
-        if windows {
-            // `ntpath.split`: keep the drive/UNC prefix plus its single root separator (e.g.
-            // `C://p5` -> `("C:/", "p5")`, `/p5` -> `("/", "p5")`, `\\srv\sh\p5` -> `("\\\\srv\\sh\\", "p5")`),
-            // except a bare `//foo` (no share) which `ntpath.split` treats as UNC root with empty
-            // tail.
-            if drive == 0
-                && after_drive.len() >= 2
-                && pattern[pos + 1..].iter().all(|&b| !is_sep_os(b, true))
-            {
-                return (pattern, Some(b'\\'), b"");
-            }
-            return (&pattern[..=drive], None, &pattern[pos + 1..]);
-        }
-        // `posixpath.split`: root prefix such as `/`, `//`, `///` stays intact with no extra `/`.
-        return (&pattern[..=pos], None, &pattern[pos + 1..]);
-    }
-    let mut dir_end = pos;
-    while dir_end > drive && is_sep_os(pattern[dir_end - 1], windows) {
-        dir_end -= 1;
-    }
-    let join_sep = if windows { b'\\' } else { b'/' };
-    (&pattern[..dir_end], Some(join_sep), &pattern[pos + 1..])
 }
 
 /// One element of a filename or glob pattern: a decoded Unicode scalar value, or a raw non-UTF-8
@@ -276,10 +194,10 @@ pub(crate) fn glob(pattern: &[u8]) -> Vec<Vec<u8>> {
         };
     }
 
-    let (dir_part, sep, base_part) = split_dir_base_os(pattern, cfg!(windows));
+    let (dir_part, base_part) = path_split_os(pattern, cfg!(windows));
     let dirs: Vec<Vec<u8>> = if dir_part.is_empty() {
         vec![Vec::new()]
-    } else if has_magic(dir_part) {
+    } else if dir_part != pattern && has_magic(dir_part) {
         glob(dir_part).into_iter().filter(|d| is_dir(d)).collect()
     } else {
         vec![dir_part.to_vec()]
@@ -288,12 +206,12 @@ pub(crate) fn glob(pattern: &[u8]) -> Vec<Vec<u8>> {
     let mut out = Vec::new();
     for dir in dirs {
         if base_part.is_empty() {
-            let candidate = join_with_sep(&dir, sep, b"");
+            let candidate = path_join_os(&dir, b"", cfg!(windows));
             if is_dir(&candidate) {
                 out.push(candidate);
             }
         } else if !has_magic(base_part) {
-            let candidate = join_with_sep(&dir, sep, base_part);
+            let candidate = path_join_os(&dir, base_part, cfg!(windows));
             if lexists(&candidate) {
                 out.push(candidate);
             }
@@ -313,7 +231,7 @@ pub(crate) fn glob(pattern: &[u8]) -> Vec<Vec<u8>> {
                     continue;
                 }
                 if fnmatch_bytes(base_part, &name) {
-                    out.push(join_with_sep(&dir, sep, &name));
+                    out.push(path_join_os(&dir, &name, cfg!(windows)));
                 }
             }
         }

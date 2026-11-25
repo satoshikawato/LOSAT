@@ -56,10 +56,14 @@ fn windows_path_joining_and_unicode_case_folding() {
         (b"C:p5.*.pin", b"C:p5.09.pin"),
         (b"\\\\srv\\sh\\p5.*.pin", b"\\\\srv\\sh\\p5.09.pin"),
         (b"//srv/sh/p5.*.pin", b"//srv/sh/p5.09.pin"),
+        (
+            b"\\\\?\\UNC\\srv\\sh\\p5.*.pin",
+            b"\\\\?\\UNC\\srv\\sh\\p5.09.pin",
+        ),
         (b"p5.*.pin", b"p5.09.pin"),
     ] {
-        let (dir, sep, _base) = split_dir_base_os(pat, true);
-        let got = join_with_sep(dir, sep, b"p5.09.pin");
+        let (dir, _base) = path_split_os(pat, true);
+        let got = path_join_os(dir, b"p5.09.pin", true);
         assert_eq!(got, want_joined, "pat={}", String::from_utf8_lossy(pat));
     }
 

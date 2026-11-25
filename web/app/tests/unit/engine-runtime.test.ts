@@ -556,7 +556,7 @@ describe.skipIf(reactors === undefined)('responses of more than 1 MiB from the s
   it('scans and registers thousands of records', async () => {
     const instance = await instantiateSerial(new WebAssembly.Module(reactors!.serial.bytes as BufferSource));
     const scanner = new ReactorScanner(async () => instance.abi);
-    const scan = await scanner.scan({ program: 'blastn', role: 'subject', dataLoaders: true }, (async function* () {
+    const scan = await scanner.scan({ program: 'blastn', role: 'subject', dataLoaders: true, parseDeflines: false }, (async function* () {
       yield fasta;
     })());
     expect(scan.records).toHaveLength(25_000);
@@ -590,11 +590,29 @@ describe.skipIf(reactors === undefined)('the serial reactor scans with the NCBI 
     ['blastn', 'query'],
     ['blastp', 'subject'],
   ] as const)("scans a small input with the reader of %s's %s", async (program, role) => {
-    const scan = await scanner.scan({ program, role, dataLoaders: true }, bytes());
+    const scan = await scanner.scan({ program, role, dataLoaders: true, parseDeflines: false }, bytes());
     expect(scan.records.map(({ id, length }) => ({ id, length }))).toEqual([
       { id: 'a', length: 4 },
       { id: 'b', length: 6 },
     ]);
+  });
+
+  it('scans opposite-molecule -parse_deflines records with NCBI lengths only when parseDeflines is on', async () => {
+    const repo = new URL('../../../../LOSAT/tests/fasta/outfmt0/pd_mol/', import.meta.url);
+    const sp = readFileSync(new URL('s_sp_nucx_bn.fa', repo));
+    const ti = readFileSync(new URL('s_ti_prot.fa', repo));
+    const chunksOf = (data: Uint8Array) =>
+      (async function* () {
+        yield data;
+      })();
+    const spOff = await scanner.scan({ program: 'blastn', role: 'subject', dataLoaders: true, parseDeflines: false }, chunksOf(sp));
+    const spOn = await scanner.scan({ program: 'blastn', role: 'subject', dataLoaders: true, parseDeflines: true }, chunksOf(sp));
+    expect(spOff.records.map((r) => r.length)).toEqual([287]);
+    expect(spOn.records.map((r) => r.length)).toEqual([300]);
+    const tiOff = await scanner.scan({ program: 'blastp', role: 'subject', dataLoaders: true, parseDeflines: false }, chunksOf(ti));
+    const tiOn = await scanner.scan({ program: 'blastp', role: 'subject', dataLoaders: true, parseDeflines: true }, chunksOf(ti));
+    expect(tiOff.records.map((r) => r.length)).toEqual([150, 110]);
+    expect(tiOn.records.map((r) => r.length)).toEqual([107, 110]);
   });
 });
 
@@ -638,7 +656,12 @@ describe.skipIf(reactors === undefined)('the serial reactor answers the search f
 
   it("checks an input with the engine's register: the verdict and the message", async () => {
     const checker = new ReactorInputChecker(reopening(open));
-    const reader = (program: 'blastn' | 'blastp' | 'tblastx', role: 'query' | 'subject', dataLoaders = true) => ({ program, role, dataLoaders });
+    const reader = (program: 'blastn' | 'blastp' | 'tblastx', role: 'query' | 'subject', dataLoaders = true, parseDeflines = false) => ({
+      program,
+      role,
+      dataLoaders,
+      parseDeflines,
+    });
     expect(await checker.check(reader('blastn', 'query'), new TextEncoder().encode('>a\nACGT\n>b\nACGT\n'))).toEqual({
       ok: true,
       records: [

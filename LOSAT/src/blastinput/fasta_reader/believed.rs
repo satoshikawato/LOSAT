@@ -406,6 +406,17 @@ pub(crate) fn named_molecule(ids: &[ParsedSeqId]) -> Option<bool> {
     None
 }
 
+/// `CFastaReader::xSetSeqMol` for a defline read under `-parse_deflines`: parses the defline's
+/// first word with [`parse_believed_defline`] and returns [`named_molecule`] of its ids, or
+/// `None` when the defline does not parse or names neither molecule.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:547-562
+pub fn defline_named_molecule(defline: &[u8], protein: bool) -> Option<bool> {
+    parse_believed_defline(defline, protein, "", 0, &mut |_| {})
+        .ok()
+        .and_then(|parsed| named_molecule(&parsed.ids))
+}
+
 /// `CFastaReader::x_NucOrProt`, in the reader's message about invalid letters: the molecule the
 /// accession named, nothing without one.
 ///

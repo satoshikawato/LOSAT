@@ -117,7 +117,7 @@ class ManualEngine implements EngineGateway {
   }
   async validate(_argv?: readonly string[], registry?: RegistryFile): Promise<ValidationResult> {
     this.registries.push(registry);
-    return { ok: true, dataLoaders: true };
+    return { ok: true, dataLoaders: true, parseDeflines: false };
   }
   run(req: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo> {
     this.started.push(req.runId);
@@ -967,7 +967,7 @@ describe('Coordinator', () => {
   it('queues nothing of a group when one request is invalid, and keeps the numbering', async () => {
     const engine = new ManualEngine();
     engine.validate = async (argv?: readonly string[]): Promise<ValidationResult> =>
-      argv?.includes('-word_size') === true ? { ok: false, message: 'bad word size' } : { ok: true, dataLoaders: true };
+      argv?.includes('-word_size') === true ? { ok: false, message: 'bad word size' } : { ok: true, dataLoaders: true, parseDeflines: false };
     const { coordinator } = setup(engine);
     const bad = { ...request, parameters: [['-word_size', '1']] as const };
     expect(await coordinator.enqueueAll([request, bad])).toEqual({ ok: false, message: 'bad word size' });
@@ -981,7 +981,7 @@ describe('Coordinator', () => {
   // runs and in the file that the page saves; the user's file as given keeps the user's name (D21).
   it('names a made input after its run: the prefix of the run\'s outputs and the role, each run of a group its own', async () => {
     const { coordinator, data } = setup(new ManualEngine());
-    const made = async (text: string) => ({ dataset: { revisionIds: [(await data.indexSource((await data.addSource(new File([text], 'x.fa'))).sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId], from: [{ name: 'x.fa', records: 1, leftOut: [], leftOutCount: 1 }] } });
+    const made = async (text: string) => ({ dataset: { revisionIds: [(await data.indexSource((await data.addSource(new File([text], 'x.fa'))).sourceId, { program: 'blastn', role: 'query', dataLoaders: true, parseDeflines: false })).revisionId], from: [{ name: 'x.fa', records: 1, leftOut: [], leftOutCount: 1 }] } });
     const given = { file: new File(['>g\nACGT\n'], 'My file.fa') };
     const group = await coordinator.enqueueAll([
       { ...request, query: await made('>a\nACGT\n'), subject: given, parameters: [['-task', 'blastn']] },
@@ -1033,7 +1033,7 @@ describe('Coordinator', () => {
     const inner = data as unknown as { sources: Map<string, File>; revisions: Map<string, unknown> };
     const runInputs = (coordinator as unknown as { runInputs: Map<string, unknown> }).runInputs;
     const source = await data.addSource(new File(['>q\nACGT\n'], 'q.fa'));
-    const query = (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId;
+    const query = (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true, parseDeflines: false })).revisionId;
     const result = await coordinator.enqueueAll([
       // A record over 2147483647 letters, which LOSAT's reader refuses (a reader's error ends the records
       // instead: line WQA's D10, 2026-11-19).
@@ -1049,7 +1049,7 @@ describe('Coordinator', () => {
     const { coordinator, data } = setup();
     const add = async (name: string, text: string) => {
       const source = await data.addSource(new File([text], name));
-      return (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true })).revisionId;
+      return (await data.indexSource(source.sourceId, { program: 'blastn', role: 'query', dataLoaders: true, parseDeflines: false })).revisionId;
     };
     const subject = await add('s.fa', '>s1\nACGT\n>s2\nGGCC\n');
     const query = await add('q.fa', '>q\nACGT\n');
@@ -1065,5 +1065,24 @@ describe('Coordinator', () => {
     expect(a!.subject.bytes).toBe(b!.subject.bytes);
     expect(new TextDecoder().decode(c!.subject.bytes)).toBe('>s2\nGGCC\n');
     expect(c!.subject.records).toEqual([{ id: 's2', length: 4 }]);
+  });
+
+  it("indexes text and file inputs with the validation's parseDeflines setting", async () => {
+    const engine = new ManualEngine();
+    engine.validate = async (argv?: readonly string[]): Promise<ValidationResult> => ({
+      ok: true,
+      dataLoaders: true,
+      parseDeflines: argv?.includes('-parse_deflines') === true,
+    });
+    const { coordinator, data } = setup(engine);
+    const seen: boolean[] = [];
+    const indexSource = data.indexSource.bind(data);
+    data.indexSource = async (sourceId, reader) => {
+      seen.push(reader.parseDeflines);
+      return indexSource(sourceId, reader);
+    };
+    const run = await coordinator.enqueue({ ...request, extra: ['-parse_deflines'] });
+    expect(run.ok).toBe(true);
+    expect(seen).toEqual([true, true]);
   });
 });

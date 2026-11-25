@@ -148,7 +148,7 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
       const argv = [row.program, '-db', row.db, '-query', row.query, ...row.extra, '-num_threads', '1'];
       // The query is read with the data loaders that the verdict on the argv gives (ABI v2 §9).
       const validation = abi.validate(argv);
-      expect(validation, row.id).toEqual({ ok: true, dataLoaders: true });
+      expect(validation, row.id).toEqual({ ok: true, dataLoaders: true, parseDeflines: false });
       const started = abi.start(argv);
       expect(started.ok && started.start.database, row.id).toBe(true);
       const query = abi.register(row.program, ROLE_QUERY, validation.ok && validation.dataLoaders, readFileSync(join(LOSAT, row.query)));
@@ -180,7 +180,7 @@ describe.skipIf(REACTORS === undefined)('a run of -db through the host', () => {
     directory.open(repeatFiles);
     const repeatArgv = ['blastn', ...repeatSubject.argv, '-num_threads', '1'];
     const repeatValidation = abi.validate(repeatArgv);
-    expect(repeatValidation, repeatSubject.id).toEqual({ ok: true, dataLoaders: true });
+    expect(repeatValidation, repeatSubject.id).toEqual({ ok: true, dataLoaders: true, parseDeflines: false });
     const repeatStarted = abi.start(repeatArgv);
     expect(repeatStarted.ok && !repeatStarted.start.database, repeatSubject.id).toBe(true);
     const repeatQuery = abi.register('blastn', ROLE_QUERY, true, readFileSync(join(LOSAT, repeatQueryPath)));

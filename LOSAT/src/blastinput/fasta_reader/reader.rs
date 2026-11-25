@@ -1001,16 +1001,21 @@ pub(crate) struct DataLineOutcome {
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:809-814
 #[derive(Clone, Copy)]
-pub(crate) struct DataLineAlphabet {
+pub struct DataLineAlphabet {
     parse_protein: bool,
 }
 
 impl DataLineAlphabet {
     #[inline]
-    pub(crate) fn new(believed_molecule: Option<bool>, program_protein: bool) -> Self {
+    pub fn new(believed_molecule: Option<bool>, program_protein: bool) -> Self {
         Self {
             parse_protein: believed_molecule.unwrap_or(program_protein),
         }
+    }
+
+    #[inline]
+    pub fn is_protein(self) -> bool {
+        self.parse_protein
     }
 }
 
@@ -1099,7 +1104,8 @@ pub(crate) fn scan_data_line(
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1448
 /// NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_tables.cpp:392-457
-pub(crate) fn pack_protein_read_nucleotide(seq_data: &mut [u8]) {
+#[inline]
+pub fn pack_protein_read_nucleotide(seq_data: &mut [u8]) {
     for residue in seq_data.iter_mut() {
         *residue = match *residue {
             b'A' | b'B' | b'C' | b'D' | b'G' | b'H' | b'K' | b'M' | b'N' | b'R' | b'S' | b'T'

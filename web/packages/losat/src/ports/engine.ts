@@ -34,12 +34,14 @@ export interface ProgramDescription {
  * The verdict of `validate`. A valid argv also says whether its run reads the inputs with NCBI's
  * data loaders on (`dataLoaders`, ABI v2 *validation*, version 8): off under `[BLAST]
  * DATA_LOADERS=none` of its `-conffile`, where the reader reads a first line that may be a Seq-id as
- * data, as the CLI does (line WQA's D16, 2026-11-20). A refused argv says it too when the engine's
- * start read the registry before the option that it refuses (line WQA's D13 round 3, L1).
+ * data, as the CLI does (line WQA's D16, 2026-11-20), and whether `-parse_deflines` is active
+ * (`parseDeflines`, ABI v2 *validation*, version 14; line RG-XT item X7-5, 2026-11-25). A refused
+ * argv says them too when the engine's start read the registry before the option that it refuses
+ * (line WQA's D13 round 3, L1).
  */
 export type ValidationResult =
-  | { readonly ok: true; readonly dataLoaders: boolean }
-  | { readonly ok: false; readonly message: string; readonly dataLoaders?: boolean };
+  | { readonly ok: true; readonly dataLoaders: boolean; readonly parseDeflines: boolean }
+  | { readonly ok: false; readonly message: string; readonly dataLoaders?: boolean; readonly parseDeflines?: boolean };
 
 /**
  * What NCBI's application reads of an argv before its arguments (docs/web/abi_v2.md §4

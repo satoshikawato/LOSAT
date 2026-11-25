@@ -32,8 +32,8 @@ function service(overrides: Partial<DataServiceDeps> & { store?: MemoryBlockStor
 
 const THREE = '>a one\nACGT\nAC\n>b\nGG\n>c three\nTTT';
 /** The engine's readers of kinds 1 and 2: BLASTN's query and BLASTP's query, with NCBI's data loaders on. */
-const NUCLEOTIDE: FastaReader = { program: 'blastn', role: 'query', dataLoaders: true };
-const PROTEIN: FastaReader = { program: 'blastp', role: 'query', dataLoaders: true };
+const NUCLEOTIDE: FastaReader = { program: 'blastn', role: 'query', dataLoaders: true, parseDeflines: false };
+const PROTEIN: FastaReader = { program: 'blastp', role: 'query', dataLoaders: true, parseDeflines: false };
 
 describe('DataService sources and record tables', () => {
   it('keeps a File reference and builds its record table with per-record SHA-256', async () => {
@@ -118,7 +118,7 @@ describe('DataService sources and record tables', () => {
       records: [{ id: 'b', length: 2 }],
       readerError: "LOSAT query error: CFastaReader: Near line 4, there's a line that doesn't look like plausible data, but it's not marked as defline or comment.",
     });
-    expect(await data.checkInput({ program: 'blastn', role: 'subject', dataLoaders: true }, [revision.revisionId])).toMatchObject({ ok: false });
+    expect(await data.checkInput({ program: 'blastn', role: 'subject', dataLoaders: true, parseDeflines: false }, [revision.revisionId])).toMatchObject({ ok: false });
   });
 
   it("rejects a reader's error that is not after the records inside the source", async () => {

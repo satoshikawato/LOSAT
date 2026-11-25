@@ -268,7 +268,7 @@ function fakeAbi(options: { failEnd?: boolean; stopOnBegin?: boolean } = {}) {
     },
     validate: () => {
       calls.push('validate');
-      return { ok: true, dataLoaders: true };
+      return { ok: true, dataLoaders: true, parseDeflines: false };
     },
     start: () => ({ ok: true, start: { conffile: null, logFile: null, strategyFile: null, dryRun: false, registerInputs: false, prints: null, database: false } }),
     memoryBytes: () => 1,

@@ -77,6 +77,11 @@ fn words(argv: &str) -> Vec<&str> {
 /// standard output on stream 11 and the files that it writes on stream 12 as they are written, and
 /// gives its exit status on stream 2, and since `losat_web2_validate` checks a `windowmasker` argv
 /// (line NP WW3a, 2026-11-22); 12 since a run of `-db`, which takes no subject
+/// 14 since `losat_web2_scan_begin` takes `parse_deflines` and *validation* emits `parse_deflines`
+/// next to `data_loaders` so the index scan reads records whose `-parse_deflines` Seq-id names the
+/// other molecule as the engine's reader reads them (line RG-XT item X7-5, 2026-11-25);
+/// 13 since `losat_web2_tool` runs the tool `windowmasker` (line NP WW3a);
+/// 12 since a run of `-db` takes subject handle 0 without a subject
 /// handle and reads the database from the run's working directory, which the host preopens as
 /// `/work`, and the *start* field `database` (line WQA D12a, 2026-11-20; 9 on its branch until 10
 /// merged first, then 12 after D10's 11); 11 since a query is read as the command line's query
@@ -96,7 +101,7 @@ fn words(argv: &str) -> Vec<&str> {
 /// that failed alone after a chunk of it was sent (line RG item T7-W).
 #[no_mangle]
 pub extern "C" fn losat_web2_abi_version() -> i32 {
-    13
+    14
 }
 
 fn layout(len: usize) -> Option<std::alloc::Layout> {
@@ -155,10 +160,10 @@ pub unsafe extern "C" fn losat_web2_start(argv_ptr: *const u8, argv_len: usize) 
 
 /// Checks the argv as the CLI does before it reads its inputs (`run::validate`; for a tool's argv,
 /// `windowmasker`, `tool::validate`, which emits nothing) and emits the *validation* JSON on stream
-/// 2: whether the run reads its inputs with NCBI's data loaders on
-/// (`{"data_loaders":true}`; docs/web/abi_v2.md §9). It is emitted once the start has read the
-/// argv's registry, before the option checks: a refused argv has it too, unless its start or
-/// LOSAT's settings failed (line WQA's D13 round 3, L1, 2026-11-20).
+/// 2: whether the run reads its inputs with NCBI's data loaders on and whether `-parse_deflines`
+/// is active (`{"data_loaders":true,"parse_deflines":false}`; docs/web/abi_v2.md §9). It is emitted
+/// once the start has read the argv's registry, before the option checks: a refused argv has it
+/// too, unless its start or LOSAT's settings failed (line WQA's D13 round 3, L1, 2026-11-20).
 ///
 /// # Safety
 /// The pointer arguments must describe readable buffers of the given lengths.
@@ -172,12 +177,16 @@ pub unsafe extern "C" fn losat_web2_validate(argv_ptr: *const u8, argv_len: usiz
             tool::validate(&argv)?;
             return Ok(0);
         }
-        // The *validation* goes out once the start knows the setting, before the option checks, so
-        // that a host has it also when they refuse the argv (line WQA's D13 round 3, L1).
-        run::validate_with(&argv, &mut |data_loaders| {
+        // The *validation* goes out once the start knows the settings, before the option checks, so
+        // that a host has them also when they refuse the argv (line WQA's D13 round 3, L1).
+        run::validate_with(&argv, &mut |validation| {
             emit(
                 STREAM_RESPONSE,
-                format!("{{\"data_loaders\":{data_loaders}}}").as_bytes(),
+                format!(
+                    "{{\"data_loaders\":{},\"parse_deflines\":{}}}",
+                    validation.data_loaders, validation.parse_deflines
+                )
+                .as_bytes(),
             );
         })?;
         Ok(0)
@@ -298,9 +307,10 @@ fn scanners() -> &'static Mutex<(u32, HashMap<u32, scan::Scanner>)> {
 }
 
 /// Starts an index scan of `program`'s input of `role` (`0` query, `1` subject) with NCBI's data
-/// loaders on (`data_loaders` 1) or off (0): the engine's reader of that input, as `register`
-/// reads it (NCBI BLAST+'s reader of nucleotide input for BLASTN, TBLASTX, the TBLASTN subject and
-/// the BLASTX query; of protein input for BLASTP, the TBLASTN query and the BLASTX subject).
+/// loaders on (`data_loaders` 1) or off (0) and `-parse_deflines` on (`parse_deflines` 1) or off
+/// (0): the engine's reader of that input, as `register` / `register_inputs` read it (NCBI BLAST+'s
+/// reader of nucleotide input for BLASTN, TBLASTX, the TBLASTN subject and the BLASTX query; of
+/// protein input for BLASTP, the TBLASTN query and the BLASTX subject).
 ///
 /// # Safety
 /// The pointer arguments must describe readable buffers of the given lengths.
@@ -310,12 +320,16 @@ pub unsafe extern "C" fn losat_web2_scan_begin(
     program_len: usize,
     role: u32,
     data_loaders: u32,
+    parse_deflines: u32,
 ) -> i32 {
     guarded(|| {
         let program = run::Program::parse(text(program_ptr, program_len, "program")?)?;
         store::role_name(role)?;
         let data_loaders = flag(data_loaders, "data_loaders")?;
-        let scanner = scan::Scanner::new(store::reader_config(program, role, data_loaders));
+        let parse_deflines = flag(parse_deflines, "parse_deflines")?;
+        let scanner = scan::Scanner::new(
+            store::reader_config(program, role, data_loaders).with_parse_deflines(parse_deflines),
+        );
         let mut scanners = scanners().lock().expect("scanners");
         scanners.0 = scanners
             .0

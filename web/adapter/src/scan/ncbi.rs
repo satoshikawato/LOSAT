@@ -29,8 +29,8 @@
 //! inputs that the command line reads.
 
 use losat::web_adapter::{
-    gap_line_letters, record_too_long, FastaInputSource, ReadError, ReaderConfig,
-    MAX_RECORD_LETTERS,
+    defline_named_molecule, gap_line_letters, pack_protein_read_nucleotide, record_too_long,
+    DataLineAlphabet, FastaInputSource, ReadError, ReaderConfig, MAX_RECORD_LETTERS,
 };
 
 use super::{ScanError, ScanRecord};
@@ -529,10 +529,9 @@ struct Builder {
     /// The residues of the data lines (the reader's `m_SeqData`, without the gaps): while there
     /// is none, a data line gets `CheckDataLine`.
     residues: u64,
-    /// Under `-parse_deflines` on nucleotide input, whether a data line has already carried a
-    /// protein-only residue (`E,F,I,J,L,O,P,Q,X,Z,*`): a record whose Seq-id names protein keeps
-    /// those letters in `m_SeqData`, so later data lines skip `CheckDataLine` (`fasta.cpp:715`).
-    any_protein_residue: bool,
+    /// Under `-parse_deflines`, the molecule named by the record's defline (`defline_named_molecule`):
+    /// `Some(true)` protein, `Some(false)` nucleotide, `None` neither (or without `-parse_deflines`).
+    named_molecule: Option<bool>,
     residue_counts: Box<[u64; 256]>,
 }
 
@@ -545,7 +544,7 @@ impl Builder {
             sequence_offset,
             length: 0,
             residues: 0,
-            any_protein_residue: false,
+            named_molecule: None,
             residue_counts: Box::new([0; 256]),
         }
     }
@@ -581,7 +580,6 @@ impl Builder {
 struct Records {
     /// The reader of the program's input whose records these are.
     config: ReaderConfig,
-    types: &'static [CharType; 256],
     line_number: u64,
     in_line: bool,
     line_start: u64,
@@ -605,11 +603,6 @@ impl Records {
     fn new(config: ReaderConfig) -> Self {
         Self {
             config,
-            types: if config.protein {
-                &PROTEIN_TYPES
-            } else {
-                &NUCLEOTIDE_TYPES
-            },
             line_number: 0,
             in_line: false,
             line_start: 0,
@@ -734,12 +727,7 @@ impl Records {
         let check = self
             .current
             .as_ref()
-            .is_some_and(|current| {
-                current.residues == 0
-                    && !(self.config.parse_deflines
-                        && !self.config.protein
-                        && current.any_protein_residue)
-            })
+            .is_some_and(|current| current.residues == 0)
             .then(Check::new);
         if byte == b'>' {
             self.state = LineState::DataAngle(Prefix::new(byte), check);
@@ -818,11 +806,13 @@ impl Records {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:809-814
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:938-950
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:970-973
-    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1447
-    /// A byte of a data line's data: a residue is stored upper-cased (the engine stores a
-    /// nucleotide `U` as `T`; the lowercase mask only changes case); `;` ends the data.
+    // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1448
+    /// A byte of a data line's data: checked with `DataLineAlphabet::new(named, protein)`, then
+    /// stored upper-cased after the program's encoding (`pack_protein_read_nucleotide` for a
+    /// protein-named record in a nucleotide program, `U` as `T` otherwise); `;` ends the data.
     fn residue(&mut self, byte: u8) {
         let LineState::Data { semicolon, .. } = &mut self.state else {
             return;
@@ -830,27 +820,32 @@ impl Records {
         if *semicolon {
             return;
         }
-        match self.types[byte as usize] {
+        let named = self
+            .current
+            .as_ref()
+            .and_then(|current| current.named_molecule);
+        let types = if DataLineAlphabet::new(named, self.config.protein).is_protein() {
+            &PROTEIN_TYPES
+        } else {
+            &NUCLEOTIDE_TYPES
+        };
+        match types[byte as usize] {
             CharType::Residue => {}
             CharType::Comment => {
                 *semicolon = true;
                 return;
             }
-            CharType::Other => {
-                if self.config.parse_deflines
-                    && !self.config.protein
-                    && PROTEIN_TYPES[byte as usize] == CharType::Residue
-                {
-                    if let Some(current) = self.current.as_mut() {
-                        current.any_protein_residue = true;
-                    }
-                }
-                return;
-            }
+            CharType::Other => return,
         }
         let mut residue = byte.to_ascii_uppercase();
-        if !self.config.protein && residue == b'U' {
-            residue = b'T';
+        if !self.config.protein {
+            if named == Some(true) {
+                let mut packed = [residue];
+                pack_protein_read_nucleotide(&mut packed);
+                residue = packed[0];
+            } else if residue == b'U' {
+                residue = b'T';
+            }
         }
         if let Some(current) = self.current.as_mut() {
             current.store(residue);
@@ -896,7 +891,18 @@ impl Records {
             state => self.state = state,
         }
         match std::mem::replace(&mut self.state, LineState::Fresh) {
-            LineState::Title(_) => self.awaiting_sequence = true,
+            LineState::Title(_) => {
+                if self.config.parse_deflines {
+                    if let Some(current) = self.current.as_mut() {
+                        let mut defline = Vec::with_capacity(1 + current.id.len());
+                        defline.push(b'>');
+                        defline.extend_from_slice(&current.id);
+                        current.named_molecule =
+                            defline_named_molecule(&defline, self.config.protein);
+                    }
+                }
+                self.awaiting_sequence = true;
+            }
             LineState::Data {
                 check: Some(check), ..
             } if !check.plausible() => {

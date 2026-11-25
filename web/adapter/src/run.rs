@@ -618,6 +618,15 @@ pub fn data_loaders(words: &[&str]) -> Result<bool, String> {
     Ok(started.settings()?.data_loaders)
 }
 
+/// The reader settings that *validation* reports for an argv (docs/web/abi_v2.md §9): whether the
+/// run reads its inputs with NCBI's data loaders on (`[BLAST] DATA_LOADERS` of its registry) and
+/// whether it parses Seq-ids from deflines (`-parse_deflines`, matching [`inputs_together`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Validation {
+    pub data_loaders: bool,
+    pub parse_deflines: bool,
+}
+
 /// `validate`: the application start (`start`: its errors are the command line's first), then
 /// `parse`, the settings that LOSAT refuses, and nothing more for a dry run (`-dryrun`); then the
 /// syntax of `-subject_loc` and `-query_loc`, BLASTN's
@@ -631,32 +640,48 @@ pub fn data_loaders(words: &[&str]) -> Result<bool, String> {
 /// `search_all`), as the CLI checks the argv's `-outfmt` alone.
 /// The other search's rejection fails only its formats, which the argv does not ask for.
 /// `run` leaves the other checks to the engine, which reports them as the CLI does.
-/// Returns whether the run reads its inputs with NCBI's data loaders on (`data_loaders`), which
-/// the host gives `register` and `scan_begin` (line WQA's D16, 2026-11-20).
-pub fn validate(words: &[&str]) -> Result<bool, String> {
+/// Returns the [`Validation`] settings that the host gives `register` and `scan_begin`
+/// (line WQA's D16, 2026-11-20; line RG-XT item X7-5, 2026-11-25).
+pub fn validate(words: &[&str]) -> Result<Validation, String> {
     validate_with(words, &mut |_| ())
 }
 
-/// `validate`, which also gives `known` the data loaders of the argv's registry as soon as the
-/// start has read it and LOSAT takes its settings, before the checks of the arguments and the
-/// options: the setting does not depend on them, so it is known while another option is refused
-/// (line WQA's D13 round 3, L1, 2026-11-20). Not called when the start or the settings fail.
-pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool, String> {
+/// `validate`, which also gives `known` the reader settings of the argv as soon as the start has
+/// read its registry and LOSAT takes its settings, before the checks of the arguments and the
+/// options: the settings do not depend on those checks, so they are known while another option is
+/// refused (line WQA's D13 round 3, L1, 2026-11-20). Not called when the start or the settings
+/// fail.
+pub fn validate_with(
+    words: &[&str],
+    known: &mut dyn FnMut(Validation),
+) -> Result<Validation, String> {
     use losat::web_adapter::{parse_optional_range, RangeRole};
     let no_files = RunFiles::Receiver(Arc::new(NoFiles));
     let started = start(words, &no_files, &mut std::io::sink()).map_err(|(message, _)| message)?;
+    let parse_deflines = inputs_together(words);
     if let Ok(settings) = started.settings() {
-        known(settings.data_loaders);
+        known(Validation {
+            data_loaders: settings.data_loaders,
+            parse_deflines,
+        });
     }
     let (program, command, requested) = match started_command(words, &started, &no_files, false)? {
         Next::Search(parsed, _) => *parsed,
         // A run that prints reads no input; the command line prints before it refuses settings.
         Next::Prints(_) => {
-            return Ok(started
-                .settings()
-                .is_ok_and(|settings| settings.data_loaders))
+            return Ok(Validation {
+                data_loaders: started
+                    .settings()
+                    .is_ok_and(|settings| settings.data_loaders),
+                parse_deflines: false,
+            })
         }
-        Next::Ends => return Ok(started.settings()?.data_loaders),
+        Next::Ends => {
+            return Ok(Validation {
+                data_loaders: started.settings()?.data_loaders,
+                parse_deflines: false,
+            })
+        }
     };
     let custom = requested.custom.as_deref();
     let settings = started.settings()?;
@@ -736,7 +761,10 @@ pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool
         }
         _ => {}
     }
-    Ok(settings.data_loaders)
+    Ok(Validation {
+        data_loaders: settings.data_loaders,
+        parse_deflines,
+    })
 }
 
 /// NCBI's formatting handler's check of the argv's own `-outfmt` (a custom delimiter that a field
@@ -1682,13 +1710,15 @@ pub fn run(
     result.and(emitted.map_err(|error| format!("the files of the run: {error}")))
 }
 
+type RunFileEntries = Vec<(Vec<u8>, Vec<u8>)>;
+
 /// The files of a run besides its outputs (the file of `-logfile`), which the engine hands over
 /// when the run ends (`RunFiles::Receiver`), emitted as a ZIP archive on `STREAM_RUN_FILES` after
 /// the run, whether it succeeded or failed (docs/web/abi_v2.md §5), and only when there are any.
 /// The archive closes once, after the run (`close`): a file handed over after it (`None`) is
 /// refused, so that a file that the engine hands over late is its error (LOSAT's internal error of
 /// `-export_search_strategy`, `strategy::end_run`) instead of a file lost without one.
-struct RunFileArchive(std::sync::Mutex<Option<Vec<(Vec<u8>, Vec<u8>)>>>);
+struct RunFileArchive(std::sync::Mutex<Option<RunFileEntries>>);
 
 impl Default for RunFileArchive {
     fn default() -> Self {
@@ -1698,7 +1728,7 @@ impl Default for RunFileArchive {
 
 impl RunFileArchive {
     /// The files handed over so far; any later one is refused.
-    fn close(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
+    fn close(&self) -> RunFileEntries {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1709,7 +1739,7 @@ impl RunFileArchive {
     /// Emits the archive of the files `files` (`close`; stored entries, as stream 4's,
     /// `zip::ZipStream`). `Err` when the archive cannot hold a file (a name of 65,536 bytes or
     /// more).
-    fn emit(files: Vec<(Vec<u8>, Vec<u8>)>) -> std::io::Result<()> {
+    fn emit(files: RunFileEntries) -> std::io::Result<()> {
         if files.is_empty() {
             return Ok(());
         }
@@ -2506,7 +2536,14 @@ mod tests {
                 &["-reward", "5", "-penalty", "-1"],
                 &["-reward", "2", "-penalty", "-1"],
             ] {
-                assert_eq!(with(base, pair), Ok(true), "{base:?} {pair:?}");
+                assert_eq!(
+                    with(base, pair),
+                    Ok(Validation {
+                        data_loaders: true,
+                        parse_deflines: false,
+                    }),
+                    "{base:?} {pair:?}"
+                );
             }
         }
         // The checks of the options stand: NCBI's and LOSAT's refusals.
@@ -2614,16 +2651,36 @@ mod tests {
     fn parse_deflines_reads_the_inputs_together() {
         for program in ["blastp", "tblastn", "blastn", "tblastx", "blastx"] {
             let words = [program, "-query", "q", "-subject", "s", "-parse_deflines"];
-            assert_eq!(validate(&words), Ok(true));
+            assert_eq!(
+                validate(&words),
+                Ok(Validation {
+                    data_loaders: true,
+                    parse_deflines: true
+                })
+            );
             assert!(inputs_together(&words), "{program}");
             assert!(start_json(&words)
                 .unwrap()
                 .ends_with(",\"register_inputs\":true,\"prints\":null,\"database\":false}"));
             let dry = [&words[..], &["-dryrun"]].concat();
+            assert_eq!(
+                validate(&dry),
+                Ok(Validation {
+                    data_loaders: true,
+                    parse_deflines: false
+                })
+            );
             assert!(!inputs_together(&dry), "{program}");
             assert!(start_json(&dry)
                 .unwrap()
                 .ends_with(",\"register_inputs\":false,\"prints\":null,\"database\":false}"));
+            assert_eq!(
+                validate(&words[..5]),
+                Ok(Validation {
+                    data_loaders: true,
+                    parse_deflines: false
+                })
+            );
             assert!(!inputs_together(&words[..5]), "{program}");
             assert!(!inputs_together(&[&words[..], &["-nosuchoption"]].concat()));
         }
@@ -3574,7 +3631,14 @@ mod tests {
                     "{program} {outfmt:?}"
                 );
                 let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
-                assert_eq!(validate(&words), Ok(true), "{program} {outfmt:?}");
+                assert_eq!(
+                    validate(&words),
+                    Ok(Validation {
+                        data_loaders: true,
+                        parse_deflines: false,
+                    }),
+                    "{program} {outfmt:?}"
+                );
             }
             // Every program writes the query-anchored formats 1 to 4 (line RG T3: BLASTP in T3a,
             // BLASTN and TBLASTN in T3b, BLASTX and TBLASTX in T3c), each an output of its own
@@ -3596,7 +3660,14 @@ mod tests {
                     "{program} {outfmt:?}"
                 );
                 let words = [program, "-query", "q", "-subject", "s", "-outfmt", outfmt];
-                assert_eq!(validate(&words), Ok(true), "{program} {outfmt:?}");
+                assert_eq!(
+                    validate(&words),
+                    Ok(Validation {
+                        data_loaders: true,
+                        parse_deflines: false,
+                    }),
+                    "{program} {outfmt:?}"
+                );
             }
             // What the CLI rejects, with its message.
             let engine = engine_program(Program::parse(program).unwrap());
@@ -4926,7 +4997,7 @@ mod tests {
         }
     }
 
-    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 60 rows of the manifest that a
+    // BLASTX writes the BLAST archive (outfmt 11) as NCBI does: the 61 rows of the manifest that a
     // run takes (not the one with a `>?` gap line, which the store refuses: maintainer decision 3),
     // stream 4 and stream 3 (NCBI's standard error, then the lines that the run's outfmt 0, 6 and 7
     // add: `and_the_lines_of`).
@@ -4947,7 +5018,7 @@ mod tests {
                 !gap_line(file("-query")) && !gap_line(file("-subject"))
             })
             .collect();
-        assert_eq!(rows.len(), 60);
+        assert_eq!(rows.len(), 61);
         for (id, argv) in &rows {
             let words: Vec<&str> = argv.iter().map(String::as_str).collect();
             let at = |flag: &str| words[words.iter().position(|w| *w == flag).unwrap() + 1];

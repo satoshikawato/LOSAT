@@ -716,10 +716,16 @@ function checkSurface(reactor, native) {
     }
   }
   // validate: accepted argv, and CLI errors with the CLI's words. An accepted argv says whether its run reads the inputs
-  // with NCBI's data loaders on (the *validation* JSON, abi_v2.md §9; line WQA's D16, 2026-11-20).
+  // with NCBI's data loaders on and with -parse_deflines on (the *validation* JSON, abi_v2.md §9; D16 and X7-5).
   const accepted = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s"].join("\0"));
   assert.equal(accepted.status, 0);
-  assert.deepEqual(JSON.parse(accepted.streams.get(2).toString()), { data_loaders: true });
+  assert.deepEqual(JSON.parse(accepted.streams.get(2).toString()), { data_loaders: true, parse_deflines: false });
+  const acceptedPd = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-parse_deflines"].join("\0"));
+  assert.equal(acceptedPd.status, 0);
+  assert.deepEqual(JSON.parse(acceptedPd.streams.get(2).toString()), { data_loaders: true, parse_deflines: true });
+  const acceptedPdDry = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-parse_deflines", "-dryrun"].join("\0"));
+  assert.equal(acceptedPdDry.status, 0);
+  assert.deepEqual(JSON.parse(acceptedPdDry.streams.get(2).toString()), { data_loaders: true, parse_deflines: false });
   // NCBI's application start (abi_v2.md §4 `losat_web2_start`, line RG E1w-3a): the *start* JSON, the
   // file of -conffile as a registry file (kind 2), and -dryrun.
   const started = reactor.call("losat_web2_start", ["tblastx", "-query", "q", "-subject", "s", "-conffile", "e1w3a.ini", "-logfile", "run.log", "-dryrun"].join("\0"));
@@ -744,7 +750,10 @@ function checkSurface(reactor, native) {
   assert.equal(reactor.call("losat_web2_file_end", begunNoLoaders.status).status, 0);
   const off = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-conffile", "nol.ini"].join("\0"));
   assert.equal(off.status, 0, off.error);
-  assert.deepEqual(JSON.parse(off.streams.get(2).toString()), { data_loaders: false });
+  assert.deepEqual(JSON.parse(off.streams.get(2).toString()), { data_loaders: false, parse_deflines: false });
+  const offPd = reactor.call("losat_web2_validate", ["blastp", "-query", "q", "-subject", "s", "-conffile", "nol.ini", "-parse_deflines"].join("\0"));
+  assert.equal(offPd.status, 0, offPd.error);
+  assert.deepEqual(JSON.parse(offPd.streams.get(2).toString()), { data_loaders: false, parse_deflines: true });
   assert.equal(reactor.call("losat_web2_file_release", begunNoLoaders.status).status, 0);
   for (const argv of [["blastp", "-query", "q", "-subject", "s", "-evalue", "abc"],
                       ["tblastn", "-query", "q", "-subject", "s", "-db_gencode", "7"],
@@ -845,7 +854,7 @@ function checkSurface(reactor, native) {
   const registered = reactor.call("losat_web2_register", "tblastn", 0, 1, input);
   assert.ok(registered.status > 0, registered.error);
   const records = JSON.parse(registered.streams.get(2).toString()).records;
-  const scanner = reactor.call("losat_web2_scan_begin", "tblastn", 0, 1).status;
+  const scanner = reactor.call("losat_web2_scan_begin", "tblastn", 0, 1, 0).status;
   assert.ok(scanner > 0);
   for (let at = 0; at < input.length; at += 37) {
     assert.equal(reactor.call("losat_web2_scan_chunk", scanner, input.subarray(at, at + 37)).status, 0);
@@ -872,15 +881,31 @@ function checkSurface(reactor, native) {
   const refused = reactor.call("losat_web2_register", "blastp", 0, 1, seqId);
   assert.equal(refused.status, -1);
   assert.match(refused.error, /^the first line of the query \("2HHB"\) is not a defline and may be a sequence identifier .* LOSAT's BLASTP /);
-  const scanRefused = reactor.call("losat_web2_scan_begin", "blastp", 0, 1).status;
+  const scanRefused = reactor.call("losat_web2_scan_begin", "blastp", 0, 1, 0).status;
   assert.equal(reactor.call("losat_web2_scan_chunk", scanRefused, seqId).status, 0);
   assert.equal(reactor.call("losat_web2_scan_end", scanRefused).error, refused.error, "the scan refuses in the same words");
   const data = reactor.call("losat_web2_register", "blastp", 0, 0, seqId);
   assert.ok(data.status > 0, data.error);
   assert.deepEqual(JSON.parse(data.streams.get(2).toString()).records.map((r) => [r.id, r.length]), [["", 13]]);
   assert.equal(reactor.call("losat_web2_release", data.status).status, 0);
-  for (const [args, error] of [[["blastp", 2, 1], /^unknown input role 2$/], [["blastp", 0, 2], /^data_loaders must be 0 or 1, not 2$/],
-                               [["nosuch", 0, 1], /./]]) {
+  // scan_begin with parse_deflines=1 reads other-molecule Seq-id records with NCBI's alphabet and
+  // encoding, matching register_inputs (line RG-XT item X7-5, ABI version 14).
+  for (const [program, file, plainLens, pdLens] of [
+    ["blastn", "LOSAT/tests/fasta/outfmt0/pd_mol/s_sp_nucx_bn.fa", [287], [300]],
+    ["blastp", "LOSAT/tests/fasta/outfmt0/pd_mol/s_ti_prot.fa", [150, 110], [107, 110]],
+  ]) {
+    const bytes = fs.readFileSync(path.join(ROOT, file));
+    for (const [pd, want] of [[0, plainLens], [1, pdLens]]) {
+      const s = reactor.call("losat_web2_scan_begin", program, 1, 1, pd).status;
+      assert.ok(s > 0, `${program} pd=${pd}`);
+      assert.equal(reactor.call("losat_web2_scan_chunk", s, bytes).status, 0);
+      const done = reactor.call("losat_web2_scan_end", s);
+      assert.equal(done.status, 0, done.error);
+      assert.deepEqual(JSON.parse(done.streams.get(2).toString()).records.map((r) => r.length), want, `${file} pd=${pd}`);
+    }
+  }
+  for (const [args, error] of [[["blastp", 2, 1, 0], /^unknown input role 2$/], [["blastp", 0, 2, 0], /^data_loaders must be 0 or 1, not 2$/],
+                               [["blastp", 0, 1, 2], /^parse_deflines must be 0 or 1, not 2$/], [["nosuch", 0, 1, 0], /./]]) {
     const begun = reactor.call("losat_web2_scan_begin", ...args);
     assert.equal(begun.status, -1, args.join(" "));
     assert.match(begun.error, error);
@@ -1500,7 +1525,7 @@ async function main() {
   const all = JSON.parse(fs.readFileSync(options.cases, "utf8"));
   for (const engine of engines) {
     const { reactor: own, close, waitForWorkers } = await engine.open();
-    assert.equal(own.exports.losat_web2_abi_version(), 13);
+    assert.equal(own.exports.losat_web2_abi_version(), 14);
     checkSurface(own, options.native);
     console.log(`ok ${engine.name} describe, validate, register, scan`);
     const logRows = await checkLogfileNames(own, options.native, scratch, engine.name, waitForWorkers);

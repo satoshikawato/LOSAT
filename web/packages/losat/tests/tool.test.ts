@@ -377,8 +377,8 @@ function fakeEngine(options: { tool?: (emit: Emit, argv: string[]) => number; va
 }
 
 describe('ReactorAbi.tool and validateTool', () => {
-  it('speaks ABI version 13 and the module check wants losat_web2_tool', () => {
-    expect(ABI_VERSION).toBe(13);
+  it('speaks ABI version 14 and the module check wants losat_web2_tool', () => {
+    expect(ABI_VERSION).toBe(14);
     expect(ABI_EXPORTS).toContain('losat_web2_tool');
   });
 
@@ -461,6 +461,55 @@ describe('ReactorAbi.tool and validateTool', () => {
       ok: false,
       message: "USAGE\n====\nError: one of '-mk_counts', '-convert' or '-ustat <stat_file>' must be specified",
     });
+  });
+
+  it('reads data_loaders and parse_deflines from validate and passes FastaReader.parseDeflines to scan_begin', () => {
+    const valid = fakeEngine({
+      validate: (emit) => {
+        emit(2, encode('{"data_loaders":true,"parse_deflines":true}'));
+        return 0;
+      },
+    });
+    expect(valid.abi.validate(['blastp', '-parse_deflines'])).toEqual({ ok: true, dataLoaders: true, parseDeflines: true });
+    const refused = fakeEngine({
+      validate: (emit) => {
+        emit(2, encode('{"data_loaders":false,"parse_deflines":true}'));
+        return -1;
+      },
+      error: 'bad option',
+    });
+    expect(refused.abi.validate(['blastp', '-parse_deflines', '-evalue', '0'])).toEqual({
+      ok: false,
+      message: 'bad option',
+      dataLoaders: false,
+      parseDeflines: true,
+    });
+    const scanCalls: Array<readonly [string, number, number, number]> = [];
+    const memory = new WebAssembly.Memory({ initial: 2 });
+    let next = 4096;
+    const abi = new ReactorAbi({
+      memory,
+      losat_web2_abi_version: () => ABI_VERSION,
+      losat_web2_alloc: (len: number) => {
+        const ptr = next;
+        next += len;
+        return ptr;
+      },
+      losat_web2_dealloc: () => 0,
+      losat_web2_last_error_ptr: () => 0,
+      losat_web2_last_error_len: () => 0,
+      losat_web2_scan_begin: (ptr: number, len: number, role: number, dataLoaders: number, parseDeflines: number) => {
+        const program = text(new Uint8Array(memory.buffer, ptr, len).slice());
+        scanCalls.push([program, role, dataLoaders, parseDeflines]);
+        return scanCalls.length;
+      },
+    } as unknown as AbiExports);
+    expect(abi.scanBegin({ program: 'blastp', role: 'subject', dataLoaders: true, parseDeflines: false })).toBe(1);
+    expect(abi.scanBegin({ program: 'blastn', role: 'query', dataLoaders: false, parseDeflines: true })).toBe(2);
+    expect(scanCalls).toEqual([
+      ['blastp', 1, 1, 0],
+      ['blastn', 0, 0, 1],
+    ]);
   });
 });
 

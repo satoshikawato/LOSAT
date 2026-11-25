@@ -1009,8 +1009,7 @@ impl<'a> BuildDatabase<'a> {
                 // sequence before `std::string::assign` throws `basic_string::_M_create`.
                 let mut headers = raw.deflines;
                 self.edit_raw_headers(&mut headers);
-                self.output_db.add_raw_negative_length()?;
-                unreachable!("add_raw_negative_length always returns an error");
+                return Err(self.output_db.add_raw_negative_length().into());
             }
             if raw.sequence.is_empty() {
                 return Err(raw_data_error(970, "Error in raw data: no sequence").into());

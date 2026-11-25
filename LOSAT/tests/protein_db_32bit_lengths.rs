@@ -368,6 +368,9 @@ impl Fixture {
 #[test]
 fn blastdbcmd_and_segmasker_match_ncbi_32bit_protein_lengths() {
     let Some(fx) = Fixture::build("cmd-seg") else {
+        eprintln!(
+            "skipped: blastdbcmd_and_segmasker_match_ncbi_32bit_protein_lengths (sparse file creation unavailable)"
+        );
         return;
     };
 
@@ -584,6 +587,9 @@ fn blastdbcmd_and_segmasker_match_ncbi_32bit_protein_lengths() {
 #[test]
 fn blastp_blastx_psiblast_skip_non_positive_32bit_proteins() {
     let Some(fx) = Fixture::build("search") else {
+        eprintln!(
+            "skipped: blastp_blastx_psiblast_skip_non_positive_32bit_proteins (sparse file creation unavailable)"
+        );
         return;
     };
 
@@ -782,6 +788,9 @@ fn blastp_blastx_psiblast_skip_non_positive_32bit_proteins() {
 #[test]
 fn makeblastdb_raw_copy_matches_ncbi_errors_and_partial_close() {
     let Some(fx) = Fixture::build("remk") else {
+        eprintln!(
+            "skipped: makeblastdb_raw_copy_matches_ncbi_errors_and_partial_close (sparse file creation unavailable)"
+        );
         return;
     };
 

@@ -365,9 +365,10 @@ fn prepare_search_block(
 ) -> Result<()> {
     let sequences = block.len();
     let invalid = holds_non_residue_byte(block.protein_bytes());
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
     // A well-formed block holds one sentinel byte before its first sequence and one
     // after every sequence. Sequences with NCBI 32-bit length <= 0 (empty or >= 2^31) are
-    // skipped by NCBI (`blast_engine.c:1425-1432`) and stored as `[0, 0]`.
+    // skipped by NCBI and stored as `[0, 0]`.
     let sentinels_in_place = (0..sequences).all(|i| {
         let with_sentinels = block.protein_with_sentinels(i);
         with_sentinels.len() == 2
@@ -2349,6 +2350,11 @@ impl ListedTitles<'_> {
                 match scope.letters() {
                     Some(blob) if blob == ordinal => {}
                     Some(other) => {
+                        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:443-451
+                        // `CSeqDBVol::GetBioseq` returns a null Bioseq when the signed 32-bit
+                        // `x_GetSequence` length is less than 1 (zero or 2^31 or more), so
+                        // `CSeqVector` throws and `x_GetSubjectSequence` yields an empty sequence.
                         let len = database
                             .db
                             .protein_length_i32(other)
@@ -2487,6 +2493,11 @@ impl ListedTitles<'_> {
                 // A holder whose letters end before every included Seq-align's range: each read
                 // throws and warns, as LOSAT's.
                 if let Some(holder) = holder {
+                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+                    // Clamp non-positive signed 32-bit `GetSeqLengthProt` lengths to 0; `GetBioseq`
+                    // returns a null Bioseq when the length is less than 1, so every range read
+                    // throws and warns.
                     let letters = database
                         .db
                         .protein_length_i32(holder.ordinal())

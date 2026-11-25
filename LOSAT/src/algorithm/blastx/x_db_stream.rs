@@ -328,6 +328,11 @@ impl<'a> XStreamDb<'a> {
         Ok(XBlock { first, end, parts })
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+    // No NCBI counterpart: LOSAT's length window for parallel work scheduling; proteins whose
+    // signed 32-bit `GetSeqLengthProt` length is non-positive are skipped by NCBI and counted as
+    // length 0.
     /// The lengths of the sequences from `oid` on, at most `LENGTH_WINDOW` of them (to the end of
     /// `oid`'s volume), from the index (`0` for proteins skipped by NCBI with length `<= 0`).
     fn read_lengths(&self, oid: usize) -> Result<Vec<u32>> {

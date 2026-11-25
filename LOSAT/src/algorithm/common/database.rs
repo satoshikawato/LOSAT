@@ -3425,6 +3425,11 @@ impl<'a> HeaderReader<'a> {
         } else {
             return RecordCopy::Differs;
         };
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:286-298
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1380-1386
+        // No NCBI counterpart: LOSAT's copy-equivalence check (`copy_of`). `GetBioseq` returns a
+        // null Bioseq when the signed 32-bit `GetSeqLengthProt` length is less than 1, so treat
+        // such proteins as distinct without loading their sequence bytes into memory.
         let protein = self.db.seqtype() == SeqType::Protein;
         if protein {
             let (Ok(len_a), Ok(len_b)) =
@@ -4839,6 +4844,10 @@ pub(crate) fn x_check_protein_stores(
         for i in 0..block.len() {
             let with_sentinels = block.protein_with_sentinels(i);
             let ordinal = range.first_ordinal + i as u32;
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
+            // No NCBI counterpart: LOSAT's stored-byte check (`x_check_protein_stores`). Proteins
+            // with non-positive NCBI 32-bit length are skipped by NCBI and returned as `[0, 0]` by
+            // `read_protein_search_block`, so skip byte validation and report length 0.
             if with_sentinels.len() == 2 {
                 each(ordinal, 0);
                 continue;

@@ -302,7 +302,10 @@ impl FormatterNcbirc {
     }
 
     /// `read` of the file's read `read` (`read_stream`).
-    fn of_read(program: &str, read: Result<Option<RegistryRead>, String>) -> Result<Self, String> {
+    pub(crate) fn of_read(
+        program: &str,
+        read: Result<Option<RegistryRead>, String>,
+    ) -> Result<Self, String> {
         let file = read.and_then(|read| match read {
             None => Ok(ConfigFile::Absent),
             Some(registry) => ConfigFile::of(program, CWD_NCBIRC.into(), registry),
@@ -398,7 +401,7 @@ impl InitConfig {
 
     /// `read` of the file `file` (its path as NCBI names it and its read, `read_stream`; `None`:
     /// no file), `debug`: `GETURL_DEBUG` is set.
-    fn of_read(
+    pub(crate) fn of_read(
         program: &str,
         file: Option<(std::ffi::OsString, Result<RegistryRead, String>)>,
         debug: bool,
@@ -424,7 +427,7 @@ impl InitConfig {
 
     /// `read` of the file `file` (its path as NCBI names it and its bytes; `None`: no file).
     #[cfg(test)]
-    pub(super) fn of(
+    pub(crate) fn of(
         program: &str,
         file: Option<(std::ffi::OsString, Vec<u8>)>,
         debug: bool,

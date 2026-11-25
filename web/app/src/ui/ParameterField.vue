@@ -131,6 +131,13 @@ const showTaxidMissing = computed(
 );
 /** Whether a sentence precedes "?" in this row (sharing the single `.hint-line` form). */
 const showSentenceTip = computed(() => showHint.value || showTaxidMissing.value);
+/** Whether `.control-tip` holds a trailing control; avoids an empty flex item when a filter/file row has no help. */
+const hasTrailingControl = computed(() => {
+  if (props.field.kind === 'filter') return filterOn.value || filterEditing.value;
+  if (props.field.kind === 'file') return fileOn.value;
+  return true;
+});
+const showControlTip = computed(() => hasTrailingControl.value || (Boolean(help.value) && !showSentenceTip.value));
 
 const defaultLabel = computed(() => {
   const engineDefault = option.value?.defaultValue;
@@ -280,7 +287,7 @@ function onList(next: string): void {
           @input="onInput"
         />
         <!-- The row's trailing control and its "?" (when no sentence precedes "?") wrap together so "?" never starts a line alone. -->
-        <span class="control-tip">
+        <span v-if="showControlTip" class="control-tip">
           <div v-if="field.kind === 'radio'" class="radios" role="radiogroup" :aria-labelledby="`${id}-label`" v-bind="mark()" :data-testid="id">
             <label v-for="choice in choices" :key="choice" class="radio">
               <input
@@ -464,7 +471,7 @@ function onList(next: string): void {
           <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->
           <HelpTip v-if="help && !showSentenceTip" :id="id" :label="`About ${field.flag}`" :text="help" />
         </span>
-        <span v-if="showSentenceTip" class="hint-line">
+        <span v-if="showSentenceTip" :class="help ? 'hint-line' : undefined">
           <span v-if="showHint" class="param-hint">{{ field.hint }}</span>
           <span v-else class="file-missing" role="status" :data-testid="`${id}-missing`">{{ field.file?.taxid?.missing }}</span>
           <!-- The engine's help waits behind "?" (stop-describing-ui: the control shows, the help waits). -->

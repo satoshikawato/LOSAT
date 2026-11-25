@@ -45,6 +45,12 @@ const note = computed(() => (state.value.note?.taxid === props.taxid ? state.val
 /** A download that stopped after some bytes was saved. */
 const partial = computed(() => (copy.value !== undefined && !copy.value.complete && copy.value.savedBytes > 0 ? copy.value : undefined));
 const saved = computed(() => (copy.value?.complete === true ? copy.value : undefined));
+/** The inline link action after the sentence, if any; drives `<wbr>` and the button choice together. */
+const linkAction = computed<'cancel' | 'delete' | undefined>(() => {
+  if (downloading.value) return 'cancel';
+  if (!busy.value && (saved.value || partial.value)) return 'delete';
+  return undefined;
+});
 
 const help = computed(
   () =>
@@ -126,9 +132,9 @@ onUpdated(() => {
     </button>
     <button v-else-if="!busy && partial" type="button" data-testid="counts-continue" @click="press">Continue</button>
     <span class="hint-line">
-      <span class="hint" data-testid="counts-note"><LosatLoader v-if="busy" />{{ sentence }}</span><wbr v-if="downloading || (!busy && (saved || partial))" />
-      <button v-if="downloading" type="button" class="link" data-testid="counts-cancel" @click="counts.cancel()">Cancel</button>
-      <button v-else-if="!busy && (saved || partial)" type="button" class="link" data-testid="counts-delete" @click="void counts.delete(taxid)">Delete</button>
+      <span class="hint" data-testid="counts-note"><LosatLoader v-if="busy" />{{ sentence }}</span><wbr v-if="linkAction !== undefined" />
+      <button v-if="linkAction === 'cancel'" type="button" class="link" data-testid="counts-cancel" @click="counts.cancel()">Cancel</button>
+      <button v-else-if="linkAction === 'delete'" type="button" class="link" data-testid="counts-delete" @click="void counts.delete(taxid)">Delete</button>
       <HelpTip :id="`counts-${taxid}`" label="About the counts download" :text="help" />
     </span>
     <p v-if="failure" class="error" data-testid="counts-error">{{ failure }}</p>

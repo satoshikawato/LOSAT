@@ -56,10 +56,15 @@ impl XDiagCells {
         matches!(self, Self::Packed(_))
     }
 
-    fn clear(&mut self) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
+    // `s_BlastDiagClear` sets every cell's `last_hit` to `-window` and clears `flag`. A packed
+    // table never runs a lead subject (its offsets and hits are non-negative), and for hits at
+    // subject offset 0 or more a cleared cell of 0 and one of `-window` give the same outcome:
+    // both lie at least a full window behind every hit when `offset == window`.
+    fn clear(&mut self, window: i32) {
         match self {
             Self::Packed(cells) => cells.fill(0),
-            Self::Pair(cells) => cells.fill((0, false)),
+            Self::Pair(cells) => cells.fill((-window, false)),
         }
     }
 }
@@ -110,10 +115,49 @@ impl Diagonals {
     fn finish_frame(&mut self, subject_length: usize) {
         if self.offset >= i32::MAX / 4 {
             self.offset = self.window;
-            self.entries.clear();
+            self.entries.clear(self.window);
         } else {
             self.offset += subject_length as i32 + self.window;
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66,87-107,131-144
+// Sets a lead subject's diagonal table (`Pair` cells) to NCBI's one-thread start offset and
+// unwritten-cell value (`TableStart::New`, series NP, M4b-T3).
+impl crate::algorithm::common::hard_chunk_walk::HardTable for Diagonals {
+    type Error = anyhow::Error;
+
+    fn ncbi_table(
+        &mut self,
+        start: crate::algorithm::common::hard_chunk_walk::NcbiStart,
+        window: i32,
+    ) {
+        debug_assert_eq!(window, self.window);
+        self.offset = start.offset;
+        match &mut self.entries {
+            XDiagCells::Pair(cells) => cells.fill((start.unwritten(self.window), false)),
+            XDiagCells::Packed(_) => {
+                debug_assert!(
+                    false,
+                    "packed diagonal table never runs a soft-mask lead subject"
+                );
+            }
+        }
+    }
+
+    fn clear_table(&mut self, window: i32) {
+        debug_assert_eq!(window, self.window);
+        self.offset = self.window;
+        self.entries.clear(self.window);
+    }
+
+    fn move_offset(&mut self, by: i32) -> anyhow::Result<()> {
+        self.offset = self
+            .offset
+            .checked_add(by)
+            .ok_or_else(|| anyhow::anyhow!("TBLASTN diagonal offset exceeds Int4"))?;
+        Ok(())
     }
 }
 
@@ -452,6 +496,14 @@ impl<'a> XTwoHit<'a> {
     /// End a unit of `subject_length` residues as NCBI does (the table is kept).
     pub(super) fn exit(&mut self, subject_length: usize) {
         self.diagonals.finish_frame(subject_length);
+    }
+
+    /// Applies `start` to this word finder's diagonal table (`HardTable`, series NP, M4b-T3).
+    pub(super) fn apply_table_start(
+        &mut self,
+        start: crate::algorithm::common::hard_chunk_walk::TableStart,
+    ) -> anyhow::Result<()> {
+        start.apply(&mut self.diagonals, self.window)
     }
 
     /// No NCBI counterpart: hands the diagonal table back for `with_table`; it does not change

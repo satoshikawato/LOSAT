@@ -1,0 +1,44 @@
+Writing messages to <stdout> at verbosity (Minutiae)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+By default, testing 200 randomly sampled OIDs.
+
+Finding database volumes.
+Testing 11 volume(s).
+ <RUN>/in/p4
+  <RUN>/in/p4 / Sample: <testing 200 randomly selected OIDs (9 unique)>
+  <RUN>/in/p4 / Sample:       Status for OID 0: PASS
+  <RUN>/in/p4 / Sample:       Status for OID 1: PASS
+  <RUN>/in/p4 / Sample:       Status for OID 2: PASS
+  <RUN>/in/p4 / Sample:       Status for OID 3: PASS
+  <RUN>/in/p4 / Sample:       Status for OID 4: PASS
+  <RUN>/in/p4 / Sample:       Status for OID 5: PASS
+  <RUN>/in/p4 / Sample:       Status for OID 6: PASS
+  <RUN>/in/p4 / Sample:       Status for OID 7: PASS
+  <RUN>/in/p4 / Sample:       Status for OID 8: PASS
+ <RUN>/in/p5
+  <RUN>/in/p5 / Sample: <testing 200 randomly selected OIDs (9 unique)>
+ <RUN>/in/pm
+  <RUN>/in/pm / Sample: <testing 200 randomly selected OIDs (9 unique)>
+ <RUN>/in/pmv.00
+  <RUN>/in/pmv.00 / Sample: <testing 200 randomly selected OIDs (7 unique)>
+ <RUN>/in/pmv.01
+  <RUN>/in/pmv.01 / Sample: <testing 200 randomly selected OIDs (2 unique)>
+ <RUN>/in/pvm.00
+  <RUN>/in/pvm.00 / Sample: <testing 200 randomly selected OIDs (4 unique)>
+ <RUN>/in/pvm.01
+  <RUN>/in/pvm.01 / Sample: <testing 200 randomly selected OIDs (5 unique)>
+ <RUN>/in/q4
+  <RUN>/in/q4 / Sample: <testing 200 randomly selected OIDs (3 unique)>
+ <RUN>/in/q5
+  <RUN>/in/q5 / Sample: <testing 200 randomly selected OIDs (3 unique)>
+ <RUN>/in/n4
+  <RUN>/in/n4 / Sample: <testing 200 randomly selected OIDs (4 unique)>
+ <RUN>/in/n5
+  <RUN>/in/n5 / Sample: <testing 200 randomly selected OIDs (4 unique)>
+ Result=SUCCESS. No errors reported for 11 volumes.
+Testing 2 alias(es).
+ <RUN>/in/pmv.pal
+ <RUN>/in/pvm.pal
+ Result=SUCCESS. No errors reported for 2 alias(es).

@@ -413,6 +413,43 @@ test("artifact preparation preserves validation and ABI rejection", () => {
   }
 });
 
+// A command that LOSAT builds carries no Web ABI (feature `no-web-abi-v1`, line RG item K4i-3d):
+// the check of the artifacts LOSAT records refuses one that does; the runners still run it (a
+// command built before the feature), and reactors keep their exports.
+test("a recorded command with Web ABI exports is refused; the runners still prepare it", () => {
+  const { prepareArtifact, inspectArtifact, refuseWebAbiInCommand } = require("./wasi_artifact");
+  for (const threaded of [false, true]) {
+    const kind = `${threaded ? "threaded" : "serial"}-command`;
+    for (const name of ["losat_web_run_pair", "losat_web2_tool"]) {
+      const bytes = command({ threaded, aliases: [name] });
+      assert.equal(prepareArtifact(bytes, kind).identity.kind, kind);
+      assert.throws(() => refuseWebAbiInCommand(inspectArtifact(bytes, kind)),
+        new RegExp(`command exports the Web ABI: ${name}`));
+    }
+    assert.equal(refuseWebAbiInCommand(inspectArtifact(command({ threaded }), kind)).kind, kind);
+  }
+  const api = ["losat_web_run_pair", "losat_web_alloc", "losat_web_dealloc",
+    "losat_web_result_ptr", "losat_web_result_len", "losat_web_error_ptr", "losat_web_error_len"];
+  const reactor = inspectArtifact(command({ threaded: false, entry: "_initialize", aliases: api }), "serial-reactor");
+  assert.equal(refuseWebAbiInCommand(reactor).kind, "serial-reactor");
+  // The command line that LOSAT's build and release scripts call (`node wasi_artifact.js FILE KIND`).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-artifact-cli-"));
+  try {
+    const script = path.join(__dirname, "wasi_artifact.js");
+    const web = path.join(dir, "web.wasm"), plain = path.join(dir, "plain.wasm");
+    fs.writeFileSync(web, command({ threaded: false, aliases: ["losat_web_run_pair"] }));
+    fs.writeFileSync(plain, command({ threaded: false }));
+    const refused = spawnSync(process.execPath, [script, web, "serial-command"], { encoding: "utf8" });
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /command exports the Web ABI: losat_web_run_pair/);
+    const passed = spawnSync(process.execPath, [script, plain, "serial-command"], { encoding: "utf8" });
+    assert.equal(passed.status, 0, passed.stderr);
+    assert.equal(JSON.parse(passed.stdout).kind, "serial-command");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // Unset, the guard cache is in the user's cache directory; 0 turns it off; a default
 // directory that cannot be used only means that the guard is computed again.
 test("LOSAT_WASI_GUARD_CACHE is on by default in the user's cache directory, and 0 turns it off", () => {

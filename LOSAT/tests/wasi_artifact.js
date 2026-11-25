@@ -66,6 +66,16 @@ function prepareArtifact(bytes, expected, module = new WebAssembly.Module(bytes)
 function inspectArtifact(bytes, expected) {
   return prepareArtifact(bytes, expected).identity;
 }
+// LOSAT's WASI command line carries no Web ABI (v1's `losat_web_*`, v2's `losat_web2_*`): LOSAT
+// builds its commands with the feature `no-web-abi-v1` (line RG item K4i-3d). Checked where
+// LOSAT records an artifact that it built (this file's command line: build_wasi_artifacts.py,
+// build_reactors.py, the release preparation), not by the runners, which also run commands built
+// before that.
+function refuseWebAbiInCommand(identity) {
+  const web = identity.exports.filter(x => x.kind === "function" && x.name.startsWith("losat_web")).map(x => x.name);
+  if (identity.kind.endsWith("-command") && web.length) throw new Error(`command exports the Web ABI: ${web.slice(0, 3).join(", ")}`);
+  return identity;
+}
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:172-176
 // Host compatibility only. A Wasm i32 reaches JavaScript as a signed number, so a
 // pointer or a length of 2 GiB or more arrives negative. Node v24.21.0 and v26.8.2,
@@ -167,9 +177,9 @@ function endOnAbortTrap(err) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ABORT_WAIT_MS);
 }
 
-module.exports = { inspectArtifact, prepareArtifact, unsignedWasiImports, blockingStdioWrite, waitForStream, createSharedMemory,
+module.exports = { inspectArtifact, prepareArtifact, refuseWebAbiInCommand, unsignedWasiImports, blockingStdioWrite, waitForStream, createSharedMemory,
   endOnAbortTrap };
 if (require.main === module) {
-  try { console.log(JSON.stringify(inspectArtifact(require("node:fs").readFileSync(process.argv[2]), process.argv[3]), null, 2)); }
+  try { console.log(JSON.stringify(refuseWebAbiInCommand(inspectArtifact(require("node:fs").readFileSync(process.argv[2]), process.argv[3])), null, 2)); }
   catch (error) { console.error(error); process.exitCode = 1; }
 }

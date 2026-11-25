@@ -1,7 +1,7 @@
 // Composition root: the only module that chooses implementations for the ports.
 import { ENGINE_ASSETS } from 'virtual:losat-engine';
 import { VERIFICATION_TABLE } from 'virtual:losat-verification';
-import { sha256Hex, WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
+import { engineBuildName, sha256Hex, WasmEngine, type RenewalLimits, type RuntimeEnd } from 'losat';
 import type { EngineGateway, ToolEngine } from 'losat/ports';
 import { Attention } from './application/attention';
 import { Availability } from './application/availability';
@@ -10,10 +10,12 @@ import { SearchDraft } from './application/draft';
 import { CountsLoader } from './application/counts';
 import { ExampleLoader } from './application/examples';
 import { ResultsBrowser } from './application/results';
+import { SessionFiles } from './application/session-files';
 import { ToolDraft } from './application/tool-draft';
 import type { Downloader } from './ports/download';
 import { BrowserAccessionFetcher } from './infra/browser/accession-fetcher';
-import { browserCountsDeletions } from './infra/browser/counts-deletions';
+import { browserCountsChanges } from './infra/browser/counts-changes';
+import { browserCountsLocks } from './infra/browser/counts-locks';
 import { BrowserCountsDownloader } from './infra/browser/counts-downloader';
 import { browserExampleDeletions } from './infra/browser/example-deletions';
 import { BrowserFileDownloader } from './infra/browser/example-downloader';
@@ -68,6 +70,12 @@ export function createApp(options: AppOptions = {}): App {
           ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
           ...(options.onRuntimeEnd === undefined ? {} : { onRuntimeEnd: options.onRuntimeEnd }),
         });
+  const sessionFiles = new SessionFiles((token) => void data.dropSessionFile(token).catch(() => undefined));
+  const countsLocks = browserCountsLocks();
+  const toolRuntime =
+    ENGINE_ASSETS === null
+      ? { path: 'fake' as const, engineBuild: 'fake-engine' }
+      : { path: 'serial' as const, engineBuild: engineBuildName('serial', ENGINE_ASSETS.serial) };
   const coordinator = new Coordinator({
     engine,
     data,
@@ -76,6 +84,9 @@ export function createApp(options: AppOptions = {}): App {
     newRunId: () => crypto.randomUUID(),
     digest: sha256Hex,
     dataWorkerEnded,
+    toolRuntime,
+    sessionFiles,
+    ...(countsLocks === undefined ? {} : { countsLocks }),
   });
   const draft = new SearchDraft({
     engine,
@@ -84,11 +95,19 @@ export function createApp(options: AppOptions = {}): App {
     fetcher: new BrowserAccessionFetcher(),
     now: () => performance.now(),
   });
+  const counts = new CountsLoader({
+    downloader: new BrowserCountsDownloader({ store: data }),
+    store: data,
+    draft,
+    changes: browserCountsChanges(),
+  });
   const toolDraft = new ToolDraft({
     engine,
     data,
     enqueueToolAll: (requests) => coordinator.enqueueToolAll(requests),
     isBusy: () => coordinator.isBusy(),
+    readSavedCounts: async (taxid) => (await counts.readSavedFile(taxid))?.file,
+    sessionFiles,
   });
   const availability = new Availability({ draft, toolDraft, dataWorkerEnded });
   const examples = new ExampleLoader({
@@ -98,12 +117,6 @@ export function createApp(options: AppOptions = {}): App {
     availability,
     deletions: browserExampleDeletions(),
     saver: browserFileSaver,
-  });
-  const counts = new CountsLoader({
-    downloader: new BrowserCountsDownloader({ store: data }),
-    store: data,
-    draft,
-    deletions: browserCountsDeletions(),
   });
   const results = new ResultsBrowser({
     data,

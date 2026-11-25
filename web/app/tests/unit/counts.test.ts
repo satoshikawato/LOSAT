@@ -966,6 +966,138 @@ describe('CountsLoader', () => {
     });
   });
 
+  function makeGate() {
+    let onStart: (() => void) | undefined;
+    let release!: () => void;
+    let gate = Promise.resolve();
+    const arm = () => {
+      gate = new Promise<void>((resolve) => (release = resolve));
+      const started = new Promise<void>((resolve) => (onStart = resolve));
+      return { started, release };
+    };
+    const enter = async () => {
+      if (onStart === undefined) return;
+      const notify = onStart;
+      onStart = undefined;
+      notify();
+      await gate;
+    };
+    return { arm, enter };
+  }
+
+  function gateStoreAppend(store: MemoryCountsStore) {
+    const appendGate = makeGate();
+    const origAppend = store.appendCounts.bind(store);
+    store.appendCounts = async (token, bytes) => {
+      await appendGate.enter();
+      return origAppend(token, bytes);
+    };
+    return appendGate.arm;
+  }
+
+  function setupStoppedDownload() {
+    const store = new MemoryCountsStore({ persistent: true, now: () => Date.UTC(2026, 10, 12) });
+    const s = site();
+    const loader = new CountsLoader({
+      downloader: new BrowserCountsDownloader({ store, fetch: s.fetchImpl }),
+      store,
+      draft: { setCounts: () => undefined },
+    });
+    const pauseNextAppend = gateStoreAppend(store);
+    const startAndStop = async () => {
+      const paused = pauseNextAppend();
+      loader.download(HUMAN);
+      await paused.started;
+      loader.cancel();
+      return paused.release;
+    };
+    const expectReading = () => expect(loader.state.get().load).toEqual({ taxid: HUMAN, progress: { state: 'reading' } });
+    const expectNoLoad = () => expect(loader.state.get().load).toBeUndefined();
+    const expectComplete = () => expect(loader.state.get().saved[HUMAN]).toMatchObject({ complete: true, size: 5000 });
+    return { loader, s, startAndStop, expectReading, expectNoLoad, expectComplete };
+  }
+
+  it('waits for a stopped download to release the ID instead of refusing a follow-up Download or Continue', async () => {
+    const { loader, s, startAndStop, expectReading, expectNoLoad, expectComplete } = setupStoppedDownload();
+    const release = await startAndStop();
+    expectNoLoad();
+
+    const callsBefore = s.calls.length;
+    try {
+      loader.download(HUMAN);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expectReading();
+      expect(s.calls).toHaveLength(callsBefore);
+    } finally {
+      release();
+    }
+    await loader.idle();
+    expect(s.calls).toHaveLength(callsBefore + 1);
+    expect(s.calls.at(-1)!.headers['Range']).toBe('bytes=4999-');
+    expectNoLoad();
+    expectComplete();
+  });
+
+  it('sends no request and leaves no writing entry when a Download waiting on a stopped download is cancelled', async () => {
+    const t = setupStoppedDownload();
+    const release = await t.startAndStop();
+
+    const callsBefore = t.s.calls.length;
+    try {
+      t.loader.download(HUMAN);
+      t.expectReading();
+      t.loader.cancel();
+    } finally {
+      release();
+    }
+    await t.loader.idle();
+    expect(t.s.calls).toHaveLength(callsBefore);
+    t.expectNoLoad();
+    expect(t.loader.state.get().saved[HUMAN]).toMatchObject({ complete: false, savedBytes: 5000 });
+
+    // The ID can be downloaded again after the waiting download was cancelled.
+    t.loader.download(HUMAN);
+    await t.loader.idle();
+    expect(t.s.calls).toHaveLength(callsBefore + 1);
+    t.expectNoLoad();
+    t.expectComplete();
+  });
+
+  it('keeps the saving state of a later save for the same ID when an earlier save finishes its final reloadList', async () => {
+    const { loader, store } = setup();
+    const pauseAppend = gateStoreAppend(store);
+    const listGate = makeGate();
+    const origList = store.listCounts.bind(store);
+    store.listCounts = async () => {
+      await listGate.enter();
+      return origList();
+    };
+    const saving562 = () => loader.state.get().saving[562];
+
+    const list = listGate.arm();
+    const first = loader.saveMade(562, new File([bytesOf(300, 1)], 'a.obinary'), madeMeta(1));
+    await list.started;
+    expect(saving562()).toBeUndefined();
+
+    const append = pauseAppend();
+    const second = loader.saveMade(562, new File([bytesOf(400, 2)], 'b.obinary'), madeMeta(2), { replace: true });
+    await append.started;
+    const expectSavingRun2 = () => expect(saving562()).toEqual({ run: 2 });
+    expectSavingRun2();
+
+    list.release();
+    try {
+      expect(await first).toMatchObject({ ok: true });
+      expectSavingRun2();
+    } finally {
+      append.release();
+    }
+    expect(await second).toMatchObject({ ok: true, copy: { size: 400, made: madeMeta(2) } });
+    await loader.idle();
+    expect(saving562()).toBeUndefined();
+    expect(loader.state.get().saved[562]).toMatchObject({ complete: true, size: 400, made: madeMeta(2) });
+  });
+
   it('drops the replaced copy from the writing tab list while the Replace writes, and lists the new copy after it ends', async () => {
     const tabs = setupTwoTabs();
     const { loader } = tabs.one;

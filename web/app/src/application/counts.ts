@@ -112,6 +112,10 @@ function accepted(saved: SavedCounts | undefined, taxid: number): SavedCounts | 
   return saved.copy.url === countsUrl(taxid) ? saved : undefined;
 }
 
+type ActiveWrite =
+  | { readonly kind: 'save'; readonly op: object }
+  | { readonly kind: 'download'; readonly op: AbortController; readonly done: Promise<void> };
+
 export class CountsLoader {
   readonly state = new Store<CountsState>({ saved: {}, saving: {}, inTab: {}, list: [] });
   private running: AbortController | undefined;
@@ -119,7 +123,7 @@ export class CountsLoader {
   /** Deletions in progress; a download or save of the same taxonomy ID waits for its deletion. */
   private readonly deleting = new Map<number, Promise<void>>();
   /** Active writes in this tab, keyed by taxonomy ID: 'save' from writeMade begin to end, 'download' from load start to end. */
-  private readonly writing = new Map<number, { readonly kind: 'save' | 'download'; readonly op: object }>();
+  private readonly writing = new Map<number, ActiveWrite>();
   /** The files that this tab holds and the browser does not keep. */
   private readonly local = new Map<number, { readonly copy: CountsCopy; readonly file: File }>();
   /** The number of the latest read of the list (reloadList): an earlier read that ends later is dropped. */
@@ -172,7 +176,10 @@ export class CountsLoader {
   /** Downloads the counts of a taxonomy ID, or continues the download that stopped. */
   download(taxid: number): void {
     const active = this.writing.get(taxid);
-    if (active !== undefined) {
+    // This tab's save, or its download that goes on, is refused in place; a download that was
+    // stopped (Cancel, another ID) is waited for below.
+    const stopped = active?.kind === 'download' && active.op.signal.aborted;
+    if (active !== undefined && !stopped) {
       this.update({
         load: {
           taxid,
@@ -187,8 +194,19 @@ export class CountsLoader {
     this.cancel();
     const controller = new AbortController();
     this.running = controller;
-    this.writing.set(taxid, { kind: 'download', op: controller });
-    this.track(this.load(taxid, controller));
+    // A download of the ID that was stopped (Cancel, another ID) still lets go of it: start after it.
+    const before = active?.kind === 'download' ? active.done : undefined;
+    if (before !== undefined) this.update({ load: { taxid, progress: { state: 'reading' } } });
+    const done: Promise<void> = (async () => {
+      if (before !== undefined) await before.catch(() => undefined);
+      if (controller.signal.aborted) {
+        this.releaseWriting(taxid, controller);
+        return;
+      }
+      await this.load(taxid, controller);
+    })();
+    this.writing.set(taxid, { kind: 'download', op: controller, done });
+    this.track(done);
   }
 
   /** Stops the running download; what was saved stays. */
@@ -288,8 +306,10 @@ export class CountsLoader {
     this.setSaving(taxid, plainMade.run);
     this.clearMessages(taxid);
     const clearSave = () => {
-      this.releaseWriting(taxid, op);
-      if (this.state.get().saving[taxid] !== undefined) this.setSaving(taxid, undefined);
+      // Only this save's own entry: a later save of the same ID keeps its state.
+      if (this.writing.get(taxid)?.op !== op) return;
+      this.writing.delete(taxid);
+      this.setSaving(taxid, undefined);
     };
 
     try {
@@ -478,10 +498,11 @@ export class CountsLoader {
 
   /** The file is whole: the draft reads it from here on. */
   private finish(taxid: number, copy: CountsCopy, file: File, controller: AbortController, announce: boolean): void {
-    if (this.running === controller) this.running = undefined;
+    const current = this.running === controller;
+    if (current) this.running = undefined;
     this.deps.draft.setCounts(taxid, { file, origin: originOf(copy) });
     this.setSaved(taxid, copy);
-    if (this.state.get().load?.taxid === taxid) this.update({ load: undefined });
+    if (current && this.state.get().load?.taxid === taxid) this.update({ load: undefined });
     if (announce) this.deps.changes?.announce(taxid);
     this.track(this.reloadList());
   }

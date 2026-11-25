@@ -256,7 +256,7 @@ pub fn split_queries(
             && rayon::current_thread_index().is_some()
             && rayon::current_num_threads() > 1
     }) {
-        chunks = crate::utils::xitems::x_map(count, &make_chunk)
+        chunks = crate::utils::xitems::x_map(count, make_chunk)
             .into_iter()
             .collect::<Result<Vec<_>>>()?;
     }

@@ -1,0 +1,478 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: prot_v5 (parsed Seq-ids)
+           51 sequences; 4,677 total letters
+
+Results from round 1
+
+
+Query= qp1 query protein one
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+XP_000001.1 alpha protein [Homo sapiens]                              255     9e-93
+CAA90002.1 second defline with a gi                                   251     3e-91
+NP_000002.1 gi plus ref protein                                       251     3e-91
+XP_910001.1 long title number 01 with many words so that it is lo...  247     2e-89
+Q00003 swissprot without version                                      247     2e-89
+CAA00005.1 emb protein                                                241     3e-87
+XP_920001.1 has a title                                               240     8e-87
+A0A000 trembl entry                                                   240     8e-87
+1ABC_A Chain A, test structure                                        237     1e-85
+BAA00006.1 dbj protein                                                233     7e-84
+pir||S00007 pir protein                                               223     3e-80
+prf||0008123A prf protein                                             217     1e-77
+myprot9 local id protein                                              213     3e-76
+mydb:prot10 general id protein                                        209     2e-74
+XP_000011.2 bare refseq accession                                     204     1e-72
+P00012 bare uniprot-like accession                                    201     3e-71
+myprot_13 bare non-accession word                                     195     5e-69
+AAA00017.1 gb with a locus name                                       195     5e-69
+AAA00018.1 unnamed protein product                                    186     2e-65
+DAA00016.1 third-party protein                                        184     2e-64
+P00019.3 with taxid                                                   173     3e-60
+unnamed protein product                                               121     1e-40
+5ABC_D Chain D                                                        121     1e-40
+WP_100014.1 unnamed protein product                                   121     1e-40
+NC_100013.1                                                           121     1e-40
+BK100012.1 tpe titled                                                 121     1e-40
+4ABC no chain four                                                    121     1e-40
+unnamed protein product                                               121     1e-40
+3ABC_C Chain C                                                        121     1e-40
+DAA10008.1 tpa with subject                                           121     1e-40
+subject seven title                                                   121     1e-40
+NP_100006.1 unnamed protein product                                   121     1e-40
+US7654321_3 Sequence 3 from Patent US 7654321                         121     1e-40
+2XYY unnamed protein product                                          121     1e-40
+2XYZ_B Chain B                                                        121     1e-40
+DAA10002.1 unnamed protein product                                    121     1e-40
+DAA10001.1 tpa titled protein                                         121     1e-40
+P11111.1 titled first                                                 121     1e-40
+unnamed protein product                                               121     1e-40
+subject seven                                                         121     1e-40
+EP0238993_7 pre-grant patent                                          121     1e-40
+prf|ABC|DEF prf two fields                                            121     1e-40
+EP0123456A1_7 patent with letters                                     121     1e-40
+USRE33188_1 patent reissue                                            121     1e-40
+ti:123 trace id                                                       121     1e-40
+long1 long title word long title word long title word long title ...  121     1e-40
+AAA00100.1 big gi                                                     121     1e-40
+123 gibbmt                                                            121     1e-40
+GPP123 genome pipeline                                                121     1e-40
+BK000013.1 third party ddbj                                           121     1e-40
+BK000012.1 third party embl                                           121     1e-40
+
+
+
+qp1            1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+XP_000001.1    1    ..........V...R.............................................  60
+CAA90002.1     1    ..........V...R.............................................  60
+NP_000002.1    1    ..........V...R.............................................  60
+XP_910001.1    1    ..........V...R...................................I.......Q.  60
+Q00003         1    ..........V...R...................................I.......Q.  60
+CAA00005.1     1    ..........V...R.....F..M.....................T..............  60
+XP_920001.1    1    ..........V.D.R..........S..................................  60
+A0A000         1    ..........V.D.R..........S..................................  60
+1ABC_A         1    ..........V...R........MCC..F..P............................  60
+BAA00006.1     1    ..........V...R...............M...........M.................  60
+S00007         1    ..........V...RV....V........G......LH......K............D..  60
+0008123A       1    ..........V...R..F.............IW............R.F.R......SS.-  59
+myprot9        1    ..........V...RV..I.....EL...........N............YN......N.  60
+prot10         1    ..........VNH.R...D......L......C.S.......C.................  60
+XP_000011.2    1    ..........V...R.....S...F....K..........Q..L...E.......Q...-  59
+P00012         1    ..........V..QR....W.H..I..K..........V............R.....E..  60
+myprot_13      1    ..........W.Q.RM....L.G..W..KYM..............Y......L.....P.  60
+AAA00017.1     1    ..........V..TK...S..ED..........LF.HR....R....QS...C.......  60
+AAA00018.1     1    ..........VP.KR...P.E.....V.IV.E.N...T.Q..........SS...R....  60
+DAA00016.1     1    ..........C...RF....CM.........W........-...K..I.........S.T  60
+                                                          \                     
+                                                          |                     
+                                                          G
+P00019.3       1    ..........E..AR.....WDM...M.....P......KCS.YHY..Q.......F.Y.  60
+Subject_36     1    ..........V...R.............................................  60
+5ABC_D         1    ..........V...R.............................................  60
+WP_100014.1    1    ..........V...R.............................................  60
+NC_100013.1    1    ..........V...R.............................................  60
+BK100012.1     1    ..........V...R.............................................  60
+4ABC           1    ..........V...R.............................................  60
+Subject_30     1    ..........V...R.............................................  60
+3ABC_C         1    ..........V...R.............................................  60
+DAA10008.1     1    ..........V...R.............................................  60
+Subject_27     1    ..........V...R.............................................  60
+NP_100006.1    1    ..........V...R.............................................  60
+US7654321_3    1    ..........V...R.............................................  60
+2XYY           1    ..........V...R.............................................  60
+2XYZ_B         1    ..........V...R.............................................  60
+DAA10002.1     1    ..........V...R.............................................  60
+DAA10001.1     1    ..........V...R.............................................  60
+P11111.1       1    ..........V...R.............................................  60
+Subject_8      1    ..........V...R.............................................  60
+Subject_7      1    ..........V...R.............................................  60
+EP0238993_7    1    ..........V...R.............................................  60
+ABC            1    ..........V...R.............................................  60
+EP0123456A1_7  1    ..........V...R.............................................  60
+USRE33188_1    1    ..........V...R.............................................  60
+123            1    ..........V...R.............................................  60
+long1          1    ..........V...R.............................................  60
+AAA00100.1     1    ..........V...R.............................................  60
+123            1    ..........V...R.............................................  60
+GPP123         1    ..........V...R.............................................  60
+BK000013.1     1    ..........V...R.............................................  60
+BK000012.1     1    ..........V...R.............................................  60
+
+qp1            61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+XP_000001.1    61   ---........QQ.....K......A..................Y........E.NT...  117
+CAA90002.1     61   ---........QQ.....K...Q..A.A................Y........E.NT...  117
+NP_000002.1    61   ---........QQ.....K...Q..A.A................Y........E.NT...  117
+XP_910001.1    61   ---.A......QQ.Q...K......A..................Y........E.NT...  117
+Q00003         61   ---.A......QQ.Q...K......A..................Y........E.NT...  117
+CAA00005.1     61   ---........QQ.....K.....PQ..................Y...A....E.NR...  117
+XP_920001.1    61   ---..E.....QQ.....K......A.......C......Y...Y........E.NT...  117
+A0A000         61   ---..E.....QQ.....K......A.......C......Y...Y........E.NT...  117
+1ABC_A         61   ---........QQ.....K......A..................Y..K.K...E.GT...  117
+BAA00006.1     61   ---....H...QQ.....K.K...KA.........AA.....K.Y...M....E.DP...  117
+S00007         61   ---........QQ.....K....S.A....V.......I....GYV.......E.NTA..  117
+0008123A       60   --I........QQ.V...P......A........D.........Y......L.E.NT..T  117
+myprot9        61   ---........QQ.....KL.....A..W.........K.....Y.....HRFEWNT.Y.  117
+prot10         61   ---..T.K...QQ.....K...GQ.A....I.Q...........Y..K.....EGNT..C  117
+XP_000011.2    60   --W....NI..QQ.I...K...I.RA....D.Y.R.E..D....Y.....F..E.NT..M  117
+P00012         61   ---.....I..QQ...HPY....YVA.NS.....Q.........YL.......E.KT...  117
+myprot_13      61   R---..D....QQ..E..K...PM.A..S......G..N.....Y......D.E.AT...  117
+AAA00017.1     61   ---.H....P.QQ.D..LKYH....AA..C..............F...T.Y..E.NT...  117
+AAA00018.1     61   ---........QQQ..H.K...A..A...Q.F.......M...SYVAR.....E.NTQ.Y  117
+DAA00016.1     61   ---.....KWWQQ..FV.K.V...CA.....IA....HW.C...YW...N...E.NT...  117
+P00019.3       61   ---..DAN...QQW...FT...D..YGI....S.....VS....Y.E......E.NTVPL  117
+
+qp1            121  FEKLKIFHYMVGHGRTASEG  140
+XP_000001.1    118  ......L.H...........  137
+CAA90002.1     118  ......L.H...........  137
+NP_000002.1    118  ......L.H...........  137
+XP_910001.1    118  ......L.H...........  137
+Q00003         118  ......L.H...........  137
+CAA00005.1     118  ...Y..L.H...........  137
+XP_920001.1    118  ......L.HI..........  137
+A0A000         118  ......L.HI..........  137
+1ABC_A         118  ......L.H...........  137
+BAA00006.1     118  ......L.H...........  137
+S00007         118  ......L.H...........  137
+0008123A       118  ....INL.H...........  137
+myprot9        118  ......L.H...........  137
+prot10         118  ......L.HL..........  137
+XP_000011.2    118  ......L.N...........  137
+P00012         118  .L....L.WK..........  137
+myprot_13      118  ......L.HG..........  137
+AAA00017.1     118  ......KPN...........  137
+AAA00018.1     118  ...K.GLET...........  137
+DAA00016.1     118  .....LL.............  137
+P00019.3       118  ...K..L.H...........  137
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 295464
+Results from round 2
+
+
+Query= qp1 query protein one
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+XP_000001.1 alpha protein [Homo sapiens]                              245     1e-88
+CAA90002.1 second defline with a gi                                   242     2e-87
+NP_000002.1 gi plus ref protein                                       242     2e-87
+XP_910001.1 long title number 01 with many words so that it is lo...  237     2e-85
+Q00003 swissprot without version                                      237     2e-85
+XP_920001.1 has a title                                               233     7e-84
+A0A000 trembl entry                                                   233     7e-84
+CAA00005.1 emb protein                                                232     1e-83
+pir||S00007 pir protein                                               230     1e-82
+1ABC_A Chain A, test structure                                        229     2e-82
+mydb:prot10 general id protein                                        226     2e-81
+prf||0008123A prf protein                                             225     9e-81
+BAA00006.1 dbj protein                                                223     3e-80
+myprot9 local id protein                                              220     8e-79
+XP_000011.2 bare refseq accession                                     215     6e-77
+AAA00017.1 gb with a locus name                                       215     7e-77
+myprot_13 bare non-accession word                                     214     1e-76
+P00012 bare uniprot-like accession                                    210     8e-75
+AAA00018.1 unnamed protein product                                    209     2e-74
+P00019.3 with taxid                                                   206     3e-73
+DAA00016.1 third-party protein                                        194     2e-68
+unnamed protein product                                               111     9e-37
+5ABC_D Chain D                                                        111     9e-37
+WP_100014.1 unnamed protein product                                   111     9e-37
+NC_100013.1                                                           111     9e-37
+BK100012.1 tpe titled                                                 111     9e-37
+4ABC no chain four                                                    111     9e-37
+unnamed protein product                                               111     9e-37
+3ABC_C Chain C                                                        111     9e-37
+DAA10008.1 tpa with subject                                           111     9e-37
+subject seven title                                                   111     9e-37
+NP_100006.1 unnamed protein product                                   111     9e-37
+US7654321_3 Sequence 3 from Patent US 7654321                         111     9e-37
+2XYY unnamed protein product                                          111     9e-37
+2XYZ_B Chain B                                                        111     9e-37
+DAA10002.1 unnamed protein product                                    111     9e-37
+DAA10001.1 tpa titled protein                                         111     9e-37
+P11111.1 titled first                                                 111     9e-37
+unnamed protein product                                               111     9e-37
+subject seven                                                         111     9e-37
+EP0238993_7 pre-grant patent                                          111     9e-37
+prf|ABC|DEF prf two fields                                            111     9e-37
+EP0123456A1_7 patent with letters                                     111     9e-37
+USRE33188_1 patent reissue                                            111     9e-37
+ti:123 trace id                                                       111     9e-37
+long1 long title word long title word long title word long title ...  111     9e-37
+AAA00100.1 big gi                                                     111     9e-37
+123 gibbmt                                                            111     9e-37
+GPP123 genome pipeline                                                111     9e-37
+BK000013.1 third party ddbj                                           111     9e-37
+BK000012.1 third party embl                                           111     9e-37
+
+Sequences not found previously or not previously below threshold:
+
+
+
+
+qp1            1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+XP_000001.1    1    ..........V...R.............................................  60
+CAA90002.1     1    ..........V...R.............................................  60
+NP_000002.1    1    ..........V...R.............................................  60
+XP_910001.1    1    ..........V...R...................................I.......Q.  60
+Q00003         1    ..........V...R...................................I.......Q.  60
+XP_920001.1    1    ..........V.D.R..........S..................................  60
+A0A000         1    ..........V.D.R..........S..................................  60
+CAA00005.1     1    ..........V...R.....F..M.....................T..............  60
+S00007         1    ..........V...RV....V........G......LH......K............D..  60
+1ABC_A         1    ..........V...R........MCC..F..P............................  60
+prot10         1    ..........VNH.R...D......L......C.S.......C.................  60
+0008123A       1    ..........V...R..F.............IW............R.F.R......SS.-  59
+BAA00006.1     1    ..........V...R...............M...........M.................  60
+myprot9        1    ..........V...RV..I.....EL...........N............YN......N.  60
+XP_000011.2    1    ..........V...R.....S...F....K..........Q..L...E.......Q...-  59
+AAA00017.1     1    ..........V..TK...S..ED..........LF.HR....R....QS...C.......  60
+myprot_13      1    ..........W.Q.RM....L.G..W..KYM..............Y......L.....P.  60
+P00012         1    ..........V..QR....W.H..I..K..........V............R.....E..  60
+AAA00018.1     1    ..........VP.KR...P.E.....V.IV.E.N...T.Q..........SS...R....  60
+P00019.3       1    ..........E..AR.....WDM...M.....P......KCS.YHY..Q.......F.Y.  60
+DAA00016.1     1    ..........C...RF....CM.........W......GCW...K..I.........S.T  60
+Subject_36     1    ..........V...R.............................................  60
+5ABC_D         1    ..........V...R.............................................  60
+WP_100014.1    1    ..........V...R.............................................  60
+NC_100013.1    1    ..........V...R.............................................  60
+BK100012.1     1    ..........V...R.............................................  60
+4ABC           1    ..........V...R.............................................  60
+Subject_30     1    ..........V...R.............................................  60
+3ABC_C         1    ..........V...R.............................................  60
+DAA10008.1     1    ..........V...R.............................................  60
+Subject_27     1    ..........V...R.............................................  60
+NP_100006.1    1    ..........V...R.............................................  60
+US7654321_3    1    ..........V...R.............................................  60
+2XYY           1    ..........V...R.............................................  60
+2XYZ_B         1    ..........V...R.............................................  60
+DAA10002.1     1    ..........V...R.............................................  60
+DAA10001.1     1    ..........V...R.............................................  60
+P11111.1       1    ..........V...R.............................................  60
+Subject_8      1    ..........V...R.............................................  60
+Subject_7      1    ..........V...R.............................................  60
+EP0238993_7    1    ..........V...R.............................................  60
+ABC            1    ..........V...R.............................................  60
+EP0123456A1_7  1    ..........V...R.............................................  60
+USRE33188_1    1    ..........V...R.............................................  60
+123            1    ..........V...R.............................................  60
+long1          1    ..........V...R.............................................  60
+AAA00100.1     1    ..........V...R.............................................  60
+123            1    ..........V...R.............................................  60
+GPP123         1    ..........V...R.............................................  60
+BK000013.1     1    ..........V...R.............................................  60
+BK000012.1     1    ..........V...R.............................................  60
+
+qp1            61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+XP_000001.1    61   ---........QQ.....K......A..................Y........E.NT...  117
+CAA90002.1     61   ---........QQ.....K...Q..A.A................Y........E.NT...  117
+NP_000002.1    61   ---........QQ.....K...Q..A.A................Y........E.NT...  117
+XP_910001.1    61   ---.A......QQ.Q...K......A..................Y........E.NT...  117
+Q00003         61   ---.A......QQ.Q...K......A..................Y........E.NT...  117
+XP_920001.1    61   ---..E.....QQ.....K......A.......C......Y...Y........E.NT...  117
+A0A000         61   ---..E.....QQ.....K......A.......C......Y...Y........E.NT...  117
+CAA00005.1     61   ---........QQ.....K.....PQ..................Y...A....E.NR...  117
+S00007         61   ---........QQ.....K....S.A....V.......I....GYV.......E.NTA..  117
+1ABC_A         61   ---........QQ.....K......A..................Y..K.K...E.GT...  117
+prot10         61   ---..T.K...QQ.....K...GQ.A....I.Q...........Y..K.....EGNT..C  117
+0008123A       60   --I........QQ.V...P......A........D.........Y......L.E.NT..T  117
+BAA00006.1     61   ---....H...QQ.....K.K...KA.........AA.....K.Y...M....E.DP...  117
+myprot9        61   ---........QQ.....KL.....A..W.........K.....Y.....HRFEWNT.Y.  117
+XP_000011.2    60   --W....NI..QQ.I...K...I.RA....D.Y.R.E..D....Y.....F..E.NT..M  117
+AAA00017.1     61   ---.H....P.QQ.D..LKYH....AA..C..............F...T.Y..E.NT...  117
+myprot_13      61   R---..D....QQ..E..K...PM.A..S......G..N.....Y......D.E.AT...  117
+P00012         61   ---.....I..QQ...HPY....YVA.NS.....Q.........YL.......E.KT...  117
+AAA00018.1     61   ---........QQQ..H.K...A..A...Q.F.......M...SYVAR.....E.NTQ.Y  117
+P00019.3       61   ---..DAN...QQW...FT...D..YGI....S.....VS....Y.E......E.NTVPL  117
+DAA00016.1     61   ---.....KWWQQ..FV.K.V...CA.....IA....HW.C...YW...N...E.NT...  117
+
+qp1            121  FEKLKIFHYMVGHGRTASEG  140
+XP_000001.1    118  ......L.H...........  137
+CAA90002.1     118  ......L.H...........  137
+NP_000002.1    118  ......L.H...........  137
+XP_910001.1    118  ......L.H...........  137
+Q00003         118  ......L.H...........  137
+XP_920001.1    118  ......L.HI..........  137
+A0A000         118  ......L.HI..........  137
+CAA00005.1     118  ...Y..L.H...........  137
+S00007         118  ......L.H...........  137
+1ABC_A         118  ......L.H...........  137
+prot10         118  ......L.HL..........  137
+0008123A       118  ....INL.H...........  137
+BAA00006.1     118  ......L.H...........  137
+myprot9        118  ......L.H...........  137
+XP_000011.2    118  ......L.N...........  137
+AAA00017.1     118  ......KPN...........  137
+myprot_13      118  ......L.HG..........  137
+P00012         118  .L....L.WK..........  137
+AAA00018.1     118  ...K.GLET...........  137
+P00019.3       118  ...K..L.H...........  137
+DAA00016.1     118  .....LL.............  137
+
+
+Lambda      K        H        a         alpha
+   0.318    0.133    0.494    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0407    0.140     1.90     42.6     43.6 
+
+Effective search space used: 295464
+
+Search has CONVERGED!
+Results from round 1
+
+
+Query= qp2 unrelated protein
+
+Length=45
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+mydb:prot10 general id protein                                        17.3    0.43 
+pir||S00007 pir protein                                               16.5    0.62 
+P00012 bare uniprot-like accession                                    16.5    0.70 
+P00019.3 with taxid                                                   14.6    3.6  
+
+
+
+qp2       4    NWKMVCRYVPYLEEDMEAWMLWKEHLTFQWCNYFWTDV  41
+prot10    1                        M.M..SVLKAV.HV      14
+prot10    45   S..VLMK.--EFSS.IHP.IT..                 65
+S00007    94     .CI.VM.G.VDQSLRH.                     110
+P00012    94     .CM.VM.R..DQSLRH.                     110
+P00019.3  70                               ..PGW.T..T  79
+
+
+Lambda      K        H        a         alpha
+   0.328    0.137    0.542    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 117360
+Results from round 2
+
+
+Query= qp2 unrelated protein
+
+Length=45
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+mydb:prot10 general id protein                                        17.7    0.24 
+P00012 bare uniprot-like accession                                    15.7    1.6  
+P00019.3 with taxid                                                   13.8    7.1  
+DAA00016.1 third-party protein                                        13.4    9.8  
+
+
+
+qp2         4    NWKMVCRYVPYLEEDMEAWMLWKEHLTFQWCNYFWTD  40
+prot10      45   S..VLMK.--EFSS.IHP.IT..                65
+P00012      94     .CM.VM.R..DQSLRH.                    110
+P00012      35                                .E..V.    40
+P00019.3    70                               ..PGW.T..  78
+DAA00016.1  64                     .IK.WQQTP.V.         75
+
+
+Lambda      K        H        a         alpha
+   0.326    0.146    0.591    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0448    0.140     1.90     42.6     43.6 
+
+Effective search space used: 117360
+
+Search has CONVERGED!
+Results from round 1
+
+
+Query= qnone no hits
+
+Length=36
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.304    0.171    0.587    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 119532
+
+
+  Database: prot_v5 (parsed Seq-ids)
+    Posted date:  Oct 26, 2026  9:07 PM
+  Number of letters in database: 4,677
+  Number of sequences in database:  51
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

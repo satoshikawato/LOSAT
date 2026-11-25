@@ -1341,6 +1341,7 @@ in_pssm = None
 in_msa = None
 msa_master_idx = None
 ignore_msa_master = false
+phi_pattern = None
 first_query_ordinal = 0
 scope_refusal = None
 pssm_versions.asn = 1
@@ -1542,6 +1543,9 @@ pssm_check = Call
 [psiblast -inclusion_ethresh 0.5]
 - inclusion_ethresh = 0.002
 + inclusion_ethresh = 0.5
+[psiblast -phi_pattern x]
+- phi_pattern = None
++ phi_pattern = "x"
 [rpsblast]
 query = "-"
 db = None

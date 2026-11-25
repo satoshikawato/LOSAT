@@ -1,0 +1,9 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+By default, testing 200 randomly sampled OIDs.
+
+Finding database volumes.
+Testing 2 volume(s).
+ <RUN>/cases/r_garbage2/junk

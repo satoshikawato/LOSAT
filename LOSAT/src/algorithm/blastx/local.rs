@@ -7,11 +7,11 @@ use super::{
     archive,
     args::{BlastxArgs, ResolvedOptions, SemanticOptionsError},
     database::{BlastxDatabase, ReportedSubjects},
+    empty_rows::SubjectLoc,
     input::FastaRecord,
     native::{
-        archive_error, database_search_error, engine, input_error, options_error, output_error,
-        report_error, reported_batch, run_query_batches, write_empty_subject_warnings,
-        ReportedAsks,
+        archive_error, database_search_error, engine, input_error, options_error, report_error,
+        reported_batch, run_query_batches, write_empty_subject_warnings, ReportedAsks,
     },
     query_setup::BATCH_SIZE,
     report::{self, LocalReport, RecordsParsed, ShownSubjects},
@@ -145,7 +145,7 @@ fn search_records(
         options.query_range = query_range;
     }
     // The taxonomy database of the reports, where the command line asks (`native::run`).
-    subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref())?;
+    subject_taxonomy(&mut resolved, args.taxdb_setting.as_ref());
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:213-217
     // Records of an input read to its end; an end that reads past them (blank lines, a reader
     // error) is met in the first batch (`reader_batches`).
@@ -241,17 +241,15 @@ fn search_records(
 pub(super) fn subject_taxonomy(
     resolved: &mut [ResolvedOptions],
     setting: Option<&crate::algorithm::common::database::TaxdbSetting>,
-) -> Result<()> {
+) {
     let taxonomy = crate::algorithm::common::database::subject_taxonomy(
         setting,
-        "BLASTX",
         resolved.iter().filter_map(|options| options.tabular),
-    )?;
+    );
     for options in resolved {
         options.taxdb_found = taxonomy.found.unwrap_or(false);
         options.subject_taxdb = taxonomy.taxdb.clone();
     }
-    Ok(())
 }
 
 /// A `-db` search's part of `report_batches`.
@@ -743,11 +741,9 @@ fn write_run(
         if let Some(document) = &mut documents[index] {
             let mut start = Vec::new();
             document.document_mut().start(&mut start);
-            writer.write_all(&start).map_err(output_error)?;
+            writer.write_all(&start)?;
         }
-        if crate::report::pairwise::flushes_after_prolog(options.html.is_some(), false) {
-            writer.flush().map_err(output_error)?;
-        }
+        writer.flush()?;
     }
     // NCBI: a batch size of 0 makes the first batch empty, and its query factory refuses it.
     if batch_size == 0 {
@@ -837,7 +833,7 @@ fn write_run(
         // search strategy request holds (`take` below).
         batch_take.note_searched(queries, results, queries_before)?;
         // Every format and the hit list read the lists in the order of the reports.
-        report::sort_lists(results);
+        report::sort_lists(results, SubjectLoc::of_run(database.is_some()));
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:283-288 (cited at
         // `native::run_inner`'s batches)
         // A database: the titles of the batch's reported sequences, read in NCBI's traceback
@@ -1007,7 +1003,7 @@ fn write_run(
                     &mut shared,
                 )
                 .map_err(archive_error)
-                .and_then(|()| writer.flush().map_err(output_error));
+                .and_then(|()| writer.flush().map_err(Into::into));
                 // An error of the format's report of the batch fails the call, or this format
                 // alone (`FormatRefusal`), which writes nothing in the later batches. The
                 // archive, as the first format, takes the place of the warnings' writer.
@@ -1043,7 +1039,7 @@ fn write_run(
                 }),
             )
             .map_err(report_error)
-            .and_then(|()| writer.flush().map_err(output_error));
+            .and_then(|()| writer.flush().map_err(Into::into));
             // An error of the format's report of the batch fails the call, or this format alone
             // (`FormatRefusal`), which writes nothing in the later batches.
             let written = refusal.check(rendered)?;
@@ -1128,7 +1124,7 @@ fn write_run(
             xml_matrix,
         )
         .map_err(report_error)
-        .and_then(|()| writer.flush().map_err(output_error));
+        .and_then(|()| writer.flush().map_err(Into::into));
         // An error of the format's epilog fails the call, or this format alone (`FormatRefusal`).
         refusal.check(ended)?;
     }
@@ -1213,6 +1209,9 @@ fn search_database(
         check_resolutions(args, &choices, resolutions, &mut *outputs.diagnostics)?;
     // The database opens after the options are processed and before the query is read, as NCBI's
     // `InitializeSubject`.
+    let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
+        outputs.formats.first().map(|format| format.outfmt),
+    );
     let database = BlastxDatabase::open_restricted(
         name,
         &settings,
@@ -1222,11 +1221,13 @@ fn search_database(
         super::args::ProgramName::BLASTX.upper,
     )?
     .showing_gis(args.show_gis)
-    .after_calls(args.first_query_ordinal > 0);
+    .after_calls(args.first_query_ordinal > 0)
+    .keeping_scope(keeps_scope, separate_xml2);
     crate::algorithm::common::database::note_archive_database_filter(
         archive,
         args.strategy.as_ref(),
         &args.db_filter,
+        database.list_gis(),
         database.list_taxids(),
         &database.statistics(),
         false,
@@ -1502,7 +1503,12 @@ fn check_resolutions(
         choices.push(choice);
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
-    let html = app::html_links(args.html, Program::Blastx, args.database_name(), &outfmts)?;
+    let html = app::html_links(
+        args.html,
+        args.request_kind(),
+        args.database_name(),
+        &outfmts,
+    )?;
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(
         "blastx",
         &outfmts,

@@ -415,7 +415,7 @@ impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
         int_member(enc, "align-len", 17, hsp.qrow.len() as i32);
         int_member(enc, "gaps", 18, counts.gaps);
         string_member(enc, "qseq", 19, &self.scratch.masked);
-        string_member(enc, "hseq", 20, hsp.srow);
+        string_member(enc, "hseq", 20, counts.hseq(hsp.srow, self.scratch));
         string_member(enc, "midline", 21, &self.scratch.midline);
         enc.end_sequence();
         Ok(())
@@ -426,7 +426,7 @@ impl<E: Encoder> HspWrite for Xml2Hsps<'_, E> {
 /// target's `db` and `subjects`) rather than a number (`int_member`, `real_member`, `big_int`):
 /// NCBI's stream writes a string one character at a time and a number at once, which decides
 /// where its buffer reaches the output (`out_buffer::xml_written_at`).
-pub(super) fn is_string_element(tag: &[u8]) -> bool {
+pub(crate) fn is_string_element(tag: &[u8]) -> bool {
     matches!(
         tag,
         b"program"

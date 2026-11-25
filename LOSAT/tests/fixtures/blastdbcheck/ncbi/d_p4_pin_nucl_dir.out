@@ -1,0 +1,18 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing first 1 and last 1 OIDs.
+
+Finding database volumes.
+Testing 1 volume(s).
+ <RUN>/cases/d_p4_pin_nucl/p4
+  [ERROR] caught exception in <RUN>/cases/d_p4_pin_nucl/p4
+NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objtools/blast/seqdb_reader/seqdbfile.cpp", line 223: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::CSeqDBIdxFile::CSeqDBIdxFile() - Error: requested sequence type does not match DB.
+
+ Result=FAILURE. 1 errors reported in 1 volumes.
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 1

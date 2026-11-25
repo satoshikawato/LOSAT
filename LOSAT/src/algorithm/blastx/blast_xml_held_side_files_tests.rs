@@ -259,3 +259,113 @@ fn a_side_file_that_cannot_be_created_at_the_release_is_the_open_error() {
     drop((held, side));
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// Discarding a held single-stream document (`HeldOutput::discard` on a LOSAT refusal) drops the
+/// held report bytes while still writing both queued stderr texts and queued `HeldDiag::Posts`
+/// (including a batch's `803.7` replaced-byte diagnostic from `-export_search_strategy`) to stderr
+/// in order.
+#[test]
+fn discard_emits_queued_strategy_posts_to_stderr() {
+    use crate::blastinput::app::Program;
+    use crate::report::archive::bioseq::BioseqInput;
+    use crate::report::archive::options::OptionInputs;
+    use crate::report::archive::strategy::{StrategyExport, StrategySink};
+    use crate::report::archive::writer::{RequestInputs, RequestQueries};
+    use crate::report::archive::{ArchiveHandle, OptionsHandle};
+    use crate::report::ostream::emit_strategy_posts;
+    use crate::report::serial::encoder::BufferPiece;
+
+    #[derive(Clone, Default)]
+    struct Sink(Arc<Mutex<Vec<u8>>>);
+    impl Sink {
+        fn record(
+            &mut self,
+            bytes: &[u8],
+            posts: &[(u64, Vec<u8>)],
+            diagnostics: &mut dyn Write,
+            archive: Option<&ArchiveHandle>,
+        ) -> io::Result<()> {
+            let _ = emit_strategy_posts(posts, None, diagnostics, archive)?;
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(())
+        }
+    }
+    impl StrategySink for Sink {
+        fn write_request(
+            &mut self,
+            bytes: &[u8],
+            _pieces: &[BufferPiece],
+            posts: &[(u64, Vec<u8>)],
+            diagnostics: &mut dyn Write,
+            archive: Option<&ArchiveHandle>,
+        ) -> io::Result<()> {
+            self.record(bytes, posts, diagnostics, archive)
+        }
+        fn write_partial(
+            &mut self,
+            bytes: &[u8],
+            posts: &[(u64, Vec<u8>)],
+            diag: &mut dyn Write,
+            archive: Option<&ArchiveHandle>,
+        ) -> io::Result<()> {
+            self.record(bytes, posts, diag, archive)
+        }
+    }
+
+    let log = Rc::new(RefCell::new(Vec::<String>::new()));
+    let held = HeldOutput::new(Box::new(Log(Rc::clone(&log), "o:")), None);
+    let mut err = held.stderr(Box::new(Log(Rc::clone(&log), "e:")));
+    held.hold();
+
+    let sink = Sink::default();
+    let export = StrategyExport::new(
+        Box::new(sink.clone()),
+        &OptionInputs::new(Program::Blastx, "blastx"),
+        None,
+        OptionsHandle::default(),
+    );
+    let bad = [BioseqInput {
+        id: "Query_1",
+        ids: None,
+        seq_loc: None,
+        defline: std::borrow::Cow::Borrowed(b">q caf\xe9"),
+        title: b"q caf\xe9",
+        letters: b"ACGTACGTACGT",
+        protein: false,
+    }];
+    let req = RequestInputs {
+        queries: RequestQueries::Bioseqs(&bad),
+        subjects: &[],
+        required: None,
+        lcase_masks: &[],
+    };
+    export.write_request(0..1, &req).unwrap();
+    let posts = export.take_all_posts();
+
+    let mut report = held.clone();
+    report.write_all(b"<BlastOutput>").unwrap();
+    err.write_all(b"reader warning\n").unwrap();
+    assert!(held.push_posts(posts));
+    err.write_all(b"later warning\n").unwrap();
+
+    held.discard();
+    drop((report, err, held));
+
+    let events = log.borrow();
+    // Held report bytes were dropped; stderr kept all warnings and the 803.7 post in order.
+    assert!(
+        events.iter().all(|e| e.starts_with("e:")),
+        "unexpected report output after discard: {events:?}"
+    );
+    let joined: String = events.iter().map(|e| &e[2..]).collect();
+    let w1 = joined.find("reader warning\n").expect("reader warning");
+    let p803 = joined
+        .find("Error: (803.7) [blastx]")
+        .expect("803.7 strategy post");
+    let w2 = joined.find("later warning\n").expect("later warning");
+    assert!(w1 < p803 && p803 < w2, "unexpected stderr order:\n{joined}");
+    assert!(
+        !sink.0.lock().unwrap().is_empty(),
+        "strategy request should be written when Posts are emitted on discard"
+    );
+}

@@ -229,7 +229,8 @@ fn bdb_error(error: BdbError) -> StreamError {
 /// an `int`) or by the text of `-db_mask` (the `string` constructor).
 pub(crate) enum Filter<'a> {
     None,
-    Name(&'a str),
+    /// The bytes of `-db_mask`.
+    Name(&'a [u8]),
 }
 
 impl BlastDbStream {
@@ -240,13 +241,13 @@ impl BlastDbStream {
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:48-57
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:62-96
     pub(crate) fn open(
-        dbname: &str,
+        dbname: &[u8],
         filter: Filter<'_>,
-        registry: Result<Option<&str>, &str>,
+        database: crate::blastinput::ncbi_environment::DatabaseSettings<'_>,
         titles: bool,
     ) -> Result<Self, StreamError> {
         let mut reader =
-            MaskBdbReader::open(dbname, SeqType::Nucleotide, registry, false, super::PROGRAM)
+            MaskBdbReader::open(dbname, SeqType::Nucleotide, database, false, super::PROGRAM)
                 .map_err(bdb_error)?;
         if titles {
             reader.ask_get_title();
@@ -259,7 +260,7 @@ impl BlastDbStream {
         };
         stream.filter = match filter {
             Filter::None => None,
-            Filter::Name(name) => match crate::ncbi_str::string_to_int(name.as_bytes(), 0).ok() {
+            Filter::Name(name) => match crate::ncbi_str::string_to_int(name, 0).ok() {
                 Some(id) => Some(stream.checked_id(id)?),
                 None => Some(stream.named_id(name)?),
             },
@@ -268,7 +269,7 @@ impl BlastDbStream {
     }
 
     /// `FindVolumePaths` (with `paths` and true) of the database opened as `dbname`.
-    pub(crate) fn volume_paths(&self, dbname: &str) -> Result<Vec<String>, StreamError> {
+    pub(crate) fn volume_paths(&self, dbname: &[u8]) -> Result<Vec<Vec<u8>>, StreamError> {
         self.reader.volume_paths(dbname).map_err(bdb_error)
     }
 
@@ -317,7 +318,7 @@ impl BlastDbStream {
     // NCBI reference (598d8ae6): c++/src/algo/blast/dbindex/sequence_istream_bdb.cpp:78-94
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2261-2266
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:2292-2296
-    fn named_id(&self, name: &str) -> Result<i32, StreamError> {
+    fn named_id(&self, name: &[u8]) -> Result<i32, StreamError> {
         let found = self
             .reader
             .db()
@@ -328,7 +329,7 @@ impl BlastDbStream {
             Ok(id) => return Ok(id),
             Err(message) => message,
         };
-        let site = crate::seqdb::throw_site(message.as_bytes())
+        let site = crate::seqdb::throw_site(&message)
             .unwrap_or(ThrowSite::generated("CSeqDBException::eInvalid"));
         Err(StreamError::Ncbi(
             NcbiException::new(site, message).rethrow(

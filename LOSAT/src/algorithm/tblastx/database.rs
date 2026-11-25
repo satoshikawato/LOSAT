@@ -82,6 +82,21 @@ impl TblastxDatabase {
         self
     }
 
+    /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
+    /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
+    /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
+    pub(crate) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+        self.taxdb.set_keeps_scope(keeps);
+        self.taxdb.set_separate_xml2(separate_xml2);
+        self
+    }
+
+    /// Mirrors `CBlastFormat::ResetScopeHistory` at the end of a query batch
+    /// (`shared::TaxdbRun::reset_scope`).
+    pub(crate) fn reset_scope(&self) {
+        self.taxdb.reset_scope();
+    }
+
     /// Opens the nucleotide database `name` as NCBI's `CSearchDatabase` opens it
     /// (`common::database::open_database`). The total length is NCBI's `Int8`, which the engine
     /// holds as such (`SubjectSetNumbers::total`) on every target.
@@ -221,6 +236,11 @@ impl TblastxDatabase {
         self.db.list_taxids()
     }
 
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(crate) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
+    }
+
     /// Whether the first query batch with a valid context fails with NCBI's `Database memory map
     /// file error` (`SeqDb::first_oid_read_fails`: no OID, and statistics that read OID 0).
     pub(crate) fn first_oid_read_fails(&self) -> bool {
@@ -272,18 +292,21 @@ impl TblastxDatabase {
     }
 
     /// LOSAT's refusals of the search masked with `mask` (`ResolvedMask::check_losat_limits`)
-    /// whose words have `word_size` letters (the shortest subject searched has `word_size * 3 + 2`
-    /// bases).
+    /// for word size `word` and two-hit window `window` (0 for one-hit; TBLASTX's translation has
+    /// no residue 0).
     pub(crate) fn check_mask_limits(
         &self,
         mask: &crate::blastinput::db_mask::ResolvedMask,
-        word_size: usize,
+        word: i32,
+        window: i32,
     ) -> Result<()> {
         mask.check_losat_limits(
             &self.db,
             PROGRAM,
             crate::blastinput::db_mask::HardScan::Translated {
-                min_length: word_size * 3 + 2,
+                word,
+                window,
+                zero_words: false,
             },
         )
     }
@@ -375,9 +398,11 @@ impl TblastxDatabase {
         threads: usize,
         mask: Option<&crate::blastinput::db_mask::ResolvedMask>,
     ) -> Result<XDbStream<'_>> {
-        Ok(XDbStream::new(&self.db, threads, PROGRAM)?.with_mask(
-            crate::algorithm::common::db_mask_search::SearchMask::of(mask),
-        ))
+        Ok(XDbStream::new(&self.db, threads, PROGRAM)?
+            .with_mask(crate::algorithm::common::db_mask_search::SearchMask::of(
+                mask,
+            ))
+            .with_hard_starts(mask.and_then(|m| m.translated_starts().cloned())))
     }
 }
 
@@ -419,7 +444,7 @@ pub(crate) fn drop_unaligned(
 /// batch name (in report order: query by query, in hit-list order; the subject index is the
 /// ordinal id, the query index counts from the batch's first query `first_query`) into
 /// `titles` (`common::database::read_header`). A reader error of NCBI's own is a
-/// `HeaderReadError` (it fails the batch); LOSAT's refusals are errors of their own. The first
+/// `ErrorAfterBatchReports` (it fails the batch); LOSAT's refusals are errors of their own. The first
 /// read of a record with a UTF8String where a VisibleString is expected is returned
 /// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there. `one_by_one`: the reports
 /// may read the reported sequences one by one (`shared::HeaderReader::new`).

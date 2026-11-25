@@ -518,13 +518,179 @@ fn posted_date_masked(text: &str) -> String {
     out
 }
 
+// `in/l_QR08.lst`-`in/l_QR15.lst` (row PS10b): PSSM and binary defline inputs where NCBI's run
+// has no defined result or depends on process state. QR08-QR10: `iupacna` byte >= 0x80 in a pair
+// position before any final odd overhang byte, where NCBI's `x_ConvertIupacnaTo4na` indexes its
+// table with a signed `char` and reads before the table (odd overhang `B18` and bytes < 0x80 `B19`
+// are defined, and `mol na` `B20` stops with NCBI's molecule error first). QR11 and QR14:
+// `:Seq-interval` pointer of another type than `PssmParameters` (binary and ASN.1 text; via
+// `Names::PROFILE`). QR12: `NULL` `Seq-id` inside `ASN1_BlastDefLine` in version 5 with 0 prior
+// OIDs (default, `-taxid 9606`, and empty `-taxid_map`, where NCBI's `~CWriteDB_TaxID` aborts
+// after posting 802.5; v4, non-empty `-taxid_map`, `org`, `-index false` on the first slot, and
+// v5 after a prior profile are frozen in `RB17`-`RB29`). QR13: 1 GiB string length past EOF
+// (host-dependent memory). QR15: `NULL` `Seq-id` profile followed by a missing input file in v5
+// and v4, where `~CWriteDB_Impl`'s `Close` throws `WriteDbError::Exception` in the unwinding of
+// the input error and NCBI aborts (rc 134); the refusal stays on one line without the trailing
+// line feed of `what()`.
+#[test]
+fn makeprofiledb_refuses_binary_and_iupacna_high_byte_defects() {
+    let iupacna_err = |byte: &str, pos: usize| {
+        format!(
+            "Error: a profile whose query has an iupacna byte {byte} at position {pos} (NCBI's \
+             makeprofiledb indexes its iupacna-to-ncbi4na table with a signed char and reads \
+             before the table) is not supported by LOSAT's MAKEPROFILEDB\n"
+        )
+    };
+    let other_si_err = |file: &str, at: &str| {
+        format!(
+            "Error: a profile that LOSAT's PSSM reader does not read ({file}: \
+             ':Seq-interval', a value of the type Seq-interval where a PssmParameters belongs \
+             ({at}): whether makeprofiledb reads it depends on the types its process has met \
+             before) is not supported by LOSAT's MAKEPROFILEDB\n"
+        )
+    };
+    let null_post_802_5 = "Error: (802.5) CObjectOStream: error at byte 15: \
+        Blast-def-line-set.E.seqid.E: cannot write unassigned member NULL element while writing \
+        container \n";
+    let qr12_v5_abort = format!(
+        "{null_post_802_5}Error: an error (ERROR: byte 15: cannot write unassigned member NULL \
+         element while writing container ) after which the database's writer stops with another \
+         (Error: No tax info for any oid; NCBI's makeprofiledb aborts there) is not supported by \
+         LOSAT's MAKEPROFILEDB\n"
+    );
+    let qr15_close_abort = format!(
+        "{null_post_802_5}Error: an error (INPUT ERROR: in/nope.smp does not exists) after which \
+         the database's writer stops with another (Error: byte 15: cannot write unassigned member \
+         NULL element while writing container ; NCBI's makeprofiledb aborts there) is not \
+         supported by LOSAT's MAKEPROFILEDB\n"
+    );
+    let cases = [
+        ("QR08", "QR08", "-binary", iupacna_err("0x80", 0)),
+        ("QR09", "QR09", "-binary", iupacna_err("0x80", 3)),
+        ("QR10", "QR10", "-binary", iupacna_err("0x80", 0)),
+        (
+            "QR11",
+            "QR11",
+            "-binary",
+            other_si_err("in/b_other_si.smp.bin", "byte 1250"),
+        ),
+        ("QR12_v5", "QR12", "", qr12_v5_abort.clone()),
+        ("QR12_tid", "QR12", "-taxid 9606", qr12_v5_abort.clone()),
+        (
+            "QR12_tmap_empty",
+            "QR12",
+            "-taxid_map in/tmap_empty.txt",
+            qr12_v5_abort,
+        ),
+        (
+            "QR13",
+            "QR13",
+            "-binary",
+            "Error: a profile that LOSAT's PSSM reader does not read (in/b_str_1g.smp.bin: a \
+             string whose length (1073741824 bytes) passes the end of the file: makeprofiledb \
+             allocates 1073741825 bytes for it, which succeeds or fails by the host's memory) is \
+             not supported by LOSAT's MAKEPROFILEDB\n"
+                .to_string(),
+        ),
+        (
+            "QR14",
+            "QR14",
+            "",
+            other_si_err("in/t_other_si.smp", "line 201"),
+        ),
+        ("QR15_v5", "QR15", "", qr15_close_abort.clone()),
+        ("QR15_v4", "QR15", "-blastdb_version 4", qr15_close_abort),
+    ];
+    for (tag, list, extra, expected_err) in cases {
+        let dir = scratch(tag);
+        let argstr = if extra.is_empty() {
+            format!("-in in/l_{list}.lst -out db")
+        } else {
+            format!("{extra} -in in/l_{list}.lst -out db")
+        };
+        let words = words(&argstr);
+        let (out, got, status, _) = run(&dir, &words);
+        assert_eq!(
+            (
+                String::from_utf8_lossy(&out),
+                String::from_utf8_lossy(&got),
+                status
+            ),
+            ("".into(), expected_err.into(), 1),
+            "{tag}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn makeprofiledb_binary_handles_non_utf8_paths() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let dir = scratch("bin-nonutf8");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("in")).unwrap();
+    let smp_bytes = fs::read(fixtures().join("in/nv01.smp.bin")).unwrap();
+    let bad_name = OsStr::from_bytes(b"bad_\xff_name.smp.bin");
+    fs::write(dir.join("in").join(bad_name), &smp_bytes).unwrap();
+    fs::write(dir.join("in/list.lst"), b"in/bad_\xff_name.smp.bin\n").unwrap();
+    let out_name = OsStr::from_bytes(b"db_\xfe_out");
+    let output = command(Path::new(env!("CARGO_BIN_EXE_losat")), &dir)
+        .args([
+            OsStr::new("makeprofiledb"),
+            OsStr::new("-binary"),
+            OsStr::new("-in"),
+            OsStr::new("in/list.lst"),
+            OsStr::new("-out"),
+            out_name,
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+    for ext in [
+        b".rps".as_slice(),
+        b".loo",
+        b".aux",
+        b".freq",
+        b".pin",
+        b".phr",
+        b".psq",
+    ] {
+        let mut file = b"db_\xfe_out".to_vec();
+        file.extend_from_slice(ext);
+        assert!(
+            dir.join(OsStr::from_bytes(&file)).is_file(),
+            "missing output file {:?}",
+            String::from_utf8_lossy(&file)
+        );
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
 // `rps/<row>.<fmt>`: NCBI rpsblast 2.17.0 `-query q3.faa -db db/db -outfmt <fmt>` on the database
 // NCBI makeprofiledb built for the row (survey rows R01 and R05, 2026-11-21; QC01, a query of
-// lower-case IUPACaa letters, 2026-11-23), its output in LOSAT's words; the database's build date
-// (outfmt 0's `Posted date:`) is the day of the run.
+// lower-case IUPACaa letters, 2026-11-23; B01 and B03, ASN.1 binary score and frequency-ratio
+// profiles, 2026-11-25), its output in LOSAT's words; the database's build date (outfmt 0's
+// `Posted date:`) is the day of the run.
 #[test]
 fn rpsblast_on_losat_databases_gives_ncbis_bytes() {
-    for (row, case) in [("R01", "O00"), ("R05", "S_f2"), ("QC01", "QC01")] {
+    for (row, case) in [
+        ("R01", "O00"),
+        ("R05", "S_f2"),
+        ("QC01", "QC01"),
+        ("B01", "B01"),
+        ("B03", "B03"),
+    ] {
         let (_, words) = cases().into_iter().find(|(name, _)| name == case).unwrap();
         let dir = scratch(&format!("rps-{row}"));
         let (_, err, status, _) = run(&dir, &words);

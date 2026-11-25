@@ -970,7 +970,7 @@ mod x_db_cut_blocks {
         let (mut log, mut messages) = (Vec::new(), Vec::new());
         let status = crate::writedb::makeblastdb::run_with(
             &args,
-            None,
+            &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
             Some(&now),
             crate::writedb::Platform::host(),
             &mut fasta.as_slice(),
@@ -1730,9 +1730,9 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
         .read_titles(&database, &hit_lists, (&[0], false))
         .err()
         .expect("a missing header file")
-        .downcast::<HeaderReadError>()
+        .downcast::<ErrorAfterBatchReports>()
         .expect("NCBI's error, with the query that reached it");
-    assert_eq!(error.query, 2);
+    assert_eq!(error.query, Some(2));
     let native = error
         .error
         .downcast_ref::<NativeError>()
@@ -1744,9 +1744,9 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
         .x_read_titles_lean(&database, &hit_lists, (&[0], false))
         .err()
         .expect("a missing header file")
-        .downcast::<HeaderReadError>()
+        .downcast::<ErrorAfterBatchReports>()
         .expect("NCBI's error, with the query that reached it");
-    assert_eq!(lean_error.query, 2);
+    assert_eq!(lean_error.query, Some(2));
     assert_eq!(
         lean_error
             .error
@@ -2124,10 +2124,10 @@ fn blocks_with_the_prefetch_need_lookups_that_cannot_be_refused() {
         (Some("btd_empty"), true),
     ] {
         let taxdb = taxdb.map(|name| tests.join("seqdb/taxdb").join(name));
-        let search =
-            SearchPath::new(&cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+        let search = SearchPath::new(&cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None);
         let database = BlastpDatabase {
-            db: SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap(),
+            db: SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search)
+                .unwrap(),
             name: "sprot_tax".to_string(),
             taxdb: shared::TaxdbRun::default(),
             program: "BLASTP",

@@ -9,11 +9,12 @@ use super::outfmt6::{format_bitscore_ncbi, format_evalue_ncbi, format_total_bits
 use super::serial::asn_text::itoa_i32;
 use super::serial::seqalign::{AlignRow, RowRangeError};
 use crate::api::local_blast::{FormatProbe, HspIndex};
-use crate::common::Hit;
+use crate::common::{GapEditOp, Hit};
 use crate::config::ScoringMatrix;
 use crate::ncbi_str::truncate_spaces;
 use crate::stats::{BlastGumbelBlk, KarlinParams};
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3563-3581
+use crate::report::ostream::ReportWrite;
 use crate::utils::matrix::protein_display_score;
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -387,42 +388,47 @@ impl PairwiseHit {
             )
     }
 
-    /// What `CSeq_align::GetSeqRange` of the row finds on the HSP's Seq-align as the engine made it
-    /// (`serial::seqalign::std_seg_row_range`): the empty rows of `rows_empty`, or the row that a
-    /// translated search's Smith-Waterman alignment starts with a gap in (RPSTBLASTN's
-    /// `-use_sw_tback`). The hits that keep their Seq-align's offsets (`has_sort_offsets`: BLASTX,
-    /// TBLASTN and TBLASTX) have Std-segs; the others' Dense-seg has a range in every row.
-    pub(crate) fn row_range(&self, row: AlignRow) -> Option<RowRangeError> {
-        if !self.hit.has_sort_offsets {
-            return None;
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1100-1122
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2576-2613
+    /// The HSP's columns, gap letters and gap openings inside the query row's aligned range
+    /// (`serial::seqalign::AlignLengths::within_query_range`: the query row's end gaps of a
+    /// Smith-Waterman alignment left out), as NCBI's tables count them (`GetAlignLengths`) and
+    /// outfmt 0's HSP header its `Gaps` (`x_GetNumGaps`, in `write_hsp_identities` and
+    /// `write_tblastn_hsp_info`; the line's denominators stay the alignment's columns). The
+    /// library's `HspRecord` holds them (`api::run::records`).
+    pub(crate) fn query_range_lengths(&self) -> super::serial::seqalign::AlignLengths {
+        super::serial::seqalign::AlignLengths {
+            length: self.hit.length,
+            gaps: self.gaps.unwrap_or_else(|| self.hit.gap_letters()),
+            gap_opens: self.hit.gapopen,
         }
-        super::serial::seqalign::std_seg_row_range(
-            self.hit.sort_query_offset as i64,
-            self.hit.sort_query_end as i64,
-            self.hit.gap_info.as_deref().unwrap_or_default(),
-            row,
-        )
+        .within_query_range(self.hit.gap_info.as_deref().unwrap_or_default())
     }
 }
 
 /// What `CSeq_align::GetSeqRange` of the row finds on the Seq-align of `hit`, of the subject whose hits are
-/// `hits`, as NCBI's formatters read it (`PairwiseHit::row_range`): `-subject`'s Seq-loc mapper
-/// (`remaps`) rewrites the empty query row of a subject with rows of letters into one nucleotide
-/// (`mapper_rewrites`; the empty subject row stays), and leaves out a first segment with a gap row
-/// (`serial::seqalign::std_seg_kept`).
+/// `hits`, as NCBI's formatters read it (`serial::seqalign::reported_std_seg_row_range`):
+/// `-subject`'s Seq-loc mapper (`remaps`) rewrites the empty query row of a subject with rows of
+/// letters into one nucleotide (`mapper_rewrites`; the empty subject row stays). Its leaving out of
+/// an end segment with a gap row is in the hit already (`serial::seqalign::mapped_script`). The
+/// hits that keep their Seq-align's offsets (`has_sort_offsets`: BLASTX, TBLASTN and TBLASTX) have
+/// Std-segs; the others' Dense-seg has a range in every row.
 fn seen_row_range(
     remaps: bool,
     hits: &[&PairwiseHit],
     hit: &PairwiseHit,
     row: AlignRow,
 ) -> Option<RowRangeError> {
-    let error = hit.row_range(row)?;
-    let seen = match (error, row) {
-        (RowRangeError::Empty, AlignRow::Query) => !mapper_rewrites(remaps, hits),
-        (RowRangeError::Empty, AlignRow::Subject) => true,
-        (RowRangeError::SeqidsNotConsistent, _) => !remaps,
-    };
-    seen.then_some(error)
+    if !hit.hit.has_sort_offsets {
+        return None;
+    }
+    super::serial::seqalign::reported_std_seg_row_range(
+        hit.hit.sort_query_offset as i64,
+        hit.hit.sort_query_end as i64,
+        hit.hit.gap_info.as_deref().unwrap_or_default(),
+        row,
+        mapper_rewrites(remaps, hits),
+    )
 }
 
 /// The first exception of `GetSeqRange` where a formatter reads the ranges of `row` of every HSP of
@@ -457,9 +463,68 @@ pub(crate) enum EmptyRowsStop {
     StdSegLengths,
     /// Not an exception: the merge of a query-anchored section (outfmt 1 to 4) frees a segment
     /// that it still reads (`blastx_anchored_stop`), which LOSAT refuses before the call's first
-    /// byte (`algorithm::blastx::empty_rows::UNPORTED_ANCHORED_FREE`).
+    /// byte (`UNPORTED_ANCHORED_FREE`).
     MergeFreesSegment,
 }
+
+/// The error of outfmt 0's writer (and of outfmt 1 to 4's): its stop at an HSP of length 0 or at a
+/// row that starts with a gap (`EmptyRowsStop`) is NCBI's exception, `CSeq_align::GetSeqRange`'s
+/// where the sorts or the description table read such a row (after the query's `Length=`;
+/// `serial::seqalign::row_range_exception`), `CreateDensegFromStdseg` where they or
+/// `-subject`'s alignment section make a Dense-seg of the Seq-loc mapper's rows, or LOSAT's
+/// refusal of a query-anchored section whose merge NCBI frees a segment in (before the call's
+/// first byte); the exception of a subject's load that ends the run (`cli::NativeError::of_writer`,
+/// `x_pairwise_par::alignment_end`); a write error stays. The one map of the writers' stops: BLASTX's
+/// and TBLASTN's outfmt 0 to 4 map their writer's errors with it.
+pub(crate) fn empty_rows_stop(error: std::io::Error) -> anyhow::Error {
+    match error
+        .get_ref()
+        .and_then(|e| e.downcast_ref::<EmptyRowsStop>())
+    {
+        Some(EmptyRowsStop::RowRange(error)) => crate::cli::NativeError::exception(
+            &super::serial::seqalign::row_range_exception(*error),
+        )
+        .into(),
+        Some(EmptyRowsStop::StdSegLengths) => crate::cli::NativeError::exception(
+            &super::serial::seqalign::std_seg_lengths_not_accurate(),
+        )
+        .into(),
+        Some(EmptyRowsStop::MergeFreesSegment) => {
+            EmptyRowsRefusal(UNPORTED_ANCHORED_FREE.to_string()).into()
+        }
+        None => crate::cli::NativeError::of_writer(error),
+    }
+}
+
+/// LOSAT's refusal of a report of an ungapped HSP of length 0 whose form LOSAT does not
+/// reproduce: not an error of NCBI's engine or formatters.
+#[derive(Debug)]
+pub(crate) struct EmptyRowsRefusal(pub(crate) String);
+
+impl std::fmt::Display for EmptyRowsRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for EmptyRowsRefusal {}
+
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmerger.cpp:598-606 (cited at
+// `report::query_anchored::aln_mix::Mix::place`), c++/src/objtools/alnmgr/alnsegments.cpp:
+// 310-327 (cited at `report::query_anchored::aln_mix::Mix::fill_unaligned_regions`)
+/// The refusal of a query-anchored report (outfmt 1 to 4) whose section NCBI's merge frees a
+/// segment in (`EmptyRowsStop::MergeFreesSegment`,
+/// `report::query_anchored::aln_mix::MixError::NcbiFreesSegment`): the Dense-seg of an HSP of
+/// length 0 has no widths, so `DisplaySeqalign` merges it with the HSPs of the query's frame +1
+/// (`report::query_anchored::HspStrands::no_widths`), as a segment of length 0 of a query row.
+/// One whose query row starts at a codon of one of those HSPs splits that HSP's segment at a
+/// length of 0, which replaces every reference to the segment while the merge still walks it
+/// (`Mix::place`). One that its query row's next segment does not follow at once is where
+/// `FillUnalignedRegions` starts to fill the row, which replaces the row's reference to its
+/// segment: the last one unless the segment is the last that the merge made (`x_Merge`'s local
+/// `CRef`), so the segment is freed while `m_Segments` still lists it and `x_CreateDenseg`
+/// reads it (`Mix::fill_unaligned_regions`). PD-LOSAT-NCBI-DEFECTS rule 3.
+pub(crate) const UNPORTED_ANCHORED_FREE: &str = "BLASTX -ungapped -window_size 0 with -outfmt 1 to 4: a one-hit ungapped alignment of length 0 among the alignments shown where NCBI BLAST+'s merge of the query-anchored alignments frees memory that it still reads (it crashed in our runs): one whose query row starts at the first nucleotide of a codon of an alignment in the query's reading frame +1, whose segment the merge splits at a length of 0, or one followed on its query row by unaligned letters, whose segment of length 0 the merge's FillUnalignedRegions replaces, unless it is the last segment the merge made, which LOSAT does not support";
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1522-1530
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3074-3094
@@ -1457,7 +1522,7 @@ fn write_hsp_identities<W: Write>(
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
     let pos_pct = ncbi_percent_match(positives, align_len);
 
-    let gaps = hit.gaps.unwrap_or_else(|| h.gap_letters());
+    let gaps = hit.query_range_lengths().gaps;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
     let gap_pct = ncbi_percent_match(gaps, align_len);
 
@@ -1563,16 +1628,7 @@ pub fn write_alignment<W: Write>(
 
     // If we have actual sequences, display them
     if let (Some(ref qseq), Some(ref sseq)) = (&hit.query_seq, &hit.subject_seq) {
-        write_alignment_with_sequences(
-            writer,
-            h,
-            qseq,
-            sseq,
-            [&hit.query_stored_gaps, &hit.subject_stored_gaps],
-            hit.query_case,
-            masks,
-            config,
-        )?;
+        write_alignment_with_sequences(writer, h, qseq, sseq, hit.query_case, masks, config)?;
     } else {
         // No sequences available - show placeholder
         writeln!(
@@ -1595,16 +1651,14 @@ pub fn write_alignment<W: Write>(
 /// Write alignment with actual sequences: the rows of BLASTP, RPSBLAST, PSIBLAST and DELTABLAST
 /// (`seqalign::protein_row_segments`) and of BLASTN (`seqalign::nucleotide_row_segments`; a
 /// minus-strand HSP's Dense-seg is reversed, `query_anchored::HspAlnVec`, so its subject row runs
-/// from high to low), rows of letters (`write_hsp_rows`). `stored_gaps` are the columns of the
-/// query's and the subject's rows whose `-` is a residue (`PairwiseHit::query_stored_gaps`,
-/// `PairwiseHit::subject_stored_gaps`), `query_case` how the query row's letters compare
-/// (`PairwiseHit::query_case`), `masks` the rows' masks under `-html` (`write_hsp_rows`).
+/// from high to low), rows of letters (`write_hsp_rows`), the columns of `hit`'s edit script.
+/// `query_case` is how the query row's letters compare (`PairwiseHit::query_case`), `masks` the
+/// rows' masks under `-html` (`write_hsp_rows`).
 fn write_alignment_with_sequences<W: Write>(
     writer: &mut W,
     hit: &Hit,
     query_seq: &str,
     subject_seq: &str,
-    stored_gaps: [&[u32]; 2],
     query_case: super::row_letters::QueryCase,
     masks: Option<&super::query_anchored::HspMasks>,
     config: &PairwiseConfig,
@@ -1619,17 +1673,15 @@ fn write_alignment_with_sequences<W: Write>(
     let max_start_len = coordinate_width(hit);
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1570-1573
     let nucleotide = config.program == "blastn";
-    // The rows' end gaps (`end_gap_span`; a `-` that is a residue, the query's gap residue or a
-    // gap stored in the subject, is a residue). A BLASTN alignment (X-drop or greedy) starts and
-    // ends with a substitution and has none: a `-` at the end of its query row fills a segment
-    // past the query's end, the gap character (alnvec.cpp:288-297, cited at `end_gap_span`;
+    // The rows' end gaps (`row_spans`). A BLASTN alignment (X-drop or greedy) starts and ends
+    // with a substitution and has none: a `-` at the end of its query row fills a segment past the
+    // query's end, the gap character (alnvec.cpp:288-297, cited at `row_spans`;
     // `algorithm::blastn::pairwise::context_letters`).
-    let [query_span, subject_span] = if nucleotide {
-        [(0, q_chars.len()), (0, s_chars.len())]
-    } else {
-        [(&q_chars, stored_gaps[0]), (&s_chars, stored_gaps[1])]
-            .map(|(row, stored)| end_gap_span(row, stored))
+    let ops = match nucleotide {
+        true => &[][..],
+        false => hit.gap_info.as_deref().unwrap_or_default(),
     };
+    let [query_span, subject_span] = row_spans(ops, [q_chars.len(), s_chars.len()]);
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2131-2155
     // The rows may carry lowercase masking, which NCBI applies only when it prints a
@@ -1996,7 +2048,7 @@ fn write_wrapped<W: Write>(writer: &mut W, text: &[u8]) -> io::Result<()> {
 }
 
 /// The row `row` (`text`, its `char`s `chars`) as NCBI's row string (`GetWholeAlnSeqString`):
-/// its end gaps (the columns outside `span`, `end_gap_span`) the end character, a space. A row
+/// its end gaps (the columns outside `span`, `row_spans`) the end character, a space. A row
 /// of ASCII letters without end gaps is its text as it is.
 fn row_string<'a>(
     text: &'a str,
@@ -2018,7 +2070,7 @@ fn row_string<'a>(
 }
 
 /// The row `row` of ASCII letters as NCBI's row string (`row_string`): its columns outside `span`
-/// (`end_gap_span`) a space.
+/// (`row_spans`) a space.
 fn ascii_row_string(row: &[u8], span: (usize, usize)) -> std::borrow::Cow<'_, [u8]> {
     if span == (0, row.len()) {
         return std::borrow::Cow::Borrowed(row);
@@ -2030,50 +2082,41 @@ fn ascii_row_string(row: &[u8], span: (usize, usize)) -> std::borrow::Cow<'_, [u
 }
 
 /// The rows `[query, subject]` of ASCII letters of a translated program's HSP (BLASTX's,
-/// TBLASTN's) as NCBI's row strings (`ascii_row_string`), `stored` the columns of each row whose
-/// `-` is a residue (`PairwiseHit::query_stored_gaps`, `PairwiseHit::subject_stored_gaps`): a
-/// Smith-Waterman alignment that starts with a gap (RPSTBLASTN's `-use_sw_tback`, line PS item
-/// PS12d) shows it as spaces, as the end gaps of BLASTP's rows (`write_alignment_with_sequences`).
+/// TBLASTN's), the columns of its edit script `ops`, as NCBI's row strings (`ascii_row_string`):
+/// a Smith-Waterman alignment that starts with a gap (`-use_sw_tback`, line PS item PS12d) shows
+/// it as spaces, as the end gaps of BLASTP's rows (`write_alignment_with_sequences`).
 fn ascii_row_strings<'a>(
     rows: [&'a [u8]; 2],
-    stored: [&[u32]; 2],
+    ops: &[GapEditOp],
 ) -> [std::borrow::Cow<'a, [u8]>; 2] {
-    [0, 1].map(|row| ascii_row_string(rows[row], end_gap_span(rows[row], stored[row])))
+    let spans = row_spans(ops, rows.map(<[u8]>::len));
+    [0, 1].map(|row| ascii_row_string(rows[row], spans[row]))
 }
 
 // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnvec.hpp:386-393
 // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:362-370 (`GetWholeAlnSeqString`)
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:279-297
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1209-1216
 // (`eShowEndGaps` is set by the query-anchored views only, blast_format.cpp:1754-1758; the
 // tabular writer sets the gap character alone, tabular.cpp:982-986.)
-/// The columns `lo..hi` of a row of a pairwise alignment between its end gaps: its columns before
-/// its first residue and after its last, which NCBI's alignment strings fill with the end
-/// character (a space in the pairwise view and in the tabular `qseq`, `sseq` and `btop`) where an
-/// inner gap is `-`. `stored` holds the columns (sorted) whose `-` is a residue: a gap character
-/// of the sequence (a database's stored `-`, a PSSM query's gap residue). Only a Smith-Waterman
-/// alignment has end gaps (rpsblast's `-use_sw_tback`: `ALIGN_EX` runs from the Smith-Waterman
-/// start over a rectangle whose best path may start with a gap); an X-drop alignment starts and
-/// ends with a substitution. The `-` that
-/// fills a segment past a sequence's end is the gap character (alnvec.cpp:279-297): `-subject`'s
-/// mapped row of BLASTX, which the tables write as it is (`tabular::TabularHsp::end_gaps`) and
-/// outfmt 0 refuses (decision X2g-5 of line RG), and BLASTN's query row of an HSP that NCBI keeps
-/// outside its query context (`algorithm::blastn::pairwise::context_letters`), whose rows the
-/// tables and outfmt 0 write without this span (remaining-gaps X1b-p).
-pub(crate) fn end_gap_span<T: Copy + PartialEq + From<u8>>(
-    row: &[T],
-    stored: &[u32],
-) -> (usize, usize) {
-    let gap = T::from(b'-');
-    let end_gap =
-        |column: usize| row[column] == gap && stored.binary_search(&(column as u32)).is_err();
-    let lo = (0..row.len())
-        .find(|&column| !end_gap(column))
-        .unwrap_or(row.len());
-    let hi = (lo..row.len())
-        .rev()
-        .find(|&column| !end_gap(column))
-        .map_or(lo, |column| column + 1);
-    (lo, hi)
+/// The columns `lo..hi` of the query's and the subject's rows (of `lens` columns) of an HSP whose
+/// edit script is `ops` between their end gaps (`serial::seqalign::row_end_gaps`): a row's gap
+/// operations before its first letter and after its last, which NCBI's alignment strings fill
+/// with the end character (a space in the pairwise view and in the tabular `qseq`, `sseq` and
+/// `btop`, `report::tabular::push_alignment_row`) where an inner gap is `-`. NCBI decides by where
+/// a `-` comes from: a `-` that is a residue (a database's stored `-`, a PSSM query's gap
+/// residue) is a letter of the script, as is the gap character that fills a segment past a
+/// sequence's end (BLASTN's query row of an HSP that NCBI keeps outside its query context,
+/// `algorithm::blastn::pairwise::context_letters`, whose rows are shown without a script,
+/// remaining-gaps X1b-p). Only a Smith-Waterman alignment has end gaps (`-use_sw_tback`:
+/// `ALIGN_EX` runs from the Smith-Waterman start over a rectangle whose best path may start with
+/// a gap); an X-drop alignment starts and ends with a substitution.
+fn row_spans(ops: &[GapEditOp], lens: [usize; 2]) -> [(usize, usize); 2] {
+    use super::serial::seqalign::row_end_gaps;
+    [
+        row_end_gaps(ops, AlignRow::Query).span(lens[0]),
+        row_end_gaps(ops, AlignRow::Subject).span(lens[1]),
+    ]
 }
 
 /// Check if two amino acids are a positive match (similar)
@@ -2247,33 +2290,22 @@ fn write_ncbi_ka_field<W: Write>(writer: &mut W, value: f64) -> io::Result<()> {
     write!(writer, "{:>8} ", format_ncbi_ka_value(value))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:395
-// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:396-441
-/// Whether a report's writer is flushed after its prolog, before the search (`write_prolog`):
-/// `html`, the report is `-html`; `own_buffer`, the writer is a buffer that its sink opened for
-/// the prolog alone (`OutputSink::open` of a library call's `Stdout` or `File` sink), flushed so
-/// that its write errors show. A plain report keeps dev's flush points (the writers of blastn,
-/// blastx and tblastx flush there; blastp and tblastn write the prolog with the first report). An
-/// `-html` report does not flush there: NCBI's `PrintProlog` flushes `cout` with the `NcbiEndl`
-/// pair after the version line and writes the references and the database lines after it without
-/// a flush, so its `cout` keeps those bytes until a post on `cerr` (tied to `cout`:
-/// `query_warnings::write_html_post`) or its buffer writes them, and `GETURL_DEBUG`'s `REGISTRY:`
-/// line, which is not a post (`QueryWarnings::html_stderr_line`), comes before them where both
-/// streams go to one pipe (line RG T4a2 fix round 2, review c C4: NCBI BLAST+ 2.17.0 after the
-/// version line's 159 bytes in every program, probes `T/t4/fix2/out/c4.*`). A write failure still
-/// shows before the search, at the version line (`write_prolog`). NCBI's later flush points of the
-/// report (the `NcbiEndl` that starts each query's footer, its buffer's size) are the report
-/// stream's of line RG T6a (PR #1508), which takes this rule with it (decision T4a2-14).
-pub(crate) fn flushes_after_prolog(html: bool, own_buffer: bool) -> bool {
-    !html || own_buffer
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:391-395
+/// The two `NcbiEndl` after the version line of `PrintProlog`'s references: two line feeds,
+/// each a flush of NCBI's (`ReportWrite::ncbi_flush`).
+fn write_prolog_endl(writer: &mut (impl ReportWrite + ?Sized)) -> io::Result<()> {
+    writeln!(writer)?;
+    writer.ncbi_flush()?;
+    writeln!(writer)?;
+    writer.ncbi_flush()
 }
 
 /// `CBlastFormat::PrintProlog` of the reports of formats 0-4 of every program (the one place of
 /// the start of their output): the version line (`reference::write_version_line`), the `NcbiEndl`
-/// pair and the references (`reference::write_prolog_references`: the Gapped BLAST or, for
-/// `megablast`, the megablast reference and, with `indexed_megablast`, the database indexing one
-/// after it, psiblast's compositionally adjusted matrices and the composition-based statistics of
-/// psiblast and blastp). `program` is NCBI's `m_Program` (any
+/// pair (`write_prolog_endl`) and the references (`reference::write_prolog_references`: the
+/// Gapped BLAST or, for `megablast`, the megablast reference and, with `indexed_megablast`, the
+/// database indexing one after it, psiblast's compositionally adjusted matrices and the
+/// composition-based statistics of psiblast and blastp). `program` is NCBI's `m_Program` (any
 /// case; `blastp_family_program` for blastp's driver).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:360-395
@@ -2283,50 +2315,49 @@ pub(crate) fn flushes_after_prolog(html: bool, own_buffer: bool) -> bool {
 /// are those of formats 0-4 that write the references.) `disable_ka_stats` is
 /// NCBI's `m_DisableKAStats` (blastn's matrix-only scoring, `BlastnIntro::matrix_only`): a
 /// blastn search then names `rmblastn` in the version line and writes RMBlast's reference, three
-/// lines with no line end after the last, before the `NcbiEndl` pair; the references after it
-/// are blastn's. `NcbiEndl` is `std::endl`, which flushes in every NCBI program. `endl_flushes`
-/// keeps each program's flushes of dev for the plain report: the reports that share the
-/// translated programs' prolog (blastx, rpstblastn, tblastn, tblastx, the blastn tasks other than
-/// megablast and matrix-only scoring) flush there, blastp's driver (blastp, psiblast, rpsblast)
-/// and megablast do not and flush later. A flush moves the point where these bytes reach the
-/// output and where a write failure shows, so the difference stays data here, not a change of
-/// this groundwork. An `-html` prolog flushes at both in every program, as NCBI's: its references
-/// post on the diagnostics (below), which a failed write of the output must not precede (line RG
-/// T4a2 review B4: `-out /dev/full` with `GETURL_DEBUG`).
+/// lines with no line end after the last, in NCBI's four insertions, before the `NcbiEndl` pair;
+/// the references after it are blastn's. `NcbiEndl` is `std::endl`, which flushes in every NCBI
+/// program: each is a flush of NCBI's here, in every program and also in an `-html` prolog (line
+/// RG item T6a: the flush is where these bytes reach the device and where a failed write shows;
+/// line RG T4a2 review B4: blastp's `-html -out /dev/full` with `GETURL_DEBUG` wrote
+/// `REGISTRY: .ncbirc` before NCBI's write error). The references and the database lines after
+/// the pair stay in NCBI's buffer (`ReportStream`) until a post on `cerr` (tied to `cout`) or its
+/// buffer writes them, so `GETURL_DEBUG`'s `REGISTRY:` line, which is not a post
+/// (`QueryWarnings::html_stderr_line`), comes before them where both streams go to one pipe
+/// (line RG T4a2 fix round 2, review c C4: NCBI BLAST+ 2.17.0 after the version line's 159 bytes
+/// in every program, probes `T/t4/fix2/out/c4.*`).
 /// `html`: the run's `-html` data (`html_ids::HtmlLinks`; `None`: the plain report) and the run's
 /// diagnostics: the HTML head and `<PRE>` (`HTML_PREFIX`) first, the version line in bold, and the
 /// references with their links, each with its own read of `./.ncbirc`, whose posts go to the
 /// diagnostics (`HtmlLinks::ncbirc`); a malformed file ends the prolog after the version line and
 /// its two newlines with NCBI's exception (line RG T4 probes `bp.di.f0.rc_bad.h`,
-/// `rc_bad_dontuse.h`: exit status 255). After the prolog, `flushes_after_prolog`.
-pub(crate) fn write_prolog<W: Write + ?Sized>(
+/// `rc_bad_dontuse.h`: exit status 255).
+pub(crate) fn write_prolog<W: ReportWrite + ?Sized>(
     writer: &mut W,
     program: &str,
     version: &str,
     megablast: bool,
     indexed_megablast: bool,
-    endl_flushes: bool,
     disable_ka_stats: bool,
     html: Option<(&super::html_ids::HtmlLinks, &mut dyn Write)>,
 ) -> io::Result<()> {
-    let endl_flushes = endl_flushes || html.is_some();
     if html.is_some() {
         writer.write_all(HTML_PREFIX)?;
     }
     if disable_ka_stats && program.eq_ignore_ascii_case("blastn") {
         super::reference::write_version_line(writer, html.is_some(), "rmblastn", version)?;
-        writer.write_all(
-            b"\n\nReference: Robert M. Hubley, Arian Smit\nRMBlast - RepeatMasker Search Engine\n2010 <http://www.repeatmasker.org>",
-        )?;
+        for insertion in [
+            &b"\n\n"[..],
+            b"Reference: Robert M. Hubley, Arian Smit\n",
+            b"RMBlast - RepeatMasker Search Engine\n",
+            b"2010 <http://www.repeatmasker.org>",
+        ] {
+            writer.write_all(insertion)?;
+        }
     } else {
         super::reference::write_version_line(writer, html.is_some(), program, version)?;
     }
-    for _ in 0..2 {
-        writeln!(writer)?;
-        if endl_flushes {
-            writer.flush()?;
-        }
-    }
+    write_prolog_endl(writer)?;
     super::reference::write_prolog_references(
         writer,
         html.map(|(links, diagnostics)| (&links.ncbirc, diagnostics)),
@@ -2526,7 +2557,7 @@ fn last_break(bytes: &[u8], pos: usize, end: usize) -> (usize, i32) {
 
 /// The outfmt 0 prolog of blastp (the version, the references and the database), which
 /// NCBI writes before it reads the first query batch (c++/src/algo/blast/format/blast_format.cpp, `PrintProlog`).
-pub fn write_blastp_pairwise_prolog<W: Write>(
+pub fn write_blastp_pairwise_prolog<W: ReportWrite>(
     writer: &mut W,
     version: &str,
     program: &str,
@@ -2540,7 +2571,6 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
         writer,
         blastp_family_program(program),
         version,
-        false,
         false,
         false,
         false,
@@ -2563,7 +2593,7 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
 /// The `Database:` lines of the prolog for the database of a `-db` search: the titles of the
 /// databases of its list joined with `; ` (`PairwiseDatabase::new`), wrapped at 68, then the
 /// summed counts and one blank line.
-fn write_blast_database_header<W: Write>(
+fn write_blast_database_header<W: ReportWrite>(
     writer: &mut W,
     database: &PairwiseDatabase,
 ) -> io::Result<()> {
@@ -2584,7 +2614,7 @@ fn write_blast_database_header<W: Write>(
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:525-553
 /// The `Masked using:` line of a database searched with database masking (`indent` before it:
 /// none in the prolog, two spaces in the epilog), not wrapped; nothing without it.
-fn write_masked_using<W: Write>(
+fn write_masked_using<W: ReportWrite>(
     writer: &mut W,
     indent: &str,
     database: &DatabaseInfo,
@@ -2600,14 +2630,15 @@ fn write_masked_using<W: Write>(
     if !database.filt_algorithm_options.is_empty() {
         write!(writer, ", options: '{}'", database.filt_algorithm_options)?;
     }
-    writeln!(writer)
+    // An insertion of `endl` (align_format_util.cpp:531, :551): a flush.
+    crate::report::ostream::ncbi_endl(writer)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:541-574
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2255-2267
 /// The database blocks of the epilog, one per database of the list, and the blank lines
 /// before the matrix line (as `write_final_database_report`).
-fn write_final_database_block<W: Write>(
+fn write_final_database_block<W: ReportWrite>(
     writer: &mut W,
     database: &PairwiseDatabase,
 ) -> io::Result<()> {
@@ -2703,11 +2734,12 @@ fn write_no_hits_found<W: Write>(writer: &mut W) -> io::Result<()> {
 // PrintKAParameters emits both -1 Karlin blocks with no Gumbel columns.
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:477-478
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1491
-fn write_tblastn_unsearched_query_footer_spacing<W: Write>(
+fn write_tblastn_unsearched_query_footer_spacing<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
     trailing: bool,
 ) -> io::Result<()> {
-    writeln!(writer)?;
+    // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+    crate::report::ostream::ncbi_endl(writer)?;
     writeln!(writer, "Lambda      K        H")?;
     for _ in 0..3 {
         write_ncbi_ka_field(writer, -1.0)?;
@@ -2732,7 +2764,7 @@ fn write_tblastn_unsearched_query_footer_spacing<W: Write>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-478:
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:477-478
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1491-1491
-fn write_blastp_query_footer_spacing<W: Write>(
+fn write_blastp_query_footer_spacing<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
     ungapped_karlin: KarlinParams,
     gapped_karlin: KarlinParams,
@@ -2753,7 +2785,8 @@ fn write_blastp_query_footer_spacing<W: Write>(
             trailing,
         );
     };
-    writeln!(writer)?;
+    // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+    crate::report::ostream::ncbi_endl(writer)?;
     writeln!(writer, "Lambda      K        H        a         alpha")?;
     write_ncbi_ka_field(writer, ungapped_karlin.lambda)?;
     write_ncbi_ka_field(writer, ungapped_karlin.k)?;
@@ -2797,12 +2830,12 @@ fn write_blastp_query_footer_spacing<W: Write>(
 /// The epilog's matrix line after its blank lines (`options.GetMatrixName()`). `None`: the
 /// options name no matrix, as RPS-BLAST's (`CBlastRPSOptionsHandle` sets none) before a query
 /// batch's set-up names the database's; the null `const char*` sets `badbit` on the formatter's
-/// stream, which throws (`cli::BadbitInsertion`): the report ends after `Matrix: ` (NCBI BLAST+
+/// stream, which throws (`ReportWrite::badbit`): the report ends after `Matrix: ` (NCBI BLAST+
 /// 2.17.0: rpsblast and rpstblastn with an empty pipe, outfmt 0 to 4, exit status 6).
-fn write_matrix_line(writer: &mut impl Write, matrix_name: Option<&str>) -> io::Result<()> {
+fn write_matrix_line(writer: &mut impl ReportWrite, matrix_name: Option<&str>) -> io::Result<()> {
     writer.write_all(b"Matrix: ")?;
     let Some(name) = matrix_name else {
-        return Err(crate::cli::BadbitInsertion::error());
+        return writer.badbit();
     };
     writeln!(writer, "{name}")
 }
@@ -2810,7 +2843,7 @@ fn write_matrix_line(writer: &mut impl Write, matrix_name: Option<&str>) -> io::
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:503-579
 //
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2258-2285
-fn write_blastp_final_footer<W: Write>(
+fn write_blastp_final_footer<W: ReportWrite>(
     writer: &mut W,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
@@ -2910,7 +2943,7 @@ fn write_final_database_report<W: Write>(
 /// it), each query's section, and the epilog when `epilog` is set. `query_gapped_k` is
 /// rpsblast's gapped K of each query's footer (`rps_search::engine::batch_gapped_k`), `None` for
 /// blastp and psiblast (the report's `gapped_karlin`).
-pub fn write_blastp_pairwise_report<W: Write>(
+pub fn write_blastp_pairwise_report<W: crate::report::ostream::ReportWrite>(
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
@@ -2959,7 +2992,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
 /// with its last. `anchored`: the sequences of the query-anchored sections (`config.view` of
 /// outfmt 1 to 4; `None` for outfmt 0).
 #[allow(clippy::too_many_arguments)]
-pub fn write_blastp_pairwise_window<W: Write>(
+pub fn write_blastp_pairwise_window<W: crate::report::ostream::ReportWrite>(
     hits: &[PairwiseHit],
     query_range: std::ops::Range<usize>,
     writer: &mut W,
@@ -2990,7 +3023,6 @@ pub fn write_blastp_pairwise_window<W: Write>(
             writer,
             blastp_family_program(&config.program),
             &report.version,
-            false,
             false,
             false,
             false,
@@ -3058,12 +3090,10 @@ pub fn write_blastp_pairwise_window<W: Write>(
         return writer.flush();
     }
 
-    // The blank lines before the epilog (blast_format.cpp:2249).
-
-    writeln!(writer)?;
-
-    writeln!(writer)?;
-
+    // The blank lines before the epilog (blast_format.cpp:2249): two insertions of `NcbiEndl`,
+    // each a flush.
+    crate::report::ostream::ncbi_endl(writer)?;
+    crate::report::ostream::ncbi_endl(writer)?;
     write_blastp_final_footer(writer, report, database, config.html.is_some())?;
     writer.flush()
 }
@@ -3277,7 +3307,7 @@ fn blastx_mapped_empty_rows(remaps: bool, hits: &[&PairwiseHit]) -> bool {
 /// `FillUnalignedRegions` after a segment of length 0). `None` for a report without such an
 /// HSP among its aligned subjects. What NCBI writes before the crash is what its stream had flushed
 /// (no prefix of it is NCBI's, as for `query_anchored::ncbi_aborts`): the program refuses the
-/// report before the call's first byte (`empty_rows::UNPORTED_ANCHORED_FREE`), unless a query
+/// report before the call's first byte (`UNPORTED_ANCHORED_FREE`), unless a query
 /// before it ends the run with an exception.
 fn blastx_anchored_stop(
     config: &PairwiseConfig,
@@ -3494,7 +3524,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             )
     }
 
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -3534,7 +3564,8 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
             if query.batch_skipped {
                 write_tblastn_unsearched_query_footer_spacing(writer, false)?;
             } else if !query.valid {
-                writeln!(writer)?;
+                // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+                crate::report::ostream::ncbi_endl(writer)?;
                 writeln!(writer)?;
                 writeln!(writer)?;
                 writeln!(writer, "Effective search space used: 0")?;
@@ -3588,7 +3619,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         writeln!(writer)
     }
 
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
@@ -3660,7 +3691,7 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
     /// The query-anchored section of the query's aligned subjects (`blastp_section_hsps`).
-    fn alignments<W: Write>(
+    fn alignments<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -3673,7 +3704,11 @@ impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
         })
     }
 
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()> {
         let query = &self.queries[q_idx];
         write_blastp_query_footer_spacing(
             writer,
@@ -3807,8 +3842,9 @@ fn write_description_table<W: Write>(
     place: super::query_warnings::ReportHook<'_, W>,
     // `-html`: the rows' links (`HtmlRows`); `None`: the plain table.
     html: Option<HtmlRows<'_>>,
-    // Where the table's read of its rows' ranges throws (BLASTX's HSPs with empty rows,
-    // `described_row_range`): that exception; `None` for every other table.
+    // Where the table's read of its rows' ranges throws (`described_row_range`: BLASTX's HSPs with
+    // empty rows, BLASTX's and TBLASTN's rows that start with a gap): that exception; `None` for
+    // every other table.
     rows_throw: Option<EmptyRowsStop>,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1068-1070
@@ -4317,6 +4353,8 @@ fn write_blastn_description_table<W: Write>(
         crate::report::db_subject::AfterThrow,
     )>,
     loads: &crate::report::db_subject::HitLoads,
+    // Where the rows' ranges throw (`write_description_table`; TBLASTN's, `described_row_range`).
+    rows_throw: Option<EmptyRowsStop>,
 ) -> io::Result<()> {
     write_description_table(
         writer,
@@ -4348,7 +4386,7 @@ fn write_blastn_description_table<W: Write>(
             parsed,
             loads,
         }),
-        None,
+        rows_throw,
     )
 }
 
@@ -4359,14 +4397,15 @@ fn write_blastn_description_table<W: Write>(
 // `None`) and a search space of 0.
 /// The footer of a nucleotide query, with the two blank lines that follow it (the next
 /// query's preamble or the epilog) when `trailing`.
-fn write_nucleotide_query_footer_spacing<W: Write>(
+fn write_nucleotide_query_footer_spacing<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
     karlin: Option<(KarlinParams, KarlinParams)>,
     gapped: bool,
     effective_search_space: i64,
     trailing: bool,
 ) -> io::Result<()> {
-    writeln!(writer)?;
+    // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+    crate::report::ostream::ncbi_endl(writer)?;
     if let Some((ungapped, _)) = karlin {
         writeln!(writer, "Lambda      K        H")?;
         write_ncbi_ka_field(writer, ungapped.lambda)?;
@@ -4404,7 +4443,7 @@ fn write_nucleotide_query_footer_spacing<W: Write>(
 // The word threshold and the window size are 0 for blastn (blast_format.cpp:2281-2288),
 // so those lines are not printed. The extension is a whole or half number, which the
 // C++ stream and Rust print alike (`2`, `2.5`).
-fn write_blastn_final_footer<W: Write>(
+fn write_blastn_final_footer<W: ReportWrite>(
     writer: &mut W,
     report: &BlastnPairwiseReport,
     html: bool,
@@ -4444,7 +4483,7 @@ fn write_blastn_final_footer<W: Write>(
 /// `Database:` lines of a database, `write_blast_database_header`).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:258-261
-pub fn write_blastn_pairwise_prolog<W: Write>(
+pub fn write_blastn_pairwise_prolog<W: ReportWrite>(
     writer: &mut W,
     version: &str,
     intro: BlastnIntro,
@@ -4462,7 +4501,6 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
             intro.megablast,
             intro.indexed_megablast,
             true,
-            true,
             html,
         )?;
     } else if intro.megablast {
@@ -4473,11 +4511,10 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
             true,
             intro.indexed_megablast,
             false,
-            false,
             html,
         )?;
     } else {
-        write_prolog(writer, "blastn", version, false, false, true, false, html)?;
+        write_prolog(writer, "blastn", version, false, false, false, html)?;
     }
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
@@ -4503,7 +4540,7 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
 // shared post-processing makes every BLASTN run compile it in Wasm hosts.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-pub fn write_blastn_pairwise_report<W: Write>(
+pub fn write_blastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
@@ -4569,7 +4606,8 @@ pub fn write_blastn_pairwise_report<W: Write>(
     // An error in a later query batch skips the epilog, and nothing follows the last
     // query's footer. The epilog starts with two blank lines (blast_format.cpp:2249).
     if report.epilog && query_range.end == queries.len() {
-        writer.write_all(b"\n\n")?;
+        crate::report::ostream::ncbi_endl(writer)?;
+        crate::report::ostream::ncbi_endl(writer)?;
         write_blastn_final_footer(writer, report, config.html.is_some())?;
     }
     writer.flush()
@@ -4611,7 +4649,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             )
     }
 
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -4666,11 +4704,12 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
             place,
             self.config.html_rows(),
             self.loads,
+            None,
         )?;
         writeln!(writer)
     }
 
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
@@ -4739,7 +4778,7 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
     /// The query-anchored section of the query's aligned subjects (`blastn_section_hsps`).
-    fn alignments<W: Write>(
+    fn alignments<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -4752,7 +4791,11 @@ impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
         })
     }
 
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()> {
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:445-449
         if self.report.intro.matrix_only {
             return Ok(());
@@ -4855,7 +4898,7 @@ pub struct TblastxPairwiseReport {
 /// its reference, then the subjects.
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:173-178
-pub fn write_tblastx_pairwise_prolog<W: Write>(
+pub fn write_tblastx_pairwise_prolog<W: ReportWrite>(
     writer: &mut W,
     version: &str,
     database_name: &[u8],
@@ -4864,7 +4907,7 @@ pub fn write_tblastx_pairwise_prolog<W: Write>(
     database: Option<&PairwiseDatabase>,
     html: Option<(&super::html_ids::HtmlLinks, &mut dyn Write)>,
 ) -> io::Result<()> {
-    write_prolog(writer, "tblastx", version, false, false, true, false, html)?;
+    write_prolog(writer, "tblastx", version, false, false, false, html)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -4980,11 +5023,12 @@ fn write_tblastx_alignment<W: Write>(
 // TBLASTX is ungapped and has no Gumbel block: only the ungapped Karlin block of the
 // query's first valid context is printed. A query without a valid context in a searched
 // batch prints neither block and a search space of 0 (blast_results.cpp:92-94).
-fn write_tblastx_query_footer<W: Write>(
+fn write_tblastx_query_footer<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
     query: &TblastxPairwiseQuery,
 ) -> io::Result<()> {
-    writeln!(writer)?;
+    // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+    crate::report::ostream::ncbi_endl(writer)?;
     if let Some(karlin) = query.karlin {
         writeln!(writer, "Lambda      K        H")?;
         write_ncbi_ka_field(writer, karlin.lambda)?;
@@ -5008,13 +5052,15 @@ fn write_tblastx_query_footer<W: Write>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2249,2256-2259
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2266-2288
 // TBLASTX is ungapped, so the gap penalties are not printed.
-fn write_tblastx_epilog<W: Write>(
+fn write_tblastx_epilog<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
     report: &TblastxPairwiseReport,
     database: Option<&PairwiseDatabase>,
     html: bool,
 ) -> io::Result<()> {
-    writer.write_all(b"\n\n")?;
+    // Two insertions of `NcbiEndl`, each a flush.
+    crate::report::ostream::ncbi_endl(writer)?;
+    crate::report::ostream::ncbi_endl(writer)?;
     match database {
         Some(database) => write_final_database_block(writer, database)?,
         None => write_final_database_report(
@@ -5082,7 +5128,7 @@ pub(crate) fn cpp_default_double(value: f64) -> String {
 // Kept out of line: this runs only for outfmt 0.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-pub fn write_tblastx_pairwise_report<W: Write>(
+pub fn write_tblastx_pairwise_report<W: crate::report::ostream::ReportWrite>(
     hits: &[PairwiseHit],
     writer: &mut W,
     config: &PairwiseConfig,
@@ -5192,7 +5238,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             )
     }
 
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -5237,11 +5283,12 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
             place,
             self.config.html_rows(),
             self.loads,
+            None,
         )?;
         writeln!(writer)
     }
 
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
@@ -5315,7 +5362,7 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
     /// nucleotide rows in their frames of their records (`seqalign::translated_row_segments`),
     /// grouped by the query's frame and added with `fForceTranslation`
     /// (`eTranslateNucToNucAlignment`, `Hsps::of_translated_nucleotides`).
-    fn alignments<W: Write>(
+    fn alignments<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -5334,7 +5381,11 @@ impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
         })
     }
 
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()> {
         write_tblastx_query_footer(writer, &self.queries[q_idx])
     }
 }
@@ -5353,7 +5404,7 @@ mod tests;
 /// NCBI writes before it reads the first query batch (as `write_tblastx_pairwise_prolog`).
 /// `program` is the program line's name: `TBLASTN`, or `PSITBLASTN` with `-in_pssm`
 /// (`Blast_ProgramNameFromType`, blast_format.cpp:94).
-pub fn write_tblastn_pairwise_prolog<W: Write>(
+pub fn write_tblastn_pairwise_prolog<W: ReportWrite>(
     writer: &mut W,
     program: &str,
     version: &str,
@@ -5363,7 +5414,7 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
     database: Option<&PairwiseDatabase>,
     html: Option<(&super::html_ids::HtmlLinks, &mut dyn Write)>,
 ) -> io::Result<()> {
-    write_prolog(writer, program, version, false, false, true, false, html)?;
+    write_prolog(writer, program, version, false, false, false, html)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -5381,7 +5432,7 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
 /// the sources from which NCBI makes an empty stored title, `stored_source`); the
 /// `query_name` of `queries` is not read. `program` is the program line's name (`TBLASTN`, or
 /// `PSITBLASTN` with `-in_pssm`).
-pub fn write_tblastn_pairwise_report<W: Write>(
+pub fn write_tblastn_pairwise_report<W: crate::report::ostream::ReportWrite>(
     program: &str,
     hits: &[PairwiseHit],
     writer: &mut W,
@@ -5423,7 +5474,6 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         &report.version,
         false,
         false,
-        true,
         false,
         html_with_diagnostics(config.html_links(), warnings.as_deref_mut())?,
     )?;
@@ -5480,9 +5530,9 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     if !epilog {
         return writer.flush();
     }
-    // The blank lines before the epilog (blast_format.cpp:2249).
-    writeln!(&mut writer)?;
-    writeln!(&mut writer)?;
+    // The blank lines before the epilog (blast_format.cpp:2249), each a flush.
+    crate::report::ostream::ncbi_endl(&mut writer)?;
+    crate::report::ostream::ncbi_endl(&mut writer)?;
     write_blastp_final_footer(&mut writer, report, database, config.html.is_some())?;
     writer.flush()
 }
@@ -5535,7 +5585,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             )
     }
 
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -5564,7 +5614,8 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             if self.query_batch_skipped[q_idx] {
                 write_tblastn_unsearched_query_footer_spacing(writer, false)?;
             } else if !self.query_validity[q_idx] {
-                writeln!(writer)?;
+                // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+                crate::report::ostream::ncbi_endl(writer)?;
                 writeln!(writer)?;
                 writeln!(writer)?;
                 writeln!(writer, "Effective search space used: 0")?;
@@ -5579,17 +5630,28 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             }
             return Ok(());
         };
+        // NCBI's sorts read the HSPs' ranges before the table (`sort_stop`): a query row that
+        // starts with a gap (a Smith-Waterman alignment of `-use_sw_tback`, `-db`: `-subject`'s
+        // records come mapped) throws there.
+        let (grouped, order) = (&group.subject_hits, &group.subject_order);
+        let remaps = self.database.is_none();
+        if let Some(stop) = sort_stop(self.config.sort, remaps, order, grouped) {
+            writer.flush()?;
+            return Err(io::Error::other(stop));
+        }
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1004-1011
         // The table of every program follows `x_InitDeflineTable`
         // (`write_blastn_description_table`): the subject's highest bit score and that HSP's
         // E-value, and the title of the subject (`CDeflineGenerator`), for the first
         // `m_NumDescriptions` subjects. The titles are those of the records read (by
-        // subject index), as BLASTN's and TBLASTX's.
+        // subject index), as BLASTN's and TBLASTX's. It reads the ranges of every HSP of each
+        // described subject first, as BLASTX's (`described_row_range`).
+        let descriptions = group.described(self.report.num_descriptions);
         write_blastn_description_table(
             writer,
-            group.described(self.report.num_descriptions),
-            group.subject_order.len() <= self.report.num_descriptions,
-            &group.subject_hits,
+            descriptions,
+            order.len() <= self.report.num_descriptions,
+            grouped,
             &group.subject_titles,
             self.parsed_subjects,
             self.subject_sources,
@@ -5599,13 +5661,14 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             place,
             self.config.html_rows(),
             self.loads,
+            described_row_range(remaps, descriptions, grouped).map(EmptyRowsStop::RowRange),
         )?;
         writeln!(writer)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1014-1040
     // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
@@ -5671,7 +5734,7 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
     /// The query-anchored section of the query's aligned subjects: Dense-segs of a protein query
     /// row and a translated nucleotide subject row (`seqalign::translated_row_segments`).
-    fn alignments<W: Write>(
+    fn alignments<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -5688,7 +5751,11 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
         })
     }
 
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()> {
         // An ungapped search's footer has the ungapped Karlin block only (`x_PrintOneQueryFooter`,
         // cited at `write_translated_query_footer`).
         write_translated_query_footer(
@@ -5728,7 +5795,7 @@ fn write_tblastn_hsp_info<W: Write>(writer: &mut W, hit: &PairwiseHit) -> io::Re
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
     let percent = |n: usize| ncbi_percent_match(n, length);
     let positives = hit.positives.unwrap_or(h.num_positives);
-    let gaps = hit.gaps.unwrap_or_else(|| h.gap_letters());
+    let gaps = hit.query_range_lengths().gaps;
     writeln!(
         writer,
         " Identities = {}/{} ({:.0}%), Positives = {}/{} ({:.0}%), Gaps = {}/{} ({:.0}%)",
@@ -5785,7 +5852,7 @@ fn write_tblastn_alignment<W: Write>(
         ));
     }
     let width = coordinate_width(&hit.hit);
-    let rows = ascii_row_strings([q, s], [&hit.query_stored_gaps, &hit.subject_stored_gaps]);
+    let rows = ascii_row_strings([q, s], hit.hit.gap_info.as_deref().unwrap_or_default());
     write_hsp_rows(
         writer,
         |segments| tblastn_row_segments(hit, segments),
@@ -5838,7 +5905,7 @@ pub type BlastxDatabaseSubjects<'a> = (
 /// `first_hsp + i`, without changing the written bytes. `database` holds a `-db` report's subjects;
 /// a `-subject` report's are `records_parsed` and `record_titles` (by subject index).
 #[allow(clippy::too_many_arguments)]
-pub fn write_blastx_pairwise_report<W: Write>(
+pub fn write_blastx_pairwise_report<W: crate::report::ostream::ReportWrite>(
     hits: &[PairwiseHit],
     writer: &mut W,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
@@ -5862,6 +5929,10 @@ pub fn write_blastx_pairwise_report<W: Write>(
     row_masks: Option<&[super::query_anchored::HspMasks]>,
     loads: &crate::report::db_subject::HitLoads,
 ) -> io::Result<()> {
+    // The report's insertions reach the stream in chunks, as in the other pairwise writers: each
+    // region change of a pairwise report is at a flush of NCBI's, which writes the chunk through.
+    let mut buffered = io::BufWriter::new(writer);
+    let writer = &mut buffered;
     let sections = BlastxSections {
         config,
         options,
@@ -6045,7 +6116,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         })
     }
 
-    fn head<W: Write>(
+    fn head<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -6107,7 +6178,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
     // Each HSP's alignment is made before its heading and block: the Std-seg of an HSP with empty
     // rows that `-subject`'s Seq-loc mapper rewrote throws there (`CreateDensegFromStdseg`), before
     // anything of the HSP (`EmptyRowsStop::StdSegLengths`), the subject's heading for its first.
-    fn subject<W: Write>(
+    fn subject<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         probe: Option<&mut FormatProbe<'_>>,
@@ -6156,7 +6227,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
     // outside its `try` (with `-html` in outfmt 0, before the first alignment): the Std-seg of an
     // HSP with empty rows that `-subject`'s Seq-loc mapper rewrote throws there
     // (`EmptyRowsStop::StdSegLengths`, as outfmt 0's plain alignments at the HSP).
-    fn subject_densegs<W: Write>(
+    fn subject_densegs<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         group: &super::x_pairwise_par::QueryGroup<'_>,
@@ -6178,7 +6249,7 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1550-1552
     /// The query-anchored section of the query's aligned subjects (`blastx_section_hsps`).
-    fn alignments<W: Write>(
+    fn alignments<W: crate::report::ostream::ReportWrite>(
         &self,
         writer: &mut W,
         q_idx: usize,
@@ -6189,7 +6260,11 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
         })
     }
 
-    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+    fn foot<W: crate::report::ostream::ReportWrite>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+    ) -> io::Result<()> {
         write_translated_query_footer(
             writer,
             &self.queries[q_idx],
@@ -6206,22 +6281,13 @@ impl super::x_pairwise_par::QuerySections for BlastxSections<'_> {
 /// `program` is the program line's name: `BLASTX`, or `RPSTBLASTN`, whose prolog is BLASTX's (the
 /// Gapped BLAST reference only, blast_format.cpp:416-426, `write_prolog`).
 pub fn write_blastx_prolog(
-    writer: &mut impl Write,
+    writer: &mut impl ReportWrite,
     program: &str,
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
     html: Option<(&super::html_ids::HtmlLinks, &mut dyn Write)>,
 ) -> io::Result<()> {
-    write_prolog(
-        writer,
-        program,
-        &report.version,
-        false,
-        false,
-        true,
-        false,
-        html,
-    )?;
+    write_prolog(writer, program, &report.version, false, false, false, html)?;
     if let Some(database) = database {
         return write_blast_database_header(writer, database);
     }
@@ -6235,7 +6301,7 @@ pub fn write_blastx_prolog(
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2264-2288
 pub fn write_blastx_epilog(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
     database: Option<&PairwiseDatabase>,
@@ -6243,8 +6309,8 @@ pub fn write_blastx_epilog(
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2264-2288
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2249-2249
-    writeln!(writer)?;
-    writeln!(writer)?;
+    crate::report::ostream::ncbi_endl(writer)?;
+    crate::report::ostream::ncbi_endl(writer)?;
     if let Some(database) = database {
         write_final_database_block(writer, database)?;
     } else {
@@ -6285,7 +6351,7 @@ pub fn write_blastx_epilog(
 /// The footer of a BLASTX or TBLASTN query (`BlastpPairwiseQuery::valid` and `batch_skipped`: its
 /// Karlin blocks, `gapped`: the gapped one, `gapped_karlin`: the query's, `query_gapped_karlin`).
 fn write_translated_query_footer(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     query: &BlastpPairwiseQuery,
     report: &BlastpPairwiseReport,
     gapped_karlin: KarlinParams,
@@ -6306,7 +6372,8 @@ fn write_translated_query_footer(
             false,
         );
     }
-    writeln!(writer)?;
+    // `x_PrintOneQueryFooter`'s first `NcbiEndl` flushes the stream.
+    crate::report::ostream::ncbi_endl(writer)?;
     if valid {
         writeln!(writer, "Lambda      K        H")?;
         for v in [
@@ -6365,7 +6432,7 @@ fn write_blastx_alignment(
             "BLASTX alignment string lengths differ",
         ));
     }
-    let rows = ascii_row_strings([q, s], [&hit.query_stored_gaps, &hit.subject_stored_gaps]);
+    let rows = ascii_row_strings([q, s], hit.hit.gap_info.as_deref().unwrap_or_default());
     write_hsp_rows(
         writer,
         |segments| blastx_row_segments(hit, segments),

@@ -103,7 +103,7 @@ pub(crate) fn write_tabular_prolog_warning(
 pub(crate) fn write_blastn_tabular(
     tab: &BlastnTabular<'_>,
     hit_lists: &[Option<BlastnHitList>],
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     mut warnings: Option<&mut QueryWarnings<'_>>,
     mut probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
@@ -178,6 +178,8 @@ pub(crate) fn write_blastn_tabular(
         }
         let Some(hit_list) = hit_list else {
             writer.write_all(&buf)?;
+            // `~CBlastTabularInfo` of the query's report flushes the stream.
+            writer.ncbi_flush()?;
             continue;
         };
         // The query's formatter (`TabularRows`).
@@ -308,11 +310,13 @@ pub(crate) fn write_blastn_tabular(
             }
         }
         writer.write_all(&buf)?;
+        writer.ncbi_flush()?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236
     if let (TabularKind::Commented, Some(num_queries)) = (spec.kind, tab.epilog) {
         warn(&mut *writer, warnings)?;
         table.epilog(writer, num_queries)?;
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -353,9 +357,9 @@ fn tabular_hsp<'r>(
         // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:288-297
         // A BLASTN alignment (X-drop or greedy) starts and ends with a substitution, so its rows
         // have no end gaps: a `-` at a row's end fills a segment past the query's end (an HSP that
-        // NCBI keeps outside its query context, `pairwise::context_letters`), the gap character.
-        end_gaps: false,
-        stored_gaps: [&[], &[]],
+        // NCBI keeps outside its query context, `pairwise::context_letters`), the gap character
+        // (`TabularHsp::ops`: no script).
+        ops: &[],
         qcovhsp,
     }
 }

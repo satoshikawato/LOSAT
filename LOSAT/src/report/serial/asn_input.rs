@@ -38,8 +38,9 @@ use crate::rpsbproc::{HOST_DEPENDENT_BYTES, USER_SPACE_BYTES};
 pub(crate) enum Fail {
     /// NCBI's `CEofException` (see the module comment).
     Eof,
-    /// A `CSerialException`, with the frame stack that `END_OBJECT_FRAME` adds to it.
-    Serial(Box<NcbiException>),
+    /// A `CSerialException`, with the frame stack that `END_OBJECT_FRAME` adds to it
+    /// ([`SerialFail`]).
+    Serial(Box<SerialFail>),
     /// Another `CException` (the `CUtilException` of a number in text, the `CStringException` of
     /// a member's tag), with a line for each frame it leaves (`NCBI_RETHROW_SAME`).
     Exception(Box<NcbiException>),
@@ -51,6 +52,43 @@ pub(crate) enum Fail {
     Std(&'static &'static str),
     /// NCBI reads it, or not, by what LOSAT does not know (the host's memory); LOSAT refuses it.
     Unsupported(Box<Refusal>),
+}
+
+/// A `CSerialException` on its way out through the object frames: the exception, and the names
+/// (`GetFrameName()`) of the frames it has left since it was last used whole, innermost first,
+/// which `END_OBJECT_FRAME` adds to its frame stack (`AddFrameInfo`). They are added at once where
+/// the exception is used whole ([`SerialFail::exception`]): NCBI puts each name in front of the
+/// stack, so an error deep inside a nest of any depth built its stack in time quadratic in the
+/// depth; this builds it in linear time.
+#[derive(Debug)]
+pub(crate) struct SerialFail {
+    exception: NcbiException,
+    frames: Vec<&'static str>,
+}
+
+impl SerialFail {
+    /// `AddFrameInfo` of the frame's name `name` as the exception leaves the frame (an empty name
+    /// adds nothing).
+    pub(crate) fn add_frame(&mut self, name: &'static str) {
+        if !name.is_empty() {
+            self.frames.push(name);
+        }
+    }
+
+    /// `GetErrCode()` of the exception, by its name (`NcbiException::kind`).
+    pub(crate) fn kind(&self) -> &'static str {
+        self.exception.kind()
+    }
+
+    /// The exception with the names of the frames it left added to its frame stack.
+    pub(crate) fn exception(self) -> NcbiException {
+        let SerialFail {
+            mut exception,
+            frames,
+        } = self;
+        exception.add_frame_infos(&frames);
+        exception
+    }
 }
 
 /// What [`Fail::Unsupported`] says of what LOSAT does not read.
@@ -70,7 +108,10 @@ impl Fail {
     /// [`Fail::Serial`] of `e`.
     #[cold]
     pub(crate) fn serial(e: NcbiException) -> Fail {
-        Fail::Serial(Box::new(e))
+        Fail::Serial(Box::new(SerialFail {
+            exception: e,
+            frames: Vec::new(),
+        }))
     }
 
     /// [`Fail::Exception`] of `e`.
@@ -142,13 +183,30 @@ pub(crate) struct Names {
 }
 
 impl Names {
-    /// The PSSM file of `-in_pssm`.
+    /// The PSSM file of `-in_pssm` (psiblast and tblastn).
     pub(crate) const PSSM: Names = Names {
         document: "PSSM",
         reader: "PSSM reader",
         input: "input",
         allocator: "NCBI's reader",
         own_serial_message: true,
+    };
+    /// A profile file of makeprofiledb (`-in`, ASN.1 text or `-binary`). makeprofiledb prints the
+    /// exception's own text, so `:OtherType` depends on the types its process has met before.
+    pub(crate) const PROFILE: Names = Names {
+        document: "profile",
+        reader: "PSSM reader",
+        input: "file",
+        allocator: "makeprofiledb",
+        own_serial_message: false,
+    };
+    /// Binary definition lines (`ASN1_BlastDefLine` user object) of makeprofiledb.
+    pub(crate) const BINARY_DEFLINES: Names = Names {
+        document: "binary definition lines",
+        reader: "binary definition lines reader",
+        input: "binary header",
+        allocator: "makeprofiledb",
+        own_serial_message: false,
     };
     /// A mask data file of makeblastdb's `-mask_data`.
     pub(crate) const MASK: Names = Names {

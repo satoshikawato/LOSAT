@@ -68,11 +68,10 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
     use crate::seqdb::alias::SearchPath;
     let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
-    let search =
-        SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+    let search = SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None);
     let path = tests.join("db_search").join(name);
     BlastxDatabase {
-        db: SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap(),
+        db: SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search).unwrap(),
         name: name.to_string(),
         taxdb: shared::TaxdbRun::default(),
         parsed_seqids: false,
@@ -114,9 +113,11 @@ fn one_query(lists: &[(usize, i32)]) -> Vec<BatchResults> {
         positive: 1,
         edit_script: Vec::new(),
         composition_method: 0,
+        query_left_out: 0,
     };
     vec![BatchResults {
         query_ordinal: 0,
+        in_report_order: false,
         queries: vec![lists
             .iter()
             .map(|&(oid, score)| HspList {

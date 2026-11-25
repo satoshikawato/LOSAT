@@ -53,8 +53,8 @@ impl FormatSpec {
     /// `%b`, `%d` and `%m`, whose algorithms are `mask_algos`); `Err` is the message of NCBI's
     /// exception. A `%` that ends the text reads the string's terminating NUL as its
     /// specifier, as NCBI's loop does.
-    pub fn parse(spec: &str, mask_algos: Vec<i32>) -> Result<Self, String> {
-        let bytes = spec.as_bytes();
+    pub fn parse(spec: &[u8], mask_algos: Vec<i32>) -> Result<Self, String> {
+        let bytes = spec;
         let mut types = Vec::new();
         let mut separators = Vec::new();
         let mut sp = Vec::new();
@@ -112,7 +112,7 @@ impl FormatSpec {
         source: &Source,
         oid: u32,
         config: &Config,
-        target: Option<&str>,
+        target: Option<&[u8]>,
         out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
         let mut seq = Vec::new();
@@ -212,7 +212,7 @@ impl FormatSpec {
         &self,
         source: &Source,
         oid: u32,
-        length: u32,
+        length: i64,
         defline: Option<&BlastDefline>,
         seq: &[u8],
         hash: &str,
@@ -231,7 +231,7 @@ impl FormatSpec {
                 b's' => line.extend_from_slice(seq),
                 b'o' => push_decimal(line, i64::from(oid)),
                 b'h' => line.extend_from_slice(hash.as_bytes()),
-                b'l' => push_decimal(line, i64::from(length)),
+                b'l' => push_decimal(line, length),
                 b'a' | b'i' | b'g' | b't' | b'T' | b'P' | b'e' | b'n' => {
                     if let Some(defline) = defline {
                         fields.write_defline_field(kind, defline, line);
@@ -285,8 +285,10 @@ fn masks_string(masks: &[(u32, u32)]) -> String {
 /// clipped), with the masks of `-mask_sequence_with` in lower case, reverse-complemented for
 /// `-strand minus` (nucleotide databases: `Config` never holds the minus strand for a protein
 /// one).
+// NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/seq_formatter.cpp:286-290
 fn x_get_seq(source: &Source, oid: u32, config: &Config) -> Result<Vec<u8>, Stop> {
-    let range = config.range.clipped(source.length(oid)?);
+    // NCBI converts the signed `GetSeqLength` result to `TSeqPos` before clipping the range.
+    let range = config.range.clipped(source.length(oid)? as u32);
     let mut seq = source.string_letters(oid, range)?;
     if config.filt_algo >= 0 {
         let masks = source.masks(oid, config.filt_algo)?;
@@ -322,7 +324,7 @@ fn x_get_seq(source: &Source, oid: u32, config: &Config) -> Result<Vec<u8>, Stop
 /// the line's end.
 fn write_asn_deflines(
     set: &DeflineSet,
-    target: Option<&str>,
+    target: Option<&[u8]>,
     out: &mut Output<'_, '_>,
 ) -> Result<(), Stop> {
     match target {
@@ -355,7 +357,10 @@ impl AsnTextDocument for DeflineDocument<'_> {
 // NCBI reference (598d8ae6): c++/src/objtools/blast/blastdb_format/blastdb_dataextract.cpp:800-819
 /// The definition line of `-target_only` for the `%` formats: the first whose Seq-id
 /// matches the target (`CSeq_id::Match`) or whose GI is the target's number.
-fn extract_target_defline<'a>(set: &'a DeflineSet, target: &str) -> Result<&'a BlastDefline, Stop> {
+fn extract_target_defline<'a>(
+    set: &'a DeflineSet,
+    target: &[u8],
+) -> Result<&'a BlastDefline, Stop> {
     let target_id = parse_target(target)?;
     let number = numeric_target(target);
     for defline in &set.deflines {
@@ -367,7 +372,9 @@ fn extract_target_defline<'a>(set: &'a DeflineSet, target: &str) -> Result<&'a B
             }
         }
     }
-    Err(Stop::Ncbi(format!("Failed to find target id {target}")))
+    Err(Stop::NcbiBytes(
+        [b"Failed to find target id ".as_slice(), target].concat(),
+    ))
 }
 
 /// What `CBlastDeflineUtil::ExtractDataFromBlastDefline` reads of a definition line

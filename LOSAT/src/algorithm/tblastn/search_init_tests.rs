@@ -1493,29 +1493,24 @@ fn diagonals_negative_exit_and_pairs_with_entry_above_hit() {
             40,
             3,
         );
-        // Set diagonal (q=10, s=5) to an unflagged entry above s + offset (diff = -15).
+        // Diagonal (q=10, s=5) with s + offset = 45: unflagged entry above hit (diff = -15) stays
+        // unchanged; flagged entry above hit stays flagged; flagged entry at/below hit clears flag.
         let idx = ((10i32 - 5) & two_hit.diagonals.mask) as usize;
-        set_cell(&mut two_hit, idx, (60, false));
         let pair = [BlastOffsetPair {
             q_off: 10,
             s_off: 5,
         }];
         let mut hits = Vec::new();
-        run_bf(mode, &mut two_hit, &pair, &mut hits);
-        assert!(hits.is_empty(), "negative diff must be skipped without hit");
-        assert_eq!(
-            two_hit.x_cell(idx),
-            (60, false),
-            "unflagged entry above hit must stay unchanged"
-        );
-
-        // Flagged entry above s + offset stays flagged; at or below s + offset clears flag.
-        set_cell(&mut two_hit, idx, (60, true));
-        run_bf(mode, &mut two_hit, &pair, &mut hits);
-        assert_eq!(two_hit.x_cell(idx), (60, true));
-        set_cell(&mut two_hit, idx, (45, true));
-        run_bf(mode, &mut two_hit, &pair, &mut hits);
-        assert_eq!(two_hit.x_cell(idx), (45, false));
+        for (initial, want, msg) in [
+            ((60, false), (60, false), "unflagged entry above hit"),
+            ((60, true), (60, true), "flagged entry above hit"),
+            ((45, true), (45, false), "flagged entry at hit"),
+        ] {
+            set_cell(&mut two_hit, idx, initial);
+            run_bf(mode, &mut two_hit, &pair, &mut hits);
+            assert!(hits.is_empty(), "{msg} must be skipped without hit");
+            assert_eq!(two_hit.x_cell(idx), want, "{msg}");
+        }
 
         // 3. Non-negative s with negative s_left_off and no x_around extends normally, and diff
         //    exceeding q wraps unsigned above context start 0 (accepted by NCBI's Uint4 test):

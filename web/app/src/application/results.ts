@@ -32,7 +32,15 @@ import {
 } from '../domain/result-index';
 import { isTerminal } from '../domain/run';
 import { toolTakesValue } from '../domain/tools';
-import { verificationBadge, type Badge, type OptionGrammar, type VerificationTable } from '../domain/verification';
+import {
+  toolOptionGrammar,
+  toolVerificationBadge,
+  verificationBadge,
+  type Badge,
+  type OptionGrammar,
+  type ToolOptionGrammar,
+  type VerificationTable,
+} from '../domain/verification';
 import type { RunStore } from '../ports/data';
 import { isToolRun, type AnyRunView, type AppState, type RunView, type ToolRunView } from './coordinator';
 import { Store } from './store';
@@ -154,6 +162,8 @@ export interface ResultsState {
   readonly loaded?: LoadedRun;
   /** The selected tool run (WindowMasker), when a tool run is open in Results. */
   readonly toolRun?: ToolRunView;
+  /** The support badge of the selected completed tool run; none for help/version or failed runs. */
+  readonly toolBadge?: Badge;
   /**
    * The options' grammar of the run's mode (`describe`: which options take a value), for its
    * command; also for a run without results. Undefined until the engine has described it.
@@ -231,7 +241,7 @@ export class ResultsBrowser {
   private headingReads = new Map<number, Promise<string | undefined>>();
   /** The options' grammar of each mode that the engine has described (one engine build: it does not change). */
   private readonly grammars = new Map<ProgramId, OptionGrammar>();
-  private readonly toolGrammars = new Map<string, OptionGrammar>();
+  private readonly toolGrammars = new Map<string, ToolOptionGrammar>();
 
   /** The table the verification badges come from (generated at build time). */
   get verification(): VerificationTable {
@@ -250,7 +260,11 @@ export class ResultsBrowser {
         const hasOutputs = run.status === 'completed' || (run.status === 'failed' && run.record.exitStatus !== undefined);
         if (phase === 'unavailable' && hasOutputs) void this.open(runId);
         else if (phase === 'unavailable') this.set({ toolRun: run, message: unavailableMessage(run) });
-        else if (phase === 'ready') this.set({ toolRun: run });
+        else if (phase === 'ready') {
+          const grammar = this.toolGrammars.get(run.snapshot.tool);
+          const toolBadge = grammar === undefined ? undefined : this.computeToolBadge(run, grammar);
+          this.set({ toolRun: run, toolBadge });
+        }
         return;
       }
       if (phase !== 'unavailable') return;
@@ -280,12 +294,14 @@ export class ResultsBrowser {
       const ready =
         isTerminal(run.status) &&
         (run.status === 'completed' || (run.status === 'failed' && run.record.exitStatus !== undefined));
+      const toolBadge = ready && grammar !== undefined ? this.computeToolBadge(run, grammar) : undefined;
       this.state.set({
         ...INITIAL,
         filters,
         runId,
         phase: ready ? 'ready' : 'unavailable',
         toolRun: run,
+        ...(toolBadge === undefined ? {} : { toolBadge }),
         ...(ready ? {} : { message: unavailableMessage(run) }),
         ...(grammar === undefined ? {} : { grammar }),
       });
@@ -376,23 +392,43 @@ export class ResultsBrowser {
     );
   }
 
+  private computeToolBadge(run: ToolRunView, grammar: ToolOptionGrammar): Badge | undefined {
+    if (run.status !== 'completed' || run.snapshot.prints !== undefined) return undefined;
+    return toolVerificationBadge(
+      {
+        tool: run.snapshot.tool,
+        argv: run.snapshot.argv,
+        runtimePath: run.record.runtimePath,
+        grammar,
+      },
+      this.deps.verification,
+    );
+  }
+
   private describeToolGrammar(token: number, tool: string): void {
-    const fallback: OptionGrammar = { takesValue: toolTakesValue(undefined) };
-    const apply = (grammar: OptionGrammar): void => {
-      if (token === this.loadToken) this.set({ grammar });
+    const fallback: ToolOptionGrammar = { takesValue: toolTakesValue(undefined) };
+    const apply = (grammar: ToolOptionGrammar, fromDescribe: boolean): void => {
+      if (token !== this.loadToken) return;
+      const run = this.state.get().toolRun;
+      // Only a grammar built from the engine's -xmlhelp (`toolOptionGrammar`) knows which options
+      // take values and their defaults; the fallback is for CommandText only and gives no badge.
+      const toolBadge =
+        fromDescribe && run !== undefined && this.state.get().phase === 'ready'
+          ? this.computeToolBadge(run, grammar)
+          : undefined;
+      this.set({ grammar, toolBadge });
     };
     if (this.deps.describeTool === undefined) {
-      this.toolGrammars.set(tool, fallback);
-      apply(fallback);
+      apply(fallback, false);
       return;
     }
     this.deps.describeTool(tool).then(
       (description) => {
-        const grammar: OptionGrammar = { takesValue: toolTakesValue(description) };
+        const grammar = toolOptionGrammar(description);
         this.toolGrammars.set(tool, grammar);
-        apply(grammar);
+        apply(grammar, true);
       },
-      () => apply(fallback),
+      () => apply(fallback, false),
     );
   }
 

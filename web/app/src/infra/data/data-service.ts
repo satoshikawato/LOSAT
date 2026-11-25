@@ -598,6 +598,11 @@ export class DataService implements DataGateway {
         if (run.files.has(cmd.key)) throw new Error(`tool output ${cmd.key} is already open`);
         const blockName = `f${match[1]}`;
         const writer = await this.deps.store.create(toolBlockPath(run.token, blockName));
+        if (this.toolRuns.get(runId) !== run) {
+          await removeToolBlocks();
+          reply({ id: cmd.id, ok: false, error: { name: 'Error', message: `run ${runId} was discarded` } });
+          return;
+        }
         run.files.set(cmd.key, { key: cmd.key, name: cmd.name, blockName, writer, length: 0, closed: false });
         run.fileOrder.push(cmd.key);
         reply({ id: cmd.id, ok: true });
@@ -631,6 +636,11 @@ export class DataService implements DataGateway {
           }
           committedFiles.set(key, { key: file.key, name: file.name, size: file.length, blockName: file.blockName });
           summaryFiles.push({ key: file.key, name: file.name, size: file.length });
+        }
+        if (this.toolRuns.get(runId) !== run) {
+          await removeToolBlocks();
+          reply({ id: cmd.id, ok: false, error: { name: 'Error', message: `run ${runId} was discarded` } }, true);
+          return;
         }
         this.toolRuns.set(runId, {
           state: 'committed',

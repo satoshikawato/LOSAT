@@ -13,7 +13,7 @@ From the repository root:
 ```bash
 cd LOSAT
 cargo build --release --bin losat
-cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command
+cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads,no-web-abi-v1 --target-dir target/threaded-command
 cd tests
 
 ./run_comparison.sh

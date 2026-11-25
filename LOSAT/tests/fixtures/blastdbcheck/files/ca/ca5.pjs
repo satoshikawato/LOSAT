@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "ca5",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "ca.faa",
+  "number-of-letters": 84,
+  "number-of-sequences": 2,
+  "last-updated": "2023-11-14T22:13:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 2,
+  "bytes-total": 49700,
+  "bytes-to-cache": 191,
+  "files": [
+    "ca5.pdb",
+    "ca5.phr",
+    "ca5.pin",
+    "ca5.pog",
+    "ca5.pos",
+    "ca5.pot",
+    "ca5.psq",
+    "ca5.ptf",
+    "ca5.pto"
+  ]
+}

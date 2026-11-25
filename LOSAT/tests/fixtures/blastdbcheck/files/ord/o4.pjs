@@ -1,0 +1,18 @@
+{
+  "version": "1.2",
+  "dbname": "o4",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "p.faa",
+  "number-of-letters": 410,
+  "number-of-sequences": 9,
+  "last-updated": "2023-11-14T22:13:00",
+  "number-of-volumes": 1,
+  "bytes-total": 1447,
+  "bytes-to-cache": 564,
+  "files": [
+    "o4.phr",
+    "o4.pin",
+    "o4.psq"
+  ]
+}

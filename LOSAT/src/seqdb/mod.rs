@@ -41,6 +41,7 @@ pub mod column;
 pub mod date;
 pub mod file;
 pub mod filter;
+pub(crate) mod find;
 pub mod gi_mask;
 pub mod header;
 pub(crate) mod id_list;
@@ -219,6 +220,14 @@ pub enum SeqDbError {
     },
     /// A file is not a valid database file.
     Format { path: PathBuf, message: String },
+    /// A list of volumes of both version 4 and version 5 (`CSeqDBLMDBSet`): NCBI's text
+    /// [`MIXED_VERSIONS`], from one of two throws, which the volume `path`, the first whose
+    /// version is not the first volume's, chooses: a version 4 volume after version 5 ones
+    /// (`version4_after_version5`), or a version 5 volume after version 4 ones.
+    MixedVersions {
+        path: PathBuf,
+        version4_after_version5: bool,
+    },
     /// A file fails one of the integrity checks of NCBI's reader (`SEQDB_FILE_ASSERT`, a
     /// `CSeqDBException` whose text names a line of NCBI's source): LOSAT's words, and NCBI's
     /// text where NCBI's search replaces it ([`SeqDbError::ncbi_search_message`]).
@@ -287,6 +296,9 @@ impl std::fmt::Display for SeqDbError {
             SeqDbError::Format { path, message } | SeqDbError::Integrity { path, message } => {
                 write!(f, "{}: {}", path.display(), message)
             }
+            SeqDbError::MixedVersions { path, .. } => {
+                write!(f, "{}: {MIXED_VERSIONS}", path.display())
+            }
             SeqDbError::Unsupported { path, message }
             | SeqDbError::NcbiThrows { path, message } => {
                 write!(f, "{}: unsupported database: {}", path.display(), message)
@@ -342,6 +354,13 @@ impl SeqDbError {
             SeqDbError::Format { path, message } => SeqDbError::Format {
                 path: path.clone(),
                 message: message.clone(),
+            },
+            SeqDbError::MixedVersions {
+                path,
+                version4_after_version5,
+            } => SeqDbError::MixedVersions {
+                path: path.clone(),
+                version4_after_version5: *version4_after_version5,
             },
             SeqDbError::Integrity { path, message } => SeqDbError::Integrity {
                 path: path.clone(),
@@ -438,13 +457,11 @@ impl std::error::Error for SeqDbError {
 /// The texts of `SeqDbError::Format` that are NCBI's own: the errors NCBI
 /// raises for the same file with the same words. Every other format error is
 /// LOSAT's (a damaged file that NCBI reads past the end of its mapping).
-const NCBI_FORMAT_MESSAGES: [&str; 16] = [
+const NCBI_FORMAT_MESSAGES: [&str; 15] = [
     // seqdbfile.cpp:181-185
     "Error: Not a valid version 4 or 5 database.",
     // seqdbfile.cpp:222-226
     "Error: requested sequence type does not match DB.",
-    // seqdblmdbset.cpp:224, 231
-    "DB list contains both Version 4 and Version 5 dbs",
     // seqdbalias.cpp:810-814
     "Illegal configuration: DB alias files are mutually recursive.",
     // seqdbcol.cpp:220-238
@@ -469,6 +486,10 @@ const NCBI_FORMAT_MESSAGES: [&str; 16] = [
     // seqdbgimask.cpp:213-217
     "Gi-mask file uses unknown format_version.",
 ];
+
+/// seqdblmdbset.cpp:224, 231: NCBI's text of a list of volumes of both versions
+/// ([`SeqDbError::MixedVersions`]).
+pub(crate) const MIXED_VERSIONS: &str = "DB list contains both Version 4 and Version 5 dbs";
 
 /// seqdbvol.cpp:3365-3382 (the title or the counts follow). The duplicate of seqdbimpl.cpp:2456-2459,
 /// whose text holds the volume's path, is a [`SeqDbError::NotFound`] of its bytes (`mask.rs`).
@@ -529,6 +550,7 @@ impl SeqDbError {
                     .iter()
                     .any(|prefix| message.starts_with(prefix)))
             .then(|| message.clone().into_bytes()),
+            SeqDbError::MixedVersions { .. } => Some(MIXED_VERSIONS.as_bytes().to_vec()),
             // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-197
             SeqDbError::MemoryMap(_) | SeqDbError::Open { .. } | SeqDbError::Map { .. } => {
                 let message = self.memory_map_message()?;
@@ -732,8 +754,45 @@ impl SeqDbError {
 // (The OID list file of an alias file's `OIDLIST` that is not a file, `SeqDbError::MemoryMap`:
 // segmasker 2.17.0 names the line 718 of the official build and the function without a module,
 // probe mk of line RG D1b.)
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:178-182
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbfile.cpp:218-226
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:861-864
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:78-96
+// (An index file of another format version, an index of the other molecule type, an empty binary
+// list file, and the LMDB file of a version 5 volume that is missing or not an LMDB file:
+// blastdbcheck 2.17.0 names these lines and functions, rows pp_p4_ver7, d_p4_pin_nucl_prot,
+// a_gizero, d_n5_no_ndb and pp_p5_pdb_cut of row RG-D2b. The missing
+// LMDB file's text starts with its path: `LMDB_MISSING_TAIL`.)
 /// The places of NCBI's throws of a database error of the reader, by the start of its text.
-const DATABASE_ERROR_SITES: [(&str, ThrowSite); 7] = [
+const DATABASE_ERROR_SITES: [(&str, ThrowSite); 11] = [
+    (
+        "Error: requested sequence type does not match DB.",
+        seqdb_site(
+            "src/objtools/blast/seqdb_reader/seqdbfile.cpp",
+            223,
+            "BLASTDB::ncbi::CSeqDBIdxFile::CSeqDBIdxFile",
+        ),
+    ),
+    (
+        "Error: Not a valid version 4 or 5 database.",
+        seqdb_site(
+            "src/objtools/blast/seqdb_reader/seqdbfile.cpp",
+            182,
+            "BLASTDB::ncbi::CSeqDBIdxFile::CSeqDBIdxFile",
+        ),
+    ),
+    (
+        "Specified file is empty.",
+        seqdb_site(
+            "src/objtools/blast/seqdb_reader/seqdbcommon.cpp",
+            864,
+            "BLASTDB::ncbi::s_SeqDB_IsBinaryNumericList",
+        ),
+    ),
+    (
+        "LMDB runtime error: ",
+        seqdb_site(SEQDB_LMDB, 95, LMDB_ENV_OPEN),
+    ),
     (
         "No alias or index file found for ",
         seqdb_site(
@@ -784,6 +843,31 @@ const DATABASE_ERROR_SITES: [(&str, ThrowSite); 7] = [
     ),
 ];
 
+/// NCBI's reader of the LMDB files of version 5 volumes.
+const SEQDB_LMDB: &str = "src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp";
+
+/// The function that opens a version 5 volume's LMDB file for reading.
+const LMDB_ENV_OPEN: &str = "BLASTDB::ncbi::CBlastLMDBManager::CBlastEnv::CBlastEnv";
+
+/// The end of the text of a version 5 volume's missing LMDB file, after `File <path>`.
+const LMDB_MISSING_TAIL: &str = " not found. If you renamed any BLAST database files, please use \
+original file names, and makeblastdb to rename the database. If you deleted any BLAST database \
+files, you need to recreate the database.";
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:84-89
+/// NCBI's error of a version 5 volume's LMDB file `path` that is not there (`CBlastEnv`): the one
+/// producer of its text, which `throw_site` places.
+pub(crate) fn missing_lmdb_file(path: &Path) -> SeqDbError {
+    SeqDbError::NotFound(
+        [
+            b"File ".as_slice(),
+            &crate::utils::os_bytes::path_bytes(path),
+            LMDB_MISSING_TAIL.as_bytes(),
+        ]
+        .concat(),
+    )
+}
+
 /// NCBI's header of the memory-mapped files of the reader.
 const SEQDBATLAS: &str = "include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp";
 
@@ -823,10 +907,38 @@ pub(crate) fn throw_site(message: &[u8]) -> Option<ThrowSite> {
     if too_many_open_files(message) {
         return None;
     }
+    if message.starts_with(b"File ") && message.ends_with(LMDB_MISSING_TAIL.as_bytes()) {
+        return Some(seqdb_site(SEQDB_LMDB, 88, LMDB_ENV_OPEN));
+    }
     DATABASE_ERROR_SITES
         .iter()
         .find(|(start, _)| message.starts_with(start.as_bytes()))
         .map(|&(_, site)| site)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:213-233
+// (A version 4 volume after version 5 ones throws on line 225, a version 5 volume after version 4
+// ones on line 232: blastdbcheck 2.17.0 names these lines, rows mix45_v4 and mix45_v5 of row
+// RG-D2b.)
+impl SeqDbError {
+    /// The place in NCBI's database reader that throws this error's `CSeqDBException`, where
+    /// LOSAT knows it: the throw that [`SeqDbError::MixedVersions`] names, else the place of its
+    /// text ([`throw_site`]).
+    pub(crate) fn throw_site(&self) -> Option<ThrowSite> {
+        if let SeqDbError::MixedVersions {
+            version4_after_version5,
+            ..
+        } = self
+        {
+            let line = if *version4_after_version5 { 225 } else { 232 };
+            return Some(seqdb_site(
+                "src/objtools/blast/seqdb_reader/seqdblmdbset.cpp",
+                line,
+                "BLASTDB::ncbi::CSeqDBLMDBSet::CSeqDBLMDBSet",
+            ));
+        }
+        throw_site(&self.ncbi_request_message()?)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:167-172
@@ -1154,9 +1266,9 @@ fn check_lmdb_names(volumes: &[(PathBuf, Option<&[u8]>)]) -> Result<(), SeqDbErr
             .iter()
             .find(|(_, name)| names_lmdb(name) != version5)
         {
-            return Err(SeqDbError::Format {
+            return Err(SeqDbError::MixedVersions {
                 path: other.clone(),
-                message: "DB list contains both Version 4 and Version 5 dbs".to_string(),
+                version4_after_version5: version5,
             });
         }
     }
@@ -1169,16 +1281,7 @@ fn check_lmdb_names(volumes: &[(PathBuf, Option<&[u8]>)]) -> Result<(), SeqDbErr
         let lmdb_name = name.unwrap_or_default();
         let lmdb_path = base.with_file_name(crate::utils::os_bytes::path_from_bytes(lmdb_name));
         if !std::fs::metadata(&lmdb_path).is_ok_and(|meta| meta.is_file()) {
-            return Err(SeqDbError::NotFound(
-                [
-                    b"File ".as_slice(),
-                    &crate::utils::os_bytes::path_bytes(&lmdb_path),
-                    b" not found. If you renamed any BLAST database files, please use \
-                      original file names, and makeblastdb to rename the database. If you \
-                      deleted any BLAST database files, you need to recreate the database.",
-                ]
-                .concat(),
-            ));
+            return Err(missing_lmdb_file(&lmdb_path));
         }
     }
     Ok(())
@@ -2007,6 +2110,13 @@ impl SeqDb {
     /// OIDs with one (approximate for nucleotides: `restrict_taxids`).
     pub fn total_length(&self) -> u64 {
         self.counts.total_length
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:872-876
+    /// `CSeqDB::GetVolumeLength`: the total length of the volumes, whatever the alias files and a
+    /// list include (blastdbcheck's metadata test).
+    pub fn volume_length(&self) -> u64 {
+        self.volume_set_length
     }
 
     /// `CSeqDB::GetMaxLength`: the longest length of the volumes (an alias file's

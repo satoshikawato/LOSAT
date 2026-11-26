@@ -689,10 +689,50 @@ fn test_fill_results_from_compo_heaps_builds_hitlist_via_hitlist_update() {
     assert_eq!(hit_list.hsplist_array[1].oid, 1);
 }
 
-// `BlastpHsp` carries no PHI-BLAST occurrence field (`phi_hooks::PhiCall` splits the final hit
-// lists by occurrence out of band), keeping every non-PHI search's HSP at 168 bytes (64-bit).
+// `BlastpHsp` stays 168 bytes (64-bit) while carrying `PhiOccurrenceIndex` in `subject_frame`
+// between `phi_traceback` and `PhiCall::split_occurrences`.
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn blastp_hsp_size_stays_168_bytes() {
     assert_eq!(std::mem::size_of::<BlastpHsp>(), 168);
+}
+
+#[test]
+fn phi_occurrence_round_trips_past_u16_max_and_clears_subject_frame() {
+    let mut hsp = BlastpHsp {
+        identity: 100.0,
+        length: 10,
+        mismatch: 0,
+        gapopen: 0,
+        q_start: 1,
+        q_end: 10,
+        s_start: 1,
+        s_end: 10,
+        gapped_q_start: 0,
+        gapped_s_start: 0,
+        e_value: 1e-5,
+        bit_score: 40.0,
+        num_ident: 10,
+        query_context: 0,
+        query_frame: 0,
+        subject_frame: 0,
+        query_length: 100,
+        q_idx: 0,
+        s_idx: 0,
+        raw_score: 50,
+        gap_info: None,
+        num_positives: 10,
+        comp_adjustment_method: 0,
+        num: 1,
+    };
+    assert_eq!(hsp.take_phi_occurrence(), None);
+    for index in [0usize, 64, 65_600] {
+        hsp = hsp.with_phi_occurrence(PhiOccurrenceIndex::new(index));
+        assert_eq!(
+            hsp.take_phi_occurrence(),
+            Some(PhiOccurrenceIndex::new(index))
+        );
+        assert_eq!(hsp.subject_frame, 0);
+        assert_eq!(hsp.take_phi_occurrence(), None);
+    }
 }

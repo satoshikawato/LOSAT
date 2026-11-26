@@ -57,6 +57,7 @@ fn a_phi_batch_is_searched_as_its_query_with_letters() {
 
 fn phi_hsp(
     occ: usize,
+    s_pat_len: i32,
     q_pat: i32,
     s_pat: i32,
     qs: i32,
@@ -67,7 +68,7 @@ fn phi_hsp(
 ) -> PhiHsp {
     PhiHsp {
         occurrence: occ,
-        s_pattern_length: 6,
+        s_pattern_length: s_pat_len,
         q_pattern_offset: q_pat,
         s_pattern_offset: s_pat,
         query_start: qs,
@@ -82,78 +83,105 @@ fn phi_hsp(
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:780-794
-// `select_kept_prelim` keeps only the preliminary HSPs surviving culling / best-hit filtering,
-// preserving multiset counts and the order of `list.hsps`.
+// `select_kept_prelim` keeps only the preliminary HSPs surviving culling / best-hit filtering
+// in `list.hsps` order, distinguishing variable-length pattern hits that share pattern starts,
+// preliminary bounds, and raw score via their `PhiPrelimOrdinal`.
 #[test]
-fn select_kept_prelim_filters_culled_hsps_and_preserves_order_and_multiplicity() {
-    let a = phi_hsp(0, 10, 20, 5, 40, 15, 50, 90);
-    let b_first = phi_hsp(1, 30, 40, 25, 60, 35, 70, 70);
-    let b_second = phi_hsp(2, 30, 40, 25, 60, 35, 70, 70);
-    let culled = phi_hsp(3, 80, 10, 75, 100, 5, 30, 50);
-    let kept = vec![
-        preliminary_of(&b_first, 0, 0, 200),
-        preliminary_of(&a, 0, 0, 200),
-    ];
-    let selected = select_kept_prelim(&kept, vec![a.clone(), b_first.clone(), b_second, culled]);
-    assert_eq!(selected, vec![b_first, a]);
+fn select_kept_prelim_distinguishes_same_start_variable_length_hits_in_kept_order() {
+    let a = phi_hsp(0, 3, 10, 20, 5, 40, 15, 50, 90);
+    let b_short = phi_hsp(1, 3, 30, 40, 25, 60, 35, 70, 70);
+    let b_long = phi_hsp(2, 4, 30, 40, 25, 60, 35, 70, 70);
+    let culled = phi_hsp(3, 4, 80, 10, 75, 100, 5, 30, 50);
+    let all = vec![a.clone(), b_short.clone(), b_long.clone(), culled];
+    let prelims: Vec<XPrelimHsp> = all
+        .iter()
+        .enumerate()
+        .map(|(index, hsp)| {
+            preliminary_of(hsp, 0, 0, 200).with_phi_ordinal(PhiPrelimOrdinal::new(index))
+        })
+        .collect();
+    // Simulate a culling/best-hit writer that keeps `b_long` before `b_short`, then `a`,
+    // and drops `culled`.
+    let kept = vec![prelims[2], prelims[1], prelims[0]];
+    let selected = select_kept_prelim(&kept, all);
+    assert_eq!(selected, vec![b_long, b_short, a]);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3572-3632
-// Occurrence indices past `u16::MAX` (e.g. 64 and 65,600, which are congruent mod 65,536) must
-// split into distinct occurrence hit lists without truncation.
+// Occurrence indices past `u16::MAX` (e.g. 64 and 65,600, congruent mod 65,536) and
+// equal-coordinate HSPs from distinct occurrences split into their exact occurrence hit lists
+// via `PhiOccurrenceIndex`, resetting `subject_frame` back to 0.
 #[test]
-fn split_hit_list_by_occurrence_keeps_indices_past_u16_max_separate() {
-    let make_hsp = |q_start: usize, score: i32| BlastpHsp {
-        identity: 100.0,
-        length: 40,
-        mismatch: 0,
-        gapopen: 0,
-        q_start,
-        q_end: q_start + 39,
-        s_start: 1,
-        s_end: 40,
-        gapped_q_start: (q_start - 1) as i32,
-        gapped_s_start: 0,
-        e_value: 1e-10,
-        bit_score: 80.0,
-        num_ident: 40,
-        query_context: 0,
-        query_frame: 0,
-        subject_frame: 0,
-        query_length: 65_720,
-        q_idx: 0,
-        s_idx: 0,
-        raw_score: score,
-        gap_info: None,
-        num_positives: 40,
-        comp_adjustment_method: 0,
-        num: 1,
+fn split_hit_list_by_occurrence_keeps_indices_past_u16_max_and_reordered_ties_separate() {
+    let make_hsp = |q_start: usize, score: i32, occ: usize| {
+        BlastpHsp {
+            identity: 100.0,
+            length: 40,
+            mismatch: 0,
+            gapopen: 0,
+            q_start,
+            q_end: q_start + 39,
+            s_start: 1,
+            s_end: 40,
+            gapped_q_start: (q_start - 1) as i32,
+            gapped_s_start: 0,
+            e_value: 1e-10,
+            bit_score: 80.0,
+            num_ident: 40,
+            query_context: 0,
+            query_frame: 0,
+            subject_frame: 0,
+            query_length: 65_720,
+            q_idx: 0,
+            s_idx: 0,
+            raw_score: score,
+            gap_info: None,
+            num_positives: 40,
+            comp_adjustment_method: 0,
+            num: 1,
+        }
+        .with_phi_occurrence(PhiOccurrenceIndex::new(occ))
     };
-    let hsp_low = make_hsp(65, 200);
-    let hsp_high = make_hsp(65_601, 180);
+    let hsp_low = make_hsp(65, 200, 64);
+    // Identical coordinates/score to `hsp_low`, different occurrence and mismatch count, placed
+    // before `hsp_high` to prove order-independent splitting.
+    let mut hsp_tie = make_hsp(65, 200, 65);
+    hsp_tie.mismatch = 2;
+    let hsp_high = make_hsp(65_601, 180, 65_600);
     let mut hit_list = BlastpHitList::new(1);
     hit_list.hsplist_array.push(BlastpHspList {
         oid: 0,
         query_index: 0,
-        hsps: vec![hsp_low, hsp_high],
+        hsps: vec![hsp_tie, hsp_low, hsp_high],
         best_evalue: 1e-10,
     });
     hit_list.hsplist_count = 1;
-    let parts = split_hit_list_by_occurrence(Some(&hit_list), 65_689, |_oid, hsp| {
-        if hsp.q_start == 65 {
-            64
-        } else {
-            65_600
-        }
+    let parts = split_hit_list_by_occurrence(Some(&mut hit_list), 65_689, |_oid, hsp| {
+        hsp.take_phi_occurrence()
+            .expect("PHI occurrence attached")
+            .index()
     });
     assert_eq!(parts.len(), 65_689);
     let list_64 = parts[64].as_ref().expect("occurrence 64 has an HSP");
     assert_eq!(list_64.hsplist_count, 1);
     assert_eq!(list_64.hsplist_array[0].hsps.len(), 1);
     assert_eq!(list_64.hsplist_array[0].hsps[0].q_start, 65);
+    assert_eq!(list_64.hsplist_array[0].hsps[0].mismatch, 0);
+    assert_eq!(list_64.hsplist_array[0].hsps[0].subject_frame, 0);
+    let list_65 = parts[65].as_ref().expect("occurrence 65 has an HSP");
+    assert_eq!(list_65.hsplist_count, 1);
+    assert_eq!(list_65.hsplist_array[0].hsps.len(), 1);
+    assert_eq!(list_65.hsplist_array[0].hsps[0].q_start, 65);
+    assert_eq!(list_65.hsplist_array[0].hsps[0].mismatch, 2);
+    assert_eq!(list_65.hsplist_array[0].hsps[0].subject_frame, 0);
     let list_65600 = parts[65_600].as_ref().expect("occurrence 65600 has an HSP");
     assert_eq!(list_65600.hsplist_count, 1);
     assert_eq!(list_65600.hsplist_array[0].hsps.len(), 1);
     assert_eq!(list_65600.hsplist_array[0].hsps[0].q_start, 65_601);
-    assert_eq!(parts.iter().filter(|p| p.is_some()).count(), 2);
+    assert_eq!(list_65600.hsplist_array[0].hsps[0].subject_frame, 0);
+    assert_eq!(parts.iter().filter(|p| p.is_some()).count(), 3);
+    assert!(hit_list.hsplist_array[0]
+        .hsps
+        .iter()
+        .all(|hsp| hsp.subject_frame == 0));
 }

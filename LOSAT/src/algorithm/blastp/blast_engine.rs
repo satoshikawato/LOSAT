@@ -11382,7 +11382,7 @@ fn shift_and_split_hit_lists(
         }
     }
     if let Some(phi) = phi_call {
-        phi.split_occurrences(hit_lists, ranges);
+        phi.split_occurrences(hit_lists);
     }
 }
 

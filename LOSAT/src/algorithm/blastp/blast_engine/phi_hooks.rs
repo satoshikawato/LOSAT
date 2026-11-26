@@ -7,15 +7,16 @@
 //! lists), and the traceback of the kept lists once every subject is scanned (`phi_traceback`: the
 //! e-values read the subjects' count of pattern hits). The final lists are blastp's; after
 //! `finish_hit_lists` and `report_values`, `PhiCall::split_occurrences` splits them by query
-//! occurrence (`PHIBlast_HSPResultsSplit`, `split_hit_list_by_occurrence`) out of band so
-//! `BlastpHsp` carries no occurrence field. Every function is out of line and cold: blastp's
-//! default path only tests `ResolvedBlastpArgs::phi`.
+//! occurrence (`PHIBlast_HSPResultsSplit`, `split_hit_list_by_occurrence`) using the typed
+//! occurrence index (`PhiOccurrenceIndex`) carried on `BlastpHsp` without growing `BlastpHsp`
+//! (168 B). Every function is out of line and cold: blastp's default path only tests
+//! `ResolvedBlastpArgs::phi`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1775-1778
 
 use anyhow::Result;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Mutex;
 
@@ -26,8 +27,10 @@ use super::{
 use crate::algorithm::blastp::args::ResolvedBlastpArgs;
 use crate::algorithm::blastp::encoding::EncodedProtein;
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
-use crate::algorithm::blastp::hsp::{update_best_evalue, BlastpHitList, BlastpHsp, BlastpHspList};
-use crate::algorithm::blastp::x_prelim_compact::XPrelimHsp;
+use crate::algorithm::blastp::hsp::{
+    update_best_evalue, BlastpHitList, BlastpHsp, BlastpHspList, PhiOccurrenceIndex,
+};
+use crate::algorithm::blastp::x_prelim_compact::{PhiPrelimOrdinal, XPrelimHsp};
 use crate::algorithm::blastp::x_redo_subjects::XRedoSubjects;
 use crate::algorithm::phi_search::engine::{self, PhiHsp, PhiSearch, PhiSetup, PhiSetupError};
 use crate::algorithm::phi_search::pattern::PhiError;
@@ -92,15 +95,6 @@ pub(super) fn phi_karlin(args: &ResolvedBlastpArgs) -> Result<stats::PhiKarlin, 
     )
 }
 
-/// Key matching a preliminary `PhiHsp` against the fields preserved in `XPrelimHsp`
-/// (`preliminary_of`): pattern offsets, alignment bounds, and preliminary raw score.
-type PhiPrelimKey = (i32, i32, i32, i32, i32, i32, i32);
-
-/// Key identifying a final `BlastpHsp` in searched (pre-`shift_hsp_to_records`) coordinates
-/// between `phi_traceback` and `PhiCall::split_occurrences`. Excludes fields that
-/// `recount_shown_identities` can recompute (`num_ident`, `mismatch`, `identity`, `num_positives`).
-type PhiFinalKey = (i32, i32, usize, usize, usize, usize, i32, usize, usize);
-
 /// The searches of the call's queries and what the preliminary stage gathers for the traceback.
 pub(super) struct PhiCall<'p> {
     /// Each query's search, by query: `None` for a query without letters (its batch is searched
@@ -125,11 +119,6 @@ pub(super) struct PhiCall<'p> {
     /// score block without Karlin blocks; NCBI's setup goes on, so the pattern's and the
     /// occurrences' errors still stop the run).
     pub(super) no_statistics: Option<String>,
-    /// Per-query occurrence indices (`pat_info->index`, `usize`) recorded during `phi_traceback`
-    /// in `ScoreCompareHSPs` order, keyed by `(oid, PhiFinalKey)`. Consumed by
-    /// `split_occurrences` after `finish_hit_lists` and `report_values` so `BlastpHsp` keeps no
-    /// occurrence field and occurrence indices past `u16::MAX` are never truncated.
-    traced_occurrences: Vec<HashMap<(u32, PhiFinalKey), VecDeque<usize>>>,
     /// Per-query, per-occurrence final hit lists (`PHIBlast_HSPResultsSplit`), populated by
     /// `split_occurrences` after `shift_hsp_to_records`.
     occurrence_lists: Vec<Vec<Option<BlastpHitList>>>,
@@ -244,31 +233,24 @@ impl PhiCall<'_> {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3572-3632
     /// Splits every searched query's final hit list into one hit list per pattern occurrence
-    /// (`PHIBlast_HSPResultsSplit`), using the occurrence indices recorded at `phi_traceback`.
+    /// (`PHIBlast_HSPResultsSplit`), consuming each HSP's `PhiOccurrenceIndex` attached at
+    /// `phi_traceback` (and resetting `subject_frame` to `0`).
     /// Called after `finish_hit_lists`, `report_values`, and `shift_hsp_to_records`.
     #[cold]
     #[inline(never)]
-    pub(super) fn split_occurrences(
-        &mut self,
-        hit_lists: &[Option<BlastpHitList>],
-        ranges: &super::BlastpRanges<'_>,
-    ) {
+    pub(super) fn split_occurrences(&mut self, hit_lists: &mut [Option<BlastpHitList>]) {
         self.occurrence_lists = (0..self.searches.len())
             .map(|q_idx| {
                 let num_occurrences = self.searches[q_idx]
                     .as_ref()
                     .map_or(0, |search| search.occurrences.len());
-                let mut map = std::mem::take(&mut self.traced_occurrences[q_idx]);
                 split_hit_list_by_occurrence(
-                    hit_lists.get(q_idx).and_then(Option::as_ref),
+                    hit_lists.get_mut(q_idx).and_then(Option::as_mut),
                     num_occurrences,
-                    |oid, hsp| {
-                        let q_shift = ranges.query_input.placements.offset(hsp.q_idx as usize);
-                        let s_shift = ranges.subject_placements.offset(hsp.s_idx as usize);
-                        let key = phi_final_key(hsp, q_shift, s_shift);
-                        map.get_mut(&(oid, key))
-                            .and_then(VecDeque::pop_front)
-                            .expect("every PHI HSP was recorded in phi_traceback")
+                    |_oid, hsp| {
+                        hsp.take_phi_occurrence()
+                            .expect("every PHI HSP carries a PhiOccurrenceIndex from phi_traceback")
+                            .index()
                     },
                 )
             })
@@ -509,7 +491,6 @@ pub(super) fn phi_start<'p>(
         lookup_hits: AtomicI64::new(0),
         refusal: Mutex::new(None),
         no_statistics: karlin.err(),
-        traced_occurrences: vec![HashMap::new(); query_frames.len()],
         occurrence_lists: Vec::new(),
     }))
 }
@@ -598,7 +579,11 @@ pub(super) fn phi_prelim(
                 query_index: q_idx as u32,
                 hsps: hsps
                     .iter()
-                    .map(|hsp| preliminary_of(hsp, q_idx, s_idx, query_length))
+                    .enumerate()
+                    .map(|(index, hsp)| {
+                        preliminary_of(hsp, q_idx, s_idx, query_length)
+                            .with_phi_ordinal(PhiPrelimOrdinal::new(index))
+                    })
                     .collect(),
                 best_evalue: 0.0,
             };
@@ -656,81 +641,35 @@ pub(super) fn phi_prelim(
     Ok(())
 }
 
-fn phi_prelim_key(hsp: &PhiHsp) -> PhiPrelimKey {
-    (
-        hsp.q_pattern_offset,
-        hsp.s_pattern_offset,
-        hsp.query_start,
-        hsp.query_end,
-        hsp.subject_start,
-        hsp.subject_end,
-        hsp.score,
-    )
-}
-
-fn kept_prelim_key(hsp: &XPrelimHsp) -> PhiPrelimKey {
-    let h = &hsp.hsp;
-    (
-        h.gapped_query_start,
-        h.gapped_subject_start,
-        h.query_start,
-        h.query_end,
-        h.subject_start,
-        h.subject_end,
-        h.raw_score,
-    )
-}
-
-fn phi_final_key(hsp: &BlastpHsp, q_shift: usize, s_shift: usize) -> PhiFinalKey {
-    (
-        hsp.gapped_q_start,
-        hsp.gapped_s_start,
-        hsp.q_start - q_shift,
-        hsp.q_end - q_shift,
-        hsp.s_start - s_shift,
-        hsp.s_end - s_shift,
-        hsp.raw_score,
-        hsp.length,
-        hsp.gapopen,
-    )
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:780-794
 /// Keeps only the re-scanned `PhiHsp`s that survived in the preliminary hit list `kept`
-/// (after `-culling_limit` / `-best_hit_*` preliminary filtering), matching by multiset
-/// multiplicity on the fields `preliminary_of` preserves and returning them in `kept` order.
+/// (after `-culling_limit` / `-best_hit_*` preliminary filtering), selecting each entry by its
+/// `PhiPrelimOrdinal` in `kept` order so variable-length pattern hits sharing a start offset and
+/// preliminary bounds stay unambiguous.
 fn select_kept_prelim(kept: &[XPrelimHsp], all: Vec<PhiHsp>) -> Vec<PhiHsp> {
-    if kept.len() == all.len()
-        && kept
-            .iter()
-            .zip(&all)
-            .all(|(k, h)| kept_prelim_key(k) == phi_prelim_key(h))
-    {
-        return all;
-    }
-    let mut by_key: HashMap<PhiPrelimKey, Vec<PhiHsp>> = HashMap::with_capacity(all.len());
-    for hsp in all.into_iter().rev() {
-        by_key.entry(phi_prelim_key(&hsp)).or_default().push(hsp);
-    }
-    let mut selected = Vec::with_capacity(kept.len());
-    for prelim in kept {
-        if let Some(bucket) = by_key.get_mut(&kept_prelim_key(prelim)) {
-            if let Some(hsp) = bucket.pop() {
-                selected.push(hsp);
-            }
-        }
-    }
-    selected
+    let mut slots: Vec<Option<PhiHsp>> = all.into_iter().map(Some).collect();
+    kept.iter()
+        .map(|prelim| {
+            let index = prelim
+                .phi_ordinal()
+                .expect("every PHI preliminary HSP carries a PhiPrelimOrdinal")
+                .index();
+            slots
+                .get_mut(index)
+                .and_then(Option::take)
+                .expect("each PHI preliminary ordinal is in range and unique")
+        })
+        .collect()
 }
 
 /// The traceback of a PHI-BLAST search (`s_PHITracebackFromHSPList` of each kept list): the
 /// subject's preliminary HSPs that survived in `list.hsps` (re-found by `PhiSearch::prelim` and
-/// filtered by `select_kept_prelim`), each traced with the final X-drop, its e-value from the
-/// count of pattern hits of every scanned subject (`num_patterns_db`, NCBI's `(Int4)` of its
-/// `Int8` sum), reaped by `-evalue`; the final HSPs with their counts
+/// selected by `select_kept_prelim` via `PhiPrelimOrdinal`), each traced with the final X-drop,
+/// its e-value from the count of pattern hits of every scanned subject (`num_patterns_db`, NCBI's
+/// `(Int4)` of its `Int8` sum), reaped by `-evalue`; the final HSPs with their counts
 /// (`pssm_search::traceback0::final_hsp`), into the final hit lists as blastp's traceback inserts
-/// them (`traceback::hit_lists_of_traced`). Each HSP's occurrence index (`usize`, never truncated)
-/// is recorded in `phi.traced_occurrences` for `PhiCall::split_occurrences`.
+/// them (`traceback::hit_lists_of_traced`). Each final HSP carries its `PhiOccurrenceIndex`
+/// (`pat_info->index`, `Int4` range) for `PhiCall::split_occurrences`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:780-815
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1636-1641
@@ -755,7 +694,6 @@ pub(super) fn phi_traceback(
         let search = phi.searches[q_idx]
             .as_ref()
             .expect("the hit list of a searched query");
-        let occ_map = &mut phi.traced_occurrences[q_idx];
         let ctx = &contexts[q_idx];
         let query_nomask = super::query_nomask_sequence(ctx);
         let count = hit_list.hsplist_count;
@@ -811,11 +749,7 @@ pub(super) fn phi_traceback(
                     );
                     final_hsp.e_value = hsp.evalue;
                     final_hsp.bit_score = hsp.bit_score;
-                    occ_map
-                        .entry((list.oid, phi_final_key(&final_hsp, 0, 0)))
-                        .or_default()
-                        .push_back(hsp.occurrence);
-                    final_hsp
+                    final_hsp.with_phi_occurrence(PhiOccurrenceIndex::new(hsp.occurrence))
                 })
                 .collect();
             let mut traced_list = BlastpHspList {
@@ -846,17 +780,21 @@ pub(super) fn phi_traceback(
 #[cold]
 #[inline(never)]
 pub(super) fn split_hit_list_by_occurrence(
-    hit_list: Option<&BlastpHitList>,
+    hit_list: Option<&mut BlastpHitList>,
     num_occurrences: usize,
-    mut occurrence_of: impl FnMut(u32, &BlastpHsp) -> usize,
+    mut occurrence_of: impl FnMut(u32, &mut BlastpHsp) -> usize,
 ) -> Vec<Option<BlastpHitList>> {
     let mut parts: Vec<Option<BlastpHitList>> = vec![None; num_occurrences];
     let Some(hit_list) = hit_list else {
         return parts;
     };
-    for list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
+    for list in hit_list
+        .hsplist_array
+        .iter_mut()
+        .take(hit_list.hsplist_count)
+    {
         let mut by_occ: BTreeMap<usize, Vec<BlastpHsp>> = BTreeMap::new();
-        for hsp in &list.hsps {
+        for hsp in &mut list.hsps {
             let occ = occurrence_of(list.oid, hsp);
             debug_assert!(
                 occ < num_occurrences,

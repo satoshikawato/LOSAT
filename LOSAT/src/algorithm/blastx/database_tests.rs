@@ -421,31 +421,38 @@ fn read_titles_does_not_let_shown_source_refusal_overtake_earlier_refusal_or_hea
             (Default::default(), true),
         )
     };
-    // OID 0 (tc_dmg_p[0]) has a 0xE9 title byte; OID 1 (tc_dmg_p[1]) has a damaged header;
-    // OID 3 (pbare_t[0]) has an empty title with a taxid refused under btd_empty.
-    let err_source_only = read(&[(3, 90)]).err().expect("shown-source refusal");
+    // Multi-volume specs sort volumes by path, so locate bare_v4 (length 20) vs tc_dmg_p
+    // (lengths 60, 60, 80: OID +0 has a 0xE9 title byte, OID +1 has a damaged header).
+    assert_eq!(database.db.num_seqs(), 4);
+    let bare_oid = (0..4usize)
+        .find(|&oid| database.db.protein_length(oid as u32).unwrap() == 20)
+        .expect("bare_v4 sequence");
+    let dmg_base = if bare_oid == 0 { 1 } else { 0 };
+    let bad_title_oid = dmg_base;
+    let damaged_oid = dmg_base + 1;
+    let err_source_only = read(&[(bare_oid, 90)]).err().expect("shown-source refusal");
     assert!(
         err_source_only
             .downcast_ref::<crate::blastinput::app::ErrorAfterBatchReports>()
             .is_none(),
         "expected shown-source refusal, got ErrorAfterBatchReports: {err_source_only:#}"
     );
-    let err_title_first = read(&[(0, 90), (3, 80)])
+    let err_title_first = read(&[(bad_title_oid, 90), (bare_oid, 80)])
         .err()
-        .expect("OID 0 title refusal");
+        .expect("bad-title refusal");
     assert!(
         format!("{err_title_first:#}")
             .contains("has a stored title with a byte outside ' ' to '~'"),
-        "expected OID 0 title refusal first, got: {err_title_first:#}"
+        "expected bad-title refusal first, got: {err_title_first:#}"
     );
-    let err_damaged_after = read(&[(3, 90), (1, 80)])
+    let err_damaged_after = read(&[(bare_oid, 90), (damaged_oid, 80)])
         .err()
-        .expect("OID 1 ErrorAfterBatchReports");
+        .expect("damaged-header ErrorAfterBatchReports");
     assert!(
         err_damaged_after
             .downcast_ref::<crate::blastinput::app::ErrorAfterBatchReports>()
             .is_some(),
-        "expected OID 1 ErrorAfterBatchReports to win over OID 3 shown-source refusal, got: {err_damaged_after:#}"
+        "expected damaged-header ErrorAfterBatchReports to win over shown-source refusal, got: {err_damaged_after:#}"
     );
     std::fs::remove_dir_all(&cwd).unwrap();
 }

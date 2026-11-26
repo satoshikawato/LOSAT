@@ -604,6 +604,7 @@ fn refusal_lists_name_rows() {
     }
 }
 
+const PROT_ALL_FASTA: [&str; 6] = ["-db", "p4", "-dbtype", "prot", "-entry", "all"];
 const PROT_ALL_FMT: [&str; 8] = [
     "-db", "p4", "-dbtype", "prot", "-entry", "all", "-outfmt", "%o %l %t",
 ];
@@ -901,7 +902,7 @@ fn nonasc_cross_program_parity() {
         (
             "nonasc_seq_dbcmd_fasta",
             "blastdbcmd",
-            vec!["-db", "p4", "-dbtype", "prot", "-entry", "all"],
+            PROT_ALL_FASTA.to_vec(),
         ),
         ("nonasc_seq_dbcmd_fmt", "blastdbcmd", PROT_ALL_FMT.to_vec()),
         (
@@ -950,7 +951,7 @@ fn nonasc_cross_program_parity() {
         (
             "nonasc_hdr_dbcmd_fasta",
             "blastdbcmd",
-            vec!["-db", "p4", "-dbtype", "prot", "-entry", "all"],
+            PROT_ALL_FASTA.to_vec(),
         ),
         ("nonasc_hdr_dbcmd_fmt", "blastdbcmd", PROT_ALL_FMT.to_vec()),
         (

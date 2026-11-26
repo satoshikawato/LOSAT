@@ -389,7 +389,10 @@ fn all_frozen_ncbi_2_17_0_asn1_cases_match_byte_for_byte() {
         assert_eq!(actual_files, expected_files, "case {name}: DB files differ");
         checked += 1;
     }
-    assert!(checked >= 82, "expected >= 82 frozen cases, got {checked}");
+    assert!(
+        checked >= 100,
+        "expected >= 100 frozen cases, got {checked}"
+    );
 }
 
 #[test]
@@ -415,6 +418,12 @@ fn text_and_binary_asn1_produce_identical_databases() {
             fix_a.join("ptitles.asn"),
             fix_a.join("ptitles.asnb"),
             "prot",
+        ),
+        (
+            "titles",
+            fix_a.join("titles.asn"),
+            fix_a.join("titles.asnb"),
+            "nucl",
         ),
         ("fr", fix_a.join("fr.asn"), fix_a.join("fr.asnb"), "nucl"),
         (
@@ -446,6 +455,24 @@ fn text_and_binary_asn1_produce_identical_databases() {
             fix_m.join("e1.asn.zst"),
             fix_m.join("e1.asnb.zst"),
             "nucl",
+        ),
+        (
+            "d3c5_unver",
+            fix_m.join("d3c5_unver.asn"),
+            fix_m.join("d3c5_unver.asnb"),
+            "nucl",
+        ),
+        (
+            "d3c5_htgs_tech",
+            fix_m.join("d3c5_htgs_tech.asn"),
+            fix_m.join("d3c5_htgs_tech.asnb"),
+            "nucl",
+        ),
+        (
+            "d3c5_prot_feats",
+            fix_m.join("d3c5_prot_feats.asn"),
+            fix_m.join("d3c5_prot_feats.asnb"),
+            "prot",
         ),
     ];
     let env = MakedbEnv {
@@ -504,42 +531,19 @@ fn text_and_binary_asn1_produce_identical_databases() {
 }
 
 #[test]
-fn d3c4_unsupported_title_and_ub_cases_are_refused_cleanly() {
-    let (fix_a, fix_m, _, _) = asn1_fixture_paths();
+fn d3c6_autodef_and_ub_cases_are_refused_cleanly() {
+    let (_fix_a, fix_m, _, _) = asn1_fixture_paths();
     let env_default = MakedbEnv {
         skip_unverified: false,
         scan_cfastareader: true,
     };
-    let file_cases = [
-        (
-            "molinfo",
-            fix_a.join("titles.asn"),
-            "nucl",
-            env_default,
-            "MolInfo",
-        ),
-        (
-            "unver",
-            fix_m.join("unver.asn"),
-            "nucl",
-            env_default,
-            "Unverified",
-        ),
-        (
-            "protfeat",
-            fix_m.join("protfeat.asn"),
-            "prot",
-            env_default,
-            "not supported by LOSAT's makeblastdb",
-        ),
-        (
-            "llong",
-            fix_m.join("llong.asn"),
-            "nucl",
-            env_default,
-            "past the data",
-        ),
-    ];
+    let file_cases = [(
+        "llong",
+        fix_m.join("llong.asn"),
+        "nucl",
+        env_default,
+        "past the data",
+    )];
     for (label, path, dbtype, env, expected_substr) in file_cases {
         let dir = TempDir::unique(&format!("asn1-refuse-{label}"));
         let dir_str = dir_string(&dir);
@@ -573,15 +577,14 @@ fn d3c4_unsupported_title_and_ub_cases_are_refused_cleanly() {
         }
     }
 
-    // Regression: Unverified on a genbank set (not skipped by SKIP_UNVER) whose explicit title
-    // begins with "UNVERIFIED: " is still refused because NCBI strips the prefix and re-emits
-    // UNVERIFIED_ORG: from the user object.
-    let genbank_unver = br#"Seq-entry ::= set {
-  class genbank,
-  descr { user { type str "Unverified", data { { label str "Type", data str "Organism" } } } },
-  seq-set {
-    seq { id { local str "g1" }, descr { title "UNVERIFIED: ok" }, inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } }
-  }
+    // D3c-6 boundary: untitled nucleotide sequence with AutodefOptions (not TLS, not RefSeq contig).
+    let autodef_nucl = br#"Seq-entry ::= seq {
+  id { other { accession "NZ_000001", version 1 } },
+  descr {
+    source { org { taxname "Escherichia coli" } },
+    user { type str "AutodefOptions", data {} }
+  },
+  inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
 }
 "#;
     let empty_delta = br#"Seq-entry ::= seq {
@@ -598,13 +601,10 @@ fn d3c4_unsupported_title_and_ub_cases_are_refused_cleanly() {
 "#;
     for (label, bytes, env, substr) in [
         (
-            "genbank_unver_prefix",
-            genbank_unver.as_slice(),
-            MakedbEnv {
-                skip_unverified: true,
-                scan_cfastareader: true,
-            },
-            "Unverified",
+            "autodef_nucl",
+            autodef_nucl.as_slice(),
+            env_default,
+            "AutoDef",
         ),
         (
             "empty_delta",
@@ -635,6 +635,16 @@ fn d3c4_unsupported_title_and_ub_cases_are_refused_cleanly() {
         ];
         let (rc, _, stderr) = run_case(&words, env, bytes);
         assert_refusal(label, rc, &stderr, substr);
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let fname = entry.unwrap().file_name().to_string_lossy().into_owned();
+            assert!(
+                !fname.ends_with(".nin")
+                    && !fname.ends_with(".nhr")
+                    && !fname.ends_with(".nsq")
+                    && !fname.ends_with(".ndb"),
+                "{label}: volume/LMDB file {fname} was left behind after refusal"
+            );
+        }
     }
 }
 

@@ -1,0 +1,103 @@
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { local str "b1" },
+      descr {
+        molinfo { completeness complete },
+        source {
+          genome mitochondrion,
+          org {
+            taxname "Homo sapiens",
+            orgname {
+              mod {
+                { subtype strain, subname "S1" },
+                { subtype substrain, subname "Sub1" },
+                { subtype breed, subname "Br1" },
+                { subtype cultivar, subname "Cv1" },
+                { subtype specimen-voucher, subname "V:1" },
+                { subtype isolate, subname "Iso1" }
+              }
+            }
+          },
+          subtype { { subtype clone, name "4 clones" }, { subtype map, name "1p36" } }
+        }
+      },
+      inst { repr raw, mol dna, length 4, topology circular, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "b2" },
+      descr {
+        molinfo { completeness complete },
+        source {
+          org { taxname "Escherichia coli K-12", orgname { mod { { subtype strain, subname "K-12" } } } },
+          subtype { { subtype plasmid-name, name "pUC19" } }
+        }
+      },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "b3" },
+      descr {
+        molinfo { completeness complete },
+        source {
+          genome chromosome,
+          org { taxname "Saccharomyces cerevisiae 'S288C'", orgname { mod { { subtype cultivar, subname "S288C" } } } }
+        }
+      },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "b4" },
+      descr {
+        molinfo { completeness complete },
+        source { org { taxname "Saccharomyces cerevisiae" }, subtype { { subtype linkage-group, name "LG1" } } }
+      },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "b5" },
+      descr { source { genome proviral, org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { local str "b6" },
+      descr { source { genome proviral, org { taxname "Human immunodeficiency virus 1" } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NC_000001", version 1 } },
+      descr { source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol dna, length 4, topology circular, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NC_000002", version 1 } },
+      descr { molinfo { completeness partial }, source { genome plasmid, org { taxname "Escherichia coli" } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NC_000003", version 1 } },
+      descr { source { genome mitochondrion, org { taxname "Zea mays" }, subtype { { subtype plasmid-name, name "S1" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NC_000004", version 1 } },
+      descr { source { genome mitochondrion, org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NC_000005", version 1 } },
+      descr { source { org { taxname "Influenza A virus" }, subtype { { subtype segment, name "4" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NC_000006", version 1 } },
+      descr { source { org { taxname "Homo sapiens" }, subtype { { subtype chromosome, name "1" } } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { other { accession "NC_000007", version 1 } },
+      descr { source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    }
+  }
+}

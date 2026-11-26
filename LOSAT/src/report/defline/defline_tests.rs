@@ -1,5 +1,22 @@
+use super::html::{guess_encoding, Encoding};
+use super::prefix_suffix::title_ends_in_organism;
 use super::*;
 use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
+
+fn title_before_decoding_of(
+    title: &[u8],
+    protein: bool,
+    leave_prefix_suffix: bool,
+    ids: &BioseqFacts,
+) -> Vec<u8> {
+    let inp = ids.to_defline_input(title, protein, leave_prefix_suffix);
+    build_main_title_before_decoding(&inp, None).0
+}
+
+fn source_title(protein: bool, ids: &BioseqFacts) -> Vec<u8> {
+    let inp = ids.to_defline_input(b"", protein, false);
+    build_empty_source_title(&inp, None).0
+}
 
 // NCBI BLAST+ 2.17.0 `blastp -db DB -outfmt "6 sseqid sacc saccver stitle"
 // -num_threads 1` on databases that makeblastdb made (without -parse_seqids) from

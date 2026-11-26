@@ -1,0 +1,58 @@
+Bioseq-set ::= {
+  seq-set {
+    set {
+      class nuc-prot,
+      descr { source { org { taxname "Drosophila melanogaster" } } },
+      seq-set {
+        seq {
+          id { other { accession "NM_000001", version 1 } },
+          descr { molinfo { biomol mRNA } },
+          inst { repr raw, mol rna, length 12, seq-data iupacna "ATGAAACCCTTT" },
+          annot { { data ftable {
+            { data gene { locus "CG1234" }, location int { from 0, to 11, id other { accession "NM_000001", version 1 } } }
+          } } }
+        },
+        seq {
+          id { other { accession "NP_000001", version 1 } },
+          inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKPF" },
+          annot { { data ftable {
+            { data prot { name { "uncharacterized protein CG1234-PA, isoform A" } }, location int { from 0, to 3, id other { accession "NP_000001", version 1 } } }
+          } } }
+        }
+      },
+      annot { { data ftable {
+        { data cdregion {}, product whole other { accession "NP_000001", version 1 }, location int { from 0, to 11, id other { accession "NM_000001", version 1 } } }
+      } } }
+    },
+    seq {
+      id { other { accession "NM_000010", version 1 } },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 12, seq-data iupacna "ATGAAACCCTTT" },
+      annot { { data ftable {
+        { data gene { locus-tag "LT1" }, location int { from 0, to 11, id other { accession "NM_000010", version 1 } } },
+        { data cdregion { orf TRUE, frame two }, location int { from 0, to 11, strand minus, id other { accession "NM_000010", version 1 } } }
+      } } }
+    },
+    seq {
+      id { other { accession "NM_000011", version 1 } },
+      descr { molinfo { biomol mRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 12, seq-data iupacna "ATGAAACCCTTT" },
+      annot { { data ftable {
+        { data gene {}, location int { from 0, to 11, id other { accession "NM_000011", version 1 } } },
+        { data cdregion {}, comment "my cds comment", location int { from 0, to 11, id other { accession "NM_000011", version 1 } }, qual { { qual "note", val "qval" } } }
+      } } }
+    },
+    seq {
+      id { other { accession "NR_000001", version 1 } },
+      descr { molinfo { biomol snoRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 8, seq-data iupacna "ACGTACGT" },
+      annot { { data ftable { { data gene { locus "SNORA1" }, location int { from 0, to 7, id other { accession "NR_000001", version 1 } } } } } }
+    },
+    seq {
+      id { other { accession "NR_000010", version 1 } },
+      descr { molinfo { biomol ncRNA }, source { org { taxname "Homo sapiens" } } },
+      inst { repr raw, mol rna, length 8, seq-data iupacna "ACGTACGT" },
+      annot { { data ftable { { data gene { desc "desc gene" }, location int { from 0, to 7, id other { accession "NR_000010", version 1 } } } } } }
+    }
+  }
+}

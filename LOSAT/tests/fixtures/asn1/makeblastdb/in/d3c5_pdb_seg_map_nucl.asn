@@ -1,0 +1,50 @@
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { pdb { mol "3ABC", chain-id "X" } },
+      descr { comment "long comment ignored for short NA", pdb { deposition std { year 2020 }, class "DNA", compound { "Short DNA" }, source { "s" } } },
+      inst { repr raw, mol dna, length 8, seq-data iupacna "ACGTACGT" }
+    },
+    seq {
+      id { pdb { mol "3ABD", chain-id "Y" } },
+      descr { comment "42 Long DNA comment", pdb { deposition std { year 2020 }, class "DNA", compound { "Long DNA compound" }, source { "s" } } },
+      inst { repr raw, mol dna, length 28, seq-data iupacna "ACGTACGTACGTACGTACGTACGTACGT" }
+    },
+    seq {
+      id { pdb { mol "3ABE", chain-id "Z" } },
+      descr { comment "Has SEQRES inside", pdb { deposition std { year 2020 }, class "DNA", compound { "SEQRES compound" }, source { "s" } } },
+      inst { repr raw, mol dna, length 28, seq-data iupacna "ACGTACGTACGTACGTACGTACGTACGT" }
+    },
+    set {
+      class segset,
+      descr { source { org { taxname "Mus musculus" } } },
+      seq-set {
+        seq {
+          id { local str "master" },
+          inst { repr seg, mol dna, length 8, seq-data iupacna "ATGAAACC", ext seg { whole local str "part1", whole local str "part2" } }
+        },
+        set {
+          class parts,
+          seq-set {
+            seq { id { local str "part1" }, inst { repr raw, mol dna, length 4, seq-data iupacna "ATGA" } },
+            seq { id { local str "part2" }, inst { repr raw, mol dna, length 4, seq-data iupacna "AACC" } }
+          }
+        }
+      },
+      annot { { data ftable {
+        { data gene { locus "MyGene" }, location int { from 0, to 3, id local str "part1" } },
+        { data cdregion {}, partial TRUE, location int { from 0, to 3, id local str "part1" }, xref { { data prot { name { "my kinase" } } } } }
+      } } }
+    },
+    seq {
+      id { local str "seg_nocds" },
+      descr { source { org { taxname "E. coli", orgname { mod { { subtype strain, subname "B" } } } } } },
+      inst { repr seg, mol dna, length 4, seq-data iupacna "ACGT", ext seg {} }
+    },
+    seq {
+      id { local str "map1" },
+      descr { source { genome chromosome, org { taxname "Homo sapiens", orgname { mod { { subtype isolate, subname "IsoX" } } } }, subtype { { subtype chromosome, name "2" } } } },
+      inst { repr map, mol dna, length 4, seq-data iupacna "ACGT", ext map { { data rsite str "EcoRI", location int { from 0, to 3, id local str "map1" } } } }
+    }
+  }
+}

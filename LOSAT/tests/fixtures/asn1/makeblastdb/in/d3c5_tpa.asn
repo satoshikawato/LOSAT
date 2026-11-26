@@ -1,0 +1,42 @@
+Bioseq-set ::= {
+  seq-set {
+    seq {
+      id { tpg { accession "BK000001", version 1 } },
+      descr { title "tpa seq", genbank { keywords { "TPA:experimental" } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { tpe { accession "BN000001", version 1 } },
+      descr { title "tpa seq", embl { creation-date std { year 2020 }, update-date std { year 2020 }, keywords { "TPA:inferential" } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { tpd { accession "BR000001", version 1 } },
+      descr { title "tpa seq", genbank { keywords { "foo;TPA:reassembly" } } },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { tpg { accession "BK000002", version 1 } },
+      descr {
+        title "tpa seq",
+        genbank { keywords { "TPA:experimental" } },
+        embl { creation-date std { year 2020 }, update-date std { year 2020 }, keywords { "TPA:inferential" } }
+      },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { tpg { accession "BK000003", version 1 } },
+      descr {
+        title "tpa seq",
+        embl { creation-date std { year 2020 }, update-date std { year 2020 }, keywords { "TPA:inferential" } },
+        genbank {}
+      },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    },
+    seq {
+      id { tpg { accession "BK000004", version 1 } },
+      descr { title "tpa seq" },
+      inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" }
+    }
+  }
+}

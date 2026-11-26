@@ -5,9 +5,11 @@
 - Shared database reader (`seqdb`): reads zero-filled bytes past EOF within the last 4 KiB memory
   page on truncated index, sequence, and header files to match NCBI BLAST+ 2.17.0 across
   `blastdbcheck`, `blastdbcmd`, and the search programs; handles non-ascending index offsets
-  (including multithreaded DB-split scan stop at the first negative-length OID and in-mapping
-  out-of-order nucleotide ambiguity offsets, refusing only offsets before the mapping and
-  multithreaded `blastn` traceback where NCBI crashes or aborts),
+  (including multithreaded DB-split scan stop at the first negative-length OID — whether included or
+  excluded by a list — across `blastp`, `blastx`, `psiblast`, and `blastn`, and in-mapping
+  out-of-order nucleotide ambiguity offsets in `blastn`, `blastdbcmd`, and `blastdbcheck`, while
+  `tblastn` and `tblastx` continue to refuse out-of-order ambiguity offsets, and offsets reading
+  before the mapping or multithreaded `blastn` traceback on `amb > next` remain refused),
   `SEQDB_FILE_ASSERT` exception messages in `blastdbcheck`, and `Error: (803.7)` diagnostics for
   `#`-replaced definition-line bytes in `blastdbcheck` and failed `blastdbcmd` header decodes.
 - `blastdbcheck`: widens alias count checks (`i128`) and `-ends` OID bounds (`i64`) so

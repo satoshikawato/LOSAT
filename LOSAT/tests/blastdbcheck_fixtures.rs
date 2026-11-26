@@ -907,9 +907,25 @@ fn nonasc_cross_program_parity() {
         qn.to_str().unwrap(),
     );
 
+    let neg_gi = root.join("neg_gi.txt");
+    fs::write(&neg_gi, b"103\n").unwrap();
+    let pos_gi = root.join("pos_gi.txt");
+    fs::write(&pos_gi, b"101\n102\n104\n105\n106\n").unwrap();
+    let neg_si = root.join("neg_si.txt");
+    fs::write(&neg_si, b"AAB00103.2\n").unwrap();
+    let n4_neg_gi = root.join("n4_neg_gi.txt");
+    fs::write(&n4_neg_gi, b"302\n").unwrap();
+    let (neg_gis, pos_gis, neg_sis, n4_neg_gis) = (
+        neg_gi.to_str().unwrap(),
+        pos_gi.to_str().unwrap(),
+        neg_si.to_str().unwrap(),
+        n4_neg_gi.to_str().unwrap(),
+    );
+
     // 1. d_p4_nonasc_seq (p4.pin@106 = 01f4 -> seq=[1, 62, 500, 179, ...]).
-    // At 2+ threads in DB-split mode, NCBI's CSeqDBImpl::x_FillSeqBuffer stops at OID 2 (len=-322);
-    // at 1 thread or `-mt_mode 1` (split by queries), NCBI scans all OIDs.
+    // At 2+ threads in DB-split mode, NCBI's CSeqDBImpl::x_FillSeqBuffer stops at OID 2 (len=-322)
+    // before applying any GI or seqid list; at 1 thread or `-mt_mode 1` (split by queries), NCBI
+    // scans all included OIDs.
     let d_seq = root.join("d_p4_nonasc_seq");
     cp_db(&d_seq, "p4", true);
     poke(d_seq.join("p4.pin"), 106, "01f4");
@@ -979,6 +995,70 @@ fn nonasc_cross_program_parity() {
             ],
         ),
         (
+            "nonasc_seq_blastp_neggi_t1",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gis,
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_neggi_t4",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gis,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_gi_t4",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-gilist",
+                pos_gis,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastp_negsi_t4",
+            "blastp",
+            vec![
+                "-query",
+                q3s,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_seqidlist",
+                neg_sis,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
             "nonasc_seq_blastx_t1",
             "blastx",
             vec![
@@ -1018,6 +1098,70 @@ fn nonasc_cross_program_parity() {
                 "6",
                 "-mt_mode",
                 "1",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_neggi_t1",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gis,
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_neggi_t4",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                neg_gis,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_gi_t4",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-gilist",
+                pos_gis,
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "nonasc_seq_blastx_negsi_t4",
+            "blastx",
+            vec![
+                "-query",
+                q3ds,
+                "-db",
+                "p4",
+                "-outfmt",
+                "6",
+                "-negative_seqidlist",
+                neg_sis,
                 "-num_threads",
                 "4",
             ],
@@ -1149,7 +1293,9 @@ fn nonasc_cross_program_parity() {
     }
 
     // 3. n4_amb_eq_start (n4.nin@100 = 00000020 -> amb[1] = seq[1] = 32; length = -4 inside mapping).
-    // Deterministic across all programs; blastn -t 4 stops at OID 1 via x_FillSeqBuffer.
+    // Deterministic in blastn, blastdbcmd, and blastdbcheck; blastn -t 4 stops at OID 1 via
+    // x_FillSeqBuffer (even when a GI list excludes OID 1). tblastn and tblastx refuse out-of-order
+    // ambiguity offsets (documented in refusals.md).
     let d_ambeq = root.join("n4_amb_eq_start");
     cp_db(&d_ambeq, "n4", true);
     poke(d_ambeq.join("n4.nin"), 100, "00000020");
@@ -1196,6 +1342,38 @@ fn nonasc_cross_program_parity() {
                 "6",
                 "-mt_mode",
                 "1",
+                "-num_threads",
+                "4",
+            ],
+        ),
+        (
+            "n4_ambeq_blastn_neggi_t1",
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gis,
+                "-num_threads",
+                "1",
+            ],
+        ),
+        (
+            "n4_ambeq_blastn_neggi_t4",
+            "blastn",
+            vec![
+                "-query",
+                qns,
+                "-db",
+                "n4",
+                "-outfmt",
+                "6",
+                "-negative_gilist",
+                n4_neg_gis,
                 "-num_threads",
                 "4",
             ],

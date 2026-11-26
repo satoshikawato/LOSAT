@@ -132,21 +132,30 @@ pub(crate) struct XStreamDb<'a> {
 }
 
 impl<'a> XStreamDb<'a> {
+    /// The database `db` with `(longest, count)` computed by `BlastxDatabase::x_open_stream`.
+    pub(crate) fn with_scan_count(db: &'a SeqDb, longest: usize, count: usize) -> Self {
+        Self::with_block_bytes_and_count(db, longest, count, BLOCK_BYTES)
+    }
+
     /// The database `db` with the longest of `BlastxDatabase::x_open_stream` (or of the check,
-    /// `x_check_stores`).
+    /// `x_check_stores`), scanning all `db.num_seqs()` ordinals (for unit tests).
+    #[cfg(test)]
     pub(crate) fn new(db: &'a SeqDb, longest: usize) -> Self {
         Self::with_block_bytes(db, longest, BLOCK_BYTES)
     }
 
     /// As `new`, with blocks of `block_bytes` (the unit tests read blocks of a few sequences).
+    #[cfg(test)]
     fn with_block_bytes(db: &'a SeqDb, longest: usize, block_bytes: u64) -> Self {
-        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
-        let count = if db.mt_stop_at_negative() {
-            db.x_protein_mt_scan_count()
-                .unwrap_or_else(|_| db.num_seqs()) as usize
-        } else {
-            db.num_seqs() as usize
-        };
+        Self::with_block_bytes_and_count(db, longest, db.num_seqs() as usize, block_bytes)
+    }
+
+    fn with_block_bytes_and_count(
+        db: &'a SeqDb,
+        longest: usize,
+        count: usize,
+        block_bytes: u64,
+    ) -> Self {
         Self {
             db,
             count,
@@ -307,6 +316,9 @@ impl<'a> XStreamDb<'a> {
             .db
             .read_protein_search_block(range)
             .map_err(read_error)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+        // A multithreaded DB-split block may end early at a negative-length OID, so `end` reflects
+        // `part.len()` rather than `range.end_ordinal()`.
         let end = ordinal + part.len();
         self.x_check(&part)?;
         Ok(XBlock {

@@ -408,9 +408,11 @@ impl BlastnDatabase {
         self
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
-    /// Configures multithreaded DB-split scan stop and records the requested thread count.
+    /// Configures multithreaded DB-split scan stop and records the requested thread count (capped
+    /// at the host CPU count as in NCBI's `CMTArgs::x_ExtractAlgorithmOptions`).
     pub(super) fn with_mt_mode(
         mut self,
         num_threads: usize,
@@ -418,7 +420,7 @@ impl BlastnDatabase {
         word_size: usize,
         query_file: Option<&std::path::Path>,
     ) -> Self {
-        self.mt_threads = num_threads;
+        self.mt_threads = shared::ncbi_effective_threads(num_threads);
         let (max_db, min_q) = if word_size < 10 {
             (150_000_000, 1_500_000)
         } else {
@@ -1226,6 +1228,7 @@ where
                     |worker, &range| -> Result<(Vec<(u32, R)>, bool)> {
                         let block = x_read_block(db, range, &mut worker.bytes)
                             .map_err(search_read_error)?;
+                        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
                         let stopped = block.stopped_at_negative();
                         let mut kept = Vec::new();
                         for i in 0..block.len() {
@@ -1252,6 +1255,7 @@ where
             for (ordinal, result) in kept {
                 merge(ordinal, result);
             }
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
             if stopped {
                 return Ok(());
             }
@@ -1328,6 +1332,7 @@ where
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
         let block = x_read_block(db, range, &mut bytes).map_err(search_read_error)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
         let stopped = block.stopped_at_negative();
         for i in 0..block.len() {
             let ordinal = range.first_ordinal + i as u32;

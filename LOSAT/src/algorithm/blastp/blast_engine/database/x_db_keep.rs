@@ -180,6 +180,7 @@ where
     K: Fn(&mut BlastpSubjectScratch, usize, BlastpSubjectRef<'_>, &mut BlastpSubjectResult) + Sync,
 {
     let block = x_read_search_block_into(db, range, &mut kit.bytes, program)?;
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
     let stopped = block.stopped_at_negative();
     kit.scratch.prepare_independent_subject(first_diag_offset);
     let mut with_hits = Vec::new();
@@ -354,6 +355,7 @@ fn x_window_worker<S, K, P>(
                     for mut subject_result in block_results {
                         merge.sink.add(&mut subject_result);
                     }
+                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
                     if stopped {
                         merge.stopped = true;
                         break;
@@ -508,6 +510,7 @@ where
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
         let block = x_read_search_block_into(db, range, &mut bytes, database.program)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
         let stopped = block.stopped_at_negative();
         for i in 0..block.len() {
             process_subject(

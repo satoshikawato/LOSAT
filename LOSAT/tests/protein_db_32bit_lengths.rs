@@ -705,11 +705,13 @@ fn blastp_blastx_psiblast_skip_non_positive_32bit_proteins() {
         assert_rc_err(&out, 3, "LOSAT engine error: Unknown error code 1\n", db);
     }
 
-    // Combined & single-volume mixed DBs: at 1 thread all 4 skip the non-positive OID and find
-    // hits on `small`. At 2 threads (DB-split), NCBI's `CSeqDBImpl::x_FillSeqBuffer`
-    // (`seqdbimpl.cpp:699-700`) stops at the first negative-length OID, so `dba` and `db_mix1`
-    // (OID 0 = -2147483648) return 0 hits, while `dba0` (OID 0 = 0) and `db_mix2` (OID 0 = 400)
-    // still find `small`.
+    // Combined & single-volume mixed DBs: verified against official NCBI BLAST+ 2.17.0.
+    // At 1 thread all 4 skip the non-positive OID and find hits on `small`. At 2 threads
+    // (DB-split), NCBI's `CSeqDBImpl::x_FillSeqBuffer` (`seqdbimpl.cpp:699-700`) stops at the
+    // first negative-length OID, so `dba` and `db_mix1` (OID 0 = -2147483648) return rc=0 with
+    // empty stdout/stderr for both `blastp` and `blastx` (gapped and ungapped), while `db_mix2`
+    // (OID 0 = 400) matches its 1-thread output byte for byte. (`dba0`, whose volume 0 has length
+    // 0, hits an internal NCBI abort at 2 threads; LOSAT skips OID 0 and matches 1-thread output.)
     for db in COMBINED_DBS {
         let mt_stops_before_small = matches!(db, "dba" | "db_mix1");
         for base in [

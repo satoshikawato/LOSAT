@@ -320,50 +320,68 @@ impl BlastxDatabase {
     // value the check counted, also where a damaged header says less (with a `-window_size` near
     // 2^28 that header chose the kept tables of 2 GiB a thread).
     /// What the search needs of the database before the first query batch, without reading its
-    /// sequences: the residues of the longest sequence, from the index's offsets
-    /// (`SeqDb::x_protein_lengths`, the lengths of the check's reads; 4 bytes a sequence where the
-    /// check read the residues). The empty database's error, and the check's (`x_check_stores`)
-    /// where the longest is above `MAX_DBSEQ_LEN` or the index cannot be read, belong to the first
-    /// query batch with a valid context, which the caller fails with it. The search checks each
-    /// sequence where it first reads it (`XStreamDb::x_check`).
-    pub(crate) fn x_open_stream(&self) -> Result<usize> {
+    /// sequences: `(longest, scan_count)`, where `longest` is the residues of the longest sequence
+    /// from the index's offsets (`SeqDb::x_protein_lengths_i32`; 4 bytes a sequence where the
+    /// check read the residues) and `scan_count` is the number of included ordinals before NCBI's
+    /// multithreaded DB-split negative-length stop (`seqdbimpl.cpp:324-373,684-710`), folded into
+    /// the same single pass over `.pin` offsets so unfiltered runs pay zero extra `.pin` scans.
+    /// The empty database's error, and the check's (`x_check_stores`) where the longest is above
+    /// `MAX_DBSEQ_LEN` or the index cannot be read, belong to the first query batch with a valid
+    /// context, which the caller fails with it. The search checks each sequence where it first
+    /// reads it (`XStreamDb::x_check`).
+    pub(crate) fn x_open_stream(&self) -> Result<(usize, usize)> {
         if self.db.first_oid_read_fails() {
             return Err(PreliminaryReadError::from_static("Database memory map file error").into());
         }
-        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
-        let count = if self.db.mt_stop_at_negative() {
-            match self.db.x_protein_mt_scan_count() {
-                Ok(scan) => scan,
-                Err(_) => return self.x_check_stores(),
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+        let stop_at_negative = self.db.mt_stop_at_negative();
+        let limit = if stop_at_negative {
+            match self.db.mt_filtered_stop_ordinal() {
+                Ok(Some(stop)) => stop,
+                Ok(None) => self.db.num_seqs(),
+                Err(_) => {
+                    return self
+                        .x_check_stores()
+                        .map(|l| (l, self.db.num_seqs() as usize))
+                }
             }
         } else {
             self.db.num_seqs()
         };
         let mut longest = 0;
         let mut first = 0;
-        while first < count {
-            let end = count.min(first.saturating_add(X_LENGTHS_PER_READ));
+        let mut scan_count = limit as usize;
+        'scan: while first < limit {
+            let end = limit.min(first.saturating_add(X_LENGTHS_PER_READ));
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1425-1432
-            // Proteins whose NCBI 32-bit length is <= 0 (`0` or `>= 2^31`) are skipped by the
-            // search and do not contribute to the searchable longest sequence.
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
+            // Proteins whose NCBI 32-bit length is <= 0 (`0`, `>= 2^31`, or non-ascending offsets)
+            // are skipped at 1 thread and do not contribute to the searchable longest sequence;
+            // negative lengths terminate the scan in multithreaded DB-split mode.
             let lengths = match self.db.x_protein_lengths_i32(first, end) {
                 Ok(lengths) if !lengths.is_empty() => lengths,
-                _ => return self.x_check_stores(),
+                _ => {
+                    return self
+                        .x_check_stores()
+                        .map(|l| (l, self.db.num_seqs() as usize))
+                }
             };
-            longest = longest.max(
-                lengths
-                    .iter()
-                    .copied()
-                    .map(|len| len.max(0) as usize)
-                    .max()
-                    .unwrap_or(0),
-            );
+            for (i, &len) in lengths.iter().enumerate() {
+                if len < 0 {
+                    if stop_at_negative {
+                        scan_count = first as usize + i;
+                        break 'scan;
+                    }
+                    continue;
+                }
+                longest = longest.max(len as usize);
+            }
             first += lengths.len() as u32;
         }
         if longest > MAX_DBSEQ_LEN {
-            return self.x_check_stores();
+            return self.x_check_stores().map(|l| (l, scan_count));
         }
-        Ok(longest)
+        Ok((longest, scan_count))
     }
 
     /// The whole check of the database (`x_check_whole`).

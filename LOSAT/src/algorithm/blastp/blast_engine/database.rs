@@ -690,6 +690,7 @@ where
                          &(range, first_diag_offset)|
                          -> Result<(Vec<BlastpSubjectResult>, bool)> {
                             let block = read_search_block(db, range, database.program)?;
+                            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
                             let stopped = block.stopped_at_negative();
                             scratch.prepare_independent_subject(first_diag_offset);
                             let mut with_hits = Vec::new();
@@ -721,6 +722,7 @@ where
                 for mut subject_result in results {
                     sink.add(&mut subject_result);
                 }
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
                 if stopped {
                     return Ok(());
                 }
@@ -739,6 +741,7 @@ where
     let mut next_ordinal = 0u32;
     while let Some(range) = db.next_block(next_ordinal, block_bytes) {
         let block = read_search_block(db, range, database.program)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
         let stopped = block.stopped_at_negative();
         for i in 0..block.len() {
             process_subject(

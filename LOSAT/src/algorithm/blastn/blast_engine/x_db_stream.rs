@@ -185,6 +185,7 @@ where
             return Ok(());
         };
         next_ordinal = last.end_ordinal();
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
         if search_window(db, pool, &blocks, block_bytes, new_scratch, search, merge)? {
             return Ok(());
         }
@@ -246,6 +247,7 @@ where
         }
         let range = blocks[i];
         let block = super::x_read_block(db, range, &mut worker.bytes).map_err(search_read_error)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
         let stopped = block.stopped_at_negative();
         let mut kept = Vec::new();
         for j in 0..block.len() {
@@ -296,6 +298,7 @@ where
                     merge(ordinal, result);
                 }
                 waiting_bytes.fetch_sub(bytes, Ordering::Relaxed);
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
                 if stopped {
                     stop.store(true, Ordering::Relaxed);
                     stopped_early = true;

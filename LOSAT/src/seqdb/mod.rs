@@ -555,7 +555,7 @@ const NCBI_FORMAT_MESSAGES: [&str; 17] = [
     "Gi-mask file uses unknown format_version.",
     // seqdbvol.cpp:2361: `x_GetAmbChar` when `amb > next`.
     AMBIGUITY_DATA_ERROR,
-    // seqdbvol.cpp:1630: `GetSequenceAsString` when `x_GetSequence` length <= 0.
+    // seqdbvol.cpp:1555-1557,1627-1628: `x_GetAmbigPartialSeq` / `x_GetAmbigSeq` when `base_length < 1`.
     "Error: could not get sequence or range.",
 ];
 
@@ -1332,6 +1332,10 @@ pub struct SeqDb {
     /// when true, preliminary block reads stop at the first OID whose `GetSequence` length is
     /// negative.
     mt_stop_at_negative: bool,
+    /// Cached ordinal stop limit for filtered databases when `mt_stop_at_negative` is true
+    /// (`u32::MAX` means no negative-length OID was found before the last included OID in
+    /// `m_RestrictBegin..m_RestrictEnd`; `seqdbimpl.cpp:324-373,684-710`).
+    mt_filter_stop: OnceLock<u32>,
 }
 
 /// NCBI's counts of a database (`CSeqDBImpl::m_NumSeqs`, `m_TotalLength`, `m_MaxLength`,
@@ -1998,6 +2002,7 @@ impl SeqDb {
             utf8_claimed: AtomicBool::new(false),
             scope_utf8_held: AtomicBool::new(false),
             mt_stop_at_negative: false,
+            mt_filter_stop: OnceLock::new(),
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
@@ -2814,36 +2819,94 @@ impl SeqDb {
     /// is negative (mirroring NCBI's `CSeqDBImpl::x_FillSeqBuffer` when `m_NumThreads` is positive).
     pub fn set_mt_stop_at_negative(&mut self, stop: bool) {
         self.mt_stop_at_negative = stop;
+        self.mt_filter_stop = OnceLock::new();
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
     /// Whether multithreaded DB-split scans stop at the first negative-length OID.
     pub fn mt_stop_at_negative(&self) -> bool {
         self.mt_stop_at_negative
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
-    /// First ordinal id whose protein `GetSequence` length is negative (`start == 0` or signed
-    /// 32-bit `end - 1 - start < 0`), or [`Self::num_seqs`] if none. Used by streaming protein
-    /// scanners when [`Self::mt_stop_at_negative`] is enabled.
-    pub fn x_protein_mt_scan_count(&self) -> Result<u32, SeqDbError> {
-        const CHUNK: u32 = 16_384;
-        let count = self.num_seqs();
-        let mut first = 0u32;
-        while first < count {
-            let end = count.min(first.saturating_add(CHUNK));
-            let Some(range) = self.x_block_range(first, end) else {
-                break;
-            };
-            if let Some(rel) =
-                self.volumes[range.volume].x_first_negative_protein_in(range.first, range.end)?
-            {
-                return Ok(range.first_ordinal + rel);
-            }
-            first = range.end_ordinal();
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+    /// For a filtered database with excluded OIDs inside `m_RestrictBegin..m_RestrictEnd` and
+    /// [`Self::mt_stop_at_negative`] enabled, returns the first ordinal id at or above the first
+    /// negative-length OID in NCBI's iteration range (whether included or excluded by the list),
+    /// or `None` when unfiltered or when no negative-length OID precedes the last included OID.
+    pub fn mt_filtered_stop_ordinal(&self) -> Result<Option<u32>, SeqDbError> {
+        if !self.mt_stop_at_negative {
+            return Ok(None);
         }
-        Ok(count)
+        let Some(filter) = self.filter.as_deref() else {
+            return Ok(None);
+        };
+        let (begin, end) = filter.range();
+        if filter.count() == end.saturating_sub(begin) {
+            return Ok(None);
+        }
+        if let Some(&cached) = self.mt_filter_stop.get() {
+            return Ok((cached != u32::MAX).then_some(cached));
+        }
+        if filter.count() == 0 {
+            let _ = self.mt_filter_stop.set(u32::MAX);
+            return Ok(None);
+        }
+        // Any OID strictly past the last included OID has `filter.rank(oid) == filter.count()`,
+        // so scanning through the last included OID finds every stop that can drop included OIDs.
+        const CHUNK: u32 = 16_384;
+        let scan_end = filter.select(filter.count() - 1) + 1;
+        for (vol_idx, volume) in self.volumes.iter().enumerate() {
+            let vol_start = self.volume_starts[vol_idx];
+            let vol_end = vol_start + volume.num_oids();
+            if vol_end <= begin {
+                continue;
+            }
+            if vol_start >= scan_end {
+                break;
+            }
+            let mut cur = begin.max(vol_start) - vol_start;
+            let stop = scan_end.min(vol_end) - vol_start;
+            while cur < stop {
+                let hi = stop.min(cur.saturating_add(CHUNK));
+                let found = match self.seqtype {
+                    SeqType::Protein => volume.x_first_negative_protein_in(cur, hi)?,
+                    SeqType::Nucleotide => {
+                        volume.x_first_negative_nucleotide_in(cur, hi, vol_start + cur)?
+                    }
+                };
+                if let Some(rel) = found {
+                    let stop_oid = vol_start + cur + rel;
+                    let rank = filter.rank(stop_oid);
+                    let _ = self.mt_filter_stop.set(rank);
+                    return Ok(Some(rank));
+                }
+                cur = hi;
+            }
+        }
+        let _ = self.mt_filter_stop.set(u32::MAX);
+        Ok(None)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:324-373,684-710
+    /// Clamps a block's volume range against [`Self::mt_filtered_stop_ordinal`]: returns `None`
+    /// when the filtered MT scan already stopped at or before `range.first_ordinal`, or
+    /// `Some((read_end, stop_after, stop_in_vol))`.
+    fn mt_block_bounds(&self, range: BlockRange) -> Result<Option<(u32, bool, bool)>, SeqDbError> {
+        if let Some(limit) = self.mt_filtered_stop_ordinal()? {
+            if range.first_ordinal >= limit {
+                return Ok(None);
+            }
+            if range.end_ordinal() >= limit {
+                let read_end = range.first + (limit - range.first_ordinal);
+                return Ok(Some((read_end, true, false)));
+            }
+            return Ok(Some((range.end, false, false)));
+        }
+        Ok(Some((range.end, false, self.mt_stop_at_negative)))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1804
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
     /// Reads the protein sequences of `range` for a search (`Volume::read_protein_search_block`),
     /// validating `.psq` ranges without allocating bytes for proteins whose NCBI 32-bit length is
     /// not positive (`<= 0`).
@@ -2852,15 +2915,23 @@ impl SeqDb {
         range: BlockRange,
     ) -> Result<SequenceBlock, SeqDbError> {
         let (volume, first_oid) = self.volume_and_first_oid(range)?;
-        volume.read_protein_search_block_mt(
+        let Some((read_end, stop_after, stop_in_vol)) = self.mt_block_bounds(range)? else {
+            return volume.empty_stopped_block(range.first_ordinal, first_oid);
+        };
+        let mut block = volume.read_protein_search_block_mt(
             range.first,
-            range.end,
+            read_end,
             range.first_ordinal,
             first_oid,
-            self.mt_stop_at_negative,
-        )
+            stop_in_vol,
+        )?;
+        if stop_after {
+            block.set_stopped_at_negative(true);
+        }
+        Ok(block)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1804
     /// Reads the one protein sequence `ordinal` for a search, skipping byte reads when its NCBI
     /// 32-bit length is not positive (`Volume::read_protein_search_block`).
     pub fn read_protein_search_sequence(&self, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
@@ -2873,25 +2944,36 @@ impl SeqDb {
         )
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1841,2350-2363
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
     /// Reads the nucleotide sequences of `range` for a search
     /// (`Volume::read_nucleotide_search_block_mt`), honoring [`Self::mt_stop_at_negative`].
     pub fn read_nucleotide_search_block(&self, range: BlockRange) -> SeqBlockResult {
         let (volume, first_oid) = self.volume_and_first_oid(range)?;
-        volume.read_nucleotide_search_block_mt(
+        let Some((read_end, stop_after, stop_in_vol)) = self.mt_block_bounds(range)? else {
+            return volume.empty_stopped_block(range.first_ordinal, first_oid);
+        };
+        let mut block = volume.read_nucleotide_search_block_mt(
             range.first,
-            range.end,
+            read_end,
             range.first_ordinal,
             first_oid,
-            self.mt_stop_at_negative,
-        )
+            stop_in_vol,
+        )?;
+        if stop_after {
+            block.set_stopped_at_negative(true);
+        }
+        Ok(block)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1841,2350-2363
     /// Reads the one nucleotide sequence `ordinal` for search traceback or retrieval
     /// (`Volume::read_nucleotide_search_block_mt` with `stop_at_negative = false`).
     pub fn read_nucleotide_search_sequence(&self, ordinal: u32) -> SeqBlockResult {
         self.read_nucleotide_search_sequence_at(self.find_volume(ordinal)?)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1841,2350-2363
     /// [`Self::read_nucleotide_search_sequence`] at `at`.
     pub fn read_nucleotide_search_sequence_at(&self, at: SeqLocation) -> SeqBlockResult {
         self.volumes[at.volume].read_nucleotide_search_block_mt(
@@ -3016,6 +3098,8 @@ impl SeqDb {
         )
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1784-1804
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
     /// EXPERIMENT (LOSAT_X_BPDBKEEP, LOSAT_X_BNMAPPED): [`Self::read_protein_search_block`] into
     /// the worker's buffer `kept` (`Volume::x_read_protein_search_block_into_mt`).
     pub fn x_read_protein_search_block_into(
@@ -3024,16 +3108,25 @@ impl SeqDb {
         kept: &mut Vec<u8>,
     ) -> SeqBlockResult {
         let (volume, first_oid) = self.volume_and_first_oid(range)?;
-        volume.x_read_protein_search_block_into_mt(
+        let Some((read_end, stop_after, stop_in_vol)) = self.mt_block_bounds(range)? else {
+            return volume.empty_stopped_block(range.first_ordinal, first_oid);
+        };
+        let mut block = volume.x_read_protein_search_block_into_mt(
             range.first,
-            range.end,
+            read_end,
             range.first_ordinal,
             first_oid,
             kept,
-            self.mt_stop_at_negative,
-        )
+            stop_in_vol,
+        )?;
+        if stop_after {
+            block.set_stopped_at_negative(true);
+        }
+        Ok(block)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1841,2350-2363
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
     /// EXPERIMENT (LOSAT_X_BNMAPPED): [`Self::read_nucleotide_search_block`] into the worker's
     /// buffer `kept`.
     pub fn x_read_nucleotide_search_block_into(
@@ -3042,16 +3135,24 @@ impl SeqDb {
         kept: &mut Vec<u8>,
     ) -> SeqBlockResult {
         let (volume, first_oid) = self.volume_and_first_oid(range)?;
-        volume.x_read_nucleotide_search_block_into_mt(
+        let Some((read_end, stop_after, stop_in_vol)) = self.mt_block_bounds(range)? else {
+            return volume.empty_stopped_block(range.first_ordinal, first_oid);
+        };
+        let mut block = volume.x_read_nucleotide_search_block_into_mt(
             range.first,
-            range.end,
+            read_end,
             range.first_ordinal,
             first_oid,
             kept,
-            self.mt_stop_at_negative,
-        )
+            stop_in_vol,
+        )?;
+        if stop_after {
+            block.set_stopped_at_negative(true);
+        }
+        Ok(block)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1805-1841,2350-2363
     /// EXPERIMENT (LOSAT_X_BNMAPPED): [`Self::read_nucleotide_search_sequence`] with the bytes
     /// in a buffer that glibc maps from 1 MiB on.
     pub fn x_read_nucleotide_search_sequence_mapped(&self, ordinal: u32) -> SeqBlockResult {

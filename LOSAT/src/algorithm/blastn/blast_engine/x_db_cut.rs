@@ -175,6 +175,7 @@ pub(super) fn x_one_thread_error(db: &SeqDb, error: anyhow::Error) -> anyhow::Er
             Ok(block) => block,
             Err(first) => return search_read_error(first),
         };
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
         let stopped = block.stopped_at_negative();
         for i in 0..block.len() {
             if let Err(first) = block_subject(&block, &range, i) {

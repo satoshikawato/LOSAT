@@ -4918,8 +4918,9 @@ fn open_search_database(
             .after_calls(args.first_query_ordinal > 0)
             .keeping_scope(keeps_scope, separate_xml2);
             let rps = resolved.rps_search.is_some();
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
             // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:96-171
-            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:211-214
+            // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:243,254
             // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
             let mt_stop = if rps {
                 false
@@ -4927,7 +4928,7 @@ fn open_search_database(
                 args.app,
                 crate::algorithm::blastp::args::BlastpApp::Psiblast
             ) {
-                resolved.num_threads > 1
+                crate::algorithm::common::database::ncbi_effective_threads(resolved.num_threads) > 1
             } else {
                 let max_db = if resolved.word_size > 4 {
                     2_500_000_000

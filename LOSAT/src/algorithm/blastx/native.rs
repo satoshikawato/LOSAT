@@ -769,18 +769,17 @@ fn run_inner(
     // first read (`x_db_stream.rs`); the empty database's error belongs to the first batch with a
     // valid context (`Subjects::Unreadable`, `search_error`). No NCBI counterpart for the blocks:
     // NCBI maps the volume files.
-    let (x_longest, unreadable) = match &database {
+    let (x_opened, unreadable) = match &database {
         None => (None, None),
         Some(database) => match database.x_open_stream() {
-            Ok(longest) => (Some(longest), None),
+            Ok(opened) => (Some(opened), None),
             Err(error) => (None, Some(error)),
         },
     };
-    let x_stream = match (&database, x_longest) {
-        (Some(database), Some(longest)) => Some(super::x_db_stream::XStreamDb::new(
-            database.x_seqdb(),
-            longest,
-        )),
+    let x_stream = match (&database, x_opened) {
+        (Some(database), Some((longest, scan_count))) => Some(
+            super::x_db_stream::XStreamDb::with_scan_count(database.x_seqdb(), longest, scan_count),
+        ),
         _ => None,
     };
     super::x_timing::run(XRun::ReadStores, x_t);

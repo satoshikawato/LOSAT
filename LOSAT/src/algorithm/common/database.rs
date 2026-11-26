@@ -23,6 +23,15 @@ use crate::report::pairwise::{DatabaseInfo, PairwiseDatabase};
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
 use crate::sequence::packed_subject::PackedNucleotide;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
+/// Requested `-num_threads` capped at the host's available CPU count, matching NCBI's
+/// `CMTArgs::x_ExtractAlgorithmOptions` (`CSystemInfo::GetCpuCount`).
+pub(crate) fn ncbi_effective_threads(num_threads: usize) -> usize {
+    let cpus = std::thread::available_parallelism().map_or(1, usize::from);
+    num_threads.min(cpus)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:96-171
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:99-174
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-173
@@ -32,9 +41,10 @@ use crate::sequence::packed_subject::PackedNucleotide;
 /// `m_NumThreads` on `CSeqDB`, so `CSeqDBImpl::x_FillSeqBuffer` stops scanning at the first OID
 /// whose `GetSequence` length is negative).
 ///
-/// With `num_threads <= 1` or `-mt_mode 1` (split by queries), each search node runs with 1
-/// thread on `CSeqDB` (`m_NumThreads` stays zero). With `-mt_mode 0` (auto), NCBI splits by
-/// queries only when `total_length < max_db_size` and the query file size exceeds `min_q_size`.
+/// With effective threads `<= 1` (after capping `-num_threads` at the host's CPU count) or
+/// `-mt_mode 1` (split by queries), each search node runs with 1 thread on `CSeqDB`
+/// (`m_NumThreads` stays zero). With `-mt_mode 0` (auto), NCBI splits by queries only when
+/// `total_length < max_db_size` and the query file size exceeds `min_q_size`.
 pub(crate) fn ncbi_mt_splits_db(
     num_threads: usize,
     mt_mode: Option<u8>,
@@ -43,7 +53,7 @@ pub(crate) fn ncbi_mt_splits_db(
     max_db_size: u64,
     min_q_size: u64,
 ) -> bool {
-    if num_threads <= 1 {
+    if ncbi_effective_threads(num_threads) <= 1 {
         return false;
     }
     match mt_mode {
@@ -5100,6 +5110,7 @@ pub(crate) fn x_check_protein_stores(
             check_protein_sequence(with_sentinels, || db.oid(ordinal), program)?;
             each(ordinal, with_sentinels.len() - 2);
         }
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
         if block.stopped_at_negative() {
             break;
         }

@@ -377,6 +377,7 @@ impl<'a> Source<'a> {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1619-1628
     fn nucleotide_letters(
         &self,
         oid: u32,
@@ -384,6 +385,7 @@ impl<'a> Source<'a> {
         error_when_empty: bool,
     ) -> Result<Vec<u8>, Stop> {
         let at = self.at(oid)?;
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1627-1628
         if self.db.nucleotide_length_i32_at(at)? < 1 {
             return if error_when_empty {
                 Err(Stop::Ncbi(

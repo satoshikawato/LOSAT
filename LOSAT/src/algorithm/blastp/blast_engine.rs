@@ -2300,16 +2300,21 @@ impl BlastpReport {
     /// scope finds as a query of its batch (`report::query_bioseq`): blastp's tables that read no
     /// letter of the found Bioseq and its organism report (`query_bioseq::tabular_shows`), the
     /// Seq-annots and the archive (which write the Seq-align id alone). The other formats, and
-    /// psiblast's calls that can make a PSSM (`psi_reads`, which reads the found Bioseq's letters)
-    /// or search one (`-in_pssm`), keep LOSAT's refusal.
+    /// psiblast's calls that can make a PSSM (`psi_reads`, which reads the found Bioseq's letters),
+    /// search one (`-in_pssm`), or search a pattern (`-phi_pattern`, whose occurrence tables key
+    /// rows by occurrence index), keep LOSAT's refusal.
     fn shows_query_bioseqs(
         formats: &[BlastpReport],
         args: &ResolvedBlastpArgs,
         psi_reads: bool,
     ) -> bool {
         use crate::report::query_bioseq::tabular_shows;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2039-2057
         (args.app == BlastpApp::Blastp
-            || (args.app == BlastpApp::Psiblast && !psi_reads && args.psi_search.is_none()))
+            || (args.app == BlastpApp::Psiblast
+                && !psi_reads
+                && args.psi_search.is_none()
+                && args.phi.is_none()))
             && formats.iter().all(|format| match *format {
                 BlastpReport::Seqalign(_) | BlastpReport::Archive => true,
                 BlastpReport::CustomTabular(spec) => {

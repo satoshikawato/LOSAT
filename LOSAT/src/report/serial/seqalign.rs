@@ -825,9 +825,10 @@ fn write_user_object<E: Encoder>(enc: &mut E, type_str: &[u8], label: &[u8], dat
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:330-381
 /// A `-subject` search has no database name (`n/a`). A `-db` named `n/a` or `SRA` is
-/// refused by the programs (`check_database`), so its title is written (a byte that NCBI's
-/// ASN.1 text or binary stream replaces is written as `#` with NCBI's post, `write_query_to`).
-fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
+/// refused by the search programs (`check_database`), so their title is written (a byte that
+/// NCBI's ASN.1 text or binary stream replaces is written as `#` with NCBI's post,
+/// `write_query_to`); blast_formatter's database name is the archive's (`DatabaseDesc::of_name`).
+fn write_desc<E: Encoder>(enc: &mut E, desc: &AnnotDesc<'_>) {
     enc.member("desc", 3);
     enc.begin_list(true);
     enc.element();
@@ -837,21 +838,89 @@ fn write_desc<E: Encoder>(enc: &mut E, run: &RunRecord<'_>) {
         b"Hist Seqalign",
         UserData::Bool(true),
     );
-    let (task, program) = blast_type(run);
     enc.element();
-    write_user_object(enc, b"Blast Type", task.as_bytes(), UserData::Int(program));
+    write_user_object(
+        enc,
+        b"Blast Type",
+        desc.task.as_bytes(),
+        UserData::Int(desc.program),
+    );
     enc.element();
-    match run.db_title {
-        None => write_user_object(enc, b"Blast Database Title", b"n/a", UserData::Bool(false)),
-        Some(title) => write_user_object(
+    match desc.database {
+        DatabaseDesc::None => {
+            write_user_object(enc, b"Blast Database Title", b"n/a", UserData::Bool(false))
+        }
+        DatabaseDesc::Sra(name) => {
+            write_user_object(enc, b"Blast Database Title", name, UserData::Bool(true))
+        }
+        DatabaseDesc::Title { title, nucleotide } => write_user_object(
             enc,
             b"Blast Database Title",
             title,
-            UserData::Bool(RequestKind::from(run.program).subject_is_nucleotide()),
+            UserData::Bool(nucleotide),
         ),
     }
     enc.end_list();
     enc.end_member();
+}
+
+/// What the Seq-annot's `desc` says of a search: `CreateSeqAnnotFromSeqAlignSet`'s `program`
+/// and its database (cited at `write_desc`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AnnotDesc<'a> {
+    /// The task name of `program` (`EProgramToTaskName`) and its number (`EProgram`): the label and
+    /// value of the "Blast Type" user object.
+    pub(crate) task: &'static str,
+    pub(crate) program: i32,
+    /// The "Blast Database Title" user object.
+    pub(crate) database: DatabaseDesc<'a>,
+}
+
+impl<'a> AnnotDesc<'a> {
+    /// The `desc` of a search program's run `run`: its program's type, and its database's title
+    /// (`RunRecord::db_title`), or `n/a` for `-subject`.
+    pub(crate) fn of_run(run: &RunRecord<'a>) -> Self {
+        let (task, program) = blast_type(run);
+        AnnotDesc {
+            task,
+            program,
+            database: match run.db_title {
+                None => DatabaseDesc::None,
+                Some(title) => DatabaseDesc::Title {
+                    title,
+                    nucleotide: RequestKind::from(run.program).subject_is_nucleotide(),
+                },
+            },
+        }
+    }
+}
+
+/// The value of the "Blast Database Title" user object (`CreateSeqAnnotFromSeqAlignSet`, cited
+/// at `write_desc`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DatabaseDesc<'a> {
+    /// No database name (a search of `-subject` sequences), or the name `n/a`: `n/a`, false.
+    None,
+    /// The database name `SRA` (any case): the name, true.
+    Sra(&'a [u8]),
+    /// Another database: its title (`db_title`: the titles of the names of its list, each its
+    /// name when it has none, joined by `; `) and whether the program's subjects are nucleotide
+    /// (`Blast_SubjectIsNucleotide`).
+    Title { title: &'a [u8], nucleotide: bool },
+}
+
+impl<'a> DatabaseDesc<'a> {
+    /// The value for the database name `name` (`m_DbName`, empty for `-subject` sequences) whose
+    /// title is `title`, with nucleotide subjects or not: NCBI's comparisons of the name.
+    pub(crate) fn of_name(name: &'a [u8], title: &'a [u8], nucleotide: bool) -> Self {
+        if name.is_empty() || name.eq_ignore_ascii_case(b"n/a") {
+            DatabaseDesc::None
+        } else if name.eq_ignore_ascii_case(b"SRA") {
+            DatabaseDesc::Sra(name)
+        } else {
+            DatabaseDesc::Title { title, nucleotide }
+        }
+    }
 }
 
 /// LOSAT's refusal of a database search (`-db name`) for a Seq-annot format, made before the
@@ -2233,21 +2302,14 @@ pub(crate) fn write_seq_aligns<E: Encoder>(
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:460-476
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:381-386
-fn write_seq_annot<E: Encoder>(
-    enc: &mut E,
-    run: &RunRecord<'_>,
-    query: &QueryRecord<'_>,
-    subjects: &[SubjectRecord<'_>],
-    hsps: &[HspRecord<'_>],
-) {
-    let mut segments = Segments::default();
+fn write_seq_annot<E: Encoder, D: SeqAnnotDocument>(enc: &mut E, document: &D) {
     enc.begin_document("Seq-annot");
     enc.begin_sequence("Seq-annot");
-    write_desc(enc, run);
+    write_desc(enc, &document.desc());
     enc.member("data", 4);
     enc.variant("Seq-annot_data", "align", 1);
     enc.begin_list(true);
-    write_seq_aligns(enc, run, query, subjects, hsps, &mut segments, |_| {});
+    document.write_aligns(enc);
     enc.end_list();
     enc.end_variant();
     enc.end_member();
@@ -2276,7 +2338,9 @@ impl std::error::Error for SeqAlignError {}
 /// from `hsps` (in NCBI's Seq-align order: subject by subject in hit-list order, each
 /// subject's HSPs sorted by e-value) and the `subjects` they index. Returns false and
 /// appends nothing when the query has no Seq-align (`results.HasAlignments()` is false:
-/// NCBI writes nothing for it). On an error, `buf` is left as it was.
+/// NCBI writes nothing for it). On an error, `buf` is left as it was. The tests' document of a
+/// query (the programs write it with `write_query_to`).
+#[cfg(test)]
 pub fn write_query(
     format: SerialFormat,
     run: &RunRecord<'_>,
@@ -2288,37 +2352,57 @@ pub fn write_query(
     if !has_alignments(run, hsps) {
         return Ok(false);
     }
+    let document = QueryDocument {
+        run,
+        query,
+        subjects,
+        hsps,
+    };
+    write_document(format, &document, buf).map_err(SeqAlignError::Serial)?;
+    Ok(true)
+}
+
+/// Appends to `buf` the Seq-annot of `document` in `format` (the one wrapper: `write_seq_annot`).
+/// On an error of NCBI's object stream, `buf` is left as it was.
+pub(crate) fn write_document<D: SeqAnnotDocument>(
+    format: SerialFormat,
+    document: &D,
+    buf: &mut Vec<u8>,
+) -> Result<(), SerialError> {
     let start = buf.len();
     let error = match format {
         SerialFormat::AsnText => {
             let mut enc = AsnTextEncoder::new(buf);
-            write_seq_annot(&mut enc, run, query, subjects, hsps);
+            write_seq_annot(&mut enc, document);
             enc.error()
         }
         SerialFormat::AsnBinary => {
             let mut enc = AsnBinaryEncoder::new(buf);
-            write_seq_annot(&mut enc, run, query, subjects, hsps);
+            write_seq_annot(&mut enc, document);
             enc.error()
         }
         SerialFormat::Json => {
             let mut enc = JsonEncoder::new(buf);
-            write_seq_annot(&mut enc, run, query, subjects, hsps);
+            write_seq_annot(&mut enc, document);
             enc.error()
         }
     };
-    if let Some(error) = error {
-        buf.truncate(start);
-        return Err(SeqAlignError::Serial(error));
+    match error {
+        Some(error) => {
+            buf.truncate(start);
+            Err(error)
+        }
+        None => Ok(()),
     }
-    Ok(true)
 }
 
 /// Writes the document of one query to `writer` through `buf`, which is cleared first: what
 /// `write_query` makes, or nothing when the query has no Seq-align. A document with a string byte
 /// that NCBI's ASN.1 text or binary stream writes as `#` with an error message (the default
 /// `eFNP_ReplaceAndWarn`: a database title, a `-parse_deflines` local id with DEL, ...) is
-/// written again through `Traced` (`write_query_posting`), with NCBI's posts of those bytes on
-/// `diagnostics`; a document without one is written as before.
+/// written again through `Traced` (`write_document_to`), with NCBI's posts of those bytes (the
+/// prefix of the running application `app`) on `diagnostics`; a document without one is written
+/// as before.
 ///
 /// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:268-279
 ///
@@ -2338,15 +2422,18 @@ pub(crate) fn write_query_to(
     writer: &mut dyn ReportWrite,
     diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
-    buf.clear();
+    if !has_alignments(run, hsps) {
+        return Ok(());
+    }
     let document = QueryDocument {
         run,
         query,
         subjects,
         hsps,
     };
-    match write_query(format, run, query, subjects, hsps, buf) {
-        Ok(true) => {
+    buf.clear();
+    match write_document(format, &document, buf) {
+        Ok(()) => {
             writer.site(Site::Serial { whole: true })?;
             match writer.write_all(buf).and_then(|()| writer.ncbi_flush()) {
                 Err(error) if crate::report::ostream::is_undecided_report_write_failure(&error) => {
@@ -2356,16 +2443,26 @@ pub(crate) fn write_query_to(
             }
             writer.site(Site::Report)?;
         }
-        Ok(false) => {}
-        Err(SeqAlignError::Serial(SerialError::NonVisibleChar(byte))) => {
+        Err(SerialError::NonVisibleChar(byte)) => {
             writer.site(Site::Serial { whole: false })?;
-            write_query_posting(format, byte, app, &document, buf, writer, diagnostics)?;
+            write_document_posting(format, byte, &document, Some(app), buf, writer, diagnostics)?;
             writer.ncbi_flush()?;
             writer.site(Site::Report)?;
         }
-        Err(error) => return Err(error.into()),
+        Err(error) => return Err(SeqAlignError::Serial(error).into()),
     }
     Ok(())
+}
+
+/// What one Seq-annot document holds (`CreateSeqAnnotFromSeqAlignSet`'s arguments): its `desc`
+/// and its Seq-aligns. The one wrapper (`write_seq_annot`) writes the search programs' records
+/// (`QueryDocument`) and blast_formatter's Seq-aligns as the archive holds them
+/// (`blast_formatter::archive`).
+pub(crate) trait SeqAnnotDocument {
+    /// The Seq-annot's `desc`.
+    fn desc(&self) -> AnnotDesc<'_>;
+    /// The Seq-aligns, as the elements of the list `data align` that the wrapper opened.
+    fn write_aligns<E: Encoder>(&self, enc: &mut E);
 }
 
 /// `document_pieces` of one query's document (for the tests).
@@ -2395,13 +2492,7 @@ pub(super) fn query_pieces(
 #[inline(never)]
 fn document_pieces(format: SerialFormat, document: &QueryDocument<'_, '_>) -> Vec<usize> {
     fn pieces<E: Encoder>(mut enc: Traced<E>, document: &QueryDocument<'_, '_>) -> Vec<usize> {
-        write_seq_annot(
-            &mut enc,
-            document.run,
-            document.query,
-            document.subjects,
-            document.hsps,
-        );
+        write_seq_annot(&mut enc, document);
         enc.piece_sizes()
     }
     let mut bytes = Vec::new();
@@ -2422,11 +2513,32 @@ struct QueryDocument<'r, 'a> {
     hsps: &'r [HspRecord<'a>],
 }
 
-/// `write_query_to` of a document that the plain encoder of `format` stopped on (the byte `byte`,
-/// `NonVisibleChar`): written again through `Traced` into `buf`, and handed to `writer` with
-/// NCBI's post of each replaced byte (`ReplacedChar::post` with the application's prefix,
-/// `options::RequestKind::application`, the one table of the applications' names) on
-/// `diagnostics` where NCBI posts it: after the bytes of the document
+impl SeqAnnotDocument for QueryDocument<'_, '_> {
+    fn desc(&self) -> AnnotDesc<'_> {
+        AnnotDesc::of_run(self.run)
+    }
+
+    /// `write_seq_aligns`: subject by subject in the order of `hsps`, one Seq-align per HSP of
+    /// score other than 0 (a gapped search) or one `diags` Seq-align per subject (an ungapped
+    /// search).
+    fn write_aligns<E: Encoder>(&self, enc: &mut E) {
+        let mut segments = Segments::default();
+        write_seq_aligns(
+            enc,
+            self.run,
+            self.query,
+            self.subjects,
+            self.hsps,
+            &mut segments,
+            |_| {},
+        );
+    }
+}
+
+/// `write_document_to` of a document that the plain encoder of `format` stopped on (the byte
+/// `byte`, `NonVisibleChar`): written again through `Traced` into `buf`, and handed to `writer`
+/// with NCBI's post of each replaced byte (`ReplacedChar::post` with the application's prefix
+/// `prefix`) on `diagnostics` where NCBI posts it: after the bytes of the document
 /// that NCBI's buffer (`COStreamBuffer`, `out_buffer`) had written to its output by then, the
 /// output flushed (`cerr` is tied to `cout`; `Traced::flush_to`). NCBI writes each query's
 /// Seq-annot with an object stream of its own (`m_Outfile` takes `MSerial_AsnText` and then
@@ -2438,18 +2550,18 @@ struct QueryDocument<'r, 'a> {
 /// NCBI reference (598d8ae6): c++/src/serial/objostrasnb.cpp:843-861
 #[cold]
 #[inline(never)]
-fn write_query_posting(
+pub(crate) fn write_document_posting<D: SeqAnnotDocument>(
     format: SerialFormat,
     byte: u8,
-    app: &str,
-    document: &QueryDocument<'_, '_>,
+    document: &D,
+    prefix: Option<&str>,
     buf: &mut Vec<u8>,
-    writer: &mut dyn ReportWrite,
+    writer: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
     buf.clear();
     let post = |replaced: &ReplacedChar| {
-        diagnostics.write_all(&replaced.post(Some(app)))?;
+        diagnostics.write_all(&replaced.post(prefix))?;
         diagnostics.flush()
     };
     match format {
@@ -2469,18 +2581,12 @@ fn write_query_posting(
 
 /// The document written through `enc` (`Traced` with its post function) and handed to `writer`
 /// with the posts; nothing on an error of the encoder.
-fn write_traced<E: Encoder>(
+fn write_traced<E: Encoder, D: SeqAnnotDocument>(
     mut enc: E,
-    document: &QueryDocument<'_, '_>,
-    writer: &mut dyn ReportWrite,
+    document: &D,
+    writer: &mut dyn Write,
 ) -> anyhow::Result<()> {
-    write_seq_annot(
-        &mut enc,
-        document.run,
-        document.query,
-        document.subjects,
-        document.hsps,
-    );
+    write_seq_annot(&mut enc, document);
     if let Some(error) = enc.error() {
         return Err(SeqAlignError::Serial(error).into());
     }

@@ -687,3 +687,15 @@ def makembindex(*words: str, input: bytes | str = b"") -> ToolOutput:
     """
     data = input.encode() if isinstance(input, str) else bytes(input)
     return ToolOutput(*_pylosat.makembindex(list(words), data))
+
+
+def blast_formatter(*words: str, input: bytes | str = b"") -> ToolOutput:
+    """Runs `blast_formatter` with the command line's words, which writes the reports of a
+    search again from its BLAST archive (`-outfmt 11`) without searching again.
+
+    `input` is what the command line reads as standard input (`-archive -`), so an archive in
+    memory can be formatted. A failure raises `SearchError` with what the command line writes to
+    its standard error. The GIL is released.
+    """
+    data = input.encode() if isinstance(input, str) else bytes(input)
+    return ToolOutput(*_pylosat.blast_formatter(list(words), data))

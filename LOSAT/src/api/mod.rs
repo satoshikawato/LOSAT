@@ -152,9 +152,9 @@
 //! - [`run_makeblastdb`] and [`run_blastdbcmd`] are the two database programs, and
 //!   [`run_dustmasker`] and [`run_segmasker`] the maskers of low-complexity regions (nucleotide,
 //!   protein), [`run_windowmasker`] the masker of over-represented nucleotide regions,
-//!   [`run_convert2blastmask`] the converter of lower case masks and [`run_makembindex`] the
-//!   writer of megablast indices: the command line's words, with the caller's reader and writers
-//!   for its standard streams.
+//!   [`run_convert2blastmask`] the converter of lower case masks, [`run_makembindex`] the
+//!   writer of megablast indices and [`run_blast_formatter`] the formatter of BLAST archives: the
+//!   command line's words, with the caller's reader and writers for its standard streams.
 //!
 //! # Items
 //!
@@ -167,7 +167,8 @@
 //! - The results: [`Outcome`], [`Batches`], [`Batch`], [`Report`], [`HspRecord`], [`Id`],
 //!   [`QueryStats`], [`QueryRounds`], [`Strand`], [`QueryHits`], [`SubjectHits`]
 //! - The tools: [`run_makeblastdb`], [`run_blastdbcmd`], [`run_dustmasker`], [`run_segmasker`],
-//!   [`run_windowmasker`], [`run_convert2blastmask`], [`run_makembindex`]
+//!   [`run_windowmasker`], [`run_convert2blastmask`], [`run_makembindex`],
+//!   [`run_blast_formatter`]
 //! - The failures: [`Error`]
 //! - The engine's version: [`VERSION`]
 
@@ -205,8 +206,8 @@ pub use run::{
 pub use search::{validate, Search, API_OWNED};
 pub use strategy::Strategy;
 pub use tools::{
-    run_blastdbcmd, run_convert2blastmask, run_dustmasker, run_makeblastdb, run_makembindex,
-    run_segmasker, run_windowmasker,
+    run_blast_formatter, run_blastdbcmd, run_convert2blastmask, run_dustmasker, run_makeblastdb,
+    run_makembindex, run_segmasker, run_windowmasker,
 };
 pub use view::{QueryHits, SubjectHits};
 

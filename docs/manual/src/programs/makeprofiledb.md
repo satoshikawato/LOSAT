@@ -1,8 +1,8 @@
 # makeprofiledb
 
-`losat makeprofiledb` builds a profile database, the kind of database that [rpsblast](rpsblast.md) and [rpstblastn](rpstblastn.md) search, from a list of PSSM files. CDD is such a database: NCBI builds it from CDD's `.smp` files with `makeprofiledb`, and you can build it, a part of it, or a database of your own profiles the same way.
+`losat makeprofiledb` builds a profile database, the kind of database that [rpsblast](rpsblast.md), [rpstblastn](rpstblastn.md) and DELTA-BLAST search, from a list of PSSM files. CDD is such a database: NCBI builds it from CDD's `.smp` files with `makeprofiledb`, and you can build it, a part of it, or a database of your own profiles the same way.
 
-It writes the same files as NCBI's `makeprofiledb` 2.17.0 with `-dbtype rps`, byte for byte, with the same messages and exit statuses.
+It writes the same files as NCBI's `makeprofiledb` 2.17.0 with `-dbtype rps` and `-dbtype delta`, byte for byte, with the same messages and exit statuses.
 
 ## Synopsis
 
@@ -29,11 +29,14 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `-threshold` | `9.82` | The word score threshold of the word table, multiplied by the scale factor. A profile's own `wordScoreThreshold` is used instead when it has one, unless `-force` is given. |
 | `-force` | off | Use `-threshold` for every profile. |
 | `-max_smp_vol` | `2500` | The largest number of profiles in one volume. A longer list is split into volumes of nearly equal size, with an alias file (`NAME.pal`). |
+| `-dbtype` | `rps` | Output database type: `rps` or `delta` (`cobalt` is refused). With `delta`, each profile must provide `weightedResFreqsPerPos` and `numIndeptObsr`, and `.wcounts` and `.obsr` are written for each volume. |
 | `-blastdb_version` | `5` | The format of the protein database of the profiles' sequences: `5` or `4`. |
 | `-index` | `true` | With `true` the sequences' ids are parsed and indexed, so that `blastdbcmd -entry` finds them. With `false` each sequence gets an id `gnl|BL_ORD_ID|N`. |
 | `-matrix` | `BLOSUM62` | The scoring matrix of profiles that do not name one. |
 | `-gapopen`, `-gapextend` | the matrix's | The gap costs of profiles that do not give them. |
 | `-scale` | `100` | The scale factor of profiles that have frequency ratios only, rounded up to an integer. |
+| `-obsr_threshold` | `6` | With `-dbtype delta`, exclude profiles whose maximum `numIndeptObsr` plus 1 is below this threshold (logged to stdout or `-logfile`). |
+| `-exclude_invalid` | `true` | With `-dbtype delta`, exclude profiles whose weighted residue frequency columns do not sum within `0.0001` of `1.0` or that have any `numIndeptObsr < 1.0`. |
 | `-taxid` | none | A taxonomy id for every sequence. |
 | `-taxid_map` | none | A file of `ID TAXID` lines that gives the taxonomy ids by sequence id. Without `-taxid` and `-taxid_map`, the organism of each profile's sequence gives its taxonomy id, as in NCBI. |
 | `-logfile` | none | Write the messages to this file. |
@@ -48,11 +51,13 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 | `NAME.freq` | The frequency ratios of every profile. |
 | `NAME.loo` | The table of the words that score at least the threshold against each profile. |
 | `NAME.aux` | The scoring matrix, the gap costs, the scale factor and each profile's length and K. |
+| `NAME.wcounts` | (`-dbtype delta`) The fixed-point weighted residue frequencies of every profile. |
+| `NAME.obsr` | (`-dbtype delta`) The run-length compressed effective observations of every profile. |
 | `NAME.pin`, `.phr`, `.psq`, ... | The protein BLAST database of the profiles' sequences (version 5: also `.pdb`, `.pos`, `.pot`, `.ptf`, `.pto`; version 4: `.psd`, `.psi`). |
 
 With several volumes the files are `NAME.00.rps`, `NAME.01.rps`, ... and `NAME.pal` lists the volumes; the standard error then shows `Created protein BLAST (alias) database NAME with N sequences`. When an existing database is replaced, the standard output shows `Deleted existing BLAST database with identical name.`
 
-After an error the RPS files are removed and the sequences already added stay in the protein database files, as NCBI leaves them.
+After an error the RPS (and for `-dbtype delta`, `.wcounts` and `.obsr`) files are removed and the sequences already added stay in the protein database files, as NCBI leaves them.
 
 ## Differences from NCBI BLAST+
 
@@ -60,7 +65,8 @@ None in the files or the messages of a normal run, or of a run that NCBI's `make
 
 ## What LOSAT refuses
 
-- `-dbtype delta` and `-dbtype cobalt`.
+- `-dbtype cobalt`.
+- With `-dbtype delta`: profiles stored by row (`byRow TRUE`), profiles with `numRows < 28` and non-empty `weightedResFreqsPerPos` (NCBI copies into an empty list's `begin()` iterator), profiles with an empty `numIndeptObsr` list (NCBI dereferences `end()`), profiles whose `weightedResFreqsPerPos` length is not a multiple of 28 when `len / 28 == numIndeptObsr.len()` and every full column of 28 sums within `0.0001` of `1.0` (NCBI increments past `end()`), `weightedResFreqsPerPos` / `numIndeptObsr` values whose scaled conversion to `Uint4` is out of range or `NaN`, and a missing or unwritable temporary directory (`TMPDIR`, where NCBI stops with a `mkstemp()` message containing its process ID).
 - `-max_smp_vol 0`, on which NCBI's `makeprofiledb` crashes (division by zero).
 - `-in` naming a directory, on which NCBI's `makeprofiledb` never ends.
 - A profile stored by row (`byRow TRUE`) with more than 28 positions, whose frequency ratios NCBI's `makeprofiledb` reads from outside its data.

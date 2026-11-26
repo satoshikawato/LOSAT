@@ -141,15 +141,17 @@ pub(super) const AHEAD: usize = 8;
 
 /// `find`'s place of an entry: a slot of the home bucket (0 to 6), none (`MISS`), or a stash
 /// entry (`STASHED` plus its index).
-const MISS: u32 = 7;
-const STASHED: u32 = 8;
+pub(super) const MISS: u32 = 7;
+pub(super) const STASHED: u32 = 8;
 
 // No NCBI counterpart: counters of LOSAT_TIMING (the stages folded on the maps, the chunks sent to
-// the chains because their scan ranges step back, the map's growths and its largest size).
+// the chains because their scan ranges step back, the map's growths, its largest size and the
+// calls of the fold in registers of LOSAT_X_DCFOLDREG).
 static STAGES: AtomicU64 = AtomicU64::new(0);
 static BACK: AtomicU64 = AtomicU64::new(0);
 static GROWS: AtomicU64 = AtomicU64::new(0);
 static MOST_BUCKETS: AtomicU64 = AtomicU64::new(0);
+static REG_CALLS: AtomicU64 = AtomicU64::new(0);
 
 /// One cache line: slots 0 to 6 (`diag`, `lvl`), the bucket's `stash_until` (`diag[UNTIL]`) and
 /// its slots' saved bits (`lvl[SAVED]`).
@@ -194,6 +196,12 @@ impl Found {
         bucket: 0,
         at: MISS,
     };
+
+    /// Tests: `find` found the entry in the stash.
+    #[cfg(test)]
+    pub(super) fn in_stash(&self) -> bool {
+        self.at >= STASHED
+    }
 }
 
 /// No NCBI counterpart: the latest insert of each diagonal (module comment).
@@ -210,6 +218,33 @@ pub(super) struct DiagLatest {
     /// Debug builds: the last S `put` saw in this stage (the order of (vi)).
     #[cfg(debug_assertions)]
     last_s: i32,
+    /// Tests: where set, what the folds read from the map and put into it, seed by seed (`Event`).
+    #[cfg(test)]
+    pub(super) trace: Option<Vec<Event>>,
+}
+
+/// Tests: one step of a fold on the map (`DiagLatest::trace`), written by the fold of
+/// LOSAT_X_DCLATEST (`x_pair_seed_disc.rs` `Latest`) and by that of LOSAT_X_DCFOLDREG
+/// (`x_dc_fold_reg.rs`), so that their tests compare them seed by seed.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Event {
+    /// The retrieve of the seed at S `s` on `diag`: the level and saved bit it gave the seed (0 and
+    /// false for no entry), and whether the entry was in the stash.
+    Read {
+        diag: i32,
+        s: i32,
+        level: i32,
+        saved: bool,
+        stash: bool,
+    },
+    /// The insert of the seed at S `s`.
+    Put {
+        diag: i32,
+        level: i32,
+        saved: bool,
+        s: i32,
+    },
 }
 
 // A map made without `begin` is a valid empty map of `UNBEGUN_BITS`, not an empty Vec: `find` and
@@ -228,6 +263,8 @@ impl Default for DiagLatest {
             top: i32::MIN,
             #[cfg(debug_assertions)]
             last_s: i32::MIN,
+            #[cfg(test)]
+            trace: None,
         }
     }
 }
@@ -323,6 +360,26 @@ fn free_below(bound: i32) -> i32 {
     bound.max(NO_LEVEL + 1)
 }
 
+/// The home bucket of `diag` where `home` shifts by `shift` (`DiagLatest::home`): the high bits of
+/// its product with a Fibonacci constant.
+#[inline(always)]
+fn home_at(diag: i32, shift: u32) -> usize {
+    ((diag as u32).wrapping_mul(0x9E37_79B1) >> shift) as usize
+}
+
+/// Slot `lane` of `bucket` takes the level `level` and the saved bit `saved` (the last statements of
+/// `DiagLatest::put`).
+#[inline(always)]
+fn set_slot(bucket: &mut Bucket, lane: u32, level: i32, saved: bool) {
+    bucket.lvl[(lane & 7) as usize] = level;
+    let bit = 1i32 << lane;
+    bucket.lvl[SAVED] = if saved {
+        bucket.lvl[SAVED] | bit
+    } else {
+        bucket.lvl[SAVED] & !bit
+    };
+}
+
 impl DiagLatest {
     /// The start of a stage whose first position has the level bound `bound0`
     /// (`LvSeeds::bound` of the stage's hash offset): a new map gets its buckets; a map whose
@@ -363,7 +420,7 @@ impl DiagLatest {
     #[inline(always)]
     fn home(&self, diag: i32) -> usize {
         debug_assert!((1..=32).contains(&self.bits) && self.shift == 32 - self.bits);
-        ((diag as u32).wrapping_mul(0x9E37_79B1) >> self.shift) as usize
+        home_at(diag, self.shift)
     }
 
     /// Brings `diag`'s home bucket toward the core (a hint only).
@@ -585,6 +642,282 @@ impl DiagLatest {
     }
 }
 
+#[cfg(test)]
+impl DiagLatest {
+    /// Tests: everything the map holds that a seed's decisions or inserts read (not the debug
+    /// order): the buckets' lanes, the stash, the size, `entries` and `top`.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    pub(super) fn state(&self) -> MapState {
+        let buckets = self
+            .buckets
+            .iter()
+            .map(|b| std::array::from_fn(|k| if k < 8 { b.diag[k] } else { b.lvl[k - 8] }))
+            .collect();
+        let stash = self
+            .stash
+            .iter()
+            .map(|e| (e.diag, e.level, e.saved))
+            .collect();
+        (
+            buckets,
+            stash,
+            self.bits,
+            self.shift,
+            self.entries,
+            self.top,
+        )
+    }
+
+    /// Tests: `e` into the trace, where the map has one.
+    pub(super) fn note(&mut self, e: Event) {
+        if let Some(trace) = self.trace.as_mut() {
+            trace.push(e);
+        }
+    }
+}
+
+/// Tests: `DiagLatest::state` (the buckets' 16 lanes, the stash's entries, `bits`, `shift`,
+/// `entries`, `top`).
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(super) type MapState = (Vec<[i32; 16]>, Vec<(i32, i32, bool)>, u32, u32, usize, i32);
+
+/// EXPERIMENT (LOSAT_X_DCFOLDREG): the map during one call of the fold that keeps it in registers
+/// (`x_dc_fold_reg.rs`). What every seed reads or writes is held here, in a local of that fold,
+/// instead of in the map behind a reference: the buckets (taken out of the map for the call), the
+/// shift of `home`, `top` and `entries`. (Through the map the fold reloaded the buckets and the
+/// shift for every seed, and kept `top` and `entries` in memory: a store and a load of each per
+/// insert.) The map gets them back before a cold path of `put` reads them (`put_cold`, which may
+/// grow the map, and `put_stashed`), the fold takes them again after it, and the map gets them back
+/// when the call ends (`Drop`, also where a panic unwinds). The reads and puts below make the
+/// statements of `DiagLatest::find` and `DiagLatest::put` in the same order on the same values,
+/// split so that the fold itself branches on the place an entry was found (no `Found`).
+pub(super) struct Hot<'a> {
+    map: &'a mut DiagLatest,
+    /// The map's buckets (the map's own `buckets` is empty meanwhile).
+    buckets: Vec<Bucket>,
+    shift: u32,
+    top: i32,
+    entries: usize,
+}
+
+impl<'a> Hot<'a> {
+    /// `map` for one fold call.
+    #[inline(always)]
+    pub(super) fn new(map: &'a mut DiagLatest) -> Self {
+        debug_assert!(!map.buckets.is_empty());
+        Hot {
+            buckets: std::mem::take(&mut map.buckets),
+            shift: map.shift,
+            top: map.top,
+            entries: map.entries,
+            map,
+        }
+    }
+
+    /// The home bucket of `diag` (`DiagLatest::home`).
+    #[inline(always)]
+    pub(super) fn home(&self, diag: i32) -> usize {
+        debug_assert!(self.shift == self.map.shift);
+        home_at(diag, self.shift)
+    }
+
+    /// Brings `diag`'s home bucket toward the core (`DiagLatest::prefetch`; a hint only).
+    #[inline(always)]
+    pub(super) fn prefetch(&self, diag: i32) {
+        prefetch(self.buckets.as_ptr().wrapping_add(self.home(diag)));
+    }
+
+    /// Bucket `b`, a `home`.
+    #[inline(always)]
+    fn bucket(&self, b: usize) -> &Bucket {
+        debug_assert!(b < self.buckets.len());
+        // SAFETY: `home` is below 2^bits, the number of buckets (`Default`, `alloc` made them), and
+        // these are the map's buckets as they are now (`new`, `take_back`).
+        unsafe { self.buckets.get_unchecked(b) }
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-836
+    /// `find`'s compare in the home bucket `b`: the slots that hold `diag`, as lane bits.
+    #[inline(always)]
+    pub(super) fn lanes(&self, b: usize, diag: i32) -> u32 {
+        eq_mask(&self.bucket(b).diag, diag) & SLOT_MASK
+    }
+
+    /// `find`'s entry in slot `lane` of bucket `b`: its level and saved bit.
+    #[inline(always)]
+    pub(super) fn slot(&self, b: usize, lane: u32) -> (i32, bool) {
+        let bucket = self.bucket(b);
+        (
+            bucket.lvl[(lane & 7) as usize],
+            (bucket.lvl[SAVED] >> lane) & 1 != 0,
+        )
+    }
+
+    /// `find` past the home bucket's slots, for a `diag` that no slot of its home `b` holds: where
+    /// the stash may hold a live entry homed at `b` for the seed at S (`s`), the stash entry of
+    /// `diag` (its place, level and saved bit).
+    #[inline(always)]
+    pub(super) fn stashed(&self, b: usize, diag: i32, s: i32) -> Option<(u32, i32, bool)> {
+        if s < self.bucket(b).diag[UNTIL] {
+            if let Some(i) = self.map.find_stash(diag) {
+                let e = &self.map.stash[i];
+                return Some((STASHED + i as u32, e.level, e.saved));
+            }
+        }
+        None
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
+    /// `DiagLatest::put` at the place `at` that the seed's find gave in its home bucket `b` (a lane,
+    /// `MISS`, or a stash entry); `bound` as for `put_new`.
+    #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
+    pub(super) fn put(
+        &mut self,
+        b: usize,
+        at: u32,
+        diag: i32,
+        level: i32,
+        saved: bool,
+        s: i32,
+        bound: i32,
+    ) {
+        if at < SLOTS {
+            self.put_slot(b, at, level, saved, s);
+        } else if at == MISS {
+            self.put_new(b, diag, level, saved, s, bound);
+        } else {
+            self.put_stashed(b, at, diag, level, saved, s, bound);
+        }
+    }
+
+    /// `put`'s first statements: the order of S (debug builds) and `top`.
+    #[inline(always)]
+    fn before_put(&mut self, level: i32, _s: i32) {
+        #[cfg(debug_assertions)]
+        {
+            assert!(
+                _s >= self.map.last_s,
+                "LOSAT_X_DCLATEST: a seed at {_s} after one at {}",
+                self.map.last_s
+            );
+            self.map.last_s = _s;
+        }
+        debug_assert!(level >= 0);
+        if self.top < level {
+            self.top = level;
+        }
+    }
+
+    /// `put` over the entry in slot `lane` of bucket `b` (found there).
+    #[inline(always)]
+    pub(super) fn put_slot(&mut self, b: usize, lane: u32, level: i32, saved: bool, s: i32) {
+        self.before_put(level, s);
+        debug_assert!(lane < SLOTS && b < self.buckets.len());
+        // SAFETY: as in `bucket`.
+        let bucket = unsafe { self.buckets.get_unchecked_mut(b) };
+        set_slot(bucket, lane, level, saved);
+    }
+
+    /// `put` of a diagonal that `find` found nowhere: into a free slot of its home bucket `b`, else
+    /// into the stash (`put_cold`). `bound` is the seed's level bound, which the fold's seeds all
+    /// have (`x_dc_fold_reg.rs`): it lies in `1..=i32::MAX`, where `free_below(bound)` is `bound`.
+    #[inline(always)]
+    pub(super) fn put_new(
+        &mut self,
+        b: usize,
+        diag: i32,
+        level: i32,
+        saved: bool,
+        s: i32,
+        bound: i32,
+    ) {
+        self.before_put(level, s);
+        debug_assert!(bound > NO_LEVEL && free_below(bound) == bound);
+        debug_assert!(b < self.buckets.len());
+        // SAFETY: as in `bucket`.
+        let bucket = unsafe { self.buckets.get_unchecked_mut(b) };
+        let free = lt_mask(&bucket.lvl, bound) & SLOT_MASK;
+        if free == 0 {
+            self.cold(|map| map.put_cold(b, Entry { diag, level, saved }, s, bound));
+            return;
+        }
+        let lane = free.trailing_zeros();
+        let slot = &mut bucket.diag[(lane & 7) as usize];
+        self.entries += usize::from(*slot == NO_DIAG);
+        *slot = diag;
+        set_slot(bucket, lane, level, saved);
+    }
+
+    /// `put` over the stash entry `at` that `find` found for a diagonal homed at `b`.
+    #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
+    pub(super) fn put_stashed(
+        &mut self,
+        b: usize,
+        at: u32,
+        diag: i32,
+        level: i32,
+        saved: bool,
+        s: i32,
+        bound: i32,
+    ) {
+        self.before_put(level, s);
+        self.cold(|map| map.put_stashed(at, b, Entry { diag, level, saved }, s, bound));
+    }
+
+    /// `f` on the map with all its fields (a cold path of `put`): they go back to the map before
+    /// and are taken again after (`f` may have grown the map).
+    #[inline(always)]
+    fn cold(&mut self, f: impl FnOnce(&mut DiagLatest)) {
+        self.give_back();
+        f(self.map);
+        self.take_back();
+    }
+
+    /// The buckets, `top` and `entries` back to the map.
+    #[inline(always)]
+    fn give_back(&mut self) {
+        debug_assert!(self.map.buckets.is_empty());
+        std::mem::swap(&mut self.map.buckets, &mut self.buckets);
+        self.map.top = self.top;
+        self.map.entries = self.entries;
+    }
+
+    /// The buckets, the shift, `top` and `entries` from the map again.
+    #[inline(always)]
+    fn take_back(&mut self) {
+        std::mem::swap(&mut self.map.buckets, &mut self.buckets);
+        self.shift = self.map.shift;
+        self.top = self.map.top;
+        self.entries = self.map.entries;
+    }
+
+    /// Tests: `e` into the map's trace (`DiagLatest::note`).
+    #[cfg(test)]
+    pub(super) fn note(&mut self, e: Event) {
+        self.map.note(e);
+    }
+}
+
+impl Drop for Hot<'_> {
+    /// The end of the fold call: the map gets its fields back (unless a panic in `cold`'s `f` left
+    /// them there).
+    #[inline(always)]
+    fn drop(&mut self) {
+        if self.map.buckets.is_empty() {
+            self.give_back();
+        }
+    }
+}
+
 /// No NCBI counterpart: counts a chunk of the strips stage that has the level bounds
 /// (`x_pair_seed_disc.rs` `latest_bound`): folded on the maps when its scan ranges `ascend`, else
 /// sent to the chains (`latest_ranges_ascend`).
@@ -593,17 +926,24 @@ pub(super) fn count_stage(ascend: bool) {
     counter.fetch_add(1, Ordering::Relaxed);
 }
 
+/// No NCBI counterpart: counts a call of the fold with the map in registers
+/// (`x_dc_fold_reg.rs`, LOSAT_X_DCFOLDREG).
+pub(super) fn count_reg_call() {
+    REG_CALLS.fetch_add(1, Ordering::Relaxed);
+}
+
 /// No NCBI counterpart: the fields of the `[TIMING] x_dc_latest:` line (after the stage's
 /// `x_pairpardisc_seed:` line while the switch is on): the stages folded on the maps, the chunks
-/// whose scan ranges step back (sent to the chains), the maps' growths and the most buckets a map
-/// had.
+/// whose scan ranges step back (sent to the chains), the maps' growths, the most buckets a map
+/// had, and the calls of the fold in registers (`LOSAT_X_DCFOLDREG`).
 pub(super) fn timing_fields() -> String {
     format!(
-        " stages={} back={} grows={} buckets={}",
+        " stages={} back={} grows={} buckets={} reg_calls={}",
         STAGES.load(Ordering::Relaxed),
         BACK.load(Ordering::Relaxed),
         GROWS.load(Ordering::Relaxed),
-        MOST_BUCKETS.load(Ordering::Relaxed)
+        MOST_BUCKETS.load(Ordering::Relaxed),
+        REG_CALLS.load(Ordering::Relaxed)
     )
 }
 

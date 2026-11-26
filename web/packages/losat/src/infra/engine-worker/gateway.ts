@@ -591,6 +591,7 @@ export class WasmEngine implements EngineGateway, ToolEngine {
       ...(result.windowMasker === undefined ? {} : { windowMasker: result.windowMasker }),
       ...(result.runFiles === undefined ? {} : { runFiles: result.runFiles }),
       ...(result.printed === undefined ? {} : { printed: result.printed }),
+      ...(result.readRecords === undefined ? {} : { readRecords: result.readRecords }),
     });
   }
 
@@ -741,7 +742,12 @@ function workerCounts(counts: CountsFile): WorkerCounts {
 }
 
 function workerInput(program: string, input: EngineInput): WorkerInput {
-  return { bytes: input.bytes, records: input.records, key: inputKey(program, input) };
+  return {
+    bytes: input.bytes,
+    records: input.records,
+    key: inputKey(program, input),
+    ...(input.assembled === true ? { assembled: true } : {}),
+  };
 }
 
 /** A thrown value as an Error. */

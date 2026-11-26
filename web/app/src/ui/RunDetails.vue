@@ -10,9 +10,10 @@ import { optionGrammar, type LoadedRun } from '../application/results';
 import { commandWords, shellWord, userArgv } from '../domain/argv';
 import { COUNTS_FILE } from '../domain/counts';
 import { dateOf } from '../domain/download-sentences';
-import { fromText, worthSaying } from '../domain/input-parts';
+import { fromText, readDifferenceText, worthSaying } from '../domain/input-parts';
 import { customOutfmt } from '../domain/output-format';
 import { programById } from '../domain/programs';
+import { runInputRecords } from '../domain/run';
 import CommandText from './CommandText.vue';
 import { formatBytes, formatCount, formatDateTime, formatDuration, formatMillis } from './format';
 import { NO_WARNINGS, warningsPlaceParts } from './message-place-text';
@@ -58,10 +59,18 @@ const countsDate = computed(() => {
 const warningsPlace = computed(() => warningsPlaceParts(props.loaded.messages, props.loaded.diagnostics, props.run));
 /** Whether those words say that the engine wrote no warnings (its place holds none). */
 const noWarnings = computed(() => warningsPlace.value?.[0]?.text === NO_WARNINGS);
-const inputs = computed(() => [
-  { role: 'Query', input: snapshot.value.query },
-  ...(snapshot.value.database === undefined ? [{ role: 'Subject', input: snapshot.value.subject }] : []),
-]);
+const inputs = computed(() => {
+  const roles: ReadonlyArray<{ readonly key: 'query' | 'subject'; readonly label: string }> = [
+    { key: 'query', label: 'Query' },
+    ...(snapshot.value.database === undefined ? [{ key: 'subject' as const, label: 'Subject' }] : []),
+  ];
+  return roles.map(({ key, label }) => {
+    const input = snapshot.value[key];
+    const records = runInputRecords(props.run, key);
+    const readDiff = readDifferenceText(input.records, record.value.readRecords?.[key], input.from?.length ?? 1);
+    return { key, role: label, input, records, readDiff };
+  });
+});
 </script>
 
 <template>
@@ -83,13 +92,15 @@ const inputs = computed(() => [
         <dd>{{ programById(snapshot.program).label }}</dd>
         <dt>Arguments</dt>
         <dd><code data-testid="run-argv"><CommandText :words="userArgv(snapshot)" :takes-value="takesValue" /></code></dd>
-        <template v-for="{ role, input } in searched ? inputs : []" :key="role">
+        <template v-for="{ key, role, input, records, readDiff } in searched ? inputs : []" :key="key">
           <dt>{{ role }}</dt>
-          <dd :data-testid="`run-input-${role.toLowerCase()}`">
-            {{ input.name }}: {{ formatCount(input.records.length) }} {{ input.records.length === 1 ? 'record' : 'records' }},
+          <dd :data-testid="`run-input-${key}`">
+            {{ input.name }}: {{ formatCount(records.length) }} {{ records.length === 1 ? 'record' : 'records' }},
             {{ formatBytes(input.bytes.length) }}<br />
             <!-- The file of the command is not the user's as given: what it is made of, and which records it leaves out (line WQA's D22, 2026-11-23). -->
-            <template v-if="worthSaying(input.from)"><span :data-testid="`run-input-${role.toLowerCase()}-from`">From {{ fromText(input.from) }}</span><br /></template>
+            <template v-if="worthSaying(input.from)"><span :data-testid="`run-input-${key}-from`">From {{ fromText(input.from) }}</span><br /></template>
+            <!-- Reading an assembled input as one file differed from the per-file tables (line WQA's D17). -->
+            <template v-if="readDiff !== undefined"><span :data-testid="`run-input-${key}-read-diff`">{{ readDiff }}</span><br /></template>
             <span class="muted small">SHA-256 {{ input.sha256 }}</span>
           </dd>
         </template>

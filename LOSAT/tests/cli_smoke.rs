@@ -160,24 +160,24 @@ fn startup_trace_needs_the_diagnostics_feature() {
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
 // NCBI's handlers read the subjects and open the query before the options are checked, so a
 // missing file is reported first; LOSAT's rejection of an option that NCBI runs comes where
-// NCBI checks the options. The option here is `-use_sw_tback` without composition-based
-// statistics, which BLASTP still refuses (with them it runs: line RG item X4).
+// NCBI checks the options. The option here is `psiblast -use_sw_tback` (BLASTP runs
+// `-use_sw_tback` with and without composition-based statistics: line RG items X4 and X4-c0).
 #[test]
 fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     let missing_query = temp_path("missing_query", "faa");
     let missing_subject = temp_path("missing_subject", "faa");
     let output = clean_losat_command()
-        .args(["blastp", "-query"])
+        .args(["psiblast", "-query"])
         .arg(&missing_query)
         .arg("-subject")
         .arg(&missing_subject)
-        .args(["-use_sw_tback", "-comp_based_stats", "0"])
+        .arg("-use_sw_tback")
         .output()
-        .expect("run unsupported blastp");
+        .expect("run unsupported psiblast");
     assert!(!output.status.success(), "a missing subject should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        !stderr.contains("not supported by LOSAT's BLASTP"),
+        !stderr.contains("not supported by LOSAT's PSIBLAST"),
         "the subject is read before the options are checked: {stderr}"
     );
 
@@ -187,20 +187,20 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     std::fs::write(&query, ">q\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
     std::fs::write(&subject, ">s\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
     let output = clean_losat_command()
-        .args(["blastp", "-query"])
+        .args(["psiblast", "-query"])
         .arg(&query)
         .arg("-subject")
         .arg(&subject)
-        .args(["-use_sw_tback", "-comp_based_stats", "0"])
+        .arg("-use_sw_tback")
         .output()
-        .expect("run unsupported blastp");
+        .expect("run unsupported psiblast");
     let _ = std::fs::remove_file(&query);
     let _ = std::fs::remove_file(&subject);
-    assert!(!output.status.success(), "unsupported blastp should fail");
+    assert!(!output.status.success(), "unsupported psiblast should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains(
-            "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's BLASTP yet"
+            "-use_sw_tback (the Smith-Waterman traceback) is not supported by LOSAT's PSIBLAST"
         ),
         "unsupported error should name program, option, and reason: {stderr}"
     );
@@ -212,8 +212,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
 // NCBI BLAST+ 2.17.0's `blastp -ungapped -comp_based_stats 0 -use_sw_tback` reads the gapped
 // Karlin blocks that an ungapped search does not have and crashes at the traceback of each query
 // batch it searches (line NP, items O4b and O4b2-2): LOSAT refuses there, with the text that
-// BLASTX and TBLASTN refuse it with, not before the search (and not with the refusal of
-// `-use_sw_tback` without composition-based statistics above: NCBI crashes at the redo's set-up,
+// BLASTX and TBLASTN refuse it with, not before the search (NCBI crashes at the redo's set-up,
 // before any match is redone). A query without a valid context (only `X`) is not searched, and its run
 // is the run without `-use_sw_tback`. The NCBI bytes are the fixture rows `db.ung.sw.*`.
 #[test]

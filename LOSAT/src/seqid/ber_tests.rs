@@ -1,6 +1,6 @@
 use super::{
-    decode_full_set, fix_visible_chars, read_std_signed, replaced_bytes, title_replaced_chars,
-    Reader, StdSignedError,
+    decode_full_set, fix_visible_chars, read_std_signed, title_replaced_chars, Reader,
+    StdSignedError,
 };
 use crate::seqdb::header::decode_deflines_as;
 use std::path::Path;
@@ -362,10 +362,11 @@ fn title_posts_give_each_byte_with_the_string_as_ncbi_holds_it() {
     assert!(title_replaced_chars(&titled_set(&[b"clean"])).is_empty());
 }
 
-/// `replaced_bytes` counts the bytes that `fix_visible_chars` replaces, for strings of every
-/// byte value and of lengths about its pieces of 255 bytes, every byte replaced included.
+/// `fix_visible_chars` makes each byte outside ' ' ..= '~' '#' and counts them, for strings of
+/// every byte value and of lengths about its steps of 16 bytes and its blocks of 255 steps,
+/// every byte replaced included, written over a buffer shorter or longer than the string.
 #[test]
-fn replaced_bytes_counts_the_replaced_bytes() {
+fn fix_visible_chars_replaces_and_counts() {
     let mut state = 0x9e37_79b9_7f4a_7c15u64;
     let mut next = || {
         state ^= state << 13;
@@ -374,7 +375,8 @@ fn replaced_bytes_counts_the_replaced_bytes() {
         state
     };
     for len in [
-        0, 1, 31, 32, 254, 255, 256, 509, 510, 511, 765, 766, 1_000, 4_097,
+        0, 1, 15, 16, 17, 31, 32, 254, 255, 256, 509, 510, 511, 765, 766, 1_000, 4_079, 4_080,
+        4_081, 4_097, 8_161,
     ] {
         let random: Vec<u8> = (0..len).map(|_| next() as u8).collect();
         let mixed: Vec<u8> = (0..len)
@@ -387,12 +389,16 @@ fn replaced_bytes_counts_the_replaced_bytes() {
             vec![b'~'; len],
             vec![0x1f; len],
         ] {
-            let replaced = fix_visible_chars(&value)
+            let want: Vec<u8> = value
                 .iter()
-                .zip(&value)
-                .filter(|(fixed, stored)| fixed != stored)
-                .count();
-            assert_eq!(replaced_bytes(&value), replaced, "length {len}");
+                .map(|&c| if (b' '..=b'~').contains(&c) { c } else { b'#' })
+                .collect();
+            let replaced = want.iter().zip(&value).filter(|(w, v)| w != v).count();
+            for kept in [Vec::new(), vec![b'x'; len / 2], vec![b'y'; len + 17]] {
+                let mut fixed = kept;
+                let count = fix_visible_chars(&value, &mut fixed);
+                assert_eq!((fixed, count), (want.clone(), replaced), "length {len}");
+            }
         }
     }
 }

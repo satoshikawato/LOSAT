@@ -930,7 +930,6 @@ impl ReportedSubjects {
                     .map(|&residue| NCBISTDAA_TO_AMINOACID[usize::from(residue)])
                     .collect(),
                 lowercase_masks: Vec::new(),
-                warnings: Vec::new(),
                 source: None,
                 around: None,
                 skipped: None,

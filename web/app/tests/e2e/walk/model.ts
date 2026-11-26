@@ -1,12 +1,12 @@
 // What the walk knows of the search form's inputs, kept apart from the application's code: the
 // texts and files it gave each role, the records it left out, and whether the role's inputs are
-// searched together or apart. A source is read as nucleotides or as proteins as the mode reads its
-// role, and the records left out are kept for each reading (src/application/draft.ts `reindex`):
-// a mode that reads the role the other way starts with every record of that reading. From it the walk writes the files that a run's command line names,
-// for the native CLI (the oracle of walk/steps.ts): the run must have searched exactly the whole
-// records that the walk chose (web/AGENTS.md rule 3), as the data layer joins them
-// (src/infra/data/data-service.ts: a whole file, or the included records' bytes, with a line end
-// between two inputs when the first has none). A pure module (tests/unit/walk.test.ts).
+// searched together or apart. Exclusions survive a mode change (src/application/draft.ts `reindex`,
+// line WQA's D16, Owner Q2=B): records already excluded stay excluded under another reading, and
+// only records newly parsed by that reading enter as included. From it the walk writes the files
+// that a run's command line names, for the native CLI (the oracle of walk/steps.ts): the run must
+// have searched exactly the whole records that the walk chose (web/AGENTS.md rule 3), as the data
+// layer joins them (src/infra/data/data-service.ts: a whole file, or the included records' bytes,
+// with a line end between two inputs when the first has none). A pure module (tests/unit/walk.test.ts).
 
 export type Role = 'query' | 'subject';
 export type Reading = 'nucleotide' | 'protein';
@@ -22,8 +22,8 @@ export interface ModelSource {
    */
   readonly name: string;
   readonly bytes: Uint8Array;
-  /** The records left out, by index, for each reading. */
-  readonly excluded: Readonly<Partial<Record<Reading, ReadonlySet<number>>>>;
+  /** The records left out, by index (survives mode changes: line WQA's D16, Owner Q2=B). */
+  readonly excluded: ReadonlySet<number>;
 }
 
 export interface RoleModel {
@@ -40,6 +40,7 @@ export interface InputModel {
 export const PASTED_NAMES: Readonly<Record<Role, string>> = Object.freeze({ query: 'query.fa', subject: 'subject.fa' });
 
 const LF = 0x0a;
+const CR = 0x0d;
 const GT = 0x3e;
 
 export function emptyModel(): InputModel {
@@ -50,7 +51,7 @@ export function emptyModel(): InputModel {
 export function withPaste(model: InputModel, role: Role, text: string): InputModel {
   const others = model[role].sources.filter((source) => source.origin !== 'paste');
   const sources =
-    text === '' ? others : [{ origin: 'paste' as const, name: PASTED_NAMES[role], bytes: new TextEncoder().encode(textareaValue(text)), excluded: {} }, ...others];
+    text === '' ? others : [{ origin: 'paste' as const, name: PASTED_NAMES[role], bytes: new TextEncoder().encode(textareaValue(text)), excluded: new Set<number>() }, ...others];
   return { ...model, [role]: { ...model[role], sources } };
 }
 
@@ -60,7 +61,7 @@ function textareaValue(text: string): string {
 }
 
 export function withFiles(model: InputModel, role: Role, files: ReadonlyArray<{ name: string; bytes: Uint8Array }>): InputModel {
-  const added = files.map((file) => ({ origin: 'file' as const, name: file.name, bytes: file.bytes, excluded: {} }));
+  const added = files.map((file) => ({ origin: 'file' as const, name: file.name, bytes: file.bytes, excluded: new Set<number>() }));
   return { ...model, [role]: { ...model[role], sources: [...model[role].sources, ...added] } };
 }
 
@@ -68,13 +69,13 @@ export function withoutSource(model: InputModel, role: Role, index: number): Inp
   return { ...model, [role]: { ...model[role], sources: model[role].sources.filter((_, i) => i !== index) } };
 }
 
-export function withIncluded(model: InputModel, role: Role, reading: Reading, index: number, record: number, included: boolean): InputModel {
+export function withIncluded(model: InputModel, role: Role, index: number, record: number, included: boolean): InputModel {
   const sources = model[role].sources.map((source, i) => {
     if (i !== index) return source;
-    const excluded = new Set(source.excluded[reading]);
+    const excluded = new Set(source.excluded);
     if (included) excluded.delete(record);
     else excluded.add(record);
-    return { ...source, excluded: { ...source.excluded, [reading]: excluded } };
+    return { ...source, excluded };
   });
   return { ...model, [role]: { ...model[role], sources } };
 }
@@ -93,23 +94,38 @@ export function recordRanges(bytes: Uint8Array): Array<readonly [number, number]
 }
 
 /** The bytes of a source that a run searches: the whole file, or its included records. */
-export function includedBytes(source: ModelSource, reading: Reading): Uint8Array {
-  const excluded = source.excluded[reading] ?? new Set<number>();
-  if (excluded.size === 0) return source.bytes;
+export function includedBytes(source: ModelSource): Uint8Array {
+  if (source.excluded.size === 0) return source.bytes;
   const parts = recordRanges(source.bytes)
-    .filter((_, index) => !excluded.has(index))
+    .filter((_, index) => !source.excluded.has(index))
     .map(([start, end]) => source.bytes.subarray(start, end));
   return concat(parts);
 }
 
-/** The bytes of inputs searched together: joined with a line end where one has none. */
-export function joinedBytes(sources: readonly ModelSource[], reading: Reading): Uint8Array {
+/** The bytes of inputs searched together: joined with a line end where one has none (preserving pure-CR streams, as data-service.ts does). */
+export function joinedBytes(sources: readonly ModelSource[]): Uint8Array {
   const parts: Uint8Array[] = [];
+  let hasLf = false;
+  let hasCr = false;
   for (const source of sources) {
-    const bytes = includedBytes(source, reading);
+    const bytes = includedBytes(source);
     const previous = parts[parts.length - 1];
-    if (bytes.length > 0 && previous !== undefined && previous[previous.length - 1] !== LF) parts.push(new Uint8Array([LF]));
-    if (bytes.length > 0) parts.push(bytes);
+    if (bytes.length > 0 && previous !== undefined) {
+      const last = previous[previous.length - 1];
+      if (last !== LF) {
+        if (!hasLf && hasCr) {
+          if (last !== CR) parts.push(new Uint8Array([CR]));
+        } else {
+          parts.push(new Uint8Array([LF]));
+          hasLf = true;
+        }
+      }
+    }
+    if (bytes.length > 0) {
+      parts.push(bytes);
+      if (!hasLf && bytes.includes(LF)) hasLf = true;
+      if (!hasCr && bytes.includes(CR)) hasCr = true;
+    }
   }
   return concat(parts);
 }
@@ -136,43 +152,42 @@ export interface ExpectedInput {
 }
 
 /** The first word of each record's title line, for the records left out (at most three, as the page names). */
-function fromOf(source: ModelSource, reading: Reading): NonNullable<ExpectedInput['from']> {
-  const excluded = source.excluded[reading] ?? new Set<number>();
+function fromOf(source: ModelSource): NonNullable<ExpectedInput['from']> {
   const ranges = recordRanges(source.bytes);
   const ids = ranges
-    .filter((_, index) => excluded.has(index))
+    .filter((_, index) => source.excluded.has(index))
     .slice(0, 3)
     .map(([start, end]) => /^>\s*(\S*)/.exec(new TextDecoder().decode(source.bytes.subarray(start, Math.min(end, start + 200))))?.[1] ?? '');
-  return { file: source.name, leftOutIds: ids, included: ranges.length - excluded.size, total: ranges.length };
+  return { file: source.name, leftOutIds: ids, included: ranges.length - source.excluded.size, total: ranges.length };
 }
 
 /** Whether the source's bytes that a run searches are not the file's own: pasted text, or records left out. */
-function madeOf(source: ModelSource, reading: Reading): boolean {
-  return source.origin === 'paste' || (source.excluded[reading]?.size ?? 0) > 0;
+function madeOf(source: ModelSource): boolean {
+  return source.origin === 'paste' || source.excluded.size > 0;
 }
 
 /**
- * The inputs that the role's runs search in a mode that reads the role as `reading`, given the
- * role's sources that the page read (`ready`, by index; a source it could not read is no input):
- * one when searched together, one per source when apart, but a source whose records are all left
- * out, which has nothing to search alone (src/application/draft.ts `inputGroups`).
+ * The inputs that the role's runs search, given the role's sources that the page read (`ready`, by
+ * index; a source it could not read is no input): one when searched together, one per source when
+ * apart, but a source whose records are all left out, which has nothing to search alone
+ * (src/application/draft.ts `inputGroups`).
  */
-export function expectedInputs(role: RoleModel, reading: Reading, ready: readonly number[]): ExpectedInput[] {
+export function expectedInputs(role: RoleModel, ready: readonly number[]): ExpectedInput[] {
   const sources = role.sources.filter((_, index) => ready.includes(index));
   if (sources.length === 0) return [];
   const single = (source: ModelSource): ExpectedInput => ({
-    name: madeOf(source, reading) ? undefined : source.name,
-    ...(source.origin !== 'paste' && (source.excluded[reading]?.size ?? 0) > 0 ? { from: fromOf(source, reading) } : {}),
-    bytes: includedBytes(source, reading),
-    made: madeOf(source, reading),
+    name: madeOf(source) ? undefined : source.name,
+    ...(source.origin !== 'paste' && source.excluded.size > 0 ? { from: fromOf(source) } : {}),
+    bytes: includedBytes(source),
+    made: madeOf(source),
   });
   if (sources.length === 1) return [single(sources[0]!)];
   if (role.mode === 'separate') {
     return sources
-      .filter((source) => includedBytes(source, reading).length > 0 || recordRanges(source.bytes).length === 0)
+      .filter((source) => includedBytes(source).length > 0 || recordRanges(source.bytes).length === 0)
       .map(single);
   }
-  return [{ name: undefined, bytes: joinedBytes(sources, reading), made: true }];
+  return [{ name: undefined, bytes: joinedBytes(sources), made: true }];
 }
 
 function concat(parts: readonly Uint8Array[]): Uint8Array {

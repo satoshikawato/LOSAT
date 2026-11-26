@@ -7,4 +7,4 @@
   pipe: fresh builds complete with exit status 0, overwriting an existing database deletes the old
   files and stops at the log line with exit status 0 and no message, and `CWriteDB` stdout lines
   stop inside `AddSequence` with exit status 0 and no message (recorded as exception 10 in
-  `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` v1.33).
+  `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` v1.34).

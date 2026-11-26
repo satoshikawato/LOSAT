@@ -59,7 +59,6 @@ pub(crate) fn run_subject_report(ops: Vec<GapEditOp>, outfmt: &str) -> SubjectRe
         title: b"q1".to_vec(),
         sequence: b"GCT".repeat((q_len as usize).max(20)),
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,
@@ -69,7 +68,6 @@ pub(crate) fn run_subject_report(ops: Vec<GapEditOp>, outfmt: &str) -> SubjectRe
         title: b"s1".to_vec(),
         sequence: vec![b'A'; (s_len as usize).max(20)],
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,
@@ -163,6 +161,7 @@ pub(crate) fn run_subject_report(ops: Vec<GapEditOp>, outfmt: &str) -> SubjectRe
                     0,
                     false,
                     None,
+                    None,
                 )
                 .and_then(|()| {
                     super::blast_xml::write_xml_epilog(&mut writer, &mut stderr, "blastx", 1, None)
@@ -187,6 +186,7 @@ pub(crate) fn run_subject_report(ops: Vec<GapEditOp>, outfmt: &str) -> SubjectRe
                     &[batch],
                     0,
                     false,
+                    None,
                     None,
                 )
                 .and_then(|()| {

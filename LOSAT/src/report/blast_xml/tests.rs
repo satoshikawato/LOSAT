@@ -164,6 +164,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
         message: Some(b"No hits found"),
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     writer.query(&run, &first, out, |_| Ok(())).unwrap();
     let second = XmlQuery {
@@ -174,6 +175,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
         message: None,
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     writer
         .query(&run, &second, out, |sink| {
@@ -257,6 +259,7 @@ fn a_later_call_continues_the_document() {
         message: None,
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     writer.query(&run, &query, &mut out, |_| Ok(())).unwrap();
     let text = String::from_utf8(out.clone()).unwrap();
@@ -287,6 +290,7 @@ fn blastn_parameters_and_the_statistics_without_a_valid_context() {
         message: Some(b"x"),
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     writer.query(&run, &query, &mut out, |_| Ok(())).unwrap();
     let text = String::from_utf8(out).unwrap();
@@ -313,6 +317,7 @@ fn a_db_len_of_minus_two_to_the_63_is_written_as_its_digits() {
         message: Some(b"x"),
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     BlastXmlWriter::new(0)
         .query(&run, &query, &mut out, |_| Ok(()))
@@ -541,6 +546,7 @@ fn a_header_exception_comes_back_after_its_posts() {
         message: None,
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     let mut writer = BlastXmlWriter::new(0);
     let mut out = Vec::new();
@@ -628,6 +634,7 @@ fn a_hit_whose_lookup_throws_is_ncbis_catch() {
         message: None,
         searched: true,
         masks: &[],
+        joins_held: false,
     };
     let mut writer = BlastXmlWriter::new(1);
     let mut out = Vec::new();

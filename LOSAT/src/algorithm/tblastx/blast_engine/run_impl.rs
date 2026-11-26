@@ -2052,6 +2052,9 @@ pub(crate) struct TblastxReportRun<'a> {
     /// EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool that formats the outfmt 0 text
     /// (`report::x_pairwise_par`), `None` for the serial writer.
     pub x_pairwise_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
+    /// Under `-parse_deflines`, the run's scopes of the reported queries: how NCBI's XML family
+    /// formats show each query's result (`query_batch::QueryScopesFrom::xml_show`).
+    pub query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'a>>,
 }
 
 /// The database of a `-db` search as its reports show it.
@@ -3164,6 +3167,7 @@ fn run_in_pool(
         x_search_pool: parallel_pool,
         queries_written: std::cell::Cell::new(0),
         reads: std::cell::RefCell::default(),
+        query_scopes: std::cell::RefCell::default(),
     };
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-178
     // A reader at the end of its input reads no batch (its `End()` is true): the report of no
@@ -3480,7 +3484,8 @@ fn run_batch_loop(
         && crate::blastinput::query_batch::outfmts_have_xml(
             outputs.formats.iter().map(|format| format.outfmt),
         );
-    let mut query_scopes = crate::blastinput::query_batch::QueryScopes::of_search(
+    let query_scopes = &reports.query_scopes;
+    *query_scopes.borrow_mut() = crate::blastinput::query_batch::QueryScopes::of_search(
         args.parse_deflines,
         subject_records,
         xml,
@@ -3619,7 +3624,7 @@ fn run_batch_loop(
     let mut reading_ended = false;
     let mut input_start = 0;
     // NCBI's reader's count of the records into the batches (`BatchCount`).
-    let mut count = BatchCount::of(query_scopes.as_ref());
+    let mut count = BatchCount::of(query_scopes.borrow().as_ref());
     // The reader is at the end of its input after the last record, unless an `eEOF` or an
     // error ends the reading there; that comes in the batch being read when the records
     // run out before the batch reaches its size, and otherwise in a batch of its own.
@@ -3693,7 +3698,7 @@ fn run_batch_loop(
         // and the messages of the batch's records. (Round 4 refused after the search, and wrote the
         // batch's request.)
         let mut scope_refusal = None;
-        if let Some(scopes) = query_scopes.as_mut() {
+        if let Some(scopes) = query_scopes.borrow_mut().as_mut() {
             if let Err(refusal) = scopes.add_batch(
                 &query_runs.input_records[input_start..input_end],
                 &input.skipped[input_start..input_end],
@@ -3963,7 +3968,7 @@ fn run_batch_loop(
         }
         if let ShownSubjects::Database { database, .. } = &subjects.shown {
             let ordered = batch.hits.as_slice();
-            if let Some(scopes) = query_scopes.as_ref() {
+            if let Some(scopes) = query_scopes.borrow().as_ref() {
                 crate::algorithm::common::database::refuse_reported_ids_of_queries(
                     &reports.titles.borrow(),
                     ordered
@@ -4208,8 +4213,14 @@ fn run_batch_loop(
                     // before (`shared::XmlCuts`), asked only where the batch's prefetch stops, by
                     // the record of their loads (`LoadedBefore`: a cut report loads nothing) and
                     // the texts that the cut reports left (`shared::XmlReportsBefore`).
+                    // The record that the report shows (`query_batch::xml_shown_of`).
+                    let shown_scopes = query_scopes.borrow();
                     let xml_cut = |query: usize| {
-                        query_records.get(query).is_some_and(|record| {
+                        let shown = crate::blastinput::query_batch::xml_shown_of(
+                            shown_scopes.as_ref().map(|s| s.numbered_from(0)),
+                            query,
+                        );
+                        query_records.get(shown).is_some_and(|record| {
                             crate::report::blast_xml::names::iteration_cut_before_hits(
                                 record.local_id.as_bytes(),
                                 record.warning_id(),
@@ -4281,7 +4292,7 @@ fn run_batch_loop(
         let failing = xml_matrix_failure
             .and_then(|failure| {
                 crate::blastinput::query_batch::QueryScopes::xml_failing_query(
-                    query_scopes.as_ref(),
+                    query_scopes.borrow().as_ref(),
                     failure,
                 )
                 .query()
@@ -4383,7 +4394,7 @@ fn run_batch_loop(
     // reader messages and posts).
     if xml_matrix_failure.is_some_and(|failure| {
         crate::blastinput::query_batch::QueryScopes::xml_failing_query(
-            query_scopes.as_ref(),
+            query_scopes.borrow().as_ref(),
             failure,
         )
         .fails_at_end(done.searched.len())
@@ -4438,6 +4449,9 @@ struct BatchReports<'a> {
     /// The texts of the subjects that each query's report reads one by one (its batch's prefetch
     /// off), by query, where the first format places them (`TblastxReportRun::query_reads`).
     reads: std::cell::RefCell<Vec<crate::report::query_warnings::QueryReads>>,
+    /// Under `-parse_deflines`, the scopes of the batches' queries, which the loop adds to as it
+    /// reads the batches (`run_batch_loop`) and the reports read (`TblastxReportRun::query_scopes`).
+    query_scopes: std::cell::RefCell<Option<crate::blastinput::query_batch::QueryScopes>>,
 }
 
 impl BatchReports<'_> {
@@ -4663,6 +4677,7 @@ impl BatchReports<'_> {
                 .map(|taxdb| taxdb.report_names("TBLASTX")),
             _ => None,
         };
+        let query_scopes = self.query_scopes.borrow();
         let written = write_tblastx_outputs(
             hits,
             outputs,
@@ -4688,6 +4703,9 @@ impl BatchReports<'_> {
                 archive_spans: &done.spans,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
                 x_pairwise_pool: crate::report::x_pairwise_par::pool(self.x_search_pool),
+                query_scopes: query_scopes
+                    .as_ref()
+                    .map(|scopes| scopes.numbered_from(first)),
             },
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);

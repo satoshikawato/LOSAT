@@ -38,6 +38,7 @@
 //! shuffle (`crate::utils::std_shuffle`).
 
 pub(crate) mod alias_file;
+pub(crate) mod asn_source;
 pub(crate) mod binary_list;
 pub mod bioseq;
 pub mod build_db;

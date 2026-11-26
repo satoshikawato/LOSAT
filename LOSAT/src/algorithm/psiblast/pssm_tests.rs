@@ -386,7 +386,7 @@ fn following_seq_aligns_whose_ids_match_share_a_row() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:529-547
-// (`GetLowestEvalue`, cited at `input_msa`): the e-value counts as at most
+// (`GetLowestEvalue`, cited at `seqalign_pssm_evalue`): the e-value counts as at most
 // BLAST_EXPECT_VALUE (10), and a NaN as 10.
 #[test]
 fn an_e_value_from_10_on_counts_as_10() {
@@ -432,6 +432,48 @@ fn fixed_formats_as_the_c_library() {
     ] {
         assert_eq!(fixed(value, precision), text, "{value}");
     }
+}
+
+// Line PS item PS7c (review S2): a block of a Lambda below 0 or not a number is left out of the
+// footer, gapped or ungapped (`stats::tables::ancillary_kept`, cited at its definition).
+#[test]
+fn a_block_of_a_lambda_below_zero_or_not_a_number_is_left_out_of_the_footer() {
+    let block = |lambda| KarlinBlk {
+        lambda,
+        ..BLOSUM62_11_1
+    };
+    let labels = |ancillary: PssmAncillary| -> Vec<&'static str> {
+        ancillary_blocks(&ancillary)
+            .iter()
+            .map(|(label, _)| label.trim_end())
+            .collect()
+    };
+    let all = PssmAncillary {
+        ungapped: BLOSUM62_11_1,
+        gapped: BLOSUM62_11_1,
+        psi_ungapped: BLOSUM62_11_1,
+        psi_gapped: BLOSUM62_11_1,
+    };
+    assert_eq!(labels(all).len(), 4);
+    for lambda in [f64::NEG_INFINITY, f64::NAN, -1.0] {
+        let gapped_out = PssmAncillary {
+            gapped: block(lambda),
+            psi_gapped: block(lambda),
+            ..all
+        };
+        assert_eq!(labels(gapped_out), ["Standard Ungapped", "PSI Ungapped"]);
+        let ungapped_out = PssmAncillary {
+            ungapped: block(lambda),
+            psi_ungapped: block(lambda),
+            ..all
+        };
+        assert_eq!(labels(ungapped_out), ["Standard Gapped", "PSI Gapped"]);
+    }
+    let infinite = PssmAncillary {
+        psi_gapped: block(f64::INFINITY),
+        ..all
+    };
+    assert_eq!(labels(infinite).len(), 4);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:191-327 (cited at

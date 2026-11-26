@@ -43,6 +43,7 @@ import {
   isTerminal,
   isToolSnapshot,
   type ConffileSnapshot,
+  type DatabaseSnapshot,
   type InputPart,
   type InputSnapshot,
   type RunRecord,
@@ -86,7 +87,14 @@ export type SequenceInput =
 export interface SearchRequest {
   readonly program: ProgramId;
   readonly query: SequenceInput;
-  readonly subject: SequenceInput;
+  /** FASTA subject input (`-subject`); omitted when searching a local BLAST database (`database`). */
+  readonly subject?: SequenceInput;
+  /** Local BLAST database metadata (`-db`); when present, `subject` is omitted and `files` mounts the database folder. */
+  readonly database?: DatabaseSnapshot;
+  /** Local repeats database metadata for BLASTN `-filtering_db`. */
+  readonly filteringDb?: DatabaseSnapshot;
+  /** Read-only run directory files mounted into WASI `/work` (database volumes, taxonomy files, filter lists, repeats DB). */
+  readonly files?: readonly DirectoryFile[];
   readonly parameters: ReadonlyArray<readonly [string, string | true]>;
   /** Words of other options, after the parameters ("Additional options", ArgvInput.extra). */
   readonly extra?: readonly string[];
@@ -218,6 +226,8 @@ export class Coordinator {
    * keeps the name, the size and the SHA-256.
    */
   private readonly conffiles = new Map<string, Blob>();
+  /** Read-only directory files held for queued/running search runs (`-db`, filter lists, `-filtering_db`); cleared when the run ends. */
+  private readonly runDirectories = new Map<string, readonly DirectoryFile[]>();
   /** Working directory files held for queued/running tool runs; cleared when the run finishes or is cancelled. */
   private readonly toolDirectories = new Map<string, readonly DirectoryFile[]>();
   /** The releases of the saved-counts locks that each queued or running run holds (holdCounts), by run. */
@@ -357,12 +367,29 @@ export class Coordinator {
       let subjectName: string;
       try {
         // The task of the run's names is the argv's, whatever the names of the inputs: a made input is named after the task is known.
-        const probe = buildArgv({ program: request.program, queryName: 'query.fa', subjectName: 'subject.fa', parameters: request.parameters, extra: request.extra ?? [] });
+        const probe = buildArgv({
+          program: request.program,
+          queryName: 'query.fa',
+          ...(request.database !== undefined ? { databaseName: request.database.name } : { subjectName: 'subject.fa' }),
+          parameters: request.parameters,
+          extra: request.extra ?? [],
+        });
         const task = await this.taskOfArgv(request.program, probe, descriptions);
         const run = { number, program: request.program, task, queuedAt };
         queryName = inputName(request.query, 'query', run);
-        subjectName = inputName(request.subject, 'subject', run);
-        argv = buildArgv({ program: request.program, queryName, subjectName, parameters: request.parameters, extra: request.extra ?? [] });
+        if (request.database !== undefined) {
+          subjectName = request.database.name;
+        } else {
+          if (request.subject === undefined) throw new Error('the subject is missing');
+          subjectName = inputName(request.subject, 'subject', run);
+        }
+        argv = buildArgv({
+          program: request.program,
+          queryName,
+          ...(request.database !== undefined ? { databaseName: request.database.name } : { subjectName }),
+          parameters: request.parameters,
+          extra: request.extra ?? [],
+        });
       } catch (error) {
         return { ok: false, reason: 'argv', message: errorMessage(error) };
       }
@@ -425,8 +452,12 @@ export class Coordinator {
       const reader = (role: 'query' | 'subject'): FastaReader => ({ program: request.program, role, dataLoaders });
       try {
         // A run that prints the command line's help or version reads no input (line WQA's D14, 2026-11-20).
+        // A database run (`-db`) has no FASTA subject input: its files are mounted read-only in `runDirectories`.
         query = prints !== null ? await this.noInput(queryName) : await this.snapshotInput('Query', request.query, queryName, reader('query'), made);
-        subject = prints !== null ? await this.noInput(subjectName) : await this.snapshotInput('Subject', request.subject, subjectName, reader('subject'), made);
+        subject =
+          prints !== null || request.database !== undefined
+            ? await this.noInput(subjectName)
+            : await this.snapshotInput('Subject', request.subject!, subjectName, reader('subject'), made);
       } catch (error) {
         return { ok: false, reason: 'argv', message: failureText(error) };
       }
@@ -453,6 +484,8 @@ export class Coordinator {
           argv,
           query,
           subject,
+          ...(request.database === undefined ? {} : { database: request.database }),
+          ...(request.filteringDb === undefined ? {} : { filteringDb: request.filteringDb }),
           requestedThreads: request.requestedThreads,
           ...(windowMasker === undefined ? {} : { windowMasker }),
           ...(conffile === undefined ? {} : { conffile: conffile.snapshot }),
@@ -482,6 +515,8 @@ export class Coordinator {
     for (const [index, snapshot] of numbered.entries()) {
       const file = conffiles[index];
       if (file !== undefined) this.conffiles.set(snapshot.runId, file);
+      const directory = prepared[index]!.request.files;
+      if (directory !== undefined && directory.length > 0) this.runDirectories.set(snapshot.runId, directory);
       this.queue.push(snapshot.runId);
     }
     this.pump();
@@ -507,6 +542,7 @@ export class Coordinator {
     if (queuedIndex >= 0) {
       this.queue.splice(queuedIndex, 1);
       this.conffiles.delete(runId);
+      this.runDirectories.delete(runId);
       this.toolDirectories.delete(runId);
       this.deps.sessionFiles?.release(`run:${runId}`);
       this.releaseCounts(runId);
@@ -748,10 +784,18 @@ export class Coordinator {
         revisionIds = Object.freeze([revision.revisionId]);
         runInput = this.deps.data.buildRunInput(revisionIds);
       }
-      const { bytes, sha256, records } = await runInput;
+      const { bytes, sha256, records, assembled } = await runInput;
       // Pasted text is a file that LOSAT made, named by the run (`inputName`): the page offers it with the run (line WQA's D22, DECISIONS 44).
       const from = 'dataset' in input ? input.dataset.from : 'text' in input ? [{ name: 'pasted text', records: records.length, leftOut: [], leftOutCount: 0 }] : undefined;
-      return Object.freeze({ name, bytes, sha256, revisionIds, records, ...(from === undefined ? {} : { from: Object.freeze(from) }) });
+      return Object.freeze({
+        name,
+        bytes,
+        sha256,
+        revisionIds,
+        records,
+        ...(assembled === true ? { assembled: true as const } : {}),
+        ...(from === undefined ? {} : { from: Object.freeze(from) }),
+      });
     } catch (error) {
       // A part of LOSAT that could not be loaded or stopped is no fault of the input (line WQA's sweep, D1).
       if (isUnavailable(error)) throw error;
@@ -819,6 +863,7 @@ export class Coordinator {
     }
     const { snapshot } = view;
     const conffile = this.conffiles.get(runId);
+    const files = this.runDirectories.get(runId);
     let staged = false;
     const startedAt = this.deps.now();
     // The files that the run made besides its outputs, which a completed and a failed run keep, and
@@ -849,7 +894,8 @@ export class Coordinator {
           runId,
           argv: snapshot.argv,
           query: engineInput(snapshot.query),
-          subject: engineInput(snapshot.subject),
+          ...(snapshot.database === undefined ? { subject: engineInput(snapshot.subject) } : {}),
+          ...(files === undefined || files.length === 0 ? {} : { files }),
           requestedThreads: snapshot.requestedThreads,
           ...(snapshot.windowMasker === undefined ? {} : { windowMasker: snapshot.windowMasker }),
           ...(snapshot.conffile === undefined || conffile === undefined ? {} : { conffile: { name: snapshot.conffile.name, file: conffile } }),
@@ -890,6 +936,7 @@ export class Coordinator {
             : { windowMasker: { ...runtime.windowMasker, ...(snapshot.windowMasker?.origin === undefined ? {} : { origin: snapshot.windowMasker.origin }) } }),
           ...(runFiles === undefined ? {} : { runFiles }),
           ...(runtime.printed === undefined ? {} : { printed: runtime.printed }),
+          ...(runtime.readRecords === undefined ? {} : { readRecords: runtime.readRecords }),
         },
       });
     } catch (error) {
@@ -921,6 +968,7 @@ export class Coordinator {
       this.stopActive = undefined;
       // The run's registry file goes with its run; the snapshot keeps its name, size and SHA-256.
       this.conffiles.delete(runId);
+      this.runDirectories.delete(runId);
       this.releaseCounts(runId);
       this.cancelRequested.delete(runId);
       this.active = undefined;
@@ -1132,7 +1180,13 @@ function inputName(input: SequenceInput, role: 'query' | 'subject', run: Paramet
 }
 
 function engineInput(input: InputSnapshot): EngineInput {
-  return { bytes: input.bytes, sha256: input.sha256, revisionIds: input.revisionIds, records: input.records };
+  return {
+    bytes: input.bytes,
+    sha256: input.sha256,
+    revisionIds: input.revisionIds,
+    records: input.records,
+    ...(input.assembled === true ? { assembled: true } : {}),
+  };
 }
 
 function errorMessage(error: unknown): string {

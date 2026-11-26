@@ -440,6 +440,7 @@ pub(super) fn write_structured_xml(
         ungapped: report.ungapped,
         epilog: report.epilog,
         only_xml2: xml_only_xml2,
+        query_scopes: report.query_scopes,
     };
     match xml2_kind {
         None => crate::algorithm::blastn::blast_xml::write_blastn_xml(

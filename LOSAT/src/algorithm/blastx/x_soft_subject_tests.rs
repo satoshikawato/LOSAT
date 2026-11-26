@@ -171,7 +171,6 @@ fn record(letters: &[u8], runs: &[(i32, i32)]) -> FastaRecord {
         title: Vec::new(),
         sequence: letters.to_vec(),
         lowercase_masks: runs.to_vec(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,

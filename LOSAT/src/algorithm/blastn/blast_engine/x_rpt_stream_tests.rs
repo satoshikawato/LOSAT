@@ -240,19 +240,18 @@ fn the_switch_acts_where_the_outputs_and_options_allow() {
         &mut outputs
     )
     .is_ok_and(|ready| !ready.one_batch));
-    assert_eq!(
-        checked(
-            true,
-            &[],
-            &good,
-            10,
-            4000,
-            SplitSizes::new(false, Some(-5), Some(-10)),
-            &mut outputs
-        )
-        .err(),
-        Some(Off::ChunkSize)
-    );
+    // A negative CHUNK_SIZE streams: its refusals come after the reports of the batches before in
+    // both paths (line RG item X-short-bat-2).
+    assert!(checked(
+        true,
+        &[],
+        &good,
+        10,
+        4000,
+        SplitSizes::new(false, Some(-5), Some(-10)),
+        &mut outputs
+    )
+    .is_ok());
     // BLAST XML, XML2 and JSON (outfmt 5, 16 and 15) are never streamed, with one batch
     // (20,000 letters) or several.
     for batch_size in [20_000, 4000] {

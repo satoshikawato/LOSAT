@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use super::bioseq::{Bioseq, SeqData};
+use super::bioseq::Bioseq;
 use super::column::{unsupported_late_column, BlobPair, ColumnDates, ColumnMeta};
 use super::convert::{
     find_sequence_length, raw_sequence_hash, seq_data_to_binary, sequence_hash, BinarySequence,
@@ -331,14 +331,7 @@ impl WriteDb {
     // of FASTA input do not have (a copied database's may).
     /// `SetDeflines`: the definition lines of the sequence added last.
     pub fn set_deflines(&mut self, mut deflines: DeflineSet) {
-        for defline in &mut deflines.deflines {
-            if defline.memberships.as_ref().is_some_and(Vec::is_empty) {
-                defline.memberships = None;
-            }
-            if defline.links.as_ref().is_some_and(Vec::is_empty) {
-                defline.links = None;
-            }
-        }
+        super::deflines::strip_empty_lists(&mut deflines);
         self.pending_deflines = Some(deflines);
         self.pending_null_seqids.clear();
     }
@@ -389,15 +382,18 @@ impl WriteDb {
         if self.indices.hash {
             if let Some(seq_data) = &bioseq.seq_data {
                 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:1709-1712
-                // The hash reads the Bioseq's sequence vector (`convert::sequence_hash`), which
-                // LOSAT has for the codings of its sources only; no program of LOSAT asks for the
-                // hash of iupacna data.
-                if let SeqData::Iupacna(_) = seq_data {
-                    return Err(WriteDbError::Unsupported(
-                        "the sequence hash (-hash_index) of iupacna data".to_string(),
-                    ));
-                }
-                self.pending_hash = sequence_hash(seq_data, bioseq.length).unwrap_or(0);
+                self.pending_hash = match sequence_hash(seq_data, bioseq.length) {
+                    Ok(hash) => hash.unwrap_or(0),
+                    Err(super::convert::SequenceHashError::OutOfRange(exception)) => {
+                        return Err(WriteDbError::Exception(exception));
+                    }
+                    Err(super::convert::SequenceHashError::PastEnd(coding)) => {
+                        return Err(WriteDbError::Unsupported(format!(
+                            "the sequence hash (-hash_index) of {coding} data shorter than its \
+                             length (NCBI makeblastdb reads past the end of the buffer)"
+                        )));
+                    }
+                };
             }
         }
         self.pending = Some(Pending::Bioseq(bioseq));

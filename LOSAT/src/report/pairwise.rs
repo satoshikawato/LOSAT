@@ -1033,6 +1033,8 @@ fn record_html_lines(
     })
 }
 
+type ParsedSubjects<'a> = &'a [Option<Arc<crate::report::db_subject::ParsedSubject>>];
+
 /// The alignment heading of one subject of a report: a database sequence's or a `-subject`
 /// record's with parsed Seq-ids (`DatabaseHeading`), or a `-subject` record's without them, with
 /// its title (`write_subject_alignments_part`).
@@ -1065,12 +1067,7 @@ impl SubjectHeading<'_> {
     }
 
     /// Seq-id text written by `write_skipped_alignment` for a per-HSP skip (`skips_pairwise_hsp`).
-    fn skip_id(
-        self,
-        parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
-        oids: Option<&[u32]>,
-        s_idx: u32,
-    ) -> Vec<u8> {
+    fn skip_id(self, parsed: ParsedSubjects<'_>, oids: Option<&[u32]>, s_idx: u32) -> Vec<u8> {
         match self {
             SubjectHeading::Database(DatabaseHeading::Skipped(id)) => id.to_vec(),
             SubjectHeading::Database(DatabaseHeading::Parsed(subject, _)) => {
@@ -1092,7 +1089,7 @@ impl SubjectHeading<'_> {
         protein: bool,
         subject_length: Option<usize>,
         html: Option<HtmlHeading<'_>>,
-        parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+        parsed: ParsedSubjects<'_>,
         s_idx: u32,
         place: super::query_warnings::ReportHook<'_, W>,
     ) -> io::Result<Option<Vec<u8>>> {
@@ -1138,16 +1135,18 @@ impl SubjectHeading<'_> {
         self,
         protein: bool,
         html: Option<HtmlHeading<'_>>,
-        parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+        parsed: ParsedSubjects<'_>,
         s_idx: u32,
     ) -> io::Result<Option<Vec<u8>>> {
         match self {
             SubjectHeading::Database(db_heading) => db_heading.skipped_id(protein, html),
             SubjectHeading::Record(title) => {
-                let defline = super::defline::generate_defline(title, protein, false);
+                let generated = super::defline::generate_defline(title, protein, false);
                 match html {
-                    Some(html) => record_html_lines(&defline, html, parsed, s_idx).map(Result::err),
-                    None => Ok(defline
+                    Some(html) => {
+                        record_html_lines(&generated, html, parsed, s_idx).map(Result::err)
+                    }
+                    None => Ok(generated
                         .err()
                         .map(|_| subject_skipped_id(parsed, None, s_idx))),
                 }

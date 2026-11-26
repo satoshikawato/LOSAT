@@ -212,10 +212,6 @@ pub(super) fn prepare_nullb_hsp(
                         GapEditOp::Sub(k_u32 - 1);
                 } else {
                     payload.edit_script.pop();
-                    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:2867-2905
-                    if !payload.edit_script.iter().any(|op| op.is_sub()) {
-                        report.mapped_empty = true;
-                    }
                 }
                 payload.align_length = payload.align_length.saturating_sub(1);
                 hsp.q_end = hsp.q_start + script_q - 1;
@@ -256,16 +252,19 @@ pub(super) fn prepare_nullb_hsp(
             }
         } else {
             // Negative frame, -subject: CSeq_loc_Mapper drops the invalid final Std-seg without
-            // invalidating scores (scores stay intact); if no aligned Sub segment remains,
-            // `x_IsEmpty` returns true and `GetDstAlign` throws `eBadAlignment`.
-            // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1568-1580,2867-2905
+            // invalidating scores (scores stay intact).
+            // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1568-1580
             payload.edit_script.pop();
-            if !payload.edit_script.iter().any(|op| op.is_sub()) {
-                report.mapped_empty = true;
-            }
             payload.align_length = payload.align_length.saturating_sub(k);
             hsp.q_end = hsp.q_start + script_q - k_i32;
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:2867-2905
+    // If `-subject` remapping leaves no aligned Sub segment, `CSeq_align_Mapper_Base::x_IsEmpty`
+    // returns true and `GetDstAlign` throws `CAnnotMapperException::eBadAlignment`.
+    if remaps && !payload.edit_script.iter().any(|op| op.is_sub()) {
+        report.mapped_empty = true;
     }
 
     payload.nullb = Some(report);

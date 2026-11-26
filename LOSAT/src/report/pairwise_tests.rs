@@ -1765,14 +1765,17 @@ fn tblastn_nullb_skip_split_parts_match_serial_for_record_and_database_html() {
     let hits: Vec<&PairwiseHit> = owned.iter().collect();
     let indices: Vec<HspIndex> = (0..hits.len()).collect();
 
-    // Record (-subject) heading across split parts (including -html):
-    let run_record = |parts: &[std::ops::Range<usize>]| -> (Vec<u8>, Vec<(usize, HtmlPost)>) {
+    let run_parts = |report: &HtmlReport,
+                     parts: &[std::ops::Range<usize>],
+                     is_db: bool|
+     -> (Vec<u8>, Vec<(usize, HtmlPost)>) {
+        let source = crate::report::defline::SourceTaxname::default();
         let mut out = Vec::new();
         let mut placed = Vec::new();
         for part in parts {
             let posts = std::cell::RefCell::new(Vec::new());
             let html = HtmlHeading {
-                report: &subj_report,
+                report,
                 s_idx: 0,
                 rank: 1,
                 posts: &posts,
@@ -1783,26 +1786,47 @@ fn tblastn_nullb_skip_split_parts_match_serial_for_record_and_database_html() {
                 }
                 Ok(())
             };
-            write_subject_alignments_part(
-                &mut out,
-                None,
-                0,
-                &[],
-                b"a0_r2",
-                false,
-                &hits,
-                &indices,
-                part.clone(),
-                Some(html),
-                &mut hook,
-                |writer, _, _| writer.write_all(b"<hsp>\n"),
-            )
-            .unwrap();
+            if is_db {
+                write_database_subject_alignments_part(
+                    &mut out,
+                    None,
+                    DatabaseHeading::Title(b"a0_r2", &source),
+                    false,
+                    &[],
+                    Some(&[0]),
+                    0,
+                    &hits,
+                    &indices,
+                    part.clone(),
+                    Some(html),
+                    &mut hook,
+                    |writer, _, _| writer.write_all(b"<hsp>\n"),
+                )
+                .unwrap();
+            } else {
+                write_subject_alignments_part(
+                    &mut out,
+                    None,
+                    0,
+                    &[],
+                    b"a0_r2",
+                    false,
+                    &hits,
+                    &indices,
+                    part.clone(),
+                    Some(html),
+                    &mut hook,
+                    |writer, _, _| writer.write_all(b"<hsp>\n"),
+                )
+                .unwrap();
+            }
         }
         (out, placed)
     };
-    let (rec_serial, rec_posts_s) = run_record(&[0..4]);
-    let (rec_split, rec_posts_p) = run_record(&[0..1, 1..2, 2..4]);
+
+    // Record (-subject) heading across split parts (including -html):
+    let (rec_serial, rec_posts_s) = run_parts(&subj_report, &[0..4], false);
+    let (rec_split, rec_posts_p) = run_parts(&subj_report, &[0..1, 1..2, 2..4], false);
     assert_eq!(rec_split, rec_serial);
     assert_eq!(rec_posts_p, rec_posts_s);
     let rec_str = std::str::from_utf8(&rec_serial).unwrap();
@@ -1811,45 +1835,8 @@ fn tblastn_nullb_skip_split_parts_match_serial_for_record_and_database_html() {
     assert_eq!(rec_str.matches("<hsp>").count(), 2);
 
     // Database (-db) heading across split parts (including -html):
-    let source = crate::report::defline::SourceTaxname::default();
-    let run_db = |parts: &[std::ops::Range<usize>]| -> (Vec<u8>, Vec<(usize, HtmlPost)>) {
-        let mut out = Vec::new();
-        let mut placed = Vec::new();
-        for part in parts {
-            let posts = std::cell::RefCell::new(Vec::new());
-            let html = HtmlHeading {
-                report: &db_report,
-                s_idx: 0,
-                rank: 1,
-                posts: &posts,
-            };
-            let mut hook = |place: ReportPlace, writer: &mut Vec<u8>| -> io::Result<()> {
-                if let ReportPlace::Html(post) = place {
-                    placed.push((writer.len(), post));
-                }
-                Ok(())
-            };
-            write_database_subject_alignments_part(
-                &mut out,
-                None,
-                DatabaseHeading::Title(b"a0_r2", &source),
-                false,
-                &[],
-                Some(&[0]),
-                0,
-                &hits,
-                &indices,
-                part.clone(),
-                Some(html),
-                &mut hook,
-                |writer, _, _| writer.write_all(b"<hsp>\n"),
-            )
-            .unwrap();
-        }
-        (out, placed)
-    };
-    let (db_serial, db_posts_s) = run_db(&[0..4]);
-    let (db_split, db_posts_p) = run_db(&[0..1, 1..2, 2..4]);
+    let (db_serial, db_posts_s) = run_parts(&db_report, &[0..4], true);
+    let (db_split, db_posts_p) = run_parts(&db_report, &[0..1, 1..2, 2..4], true);
     assert_eq!(db_split, db_serial);
     assert_eq!(db_posts_p, db_posts_s);
     let db_str = std::str::from_utf8(&db_serial).unwrap();

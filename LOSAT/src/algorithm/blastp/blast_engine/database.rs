@@ -745,15 +745,17 @@ pub(super) struct ListedSubjects {
 
 /// A preliminary hit list that NCBI's composition-based redo reaches in its stream and whose
 /// subject the redo's fetch then excludes (`exclude_fetched`): the list leaves the query's hit
-/// list, and this mark keeps its place, `position` kept lists of the query before it, with what
-/// the redo reads of it there (its best e-value, the early termination test's). The
+/// list, and this mark keeps its place, `position` kept lists of the query before it, its database
+/// `ordinal` (for the subject-order stream of `-comp_based_stats 0 -use_sw_tback`, item X4-c0),
+/// and what the redo reads of it there (its best e-value, the early termination test's). The
 /// Smith-Waterman redo's status reads the marks, in the one-thread loop
-/// (`redo_run::one_thread_redo`) and in the replay of the parallel redo's windows
-/// (`x_redo_par.rs`, `XSwBatch`), both through `redo_run::query_fetch_excluded_reached`.
+/// (`redo_run::one_thread_redo`, `sw_c0::sw_c0_one_thread`) and in the replay of the parallel
+/// redo's windows (`x_redo_par.rs`, `XSwBatch`, and `sw_c0::sw_c0_windows`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(in crate::algorithm::blastp) struct FetchExcludedMatch {
     pub(in crate::algorithm::blastp) query: usize,
     pub(in crate::algorithm::blastp) position: usize,
+    pub(in crate::algorithm::blastp) ordinal: u32,
     pub(in crate::algorithm::blastp) best_evalue: f64,
 }
 
@@ -844,8 +846,9 @@ impl XFetchedUtf8 {
     /// The first, in NCBI's order of the fetches, of the reads `reads` (`self.reads` or
     /// `self.unreadable`) that the ordinary traceback (`shared::FetchedUtf8::traceback_first`:
     /// every subject, in increasing ordinal) or, with `heaps` (as the redo left them), the
-    /// composition-based redo makes (`shared::redo_fetches`: query by query, each in its lists'
-    /// order), the batches of the queries (`batch_of`) one after the other: its query and ordinal
+    /// composition-based redo makes (`shared::redo_fetches`: query by query in its lists' order
+    /// when `!oid_order`, or by `(ordinal ASC, query DESC)` per batch when `oid_order`, item
+    /// X4-c0), the batches of the queries (`batch_of`) one after the other: its query and ordinal
     /// id.
     #[cold]
     #[inline(never)]
@@ -855,6 +858,7 @@ impl XFetchedUtf8 {
         heaps: Option<&[BlastCompoHeap]>,
         batch_of: &dyn Fn(usize) -> std::ops::Range<usize>,
         ordinals: &[u32],
+        oid_order: bool,
     ) -> Option<(usize, u32)> {
         let Some(heaps) = heaps else {
             // A batch's traceback, then the next batch's.
@@ -863,7 +867,61 @@ impl XFetchedUtf8 {
                 .min_by_key(|read| (batch_of(read.query).start, read.key.ordinal))
                 .map(|read| (read.query, read.key.ordinal));
         };
-        self.first_redone(reads, heaps, batch_of, ordinals, &|_| true)
+        if oid_order {
+            self.first_redone_oid(reads, heaps, batch_of, ordinals, &|_| true)
+        } else {
+            self.first_redone(reads, heaps, batch_of, ordinals, &|_| true)
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hspstream.c:678-686
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3575
+    /// `first` of `reads` in the Smith-Waterman redo without composition-based statistics
+    /// (`-comp_based_stats 0 -use_sw_tback`, item X4-c0), where each batch's stream runs in
+    /// `(ordinal ASC, query DESC)` order across all queries of the batch.
+    fn first_redone_oid(
+        &self,
+        reads: &[XFetchedRead],
+        heaps: &[BlastCompoHeap],
+        batch_of: &dyn Fn(usize) -> std::ops::Range<usize>,
+        ordinals: &[u32],
+        reached: &dyn Fn(&XFetchedRead) -> bool,
+    ) -> Option<(usize, u32)> {
+        reads
+            .iter()
+            .filter(|read| read.key.has_hsps && reached(read))
+            .filter(|read| {
+                let turn = (read.key.ordinal, std::cmp::Reverse(read.query));
+                let redo_heaps: Vec<shared::RedoHeap> = batch_of(read.query)
+                    .map(|query| {
+                        let heap = &heaps[query];
+                        let inserted_before = heap
+                            .records()
+                            .iter()
+                            .filter(|record| record.best_evalue <= heap.ecutoff)
+                            .filter(|record| {
+                                let ord = ordinals[record.subject_index as usize];
+                                (ord, std::cmp::Reverse(query)) < turn
+                            })
+                            .count();
+                        shared::RedoHeap {
+                            ecutoff: heap.ecutoff,
+                            heap_threshold: heap.heap_threshold,
+                            inserted_before,
+                            ends_early: heap.x_ends_early,
+                        }
+                    })
+                    .collect();
+                shared::redo_fetches(read.key.best_evalue, &redo_heaps)
+            })
+            .min_by_key(|read| {
+                (
+                    batch_of(read.query).start,
+                    read.key.ordinal,
+                    std::cmp::Reverse(read.query),
+                )
+            })
+            .map(|read| (read.query, read.key.ordinal))
     }
 
     /// `first` of `reads` in the composition-based redo with `heaps`, among the reads that
@@ -952,6 +1010,8 @@ impl XFetchedUtf8 {
 pub(in crate::algorithm::blastp) struct FetchNotes<'a> {
     listed: Option<&'a ListedSubjects>,
     database: Option<&'a BlastpDatabase>,
+    /// Whether the redo runs in batch OID order (`-comp_based_stats 0 -use_sw_tback`, item X4-c0).
+    sw_oid_order: bool,
     /// Whether the PSSM's position-based redo ran and noted its own.
     pssm_redone: std::cell::Cell<bool>,
 }
@@ -960,10 +1020,12 @@ impl<'a> FetchNotes<'a> {
     pub(super) fn new(
         listed: Option<&'a ListedSubjects>,
         database: Option<&'a BlastpDatabase>,
+        sw_oid_order: bool,
     ) -> Self {
         Self {
             listed,
             database,
+            sw_oid_order,
             pssm_redone: std::cell::Cell::new(false),
         }
     }
@@ -975,7 +1037,7 @@ impl<'a> FetchNotes<'a> {
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     pub(in crate::algorithm::blastp) fn none() -> FetchNotes<'static> {
-        FetchNotes::new(None, None)
+        FetchNotes::new(None, None, false)
     }
 
     /// The PSSM's position-based redo of modes 1 to 3 ran, whose heaps `heaps` tell which
@@ -985,7 +1047,7 @@ impl<'a> FetchNotes<'a> {
         self.pssm_redone.set(true);
         if let (Some(listed), Some(database)) = (self.listed, self.database) {
             let all = |_: usize| 0..heaps.len();
-            listed.note_fetched(database, Some(heaps), &all)?;
+            listed.note_fetched(database, Some(heaps), &all, false)?;
         }
         Ok(())
     }
@@ -1057,6 +1119,72 @@ impl<'a> FetchNotes<'a> {
         })
     }
 
+    /// `refused_before_failure` for `-comp_based_stats 0 -use_sw_tback` (item X4-c0), where a
+    /// batch's stream runs in `(ordinal ASC, query DESC)` order: `at` is `Some((ordinal, query))`
+    /// for an endless redo at that match, or `None` at the batch's end.
+    pub(super) fn refused_before_failure_oid(
+        &self,
+        heaps: &[BlastCompoHeap],
+        batch: std::ops::Range<usize>,
+        at: Option<(u32, usize)>,
+    ) -> Option<anyhow::Error> {
+        let (listed, database) = (self.listed?, self.database?);
+        if listed.fetched_utf8.unreadable.is_empty() {
+            return None;
+        }
+        let batch_of = |_: usize| batch.clone();
+        let reached = |read: &XFetchedRead| {
+            batch.contains(&read.query)
+                && at.is_none_or(|(ordinal, query)| {
+                    (read.key.ordinal, std::cmp::Reverse(read.query))
+                        <= (ordinal, std::cmp::Reverse(query))
+                })
+        };
+        let (query, ordinal) = listed.fetched_utf8.first_redone_oid(
+            &listed.fetched_utf8.unreadable,
+            heaps,
+            &batch_of,
+            &listed.ordinals,
+            &reached,
+        )?;
+        Some(fetch_refused(database, query, ordinal))
+    }
+
+    /// `fetched_before_failure` for `-comp_based_stats 0 -use_sw_tback` (item X4-c0), where a
+    /// batch's stream runs in `(ordinal ASC, query DESC)` order: `at` is `Some((ordinal, query))`
+    /// for an endless redo at that match, or `None` at the batch's end.
+    pub(super) fn fetched_before_failure_oid(
+        &self,
+        heaps: &[BlastCompoHeap],
+        batch: std::ops::Range<usize>,
+        at: Option<(u32, usize)>,
+    ) -> Option<Utf8Read> {
+        let (listed, database) = (self.listed?, self.database?);
+        if listed.fetched_utf8.reads.is_empty() {
+            return None;
+        }
+        let batch_of = |_: usize| batch.clone();
+        let reached = |read: &XFetchedRead| {
+            batch.contains(&read.query)
+                && at.is_none_or(|(ordinal, query)| {
+                    (read.key.ordinal, std::cmp::Reverse(read.query))
+                        <= (ordinal, std::cmp::Reverse(query))
+                })
+        };
+        let (_, ordinal) = listed.fetched_utf8.first_redone_oid(
+            &listed.fetched_utf8.reads,
+            heaps,
+            &batch_of,
+            &listed.ordinals,
+            &reached,
+        )?;
+        let at = database.db.location_of(ordinal)?;
+        Some(Utf8Read {
+            query: batch.start,
+            path: database.db.utf8_string_path_at(at)?,
+        })
+    }
+
     /// After the traceback: `heaps`, the composition-based redo's, which made the hit lists where
     /// the ordinary traceback made none (`ordinary`), the batch of each query being in `batches`
     /// (`redo_run::kappa_query_batches`); LOSAT's refusal where a fetch read a header that
@@ -1072,9 +1200,9 @@ impl<'a> FetchNotes<'a> {
         };
         let batch_of = |q_idx: usize| batches[q_idx].clone();
         if ordinary.is_none() {
-            listed.note_fetched(database, Some(heaps), &batch_of)?;
+            listed.note_fetched(database, Some(heaps), &batch_of, self.sw_oid_order)?;
         } else if !self.pssm_redone.get() {
-            listed.note_fetched(database, None, &batch_of)?;
+            listed.note_fetched(database, None, &batch_of, false)?;
         }
         Ok(())
     }
@@ -1267,6 +1395,7 @@ impl ListedSubjects {
         database: &BlastpDatabase,
         heaps: Option<&[BlastCompoHeap]>,
         batch_of: &dyn Fn(usize) -> std::ops::Range<usize>,
+        oid_order: bool,
     ) -> Result<()> {
         if !self.fetched_utf8.unreadable.is_empty() {
             if let Some((query, ordinal)) = self.fetched_utf8.first(
@@ -1274,6 +1403,7 @@ impl ListedSubjects {
                 heaps,
                 batch_of,
                 &self.ordinals,
+                oid_order,
             ) {
                 return Err(fetch_refused(database, query, ordinal));
             }
@@ -1281,10 +1411,13 @@ impl ListedSubjects {
         if self.fetched_utf8.reads.is_empty() {
             return Ok(());
         }
-        if let Some((query, ordinal)) =
-            self.fetched_utf8
-                .first(&self.fetched_utf8.reads, heaps, batch_of, &self.ordinals)
-        {
+        if let Some((query, ordinal)) = self.fetched_utf8.first(
+            &self.fetched_utf8.reads,
+            heaps,
+            batch_of,
+            &self.ordinals,
+            oid_order,
+        ) {
             self.earlier_utf8
                 .lock()
                 .expect("the UTF8String reads are not poisoned")
@@ -1514,6 +1647,7 @@ fn leave_fetched<H: crate::algorithm::blastp::hsp::HitListHsp>(
             marks.push(FetchExcludedMatch {
                 query,
                 position: kept,
+                ordinal: list.oid,
                 best_evalue: list.best_evalue,
             });
         }

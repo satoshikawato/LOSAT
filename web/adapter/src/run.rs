@@ -540,18 +540,22 @@ struct SearchRunFiles {
     read: Vec<Vec<u8>>,
 }
 
-/// The names of the search's files that the host holds outside `/work` and the list files of a
-/// `-db` search that the run opens for reading (line WQA D19 rounds R1 and R2):
+/// The names of the search's files that the host holds outside `/work` and the files of a `-db`
+/// or `-filtering_db` search that the run opens or checks for reading (line WQA D19 rounds R1 and
+/// R2, D19b):
 /// - `registered`: `-query` and `-subject` (unless `-`), BLASTN's `-window_masker_db` or
 ///   `-window_masker_taxid` (`windowmasker/<taxid>/wmasker.obinary`) when registered as kind 1,
 ///   and the kind-2 registry files of `registry` that this run's start reads (`.ncbirc`, and
 ///   without a version word either the registered file of `-conffile` or `<program>.ini`);
 /// - `read`: with `-db`, the list files of its filters (`-gilist`, `-negative_gilist`,
 ///   `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist`,
-///   `-negative_taxidlist`), kept apart from `registered` so a missing list file does not make
-///   its parent folders present.
+///   `-negative_taxidlist`), the database lookup files (`search_database_read_files`, including
+///   BLASTN's `-filtering_db` even with `-subject`) and taxonomy lookup files, kept apart from
+///   `registered` so a missing file does not make its parent folders present.
 fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry) -> SearchRunFiles {
-    use losat::web_adapter::{preparse, scan_program_argv, Preparsed, RegistryFiles as _};
+    use losat::web_adapter::{
+        preparse, scan_program_argv, search_database_read_files, Preparsed, RegistryFiles as _,
+    };
     use std::path::Path;
 
     let (program_name, arguments) = words.split_first().unwrap_or((&"", &[]));
@@ -587,9 +591,17 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
     // one (even when it starts with `-`).
     let mut registered: Vec<Vec<u8>> = Vec::new();
     let mut list_files: Vec<Vec<u8>> = Vec::new();
-    let mut has_db = false;
+    let mut dbs: Vec<String> = Vec::new();
+    let mut filtering_dbs: Vec<String> = Vec::new();
+    let mut outfmt: Option<String> = None;
+    let mut has_taxids = false;
+    let mut no_taxid_expansion = false;
     let is_blastn = program == Program::Blastn;
     scan_program_argv(program_name, arguments, |name, value| {
+        if name == "no_taxid_expansion" && value.is_none() {
+            no_taxid_expansion = true;
+            return;
+        }
         let Some(value) = value else {
             return;
         };
@@ -597,9 +609,18 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
             "query" | "subject" => push_input(&mut registered, value),
             "window_masker_db" if is_blastn => push_counts(&mut registered, value),
             "window_masker_taxid" if is_blastn => push_taxid(&mut registered, value),
-            "db" => has_db = true,
+            "db" => dbs.push(value.to_string()),
+            "filtering_db" if is_blastn => filtering_dbs.push(value.to_string()),
+            "outfmt" => outfmt = Some(value.to_string()),
+            "taxids" | "negative_taxids" => has_taxids = true,
+            "taxidlist" | "negative_taxidlist" => {
+                has_taxids = true;
+                if !value.is_empty() {
+                    list_files.push(value.as_bytes().to_vec());
+                }
+            }
             "gilist" | "negative_gilist" | "ipglist" | "negative_ipglist" | "seqidlist"
-            | "negative_seqidlist" | "taxidlist" | "negative_taxidlist" => {
+            | "negative_seqidlist" => {
                 if !value.is_empty() {
                     list_files.push(value.as_bytes().to_vec());
                 }
@@ -625,10 +646,23 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
             }
         }
     }
-    SearchRunFiles {
-        registered,
-        read: if has_db { list_files } else { Vec::new() },
-    }
+    let mut read = if !dbs.is_empty() {
+        list_files
+    } else {
+        Vec::new()
+    };
+    let db_refs: Vec<&str> = dbs.iter().map(String::as_str).collect();
+    let filtering_db_refs: Vec<&str> = filtering_dbs.iter().map(String::as_str).collect();
+    read.extend(search_database_read_files(
+        program.api(),
+        arguments,
+        registry,
+        &db_refs,
+        &filtering_db_refs,
+        outfmt.as_deref().unwrap_or("0"),
+        has_taxids && !no_taxid_expansion,
+    ));
+    SearchRunFiles { registered, read }
 }
 
 /// The names of the search's files that the host holds outside `/work` (`search_run_files`).

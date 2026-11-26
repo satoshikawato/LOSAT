@@ -1078,3 +1078,118 @@ fn the_utf8_read_of_a_call_is_of_its_batch_alone() {
     assert!(call.of_batch(2));
     assert!(!call.of_batch(0) && !call.of_batch(4));
 }
+
+#[test]
+fn outfmt_taxdb_use_matches_ncbi_format_rules() {
+    use super::{outfmt_prefetches_taxdb, outfmt_taxdb_use, OutfmtTaxdbUse};
+    use crate::report::archive::options::RequestKind;
+    let app = RequestKind::Blastp;
+    // Formats that check taxdb.bti even when absent: XML2/JSON (13..=16) on `-db`, and plural
+    // tabular taxonomy columns (6/7/10/20) on both `-db` and `-subject`.
+    for fmt in ["13", "14", "15", "16"] {
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, true),
+            OutfmtTaxdbUse::Always,
+            "{fmt} db"
+        );
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, false),
+            OutfmtTaxdbUse::None,
+            "{fmt} subj"
+        );
+    }
+    for fmt in [
+        "6 qseqid sseqid sscinames",
+        "6 qseqid sseqid scomnames",
+        "6 qseqid sseqid sblastnames",
+        "6 qseqid sseqid sskingdoms",
+        "7 qseqid sseqid sscinames",
+        "10 qseqid sseqid sscinames",
+        "20 qseqid sseqid sscinames",
+    ] {
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, true),
+            OutfmtTaxdbUse::Always,
+            "{fmt} db"
+        );
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, false),
+            OutfmtTaxdbUse::Always,
+            "{fmt} subj"
+        );
+    }
+    // Formats that read taxonomy names only when taxdb.bti already exists on the search path:
+    // singular tabular name fields, outfmt 18, pairwise/query-anchored 0..=4 on `-db`, and
+    // tabular formats (6/7/10/20) that print a subject id column (`PrintedIds`, including `std`).
+    for fmt in [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "6",
+        "6 std",
+        "7",
+        "10",
+        "18",
+        "20",
+        "6 qseqid sseqid ssciname",
+        "6 qseqid sseqid scomname",
+        "6 qseqid sseqid sblastname",
+        "6 qseqid sseqid sskingdom",
+        "7 qseqid sseqid ssciname",
+        "10 qseqid sseqid ssciname",
+        "20 qseqid sseqid ssciname",
+        "6 qseqid sseqid staxid",
+        "6 qseqid sseqid staxids",
+        "6 qseqid sacc",
+        "6 qseqid saccver",
+        "6 qseqid sallseqid",
+        "6 qseqid sallacc",
+    ] {
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, true),
+            OutfmtTaxdbUse::WhenPresent,
+            "{fmt} db"
+        );
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, false),
+            OutfmtTaxdbUse::None,
+            "{fmt} subj"
+        );
+    }
+    // Formats that do not consult taxdb for formatting: 5, 6/7/10/20 without tax name or
+    // printed subject id columns (including staxid/staxids/sgi/stitle alone), 8, 9, 11, 12, 17.
+    for fmt in [
+        "5",
+        "6 qseqid pident",
+        "6 qseqid staxid",
+        "6 qseqid staxids",
+        "6 qseqid sgi sallgi stitle",
+        "7 qseqid pident",
+        "10 qseqid pident",
+        "20 qseqid pident",
+        "8",
+        "9",
+        "11",
+        "12",
+        "17",
+    ] {
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, true),
+            OutfmtTaxdbUse::None,
+            "{fmt} db"
+        );
+        assert_eq!(
+            outfmt_taxdb_use(fmt, app, false),
+            OutfmtTaxdbUse::None,
+            "{fmt} subj"
+        );
+    }
+    for fmt in ["0", "4", "5", "6", "7", "17"] {
+        assert!(outfmt_prefetches_taxdb(fmt), "{fmt}");
+    }
+    for fmt in ["8", "9", "10", "11", "12", "13", "15", "18", "20"] {
+        assert!(!outfmt_prefetches_taxdb(fmt), "{fmt}");
+    }
+}

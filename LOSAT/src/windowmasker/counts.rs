@@ -136,7 +136,7 @@ fn finalize(
 /// open or read gives no more names.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_gen_counts.cpp:228-242
-fn file_list(input: &OsStr, fa_list: bool) -> Vec<Vec<u8>> {
+pub(crate) fn file_list(input: &OsStr, fa_list: bool) -> Vec<Vec<u8>> {
     if !fa_list {
         if input.is_empty() {
             return Vec::new();

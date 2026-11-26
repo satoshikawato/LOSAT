@@ -27,8 +27,8 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::common::GapEditOp;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, taxdb_warning_line, union_length, QueryCoveragePerHsp, TabularHsp,
-    TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularWriter,
+    coverage_percent, union_length, QueryCoveragePerHsp, TabularHsp, TabularKind, TabularNames,
+    TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
 use crate::utils::lower_bound::lower_bound_by;
 
@@ -89,8 +89,11 @@ pub(crate) fn write_tabular_prolog_warning(
     taxdb_found: bool,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
-    if spec.kind == TabularKind::CsvWithHeader && spec.checks_taxdb() && !taxdb_found {
-        diagnostics.write_all(taxdb_warning_line("blastn").as_bytes())?;
+    if let Some(line) = spec
+        .formatter_warning(taxdb_found, "blastn")
+        .filter(|_| spec.kind == TabularKind::CsvWithHeader)
+    {
+        diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
     Ok(())
@@ -126,8 +129,7 @@ pub(crate) fn write_blastn_tabular(
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
-    let taxdb_warning =
-        (spec.checks_taxdb() && !tab.taxdb_found).then(|| taxdb_warning_line("blastn"));
+    let taxdb_warning = spec.formatter_warning(tab.taxdb_found, "blastn");
     let warn = |writer: &mut dyn Write, warnings: Option<&mut QueryWarnings<'_>>| -> Result<()> {
         if let (Some(line), Some(warnings)) = (taxdb_warning.as_deref(), warnings) {
             writer.flush()?;

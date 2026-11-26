@@ -1089,19 +1089,9 @@ impl ReportedAsks {
                 )
             }),
             titles: crate::algorithm::common::database::TitleReads::of_outfmts(
-                Self::request_kind(options),
+                options.request_kind(),
                 [i32::from(options.outfmt)],
             ),
-        }
-    }
-
-    fn request_kind(
-        options: &super::args::ResolvedOptions,
-    ) -> crate::report::archive::options::RequestKind {
-        if options.rpstblastn.is_some() {
-            crate::report::archive::options::RequestKind::Rpstblastn
-        } else {
-            crate::report::archive::options::RequestKind::Blastx
         }
     }
 
@@ -1111,7 +1101,7 @@ impl ReportedAsks {
     pub(super) fn of_archive(options: &super::args::ResolvedOptions) -> Self {
         Self {
             titles: crate::algorithm::common::database::TitleReads::of_outfmts(
-                Self::request_kind(options),
+                options.request_kind(),
                 [11],
             ),
             ..Self::default()
@@ -1133,7 +1123,7 @@ impl ReportedAsks {
             .unwrap_or_default();
         let app = options.first().map_or(
             crate::report::archive::options::RequestKind::Blastx,
-            Self::request_kind,
+            super::args::ResolvedOptions::request_kind,
         );
         asks.throw = asks.throw.of_search(
             others,

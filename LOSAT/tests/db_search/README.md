@@ -2887,4 +2887,7 @@ posts `Error: (803.7) [<program>] Blast-def-line-set.E.title` / `Bad char [0x..]
 each such byte in order, at each read that the cache does not answer (N is the position after the whole title in its
 record; the bytes before the posted one are already `#`). Outfmt 8, 9, 11 and 12 read the definition line there only
 (`PRE_FETCH_SEQS_LIMIT=2147483647` makes 8, 9 and 12 prefetch); the other formats read it again, which LOSAT refuses
-(the `losat-rejection` rows), except in a batch that fails at a header read, which reaches no formatter (`dmg.6`).
+(the `losat-rejection` rows), except in a batch that fails at a header read, which reaches no formatter (`dmg.*`,
+including `psiblast` one-round and multi-round runs and `rpsblast`/`rpstblastn` against `rps_mini` with
+`rps/rps_mini_tchar_dmg.phr.gz`, where OID 2's title holds `0xE9` and OID 0's title tag is rewritten to `0x1B`;
+`rps/rps_mini_tchar.phr.gz` holds OID 2's `0xE9` alone for the `rpsblast` and `rpstblastn` `losat-rejection` rows).

@@ -850,12 +850,15 @@
   1.116 2026-11-26 (the rule-2 explicit rejection of a stored definition-line title with a byte
   outside `' '` to `'~'`, of 1.10, narrowed to the cases that read the definition line outside
   a query batch's Seq-aligns: formats other than `-outfmt` 8, 9, 11 and 12, or 8, 9 and 12 with
-  `PRE_FETCH_SEQS_LIMIT=2147483647`; `psiblast`, `rpsblast` and `rpstblastn`; searches restricted
+  `PRE_FETCH_SEQS_LIMIT=2147483647`; `psiblast`, `rpsblast` and `rpstblastn` (except a query
+  batch that ends at a header NCBI cannot read); searches restricted
   by a seqid, GI or taxid list, alias files with a list or an OID mask, or a volume with an OID
   mask type; a query batch whose headers also give NCBI's warning of a UTF8String; and a stored
   Seq-id with such a byte. Otherwise BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX write NCBI's
-  output and `Error: (803.7)` messages, rule 2, also for a query batch that ends at a header
-  NCBI cannot read in any format; line RG-KB item 9(b), Owner-delegated, standing instruction
+  output and `Error: (803.7)` messages, rule 2; and in any format of all eight search programs
+  (including `psiblast`, `rpsblast` and `rpstblastn`), a query batch that ends at a header NCBI
+  cannot read writes NCBI's `Error: (803.7)` messages for the titles read before it, then NCBI's
+  error; line RG-KB item 9(b), Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.115 at the merge of dev 9758dbd59; first 1.107,
   then 1.113, then 1.114, then 1.115)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
@@ -4868,14 +4871,15 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`): NCBI shows the query's title and letters for the
   id (its second lookup, by the display id, the query's title in that line).
 - A stored Seq-id with a byte outside ' ' to '~', and a stored title with such a byte in the
-  cases narrowed by version 1.114 (line RG-KB item 9(b), Owner-delegated: `psiblast`, `rpsblast`
+  cases narrowed by version 1.116 (line RG-KB item 9(b), Owner-delegated: `psiblast`, `rpsblast`
   and `rpstblastn`; a format other than `-outfmt` 8, 9, 11 and 12, or 8, 9 and 12 with
   `PRE_FETCH_SEQS_LIMIT=2147483647`; a search restricted by a seqid, GI or taxid list, an alias
   file with a list or an OID mask, or a volume with an OID mask type; a query batch whose headers
-  also give NCBI's warning of a UTF8String): NCBI prints `#` and an error message each time it
-  reads the definition line. Otherwise BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX write NCBI's
-  output and `Error: (803.7)` messages (also for a query batch that ends at a header NCBI cannot
-  read, in any format).
+  also give NCBI's warning of a UTF8String; except a query batch that ends at a header NCBI cannot
+  read, which writes NCBI's `Error: (803.7)` messages for the titles read before it, then NCBI's
+  error, in any format of all eight search programs): NCBI prints `#` and an error message each
+  time it reads the definition line. Otherwise BLASTN, BLASTP, BLASTX, TBLASTN and TBLASTX write
+  NCBI's output and `Error: (803.7)` messages.
 - psiblast and tblastn `-in_pssm` with `-subject` (version 1.45, line RG item D3-1,
   Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07): a Seq-id twice in the
   PSSM query's entry whose `duplicate Bioseq id` message may spell a subject record's Seq-id (NCBI

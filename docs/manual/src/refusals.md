@@ -243,7 +243,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-out_pssm` or `-out_ascii_pssm` into the standard output, the standard error or the `-out` file | Refused. Where NCBI stops first with its own error of `-outfmt` (13 or 14 without `-out`, for example), you get that error. |
 | `-out_pssm` into a named pipe, a block device or a symbolic link to a missing file | Refused. |
 | The library calls `run` or `run_collect` with formats that take two searches (two hit list sizes under `-num_descriptions` or `-num_alignments`, or `psiblast`'s outfmt 5 or 11 with other formats) and PSSM files | Refused. One call per format writes the command line's output. |
-| `-db` with a reported sequence whose stored title holds a byte outside `' '` to `'~'` | Refused in every format, including `-outfmt` 8, 9 and 11 (`psiblast`'s PSSM construction and unpruned hit lists read definition lines outside the reported Seq-aligns). |
+| `-db` with a reported sequence whose stored title holds a byte outside `' '` to `'~'` | Refused in every format, including `-outfmt` 8, 9 and 11 (`psiblast`'s PSSM construction and unpruned hit lists read definition lines outside the reported Seq-aligns), except for a query batch that ends at a header NCBI cannot read (which writes NCBI's messages for the titles read before it, then NCBI's error, in any format). |
 
 `-matrix IDENTITY` gives NCBI's own error.
 
@@ -282,7 +282,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `rpsblast` in the library API and the Web engine | Refused. |
 | The profile-database cases named in Alias files above | Refused. |
 | An infinite `-evalue`, or an `-evalue` of 1.7976931348623157e308 with composition-based statistics (the default of `rpsblast`) | Refused, as in `blastp`. |
-| `-db` with a reported profile whose stored title holds a byte outside `' '` to `'~'` | Refused in every format, including `-outfmt` 8, 9, 11 and 12 (NCBI's `CLocalRPSBlast` opens a fresh `CSeqDB` per query batch and per volume and merges volume alignments before `PruneSeqalign`). |
+| `-db` with a reported profile whose stored title holds a byte outside `' '` to `'~'` | Refused in every format, including `-outfmt` 8, 9, 11 and 12 (NCBI's `CLocalRPSBlast` opens a fresh `CSeqDB` per query batch and per volume and merges volume alignments before `PruneSeqalign`), except for a query batch that ends at a header NCBI cannot read (which writes NCBI's messages for the titles read before it, then NCBI's error, in any format). |
 
 NCBI's errors for a missing `.aux`, `.loo` or `.rps` file, a wrong magic number or an empty `.aux` come as in NCBI (exit status 3).
 
@@ -304,7 +304,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-use_sw_tback` with a profile whose Smith-Waterman alignment starts with a gap in the query's row | Refused, at the same place. No search has been found that gives one, so there is no NCBI output to follow. An alignment that starts with a gap in the profile's row is written as NCBI writes it: the warning that the sequence data could not be pre-fetched, and `-outfmt 0` to `5` and `13` to `16` stop where NCBI's do. |
 | The database refusals of `rpsblast` above, with its alias-file cases | Refused. |
 | `-comp_based_stats 0` with a hit on a profile whose consensus letters in `.psq` are fewer than its score columns, where an alignment starts at or past those letters | Refused, for the query batch of that hit. NCBI prints alignments there whose positions, scores and identities disagree, or crashes when such an alignment then meets a letter of 28 or more. |
-| `-db` with a reported profile whose stored title holds a byte outside `' '` to `'~'` | Refused in every format, including `-outfmt` 8, 9, 11 and 12 (NCBI's `CLocalRPSBlast` opens a fresh `CSeqDB` per query batch and per volume and merges volume alignments before `PruneSeqalign`). |
+| `-db` with a reported profile whose stored title holds a byte outside `' '` to `'~'` | Refused in every format, including `-outfmt` 8, 9, 11 and 12 (NCBI's `CLocalRPSBlast` opens a fresh `CSeqDB` per query batch and per volume and merges volume alignments before `PruneSeqalign`), except for a query batch that ends at a header NCBI cannot read (which writes NCBI's messages for the titles read before it, then NCBI's error, in any format). |
 
 NCBI's errors for a missing `.aux`, `.loo` or `.rps` file and for an empty `.aux` come as in NCBI (exit status 3). The refusals of options and databases come before the first byte of output, as `rpsblast`'s do, also for queries without a valid frame, which NCBI does not search.
 

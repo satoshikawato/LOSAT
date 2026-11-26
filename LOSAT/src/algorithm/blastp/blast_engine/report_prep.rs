@@ -79,6 +79,7 @@ pub(super) struct ReportPrep<'a, 'o> {
     pub(super) prefetch_taxids: bool,
     pub(super) prefetch_only: bool,
     pub(super) psiblast_prefetched: &'a Option<Vec<Vec<usize>>>,
+    pub(super) pre_prune_replaced_titles: &'a [Option<usize>],
     pub(super) batch_ranges: &'a [Range<usize>],
     pub(super) batch_prefetch: &'a BatchPrefetch,
     pub(super) pssm_made: bool,
@@ -240,6 +241,7 @@ pub(super) fn prefetch_reported_subjects(
         prefetch_taxids,
         prefetch_only,
         psiblast_prefetched,
+        pre_prune_replaced_titles,
         batch_ranges,
         batch_prefetch,
         pssm_made,
@@ -356,17 +358,26 @@ pub(super) fn prefetch_reported_subjects(
     // report with its error.
     let prefetch_stop = prefetch_stop.filter(|span| hit_loads.reaches(span.start));
     if let Some(titles) = listed_titles.as_ref() {
-        titles.check_reported_titles(
-            database.expect("listed titles are a database's"),
-            reported_lists,
-            crate::algorithm::common::database::TitleReads::of_outfmts(
-                args.app.request_kind(),
-                outputs
-                    .formats
-                    .iter()
-                    .map(|format| format.report_format().map_or(-1, |format| format as i32)),
-            ),
-        )?;
+        let db = database.expect("listed titles are a database's");
+        let title_reads = crate::algorithm::common::database::TitleReads::of_outfmts(
+            args.app.request_kind(),
+            outputs
+                .formats
+                .iter()
+                .map(|format| format.report_format().map_or(-1, |format| format as i32)),
+        );
+        titles.check_reported_titles(db, reported_lists, title_reads)?;
+        // For psiblast and rpsblast (`prunes_after_traceback`), Seq-aligns read subjects beyond
+        // `-max_target_seqs` before `PruneSeqalign`: refuse any replaced title read before the cut
+        // in the batches before `prefetch_stop` too, so no round silently reads a bad title into
+        // NCBI's header cache.
+        for &rank in pre_prune_replaced_titles
+            .iter()
+            .take(reported_lists.len())
+            .flatten()
+        {
+            titles.check_rank_title(db, rank, title_reads)?;
+        }
         // The subjects with parsed Seq-ids that the reports asked for do not write as NCBI
         // (the formats that read a subject's Bioseq need its sequence found by its Seq-align
         // id, which a table of fields that read nothing of the subject does not; outfmt 0, 5 and
@@ -1371,6 +1382,7 @@ pub(super) struct ReportValues {
     pub(super) prefetch_taxids: bool,
     pub(super) prefetch_only: bool,
     pub(super) psiblast_prefetched: Option<Vec<Vec<usize>>>,
+    pub(super) pre_prune_replaced_titles: Vec<Option<usize>>,
     pub(super) batch_ranges: Vec<Range<usize>>,
     pub(super) batch_prefetch: BatchPrefetch,
     pub(super) pssm_reads: database::PssmReads,
@@ -1476,6 +1488,22 @@ pub(super) fn report_values(
     // psiblast's before its formatter's cut: the subjects of the traceback hit lists, also those
     // beyond `max_target_seqs` that no report shows. Their ranks, by query, for the prefetch
     // (`ListedTitles::prefetched_ranks`).
+    // For psiblast and rpsblast (`prunes_after_traceback`), Seq-aligns read every subject of the
+    // traceback hit lists before `PruneSeqalign` cuts them to `-max_target_seqs`: note the first
+    // subject rank with a replaced title byte per query before the cut (empty when no reader met
+    // such a title, zero work on clean databases).
+    let pre_prune_replaced_titles: Vec<Option<usize>> = match (listed_titles.as_ref(), database) {
+        (Some(titles), Some(database)) if prunes_lists && database.seqdb().replaced_titles() => {
+            hit_lists
+                .iter()
+                .map(|hit_list| {
+                    database::ListedTitles::reported_ranks(std::slice::from_ref(hit_list))
+                        .find(|&rank| titles.has_replaced_title_bytes(rank))
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    };
     let psiblast_prefetched: Option<Vec<Vec<usize>>> =
         (args.app.prunes_after_traceback() && batches_prefetch).then(|| {
             hit_lists
@@ -1667,6 +1695,7 @@ pub(super) fn report_values(
         prefetch_taxids,
         prefetch_only,
         psiblast_prefetched,
+        pre_prune_replaced_titles,
         batch_ranges,
         batch_prefetch,
         pssm_reads,

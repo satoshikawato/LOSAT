@@ -1948,15 +1948,30 @@ impl ListedTitles<'_> {
         reads: shared::TitleReads,
     ) -> Result<()> {
         for rank in Self::reported(hit_lists) {
-            shared::check_reported_title(
-                database.seqdb(),
-                self.listed.ordinals[rank],
-                self.replaced_title_bytes[rank],
-                reads,
-                self.program,
-            )?;
+            self.check_rank_title(database, rank, reads)?;
         }
         Ok(())
+    }
+
+    /// [`check_reported_titles`] for one subject rank `rank`.
+    pub(super) fn check_rank_title(
+        &self,
+        database: &BlastpDatabase,
+        rank: usize,
+        reads: shared::TitleReads,
+    ) -> Result<()> {
+        shared::check_reported_title(
+            database.seqdb(),
+            self.listed.ordinals[rank],
+            self.replaced_title_bytes[rank],
+            reads,
+            self.program,
+        )
+    }
+
+    /// Whether the stored title of the subject of rank `rank` held a byte outside `' '..='~'`.
+    pub(super) fn has_replaced_title_bytes(&self, rank: usize) -> bool {
+        self.replaced_title_bytes[rank]
     }
 
     /// NCBI's posts of the titles that each batch of `batches` (the queries of each) reads where

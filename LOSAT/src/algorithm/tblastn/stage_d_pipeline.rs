@@ -1080,11 +1080,24 @@ fn run_local_search(
 /// letters).
 pub(super) type BatchRecord = (usize, Option<usize>);
 
+/// The outcome of setting up a query batch without searching it (`set_up_batch`).
+#[derive(Clone, Copy, Debug)]
+pub(super) struct SetUpOutcome {
+    /// Whether NCBI's search of the batch reaches reading its subjects (valid context and set-up
+    /// passed).
+    pub(super) reads: bool,
+    /// Whether the batch is split into query chunks.
+    pub(super) split: bool,
+    /// When the batch has no valid context and is not split, whether the subjects themselves pass
+    /// preliminary setup checks and have no failed database read.
+    pub(super) subjects_pass: bool,
+}
+
 /// The set-up of a query batch without its search (`set_up_batch`): NCBI's batch (`records`), and
-/// whether NCBI's search of it reads the subjects (`reads`), which the set-up decides.
+/// its outcome (`outcome`).
 struct SetUpOnly<'a> {
     records: &'a [BatchRecord],
-    reads: bool,
+    outcome: SetUpOutcome,
 }
 
 /// The set-up of a query batch without its search (`run_local_search_with_pool` up to where NCBI's
@@ -1105,10 +1118,14 @@ pub(super) fn set_up_batch(
     compo_adjust_mode: BlastCompoAdjustMode,
     do_sum_stats: bool,
     scoring: LocalStageDScoring,
-) -> Result<bool> {
+) -> Result<SetUpOutcome> {
     let mut set_up = SetUpOnly {
         records,
-        reads: false,
+        outcome: SetUpOutcome {
+            reads: false,
+            split: false,
+            subjects_pass: false,
+        },
     };
     run_local_search_with_pool(
         queries,
@@ -1122,7 +1139,7 @@ pub(super) fn set_up_batch(
         None,
         Some(&mut set_up),
     )?;
-    Ok(set_up.reads)
+    Ok(set_up.outcome)
 }
 
 /// NCBI's engine error of a query batch's setup (`BLAST_GapAlignSetUp`, c++/src/algo/blast/core/blast_setup.c:888-1000):
@@ -1464,8 +1481,11 @@ fn run_local_search_with_redo<R: MatchRedo>(
     *setup = Some(batch_setup);
     // The set-up alone (`set_up_batch`): no search. A batch with a valid context reads its
     // subjects, one searched whole after the checks above (`BatchSplit::set_up_reads`).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-980
     if let Some(set_up) = setup_only {
-        set_up.reads = any_valid
+        set_up.outcome.split = split.chunks.is_some();
+        set_up.outcome.reads = any_valid
             && split.set_up_reads(
                 queries,
                 set_up.records,
@@ -1474,6 +1494,18 @@ fn run_local_search_with_redo<R: MatchRedo>(
                 setup_checks,
                 pool,
             )?;
+        set_up.outcome.subjects_pass = !any_valid
+            && split.chunks.is_none()
+            && profile.subject_set.read_fails.is_none()
+            && setup_checks().is_ok()
+            && query_set_setup(
+                &[b"MKTAYIAKQRQISFVKSHFS".to_vec()],
+                inputs,
+                options_searchsp.as_ref().map(std::slice::from_ref),
+                false,
+                None,
+            )
+            .is_ok_and(|probe| probe.valid_contexts.iter().any(|&valid| valid));
         return Ok(Vec::new());
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:322-327 (cited at

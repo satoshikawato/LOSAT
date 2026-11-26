@@ -3720,6 +3720,14 @@ fn run_batch_loop(
         && crate::blastinput::query_batch::outfmts_have_xml(
             outputs.formats.iter().map(|format| format.outfmt),
         );
+    let query_range = crate::blastinput::seq_range::parse_optional_range(
+        args.query_loc.as_deref(),
+        crate::blastinput::seq_range::RangeRole::Query,
+    )
+    .ok()
+    .flatten();
+    let minus_strand = crate::algorithm::blastn::args::QueryStrand::from_option(&args.strand)
+        == crate::algorithm::blastn::args::QueryStrand::Minus;
     let query_scopes = &reports.query_scopes;
     *query_scopes.borrow_mut() = crate::blastinput::query_batch::QueryScopes::of_search(
         args.parse_deflines,
@@ -3734,6 +3742,8 @@ fn run_batch_loop(
             scopes
         }
         .with_refusal(args.scope_refusal.clone())
+        .with_query_range(query_range)
+        .with_minus_strand(minus_strand)
         .with_xml_matrix_failure(reports.xml_matrix_failure(outputs))
     });
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
@@ -3971,6 +3981,18 @@ fn run_batch_loop(
                 return Err(error);
             }
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:485-652
+        // `SetupQueries_OMF` fails with `CSeqVector_CI` / `Sequence contains no data` before
+        // `BLAST_MainSetUp` checks the matrix name (`TblastxMatrix::Unknown`, line RG-KB item 7b).
+        if let Some(error) = scope_refusal
+            .as_ref()
+            .and_then(crate::blastinput::query_batch::ScopeRefusal::of)
+            .and_then(crate::blastinput::query_batch::ScopeRefusal::setup_queries_error)
+        {
+            reports.write_before_failed_batch(outputs, done, &warnings)?;
+            batch_warnings.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
+            return Err(error);
+        }
         let batch_queries = &query_records[start..end];
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-652
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux.cpp:1013-1025
@@ -4049,7 +4071,20 @@ fn run_batch_loop(
                         .collect();
                     match set_up(&records) {
                         Ok(batch) if batch.searched => BatchSetUp::Searched,
-                        Ok(_) => BatchSetUp::Unknown,
+                        Ok(_) => {
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+                            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+                            // None of the given records has a valid context (review 2 B1/B2):
+                            // probe whether the run's subjects themselves pass set-up so XML
+                            // matrix failure proceeds only when subjects pass.
+                            let probe = [FastaRecord::new(
+                                String::new(),
+                                &[],
+                                b"ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTTCTTTTGTTAAATCTCATTTTTCT",
+                            )];
+                            let subjects_pass = set_up(&probe).is_ok_and(|b| b.searched);
+                            BatchSetUp::NoValidContext { subjects_pass }
+                        }
                         Err(error) if error.is::<SubjectsUnreadable>() => stores_error
                             .take()
                             .and_then(|error| {

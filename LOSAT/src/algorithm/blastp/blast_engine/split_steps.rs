@@ -570,7 +570,26 @@ pub(super) fn refused_batch_setup_error(
         .iter()
         .any(|context| context.is_valid && context.aa_len > 0)
     {
-        return BatchSetUp::Unknown;
+        if chunks.is_some() {
+            return BatchSetUp::Unknown;
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:925-982
+        // Check whether the subjects themselves pass whole-batch set-up for a valid context so
+        // an XML matrix failure can proceed when neither NCBI nor LOSAT fails on the subjects.
+        let probe = [FastaRecord::new(
+            String::new(),
+            b"",
+            b"MKTAYIAKQRQISFVKSHFS",
+        )];
+        let probe_contexts = pssm_hooks::psi_contexts(args, &blastp_query_frames(args, &probe));
+        let subjects_pass = probe_contexts
+            .iter()
+            .any(|context| context.is_valid && context.aa_len > 0)
+            && SetupFailures::of(args, database, &encoded, &probe_contexts)
+                .of_whole_batch()
+                .is_none();
+        return BatchSetUp::NoValidContext { subjects_pass };
     }
     let failures = SetupFailures::of(args, database, &encoded, &contexts);
     let Some(chunks) = chunks else {

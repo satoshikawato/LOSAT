@@ -190,6 +190,8 @@ impl ReaderBatchShape {
 /// batch that is set up holds two (line WQA D10 round 5, 2026-11-20).
 pub(crate) fn set_up_error(
     queries: &[FastaRecord],
+    batch_query_count: usize,
+    first_query_len: usize,
     options: &ResolvedOptions,
     subjects: Subjects<'_>,
 ) -> crate::blastinput::query_batch::BatchSetUp {
@@ -199,7 +201,50 @@ pub(crate) fn set_up_error(
     };
     let mut params = score_block_for(&prepared, options.scoring);
     if !params.iter().any(|p| p.valid) {
-        return BatchSetUp::Unknown;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:105-145
+        // A single-query batch that NCBI splits into chunks stays `Unknown`.
+        if batch_query_count == 1 && options.gapped {
+            let Ok(sizes) = super::split::split_sizes(1) else {
+                return BatchSetUp::Unknown;
+            };
+            let mut chunk_size = sizes.chunk_size;
+            if super::split::calculate_num_chunks(
+                &mut chunk_size,
+                sizes.overlap,
+                first_query_len,
+                1,
+            ) > 1
+            {
+                return BatchSetUp::Unknown;
+            }
+        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-180
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:969-980
+        if subjects.is_unreadable() {
+            return BatchSetUp::NoValidContext {
+                subjects_pass: false,
+            };
+        }
+        let Ok(numbers) = subjects.numbers() else {
+            return BatchSetUp::Unknown;
+        };
+        let probe = [FastaRecord {
+            internal_id: String::new(),
+            title: Vec::new(),
+            sequence: b"ATGAAAACCGCGTATATTGCGAAACAGCGTCAGATTTCTTTTGTTAAATCTCATTTTTCT".to_vec(),
+            lowercase_masks: Vec::new(),
+            source: None,
+            around: None,
+            skipped: None,
+        }];
+        let subjects_pass = prepare_unit_queries(&probe, None, options).is_ok_and(|probe_prep| {
+            let mut probe_params = score_block_for(&probe_prep, options.scoring);
+            probe_params.iter().any(|p| p.valid)
+                && subject_parameters(&probe_prep, &mut probe_params, options, numbers, None)
+                    .is_ok()
+                && subjects.sequence_file_read_error().is_none()
+        });
+        return BatchSetUp::NoValidContext { subjects_pass };
     }
     if subjects.is_unreadable() {
         return BatchSetUp::Fails(super::subjects::UnreadableSubjects.into());

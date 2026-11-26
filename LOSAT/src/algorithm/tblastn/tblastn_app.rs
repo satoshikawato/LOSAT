@@ -231,8 +231,16 @@ fn refused_batch_setup_error(
     );
     match setup {
         Err(error) => batch_failure(error).ok().into(),
-        Ok(false) => BatchSetUp::Unknown,
-        Ok(true) => match read {
+        Ok(outcome) if !outcome.reads => {
+            if outcome.split {
+                BatchSetUp::Unknown
+            } else {
+                BatchSetUp::NoValidContext {
+                    subjects_pass: outcome.subjects_pass && matches!(read, None | Some(Ok(_))),
+                }
+            }
+        }
+        Ok(_) => match read {
             None | Some(Ok(_)) => BatchSetUp::Searched,
             Some(Err((error, _))) => database_read_failure(error).ok().into(),
         },
@@ -1594,6 +1602,37 @@ fn pairwise_reading(
     ))
 }
 
+/// Under `-parse_deflines`, builds the batch/run query scope tracker for TBLASTN.
+fn tblastn_query_scopes(
+    believed_queries: bool,
+    has_database: bool,
+    has_pssm: bool,
+    args: &TblastnArgs,
+    resolved: &ResolvedTblastnArgs,
+    outputs: &ReportOutputs<'_>,
+) -> Option<crate::blastinput::query_batch::QueryScopes> {
+    crate::blastinput::query_batch::QueryScopes::of_search(
+        believed_queries,
+        !has_database,
+        believed_queries
+            && crate::blastinput::query_batch::outfmts_have_xml(
+                outputs.formats.iter().map(|format| format.outfmt),
+            ),
+        "TBLASTN",
+    )
+    .map(|scopes| {
+        scopes
+            .with_refusal(args.scope_refusal.clone())
+            .with_query_range(resolved.query_range)
+            .with_xml_matrix_failure(super::stage_e_report::xml_matrix_failure(
+                &outputs.formats,
+                &resolved.matrix_name,
+                has_database,
+                has_pssm,
+            ))
+    })
+}
+
 fn search(
     args: &TblastnArgs,
     resolved: ResolvedTblastnArgs,
@@ -1797,25 +1836,14 @@ fn search(
         reading,
         batch_size,
         true,
-        crate::blastinput::query_batch::QueryScopes::of_search(
+        tblastn_query_scopes(
             believed_queries,
-            database.is_none(),
-            believed_queries
-                && crate::blastinput::query_batch::outfmts_have_xml(
-                    outputs.formats.iter().map(|format| format.outfmt),
-                ),
-            "TBLASTN",
-        )
-        .map(|scopes| {
-            scopes
-                .with_refusal(args.scope_refusal.clone())
-                .with_xml_matrix_failure(super::stage_e_report::xml_matrix_failure(
-                    &outputs.formats,
-                    &resolved.matrix_name,
-                    database.is_some(),
-                    pssm.is_some(),
-                ))
-        }),
+            database.is_some(),
+            pssm.is_some(),
+            args,
+            &resolved,
+            outputs,
+        ),
     );
     // Where the run's XML failure for its matrix name takes a refusal (`ScopeRefusal::xml_takes`),
     // a batch whose set-up passes is searched (`QueryBatches::resolve_refusals`).

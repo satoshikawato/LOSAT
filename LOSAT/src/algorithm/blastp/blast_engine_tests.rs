@@ -3044,8 +3044,8 @@ fn a_failed_lookup_fails_its_batch_after_the_posts_up_to_its_query() {
         crate::blastinput::app::ReportFormat::Tabular,
         &crate::blastinput::app::FormatChoice {
             number: 6,
-            spec: "qseqid sallacc".to_string(),
-            delimiter: String::new(),
+            spec: b"qseqid sallacc".to_vec(),
+            delimiter: Vec::new(),
         },
         crate::report::archive::options::RequestKind::Blastp,
     )

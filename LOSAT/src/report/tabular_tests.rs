@@ -1209,8 +1209,8 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
             ReportFormat::Tabular,
             &FormatChoice {
                 number: 6,
-                spec: fields.to_string(),
-                delimiter: String::new(),
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
             },
         )
         .unwrap()
@@ -1266,8 +1266,8 @@ fn a_failed_lookup_refusal_names_the_first_query_of_the_batch_it_stops() {
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
-            spec: "qseqid sallacc".to_string(),
-            delimiter: String::new(),
+            spec: b"qseqid sallacc".to_vec(),
+            delimiter: Vec::new(),
         },
     )
     .unwrap();

@@ -3,7 +3,8 @@
 //! counts file: the value of BLASTN's `-window_masker_db`, or the file of `-window_masker_taxid
 //! <taxid>`, `windowmasker/<taxid>/wmasker.obinary` (`WINDOW_MASKER_PATH`). Kind 2 is a registry
 //! file of NCBI's application start: the file of `-conffile`, which the start of a run reads
-//! (`registry_files`; line RG item E1w-3a).
+//! (`registry_files`; line RG item E1w-3a). Kind 3 is a search strategy file: the file of
+//! `-import_search_strategy`, which the engine's import reads (`strategy`; line RG item F2-4).
 //!
 //! The command line opens the counts file by its name twice: NCBI's check of the format
 //! (`DiscoverStatType`) and its reader (`CSeqMaskerIstatFactory::create`). A registered file
@@ -29,6 +30,9 @@ pub const KIND_WINDOW_MASKER_COUNTS: u32 = 1;
 
 /// The kind of a registry file of NCBI's application start (`-conffile`).
 pub const KIND_REGISTRY: u32 = 2;
+
+/// The kind of a search strategy file (`-import_search_strategy`).
+pub const KIND_SEARCH_STRATEGY: u32 = 3;
 
 /// The directory of BLASTN's `-window_masker_taxid` in LOSAT Web, where the command line reads
 /// NCBI's registry entry `[WINDOW_MASKER] WINDOW_MASKER_PATH`: the counts file of a taxid is the
@@ -64,12 +68,19 @@ struct RegistryFile {
     bytes: Vec<u8>,
 }
 
+/// A registered search strategy file: its bytes, which the import of each run reads (`strategy`).
+struct StrategyFile {
+    name: String,
+    bytes: Arc<Vec<u8>>,
+}
+
 #[derive(Default)]
 struct Files {
     next: u32,
     loading: HashMap<u32, Loading>,
     registered: HashMap<u32, Arc<Counts>>,
     registry: HashMap<u32, Arc<RegistryFile>>,
+    strategies: HashMap<u32, Arc<StrategyFile>>,
 }
 
 impl Files {
@@ -79,6 +90,7 @@ impl Files {
             .map(|file| file.name.as_str())
             .chain(self.registered.values().map(|file| file.name.as_str()))
             .chain(self.registry.values().map(|file| file.name.as_str()))
+            .chain(self.strategies.values().map(|file| file.name.as_str()))
     }
 }
 
@@ -94,6 +106,7 @@ pub fn begin(kind: u32, name: &str, size: usize) -> Result<u32, String> {
     let what = match kind {
         KIND_WINDOW_MASKER_COUNTS => "the WindowMasker counts",
         KIND_REGISTRY => "the registry file",
+        KIND_SEARCH_STRATEGY => "the search strategy file",
         _ => return Err(format!("unknown input file kind {kind}")),
     };
     if name.is_empty() {
@@ -194,6 +207,25 @@ pub fn end(file: u32) -> Result<String, String> {
             .insert(file, Arc::new(RegistryFile { name, bytes }));
         return Ok(out);
     }
+    if kind == KIND_SEARCH_STRATEGY {
+        // The bytes are kept: the import of each run reads the file as the command line's
+        // `-import_search_strategy` reads it from the disk (`strategy`), its errors included.
+        let mut out = String::new();
+        let _ = write!(out, "{{\"handle\":{file},\"name\":");
+        json::string(&mut out, &name);
+        let _ = write!(
+            out,
+            ",\"kind\":\"search_strategy\",\"size\":{size},\"sha256\":\"{sha256}\"}}"
+        );
+        files().lock().expect("files").strategies.insert(
+            file,
+            Arc::new(StrategyFile {
+                name,
+                bytes: Arc::new(bytes),
+            }),
+        );
+        return Ok(out);
+    }
     let found = discover_stat_type_in(&mut Cursor::new(bytes.as_slice()));
     // The command line's reader with blastn's settings (`s_BuildSeqMasker`); for a format other
     // than the two binary ones it reads the format alone and returns its error.
@@ -220,6 +252,7 @@ pub fn release(file: u32) -> Result<(), String> {
     let mut files = files().lock().expect("files");
     let removed = files.registered.remove(&file).is_some()
         || files.registry.remove(&file).is_some()
+        || files.strategies.remove(&file).is_some()
         || files.loading.remove(&file).is_some();
     if removed {
         Ok(())
@@ -410,6 +443,24 @@ pub fn registry_files() -> RegisteredRegistry {
     }
 }
 
+/// The bytes of the search strategy file that the argv's `-import_search_strategy NAME` names (kind
+/// 3), when one is registered. A registered file is the file of its name in the command line's
+/// working directory, so a leading `./` names the same file (`working_name`); the standard input
+/// (`-`) is no file here.
+pub fn strategy(name: &std::path::Path) -> Option<Arc<Vec<u8>>> {
+    if name.as_os_str() == "-" {
+        return None;
+    }
+    let wanted = working_name(name)?;
+    files()
+        .lock()
+        .expect("files")
+        .strategies
+        .values()
+        .find(|file| working_name(std::path::Path::new(&file.name)).as_deref() == Some(&wanted))
+        .map(|file| file.bytes.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -530,8 +581,8 @@ mod tests {
         // One name is one file, of one kind.
         assert!(begin(KIND_REGISTRY, "twice.binary", 1).is_err());
         assert_eq!(
-            begin(3, "other", 1).unwrap_err(),
-            "unknown input file kind 3"
+            begin(4, "other", 1).unwrap_err(),
+            "unknown input file kind 4"
         );
         assert!(begin(KIND_WINDOW_MASKER_COUNTS, "", 1).is_err());
         release(file).expect("release");

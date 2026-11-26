@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.117
+- Version: 1.119
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -867,7 +867,61 @@
   `-filtering_db`, via relative paths, symlinks, hard links, or missing inputs that `-logfile`
   would create — is refused before opening or creating the file, exit status 1, leaving existing
   inputs unchanged, matching LOSAT Web's D19 rule; numbered after 1.116 at the merge of dev
-  f71a5cb85 that brought 1.116 (#1619); first 1.110, then 1.113, then 1.114, then 1.115, then 1.116)
+  f71a5cb85 that brought 1.116 (#1619); first 1.110, then 1.113, then 1.114, then 1.115, then 1.116);
+  1.118 2026-11-24 (approved exception 33, the Owner's decision of 2026-11-20 on line RG's question
+  F2-Q1, 「Q1=C」: an imported strategy's subjects searched once at any `-num_threads`; line RG item
+  F2, `-import_search_strategy`; numbered after 1.117; first 1.70, taking exception 22 at the merge
+  of dev 540759a2f, then 1.71 at the merge of dev 194053478 that brought line RG item D1b-2's 1.70,
+  then 1.72 at the merge of dev 1b6e05a0d that brought line DBID item pfoff-3's 1.71, then 1.74 at
+  the merge of dev 2e9653a71 that brought line NP items M5a and M5b's 1.72 and line RG item X4b-1's
+  1.73, then 1.75 at the merge of dev d7641b99f that brought line RG item D5b-3's 1.74, then 1.81 and
+  exception 25 at the merge of dev 34cc301c4 that brought 1.75 to 1.80 and exceptions 22 to 24
+  (line NP items M5 and O4c, line RG items X4b-2, D3c-3a and D5b-5, line PS item PS12c), then 1.82
+  and exception 26 at the merge of dev 328728a05 that brought line NP item M4c-1's 1.81 and
+  exception 25; then 1.83 and exception 27 at the merge of dev 50474994c that brought psiblast line
+  item PS10a's 1.82 and exception 26; then 1.86 at the merge of dev 719709924 that
+  brought line NP item M4b-AX's 1.83, psiblast line item PS10c's 1.84 and line RG item D1c-1's 1.85;
+  then 1.92 and exception 28 at the merge of dev ad35fcaee that brought 1.86 to 1.91 and exception 27
+  (psiblast line item PS10d, line NP items O4b2-2, M4b-3c and M4b-T2, line RG item T5d, line PS item
+  PS12d); then 1.93 at the merge of dev 2cd5a1906 that brought line NP item O4b2-4's 1.92; then 1.94
+  at the merge of dev 73242b104 that brought line RG item D1c-1c's 1.93; then 1.95 at the merge of dev
+  bb64581ea that brought line NP item M4c-2's 1.94; then 2.00 at the merge of dev 4626ddd5d that
+  brought 1.95 to 1.98 and exception 29: line NP item M4b-3b, line DBID item pfoff-4, line RG items
+  X-short-bat and X-bpgap, with 1.99 left to line RG item D5's pull request; then 1.104 at the merge
+  of dev 518d403cc that brought 1.99 to 1.103 and exception 30 (line RG items X-short-tbx-link,
+  KC-11d, D5c and K10a, psiblast line item PS10e); then 1.106 at the merge of dev f25e2276a that
+  brought 1.104 and 1.105 (line NP item M4b-T3, psiblast line item PS10b); then 1.108 and exception 31
+  at the merge of dev 5c7e93761 that brought 1.106 and 1.107 and exception 28 (line NP items M4b-3c
+  part 2 and M4a-mdepth); then 1.109 at the merge of dev df03b20e2 that brought 1.108 (line RG item
+  X-short-bat-2); then 1.113 and exception 32 at the merge of dev 245b7e2e3 that brought 1.109 to
+  1.112 and exception 31 (line RG items D1c-2, X-short-bat-2, D3c-4 and psiblast line item PS7c);
+  then 1.114 at the merge of dev fe1452e21 that brought 1.113 (psiblast line item PS14); then 1.115
+  at the merge of dev 42678f399 that brought 1.114 (line DBID item pfoff-7); then 1.116 and
+  exception 33 at the merge of dev 9758dbd59 that brought 1.115 and exception 32 (line RG item G1);
+  then 1.117 at the merge of dev f71a5cb85 that brought 1.116 (line RG item X-chunk); then 1.118
+  at the merge of dev 351661f13 that brought 1.117 (line WQA item D23));
+  1.119 2026-11-24 (approved exception 34, the Owner's answer of 2026-11-24 00:04 JST, on the board, to
+  line RG's question Q-F2-28 (recommended A), 「Q-F2-28=A」: a negative `WindowSize` and a
+  `LongestIntronLength` of an imported strategy whose arithmetic passes `Int4`, and the one-thread
+  result of a negative window; line RG item F2 fix round 3, review 3's R3-B2; numbered after 1.118;
+  first 1.87 (then proposed as exception 28 and pending the Owner), then 1.93 and exception 29 at the
+  merge of dev ad35fcaee that brought 1.86 to 1.91 and exception 27; then 1.94 at the merge of dev
+  2cd5a1906 that brought line NP item O4b2-4's 1.92; then 1.95 at the merge of dev 73242b104 that
+  brought line RG item D1c-1c's 1.93; then 1.96 at the merge of dev bb64581ea that brought line NP
+  item M4c-2's 1.94; then 2.01 and exception 31 at the merge of dev 4626ddd5d that brought 1.95 to
+  1.98 and exception 29 (line NP item M4b-3b), with 1.99 and exception 30 left to line RG item D5's
+  pull request; then 1.105 at the merge of dev 518d403cc that brought 1.99 to 1.103 and exception
+  30 (line RG items X-short-tbx-link, KC-11d, D5c and K10a, psiblast line item PS10e); then 1.107
+  at the merge of dev f25e2276a that brought 1.104 and 1.105 (line NP item M4b-T3, psiblast line
+  item PS10b); then 1.109 and exception 32 at the merge of dev 5c7e93761 that brought 1.106 and
+  1.107 and exception 28 (line NP items M4b-3c part 2 and M4a-mdepth); then 1.110 at the merge of dev
+  df03b20e2 that brought 1.108 (line RG item X-short-bat-2); then 1.114 and exception 33 at the merge
+  of dev 245b7e2e3 that brought 1.109 to 1.112 and exception 31 (line RG items D1c-2, X-short-bat-2,
+  D3c-4 and psiblast line item PS7c); then 1.115 at the merge of dev fe1452e21 that brought 1.113
+  (psiblast line item PS14); then 1.116 at the merge of dev 42678f399 that brought 1.114 (line DBID
+  item pfoff-7); then 1.117 and exception 34 at the merge of dev 9758dbd59 that brought 1.115 and
+  exception 32 (line RG item G1); then 1.118 at the merge of dev f71a5cb85 that brought 1.116 (line
+  RG item X-chunk); then 1.119 at the merge of dev 351661f13 that brought 1.117 (line WQA item D23))
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -4868,6 +4922,93 @@ past `Int4`)". Line RG item G1.
     non-overflowing run (the `ncbi-near` rows `db.g1.*` of `LOSAT/tests/db_search_manifest/blastn.g1.tsv`
     and the `g1.*` cases of `LOSAT/tests/blastn_regression_fixtures.py`). Before version 1.115
     LOSAT refused megablast gap costs above 32767 (rule 3).
+
+## Approved exception 33 (an imported strategy's subjects at more than one thread, version 1.118)
+
+Version 1.118, line RG item F2 (DECISIONS F2-Q1). The Owner
+decided on 2026-11-20 at 20:05 JST, with the words 「Q1=C」 after asking 「重複すること自体バグでは？」 ("is the
+duplication itself not a bug?"), that a search strategy whose subjects are sequences, imported with
+`-num_threads` above 1, gives the output of `-num_threads 1` in every program. Not taken: NCBI's copies
+(option A, rule 2 as written: the copies come from a check that reads the wrong argument, so the same
+alignment printed N times is not a result of the search), and a refusal of the combination (option B:
+the search itself is valid and its `-num_threads 1` result is deterministic).
+
+33. **An imported strategy's subjects at more than one thread.** NCBI decides whether a search takes
+    `-num_threads` from the command line's `-subject` only (`CMTArgs::x_ExtractAlgorithmOptions`, NCBI
+    reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3203-3236): a strategy that carries its subjects
+    (`s_ImportSearchStrategy`, NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:532-628)
+    leaves the threads on, and each thread searches every subject. In our runs of NCBI BLAST+ 2.17.0
+    `blastp`, `blastx` and `tblastn` at 2 to 8 threads, and `blastn` at 2 and 3, print each alignment
+    once per thread (probes `I.<program>.sub.nt3.r1` to `.r3`, `I.<program>.sub.nt4`,
+    `I.blastp.sub.nt4f6`, `I.blastn.sub.nt2.*`); `blastn` at 4 and 8 threads and `tblastx` at 2, 3, 4
+    and 8 stop with `malloc(): invalid size (unsorted)` and a core dump (SIGABRT; `I.blastn.sub.nt4`,
+    `I.blastn.sub.nt8.*`, `I.tblastx.sub.nt2.*` to `I.tblastx.sub.nt8.*`). The copies are rule 2's deterministic NCBI output, which this exception
+    replaces by the Owner's decision; the aborts are rule 1. LOSAT searches a strategy's subjects
+    once, with the command line's `-num_threads`, as it searches the records of `-subject` (its
+    output is the same at every thread count, the Owner's rule of 2026-10-13): the engine's import
+    (`import::apply`, which the command line, the library API and LOSAT Web share, also where one
+    program runs another's strategy) keeps the threads, with no warning and no refusal, and
+    the output is NCBI's `-num_threads 1` output, frozen. On a terminal, `losat blastn` draws its
+    progress bar for them as for the records of `-subject` (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES
+    exception 11). `-mt_mode 1` gives the same bytes (its
+    output is that of one thread, as for every search). NCBI's warning `Number of threads was reduced
+    to N to match the number of available CPUs` is not printed, as for every search (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES). A strategy whose subject is a
+    database, and the command line's `-subject` or `-db` over a strategy, keep their usual threads.
+    Evidence: the probes of line RG item F2 named above (NCBI BLAST+ 2.17.0).
+    Fixture rows: `LOSAT/tests/fixtures/strategy/import/import_cases.tsv` holds the `-num_threads 1`
+    rows `I.<program>.sub.alone`; the test
+    `a_strategys_subjects_are_searched_once_at_any_thread_count`
+    (`LOSAT/tests/import_search_strategy.rs`) runs them at 2, 4 and 8 threads against those bytes for
+    the five programs (a search of the subjects once per thread fails it), and
+    `a_strategys_subjects_keep_the_threads_of_the_command_line`
+    (`LOSAT/src/report/archive/read/strategy_tests.rs`) checks that the import keeps `-num_threads 4`.
+
+## Approved exception 34 (a strategy's negative window and intron length past `Int4`, and a negative window at more than one thread, version 1.119)
+
+Version 1.119, line RG item F2 fix round 3 (review 3, R3-B2; DECISIONS F-Q28). The Owner decided on
+2026-11-24 at 00:04 JST, on the board, with the words 「Q-F2-28=A」 (option A of line RG's question
+Q-F2-28, the recommended one; proposed 2026-11-23 under the standing instruction of 2026-09-29, restated
+2026-10-07), under the Owner's rules of 2026-10-10 「NCBI のバグを再現する必要はない」 and 2026-10-22
+「広い型になおしましょう」 and rule 1 above. Not taken: NCBI's wrapped values (option B: undefined behavior in
+C, whatever NCBI's build gives, and NCBI's result at several threads, which changes from run to run,
+below, cannot be reproduced), and a refusal of the values at the import (option C: the searches are valid
+and their values of a nearby input are deterministic).
+
+34. **A negative `WindowSize` or `LongestIntronLength` of an imported strategy.** The command line takes
+    0 or more for both (`-window_size`, `-max_intron_length`); a hand-edited strategy can carry any `int`,
+    and NCBI runs it with no check.
+    - *Window, arithmetic.* A window of 0 or less runs the one-hit word finder over NCBI's diagonal
+      table, whose state passes from one word finder call to the next: the table's offset grows by the
+      call's subject length plus the window after each call and is cleared at `INT4_MAX / 4`
+      (`Blast_ExtendWordExit`, NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-185),
+      and a word is extended where its subject offset passes the diagonal's last hit less the offset
+      (aa_ungapped.c:715-810, na_ungapped.c:640-945). From a window of about -2^29 down, the offset of a
+      search passes the range of `Int4` within a few calls, an overflow of signed values (undefined
+      behavior). NCBI BLAST+ 2.17.0's build wraps: `tblastx` with the strategy `tblastx.db.ss` and
+      `WindowSize` -536870912 reports 11 alignments, -2^30 14, -1.5 x 10^9 43, -2147483647 and -2^31 27,
+      where every window from -1000 to -10^6 (defined arithmetic) reports none (probes
+      `F/f2/tmp/wneg_tblastx/out_<w>.tsv` of line RG item F2). LOSAT computes these sums in 64 bits, their
+      mathematical value, and keeps NCBI's comparisons, its reset and the 31 bits of a diagonal's last hit
+      (a defined truncation): it reports no alignment for those windows, as NCBI does for -10^6. Where
+      NCBI's arithmetic stays in `Int4` (the windows of the frozen rows: -1, -5, -40, -1000, -10^5,
+      -10^6), LOSAT's bytes are NCBI's.
+    - *Window, threads.* NCBI's threads take the subjects (or database chunks) by timing and each keeps
+      its own table, so the state that one search passes to the next depends on the schedule: in our runs
+      of NCBI BLAST+ 2.17.0 with `WindowSize` -40 at 4 and 8 threads (3 runs each), `blastp` gave 2
+      different outputs in 6 runs, `tblastn` 3 and `tblastx` 3, and those of `tblastn` and `tblastx` all
+      differ from their `-num_threads 1` output. LOSAT gives NCBI's `-num_threads 1` output at every
+      thread count: the word finder calls of a negative window run in NCBI's one-thread order on one
+      table (rows `S3.<program>.window_neg40.nt4`, which hold NCBI's `-num_threads 1` bytes).
+    - *Intron length.* `blastx` and `tblastn` with sum statistics subtract 2 from the length and divide
+      by 3 (blast_parameters.c:788-815): for -2^31 and -2^31 + 1 the subtraction passes `Int4`, which
+      NCBI's build wraps to a large positive gap. LOSAT subtracts in 64 bits: the gap is negative, so a
+      gapped search links no HSPs, as NCBI does for -2^31 + 2 and every other negative length
+      (`core::link_hsps::translated_longest_intron`).
+    Evidence: the probes named above; rows `S3.*.window_*` of
+    `LOSAT/tests/fixtures/strategy/import/import_cases.tsv` (NCBI's bytes where its arithmetic is
+    defined), the unit tests of the negative window in the five engines and
+    `the_longest_intron_of_a_translated_search_follows_ncbis_branches`
+    (`LOSAT/src/core/link_hsps_tests.rs`).
 
 ## Explicit rejections of deterministic results (rule 2, version 1.10)
 

@@ -531,7 +531,8 @@ fn an_empty_choice_element_holds_its_first_list_variant() {
         "SeqTable-multi-data.int",
         "SeqTable-sparse-index.indexes",
         "Seq-annot.data.ftable",
-        // The types of the root `Blast4-archive` (rpsbproc's archives).
+        // The types of `Blast4-archive` (rpsbproc's archives) and the search strategy's types
+        // (line RG item F2's import, `report::archive::read`).
         "Blast4-queries.seq-loc-list",
         "Blast4-subject.sequences",
         "Blast4-value.big-integer-list",

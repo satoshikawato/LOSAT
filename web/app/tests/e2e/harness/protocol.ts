@@ -67,3 +67,27 @@ export interface HighMemoryResult {
   readonly normal: HighMemoryMode;
   readonly high: HighMemoryMode;
 }
+
+/** A search strategy file run by the serial reactor (strategy-worker.ts): the program, the file's name and bytes, and the argv's other options. */
+export interface StrategySearch {
+  readonly program: string;
+  readonly name: string;
+  readonly strategy: Uint8Array;
+  readonly options: readonly string[];
+}
+
+/** What the run of a strategy did: the file's kind, the argv, and SHA-256 and length of every stream, or the engine's error. */
+export interface StrategySearchResult {
+  readonly kind: string;
+  readonly argv: readonly string[];
+  readonly registerInputs?: boolean;
+  readonly queryRecords?: number;
+  readonly subjectRecords?: number;
+  readonly sha256?: Readonly<Record<number, string>>;
+  readonly bytes?: Readonly<Record<number, number>>;
+  readonly error?: string;
+}
+
+export type StrategySearchEvent =
+  | { readonly type: 'result'; readonly result: StrategySearchResult }
+  | { readonly type: 'error'; readonly message: string };

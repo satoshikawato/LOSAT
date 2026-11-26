@@ -1,0 +1,2 @@
+NCBI C++ Exception:
+    T0 "/opt/conda/conda-bld/blast_1787399212531/work/c++/src/objmgr/seq_vector_ci.cpp", line 548: Error: (CSeqVectorException::eCodingError) ncbi::objects::CSeqVector_CI::x_FillCache() - Incompatible sequence codings: 4 -> 8

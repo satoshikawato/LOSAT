@@ -1,0 +1,100 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: seg masks v5
+Masked using: 'seg', options: 'window=12; locut=2.2; hicut=2.5'
+           7 sequences; 1,720 total letters
+
+
+
+Query= lcl|Query_1 ovr_n1 override nucleotide
+
+Length=200
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p6 p1 homolog                                                         15.8    1.1  
+p5 random for hand masks                                              15.8    1.4  
+
+
+>p6 p1 homolog
+Length=300
+
+ Score = 15.8 bits (29),  Expect = 1.1, Method: Composition-based stats.
+ Identities = 3/9 (33%), Positives = 7/9 (78%), Gaps = 0/9 (0%)
+ Frame = -3
+
+Query  120  SHGPIPYFR  94
+            +H P+ Y++
+Sbjct  262  THCPVTYYK  270
+
+
+ Score = 14.2 bits (25),  Expect = 4.9, Method: Compositional matrix adjust.
+ Identities = 4/6 (67%), Positives = 4/6 (67%), Gaps = 0/6 (0%)
+ Frame = +3
+
+Query  93   PENTGW  110
+            P N GW
+Sbjct  31   PNNAGW  36
+
+
+>p5 random for hand masks
+Length=400
+
+ Score = 15.8 bits (29),  Expect = 1.4, Method: Composition-based stats.
+ Identities = 5/12 (42%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
+ Frame = +2
+
+Query  86   WTTRKYGMGPWL  121
+            W +  Y  GP+L
+Sbjct  231  WVSYIYSTGPYL  242
+
+
+ Score = 15.0 bits (27),  Expect = 2.2, Method: Composition-based stats.
+ Identities = 4/13 (31%), Positives = 7/13 (54%), Gaps = 0/13 (0%)
+ Frame = +1
+
+Query  136  ENYCWPANMSWKV  174
+            E++ W    SW +
+Sbjct  28   ESWVWAKLFSWYI  40
+
+
+ Score = 13.9 bits (24),  Expect = 5.4, Method: Composition-based stats.
+ Identities = 7/18 (39%), Positives = 9/18 (50%), Gaps = 0/18 (0%)
+ Frame = +1
+
+Query  70   VLRKVMDDPKIRDGPMAV  123
+            + R  + DP I    MAV
+Sbjct  40   IWRINLTDPHIHYEQMAV  57
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 63345
+
+
+  Database: seg masks v5
+  Masked using: 'seg', options: 'window=12; locut=2.2; hicut=2.5'
+    Posted date:  Nov 21, 2026  4:28 AM
+  Number of letters in database: 1,720
+  Number of sequences in database:  7
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

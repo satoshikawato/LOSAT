@@ -214,12 +214,19 @@ fn evalues_without_linking(
 }
 
 /// The first linking call of the subject's HSP list from its frame loop (`hits`): an empty list
-/// stays as it is; a list of the one-hit word finder (`window` 0) that holds an HSP of length 0 or
-/// less links with NCBI's `Int4` ends (`link_subject_hits_int4`), which keeps those HSPs; any
-/// other, and every list of a search without sum statistics, goes to `link_subject_hits`.
+/// stays as it is; a list of the one-hit word finder (`window` 0 or less) that holds an HSP of
+/// length 0 or less links with NCBI's `Int4` ends (`link_subject_hits_int4`), which keeps those
+/// HSPs; any other, and every list of a search without sum statistics, goes to `link_subject_hits`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-890 (cited at the call in
 /// `process_subject`).
+/// Whether the search uses NCBI's one-hit word finder (`window <= 0`, i.e. `-window_size 0` or a
+/// hand-edited strategy's negative `WindowSize`, blast_extend.c:137).
+#[inline]
+fn is_one_hit(window: i32) -> bool {
+    window <= 0
+}
+
 pub(super) fn first_link_subject_hits(
     link: &SubjectLinkArgs<'_>,
     hits: Vec<UngappedHit>,
@@ -227,7 +234,7 @@ pub(super) fn first_link_subject_hits(
 ) -> Vec<UngappedHit> {
     match link.linking_params {
         _ if hits.is_empty() => hits,
-        Some(linking_params) if window == 0 && holds_int4_inverted(&hits) => {
+        Some(linking_params) if is_one_hit(window) && holds_int4_inverted(&hits) => {
             link_subject_hits_int4(link, linking_params, hits)
         }
         _ => link_subject_hits(link, hits),
@@ -299,7 +306,7 @@ pub(super) struct SubjectStageArgs<'a> {
 }
 
 /// The first linking call's list sorted by score (when it is not; a list that was not linked,
-/// without sum statistics, keeps its order; a list of the one-hit word finder, `window` 0, with
+/// without sum statistics, keeps its order; a list of the one-hit word finder, `window <= 0`, with
 /// its ends read as NCBI's `Int4`), then reaped by the preliminary E-value, with its stage dumps
 /// and the `[DEBUG PRELIM_REAP]` line of LOSAT_DIAGNOSTICS.
 ///
@@ -341,7 +348,7 @@ pub(super) fn sort_and_reap_after_first_link(
     // `ScoreCompareHSPs` reads as `Int4` (`score_compare_ungapped_hits_int4`, the comparator of
     // that list's sort in the frame loop too); on ends of 0 or more the two comparators agree.
     if link.linking_params.is_some() {
-        if window == 0 {
+        if is_one_hit(window) {
             sort_ungapped_hits_by_score_int4(&mut prelinked_ungapped_hits);
         } else if !ungapped_hits_is_sorted_by_score_ncbi(&prelinked_ungapped_hits) {
             sort_ungapped_hits_by_score_ncbi(&mut prelinked_ungapped_hits);
@@ -383,9 +390,9 @@ pub(super) fn sort_and_reap_after_first_link(
     prelinked_ungapped_hits
 }
 
-/// The HSPs of length 0 or less of the one-hit word finder (`window` 0) removed from the subject's
-/// list (`hits`) before its re-evaluation, which deletes them in NCBI, with sum statistics or
-/// without.
+/// The HSPs of length 0 or less of the one-hit word finder (`window` 0 or less) removed from the
+/// subject's list (`hits`) before its re-evaluation, which deletes them in NCBI, with sum
+/// statistics or without.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:687,699 (in
 /// `Blast_HSPReevaluateWithAmbiguitiesUngapped`) and :452-453 (in `s_UpdateReevaluatedHSP`)
@@ -405,7 +412,7 @@ pub(super) fn sort_and_reap_after_first_link(
 /// HSP of length 1 or more.
 #[inline]
 pub(super) fn drop_unread_int4_inverted(window: i32, hits: &mut Vec<UngappedHit>) {
-    if window == 0 {
+    if is_one_hit(window) {
         hits.retain(|hit| !hit.is_int4_inverted());
     }
 }

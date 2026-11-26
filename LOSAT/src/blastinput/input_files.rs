@@ -319,6 +319,25 @@ fn inflate_to_temporary_file(
     Ok(temporary)
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:398-399,436-438
+/// The bytes `text` as an input file, positioned at its start: an unnamed temporary file
+/// (`unnamed_temporary_file`) in the directory of temporary files (NCBI's `CTmpFile`, whose
+/// file the run reads as its query), or the current directory where there is none (WASI).
+pub(crate) fn temporary_input(role: &str, text: &[u8]) -> std::io::Result<std::fs::File> {
+    use std::io::{Seek, Write};
+    let mut temporary = temporary_output(role)?;
+    temporary.write_all(text)?;
+    temporary.seek(std::io::SeekFrom::Start(0))?;
+    Ok(temporary)
+}
+
+/// An empty unnamed temporary file in the directory of [`temporary_input`], for a text that is
+/// written to it a part at a time.
+pub(crate) fn temporary_output(role: &str) -> std::io::Result<std::fs::File> {
+    let directory = temporary_directory().unwrap_or_else(|| std::path::PathBuf::from("."));
+    unnamed_temporary_file(&directory, role)
+}
+
 /// A new, empty file in `directory` that no name reaches: on Unix and WASI its name is removed
 /// as soon as it is open, on Windows it is hidden and deleted when its last handle closes
 /// (`FILE_FLAG_DELETE_ON_CLOSE`, shared for reading, writing and deletion so that `try_clone`

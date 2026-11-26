@@ -411,12 +411,13 @@ export async function retention(
   const input = (search: SearchCase, role: InputRole) => {
     const which = search[role];
     const parser = fastaParser(programById(search.program), role);
-    const key = JSON.stringify([which.url, which.name, parser]);
+    const parseDeflines = search.options.includes('-parse_deflines');
+    const key = JSON.stringify([which.url, which.name, parser, parseDeflines]);
     let cached = inputs.get(key);
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true });
+        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true, parseDeflines });
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       })();
@@ -499,12 +500,13 @@ export async function timed(list: readonly SearchCase[], options: TimedOptions =
   const input = (search: SearchCase, role: InputRole) => {
     const which = search[role];
     const parser = fastaParser(programById(search.program), role);
-    const key = JSON.stringify([which.url, which.name, parser]);
+    const parseDeflines = search.options.includes('-parse_deflines');
+    const key = JSON.stringify([which.url, which.name, parser, parseDeflines]);
     let cached = options.reindex === true ? undefined : inputs.get(key);
     if (cached === undefined) {
       cached = (async () => {
         const source = await data.addSource(await fetchFile(which));
-        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true });
+        const revision = await data.indexSource(source.sourceId, { program: search.program, role, dataLoaders: true, parseDeflines });
         const run = await data.buildRunInput([revision.revisionId]);
         return { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       })();
@@ -622,7 +624,7 @@ export async function databaseSearches(list: readonly DatabaseSearch[], picked?:
     try {
       const source = await data.addSource(await file(search.query));
       // The rows have no registry file: the query is read with the data loaders on, as the CLI reads it (ABI v2 §9).
-      const revision = await data.indexSource(source.sourceId, { program: search.program, role: 'query', dataLoaders: true });
+      const revision = await data.indexSource(source.sourceId, { program: search.program, role: 'query', dataLoaders: true, parseDeflines: search.argv.includes('-parse_deflines') });
       const run = await data.buildRunInput([revision.revisionId]);
       const query: EngineInput = { bytes: run.bytes, sha256: run.sha256, revisionIds: [revision.revisionId], records: run.records };
       const directory = await Promise.all(search.files.map(async (name) => ({ name, file: await file(name) })));

@@ -539,6 +539,7 @@ fn round_io(
 /// `Iteration` after them and writes its header with the first), whether its outfmt 0 report starts
 /// with the prolog (`prolog`), its round (`io`), and NCBI's scope at its prefetch
 /// (`prefetch_scope`).
+#[allow(clippy::too_many_arguments)]
 fn round_reports<'r>(
     reader_warnings: &'r [Vec<u8>],
     calls: usize,
@@ -546,6 +547,7 @@ fn round_reports<'r>(
     io: &'r PsiRoundIo,
     batches: &'r QueryBatches,
     query: usize,
+    searched_queries: &'r [FastaRecord],
     prefetch_scope: &'r (dyn Fn() -> crate::blastinput::query_batch::QueryScope + Sync),
 ) -> BlastpReports<'r> {
     BlastpReports {
@@ -562,6 +564,7 @@ fn round_reports<'r>(
             .query_scopes
             .as_ref()
             .map(|scopes| scopes.numbered_from(query)),
+        all_searched_queries: Some(searched_queries),
         prefetch_scope: Some(prefetch_scope),
         strategy_next: None,
         call_requests: None,
@@ -806,6 +809,7 @@ fn search_delta_batch(
                     &call.io,
                     batches,
                     query,
+                    searched_queries,
                     prefetch_scope,
                 ),
                 super::x_lookup_ahead::XAheadBlock::none(),
@@ -859,6 +863,7 @@ fn search_delta_batch(
                 &call.io,
                 batches,
                 call.query,
+                searched_queries,
                 prefetch_scope,
             ),
         );
@@ -897,6 +902,7 @@ fn search_delta_batch(
                 &call.io,
                 batches,
                 call.query,
+                searched_queries,
                 prefetch_scope,
             ),
         );
@@ -1225,6 +1231,7 @@ fn run_queries(
                                     &io,
                                     batches,
                                     query,
+                                    searched_queries,
                                     &prefetch_scope,
                                 ),
                                 super::x_lookup_ahead::XAheadBlock::none(),

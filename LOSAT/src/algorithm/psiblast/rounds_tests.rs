@@ -53,6 +53,50 @@ fn the_rounds_run_out_and_number_from_one() {
     assert!(state.has_converged(), "converged on the last allowed round");
 }
 
+// psiblast_app.cpp:296-310 (cited at `blastp::BlastpReport::resolve_subjects`): a round makes a
+// PSSM, which reads its subjects' letters from NCBI's scope, only where another round can follow
+// it or the last PSSM is saved (review 3 of line RG-KB item 12, F1).
+#[test]
+fn a_round_may_make_a_pssm_only_where_a_round_follows_or_the_last_is_saved() {
+    let io = |total: u32, done: u32, save_last: bool| {
+        let options = PsiblastPssmOptions {
+            rounds: Some(total),
+            save_pssm_after_last_round: save_last,
+            ..PsiblastPssmOptions::default()
+        };
+        let plan = PsiRoundPlan::of(&options, None).expect("rounds");
+        let mut state = IterationState::new(total);
+        for round in 0..done {
+            state.advance(set(&[round]));
+        }
+        PsiRoundIo {
+            state,
+            save_last: plan.save_last,
+            request: plan.request,
+            query_id: None,
+            silent: false,
+            extra_result: false,
+            pssm_letters: None,
+            first_round_ancillary: None,
+            outcome: std::sync::Mutex::new(None),
+        }
+    };
+    assert!(!io(1, 0, false).may_make_next(), "one round");
+    assert!(
+        io(1, 0, true).may_make_next(),
+        "one round whose PSSM is saved"
+    );
+    assert!(io(2, 0, false).may_make_next(), "round 1 of 2");
+    assert!(!io(2, 1, false).may_make_next(), "round 2 of 2");
+    assert!(io(0, 3, false).may_make_next(), "until convergence");
+    let mut extra = io(0, 0, true);
+    extra.extra_result = true;
+    assert!(
+        !extra.may_make_next(),
+        "deltablast extra result never builds a PSSM"
+    );
+}
+
 fn id(text: &str) -> SetKey {
     use crate::seqid::accguide::parse_flags::{ANY_LOCAL, PARTIAL_OK, RAW_TEXT};
     use crate::seqid::parse::parse_ids;

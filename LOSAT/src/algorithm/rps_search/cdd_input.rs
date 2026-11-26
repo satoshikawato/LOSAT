@@ -196,7 +196,7 @@ impl Hit {
         }
         new_segments.extend(slots.into_iter().flatten());
         // `compare_hitseg_range`: by the subject's start (Rust's stable sort keeps equal starts in
-        // intersection order; PD-LOSAT-NCBI-DEFECTS 1.121 / Owner Q-DL-SEGTIE=A, 2026-11-26).
+        // intersection order; PD-LOSAT-NCBI-DEFECTS 1.122 / Owner Q-DL-SEGTIE=A, 2026-11-26).
         new_segments.sort_by_key(|segment| segment.subject.from);
         self.segments = new_segments;
     }

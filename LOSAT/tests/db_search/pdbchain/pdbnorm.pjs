@@ -1,0 +1,21 @@
+{
+  "version": "1.2",
+  "dbname": "pdbnorm",
+  "dbtype": "Protein",
+  "db-version": 4,
+  "description": "pdbnorm",
+  "number-of-letters": 1320,
+  "number-of-sequences": 6,
+  "last-updated": "2026-11-24T05:35:00",
+  "number-of-volumes": 1,
+  "bytes-total": 2162,
+  "bytes-to-cache": 1447,
+  "files": [
+    "pdbnorm.phr",
+    "pdbnorm.pin",
+    "pdbnorm.pog",
+    "pdbnorm.psd",
+    "pdbnorm.psi",
+    "pdbnorm.psq"
+  ]
+}

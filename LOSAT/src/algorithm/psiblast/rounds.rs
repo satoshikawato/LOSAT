@@ -299,6 +299,17 @@ impl PsiRoundIo {
             .as_ref()
             .is_some_and(|outcome| outcome.next.is_some())
     }
+
+    // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:384-398,507-524
+    /// Whether the round can make a PSSM, whatever its inclusion set: another round can follow it
+    /// (`-num_iterations` 0, or a round before the last) or the last PSSM is saved, and the call
+    /// is not an extra result of a deltablast batch (`!extra_result`, whose results never build a
+    /// PSSM). Before the round's outcome (`makes_next`), a round that cannot reads no letter of
+    /// its subjects from NCBI's scope (`report::query_bioseq`).
+    pub(crate) fn may_make_next(&self) -> bool {
+        !self.extra_result
+            && (self.save_last || self.state.total == 0 || self.state.done + 1 < self.state.total)
+    }
 }
 
 /// The outcome of a round: whether it has alignments (`HasAlignments`), its inclusion set

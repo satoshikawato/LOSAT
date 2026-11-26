@@ -761,7 +761,13 @@ fn open_search_database(
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
-            .keeping_scope(keeps_scope, separate_xml2);
+            .keeping_scope(
+                keeps_scope,
+                separate_xml2,
+                crate::report::db_subject::FormatThrow::record_keeps_scope(
+                    outputs.formats.iter().map(|format| format.outfmt),
+                ),
+            );
             if !joins_scope {
                 return Ok(Some(database));
             }

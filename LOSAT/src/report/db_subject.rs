@@ -72,12 +72,6 @@ pub struct ParsedSubject {
     query_scope_keys: std::sync::OnceLock<QueryScopeKeys>,
     /// `skipped_id`, made at the first line that asks.
     skipped_id: std::sync::OnceLock<Vec<u8>>,
-    /// `blob_keys`, made at the first load that asks.
-    blob_keys: std::sync::OnceLock<std::sync::Arc<BlobKeys>>,
-    /// `id_keys`, made at the first load that asks.
-    id_keys: std::sync::OnceLock<IdKeys>,
-    /// `display_keys`, made at the first description line that asks.
-    display_keys: std::sync::OnceLock<Option<IdKeys>>,
 }
 
 /// The keys by which NCBI's scope finds a query for the Seq-align id of a reported database
@@ -260,52 +254,129 @@ fn handle_key(id: &ParsedSeqId) -> Option<HandleKey> {
     Some((u128::from(high.finish()) << 64) | u128::from(low.finish()))
 }
 
-/// The keys of the Seq-ids of one definition line, by which NCBI's places find a sequence
-/// ([`BlobKeys`]).
-#[derive(Debug, Default, PartialEq, Eq)]
-struct LineKeys {
-    /// The exact handles (`mask_handle_key`): the loader's `m_Ids`, the scope's exact match.
-    handles: Vec<HandleKey>,
-    /// `defline_set::scope_keys`: the scope takes such an id for an id of one of these keys.
-    scope: Vec<u64>,
-    /// `id_scope::kind_keys`: an id whose `id_scope::weak_keys` holds one of these matches such
-    /// an id weakly.
-    kinds: Vec<u64>,
-}
-
-impl LineKeys {
-    /// The keys of the Seq-ids `ids`.
-    fn of(ids: &[ParsedSeqId]) -> Self {
-        let mut keys = LineKeys::default();
-        for id in ids {
-            keys.handles.extend(handle_key(id));
-            crate::seqid::defline_set::scope_keys(id, &mut keys.scope);
-            crate::seqid::id_scope::kind_keys(id, &mut keys.kinds);
-        }
-        keys
-    }
-}
-
-/// The keys of a sequence with parsed Seq-ids that NCBI loads (`ParsedSubject::blob_keys`): of
-/// each definition line ([`LineKeys`]), and the line of its own Seq-align id (`target`, the line
-/// by which a load by that id makes its Bioseq). A sequence that NCBI's places give for a subject
-/// that is not the subject or the sequence that the subject's lookup gives (a copy of its record)
-/// is another sequence, also a copy of the record, which LOSAT refuses where a format reads it
-/// (`ParsedSubject::fetched`).
+/// The keys of a sequence with parsed Seq-ids that NCBI loads (`BlobKeys::of_deflines`): all exact
+/// handles of all definition lines flattened into one slice, plus flat per-line scope and weak
+/// keys for a holder loaded by `LoaderIds`, and the line of its own Seq-align id (`target`, the
+/// line by which a load by that id makes its Bioseq). A sequence that NCBI's places give for a
+/// subject that is not the subject or the sequence that the subject's lookup gives (a copy of its
+/// record) is another sequence, also a copy of the record, which LOSAT refuses where a format
+/// reads it (`ParsedSubject::fetched`).
 #[derive(Debug, PartialEq, Eq)]
 pub struct BlobKeys {
     sequence: Option<DbSequence>,
     target: usize,
-    lines: Vec<LineKeys>,
+    /// Exact handles (`mask_handle_key`) of every Seq-id of every definition line, flattened.
+    handles: Box<[HandleKey]>,
+    /// Line index for each entry in `handles`; empty when every line `0..handles.len()` holds
+    /// exactly one handle (the common case, where handle `i` belongs to line `i`).
+    handle_lines: Box<[u32]>,
+    /// Flattened `defline_set::scope_keys` per line, with end offsets in `scope_ends`.
+    scope: Box<[u64]>,
+    scope_ends: Box<[u32]>,
+    /// Flattened `id_scope::kind_keys` per line, with end offsets in `kinds_ends` (both empty when
+    /// no line has weak kind keys, such as PDB and GI records).
+    kinds: Box<[u64]>,
+    kinds_ends: Box<[u32]>,
 }
 
 impl BlobKeys {
+    /// Builds compact flat keys for `deflines` of `sequence`, targeting `target`.
+    fn of_deflines(sequence: Option<DbSequence>, target: usize, deflines: &[BlastDefline]) -> Self {
+        let mut handles = Vec::with_capacity(deflines.len());
+        let mut handle_lines = Vec::new();
+        let mut one_to_one = true;
+        let mut scope = Vec::with_capacity(deflines.len());
+        let mut scope_ends = Vec::with_capacity(deflines.len());
+        let mut kinds = Vec::new();
+        let mut kinds_ends = Vec::with_capacity(deflines.len());
+        for (line_idx, defline) in deflines.iter().enumerate() {
+            let start_h = handles.len();
+            for id in &defline.ids {
+                handles.extend(handle_key(id));
+                crate::seqid::defline_set::scope_keys(id, &mut scope);
+                crate::seqid::id_scope::kind_keys(id, &mut kinds);
+            }
+            let added_h = handles.len() - start_h;
+            if one_to_one && added_h != 1 {
+                one_to_one = false;
+                handle_lines.reserve(handles.len());
+                for prev in 0..line_idx {
+                    handle_lines.push(prev as u32);
+                }
+            }
+            if !one_to_one {
+                for _ in 0..added_h {
+                    handle_lines.push(line_idx as u32);
+                }
+            }
+            scope_ends.push(scope.len() as u32);
+            kinds_ends.push(kinds.len() as u32);
+        }
+        if kinds.is_empty() {
+            kinds_ends.clear();
+        }
+        BlobKeys {
+            sequence,
+            target,
+            handles: handles.into_boxed_slice(),
+            handle_lines: handle_lines.into_boxed_slice(),
+            scope: scope.into_boxed_slice(),
+            scope_ends: scope_ends.into_boxed_slice(),
+            kinds: kinds.into_boxed_slice(),
+            kinds_ends: kinds_ends.into_boxed_slice(),
+        }
+    }
+
+    /// All exact handles across every definition line, in order.
+    fn all_handles(&self) -> &[HandleKey] {
+        &self.handles
+    }
+
     /// The first line of this sequence that holds an id of the handle `handle`: the line of the
     /// Bioseq that a load by that handle makes (`GetBioseq` with that target).
     fn line_of(&self, handle: HandleKey) -> Option<usize> {
-        self.lines
-            .iter()
-            .position(|line| line.handles.contains(&handle))
+        let pos = self.handles.iter().position(|&h| h == handle)?;
+        Some(if self.handle_lines.is_empty() {
+            pos
+        } else {
+            self.handle_lines[pos] as usize
+        })
+    }
+
+    /// Exact handles of definition line `line`.
+    fn line_handles(&self, line: usize) -> &[HandleKey] {
+        if self.handle_lines.is_empty() {
+            return self.handles.get(line..line + 1).unwrap_or(&[]);
+        }
+        let target = line as u32;
+        let start = self.handle_lines.partition_point(|&l| l < target);
+        let end = self.handle_lines.partition_point(|&l| l <= target);
+        &self.handles[start..end]
+    }
+
+    /// `defline_set::scope_keys` of definition line `line`.
+    fn line_scope(&self, line: usize) -> &[u64] {
+        let Some(&end) = self.scope_ends.get(line) else {
+            return &[];
+        };
+        let start = line
+            .checked_sub(1)
+            .map_or(0, |prev| self.scope_ends[prev] as usize);
+        &self.scope[start..end as usize]
+    }
+
+    /// `id_scope::kind_keys` of definition line `line`.
+    fn line_kinds(&self, line: usize) -> &[u64] {
+        if self.kinds.is_empty() {
+            return &[];
+        }
+        let Some(&end) = self.kinds_ends.get(line) else {
+            return &[];
+        };
+        let start = line
+            .checked_sub(1)
+            .map_or(0, |prev| self.kinds_ends[prev] as usize);
+        &self.kinds[start..end as usize]
     }
 }
 
@@ -372,20 +443,26 @@ impl Registrant {
 // holder's, is NCBI's own record; `lru9x100`, 902, and `lru12x1`, 12, still the holder's).
 /// The loader's `m_Ids` as LOSAT knows it ([`ScopeWalk`], [`ScopeRecord`]): each handle's last
 /// registrant ([`Registrant`]) and the times of its last use, a range where LOSAT does not know
-/// when it was last used (`lo` the earliest, `hi` the latest; `lo` `None` where LOSAT does not
-/// know that the handle was ever added: a load that may not have happened). A handle is held
-/// ([`Held`]) where fewer than 1,000 others may have been used after its earliest last use, and
-/// gone where at least 1,000 others were used after its latest; in between LOSAT does not know.
-/// A handle that is surely gone is dropped (`gc`), so the map keeps about 2,000 handles at most
-/// besides those whose presence LOSAT does not know.
+/// when it was last used (`lo` the earliest, `hi` the latest; `lo == 0` where LOSAT does not know
+/// that the handle was ever added: a load that may not have happened). A handle is held ([`Held`])
+/// where fewer than 1,000 others may have been used after its earliest last use, and gone where at
+/// least 1,000 others were used after its latest; in between LOSAT does not know. Timestamp counts
+/// (`by_lo`, `by_hi`) store one entry per distinct timestamp rather than per handle, and `gc`
+/// drops handles that are surely gone.
 #[derive(Clone, Debug, Default)]
 struct LoaderIds {
-    entries: std::collections::HashMap<HandleKey, IdEntry>,
-    /// Each handle's earliest last use (`IdEntry::lo`), in order.
-    by_lo: std::collections::BTreeSet<(u64, HandleKey)>,
-    /// Each handle's latest last use (`IdEntry::hi`), in order.
-    by_hi: std::collections::BTreeSet<(u64, HandleKey)>,
-    /// The number of uses so far (each use takes the next time).
+    entries: rustc_hash::FxHashMap<HandleKey, IdEntry>,
+    /// Count of active entries with each earliest last-use time `lo > 0`.
+    by_lo: std::collections::BTreeMap<u64, u32>,
+    /// Count of active entries with each latest last-use time `hi > 0`.
+    by_hi: std::collections::BTreeMap<u64, u32>,
+    /// Count of active entries whose registrant is each sequence ordinal (so callers can drop
+    /// `BlobKeys` of evicted sequences in O(1)).
+    seq_counts: rustc_hash::FxHashMap<u32, u32>,
+    /// For handles with `!registrant.sure`, all sequences that may have registered the handle last
+    /// (for O(1) `ScopeRecord::registrants_of` without scanning earlier loads).
+    ambiguous: rustc_hash::FxHashMap<HandleKey, Vec<DbSequence>>,
+    /// The number of uses so far (each use takes the next time, starting at 1).
     clock: u64,
 }
 
@@ -393,7 +470,8 @@ struct LoaderIds {
 #[derive(Clone, Copy, Debug)]
 struct IdEntry {
     registrant: Registrant,
-    lo: Option<u64>,
+    /// `0` means `None` (maybe-only use); `>= 1` is `Some(lo)`.
+    lo: u64,
     hi: u64,
 }
 
@@ -411,60 +489,121 @@ enum Held {
 const LOADER_IDS: usize = 1000;
 
 impl LoaderIds {
+    /// Increments the count for timestamp `time` in `counts`.
+    #[inline]
+    fn inc_time(counts: &mut std::collections::BTreeMap<u64, u32>, time: u64) {
+        *counts.entry(time).or_insert(0) += 1;
+    }
+
+    /// Decrements the count for timestamp `time` in `counts`, removing it at zero.
+    #[inline]
+    fn dec_time(counts: &mut std::collections::BTreeMap<u64, u32>, time: u64) {
+        if let std::collections::btree_map::Entry::Occupied(mut e) = counts.entry(time) {
+            let c = e.get_mut();
+            *c -= 1;
+            if *c == 0 {
+                e.remove();
+            }
+        }
+    }
+
+    /// Increments the active handle count for sequence `ordinal`.
+    #[inline]
+    fn inc_seq(&mut self, ordinal: u32) {
+        *self.seq_counts.entry(ordinal).or_insert(0) += 1;
+    }
+
+    /// Decrements the active handle count for sequence `ordinal`, removing it at zero.
+    #[inline]
+    fn dec_seq(&mut self, ordinal: u32) {
+        if let std::collections::hash_map::Entry::Occupied(mut e) = self.seq_counts.entry(ordinal) {
+            let c = e.get_mut();
+            *c -= 1;
+            if *c == 0 {
+                e.remove();
+            }
+        }
+    }
+
+    /// Whether `m_Ids` still holds at least one entry registered to `ordinal`.
+    #[inline]
+    fn has_sequence(&self, ordinal: u32) -> bool {
+        self.seq_counts.contains_key(&ordinal)
+    }
+
+    /// Records `sequence` as a possible last registrant of an unsure `handle`.
+    fn push_ambiguous(&mut self, handle: HandleKey, sequence: DbSequence) {
+        let list = self.ambiguous.entry(handle).or_default();
+        if !list.contains(&sequence) {
+            list.push(sequence);
+        }
+    }
+
     /// Whether `m_Ids` holds `handle` now.
     fn held(&self, handle: HandleKey) -> Held {
         let Some(entry) = self.entries.get(&handle) else {
             return Held::Absent;
         };
-        if let Some(lo) = entry.lo {
-            // At most this many handles were used after its earliest last use.
-            let present = self.clock - lo < LOADER_IDS as u64
-                || self.used_after(&self.by_hi, lo, handle) < LOADER_IDS;
+        if entry.lo != 0 {
+            // At most `self.clock - entry.lo` handles were used after its earliest last use.
+            let present = self.clock - entry.lo < LOADER_IDS as u64 || {
+                let self_in_range = usize::from(entry.hi > entry.lo);
+                let limit = LOADER_IDS + self_in_range;
+                let mut total = 0usize;
+                for (_, &cnt) in self.by_hi.range((entry.lo + 1)..) {
+                    total += cnt as usize;
+                    if total >= limit {
+                        break;
+                    }
+                }
+                total.saturating_sub(self_in_range) < LOADER_IDS
+            };
             if present {
                 return Held::Present(entry.registrant);
             }
         }
-        if self.used_after(&self.by_lo, entry.hi, handle) >= LOADER_IDS {
-            return Held::Absent;
+        // Invariant: `entry.lo <= entry.hi`, so `handle` itself is never in `by_lo` past `entry.hi`.
+        let mut after_hi = 0usize;
+        for (_, &cnt) in self.by_lo.range((entry.hi + 1)..) {
+            after_hi += cnt as usize;
+            if after_hi >= LOADER_IDS {
+                return Held::Absent;
+            }
         }
         Held::Maybe(entry.registrant)
     }
 
-    /// The number of handles but `handle` of `times` (`by_lo` or `by_hi`) after the time `time`,
-    /// counted up to [`LOADER_IDS`].
-    fn used_after(
-        &self,
-        times: &std::collections::BTreeSet<(u64, HandleKey)>,
-        time: u64,
-        handle: HandleKey,
-    ) -> usize {
-        times
-            .range((time + 1, 0)..)
-            .filter(|&&(_, other)| other != handle)
-            .take(LOADER_IDS)
-            .count()
-    }
-
-    /// Moves `handle`'s times to `lo` and `hi`, with the registrant `registrant`.
-    fn set(&mut self, handle: HandleKey, registrant: Registrant, lo: Option<u64>, hi: u64) {
+    /// Moves `handle`'s times to `lo` (`0` for `None`) and `hi`, with the registrant `registrant`.
+    fn set(&mut self, handle: HandleKey, registrant: Registrant, lo: u64, hi: u64) {
+        let new_ord = registrant.sequence.ordinal();
         if let Some(old) = self.entries.insert(handle, IdEntry { registrant, lo, hi }) {
-            if let Some(lo) = old.lo {
-                self.by_lo.remove(&(lo, handle));
+            if old.lo != 0 {
+                Self::dec_time(&mut self.by_lo, old.lo);
             }
-            self.by_hi.remove(&(old.hi, handle));
+            Self::dec_time(&mut self.by_hi, old.hi);
+            let old_ord = old.registrant.sequence.ordinal();
+            if old_ord != new_ord {
+                self.dec_seq(old_ord);
+                self.inc_seq(new_ord);
+            }
+        } else {
+            self.inc_seq(new_ord);
         }
-        if let Some(lo) = lo {
-            self.by_lo.insert((lo, handle));
+        if lo != 0 {
+            Self::inc_time(&mut self.by_lo, lo);
         }
-        self.by_hi.insert((hi, handle));
+        Self::inc_time(&mut self.by_hi, hi);
+        if registrant.sure {
+            self.ambiguous.remove(&handle);
+        }
     }
 
     /// A use of `handle` now (a find that marks it used, or an insert of a new one) whose
-    /// registrant is `registrant`; then the eviction.
+    /// registrant is `registrant`; then amortized eviction.
     fn use_now(&mut self, handle: HandleKey, registrant: Registrant) {
         self.clock += 1;
-        self.set(handle, registrant, Some(self.clock), self.clock);
-        self.gc();
+        self.set(handle, registrant, self.clock, self.clock);
+        self.gc(false);
     }
 
     /// `RegisterIds` of a new blob of `sequence` whose lines hold the handles `handles`, in their
@@ -481,9 +620,10 @@ impl LoaderIds {
     /// another.
     fn maybe_use(&mut self, handle: HandleKey, registrant: Registrant) {
         self.clock += 1;
-        let (lo, registrant) = match self.entries.get(&handle) {
+        let (lo, old_seq, registrant) = match self.entries.get(&handle) {
             Some(entry) => (
                 entry.lo,
+                Some(entry.registrant.sequence),
                 Registrant {
                     sure: entry.registrant.sure
                         && registrant.sure
@@ -491,64 +631,142 @@ impl LoaderIds {
                     ..registrant
                 },
             ),
-            None => (None, registrant),
+            None => (0, None, registrant),
         };
         self.set(handle, registrant, lo, self.clock);
-        self.gc();
+        if !registrant.sure {
+            if let Some(old_seq) = old_seq {
+                self.push_ambiguous(handle, old_seq);
+            }
+            self.push_ambiguous(handle, registrant.sequence);
+        }
+        self.gc(false);
     }
 
-    /// Uses of `registered` (handles with their registrants) in an order that LOSAT does not
-    /// know, each surely made (a note of the run's record, a set; the ties of a prefetch): each
-    /// one's last use lies among them; a handle that several of them register is not sure.
-    fn use_unordered(&mut self, registered: &[(HandleKey, Registrant)]) {
+    /// Uses of pre-merged `merged` (handles with their registrants, plus optional extra sequences
+    /// where a handle had multiple registrants) in an order that LOSAT does not know, advancing
+    /// `clock` by `total_uses` (at least `merged.len()`).
+    fn use_unordered_map(
+        &mut self,
+        merged: rustc_hash::FxHashMap<HandleKey, Registrant>,
+        extra_ambiguous: rustc_hash::FxHashMap<HandleKey, Vec<DbSequence>>,
+        total_uses: u64,
+    ) {
+        if merged.is_empty() {
+            return;
+        }
         let start = self.clock + 1;
-        self.clock += registered.len() as u64;
-        let mut merged: std::collections::HashMap<HandleKey, Registrant> = Default::default();
+        self.clock += total_uses.max(merged.len() as u64);
+        let end = self.clock;
+        for (handle, registrant) in merged {
+            self.set(handle, registrant, start, end);
+        }
+        for (handle, seqs) in extra_ambiguous {
+            if self
+                .entries
+                .get(&handle)
+                .is_some_and(|e| !e.registrant.sure)
+            {
+                for seq in seqs {
+                    self.push_ambiguous(handle, seq);
+                }
+            }
+        }
+        self.gc(true);
+    }
+
+    /// Convenience wrapper over [`Self::use_unordered_map`] for unit tests.
+    #[cfg(test)]
+    fn use_unordered(&mut self, registered: &[(HandleKey, Registrant)]) {
+        let mut merged: rustc_hash::FxHashMap<HandleKey, Registrant> = Default::default();
+        let mut extra_ambiguous: rustc_hash::FxHashMap<HandleKey, Vec<DbSequence>> =
+            Default::default();
         for &(handle, registrant) in registered {
             merged
                 .entry(handle)
                 .and_modify(|existing| {
-                    existing.sure &= registrant.sure && existing.sequence == registrant.sequence;
+                    if !existing.sure
+                        || !registrant.sure
+                        || existing.sequence != registrant.sequence
+                    {
+                        existing.sure = false;
+                        let list = extra_ambiguous.entry(handle).or_default();
+                        if !list.contains(&existing.sequence) {
+                            list.push(existing.sequence);
+                        }
+                        if !list.contains(&registrant.sequence) {
+                            list.push(registrant.sequence);
+                        }
+                    }
                 })
                 .or_insert(registrant);
         }
-        for (handle, registrant) in merged {
-            self.set(handle, registrant, Some(start), self.clock);
-        }
-        self.gc();
+        self.use_unordered_map(merged, extra_ambiguous, registered.len() as u64);
     }
 
     // NCBI reference (598d8ae6): c++/include/util/limited_size_map.hpp:243-250 (`x_GC`)
     /// Drops the handles that are surely gone: those after whose latest last use at least 1,000
-    /// handles were surely used (the 1,000th latest earliest use is after it). Run where the map
-    /// holds twice its size, so each use costs a constant share.
-    fn gc(&mut self) {
-        if self.entries.len() <= 2 * LOADER_IDS {
-            return;
+    /// handles were surely used (the 1,000th latest earliest use is after it). When `force` is
+    /// false, runs only once at least `max(LOADER_IDS, entries.len() / 4)` handles are evictable
+    /// so every use pays O(1) amortized cost; when `force` is true (batch boundary), drops every
+    /// surely-evicted handle immediately. Returns whether any entry was removed.
+    fn gc(&mut self, force: bool) -> bool {
+        if !force && self.entries.len() <= 2 * LOADER_IDS {
+            return false;
         }
-        let Some(&(threshold, _)) = self.by_lo.iter().rev().nth(LOADER_IDS - 1) else {
-            return;
-        };
-        while let Some(&(hi, handle)) = self.by_hi.first() {
-            if hi >= threshold {
+        let mut seen = 0usize;
+        let mut threshold = None;
+        for (&lo, &cnt) in self.by_lo.iter().rev() {
+            seen += cnt as usize;
+            if seen >= LOADER_IDS {
+                threshold = Some(lo);
                 break;
             }
-            self.by_hi.pop_first();
-            if let Some(entry) = self.entries.remove(&handle) {
-                if let Some(lo) = entry.lo {
-                    self.by_lo.remove(&(lo, handle));
+        }
+        let Some(threshold) = threshold else {
+            return false;
+        };
+        let Some((&min_hi, _)) = self.by_hi.first_key_value() else {
+            return false;
+        };
+        if min_hi >= threshold {
+            return false;
+        }
+        let evictable: usize = self
+            .by_hi
+            .range(..threshold)
+            .map(|(_, &cnt)| cnt as usize)
+            .sum();
+        if evictable == 0 {
+            return false;
+        }
+        if !force && evictable < (self.entries.len() / 4).max(LOADER_IDS) {
+            return false;
+        }
+        let by_lo = &mut self.by_lo;
+        let by_hi = &mut self.by_hi;
+        let seq_counts = &mut self.seq_counts;
+        let ambiguous = &mut self.ambiguous;
+        self.entries.retain(|handle, entry| {
+            if entry.hi >= threshold {
+                return true;
+            }
+            if entry.lo != 0 {
+                Self::dec_time(by_lo, entry.lo);
+            }
+            Self::dec_time(by_hi, entry.hi);
+            let ord = entry.registrant.sequence.ordinal();
+            if let std::collections::hash_map::Entry::Occupied(mut e) = seq_counts.entry(ord) {
+                let c = e.get_mut();
+                *c -= 1;
+                if *c == 0 {
+                    e.remove();
                 }
             }
-        }
-    }
-
-    /// The handles used after the time `time`, with their registrants (the uses of a walk of one
-    /// tie, [`ScopeWalk::bulk_ties`]).
-    fn used_since(&self, time: u64) -> Vec<(HandleKey, Registrant)> {
-        self.by_hi
-            .range((time + 1, 0)..)
-            .map(|&(_, handle)| (handle, self.entries[&handle].registrant))
-            .collect()
+            ambiguous.remove(handle);
+            false
+        });
+        true
     }
 }
 
@@ -596,58 +814,161 @@ pub struct ShownInstead {
     pub by: ShownBy,
 }
 
+/// Inverted index built lazily for [`ScopePlaces`] only when `holders()` is actually queried
+/// (prefetch-off, failed prefetch, or pairwise display lookup): stays unallocated on prefetch-on
+/// tabular and XML runs.
+#[derive(Debug, Default)]
+struct ScopeIndex {
+    exact: rustc_hash::FxHashMap<HandleKey, Vec<u32>>,
+    taken: rustc_hash::FxHashMap<u64, Vec<u32>>,
+    kinds: rustc_hash::FxHashMap<u64, Vec<u32>>,
+}
+
+impl ScopeIndex {
+    /// Indexes load `at` with its line's `handles`, `scope`, and `kinds`.
+    fn add_load(&mut self, at: u32, handles: &[HandleKey], scope: &[u64], kinds: &[u64]) {
+        for &handle in handles {
+            self.exact.entry(handle).or_default().push(at);
+        }
+        for &key in scope {
+            self.taken.entry(key).or_default().push(at);
+        }
+        for &key in kinds {
+            self.kinds.entry(key).or_default().push(at);
+        }
+    }
+
+    /// Builds the inverted index from `places`'s flat arenas in one linear pass.
+    fn build(places: &ScopePlaces) -> Self {
+        let mut index = ScopeIndex::default();
+        let mut h_start = 0usize;
+        let mut s_start = 0usize;
+        let mut k_start = 0usize;
+        for at in 0..places.loads.len() {
+            let h_end = places.handle_ends[at] as usize;
+            let s_end = places.scope_ends[at] as usize;
+            let k_end = places.kinds_ends[at] as usize;
+            index.add_load(
+                at as u32,
+                &places.line_handles[h_start..h_end],
+                &places.line_scope[s_start..s_end],
+                &places.line_kinds[k_start..k_end],
+            );
+            h_start = h_end;
+            s_start = s_end;
+            k_start = k_end;
+        }
+        index
+    }
+}
+
 /// One scope's places ([`ScopeRecord`], [`ScopeWalk`]): the ids resolved (`m_Seq_idMap`) and
-/// the sequences loaded, in the order of their loads (`m_TSE_BySeqId`), with the keys of the line
-/// by which each was loaded, indexed by key.
-#[derive(Clone, Debug, Default)]
+/// the sequences loaded, in the order of their loads (`m_TSE_BySeqId`), with the keys of the one
+/// definition line by which each was loaded stored in flat arenas and indexed lazily on demand.
+#[derive(Debug, Default)]
 struct ScopePlaces {
-    cache: std::collections::HashMap<HandleKey, Resolved>,
-    /// The sequences loaded, in order, with their keys and the line of their load.
-    loads: Vec<(std::sync::Arc<BlobKeys>, usize)>,
-    exact: std::collections::HashMap<HandleKey, Vec<u32>>,
-    taken: std::collections::HashMap<u64, Vec<u32>>,
-    kinds: std::collections::HashMap<u64, Vec<u32>>,
+    cache: rustc_hash::FxHashMap<HandleKey, Resolved>,
+    /// The sequences loaded, in order (8 bytes per load).
+    loads: Vec<DbSequence>,
+    /// Flat arenas of the ONE loaded definition line per entry in `loads`.
+    line_handles: Vec<HandleKey>,
+    handle_ends: Vec<u32>,
+    line_scope: Vec<u64>,
+    scope_ends: Vec<u32>,
+    line_kinds: Vec<u64>,
+    kinds_ends: Vec<u32>,
+    /// Inverted index over `loads`, built only on the first `holders()` query.
+    index: std::sync::OnceLock<ScopeIndex>,
     /// The ranges of loads from a failed prefetch ([`ScopeWalk::failed_prefetch`]), whose
     /// occurrence and order among themselves LOSAT does not know.
     maybe: Vec<std::ops::Range<u32>>,
 }
 
+impl Clone for ScopePlaces {
+    fn clone(&self) -> Self {
+        ScopePlaces {
+            cache: self.cache.clone(),
+            loads: self.loads.clone(),
+            line_handles: self.line_handles.clone(),
+            handle_ends: self.handle_ends.clone(),
+            line_scope: self.line_scope.clone(),
+            scope_ends: self.scope_ends.clone(),
+            line_kinds: self.line_kinds.clone(),
+            kinds_ends: self.kinds_ends.clone(),
+            index: std::sync::OnceLock::new(),
+            maybe: self.maybe.clone(),
+        }
+    }
+}
+
 impl ScopePlaces {
-    /// Adds a load of `keys` by the line `line`.
-    fn add(&mut self, keys: &std::sync::Arc<BlobKeys>, line: usize) {
-        if keys.sequence.is_none() {
-            return;
-        }
+    /// Adds a load of `sequence` directly from the Seq-ids `ids` of its loaded definition line
+    /// (zero temporary heap allocations).
+    fn add_ids(&mut self, sequence: DbSequence, ids: &[ParsedSeqId]) {
         let at = u32::try_from(self.loads.len()).unwrap_or(u32::MAX);
-        let held = &keys.lines[line];
-        for &handle in &held.handles {
-            self.exact.entry(handle).or_default().push(at);
+        let h_start = self.line_handles.len();
+        let s_start = self.line_scope.len();
+        let k_start = self.line_kinds.len();
+        for id in ids {
+            self.line_handles.extend(handle_key(id));
+            crate::seqid::defline_set::scope_keys(id, &mut self.line_scope);
+            crate::seqid::id_scope::kind_keys(id, &mut self.line_kinds);
         }
-        for &key in &held.scope {
-            self.taken.entry(key).or_default().push(at);
+        self.handle_ends.push(self.line_handles.len() as u32);
+        self.scope_ends.push(self.line_scope.len() as u32);
+        self.kinds_ends.push(self.line_kinds.len() as u32);
+        self.loads.push(sequence);
+        if let Some(index) = self.index.get_mut() {
+            index.add_load(
+                at,
+                &self.line_handles[h_start..],
+                &self.line_scope[s_start..],
+                &self.line_kinds[k_start..],
+            );
         }
-        for &key in &held.kinds {
-            self.kinds.entry(key).or_default().push(at);
+    }
+
+    /// Adds a load of `keys` by the line `line`.
+    fn add_blob(&mut self, keys: &BlobKeys, line: usize) {
+        let Some(sequence) = keys.sequence else {
+            return;
+        };
+        let at = u32::try_from(self.loads.len()).unwrap_or(u32::MAX);
+        let handles = keys.line_handles(line);
+        let scope = keys.line_scope(line);
+        let kinds = keys.line_kinds(line);
+        self.line_handles.extend_from_slice(handles);
+        self.line_scope.extend_from_slice(scope);
+        self.line_kinds.extend_from_slice(kinds);
+        self.handle_ends.push(self.line_handles.len() as u32);
+        self.scope_ends.push(self.line_scope.len() as u32);
+        self.kinds_ends.push(self.line_kinds.len() as u32);
+        self.loads.push(sequence);
+        if let Some(index) = self.index.get_mut() {
+            index.add_load(at, handles, scope, kinds);
         }
-        self.loads.push((keys.clone(), line));
     }
 
     /// The loads whose line holds the id of `keys` exactly (`exact`), else by an id that the scope
     /// takes for it or matches weakly, in the order of the loads, each with how it holds it.
     fn holders(&self, keys: &IdKeys, exact: bool) -> Vec<(u32, ShownBy)> {
+        if self.loads.is_empty() {
+            return Vec::new();
+        }
+        let index = self.index.get_or_init(|| ScopeIndex::build(self));
         let mut found: Vec<(u32, ShownBy)> = Vec::new();
         if exact {
-            if let Some(at) = keys.handle.and_then(|handle| self.exact.get(&handle)) {
+            if let Some(at) = keys.handle.and_then(|handle| index.exact.get(&handle)) {
                 found.extend(at.iter().map(|&at| (at, ShownBy::Holder)));
             }
         } else {
             for key in &keys.scope {
-                if let Some(at) = self.taken.get(key) {
+                if let Some(at) = index.taken.get(key) {
                     found.extend(at.iter().map(|&at| (at, ShownBy::Holder)));
                 }
             }
             for key in &keys.weak {
-                if let Some(at) = self.kinds.get(key) {
+                if let Some(at) = index.kinds.get(key) {
                     found.extend(at.iter().map(|&at| (at, ShownBy::Weak)));
                 }
             }
@@ -686,19 +1007,6 @@ impl ScopePlaces {
     /// The sequence of the load `at`.
     fn sequence(&self, at: u32) -> DbSequence {
         self.loads[at as usize]
-            .0
-            .sequence
-            .expect("only sequences are added")
-    }
-
-    /// The keys of a load of the sequence `sequence` among the first `loads` loads, where this
-    /// scope holds one.
-    fn keys_of(&self, sequence: DbSequence, loads: u32) -> Option<std::sync::Arc<BlobKeys>> {
-        self.loads
-            .iter()
-            .take(loads as usize)
-            .find(|(keys, _)| keys.sequence == Some(sequence))
-            .map(|(keys, _)| keys.clone())
     }
 }
 
@@ -719,181 +1027,35 @@ impl ScopePlaces {
 /// with no more blob ids in the run, no blob is dropped and loaded again.
 const BLOBS_KEPT: usize = 10;
 
-/// A walk's scope in the run's record ([`ScopeRecord::scope`]): its loads and the notes that
-/// made them.
-#[derive(Clone, Debug)]
-struct RecordedScope {
-    loads: std::ops::Range<u32>,
-    notes: std::ops::Range<u32>,
-}
-
-/// What a run loaded before a walk of its reports' loads ([`LoadsBefore`], kept by
-/// `common::database::TaxdbRun::note_loaded`, the one producer), as one record that only grows,
-/// so that a walk reads it as it was at its start (`LoadsBefore`: the notes and loads before):
-/// the data loader's `m_Ids` ([`LoaderIds`], copied where it changes after a walk took it), the
-/// blob ids loaded (the OID and the requested handle, with the note of the first load: a blob
-/// loaded again registers nothing, `BLOBS_KEPT`), and every load in the order of the notes, by
-/// the line of its load, with the query batch of each note (the scope of the run where outfmt 5
-/// keeps one, `RunThrow::keeps_scope`; else the last recorded batch's, which psiblast's rounds of
-/// a query share). A note is a set: its loads use `m_Ids` in an order that LOSAT does not know
-/// (`LoaderIds::use_unordered`; where several of its sequences registered one handle, LOSAT does
-/// not know which came last, [`Registrant::sure`]).
-#[derive(Debug, Default)]
-pub struct ScopeRecord {
-    ids: std::sync::Arc<LoaderIds>,
-    /// The blob ids loaded (ordinal id, requested handle; 0 for none), with the first note of
-    /// each.
-    blob_ids: std::collections::HashMap<(u32, HandleKey), u32>,
-    /// The first note after which the run had loaded more than [`BLOBS_KEPT`] blob ids.
-    many_blobs: Option<u32>,
-    /// Every load of the notes with a batch, in order.
+/// One recorded scope (`ScopeRecord`'s latest batch, or the whole run when the run keeps one
+/// scope): its loads (`places`), Seq-align id resolutions (`by_id`), and unresolved handles
+/// (`unresolved`). Queries read only the entries from before a walk's snapshot `(notes, loads)`,
+/// without scanning or filtering unrelated batches.
+#[derive(Clone, Debug, Default)]
+struct RecordedBatchScope {
+    batch: usize,
     places: ScopePlaces,
-    /// The loads by the handle of the Seq-align id that each was loaded by (the scope's cache).
-    by_id: std::collections::HashMap<HandleKey, Vec<u32>>,
-    /// The first load and the first note of each batch, in order.
-    batches: Vec<(usize, u32, u32)>,
-    /// The handles of Seq-align ids that resolved to no Bioseq (the lookup gives no blob, and
-    /// no blob of the run may have registered the handle), each with its notes: the scope keeps
-    /// them unresolved ([`ScopeWalk::resolve`]).
-    unresolved: std::collections::HashMap<HandleKey, Vec<u32>>,
-    notes: u32,
+    /// By Seq-align id handle: `(load_index, sequence)` of each load in this scope.
+    by_id: rustc_hash::FxHashMap<HandleKey, Vec<(u32, DbSequence)>>,
+    /// Handles that resolved to no Bioseq in this scope, with the notes that recorded them.
+    unresolved: rustc_hash::FxHashMap<HandleKey, Vec<u32>>,
 }
 
-impl ScopeRecord {
-    /// Records the loads `loads` of the query batch `batch` (`None`: the loader's alone, as the
-    /// loads before a stop), each by the subject's own Seq-align id: its lookup in `m_Ids`, then
-    /// the blob that it gives ([`ParsedSubject::loaded_blob`]), whose lines register every
-    /// handle where its blob id is new (where it is not, and the run has more than
-    /// [`BLOBS_KEPT`] blob ids, they may register again), and its id resolves to it; an id whose
-    /// lookup gives no blob (none, or a record whose lines do not hold it) resolves to no Bioseq where no blob of the run may have registered its
-    /// handle (where one may have, the order of the note's loads decides, which LOSAT does not
-    /// know: a later read asks the loader).
-    pub fn note<'p>(
-        &mut self,
-        batch: Option<usize>,
-        subjects: impl IntoIterator<Item = &'p ParsedSubject>,
-    ) {
-        let mut loads: Vec<(&ParsedSubject, std::sync::Arc<BlobKeys>, usize)> = Vec::new();
-        let mut unresolved: Vec<HandleKey> = Vec::new();
-        for subject in subjects {
-            match subject.loaded_blob() {
-                Some((keys, line)) => loads.push((subject, keys, line)),
-                None if !matches!(
-                    subject.resolution.found,
-                    Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_))
-                ) =>
-                {
-                    unresolved.extend(subject.id_keys().handle);
-                }
-                None => {}
-            }
-        }
-        // Neither before the note nor after it may `m_Ids` hold the handle.
-        unresolved.retain(|&handle| self.ids.held(handle) == Held::Absent);
-        if loads.is_empty() && unresolved.is_empty() {
-            return;
-        }
-        let note = self.notes;
-        self.notes += 1;
-        let many = self.many_blobs.is_some();
-        let mut used: Vec<(HandleKey, Registrant)> = Vec::new();
-        let mut maybe: Vec<(HandleKey, Registrant)> = Vec::new();
-        for (subject, keys, _) in &loads {
-            let sequence = keys.sequence.expect("a loaded blob is a sequence");
-            let requested = subject.id_keys().handle;
-            used.extend(requested.map(|handle| (handle, Registrant::of(sequence))));
-            let lines = keys.lines.iter().flat_map(|line| &line.handles);
-            let id = (sequence.ordinal(), requested.unwrap_or(0));
-            if *self.blob_ids.entry(id).or_insert(note) == note {
-                used.extend(lines.map(|&handle| (handle, Registrant::of(sequence))));
-            } else if many {
-                maybe.extend(lines.map(|&handle| (handle, Registrant::of(sequence))));
-            }
-        }
-        let ids = std::sync::Arc::make_mut(&mut self.ids);
-        ids.use_unordered(&used);
-        for (handle, registrant) in maybe {
-            ids.maybe_use(handle, registrant);
-        }
-        if self.many_blobs.is_none() && self.blob_ids.len() > BLOBS_KEPT {
-            self.many_blobs = Some(note);
-        }
-        let Some(batch) = batch else {
-            return;
-        };
-        unresolved.retain(|&handle| self.ids.held(handle) == Held::Absent);
-        if loads.is_empty() && unresolved.is_empty() {
-            return;
-        }
-        let first = u32::try_from(self.places.loads.len()).unwrap_or(u32::MAX);
-        if self
-            .batches
-            .last()
-            .is_none_or(|&(last, _, _)| last != batch)
-        {
-            self.batches.push((batch, first, note));
-        }
-        for handle in unresolved {
-            self.unresolved.entry(handle).or_default().push(note);
-        }
-        for (subject, keys, line) in loads {
-            let at = u32::try_from(self.places.loads.len()).unwrap_or(u32::MAX);
-            self.places.add(&keys, line);
-            if let Some(id) = subject.id_keys().handle {
-                self.by_id.entry(id).or_default().push(at);
-            }
-        }
-    }
-
-    /// Whether the blob id `id` was loaded before the note `notes`.
-    fn loaded_before(&self, id: (u32, HandleKey), notes: u32) -> bool {
-        self.blob_ids.get(&id).is_some_and(|&note| note < notes)
-    }
-
-    /// The scope of the reports of the query batch `batch` (`None`: of the record's last batch)
-    /// in the record as it was at `(notes, loads)` ([`ScopeRecord::now`]): every note where the
-    /// run keeps one scope (`keeps_scope`), else those of the record's last batch where it is
-    /// `batch`.
-    fn scope(
-        &self,
-        batch: Option<usize>,
-        keeps_scope: bool,
-        (notes, loads): (u32, u32),
-    ) -> Option<RecordedScope> {
-        if keeps_scope {
-            return Some(RecordedScope {
-                loads: 0..loads,
-                notes: 0..notes,
-            });
-        }
-        let &(last, first, note) = self
-            .batches
-            .iter()
-            .rev()
-            .find(|&&(_, _, note)| note < notes)?;
-        batch
-            .is_none_or(|batch| batch == last)
-            .then_some(RecordedScope {
-                loads: first..loads,
-                notes: note..notes,
-            })
-    }
-
-    /// The scope's cache (`m_Seq_idMap`) of `handle` in the record's scope `scope`: the sequence
-    /// its loads gave, `Unknown` where they gave several (a note is a set), `Nothing` where it
-    /// resolved to no Bioseq (`unresolved`), and `Unknown` where both.
-    fn cached(&self, handle: HandleKey, scope: &RecordedScope) -> Option<Resolved> {
+impl RecordedBatchScope {
+    /// Step 1 (`m_Seq_idMap`) of `handle` among the first `loads` loads and `notes` notes of this
+    /// recorded scope.
+    fn cached(&self, handle: HandleKey, notes: u32, loads: u32) -> Option<Resolved> {
         let unresolved = self
             .unresolved
             .get(&handle)
-            .is_some_and(|notes| notes.iter().any(|note| scope.notes.contains(note)));
+            .is_some_and(|at| at.iter().any(|&note| note < notes));
         let mut found = self
             .by_id
             .get(&handle)
             .into_iter()
             .flatten()
-            .filter(|at| scope.loads.contains(at))
-            .map(|&at| self.places.sequence(at));
+            .filter(|&&(at, _)| at < loads)
+            .map(|&(_, sequence)| sequence);
         let Some(first) = found.next() else {
             return unresolved.then_some(Resolved::Nothing);
         };
@@ -904,20 +1066,13 @@ impl ScopeRecord {
         })
     }
 
-    /// The scope's index among the loads `range` ([`ScopeWalk::scope_match`]): one sequence where
-    /// every match is that sequence, else `Unknown` (a note is a set).
-    fn scope_match(
-        &self,
-        keys: &IdKeys,
-        exact: bool,
-        range: &std::ops::Range<u32>,
-    ) -> Option<Resolved> {
-        let found: Vec<(u32, ShownBy)> = self
-            .places
-            .holders(keys, exact)
-            .into_iter()
-            .filter(|(at, _)| range.contains(at))
-            .collect();
+    /// Step 2 (`m_TSE_BySeqId`) among the first `loads` loads of this recorded scope.
+    fn scope_match(&self, keys: &IdKeys, exact: bool, loads: u32) -> Option<Resolved> {
+        if loads == 0 {
+            return None;
+        }
+        let mut found: Vec<(u32, ShownBy)> = self.places.holders(keys, exact);
+        found.retain(|&(at, _)| at < loads);
         let &(first, by) = found.first()?;
         let sequence = self.places.sequence(first);
         Some(
@@ -931,18 +1086,221 @@ impl ScopeRecord {
             },
         )
     }
+}
+
+/// What a run loaded before a walk of its reports' loads ([`LoadsBefore`], kept by
+/// `common::database::TaxdbRun::note_loaded`, the one producer):
+/// - the data loader's `m_Ids` ([`LoaderIds`], copy-on-write via `Arc`);
+/// - the compact `BlobKeys` of sequences that `m_Ids` may still hold as registrants (plus kept
+///   scope sequences when the run keeps one scope, `keeps_scope != Some(false)`);
+/// - the blob ids loaded (ordinal id, requested handle, with the first note of each: a blob loaded
+///   again registers nothing while at most [`BLOBS_KEPT`] blob ids exist);
+/// - the current batch's scope (`current_batch`: dropped immediately on every new batch when
+///   `keeps_scope == Some(false)` so memory and lookup time stay bounded per batch), and the
+///   run-wide scope (`all_scope`: populated only when `keeps_scope != Some(false)`, i.e. outfmt 5
+///   or unknown, where lookups never filter out earlier batches).
+#[derive(Debug, Default)]
+pub struct ScopeRecord {
+    /// Whether the run keeps one scope across query batches (`Some(false)` for every format that
+    /// calls `ResetScopeHistory`, `Some(true)` for outfmt 5, `None` when unknown / tests).
+    keeps_scope: Option<bool>,
+    ids: std::sync::Arc<LoaderIds>,
+    /// Compact `BlobKeys` of sequences that `ids` may still hold (and, when `keeps_scope !=
+    /// Some(false)`, sequences of the kept scope for `relock`). Copy-on-write via `Arc` so
+    /// `LoadsBefore` reads it in O(1) without locking or scanning.
+    loader_blobs: std::sync::Arc<rustc_hash::FxHashMap<u32, std::sync::Arc<BlobKeys>>>,
+    /// The blob ids loaded (ordinal id, requested handle; 0 for none), with the first note of
+    /// each.
+    blob_ids: rustc_hash::FxHashMap<(u32, HandleKey), u32>,
+    /// The first note after which the run had loaded more than [`BLOBS_KEPT`] blob ids.
+    many_blobs: Option<u32>,
+    /// Latest batch's recorded scope (dropped on every new batch when `keeps_scope ==
+    /// Some(false)`, and snapshot-shared via `Arc` with `LoadsBefore`).
+    current_batch: Option<std::sync::Arc<RecordedBatchScope>>,
+    /// Run-wide recorded scope, kept only when `keeps_scope != Some(false)` (outfmt 5 or unknown).
+    all_scope: Option<RecordedBatchScope>,
+    notes: u32,
+    total_loads: u32,
+}
+
+impl ScopeRecord {
+    /// Records whether the run keeps one scope across batches (`Some(false)` drops earlier
+    /// batches' scope places on every new batch; `Some(true)` or `None` keeps run-wide scope).
+    pub fn set_keeps_scope(&mut self, keeps: Option<bool>) {
+        self.keeps_scope = keeps;
+    }
+
+    /// Records the loads `loads` of the query batch `batch` (`None`: the loader's alone, as the
+    /// loads before a stop), each by the subject's own Seq-align id: its lookup in `m_Ids`, then
+    /// the blob that it gives ([`ParsedSubject::loaded_blob`]), whose lines register every
+    /// handle where its blob id is new (where it is not, and the run has more than
+    /// [`BLOBS_KEPT`] blob ids, they may register again), and its id resolves to it; an id whose
+    /// lookup gives no blob (none, or a record whose lines do not hold it) resolves to no Bioseq
+    /// where no blob of the run may have registered its handle (where one may have, the order of
+    /// the note's loads decides, which LOSAT does not know: a later read asks the loader).
+    pub fn note<'p>(
+        &mut self,
+        batch: Option<usize>,
+        subjects: impl IntoIterator<Item = &'p ParsedSubject>,
+    ) {
+        let mut loads: Vec<(&ParsedSubject, LoadedBlobRef)> = Vec::new();
+        let mut unresolved: Vec<HandleKey> = Vec::new();
+        for subject in subjects {
+            match subject.loaded_blob_ref() {
+                Some(blob) => loads.push((subject, blob)),
+                None if !matches!(
+                    subject.resolution.found,
+                    Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_))
+                ) =>
+                {
+                    unresolved.extend(subject.id_handle());
+                }
+                None => {}
+            }
+        }
+        // Neither before the note nor after it may `m_Ids` hold the handle.
+        unresolved.retain(|&handle| self.ids.held(handle) == Held::Absent);
+        if loads.is_empty() && unresolved.is_empty() {
+            return;
+        }
+        let note = self.notes;
+        self.notes += 1;
+        let many = self.many_blobs.is_some();
+        let mut merged: rustc_hash::FxHashMap<HandleKey, Registrant> = Default::default();
+        let mut extra_ambiguous: rustc_hash::FxHashMap<HandleKey, Vec<DbSequence>> =
+            Default::default();
+        let mut total_uses = 0u64;
+        let mut maybe: Vec<(HandleKey, Registrant)> = Vec::new();
+        let mut record_use = |handle: HandleKey, registrant: Registrant| {
+            total_uses += 1;
+            merged
+                .entry(handle)
+                .and_modify(|existing| {
+                    if !existing.sure
+                        || !registrant.sure
+                        || existing.sequence != registrant.sequence
+                    {
+                        existing.sure = false;
+                        let list = extra_ambiguous.entry(handle).or_default();
+                        if !list.contains(&existing.sequence) {
+                            list.push(existing.sequence);
+                        }
+                        if !list.contains(&registrant.sequence) {
+                            list.push(registrant.sequence);
+                        }
+                    }
+                })
+                .or_insert(registrant);
+        };
+        for (subject, blob) in &loads {
+            let sequence = blob.sequence();
+            let requested = subject.id_handle();
+            if let Some(handle) = requested {
+                record_use(handle, Registrant::of(sequence));
+            }
+            let id = (sequence.ordinal(), requested.unwrap_or(0));
+            let is_new = *self.blob_ids.entry(id).or_insert(note) == note;
+            if is_new {
+                blob.for_each_handle(subject, |handle| {
+                    record_use(handle, Registrant::of(sequence));
+                });
+            } else if many {
+                blob.for_each_handle(subject, |handle| {
+                    maybe.push((handle, Registrant::of(sequence)));
+                });
+            }
+        }
+        let ids = std::sync::Arc::make_mut(&mut self.ids);
+        ids.use_unordered_map(merged, extra_ambiguous, total_uses);
+        for (handle, registrant) in maybe {
+            ids.maybe_use(handle, registrant);
+        }
+        ids.gc(true);
+        let keeps_all = self.keeps_scope != Some(false);
+        // Retain compact `BlobKeys` for sequences that `ids` may still hold (and, where the run
+        // keeps one scope, for `relock`).
+        let blobs = std::sync::Arc::make_mut(&mut self.loader_blobs);
+        if !keeps_all {
+            blobs.retain(|&ord, _| ids.has_sequence(ord));
+        }
+        for (subject, blob) in &loads {
+            let ord = blob.sequence().ordinal();
+            if keeps_all || ids.has_sequence(ord) {
+                blobs
+                    .entry(ord)
+                    .or_insert_with(|| blob.to_arc_blob_keys(subject));
+            }
+        }
+        if self.many_blobs.is_none() && self.blob_ids.len() > BLOBS_KEPT {
+            self.many_blobs = Some(note);
+        }
+        let Some(batch) = batch else {
+            return;
+        };
+        unresolved.retain(|&handle| self.ids.held(handle) == Held::Absent);
+        if loads.is_empty() && unresolved.is_empty() {
+            return;
+        }
+        self.total_loads = self.total_loads.saturating_add(loads.len() as u32);
+        // Update `current_batch` (dropping the previous batch whenever `batch` changes), unless
+        // `keeps_scope == Some(true)` (where only `all_scope` is ever read).
+        if self.keeps_scope != Some(true) {
+            if self
+                .current_batch
+                .as_ref()
+                .is_none_or(|current| current.batch != batch)
+            {
+                self.current_batch = Some(std::sync::Arc::new(RecordedBatchScope {
+                    batch,
+                    ..RecordedBatchScope::default()
+                }));
+            }
+            let current = std::sync::Arc::make_mut(
+                self.current_batch.as_mut().expect("current batch created"),
+            );
+            for &handle in &unresolved {
+                current.unresolved.entry(handle).or_default().push(note);
+            }
+            for (subject, blob) in &loads {
+                let at = u32::try_from(current.places.loads.len()).unwrap_or(u32::MAX);
+                blob.add_to_places(&mut current.places, subject);
+                if let Some(id) = subject.id_handle() {
+                    current
+                        .by_id
+                        .entry(id)
+                        .or_default()
+                        .push((at, blob.sequence()));
+                }
+            }
+        }
+        // Update `all_scope` only when the run may keep one scope across batches (outfmt 5 or
+        // unknown).
+        if keeps_all {
+            let all = self.all_scope.get_or_insert_with(Default::default);
+            for handle in unresolved {
+                all.unresolved.entry(handle).or_default().push(note);
+            }
+            for (subject, blob) in &loads {
+                let at = u32::try_from(all.places.loads.len()).unwrap_or(u32::MAX);
+                blob.add_to_places(&mut all.places, subject);
+                if let Some(id) = subject.id_handle() {
+                    all.by_id.entry(id).or_default().push((at, blob.sequence()));
+                }
+            }
+        }
+    }
+
+    /// Whether the blob id `id` was loaded before the note `notes`.
+    fn loaded_before(&self, id: (u32, HandleKey), notes: u32) -> bool {
+        self.blob_ids.get(&id).is_some_and(|&note| note < notes)
+    }
 
     /// The sequences that `m_Ids` as `ids` holds (a walk's start, [`LoadsBefore`]) may hold for
-    /// the handle of `subject`'s Seq-align id, among the first `loads` loads: the last registrant
-    /// where the handle may still be held, and where LOSAT does not know that it registered it
-    /// last, every one of those loads that holds the handle in a line.
-    fn registrants_of(
-        &self,
-        ids: &LoaderIds,
-        subject: &ParsedSubject,
-        loads: u32,
-    ) -> Vec<DbSequence> {
-        let Some(handle) = subject.id_keys().handle else {
+    /// the handle of `subject`'s Seq-align id: the last registrant where the handle may still be
+    /// held, and where LOSAT does not know that it registered it last, every sequence recorded in
+    /// `ids.ambiguous` for that handle (O(1), never scans earlier loads).
+    fn registrants_of(ids: &LoaderIds, subject: &ParsedSubject) -> Vec<DbSequence> {
+        let Some(handle) = subject.id_handle() else {
             return Vec::new();
         };
         let (Held::Present(last) | Held::Maybe(last)) = ids.held(handle) else {
@@ -951,17 +1309,7 @@ impl ScopeRecord {
         if last.sure {
             return vec![last.sequence];
         }
-        // A note whose several sequences registered it: each that holds the handle in a line.
-        let mut found: Vec<DbSequence> = self
-            .places
-            .loads
-            .iter()
-            .take(loads as usize)
-            .filter_map(|(keys, _)| {
-                let sequence = keys.sequence?;
-                keys.line_of(handle).map(|_| sequence)
-            })
-            .collect();
+        let mut found = ids.ambiguous.get(&handle).cloned().unwrap_or_default();
         found.push(last.sequence);
         found.sort_unstable_by_key(|sequence| sequence.ordinal());
         found.dedup();
@@ -989,10 +1337,7 @@ impl ScopeRecord {
 
     /// The number of notes and loads now: a walk's start ([`LoadsBefore`]).
     fn now(&self) -> (u32, u32) {
-        (
-            self.notes,
-            u32::try_from(self.places.loads.len()).unwrap_or(u32::MAX),
-        )
+        (self.notes, self.total_loads)
     }
 }
 
@@ -1012,10 +1357,17 @@ pub struct LoadsBefore {
     record: SharedRecord,
     notes: u32,
     loads: u32,
+    /// Number of loads in `ScopeRecord::all_scope` at this snapshot.
+    all_loads: u32,
     batch: Option<usize>,
     unrecorded: bool,
     /// The record's `m_Ids` as it was ([`ScopeRecord::ids`]).
     ids: std::sync::Arc<LoaderIds>,
+    /// The record's `loader_blobs` as it was ([`ScopeRecord::loader_blobs`]).
+    loader_blobs: std::sync::Arc<rustc_hash::FxHashMap<u32, std::sync::Arc<BlobKeys>>>,
+    /// Snapshot of the matching latest batch's scope (when `batch` is `None` or equals the
+    /// record's latest batch), with the number of loads in that batch at snapshot time.
+    batch_scope: Option<(std::sync::Arc<RecordedBatchScope>, u32)>,
     /// The number of blob ids that the record had loaded.
     blobs: usize,
 }
@@ -1031,13 +1383,27 @@ impl LoadsBefore {
     pub fn new(record: &SharedRecord, batch: Option<usize>, unrecorded: bool) -> Self {
         let read = record.read().expect("the run's record");
         let (notes, loads) = read.now();
+        let all_loads = read.all_scope.as_ref().map_or(0, |s| {
+            u32::try_from(s.places.loads.len()).unwrap_or(u32::MAX)
+        });
+        let batch_scope = read.current_batch.as_ref().and_then(|current| {
+            batch.is_none_or(|b| b == current.batch).then(|| {
+                (
+                    std::sync::Arc::clone(current),
+                    u32::try_from(current.places.loads.len()).unwrap_or(u32::MAX),
+                )
+            })
+        });
         LoadsBefore {
             record: record.clone(),
             notes,
             loads,
+            all_loads,
             batch,
             unrecorded,
             ids: read.ids.clone(),
+            loader_blobs: read.loader_blobs.clone(),
+            batch_scope,
             blobs: read.blob_ids.len(),
         }
     }
@@ -1066,7 +1432,7 @@ impl LoadsBefore {
     /// The sequences that the loader's record held for the handle of `subject`'s Seq-align id
     /// before these reports ([`ScopeRecord::registrants_of`]).
     pub fn registrants_of(&self, subject: &ParsedSubject) -> Vec<DbSequence> {
-        self.read(|record| record.registrants_of(&self.ids, subject, self.loads))
+        ScopeRecord::registrants_of(&self.ids, subject)
     }
 
     /// Whether the run had loaded the blob id `id` before these reports.
@@ -1087,6 +1453,103 @@ impl LoadsBefore {
     fn read<T>(&self, read: impl FnOnce(&ScopeRecord) -> T) -> T {
         read(&self.record.read().expect("the run's record"))
     }
+}
+
+/// Reference to the blob that a load of a [`ParsedSubject`] loads (step 4 of
+/// [`ScopeWalk::load`]), without allocating a `BlobKeys` when the blob is the subject's own
+/// `DeflineSet`.
+#[derive(Clone, Debug)]
+enum LoadedBlobRef {
+    Own {
+        sequence: DbSequence,
+        line: usize,
+    },
+    External {
+        blob: std::sync::Arc<BlobKeys>,
+        sequence: DbSequence,
+        line: usize,
+    },
+}
+
+impl LoadedBlobRef {
+    #[inline]
+    fn sequence(&self) -> DbSequence {
+        match self {
+            LoadedBlobRef::Own { sequence, .. } | LoadedBlobRef::External { sequence, .. } => {
+                *sequence
+            }
+        }
+    }
+
+    #[inline]
+    fn line(&self) -> usize {
+        match self {
+            LoadedBlobRef::Own { line, .. } | LoadedBlobRef::External { line, .. } => *line,
+        }
+    }
+
+    fn for_each_handle(&self, subject: &ParsedSubject, mut f: impl FnMut(HandleKey)) {
+        match self {
+            LoadedBlobRef::Own { .. } => {
+                for handle in subject.line_handles() {
+                    f(handle);
+                }
+            }
+            LoadedBlobRef::External { blob, .. } => {
+                for &handle in blob.all_handles() {
+                    f(handle);
+                }
+            }
+        }
+    }
+
+    fn add_to_places(&self, places: &mut ScopePlaces, subject: &ParsedSubject) {
+        match self {
+            LoadedBlobRef::Own { sequence, line } => {
+                places.add_ids(*sequence, &subject.set.deflines[*line].ids);
+            }
+            LoadedBlobRef::External { blob, line, .. } => {
+                places.add_blob(blob, *line);
+            }
+        }
+    }
+
+    fn to_arc_blob_keys(&self, subject: &ParsedSubject) -> std::sync::Arc<BlobKeys> {
+        match self {
+            LoadedBlobRef::Own { sequence, .. } => subject.blob_keys_as(*sequence),
+            LoadedBlobRef::External { blob, .. } => blob.clone(),
+        }
+    }
+}
+
+/// How a single tie item in [`ScopeWalk::bulk_ties`] registers its blob's handles.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TieRegister {
+    None,
+    Definite,
+    Maybe,
+}
+
+/// What resolving one tie item alone against an immutable `&ScopeWalk` would load.
+struct AloneBlobLoad {
+    sequence: DbSequence,
+    line: usize,
+    new_blob_id: Option<(u32, HandleKey)>,
+    register: TieRegister,
+    /// `None` when the blob's handles and loaded line come directly from the item's `ParsedSubject`.
+    external: Option<std::sync::Arc<BlobKeys>>,
+    /// `Some(handles)` only for a `relock` on a foreign sequence whose handles came from
+    /// `scope_handles` (no `BlobKeys` needed, `add_to_scope` is false).
+    relock_handles: Option<Box<[HandleKey]>>,
+    add_to_scope: bool,
+}
+
+/// Outcome of resolving one tie item alone against an immutable `&ScopeWalk`.
+struct AloneResult {
+    resolved: Option<Resolved>,
+    /// `(handle, registrant, maybe)` for the item's own handle use before `load_blob`.
+    requested_use: Option<(HandleKey, Registrant, bool)>,
+    blob_load: Option<AloneBlobLoad>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:1769-1810, 2195-2230
@@ -1127,13 +1590,17 @@ pub struct ScopeWalk {
     /// The blob ids (ordinal id, requested handle; 0 for none) that the walk loaded, and those
     /// that a failed prefetch may have loaded (`maybe_blobs`): a blob loaded before registers
     /// nothing again ([`ScopeWalk::load_blob`]).
-    blob_ids: std::collections::HashSet<(u32, HandleKey)>,
-    maybe_blobs: std::collections::HashSet<(u32, HandleKey)>,
+    blob_ids: rustc_hash::FxHashSet<(u32, HandleKey)>,
+    maybe_blobs: rustc_hash::FxHashSet<(u32, HandleKey)>,
     /// The walk's own places of the current scope.
     scope: ScopePlaces,
-    /// The keys of every blob that the walk loaded, by ordinal id, for the run (a holder that the
-    /// loader gives in a later batch is loaded again by them, `held_blob`).
-    blobs: std::collections::HashMap<u32, std::sync::Arc<BlobKeys>>,
+    /// Compact `BlobKeys` of sequences that `self.ids` may still hold (pruned when evicted from
+    /// `self.ids`), so `held_blob` and `first_blob` can load a holder by any of its lines.
+    blobs: rustc_hash::FxHashMap<u32, std::sync::Arc<BlobKeys>>,
+    /// Flat handles of sequences loaded in the current scope (cleared on `enter` when
+    /// `!keeps_scope`), used only if `relock` needs a foreign holder whose handles were already
+    /// evicted from `self.ids`.
+    scope_handles: rustc_hash::FxHashMap<u32, Box<[HandleKey]>>,
     /// The query batch of the current scope (`None`: none named yet).
     batch: Option<usize>,
     /// Whether the current scope began in the record (`before.batch`'s scope).
@@ -1159,6 +1626,7 @@ impl ScopeWalk {
             maybe_blobs: Default::default(),
             scope: ScopePlaces::default(),
             blobs: Default::default(),
+            scope_handles: Default::default(),
             batch,
             in_record: true,
             keeps_scope: keeps_scope.unwrap_or(false),
@@ -1178,21 +1646,17 @@ impl ScopeWalk {
         };
         if self.batch.is_some_and(|current| current != batch) && !self.keeps_scope {
             self.scope = ScopePlaces::default();
+            self.scope_handles.clear();
             self.in_record = false;
+            self.prune_blobs();
         }
         self.batch = Some(batch);
     }
 
-    /// The record's loads of the current scope ([`ScopeRecord::scope`]): every recorded load
-    /// where the run keeps one scope, the record's last batch's where the current scope is that
-    /// batch's (or names no batch).
-    fn recorded_scope(&self) -> Option<RecordedScope> {
-        if !self.keeps_scope && !self.in_record {
-            return None;
-        }
-        let now = (self.before.notes, self.before.loads);
-        self.before
-            .read(|record| record.scope(self.batch, self.keeps_scope, now))
+    /// Drops cached `BlobKeys` for sequences no longer held by `self.ids`.
+    fn prune_blobs(&mut self) {
+        let ids = &self.ids;
+        self.blobs.retain(|&ord, _| ids.has_sequence(ord));
     }
 
     /// Step 1: the cache of the current scope.
@@ -1200,8 +1664,27 @@ impl ScopeWalk {
         if let Some(&resolved) = self.scope.cache.get(&handle) {
             return Some(resolved);
         }
-        let scope = self.recorded_scope()?;
-        self.before.read(|record| record.cached(handle, &scope))
+        if self.keeps_scope {
+            if self.before.all_loads == 0 && self.before.notes == 0 {
+                return None;
+            }
+            let notes = self.before.notes;
+            let all_loads = self.before.all_loads;
+            return self.before.read(|record| {
+                record
+                    .all_scope
+                    .as_ref()
+                    .and_then(|scope| scope.cached(handle, notes, all_loads))
+            });
+        }
+        if !self.in_record {
+            return None;
+        }
+        let (batch_scope, loads) = self.before.batch_scope.as_ref()?;
+        if self.batch.is_some_and(|b| b != batch_scope.batch) {
+            return None;
+        }
+        batch_scope.cached(handle, self.before.notes, *loads)
     }
 
     /// Whether the run has loaded more than [`BLOBS_KEPT`] blob ids, so that NCBI may have dropped
@@ -1271,15 +1754,74 @@ impl ScopeWalk {
     /// One pass of [`ScopeWalk::scope_match`] (`exact` or weak/taken), returning whether a
     /// matching load is definite.
     fn scope_match_pass(&self, keys: &IdKeys, exact: bool) -> Option<(Resolved, bool)> {
-        if let Some(scope) = self.recorded_scope() {
-            let found = self
-                .before
-                .read(|record| record.scope_match(keys, exact, &scope.loads));
-            if let Some(found) = found {
-                return Some((found, true));
-            }
+        let recorded = if self.keeps_scope {
+            let all_loads = self.before.all_loads;
+            (all_loads > 0).then(|| {
+                self.before.read(|record| {
+                    record
+                        .all_scope
+                        .as_ref()
+                        .and_then(|scope| scope.scope_match(keys, exact, all_loads))
+                })
+            })
+        } else if self.in_record {
+            self.before
+                .batch_scope
+                .as_ref()
+                .filter(|(scope, _)| self.batch.is_none_or(|b| b == scope.batch))
+                .map(|(scope, loads)| scope.scope_match(keys, exact, *loads))
+        } else {
+            None
+        }
+        .flatten();
+        if let Some(found) = recorded {
+            return Some((found, true));
         }
         self.scope.first_of(&self.scope.holders(keys, exact))
+    }
+
+    /// Loads `subject`'s own blob (as `sequence`) by `line` and `requested`: registers its handles
+    /// directly from `subject.set.deflines` without allocating a `BlobKeys` unless `self.ids`
+    /// retains `sequence`.
+    fn load_subject_blob(
+        &mut self,
+        subject: &ParsedSubject,
+        sequence: DbSequence,
+        line: usize,
+        requested: Option<HandleKey>,
+    ) {
+        let ord = sequence.ordinal();
+        let id = (ord, requested.unwrap_or(0));
+        if self.loaded_before(id) {
+            if self.many_blobs() {
+                for handle in subject.line_handles() {
+                    self.ids.maybe_use(handle, Registrant::of(sequence));
+                }
+            }
+        } else if self.maybe_blobs.remove(&id) {
+            for handle in subject.line_handles() {
+                self.ids.maybe_use(handle, Registrant::of(sequence));
+            }
+            self.blob_ids.insert(id);
+        } else {
+            self.ids.register(subject.line_handles(), sequence);
+            self.blob_ids.insert(id);
+        }
+        self.scope
+            .add_ids(sequence, &subject.set.deflines[line].ids);
+        if self.ids.has_sequence(ord) {
+            self.blobs
+                .entry(ord)
+                .or_insert_with(|| subject.blob_keys_as(sequence));
+        } else if !self.blobs.contains_key(&ord) {
+            self.scope_handles.entry(ord).or_insert_with(|| {
+                let handles: Vec<HandleKey> = subject.line_handles().collect();
+                handles.into_boxed_slice()
+            });
+        }
+        if self.blobs.len() > self.ids.seq_counts.len() * 2 + 64 {
+            self.prune_blobs();
+        }
     }
 
     /// The blob of `keys` loaded by the requested handle `requested` (its blob id): where it is
@@ -1296,14 +1838,8 @@ impl ScopeWalk {
         let Some(sequence) = keys.sequence else {
             return;
         };
-        self.blobs
-            .entry(sequence.ordinal())
-            .or_insert_with(|| keys.clone());
-        let id = (sequence.ordinal(), requested.unwrap_or(0));
-        let handles = keys
-            .lines
-            .iter()
-            .flat_map(|line| line.handles.iter().copied());
+        let ord = sequence.ordinal();
+        let id = (ord, requested.unwrap_or(0));
         if self.loaded_before(id) {
             if self.many_blobs() {
                 self.maybe_register(keys);
@@ -1312,10 +1848,21 @@ impl ScopeWalk {
             self.maybe_register(keys);
             self.blob_ids.insert(id);
         } else {
-            self.ids.register(handles, sequence);
+            self.ids
+                .register(keys.all_handles().iter().copied(), sequence);
             self.blob_ids.insert(id);
         }
-        self.scope.add(keys, line);
+        self.scope.add_blob(keys, line);
+        if self.ids.has_sequence(ord) {
+            self.blobs.entry(ord).or_insert_with(|| keys.clone());
+        } else {
+            self.scope_handles
+                .entry(ord)
+                .or_insert_with(|| keys.all_handles().to_vec().into_boxed_slice());
+        }
+        if self.blobs.len() > self.ids.seq_counts.len() * 2 + 64 {
+            self.prune_blobs();
+        }
     }
 
     /// A `RegisterIds` of the blob of `keys` that may run (a blob that NCBI may have dropped and
@@ -1324,46 +1871,36 @@ impl ScopeWalk {
         let Some(sequence) = keys.sequence else {
             return;
         };
-        for &handle in keys.lines.iter().flat_map(|line| &line.handles) {
+        for &handle in keys.all_handles() {
             self.ids.maybe_use(handle, Registrant::of(sequence));
         }
     }
 
     /// Where NCBI may have dropped the blob of `sequence` (more than [`BLOBS_KEPT`] blob ids in
     /// the run), a read that the scope answers with it may load it again, which registers its
-    /// lines ([`LoaderIds::maybe_use`]).
-    fn relock(&mut self, resolved: Option<Resolved>) {
+    /// lines ([`LoaderIds::maybe_use`]). When `subject.mine(sequence)`, reads `subject` directly
+    /// with zero lookup or allocation.
+    fn relock(&mut self, subject: &ParsedSubject, resolved: Option<Resolved>) {
         let Some(Resolved::Blob(sequence, _) | Resolved::Unknown(Some(sequence), _)) = resolved
         else {
             return;
         };
-        if self.many_blobs() {
-            if let Some(keys) = self.blob_of(sequence) {
-                self.maybe_register(&keys);
+        if !self.many_blobs() {
+            return;
+        }
+        if subject.mine(sequence) {
+            for handle in subject.line_handles() {
+                self.ids.maybe_use(handle, Registrant::of(sequence));
+            }
+            return;
+        }
+        if let Some(keys) = self.blob_of(sequence) {
+            self.maybe_register(&keys);
+        } else if let Some(handles) = self.scope_handles.get(&sequence.ordinal()).cloned() {
+            for &handle in &handles {
+                self.ids.maybe_use(handle, Registrant::of(sequence));
             }
         }
-    }
-
-    /// The blob keys of `subject` as the sequence `sequence` (its own, or a copy of its record that
-    /// the lookup gives, whose definition lines hold the same ids).
-    fn keys_as(subject: &ParsedSubject, sequence: DbSequence) -> std::sync::Arc<BlobKeys> {
-        let own = subject.blob_keys();
-        if own.sequence == Some(sequence) {
-            return own;
-        }
-        std::sync::Arc::new(BlobKeys {
-            sequence: Some(sequence),
-            target: own.target,
-            lines: own
-                .lines
-                .iter()
-                .map(|line| LineKeys {
-                    handles: line.handles.clone(),
-                    scope: line.scope.clone(),
-                    kinds: line.kinds.clone(),
-                })
-                .collect(),
-        })
     }
 
     /// Steps 3 and 4 of a load of `subject` (also the prefetch's, which skips step 2): the
@@ -1373,8 +1910,8 @@ impl ScopeWalk {
     /// ([`ScopeResolution`]): its blob, which registers its lines, a failure (`Throws`), or
     /// nothing (no blob: the lookup gives none, or another record, whose refusal is the
     /// lookup's, `FoundInstead`).
-    fn loader(&mut self, subject: &ParsedSubject, keys: &IdKeys) -> Option<Resolved> {
-        if let Some(handle) = keys.handle {
+    fn loader(&mut self, subject: &ParsedSubject, handle: Option<HandleKey>) -> Option<Resolved> {
+        if let Some(handle) = handle {
             let registrant = match self.ids.held(handle) {
                 Held::Present(registrant) => Some(registrant),
                 // Where LOSAT does not know whether `m_Ids` still holds the handle, the lookup
@@ -1404,10 +1941,9 @@ impl ScopeWalk {
                     // scope by the line of the handle, where a later load finds it (review 4 of
                     // line DBID pfoff-4, `pq.zr1.V.U1.b1.0`: a description's load, then a failing
                     // lookup's alignment that this Bioseq holds weakly); it registers its lines
-                    // only where its blob id is new (`load_blob`).
-                    let keys = Self::keys_as(subject, registrant.sequence);
-                    let line = keys.line_of(handle).unwrap_or(keys.target);
-                    self.load_blob(&keys, line, Some(handle));
+                    // only where its blob id is new (`load_subject_blob`).
+                    let line = subject.line_of_handle(handle).unwrap_or(subject.target);
+                    self.load_subject_blob(subject, registrant.sequence, line, Some(handle));
                 } else {
                     self.held_blob(registrant.sequence, handle);
                 }
@@ -1425,13 +1961,20 @@ impl ScopeWalk {
         ) {
             return Some(Resolved::Throws);
         }
-        let (blob, line) = subject.loaded_blob()?;
-        let sequence = blob.sequence?;
+        let blob = subject.loaded_blob_ref()?;
+        let sequence = blob.sequence();
         // The lookup adds the handle with the sequence it gives.
-        if let Some(handle) = keys.handle {
+        if let Some(handle) = handle {
             self.ids.use_now(handle, Registrant::of(sequence));
         }
-        self.load_blob(&blob, line, keys.handle);
+        match blob {
+            LoadedBlobRef::Own { sequence, line } => {
+                self.load_subject_blob(subject, sequence, line, handle);
+            }
+            LoadedBlobRef::External { blob, line, .. } => {
+                self.load_blob(&blob, line, handle);
+            }
+        }
         Some(Resolved::Blob(sequence, ShownBy::Holder))
     }
 
@@ -1448,7 +1991,7 @@ impl ScopeWalk {
         ) {
             return None;
         }
-        subject.loaded_blob()?.0.sequence
+        subject.loaded_blob_ref().map(|blob| blob.sequence())
     }
 
     /// Where step 3 gave another sequence, `holder`, for the handle `handle`: its new blob (by
@@ -1506,7 +2049,7 @@ impl ScopeWalk {
         let handle = keys.handle?;
         let resolved = self
             .cached(handle)
-            .or_else(|| self.scope_match(keys).map(|(resolved, _)| resolved))
+            .or_else(|| self.scope_match(&keys).map(|(resolved, _)| resolved))
             .or_else(|| self.registered_place(handle))?;
         self.scope.cache.insert(handle, resolved);
         match Self::answer(subject, Some(resolved)) {
@@ -1536,46 +2079,53 @@ impl ScopeWalk {
     /// [`ScopeWalk::load`]'s resolution; `scope`: whether the scope's index answers (a report's
     /// load, not the prefetch's).
     fn resolve(&mut self, subject: &ParsedSubject, scope: bool) -> Option<Resolved> {
-        let keys = subject.id_keys();
-        if let Some(handle) = keys.handle {
+        let handle = subject.id_handle();
+        if let Some(handle) = handle {
             if let Some(resolved) = self.cached(handle) {
                 if resolved == Resolved::Nothing {
                     return None;
                 }
-                self.relock(Some(resolved));
+                self.relock(subject, Some(resolved));
                 return Some(resolved);
             }
         }
-        let resolved = match scope.then(|| self.scope_match(keys)).flatten() {
-            Some((resolved, true)) => {
-                self.relock(Some(resolved));
-                Some(resolved)
-            }
-            Some((resolved, false)) => {
-                // Only a failed prefetch's load (`ScopePlaces::maybe`) matched in the scope:
-                // where that blob was loaded before the failure, the scope gives `resolved`;
-                // where it was not, the read misses the scope and reaches the loader.
-                match resolved {
-                    Resolved::Blob(sequence, _) if subject.mine(sequence) => {
-                        match self.resolve_after_scope(subject, keys, scope) {
-                            Some(Resolved::Blob(other, _)) if other == sequence => Some(resolved),
-                            other => {
-                                let (holder, by) = match other {
-                                    Some(Resolved::Blob(holder, by)) => (Some(holder), by),
-                                    Some(Resolved::Unknown(holder, by)) => (holder, by),
-                                    _ => (Some(sequence), ShownBy::Order),
-                                };
-                                Some(Resolved::Unknown(holder, by))
+        let resolved = if scope {
+            let keys = subject.id_keys();
+            match self.scope_match(&keys) {
+                Some((resolved, true)) => {
+                    self.relock(subject, Some(resolved));
+                    Some(resolved)
+                }
+                Some((resolved, false)) => {
+                    // Only a failed prefetch's load (`ScopePlaces::maybe`) matched in the scope:
+                    // where that blob was loaded before the failure, the scope gives `resolved`;
+                    // where it was not, the read misses the scope and reaches the loader.
+                    match resolved {
+                        Resolved::Blob(sequence, _) if subject.mine(sequence) => {
+                            match self.resolve_after_scope(subject, handle, true) {
+                                Some(Resolved::Blob(other, _)) if other == sequence => {
+                                    Some(resolved)
+                                }
+                                other => {
+                                    let (holder, by) = match other {
+                                        Some(Resolved::Blob(holder, by)) => (Some(holder), by),
+                                        Some(Resolved::Unknown(holder, by)) => (holder, by),
+                                        _ => (Some(sequence), ShownBy::Order),
+                                    };
+                                    Some(Resolved::Unknown(holder, by))
+                                }
                             }
                         }
-                    }
-                    other => {
-                        self.relock(Some(other));
-                        Some(other)
+                        other => {
+                            self.relock(subject, Some(other));
+                            Some(other)
+                        }
                     }
                 }
+                None => self.resolve_after_scope(subject, handle, true),
             }
-            None => self.resolve_after_scope(subject, keys, scope),
+        } else {
+            self.resolve_after_scope(subject, handle, false)
         };
         // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:3300-3330
         // NCBI reference (598d8ae6): c++/src/objmgr/scope_impl.cpp:2200-2218
@@ -1586,7 +2136,7 @@ impl ScopeWalk {
         // (review 1 of line DBID holdrec, `ahA1`: A's lookup gives Y, whose lines do not hold
         // A's id, before Z registers that id; the PSSM's read of A then gets nothing, and NCBI
         // warns).
-        if let Some(handle) = keys.handle {
+        if let Some(handle) = handle {
             if resolved != Some(Resolved::Throws) {
                 self.scope
                     .cache
@@ -1602,7 +2152,7 @@ impl ScopeWalk {
     fn resolve_after_scope(
         &mut self,
         subject: &ParsedSubject,
-        keys: &IdKeys,
+        handle: Option<HandleKey>,
         scope: bool,
     ) -> Option<Resolved> {
         // A scope kept for the run (outfmt 5) after calls whose loads LOSAT has no record
@@ -1612,7 +2162,7 @@ impl ScopeWalk {
                 return Some(Resolved::Unknown(holder, ShownBy::Calls));
             }
         }
-        self.loader(subject, keys)
+        self.loader(subject, handle)
     }
 
     /// The reports' answer of `resolved` for `subject` ([`ScopeWalk::load`]).
@@ -1643,21 +2193,35 @@ impl ScopeWalk {
         &mut self,
         subjects: impl IntoIterator<Item = (usize, &'p ParsedSubject)>,
     ) -> std::collections::HashMap<usize, HitLoad> {
-        let mut subjects: Vec<(usize, &ParsedSubject)> = subjects.into_iter().collect();
-        subjects.sort_by_key(|&(key, subject)| (subject.id_keys().order, key));
-        let mut answers = std::collections::HashMap::new();
+        let mut keyed: Vec<(u64, Option<HandleKey>, usize, &ParsedSubject)> = subjects
+            .into_iter()
+            .map(|(key, subject)| {
+                let (handle, order) = subject.id_handle_order();
+                (order, handle, key, subject)
+            })
+            .collect();
+        keyed.sort_unstable_by_key(|&(order, _, key, _)| (order, key));
+        self.bulk_sorted(&keyed)
+    }
+
+    /// Non-generic core of [`ScopeWalk::bulk`] over pre-keyed, sorted subjects.
+    fn bulk_sorted(
+        &mut self,
+        keyed: &[(u64, Option<HandleKey>, usize, &ParsedSubject)],
+    ) -> std::collections::HashMap<usize, HitLoad> {
+        let mut answers = std::collections::HashMap::with_capacity(keyed.len());
         let mut at = 0;
-        while at < subjects.len() {
-            let order = subjects[at].1.id_keys().order;
+        while at < keyed.len() {
+            let order = keyed[at].0;
             let end = at
-                + subjects[at..]
+                + keyed[at..]
                     .iter()
-                    .take_while(|(_, subject)| subject.id_keys().order == order)
+                    .take_while(|&&(o, _, _, _)| o == order)
                     .count();
-            let group = &subjects[at..end];
-            let first = group[0].1.id_keys().handle;
-            if first.is_some() && group.iter().all(|(_, s)| s.id_keys().handle == first) {
-                for &(key, subject) in group {
+            let group = &keyed[at..end];
+            let first = group[0].1;
+            if first.is_some() && group.iter().all(|&(_, h, _, _)| h == first) {
+                for &(_, _, key, subject) in group {
                     let resolved = self.resolve(subject, false);
                     answers.insert(key, Self::answer(subject, resolved));
                 }
@@ -1667,7 +2231,7 @@ impl ScopeWalk {
             at = end;
         }
         if let Some(other) = &mut self.other {
-            let others = other.bulk(subjects);
+            let others = other.bulk_sorted(keyed);
             for (key, answer) in &mut answers {
                 if let Some(&other) = others.get(key) {
                     *answer = Self::either(*answer, other);
@@ -1697,32 +2261,38 @@ impl ScopeWalk {
         if let Some(other) = &mut self.other {
             other.failed_prefetch(subjects.clone());
         }
-        let blobs: Vec<(std::sync::Arc<BlobKeys>, usize)> = subjects
-            .into_iter()
-            .filter_map(|(_, subject)| {
-                let (keys, line) = self.first_blob(subject)?;
-                let sequence = keys.sequence?;
-                // Its lookup in `m_Ids`, then its blob, may have been made.
-                let requested = subject.id_keys().handle;
-                if let Some(handle) = requested {
-                    self.ids.maybe_use(handle, Registrant::of(sequence));
-                }
-                let id = (sequence.ordinal(), requested.unwrap_or(0));
-                if !self.loaded_before(id) {
-                    self.maybe_register(&keys);
-                    self.maybe_blobs.insert(id);
-                } else if self.many_blobs() {
-                    self.maybe_register(&keys);
-                }
-                self.blobs
-                    .entry(sequence.ordinal())
-                    .or_insert_with(|| keys.clone());
-                Some((keys, line))
-            })
-            .collect();
         let start = u32::try_from(self.scope.loads.len()).unwrap_or(u32::MAX);
-        for (keys, line) in &blobs {
-            self.scope.add(keys, *line);
+        let mut additions: Vec<(&ParsedSubject, LoadedBlobRef)> = Vec::new();
+        for (_, subject) in subjects {
+            let Some(blob) = self.first_blob(subject) else {
+                continue;
+            };
+            let sequence = blob.sequence();
+            let requested = subject.id_handle();
+            if let Some(handle) = requested {
+                self.ids.maybe_use(handle, Registrant::of(sequence));
+            }
+            let id = (sequence.ordinal(), requested.unwrap_or(0));
+            if !self.loaded_before(id) {
+                blob.for_each_handle(subject, |handle| {
+                    self.ids.maybe_use(handle, Registrant::of(sequence));
+                });
+                self.maybe_blobs.insert(id);
+            } else if self.many_blobs() {
+                blob.for_each_handle(subject, |handle| {
+                    self.ids.maybe_use(handle, Registrant::of(sequence));
+                });
+            }
+            let ord = sequence.ordinal();
+            if self.ids.has_sequence(ord) {
+                self.blobs
+                    .entry(ord)
+                    .or_insert_with(|| blob.to_arc_blob_keys(subject));
+            }
+            additions.push((subject, blob));
+        }
+        for (subject, blob) in additions {
+            blob.add_to_places(&mut self.scope, subject);
         }
         let end = u32::try_from(self.scope.loads.len()).unwrap_or(u32::MAX);
         if end > start {
@@ -1736,7 +2306,7 @@ impl ScopeWalk {
     /// lookup's own answer). For a failed prefetch ([`HitLoads::of`]): where a blob loaded before
     /// the failure registered the id of a subject whose lookup throws, the pass gave that blob.
     pub fn peek(&self, subject: &ParsedSubject) -> HitLoad {
-        let resolved = subject.id_keys().handle.and_then(|handle| {
+        let resolved = subject.id_handle().and_then(|handle| {
             self.cached(handle)
                 .or_else(|| self.registered_place(handle))
         });
@@ -1751,121 +2321,419 @@ impl ScopeWalk {
     /// ([`ScopeWalk::loader`] without its records): none where the scope's cache resolved its
     /// Seq-align id, the blob of the sequence that the loader registered for its handle last (by
     /// the first line that holds it), else its lookup's.
-    fn first_blob(&self, subject: &ParsedSubject) -> Option<(std::sync::Arc<BlobKeys>, usize)> {
-        let keys = subject.id_keys();
-        if let Some(handle) = keys.handle {
+    fn first_blob(&self, subject: &ParsedSubject) -> Option<LoadedBlobRef> {
+        if let Some(handle) = subject.id_handle() {
             if self.cached(handle).is_some() {
                 return None;
             }
             if let Held::Present(registrant) | Held::Maybe(registrant) = self.ids.held(handle) {
-                let blob = match subject.mine(registrant.sequence) {
-                    true => Self::keys_as(subject, registrant.sequence),
-                    false => self.blob_of(registrant.sequence)?,
-                };
+                if subject.mine(registrant.sequence) {
+                    let line = subject.line_of_handle(handle)?;
+                    return Some(LoadedBlobRef::Own {
+                        sequence: registrant.sequence,
+                        line,
+                    });
+                }
+                let blob = self.blob_of(registrant.sequence)?;
                 let line = blob.line_of(handle)?;
-                return Some((blob, line));
+                return Some(LoadedBlobRef::External {
+                    sequence: registrant.sequence,
+                    blob,
+                    line,
+                });
             }
         }
         match subject.resolution.found {
             Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_)) => None,
-            _ => subject.loaded_blob(),
+            _ => subject.loaded_blob_ref(),
         }
     }
 
-    /// The keys of the sequence `sequence` where LOSAT holds them (the walk's blobs, or a load of
-    /// the record's).
+    /// The keys of the sequence `sequence` where LOSAT holds them (the walk's blobs, or the
+    /// record's snapshot `loader_blobs`, in O(1) without locking or scanning).
     fn blob_of(&self, sequence: DbSequence) -> Option<std::sync::Arc<BlobKeys>> {
-        let loads = self.before.loads;
-        self.blobs.get(&sequence.ordinal()).cloned().or_else(|| {
-            self.before
-                .read(|record| record.places.keys_of(sequence, loads))
-        })
+        let ord = sequence.ordinal();
+        self.blobs
+            .get(&ord)
+            .cloned()
+            .or_else(|| self.before.loader_blobs.get(&ord).cloned())
+    }
+
+    /// Plans what `load_blob` / `load_subject_blob` would do for a single tie item against the
+    /// immutable walk state `&self`.
+    fn plan_alone_blob(
+        &self,
+        sequence: DbSequence,
+        line: usize,
+        requested: Option<HandleKey>,
+        external: Option<std::sync::Arc<BlobKeys>>,
+    ) -> AloneBlobLoad {
+        let id = (sequence.ordinal(), requested.unwrap_or(0));
+        let (register, new_blob_id) = if self.loaded_before(id) {
+            (
+                if self.many_blobs() {
+                    TieRegister::Maybe
+                } else {
+                    TieRegister::None
+                },
+                None,
+            )
+        } else if self.maybe_blobs.contains(&id) {
+            (TieRegister::Maybe, Some(id))
+        } else {
+            (TieRegister::Definite, Some(id))
+        };
+        AloneBlobLoad {
+            sequence,
+            line,
+            new_blob_id,
+            register,
+            external,
+            relock_handles: None,
+            add_to_scope: true,
+        }
+    }
+
+    /// Resolves one tie item of [`ScopeWalk::bulk_ties`] as if it came first against `&self`,
+    /// without cloning `self.ids`, `self.scope`, `self.blobs`, or `self.blob_ids`.
+    fn resolve_alone_bulk(
+        &self,
+        subject: &ParsedSubject,
+        handle: Option<HandleKey>,
+    ) -> AloneResult {
+        if let Some(handle) = handle {
+            if let Some(resolved) = self.cached(handle) {
+                if resolved == Resolved::Nothing {
+                    return AloneResult {
+                        resolved: None,
+                        requested_use: None,
+                        blob_load: None,
+                    };
+                }
+                let blob_load = if self.many_blobs() {
+                    match resolved {
+                        Resolved::Blob(seq, _) | Resolved::Unknown(Some(seq), _) => {
+                            if subject.mine(seq) {
+                                Some(AloneBlobLoad {
+                                    sequence: seq,
+                                    line: 0,
+                                    new_blob_id: None,
+                                    register: TieRegister::Maybe,
+                                    external: None,
+                                    relock_handles: None,
+                                    add_to_scope: false,
+                                })
+                            } else if let Some(ext) = self.blob_of(seq) {
+                                Some(AloneBlobLoad {
+                                    sequence: seq,
+                                    line: 0,
+                                    new_blob_id: None,
+                                    register: TieRegister::Maybe,
+                                    external: Some(ext),
+                                    relock_handles: None,
+                                    add_to_scope: false,
+                                })
+                            } else {
+                                self.scope_handles.get(&seq.ordinal()).map(|handles| {
+                                    AloneBlobLoad {
+                                        sequence: seq,
+                                        line: 0,
+                                        new_blob_id: None,
+                                        register: TieRegister::Maybe,
+                                        external: None,
+                                        relock_handles: Some(handles.clone()),
+                                        add_to_scope: false,
+                                    }
+                                })
+                            }
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                return AloneResult {
+                    resolved: Some(resolved),
+                    requested_use: None,
+                    blob_load,
+                };
+            }
+        }
+        // Steps 3 and 4 (`scope = false`): check `self.ids`, then `unrecorded`, then lookup.
+        if let Some(handle) = handle {
+            let registrant = match self.ids.held(handle) {
+                Held::Present(registrant) => Some(registrant),
+                Held::Maybe(registrant)
+                    if registrant.sure && self.looked_up(subject) == Some(registrant.sequence) =>
+                {
+                    Some(registrant)
+                }
+                Held::Maybe(registrant) => {
+                    return AloneResult {
+                        resolved: Some(match subject.mine(registrant.sequence) {
+                            true => Resolved::Unknown(Some(registrant.sequence), ShownBy::Order),
+                            false => Self::place(registrant),
+                        }),
+                        requested_use: Some((handle, registrant, true)),
+                        blob_load: None,
+                    };
+                }
+                Held::Absent => None,
+            };
+            if let Some(registrant) = registrant {
+                if !registrant.sure {
+                    return AloneResult {
+                        resolved: Some(Resolved::Unknown(
+                            Some(registrant.sequence),
+                            ShownBy::Order,
+                        )),
+                        requested_use: Some((handle, registrant, false)),
+                        blob_load: None,
+                    };
+                }
+                let blob_load = if subject.mine(registrant.sequence) {
+                    let line = subject.line_of_handle(handle).unwrap_or(subject.target);
+                    Some(self.plan_alone_blob(registrant.sequence, line, Some(handle), None))
+                } else {
+                    self.blob_of(registrant.sequence).and_then(|ext| {
+                        let line = ext.line_of(handle)?;
+                        Some(self.plan_alone_blob(
+                            registrant.sequence,
+                            line,
+                            Some(handle),
+                            Some(ext),
+                        ))
+                    })
+                };
+                return AloneResult {
+                    resolved: Some(Resolved::Blob(registrant.sequence, ShownBy::Holder)),
+                    requested_use: Some((handle, registrant, false)),
+                    blob_load,
+                };
+            }
+        }
+        if self.before.unrecorded {
+            if let Some(holder) = subject.resolution.unrecorded.loader.first() {
+                return AloneResult {
+                    resolved: Some(Resolved::Unknown(holder, ShownBy::Calls)),
+                    requested_use: None,
+                    blob_load: None,
+                };
+            }
+        }
+        if matches!(
+            subject.resolution.found,
+            Some(FoundInstead::Failed(_) | FoundInstead::ThrowsOnId(_))
+        ) {
+            return AloneResult {
+                resolved: Some(Resolved::Throws),
+                requested_use: None,
+                blob_load: None,
+            };
+        }
+        let Some(blob) = subject.loaded_blob_ref() else {
+            return AloneResult {
+                resolved: None,
+                requested_use: None,
+                blob_load: None,
+            };
+        };
+        let sequence = blob.sequence();
+        let line = blob.line();
+        let external = match blob {
+            LoadedBlobRef::Own { .. } => None,
+            LoadedBlobRef::External { blob, .. } => Some(blob),
+        };
+        AloneResult {
+            resolved: Some(Resolved::Blob(sequence, ShownBy::Holder)),
+            requested_use: handle.map(|h| (h, Registrant::of(sequence), false)),
+            blob_load: Some(self.plan_alone_blob(sequence, line, handle, external)),
+        }
     }
 
     /// [`ScopeWalk::bulk`] of ids with one place in `CSeq_id_Handle`'s order but different handles
-    /// (or none), whose order LOSAT does not know: each resolved as if it came first; where
-    /// another's blob registers its handle with another answer, the order decides
-    /// (`ShownBy::Order`); a handle that two of their blobs register is not sure afterwards.
+    /// (or none), whose order LOSAT does not know: each resolved as if it came first against the
+    /// unmodified walk; where another's blob registers its handle with another answer, the order
+    /// decides (`ShownBy::Order`); a handle that two of their blobs register is not sure
+    /// afterwards. Runs in O(total handles in `group`) time and O(`group.len()`) space with no
+    /// per-item clones of the walk state.
     fn bulk_ties(
         &mut self,
-        group: &[(usize, &ParsedSubject)],
+        group: &[(u64, Option<HandleKey>, usize, &ParsedSubject)],
         answers: &mut std::collections::HashMap<usize, HitLoad>,
     ) {
-        let start = self.ids.clock;
-        let mut results = Vec::with_capacity(group.len());
-        let mut blob_ids = Vec::new();
-        for &(_, subject) in group {
-            let mut alone = ScopeWalk {
-                before: self.before.clone(),
-                ids: self.ids.clone(),
-                blob_ids: self.blob_ids.clone(),
-                maybe_blobs: self.maybe_blobs.clone(),
-                scope: self.scope.clone(),
-                blobs: self.blobs.clone(),
-                batch: self.batch,
-                in_record: self.in_record,
-                keeps_scope: self.keeps_scope,
-                other: None,
-            };
-            let resolved = alone.resolve(subject, false);
-            let changed = alone.ids.used_since(start);
-            for (ordinal, keys) in alone.blobs {
-                self.blobs.entry(ordinal).or_insert(keys);
+        // Target handles that are not yet cached in this scope: only uses touching one of these
+        // can move another tie item's answer.
+        let mut target_handles: rustc_hash::FxHashSet<HandleKey> =
+            rustc_hash::FxHashSet::with_capacity_and_hasher(group.len(), Default::default());
+        for &(_, handle, _, _) in group {
+            if let Some(handle) = handle {
+                if self.cached(handle).is_none() {
+                    target_handles.insert(handle);
+                }
             }
-            blob_ids.extend(alone.blob_ids.difference(&self.blob_ids).copied());
-            results.push((resolved, changed, alone.scope));
         }
-        // Every tie's uses, in an order that LOSAT does not know.
-        let merged: Vec<(HandleKey, Registrant)> = results
-            .iter()
-            .flat_map(|(_, changed, _)| changed.iter().copied())
-            .collect();
-        // The ties that another's uses may have given another answer.
-        let mut moved = vec![false; group.len()];
-        for (index, &(key, subject)) in group.iter().enumerate() {
-            let resolved = results[index].0;
-            let mut answer = Self::answer(subject, resolved);
-            let handle = subject.id_keys().handle;
-            let cached = handle.is_some_and(|handle| self.cached(handle).is_some());
-            if let (Some(handle), false) = (handle, cached) {
-                for (other, (_, changed, _)) in results.iter().enumerate() {
-                    if other == index {
-                        continue;
+
+        let mut results: Vec<AloneResult> = Vec::with_capacity(group.len());
+        let mut merged_uses: rustc_hash::FxHashMap<HandleKey, Registrant> = Default::default();
+        let mut extra_ambiguous: rustc_hash::FxHashMap<HandleKey, Vec<DbSequence>> =
+            Default::default();
+        let mut total_uses = 0u64;
+        // For each target handle, at most two `(index, sequence)` entries per distinct sequence
+        // (preserving ascending `index` order), so Pass 2 checks every `other != index` in O(1).
+        let mut target_hits: rustc_hash::FxHashMap<HandleKey, Vec<(usize, DbSequence)>> =
+            Default::default();
+
+        for (index, &(_, handle, _, subject)) in group.iter().enumerate() {
+            let alone = self.resolve_alone_bulk(subject, handle);
+            let definite_req = alone
+                .requested_use
+                .and_then(|(h, _, maybe)| (!maybe).then_some(h));
+            let mut record_use = |h: HandleKey, reg: Registrant, maybe: bool| {
+                let effective = if maybe && definite_req != Some(h) {
+                    match self.ids.entries.get(&h) {
+                        Some(entry) => Registrant {
+                            sure: entry.registrant.sure
+                                && reg.sure
+                                && entry.registrant.sequence == reg.sequence,
+                            ..reg
+                        },
+                        None => reg,
                     }
-                    let Some(&(_, registrant)) = changed.iter().find(|(h, _)| *h == handle) else {
-                        continue;
-                    };
-                    let later = Self::answer(
-                        subject,
-                        Some(Resolved::Blob(registrant.sequence, ShownBy::Holder)),
-                    );
-                    if later != answer {
-                        answer = Self::either(answer, later);
-                        moved[index] = true;
+                } else {
+                    reg
+                };
+                total_uses += 1;
+                merged_uses
+                    .entry(h)
+                    .and_modify(|existing| {
+                        if !existing.sure
+                            || !effective.sure
+                            || existing.sequence != effective.sequence
+                        {
+                            existing.sure = false;
+                            let list = extra_ambiguous.entry(h).or_default();
+                            if !list.contains(&existing.sequence) {
+                                list.push(existing.sequence);
+                            }
+                            if !list.contains(&effective.sequence) {
+                                list.push(effective.sequence);
+                            }
+                        }
+                    })
+                    .or_insert(effective);
+                if target_handles.contains(&h) {
+                    let hits = target_hits.entry(h).or_default();
+                    let seq = effective.sequence;
+                    if !hits.iter().any(|&(i, s)| i == index && s == seq)
+                        && hits.iter().filter(|&&(_, s)| s == seq).count() < 2
+                    {
+                        hits.push((index, seq));
+                    }
+                }
+            };
+            if let Some((h, reg, maybe)) = alone.requested_use {
+                record_use(h, reg, maybe);
+            }
+            if let Some(load) = &alone.blob_load {
+                if load.register != TieRegister::None {
+                    let is_maybe = load.register == TieRegister::Maybe;
+                    let reg = Registrant::of(load.sequence);
+                    if let Some(ext) = &load.external {
+                        for &h in ext.all_handles() {
+                            record_use(h, reg, is_maybe);
+                        }
+                    } else if let Some(handles) = &load.relock_handles {
+                        for &h in handles {
+                            record_use(h, reg, is_maybe);
+                        }
+                    } else {
+                        for h in subject.line_handles() {
+                            record_use(h, reg, is_maybe);
+                        }
+                    }
+                }
+            }
+            results.push(alone);
+        }
+
+        // Pass 2: compute answers and `moved` flags in O(group.len()).
+        let mut moved = vec![false; group.len()];
+        for (index, &(_, handle, key, subject)) in group.iter().enumerate() {
+            let resolved = results[index].resolved;
+            let mut answer = Self::answer(subject, resolved);
+            if let Some(handle) = handle {
+                if target_handles.contains(&handle) {
+                    if let Some(hits) = target_hits.get(&handle) {
+                        for &(other, seq) in hits {
+                            if other == index {
+                                continue;
+                            }
+                            let later =
+                                Self::answer(subject, Some(Resolved::Blob(seq, ShownBy::Holder)));
+                            if later != answer {
+                                answer = Self::either(answer, later);
+                                moved[index] = true;
+                            }
+                        }
                     }
                 }
             }
             answers.insert(key, answer);
         }
-        let loaded = self.scope.loads.len();
-        for (index, &(_, subject)) in group.iter().enumerate() {
-            let (resolved, _, scope) = &results[index];
+
+        // Pass 3: commit cache, scope loads, blob ids, `m_Ids`, and active `blobs`.
+        self.ids
+            .use_unordered_map(merged_uses, extra_ambiguous, total_uses);
+        for (index, &(_, handle, _, subject)) in group.iter().enumerate() {
+            let alone = &results[index];
             // A tie that resolved to nothing alone, where another may have registered its
             // handle before it, is not known to be unresolved: a later read asks the loader.
-            let kept = match resolved {
+            let kept = match alone.resolved {
                 Some(Resolved::Throws) => None,
                 None if moved[index] => None,
-                _ => Some(resolved.unwrap_or(Resolved::Nothing)),
+                _ => Some(alone.resolved.unwrap_or(Resolved::Nothing)),
             };
-            if let (Some(handle), Some(kept)) = (subject.id_keys().handle, kept) {
+            if let (Some(handle), Some(kept)) = (handle, kept) {
                 self.scope.cache.entry(handle).or_insert(kept);
             }
-            for (keys, line) in &scope.loads[loaded..] {
-                self.scope.add(keys, *line);
+            if let Some(load) = &alone.blob_load {
+                if let Some(id) = load.new_blob_id {
+                    self.maybe_blobs.remove(&id);
+                    self.blob_ids.insert(id);
+                }
+                if load.add_to_scope {
+                    if let Some(ext) = &load.external {
+                        self.scope.add_blob(ext, load.line);
+                    } else {
+                        self.scope
+                            .add_ids(load.sequence, &subject.set.deflines[load.line].ids);
+                    }
+                }
+                let ord = load.sequence.ordinal();
+                if self.ids.has_sequence(ord) {
+                    self.blobs
+                        .entry(ord)
+                        .or_insert_with(|| match &load.external {
+                            Some(ext) => ext.clone(),
+                            None => subject.blob_keys_as(load.sequence),
+                        });
+                } else if load.add_to_scope && !self.blobs.contains_key(&ord) {
+                    self.scope_handles
+                        .entry(ord)
+                        .or_insert_with(|| match &load.external {
+                            Some(ext) => ext.all_handles().to_vec().into_boxed_slice(),
+                            None => subject
+                                .line_handles()
+                                .collect::<Vec<_>>()
+                                .into_boxed_slice(),
+                        });
+                }
             }
         }
-        self.ids.use_unordered(&merged);
-        self.blob_ids.extend(blob_ids);
+        if self.blobs.len() > self.ids.seq_counts.len() * 2 + 64 {
+            self.prune_blobs();
+        }
     }
 }
 
@@ -2119,9 +2987,6 @@ impl ParsedSubject {
             saccver: std::sync::OnceLock::new(),
             query_scope_keys: std::sync::OnceLock::new(),
             skipped_id: std::sync::OnceLock::new(),
-            blob_keys: std::sync::OnceLock::new(),
-            id_keys: std::sync::OnceLock::new(),
-            display_keys: std::sync::OnceLock::new(),
         })
     }
 
@@ -2157,9 +3022,6 @@ impl ParsedSubject {
             saccver: std::sync::OnceLock::new(),
             query_scope_keys: std::sync::OnceLock::new(),
             skipped_id: std::sync::OnceLock::new(),
-            blob_keys: std::sync::OnceLock::new(),
-            id_keys: std::sync::OnceLock::new(),
-            display_keys: std::sync::OnceLock::new(),
         }
     }
 
@@ -2228,40 +3090,92 @@ impl ParsedSubject {
         self.sequence == Some(sequence) || self.resolution.gives == Some(sequence)
     }
 
-    /// The blob that a load of this subject by its own Seq-align id loads where no place before
-    /// the lookup answers (step 4 of [`ScopeWalk::load`]), with the line of its Bioseq: the
-    /// sequence that the lookup gives (the subject, a copy of its record, or another record,
-    /// `ScopeResolution::gives_keys`); none where the lookup gives nothing or fails.
-    pub fn loaded_blob(&self) -> Option<(std::sync::Arc<BlobKeys>, usize)> {
+    /// Non-allocating reference to the blob that a load of this subject by its own Seq-align id
+    /// loads where no place before the lookup answers (step 4 of [`ScopeWalk::load`]).
+    fn loaded_blob_ref(&self) -> Option<LoadedBlobRef> {
         use FoundInstead as F;
-        let keys = match &self.resolution.found {
-            Some(F::Failed(_) | F::ThrowsOnId(_) | F::Nothing) => return None,
-            Some(F::Sequence(_)) => self.resolution.gives_keys.clone()?,
-            None | Some(F::OtherTaxids(_) | F::CopyApart(..)) => {
-                ScopeWalk::keys_as(self, self.resolution.gives.or(self.sequence)?)
+        match &self.resolution.found {
+            Some(F::Failed(_) | F::ThrowsOnId(_) | F::Nothing) => None,
+            Some(F::Sequence(_)) => {
+                let blob = self.resolution.gives_keys.clone()?;
+                let sequence = blob.sequence?;
+                let line = blob.target;
+                Some(LoadedBlobRef::External {
+                    blob,
+                    sequence,
+                    line,
+                })
             }
-        };
-        let line = keys.target;
-        Some((keys, line))
+            None | Some(F::OtherTaxids(_) | F::CopyApart(..)) => Some(LoadedBlobRef::Own {
+                sequence: self.resolution.gives.or(self.sequence)?,
+                line: self.target,
+            }),
+        }
+    }
+
+    /// Exact handles of every Seq-id of every definition line of this subject, without allocation.
+    fn line_handles(&self) -> impl Iterator<Item = HandleKey> + '_ {
+        self.set
+            .deflines
+            .iter()
+            .flat_map(|defline| defline.ids.iter())
+            .filter_map(handle_key)
+    }
+
+    /// First definition line of this subject that holds `handle`, without allocation.
+    fn line_of_handle(&self, handle: HandleKey) -> Option<usize> {
+        self.set
+            .deflines
+            .iter()
+            .position(|defline| defline.ids.iter().any(|id| handle_key(id) == Some(handle)))
+    }
+
+    /// The exact handle key of this subject's Seq-align id, without allocating `IdKeys`.
+    fn id_handle(&self) -> Option<HandleKey> {
+        handle_key(&self.alignment_id)
+    }
+
+    /// The exact handle key and bulk sort order of this subject's Seq-align id, without
+    /// allocating `IdKeys`.
+    fn id_handle_order(&self) -> (Option<HandleKey>, u64) {
+        (
+            handle_key(&self.alignment_id),
+            crate::seqid::mask_handle::mask_handle_order(
+                crate::seqid::mask_handle::mask_handle_packed(&self.alignment_id),
+            ),
+        )
+    }
+
+    /// Compact flat [`BlobKeys`] for this subject as `sequence`.
+    fn blob_keys_as(&self, sequence: DbSequence) -> std::sync::Arc<BlobKeys> {
+        std::sync::Arc::new(BlobKeys::of_deflines(
+            Some(sequence),
+            self.target,
+            &self.set.deflines,
+        ))
     }
 
     /// The sequence whose blob a load of `other` by its own Seq-align id loads
-    /// ([`ParsedSubject::loaded_blob`]) where that blob registers the handle of this subject's
+    /// ([`ParsedSubject::loaded_blob_ref`]) where that blob registers the handle of this subject's
     /// Seq-align id (`RegisterIds`: a line of it holds an id of that handle; any blob where the id
     /// has no handle that a function can know, `id_handle_unknown`): the loads before the stop of
     /// a prefetch (`common::database::stop_lookup_unsure`).
     pub fn registered_by(&self, other: &ParsedSubject) -> Option<DbSequence> {
-        let (keys, _) = other.loaded_blob()?;
-        match self.id_keys().handle {
-            Some(handle) => keys.line_of(handle).and(keys.sequence),
-            None => keys.sequence,
+        let blob = other.loaded_blob_ref()?;
+        let sequence = blob.sequence();
+        match self.id_handle() {
+            Some(handle) => match blob {
+                LoadedBlobRef::Own { .. } => other.line_of_handle(handle).map(|_| sequence),
+                LoadedBlobRef::External { blob, .. } => blob.line_of(handle).map(|_| sequence),
+            },
+            None => Some(sequence),
         }
     }
 
     // No NCBI counterpart: the keys of LOSAT's own check before a search whether any load can be
     // given another sequence (`common::database::reports_may_refuse`).
     /// The keys by which NCBI's places can find the blob that a load of this subject loads
-    /// ([`ParsedSubject::loaded_blob`]: each line's exact handles, and the scope's keys of the
+    /// ([`ParsedSubject::loaded_blob_ref`]: each line's exact handles, and the scope's keys of the
     /// line of its Bioseq), each with that blob's ordinal id (`held`), and those by which a load of
     /// its Seq-align id looks for one: its handle in `m_Ids` (`sought`), and the keys of the
     /// scope's index (`scope_sought`, which only a load one by one reads, `ScopeWalk::bulk`): one
@@ -2276,20 +3190,43 @@ impl ParsedSubject {
         fn tagged(tag: u64, key: u64) -> u64 {
             key.rotate_left(17 * tag as u32) ^ tag.wrapping_mul(0x9e37_79b9_7f4a_7c15)
         }
-        if let Some((keys, line)) = self.loaded_blob() {
-            if let Some(sequence) = keys.sequence {
-                let ordinal = sequence.ordinal();
-                for (at, line_keys) in keys.lines.iter().enumerate() {
+        if let Some(blob) = self.loaded_blob_ref() {
+            let ordinal = blob.sequence().ordinal();
+            let line = blob.line();
+            match blob {
+                LoadedBlobRef::Own { .. } => {
+                    for (at, defline) in self.set.deflines.iter().enumerate() {
+                        for id in &defline.ids {
+                            if let Some(h) = handle_key(id) {
+                                held.push((tagged(0, h as u64), ordinal));
+                            }
+                            if at == line {
+                                let mut scope = Vec::new();
+                                crate::seqid::defline_set::scope_keys(id, &mut scope);
+                                held.extend(scope.into_iter().map(|k| (tagged(1, k), ordinal)));
+                                let mut kinds = Vec::new();
+                                crate::seqid::id_scope::kind_keys(id, &mut kinds);
+                                held.extend(kinds.into_iter().map(|k| (tagged(2, k), ordinal)));
+                            }
+                        }
+                    }
+                }
+                LoadedBlobRef::External { blob, .. } => {
                     held.extend(
-                        line_keys
-                            .handles
+                        blob.all_handles()
                             .iter()
                             .map(|&h| (tagged(0, h as u64), ordinal)),
                     );
-                    if at == line {
-                        held.extend(line_keys.scope.iter().map(|&k| (tagged(1, k), ordinal)));
-                        held.extend(line_keys.kinds.iter().map(|&k| (tagged(2, k), ordinal)));
-                    }
+                    held.extend(
+                        blob.line_scope(line)
+                            .iter()
+                            .map(|&k| (tagged(1, k), ordinal)),
+                    );
+                    held.extend(
+                        blob.line_kinds(line)
+                            .iter()
+                            .map(|&k| (tagged(2, k), ordinal)),
+                    );
                 }
             }
         }
@@ -2309,7 +3246,7 @@ impl ParsedSubject {
     /// (`seqid::mask_handle::mask_handle_key`: a giim id, or a Textseq-id with neither accession
     /// nor name), so that the stop of a prefetch takes any load for one that may register it.
     pub fn id_handle_unknown(&self) -> bool {
-        self.id_keys().handle.is_none()
+        self.id_handle().is_none()
     }
 
     /// The other sequences that NCBI's places may give for this subject's Seq-align id after the
@@ -2338,45 +3275,17 @@ impl ParsedSubject {
         set: &crate::seqid::DeflineSet,
         sequence: DbSequence,
     ) -> std::sync::Arc<BlobKeys> {
-        let lines: Vec<LineKeys> = set
-            .deflines
-            .iter()
-            .map(|defline| LineKeys::of(&defline.ids))
-            .collect();
-        let handle = self.id_keys().handle;
-        let target = handle
-            .and_then(|handle| lines.iter().position(|line| line.handles.contains(&handle)))
+        let mut keys = BlobKeys::of_deflines(Some(sequence), 0, &set.deflines);
+        keys.target = self
+            .id_handle()
+            .and_then(|handle| keys.line_of(handle))
             .unwrap_or(0);
-        std::sync::Arc::new(BlobKeys {
-            sequence: Some(sequence),
-            target,
-            lines,
-        })
+        std::sync::Arc::new(keys)
     }
 
-    /// The keys of the definition lines of this sequence by which NCBI's places find it once
-    /// loaded ([`BlobKeys`]), made at the first load that asks.
-    pub fn blob_keys(&self) -> std::sync::Arc<BlobKeys> {
-        self.blob_keys
-            .get_or_init(|| {
-                std::sync::Arc::new(BlobKeys {
-                    sequence: self.sequence,
-                    target: self.target,
-                    lines: self
-                        .set
-                        .deflines
-                        .iter()
-                        .map(|defline| LineKeys::of(&defline.ids))
-                        .collect(),
-                })
-            })
-            .clone()
-    }
-
-    /// The keys of the Seq-align id by which NCBI's places find a sequence for it ([`IdKeys`]),
-    /// made at the first load that asks.
-    pub fn id_keys(&self) -> &IdKeys {
-        self.id_keys.get_or_init(|| IdKeys::of(&self.alignment_id))
+    /// The keys of the Seq-align id by which NCBI's places find a sequence for it ([`IdKeys`]).
+    pub fn id_keys(&self) -> IdKeys {
+        IdKeys::of(&self.alignment_id)
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:432-433, 497-498
@@ -2385,13 +3294,13 @@ impl ParsedSubject {
     /// NCBI's places ([`ScopeWalk::display`]), which can give another sequence's Bioseq (probe
     /// `R/hr/bin/hr1open.py` D.ab: two records with other GIs and one accession). `None` where
     /// that lookup is the Seq-align id's own.
-    pub fn display_keys(&self) -> Option<&IdKeys> {
-        self.display_keys
-            .get_or_init(|| {
-                let keys = IdKeys::of(self.display_id()?);
-                (keys.handle.is_some() && keys.handle != self.id_keys().handle).then_some(keys)
-            })
-            .as_ref()
+    pub fn display_keys(&self) -> Option<IdKeys> {
+        let display = self.display_id()?;
+        let display_handle = handle_key(display)?;
+        if Some(display_handle) == self.id_handle() {
+            return None;
+        }
+        Some(IdKeys::of(display))
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:411-451 (cited at
@@ -4220,6 +5129,26 @@ impl FormatThrow {
         }
     }
 
+    /// Whether the run's [`ScopeRecord`] keeps earlier batches' scopes across query batches:
+    /// `Some(true)` where the sole format is outfmt 5, `Some(false)` where there is at most one
+    /// known non-XML non-SAM format (so `ResetScopeHistory` empties the scope after each batch),
+    /// and `None` where multiple formats or outfmt 17 / an unrecognised format may walk both
+    /// scope lifetimes.
+    pub fn record_keeps_scope<'a>(outfmts: impl IntoIterator<Item = &'a str>) -> Option<bool> {
+        let mut iter = outfmts.into_iter();
+        let Some(first) = iter.next() else {
+            return Some(false);
+        };
+        if iter.next().is_some() {
+            return None;
+        }
+        match Self::report_format(first) {
+            Some(crate::blastinput::app::ReportFormat::Xml) => Some(true),
+            Some(crate::blastinput::app::ReportFormat::Sam) | None => None,
+            Some(_) => Some(false),
+        }
+    }
+
     /// The answer of two formats of one run: a refusal by either refuses, a format that reads
     /// nothing leaves the other's answer, and of two that write, the one that loads more after the
     /// throw (a subject is loaded where some report loads it), at the rows that either loads at,
@@ -4967,13 +5896,11 @@ impl HitLoads {
             }
         }
         let mut places = ScopePlaces::default();
-        let mut registry: std::collections::HashMap<HandleKey, Vec<DbSequence>> =
-            Default::default();
+        let mut registry: rustc_hash::FxHashMap<HandleKey, Vec<DbSequence>> = Default::default();
         for (_, subject) in &subjects {
-            let keys = subject.blob_keys();
-            places.add(&keys, keys.target);
-            if let Some(sequence) = keys.sequence {
-                for &handle in keys.lines.iter().flat_map(|line| &line.handles) {
+            if let Some(sequence) = subject.sequence {
+                places.add_ids(sequence, &subject.set.deflines[subject.target].ids);
+                for handle in subject.line_handles() {
                     registry.entry(handle).or_default().push(sequence);
                 }
             }
@@ -4981,9 +5908,9 @@ impl HitLoads {
         for (key, subject) in subjects {
             let keys = subject.id_keys();
             let mut others = places
-                .holders(keys, true)
+                .holders(&keys, true)
                 .into_iter()
-                .chain(places.holders(keys, false))
+                .chain(places.holders(&keys, false))
                 .map(|(at, _)| places.sequence(at))
                 .chain(
                     keys.handle
@@ -5001,7 +5928,7 @@ impl HitLoads {
             if shown.is_none() {
                 shown = subject.display_keys().and_then(|keys| {
                     places
-                        .holders(keys, true)
+                        .holders(&keys, true)
                         .into_iter()
                         .map(|(at, _)| places.sequence(at))
                         .find(|&other| !subject.mine(other))

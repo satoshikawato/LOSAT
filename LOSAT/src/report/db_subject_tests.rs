@@ -3474,3 +3474,110 @@ fn a_failed_prefetch_load_is_uncertain_against_weak_and_loader_matches() {
     walk.failed_prefetch([(0, &s), (1, &t)]);
     assert_eq!(walk.load(&s), shown(Some(1), ShownBy::Order));
 }
+
+#[test]
+fn scope_record_drops_earlier_batches_when_not_keeping_scope() {
+    let pdb = |mol: &str, chain: &str| {
+        ParsedSeqId::Pdb(crate::seqid::model::PdbSeqId {
+            mol: mol.as_bytes().to_vec(),
+            chain: None,
+            rel: None,
+            chain_id: Some(chain.as_bytes().to_vec()),
+        })
+    };
+    let mut record = ScopeRecord::default();
+    record.set_keeps_scope(Some(false));
+    // Note 30 batches of 100 distinct sequences each: `current_batch` keeps only the latest batch,
+    // `all_scope` stays `None`, and `loader_blobs` stays bounded to active `LoaderIds` registrants
+    // (evicting earlier batches once >= 1,000 newer handles are recorded).
+    let mut seqs: Vec<ParsedSubject> = Vec::new();
+    for b in 0..30usize {
+        let mut batch_seqs = Vec::new();
+        for i in 0..100u32 {
+            let ord = (b as u32) * 100 + i;
+            let acc = format!("AAA{:06}", ord + 1);
+            batch_seqs.push(sequence(vec![gb(&acc, 1)], ord));
+        }
+        record.note(Some(b), batch_seqs.iter());
+        assert!(record.all_scope.is_none());
+        let current = record.current_batch.as_ref().expect("current batch");
+        assert_eq!(current.batch, b);
+        assert_eq!(current.places.loads.len(), 100);
+        // Compact `loader_blobs` holds at most the sequences still referenced by `LoaderIds`.
+        assert!(
+            record.loader_blobs.len() <= 2 * LOADER_IDS,
+            "batch {b}: loader_blobs grew to {}",
+            record.loader_blobs.len()
+        );
+        if b == 0 {
+            seqs = batch_seqs;
+        }
+    }
+    // Blob ids stay tracked across the whole run (3,000 distinct blobs).
+    assert_eq!(record.blob_ids.len(), 3000);
+    // Earliest batch's handles have been evicted from `m_Ids` and `loader_blobs`.
+    assert!(!record.loader_blobs.contains_key(&0));
+    let shared: SharedRecord = std::sync::Arc::new(std::sync::RwLock::new(record));
+    let before = LoadsBefore::new(&shared, Some(30), false);
+    assert!(before.batch_scope.is_none());
+    assert!(before.registrants_of(&seqs[0]).is_empty());
+
+    // With `keeps_scope = Some(true)` (outfmt 5), earlier batches stay in `all_scope` and
+    // `current_batch` is not duplicated.
+    let mut kept = ScopeRecord::default();
+    kept.set_keeps_scope(Some(true));
+    let s0 = sequence(vec![pdb("1ABC", "A")], 0);
+    let s1 = sequence(vec![pdb("1DEF", "A")], 1);
+    kept.note(Some(0), [&s0]);
+    kept.note(Some(1), [&s1]);
+    assert!(kept.current_batch.is_none());
+    assert_eq!(kept.all_scope.as_ref().unwrap().places.loads.len(), 2);
+}
+
+#[test]
+fn bulk_ties_resolves_unpacked_group_without_quadratic_clones_and_prunes_batches() {
+    let pdb = |mol: &str, chain: &str| {
+        ParsedSeqId::Pdb(crate::seqid::model::PdbSeqId {
+            mol: mol.as_bytes().to_vec(),
+            chain: None,
+            rel: None,
+            chain_id: Some(chain.as_bytes().to_vec()),
+        })
+    };
+    // Unpacked PDB ids all share `order = u64::MAX` (`bulk_ties`).
+    // Sequence 0 (`pdb|1AAA|A`) and sequence 1 (`pdb|1BBB|A` with second line `pdb|1AAA|A`):
+    // their relative order in `bulk_ties` decides what sequence 0 gets (`ShownBy::Order`).
+    let s0 = sequence(vec![pdb("1AAA", "A")], 0);
+    let s1 = lines(vec![vec![pdb("1BBB", "A")], vec![pdb("1AAA", "A")]])
+        .in_database(DbSequence::of_unrestricted(1));
+    // Sequence 2 (`pdb|1CCC|A`) resolves to nothing alone, while sequence 3 (`pdb|1DDD|A` ^A
+    // `pdb|1CCC|A`) may register it first -> `ShownBy::Order`, and `1CCC|A` must NOT be cached
+    // as `Resolved::Nothing` so a later load sees sequence 3 in `m_Ids`.
+    let s2 = sequence(vec![pdb("1CCC", "A")], 2).found_instead(Some(FoundInstead::Sequence(
+        DbSequence::of_unrestricted(99),
+    )));
+    let s3 = lines(vec![vec![pdb("1DDD", "A")], vec![pdb("1CCC", "A")]])
+        .in_database(DbSequence::of_unrestricted(3));
+
+    let mut walk = ScopeWalk::new(LoadsBefore::none(), Some(false));
+    walk.enter(Some(0));
+    let answers = walk.bulk([(0, &s0), (1, &s1), (2, &s2), (3, &s3)]);
+    assert_eq!(answers[&0], shown(Some(1), ShownBy::Order));
+    assert_eq!(answers[&1], HitLoad::Loaded);
+    assert_eq!(answers[&2], shown(Some(3), ShownBy::Order));
+    assert_eq!(answers[&3], HitLoad::Loaded);
+    // `s2` was NOT cached as `Resolved::Nothing`; a later load sees `s3` in `m_Ids`.
+    assert_eq!(walk.load(&s2), shown(Some(3), ShownBy::Holder));
+
+    // A later batch of 1,100 fresh unpacked PDB ids evicts batch 0 from `m_Ids` and prunes
+    // `blobs` / `scope_handles` on `enter(Some(1))`.
+    let batch1: Vec<ParsedSubject> = (10..1110u32)
+        .map(|i| sequence(vec![pdb(&format!("{:04X}", i), "A")], i))
+        .collect();
+    walk.enter(Some(1));
+    assert!(walk.scope_handles.is_empty());
+    let ans1 = walk.bulk(batch1.iter().enumerate());
+    assert!(ans1.values().all(|&a| a == HitLoad::Loaded));
+    assert!(!walk.ids.has_sequence(0));
+    assert!(!walk.blobs.contains_key(&0));
+}

@@ -5897,6 +5897,16 @@ impl TaxdbRun {
             .keeps_scope = keeps;
     }
 
+    /// Records whether the run's [`ScopeRecord`] keeps earlier batches' scopes across batches
+    /// (`FormatThrow::record_keeps_scope`: `Some(false)` drops earlier batches on every new batch;
+    /// `Some(true)` or `None` keeps them for outfmt 5 or unknown/multi-format calls).
+    pub(crate) fn set_record_keeps_scope(&mut self, keeps: Option<bool>) {
+        self.loaded
+            .write()
+            .expect("the run's record")
+            .set_keeps_scope(keeps);
+    }
+
     /// Records that the run's first format is not XML2/JSON (`!FormatThrow::is_xml2`), so any
     /// secondary XML2/JSON lookup on a cache-colliding volume (`read_reported_taxonomy`) is
     /// refused (`TaxdbRun::refuse_cache_collision`), while non-collision runs still share the

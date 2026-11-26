@@ -1,0 +1,29 @@
+# TBLASTN 2.17.0+
+# Query: q0
+# Database: tests/db_search/idlist/pn
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+q0	NP_000001.1	100.000	150	0	0	1	150	1	450	8.84e-117	315
+q0	NP_000002.1	25.000	40	26	1	32	67	55	174	1.0	15.8
+q0	NP_000006.1	38.462	13	8	0	98	110	379	417	1.4	15.8
+# TBLASTN 2.17.0+
+# Query: q1
+# Database: tests/db_search/idlist/pn
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+q1	NP_000002.1	100.000	150	0	0	1	150	1	450	4.94e-117	315
+q1	NP_000001.1	25.000	40	26	1	19	58	94	201	1.0	15.8
+# TBLASTN 2.17.0+
+# Query: q2
+# Database: tests/db_search/idlist/pn
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q2	NP_000006.1	50.000	18	5	1	114	131	382	423	3.0	14.6
+# TBLASTN 2.17.0+
+# Query: q3
+# Database: tests/db_search/idlist/pn
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+q3	NP_000006.1	100.000	150	0	0	1	150	1	450	6.85e-118	317
+q3	NP_000001.1	38.462	13	8	0	127	139	292	330	1.4	15.8
+# BLAST processed 4 queries

@@ -569,9 +569,10 @@ impl BlastnDatabase {
             .map(|hsp| hsp.s_idx as usize)
             .filter(|&rank| loads.loaded(rank))
             .collect();
-        // Each query's `Hit`s, the subjects of its HSP lists in order.
+        // Each query's `Hit`s, the subjects of its HSP lists in order, plus per-batch prefetched
+        // `(rank, flipped)` matching `prefetch_subjects`.
         let batches = || {
-            shared::XmlBatchLoads::of(
+            shared::XmlBatchLoads::of_with_prefetched(
                 hit_lists.len(),
                 spans,
                 &batches_prefetch(format, hit_lists, 0, spans, gapped),
@@ -583,6 +584,24 @@ impl BlastnDatabase {
                         .filter_map(|hsp_list| hsp_list.hsps.first())
                         .map(|hsp| hsp.s_idx as usize)
                         .collect()
+                },
+                |span| {
+                    Some(
+                        hit_lists[span]
+                            .iter()
+                            .flatten()
+                            .flat_map(|hit_list| &hit_list.hsplist_array)
+                            .filter(|hsp_list| !hsp_list.hsps.is_empty())
+                            .map(|hsp_list| {
+                                let flipped = if gapped {
+                                    hsp_list.hsps.iter().any(|hsp| hsp.query_frame < 0)
+                                } else {
+                                    hsp_list.hsps[0].query_frame < 0
+                                };
+                                (hsp_list.hsps[0].s_idx as usize, flipped)
+                            })
+                            .collect(),
+                    )
                 },
             )
         };
@@ -797,11 +816,62 @@ impl BlastnDatabase {
                 self.taxdb.calls_before(),
                 |ordinal| titled_parsed(titles, ordinal),
             );
+            let before_batches = || {
+                shared::XmlBatchLoads::of_with_prefetched(
+                    before.len(),
+                    spans,
+                    &prefetch,
+                    &loads,
+                    |query| {
+                        before[query]
+                            .iter()
+                            .flat_map(|hit_list| {
+                                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                                &hit_list.hsplist_array[..count]
+                            })
+                            .filter(|hsp_list| !hsp_list.hsps.is_empty())
+                            .map(|hsp_list| hsp_list.oid as usize)
+                            .collect()
+                    },
+                    |span| {
+                        Some(
+                            before[span]
+                                .iter()
+                                .flatten()
+                                .flat_map(|hit_list| {
+                                    let count =
+                                        hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                                    &hit_list.hsplist_array[..count]
+                                })
+                                .filter(|hsp_list| !hsp_list.hsps.is_empty())
+                                .map(|hsp_list| {
+                                    let flipped = if gapped {
+                                        hsp_list.hsps.iter().any(|hsp| hsp.query_frame < 0)
+                                    } else {
+                                        hsp_list.hsps[0].query_frame < 0
+                                    };
+                                    (hsp_list.oid as usize, flipped)
+                                })
+                                .collect(),
+                        )
+                    },
+                )
+                .map(|batches| {
+                    shared::BeforeXmlBatch::from_xml_batches(batches, |ordinal| {
+                        shared::PrefetchSubject::unflipped(
+                            ordinal as u32,
+                            titled_parsed(titles, ordinal),
+                        )
+                    })
+                })
+            };
             shared::held_batch_prefetch_stop(
                 &self.db,
                 &self.taxdb,
+                queries.error_query(),
                 Self::prefetch_subjects(titles, before, gapped, SubjectFetch::Every)
                     .filter(|subject| loads.loaded(subject.ordinal as usize)),
+                &before_batches,
                 std::iter::empty(),
                 Self::prefetch_subjects(titles, hit_lists, gapped, SubjectFetch::Every),
                 PROGRAM,

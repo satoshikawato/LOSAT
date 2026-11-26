@@ -336,9 +336,10 @@ impl TblastxDatabase {
         let ranks: std::collections::BTreeSet<usize> = (0..reported.ordinals.len())
             .filter(|rank| reported.loads.loaded(*rank))
             .collect();
-        // Each query's `Hit`s: its hits' subjects, each once, in order.
+        // Each query's `Hit`s: its hits' subjects, each once, in order, plus per-batch prefetched
+        // `(rank, flipped)` matching `prefetch_subjects`.
         let batches = || {
-            shared::XmlBatchLoads::of(
+            shared::XmlBatchLoads::of_with_prefetched(
                 queries,
                 spans,
                 &batches_prefetch(format, ordered, queries, spans),
@@ -350,6 +351,22 @@ impl TblastxDatabase {
                         .map(|hsp| hsp.hit.s_idx as usize)
                         .filter(|&rank| seen.insert(rank))
                         .collect()
+                },
+                |span| {
+                    let mut previous = None;
+                    Some(
+                        query_hits(ordered, span)
+                            .iter()
+                            .map(|hsp| {
+                                let rank = hsp.hit.s_idx as usize;
+                                let run = (hsp.hit.q_idx, rank);
+                                let first = previous.replace(run) != Some(run);
+                                let flipped =
+                                    first && hsp.hit.query_frame < 0 && hsp.subject_frame > 0;
+                                (rank, flipped)
+                            })
+                            .collect(),
+                    )
                 },
             )
         };
@@ -768,10 +785,49 @@ pub(crate) fn batch_prefetch_stop(
         titles,
         identities,
     );
+    let before_batches = || {
+        shared::XmlBatchLoads::of_with_prefetched(
+            before_queries,
+            before_spans,
+            &prefetch,
+            &loads,
+            |query| {
+                let mut seen = std::collections::HashSet::new();
+                query_hits(before, query..query + 1)
+                    .iter()
+                    .map(|hsp| hsp.hit.s_idx as usize)
+                    .filter(|&ordinal| seen.insert(ordinal))
+                    .collect()
+            },
+            |span| {
+                let mut previous = None;
+                Some(
+                    query_hits(before, span)
+                        .iter()
+                        .map(|hsp| {
+                            let ordinal = hsp.hit.s_idx as usize;
+                            let run = (hsp.hit.q_idx, ordinal);
+                            let first = previous.replace(run) != Some(run);
+                            let flipped =
+                                first && hsp.hit.query_frame < 0 && hsp.subject_frame > 0;
+                            (ordinal, flipped)
+                        })
+                        .collect(),
+                )
+            },
+        )
+        .map(|batches| {
+            shared::BeforeXmlBatch::from_xml_batches(batches, |ordinal| {
+                shared::PrefetchSubject::unflipped(ordinal as u32, titled_parsed(titles, ordinal))
+            })
+        })
+    };
     shared::held_batch_prefetch_stop(
         &database.db,
         &database.taxdb,
+        queries.error_query(),
         prefetch_subjects(before, titles).filter(|subject| loads.loaded(subject.ordinal as usize)),
+        &before_batches,
         std::iter::empty(),
         prefetch_subjects(ordered, titles),
         PROGRAM,

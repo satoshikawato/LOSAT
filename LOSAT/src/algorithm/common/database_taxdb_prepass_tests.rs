@@ -1869,7 +1869,9 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
             (3, error.clone())
         );
         assert_eq!(
-            stopped(batch_prefetch_stop(&db, &run, alone, "BLASTN", &stop_queries(3)).map(drop)),
+            stopped(
+                batch_prefetch_stop(&db, &run, 3, alone, "BLASTN", &stop_queries(3)).map(drop)
+            ),
             (3, error.clone())
         );
         // With another subject whose load writes the texts of opening the taxonomy database:
@@ -1901,7 +1903,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                 );
                 assert_eq!(
                     stopped(
-                        batch_prefetch_stop(&db, &run, both(), "BLASTN", &stop_queries(0))
+                        batch_prefetch_stop(&db, &run, 0, both(), "BLASTN", &stop_queries(0))
                             .map(drop)
                     )
                     .1,
@@ -1912,7 +1914,9 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                         held_batch_prefetch_stop(
                             &db,
                             &TaxdbRun::default(),
+                            0,
                             std::iter::empty(),
+                            &|| None,
                             std::iter::empty(),
                             both(),
                             "BLASTN",
@@ -1940,6 +1944,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                     batch_prefetch_stop(
                         &db,
                         &TaxdbRun::default(),
+                        0,
                         both(),
                         "BLASTN",
                         &stop_queries(0),
@@ -1948,7 +1953,9 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                     held_batch_prefetch_stop(
                         &db,
                         &TaxdbRun::default(),
+                        0,
                         std::iter::empty(),
+                        &|| None,
                         std::iter::empty(),
                         both(),
                         "BLASTN",
@@ -2003,7 +2010,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                 .unwrap();
                 assert_eq!(
                     stopped(
-                        batch_prefetch_stop(&db, &run, both(), "BLASTN", &stop_queries(1))
+                        batch_prefetch_stop(&db, &run, 1, both(), "BLASTN", &stop_queries(1))
                             .map(drop)
                     ),
                     (1, error.clone())
@@ -2013,7 +2020,9 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
                         held_batch_prefetch_stop(
                             &db,
                             &TaxdbRun::default(),
+                            1,
                             [subject(other, &None)],
+                            &|| None,
                             std::iter::empty(),
                             both(),
                             "BLASTN",
@@ -2029,6 +2038,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
         batch_prefetch_stop(
             &db,
             &run,
+            0,
             [subject(other, &None)],
             "BLASTN",
             &stop_queries(0),
@@ -2073,6 +2083,7 @@ fn a_lookup_that_fails_on_a_file_stops_the_batchs_prefetch_as_ncbis() {
         batch_prefetch_stop(
             &db,
             &run,
+            0,
             [subject(other, &throws), subject(stop as u32, &parsed[stop])],
             "BLASTN",
             &stop_queries(0),
@@ -3933,6 +3944,7 @@ fn separate_xml2_shares_open_and_non_collision_state_and_refuses_collision() {
             first: 0,
             prefetch: true,
             hits: vec![(0..db_col.num_seqs() as usize).collect()],
+            prefetched: None,
         }])
     };
     let sec_err = read_reported_taxonomy(

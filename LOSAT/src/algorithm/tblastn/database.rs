@@ -437,6 +437,27 @@ impl TblastnDatabase {
             shared::PrefetchSubject::unflipped(*ordinal, parsed.as_deref())
         });
         let stopped = if at_hits {
+            let before_batches = || {
+                reported.and_then(|reported| {
+                    shared::XmlBatchLoads::of(
+                        before.hits.len(),
+                        before.spans,
+                        &reported.prefetch,
+                        &reported.loads,
+                        |query| {
+                            reported_ranks(std::slice::from_ref(&before.hits[query])).collect()
+                        },
+                    )
+                    .map(|batches| {
+                        shared::BeforeXmlBatch::from_xml_batches(batches, |rank| {
+                            shared::PrefetchSubject::unflipped(
+                                reported.ordinals[rank],
+                                reported.parsed_subject(rank),
+                            )
+                        })
+                    })
+                })
+            };
             let before = reported.into_iter().flat_map(|reported| {
                 reported_ranks(before.hits)
                     .filter(|rank| reported.loads.loaded(*rank))
@@ -450,7 +471,9 @@ impl TblastnDatabase {
             shared::held_batch_prefetch_stop(
                 &self.db,
                 &self.taxdb,
+                queries.error_query(),
                 before,
+                &before_batches,
                 std::iter::empty(),
                 subjects,
                 PROGRAM,
@@ -746,39 +769,53 @@ impl<'a> CallReads<'a> {
         let mut posts = Vec::new();
         let Some(database) = self
             .database
-            .filter(|database| xml2 && database.scope_utf8_seen())
+            .filter(|database| xml2 && (database.scope_utf8_seen() || database.parsed_seqids()))
         else {
             return Ok(posts);
         };
         for span in self.reaching(spans) {
+            if !reported.loads.reaches(span.start) {
+                break;
+            }
             let Some(hitlists) = results.get(span.clone()) else {
                 break;
             };
             if shared::prefetch_off(reported.format, seq_aligns_of(hitlists, reported.gapped)) {
-                for (query, hitlist) in span.clone().zip(hitlists) {
-                    let subjects = hitlist.lists().iter().map(|list| {
-                        let rank = list.oid as usize;
-                        (
-                            rank as u32,
-                            reported.ordinals[rank],
-                            reported.parsed_subject(rank),
-                        )
-                    });
-                    let reads = shared::scope_utf8_hit_reads(
-                        &database.db,
-                        &database.taxdb,
-                        after,
-                        subjects,
-                        PROGRAM,
-                    );
-                    subject_reads.set(query, reads);
+                if database.scope_utf8_seen() {
+                    for (query, hitlist) in span.clone().zip(hitlists) {
+                        if !reported.loads.reaches(query) {
+                            break;
+                        }
+                        let subjects = hitlist.lists().iter().map(|list| {
+                            let rank = list.oid as usize;
+                            (
+                                rank as u32,
+                                reported.ordinals[rank],
+                                reported.parsed_subject(rank),
+                            )
+                        });
+                        let reads = shared::scope_utf8_hit_reads(
+                            &database.db,
+                            &database.taxdb,
+                            after,
+                            subjects,
+                            PROGRAM,
+                        );
+                        subject_reads.set(query, reads);
+                    }
                 }
                 continue;
             }
             let subjects: Vec<shared::PrefetchSubject<'_>> =
                 TblastnDatabase::prefetch_subjects(reported, hitlists, SubjectFetch::Every)
                     .collect();
-            let warning = shared::scope_utf8_prefetch_post(&database.db, &subjects, PROGRAM)?;
+            let warning = shared::xml2_non_stopping_prefetch(
+                &database.db,
+                &database.taxdb,
+                span.start,
+                &subjects,
+                PROGRAM,
+            )?;
             if !warning.is_empty() {
                 posts.push((
                     span.start,

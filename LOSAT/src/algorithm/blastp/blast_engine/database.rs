@@ -217,6 +217,12 @@ impl BlastpDatabase {
         self.taxdb.found(&self.db)
     }
 
+    /// Whether XML2/JSON reports on this database need per-batch placed prefetch/read modelling
+    /// (`shared::TaxdbRun::xml2_placed_needed`: opening texts, offset error, or empty `taxdb.btd`).
+    pub(super) fn xml2_placed_needed(&self) -> bool {
+        self.taxdb.xml2_placed_needed(&self.db)
+    }
+
     /// Whether a fetch of the run may be refused for NCBI's taxonomy cache
     /// (`shared::TaxdbRun::cache_may_refuse`), which can come at a later batch.
     pub(super) fn cache_may_refuse(&self) -> bool {
@@ -2066,31 +2072,38 @@ impl ListedTitles<'_> {
     }
 
     /// The stop of NCBI's prefetch of a query batch's subjects of ranks `ranks` (the batch of
-    /// `queries`), for the XML2 and JSON formats, which write the taxonomy texts at each `Hit`
-    /// (`shared::held_batch_prefetch_stop`): after the lookups of the reports of the batches
-    /// before, whose final hit lists are `before` (their subjects are those `read_taxids` reads),
-    /// which BLASTP writes after the stop (the search of those batches again, `ErrorAfterBatchReports`),
-    /// and the loads of those batches of ranks `loaded` (`shared::batch_loads`, with psiblast's
-    /// traceback beyond the cut, which no report reads), recorded where the batch stops. Of both,
-    /// the subjects that those reports load (`loads`, `hit_loads` of `before`: not one whose
-    /// `Hit` throws, nor one shown only after it; review 1 of line DBID pfoff-1, H1). `Ok`: the
-    /// warning of a UTF8String header that a load of a batch that does not stop posts
-    /// (`shared::batch_prefetch_stop`), for the batch's prefetch posts.
+    /// `queries`), for the XML2 and JSON formats (`shared::held_batch_prefetch_stop`): after the
+    /// lookups of the reports of the batches before, whose final hit lists are `before` and whose
+    /// batch structure is `before_batches` (evaluated only when the batch stops), and the loads of
+    /// those batches of ranks `loaded` (`shared::batch_loads`, with psiblast's traceback beyond
+    /// the cut). `Ok`: any UTF8String or prefetch-failure warning of a non-stopping batch.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn batch_prefetch_stop(
         &self,
         database: &BlastpDatabase,
+        batch_first: usize,
         before: &[Option<BlastpHitList>],
+        before_batches: &dyn Fn() -> Option<Vec<shared::XmlBatchLoads>>,
         loaded: impl IntoIterator<Item = usize>,
         loads: &HitLoads,
         ranks: impl IntoIterator<Item = usize>,
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<Vec<u8>> {
+        let before_xml = || {
+            before_batches().map(|batches| {
+                shared::BeforeXmlBatch::from_xml_batches(batches, |rank| {
+                    self.prefetch_subject(rank)
+                })
+            })
+        };
         shared::held_batch_prefetch_stop(
             &database.db,
             &database.taxdb,
+            batch_first,
             Self::reported_ranks(before)
                 .filter(|&rank| loads.loaded(rank))
                 .map(|rank| self.prefetch_subject(rank)),
+            &before_xml,
             loaded
                 .into_iter()
                 .filter(|&rank| loads.loaded(rank))
@@ -2101,19 +2114,25 @@ impl ListedTitles<'_> {
         )
     }
 
-    /// NCBI's warning of a UTF8String header that a load of the prefetch of the subjects of ranks
-    /// `ranks` (a batch of the XML2 and JSON formats whose prefetch is on and does not stop) posts
-    /// (`shared::scope_utf8_prefetch_post`); empty where none.
-    pub(super) fn scope_utf8_prefetch(
+    /// Non-stopping prefetch of a query batch's subjects of ranks `ranks` (at `batch_first`) for
+    /// the XML2 and JSON formats (`shared::xml2_non_stopping_prefetch`).
+    pub(super) fn xml2_non_stopping_prefetch(
         &self,
         database: &BlastpDatabase,
+        batch_first: usize,
         ranks: impl IntoIterator<Item = usize>,
     ) -> Result<Vec<u8>> {
         let subjects: Vec<shared::PrefetchSubject<'_>> = ranks
             .into_iter()
             .map(|rank| self.prefetch_subject(rank))
             .collect();
-        shared::scope_utf8_prefetch_post(&database.db, &subjects, self.program)
+        shared::xml2_non_stopping_prefetch(
+            &database.db,
+            &database.taxdb,
+            batch_first,
+            &subjects,
+            self.program,
+        )
     }
 
     /// The run's record of the subjects of ranks `ranks` that NCBI's BLAST database data loader

@@ -1091,9 +1091,11 @@ impl ReportedSubjects {
         gapped: bool,
         queries: &shared::PrefetchQueries<'_>,
     ) -> Result<Vec<u8>> {
+        let batch_first = batches.first().map_or(0, |batch| batch.query_ordinal);
         shared::batch_prefetch_stop(
             &database.db,
             &database.taxdb,
+            batch_first,
             self.prefetch_subjects(batches, gapped),
             database.program,
             queries,
@@ -1582,9 +1584,18 @@ fn xml_batch_loads(
                 .collect()
         }));
     }
+    let prefetched = (!one_by_one && cut != usize::MAX).then(|| {
+        batches
+            .iter()
+            .flat_map(|batch| batch.queries.iter().flatten())
+            .filter(|list| super::report::reported(list, gapped))
+            .map(|list| (list.oid, false))
+            .collect()
+    });
     Some(vec![shared::XmlBatchLoads {
         first,
         prefetch: !one_by_one,
         hits,
+        prefetched,
     }])
 }

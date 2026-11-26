@@ -162,19 +162,18 @@ pub(super) fn query_warning_lines(
     (lines, later.then_some(later_lines))
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:764-772 (cited at
-// `shared::prefetch_off`)
-/// The XML2 and JSON formats (whose prefetch LOSAT models only where it stops,
-/// `shared::batch_prefetch_stop`): NCBI's warning of a UTF8String header that the prefetch of a
-/// batch whose prefetch is on reads at a load (`shared::scope_utf8_prefetch_post`), with the
-/// batch's prefetch posts (`prefetch_posts`, after its reader messages), or where its prefetch is
-/// off, a `Hit` of a query's report (`shared::scope_utf8_hit_reads` of its final hit list, in
-/// `subject_reads`), the batches in their order; none after the call's first such read among the
-/// batches' own (`shared::Utf8Read::reach`).
-fn xml2_scope_utf8(
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:756-788
+/// Non-stopping XML2 and JSON batch prefetch pass: for each reachable batch whose prefetch is on,
+/// delegates to `ListedTitles::xml2_non_stopping_prefetch` (`shared::xml2_non_stopping_prefetch`:
+/// UTF8String 803.10 warnings, `Error pre-fetching sequence data`, or claiming the one-shot post
+/// for `placed_load_texts` on a damaged taxdb); where a batch's prefetch is off, records per-`Hit`
+/// UTF8String reads (`scope_utf8_hit_reads`).
+#[allow(clippy::too_many_arguments)]
+fn xml2_non_stopping_batches(
     titles: &database::ListedTitles<'_>,
     database: &database::BlastpDatabase,
     query_batches: &[RangedBatch],
+    hit_loads: &crate::report::db_subject::HitLoads,
     after: Option<crate::report::db_subject::RunThrow>,
     (prefetch_posts, subject_reads, hit_lists): (
         &mut Vec<(usize, crate::report::diag_log::Posts)>,
@@ -189,6 +188,9 @@ fn xml2_scope_utf8(
 ) -> Result<()> {
     let db = database.seqdb();
     for batch in query_batches {
+        if !hit_loads.reaches(batch.searched.start) {
+            break;
+        }
         crate::algorithm::common::database::Utf8Read::reach(
             titles.utf8.as_ref(),
             &batch.searched,
@@ -196,18 +198,24 @@ fn xml2_scope_utf8(
         );
         let span = batch.searched.clone();
         if crate::algorithm::common::database::prefetch_off(format, seq_aligns(span.clone())) {
-            for query in span {
-                let shown = std::slice::from_ref(&hit_lists[query]);
-                let reads = titles.scope_utf8_hit_reads(
-                    database,
-                    after,
-                    database::ListedTitles::reported_ranks(shown),
-                );
-                subject_reads.set(query, reads);
+            if db.scope_utf8_seen() {
+                for query in span {
+                    if !hit_loads.reaches(query) {
+                        break;
+                    }
+                    let shown = std::slice::from_ref(&hit_lists[query]);
+                    let reads = titles.scope_utf8_hit_reads(
+                        database,
+                        after,
+                        database::ListedTitles::reported_ranks(shown),
+                    );
+                    subject_reads.set(query, reads);
+                }
             }
             continue;
         }
-        let warning = titles.scope_utf8_prefetch(database, prefetched_ranks(span.clone()))?;
+        let warning =
+            titles.xml2_non_stopping_prefetch(database, span.start, prefetched_ranks(span.clone()))?;
         if !warning.is_empty() {
             prefetch_posts.push((
                 span.start,
@@ -642,13 +650,39 @@ pub(super) fn prefetch_reported_subjects(
         // texts at each `Hit`.
         if let Some(span) = prefetch_stop.as_ref().filter(|_| xml2_prefetch) {
             let scope = || batch_scope(span);
+            let before_batches = || {
+                crate::algorithm::common::database::XmlBatchLoads::of_with_prefetched(
+                    span.start,
+                    batch_ranges,
+                    batch_prefetch,
+                    &hit_loads,
+                    |query| {
+                        database::ListedTitles::reported_ranks(std::slice::from_ref(
+                            &hit_lists[query],
+                        ))
+                        .collect()
+                    },
+                    |batch_span| {
+                        psiblast_prefetched.as_ref().map(|ranks| {
+                            ranks[batch_span]
+                                .iter()
+                                .flatten()
+                                .copied()
+                                .map(|rank| (rank, false))
+                                .collect()
+                        })
+                    },
+                )
+            };
             // The loads of the batches before (psiblast's traceback beyond the cut, which no
             // report reads), beside their reports' lookups, which the stop records as every stop
             // records the call's loads before it (without the record's gate, f8 decision b of
             // line DBID loadord; review 5 L3).
             titles.batch_prefetch_stop(
                 database,
+                span.start,
                 &hit_lists[..span.start],
+                &before_batches,
                 loaded(span.start),
                 &hit_loads,
                 prefetched_ranks(span.clone()),
@@ -667,11 +701,12 @@ pub(super) fn prefetch_reported_subjects(
                     .where_reports_unchanged_by_load_throws(reports_unchanged_by_load_throws),
             )?;
         }
-        if xml2_prefetch && db.scope_utf8_seen() && prefetch_stop.is_none() {
-            xml2_scope_utf8(
+        if xml2_prefetch && (db.scope_utf8_seen() || !titles.parsed.is_empty()) && prefetch_stop.is_none() {
+            xml2_non_stopping_batches(
                 titles,
                 database,
                 query_batches,
+                &hit_loads,
                 after_throw.run(),
                 (&mut prefetch_posts, &mut subject_reads, hit_lists),
                 (prefetch_format, &|span| batch_seq_aligns(span)),
@@ -887,11 +922,11 @@ pub(super) fn prefetch_reported_subjects(
             titles.note_loaded(database, ranges.x_ordinal_base, || loaded(hit_lists.len()));
         }
     }
-    // The batches before a stop: each `Hit`'s read where a batch's prefetch is off, the final
-    // hit list's subjects in order (as `xml2_scope_utf8` reads them).
+    // The batches before a stop: built only on damaged-taxdb runs (`xml2_placed_needed`) so
+    // default healthy-taxdb runs pay zero overhead.
     let xml2_loads =
-        if xml2_prefetch && database.is_some_and(|database| database.cache_may_refuse()) {
-            crate::algorithm::common::database::XmlBatchLoads::of(
+        if xml2_prefetch && database.is_some_and(|database| database.xml2_placed_needed()) {
+            crate::algorithm::common::database::XmlBatchLoads::of_with_prefetched(
                 reported_lists.len(),
                 batch_ranges,
                 batch_prefetch,
@@ -899,6 +934,16 @@ pub(super) fn prefetch_reported_subjects(
                 |query| {
                     database::ListedTitles::reported_ranks(std::slice::from_ref(&hit_lists[query]))
                         .collect()
+                },
+                |span| {
+                    psiblast_prefetched.as_ref().map(|ranks| {
+                        ranks[span]
+                            .iter()
+                            .flatten()
+                            .copied()
+                            .map(|rank| (rank, false))
+                            .collect()
+                    })
                 },
             )
         } else {

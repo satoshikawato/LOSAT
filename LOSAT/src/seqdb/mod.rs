@@ -3041,6 +3041,28 @@ impl SeqDb {
         modelled
     }
 
+    // NCBI reference (598d8ae6): c++/include/corelib/ncbidiag.hpp:617-622
+    /// `model` for an XML2/JSON batch whose prefetch claimed the run's one-time UTF8String post
+    /// (`claim_utf8_post`) during the batch loop so that `placed_load_texts` can interleave
+    /// NCBI's warning (803.10) with the taxonomy texts of that batch's loads in NCBI's handle
+    /// order. Temporarily clears `utf8_claimed` and `scope_utf8_ended` for `model`, then leaves
+    /// `utf8_claimed` set so no later batch or header read posts the warning again.
+    #[cold]
+    #[inline(never)]
+    pub fn with_claimed_scope_utf8_load<T>(&self, model: impl FnOnce() -> T) -> T {
+        let ended = self
+            .scope_utf8_ended
+            .swap(false, std::sync::atomic::Ordering::Relaxed);
+        self.utf8_claimed
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        let modelled = model();
+        self.utf8_claimed
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.scope_utf8_ended
+            .store(ended, std::sync::atomic::Ordering::Relaxed);
+        modelled
+    }
+
     /// The sequence at `at` (by its ordinal id).
     pub(crate) fn sequence_at(&self, at: SeqLocation) -> DbSequence {
         self.sequence(self.ordinal_of(self.location_oid(&at)))

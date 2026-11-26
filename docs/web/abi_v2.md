@@ -559,8 +559,9 @@ a `-logfile` that names an existing file of the run (inside or outside the worki
 the run opens or checks for reading even when that file is missing (a `-db` search's `-gilist`,
 `-negative_gilist`, `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist` or
 `-negative_taxidlist`, database lookup files of `-db`, BLASTN's `-filtering_db` or `windowmasker -infmt blastdb`
-— alias `.nal`/`.pal`, index `.nin`/`.pin`, `index.alx` and `DBLIST` targets — a `-db` search's `taxdb.bti`
-or paired `taxdb.btd` when `taxdb.bti` exists, `taxonomy4blast.sqlite3` when shadowing an existing file on
+— alias `.nal`/`.pal`, index `.nin`/`.pin`, `index.alx`, `DBLIST` targets and local-copy/search-path
+candidates — `taxdb.bti` or paired `taxdb.btd` when the `-outfmt` consults the taxonomy database,
+`taxonomy4blast.sqlite3` when shadowing an existing file on
 the search path, or `windowmasker`'s `-in`, `-fa_list true` listed entries, `-ustat`,
 `-ids` or `-exclude_ids`, without making missing parent folders present), and a `windowmasker` `-out`
 that names an existing file or a missing input the command line reads after opening `-out` (`-in` of

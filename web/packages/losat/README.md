@@ -124,7 +124,7 @@ arrived holds the warnings that the command line writes to its standard error be
 Linux reads it in a working directory holding the run's files (the run directory's files, plus a
 search's `-query`, `-subject`, `-conffile` and `-window_masker_db` names): a name in a folder that
 is missing (`logs/run.log` without `logs`) or naming a folder gives no file and keeps its messages
-on stream 3; a name that is an existing file of the run or a file the run opens or checks for reading even when that file is missing (`q.fa`, `.ncbirc`, `/tmp/q.fa`, a `-db` list file, a database lookup file of `-db`, `-filtering_db` or `windowmasker -infmt blastdb`, `taxdb.bti`, an input of `windowmasker` including entries listed by `-fa_list true`, inside or outside the working directory) is refused, because LOSAT Web does not write to the run's files. When a file is
+on stream 3; a name that is an existing file of the run or a file the run opens or checks for reading even when that file is missing (`q.fa`, `.ncbirc`, `/tmp/q.fa`, a `-db` list file, a database lookup file of `-db`, `-filtering_db` or `windowmasker -infmt blastdb`, `taxdb.bti` when `-outfmt` consults the taxonomy database, an input of `windowmasker` including entries listed by `-fa_list true`, inside or outside the working directory) is refused, because LOSAT Web does not write to the run's files. When a file is
 made, its name is the command line's file name (`run.log` for ` run.log` and `./run.log`, `logs` for
 `logs/`, `sub/run.log` when `sub` is a folder of the run, `/tmp/run.log` outside the working
 directory, and `/dev/stdout` for a search's `/dev/stdout`); show and save it as a name, not as a

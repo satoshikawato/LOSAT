@@ -359,25 +359,32 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
             b"p5.pin".to_vec()
         ]
     );
-    // Multiple quoted names with spaces.
+    // Multiple quoted names with spaces: stops at the first missing name (matching NCBI's
+    // `resolve_in` short-circuit), and continues to the second name when the first exists.
     assert_eq!(
         database_lookup_files(b"\"sub dir/x1\" x2", SeqType::Nucleotide, None),
         vec![
             b"sub dir/index.alx".to_vec(),
             b"sub dir/x1.nal".to_vec(),
             b"sub dir/x1.nin".to_vec(),
-            b"index.alx".to_vec(),
-            b"x2.nal".to_vec(),
-            b"x2.nin".to_vec(),
         ]
     );
+    let qdir = crate::utils::test_dir::TempDir::unique("losat-d19b-quoted");
+    let sub = qdir.join("sub dir");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(sub.join("x1.nin"), b"x").unwrap();
+    let quoted_arg = format!("\"{}\" x2", sub.join("x1").display());
+    let quoted_got = database_lookup_files(quoted_arg.as_bytes(), SeqType::Nucleotide, None);
+    assert!(quoted_got.iter().any(|p| p == b"x2.nal"), "{quoted_got:?}");
+    assert!(quoted_got.iter().any(|p| p == b"x2.nin"), "{quoted_got:?}");
     // Existing alias file expands DBLIST and stops on mutual recursion.
     let dir = crate::utils::test_dir::TempDir::unique("losat-d19b-alias");
     std::fs::write(
         dir.join("a.nal"),
-        b"TITLE a\nDBLIST b v1\nSEQIDLIST ids.txt\n",
+        b"TITLE a\nDBLIST v1 b\nSEQIDLIST ids.txt\n",
     )
     .unwrap();
+    std::fs::write(dir.join("v1.nin"), b"x").unwrap();
     std::fs::write(dir.join("b.nal"), b"TITLE b\nDBLIST a\n").unwrap();
     let base = dir.join("a");
     let got = database_lookup_files(
@@ -385,17 +392,50 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
         SeqType::Nucleotide,
         None,
     );
-    let has = |name: &str| {
-        let full = dir.join(name);
-        got.iter()
-            .any(|p| p.as_slice() == full.as_os_str().as_encoded_bytes())
+    let has = |list: &[Vec<u8>], path: &std::path::Path| {
+        let want = path.as_os_str().as_encoded_bytes();
+        list.iter().any(|p| p.as_slice() == want)
     };
-    assert!(has("a.nal"));
-    assert!(has("b.nal"));
-    assert!(has("v1.nal"));
-    assert!(has("v1.nin"));
-    assert!(has("ids.txt"));
-    assert!(has("index.alx"));
+    assert!(has(&got, &dir.join("a.nal")));
+    assert!(has(&got, &dir.join("b.nal")));
+    assert!(has(&got, &dir.join("v1.nal")));
+    assert!(has(&got, &dir.join("v1.nin")));
+    assert!(has(&got, &dir.join("ids.txt")));
+    assert!(has(&got, &dir.join("index.alx")));
+
+    // Finding 2 (a): local copy in cwd (`!skip_local`) is checked for DBLIST entries without a
+    // directory when the alias sits in a BLASTDB directory.
+    let case_b = crate::utils::test_dir::TempDir::unique("losat-d19b-local-copy");
+    let b_dbs = case_b.join("dbs");
+    std::fs::create_dir_all(&b_dbs).unwrap();
+    std::fs::write(b_dbs.join("a.pal"), b"TITLE a\nDBLIST v1\n").unwrap();
+    std::fs::write(b_dbs.join("v1.pin"), b"x").unwrap();
+    let got_b = database_lookup_files(
+        b"a",
+        SeqType::Protein,
+        Some(b_dbs.as_os_str().as_encoded_bytes()),
+    );
+    assert!(
+        got_b.iter().any(|p| p == b"v1.pin"),
+        "local copy v1.pin in cwd must be recorded: {got_b:?}"
+    );
+
+    // Finding 2 (b): DBLIST entry resolved via BLASTDB search path (and recursive alias inside
+    // BLASTDB) records every checked `.pal`/`.pin` along the search path.
+    let case_c = crate::utils::test_dir::TempDir::unique("losat-d19b-search-relookup");
+    let c_dbs = case_c.join("dbs");
+    std::fs::create_dir_all(&c_dbs).unwrap();
+    std::fs::write(case_c.join("a.pal"), b"TITLE a\nDBLIST sub\n").unwrap();
+    std::fs::write(c_dbs.join("sub.pal"), b"TITLE sub\nDBLIST v1\n").unwrap();
+    std::fs::write(c_dbs.join("v1.pin"), b"x").unwrap();
+    let got_c = database_lookup_files(
+        case_c.join("a").as_os_str().as_encoded_bytes(),
+        SeqType::Protein,
+        Some(c_dbs.as_os_str().as_encoded_bytes()),
+    );
+    assert!(has(&got_c, &c_dbs.join("sub.pal")), "{got_c:?}");
+    assert!(has(&got_c, &c_dbs.join("v1.pal")), "{got_c:?}");
+    assert!(has(&got_c, &c_dbs.join("v1.pin")), "{got_c:?}");
 }
 
 #[test]

@@ -545,6 +545,7 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
     let mut list_files: Vec<Vec<u8>> = Vec::new();
     let mut dbs: Vec<String> = Vec::new();
     let mut filtering_dbs: Vec<String> = Vec::new();
+    let mut outfmt: Option<String> = None;
     let mut has_taxids = false;
     let mut no_taxid_expansion = false;
     let is_blastn = program == Program::Blastn;
@@ -562,6 +563,7 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
             "window_masker_taxid" if is_blastn => push_taxid(&mut registered, value),
             "db" => dbs.push(value.to_string()),
             "filtering_db" if is_blastn => filtering_dbs.push(value.to_string()),
+            "outfmt" => outfmt = Some(value.to_string()),
             "taxids" | "negative_taxids" => has_taxids = true,
             "taxidlist" | "negative_taxidlist" => {
                 has_taxids = true;
@@ -609,6 +611,7 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
         registry,
         &db_refs,
         &filtering_db_refs,
+        outfmt.as_deref().unwrap_or("0"),
         has_taxids && !no_taxid_expansion,
     ));
     SearchRunFiles { registered, read }

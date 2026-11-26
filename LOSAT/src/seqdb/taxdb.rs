@@ -84,35 +84,78 @@ fn data_name_for(index_name: &[u8]) -> Vec<u8> {
     data_name
 }
 
-// No NCBI counterpart: LOSAT Web reads `-logfile` against the taxonomy files that a `-db` search
-// checks or opens (`INDEX_FILE`, and its paired `.btd` when `INDEX_FILE` already exists), so
-// `-logfile` cannot suppress the missing-taxdb warning or feed itself into `TaxDb::open` (line
-// WQA D19b).
-/// Taxonomy database file names that a `-db` search checks or opens in the working directory (and
-/// in each directory of `blastdb`, if given), keeping relative paths relative so `run_files`
-/// matches them without making missing parent folders present.
-pub(crate) fn lookup_files(blastdb: Option<&[u8]>) -> Vec<Vec<u8>> {
+// No NCBI counterpart: LOSAT Web reads `-logfile` against the taxonomy files that a search
+// checks or opens (`INDEX_FILE`, and its paired `.btd` when `INDEX_FILE` already exists), gated
+// by how the run's `-outfmt` consults taxdb so formats that do not read `taxdb.bti` are not
+// refused while formats that do cannot suppress the missing-taxdb warning, shadow an existing
+// `taxdb.bti`, or feed the log into `TaxDb::open` (line WQA D19b).
+/// Taxonomy database file names that a search checks or opens in the working directory and in
+/// each directory of `SearchPath::from_environment(blastdb)`, keeping paths under the working
+/// directory relative so `run_files` matches them without making missing parent folders present:
+/// - `OutfmtTaxdbUse::Always`: `taxdb.bti` in every search directory, plus its paired `taxdb.btd`
+///   where `taxdb.bti` already exists;
+/// - `OutfmtTaxdbUse::WhenPresent`: the same when `taxdb.bti` already exists on the search path,
+///   else only `taxdb.bti` beside an already-present `taxdb.btd`;
+/// - `OutfmtTaxdbUse::None`: only `taxdb.bti` beside an already-present `taxdb.btd` when
+///   `check_existing_btd` is true (database prefetch formats), else empty.
+pub(crate) fn lookup_files_for_use(
+    blastdb: Option<&[u8]>,
+    use_kind: crate::algorithm::common::database::OutfmtTaxdbUse,
+    check_existing_btd: bool,
+) -> Vec<Vec<u8>> {
+    use crate::algorithm::common::database::OutfmtTaxdbUse;
     use crate::utils::os_bytes::path_of_bytes;
-    let index = INDEX_FILE.as_bytes();
-    let mut out = vec![index.to_vec()];
-    if super::alias::exists(std::path::Path::new(INDEX_FILE)) {
-        out.push(data_name_for(index));
+    let search = SearchPath::from_environment(blastdb);
+    let include_all = match use_kind {
+        OutfmtTaxdbUse::Always => true,
+        OutfmtTaxdbUse::WhenPresent => search.resolve_file(INDEX_FILE.as_bytes()).is_some(),
+        OutfmtTaxdbUse::None => false,
+    };
+    let check_btd = !include_all && (use_kind == OutfmtTaxdbUse::WhenPresent || check_existing_btd);
+    if !include_all && !check_btd {
+        return Vec::new();
     }
-    if let Some(dirs) = blastdb {
-        for dir in super::alias::split_search_dirs(dirs) {
-            let idx = super::alias::combine_path(&super::alias::fix_delimiters(dir), index);
-            if !out.contains(&idx) {
-                out.push(idx.clone());
+    let index = INDEX_FILE.as_bytes();
+    let data_file = data_name_for(index);
+    let cwd = super::alias::fix_delimiters(search.cwd_bytes());
+    let norm_cwd = super::alias::normalize_dir(&cwd);
+    let mut out = Vec::new();
+    let push_rel = |out: &mut Vec<Vec<u8>>, path: Vec<u8>| {
+        let rel = super::alias::strip_dir_prefix(&path, &norm_cwd)
+            .or_else(|| super::alias::strip_dir_prefix(&path, &cwd))
+            .unwrap_or(path.as_slice())
+            .to_vec();
+        if !out.contains(&rel) {
+            out.push(rel);
+        }
+    };
+    for dir in super::alias::split_search_dirs(search.as_bytes()) {
+        let dir = super::alias::fix_delimiters(dir);
+        let idx = super::alias::combine_path(&dir, index);
+        if include_all {
+            let idx_exists = super::alias::exists(&path_of_bytes(&idx));
+            push_rel(&mut out, idx.clone());
+            if idx_exists {
+                push_rel(&mut out, data_name_for(&idx));
             }
-            if super::alias::exists(&path_of_bytes(&idx)) {
-                let data = data_name_for(&idx);
-                if !out.contains(&data) {
-                    out.push(data);
-                }
+        } else {
+            let btd = super::alias::combine_path(&dir, &data_file);
+            if super::alias::exists(&path_of_bytes(&btd)) {
+                push_rel(&mut out, idx);
             }
         }
     }
     out
+}
+
+/// [`lookup_files_for_use`] with [`OutfmtTaxdbUse::Always`], for tests.
+#[cfg(test)]
+pub(crate) fn lookup_files(blastdb: Option<&[u8]>) -> Vec<Vec<u8>> {
+    lookup_files_for_use(
+        blastdb,
+        crate::algorithm::common::database::OutfmtTaxdbUse::Always,
+        false,
+    )
 }
 
 /// `ERR_POST` text (seqdbtax.cpp:`CTaxDBFileInfo::CTaxDBFileInfo`): the magic number is wrong.

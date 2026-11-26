@@ -180,14 +180,9 @@ impl SubjectPlan {
     /// The next hard chunk (`None`: none left), with NCBI's chunk overlap (`DBSEQ_CHUNK_OVERLAP`,
     /// which NCBI's merge takes after every chunk that ends a range, as it compares the chunk's
     /// offset with the next range's left). BLASTP and BLASTX search every chunk, whatever its
-    /// length (`algorithm::common::hard_chunk_walk::DiagonalWalk::chunk`), and append each
-    /// chunk's HSPs: a chunk's HSPs end within its range, only those of the one word of a chunk
-    /// shorter than the word lie past it (the search refuses the sequence where they meet another
-    /// chunk's in the merge, `common::hard_chunk_scan::merge_joins`), and a chunk that can hold
-    /// HSPs (of the word's letters or more) starts at or past the end of every earlier such chunk
-    /// (else refused, `HardMaskShape::PartsOutOfOrder`), so the merge finds none past the next
-    /// chunk's offset (blast_hits.c:2888-2899). A long range's chunks overlap (refused,
-    /// `HardMaskShape::LongRange`).
+    /// length (`algorithm::common::hard_chunk_walk::DiagonalWalk::chunk`), and merge each chunk's
+    /// HSPs across `chunk.overlap` via `core::blast_hits::merge_subject_chunk_hsps`
+    /// (`Blast_HSPListsMerge`, series NP, M4b-3d).
     pub(crate) fn next_chunk(&mut self) -> Option<HardChunk> {
         self.split
             .next_chunk(crate::core::subject_split::DBSEQ_CHUNK_OVERLAP)

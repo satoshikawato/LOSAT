@@ -1,0 +1,1 @@
+- `psiblast` supports `-html` for formats `0` to `4` and `18` (and ignores it in formats `5` to `12` and `20`, as in NCBI BLAST+ 2.17.0), across single- and multi-iteration rounds (`-num_iterations`), `-in_pssm`, `-in_msa`, `-db`, and `-subject` on both the command line and library (`losat::api` / `pylosat`), reusing the shared HTML formatting and registry infrastructure.

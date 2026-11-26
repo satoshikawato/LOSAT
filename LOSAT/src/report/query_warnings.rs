@@ -466,8 +466,8 @@ pub enum ReportPlace {
 /// far (`x_pairwise_par::at_place`, or a writer's own marks).
 pub type ReportHook<'r, W> = &'r mut dyn FnMut(ReportPlace, &mut W) -> io::Result<()>;
 
-/// A [`ReportHook`] that writes nothing: of a writer without `-html` that reads no subject
-/// through it (psiblast's headings), and of the tests of the writers.
+/// A [`ReportHook`] that writes nothing, for the tests of the writers.
+#[cfg(test)]
 pub fn no_places<W>(_place: ReportPlace, _writer: &mut W) -> io::Result<()> {
     Ok(())
 }

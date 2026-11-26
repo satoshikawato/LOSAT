@@ -1102,7 +1102,7 @@ fn write_subject_part<'h, W: Write>(
 }
 
 /// Writes the HSPs `part` of a TBLASTN subject when at least one HSP skips alignment formatting
-/// due to `CAlnVec::TranslateNAToAA` (`PairwiseNullbStop::SkipTranslate`): each skipped HSP
+/// due to `CAlnVec::TranslateNAToAA` (`PairwiseEdge::NullbSkipTranslate`): each skipped HSP
 /// prints NCBI's `alignment skipped` line without emitting the subject heading, and the first
 /// non-skipped HSP prints the subject heading once before its alignment.
 ///

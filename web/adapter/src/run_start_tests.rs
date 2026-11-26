@@ -1400,10 +1400,12 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
         refusal("blastp", "taxonomy4blast.sqlite3"),
         "taxonomy4blast.sqlite3 shadowing BLASTDB: validate"
     );
-    // When `taxdb.bti` exists in BLASTDB, `-outfmt 18` and singular `-outfmt "6 ... ssciname"`
-    // refuse `-logfile taxdb.bti` (which would shadow BLASTDB's file), while `-outfmt 6` still
+    // When `taxdb.bti` exists in BLASTDB, `-outfmt 18`, singular `-outfmt "6 ... ssciname"`, and
+    // default `-outfmt 6` (whose `saccver` column uses `GenerateDefline` on databases without
+    // `-parse_seqids`) refuse `-logfile taxdb.bti` (which would shadow BLASTDB's file), while a
+    // tabular format without subject id or taxonomy-name columns (`-outfmt "6 qseqid pident"`)
     // passes.
-    for fmt in ["18", "6 qseqid sseqid ssciname"] {
+    for fmt in ["18", "6 qseqid sseqid ssciname", "6"] {
         let shadow_bti = [
             "blastp",
             "-conffile",
@@ -1439,13 +1441,16 @@ fn the_search_receiver_reads_logfile_against_registered_files() {
         "-db",
         prot_db,
         "-outfmt",
-        "6",
+        "6 qseqid pident",
         "-num_threads",
         "1",
         "-logfile",
         "taxdb.bti",
     ];
     validate(&no_tax_under_blastdb).unwrap();
+    run_db_of(&no_tax_under_blastdb)
+        .0
+        .expect("outfmt without subject id or tax names passes with taxdb in BLASTDB");
 
     // Finding 2 (GXR R1 cases B and C):
     // - Case B: alias in BLASTDB (`B/dbs/a.pal` with `DBLIST v1`, volume `B/dbs/v1.pin`),

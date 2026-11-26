@@ -377,7 +377,8 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
     let quoted_got = database_lookup_files(quoted_arg.as_bytes(), SeqType::Nucleotide, None);
     assert!(quoted_got.iter().any(|p| p == b"x2.nal"), "{quoted_got:?}");
     assert!(quoted_got.iter().any(|p| p == b"x2.nin"), "{quoted_got:?}");
-    // Existing alias file expands DBLIST and stops on mutual recursion.
+    // Existing alias file expands DBLIST and stops on mutual recursion (before `compute_masks`
+    // runs, so filter list paths like `SEQIDLIST` are not recorded on resolution failure).
     let dir = crate::utils::test_dir::TempDir::unique("losat-d19b-alias");
     std::fs::write(
         dir.join("a.nal"),
@@ -400,8 +401,59 @@ fn database_lookup_files_collects_alias_index_group_and_existing_dblist() {
     assert!(has(&got, &dir.join("b.nal")));
     assert!(has(&got, &dir.join("v1.nal")));
     assert!(has(&got, &dir.join("v1.nin")));
-    assert!(has(&got, &dir.join("ids.txt")));
+    assert!(!has(&got, &dir.join("ids.txt")));
     assert!(has(&got, &dir.join("index.alx")));
+
+    // Valid alias records `compute_masks` paths: `SEQIDLIST`, `OIDLIST` primary + first-volume
+    // fallback when primary is missing, and (on Unix) preserves backslashes literally just like
+    // `compute_masks` (without `fix_delimiters`).
+    let mask_dir = crate::utils::test_dir::TempDir::unique("losat-d19b-masks");
+    let vol_dir = mask_dir.join("vols");
+    std::fs::create_dir_all(&vol_dir).unwrap();
+    std::fs::write(vol_dir.join("v1.nin"), b"x").unwrap();
+    std::fs::write(
+        mask_dir.join("m.nal"),
+        b"TITLE m\nDBLIST v1\nOIDLIST mask.msk\nSEQIDLIST ids.txt\n",
+    )
+    .unwrap();
+    let got_m = database_lookup_files(
+        mask_dir.join("m").as_os_str().as_encoded_bytes(),
+        SeqType::Nucleotide,
+        Some(vol_dir.as_os_str().as_encoded_bytes()),
+    );
+    assert!(has(&got_m, &mask_dir.join("mask.msk")), "{got_m:?}");
+    assert!(has(&got_m, &vol_dir.join("mask.msk")), "{got_m:?}");
+    assert!(has(&got_m, &mask_dir.join("ids.txt")), "{got_m:?}");
+    // When primary OIDLIST already exists, `compute_masks` does not consult the volume fallback.
+    std::fs::write(mask_dir.join("mask.msk"), b"x").unwrap();
+    let got_m_present = database_lookup_files(
+        mask_dir.join("m").as_os_str().as_encoded_bytes(),
+        SeqType::Nucleotide,
+        Some(vol_dir.as_os_str().as_encoded_bytes()),
+    );
+    assert!(has(&got_m_present, &mask_dir.join("mask.msk")));
+    assert!(
+        !has(&got_m_present, &vol_dir.join("mask.msk")),
+        "{got_m_present:?}"
+    );
+    #[cfg(unix)]
+    {
+        std::fs::write(
+            mask_dir.join("bs.nal"),
+            b"TITLE bs\nDBLIST v1\nOIDLIST sub\\mask.msk\nSEQIDLIST sub\\ids.txt\n",
+        )
+        .unwrap();
+        let got_bs = database_lookup_files(
+            mask_dir.join("bs").as_os_str().as_encoded_bytes(),
+            SeqType::Nucleotide,
+            Some(vol_dir.as_os_str().as_encoded_bytes()),
+        );
+        assert!(has(&got_bs, &mask_dir.join(r"sub\mask.msk")), "{got_bs:?}");
+        assert!(has(&got_bs, &vol_dir.join(r"sub\mask.msk")), "{got_bs:?}");
+        assert!(has(&got_bs, &mask_dir.join(r"sub\ids.txt")), "{got_bs:?}");
+        assert!(!has(&got_bs, &mask_dir.join("sub/mask.msk")), "{got_bs:?}");
+        assert!(!has(&got_bs, &mask_dir.join("sub/ids.txt")), "{got_bs:?}");
+    }
 
     // Finding 2 (a): local copy in cwd (`!skip_local`) is checked for DBLIST entries without a
     // directory when the alias sits in a BLASTDB directory.

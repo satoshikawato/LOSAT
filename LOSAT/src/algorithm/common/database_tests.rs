@@ -988,14 +988,20 @@ fn outfmt_taxdb_use_matches_ncbi_format_rules() {
         );
     }
     // Formats that read taxonomy names only when taxdb.bti already exists on the search path:
-    // singular tabular name fields, outfmt 18, and pairwise/query-anchored 0..=4 on `-db`.
+    // singular tabular name fields, outfmt 18, pairwise/query-anchored 0..=4 on `-db`, and
+    // tabular formats (6/7/10/20) that print a subject id column (`PrintedIds`, including `std`).
     for fmt in [
         "0",
         "1",
         "2",
         "3",
         "4",
+        "6",
+        "6 std",
+        "7",
+        "10",
         "18",
+        "20",
         "6 qseqid sseqid ssciname",
         "6 qseqid sseqid scomname",
         "6 qseqid sseqid sblastname",
@@ -1003,6 +1009,12 @@ fn outfmt_taxdb_use_matches_ncbi_format_rules() {
         "7 qseqid sseqid ssciname",
         "10 qseqid sseqid ssciname",
         "20 qseqid sseqid ssciname",
+        "6 qseqid sseqid staxid",
+        "6 qseqid sseqid staxids",
+        "6 qseqid sacc",
+        "6 qseqid saccver",
+        "6 qseqid sallseqid",
+        "6 qseqid sallacc",
     ] {
         assert_eq!(
             outfmt_taxdb_use(fmt, app, true),
@@ -1015,22 +1027,22 @@ fn outfmt_taxdb_use_matches_ncbi_format_rules() {
             "{fmt} subj"
         );
     }
-    // Formats that do not consult taxdb for formatting: 5, 6/7/10/20 without tax name fields
-    // (including staxid/staxids), 8, 9, 11, 12, 17.
+    // Formats that do not consult taxdb for formatting: 5, 6/7/10/20 without tax name or
+    // printed subject id columns (including staxid/staxids/sgi/stitle alone), 8, 9, 11, 12, 17.
     for fmt in [
         "5",
-        "6",
-        "6 std",
-        "6 qseqid sseqid staxid",
-        "6 qseqid sseqid staxids",
-        "7",
+        "6 qseqid pident",
+        "6 qseqid staxid",
+        "6 qseqid staxids",
+        "6 qseqid sgi sallgi stitle",
+        "7 qseqid pident",
+        "10 qseqid pident",
+        "20 qseqid pident",
         "8",
         "9",
-        "10",
         "11",
         "12",
         "17",
-        "20",
     ] {
         assert_eq!(
             outfmt_taxdb_use(fmt, app, true),

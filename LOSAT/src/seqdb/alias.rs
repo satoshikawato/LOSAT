@@ -490,9 +490,9 @@ impl SearchPath {
         seqtype: Option<SeqType>,
         mut record: Option<&mut Vec<Vec<u8>>>,
     ) -> Option<Vec<u8>> {
-        let mut record_candidate = |path: Vec<u8>| {
+        let mut record_path = |path: &Path| {
             if let Some(log) = record.as_deref_mut() {
-                push_unique(log, path);
+                push_unique(log, path_bytes(path).into_owned());
             }
         };
         for road in split_search_dirs(&self.path) {
@@ -501,11 +501,11 @@ impl SearchPath {
             let found = match seqtype {
                 Some(seqtype) => DB_LOOKUP_EXTNS.iter().any(|ext| {
                     let candidate = with_extension(&base, seqtype, ext);
-                    record_candidate(path_bytes(&candidate).into_owned());
+                    record_path(&candidate);
                     exists(&candidate)
                 }),
                 None => {
-                    record_candidate(attempt.clone());
+                    record_path(&base);
                     exists(&base)
                 }
             };
@@ -779,25 +779,11 @@ impl Resolver<'_, '_> {
         // errors of `DbFile::open`.
         let bytes = DbFile::open(&path)?.read_all()?;
         let values = read_values(&bytes);
-        let mut dblist: &[u8] = &[];
-        let mut oidlist: Option<Vec<u8>> = None;
-        let dir = dir_name(base);
-        for (key, value) in &values {
-            if key == b"DBLIST" {
-                dblist = value;
-            } else if self.record.is_some()
-                && PATH_KEYS.iter().any(|k| k.as_bytes() == key.as_slice())
-                && !value.is_empty()
-            {
-                let target = combine_path(dir, &fix_delimiters(value));
-                if key == b"OIDLIST" {
-                    oidlist = Some(value.clone());
-                }
-                if let Some(log) = self.record.as_deref_mut() {
-                    push_unique(log, target);
-                }
-            }
-        }
+        let dblist = values
+            .iter()
+            .find(|(key, _)| key == b"DBLIST")
+            .map(|(_, value)| value.as_slice())
+            .unwrap_or(&[]);
         let entries: Vec<Vec<u8>> = split_quoted(dblist, false)
             .into_iter()
             .map(fix_delimiters)
@@ -805,6 +791,7 @@ impl Resolver<'_, '_> {
 
         let this_name = path_bytes(&path).into_owned();
         self.recurse.push(this_name.clone());
+        let dir = dir_name(base);
         let mut node = AliasNode {
             this_name: Some(this_name),
             values,
@@ -813,17 +800,6 @@ impl Resolver<'_, '_> {
         };
         let result = self.expand(&mut node, dir, base, &entries, false);
         self.recurse.pop();
-        if let Some(value) = oidlist {
-            let direct = combine_path(dir, &fix_delimiters(&value));
-            if !exists(&path_of_bytes(&direct)) {
-                if let Some(first) = node.vol_names.first() {
-                    let fallback = combine_path(dir_name(first), &fix_delimiters(&value));
-                    if let Some(log) = self.record.as_deref_mut() {
-                        push_unique(log, fallback);
-                    }
-                }
-            }
-        }
         result.map(|()| node)
     }
 
@@ -996,10 +972,11 @@ pub(super) fn strip_dir_prefix<'a>(path: &'a [u8], dir: &[u8]) -> Option<&'a [u8
 // that `resolve_in` checks or opens for `dbname`, so a write name equal to a missing
 // alias/index/group-alias file is refused instead of diverging from the command line, which
 // creates the file and then reads it back (line WQA D19b).
-/// File names that [`resolve_in`] checks or opens for `dbname` (`seqtype`) using the engine's own
-/// [`SearchPath::from_environment`] and [`resolve_in_recording`] walk (returning recorded paths on
-/// both `Ok` and `Err`). Paths inside the working directory are returned relative to it so
-/// `run_files` matches them without making missing parent folders present.
+/// File names that [`resolve_in`] and [`compute_masks`] check or open for `dbname` (`seqtype`),
+/// using the engine's own [`SearchPath::from_environment`], [`resolve_in_recording`] (on both `Ok`
+/// and `Err`) and [`compute_masks_recording`] (on `Ok`). Paths inside the working directory are
+/// returned relative to it so `run_files` matches them without making missing parent folders
+/// present.
 pub(crate) fn database_lookup_files(
     dbname: &[u8],
     seqtype: SeqType,
@@ -1007,7 +984,9 @@ pub(crate) fn database_lookup_files(
 ) -> Vec<Vec<u8>> {
     let search = SearchPath::from_environment(blastdb);
     let mut raw = Vec::new();
-    let _ = resolve_in_recording(dbname, seqtype, &search, Some(&mut raw));
+    if let Ok(mut tree) = resolve_in_recording(dbname, seqtype, &search, Some(&mut raw)) {
+        let _ = compute_masks_recording(&mut tree.root, Some(&mut raw));
+    }
     let cwd = fix_delimiters(&search.cwd);
     let norm_cwd = normalize_path(&cwd);
     let mut out = Vec::with_capacity(raw.len());
@@ -1483,6 +1462,16 @@ pub(super) fn walk_totals(root: &AliasNode, volume: &dyn Fn(&[u8]) -> (u32, u64)
 /// top down, a node before its sub-nodes; the first value that does not convert is the error
 /// (`SeqDbError::Ncbi`), as is a value naming several lists (`SeqDbError::NotFound`).
 pub(super) fn compute_masks(node: &mut AliasNode) -> Result<(), SeqDbError> {
+    compute_masks_recording(node, None)
+}
+
+/// [`compute_masks`], optionally recording every `OIDLIST` (primary and first-volume fallback when
+/// primary is missing) and id-list path checked or resolved (`record`). When `record` is `None`
+/// (the default engine path), nothing is recorded or allocated.
+fn compute_masks_recording(
+    node: &mut AliasNode,
+    mut record: Option<&mut Vec<Vec<u8>>>,
+) -> Result<(), SeqDbError> {
     let convert = |value: &[u8]| string_to_uint(value).map_err(SeqDbError::Ncbi);
     let first_oid = node.value("FIRST_OID").map(convert).transpose()?;
     let last_oid = node.value("LAST_OID").map(convert).transpose()?;
@@ -1494,9 +1483,15 @@ pub(super) fn compute_masks(node: &mut AliasNode) -> Result<(), SeqDbError> {
     }
     if let Some(value) = node.value("OIDLIST") {
         let mut path = combine_path(&node.db_path, value);
+        if let Some(log) = record.as_deref_mut() {
+            push_unique(log, path.clone());
+        }
         if !exists(&path_of_bytes(&path)) {
             if let Some(first) = node.vol_names.first() {
                 path = combine_path(dir_name(first), value);
+                if let Some(log) = record.as_deref_mut() {
+                    push_unique(log, path.clone());
+                }
             }
         }
         node.oid_list = Some(path);
@@ -1529,10 +1524,13 @@ pub(super) fn compute_masks(node: &mut AliasNode) -> Result<(), SeqDbError> {
             ));
         }
         let path = combine_path(&node.db_path, value);
+        if let Some(log) = record.as_deref_mut() {
+            push_unique(log, path.clone());
+        }
         node.lists.push(AliasList { kind, path });
     }
     for subnode in &mut node.subnodes {
-        compute_masks(subnode)?;
+        compute_masks_recording(subnode, record.as_deref_mut())?;
     }
     Ok(())
 }

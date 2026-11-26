@@ -7318,14 +7318,25 @@ fn parse_outfmt_for_taxdb(
     Some((report, tabular))
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:522-532
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
 /// How an `-outfmt` string consults NCBI's taxonomy database for `app` (and whether the search
 /// uses `-db`, `is_db`), sharing the engine's own `parse_formatting_string`, `Xml2Kind::of`,
-/// `ReportFormat::writes_html_links` and `TabularSpec::of_app` rules (line WQA D19b).
+/// `ReportFormat::writes_html_links`, `TabularSpec::of_app` and `PrintedIds::of` rules
+/// (line WQA D19b).
+///
+/// On `-db` searches, tabular formats (6, 7, 10, 20) that print a subject id column
+/// (`PrintedIds`: `sseqid`, `sacc`, `saccver`, `sallseqid`, `sallacc`, including the default
+/// `std` fields of outfmt 6 and 7) derive the replacement word for `gnl|BL_ORD_ID|n` on
+/// databases without `-parse_seqids` from `GenerateDefline`, which uses `taxdb` when a sequence's
+/// stored title is empty, so they return [`OutfmtTaxdbUse::WhenPresent`].
 pub(crate) fn outfmt_taxdb_use(
     outfmt: &str,
     app_kind: crate::report::archive::options::RequestKind,
     is_db: bool,
 ) -> OutfmtTaxdbUse {
+    use crate::blastinput::app::ReportFormat;
+    use crate::report::tabular::PrintedIds;
     let Some((report, tabular)) = parse_outfmt_for_taxdb(outfmt, app_kind) else {
         return OutfmtTaxdbUse::None;
     };
@@ -7336,12 +7347,18 @@ pub(crate) fn outfmt_taxdb_use(
         if spec.checks_taxdb() {
             return OutfmtTaxdbUse::Always;
         }
-        if is_db && spec.needs().taxonomy_names {
+        if is_db && (spec.needs().taxonomy_names || PrintedIds::of(Some(&spec)).any()) {
             return OutfmtTaxdbUse::WhenPresent;
         }
         return OutfmtTaxdbUse::None;
     }
-    if is_db && report.writes_html_links() {
+    if is_db
+        && (report.writes_html_links()
+            || (matches!(
+                report,
+                ReportFormat::Tabular | ReportFormat::TabularWithComments
+            ) && PrintedIds::of(None).any()))
+    {
         return OutfmtTaxdbUse::WhenPresent;
     }
     OutfmtTaxdbUse::None

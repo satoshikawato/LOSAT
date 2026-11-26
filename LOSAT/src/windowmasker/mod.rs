@@ -10,7 +10,7 @@
 
 mod app;
 mod checkdup;
-mod counts;
+pub(crate) mod counts;
 mod ids;
 mod sdust;
 mod work;

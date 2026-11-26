@@ -1270,6 +1270,28 @@ fn subject_hits_with<S: super::seed::BxScoring>(
         super::x_soft_subject::x_word_finder(
             scoring, batch, params, options, encoded, lookup, diagonals, ranges, None,
         )?
+    } else if options.window_size < 0 {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1431
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:214-235
+        // A negative window (a search strategy's) takes the reference one-hit word finder on the
+        // search's one table, in the order of the subjects (the search runs on one thread,
+        // `ResolvedOptions`): the table carries its entries and its offset from one subject to
+        // the next, so none of the loops of `window_size >= 0`, which a subject's own search or
+        // another table's may stand for, is right. NCBI does not search an empty subject.
+        if encoded.len() <= 1 {
+            Vec::new()
+        } else {
+            super::seed::word_finder_bx_of(
+                scoring,
+                batch,
+                params,
+                options,
+                encoded,
+                lookup,
+                diagonals,
+                |_| {},
+            )?
+        }
     } else {
         let x_sent = if x_lead {
             super::seed::x_ungap_sent::XSent::new(scoring, &batch.sequence_start, x_buffer)

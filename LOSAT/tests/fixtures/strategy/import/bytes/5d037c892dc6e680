@@ -1,0 +1,3 @@
+Warning: [blastn] mt_mode cannot be overridden when using a search strategy
+BLAST query/options error: Word-size must be 4 or greater for nucleotide comparison
+Please refer to the BLAST+ user manual.

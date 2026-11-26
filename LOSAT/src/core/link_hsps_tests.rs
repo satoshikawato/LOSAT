@@ -93,6 +93,12 @@ fn the_longest_intron_of_a_translated_search_follows_ncbis_branches() {
         (123, Some(40)),
         (125, Some(41)),
         (i32::MAX, Some(715_827_881)),
+        // A search strategy's negative `LongestIntronLength`: C's division truncates toward
+        // zero, and the two smallest values subtract 2 in 64 bits (no `Int4` overflow).
+        (-1, None),
+        (-5, None),
+        (i32::MIN, None),
+        (i32::MIN + 1, None),
     ] {
         assert_eq!(translated_longest_intron(option, true), gapped, "{option}");
     }
@@ -103,6 +109,8 @@ fn the_longest_intron_of_a_translated_search_follows_ncbis_branches() {
         (5, 1),
         (125, 41),
         (i32::MAX, 715_827_881),
+        (-5, 0),
+        (i32::MIN, 0),
     ] {
         assert_eq!(
             translated_longest_intron(option, false),

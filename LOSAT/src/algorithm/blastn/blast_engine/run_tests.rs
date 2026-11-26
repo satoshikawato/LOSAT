@@ -646,7 +646,7 @@ fn a_query_split_merges_hsps_across_the_split_on_either_strand() {
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1526,2991-2995
-// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.118 (rule 3): merging two HSPs whose density-scaled score leaves
+// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.120 (rule 3): merging two HSPs whose density-scaled score leaves
 // `Int4` must return `ChunkMergeUndefined` (and a typed `ShortChunkSeedRefusal` naming the OID in
 // `merge_prelim_hit_list`) instead of panicking.
 #[test]

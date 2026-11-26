@@ -1,0 +1,6 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { general { db "DB", tag id 7 } }, descr { title "a" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } },
+        seq { id { general { db "DB", tag str "7" } }, descr { title "b" }, inst { repr raw, mol na, length 4, seq-data iupacna "ACGT" } }
+      }
+    }

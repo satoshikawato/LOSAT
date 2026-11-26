@@ -4,7 +4,7 @@
 //! overlapping range.
 
 use super::view::V;
-use super::Stop;
+use super::{RefElement, Stop};
 use std::collections::HashMap;
 
 use crate::seqid::mask_handle::{
@@ -625,7 +625,7 @@ impl HandleRangeMap {
 
     // NCBI reference (598d8ae6): c++/src/objmgr/handle_range_map.cpp:91-205
     // An element stated as `NULL` of a `mix`, an `equiv` or a `packed-int` is dereferenced where
-    // it is reached (`V::deref`; probe D3c-3b `probe7` `loc_mix`, `loc_mix2`).
+    // it is reached (`RefElement::deref`; probe D3c-3b `probe7` `loc_mix`, `loc_mix2`).
     fn add_location<'v>(&mut self, loc: V<'v>, state: &mut AddState<'_>) -> Result<(), Stop> {
         // The `mix` and `equiv` locations being walked (to any depth the reader read): the
         // location's parts, the next one, and whether it is an `equiv`.

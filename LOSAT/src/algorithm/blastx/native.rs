@@ -189,8 +189,16 @@ fn run_inner(
     };
     // `-subject -` is `cin` (ncbiargs.cpp:717-721, cited at `input_files::open_input`), the
     // stream that `-query -` names too: one owner opens both (`open_input`).
+    // An imported strategy's subject Bioseqs (`import::apply`) stand for `-subject`.
+    let imported = args.import.as_ref().and_then(|run| run.subjects.as_ref());
     let subject_file = match (&args.db, subject_path) {
         (Some(_), _) => None,
+        (None, _) if imported.is_some() => {
+            Some(crate::report::archive::read::import::ImportRun::input_of(
+                "subject",
+                imported.expect("imported subjects"),
+            )?)
+        }
         (None, Some(path)) => Some(
             crate::blastinput::input_files::open_input(path, "subject", program.upper)
                 .map_err(early_archive_error)?,
@@ -214,6 +222,10 @@ fn run_inner(
         }
         None => Box::new(crate::cli::CliStderr::process()),
     };
+    // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
+    if let Some(import) = &args.import {
+        stderr.write_all(&import.warning_lines())?;
+    }
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the formatting handler and before
     // `CStdCmdLineArgs`, which opens the query and the output: its warning before theirs (probe
@@ -223,7 +235,7 @@ fn run_inner(
     let list = match args.database_name() {
         Some(_) => args
             .db_filter
-            .resolve(&settings, "blastx", &mut stderr)
+            .resolve(&settings, args.app_name(), &mut stderr)
             .map_err(early_archive_error)?,
         None => None,
     };
@@ -264,9 +276,12 @@ fn run_inner(
     if args.db.is_none() && subjects.is_empty() {
         return Err(early_archive_error(engine("Empty CBlastQueryVector")));
     }
-    let mut query_file =
-        crate::blastinput::input_files::open_input(&args.query, "query", program.upper)
-            .map_err(early_archive_error)?;
+    let mut query_file = crate::report::archive::read::import::ImportRun::open_query(
+        args.import.as_ref(),
+        &args.query,
+        program.upper,
+    )
+    .map_err(early_archive_error)?;
     // BLAST XML (outfmt 5) and the XML2 and JSON documents (outfmt 13 to 16): the output can
     // hold the whole document in memory (`blast_xml::HeldOutput`), decided below before the
     // search.
@@ -334,15 +349,20 @@ fn run_inner(
     // The filtering handler comes before the query options handler (blastx_args.cpp:87-107):
     // NCBI's error of `-seg` first (`local::check_filtering`).
     super::local::check_filtering(args)?;
-    let query_range = crate::blastinput::seq_range::parse_optional_range(
-        args.query_loc.as_deref(),
-        crate::blastinput::seq_range::RangeRole::Query,
-    )?;
+    // An imported strategy's query range stands for `-query_loc`'s (`import::apply`).
+    let query_range = match args.import.as_ref().and_then(|import| import.query_range) {
+        Some(range) => Some(range),
+        None => crate::blastinput::seq_range::parse_optional_range(
+            args.query_loc.as_deref(),
+            crate::blastinput::seq_range::RangeRole::Query,
+        )?,
+    };
     // A value that the early reading left to this handler (`EarlyFormat::Deferred`) fails here.
     let choice = choice.at_formatting_handler(&args.outfmt)?;
-    app::formatting_handler_check(&choice, Program::Blastx)?;
+    app::formatting_handler_check_of_run(&choice, args.app(), Program::Blastx)?;
     let html = app::html_links(
         args.html,
+        args.app_request_kind(),
         args.request_kind(),
         args.database_name(),
         &[choice.number],
@@ -350,6 +370,11 @@ fn run_inner(
     // The warnings of the hit list size and of an ignored -num_descriptions
     // (`blastinput::report_counts`).
     stderr.write_all(&warnings_of(args, choice.number))?;
+    // An imported strategy's warnings for the options it replaces
+    // (`x_IssueWarningsForIgnoredOptions`, after the formatting handler's).
+    if let Some(import) = &args.import {
+        stderr.write_all(&import.option_warning_lines())?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
     let mut options = resolution.map_err(options_error)?;
     options.html = html;
@@ -368,6 +393,7 @@ fn run_inner(
                 args.db_mask.option().as_ref(),
                 &mut stderr,
                 program.upper,
+                program.app,
             )?
             .showing_gis(args.show_gis)
             .after_calls(args.first_query_ordinal > 0)
@@ -384,7 +410,7 @@ fn run_inner(
                 database.list_taxids(),
                 &database.statistics(),
                 false,
-                rps || args.searchsp.is_some_and(|space| space > 0),
+                rps || args.searchsp.is_some_and(|space| space != 0),
                 !rps && args.dbsize.is_some_and(|size| size > 0),
                 program.upper,
             )?;
@@ -496,7 +522,12 @@ fn run_inner(
         // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
         // FIFO) or `-query -` cannot be read a second time: the read before the search would
         // take every byte (DECISIONS 22). Refused before the search.
-        if args.query.as_os_str() == "-"
+        // An imported strategy's queries are an unnamed regular file read through its handle.
+        let imported_queries = args
+            .import
+            .as_ref()
+            .is_some_and(|run| run.queries.is_some());
+        if (args.query.as_os_str() == "-" && !imported_queries)
             || !query_file.metadata().is_ok_and(|m| m.is_file())
             || !crate::blastinput::input_files::has_stream_position(&query_file)
         {
@@ -598,7 +629,7 @@ fn run_inner(
     let shared_standard_input =
         args.query.as_os_str() == "-" && subject_path.is_some_and(|path| path.as_os_str() == "-");
     if !shared_standard_input && query_stream.stream_is_empty() {
-        stderr.write_all(format!("Warning: [{}] Query is Empty!\n", program.lower).as_bytes())?;
+        stderr.write_all(format!("Warning: [{}] Query is Empty!\n", args.app_name()).as_bytes())?;
         // NCBI returns before the formatter exists: no archive carries the message.
         if let Some(handle) = &archive {
             handle.take_messages();
@@ -622,13 +653,14 @@ fn run_inner(
     if let (Some(database), Some(option)) = (&database, args.db_mask.option()) {
         options.db_mask = database.resolve_mask_option(
             &option,
+            args.app_name(),
             archive.as_ref(),
             strategy.as_ref(),
             &mut *stderr,
         )?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:773-789
-    write_empty_subject_warnings(&subjects, &mut *stderr)?;
+    write_empty_subject_warnings(&subjects, args.app_name(), &mut *stderr)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:251-254
     // The XInclude formats written to standard output fail after the formatter is made (a
     // format 13 or 14 to a file is LOSAT's rejection, above).
@@ -685,8 +717,9 @@ fn run_inner(
             pairwise,
             reported: &no_reported,
         },
+        // An imported strategy's subjects have no input file (an empty tag).
         _ => ShownSubjects::Fasta {
-            path: subject_path.expect("a subject file without -db"),
+            path: subject_path.unwrap_or(std::path::Path::new("")),
             parsed: &records_parsed,
         },
     };
@@ -1193,7 +1226,7 @@ pub(super) fn batch_titles(
     if let Some(posts) = Utf8Read::post_of(
         Utf8Read::of_read(&titles, |titles| titles.utf8.as_ref()),
         &database.db,
-        &database.program.to_ascii_lowercase(),
+        &database.post_prefix(),
     ) {
         posts.write(diagnostics, None)?;
     }
@@ -1466,7 +1499,7 @@ pub(super) fn reported_batch(
     let prefetch_format = options.prefetch_format();
     let mut reported = reported;
     if prefetch.fails {
-        diagnostics.write_all(&database.prefetch_warning())?;
+        diagnostics.write_all(&database.prefetch_warning(options.app_name))?;
     }
     // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning after
     // the taxonomy texts (`ReportedSubjects::batch_prefetch`), with or without `taxdb.bti`.
@@ -1600,13 +1633,10 @@ fn failed_batch_reads(
         Ok(failure) => return Ok(failure.into()),
         Err(error) => return Ok(error),
     };
+    // The post's prefix is the running application's (`app_name`: BLASTX's own run names its
+    // program, RPSTBLASTN's too).
     if let (Some(read), Some(db)) = (&failure.utf8, subjects.seqdb()) {
-        let program = if options.rpstblastn.is_some() {
-            "rpstblastn"
-        } else {
-            "blastx"
-        };
-        if let Some(posts) = read.post(db, program) {
+        if let Some(posts) = read.post(db, options.app_name) {
             posts.write(diagnostics, None)?;
         }
     }
@@ -1697,11 +1727,12 @@ pub(super) fn options_error(error: anyhow::Error) -> anyhow::Error {
 /// (`input_files::write_empty_subject_warnings_of`: the id, then the title's bytes as read).
 pub(super) fn write_empty_subject_warnings(
     subjects: &[FastaRecord],
+    app: &str,
     stderr: &mut dyn Write,
 ) -> Result<()> {
     crate::blastinput::input_files::write_empty_subject_warnings_of(
         subjects.iter().map(|s| (s.names(), s.sequence.len())),
-        "blastx",
+        app,
         stderr,
     )?;
     Ok(())
@@ -3071,14 +3102,15 @@ fn x_flow(
 /// The formatting handler's warnings of a BLASTX run with output format `outfmt`
 /// (`ReportCounts::warnings`).
 pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
-    crate::blastinput::report_counts::report_counts(
+    crate::blastinput::report_counts::report_counts_from(
+        args.formatting.hitlist_start_count(),
         outfmt,
         super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,
         args.num_alignments,
     )
     .warnings_with(
-        args.program().lower,
+        args.app_name(),
         outfmt,
         args.num_descriptions.is_some(),
         &args.formatting,

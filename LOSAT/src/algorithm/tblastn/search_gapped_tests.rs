@@ -5198,7 +5198,7 @@ fn short_alignment_starting_before_chunk_uses_middle_and_refuses_ncbi_crashes() 
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1513-1515,2973-2995
-// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.118 (rule 3): ungapped one-hit chunk merges whose query lengths
+// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.120 (rule 3): ungapped one-hit chunk merges whose query lengths
 // sum to 0 refuse with a typed `ShortChunkSeedRefusal` naming the subject OID and reading frame.
 #[test]
 fn merge_adjusted_chunk_refuses_zero_length_sum_with_oid_and_frame() {

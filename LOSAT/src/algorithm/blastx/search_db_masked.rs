@@ -258,7 +258,9 @@ impl Masked<'_> {
     /// (`common::hard_chunk_walk::DiagonalWalk`), its HSPs merged via NCBI's `Blast_HSPListsMerge`
     /// (`core::blast_hits::merge_subject_chunk_hsps`). The sequences that LOSAT refuses before the
     /// search never come here (`HardMaskShape::Inverted`, `PastEnd`, `TailMaskWithLaterMasks`,
-    /// `WordPastEnd`).
+    /// `WordPastEnd`, `LastRangeOverlap`). With a negative window (a search strategy's) the chunks
+    /// run on NCBI's one-thread table without a walk: a chunk that holds a word is searched over
+    /// its own letters, a shorter one only moves the offset.
     fn compute(&self, diagonals: &mut Diagonals) -> Result<SubjectComputation> {
         let Masked {
             db,
@@ -330,15 +332,26 @@ impl Masked<'_> {
         // finds no hit: BLASTX's translation has no residue 0), so `reference` is exact or more,
         // and its margins too (a larger margin moves the offset further past entries that no hit
         // reaches).
-        let (mut walk, start) = DiagonalWalk::start(
-            options.word_size,
-            options.window_size,
-            length,
-            &chunks,
-            ncbi,
-            diagonals.offset(),
-        );
-        start.apply(diagonals, options.window_size)?;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:762-766
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
+        // A negative window (a search strategy's; the command line takes none) has no walk: the
+        // table keeps NCBI's one-thread state from chunk to chunk and from sequence to sequence
+        // (`Diagonals::finish_chunk_wide`), the one-hit scan of a chunk shorter than the word reads
+        // nothing, and every chunk's exit moves the offset by its length plus the window.
+        let mut walk = if options.window_size < 0 {
+            None
+        } else {
+            let (walk, start) = DiagonalWalk::start(
+                options.word_size,
+                options.window_size,
+                length,
+                &chunks,
+                ncbi,
+                diagonals.offset(),
+            );
+            start.apply(diagonals, options.window_size)?;
+            Some(walk)
+        };
         let mut raw = Vec::new();
         let mut purged = Vec::new();
         let mut containment = Vec::new();
@@ -361,7 +374,11 @@ impl Masked<'_> {
             }
             // The exit of this chunk's word finder clears the table (`Diagonals::finish_chunk`).
             let clears = diagonals.offset() >= i32::MAX / 4;
-            let work = walk.chunk(chunk.offset, chunk.length);
+            let work = match walk.as_mut() {
+                Some(walk) => walk.chunk(chunk.offset, chunk.length),
+                None if chunk.length < options.word_size => ChunkWork::Nothing,
+                None => ChunkWork::Words { reference: false },
+            };
             let found = match work {
                 ChunkWork::Words { reference } => {
                     // The chunk's letters between the sentinels that the sequence has.
@@ -416,11 +433,15 @@ impl Masked<'_> {
                     }
                 }
                 ChunkWork::Nothing => {
-                    diagonals.finish_chunk(chunk.length)?;
+                    if walk.is_some() {
+                        diagonals.finish_chunk(chunk.length)?;
+                    } else {
+                        diagonals.finish_chunk_wide(i64::from(chunk.length));
+                    }
                     None
                 }
             };
-            if clears {
+            if let (true, Some(walk)) = (clears, walk.as_mut()) {
                 walk.clear();
             }
             let Some((chunk_raw, mut chunk_purged, chunk_containment)) = found else {
@@ -481,8 +502,10 @@ impl Masked<'_> {
                 subject_besthit_preliminary(&mut purged);
             }
         }
-        walk.after(diagonals.offset())
-            .apply(diagonals, options.window_size)?;
+        if let Some(walk) = walk {
+            walk.after(diagonals.offset())
+                .apply(diagonals, options.window_size)?;
+        }
         Ok(SubjectComputation {
             raw,
             purged,

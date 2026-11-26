@@ -72,13 +72,14 @@ pub(crate) fn reads_letters(fields: &[TabularField]) -> bool {
 pub(super) fn write_tabular_prolog(
     spec: &TabularSpec,
     taxdb_found: bool,
+    app: &str,
     writer: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     crate::algorithm::common::tabular::write_tabular_prolog(
         spec,
         taxdb_found,
-        "tblastx",
+        app,
         PROGRAM_VERSION,
         writer,
         diagnostics,
@@ -95,7 +96,7 @@ pub(super) struct TblastxTabular<'a, 'r> {
     /// The `# Query:` title of each query.
     pub query_titles: &'a [&'a [u8]],
     /// The `# Database:` name.
-    pub database: &'a str,
+    pub database: &'a [u8],
     /// The default report's tabular subject ids (`sseqid`, `sacc`, `saccver`), by subject index
     /// or rank (`tabular_subject_ids`, `ReportedSubjects::tabular_subject_ids`).
     pub subject_ids: &'a [crate::algorithm::common::tabular::SubjectId],
@@ -201,6 +202,7 @@ pub(super) fn write_tblastx_tabular(
             false,
             names,
             PROGRAM,
+            args.app().ncbi_name(),
             &queries,
             writer,
             warnings,
@@ -227,7 +229,7 @@ pub(super) fn write_tblastx_tabular(
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
-    let taxdb_warning = spec.formatter_warning(taxdb_found, "tblastx");
+    let taxdb_warning = spec.formatter_warning(taxdb_found, args.app().ncbi_name());
     let warn = |writer: &mut dyn Write, warnings: Option<&mut QueryWarnings<'_>>| -> Result<()> {
         if let (Some(line), Some(warnings)) = (taxdb_warning.as_deref(), warnings) {
             writer.flush()?;
@@ -246,7 +248,13 @@ pub(super) fn write_tblastx_tabular(
             Some(warnings) => &mut *warnings.sink,
             None => &mut no_diagnostics,
         };
-        write_tabular_prolog(spec, taxdb_found, writer, diagnostics)?;
+        write_tabular_prolog(
+            spec,
+            taxdb_found,
+            args.app().ncbi_name(),
+            writer,
+            diagnostics,
+        )?;
     }
     // The HSPs of each query in report order, numbered by their place in the final list (the
     // HSP numbers of the format observer, `report::write_tabular`).
@@ -291,7 +299,7 @@ pub(super) fn write_tblastx_tabular(
         table.query_header(
             &mut buf,
             tab.query_titles[q_idx],
-            tab.database.as_bytes(),
+            tab.database,
             (!tab.unsearched[q_idx]).then_some(query_hits.len()),
         )?;
         writer.write_all(&buf)?;

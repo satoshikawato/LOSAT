@@ -145,12 +145,6 @@ impl MaskWriter {
             value.push(b':');
         }
         if self.gi_masks.is_some() {
-            let Ok(name) = std::str::from_utf8(name) else {
-                return Err(WriteDbError::Unsupported(
-                    "-gi_mask: the name of a masking algorithm's GI-mask files is not valid UTF-8"
-                        .to_string(),
-                ));
-            };
             let dates = [clock.now()?, clock.now()?];
             if let Some(gi_masks) = self.gi_masks.as_mut() {
                 gi_masks.add(algorithm_id, name, &value, max_file_size, dates);
@@ -318,7 +312,7 @@ impl MaskWriter {
 
     /// The names of the GI masks after their close (`GetName`, empty for one without GIs), in
     /// the order of registration; none without `-gi_mask`.
-    pub(crate) fn gi_mask_names(&self) -> impl Iterator<Item = &str> {
+    pub(crate) fn gi_mask_names(&self) -> impl Iterator<Item = &[u8]> {
         self.gi_masks.iter().flat_map(GiMasks::names)
     }
 }

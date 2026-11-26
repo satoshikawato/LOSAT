@@ -216,8 +216,8 @@ where
         Xml2Target::Database => {
             enc.variant("Target", "db", 0);
             // The names' bytes reach the stream as they are; the stream writes or throws on them.
-            let names = crate::seqdb::alias::report_names(run.db_name).join(" ");
-            enc.visible_str(names.as_bytes());
+            let names = crate::seqdb::alias::report_names(run.db_name).join(&b' ');
+            enc.visible_str(&names);
             enc.end_variant();
         }
         Xml2Target::Subjects(count) => match &params.subject_names {
@@ -851,7 +851,7 @@ impl<F: SideFiles> StructuredXml for Xml2Writer<F> {
                     let posts = enc.take_posts();
                     let thrown = enc.take_thrown();
                     threw = thrown.is_some();
-                    xml_report_made(report, kind, run.program, result, posts, thrown)
+                    xml_report_made(report, kind, run.app, result, posts, thrown)
                 }
                 Xml2Kind::Single15 => {
                     let mut enc = JsonEncoder::array_element(report);

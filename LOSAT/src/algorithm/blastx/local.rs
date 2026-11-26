@@ -107,8 +107,16 @@ fn search_records(
     archive: Option<&crate::report::archive::ArchiveHandle>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
-    let Some(subject_path) = args.subject.as_deref() else {
-        return Err(app::missing_subject_error());
+    // An imported strategy's subjects stand for `-subject`, with no name (`native::run_inner`).
+    let subject_path = match (
+        args.subject.as_deref(),
+        args.import
+            .as_ref()
+            .is_some_and(|run| run.subjects.is_some()),
+    ) {
+        (Some(path), _) => path,
+        (None, true) => std::path::Path::new(""),
+        (None, false) => return Err(app::missing_subject_error()),
     };
     let diagnostics = &mut outputs.diagnostics;
     let subject_range = parse_subject_range(args)?;
@@ -149,7 +157,8 @@ fn search_records(
     // Records of an input read to its end; an end that reads past them (blank lines, a reader
     // error) is met in the first batch (`reader_batches`).
     if query_records.is_empty() && query_end.is_input() {
-        diagnostics.write_all(b"Warning: [blastx] Query is Empty!\n")?;
+        diagnostics
+            .write_all(format!("Warning: [{}] Query is Empty!\n", args.app_name()).as_bytes())?;
         return Ok(());
     }
     // The letters of a reader batch (`native::run_inner`).
@@ -168,7 +177,7 @@ fn search_records(
         args.parse_deflines,
         args.scope_refusal.as_ref(),
     )?;
-    write_empty_subject_warnings(&subjects, &mut **diagnostics)?;
+    write_empty_subject_warnings(&subjects, args.app_name(), &mut **diagnostics)?;
     // NCBI's error of an XInclude format without a file name, where the command line gives it
     // (`native::run_inner`, blastx_app.cpp:251).
     outputs.xinclude_check(args.out.as_deref())?;
@@ -809,7 +818,7 @@ fn write_run(
                 results,
                 search_options.gapped,
                 asks,
-                &mut *diagnostics,
+                (&mut *diagnostics, archive),
             )?,
             None => None,
         };
@@ -1165,7 +1174,7 @@ fn search_database(
     // (`native::run_inner`).
     let list = args
         .db_filter
-        .resolve(&settings, "blastx", &mut *outputs.diagnostics)?;
+        .resolve(&settings, args.app_name(), &mut *outputs.diagnostics)?;
     // `-out` (`run_to_file`) is made where the command line opens it (`native::run`).
     outputs.open_out()?;
     check_filtering(args)?;
@@ -1178,12 +1187,13 @@ fn search_database(
         outputs.formats.first().map(|format| format.outfmt),
     );
     let database = BlastxDatabase::open_restricted(
-        name,
+        &name,
         &settings,
         list.as_ref(),
         args.db_mask.option().as_ref(),
         &mut *outputs.diagnostics,
         super::args::ProgramName::BLASTX.upper,
+        args.app_name(),
     )?
     .showing_gis(args.show_gis)
     .after_calls(args.first_query_ordinal > 0)
@@ -1196,7 +1206,7 @@ fn search_database(
         database.list_taxids(),
         &database.statistics(),
         false,
-        args.searchsp.is_some_and(|space| space > 0),
+        args.searchsp.is_some_and(|space| space != 0),
         args.dbsize.is_some_and(|size| size > 0),
         "BLASTX",
     )?;
@@ -1234,7 +1244,7 @@ fn search_database(
     if query_records.is_empty() && query_end.is_input() {
         outputs
             .diagnostics
-            .write_all(b"Warning: [blastx] Query is Empty!\n")?;
+            .write_all(format!("Warning: [{}] Query is Empty!\n", args.app_name()).as_bytes())?;
         return Ok(());
     }
     // The letters of a reader batch (`native::run_inner`).
@@ -1243,6 +1253,7 @@ fn search_database(
     if let Some(option) = args.db_mask.option() {
         let mask = database.resolve_mask_option(
             &option,
+            args.app_name(),
             archive,
             args.strategy.as_ref(),
             &mut *outputs.diagnostics,
@@ -1352,7 +1363,8 @@ fn search_database(
 /// (`OutputSink::Files`, which LOSAT Web gives them): a run without one gives NCBI's error after the
 /// records are read (`ReportOutputs::xinclude_check`).
 pub fn check_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<()> {
-    let (choices, resolutions) = read_options(args, outfmts)?;
+    let outfmt_bytes: Vec<&[u8]> = outfmts.iter().map(|s| s.as_bytes()).collect();
+    let (choices, resolutions) = read_options(args, &outfmt_bytes)?;
     crate::utils::threading::validate_threads(args.num_threads as usize)?;
     parse_subject_range(args)?;
     check_filtering(args)?;
@@ -1382,14 +1394,18 @@ pub(super) fn check_filtering(args: &BlastxArgs) -> Result<()> {
 /// `-query_loc`, which the command line reads after the subjects, with the query options and
 /// before the formatting handler (`native::run_inner`).
 fn parse_query_range(args: &BlastxArgs) -> Result<Option<SequenceRange>> {
-    parse_optional_range(args.query_loc.as_deref(), RangeRole::Query)
+    // An imported strategy's query range stands for `-query_loc`'s (`import::apply`).
+    match args.import.as_ref().and_then(|import| import.query_range) {
+        Some(range) => Ok(Some(range)),
+        None => parse_optional_range(args.query_loc.as_deref(), RangeRole::Query),
+    }
 }
 
 /// The output formats `outfmts` as `run_local` reads them and the options of each, before the
 /// records are read: LOSAT Web's refusals and LOSAT's fail here; NCBI's errors of the options
 /// (`SemanticOptionsError`) stay in the resolutions, which the command line reports after the
 /// subjects are read (`native::run_inner`).
-fn read_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<ReadOptions> {
+fn read_options(args: &BlastxArgs, outfmts: &[&[u8]]) -> Result<ReadOptions> {
     // `-parse_deflines` is the records' (`run_local`): LOSAT Web reads them with the ids of their
     // deflines since line WQA's sweep, D7, 2026-11-19 (`register_inputs`), so its refusal of
     // records that kept none, which also refused two empty inputs that the command line ends with
@@ -1398,7 +1414,7 @@ fn read_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<ReadOptions> {
 }
 
 /// The `-outfmt` value of each output of `outputs`.
-fn requested_formats<'o>(outputs: &'o ReportOutputs<'_>) -> Vec<&'o str> {
+fn requested_formats<'o>(outputs: &'o ReportOutputs<'_>) -> Vec<&'o [u8]> {
     outputs.formats.iter().map(|format| format.outfmt).collect()
 }
 
@@ -1410,7 +1426,7 @@ type ReadOptions = (Vec<app::EarlyFormat>, Vec<Result<ResolvedOptions>>);
 /// `read_options` without its refusals of what a search of records in memory cannot do. Outfmt 13
 /// and 14 whose side files have no file name to go by get NCBI's error later, where the command
 /// line gives it (`ReportOutputs::xinclude_check`).
-fn read_format_options(args: &BlastxArgs, outfmts: &[&str]) -> Result<ReadOptions> {
+fn read_format_options(args: &BlastxArgs, outfmts: &[&[u8]]) -> Result<ReadOptions> {
     // NCBI parses -outfmt before its option handlers read the subjects (`native::run_inner`);
     // where the argv names a search strategy file a value that does not parse is left to the
     // formatting handler (`app::early_format_choice`, `check_resolutions`).
@@ -1462,20 +1478,22 @@ fn check_resolutions(
     diagnostics: &mut dyn Write,
 ) -> Result<(Vec<app::FormatChoice>, Vec<ResolvedOptions>)> {
     let mut choices = Vec::with_capacity(early.len());
+    let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt);
     for choice in early {
-        let choice = choice.at_formatting_handler(&args.outfmt)?;
-        app::formatting_handler_check(&choice, Program::Blastx)?;
+        let choice = choice.at_formatting_handler(&outfmt_bytes)?;
+        app::formatting_handler_check_of_run(&choice, args.app(), Program::Blastx)?;
         choices.push(choice);
     }
     let outfmts: Vec<i32> = choices.iter().map(|choice| choice.number).collect();
     let html = app::html_links(
         args.html,
+        args.app_request_kind(),
         args.request_kind(),
-        args.database_name(),
+        args.database_name().as_deref(),
         &outfmts,
     )?;
     let (_, warnings) = crate::blastinput::report_counts::run_report_counts_with(
-        "blastx",
+        args.app_name(),
         &outfmts,
         super::args::max_target_seqs_count(args.max_target_seqs),
         args.num_descriptions,
@@ -1483,6 +1501,11 @@ fn check_resolutions(
         &args.formatting,
     )?;
     diagnostics.write_all(&warnings)?;
+    // An imported strategy's warnings for the options it replaces
+    // (`x_IssueWarningsForIgnoredOptions`, after the formatting handler's).
+    if let Some(import) = &args.import {
+        diagnostics.write_all(&import.option_warning_lines())?;
+    }
     let resolved = resolutions
         .into_iter()
         .map(|resolution| {

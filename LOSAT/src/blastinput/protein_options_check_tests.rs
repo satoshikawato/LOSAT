@@ -10,7 +10,7 @@ fn psiblast_takes_word_sizes_below_5_and_the_standard_matrices() {
             gapped: true,
             gap_open: 11,
             gap_extend: 1,
-            matrix_name,
+            matrix_name: matrix_name.as_bytes(),
             threshold: 11.0,
             word_size,
             compressed_lookup,
@@ -19,6 +19,9 @@ fn psiblast_takes_word_sizes_below_5_and_the_standard_matrices() {
             psiblast,
             psi_tblastn: false,
             x_dropoff: None,
+            culling_limit: None,
+            best_hit_overhang: None,
+            best_hit_score_edge: None,
         })
         .map_err(|error| error.to_string())
     };

@@ -121,12 +121,12 @@ fn unsupported_formats_fail_before_searching() {
             html_posts: None,
             formats: vec![
                 FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut valid),
                 },
                 FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut invalid),
                 },
@@ -177,7 +177,7 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
                 .iter()
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
@@ -373,7 +373,7 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
             other_outfmts: &[],
             html_posts: None,
             formats: vec![FormatOutput {
-                outfmt,
+                outfmt: outfmt.as_bytes(),
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut output),
             }],
@@ -442,7 +442,7 @@ fn run_local_outputs(
                 .iter()
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(sink),
                 })
@@ -499,7 +499,7 @@ fn a_word_size_below_four_is_ncbis_core_error() {
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
@@ -581,7 +581,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
@@ -612,7 +612,7 @@ fn hand_set_template_lookup_and_task_are_refused() {
             other_outfmts: &[],
             html_posts: None,
             formats: vec![FormatOutput {
-                outfmt: "6",
+                outfmt: b"6",
                 refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                 sink: OutputSink::Writer(&mut sink),
             }],
@@ -880,7 +880,7 @@ fn blastn_batches_are_those_of_the_search_of_all_queries() {
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     refusal: crate::api::local_blast::FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut report),
                 }],
@@ -958,12 +958,12 @@ fn an_outfmt_0_refusal_of_a_parse_deflines_record_fails_outfmt_0_alone_or_the_ca
             html_posts: None,
             formats: vec![
                 FormatOutput {
-                    outfmt: "6",
+                    outfmt: b"6",
                     sink: OutputSink::Writer(&mut six),
                     refusal: FormatRefusal::FailsCall,
                 },
                 FormatOutput {
-                    outfmt: "0",
+                    outfmt: b"0",
                     sink: OutputSink::Writer(&mut zero),
                     refusal: if alone {
                         FormatRefusal::FailsAlone

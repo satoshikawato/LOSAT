@@ -265,7 +265,7 @@ fn matrix_files_are_found_where_ncbi_looks() {
             blastmat: blastmat.map(OsString::from),
         };
     let find = |name: &str, search: &MatrixSearch| {
-        find_matrix_file(name, search, &is_file, &is_dir).unwrap()
+        find_matrix_file(name.as_bytes(), search, &is_file, &is_dir).unwrap()
     };
     let none = search(None, None, None);
     // NCBI_DATA_PATH's directories (empty parts dropped), then [NCBI] Data, each with a
@@ -301,7 +301,7 @@ fn matrix_files_are_found_where_ncbi_looks() {
         ..none.clone()
     };
     assert_eq!(
-        find_matrix_file("mymat", &unreadable, &is_file, &is_dir),
+        find_matrix_file(b"mymat", &unreadable, &is_file, &is_dir),
         Err("reason".to_string())
     );
 }
@@ -406,9 +406,15 @@ fn find_matrix_file_with_rules_covers_unix_and_windows_edge_cases() {
     let win_is_file = |p: &Path| win_files.contains(&p.as_os_str());
     let win_is_dir = |p: &Path| win_dirs.contains(&p.as_os_str());
     let find_win = |name: &str, s: &MatrixSearch| {
-        find_matrix_file_with_rules(PathRules::Windows, name, s, &win_is_file, &win_is_dir)
-            .unwrap()
-            .map(PathBuf::into_os_string)
+        find_matrix_file_with_rules(
+            PathRules::Windows,
+            name.as_bytes(),
+            s,
+            &win_is_file,
+            &win_is_dir,
+        )
+        .unwrap()
+        .map(PathBuf::into_os_string)
     };
 
     let win_dp = ";C:;C:/mixed;;D:\\trailing\\;E:/slash/;";
@@ -456,9 +462,15 @@ fn find_matrix_file_with_rules_covers_unix_and_windows_edge_cases() {
     let unix_is_file = |p: &Path| unix_files.contains(&p.as_os_str());
     let unix_is_dir = |p: &Path| unix_dirs.contains(&p.as_os_str());
     let find_unix = |name: &str, s: &MatrixSearch| {
-        find_matrix_file_with_rules(PathRules::Unix, name, s, &unix_is_file, &unix_is_dir)
-            .unwrap()
-            .map(PathBuf::into_os_string)
+        find_matrix_file_with_rules(
+            PathRules::Unix,
+            name.as_bytes(),
+            s,
+            &unix_is_file,
+            &unix_is_dir,
+        )
+        .unwrap()
+        .map(PathBuf::into_os_string)
     };
     assert_eq!(
         find_unix("mat_bs", &search(Some("dir\\"), None, None)),
@@ -503,19 +515,19 @@ fn find_matrix_file_preserves_non_utf8_os_paths_on_unix() {
         blastmat: Some(bm_raw),
     };
     assert_eq!(
-        find_matrix_file_with_rules(PathRules::Unix, "mat1", &search, &is_file, &is_dir).unwrap(),
+        find_matrix_file_with_rules(PathRules::Unix, b"mat1", &search, &is_file, &is_dir).unwrap(),
         Some(expected_dp1)
     );
     assert_eq!(
-        find_matrix_file_with_rules(PathRules::Unix, "mat2", &search, &is_file, &is_dir).unwrap(),
+        find_matrix_file_with_rules(PathRules::Unix, b"mat2", &search, &is_file, &is_dir).unwrap(),
         Some(expected_dp2)
     );
     assert_eq!(
-        find_matrix_file_with_rules(PathRules::Unix, "mat3", &search, &is_file, &is_dir).unwrap(),
+        find_matrix_file_with_rules(PathRules::Unix, b"mat3", &search, &is_file, &is_dir).unwrap(),
         Some(expected_data)
     );
     assert_eq!(
-        find_matrix_file_with_rules(PathRules::Unix, "mat4", &search, &is_file, &is_dir).unwrap(),
+        find_matrix_file_with_rules(PathRules::Unix, b"mat4", &search, &is_file, &is_dir).unwrap(),
         Some(expected_bm)
     );
 }
@@ -1018,7 +1030,7 @@ fn the_window_masker_directory_is_ncbis() {
             .unwrap_or_else(|reason| panic!("{id}: {reason}"))
             .path
             .filter(|value| !value.is_empty());
-        let expected = (row[7] != "<cwd>").then(|| place(&row[7]));
+        let expected = (row[7] != "<cwd>").then(|| place(&row[7]).into_bytes());
         assert_eq!(used, expected, "{id}");
         cases += 1;
     }
@@ -1034,9 +1046,9 @@ fn the_window_masker_directory_is_ncbis() {
 /// off for the application and when a variable gives the directory (NCBI reads the file
 /// before it asks for the entry). A one-byte file whose stream fails is posted by that
 /// registry's first load only where no read with its flags came before (NCBI BLAST+ 2.17.0 on
-/// 2026-11-12, line NP M3c). `[NCBI] .Inherits` and a value that is not UTF-8 are refused for
-/// `-window_masker_taxid`. A malformed file is posted and the start goes on, in LOSAT's library
-/// too (`api::start`, line RG item E1w-2).
+/// 2026-11-12, line NP M3c). `[NCBI] .Inherits` is refused for `-window_masker_taxid`, while a
+/// non-UTF-8 `WINDOW_MASKER_PATH` value is kept verbatim as raw bytes. A malformed file is posted
+/// and the start goes on, in LOSAT's library too (`api::start`, line RG item E1w-2).
 #[test]
 fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
     let dir = crate::utils::test_dir::temp_dir().join(format!(
@@ -1071,7 +1083,7 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
     };
     let registry = |extra: &[(&str, &str)]| registry_of("blastn", extra).unwrap();
     let path_of = |path: &str| WindowMaskerRegistry {
-        path: Some(path.to_string()),
+        path: Some(path.as_bytes().to_vec()),
         ..WindowMaskerRegistry::default()
     };
     let ncbirc = dir.join(SYSTEM_WIDE_REGISTRY);
@@ -1104,7 +1116,11 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
         let settings = start.settings.unwrap();
         assert_eq!(settings.blastdb, Some(b"/dbs".to_vec()), "{program}");
         let registry = settings.window_masker_registry.unwrap();
-        assert_eq!(registry.path.as_deref(), Some("/w"), "{program}");
+        assert_eq!(
+            registry.path.as_deref(),
+            Some(b"/w".as_slice()),
+            "{program}"
+        );
         let mut posts = Posts::new();
         posts.post(
             CRITICAL,
@@ -1161,7 +1177,7 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
     assert_eq!(
         registry(&[("BLAST_USAGE_REPORT", "0")]),
         WindowMaskerRegistry {
-            path: Some("/w".to_string()),
+            path: Some(b"/w".to_vec()),
             load_posts: posts.clone(),
             posts_once: true,
         }
@@ -1171,7 +1187,7 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
     std::fs::write(&ncbirc, format!("{twice}[my blast]\n")).unwrap();
     for extra in [&[][..], &[("BLAST_USAGE_REPORT", "0")][..]] {
         let registry = registry(extra);
-        assert_eq!(registry.path.as_deref(), Some("/w"));
+        assert_eq!(registry.path.as_deref(), Some(b"/w".as_slice()));
         assert!(!registry.posts_once);
         let mut expected = posts.clone();
         expected.post(
@@ -1233,7 +1249,11 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
             (&[("WINDOW_MASKER_PATH", "/v")][..], Some("/v")),
         ] {
             let registry = registry(extra);
-            assert_eq!(registry.path.as_deref(), path, "{text:?} {extra:?}");
+            assert_eq!(
+                registry.path.as_deref(),
+                path.map(str::as_bytes),
+                "{text:?} {extra:?}"
+            );
             assert!(
                 registry.load_posts.text().starts_with(
                     // NCBI's `... file: NCBI C++ Exception:\n    T0 ...` in LOSAT's words
@@ -1251,10 +1271,9 @@ fn window_masker_registry_values_are_read_or_refused_as_ncbi_stores_them() {
         let reason = registry_of("blastn", extra).unwrap_err();
         assert!(reason.contains(".Inherits"), "{reason}");
     }
-    // A byte that is not UTF-8 in the value.
+    // A byte that is not UTF-8 in the value is kept verbatim as raw bytes.
     std::fs::write(&ncbirc, b"[WINDOW_MASKER]\nWINDOW_MASKER_PATH = /w\xff\n").unwrap();
-    let reason = registry_of("blastn", &[]).unwrap_err();
-    assert!(reason.contains("UTF-8"), "{reason}");
+    assert_eq!(registry(&[]).path.as_deref(), Some(b"/w\xff".as_slice()));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

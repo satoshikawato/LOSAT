@@ -59,7 +59,7 @@ const NCBISTDAA_TO_AMINOACID: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
 /// (`BlastxArgs::database_name`: the `-db` value without white space at its ends).
 pub(crate) struct BlastxDatabase {
     pub(crate) db: SeqDb,
-    name: String,
+    name: Vec<u8>,
     /// The taxonomy database of the run and the taxids its volumes have looked up (XML2 and
     /// JSON, and the batches' prefetch of outfmt 0, 5, 6 and 7), kept across the query batches
     /// of the run.
@@ -104,33 +104,56 @@ impl BlastxDatabase {
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
     /// with the command line's errors.
     #[cfg(test)]
-    pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, None, &mut std::io::sink(), PROGRAM)
+    pub(crate) fn open(name: impl AsRef<[u8]>, settings: &ApplicationSettings) -> Result<Self> {
+        Self::open_restricted(
+            name.as_ref(),
+            settings,
+            None,
+            None,
+            &mut std::io::sink(),
+            PROGRAM,
+            "blastx",
+        )
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
     /// line, and with the id of the database mask `mask` checked (`-db_soft_mask`,
     /// `-db_hard_mask`; series NP, M4b) (`shared::restrict_database`, whose warnings go to
-    /// `diagnostics`).
+    /// `diagnostics`), for the application `app` (NCBI's lower-case name: the prefix of the
+    /// run's posts, which is not `program`'s where the run is another program's strategy).
     pub(crate) fn open_restricted(
-        name: &str,
+        name: &[u8],
         settings: &ApplicationSettings,
         list: Option<&crate::seqdb::DbList>,
         mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
         program: &'static str,
+        app: &'static str,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Protein, settings, program)?;
         // A database with parsed Seq-ids is read (line DBID, ID2a).
-        let parsed_seqids =
-            shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, program)?;
+        let parsed_seqids = shared::restrict_database(
+            &mut db,
+            name,
+            list,
+            mask,
+            diagnostics,
+            settings,
+            program,
+            app,
+        )?;
         Ok(Self {
             db,
-            name: name.to_string(),
-            taxdb: shared::TaxdbRun::default(),
+            name: name.to_vec(),
+            taxdb: shared::TaxdbRun::running(app),
             parsed_seqids,
             program,
         })
+    }
+
+    /// The prefix of the run's posts (`shared::TaxdbRun::prefix`): the running application's name.
+    pub(crate) fn post_prefix(&self) -> String {
+        self.taxdb.prefix(self.program)
     }
 
     /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
@@ -168,7 +191,7 @@ impl BlastxDatabase {
     }
 
     /// The `-db` value as NCBI keeps it.
-    pub(crate) fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &[u8] {
         &self.name
     }
 
@@ -180,10 +203,10 @@ impl BlastxDatabase {
         self.taxdb.found(&self.db)
     }
 
-    /// NCBI's warning of a failed prefetch, which names the run's program
+    /// NCBI's warning of a failed prefetch, which names the running application `app`
     /// (`shared::prefetch_warning`).
-    pub(crate) fn prefetch_warning(&self) -> Vec<u8> {
-        shared::prefetch_warning(self.program)
+    pub(crate) fn prefetch_warning(&self, app: &str) -> Vec<u8> {
+        shared::prefetch_warning(app)
     }
 
     /// Whether a later query batch of an XML, XML2 or JSON run could still refuse a taxonomy
@@ -239,6 +262,7 @@ impl BlastxDatabase {
     pub(crate) fn resolve_mask_option(
         &self,
         option: &crate::blastinput::db_mask::DbMaskOption,
+        app: &str,
         archive: Option<&crate::report::archive::ArchiveHandle>,
         strategy: Option<&crate::report::archive::strategy::StrategyExport>,
         diagnostics: &mut dyn std::io::Write,
@@ -248,6 +272,7 @@ impl BlastxDatabase {
             &self.name,
             option,
             self.program,
+            app,
             archive,
             strategy,
             &mut |text| match archive {
@@ -550,14 +575,15 @@ impl ReportedSubjects {
     /// (their Seq-ids), before the batch's prefetch: NCBI's reader error stops the run at this
     /// batch (`ErrorAfterBatchReports`). A sequence with parsed Seq-ids is read with every Seq-id
     /// (`shared::read_header`). A title LOSAT does not show as NCBI is its refusal
-    /// (`check_reported_title`; with `pairwise`, `StoredTitle::check_shown_source`). The rest of
-    /// the batch's reported sequences is `for_batch`. `one_by_one`: the reports may read the
+    /// (`check_reported_title`, after the batch's reads, whose error comes first: NCBI's Seq-aligns
+    /// end there, before any report; with `pairwise`, `StoredTitle::check_shown_source`). The rest
+    /// of the batch's reported sequences is `for_batch`. `one_by_one`: the reports may read the
     /// reported sequences one by one (`shared::HeaderReader::new`).
     pub(crate) fn read_titles(
         database: &BlastxDatabase,
         batches: &[BatchResults],
         gapped: bool,
-        pairwise: bool,
+        (pairwise, title_reads): (bool, shared::TitleReads),
         (earlier, one_by_one): (shared::EarlierUtf8, bool),
     ) -> Result<BatchTitles> {
         // Every listed subject gets a record (the tabular writer looks its list's subject
@@ -568,6 +594,10 @@ impl ReportedSubjects {
         let mut sources: BTreeMap<usize, crate::report::defline::SourceTaxname> = BTreeMap::new();
         let headers = shared::HeaderReader::new(&database.db, one_by_one);
         headers.note_earlier(earlier);
+        // The first title or shown-source refusal that the reports refuse (`check_reported_title`,
+        // `StoredTitle::check_shown_source`), held until the batch's header reads finish so an
+        // earlier refusal does not get overtaken by a later one or overtake a later header error.
+        let mut refused = None;
         for batch in batches {
             for (qidx, lists) in batch.queries.iter().enumerate() {
                 for list in lists {
@@ -589,16 +619,21 @@ impl ReportedSubjects {
                         database.program,
                     )? {
                         shared::ReportedHeader::Stored(stored) => {
-                            shared::check_reported_title(
+                            if let Err(refusal) = shared::check_reported_title(
+                                &database.db,
+                                ordinal,
                                 stored.replaced_bytes,
-                                || database.db.oid(ordinal),
+                                title_reads,
                                 database.program,
-                            )?;
-                            if pairwise {
-                                stored.check_shown_source(
+                            ) {
+                                refused.get_or_insert(refusal);
+                            } else if pairwise {
+                                if let Err(refusal) = stored.check_shown_source(
                                     || database.db.oid(ordinal),
                                     database.program,
-                                )?;
+                                ) {
+                                    refused.get_or_insert(refusal);
+                                }
                             }
                             if stored.source != crate::report::defline::SourceTaxname::Unnamed {
                                 sources.insert(list.oid, stored.source);
@@ -606,12 +641,24 @@ impl ReportedSubjects {
                             listed.insert(list.oid, Some(Arc::from(stored.title)));
                         }
                         shared::ReportedHeader::Parsed(subject) => {
+                            if let Err(refusal) = shared::check_reported_title(
+                                &database.db,
+                                ordinal,
+                                subject.replaced_title_bytes(),
+                                title_reads,
+                                database.program,
+                            ) {
+                                refused.get_or_insert(refusal);
+                            }
                             listed.insert(list.oid, Some(Arc::from(subject.first_title())));
                             parsed.insert(list.oid, subject);
                         }
                     }
                 }
             }
+        }
+        if let Some(refusal) = refused {
+            return Err(refusal);
         }
         Ok(BatchTitles {
             listed,

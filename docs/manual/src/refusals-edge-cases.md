@@ -75,6 +75,8 @@ Databases with parsed ids (the error names the sequence). No comparison with NCB
 Strategy files:
 
 - `-export_search_strategy` is written as NCBI writes it for the five programs, `psiblast` (with a FASTA query or `-in_pssm`), `rpsblast`, `rpstblastn` and `tblastn -in_pssm`, apart from its `ident` (`LOSAT 0.2.0` where NCBI writes `2.17.0+`). For `tblastn -in_pssm` NCBI's request is a PSI-BLAST request that holds the PSSM as read, with `-db`. With `-subject` NCBI gives its error after the prolog.
+- `-import_search_strategy` runs the text strategy files that NCBI BLAST+ and LOSAT write, in `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`. A strategy's subjects are searched once whatever `-num_threads` says; NCBI prints every alignment once per thread, or stops with an error.
+- `-import_search_strategy` refuses a strategy file with an element stated as `NULL` in one of its lists (an option, a query, a query's ids or descriptions). NCBI BLAST+ and LOSAT never write one; NCBI reads it and then uses the empty element wherever it reads that list.
 - `rpsblast` and `rpstblastn` write the file of NCBI's `-num_threads 1` at every `-num_threads` and `-mt_mode`. With `-mt_mode 1` and more than one thread, NCBI's threads write their requests into the file at the same time, and for a database of several volumes they leave out the search space of the batch before.
 
 ## blastn
@@ -250,7 +252,7 @@ A PSSM given with `-in_pssm` is refused when its input or content is one of thes
 - In an archive, Seq-align segments other than `Dense-seg`, `Std-seg` and `Packed-seg` (`dendiag`, `disc`, `spliced`, `sparse`) are refused.
 - A `Std-seg` alignment whose query id NCBI would take from a first location of the kind `packed-int`, `packed-pnt`, `mix`, `equiv`, `bond` or `feat` is refused. LOSAT does not look up those ids.
 - Residues in NCBI8aa and NCBIstdaa codes from 28 are refused.
-- A query without a title but with `annot` is refused.
+- A query without a title descriptor whose `annot` reaches a `NULL` `Seq-annot` or `Seq-feat` before a matching feature is refused. NCBI stops there with a NULL pointer stack trace.
 - A mask location other than a `packed-int` of one Seq-id is refused.
 - Data lines on which NCBI's loader reads outside the line are refused: `cdtrack.txt` lines that end without a root or after a field it skips.
 - For nucleotide queries, a first `Std-seg` with fewer than 2 ids is refused.

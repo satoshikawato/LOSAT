@@ -52,7 +52,7 @@ pub(crate) struct BlastnTabular<'a> {
     /// `report::tabular::QueryCoveragePerHsp`).
     pub ungapped: bool,
     /// Outfmt 7's `# Database:` text.
-    pub database: &'a str,
+    pub database: &'a [u8],
     pub subjects: TabularSubjects<'a>,
     /// The letters of the subjects, which the rows read.
     pub letters: SubjectLetters<'a>,
@@ -64,6 +64,8 @@ pub(crate) struct BlastnTabular<'a> {
     pub epilog: Option<usize>,
     /// Whether `taxdb.bti` is on NCBI's search path (`SeqDB_ResolveDbPath`).
     pub taxdb_found: bool,
+    /// The running application (`BlastnArgs::app`), the prefix of the taxonomy warning.
+    pub app: crate::blastinput::app::Program,
     /// The names of the taxonomy database that the rows look up (`None`: every lookup fails).
     pub names: Option<&'a TabularNames>,
 }
@@ -87,10 +89,11 @@ pub(crate) fn write_tabular_prolog(spec: &TabularSpec, writer: &mut dyn Write) -
 pub(crate) fn write_tabular_prolog_warning(
     spec: &TabularSpec,
     taxdb_found: bool,
+    app: crate::blastinput::app::Program,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
     if let Some(line) = spec
-        .formatter_warning(taxdb_found, "blastn")
+        .formatter_warning(taxdb_found, app.ncbi_name())
         .filter(|_| spec.kind == TabularKind::CsvWithHeader)
     {
         diagnostics.write_all(line.as_bytes())?;
@@ -129,7 +132,7 @@ pub(crate) fn write_blastn_tabular(
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
-    let taxdb_warning = spec.formatter_warning(tab.taxdb_found, "blastn");
+    let taxdb_warning = spec.formatter_warning(tab.taxdb_found, tab.app.ncbi_name());
     let warn = |writer: &mut dyn Write, warnings: Option<&mut QueryWarnings<'_>>| -> Result<()> {
         if let (Some(line), Some(warnings)) = (taxdb_warning.as_deref(), warnings) {
             writer.flush()?;
@@ -170,7 +173,7 @@ pub(crate) fn write_blastn_tabular(
             tab.query_titles
                 .get(q_idx)
                 .map_or(&b"unknown"[..], |title| title.as_ref()),
-            tab.database.as_bytes(),
+            tab.database,
             (!tab.unsearched.get(q_idx).copied().unwrap_or(false))
                 .then(|| blastn_hsp_count(hit_list)),
         )?;

@@ -301,7 +301,7 @@ fn database_check(
         pairwise,
         structured: format.is_structured_xml(),
         joined: pairwise || format.tabular_joins_subjects(),
-        sam: false,
+        sam: matches!(format, report::TblastxOutputFormat::Sam(_)),
         taxonomy: format.writes_taxonomy(),
         words: format.printed_ids(),
         stops_at_failed_lookup: format.is_tabular()
@@ -312,6 +312,10 @@ fn database_check(
             && !crate::algorithm::common::database::prefetch_always_off(format.prefetch_format()),
         one_by_one: crate::algorithm::common::database::prefetch_may_be_off(
             format.prefetch_format(),
+        ),
+        titles: crate::algorithm::common::database::TitleReads::of_outfmts(
+            crate::report::archive::options::RequestKind::Tblastx,
+            [format.report_format().map_or(-1, |format| format as i32)],
         ),
     };
     // The batches' prefetch reads the taxonomy database (`run_batch_loop`).

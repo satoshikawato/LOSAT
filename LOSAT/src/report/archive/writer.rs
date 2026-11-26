@@ -20,6 +20,7 @@ use std::io::Write;
 use anyhow::Result;
 
 use super::bioseq::{write_bioseq, write_seq_loc, BioseqInput};
+use super::fields;
 use super::masks::{write_mask, MaskEntry};
 use super::options::{Param, ParamValue};
 use super::{ArchiveEncoding, ArchiveHandle};
@@ -274,38 +275,23 @@ fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
     enc.element();
     enc.begin_sequence("Blast4-parameter");
     enc.member("name", 0);
-    enc.visible_str(param.name.as_bytes());
+    enc.visible_str(param.name().as_bytes());
     enc.end_member();
     enc.member("value", 1);
+    let value_type = param.value.value_type();
+    enc.variant("Blast4-value", value_type.variant(), value_type.tag());
     match &param.value {
         ParamValue::Evalue(value) => {
-            enc.variant("Blast4-value", "cutoff", 3);
             enc.variant("Blast4-cutoff", "e-value", 0);
             enc.real(*value);
             enc.end_variant();
         }
-        ParamValue::Integer(value) => {
-            enc.variant("Blast4-value", "integer", 4);
-            enc.int(*value);
-        }
-        ParamValue::BigInteger(value) => {
-            enc.variant("Blast4-value", "big-integer", 0);
-            enc.big_int(*value);
-        }
-        ParamValue::Boolean(value) => {
-            enc.variant("Blast4-value", "boolean", 2);
-            enc.boolean(*value);
-        }
-        ParamValue::Real(value) => {
-            enc.variant("Blast4-value", "real", 6);
-            enc.real(*value);
-        }
-        ParamValue::Str(value) => {
-            enc.variant("Blast4-value", "string", 11);
-            enc.visible_str(value.as_bytes());
-        }
+        ParamValue::Integer(value) => enc.int(*value),
+        ParamValue::BigInteger(value) => enc.big_int(*value),
+        ParamValue::Boolean(value) => enc.boolean(*value),
+        ParamValue::Real(value) => enc.real(*value),
+        ParamValue::Str(value) => enc.visible_str(value),
         ParamValue::IntegerList(values) => {
-            enc.variant("Blast4-value", "integer-list", 16);
             enc.begin_list(false);
             for &value in values {
                 enc.element();
@@ -313,9 +299,17 @@ fn write_param<E: Encoder>(enc: &mut E, param: &Param) {
             }
             enc.end_list();
         }
+        // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:493-497
+        ParamValue::StrandType(value) => enc.enumerated(
+            match value {
+                1 => "forward-strand",
+                2 => "reverse-strand",
+                _ => "both-strands",
+            },
+            *value,
+        ),
         // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:512
         ParamValue::BigIntegerList(values) => {
-            enc.variant("Blast4-value", "big-integer-list", 12);
             enc.begin_list(false);
             for &value in values {
                 enc.element();
@@ -478,15 +472,15 @@ fn write_request_options<E: Encoder>(
     out.enc.member("algorithm-options", 5);
     out.enc.begin_named("Blast4-parameters");
     out.enc.begin_list(false);
-    let set = |name: &str| sets.iter().find(|param| param.name == name);
+    let set = |name: &str| sets.iter().find(|param| param.name() == name);
     for param in &request.algorithm {
-        write_param(&mut out.enc, set(param.name).unwrap_or(param));
+        write_param(&mut out.enc, set(param.name()).unwrap_or(param));
     }
     for param in sets.iter().filter(|param| {
         !request
             .algorithm
             .iter()
-            .any(|recorded| recorded.name == param.name)
+            .any(|recorded| recorded.name() == param.name())
     }) {
         write_param(&mut out.enc, param);
     }
@@ -499,24 +493,20 @@ fn write_request_options<E: Encoder>(
         out.enc.begin_named("Blast4-parameters");
         out.enc.begin_list(false);
         if let Some((start, end)) = batch.required {
-            for (name, value) in [("RequiredStart", start), ("RequiredEnd", end)] {
-                write_param(
-                    &mut out.enc,
-                    &Param {
-                        name,
-                        value: ParamValue::Integer(value),
-                    },
-                );
+            for (field, value) in [(fields::REQUIRED_START, start), (fields::REQUIRED_END, end)] {
+                write_param(&mut out.enc, &Param::new(field, ParamValue::Integer(value)));
             }
         }
         for mask in batch.lcase_masks {
             out.enc.element();
             out.enc.begin_sequence("Blast4-parameter");
             out.enc.member("name", 0);
-            out.enc.visible_str(b"LCaseMask");
+            out.enc.visible_str(fields::L_CASE_MASK.name().as_bytes());
             out.enc.end_member();
             out.enc.member("value", 1);
-            out.enc.variant("Blast4-value", "query-mask", 26);
+            let value_type = fields::L_CASE_MASK.value_type();
+            out.enc
+                .variant("Blast4-value", value_type.variant(), value_type.tag());
             write_mask(&mut out.enc, mask);
             out.enc.end_variant();
             out.enc.end_member();
@@ -540,10 +530,7 @@ fn write_request_options<E: Encoder>(
         out.enc.begin_list(false);
         write_param(
             &mut out.enc,
-            &Param {
-                name: "Web_StepNumber",
-                value: ParamValue::Integer(step),
-            },
+            &Param::new(fields::WEB_STEP_NUMBER, ParamValue::Integer(step)),
         );
         out.enc.end_list();
         out.enc.end_named();
@@ -877,11 +864,11 @@ fn write_archive_object<A: AlignSource>(
     let request = match batch.round {
         Some(round) => {
             if let Some(mode) = round.comp_based_stats {
-                sets.retain(|param| param.name != "CompositionBasedStats");
-                sets.push(Param {
-                    name: "CompositionBasedStats",
-                    value: ParamValue::Integer(mode),
-                });
+                sets.retain(|param| param.field() != fields::COMPOSITION_BASED_STATS);
+                sets.push(Param::new(
+                    fields::COMPOSITION_BASED_STATS,
+                    ParamValue::Integer(mode),
+                ));
             }
             let request = handle.request();
             round_request = super::ArchiveRequest {

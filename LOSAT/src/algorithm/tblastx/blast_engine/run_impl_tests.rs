@@ -711,6 +711,227 @@ fn chunk_merge_is_ncbis_merge() {
     assert!(compared > 1000 && merged > 100 && refused > 10 && reordered > 10);
 }
 
+/// The TBLASTX engine of a strategy that another application runs (R2-B1, review 2 of F2).
+fn run_as(running: &str, options: &[&str]) -> TblastxArgs {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/strategy/import/ss/tblastx.db.ss");
+    let mut argv = vec![
+        "losat",
+        running,
+        "-import_search_strategy",
+        path.to_str().unwrap(),
+    ];
+    argv.extend_from_slice(options);
+    let cli = crate::cli::try_parse_from(argv).unwrap();
+    let command =
+        crate::report::archive::read::import::apply(cli.command, None, &mut Vec::new()).unwrap();
+    let crate::cli::Commands::Tblastx(args) = command else {
+        panic!("{running} running a tblastx strategy");
+    };
+    args
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2947-2989
+// The formatting handler's warnings of blastn (and of blastx) running a tblastx strategy carry the
+// running application's name.
+#[test]
+fn the_warnings_of_another_applications_run_carry_its_name() {
+    for running in ["blastn", "blastx"] {
+        let args = run_as(running, &["-max_target_seqs", "2"]);
+        assert_eq!(args.app().ncbi_name(), running);
+        let mut posted = Vec::new();
+        check_ncbi_options(&args, &cli_outfmts(&args).unwrap(), &mut posted).unwrap();
+        let posted = String::from_utf8(posted).unwrap();
+        assert!(
+            posted.contains(&format!(
+                "Warning: [{running}] Examining 5 or more matches is recommended\n"
+            )),
+            "{running}: {posted}"
+        );
+        assert!(!posted.contains("[tblastx]"), "{running}: {posted}");
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2875-2878
+// The SAM check is the running application's: blastx stops with NCBI's error, blastn passes it and
+// writes the SAM report of the TBLASTX strategy (`tblastx::sam`).
+#[test]
+fn the_sam_check_of_another_applications_run_is_the_running_applications() {
+    let checked = |running: &str| {
+        let args = run_as(running, &["-outfmt", "17"]);
+        check_ncbi_options(&args, &cli_outfmts(&args).unwrap(), &mut Vec::new())
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    };
+    assert!(checked("blastx")
+        .unwrap_err()
+        .contains("SAM format is only applicable to blastn"));
+    assert_eq!(checked("blastn"), Ok(()));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:42-65,137 (the table of a window
+// below 0 is the one-hit one, its offset starts at the window and its cells at 0) and
+// c++/src/algo/blast/core/aa_ungapped.c:775-783 (a word is extended when `diff >= 0`)
+#[test]
+fn a_fresh_table_of_a_negative_window_skips_the_words_before_the_window() {
+    for (window, first) in [(-1, 1), (-40, 40)] {
+        let offset = word_finder::WideOffset::new(window);
+        let cell = DiagStruct::default();
+        assert_eq!(offset.get(), i64::from(window));
+        for s_off in [0, first - 1] {
+            assert!(
+                !word_finder::WideOffset::admits(offset.get(), cell.last_hit(), s_off),
+                "window {window}, word at {s_off}"
+            );
+        }
+        for s_off in [first, first + 1, 5_000] {
+            assert!(
+                word_finder::WideOffset::admits(offset.get(), cell.last_hit(), s_off),
+                "window {window}, word at {s_off}"
+            );
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-185 (`Blast_ExtendWordExit`
+// adds the subject's length and the window) and c++/src/algo/blast/core/aa_ungapped.c:775-800
+#[test]
+fn a_table_of_a_negative_window_carries_its_cells_to_the_next_call() {
+    let window = -40;
+    let wordsize = 3;
+    let mut cells = vec![DiagStruct::default(); 4];
+    let offset = word_finder::WideOffset::new(window);
+    // An extension that ended at 300 stores `300 - (wordsize - 1) + offset`.
+    let stored = word_finder::WideOffset::last_hit(offset.get(), 300, wordsize);
+    assert_eq!(stored, 258);
+    cells[0].set_last_hit(stored);
+    // A long call moves the offset past the cell: nothing it holds blocks a word of the next.
+    let after_long = word_finder::WideOffset::new(window);
+    after_long.exit(window, &mut cells, 1_000);
+    assert_eq!(after_long.get(), -40 + 1_000 - 40);
+    assert!(word_finder::WideOffset::admits(after_long.get(), 258, 0));
+    // A short call moves it by less than the cell's lead: the next call's words before 328 on
+    // that diagonal are blocked, and those before 70 on a cell that was never written: a table
+    // made fresh for the call would block neither.
+    offset.exit(window, &mut cells, 10);
+    assert_eq!(offset.get(), -70);
+    assert!(!word_finder::WideOffset::admits(offset.get(), 258, 327));
+    assert!(word_finder::WideOffset::admits(offset.get(), 258, 328));
+    let unwritten = DiagStruct::default().last_hit();
+    assert!(!word_finder::WideOffset::admits(
+        offset.get(),
+        unwritten,
+        69
+    ));
+    assert!(word_finder::WideOffset::admits(offset.get(), unwritten, 70));
+    // The cells themselves stay as they were stored.
+    assert_eq!(cells[0].last_hit(), 258);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:90-106,162-173 (the table is
+// cleared to `-window` and the offset goes back to the window once the offset reaches
+// a quarter of `INT4_MAX`)
+#[test]
+fn a_table_of_a_negative_window_is_cleared_when_its_offset_reaches_a_quarter_of_int4_max() {
+    let window = -1;
+    let mut cells = vec![DiagStruct::default(); 4];
+    cells[2].set_last_hit(123);
+    cells[2].set_flag(1);
+    let offset = word_finder::WideOffset::new(window);
+    let mut calls: i32 = 0;
+    while offset.get() < i64::from(i32::MAX / 4) {
+        offset.exit(window, &mut cells, 5_000_000);
+        calls += 1;
+        assert!(calls < 200, "the offset rises by 4,999,999 a call");
+    }
+    assert_eq!(offset.get(), -1 + i64::from(calls) * 4_999_999);
+    assert_eq!(
+        cells[2].last_hit(),
+        123,
+        "no clear before the exit that finds the offset"
+    );
+    offset.exit(window, &mut cells, 5_000_000);
+    assert_eq!(offset.get(), -1);
+    for cell in &cells {
+        assert_eq!((cell.last_hit(), cell.flag()), (1, 0));
+    }
+}
+
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-61 (a 31-bit signed
+// `last_hit`, truncated when stored)
+#[test]
+fn a_table_of_a_negative_window_stores_the_31_low_bits_of_the_cell() {
+    let mut cell = DiagStruct::default();
+    cell.set_last_hit(word_finder::WideOffset::last_hit(1 << 30, 10, 3));
+    assert_eq!(cell.last_hit(), -1_073_741_816);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-185 and
+// c++/src/algo/blast/core/aa_ungapped.c:775-800: sums that overflow `Int4` there (undefined) are
+// exact here, and nothing panics for any window
+#[test]
+fn a_table_of_the_smallest_window_runs_without_overflow() {
+    let window = i32::MIN;
+    let mut cells = vec![DiagStruct::default(); 1];
+    let offset = word_finder::WideOffset::new(window);
+    assert_eq!(offset.get(), i64::from(i32::MIN));
+    // `last_hit - diag_offset` is 2^31: no word of a subject of fewer than 2^31 letters is extended.
+    for s_off in [0, 1, 5_000_000] {
+        assert!(!word_finder::WideOffset::admits(offset.get(), 0, s_off));
+    }
+    offset.exit(window, &mut cells, 1_000);
+    assert_eq!(offset.get(), 2 * i64::from(i32::MIN) + 1_000);
+    offset.exit(window, &mut cells, 1_000);
+    assert_eq!(offset.get(), 3 * i64::from(i32::MIN) + 2_000);
+    assert!(!word_finder::WideOffset::admits(offset.get(), 0, 5_000_000));
+    // The cell keeps the 31 low bits of the exact sum.
+    let mut cell = DiagStruct::default();
+    cell.set_last_hit(word_finder::WideOffset::last_hit(
+        -(1 << 32) + 1_000,
+        100,
+        3,
+    ));
+    assert_eq!(cell.last_hit(), 1_098);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:775-783 (`diff` is a `Uint4`
+// minus an `Int4` read as an `Int4`): where NCBI's arithmetic is defined, the exact offset gives
+// the test of the one-hit scan of the window 0 (`scan_chunk_one_hit`)
+#[test]
+fn the_offset_test_of_a_negative_window_is_the_one_hit_test_where_int4_holds() {
+    let narrow = |offset: i32, last_hit: i32, s_off: u32| {
+        s_off.wrapping_sub(last_hit.wrapping_sub(offset) as u32) as i32 >= 0
+    };
+    let offsets: [i32; 10] = [
+        -2_000_000_000,
+        -1_073_741_000,
+        -1_000,
+        -41,
+        -1,
+        0,
+        7,
+        1_000,
+        536_870_911,
+        1_000_000_000,
+    ];
+    let last_hits: [i32; 6] = [0, 5, -5, 258, (1 << 30) - 1, -(1 << 30)];
+    let words = [0u32, 1, 39, 40, 100, 328, 1 << 20, (1 << 30) + 9];
+    for offset in offsets {
+        for last_hit in last_hits {
+            if last_hit.checked_sub(offset).is_none() {
+                continue;
+            }
+            for s_off in words {
+                assert_eq!(
+                    word_finder::WideOffset::admits(i64::from(offset), last_hit, s_off),
+                    narrow(offset, last_hit, s_off),
+                    "offset {offset}, cell {last_hit}, word {s_off}"
+                );
+            }
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
 // A negative chunk length moves `diag_offset` back by the chunk length plus window; at or above
 // INT4_MAX / 4 the table clears to `DiagStruct::clear(window)` and `diag_offset` resets to window.
@@ -740,4 +961,22 @@ fn advance_tblastx_diag_offset_handles_negative_length_and_clear() {
             assert_eq!(diag_array[0].last_hit(), 123);
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-185
+// A negative window over overlapping hard masks (negative signed chunk length) moves `WideOffset`
+// back by the chunk length plus window without resetting or losing the carried table, and a
+// >15 Mbp subject (`s_len / 3 > MAX_DBSEQ_LEN`) keeps that carried table across its chunks.
+#[test]
+fn wide_offset_exit_handles_negative_chunk_length_and_long_subject_carry() {
+    let window = -40;
+    let mut cells = vec![DiagStruct::default(); 4];
+    let offset = word_finder::WideOffset::new(window);
+    assert_eq!(offset.get(), -40);
+    // Overlapping hard-mask chunk of signed length -25 moves offset by -25 + (-40).
+    offset.exit(window, &mut cells, -25);
+    assert_eq!(offset.get(), -105);
+    // A 5,000,000-aa chunk of a >15 Mbp subject advances the carried table as in NCBI.
+    offset.exit(window, &mut cells, 5_000_000);
+    assert_eq!(offset.get(), -105 + 5_000_000 - 40);
 }

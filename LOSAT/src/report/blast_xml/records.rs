@@ -12,13 +12,20 @@ use super::subjects::SubjectNames;
 pub struct XmlRun<'a> {
     /// `BlastOutput_program`: `Blast_ProgramNameFromType` (`blastn`, `blastp`, ...).
     pub program: &'static str,
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:126
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:128
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:100
+    /// The running application's name in lower case (`blastn`, ...), which every post of the
+    /// run's diagnostics names (`SetDiagPostPrefix`, set once per process by the application):
+    /// `program` where the search runs the application's own program, and the application's where
+    /// an imported search strategy of another program runs (`Program::ncbi_name`).
+    pub app: &'static str,
     /// `BlastOutput_version`: `BLASTP 2.17.0+`.
     pub version: &'a str,
     /// `BlastOutput_reference`, before the XML escapes (`Sch&auml;ffer` stands as written).
     pub reference: &'static str,
-    /// `BlastOutput_db`: the `-db` value (UTF-8: LOSAT refuses another file name when it reads the
-    /// command line); empty for `-subject`.
-    pub db_name: &'a str,
+    /// `BlastOutput_db`: the `-db` value; empty for `-subject`.
+    pub db_name: &'a [u8],
     /// `Parameters_matrix`; none for BLASTN.
     pub matrix: Option<&'a str>,
     /// `Parameters_expect`.

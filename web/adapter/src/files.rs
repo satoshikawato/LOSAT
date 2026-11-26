@@ -3,7 +3,8 @@
 //! counts file: the value of BLASTN's `-window_masker_db`, or the file of `-window_masker_taxid
 //! <taxid>`, `windowmasker/<taxid>/wmasker.obinary` (`WINDOW_MASKER_PATH`). Kind 2 is a registry
 //! file of NCBI's application start: the file of `-conffile`, which the start of a run reads
-//! (`registry_files`; line RG item E1w-3a).
+//! (`registry_files`; line RG item E1w-3a). Kind 3 is a search strategy file: the file of
+//! `-import_search_strategy`, which the engine's import reads (`strategy`; line RG item F2-4).
 //!
 //! The command line opens the counts file by its name twice: NCBI's check of the format
 //! (`DiscoverStatType`) and its reader (`CSeqMaskerIstatFactory::create`). A registered file
@@ -29,6 +30,9 @@ pub const KIND_WINDOW_MASKER_COUNTS: u32 = 1;
 
 /// The kind of a registry file of NCBI's application start (`-conffile`).
 pub const KIND_REGISTRY: u32 = 2;
+
+/// The kind of a search strategy file (`-import_search_strategy`).
+pub const KIND_SEARCH_STRATEGY: u32 = 3;
 
 /// The directory of BLASTN's `-window_masker_taxid` in LOSAT Web, where the command line reads
 /// NCBI's registry entry `[WINDOW_MASKER] WINDOW_MASKER_PATH`: the counts file of a taxid is the
@@ -64,12 +68,19 @@ struct RegistryFile {
     bytes: Vec<u8>,
 }
 
+/// A registered search strategy file: its bytes, which the import of each run reads (`strategy`).
+struct StrategyFile {
+    name: String,
+    bytes: Arc<Vec<u8>>,
+}
+
 #[derive(Default)]
 struct Files {
     next: u32,
     loading: HashMap<u32, Loading>,
     registered: HashMap<u32, Arc<Counts>>,
     registry: HashMap<u32, Arc<RegistryFile>>,
+    strategies: HashMap<u32, Arc<StrategyFile>>,
 }
 
 impl Files {
@@ -79,6 +90,7 @@ impl Files {
             .map(|file| file.name.as_str())
             .chain(self.registered.values().map(|file| file.name.as_str()))
             .chain(self.registry.values().map(|file| file.name.as_str()))
+            .chain(self.strategies.values().map(|file| file.name.as_str()))
     }
 }
 
@@ -94,6 +106,7 @@ pub fn begin(kind: u32, name: &str, size: usize) -> Result<u32, String> {
     let what = match kind {
         KIND_WINDOW_MASKER_COUNTS => "the WindowMasker counts",
         KIND_REGISTRY => "the registry file",
+        KIND_SEARCH_STRATEGY => "the search strategy file",
         _ => return Err(format!("unknown input file kind {kind}")),
     };
     if name.is_empty() {
@@ -194,6 +207,25 @@ pub fn end(file: u32) -> Result<String, String> {
             .insert(file, Arc::new(RegistryFile { name, bytes }));
         return Ok(out);
     }
+    if kind == KIND_SEARCH_STRATEGY {
+        // The bytes are kept: the import of each run reads the file as the command line's
+        // `-import_search_strategy` reads it from the disk (`strategy`), its errors included.
+        let mut out = String::new();
+        let _ = write!(out, "{{\"handle\":{file},\"name\":");
+        json::string(&mut out, &name);
+        let _ = write!(
+            out,
+            ",\"kind\":\"search_strategy\",\"size\":{size},\"sha256\":\"{sha256}\"}}"
+        );
+        files().lock().expect("files").strategies.insert(
+            file,
+            Arc::new(StrategyFile {
+                name,
+                bytes: Arc::new(bytes),
+            }),
+        );
+        return Ok(out);
+    }
     let found = discover_stat_type_in(&mut Cursor::new(bytes.as_slice()));
     // The command line's reader with blastn's settings (`s_BuildSeqMasker`); for a format other
     // than the two binary ones it reads the format alone and returns its error.
@@ -220,6 +252,7 @@ pub fn release(file: u32) -> Result<(), String> {
     let mut files = files().lock().expect("files");
     let removed = files.registered.remove(&file).is_some()
         || files.registry.remove(&file).is_some()
+        || files.strategies.remove(&file).is_some()
         || files.loading.remove(&file).is_some();
     if removed {
         Ok(())
@@ -296,27 +329,32 @@ impl std::fmt::Debug for RegisteredCounts {
 }
 
 impl RegisteredCounts {
-    fn file(&self, name: &str) -> Result<&Counts, WinMaskError> {
-        self.files
-            .get(name)
+    fn file(&self, name: &std::path::Path) -> Result<&Counts, WinMaskError> {
+        name.to_str()
+            .and_then(|key| self.files.get(key))
             .map(|file| &**file)
             .ok_or_else(|| WinMaskError::Open {
-                name: name.as_bytes().to_vec(),
+                name: name.as_os_str().as_encoded_bytes().to_vec(),
             })
     }
 }
 
 impl CountsSource for RegisteredCounts {
-    fn discover(&self, name: &str) -> Result<StatFile, WinMaskError> {
+    fn discover(&self, name: &std::path::Path) -> Result<StatFile, WinMaskError> {
         self.file(name)?.found.clone()
     }
 
-    fn counts(&self, name: &str, params: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError> {
+    fn counts(
+        &self,
+        name: &std::path::Path,
+        params: &MaskerParams,
+    ) -> Result<Arc<UnitCounts>, WinMaskError> {
         let file = self.file(name)?;
         if *params != MaskerParams::default() {
             return Err(WinMaskError::CreateFail {
                 message: format!(
-                    "LOSAT Web holds the WindowMasker counts {name} read with BLASTN's settings only"
+                    "LOSAT Web holds the WindowMasker counts {} read with BLASTN's settings only",
+                    name.display()
                 ),
             });
         }
@@ -410,6 +448,24 @@ pub fn registry_files() -> RegisteredRegistry {
     }
 }
 
+/// The bytes of the search strategy file that the argv's `-import_search_strategy NAME` names (kind
+/// 3), when one is registered. A registered file is the file of its name in the command line's
+/// working directory, so a leading `./` names the same file (`working_name`); the standard input
+/// (`-`) is no file here.
+pub fn strategy(name: &std::path::Path) -> Option<Arc<Vec<u8>>> {
+    if name.as_os_str() == "-" {
+        return None;
+    }
+    let wanted = working_name(name)?;
+    files()
+        .lock()
+        .expect("files")
+        .strategies
+        .values()
+        .find(|file| working_name(std::path::Path::new(&file.name)).as_deref() == Some(&wanted))
+        .map(|file| file.bytes.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,7 +507,7 @@ mod tests {
             assert!(response.contains("\"stat_type\":\"obinary\",\"unit_size\":9,\"error\":null"));
             let source = source();
             let counts = source
-                .counts(&name, &MaskerParams::default())
+                .counts(std::path::Path::new(&name), &MaskerParams::default())
                 .expect("registered counts");
             assert_eq!(counts.unit_size(), whole.unit_size());
             assert_eq!(counts.threshold(), whole.threshold());
@@ -476,7 +532,7 @@ mod tests {
                 .map(|_| ())
                 .expect_err("not counts LOSAT reads");
             let got = source()
-                .counts(name, &MaskerParams::default())
+                .counts(std::path::Path::new(name), &MaskerParams::default())
                 .map(|_| ())
                 .expect_err("the reader's error");
             assert_eq!(got, want, "{name}");
@@ -530,8 +586,8 @@ mod tests {
         // One name is one file, of one kind.
         assert!(begin(KIND_REGISTRY, "twice.binary", 1).is_err());
         assert_eq!(
-            begin(3, "other", 1).unwrap_err(),
-            "unknown input file kind 3"
+            begin(4, "other", 1).unwrap_err(),
+            "unknown input file kind 4"
         );
         assert!(begin(KIND_WINDOW_MASKER_COUNTS, "", 1).is_err());
         release(file).expect("release");
@@ -552,9 +608,14 @@ mod tests {
             "{response}"
         );
         let source = source();
-        assert!(source.discover("short.obinary").is_ok());
+        assert!(source
+            .discover(std::path::Path::new("short.obinary"))
+            .is_ok());
         assert!(matches!(
-            source.counts("short.obinary", &MaskerParams::default()),
+            source.counts(
+                std::path::Path::new("short.obinary"),
+                &MaskerParams::default()
+            ),
             Err(WinMaskError::Format { .. })
         ));
         release(file).expect("release");
@@ -568,7 +629,7 @@ mod tests {
         release(file).expect("release");
 
         assert_eq!(
-            source.discover("never.registered"),
+            source.discover(std::path::Path::new("never.registered")),
             Err(WinMaskError::Open {
                 name: b"never.registered".to_vec()
             })

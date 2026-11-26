@@ -477,15 +477,21 @@ fn the_kind_of_a_seq_align_id_refuses_nothing_before_its_lookup() {
         .unwrap()
         .fetched(false, true, HitLoad::Loaded)
         .is_ok());
-    let replaced = DeflineSet {
+    // A stored title with a byte outside ' ' ..= '~' is read (its posts are the Seq-aligns',
+    // `ParsedSubject::replaced_title_bytes`); such a byte of a stored Seq-id is refused.
+    let replaced = |title, id| DeflineSet {
         deflines: vec![BlastDefline {
             ids: vec![ParsedSeqId::Gi(7)],
-            replaced_title_bytes: 1,
+            replaced_title_bytes: title,
+            replaced_id_bytes: id,
             ..BlastDefline::default()
         }],
         utf8: false,
     };
-    assert!(ParsedSubject::new(replaced).is_err());
+    assert!(ParsedSubject::new(replaced(1, 0))
+        .unwrap()
+        .replaced_title_bytes());
+    assert!(ParsedSubject::new(replaced(0, 1)).is_err());
     assert!(ParsedSubject::new(DeflineSet::default()).is_err());
 }
 
@@ -1380,8 +1386,8 @@ fn the_names_of_the_tables_take_only_the_loaded_subjects() {
         crate::blastinput::app::ReportFormat::Tabular,
         &crate::blastinput::app::FormatChoice {
             number: 6,
-            spec: "qseqid sseqid ssciname".to_string(),
-            delimiter: String::new(),
+            spec: b"qseqid sseqid ssciname".to_vec(),
+            delimiter: Vec::new(),
         },
         RequestKind::Blastp,
     )
@@ -2853,6 +2859,29 @@ fn a_thrown_description_is_the_alignment_id_and_unknown() {
         let gap: &[u8] = if subject.show_gis { b"  " } else { b"" };
         assert_eq!(title.text, [gap, b"Unknown"].concat());
     }
+}
+
+// RG-KB 9(b) review 1 (F2): a database with parsed Seq-ids (`tests/db_search/tchar/tc_ps_p`,
+// makeblastdb -parse_seqids) whose stored title holds 0xE9 is a subject, read as '#', whose
+// Seq-aligns NCBI makes as of the others (`db.tchar.*.ps.8`); a byte of a stored Seq-id is
+// refused.
+#[test]
+fn a_parsed_subject_with_a_replaced_title_byte_is_read() {
+    let base =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/tchar/tc_ps_p");
+    let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+    let replaced = ParsedSubject::new(db.defline_set(0).unwrap()).unwrap();
+    assert!(replaced.replaced_title_bytes());
+    assert_eq!(replaced.first_title(), b"fam#one");
+    let clean = ParsedSubject::new(db.defline_set(1).unwrap()).unwrap();
+    assert!(!clean.replaced_title_bytes());
+    let mut set = db.defline_set(1).unwrap();
+    set.deflines[0].replaced_id_bytes = 1;
+    let refusal = ParsedSubject::new(set).unwrap_err().to_string();
+    assert!(
+        refusal.contains("stored Seq-id with a byte outside"),
+        "{refusal}"
+    );
 }
 
 // Review 1 of line DBID pfoff-4, H1 and H2 (`R/pfoff/p4/review1`, cases `*.scope.*` and

@@ -1,0 +1,3 @@
+Warning: [blastp] mt_mode cannot be overridden when using a search strategy
+BLAST query/options error: HSP Filtering options invalid
+Please refer to the BLAST+ user manual.

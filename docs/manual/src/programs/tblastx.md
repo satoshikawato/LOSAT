@@ -99,7 +99,7 @@ LOSAT stops with an error for these `tblastx` settings instead of running someth
 - `-db_gencode 32` and `-query_gencode 32`.
 - An `-xdrop_ungap` of about 15,000 bits or more (BLOSUM62) when an extension would pass into the next frame of the query.
 - A subject (or `-subject_loc` range) of fewer than 12 bases whose alignment reaches the ungapped re-evaluation.
-- `-remote`, `-entrez_query` and `-import_search_strategy`.
+- `-remote` and `-entrez_query`.
 
 ## Examples
 

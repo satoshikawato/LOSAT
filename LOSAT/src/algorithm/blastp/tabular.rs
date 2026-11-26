@@ -60,7 +60,7 @@ pub(super) struct BlastpTabular<'a> {
     /// `report::tabular::QueryCoveragePerHsp`).
     pub ungapped: bool,
     /// Outfmt 7's `# Database:` text.
-    pub database: &'a str,
+    pub database: &'a [u8],
     pub subjects: TabularSubjects<'a>,
     /// By query: whether NCBI did not search its batch (outfmt 7's lines without a count).
     pub unsearched: &'a [bool],
@@ -428,7 +428,10 @@ pub(super) fn needs_rows(rows: bool, spec: &TabularSpec, app: BlastpApp) -> bool
 /// writes it (`TabularSpec::of_app`: psiblast's and rpsblast's without the custom delimiter);
 /// `None` for the other formats and for the default outfmt 6 and 7. Every report of the blastp
 /// engine reads its spec here, from the value of the command line or the library's as given.
-pub(super) fn custom_tabular_spec(outfmt: &str, app: BlastpApp) -> Option<&'static TabularSpec> {
+pub(super) fn custom_tabular_spec(
+    outfmt: impl AsRef<[u8]>,
+    app: BlastpApp,
+) -> Option<&'static TabularSpec> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
     let format = crate::blastinput::app::ReportFormat::from_number(choice.number)?;
     TabularSpec::of_app(format, &choice, app.request_kind()).map(TabularSpec::intern)
@@ -612,6 +615,7 @@ pub(super) fn write_blastp_tax_report(
         loads,
         tab.names,
         tab.app.name(),
+        tab.app.ncbi_name(),
         html,
     )?;
     write_report(writer, warnings, &queries, &report)?;
@@ -729,7 +733,7 @@ fn write_tabular_rows<const RPS: bool>(
             tab.query_titles
                 .get(q_idx)
                 .map_or(&b""[..], |title| title.as_ref()),
-            tab.database.as_bytes(),
+            tab.database,
             num_hits,
         )?;
         writer.write_all(&buf)?;

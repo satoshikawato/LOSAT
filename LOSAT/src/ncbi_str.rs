@@ -29,7 +29,9 @@ mod double;
 pub(crate) mod mask;
 pub(crate) mod utf8;
 
+#[cfg(test)]
 pub use data_size::string_to_uint8_data_size;
+pub use data_size::string_to_uint8_data_size_bytes;
 pub(crate) use double::{
     string_to_double, string_to_double_posix, string_to_double_posix_or_local, NCBI_NAN,
 };
@@ -627,6 +629,7 @@ pub(crate) fn truncate_spaces_end(str: &[u8]) -> &[u8] {
 
 /// [`truncate_spaces`] of a `str` (`NStr::TruncateSpaces` of a `string`): the spaces are ASCII
 /// bytes, so what is left starts and ends at characters.
+#[cfg(test)]
 pub(crate) fn truncate_spaces_str(str: &str) -> &str {
     let beg = str.len() - truncate_spaces_begin(str.as_bytes()).len();
     let end = truncate_spaces_end(str.as_bytes()).len().max(beg);

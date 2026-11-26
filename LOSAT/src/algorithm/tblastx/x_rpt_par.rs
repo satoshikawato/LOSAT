@@ -105,7 +105,7 @@ pub(crate) fn write_tabular<W: crate::report::ostream::ReportWrite>(
     writer: &mut W,
     comments: bool,
     query_titles: &[&[u8]],
-    database: &str,
+    database: &[u8],
     query_ids: &[Arc<[u8]>],
     subject_ids: &[crate::algorithm::common::tabular::SubjectId],
     unsearched: &[bool],

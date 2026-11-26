@@ -179,16 +179,19 @@ fn delimiter_conflicts_are_ncbis() {
 fn default_reports_have_no_spec() {
     let choice = |spec: &str, delimiter: &str| FormatChoice {
         number: 6,
-        spec: spec.to_string(),
-        delimiter: delimiter.to_string(),
+        spec: spec.as_bytes().to_vec(),
+        delimiter: delimiter.as_bytes().to_vec(),
     };
     assert!(blastp_spec(ReportFormat::Tabular, &choice("", "")).is_none());
     assert!(blastp_spec(ReportFormat::Tabular, &choice("std", "\t")).is_none());
     assert!(blastp_spec(ReportFormat::TabularWithComments, &choice("", "")).is_none());
     let csv = blastp_spec(ReportFormat::CommaSeparatedValues, &choice("", "")).unwrap();
-    assert_eq!((csv.delimiter.as_str(), csv.fields.len()), (",", 12));
+    assert_eq!(
+        (csv.delimiter.as_slice(), csv.fields.len()),
+        (b",".as_slice(), 12)
+    );
     let piped = blastp_spec(ReportFormat::Tabular, &choice("std", "|")).unwrap();
-    assert_eq!(piped.delimiter, "|");
+    assert_eq!(piped.delimiter, b"|");
 }
 
 // NCBI 2.17.0 (line RG F/d36 probes ps.f10at, ps.f20at, ps.f6at, ps.pssm.f10at, bp.f20at,
@@ -200,8 +203,8 @@ fn only_the_apps_that_set_the_delimiter_take_it() {
     use crate::report::archive::options::RequestKind;
     let choice = |number: i32, spec: &str| FormatChoice {
         number,
-        spec: spec.to_string(),
-        delimiter: "@".to_string(),
+        spec: spec.as_bytes().to_vec(),
+        delimiter: b"@".to_vec(),
     };
     let csv = choice(10, "qseqid sseqid evalue");
     let std6 = choice(6, "");
@@ -216,12 +219,12 @@ fn only_the_apps_that_set_the_delimiter_take_it() {
     ] {
         let spec = TabularSpec::of_app(ReportFormat::CommaSeparatedValues, &csv, app).unwrap();
         assert_eq!(
-            (spec.kind, spec.delimiter.as_str(), spec.fields.len()),
-            (TabularKind::Csv, "@", 3),
+            (spec.kind, spec.delimiter.as_slice(), spec.fields.len()),
+            (TabularKind::Csv, b"@".as_slice(), 3),
             "{app:?}"
         );
         let spec = TabularSpec::of_app(ReportFormat::Tabular, &std6, app).unwrap();
-        assert_eq!(spec.delimiter, "@", "{app:?}");
+        assert_eq!(spec.delimiter, b"@", "{app:?}");
     }
     for app in [
         RequestKind::Psiblast,
@@ -230,16 +233,16 @@ fn only_the_apps_that_set_the_delimiter_take_it() {
     ] {
         let spec = TabularSpec::of_app(ReportFormat::CommaSeparatedValues, &csv, app).unwrap();
         assert_eq!(
-            (spec.kind, spec.delimiter.as_str(), spec.fields.len()),
-            (TabularKind::Csv, ",", 3),
+            (spec.kind, spec.delimiter.as_slice(), spec.fields.len()),
+            (TabularKind::Csv, b",".as_slice(), 3),
             "{app:?}"
         );
         let spec = TabularSpec::of_app(ReportFormat::CommaSeparatedValuesWithHeader, &header, app);
-        assert_eq!(spec.unwrap().delimiter, ",", "{app:?}");
+        assert_eq!(spec.unwrap().delimiter, b",", "{app:?}");
         assert!(TabularSpec::of_app(ReportFormat::Tabular, &std6, app).is_none());
         let commented = choice(7, "qseqid");
         let spec = TabularSpec::of_app(ReportFormat::TabularWithComments, &commented, app);
-        assert_eq!(spec.unwrap().delimiter, "\t", "{app:?}");
+        assert_eq!(spec.unwrap().delimiter, b"\t", "{app:?}");
     }
 }
 
@@ -317,8 +320,8 @@ fn taxonomy_names_get_ncbis_fillers() {
                names: Option<&TabularNames>| {
         let choice = FormatChoice {
             number: 10,
-            spec: fields.to_string(),
-            delimiter: String::new(),
+            spec: fields.as_bytes().to_vec(),
+            delimiter: Vec::new(),
         };
         let spec = blastp_spec(format, &choice).unwrap();
         let writer = TabularWriter::new(&spec, "BLASTN 2.17.0+", None);
@@ -467,8 +470,8 @@ fn row_messages_follow_the_lookups() {
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
-            spec: "ssciname sscinames".to_string(),
-            delimiter: String::new(),
+            spec: b"ssciname sscinames".to_vec(),
+            delimiter: Vec::new(),
         },
     )
     .unwrap();
@@ -511,8 +514,8 @@ fn protein_rows_frames_and_rounds_are_ncbis() {
             format,
             &FormatChoice {
                 number: 6,
-                spec: fields.to_string(),
-                delimiter: String::new(),
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
             },
         )
         .unwrap()
@@ -610,8 +613,8 @@ fn id_columns_are_the_subject_s_own() {
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
-            spec: "qseqid qacc qaccver sseqid sacc saccver sgi stitle salltitles".to_string(),
-            delimiter: String::new(),
+            spec: b"qseqid qacc qaccver sseqid sacc saccver sgi stitle salltitles".to_vec(),
+            delimiter: Vec::new(),
         },
     )
     .unwrap();
@@ -675,8 +678,8 @@ fn failed_rows(fields: &str, subjects: &[TabularSubject<'_>]) -> String {
         ReportFormat::Tabular,
         &FormatChoice {
             number: 6,
-            spec: fields.to_string(),
-            delimiter: String::new(),
+            spec: fields.as_bytes().to_vec(),
+            delimiter: Vec::new(),
         },
     )
     .unwrap();
@@ -1004,8 +1007,8 @@ fn a_load_that_throws_writes_the_kept_row() {
             ReportFormat::Tabular,
             &FormatChoice {
                 number: 6,
-                spec: fields.to_string(),
-                delimiter: String::new(),
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
             },
         )
         .unwrap()
@@ -1076,8 +1079,8 @@ fn a_rows_fields_say_what_its_throw_does() {
             ReportFormat::CommaSeparatedValues,
             &FormatChoice {
                 number: 10,
-                spec: fields.to_string(),
-                delimiter: String::new(),
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
             },
         )
         .unwrap()
@@ -1127,8 +1130,8 @@ fn a_rows_fields_say_what_its_throw_does() {
         ReportFormat::TaxFormat,
         &FormatChoice {
             number: 18,
-            spec: String::new(),
-            delimiter: String::new(),
+            spec: Vec::new(),
+            delimiter: Vec::new(),
         },
     )
     .unwrap();
@@ -1252,8 +1255,8 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
             ReportFormat::CommaSeparatedValues,
             &FormatChoice {
                 number: 10,
-                spec: fields.to_string(),
-                delimiter: String::new(),
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
             },
         )
         .unwrap()
@@ -1314,8 +1317,8 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
             ReportFormat::Tabular,
             &FormatChoice {
                 number: 6,
-                spec: fields.to_string(),
-                delimiter: String::new(),
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
             },
         )
         .unwrap()
@@ -1491,8 +1494,8 @@ fn an_rps_report_refuses_a_generated_id_where_ncbi_shows_the_query() {
             format,
             &FormatChoice {
                 number,
-                spec: fields.to_string(),
-                delimiter: String::new(),
+                spec: fields.as_bytes().to_vec(),
+                delimiter: Vec::new(),
             },
             crate::report::archive::options::RequestKind::Rpsblast,
         )

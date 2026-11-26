@@ -156,8 +156,8 @@ impl HspScores {
             bits,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1185-1190
             // The comparators read the Seq-align's E-value (`GetAlnScores`), 0 below 1e-180:
-            // two HSPs below it tie.
-            evalue: crate::report::serial::seqalign::seqalign_evalue(e_value),
+            // two HSPs below it tie; -1 where the Seq-align has none.
+            evalue: crate::report::serial::seqalign::seqalign_evalue_read(e_value),
             num_ident: seqalign_num_ident as i64,
             length: length as i64,
             query_from: zero_based(query.0.min(query.1)),

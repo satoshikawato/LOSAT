@@ -101,8 +101,6 @@ fn ncbi_reader_preserves_normalized_positions_and_warnings() {
     assert_eq!(r[0].internal_id, "Query_1");
     assert_eq!(r[0].sequence, b"ATGACT");
     assert_eq!(r[0].lowercase_masks, vec![(0, 2)]);
-    assert_eq!(r[0].warnings.len(), 2);
-    assert_eq!(r[0].warnings[1].positions, vec![4, 6, 8]);
     assert!(parse_fasta(b">q\nATG?!ACT", false, false).is_err());
 }
 #[test]

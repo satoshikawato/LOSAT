@@ -133,6 +133,11 @@ pub struct PsiSearch {
     /// (the default fields among them), which throws `CSeqVectorException` at the first row
     /// (`report::tabular::query_sequence_exception`).
     pub(crate) query_other_coding: Option<i32>,
+    /// The letter that a query with one letter more than its Seq-inst's `length` has past the
+    /// `length` (ASCII; empty for any other query): the search reads the first `length` letters,
+    /// and the PSSM engine of the next round (NCBI BLAST+ 2.17.0 reads the query's whole Seq-data)
+    /// all of them (line PS item PS7c).
+    pub(crate) query_tail: Vec<u8>,
 }
 
 /// The PSSM of `-in_pssm` as NCBI's application read it (before `CPsiBlastImpl` computes the
@@ -469,6 +474,7 @@ impl PsiSearch {
             split_setup: None,
             from_msa: false,
             query_other_coding: None,
+            query_tail: Vec::new(),
         }
     }
 

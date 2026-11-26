@@ -170,7 +170,8 @@ trait SeedOut {
 
     /// EXPERIMENT (LOSAT_X_DCEMITHOIST): the seeds `seed` gives for the pairs of one word's run, in
     /// the run's order (at most one per pair; the caller has room for the whole run): each through
-    /// `push`. A strip's list (`Vec<Seed>`) makes room for the whole run once instead.
+    /// `push`. A strip's list (`Vec<Seed>`) writes into spare capacity when room fits the run,
+    /// falling back to `push` on growth so capacity matches `Vec::push`.
     #[inline(always)]
     fn x_push_run(&mut self, run: &[u32], mut seed: impl FnMut(u32) -> Option<Seed>) {
         for &q_off_1 in run {
@@ -326,34 +327,51 @@ impl Cut {
     }
 }
 
+/// Cold fallback for `Vec<Seed>::x_push_run` when the remaining spare capacity is smaller than
+/// `run.len()`: appends through `Vec::push` so capacity growth matches `Vec::push` exactly
+/// (runs with dropped pairs never trigger an unnecessary doubling).
+#[cold]
+#[inline(never)]
+fn push_run_grow(out: &mut Vec<Seed>, run: &[u32], seed: &mut dyn FnMut(u32) -> Option<Seed>) {
+    for &q_off_1 in run {
+        if let Some(s) = seed(q_off_1) {
+            out.push(s);
+        }
+    }
+}
+
 impl SeedOut for Vec<Seed> {
     #[inline(always)]
     fn push(&mut self, seed: Seed) {
         Vec::push(self, seed);
     }
 
-    /// The run's seeds appended in order, as `Vec::push` appends them one by one, with the room
-    /// for the whole run made once (`reserve`) and the length written once, after the run: the
-    /// loop keeps the count of the seeds written in a register instead of reading and writing the
-    /// list's length and testing its capacity for each seed.
+    /// The run's seeds appended in order, as `Vec::push` appends them one by one. When the list
+    /// already has room for the whole run (nearly every run), writes directly into the spare
+    /// capacity and writes the length once after the run so the loop keeps the count in a
+    /// register; otherwise appends through `Vec::push` (`push_run_grow`) so the allocation
+    /// sequence and peak capacity stay identical to `Vec::push`.
     #[inline(always)]
     fn x_push_run(&mut self, run: &[u32], mut seed: impl FnMut(u32) -> Option<Seed>) {
-        self.reserve(run.len());
         let len = self.len();
         let spare = self.spare_capacity_mut();
-        let mut k = 0usize;
-        for &q_off_1 in run {
-            if let Some(s) = seed(q_off_1) {
-                debug_assert!(k < spare.len());
-                // SAFETY: `k` counts the seeds written, at most one per pair of the run before
-                // this one, so `k < run.len() <= spare.len()` (`reserve` above).
-                unsafe { spare.get_unchecked_mut(k) }.write(s);
-                k += 1;
+        if run.len() <= spare.len() {
+            let mut k = 0usize;
+            for &q_off_1 in run {
+                if let Some(s) = seed(q_off_1) {
+                    debug_assert!(k < spare.len());
+                    // SAFETY: `k` counts the seeds written, at most one per pair of the run before
+                    // this one, so `k < run.len() <= spare.len()` (checked above).
+                    unsafe { spare.get_unchecked_mut(k) }.write(s);
+                    k += 1;
+                }
             }
+            // SAFETY: the `k` slots after the first `len` were written above (in order, from the
+            // first spare slot), and `len + k <= len + run.len() <=` the capacity.
+            unsafe { self.set_len(len + k) };
+        } else {
+            push_run_grow(self, run, &mut seed);
         }
-        // SAFETY: the `k` slots after the first `len` were written above (in order, from the
-        // first spare slot), and `len + k <= len + run.len() <=` the capacity.
-        unsafe { self.set_len(len + k) };
     }
 }
 

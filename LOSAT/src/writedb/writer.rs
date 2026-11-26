@@ -11,6 +11,7 @@ use super::column::{unsupported_late_column, BlobPair, ColumnDates, ColumnMeta};
 use super::convert::{
     find_sequence_length, raw_sequence_hash, seq_data_to_binary, sequence_hash, BinarySequence,
 };
+use super::cout::Cout;
 pub use super::files::DbVersion;
 use super::files::OffsetArrays;
 use super::header::{
@@ -21,7 +22,7 @@ use super::lmdb::{
     lmdb_file_name, lmdb_map_size_from_env, LmdbEnvSettings, WriteDbLmdb, WriteDbTaxId,
 };
 use super::mask_data::{MaskWriter, MaskedRanges};
-use super::ofstream::OfStream;
+use super::ofstream::{OfStream, StreamBuf};
 use super::platform::Platform;
 pub use super::volume::Indices;
 use super::volume::{IndexScratch, Volume};
@@ -369,7 +370,26 @@ impl WriteDb {
     /// `AddSequence` of a `CBioseq`: publishes the previous sequence and
     /// keeps this one.
     pub fn add_sequence(&mut self, bioseq: Bioseq) -> Result<(), WriteDbError> {
-        self.publish()?;
+        self.add_sequence_inner(bioseq, None)
+    }
+
+    /// `AddSequence` of a `CBioseq`, flushing any `WriteDB_Ncbi4naToBinary` stdout line to `cout`
+    /// inside `x_Publish` (before creating or writing the volume) and stopping with
+    /// [`WriteDbError::ClosedPipe`] when `cout` hits a closed pipe where SIGPIPE ends NCBI.
+    pub(crate) fn add_sequence_with_cout(
+        &mut self,
+        bioseq: Bioseq,
+        cout: &mut Cout<'_>,
+    ) -> Result<(), WriteDbError> {
+        self.add_sequence_inner(bioseq, Some(cout))
+    }
+
+    fn add_sequence_inner(
+        &mut self,
+        bioseq: Bioseq,
+        cout: Option<&mut Cout<'_>>,
+    ) -> Result<(), WriteDbError> {
+        self.publish_inner(cout)?;
         self.reset_sequence_data();
         if bioseq.is_aa != self.protein {
             let name = |protein: bool| if protein { "protein" } else { "nucleotide" };
@@ -612,6 +632,10 @@ impl WriteDb {
     /// `x_Publish`: writes the kept sequence, into a new volume when the
     /// current one is full.
     fn publish(&mut self) -> Result<(), WriteDbError> {
+        self.publish_inner(None)
+    }
+
+    fn publish_inner(&mut self, cout: Option<&mut Cout<'_>>) -> Result<(), WriteDbError> {
         let Some(pending) = self.pending.take() else {
             return Ok(());
         };
@@ -655,6 +679,19 @@ impl WriteDb {
         let binary = match &pending {
             Pending::Bioseq(bioseq) => {
                 cooked = cook_sequence(bioseq, &mut self.stdout)?;
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:464-466
+                // `WriteDB_Ncbi4naToBinary` writes `ib=...,n4sz=...` to `cout` with `endl` before
+                // the volume is opened or written: on a closed pipe, SIGPIPE ends NCBI right here.
+                if let Some(cout) = cout {
+                    let text = std::mem::take(&mut self.stdout);
+                    if !text.is_empty() {
+                        cout.insert(&text);
+                        cout.flush();
+                        if cout.rdbuf().closed_pipe() {
+                            return Err(WriteDbError::ClosedPipe);
+                        }
+                    }
+                }
                 &cooked
             }
             Pending::Raw(binary) => binary,
@@ -870,11 +907,22 @@ impl WriteDb {
     /// the files their final names, writes the alias file of a database of several volumes or
     /// with GI masks, and the LMDB files of version 5.
     pub fn close(&mut self) -> Result<(), WriteDbError> {
+        self.close_inner(None)
+    }
+
+    /// `Close`, flushing any `WriteDB_Ncbi4naToBinary` stdout line emitted while publishing the
+    /// final pending sequence directly to `cout` so a closed pipe stops before volume close,
+    /// rename, or LMDB/taxdb close (as SIGPIPE ends NCBI inside `x_Publish`).
+    pub(crate) fn close_with_cout(&mut self, cout: &mut Cout<'_>) -> Result<(), WriteDbError> {
+        self.close_inner(Some(cout))
+    }
+
+    fn close_inner(&mut self, cout: Option<&mut Cout<'_>>) -> Result<(), WriteDbError> {
         if self.closed {
             return Ok(());
         }
         self.closed = true;
-        self.publish()?;
+        self.publish_inner(cout)?;
         let count = self.volumes.len();
         if count == 0 {
             return Ok(());
@@ -1195,7 +1243,7 @@ impl WriteDb {
         }
         let mut masklist = Vec::new();
         for name in self.mask.gi_mask_names().filter(|name| !name.is_empty()) {
-            masklist.extend_from_slice(name.as_bytes());
+            masklist.extend_from_slice(name);
             masklist.push(b' ');
         }
         let mut alias =

@@ -81,3 +81,19 @@ byte), `-logfile`, and constrained values (`-dbtype`, `-seqid_dbtype`) and numbe
 With them the date of a binary seqid list (`.bsl`: its date and the date's length byte) is masked
 too (`undated`), and its 8-byte size, which counts the date, is zeroed when it holds the length of
 the file, so a wrong size still differs (review F1; `undated_seqid_list` of `tests/temp_support`).
+
+The `K10c_*` cases (line RG item K10c, frozen on 2026-11-26 with `make_fixtures.py --ncbi-bin
+"$NCBI_BIN" --rpsbproc-bin "$RPSBPROC_BIN"`) cover the remaining non-UTF-8 paths, keys, and
+option values across all eight search programs (`blastn`, `blastp`, `blastx`, `tblastn`,
+`tblastx`, `psiblast`, `rpsblast`, `rpstblastn`), `makeblastdb`, and `rpsbproc`: `-query`,
+`-subject`, `-out`, `-db`, `-export_search_strategy`, `-filtering_db`, `-window_masker_db`,
+`-window_masker_taxid` (`WINDOW_MASKER_PATH` in the environment, `[WINDOW_MASKER]` in `.ncbirc`,
+and current working directory), `-use_index true` (new-style and old-style `-index_name`),
+`-seqidlist`, `-gilist`, `-taxidlist`, `-ipglist`, `-db_soft_mask`, `-out_pssm`,
+`-out_ascii_pssm`, `-in_pssm`, `-in_msa`, `-outfmt` (`0`, `5`, `6`, `7`, `11`, `15`, `16`, custom
+`delim=\xe9`, and invalid non-UTF-8 formats), non-path text options (`-dust`, `-seg`, `-matrix`,
+`-query_loc`, `-comp_based_stats`), `makeblastdb` (`-in`, `-out`, `-title`,
+`-metadata_output_prefix`, `-taxid_map`, `-mask_data`, `-mask_id`, `-mask_desc`, `-gi_mask`,
+`-gi_mask_name`, `-max_file_sz`, `-logfile`), and `rpsbproc` (`-i`, `-o`, `-d`, existing and
+missing). `make_fixtures.py` and `non_utf8_names.rs` also mask makeblastdb's time and elapsed
+seconds in `.log` files (`undated`) and clear `WINDOW_MASKER_PATH`.

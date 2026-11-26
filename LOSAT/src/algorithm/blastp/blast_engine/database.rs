@@ -97,7 +97,7 @@ const BLOCKS_PER_THREAD: usize = 8;
 /// (`ResolvedBlastpArgs::db`: the `-db` value without white space at its ends).
 pub(super) struct BlastpDatabase {
     db: SeqDb,
-    name: String,
+    name: Vec<u8>,
     /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16,
     /// and the batches' prefetch of outfmt 0, 5, 6 and 7).
     taxdb: shared::TaxdbRun,
@@ -123,12 +123,25 @@ impl BlastpDatabase {
         self.rps_units.as_ref()
     }
 
-    /// The taxonomy database's lookups back to a run's start (`shared::TaxdbRun::restart`), and the
-    /// loads' posts of NCBI's warning of a UTF8String header (`SeqDb::restart_utf8_loads`), for the
-    /// search again of the batches before a failed one.
+    /// NCBI's posts of the titles that the failed batch of `failure` read where it made its
+    /// Seq-aligns, which posted NCBI's warning of a UTF8String header or not (`utf8_posted`;
+    /// `ErrorAfterBatchReports::title_posts`).
+    pub(super) fn failed_title_posts(
+        &self,
+        failure: &ErrorAfterBatchReports,
+        utf8_posted: bool,
+    ) -> Result<crate::report::diag_log::Posts> {
+        failure.title_posts(&self.db, utf8_posted, self.program)
+    }
+
+    /// The taxonomy database's lookups back to a run's start (`shared::TaxdbRun::restart`), the
+    /// loads' posts of NCBI's warning of a UTF8String header (`SeqDb::restart_utf8_loads`) and the
+    /// model of NCBI's cache of header records (`SeqDb::restart_header_reads`), for the search
+    /// again of the batches before a failed one.
     pub(super) fn restart_taxonomy(&self) {
         self.taxdb.restart();
         self.db.restart_utf8_loads();
+        self.db.restart_header_reads();
     }
 
     /// The OIDs of the database's ordinal ids, which name the reported sequences without
@@ -170,11 +183,18 @@ impl BlastpDatabase {
     /// with the command line's errors, which name `program`.
     #[cfg(test)]
     pub(super) fn open(
-        name: &str,
+        name: impl AsRef<[u8]>,
         settings: &ApplicationSettings,
         program: &'static str,
     ) -> Result<Self> {
-        Self::open_restricted(name, settings, program, None, None, &mut std::io::sink())
+        Self::open_restricted(
+            name.as_ref(),
+            settings,
+            program,
+            None,
+            None,
+            &mut std::io::sink(),
+        )
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
@@ -182,7 +202,7 @@ impl BlastpDatabase {
     /// `-db_hard_mask`; series NP, M4b) (`shared::restrict_database`, whose warnings go to
     /// `diagnostics`).
     pub(super) fn open_restricted(
-        name: &str,
+        name: &[u8],
         settings: &ApplicationSettings,
         program: &'static str,
         list: Option<&crate::seqdb::DbList>,
@@ -203,7 +223,7 @@ impl BlastpDatabase {
         )?;
         Ok(Self {
             db,
-            name: name.to_string(),
+            name: name.to_vec(),
             taxdb: shared::TaxdbRun::default(),
             program,
             rps_units: None,
@@ -217,7 +237,7 @@ impl BlastpDatabase {
     }
 
     /// The `-db` value as NCBI keeps it.
-    pub(super) fn name(&self) -> &str {
+    pub(super) fn name(&self) -> &[u8] {
         &self.name
     }
 
@@ -1181,10 +1201,11 @@ impl<'a> CallTitles<'a> {
         // The weak matches of NCBI's scope are looked for where a read may come one by one.
         let one_by_one = shared::prefetch_may_be_off(self.format);
         let titles = if x_lean {
-            listed.x_read_titles_lean(database, hit_lists, (&starts, one_by_one))?
+            listed.x_read_titles_lean(database, hit_lists, (&starts, one_by_one))
         } else {
-            listed.read_titles(database, hit_lists, (&starts, one_by_one))?
-        };
+            listed.read_titles(database, hit_lists, (&starts, one_by_one))
+        }
+        .map_err(|error| self.after_seq_aligns(error, listed, hit_lists))?;
         if let Some(read) = &titles.utf8 {
             let batch = self
                 .batches
@@ -1194,6 +1215,35 @@ impl<'a> CallTitles<'a> {
             self.utf8.note(batch, Some(read));
         }
         Ok(Some(titles))
+    }
+
+    /// `ErrorAfterBatchReports::after_seq_aligns` of `error` with the Seq-align reads of the batch
+    /// whose read failed (`ListedSubjects::seq_align_reads` of its final hit lists of `hit_lists`):
+    /// the failed batch writes their posts before its error (`ErrorAfterBatchReports::title_posts`).
+    #[cold]
+    #[inline(never)]
+    fn after_seq_aligns(
+        &self,
+        error: anyhow::Error,
+        listed: &ListedSubjects,
+        hit_lists: &[Option<BlastpHitList>],
+    ) -> anyhow::Error {
+        let Some(batch) = error
+            .downcast_ref::<ErrorAfterBatchReports>()
+            .and_then(|failure| failure.query)
+            .and_then(|query| {
+                self.batches
+                    .iter()
+                    .find(|batch| batch.searched.contains(&query))
+            })
+            .map(|batch| batch.searched.clone())
+        else {
+            return error;
+        };
+        ErrorAfterBatchReports::after_seq_aligns(
+            error,
+            listed.seq_align_reads(hit_lists.get(batch).unwrap_or_default()),
+        )
     }
 
     /// The call's first read of such a header in its batches' Seq-aligns (`titles`).
@@ -1321,6 +1371,21 @@ impl ListedSubjects {
                 .fetched = database.db.location_of(ordinal).map(|at| (query, at));
         }
         Ok(())
+    }
+
+    /// The reads of the headers where NCBI makes the Seq-aligns of the final hit lists `lists` (of
+    /// one batch; `shared::batch_title_posts`): the ordinal id of each subject of each list, query
+    /// by query in the order of each list, as `read_titles` reads them.
+    pub(super) fn seq_align_reads<'h>(
+        &'h self,
+        lists: &'h [Option<BlastpHitList>],
+    ) -> impl Iterator<Item = u32> + Clone + 'h {
+        lists.iter().flatten().flat_map(|hit_list| {
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            hit_list.hsplist_array[..count]
+                .iter()
+                .map(|hsp_list| self.ordinals[hsp_list.oid as usize])
+        })
     }
 
     /// The reader of the reported sequences' headers of the call (`read_titles`), whose batches
@@ -1665,7 +1730,8 @@ impl ParsedSubjects {
     /// Reads the header of the subject `ordinal` of rank `rank` (of `ranks`) of `database` with
     /// `headers` (its reader), where the hit list of query `query` reaches it
     /// (`shared::read_header`): its stored title (`shared::StoredTitle`), or for a sequence with
-    /// parsed Seq-ids, kept here, the title of its first definition line.
+    /// parsed Seq-ids, kept here, the title of its first definition line (whose `replaced_bytes`
+    /// say whether any of its titles held a byte read as '#', `check_reported_titles`).
     pub(super) fn read(
         &mut self,
         database: &BlastpDatabase,
@@ -1679,12 +1745,14 @@ impl ParsedSubjects {
             shared::ReportedHeader::Stored(stored) => Ok(stored),
             shared::ReportedHeader::Parsed(subject) => {
                 let title = subject.first_title().to_vec();
+                let replaced_bytes = subject.replaced_title_bytes();
                 if self.by_rank.is_empty() {
                     self.by_rank = vec![None; ranks];
                 }
                 self.by_rank[rank] = Some(subject);
                 Ok(shared::StoredTitle {
                     title,
+                    replaced_bytes,
                     ..Default::default()
                 })
             }
@@ -1884,19 +1952,73 @@ impl ListedTitles<'_> {
         }
     }
 
-    /// LOSAT's rejection of a reported subject (one with rows in the final `hit_lists`)
-    /// whose stored title holds a byte outside ' ' ..= '~'
-    /// (`algorithm::common::database::check_reported_title`): NCBI writes an error message
-    /// for the byte each time its formatter reads the definition line.
-    pub(super) fn check_reported_titles(&self, hit_lists: &[Option<BlastpHitList>]) -> Result<()> {
+    /// LOSAT's rejection of a reported subject (one with rows in the final `hit_lists`) of
+    /// `database` whose stored title holds a byte outside ' ' ..= '~' where the reports read its
+    /// definition line besides the Seq-aligns (`reads`;
+    /// `algorithm::common::database::check_reported_title`): NCBI writes an error message for the
+    /// byte each time it reads the definition line.
+    pub(super) fn check_reported_titles(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &[Option<BlastpHitList>],
+        reads: shared::TitleReads,
+    ) -> Result<()> {
         for rank in Self::reported(hit_lists) {
-            shared::check_reported_title(
-                self.replaced_title_bytes[rank],
-                || self.oids.oid(self.listed.ordinals[rank]),
-                self.program,
-            )?;
+            self.check_rank_title(database, rank, reads)?;
         }
         Ok(())
+    }
+
+    /// [`Self::check_reported_titles`] for one subject rank `rank`.
+    pub(super) fn check_rank_title(
+        &self,
+        database: &BlastpDatabase,
+        rank: usize,
+        reads: shared::TitleReads,
+    ) -> Result<()> {
+        shared::check_reported_title(
+            database.seqdb(),
+            self.listed.ordinals[rank],
+            self.replaced_title_bytes[rank],
+            reads,
+            self.program,
+        )
+    }
+
+    /// Whether the stored title of the subject of rank `rank` held a byte outside `' '..='~'`.
+    pub(super) fn has_replaced_title_bytes(&self, rank: usize) -> bool {
+        self.replaced_title_bytes[rank]
+    }
+
+    /// NCBI's posts of the titles that each batch of `batches` (the queries of each) reads where
+    /// it makes the Seq-aligns of its final hit lists `hit_lists` (`read_titles`' order;
+    /// `shared::batch_title_posts`), each with the batch's first query; none where no reader met
+    /// a title with a byte outside ' ' ..= '~' (`SeqDb::replaced_titles`).
+    pub(super) fn title_posts<'b>(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &[Option<BlastpHitList>],
+        batches: impl IntoIterator<Item = &'b std::ops::Range<usize>>,
+    ) -> Result<Vec<(usize, crate::report::diag_log::Posts)>> {
+        let db = database.seqdb();
+        let mut posts = Vec::new();
+        if !db.replaced_titles() {
+            return Ok(posts);
+        }
+        for batch in batches {
+            let aligned = self
+                .listed
+                .seq_align_reads(hit_lists.get(batch.clone()).unwrap_or_default());
+            let utf8 = self
+                .utf8
+                .as_ref()
+                .is_some_and(|read| batch.contains(&read.query));
+            let batch_posts = shared::batch_title_posts(db, aligned, utf8, self.program)?;
+            if !batch_posts.is_empty() {
+                posts.push((batch.start, batch_posts));
+            }
+        }
+        Ok(posts)
     }
 
     /// The Blast-def-line taxid of each reported subject by rank (0 for none and for a

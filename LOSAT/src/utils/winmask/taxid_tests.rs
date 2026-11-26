@@ -20,8 +20,9 @@ fn the_file_is_found_under_the_decimal_taxid() {
     std::fs::write(dir.join("7227").join(STAT_FILE_NAME), b"x").unwrap();
     std::fs::write(dir.join("-1").join(STAT_FILE_NAME), b"x").unwrap();
     let root = dir.to_str().unwrap();
-    let found =
-        |directory: &str, taxid| taxid_stat_file(Some(directory), taxid, &FileCounts).unwrap();
+    let found = |directory: &str, taxid| {
+        taxid_stat_file(Some(directory.as_bytes()), taxid, &FileCounts).unwrap()
+    };
     assert_eq!(
         found(root, 7227),
         Some(PathBuf::from(format!(
@@ -63,7 +64,7 @@ fn no_directory_is_the_current_one() {
     let expected = stat_file_path(cwd, 7227);
     assert!(!expected.is_file());
     assert_eq!(taxid_stat_file(None, 7227, &FileCounts).unwrap(), None);
-    assert_eq!(taxid_stat_file(Some(""), 7227, &FileCounts).unwrap(), None);
+    assert_eq!(taxid_stat_file(Some(b""), 7227, &FileCounts).unwrap(), None);
     assert_eq!(
         stat_file_path("/w".into(), 7227),
         PathBuf::from(format!(
@@ -77,11 +78,11 @@ fn no_directory_is_the_current_one() {
 struct Paths(&'static [&'static str]);
 
 impl CountsSource for Paths {
-    fn discover(&self, _: &str) -> Result<StatFile, WinMaskError> {
+    fn discover(&self, _: &Path) -> Result<StatFile, WinMaskError> {
         unreachable!("only the paths are asked")
     }
 
-    fn counts(&self, _: &str, _: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError> {
+    fn counts(&self, _: &Path, _: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError> {
         unreachable!("only the paths are asked")
     }
 
@@ -94,14 +95,17 @@ impl CountsSource for Paths {
 fn the_source_says_which_files_are_there() {
     let source = Paths(&["windowmasker/9606/wmasker.obinary"]);
     assert_eq!(
-        taxid_stat_file(Some("windowmasker"), 9606, &source).unwrap(),
+        taxid_stat_file(Some(b"windowmasker"), 9606, &source).unwrap(),
         Some(PathBuf::from(format!(
             "windowmasker{MAIN_SEPARATOR}9606{MAIN_SEPARATOR}wmasker.obinary"
         )))
     );
     assert_eq!(
-        taxid_stat_file(Some("windowmasker"), 10090, &source).unwrap(),
+        taxid_stat_file(Some(b"windowmasker"), 10090, &source).unwrap(),
         None
     );
-    assert_eq!(taxid_stat_file(Some("other"), 9606, &source).unwrap(), None);
+    assert_eq!(
+        taxid_stat_file(Some(b"other"), 9606, &source).unwrap(),
+        None
+    );
 }

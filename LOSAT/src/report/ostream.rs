@@ -1052,7 +1052,7 @@ impl ReportStream {
     pub fn of_cli(
         out_file: Option<std::fs::File>,
         program: &'static str,
-        outfmt: &str,
+        outfmt: impl AsRef<[u8]>,
         strategy: Option<&crate::report::archive::strategy::StrategyExport>,
     ) -> Self {
         let number = crate::blastinput::app::parse_formatting_string(outfmt)
@@ -1080,7 +1080,7 @@ impl ReportStream {
     pub(crate) fn of_library_file(
         file: std::fs::File,
         program: &'static str,
-        outfmt: &str,
+        outfmt: impl AsRef<[u8]>,
         posts: Box<dyn std::io::Write + Send>,
     ) -> Self {
         let stream = Self::of_cli(Some(file), program, outfmt, None);

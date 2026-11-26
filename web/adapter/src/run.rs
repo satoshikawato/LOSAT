@@ -151,7 +151,7 @@ pub fn outputs(program: Program, requested: &Requested) -> Vec<Output> {
 }
 
 /// The `-outfmt` value of the program's arguments.
-fn outfmt_of(command: &mut Commands) -> &mut String {
+fn outfmt_of(command: &mut Commands) -> &mut std::ffi::OsString {
     match command {
         Commands::Blastp(a) => &mut a.outfmt,
         Commands::Tblastn(a) => &mut a.outfmt,
@@ -335,7 +335,9 @@ fn read_outfmt(
 ) -> Result<(Program, Commands, Requested), String> {
     use losat::web_adapter::EarlyFormat;
     let strategy = losat::web_adapter::export_search_strategy_of(&command).is_some();
-    let outfmt = std::mem::replace(outfmt_of(&mut command), "0".to_string());
+    let outfmt = std::mem::replace(outfmt_of(&mut command), std::ffi::OsString::from("0"))
+        .into_string()
+        .map_err(|_| "invalid UTF-8 in -outfmt".to_string())?;
     let early = losat::web_adapter::early_format_choice(&outfmt, strategy)
         .map_err(|error| format!("{error:#}"))?;
     // NCBI's error for an argv without `-subject` (and without `-db`), which the command line
@@ -351,7 +353,7 @@ fn read_outfmt(
         // The value stays the arguments' and is the run's one output, which the engine's
         // formatting handler reads again (line RG F1w review 2, S-a).
         EarlyFormat::Deferred => {
-            outfmt.clone_into(outfmt_of(&mut command));
+            *outfmt_of(&mut command) = std::ffi::OsString::from(&outfmt);
             let requested = Requested {
                 custom: Some(outfmt),
                 number: None,
@@ -398,7 +400,10 @@ fn read_outfmt(
         // number, which NCBI and the CLI drop (`FormatChoice::normalized`). The engine's library
         // drops them as well (`parse_formatting_string`; BLASTP's since line RG F/d36), so this
         // only gives the output one spelling of its number.
-        1..=4 => Some(choice.normalized()),
+        1..=4 => Some(
+            String::from_utf8(choice.normalized())
+                .map_err(|_| "invalid UTF-8 in -outfmt".to_string())?,
+        ),
         _ => Some(outfmt),
     };
     let number = Some(choice.number as u32);
@@ -460,7 +465,7 @@ pub fn enter_run_directory() {
 /// The database of the arguments `command` (`-db NAME`), which the run opens by name as the command
 /// line opens it, from the files of the run's working directory that the host gives the engine
 /// (docs/web/abi_v2.md §3, §4; line WQA D12a, 2026-11-20). `None` for a search of `-subject`.
-fn database_of(command: &Commands) -> Option<&str> {
+fn database_of(command: &Commands) -> Option<&std::ffi::OsStr> {
     match command {
         Commands::Blastp(args) => args.db.as_deref(),
         Commands::Tblastn(args) => args.db.as_deref(),
@@ -535,18 +540,22 @@ struct SearchRunFiles {
     read: Vec<Vec<u8>>,
 }
 
-/// The names of the search's files that the host holds outside `/work` and the list files of a
-/// `-db` search that the run opens for reading (line WQA D19 rounds R1 and R2):
+/// The names of the search's files that the host holds outside `/work` and the files of a `-db`
+/// or `-filtering_db` search that the run opens or checks for reading (line WQA D19 rounds R1 and
+/// R2, D19b):
 /// - `registered`: `-query` and `-subject` (unless `-`), BLASTN's `-window_masker_db` or
 ///   `-window_masker_taxid` (`windowmasker/<taxid>/wmasker.obinary`) when registered as kind 1,
 ///   and the kind-2 registry files of `registry` that this run's start reads (`.ncbirc`, and
 ///   without a version word either the registered file of `-conffile` or `<program>.ini`);
 /// - `read`: with `-db`, the list files of its filters (`-gilist`, `-negative_gilist`,
 ///   `-ipglist`, `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist`,
-///   `-negative_taxidlist`), kept apart from `registered` so a missing list file does not make
-///   its parent folders present.
+///   `-negative_taxidlist`), the database lookup files (`search_database_read_files`, including
+///   BLASTN's `-filtering_db` even with `-subject`) and taxonomy lookup files, kept apart from
+///   `registered` so a missing file does not make its parent folders present.
 fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry) -> SearchRunFiles {
-    use losat::web_adapter::{preparse, scan_program_argv, Preparsed, RegistryFiles as _};
+    use losat::web_adapter::{
+        preparse, scan_program_argv, search_database_read_files, Preparsed, RegistryFiles as _,
+    };
     use std::path::Path;
 
     let (program_name, arguments) = words.split_first().unwrap_or((&"", &[]));
@@ -582,9 +591,17 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
     // one (even when it starts with `-`).
     let mut registered: Vec<Vec<u8>> = Vec::new();
     let mut list_files: Vec<Vec<u8>> = Vec::new();
-    let mut has_db = false;
+    let mut dbs: Vec<String> = Vec::new();
+    let mut filtering_dbs: Vec<String> = Vec::new();
+    let mut outfmt: Option<String> = None;
+    let mut has_taxids = false;
+    let mut no_taxid_expansion = false;
     let is_blastn = program == Program::Blastn;
     scan_program_argv(program_name, arguments, |name, value| {
+        if name == "no_taxid_expansion" && value.is_none() {
+            no_taxid_expansion = true;
+            return;
+        }
         let Some(value) = value else {
             return;
         };
@@ -592,9 +609,18 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
             "query" | "subject" => push_input(&mut registered, value),
             "window_masker_db" if is_blastn => push_counts(&mut registered, value),
             "window_masker_taxid" if is_blastn => push_taxid(&mut registered, value),
-            "db" => has_db = true,
+            "db" => dbs.push(value.to_string()),
+            "filtering_db" if is_blastn => filtering_dbs.push(value.to_string()),
+            "outfmt" => outfmt = Some(value.to_string()),
+            "taxids" | "negative_taxids" => has_taxids = true,
+            "taxidlist" | "negative_taxidlist" => {
+                has_taxids = true;
+                if !value.is_empty() {
+                    list_files.push(value.as_bytes().to_vec());
+                }
+            }
             "gilist" | "negative_gilist" | "ipglist" | "negative_ipglist" | "seqidlist"
-            | "negative_seqidlist" | "taxidlist" | "negative_taxidlist" => {
+            | "negative_seqidlist" => {
                 if !value.is_empty() {
                     list_files.push(value.as_bytes().to_vec());
                 }
@@ -620,10 +646,23 @@ fn search_run_files(words: &[&str], registry: &crate::files::RegisteredRegistry)
             }
         }
     }
-    SearchRunFiles {
-        registered,
-        read: if has_db { list_files } else { Vec::new() },
-    }
+    let mut read = if !dbs.is_empty() {
+        list_files
+    } else {
+        Vec::new()
+    };
+    let db_refs: Vec<&str> = dbs.iter().map(String::as_str).collect();
+    let filtering_db_refs: Vec<&str> = filtering_dbs.iter().map(String::as_str).collect();
+    read.extend(search_database_read_files(
+        program.api(),
+        arguments,
+        registry,
+        &db_refs,
+        &filtering_db_refs,
+        outfmt.as_deref().unwrap_or("0"),
+        has_taxids && !no_taxid_expansion,
+    ));
+    SearchRunFiles { registered, read }
 }
 
 /// The names of the search's files that the host holds outside `/work` (`search_run_files`).
@@ -836,7 +875,7 @@ pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool
     // (before the other option handlers), the query range with the query options (the
     // engine's option checks read it). Whether a range fits the records is checked by
     // `run`, which has them.
-    let subject_range = |subject_loc: Option<&str>| {
+    let subject_range = |subject_loc: Option<&std::ffi::OsStr>| {
         parse_optional_range(subject_loc, RangeRole::Subject).map(|_| ())
     };
     let groups = search_groups(&outputs(program, &requested), &command);
@@ -851,7 +890,9 @@ pub fn validate_with(words: &[&str], known: &mut dyn FnMut(bool)) -> Result<bool
     // checks it and as the CLI does, whose hit list check (`No hits are being saved`) comes before
     // the e-value's (line WQA's sweep, D3 review r2, 2026-11-19: with format 0's size, `-outfmt 6
     // -num_alignments 0 -evalue 0` gave the e-value's error).
-    let with_own = |outfmt: &mut String| own[0].outfmt.clone_into(outfmt);
+    let with_own = |outfmt: &mut std::ffi::OsString| {
+        *outfmt = std::ffi::OsString::from(&own[0].outfmt);
+    };
     // The CLI checks the thread count before the options (`validate_threads`), the checks of the
     // options alone last; with the argv's `-outfmt` they stop at its delimiter first.
     if custom_rejected {
@@ -1095,7 +1136,10 @@ impl FormatObserver for RangeRecorder {
 /// run before any hit.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:146-155
-fn searched_queries(query_loc: Option<&str>, records: &[FastaRecord]) -> Option<Vec<usize>> {
+fn searched_queries(
+    query_loc: Option<&std::ffi::OsStr>,
+    records: &[FastaRecord],
+) -> Option<Vec<usize>> {
     use losat::web_adapter::{parse_optional_range, record_interval, RangeRole, RecordInterval};
     let range = parse_optional_range(query_loc, RangeRole::Query).ok()??;
     Some(
@@ -1432,7 +1476,7 @@ fn search(
                 .zip(writers.iter_mut())
                 .zip(archives.iter_mut())
                 .map(|((format, writer), archive)| FormatOutput {
-                    outfmt: &format.outfmt,
+                    outfmt: format.outfmt.as_bytes(),
                     refusal: if format.requested {
                         FormatRefusal::FailsCall
                     } else {
@@ -1739,7 +1783,7 @@ fn link_format0(
 /// without the options is validated as before named input files.
 fn validates_window_masker(args: &losat::web_adapter::BlastnArgs) -> bool {
     match args.window_masker_db.as_deref() {
-        Some(name) => crate::files::registered(name),
+        Some(name) => name.to_str().is_some_and(crate::files::registered),
         None => args.window_masker_taxid.is_some(),
     }
 }
@@ -3537,7 +3581,7 @@ mod tests {
         assert!(q_idx(&words).iter().all(|&index| index == 1));
         let ranged = [&words[..], &["-query_loc", "5-40"]].concat();
         assert!(q_idx(&ranged).iter().all(|&index| index == 1));
-        let ordinals = searched_queries(Some("5-40"), &query).unwrap();
+        let ordinals = searched_queries(Some(std::ffi::OsStr::new("5-40")), &query).unwrap();
         assert_eq!(ordinals, vec![2]);
         assert_eq!(searched_queries(None, &query), None);
     }
@@ -5904,7 +5948,10 @@ mod tests {
         let records = text(&ranged[&1]);
         assert_eq!(records.lines().count(), 1);
         assert!(records.contains("\"q_idx\":1"), "{records}");
-        assert_eq!(searched_queries(Some("31-198"), &query), Some(vec![1]));
+        assert_eq!(
+            searched_queries(Some(std::ffi::OsStr::new("31-198")), &query),
+            Some(vec![1])
+        );
         // The errors of the argv, as the run reports them.
         for extra in [
             &["-subject_loc", "5-2", "-query_loc", "9-1"][..],

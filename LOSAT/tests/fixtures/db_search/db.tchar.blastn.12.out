@@ -1,0 +1,1406 @@
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "blastn"
+              },
+              "data": {
+                "int": 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "tc_n"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 180
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 180
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.00077640324142e-95
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 333.517231654535
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 180
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 100
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 1,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_1"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 0
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0
+              ],
+              "lens": [
+                180
+              ],
+              "strands": [
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 166
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 166
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 6.06588500047675e-88
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 307.664136521805
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 170
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 96.0555555555556
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 1,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_1"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 1
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0
+              ],
+              "lens": [
+                172
+              ],
+              "strands": [
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 157
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 157
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 6.10895047087338e-83
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 291.044289650764
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 168
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 96.0555555555556
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 5,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_1"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 2
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0,
+                -1,
+                159,
+                159,
+                160,
+                166,
+                -1,
+                167,
+                167
+              ],
+              "lens": [
+                159,
+                1,
+                7,
+                1,
+                5
+              ],
+              "strands": [
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 135
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 135
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.03681008866189e-70
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 250.417997299331
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 135
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 75.5
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 1,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_1"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 2
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                300
+              ],
+              "lens": [
+                135
+              ],
+              "strands": [
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 124
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 124
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.3507205883318e-64
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 230.104851123614
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 124
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 69.3888888888889
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 1,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_1"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 3
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0
+              ],
+              "lens": [
+                124
+              ],
+              "strands": [
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 99
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 99
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.06656896034371e-50
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 183.938609815167
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 99
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 55.5
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 1,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_1"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 5
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0
+              ],
+              "lens": [
+                99
+              ],
+              "strands": [
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 87
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 87
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.99749286311333e-44
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 161.778813987113
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 87
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 48.8333333333333
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 1,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_1"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 6
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0
+              ],
+              "lens": [
+                87
+              ],
+              "strands": [
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "blastn"
+              },
+              "data": {
+                "int": 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "tc_n"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 174
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 174
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.16630038965481e-92
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 322.437333740508
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 178
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 100
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 1,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_2"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 1
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0
+              ],
+              "lens": [
+                180
+              ],
+              "strands": [
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 172
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 172
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.80228660911644e-91
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 318.744034435832
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 172
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 96.0555555555556
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 1,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_2"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 0
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0
+              ],
+              "lens": [
+                172
+              ],
+              "strands": [
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 165
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 165
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.18168029634496e-87
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 305.817486869467
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 176
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 100
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 5,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_2"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 2
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0,
+                -1,
+                159,
+                159,
+                160,
+                166,
+                -1,
+                167,
+                167
+              ],
+              "lens": [
+                159,
+                1,
+                7,
+                1,
+                13
+              ],
+              "strands": [
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 141
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.78980235765379e-74
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 261.497895213358
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 168
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 100
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 5,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_2"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 2
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                300,
+                -1,
+                459,
+                159,
+                460,
+                166,
+                -1,
+                167,
+                467
+              ],
+              "lens": [
+                159,
+                1,
+                7,
+                1,
+                13
+              ],
+              "strands": [
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 126
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 126
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.04417104492411e-65
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 233.79815042829
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 163
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 100
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 5,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_2"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 3
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0,
+                -1,
+                159,
+                159,
+                160,
+                166,
+                -1,
+                167,
+                167
+              ],
+              "lens": [
+                159,
+                1,
+                7,
+                1,
+                13
+              ],
+              "strands": [
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 99
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 99
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.06656896034371e-50
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 183.938609815167
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 99
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 55.5
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 1,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_2"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 5
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0
+              ],
+              "lens": [
+                99
+              ],
+              "strands": [
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 87
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 87
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 4.99749286311333e-44
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 161.778813987113
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 87
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 48.8333333333333
+              }
+            }
+          ],
+          "segs": {
+            "denseg": {
+              "dim": 2,
+              "numseg": 1,
+              "ids": [
+                {
+                  "local": {
+                    "str": "Query_2"
+                  }
+                },
+                {
+                  "general": {
+                    "db": "BL_ORD_ID",
+                    "tag": {
+                      "id": 6
+                    }
+                  }
+                }
+              ],
+              "starts": [
+                0,
+                0
+              ],
+              "lens": [
+                87
+              ],
+              "strands": [
+                "plus",
+                "plus"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

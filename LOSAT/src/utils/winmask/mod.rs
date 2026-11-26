@@ -177,9 +177,9 @@ impl std::error::Error for WinMaskError {}
 /// the command line. `FileCounts` is the file system.
 pub trait CountsSource: Send + Sync + fmt::Debug {
     /// `CSeqMaskerIstatFactory::DiscoverStatType` of `name`.
-    fn discover(&self, name: &str) -> Result<StatFile, WinMaskError>;
+    fn discover(&self, name: &Path) -> Result<StatFile, WinMaskError>;
     /// `CSeqMaskerIstatFactory::create` of `name`, with the other arguments from `params`.
-    fn counts(&self, name: &str, params: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError>;
+    fn counts(&self, name: &Path, params: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError>;
     /// `Exists` of a `CFile` of `path`: whether `path` is a file (or a link to one), which NCBI asks of
     /// the counts file of `-window_masker_taxid` (`taxid_stat_file`).
     fn is_file(&self, path: &Path) -> bool;
@@ -190,12 +190,12 @@ pub trait CountsSource: Send + Sync + fmt::Debug {
 pub struct FileCounts;
 
 impl CountsSource for FileCounts {
-    fn discover(&self, name: &str) -> Result<StatFile, WinMaskError> {
-        discover_stat_type(Path::new(name))
+    fn discover(&self, name: &Path) -> Result<StatFile, WinMaskError> {
+        discover_stat_type(name)
     }
 
-    fn counts(&self, name: &str, params: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError> {
-        UnitCounts::open(Path::new(name), params).map(Arc::new)
+    fn counts(&self, name: &Path, params: &MaskerParams) -> Result<Arc<UnitCounts>, WinMaskError> {
+        UnitCounts::open(name, params).map(Arc::new)
     }
 
     fn is_file(&self, path: &Path) -> bool {

@@ -564,7 +564,7 @@ pub(crate) struct ImportRun {
     /// blastn's MegaBLAST database index of the import (`import_into`): the strategy's
     /// (`ForceMbIndex` with its name, a new-style index), or the one that the command line's
     /// `-use_index true` names over it; the name and whether the index is old-style.
-    pub(crate) mb_index: Option<(String, bool)>,
+    pub(crate) mb_index: Option<(Vec<u8>, bool)>,
     /// The strategy's query range (`Start::query_range`), which the program's query options
     /// take in place of `-query_loc`'s.
     pub(crate) query_range: Option<crate::blastinput::seq_range::SequenceRange>,
@@ -742,7 +742,7 @@ impl Start {
     pub(crate) fn run(
         &mut self,
         parse_deflines: bool,
-        query_loc: Option<&String>,
+        query_loc: Option<&std::ffi::OsStr>,
         program: &str,
     ) -> Result<ImportRun> {
         let subjects = match &self.imported.subject {
@@ -827,8 +827,8 @@ impl Start {
             some(options.negative_taxid_list.as_deref()),
         ) {
             (None, None) => return Ok(filter),
-            (Some(list), None) => filter.taxids = Some(join(list)),
-            (None, Some(list)) => filter.negative_taxids = Some(join(list)),
+            (Some(list), None) => filter.taxids = Some(join(list).into()),
+            (None, Some(list)) => filter.negative_taxids = Some(join(list).into()),
             (Some(_), Some(_)) => {
                 return Err(unported("a search strategy with both taxid lists", program))
             }
@@ -871,7 +871,7 @@ impl Start {
     /// is not modelled.
     fn query_range(
         &self,
-        given: Option<&String>,
+        given: Option<&std::ffi::OsStr>,
         program: &str,
     ) -> Result<Option<crate::blastinput::seq_range::SequenceRange>> {
         use crate::blastinput::seq_range::SequenceRange;
@@ -956,7 +956,7 @@ fn option_text(setter: &Setter) -> String {
                     ParamValue::Integer(n) => n.to_string(),
                     ParamValue::BigInteger(n) => n.to_string(),
                     ParamValue::Real(v) | ParamValue::Evalue(v) => v.to_string(),
-                    ParamValue::Str(text) => format!("\"{text}\""),
+                    ParamValue::Str(text) => format!("\"{}\"", String::from_utf8_lossy(text)),
                     ParamValue::IntegerList(list) => list
                         .iter()
                         .map(i32::to_string)
@@ -993,9 +993,11 @@ pub(crate) fn formatting_early_return(
     formatting: &mut crate::blastinput::report_counts::FormattingArgs,
     num_descriptions_given: bool,
     num_alignments_given: bool,
-    outfmt: &str,
+    outfmt: &std::ffi::OsStr,
 ) {
-    let kept = match crate::blastinput::app::parse_formatting_string(outfmt) {
+    let kept = match crate::blastinput::app::parse_formatting_string(
+        crate::utils::os_bytes::os_str_bytes(outfmt).as_ref(),
+    ) {
         Ok(format) => crate::blastinput::report_counts::kept_hitlist_counts(
             formatting.hitlist_start_count(),
             format.number,
@@ -1151,7 +1153,7 @@ fn recorded_params(setter: &Setter) -> Vec<Param> {
         Setter::DomainInclusionThreshold(v) => one(f::DOMAIN_INCLUSION_THRESHOLD, Real(*v)),
         Setter::EffectiveSearchSpace(v) => one(f::EFFECTIVE_SEARCH_SPACE, BigInteger(*v)),
         Setter::EvalueThreshold(v) => one(f::EVALUE_THRESHOLD, Evalue(*v)),
-        Setter::FilterString(v) => one(f::FILTER_STRING, Str(v.clone())),
+        Setter::FilterString(v) => one(f::FILTER_STRING, Str(v.as_bytes().to_vec())),
         Setter::GapExtensionCost(v) => one(f::GAP_EXTENSION_COST, Integer(*v)),
         Setter::GapOpeningCost(v) => one(f::GAP_OPENING_COST, Integer(*v)),
         Setter::GapTracebackAlgorithm(v) => one(f::GAP_TRACEBACK_ALGORITHM, Integer(*v)),
@@ -1166,18 +1168,18 @@ fn recorded_params(setter: &Setter) -> Vec<Param> {
         Setter::MbTemplateLength(v) => one(f::MB_TEMPLATE_LENGTH, Integer(i32::from(*v))),
         Setter::MbTemplateType(v) => one(f::MB_TEMPLATE_TYPE, Integer(i32::from(*v))),
         Setter::MatchReward(v) => one(f::MATCH_REWARD, Integer(*v)),
-        Setter::MatrixName(v) => one(f::MATRIX_NAME, Str(v.clone())),
+        Setter::MatrixName(v) => one(f::MATRIX_NAME, Str(v.as_bytes().to_vec())),
         Setter::MismatchPenalty(v) => one(f::MISMATCH_PENALTY, Integer(*v)),
         Setter::MaskAtHash(v) => one(f::MASK_AT_HASH, Boolean(*v)),
         Setter::MaxHspsPerSubject(v) => one(f::MAX_HSPS_PER_SUBJECT, Integer(*v)),
         Setter::OutOfFrameMode(v) => one(f::OUT_OF_FRAME_MODE, Boolean(*v)),
-        Setter::PhiPattern { pattern, .. } => one(f::PHI_PATTERN, Str(pattern.clone())),
+        Setter::PhiPattern { pattern, .. } => one(f::PHI_PATTERN, Str(pattern.as_bytes().to_vec())),
         Setter::PercentIdentity(v) => one(f::PERCENT_IDENTITY, Real(*v)),
         Setter::PseudoCount(v) => one(f::PSEUDO_COUNT, Integer(*v)),
         Setter::QueryGeneticCode(v) => one(f::QUERY_GENETIC_CODE, Integer(*v)),
         Setter::QueryCovHspPerc(v) => one(f::QUERY_COV_HSP_PERC, Real(*v)),
         Setter::RepeatFiltering(v) => one(f::REPEAT_FILTERING, Boolean(*v)),
-        Setter::RepeatFilteringDb(v) => one(f::REPEAT_FILTERING_DB, Str(v.clone())),
+        Setter::RepeatFilteringDb(v) => one(f::REPEAT_FILTERING_DB, Str(v.as_bytes().to_vec())),
         Setter::StrandOption(v) if (1..=3).contains(v) => {
             one(f::STRAND_OPTION, ParamValue::StrandType(*v))
         }
@@ -1200,7 +1202,7 @@ fn recorded_params(setter: &Setter) -> Vec<Param> {
         // loader that uses no index sets it false again (`options::replayed_options`).
         Setter::UseIndex { index_name } => vec![
             Param::new(f::FORCE_MB_INDEX, Boolean(true)),
-            Param::new(f::MB_INDEX_NAME, Str(index_name.clone())),
+            Param::new(f::MB_INDEX_NAME, Str(index_name.as_bytes().to_vec())),
         ],
     }
 }
@@ -1239,9 +1241,9 @@ pub(crate) trait StrategyArgs: Sized {
 /// The arguments of the program that [`StrategyArgs::fields`] gives the import.
 pub(crate) struct Fields<'a> {
     pub(crate) import_search_strategy: &'a mut Option<std::path::PathBuf>,
-    pub(crate) db: &'a mut Option<String>,
+    pub(crate) db: &'a mut Option<std::ffi::OsString>,
     pub(crate) subject: &'a mut Option<std::path::PathBuf>,
-    pub(crate) subject_loc: &'a mut Option<String>,
+    pub(crate) subject_loc: &'a mut Option<std::ffi::OsString>,
     pub(crate) db_filter: &'a mut crate::blastinput::db_filter::DbFilterArgs,
     pub(crate) db_mask: &'a mut crate::blastinput::db_mask::DbMaskArgs,
     pub(crate) dbsize: &'a mut Option<i64>,
@@ -1249,7 +1251,7 @@ pub(crate) struct Fields<'a> {
     pub(crate) formatting: &'a mut crate::blastinput::report_counts::FormattingArgs,
     pub(crate) num_descriptions: Option<usize>,
     pub(crate) num_alignments: Option<usize>,
-    pub(crate) outfmt: &'a str,
+    pub(crate) outfmt: &'a std::ffi::OsStr,
     pub(crate) import: &'a mut Option<ImportRun>,
 }
 
@@ -1262,14 +1264,14 @@ pub(crate) struct Kept {
     pub(crate) path: std::path::PathBuf,
     pub(crate) given: Vec<(String, String)>,
     pub(crate) query: std::path::PathBuf,
-    pub(crate) query_loc: Option<String>,
+    pub(crate) query_loc: Option<std::ffi::OsString>,
     /// `-strand`, `None` for a program without it (a protein query).
     pub(crate) strand: Option<String>,
     pub(crate) lcase_masking: bool,
     pub(crate) parse_deflines: bool,
     pub(crate) id_scope: Option<std::sync::Arc<crate::seqid::id_scope::IdScope>>,
     pub(crate) out: Option<std::path::PathBuf>,
-    pub(crate) outfmt: String,
+    pub(crate) outfmt: std::ffi::OsString,
     pub(crate) show_gis: bool,
     /// `-html`, a formatting option of the command line that no strategy records.
     pub(crate) html: bool,
@@ -1291,9 +1293,9 @@ pub(crate) struct Kept {
 
 /// `CBlastDatabaseArgs` of a command line that gives `-db` or `-subject`.
 pub(crate) struct KeptDatabase {
-    pub(crate) db: Option<String>,
+    pub(crate) db: Option<std::ffi::OsString>,
     pub(crate) subject: Option<std::path::PathBuf>,
-    pub(crate) subject_loc: Option<String>,
+    pub(crate) subject_loc: Option<std::ffi::OsString>,
     pub(crate) db_filter: crate::blastinput::db_filter::DbFilterArgs,
     pub(crate) db_mask: crate::blastinput::db_mask::DbMaskArgs,
     pub(crate) dbsize: Option<i64>,
@@ -1303,9 +1305,9 @@ impl KeptDatabase {
     /// The database arguments of a command line, `None` when it gives neither `-db` nor
     /// `-subject`.
     pub(crate) fn given(
-        db: Option<String>,
+        db: Option<std::ffi::OsString>,
         subject: Option<std::path::PathBuf>,
-        subject_loc: Option<String>,
+        subject_loc: Option<std::ffi::OsString>,
         db_filter: crate::blastinput::db_filter::DbFilterArgs,
         db_mask: crate::blastinput::db_mask::DbMaskArgs,
         dbsize: Option<i64>,
@@ -1330,7 +1332,7 @@ impl KeptDatabase {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MbIndexRequest {
     None,
-    Index { name: String, old_style: bool },
+    Index { name: Vec<u8>, old_style: bool },
     NoName,
 }
 
@@ -1340,19 +1342,19 @@ impl MbIndexRequest {
         use_index: Option<bool>,
         task: &str,
         subject_given: bool,
-        index_name: Option<&String>,
-        db: Option<&String>,
+        index_name: Option<&std::ffi::OsStr>,
+        db: Option<&std::ffi::OsStr>,
     ) -> Self {
         if use_index != Some(true) || task != "megablast" || subject_given {
             return Self::None;
         }
         match (index_name, db) {
             (Some(name), _) => Self::Index {
-                name: name.clone(),
+                name: crate::utils::os_bytes::os_str_bytes(name).into_owned(),
                 old_style: true,
             },
             (None, Some(db)) => Self::Index {
-                name: db.clone(),
+                name: crate::utils::os_bytes::os_str_bytes(db).into_owned(),
                 old_style: false,
             },
             (None, None) => Self::NoName,
@@ -1602,7 +1604,7 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
     let database = kept.database.take();
     let mb_index = std::mem::replace(&mut kept.mb_index, MbIndexRequest::None);
     out.keep(kept)?;
-    let mut run = start.run(parse_deflines, query_loc.as_ref(), program)?;
+    let mut run = start.run(parse_deflines, query_loc.as_deref(), program)?;
     let fields = out.fields();
     *fields.import_search_strategy = Some(path);
     // `CBlastDatabaseArgs` of the command line when it gives the database or the subjects, else
@@ -1621,7 +1623,7 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
         }
         None => {
             if let Some(name) = start.database() {
-                *fields.db = Some(name.to_string());
+                *fields.db = Some(name.into());
                 *fields.db_filter = start.db_filter(program)?;
                 if let Some((algorithm, kind)) = start.db_mask() {
                     let value = match algorithm {
@@ -1629,8 +1631,8 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
                         DbMaskAlgorithm::Key(key) => key,
                     };
                     match kind {
-                        1 => fields.db_mask.db_soft_mask = Some(value),
-                        2 => fields.db_mask.db_hard_mask = Some(value),
+                        1 => fields.db_mask.db_soft_mask = Some(value.into()),
+                        2 => fields.db_mask.db_hard_mask = Some(value.into()),
                         _ => {
                             return Err(unported(
                                 "a search strategy with this database masking type",
@@ -1683,7 +1685,10 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
             ))
         }
         MbIndexRequest::Index { name, old_style } => Some((name, old_style)),
-        MbIndexRequest::None => collected.index.take().map(|name| (name, false)),
+        MbIndexRequest::None => collected
+            .index
+            .take()
+            .map(|name| (name.into_bytes(), false)),
     };
     if index.is_some() && (T::PROGRAM != Program::Blastn || out.fields().db.is_none()) {
         return Err(unported(

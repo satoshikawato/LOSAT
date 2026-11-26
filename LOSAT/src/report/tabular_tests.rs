@@ -1017,7 +1017,7 @@ fn a_load_that_throws_writes_the_kept_row() {
     assert!(failed_lookup_stop(Some(&spec("qseqid saccver")), thrown, false).is_none());
     assert!(failed_lookup_stop(Some(&spec("staxid")), thrown, true).is_some());
     assert!(failed_lookup_stop(Some(&spec("qseqid sseqid")), thrown, true).is_none());
-    assert!(may_stop_at_failed_lookup(Some(&spec("staxid ssciname"))));
+    assert!(stops_at_lookup_failure(Some(&spec("staxid ssciname"))));
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:828-875 (the catch of the subject block) for the default fields (probe of
@@ -1286,10 +1286,10 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
     };
     assert!(failed_lookup_stop(Some(&spec("qseqid saccver sallseqid")), only_all, false).is_none());
     assert!(failed_lookup_stop(None, only_all, true).is_none());
-    assert!(!may_stop_at_failed_lookup(Some(&spec(
+    assert!(!stops_at_lookup_failure(Some(&spec(
         "qseqid sseqid sallseqid evalue"
     ))));
-    assert!(may_stop_at_failed_lookup(None));
+    assert!(stops_at_lookup_failure(None));
     // The field of the stop (`row_stop_field`): the first that NCBI has no result for.
     let field = |fields: Option<&str>, failure, first| {
         row_stop_field(fields.map(spec).as_ref(), failure, first).map(|(at, _)| at)
@@ -1337,7 +1337,8 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
         .is_none());
         assert!(failed_lookup_stop(None, lineless, first).is_none());
     }
-    assert!(may_stop_at_failed_lookup(Some(&spec("qseqid sallacc"))));
+    assert!(stops_at_lineless_accession(Some(&spec("qseqid sallacc"))));
+    assert!(!stops_at_lookup_failure(Some(&spec("qseqid sallacc"))));
     let all_ids = [
         DeflineIds {
             id: b"gb|AAA00001.1|".to_vec(),
@@ -1369,7 +1370,7 @@ fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
         lookup: SubjectLookup::Found,
         index: 1,
     };
-    let query = TabularQuery::of(b"q1", 100);
+    let query = TabularQuery::local(b"q1", 100);
     let hsp = TabularHsp {
         q_start: 1,
         q_end: 10,

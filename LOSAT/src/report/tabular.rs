@@ -960,21 +960,6 @@ impl TabularSpec {
         }
     }
 
-    /// Whether a row of this report can stop where NCBI has no result (`failed_lookup_stop`):
-    /// the report asks `sacc` or `saccver`, or `staxid` (a failed first row: `staxid` loads the
-    /// subject, whose load may throw, `FailedStage::Bioseq`), or `sallacc` (a subject with a
-    /// definition line without a Seq-id, `LookupFailure::lineless`). A report that cannot stop
-    /// needs no check of its rows before it is written.
-    pub fn may_stop_at_failed_lookup(&self) -> bool {
-        self.writes_rows()
-            && self.has_any(&[
-                SubjectAccession,
-                SubjectAccessionVersion,
-                SubjectTaxId,
-                SubjectAllAccessions,
-            ])
-    }
-
     /// Whether the report looks every taxid of its subjects up in the taxonomy database, 0 too:
     /// the plural names (`x_SetTaxInfoAll`, `checks_taxdb`) and the organism report (outfmt 18,
     /// `CTaxFormat::x_InitBlastDBTaxInfo`); its rows write the texts of those lookups.
@@ -1104,12 +1089,6 @@ pub const LINELESS_ACCESSION_NULL_POINTER: &str = "NCBI BLAST+ stops with a null
 /// `report::db_subject::RunThrow::first_row_ends`.
 pub fn first_thrown_row_ends_run(spec: Option<&TabularSpec>) -> bool {
     failed_lookup_stop(spec, LookupFailure::thrown(), true) == Some(FAILED_LOOKUP_NULL_POINTER)
-}
-
-/// Whether a tabular report of `spec` (`None`: the default fields) can stop where NCBI has no
-/// result (`TabularSpec::may_stop_at_failed_lookup`, `RowStop`).
-pub fn may_stop_at_failed_lookup(spec: Option<&TabularSpec>) -> bool {
-    spec.is_none_or(TabularSpec::may_stop_at_failed_lookup)
 }
 
 /// Whether a tabular report of `spec` (`None`: the default fields) can stop at a row whose

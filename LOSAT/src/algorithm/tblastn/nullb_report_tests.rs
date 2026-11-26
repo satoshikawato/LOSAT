@@ -164,3 +164,64 @@ fn subject_remap_empty_alignment_sets_mapped_empty() {
     assert_eq!(exc.site().line, 2902);
     assert_eq!(exc.site().kind, "CAnnotMapperException::eBadAlignment");
 }
+
+#[test]
+fn db_negative_frame_all_tail_sets_subject_row_empty() {
+    // Negative frame, -db, script = [Sub(2)] for rem = 0, 1, 2: subject row has no letters.
+    for (subject_len, expected_wrapped) in [(57usize, 2usize), (58, 2), (59, 0)] {
+        let (linked, payload, nullb) = run_prepare(-1, vec![Sub(2)], subject_len, false);
+        assert!(nullb.subject_row_empty, "len={subject_len}");
+        assert!(!nullb.mapped_empty, "len={subject_len}");
+        assert_eq!(nullb.wrapped_minus_tail, expected_wrapped);
+        assert!(hsp_has_empty_subject_row_db(&linked, &payload));
+        if subject_len == 59 {
+            assert_eq!(payload.edit_script, vec![Ins(2)]);
+        } else {
+            assert_eq!(payload.edit_script, vec![Sub(2)]);
+        }
+    }
+
+    // Negative frame, -db, with an earlier backed Sub: subject row is not empty.
+    let (linked, payload, nullb) = run_prepare(-1, k2_script(), 57, false);
+    assert!(!nullb.subject_row_empty);
+    assert!(!hsp_has_empty_subject_row_db(&linked, &payload));
+
+    // Positive frame, -db, rem == 0, k == 1, [Sub(1)]: s_from >= 0, subject row is not empty.
+    let (linked_pos, payload_pos, nullb_pos) = run_prepare(1, vec![Sub(1)], 57, false);
+    assert!(!nullb_pos.subject_row_empty);
+    assert!(!hsp_has_empty_subject_row_db(&linked_pos, &payload_pos));
+
+    // Pre-prepare detection matches post-prepare detection.
+    let pre_linked = LinkedHsp {
+        hsp: GappedHsp {
+            frame: -1,
+            score: 25,
+            q_start: 14,
+            q_end: 14,
+            s_start: 18,
+            s_end: 18,
+            q_gapped_start: 15,
+            s_gapped_start: 19,
+        },
+        context: 0,
+        evalue: 1e-4,
+        num: 1,
+        source_index: 0,
+    };
+    let pre_payload = KappaHspPayload {
+        bit_score: 14.0,
+        num_ident: 0,
+        num_positives: 0,
+        report_num_ident: 0,
+        report_mismatches: 0,
+        align_length: 2,
+        mismatches: 0,
+        gap_opens: 0,
+        gap_letters: 0,
+        edit_script: vec![Sub(2)],
+        matrix_adjust_rule: EMatrixAdjustRule::DontAdjustMatrix,
+        query_left_out: 0,
+        nullb: None,
+    };
+    assert!(hsp_has_empty_subject_row_db(&pre_linked, &pre_payload));
+}

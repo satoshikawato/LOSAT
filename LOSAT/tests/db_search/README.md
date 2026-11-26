@@ -156,6 +156,9 @@ FASTA files:
   remainder bases past the frame's last codon for `-in_pssm -window_size 0` NULLB-start reporting.
   `LOSAT/tests/fixtures/pssm/x2d_w10.asn.gz` is `x2d_d50.asn.gz` with row 10 `W` set to +10 and row 11 `V` to -10 so
   ungapped NULLB-start alignments (`Sub(2)` / `Sub(1)`) map to an empty alignment under `-subject` (`eBadAlignment`).
+  `LOSAT/tests/fixtures/pssm/x2d_w20.asn.gz` sets row 10 `W` to +20 and row 11 `V` to -20 so negative-frame `-db`
+  NULLB-start alignments whose entire edit script lies in the trailing `Sub(k)` segment leave an empty subject row
+  (`Row is empty` in pairwise/XML/XML2/JSON/prefetch and `Row 1 contains gaps only.` in tabular).
 
 - The database `xs_w12w11` (rows `db.xs.*`, line RG item X-short; title `xs w12 w11 subjects`, `-blastdb_version 4`) is
   `LOSAT/tests/fasta/outfmt0/xs_w12w11_s.fna`: `w12` (`TGGTGGTGGTTT`, 12 bases) and `w11` (`TGGTGGTGGTT`, 11 bases),

@@ -407,6 +407,12 @@ pub(crate) enum PairwiseEdge {
     /// with `k == 1`): `CAlnVec::TranslateNAToAA` throws inside outfmt 0's per-HSP `try` block,
     /// writing `alignment skipped` with `subject_skipped_id` without emitting the heading yet.
     NullbSkipTranslate,
+    /// TBLASTN `-in_pssm -window_size 0` `-db`, negative frame, every subject residue in the
+    /// trailing `Sub` segment (`NullbReport::subject_row_empty`): `GetSeqRange` on row 1 throws
+    /// `Row is empty` (`EmptyRowsStop::RowRange(RowRangeError::Empty)`) in `-sorthsps 4` and the
+    /// description table; with `-num_descriptions 0`, outfmt 0 skips the HSP inside its per-HSP
+    /// `try` block and outfmt 1-4 merges the query segment without a subject row.
+    NullbEmptySubjectRow,
 }
 
 impl PairwiseHit {
@@ -418,12 +424,14 @@ impl PairwiseHit {
 
     /// Whether outfmt 0 skips this HSP inside NCBI's per-HSP `try` block before `x_PrintDefLine`
     /// (`PairwiseEdge::QueryLeftOfRecord` for BLASTN class N, or `PairwiseEdge::NullbSkipTranslate`
-    /// for TBLASTN `-in_pssm -window_size 0` `CAlnVec::TranslateNAToAA`).
+    /// / `PairwiseEdge::NullbEmptySubjectRow` for TBLASTN `-in_pssm -window_size 0`).
     #[inline]
     fn skips_pairwise_hsp(&self) -> bool {
         matches!(
             self.edge,
-            PairwiseEdge::QueryLeftOfRecord | PairwiseEdge::NullbSkipTranslate
+            PairwiseEdge::QueryLeftOfRecord
+                | PairwiseEdge::NullbSkipTranslate
+                | PairwiseEdge::NullbEmptySubjectRow
         )
     }
 
@@ -481,6 +489,12 @@ fn seen_row_range(
 ) -> Option<RowRangeError> {
     if !hit.hit.has_sort_offsets {
         return None;
+    }
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:176-230
+    // A TBLASTN `-db` negative-frame NULLB-start HSP with no backed subject residues has an empty
+    // subject range (`Row is empty`), even when `rem in {0, 1}` keeps its trailing `Sub` op.
+    if row == AlignRow::Subject && hit.edge == PairwiseEdge::NullbEmptySubjectRow {
+        return Some(RowRangeError::Empty);
     }
     super::serial::seqalign::reported_std_seg_row_range(
         hit.hit.sort_query_offset as i64,
@@ -3633,6 +3647,13 @@ fn tblastn_row_segments(
     hit: &PairwiseHit,
     segments: &mut super::serial::seqalign::Segments,
 ) -> super::query_anchored::HspStrands {
+    if hit.edge == PairwiseEdge::NullbEmptySubjectRow {
+        return super::serial::seqalign::empty_subject_row_segments(
+            &hit.hit,
+            hit.subject_frame.unwrap_or(1),
+            segments,
+        );
+    }
     super::serial::seqalign::translated_row_segments(
         &hit.hit,
         None,

@@ -480,11 +480,12 @@ pub(super) fn write_tblastn_tabular(
                 // they are given: where the engine's identities are positive and the report's
                 // are 0, the rows are read and `num_ident` is the engine's.
                 // A row whose subject's load throws prints none of its letters.
-                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-986
-                // NULLB-start alignments on positive frames with `rem in {1, 2}` throw inside
-                // `CreateDensegFromStdseg` (`std_seg_lengths_inaccurate`, when entering the
-                // counts/coords block) or `CAlnVec::TranslateNAToAA` (`translate_na_failure`,
-                // when entering the sequence-fetch block).
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-986,1045-1068
+                // NULLB-start alignments throw inside `CreateDensegFromStdseg`
+                // (`std_seg_lengths_inaccurate`), `CAlnVec::x_GetSeqLeftSeg` /
+                // `x_GetSeqRightSeg` (`subject_row_empty`, when reading rows or subject
+                // endpoints), or `CAlnVec::TranslateNAToAA` (`translate_na_failure`, when
+                // entering the sequence-fetch block).
                 if let Some(nullb) = payload.nullb {
                     if !subject.throws() {
                         if nullb.std_seg_lengths_inaccurate
@@ -495,6 +496,34 @@ pub(super) fn write_tblastn_tabular(
                                 &crate::report::serial::seqalign::std_seg_lengths_not_accurate(),
                             )
                             .into());
+                        }
+                        if nullb.subject_row_empty {
+                            if super::nullb_report::tabular_enters_translate(spec, engine_ident) {
+                                writer.flush()?;
+                                return Err(NativeError::exception(
+                                    &crate::report::serial::seqalign::aln_vec_row_gaps_only(
+                                        1, true,
+                                    ),
+                                )
+                                .into());
+                            }
+                            if super::nullb_report::tabular_enters_subject_coords(
+                                spec,
+                                engine_ident,
+                            ) {
+                                // NCBI reference (598d8ae6): c++/include/objtools/alnmgr/alnmap.hpp:665-671
+                                // `rem in {0, 1}` keeps a minus strand so `GetSeqStart` on row 1
+                                // calls `x_GetSeqRightSeg`; `rem == 2` leaves an unknown strand
+                                // so `GetSeqStart` on row 1 calls `x_GetSeqLeftSeg`.
+                                writer.flush()?;
+                                return Err(NativeError::exception(
+                                    &crate::report::serial::seqalign::aln_vec_row_gaps_only(
+                                        1,
+                                        nullb.wrapped_minus_tail == 0,
+                                    ),
+                                )
+                                .into());
+                            }
                         }
                         if nullb.translate_na_failure
                             && super::nullb_report::tabular_enters_translate(spec, engine_ident)
@@ -508,9 +537,11 @@ pub(super) fn write_tblastn_tabular(
                     }
                 }
                 let rows_read = !subject.throws()
-                    && !payload
-                        .nullb
-                        .is_some_and(|n| n.std_seg_lengths_inaccurate || n.translate_na_failure)
+                    && !payload.nullb.is_some_and(|n| {
+                        n.subject_row_empty
+                            || n.std_seg_lengths_inaccurate
+                            || n.translate_na_failure
+                    })
                     && (needs.rows
                         || (nident_alone && engine_ident > 0 && payload.report_num_ident == 0));
                 if rows_read {

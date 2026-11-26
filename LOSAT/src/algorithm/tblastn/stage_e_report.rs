@@ -1281,6 +1281,13 @@ fn write_tabular(
                 if let Some(nullb) = payload.nullb {
                     let exc = if nullb.std_seg_lengths_inaccurate {
                         Some(crate::report::serial::seqalign::std_seg_lengths_not_accurate())
+                    } else if nullb.subject_row_empty {
+                        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:986
+                        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:240
+                        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:716-733
+                        Some(crate::report::serial::seqalign::aln_vec_row_gaps_only(
+                            1, true,
+                        ))
                     } else if nullb.translate_na_failure {
                         Some(crate::report::serial::seqalign::translate_na_to_aa_exception())
                     } else {
@@ -1536,6 +1543,9 @@ fn pairwise_hits(
                 let (s_start, s_end) = subject_endpoints(hsp, i32::try_from(subject_seq.len())?);
                 let query_letters = QueryLetters::new(query, query_bioseq);
                 let edge = match payload.nullb {
+                    Some(nullb) if nullb.subject_row_empty => {
+                        crate::report::pairwise::PairwiseEdge::NullbEmptySubjectRow
+                    }
                     Some(nullb) if nullb.std_seg_lengths_inaccurate => {
                         crate::report::pairwise::PairwiseEdge::NullbStdSegLengths
                     }
@@ -1598,11 +1608,18 @@ fn pairwise_hits(
                 // start and the record's length (the search's frame without
                 // `-subject_loc`).
                 let subject_length = ranges.subjects.length(oid, subject_seq.len());
-                let subject_frame = crate::blastinput::seq_range::record_frame(
-                    frame > 0,
-                    usize::try_from(s_start - 1)?,
-                    subject_length,
-                );
+                let subject_frame = if edge
+                    == crate::report::pairwise::PairwiseEdge::NullbEmptySubjectRow
+                    && s_start < 1
+                {
+                    frame
+                } else {
+                    crate::blastinput::seq_range::record_frame(
+                        frame > 0,
+                        usize::try_from(s_start - 1)?,
+                        subject_length,
+                    )
+                };
                 let hit = Hit {
                     identity: if payload.align_length > 0 {
                         100.0 * payload.report_num_ident as f64 / payload.align_length as f64
@@ -1981,10 +1998,9 @@ fn recount_shown_counts(
                 if !recount_all && payload.nullb.is_none() {
                     continue;
                 }
-                if payload
-                    .nullb
-                    .is_some_and(|n| n.std_seg_lengths_inaccurate || n.translate_na_failure)
-                {
+                if payload.nullb.is_some_and(|n| {
+                    n.subject_row_empty || n.std_seg_lengths_inaccurate || n.translate_na_failure
+                }) {
                     continue;
                 }
                 let hsp = &linked.hsp;

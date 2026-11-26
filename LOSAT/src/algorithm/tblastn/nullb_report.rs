@@ -69,6 +69,12 @@ pub(super) struct NullbReport {
     /// `CSeq_align_Mapper_Base::x_IsEmpty` is true and `GetDstAlign` throws
     /// `CAnnotMapperException::eBadAlignment` (`seq_align_mapper_base.cpp:2902`).
     pub mapped_empty: bool,
+    /// Negative frame, `-db`: every subject residue of the edit script lies in the trailing
+    /// `Sub` segment (`script_s == k`, with `s_from` in `{-3, -2, -1}`), leaving the subject
+    /// row with an empty range (`GetSeqRange` on row 1 throws `Row is empty`, `Seq_align.cpp:227`)
+    /// and negative-only Dense-seg starts (`CAlnVec::x_GetSeqLeftSeg` / `x_GetSeqRightSeg` throws
+    /// `Invalid Dense-seg: Row 1 contains gaps only.`, `alnmap.cpp:732,753`).
+    pub subject_row_empty: bool,
 }
 
 /// `CAnnotMapperException::eBadAlignment` thrown by `CSeq_align_Mapper_Base::GetDstAlign` when
@@ -114,6 +120,46 @@ pub(super) fn is_nullb_start(linked: &LinkedHsp, payload: &KappaHspPayload) -> b
         .sum();
     let range = i64::from(linked.hsp.q_end) - i64::from(linked.hsp.q_start);
     query_letters != range
+}
+
+/// Whether a `-db` HSP has a negative-frame NULLB-start alignment whose every subject residue lies
+/// in the trailing `Sub(k)` segment (`NullbReport::subject_row_empty`), usable both before and
+/// after `prepare_nullb_hsp` runs (for `batch_prefetch` and `reported_subjects`).
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:677-679
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-229
+pub(super) fn hsp_has_empty_subject_row_db(linked: &LinkedHsp, payload: &KappaHspPayload) -> bool {
+    if let Some(nullb) = payload.nullb {
+        return nullb.subject_row_empty;
+    }
+    if linked.hsp.frame >= 0 || !is_nullb_start(linked, payload) {
+        return false;
+    }
+    let Some(GapEditOp::Sub(k)) = payload.edit_script.last().copied() else {
+        return false;
+    };
+    let script_s: u32 = payload
+        .edit_script
+        .iter()
+        .map(|op| match *op {
+            GapEditOp::Sub(n) | GapEditOp::Del(n) => n,
+            GapEditOp::Ins(_) => 0,
+        })
+        .sum();
+    script_s == k
+}
+
+/// Whether any `-db` HSP in `hitlists` has an empty subject row whose `GetSeqRange` on row 1
+/// throws `Row is empty` during `BlastFormatter_PreFetchSequenceData`.
+pub(super) fn hitlists_have_empty_subject_row_db(hitlists: &[KappaResultHitList]) -> bool {
+    hitlists.iter().any(|hitlist| {
+        hitlist.lists().iter().any(|list| {
+            list.hsps
+                .hsps
+                .iter()
+                .zip(&list.payloads)
+                .any(|(linked, payload)| hsp_has_empty_subject_row_db(linked, payload))
+        })
+    })
 }
 
 /// Whether any HSP in `hitlists` is a NULLB-start alignment (before or after report preparation).
@@ -181,6 +227,7 @@ pub(super) fn prepare_nullb_hsp(
         trailing_nullb_dash: false,
         wrapped_minus_tail: 0,
         mapped_empty: false,
+        subject_row_empty: false,
     };
 
     if frame > 0 {
@@ -250,6 +297,14 @@ pub(super) fn prepare_nullb_hsp(
             } else {
                 report.wrapped_minus_tail = k;
             }
+            // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:176-230
+            // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:716-754
+            // When every subject residue lies in this trailing `Sub` segment (`script_s == k`),
+            // every subject segment has `s_from` in `{-3, -2, -1}`, so `GetSeqRange` on row 1 is
+            // empty and `CAlnVec` has no non-negative subject start.
+            if script_s == k_i32 {
+                report.subject_row_empty = true;
+            }
         } else {
             // Negative frame, -subject: CSeq_loc_Mapper drops the invalid final Std-seg without
             // invalidating scores (scores stay intact).
@@ -289,6 +344,18 @@ pub(super) fn tabular_enters_translate(spec: &TabularSpec, engine_ident: usize) 
             || spec.has(TabularField::NumIdentical)
             || spec.has(TabularField::Mismatches)
             || spec.has(TabularField::PercentIdentical))
+}
+
+/// Whether NCBI's `CBlastTabularInfo::SetFields` enters the subject-endpoint block after
+/// `CreateDensegFromStdseg` and reads `GetSeqStart` / `GetSeqStop` on row 1.
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-908,1045-1068
+pub(super) fn tabular_enters_subject_coords(spec: &TabularSpec, engine_ident: usize) -> bool {
+    tabular_enters_denseg(spec, engine_ident)
+        && (spec.has(TabularField::SubjectStart)
+            || spec.has(TabularField::SubjectEnd)
+            || spec.has(TabularField::SubjectFrame)
+            || spec.has(TabularField::Frames)
+            || spec.has(TabularField::SubjectStrand))
 }
 
 /// Renders `(query_string, subject_string)` for a NULLB-start alignment whose final `Sub` segment

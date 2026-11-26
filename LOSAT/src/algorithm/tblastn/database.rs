@@ -969,7 +969,11 @@ pub(super) fn prefetch_stop(
         let seq_aligns = lists()
             .map(|list| shared::subject_seq_aligns(scored(list), gapped))
             .sum();
-        if shared::prefetch_off(format, seq_aligns) {
+        if shared::prefetch_off(format, seq_aligns)
+            || hitlists
+                .get(span.clone())
+                .is_some_and(super::nullb_report::hitlists_have_empty_subject_row_db)
+        {
             return None;
         }
         let subjects: Vec<(u32, Option<Arc<ParsedSubject>>)> = lists()
@@ -1232,12 +1236,13 @@ pub(super) fn reported_subjects(
         batches,
         |span| seq_aligns_of(&hitlists[span], gapped),
         |span| {
-            shared::BatchPrefetch::prefetch_fails_among(
-                hitlists[span]
-                    .iter()
-                    .flat_map(KappaResultHitList::lists)
-                    .map(|list| titled(usize::try_from(list.oid).ok()?)),
-            )
+            super::nullb_report::hitlists_have_empty_subject_row_db(&hitlists[span.clone()])
+                || shared::BatchPrefetch::prefetch_fails_among(
+                    hitlists[span]
+                        .iter()
+                        .flat_map(KappaResultHitList::lists)
+                        .map(|list| titled(usize::try_from(list.oid).ok()?)),
+                )
         },
     );
     let reads = prefetch.reads(hitlists.iter().enumerate().flat_map(|(query, hitlist)| {

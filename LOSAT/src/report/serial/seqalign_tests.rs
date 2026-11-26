@@ -1704,3 +1704,40 @@ fn a_translated_rows_leading_gap_takes_the_rows_strand() {
         [minus, none, minus, none, minus, none]
     );
 }
+
+#[test]
+fn gapped_row_range_and_aln_vec_row_gaps_only() {
+    use super::seqalign::{aln_vec_row_gaps_only, gapped_row_range, AlignRow, RowRangeError};
+    use crate::common::GapEditOp::{Del, Ins, Sub};
+
+    assert_eq!(
+        gapped_row_range(&[Ins(2)], AlignRow::Subject),
+        Some(RowRangeError::Empty)
+    );
+    assert_eq!(gapped_row_range(&[Ins(2)], AlignRow::Query), None);
+    assert_eq!(
+        gapped_row_range(&[Del(2)], AlignRow::Query),
+        Some(RowRangeError::Empty)
+    );
+    assert_eq!(
+        gapped_row_range(&[Ins(2), Sub(3)], AlignRow::Subject),
+        Some(RowRangeError::SeqidsNotConsistent)
+    );
+    assert_eq!(gapped_row_range(&[Sub(2)], AlignRow::Subject), None);
+
+    let left = aln_vec_row_gaps_only(1, true);
+    assert_eq!(left.site().file, "src/objtools/alnmgr/alnmap.cpp");
+    assert_eq!(left.site().line, 732);
+    assert_eq!(left.site().kind, "CAlnException::eInvalidDenseg");
+    assert!(left
+        .to_string()
+        .contains("CAlnVec::x_GetSeqLeftSeg(): Invalid Dense-seg: Row 1 contains gaps only."));
+
+    let right = aln_vec_row_gaps_only(1, false);
+    assert_eq!(right.site().file, "src/objtools/alnmgr/alnmap.cpp");
+    assert_eq!(right.site().line, 753);
+    assert_eq!(right.site().kind, "CAlnException::eInvalidDenseg");
+    assert!(right
+        .to_string()
+        .contains("CAlnVec::x_GetSeqRightSeg(): Invalid Dense-seg: Row 1 contains gaps only."));
+}

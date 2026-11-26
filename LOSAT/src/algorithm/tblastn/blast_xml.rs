@@ -699,6 +699,14 @@ impl PreparedXml {
                                     return Err(CaughtException(row_range_exception(error)).into());
                                 }
                                 if let Some(nullb) = payload.nullb {
+                                    if nullb.subject_row_empty {
+                                        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:243-245
+                                        // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-229
+                                        return Err(CaughtException(row_range_exception(
+                                            crate::report::serial::seqalign::RowRangeError::Empty,
+                                        ))
+                                        .into());
+                                    }
                                     if nullb.std_seg_lengths_inaccurate {
                                         return Err(CaughtException(
                                             crate::report::serial::seqalign::std_seg_lengths_not_accurate(),

@@ -531,6 +531,32 @@ pub(crate) fn empty_row_segments(
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:783-786,834-836
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmatch.cpp:126-140
+/// The Dense-seg segments of a TBLASTN `-in_pssm -window_size 0` `-db` negative-frame NULLB-start
+/// HSP whose every subject segment has a negative start (`-3`, `-2`, or `-1`): `CAlnMixMatches::Add`
+/// treats row 1 as a gap-only segment and merges only the query row.
+pub(crate) fn empty_subject_row_segments(
+    hit: &crate::common::Hit,
+    subject_frame: i8,
+    segments: &mut Segments,
+) -> crate::report::query_anchored::HspStrands {
+    let q_from = hit.q_start.min(hit.q_end).saturating_sub(1) as i32;
+    let len = (hit.q_end.abs_diff(hit.q_start) + 1) as i32;
+    segments.starts.clear();
+    segments.lens.clear();
+    segments.strands.clear();
+    segments.starts.extend([q_from, -1]);
+    segments.lens.push(len);
+    segments.strands.extend([Strand::Unknown, Strand::Unknown]);
+    crate::report::query_anchored::HspStrands {
+        query_minus: false,
+        subject_minus: subject_frame < 0,
+        query_frame: 0,
+        no_widths: false,
+    }
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:89-100
 fn get_curr_pos(pos: &mut i32, pos2advance: i32) -> i32 {
     let retval = if *pos < 0 {
@@ -1366,6 +1392,28 @@ pub(crate) fn translate_na_to_aa_exception() -> NcbiException {
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:716-754
+/// `CAlnVec::x_GetSeqLeftSeg()` / `x_GetSeqRightSeg(): Invalid Dense-seg: Row <row> contains
+/// gaps only.` (`alnmap.cpp:732,753`): thrown when every segment of `row` in a Dense-seg has a
+/// negative start (for example, TBLASTN `-in_pssm -window_size 0` `-db` negative frame whose
+/// entire alignment lies in the trailing NULLB segment with `s_from` in `{-3, -2, -1}`).
+pub(crate) fn aln_vec_row_gaps_only(row: usize, left: bool) -> NcbiException {
+    let (line, method) = if left {
+        (732, "x_GetSeqLeftSeg")
+    } else {
+        (753, "x_GetSeqRightSeg")
+    };
+    NcbiException::new(
+        ThrowSite {
+            file: "src/objtools/alnmgr/alnmap.cpp",
+            line,
+            kind: "CAlnException::eInvalidDenseg",
+            function: None,
+        },
+        format!("CAlnVec::{method}(): Invalid Dense-seg: Row {row} contains gaps only."),
+    )
+}
+
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
 // NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:226-230
 /// What `CSeq_align::GetSeqRange` of the row finds on the Std-segs of a translated search's HSP from the
@@ -1430,11 +1478,25 @@ pub(crate) fn reported_std_seg_rows_range(
     )
 }
 
-// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191
-/// `std_seg_row_range` of a gapped HSP whose edit script is `ops` (never of length 0): the row that
-/// the script starts with a gap in (`RowRangeError::SeqidsNotConsistent`, `row_end_gaps`).
+/// Whether `op` places at least one sequence letter (not a gap) on `row`.
+#[inline]
+fn op_has_row_letter(op: &GapEditOp, row: AlignRow) -> bool {
+    !matches!(
+        (op, row),
+        (GapEditOp::Del(_), AlignRow::Query) | (GapEditOp::Ins(_), AlignRow::Subject)
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:171-191,226-230
+/// `std_seg_row_range` of a gapped HSP whose edit script is `ops`: `RowRangeError::Empty` when
+/// `ops` is non-empty and has no letter on `row` (for example, TBLASTN `-in_pssm -window_size 0`
+/// `-db` negative frame `rem == 2` whose sole segment is `Ins(k)`), or
+/// `RowRangeError::SeqidsNotConsistent` when the script starts with a gap on `row` before a letter.
 #[inline]
 pub(crate) fn gapped_row_range(ops: &[GapEditOp], row: AlignRow) -> Option<RowRangeError> {
+    if !ops.is_empty() && !ops.iter().any(|op| op_has_row_letter(op, row)) {
+        return Some(RowRangeError::Empty);
+    }
     (row_end_gaps(ops, row).leading > 0).then_some(RowRangeError::SeqidsNotConsistent)
 }
 
@@ -1455,14 +1517,9 @@ pub(crate) fn gapped_row_range(ops: &[GapEditOp], row: AlignRow) -> Option<RowRa
 ///
 /// Only a Smith-Waterman alignment of `-use_sw_tback` has them (`ALIGN_EX` from the
 /// Smith-Waterman start may start with a gap); an X-drop alignment starts and ends with a
-/// substitution. A script without a letter of the row (never made) has none.
+/// substitution. A script without a letter of the row has none.
 pub(crate) fn row_end_gaps(ops: &[GapEditOp], row: AlignRow) -> RowEndGaps {
-    let has_letter = |op: &GapEditOp| {
-        !matches!(
-            (op, row),
-            (GapEditOp::Del(_), AlignRow::Query) | (GapEditOp::Ins(_), AlignRow::Subject)
-        )
-    };
+    let has_letter = |op: &GapEditOp| op_has_row_letter(op, row);
     let (Some(first), Some(last)) = (
         ops.iter().position(has_letter),
         ops.iter().rposition(has_letter),

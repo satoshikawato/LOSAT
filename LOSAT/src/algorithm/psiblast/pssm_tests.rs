@@ -1356,8 +1356,8 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
 
     // Single-round / PssmFiles with -save_each_pssm = false replaces earlier query's ASN.1.
     let req = PssmRequest {
-        asn_path: Some("./out.pssm".to_string()),
-        ascii_path: Some("out.ascii".to_string()),
+        asn_path: Some(std::path::PathBuf::from("./out.pssm")),
+        ascii_path: Some(std::path::PathBuf::from("out.ascii")),
         save_each: false,
         pseudocount: 0,
         versions: Default::default(),
@@ -1383,8 +1383,8 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
 
     // RoundFiles with -save_each_pssm = true delivers numbered files.
     let each_req = PssmRequest {
-        asn_path: Some("iter.pssm".to_string()),
-        ascii_path: Some("iter.ascii".to_string()),
+        asn_path: Some(std::path::PathBuf::from("iter.pssm")),
+        ascii_path: Some(std::path::PathBuf::from("iter.ascii")),
         save_each: true,
         pseudocount: 0,
         versions: Default::default(),
@@ -1405,7 +1405,7 @@ fn pssm_files_and_round_files_deliver_bytes_through_run_files_receiver() {
 
     // Collision with an existing registered file is refused by check_pssm_files.
     let collision = PssmRequest {
-        asn_path: Some("existing.pssm".to_string()),
+        asn_path: Some(std::path::PathBuf::from("existing.pssm")),
         ascii_path: None,
         save_each: false,
         pseudocount: 0,

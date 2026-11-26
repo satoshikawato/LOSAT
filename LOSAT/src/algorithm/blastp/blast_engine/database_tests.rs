@@ -356,7 +356,7 @@ fn reader_errors_of_the_search_and_of_the_other_reads() {
     let read = shared::search_read_error(unreadable(), "BLASTP")
         .downcast::<PreliminaryReadError>()
         .expect("NCBI's error of the search stage");
-    assert_eq!(read.0, "Database memory map file error");
+    assert_eq!(read.as_bytes(), b"Database memory map file error");
     assert_eq!(
         read.to_string(),
         "LOSAT engine error: Database memory map file error"
@@ -376,14 +376,14 @@ fn reader_errors_of_the_search_and_of_the_other_reads() {
         .downcast::<PreliminaryReadError>()
         .expect("NCBI's error of the search stage");
     assert_eq!(
-        read.0,
-        "Too many open files, please raise the open file limit"
+        read.as_bytes(),
+        b"Too many open files, please raise the open file limit"
     );
     let missing = SeqDbError::NotFound("Error: File (/data/db.psq) not found.".to_string().into());
     let read = shared::search_read_error(missing, "BLASTP")
         .downcast::<PreliminaryReadError>()
         .expect("NCBI's error of the search stage");
-    assert_eq!(read.0, "Database memory map file error");
+    assert_eq!(read.as_bytes(), b"Database memory map file error");
     for refused in [shared::search_read_error, shared::database_error] {
         let error = refused(
             SeqDbError::Unsupported {
@@ -1733,9 +1733,9 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
         .read_titles(&database, &hit_lists, (&[0], false))
         .err()
         .expect("a missing header file")
-        .downcast::<HeaderReadError>()
+        .downcast::<ErrorAfterBatchReports>()
         .expect("NCBI's error, with the query that reached it");
-    assert_eq!(error.query, 2);
+    assert_eq!(error.query, Some(2));
     let native = error
         .error
         .downcast_ref::<NativeError>()
@@ -1747,9 +1747,9 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
         .x_read_titles_lean(&database, &hit_lists, (&[0], false))
         .err()
         .expect("a missing header file")
-        .downcast::<HeaderReadError>()
+        .downcast::<ErrorAfterBatchReports>()
         .expect("NCBI's error, with the query that reached it");
-    assert_eq!(lean_error.query, 2);
+    assert_eq!(lean_error.query, Some(2));
     assert_eq!(
         lean_error
             .error

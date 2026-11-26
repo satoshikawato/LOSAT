@@ -1,0 +1,128 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: pm5
+           6 sequences; 360 total letters
+
+
+
+Query= qn0
+
+Length=80
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P00001.1 seq0_dl0 bit1                                                55.5    1e-17
+
+
+>P00001.1 seq0_dl0 bit1
+Length=60
+
+ Score = 55.5 bits (132),  Expect = 1e-17, Method: Compositional matrix adjust.
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = +1
+
+Query  1   MKTAYIAKQRQISFVKSHFSRQLEER  78
+           MKTAYIAKQRQISFVKSHFSRQLEER
+Sbjct  1   MKTAYIAKQRQISFVKSHFSRQLEER  26
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 8850
+
+
+Query= qn1
+
+Length=80
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000001.1 seq1_dl0 bit1and3                                         60.8    8e-20
+
+
+>NP_000001.1 seq1_dl0 bit1and3
+ XP_000001.1 seq1_dl1 bit1model_twoints
+Length=60
+
+ Score = 60.8 bits (146),  Expect = 8e-20, Method: Compositional matrix adjust.
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = +1
+
+Query  1   ACDEFGHIKLMNPQRSTVWYACDEFG  78
+           ACDEFGHIKLMNPQRSTVWYACDEFG
+Sbjct  1   ACDEFGHIKLMNPQRSTVWYACDEFG  26
+
+
+ Score = 60.8 bits (146),  Expect = 8e-20, Method: Compositional matrix adjust.
+ Identities = 26/26 (100%), Positives = 26/26 (100%), Gaps = 0/26 (0%)
+ Frame = +1
+
+Query  1   ACDEFGHIKLMNPQRSTVWYACDEFG  78
+           ACDEFGHIKLMNPQRSTVWYACDEFG
+Sbjct  21  ACDEFGHIKLMNPQRSTVWYACDEFG  46
+
+
+ Score = 47.8 bits (112),  Expect = 1e-14, Method: Compositional matrix adjust.
+ Identities = 20/20 (100%), Positives = 20/20 (100%), Gaps = 0/20 (0%)
+ Frame = +1
+
+Query  1   ACDEFGHIKLMNPQRSTVWY  60
+           ACDEFGHIKLMNPQRSTVWY
+Sbjct  41  ACDEFGHIKLMNPQRSTVWY  60
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 8850
+
+
+Query= qn2
+
+Length=80
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.309    0.130    0.406    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 8850
+
+
+  Database: pm5
+    Posted date:  Nov 26, 2026  2:40 AM
+  Number of letters in database: 360
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

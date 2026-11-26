@@ -38,8 +38,8 @@ use rayon::prelude::*;
 
 use crate::algorithm::blastn::coordination::SubjectMetadata;
 use crate::algorithm::blastn::hsp::{BlastnHitList, BlastnHspList, BlastnOutputFormat};
+pub(super) use crate::algorithm::common::database::PreliminaryReadError;
 use crate::algorithm::common::database::{self as shared, ParsedShown, ReportedHeader};
-pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::blastinput::db_mask::{DbMaskOption, ResolvedMask};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
@@ -418,6 +418,21 @@ impl BlastnDatabase {
         self
     }
 
+    /// Whether NCBI's formatter keeps its scope across query batches (`shared::TaxdbRun::
+    /// set_keeps_scope`: BLAST XML, outfmt 5), and whether XML2/JSON taxonomy reads belong to a
+    /// secondary format (`shared::TaxdbRun::set_separate_xml2`).
+    pub(super) fn keeping_scope(mut self, keeps: bool, separate_xml2: bool) -> Self {
+        self.taxdb.set_keeps_scope(keeps);
+        self.taxdb.set_separate_xml2(separate_xml2);
+        self
+    }
+
+    /// Mirrors `CBlastFormat::ResetScopeHistory` at the end of a query batch
+    /// (`shared::TaxdbRun::reset_scope`).
+    pub(super) fn reset_scope(&self) {
+        self.taxdb.reset_scope();
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:182-187
     /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
@@ -627,12 +642,16 @@ impl BlastnDatabase {
     /// reads its subjects one by one: in the order of the hit lists, or, for the pairwise report
     /// (`pairwise`: how it reads them), those that it shows in the order that it reads them
     /// (`pairwise_read_order`, `PairwiseReads::subjects`).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn subject_read_texts(
         &self,
         titles: &DatabaseTitles,
         hit_lists: &[Option<BlastnHitList>],
         rows_open: bool,
         pairwise: Option<crate::report::pairwise::PairwiseReading>,
+        placements: &crate::blastinput::seq_range::Placements,
+        first_query: usize,
+        ungapped: bool,
         loads: &HitLoads,
     ) -> Result<crate::report::query_warnings::QueryReads> {
         let parsed = |oid: u32| match titles.get(&oid) {
@@ -640,9 +659,13 @@ impl BlastnDatabase {
             _ => None,
         };
         let ordinals: Vec<u32> = match pairwise {
-            Some(reading) => pairwise_read_order(hit_lists, reading, |oid| {
-                titled_parsed(titles, oid as usize)
-            })
+            Some(reading) => pairwise_read_order(
+                hit_lists,
+                |query| placements.offset(first_query + query),
+                ungapped,
+                reading,
+                |oid| titled_parsed(titles, oid as usize),
+            )
             .subjects()
             .into_iter()
             .map(|oid| oid as u32)
@@ -764,10 +787,13 @@ impl BlastnDatabase {
         }
         (seq_aligns > 0).then(|| {
             let prefetch = batches_prefetch(format, before, 0, spans, gapped);
+            let no_placements = crate::blastinput::seq_range::Placements::default();
             let loads = hit_loads(
                 before,
                 &prefetch,
                 (after, None),
+                &no_placements,
+                !gapped,
                 self.taxdb.calls_before(),
                 |ordinal| titled_parsed(titles, ordinal),
             );
@@ -914,6 +940,11 @@ impl BlastnDatabase {
     /// The taxids of the search's list (`SeqDb::list_taxids`).
     pub(super) fn list_taxids(&self) -> &[i32] {
         self.db.list_taxids()
+    }
+
+    /// The GIs of the search's list (`SeqDb::list_gis`).
+    pub(super) fn list_gis(&self) -> &[i64] {
+        self.db.list_gis()
     }
 
     /// The number of sequences the search reads: the included ones (`SeqDb::num_seqs`), which
@@ -1681,9 +1712,11 @@ pub(super) fn fetch_excluded(database: &BlastnDatabase) -> Option<shared::FetchE
 }
 
 /// LOSAT's refusal of a search whose fetch with `check_oid_exclusion` cannot read the header
-/// of a subject (`shared::FetchExcluded::refusal`), where NCBI's search fails.
+/// of a subject (`shared::FetchExcluded::refusal`), where NCBI's search of the batch fails: after the
+/// reports of the batches before, which NCBI's batch loop has printed (`super::after_batch_reports`;
+/// for the first batch, the prologs), as TBLASTN's and TBLASTX's (line RG item X-short-bat-2).
 pub(super) fn fetch_refusal(failed: (u32, crate::seqdb::SeqDbError)) -> anyhow::Error {
-    shared::FetchExcluded::refusal(failed, PROGRAM)
+    super::after_batch_reports(shared::FetchExcluded::refusal(failed, PROGRAM))
 }
 
 impl BlastnDatabase {
@@ -1695,7 +1728,7 @@ impl BlastnDatabase {
     /// request posts, before its prefetch), also where the read fails after it
     /// (`shared::Utf8Read::of_read`), then NCBI's posts of the titles that its Seq-aligns read
     /// (`shared::batch_title_posts`, or those before a failed read,
-    /// `shared::HeaderReadError::title_posts`). The error is `read_titles`'.
+    /// `blastinput::app::ErrorAfterBatchReports::title_posts`). The error is `read_titles`'.
     pub(super) fn batch_titles(
         &self,
         (fetched, one_by_one): (Option<crate::seqdb::SeqLocation>, bool),
@@ -1720,8 +1753,11 @@ impl BlastnDatabase {
         if let Err(error) = read {
             // A read that NCBI cannot make ends the batch's Seq-aligns: the posts of the reads
             // before it come before its error.
-            let error = shared::HeaderReadError::after_seq_aligns(error, aligned);
-            if let Some(failure) = error.downcast_ref::<shared::HeaderReadError>() {
+            let error =
+                crate::blastinput::app::ErrorAfterBatchReports::after_seq_aligns(error, aligned);
+            if let Some(failure) =
+                error.downcast_ref::<crate::blastinput::app::ErrorAfterBatchReports>()
+            {
                 posts.append(&failure.title_posts(&self.db, warning.is_some(), PROGRAM)?);
             }
             return Err(error);
@@ -1768,7 +1804,7 @@ pub(super) fn drop_unaligned(
 // read again: the header file stays open, and the title is the same.
 /// Reads the definition lines of the sequences that the final hit lists `hit_lists` of a
 /// query batch name, in NCBI's order, into `titles` (`common::database::read_header`). A reader
-/// error of NCBI's own is a `HeaderReadError` (it fails the batch); LOSAT's refusals are errors
+/// error of NCBI's own is an `ErrorAfterBatchReports` (it fails the batch); LOSAT's refusals are errors
 /// of their own. The batch's first read of a record with a UTF8String where a VisibleString is
 /// expected, its fetches' and Seq-aligns' (`earlier`) or these, is returned
 /// (`shared::HeaderReader::first_utf8`): NCBI posts its warning there.
@@ -1949,26 +1985,32 @@ fn most_identities(hsp_list: &BlastnHspList) -> usize {
 /// What a pairwise report (outfmt 0 to 4) of the hit lists `hit_lists` reads, by the key that
 /// `hit_lists` names the subjects by (`QueryGroup::read_order` of the HSPs as the writer reads
 /// them, `reading`; `parsed` gives the subject with parsed Seq-ids of a key, whose copies join a
-/// hit). The rows that the writer reads are these HSPs (`pairwise::Rows::list`: `into_hit` of
-/// each HSP and its `num_ident`; the rows' later shift to the records of a ranged query moves
-/// every HSP of the query alike, which no sort reads, and the rows name the subjects by rank, in
-/// the order of the ordinal ids).
+/// hit). The rows that the writer reads are these HSPs (`pairwise::Rows::list`: shifted to the
+/// records of a ranged query by `query_offset`, with the run's `ungapped` flag deciding whether a
+/// negative Seq-align start is lifted by `-query_loc` or stays class N with an unsigned `TSeqPos`
+/// range; the rows name the subjects by rank, in the order of the ordinal ids).
 fn pairwise_read_order<'p>(
     hit_lists: &[Option<BlastnHitList>],
+    query_offset: impl Fn(usize) -> usize,
+    ungapped: bool,
     reading: crate::report::pairwise::PairwiseReading,
     parsed: impl Fn(u32) -> Option<&'p ParsedSubject>,
 ) -> crate::report::db_subject::PairwiseReads {
-    let lists = hit_lists
-        .iter()
-        .flat_map(shown_lists)
-        .filter(|hsp_list| !hsp_list.hsps.is_empty());
     crate::report::x_pairwise_par::QueryGroup::read_order(
-        lists.flat_map(|hsp_list| hsp_list.hsps.iter().map(|hsp| (hsp_list.oid, hsp))),
-        |hsp| {
-            crate::report::hit_sort::HspScores::of_hit(
-                &crate::algorithm::blastn::hsp::BlastnHsp::clone(hsp).into_hit(),
-                hsp.num_ident,
-            )
+        hit_lists.iter().enumerate().flat_map(|(query, hit_list)| {
+            let offset = query_offset(query);
+            shown_lists(hit_list)
+                .iter()
+                .filter(|hsp_list| !hsp_list.hsps.is_empty())
+                .flat_map(move |hsp_list| {
+                    hsp_list
+                        .hsps
+                        .iter()
+                        .map(move |hsp| (hsp_list.oid, (hsp, offset)))
+                })
+        }),
+        |&(hsp, offset)| {
+            crate::algorithm::blastn::left_of_query::blastn_hsp_scores(hsp, offset, ungapped)
         },
         |previous, oid| match (parsed(previous), parsed(oid)) {
             (Some(earlier), Some(later)) => {
@@ -1984,16 +2026,25 @@ fn pairwise_read_order<'p>(
 
 /// The subjects of the query report of `hit_list` for `HitLoads::of` where the run's formats
 /// are pairwise (`pairwise`: how its report reads them, with `after` a pairwise one): the
-/// report's reads (`pairwise_read_order`). `None` otherwise (the HSP lists' order).
+/// report's reads (`pairwise_read_order`, with `query_offset` and `ungapped` matching the
+/// writer). `None` otherwise (the HSP lists' order).
 fn pairwise_keys<'p>(
     hit_list: &Option<BlastnHitList>,
+    query_offset: usize,
+    ungapped: bool,
     after: crate::report::db_subject::FormatThrow,
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     parsed: impl Fn(u32) -> Option<&'p ParsedSubject>,
 ) -> Option<crate::report::db_subject::ReportKeys> {
     let reading = pairwise.filter(|_| after.run().is_some_and(|run| run.after.is_pairwise()))?;
     Some(crate::report::db_subject::ReportKeys::Pairwise(
-        pairwise_read_order(std::slice::from_ref(hit_list), reading, parsed),
+        pairwise_read_order(
+            std::slice::from_ref(hit_list),
+            |_| query_offset,
+            ungapped,
+            reading,
+            parsed,
+        ),
     ))
 }
 
@@ -2001,8 +2052,9 @@ fn pairwise_keys<'p>(
 /// those reports alone, by ordinal id, after the reports before them in the run, `run`): the
 /// subjects of its reads one by one (`DatabaseTitles`' texts of a batch whose prefetch is off),
 /// not one whose load throws, nor one that no report reaches after it. `pairwise`: how a
-/// pairwise report reads them (`pairwise_keys`); `before`: the loads of the run's record and of
-/// the calls before (`RunLoads::loads`), whose last report is of the batch that `before` names
+/// pairwise report reads them (`pairwise_keys`, with `placements` from `first_query` and
+/// `ungapped`); `before`: the loads of the run's record and of the calls before
+/// (`RunLoads::loads`), whose last report is of the batch that `before` names
 /// (`TaxdbRun::loads_before`), in whose scope these reports read.
 fn report_loads(
     run: &crate::report::db_subject::RunLoads,
@@ -2012,6 +2064,9 @@ fn report_loads(
         Option<crate::report::pairwise::PairwiseReading>,
         crate::report::db_subject::LoadsBefore,
     ),
+    placements: &crate::blastinput::seq_range::Placements,
+    first_query: usize,
+    ungapped: bool,
 ) -> HitLoads {
     let read = crate::report::db_subject::ReportRead {
         one_by_one: true,
@@ -2019,19 +2074,26 @@ fn report_loads(
     };
     run.loads(
         before,
-        hit_lists.iter().map(|hit_list| {
+        hit_lists.iter().enumerate().map(|(query, hit_list)| {
             let parsed = |oid: u32| titled_parsed(titles, oid as usize);
-            let keys =
-                pairwise_keys(hit_list, run.answer(), pairwise, parsed).unwrap_or_else(|| {
-                    crate::report::db_subject::ReportKeys::Entries(
-                        shown_lists(hit_list)
-                            .iter()
-                            .map(|hsp_list| {
-                                (!hsp_list.hsps.is_empty()).then_some(hsp_list.oid as usize)
-                            })
-                            .collect(),
-                    )
-                });
+            let keys = pairwise_keys(
+                hit_list,
+                placements.offset(first_query + query),
+                ungapped,
+                run.answer(),
+                pairwise,
+                parsed,
+            )
+            .unwrap_or_else(|| {
+                crate::report::db_subject::ReportKeys::Entries(
+                    shown_lists(hit_list)
+                        .iter()
+                        .map(|hsp_list| {
+                            (!hsp_list.hsps.is_empty()).then_some(hsp_list.oid as usize)
+                        })
+                        .collect(),
+                )
+            });
             (read, keys)
         }),
         |ordinal| titled_parsed(titles, ordinal),
@@ -2058,8 +2120,10 @@ pub(super) struct QueryFetches<'a> {
     /// Whether the first format is a pairwise one, which places the texts in the order of its
     /// reads (`places`).
     pub(super) pairwise_first: bool,
-    /// Whether each HSP is a Seq-align (`seq_aligns_of`).
+    /// Whether each HSP is a Seq-align (`seq_aligns_of`) and the search is gapped (`!ungapped`).
     pub(super) gapped: bool,
+    /// The `-query_loc` offsets of the run's queries (for `pairwise_read_order`).
+    pub(super) placements: &'a crate::blastinput::seq_range::Placements,
 }
 
 impl QueryFetches<'_> {
@@ -2109,7 +2173,15 @@ impl QueryFetches<'_> {
                 let shown = std::slice::from_ref(hit_list);
                 // The loop records a batch after its texts here (`note_loaded`).
                 let before = self.database.taxdb.loads_before(Some(first));
-                let loads = report_loads(self.run, self.titles, shown, (self.pairwise, before));
+                let loads = report_loads(
+                    self.run,
+                    self.titles,
+                    shown,
+                    (self.pairwise, before),
+                    self.placements,
+                    first + index,
+                    !self.gapped,
+                );
                 let mut messages = Vec::new();
                 if fetches && seq_aligns_of(shown, self.gapped) > 0 {
                     if self.places {
@@ -2118,6 +2190,9 @@ impl QueryFetches<'_> {
                             shown,
                             self.plural_names,
                             self.pairwise.filter(|_| self.pairwise_first),
+                            self.placements,
+                            first + index,
+                            !self.gapped,
                             &loads,
                         )?;
                     } else {
@@ -2195,6 +2270,8 @@ pub(super) fn hit_loads<'p>(
         crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
     ),
+    placements: &crate::blastinput::seq_range::Placements,
+    ungapped: bool,
     before: crate::report::db_subject::LoadsBefore,
     parsed: impl Fn(usize) -> Option<&'p ParsedSubject>,
 ) -> HitLoads {
@@ -2212,6 +2289,8 @@ pub(super) fn hit_loads<'p>(
             let one_by_one = read.one_by_one;
             let keys = pairwise_keys(
                 &hit_lists[query],
+                placements.offset(query),
+                ungapped,
                 after,
                 pairwise.filter(|_| one_by_one),
                 |oid| parsed(oid as usize),
@@ -2274,6 +2353,7 @@ pub(super) fn reported_subjects(
         crate::report::db_subject::FormatThrow,
         Option<crate::report::pairwise::PairwiseReading>,
     ),
+    placements: &crate::blastinput::seq_range::Placements,
     batches: &[std::ops::Range<usize>],
     first_query: usize,
     gapped: bool,
@@ -2316,6 +2396,8 @@ pub(super) fn reported_subjects(
         hit_lists,
         &prefetch,
         (after, pairwise),
+        placements,
+        !gapped,
         recorded.with_calls_before(database.taxdb.unrecorded_calls()),
         |ordinal| titled_parsed(titles, ordinal),
     );

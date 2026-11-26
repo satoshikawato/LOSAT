@@ -125,10 +125,10 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `blastx` | Translated nucleotide against protein (`blastx`, `blastx-fast`) | `0`–`16`, `18`, `20` | [blastx](docs/manual/src/programs/blastx.md) |
 | `tblastn` | Protein or PSSM (`-in_pssm`) against translated nucleotide (`tblastn`, `tblastn-fast`) | `0`–`16`, `18`, `20` | [tblastn](docs/manual/src/programs/tblastn.md) |
 | `tblastx` | Translated nucleotide against translated nucleotide | `0`–`16`, `18`, `20` | [tblastx](docs/manual/src/programs/tblastx.md) |
-| `psiblast` | Iterated protein search with a PSSM (`-num_iterations`, `-in_pssm`, `-in_msa`, `-out_pssm`) | `0`, `5`–`11`, `20` | [psiblast](docs/manual/src/programs/psiblast.md) |
+| `psiblast` | Iterated protein search with a PSSM (`-num_iterations`, `-in_pssm`, `-in_msa`, `-out_pssm`) | `0`–`12`, `18`, `20` | [psiblast](docs/manual/src/programs/psiblast.md) |
 | `rpsblast` | Protein against a PSSM database such as CDD | `0`–`16`, `18`, `20` | [rpsblast](docs/manual/src/programs/rpsblast.md) |
 | `rpstblastn` | Translated nucleotide against a PSSM database | `0`–`16`, `18`, `20` | [rpstblastn](docs/manual/src/programs/rpstblastn.md) |
-| `makeblastdb` | Builds BLAST databases (versions 5 and 4; `-parse_seqids`, `-taxid`, `-mask_data`) from FASTA, also compressed | | [makeblastdb](docs/manual/src/programs/makeblastdb.md) |
+| `makeblastdb` | Builds BLAST databases (versions 5 and 4; `-parse_seqids`, `-taxid`, `-mask_data`) from FASTA, ASN.1 (`asn1_txt`, `asn1_bin`) or BLAST databases, also compressed | | [makeblastdb](docs/manual/src/programs/makeblastdb.md) |
 | `blastdbcmd` | Prints sequences and information from a BLAST database (`-entry`, `-entry_batch`, `-info`, `-outfmt`) | | [blastdbcmd](docs/manual/src/programs/blastdbcmd.md) |
 | `dustmasker` | Masks low-complexity nucleotide regions | intervals, FASTA, mask files for `makeblastdb` | [dustmasker](docs/manual/src/programs/dustmasker.md) |
 | `windowmasker` | Makes the unit counts file of a genome (`-mk_counts`), converts it (`-convert`), masks repeats of nucleotide sequences with it (`-ustat`) | counts files, intervals, FASTA, mask files for `makeblastdb` | [windowmasker](docs/manual/src/programs/windowmasker.md) |
@@ -138,6 +138,7 @@ Every search program reads BLAST databases (`-db`, versions 4 and 5, found throu
 | `makeprofiledb` | Builds profile databases for `rpsblast` and `rpstblastn` (such as CDD) from PSSM files | | [makeprofiledb](docs/manual/src/programs/makeprofiledb.md) |
 | `blastdb_aliastool` | Makes alias files that combine databases or keep a list of their sequences; converts GI and sequence id lists to binary lists | alias files, binary lists | [blastdb_aliastool](docs/manual/src/programs/blastdb_aliastool.md) |
 | `blastdbcheck` | Checks BLAST databases for damage: files, sequences, ISAM indexes, alias files, taxonomy ids | report | [blastdbcheck](docs/manual/src/programs/blastdbcheck.md) |
+| `cleanup-blastdb-volumes.py` | Removes orphaned BLAST database volume files not listed in a database's `.pal` or `.nal` alias file | | [cleanup-blastdb-volumes.py](docs/manual/src/programs/cleanup-blastdb-volumes.md) |
 | `rpsbproc` | Annotates conserved domains, sites and motifs from RPS-BLAST results, as NCBI's `rpsbproc` 0.5.1 | domain report | [rpsbproc](docs/manual/src/programs/rpsbproc.md) |
 
 `rpsbproc` reads `-outfmt 11` archives, which LOSAT's `rpsblast` and `rpstblastn` write as NCBI BLAST+'s do: `losat rpsblast -query proteins.faa -db Cdd -outfmt 11 | losat rpsbproc -d cdd_data` ([rpsbproc](docs/manual/src/programs/rpsbproc.md)).
@@ -163,7 +164,7 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
 
 - **Rust (`losat`):** `losat::api` runs a search on FASTA records in memory or on a BLAST database and returns the command line's reports byte for byte, plus one typed record per HSP. Add it with `cargo add losat`. See [LOSAT/README.md](LOSAT/README.md) and the [Rust library page](docs/manual/src/libraries/rust.md).
 - **Python (`pylosat`):** searches from Python, with the hits as an Arrow table for pandas or Polars. Install it with `pip install pylosat`. See [python/README.md](python/README.md) and the [Python page](docs/manual/src/libraries/python.md).
-- **WebAssembly & LOSAT Web:** the npm package `losat` (built from this repository) runs the engine in web pages and Node.js, and the browser preview LOSAT Web runs on it; `losat.wasm` is the command for WASI hosts. See [web/packages/losat/README.md](web/packages/losat/README.md), the [WebAssembly page](docs/manual/src/libraries/webassembly.md), and the [LOSAT Web guide](docs/manual/src/web.md).
+- **WebAssembly & LOSAT Web:** the npm package `losat` (built from this repository) runs the engine in web pages and Node.js, and the browser preview LOSAT Web runs on it (supporting FASTA subjects, local BLAST database folders with `-db` and filter lists, and BLASTN `-filtering_db` repeats databases read in place from your device); `losat.wasm` is the command for WASI hosts. See [web/packages/losat/README.md](web/packages/losat/README.md), the [WebAssembly page](docs/manual/src/libraries/webassembly.md), and the [LOSAT Web guide](docs/manual/src/web.md).
 
 ---
 
@@ -175,7 +176,7 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
   - [Introduction](docs/manual/src/introduction.md) • [Quick start](docs/manual/src/quick-start.md) • [Common workflows](docs/manual/src/workflows.md) • [Installation](docs/manual/src/installation.md)
   - [Coming from NCBI BLAST+](docs/manual/src/from-ncbi-blast.md) • [Upgrading from LOSAT v0.1](docs/manual/src/from-losat-v0-1.md) • [Threads, speed and memory](docs/manual/src/performance.md)
   - [Differences from NCBI BLAST+](docs/manual/src/differences.md) • [What LOSAT refuses](docs/manual/src/refusals.md) • [Databases](docs/manual/src/databases.md) • [Output formats](docs/manual/src/output-formats.md) • [Environment variables](docs/manual/src/environment.md) • [LOSAT Web](docs/manual/src/web.md)
-- **Not in v0.2.0:** `deltablast`, `makeprofiledb -dbtype delta` or `cobalt`, `blast_formatter`, `psiblast -phi_pattern`, and `-html` in `psiblast`, `rpsblast` and `rpstblastn`; options that need NCBI's servers or its GI and IPG lists (`-remote`, `-entrez_query`, `-gilist`, `-negative_gilist`, `-ipglist`, `-negative_ipglist`) and `-import_search_strategy`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
+- **Not in v0.2.0:** `deltablast`, `makeprofiledb -dbtype delta` or `cobalt`, `blast_formatter`, `psiblast -phi_pattern`, and `-html` in `psiblast`; options that need NCBI's servers (`-remote`, `-entrez_query`) and `-import_search_strategy`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
 - [v0.2.0 release record](docs/release/v0.2.0.md) • [Contributing](CONTRIBUTING.md)
 
 ## Citation & References

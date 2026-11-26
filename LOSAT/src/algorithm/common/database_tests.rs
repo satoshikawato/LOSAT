@@ -972,21 +972,22 @@ fn a_failed_header_read_keeps_the_posts_of_the_seq_aligns_before_it() {
     let base =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/tchar/tc_dmg_p");
     let db = SeqDb::open(base.to_str().unwrap(), SeqType::Protein).unwrap();
+    use crate::blastinput::app::ErrorAfterBatchReports;
     let failure = |title_reads: Vec<u32>| {
-        anyhow::Error::new(HeaderReadError {
-            query: 0,
+        anyhow::Error::new(ErrorAfterBatchReports {
+            query: Some(0),
             error: anyhow::anyhow!("unreadable"),
             utf8: None,
             title_reads,
         })
     };
     // The reads of the batch's Seq-aligns before the first read of the failed one, then it.
-    let error = HeaderReadError::after_seq_aligns(failure(vec![1]), [2, 0, 1, 2, 1]);
-    let failed = error.downcast_ref::<HeaderReadError>().unwrap();
+    let error = ErrorAfterBatchReports::after_seq_aligns(failure(vec![1]), [2, 0, 1, 2, 1]);
+    let failed = error.downcast_ref::<ErrorAfterBatchReports>().unwrap();
     assert_eq!(failed.title_reads, [2, 0, 1]);
     // A failure elsewhere (a fetch, the prefetch) has no such reads.
-    let elsewhere = HeaderReadError::after_seq_aligns(failure(Vec::new()), [0, 1]);
-    let elsewhere = elsewhere.downcast_ref::<HeaderReadError>().unwrap();
+    let elsewhere = ErrorAfterBatchReports::after_seq_aligns(failure(Vec::new()), [0, 1]);
+    let elsewhere = elsewhere.downcast_ref::<ErrorAfterBatchReports>().unwrap();
     assert!(elsewhere.title_reads.is_empty());
     assert_eq!(
         elsewhere.title_posts(&db, false, "BLASTP").unwrap(),

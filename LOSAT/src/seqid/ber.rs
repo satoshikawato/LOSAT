@@ -169,12 +169,6 @@ const END_OF_FILE: ThrowSite = site(
     "CEofException::eEof",
     Some("ncbi::CIStreamBuffer::FillBuffer"),
 );
-// NCBI reference (598d8ae6): c++/src/serial/member.cpp:715-755
-const READ_WITH_SET_FLAG_MEMBER: (&str, u32, &str) = (
-    "src/serial/member.cpp",
-    752,
-    "ncbi::CMemberInfoFunctions::ReadWithSetFlagMember",
-);
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objstack.hpp:201-214
 // NCBI reference (598d8ae6): c++/src/serial/objstack.cpp:399-451
@@ -255,7 +249,7 @@ impl Frame {
 enum Failure {
     /// NCBI's `CSerialException` as it leaves the frames of NCBI's object stack: the exception
     /// with its backlogs (`NCBI_RETHROW_SAME`) and its frame stack (`m_FrameStack`, which
-    /// `AddFrameInfo` extends, `NcbiException::add_frame_info`, and `ReportExtra` prints as
+    /// `AddFrameInfo` extends, `NcbiException::add_frame_infos`, and `ReportExtra` prints as
     /// ` at <frames>`).
     Serial { exception: NcbiException },
     /// The record ends where NCBI's stream needs a byte (the `CEofException` of
@@ -302,7 +296,7 @@ impl BerError {
     fn left(self, frame: Frame) -> Self {
         let failure = match *self.0 {
             Failure::Serial { mut exception } => {
-                exception.add_frame_info(frame.name());
+                exception.add_frame_infos(&[frame.name()]);
                 Failure::Serial { exception }
             }
             Failure::Eof { pos } => match frame {
@@ -364,17 +358,11 @@ impl BerError {
     #[inline(never)]
     fn member_read(self, member: &'static str) -> Self {
         match *self.0 {
-            Failure::Serial { exception } => {
-                let (file, line, function) = READ_WITH_SET_FLAG_MEMBER;
-                BerError(Box::new(Failure::Serial {
-                    exception: exception.rethrow_same(
-                        file,
-                        line,
-                        function,
-                        format!("error while reading {member}"),
-                    ),
-                }))
-            }
+            Failure::Serial { exception } => BerError(Box::new(Failure::Serial {
+                exception: crate::report::serial::asn_types::read::rethrow_set_flag_member(
+                    exception, member,
+                ),
+            })),
             failure => BerError(Box::new(failure)),
         }
     }
@@ -1320,7 +1308,7 @@ const TITLE_TRACE: &str = "Blast-def-line-set.E.title";
 /// whose `post` is the text). The record is read again up to a failure (NCBI posts what it read
 /// before it). Asked at each read of a record that the model of NCBI's cache of header records
 /// does not answer, once a title with such a byte was read (`SeqDb::title_posts_at`), and of a
-/// read that failed (`algorithm::common::database::HeaderReadError::title_posts`): a record whose
+/// read that failed (`blastinput::app::ErrorAfterBatchReports::title_posts`): a record whose
 /// titles hold none returns nothing.
 #[cold]
 #[inline(never)]
@@ -1336,25 +1324,24 @@ pub fn title_replaced_chars(record: &[u8]) -> Vec<crate::report::serial::encoder
         crate::report::serial::asn_ber_reader::fix_visible_chars(
             &mut record[range].to_vec(),
             end,
-            &mut posts,
+            &mut |post| {
+                if let StringPost::BadChar {
+                    position,
+                    byte,
+                    string,
+                } = post
+                {
+                    posts.push(ReplacedChar {
+                        trace: TITLE_TRACE.to_string(),
+                        byte,
+                        position,
+                        string: string.into(),
+                    });
+                }
+            },
         );
     }
     posts
-        .into_iter()
-        .filter_map(|post| match post {
-            StringPost::BadChar {
-                position,
-                byte,
-                string,
-            } => Some(ReplacedChar {
-                trace: TITLE_TRACE.to_string(),
-                byte,
-                position,
-                string: string.into(),
-            }),
-            StringPost::Utf8Tag => None,
-        })
-        .collect()
 }
 
 /// NCBI's warning of a UTF8String read where a VisibleString is expected (cited at

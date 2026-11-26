@@ -85,19 +85,25 @@ impl BlastpApp {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1066-1133
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:707-711
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2358-2362
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:873-901
     /// How the formatter of the output format `outfmt` cuts the app's hit lists: the one owner of
     /// this rule for the search (`report_prep::report_values` reads it of the first format) and
     /// for the library's grouping of formats into searches (`api::run::search_groups`), since a
-    /// search's lists are cut once for all its reports. `WriteArchive` cuts nothing; psiblast's
-    /// XML formatter cuts the round's results themselves before the round's PSSM and inclusion set
-    /// are made (`TrimSeqAlign`); the other formats of psiblast and rpsblast cut a copy after them
-    /// (`PruneSeqalign`); the lists of the other apps are never longer than the formats show.
+    /// search's lists are cut once for all its reports. `WriteArchive` and the organism report
+    /// (`x_PrintTaxReport`, outfmt 18) cut nothing; psiblast's XML formatter and its XML2 and JSON
+    /// formatters (outfmt 13 to 16) cut the round's results themselves before the round's PSSM and
+    /// inclusion set are made (`TrimSeqAlign`); the other formats of psiblast and rpsblast cut a
+    /// copy after them (`PruneSeqalign`); the lists of the other apps are never longer than the
+    /// formats show.
     pub fn list_cut(self, outfmt: i32) -> ListCut {
-        use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, XML};
+        use crate::blastinput::app::output_format::{
+            ARCHIVE_FORMAT, JSON, TAX_FORMAT, XML, XML2_S,
+        };
         match (self, outfmt) {
             _ if !self.prunes_after_traceback() => ListCut::Uncut,
-            (_, ARCHIVE_FORMAT) => ListCut::Uncut,
-            (BlastpApp::Psiblast, XML) => ListCut::BeforePssm,
+            (_, ARCHIVE_FORMAT | TAX_FORMAT) => ListCut::Uncut,
+            (BlastpApp::Psiblast, XML | JSON..=XML2_S) => ListCut::BeforePssm,
             _ => ListCut::AfterPssm,
         }
     }
@@ -405,7 +411,7 @@ impl BlastpArgs {
             query: args.option_or_default("query")?,
             subject: args.given_option("subject")?,
             db: args.given_option("db")?,
-            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args(args)?,
+            db_filter: crate::blastinput::db_filter::DbFilterArgs::from_args_with_ipg(args)?,
             db_mask: crate::blastinput::db_mask::DbMaskArgs::from_args(args)?,
             dbsize: args.given_option("dbsize")?,
             show_gis: args.flag("show_gis"),
@@ -541,8 +547,7 @@ pub struct ResolvedBlastpArgs {
     /// `-show_gis`, for the same reports.
     pub show_gis: bool,
     /// The `-html` links of the outfmt 0 to 4 reports (`blastinput::app::html_links`); None
-    /// without `-html` or any of those formats, and for psiblast and rpsblast, which have no
-    /// `-html`.
+    /// without `-html` or any of those formats, and for psiblast, which has no `-html`.
     pub html: Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>,
     /// `-html` (NCBI's `CBlastFormat::m_IsHTML`, blast_format.cpp:90,224): the HTML form of the
     /// outfmt 0 to 4 and 18 reports (the organism report takes no links).
@@ -881,7 +886,7 @@ impl BlastpArgs {
         )?;
         let html = crate::blastinput::app::html_links(
             self.html,
-            crate::blastinput::app::Program::Blastp,
+            self.app.request_kind(),
             self.db.as_deref().map(crate::seqdb::db_argument_name),
             &[choice.number],
         )?;

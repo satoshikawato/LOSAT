@@ -1,0 +1,82 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: nest_p.fna
+           1 sequences; 1,140 total letters
+
+
+
+Query= f101
+
+Length=190
+
+
+
+Query_1  1     MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTG  60
+0        286   ............................................................  465
+0        286   ............................................................  465
+               \                                                           
+               |                                                           
+               MQLILSHHLTMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILI
+0        811        ..YYRYRS.TAP*K..L                                        761
+0        779                                                           ..S.  790
+0        868                     ...RHP.TQPH                                 836
+0        688                                                              .  686
+0        1084                                                       ..H.Q.   1067
+
+Query_1  61    TIVTHAGEVIEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIA  120
+0        466   ............................................................  645
+0        466   ............................................................  645
+0        859                                       ........................  930
+0        481          H.SQW.PYH.R.GS.E...                                    425
+0        791   ..TIIM*S.W..                                                  826
+0        985                                  ..VYGS.*T.V..                  947
+0        685   SVR.S..Q                                                      662
+0        172       .THTLFQ..                                                 146
+
+Query_1  121   ALDGTSDQQMFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGG  180
+0        646   ............................................................  825
+0        646   ............................................................  825
+0        931   ............................................................  1110
+0        55               ...QPYR.WL.DGSR.TA                                 2
+0        748                      .KSC.L..VLR.                               713
+0        1129        P.RT.P.LRR                                              1100
+0        1054                  V..WYQ.YIS.W.S..V                             983
+                                        \                                  
+                                        |                                  
+                                  SCTLKPT
+
+Query_1  181   AEMYAAACRD  190
+0        826   ..........  855
+0        826   ..........  855
+0        1111  ..........  1140
+
+
+Lambda      K        H        a         alpha
+   0.322    0.137    0.405    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 58575
+
+
+  Database: nest_p.fna
+    Posted date:  Nov 24, 2026  5:03 PM
+  Number of letters in database: 1,140
+  Number of sequences in database:  1
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

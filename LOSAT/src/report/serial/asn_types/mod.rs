@@ -42,6 +42,7 @@ mod write_tests;
 
 pub(crate) use crate::report::serial::asn_input::{Encoding, StringKind};
 pub(crate) use read::{read_ber_document, read_document, Post, ReadError};
+pub(crate) use typed::NestPart;
 
 /// `Member::flags`: an OPTIONAL member (`->SetOptional()`).
 pub(crate) const OPTIONAL: u8 = 1;
@@ -255,21 +256,48 @@ pub(crate) fn type_info(ty: u16) -> &'static TypeInfo {
     &table::TYPES[usize::from(ty)]
 }
 
-/// The class of the table named `name`: a SEQUENCE, a CHOICE or a named SEQUENCE OF or SET OF
-/// (NCBI's implicit class), the types that NCBI's registry of classes holds by their names
-/// (`CClassTypeInfoBase::GetClassInfoByName`; an ENUMERATED or an alias is no class there).
-pub(crate) fn class_named(name: &[u8]) -> Option<u16> {
-    table::TYPES
-        .iter()
-        .position(|info| {
-            !info.name().is_empty()
-                && info.name().as_bytes() == name
-                && matches!(
-                    info.kind,
-                    Kind::Sequence(_) | Kind::Choice(_) | Kind::List { .. }
-                )
-        })
-        .map(|index| u16::try_from(index).expect("the table's index"))
+/// The class of the table named `name` that the root type `root` reaches: a SEQUENCE, a CHOICE or
+/// a named SEQUENCE OF or SET OF (NCBI's implicit class), the types that NCBI's registry of
+/// classes holds by their names (`CClassTypeInfoBase::GetClassInfoByName`; an ENUMERATED or an
+/// alias is no class there) once its reader reads an object of `root`.
+// NCBI reference (598d8ae6): c++/src/serial/classinfob.cpp:244-252
+pub(crate) fn class_named(root: u16, name: &[u8]) -> Option<u16> {
+    if usize::from(root) >= table::TYPES.len() {
+        return None;
+    }
+    let mut seen = [false; table::TYPES.len()];
+    let mut todo = vec![root];
+    while let Some(ty) = todo.pop() {
+        let slot = usize::from(ty);
+        if seen[slot] {
+            continue;
+        }
+        seen[slot] = true;
+        let info = &table::TYPES[slot];
+        if !info.name().is_empty()
+            && info.name().as_bytes() == name
+            && matches!(
+                info.kind,
+                Kind::Sequence(_) | Kind::Choice(_) | Kind::List { .. }
+            )
+        {
+            return Some(ty);
+        }
+        match info.kind {
+            Kind::Sequence(span) | Kind::Choice(span) => {
+                todo.extend(span.members().iter().map(|member| member.ty));
+            }
+            Kind::List { element, .. } | Kind::Alias(element) => todo.push(element),
+            Kind::Integer(_)
+            | Kind::Enumerated { .. }
+            | Kind::Boolean
+            | Kind::Null
+            | Kind::Real
+            | Kind::String(_)
+            | Kind::Octets => {}
+        }
+    }
+    None
 }
 
 /// The type `ty` with its aliases followed.
@@ -417,11 +445,11 @@ impl TextRun {
 /// inside the one that holds it would recurse as deep as the values nest (the reader reads any
 /// depth).
 impl Drop for Value {
+    /// A value that holds none (most of them) has nothing to take.
+    #[inline]
     fn drop(&mut self) {
-        let mut nested = Vec::new();
-        self.take_nested(&mut nested);
-        while let Some(mut value) = nested.pop() {
-            value.take_nested(&mut nested);
+        if self.holds_values() {
+            self.drop_nested();
         }
     }
 }
@@ -674,12 +702,24 @@ impl Value {
     }
 
     /// Whether the value holds values (that may hold more).
+    #[inline]
     fn holds_values(&self) -> bool {
         match self {
             Value::Sequence(members) => !members.is_empty(),
             Value::Choice(..) => true,
             Value::List(items) => !items.is_empty(),
             _ => false,
+        }
+    }
+
+    /// `Drop` of a value that holds values: each one that holds more is taken out (`take_nested`)
+    /// to a list on the heap, which is emptied the same way.
+    #[inline(never)]
+    fn drop_nested(&mut self) {
+        let mut nested = Vec::new();
+        self.take_nested(&mut nested);
+        while let Some(mut value) = nested.pop() {
+            value.take_nested(&mut nested);
         }
     }
 

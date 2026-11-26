@@ -53,7 +53,6 @@ fn a_record_of_the_stored_letters_encodes_to_the_searched_bytes() {
             .map(|&residue| NCBISTDAA_TO_AMINOACID[usize::from(residue)])
             .collect(),
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,
@@ -89,7 +88,6 @@ fn one_query(lists: &[(usize, i32)]) -> Vec<BatchResults> {
         title: Vec::new(),
         sequence: b"ACGTACGTACGTACGTACGTACGTACGTAC".to_vec(),
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,
@@ -113,9 +111,11 @@ fn one_query(lists: &[(usize, i32)]) -> Vec<BatchResults> {
         positive: 1,
         edit_script: Vec::new(),
         composition_method: 0,
+        query_left_out: 0,
     };
     vec![BatchResults {
         query_ordinal: 0,
+        in_report_order: false,
         queries: vec![lists
             .iter()
             .map(|&(oid, score)| HspList {
@@ -342,7 +342,7 @@ fn with_the_prefetch_off_each_query_fetches_what_it_shows() {
 // RG-KB 9(b) review (PR #1637 small finding 3): in pairwise mode, a later subject's
 // `StoredTitle::check_shown_source` refusal must stay in the deferred `refused` slot so it
 // neither overtakes an earlier `check_reported_title` refusal nor overtakes a later damaged
-// header record's `HeaderReadError`.
+// header record's `ErrorAfterBatchReports`.
 #[test]
 fn read_titles_does_not_let_shown_source_refusal_overtake_earlier_refusal_or_header_error() {
     use crate::seqdb::alias::SearchPath;
@@ -417,9 +417,9 @@ fn read_titles_does_not_let_shown_source_refusal_overtake_earlier_refusal_or_hea
     let err_source_only = read(&[(3, 90)]).err().expect("shown-source refusal");
     assert!(
         err_source_only
-            .downcast_ref::<shared::HeaderReadError>()
+            .downcast_ref::<crate::blastinput::app::ErrorAfterBatchReports>()
             .is_none(),
-        "expected shown-source refusal, got HeaderReadError: {err_source_only:#}"
+        "expected shown-source refusal, got ErrorAfterBatchReports: {err_source_only:#}"
     );
     let err_title_first = read(&[(0, 90), (3, 80)])
         .err()
@@ -431,12 +431,12 @@ fn read_titles_does_not_let_shown_source_refusal_overtake_earlier_refusal_or_hea
     );
     let err_damaged_after = read(&[(3, 90), (1, 80)])
         .err()
-        .expect("OID 1 HeaderReadError");
+        .expect("OID 1 ErrorAfterBatchReports");
     assert!(
         err_damaged_after
-            .downcast_ref::<shared::HeaderReadError>()
+            .downcast_ref::<crate::blastinput::app::ErrorAfterBatchReports>()
             .is_some(),
-        "expected OID 1 HeaderReadError to win over OID 3 shown-source refusal, got: {err_damaged_after:#}"
+        "expected OID 1 ErrorAfterBatchReports to win over OID 3 shown-source refusal, got: {err_damaged_after:#}"
     );
     std::fs::remove_dir_all(&cwd).unwrap();
 }

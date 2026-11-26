@@ -1,0 +1,10 @@
+# BLASTX 2.17.0+
+# Query: f101n
+# Database: tests/db_search/swgap/nestaa
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+f101n	nest_101	100.000	190	0	0	1	570	96	285	4.24e-144	394
+f101n	nest_101	100.000	190	0	0	1	570	1	285	5.43e-128	353
+f101n	nest_101	100.000	94	0	0	289	570	287	380	6.67e-68	200
+f101n	nest_101	50.000	16	8	0	494	541	57	72	0.39	17.3
+# BLAST processed 1 queries

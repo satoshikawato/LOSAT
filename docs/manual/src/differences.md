@@ -96,6 +96,13 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **Why.** NCBI's behaviour is a signed overflow, which is undefined in C. LOSAT computes the sizes without overflow.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
+### `-in_pssm` with a very small or negative gapped Lambda
+
+- **What you see.** A report without hits, as with a slightly larger Lambda. NCBI BLAST+ 2.17.0 never ends, or, where it ends, writes the same report.
+- **When.** `psiblast -in_pssm` or `tblastn -in_pssm` with a PSSM file whose gapped Lambda is so small that NCBI's search for the score of the hit-saving cutoff passes the largest 32-bit integer (about 7e-9 or less for a PSSM of 30 columns at the default `-evalue`; where it starts depends on the e-value and the lengths), or is below 0. For that PSSM NCBI never ends with 1e-9 (psiblast also with 4e-9); with the other Lambdas from 4e-9 to 7e-9, and below 0, it writes LOSAT's report.
+- **Why.** NCBI finds the cutoff's score by doubling and halving a signed 32-bit integer, which overflows there (undefined in C). LOSAT makes the same search without overflow and keeps the hits whose score reaches that cutoff: over a billion for that PSSM, or, below about 3.4e-9 and below 0, above every score. So for that PSSM no hit is kept.
+- **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
 ### `gb`, `emb` and `dbj` ids
 
 - **What you see.** LOSAT prints the id type that is stored. NCBI can print `gb|AF000002.1|` for a sequence stored as `emb|AF000002.1|`.
@@ -109,14 +116,15 @@ The other items are rare cases in which NCBI BLAST+ crashes, reads outside its m
 - **Why.** Both are failures of NCBI's lookup code. LOSAT gives what NCBI gives for a nearby input.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
-### Numbers and nesting in a PSSM, archive or XML file
+### Numbers and nesting in a PSSM, mask, archive or XML file
 
 - **What you see.**
   - A real number whose exponent does not fit in a 32-bit integer, such as `1.55e-2147483647`, is read with its exact exponent: the smallest normal double. NCBI's reader overflows the exponent and reads the largest double.
   - `psiblast` and `tblastn` read a PSSM (`-in_pssm`) whose values nest to any depth, and `psiblast -out_pssm` writes it back. NCBI reads and writes such values by recursion and can crash (exit status 139, no output) with its default 8 MiB stack; with a stack large enough it writes LOSAT's output.
+  - `makeblastdb -mask_data` reads a mask file whose locations nest inside each other (`mix`, `equiv`) to any depth. NCBI reads them by recursion and crashes (exit status 139, no database) from about 6,500 to 6,900 levels with its default 8 MiB stack; with a stack large enough it writes LOSAT's database.
   - When `psiblast` writes a PSSM (`-out_pssm`) that holds -2147483648 or -9223372036854775808, LOSAT writes the number. NCBI's writer overflows on these two numbers and prints `-8` or `-0`.
   - A database length of -9223372036854775808 is written as that number in BLAST XML and XML2 (`-outfmt` 5, 14 and 16), in the search strategy (`-export_search_strategy`) and in the BLAST archive. NCBI's writer prints `-0` there.
-- **When.** Only with a file that holds such a number or nest (a PSSM given to `-in_pssm`, an archive or XML given to `rpsbproc`). A PSSM that `psiblast` makes from a FASTA query does not nest this way, and NCBI's writers do not write such exponents. A database has that length only with an alias file's `LENGTH` of 9223372036854775808 or with `-dbsize -9223372036854775808`.
+- **When.** Only with a file that holds such a number or nest (a PSSM given to `-in_pssm`, a mask file given to `-mask_data`, an archive or XML given to `rpsbproc`). A PSSM that `psiblast` makes from a FASTA query does not nest this way, nor do the masks that `dustmasker`, `segmasker`, `windowmasker` and `convert2blastmask` write, and NCBI's writers do not write such exponents. A database has that length only with an alias file's `LENGTH` of 9223372036854775808 or with `-dbsize -9223372036854775808`.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
 
 ### `rpsbproc`: ids and positions past 2^31
@@ -214,7 +222,7 @@ These cases are about what the program prints around the search, not the search 
 
 - **What you see.** Where NCBI writes its own version, LOSAT writes its own name and version, and where NCBI starts an error with `BLAST`, LOSAT starts it with `LOSAT`.
   - After a program's name, `BLASTP (LOSAT 0.2.0)` where NCBI writes `BLASTP 2.17.0+`: in the first line of `-outfmt 0`, in the `# BLASTP (LOSAT 0.2.0)` line of `-outfmt 7`, in `<BlastOutput_version>` of `-outfmt 5`, in the `"version"` of `-outfmt 13` and `15`, in the `<version>` of `-outfmt 14` and `16`, and in the description line of `-xmlhelp` and of the `-h`, `-help` and `-help-full` texts of every BLAST search program (`Protein-Protein BLAST (LOSAT 0.2.0)`), which the usage of an argument error repeats.
-  - On its own, `LOSAT 0.2.0` where NCBI writes `2.17.0+`: in the `ident` of an `-outfmt 11` archive and of `-export_search_strategy`, in the `VN:` of the `@PG` line of `-outfmt 17`, in the first line of `-version` (`blastn: LOSAT 0.2.0`; also `dustmasker`, `segmasker` and `rpsbproc`, where NCBI writes its own versions 1.0.0 and 0.5.1), and in `BLAST database client, version LOSAT 0.2.0` of `blastdbcmd -help` and `Application to create BLAST databases, version LOSAT 0.2.0` of `makeblastdb -help` (and the `version LOSAT 0.2.0` line of `makeprofiledb -help`). The banner that `rpsbproc` writes on the standard error reads `Post-RPSBLAST Processing Utility (LOSAT 0.2.0)`.
+  - On its own, `LOSAT 0.2.0` where NCBI writes `2.17.0+`: in the `ident` of an `-outfmt 11` archive and of `-export_search_strategy`, in the `VN:` of the `@PG` line of `-outfmt 17`, in the first line of `-version` (`blastn: LOSAT 0.2.0`; also `dustmasker`, `segmasker`, `rpsbproc` and `cleanup-blastdb-volumes.py`, where NCBI writes its own versions 1.0.0, 0.5.1 and 1.0), and in `BLAST database client, version LOSAT 0.2.0` of `blastdbcmd -help` and `Application to create BLAST databases, version LOSAT 0.2.0` of `makeblastdb -help` (and the `version LOSAT 0.2.0` line of `makeprofiledb -help`). The banner that `rpsbproc` writes on the standard error reads `Post-RPSBLAST Processing Utility (LOSAT 0.2.0)`.
   - As a number, `0.2.0` in the program's `<version>` of `-xmlhelp`, where NCBI writes `2.17.0` (`1.0.0` for `dustmasker` and `segmasker`, `0.5.1` for `rpsbproc`).
   - The error prefixes are `LOSAT query/options error:`, `LOSAT engine error:`, `LOSAT database error:`, `LOSAT database creation error:`, `LOSAT options error:` and `LOSAT query error:`, where NCBI writes `BLAST query/options error:`, `BLAST engine error:`, `BLAST Database error:`, `BLAST Database creation error:`, `BLAST options error:` and `BLAST query error:`.
 - **When.** In every run that writes one of these lines or errors. Every other byte is NCBI's: `-outfmt 6` and `10` (they have no such line), `8`, `9` and `12`, the output of `dustmasker`, `segmasker` and `convert2blastmask`, what `blastdbcmd` retrieves, the files of `makeblastdb`, the `Reference:` lines, `# BLAST processed N queries`, and the structure of the XML and JSON documents (DOCTYPE, namespaces, schema locations, element names). The messages after the prefix, NCBI's diagnostic codes and the exit statuses are unchanged.
@@ -231,7 +239,7 @@ These cases are about what the program prints around the search, not the search 
 - **Tabular output (6, 7) cannot be written** (`-out /dev/full`, a full disk): NCBI aborts. LOSAT reports the write error and exits with a non-zero status. For outfmt 0 LOSAT gives NCBI's message and exit status (`BLAST failed to write output`, 6).
 - **A side file of outfmt 13 or 14 cannot be written**: NCBI reports it on the standard error and goes on, exit status 0. LOSAT stops with `BLAST failed to write output` (exit status 6).
 - **A search program runs out of memory**: NCBI catches it and writes `BLAST ran out of memory` (exit status 4). LOSAT aborts.
-- **The reader of a pipe closes it** (`... | head`): NCBI is ended by the signal (exit status 141 in a shell, no message). LOSAT stops at once and reports the write failure for outfmt 0, 6 and 7 (exit status 6 for outfmt 0), or stops with exit status 0 for `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex -show_filters`, the log of `makeblastdb` (a reader that is gone when it starts leaves no new file, and an existing database of the name stays as it was) and for the version and help texts. A short report that LOSAT has written before the reader closes ends with status 0 where NCBI is ended later.
+- **The reader of a pipe closes it** (`... | head`): NCBI is ended by the signal (exit status 141 in a shell, no message). LOSAT stops at once and reports the write failure for outfmt 0, 6 and 7 (exit status 6 for outfmt 0), or stops with exit status 0 for `blastdbcmd`, `dustmasker`, `segmasker`, `windowmasker`, `convert2blastmask`, `makembindex` (`-show_filters`, `-stat`, and index outputs that are named pipes), the log of `makeblastdb` (a reader that is gone when it starts leaves no new file, and an existing database of the name stays as it was) and for the version and help texts. A short report that LOSAT has written before the reader closes ends with status 0 where NCBI is ended later.
 - **Standard output closed at the start** (`>&-`): NCBI fails on its first write. LOSAT writes the report to `/dev/null` and exits as the search ends.
 - **`rpsbproc` cannot write its report**: NCBI's `rpsbproc` drops the writes and exits with 0. LOSAT stops with `rpsbproc failed to write output` (exit status 4).
 
@@ -266,6 +274,11 @@ Record: [The decision record on blastdbcmd output that NCBI gets wrong](https://
 - **When.** `windowmasker` with an `-ids` or `-exclude_ids` file matched as text (without `-text_match F`), in masking or with `-mk_counts`, when a line gives an empty id: a line that starts with a space or a tab, or a line `>`, `|`, `>|`, `>>` or `>>|` (alone or before a space or a tab).
 - **Why.** NCBI's error says that it ignores the id, but NCBI then stores the id far past the end of its list of ids, which is undefined in C++. LOSAT does what the error says.
 - **Record.** [The decision record on NCBI BLAST+ defects](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md).
+
+### `cleanup-blastdb-volumes.py`
+
+- **Version line.** `-version` writes `cleanup-blastdb-volumes.py LOSAT 0.2.0` where NCBI BLAST+ 2.17.0 writes `cleanup-blastdb-volumes.py 1.0`.
+- **Record.** [The decision record on command-line behavior outside the search results](https://github.com/satoshikawato/LOSAT/blob/v0.2.0/docs/product_decisions/PD-LOSAT-CLI-NONSEARCH-DIFFERENCES.md), exception 14.
 
 ## The library
 

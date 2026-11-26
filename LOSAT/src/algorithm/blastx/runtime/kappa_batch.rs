@@ -21,7 +21,8 @@ use super::{
 use super::{x_bx_par_rule, x_inner_serial, x_kappa_workers, x_speculate_match, XKappaWorker};
 use crate::algorithm::blastx::kappa::{sw_batch_failed, sw_endless};
 use crate::algorithm::blastx::x_timing::{self, End as XEnd};
-use crate::algorithm::common::database::{FetchMarks, FetchedUtf8, HeaderReadError, Utf8Read};
+use crate::algorithm::common::database::{FetchMarks, FetchedUtf8, Utf8Read};
+use crate::blastinput::app::ErrorAfterBatchReports;
 use crate::core::composition_adjustment::smith_waterman_match::SwBatchStatus;
 
 /// No NCBI counterpart (scheduling only): EXPERIMENT (LOSAT_X_BXREDOFLOW, in the strict set: on
@@ -224,7 +225,7 @@ impl Runtime<'_> {
     /// of the batch's fetches that read a header with a UTF8String where a VisibleString is
     /// expected, `sw_fetched`): NCBI posted its warning before the error (rows
     /// `db.t5d.blastx.nsw.fail.*`), which the batch's error then carries
-    /// (`HeaderReadError::utf8`, written before it by `native::failed_batch_reads`).
+    /// (`ErrorAfterBatchReports::utf8`, written before it by `native::failed_batch_reads`).
     #[cold]
     #[inline(never)]
     fn sw_failed_after(&self, error: anyhow::Error, fetched: Option<u32>) -> anyhow::Error {
@@ -237,8 +238,11 @@ impl Runtime<'_> {
         else {
             return error;
         };
-        HeaderReadError {
-            query: self.ordinal,
+        // The batch's error (`kappa::sw_batch_failed`, `kappa::sw_endless`, or the redo's own)
+        // with the read before it; `native::failed_batch_reads` writes the warning, then that
+        // error.
+        ErrorAfterBatchReports {
+            query: Some(self.ordinal),
             error,
             utf8: Some(Utf8Read {
                 query: self.ordinal,

@@ -195,7 +195,10 @@ fn the_search_space_option_carries_over_unsearched_batches() {
             },
             OptionsHandle::default(),
         );
-        handle.options().set_database_filter(None, length).unwrap();
+        handle
+            .options()
+            .set_database_filter(Vec::new(), length)
+            .unwrap();
         handle
     };
     assert_eq!(
@@ -639,6 +642,32 @@ fn the_archive_streams_gaps_of_a_pssm_files_members() {
     assert!(!pssm_holds_null_element(&fixture_pssm(
         "db_search/db.ps.asn.rnd.6.asn"
     )));
+}
+
+// Line PS item PS7c: the archive block of a Lambda the results do not keep (`stats::tables::ancillary_kept`).
+#[test]
+fn a_block_of_a_lambda_below_zero_or_not_a_number_is_the_missing_one() {
+    let params = |lambda| KarlinParams {
+        lambda,
+        k: 0.041,
+        h: 0.14,
+        alpha: 0.0,
+        beta: 0.0,
+    };
+    for lambda in [f64::NAN, f64::NEG_INFINITY, -0.5] {
+        let block = ka_block(&params(lambda), true);
+        assert_eq!(
+            (block.lambda, block.k, block.h, block.gapped),
+            (-1.0, -1.0, -1.0, true)
+        );
+    }
+    let block = ka_block(&params(0.267), false);
+    assert_eq!(
+        (block.lambda, block.k, block.h, block.gapped),
+        (0.267, 0.041, 0.14, false)
+    );
+    // +inf is kept, as NCBI's test keeps it.
+    assert_eq!(ka_block(&params(f64::INFINITY), true).lambda, f64::INFINITY);
 }
 
 /// A delayed member of another format whose read posts a replaced byte is written through

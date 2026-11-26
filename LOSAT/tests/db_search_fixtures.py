@@ -42,10 +42,10 @@ every machine: NCBI writes the `-db` text into the `[LOCAL_ID] TOOL_URL` link (`
 put the checkout's path into the frozen bytes. Not taken: absolute paths (bytes of one machine); paths relative to
 DIR in the cells (every path of a row is relative to LOSAT/, and every reader of the cells counts on it); a temporary
 directory with copies of the files (absolute paths again); a new column (a new header for every file and every
-reader). A `cwd=` row whose query is a PSSM (`pssm:`, `pssm-gz:`) or standard input (`stdin:`), whose `db` cell is
-`rps-gz:`, whose `files` column is set, or whose `extra_args` names a file under `tests/` (an argument that would
-not be rebased) is refused (`run_dir`; such rows are not needed, and the mechanism stays small). `freeze` and `check`
-refuse to start when LOSAT/.ncbirc exists (NCBI's application and formatter would read it in every row).
+reader). A `cwd=` row whose query is a PSSM (`pssm:`, `pssm-gz:`) or standard input (`stdin:`), whose `files` column
+is set, or whose `extra_args` names a file under `tests/` (an argument that would not be rebased) is refused
+(`run_dir`; such rows are not needed, and the mechanism stays small). An `rps-gz:` db cell is taken: its names are
+databases of the inflated directory, not paths. `freeze` and `check` refuse to start when LOSAT/.ncbirc exists (NCBI's application and formatter would read it in every row).
 
 - kind `ncbi`: the expectation is NCBI's stdout, stderr and exit status (`rc`) of a run with
   `-num_threads 1`, every byte, nothing normalised. The frozen bytes are
@@ -63,7 +63,9 @@ refuse to start when LOSAT/.ncbirc exists (NCBI's application and formatter woul
   array of a batch's heaps, with the near input that follows each query batch by queries without a hit, where
   they add no byte: outfmt 6, or a batch that fails and writes nothing; exception 29: `-db_hard_mask` with
   overlapping masks after which NCBI's word hits reach diagonal entries of another subject, with the near database
-  that holds a spacer of `X` between the two subjects under an alias with the database's statistics). The row has no
+  that holds a spacer of `X` between the two subjects under an alias with the database's statistics; exception 31:
+  a PSSM file's gapped Lambda for which NCBI's search for the hit-saving cutoff never ends, with the near Lambda
+  8e-9 whose search stays inside Int4, in outfmt 7, which prints neither Lambda). The row has no
   frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row`). ROW_ID is
   an `ncbi` row of the same outfmt without a near row of its own, and an `ncbi` row takes all of its bytes.
 - a `ncbi` row whose `covers` cell has a part ` | ncbi-valgrind`: the frozen bytes are NCBI's run under valgrind
@@ -376,9 +378,10 @@ def is_cwd_token(token: str) -> bool:
 
 def run_dir(row: dict[str, str]) -> str | None:
     """DIR of the row's token `cwd=DIR` (relative to LOSAT/), or None: the row runs in LOSAT/. Refuses a second
-    token, an empty or absolute DIR, and the rows the mechanism does not take: a PSSM, alignment, standard-input or `none:` query, an
-    `rps-gz:` db cell, a `files` column, an argument of `extra_args` that names a file under `tests/` (it would
-    reach the program relative to LOSAT/ from DIR)."""
+    token, an empty or absolute DIR, and the rows the mechanism does not take: a PSSM, alignment, standard-input or `none:` query, a
+    `files` column, an argument of `extra_args` that names a file under `tests/` (it would
+    reach the program relative to LOSAT/ from DIR). An `rps-gz:` db cell is taken: its names are databases of the
+    inflated directory (`rps_env`), not paths."""
     tokens = extra_tokens(row)
     dirs = [token.removeprefix(CWD_TOKEN) for token in tokens if is_cwd_token(token)]
     if not dirs:
@@ -386,8 +389,7 @@ def run_dir(row: dict[str, str]) -> str | None:
     where = row.get("row_id", "?")
     if len(dirs) > 1 or not dirs[0] or os.path.isabs(dirs[0]):
         raise SystemExit(f"{where}: one token cwd=DIR, DIR relative to LOSAT/ (got {dirs})")
-    if row["query"].startswith(("pssm:", "pssm-gz:", "msa:", "none:", *STDIN_PREFIXES)) \
-            or rps_cell(row["db"]) is not None or row.get("files"):
+    if row["query"].startswith(("pssm:", "pssm-gz:", "msa:", "none:", *STDIN_PREFIXES)) or row.get("files"):
         raise SystemExit(f"{where}: a cwd= row has a query file, a db or subject: cell and no files column")
     named = [token for token in tokens if token.startswith("tests/")]
     if named:

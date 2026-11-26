@@ -204,22 +204,28 @@ impl NcbiException {
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/exception.cpp:47-61
-    /// `CSerialException::AddFrameInfo` with `frame_info`, which the object stack's `END_OBJECT_FRAME`
-    /// calls with `GetFrameName()` of each frame a `CSerialException` leaves: the frame stack is
-    /// the extra text of the exception's report (`ReportExtra`, ` at <stack>`; a
-    /// `CSerialException` has no other). `NCBI_RETHROW_SAME` (`rethrow_same`) keeps the stack in
-    /// the new exception and freezes a copy in its predecessor, as `AddBacklog` clones it.
-    pub(crate) fn add_frame_info(&mut self, frame_info: &str) {
-        if frame_info.is_empty() {
+    /// `CSerialException::AddFrameInfo` with each of `frame_infos` in turn (the names that the
+    /// object stack's `END_OBJECT_FRAME` gives it, `GetFrameName()`, of the frames a
+    /// `CSerialException` leaves, innermost first): each name that is not empty goes in front of
+    /// the frame stack, after a `.` when the stack has one. The frame stack is the extra text of
+    /// the exception's report (`ReportExtra`, ` at <stack>`; a `CSerialException` has no other).
+    /// `NCBI_RETHROW_SAME` (`rethrow_same`) keeps the stack in the new exception and freezes a copy
+    /// in its predecessor, as `AddBacklog` clones it. The names are added in one pass, in time
+    /// linear in the length of the stack: adding them one by one in front of it, as NCBI does,
+    /// copies the stack once for each frame, quadratic in the depth of a nest.
+    pub(crate) fn add_frame_infos(&mut self, frame_infos: &[&str]) {
+        let mut stack = String::new();
+        for name in frame_infos.iter().rev().filter(|name| !name.is_empty()) {
+            stack.push_str(if stack.is_empty() { " at " } else { "." });
+            stack.push_str(name);
+        }
+        if stack.is_empty() {
             return;
         }
-        let stack = match self.extra.take() {
-            Some(extra) => {
-                let stack = extra.strip_prefix(" at ").unwrap_or(&extra);
-                format!(" at {frame_info}.{stack}")
-            }
-            None => format!(" at {frame_info}"),
-        };
+        if let Some(extra) = self.extra.take() {
+            stack.push('.');
+            stack.push_str(extra.strip_prefix(" at ").unwrap_or(&extra));
+        }
         self.extra = Some(stack.into_boxed_str());
     }
 
@@ -551,15 +557,21 @@ pub(crate) fn post_line_in(
     message: &[u8],
     failed: bool,
 ) -> Vec<u8> {
-    let mut line = match severity {
-        Severity::Warning => b"Warning: ".to_vec(),
-        Severity::Error => b"Error: ".to_vec(),
+    let header: &[u8] = match severity {
+        Severity::Warning => b"Warning: ",
+        Severity::Error => b"Error: ",
     };
-    if let Some(id) = id {
-        line.extend_from_slice(format!("({id}) ").as_bytes());
-    }
-    if let Some(prefix) = prefix {
-        line.extend_from_slice(format!("[{prefix}] ").as_bytes());
+    // One buffer of the line's length (a run of many posts makes no growth of each).
+    let length = |part: Option<&str>| part.map_or(0, |part| part.len() + 3);
+    let mut line =
+        Vec::with_capacity(header.len() + length(id) + length(prefix) + message.len() + 1);
+    line.extend_from_slice(header);
+    for (part, open, close) in [(id, b'(', b')'), (prefix, b'[', b']')] {
+        if let Some(part) = part {
+            line.push(open);
+            line.extend_from_slice(part.as_bytes());
+            line.extend_from_slice(&[close, b' ']);
+        }
     }
     if !failed {
         line.extend_from_slice(message);
@@ -567,7 +579,10 @@ pub(crate) fn post_line_in(
     line.push(b'\n');
     // LOSAT's words: an exception's class and code (`id`) and NCBI's exception reports are left
     // out (`PD-LOSAT-CLI-NONSEARCH-DIFFERENCES` exception 12).
-    crate::wording::losat_bytes(&line).into_owned()
+    match crate::wording::losat_bytes(&line) {
+        std::borrow::Cow::Owned(mapped) => mapped,
+        std::borrow::Cow::Borrowed(_) => line,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objmgr/seq_annot_info.cpp:676-697

@@ -32,3 +32,6 @@ pub mod tblastx;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-55
 pub mod blastx;
+
+#[cfg(test)]
+mod mapped_row_range_tests;

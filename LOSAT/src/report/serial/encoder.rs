@@ -257,9 +257,8 @@ impl NullElement {
             self.site(),
             format!("{}: {}", self.position, Self::MESSAGE),
         );
-        for frame in self.frames.iter().rev() {
-            exception.add_frame_info(frame);
-        }
+        let names: Vec<&str> = self.frames.iter().rev().map(String::as_str).collect();
+        exception.add_frame_infos(&names);
         exception
     }
 }
@@ -280,11 +279,16 @@ impl ReplacedChar {
     /// (the hex digits in upper case without padding, `NumericToString` of `c` in base 16) and the
     /// string when there is one.
     pub fn message(&self) -> Vec<u8> {
-        let mut message = format!(
+        use std::io::Write;
+        // One buffer of the message's length (the text between the trace and the string, with a
+        // position of 20 digits, is under 64 bytes).
+        let mut message = Vec::with_capacity(self.trace.len() + 64 + self.string.len());
+        write!(
+            message,
             "{}\nBad char [0x{:X}] in string at {}",
             self.trace, self.byte, self.position
         )
-        .into_bytes();
+        .expect("a write to a Vec");
         if !self.string.is_empty() {
             message.push(b'\n');
             message.extend_from_slice(&self.string);
@@ -659,6 +663,7 @@ impl<E: Encoder> Traced<E> {
 }
 
 /// A frame of NCBI's object stack that shows in its path (`object_stack_trace`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StackStep<'a> {
     /// `eFrameClassMember` or `eFrameChoiceVariant` with its member's name.
     Member(&'a str),

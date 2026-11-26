@@ -310,6 +310,31 @@ pub(super) fn render(
     for hitlist in hitlists.iter_mut() {
         hitlist.put_in_report_order(remaps, |oid| subject_letters.length(oid));
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270,327
+    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:2901-2905
+    // When `-subject` remapping leaves a NULLB-start alignment with no aligned segments,
+    // `CSeq_align_Mapper_Base::GetDstAlign` throws `CAnnotMapperException::eBadAlignment` inside
+    // `CPsiBlast::Run` — after `CBlastFormat::PrintProlog` and before any query's report.
+    if super::nullb_report::has_mapped_empty(hitlists) {
+        write_mapped_empty_prologs(
+            outputs,
+            subject_records,
+            subject_letters,
+            shown,
+            subject_set,
+            parameters,
+            scoring,
+            matrix_name,
+            report_counts,
+            formatting,
+            ranges,
+            tabular,
+            pssm,
+            archive,
+        )?;
+        let exc = super::nullb_report::mapped_empty_alignment_exception();
+        return Err(crate::cli::NativeError::exception(&exc).into());
+    }
     // A PSSM query's Bioseq letters where they are not its record's, which the reports read; its
     // counts are the rows' where its reports read other letters than its search and a report
     // reads the subjects' letters (`reads_subject_letters`; the Seq-aligns keep the search's).
@@ -993,6 +1018,118 @@ pub(super) fn render(
     // again, whichever format came last (as in blastn and blastp).
     if let Some(handle) = archive.map(|render| render.handle) {
         handle.set_muted(false);
+    }
+    Ok(())
+}
+
+/// Writes `CBlastFormat::PrintProlog` for every requested format when `-subject` remapping throws
+/// `CAnnotMapperException::eBadAlignment` (`nullb_report::has_mapped_empty`) before any query's
+/// report runs: outfmt 0–4's banner and database header, outfmt 15/16's XML2/JSON opening, and
+/// outfmt 20's CSV field header; nothing for the remaining formats (outfmt 11's error archive is
+/// written by `tblastn_app::run` when the exception returns).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-442
+/// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270,327
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn write_mapped_empty_prologs(
+    outputs: &mut ReportOutputs<'_>,
+    subject_records: &[FastaRecord],
+    subject_letters: SubjectLetters<'_>,
+    shown: &ShownSubjects<'_>,
+    subject_set: SubjectSetNumbers,
+    parameters: &LocalSubjectParameters,
+    scoring: LocalStageDScoring,
+    matrix_name: &str,
+    report_counts: crate::blastinput::report_counts::ReportCounts,
+    formatting: crate::blastinput::report_counts::FormattingArgs,
+    ranges: &ReportRanges<'_>,
+    tabular: &super::tabular::TabularInputs,
+    pssm: Option<&crate::algorithm::pssm_search::PsiSearch>,
+    archive: Option<&super::archive::ArchiveRender<'_>>,
+) -> Result<()> {
+    let empty_ranges = ReportRanges {
+        queries: ranges.queries,
+        subjects: ranges.subjects,
+        epilog: false,
+        query_scopes: ranges.query_scopes,
+    };
+    for (format_index, format) in outputs.formats.iter_mut().enumerate() {
+        if format.refusal.refused() {
+            continue;
+        }
+        let number = format_number(format.outfmt);
+        let report_format = format.report_format();
+        let outfmt = format.outfmt;
+        let mut writer = crate::cli::NcbiOstream::sink(&mut format.sink)?;
+        match number {
+            0..=4 => {
+                let mut warnings = crate::report::query_warnings::report_posts(
+                    report_format,
+                    tabular.html.is_some(),
+                )
+                .then(|| {
+                    crate::report::query_warnings::QueryWarnings::of_posts(
+                        &[],
+                        archive.map(|render| render.handle),
+                        &mut *outputs.diagnostics,
+                    )
+                    .for_report(format_index)
+                    .with_html_posts(
+                        outputs
+                            .html_posts
+                            .as_deref_mut()
+                            .map(|posts| posts as &mut dyn std::io::Write),
+                    )
+                });
+                write_pairwise(
+                    &mut writer,
+                    &[],
+                    &[],
+                    subject_records,
+                    subject_letters,
+                    shown,
+                    subject_set,
+                    parameters,
+                    &[],
+                    &[],
+                    &[],
+                    scoring,
+                    matrix_name,
+                    report_counts,
+                    formatting,
+                    &empty_ranges,
+                    None,
+                    warnings.as_mut(),
+                    pssm,
+                    crate::report::pairwise::PairwiseView::of(
+                        crate::blastinput::app::ReportFormat::from_number(number)
+                            .expect("a format number 0 to 4"),
+                    )
+                    .expect("a pairwise view of formats 0 to 4"),
+                    None,
+                    tabular.html.as_ref(),
+                    None,
+                )?;
+            }
+            13..=16 => {
+                let kind = xml2_kind(outfmt).expect("a checked XML2 or JSON format");
+                writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+            }
+            20 => {
+                if let Some(spec) = super::tabular::tabular_spec(outfmt) {
+                    super::tabular::write_tabular_prolog(
+                        &spec,
+                        tabular.taxdb_found,
+                        &mut writer,
+                        &mut *outputs.diagnostics,
+                    )?;
+                }
+            }
+            _ => {}
+        }
+        writer.flush()?;
     }
     Ok(())
 }

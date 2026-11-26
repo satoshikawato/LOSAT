@@ -416,6 +416,17 @@ impl PairwiseHit {
         self.edge == PairwiseEdge::QueryLeftOfRecord
     }
 
+    /// Whether outfmt 0 skips this HSP inside NCBI's per-HSP `try` block before `x_PrintDefLine`
+    /// (`PairwiseEdge::QueryLeftOfRecord` for BLASTN class N, or `PairwiseEdge::NullbSkipTranslate`
+    /// for TBLASTN `-in_pssm -window_size 0` `CAlnVec::TranslateNAToAA`).
+    #[inline]
+    fn skips_pairwise_hsp(&self) -> bool {
+        matches!(
+            self.edge,
+            PairwiseEdge::QueryLeftOfRecord | PairwiseEdge::NullbSkipTranslate
+        )
+    }
+
     /// Record-coordinate `(query_start, query_len)` of a BLASTN `-db` class N HSP
     /// (`query_left_of_record`), or `None` for normal in-context HSPs.
     #[inline]
@@ -884,22 +895,26 @@ fn write_subject_alignments_part<W: Write>(
     place: super::query_warnings::ReportHook<'_, W>,
     write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
+    if hits.iter().any(|hit| hit.skips_pairwise_hsp()) {
+        return write_subject_with_skips(
+            writer,
+            probe,
+            SubjectHeading::Record(title),
+            protein,
+            parsed,
+            None,
+            s_idx,
+            hits,
+            hsp_indices,
+            part,
+            html,
+            place,
+            write_hsp,
+        );
+    }
     let first_index = hsp_indices[0];
     let heading = super::defline::generate_defline(title, protein, false);
-    let attempt = |html: HtmlHeading<'_>| -> io::Result<Result<Vec<u8>, Vec<u8>>> {
-        let mut lines = Vec::new();
-        if let Err(error) = html.unparsed_start(&mut lines) {
-            return HtmlHeading::skips(error, || html.unparsed_skipped_id()).map(Err);
-        }
-        Ok(match &heading {
-            Ok(heading) => {
-                super::db_subject::wrap_title(&super::html::html_encode(&heading.text), &mut lines);
-                lines.push(b'\n');
-                Ok(lines)
-            }
-            Err(super::defline::UnknownEncoding) => Err(subject_skipped_id(parsed, None, s_idx)),
-        })
-    };
+    let attempt = |html: HtmlHeading<'_>| record_html_lines(&heading, html, parsed, s_idx);
     let skipped = match html {
         Some(html) if part.start == 0 => {
             if let Some(probe) = probe.as_mut() {
@@ -996,6 +1011,28 @@ fn later_part_posts<W: Write>(
     place_heading_posts(html, made, writer, place)
 }
 
+/// HTML heading lines of a `-subject` record without parsed Seq-ids, or the Seq-id text of NCBI's
+/// `alignment skipped` line when the heading's title or HTML link throws.
+fn record_html_lines(
+    heading: &Result<super::defline::Defline, super::defline::UnknownEncoding>,
+    html: HtmlHeading<'_>,
+    parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+    s_idx: u32,
+) -> io::Result<Result<Vec<u8>, Vec<u8>>> {
+    let mut lines = Vec::new();
+    if let Err(error) = html.unparsed_start(&mut lines) {
+        return HtmlHeading::skips(error, || html.unparsed_skipped_id()).map(Err);
+    }
+    Ok(match heading {
+        Ok(heading) => {
+            super::db_subject::wrap_title(&super::html::html_encode(&heading.text), &mut lines);
+            lines.push(b'\n');
+            Ok(lines)
+        }
+        Err(super::defline::UnknownEncoding) => Err(subject_skipped_id(parsed, None, s_idx)),
+    })
+}
+
 /// The alignment heading of one subject of a report: a database sequence's or a `-subject`
 /// record's with parsed Seq-ids (`DatabaseHeading`), or a `-subject` record's without them, with
 /// its title (`write_subject_alignments_part`).
@@ -1024,6 +1061,97 @@ impl SubjectHeading<'_> {
             HeadingStarts::EachAlignment
         } else {
             HeadingStarts::Once
+        }
+    }
+
+    /// Seq-id text written by `write_skipped_alignment` for a per-HSP skip (`skips_pairwise_hsp`).
+    fn skip_id(
+        self,
+        parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+        oids: Option<&[u32]>,
+        s_idx: u32,
+    ) -> Vec<u8> {
+        match self {
+            SubjectHeading::Database(DatabaseHeading::Skipped(id)) => id.to_vec(),
+            SubjectHeading::Database(DatabaseHeading::Parsed(subject, _)) => {
+                subject.skipped_id().to_vec()
+            }
+            SubjectHeading::Database(DatabaseHeading::Title(..)) => {
+                subject_skipped_id(parsed, oids, s_idx)
+            }
+            SubjectHeading::Record(_) => subject_skipped_id(parsed, None, s_idx),
+        }
+    }
+
+    /// Writes the subject heading (`Database` or `Record`), returning `Some(skip_id)` when the
+    /// heading itself throws and each alignment is skipped instead.
+    #[allow(clippy::too_many_arguments)]
+    fn write_heading<W: Write>(
+        self,
+        writer: &mut W,
+        protein: bool,
+        subject_length: Option<usize>,
+        html: Option<HtmlHeading<'_>>,
+        parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+        s_idx: u32,
+        place: super::query_warnings::ReportHook<'_, W>,
+    ) -> io::Result<Option<Vec<u8>>> {
+        match self {
+            SubjectHeading::Database(db_heading) => write_database_subject_heading(
+                writer,
+                db_heading,
+                protein,
+                subject_length,
+                html,
+                place,
+            ),
+            SubjectHeading::Record(title) => {
+                let defline = super::defline::generate_defline(title, protein, false);
+                match html {
+                    Some(html) => {
+                        let attempted = record_html_lines(&defline, html, parsed, s_idx);
+                        place_heading_posts(html, true, writer, place)?;
+                        match attempted? {
+                            Ok(lines) => {
+                                write_heading_lines(writer, &lines, subject_length)?;
+                                Ok(None)
+                            }
+                            Err(id) => Ok(Some(id)),
+                        }
+                    }
+                    None => match defline {
+                        Ok(defline) => {
+                            write_subject_header(writer, &defline.text, None, subject_length)?;
+                            Ok(None)
+                        }
+                        Err(super::defline::UnknownEncoding) => {
+                            Ok(Some(subject_skipped_id(parsed, None, s_idx)))
+                        }
+                    },
+                }
+            }
+        }
+    }
+
+    /// Checks whether the heading throws (for a later split part or an `-html` retry).
+    fn skipped_id(
+        self,
+        protein: bool,
+        html: Option<HtmlHeading<'_>>,
+        parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
+        s_idx: u32,
+    ) -> io::Result<Option<Vec<u8>>> {
+        match self {
+            SubjectHeading::Database(db_heading) => db_heading.skipped_id(protein, html),
+            SubjectHeading::Record(title) => {
+                let defline = super::defline::generate_defline(title, protein, false);
+                match html {
+                    Some(html) => record_html_lines(&defline, html, parsed, s_idx).map(Result::err),
+                    None => Ok(defline
+                        .err()
+                        .map(|_| subject_skipped_id(parsed, None, s_idx))),
+                }
+            }
         }
     }
 }
@@ -1099,142 +1227,6 @@ fn write_subject_part<'h, W: Write>(
             write_hsp,
         ),
     }
-}
-
-/// Writes the HSPs `part` of a TBLASTN subject when at least one HSP skips alignment formatting
-/// due to `CAlnVec::TranslateNAToAA` (`PairwiseEdge::NullbSkipTranslate`): each skipped HSP
-/// prints NCBI's `alignment skipped` line without emitting the subject heading, and the first
-/// non-skipped HSP prints the subject heading once before its alignment.
-///
-/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1948-1981
-#[allow(clippy::too_many_arguments)]
-fn write_tblastn_subject_with_skips<'h, W: Write>(
-    writer: &mut W,
-    mut probe: Option<&mut FormatProbe<'_>>,
-    group: &super::x_pairwise_par::QueryGroup<'_>,
-    s_idx: u32,
-    part: std::ops::Range<usize>,
-    html: Option<&super::html_ids::HtmlReport>,
-    records: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
-    subject_oids: Option<&[u32]>,
-    heading_of: impl Fn(u32) -> SubjectHeading<'h>,
-    place: super::query_warnings::ReportHook<'_, W>,
-    mut write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
-) -> io::Result<()> {
-    let posts = std::cell::RefCell::new(Vec::new());
-    let html_heading = html.map(|report| HtmlHeading {
-        report,
-        s_idx,
-        rank: group.heading_rank(s_idx, |subject| heading_of(subject).starts(false)),
-        posts: &posts,
-    });
-    let (hits, indices) = (
-        &group.subject_hits[&s_idx],
-        &group.subject_hit_indices[&s_idx],
-    );
-    let first_ok = hits
-        .iter()
-        .position(|h| h.edge != PairwiseEdge::NullbSkipTranslate);
-    let heading = heading_of(s_idx);
-    let mut heading_skipped: Option<Vec<u8>> = None;
-    for i in part {
-        let hit = hits[i];
-        let hsp_index = indices[i];
-        if hit.edge == PairwiseEdge::NullbSkipTranslate {
-            let id = subject_skipped_id(records, subject_oids, s_idx);
-            if let Some(probe) = probe.as_mut() {
-                writer.flush()?;
-                probe.begin(hsp_index);
-            }
-            write_skipped_alignment(writer, &id)?;
-            if let Some(probe) = probe.as_mut() {
-                writer.flush()?;
-                probe.end(hsp_index);
-            }
-            continue;
-        }
-        if Some(i) == first_ok {
-            if let Some(probe) = probe.as_mut() {
-                writer.flush()?;
-                probe.subject_begin(hsp_index);
-            }
-            heading_skipped = match heading {
-                SubjectHeading::Database(db_heading) => write_database_subject_heading(
-                    writer,
-                    db_heading,
-                    false,
-                    hit.subject_length,
-                    html_heading,
-                    &mut *place,
-                )?,
-                SubjectHeading::Record(title) => {
-                    let defline = super::defline::generate_defline(title, false, false);
-                    match html_heading {
-                        Some(html) => {
-                            let attempted: io::Result<Result<Vec<u8>, Vec<u8>>> = (|| {
-                                let mut lines = Vec::new();
-                                if let Err(error) = html.unparsed_start(&mut lines) {
-                                    return HtmlHeading::skips(error, || {
-                                        html.unparsed_skipped_id()
-                                    })
-                                    .map(Err);
-                                }
-                                Ok(match &defline {
-                                    Ok(defline) => {
-                                        super::db_subject::wrap_title(
-                                            &super::html::html_encode(&defline.text),
-                                            &mut lines,
-                                        );
-                                        lines.push(b'\n');
-                                        Ok(lines)
-                                    }
-                                    Err(_) => Err(html.unparsed_skipped_id()),
-                                })
-                            })(
-                            );
-                            place_heading_posts(html, true, writer, &mut *place)?;
-                            match attempted? {
-                                Ok(lines) => {
-                                    write_heading_lines(writer, &lines, hit.subject_length)?;
-                                    None
-                                }
-                                Err(id) => Some(id),
-                            }
-                        }
-                        None => match defline {
-                            Ok(defline) => {
-                                write_subject_header(
-                                    writer,
-                                    &defline.text,
-                                    None,
-                                    hit.subject_length,
-                                )?;
-                                None
-                            }
-                            Err(_) => Some(subject_skipped_id(records, None, s_idx)),
-                        },
-                    }
-                }
-            };
-            if let Some(probe) = probe.as_mut() {
-                writer.flush()?;
-                probe.subject_end(hsp_index);
-            }
-        }
-        if let Some(probe) = probe.as_mut() {
-            writer.flush()?;
-            probe.begin(hsp_index);
-        }
-        match &heading_skipped {
-            None => write_hsp(writer, hit, hsp_index)?,
-            Some(id) => write_skipped_alignment(writer, id)?,
-        }
-        if let Some(probe) = probe.as_mut() {
-            writer.flush()?;
-            probe.end(hsp_index);
-        }
-    }
-    Ok(())
 }
 
 /// One subject's alignments in a BLASTP or PSIBLAST pairwise report (`BlastpSections::subject`
@@ -1400,11 +1392,11 @@ fn write_database_subject_alignments_part<W: Write>(
     place: super::query_warnings::ReportHook<'_, W>,
     write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
-    if hits.iter().any(|hit| hit.query_left_of_record()) {
-        return write_database_subject_with_left_of_record(
+    if hits.iter().any(|hit| hit.skips_pairwise_hsp()) {
+        return write_subject_with_skips(
             writer,
             probe,
-            title,
+            SubjectHeading::Database(title),
             protein,
             parsed,
             oids,
@@ -1457,22 +1449,24 @@ fn write_database_subject_alignments_part<W: Write>(
     )
 }
 
-/// Per-HSP skip handling for a database subject that contains at least one BLASTN class N HSP
-/// (`query_left_of_record`): `x_PrepareRowData` throws before `x_PrintDefLine`, so a
-/// class N HSP writes NCBI's `...alignment skipped` line without starting a heading or updating
-/// `previousId`; the first non-class-N HSP writes the heading (and sets `previousId`), and a
-/// later class N HSP leaves `previousId` unchanged so subsequent non-class-N HSPs do not repeat
-/// the heading.
+/// Per-HSP skip handling for a subject (`Database` or `Record` heading) that contains at least
+/// one HSP skipped inside NCBI's per-HSP `try` block before `x_PrintDefLine`
+/// (`PairwiseHit::skips_pairwise_hsp`: BLASTN class N `QueryLeftOfRecord` or TBLASTN
+/// `NullbSkipTranslate`). Each skipped HSP writes NCBI's `...alignment skipped` line without
+/// starting a heading or updating `previousId`; the first non-skipped HSP writes the heading
+/// (and sets `previousId`), and a later skipped HSP leaves `previousId` unchanged so subsequent
+/// non-skipped HSPs do not repeat the heading. Handles split parts (`part.start > first_shown`)
+/// and `-html` heading posts (`later_part_posts` and retries) uniformly for both heading kinds.
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:1941-1984
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3956-3981
 #[cold]
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn write_database_subject_with_left_of_record<W: Write>(
+fn write_subject_with_skips<W: Write>(
     writer: &mut W,
     mut probe: Option<&mut FormatProbe<'_>>,
-    title: DatabaseHeading<'_>,
+    heading: SubjectHeading<'_>,
     protein: bool,
     parsed: &[Option<Arc<crate::report::db_subject::ParsedSubject>>],
     oids: Option<&[u32]>,
@@ -1484,12 +1478,8 @@ fn write_database_subject_with_left_of_record<W: Write>(
     place: super::query_warnings::ReportHook<'_, W>,
     mut write_hsp: impl FnMut(&mut W, &PairwiseHit, HspIndex) -> io::Result<()>,
 ) -> io::Result<()> {
-    let skip_id: Vec<u8> = match title {
-        DatabaseHeading::Skipped(id) => id.to_vec(),
-        DatabaseHeading::Parsed(subject, _) => subject.skipped_id().to_vec(),
-        DatabaseHeading::Title(..) => subject_skipped_id(parsed, oids, s_idx),
-    };
-    let Some(first_shown) = hits.iter().position(|hit| !hit.query_left_of_record()) else {
+    let skip_id = heading.skip_id(parsed, oids, s_idx);
+    let Some(first_shown) = hits.iter().position(|hit| !hit.skips_pairwise_hsp()) else {
         for &hsp_index in &hsp_indices[part] {
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
@@ -1508,7 +1498,7 @@ fn write_database_subject_with_left_of_record<W: Write>(
     let mut seen_shown_in_part = false;
     for idx in part {
         let (hit, hsp_index) = (hits[idx], hsp_indices[idx]);
-        if hit.query_left_of_record() {
+        if hit.skips_pairwise_hsp() {
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
                 probe.begin(hsp_index);
@@ -1525,12 +1515,13 @@ fn write_database_subject_with_left_of_record<W: Write>(
                 writer.flush()?;
                 probe.subject_begin(hsp_index);
             }
-            heading_skipped = write_database_subject_heading(
+            heading_skipped = heading.write_heading(
                 writer,
-                title,
                 protein,
-                hits[0].subject_length,
+                hit.subject_length,
                 html,
+                parsed,
+                s_idx,
                 &mut *place,
             )?;
             if let Some(probe) = probe.as_mut() {
@@ -1540,7 +1531,7 @@ fn write_database_subject_with_left_of_record<W: Write>(
             heading_done = true;
             seen_shown_in_part = true;
         } else if !seen_shown_in_part {
-            let skipped = title.skipped_id(protein, html);
+            let skipped = heading.skipped_id(protein, html, parsed, s_idx);
             if let Some(html) = html {
                 later_part_posts(html, &skipped, writer, &mut *place)?;
             }
@@ -1548,7 +1539,7 @@ fn write_database_subject_with_left_of_record<W: Write>(
             seen_shown_in_part = true;
         } else if heading_skipped.is_some() {
             if let Some(html) = html {
-                let retried = title.skipped_id(protein, Some(html));
+                let retried = heading.skipped_id(protein, Some(html), parsed, s_idx);
                 place_heading_posts(html, true, writer, &mut *place)?;
                 heading_skipped = retried?;
             }
@@ -6219,9 +6210,6 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             .clone()
             .find(|&hsp| hits[hsp].edge == PairwiseEdge::NullbStdSegLengths);
         let written = part.start..stop.unwrap_or(part.end);
-        let has_skip = hits
-            .iter()
-            .any(|h| h.edge == PairwiseEdge::NullbSkipTranslate);
         let heading = |subject| {
             group_heading(
                 group,
@@ -6234,36 +6222,20 @@ impl super::x_pairwise_par::QuerySections for TblastnSections<'_> {
             )
         };
         if !written.is_empty() {
-            if has_skip {
-                write_tblastn_subject_with_skips(
-                    writer,
-                    probe,
-                    group,
-                    s_idx,
-                    written,
-                    config.html.as_ref(),
-                    parsed,
-                    self.subject_oids,
-                    heading,
-                    place,
-                    write_hsp,
-                )?;
-            } else {
-                write_subject_part(
-                    writer,
-                    probe,
-                    group,
-                    s_idx,
-                    written,
-                    false,
-                    config.html.as_ref(),
-                    parsed,
-                    None,
-                    heading,
-                    place,
-                    write_hsp,
-                )?;
-            }
+            write_subject_part(
+                writer,
+                probe,
+                group,
+                s_idx,
+                written,
+                false,
+                config.html.as_ref(),
+                parsed,
+                self.subject_oids,
+                heading,
+                place,
+                write_hsp,
+            )?;
         }
         if stop.is_some() {
             writer.flush()?;

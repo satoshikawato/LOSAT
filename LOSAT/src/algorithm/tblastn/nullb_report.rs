@@ -64,6 +64,38 @@ pub(super) struct NullbReport {
     /// subject display row (for `rem == 2`, `s_from == -1 == GAP_VALUE` turns the segment directly
     /// into `GapEditOp::Ins(k)` in `edit_script`).
     pub wrapped_minus_tail: usize,
+    /// `-subject`: after `CSeq_loc_Mapper` drops the unmapped trailing `Sub` segment (positive
+    /// frame `rem == 0, k == 1` or negative frame), no aligned `Sub` segment remains so
+    /// `CSeq_align_Mapper_Base::x_IsEmpty` is true and `GetDstAlign` throws
+    /// `CAnnotMapperException::eBadAlignment` (`seq_align_mapper_base.cpp:2902`).
+    pub mapped_empty: bool,
+}
+
+/// `CAnnotMapperException::eBadAlignment` thrown by `CSeq_align_Mapper_Base::GetDstAlign` when
+/// `-subject` remapping leaves no segment with two non-gap rows (`x_IsEmpty`).
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:2867-2905
+pub(super) fn mapped_empty_alignment_exception() -> crate::ncbi_exception::NcbiException {
+    crate::ncbi_exception::NcbiException::new(
+        crate::ncbi_exception::ThrowSite {
+            file: "src/objects/seq/seq_align_mapper_base.cpp",
+            line: 2902,
+            kind: "CAnnotMapperException::eBadAlignment",
+            function: None,
+        },
+        "Mapping resulted in an empty alignment, can not initialize Seq-align.",
+    )
+}
+
+/// Whether any HSP in `hitlists` mapped to an empty alignment under `-subject`
+/// (`NullbReport::mapped_empty`).
+pub(super) fn has_mapped_empty(hitlists: &[KappaResultHitList]) -> bool {
+    hitlists.iter().any(|hitlist| {
+        hitlist.lists().iter().any(|list| {
+            list.payloads
+                .iter()
+                .any(|payload| payload.nullb.is_some_and(|n| n.mapped_empty))
+        })
+    })
 }
 
 /// Whether `linked` / `payload` is a NULLB-start alignment: its edit script consumes more query
@@ -148,6 +180,7 @@ pub(super) fn prepare_nullb_hsp(
         translate_na_failure: false,
         trailing_nullb_dash: false,
         wrapped_minus_tail: 0,
+        mapped_empty: false,
     };
 
     if frame > 0 {
@@ -179,6 +212,10 @@ pub(super) fn prepare_nullb_hsp(
                         GapEditOp::Sub(k_u32 - 1);
                 } else {
                     payload.edit_script.pop();
+                    // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:2867-2905
+                    if !payload.edit_script.iter().any(|op| op.is_sub()) {
+                        report.mapped_empty = true;
+                    }
                 }
                 payload.align_length = payload.align_length.saturating_sub(1);
                 hsp.q_end = hsp.q_start + script_q - 1;
@@ -219,9 +256,13 @@ pub(super) fn prepare_nullb_hsp(
             }
         } else {
             // Negative frame, -subject: CSeq_loc_Mapper drops the invalid final Std-seg without
-            // invalidating scores (scores stay intact).
-            // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1568-1580
+            // invalidating scores (scores stay intact); if no aligned Sub segment remains,
+            // `x_IsEmpty` returns true and `GetDstAlign` throws `eBadAlignment`.
+            // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1568-1580,2867-2905
             payload.edit_script.pop();
+            if !payload.edit_script.iter().any(|op| op.is_sub()) {
+                report.mapped_empty = true;
+            }
             payload.align_length = payload.align_length.saturating_sub(k);
             hsp.q_end = hsp.q_start + script_q - k_i32;
         }

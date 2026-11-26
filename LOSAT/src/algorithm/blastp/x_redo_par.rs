@@ -245,7 +245,7 @@ const X_WINDOW_JOBS_PER_THREAD: usize = 64;
 /// positive integer (tests make small windows with it), `X_WINDOW_JOBS_PER_THREAD` when it is
 /// not set or holds anything else (0, a negative number, not a number), as a value switch of
 /// `utils/xswitch.rs` gives its built-in value.
-pub(crate) fn x_window_jobs_per_thread() -> usize {
+fn x_window_jobs_per_thread() -> usize {
     static JOBS: OnceLock<usize> = OnceLock::new();
     *JOBS.get_or_init(|| {
         std::env::var("LOSAT_X_BPREDOPARWINDOW")
@@ -984,7 +984,7 @@ fn x_redo_match<P>(
 /// better than the new root), or changes nothing. Each case keeps all four conditions, so the test
 /// stays FALSE up to the replay (`hsp_tests.rs`,
 /// `test_compo_heap_would_insert_view_equals_would_insert_and_a_false_stays_false`).
-pub(crate) fn x_sw_heap_test(
+fn x_sw_heap_test(
     heap: &BlastCompoHeap,
     before: usize,
     (evalue, score, subject_index): (f64, i32, u32),
@@ -1070,7 +1070,6 @@ fn x_redo_match_sw<P>(
         &mut scratch.gap_scratch,
         &mut scratch.range_cache,
         search.engine_positives,
-        None,
         scratch.sw.get_or_insert_with(SwMatchScratch::new),
         resume,
         &mut |evalue, score| match test {
@@ -1317,7 +1316,7 @@ fn x_job_costs<P>(
 // NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPREDOLPT): the job indices by `costs`, largest first; jobs of equal cost
 /// in index order.
-pub(crate) fn x_lpt_order(costs: &[u64]) -> Vec<usize> {
+fn x_lpt_order(costs: &[u64]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..costs.len()).collect();
     order.sort_by_key(|&job| (std::cmp::Reverse(costs[job]), job));
     order
@@ -1344,7 +1343,7 @@ pub(crate) fn x_lpt_order(costs: &[u64]) -> Vec<usize> {
 /// operation changes order: jobs share no reduction. A task waits for nothing but a workspace
 /// another job is building, and that building runs no rayon work, so no task depends on a task
 /// that could be stolen below it.
-pub(crate) fn x_compute_window_lpt<S, R>(
+fn x_compute_window_lpt<S, R>(
     pool: &SearchPool<'_>,
     tasks: usize,
     order: &[usize],

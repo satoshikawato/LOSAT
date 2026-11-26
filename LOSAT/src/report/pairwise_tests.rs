@@ -1736,3 +1736,125 @@ fn header_gaps_leave_out_the_query_rows_end_gaps() {
     assert_eq!(plain.query_range_lengths().gaps, 0);
     assert_eq!(plain.query_range_lengths().length, plain.hit.length);
 }
+
+#[test]
+fn tblastn_nullb_skip_split_parts_match_serial_for_record_and_database_html() {
+    use crate::report::html_ids::{HtmlPost, HtmlReport};
+    use crate::report::query_warnings::ReportPlace;
+
+    let links = Arc::new(html_links_with(None));
+    let db_report = HtmlReport::new(&links, [crate::seqdb::Oid::of_unrestricted(0)]);
+    let subj_report = HtmlReport::new(&links, []);
+
+    let make = |edge: PairwiseEdge| {
+        let mut hit = PairwiseHit::from(make_hit());
+        hit.subject_length = Some(59);
+        hit.edge = edge;
+        hit
+    };
+    // 0: skipped (NullbSkipTranslate)
+    // 1: shown (emits heading once)
+    // 2: skipped (NullbSkipTranslate)
+    // 3: shown (no duplicate heading)
+    let owned = [
+        make(PairwiseEdge::NullbSkipTranslate),
+        make(PairwiseEdge::Normal),
+        make(PairwiseEdge::NullbSkipTranslate),
+        make(PairwiseEdge::Normal),
+    ];
+    let hits: Vec<&PairwiseHit> = owned.iter().collect();
+    let indices: Vec<HspIndex> = (0..hits.len()).collect();
+
+    // Record (-subject) heading across split parts (including -html):
+    let run_record = |parts: &[std::ops::Range<usize>]| -> (Vec<u8>, Vec<(usize, HtmlPost)>) {
+        let mut out = Vec::new();
+        let mut placed = Vec::new();
+        for part in parts {
+            let posts = std::cell::RefCell::new(Vec::new());
+            let html = HtmlHeading {
+                report: &subj_report,
+                s_idx: 0,
+                rank: 1,
+                posts: &posts,
+            };
+            let mut hook = |place: ReportPlace, writer: &mut Vec<u8>| -> io::Result<()> {
+                if let ReportPlace::Html(post) = place {
+                    placed.push((writer.len(), post));
+                }
+                Ok(())
+            };
+            write_subject_alignments_part(
+                &mut out,
+                None,
+                0,
+                &[],
+                b"a0_r2",
+                false,
+                &hits,
+                &indices,
+                part.clone(),
+                Some(html),
+                &mut hook,
+                |writer, _, _| writer.write_all(b"<hsp>\n"),
+            )
+            .unwrap();
+        }
+        (out, placed)
+    };
+    let (rec_serial, rec_posts_s) = run_record(&[0..4]);
+    let (rec_split, rec_posts_p) = run_record(&[0..1, 1..2, 2..4]);
+    assert_eq!(rec_split, rec_serial);
+    assert_eq!(rec_posts_p, rec_posts_s);
+    let rec_str = std::str::from_utf8(&rec_serial).unwrap();
+    assert_eq!(rec_str.matches("alignment skipped").count(), 2);
+    assert_eq!(rec_str.matches("<a name=Subject_1></a>").count(), 1);
+    assert_eq!(rec_str.matches("<hsp>").count(), 2);
+
+    // Database (-db) heading across split parts (including -html):
+    let source = crate::report::defline::SourceTaxname::default();
+    let run_db = |parts: &[std::ops::Range<usize>]| -> (Vec<u8>, Vec<(usize, HtmlPost)>) {
+        let mut out = Vec::new();
+        let mut placed = Vec::new();
+        for part in parts {
+            let posts = std::cell::RefCell::new(Vec::new());
+            let html = HtmlHeading {
+                report: &db_report,
+                s_idx: 0,
+                rank: 1,
+                posts: &posts,
+            };
+            let mut hook = |place: ReportPlace, writer: &mut Vec<u8>| -> io::Result<()> {
+                if let ReportPlace::Html(post) = place {
+                    placed.push((writer.len(), post));
+                }
+                Ok(())
+            };
+            write_database_subject_alignments_part(
+                &mut out,
+                None,
+                DatabaseHeading::Title(b"a0_r2", &source),
+                false,
+                &[],
+                Some(&[0]),
+                0,
+                &hits,
+                &indices,
+                part.clone(),
+                Some(html),
+                &mut hook,
+                |writer, _, _| writer.write_all(b"<hsp>\n"),
+            )
+            .unwrap();
+        }
+        (out, placed)
+    };
+    let (db_serial, db_posts_s) = run_db(&[0..4]);
+    let (db_split, db_posts_p) = run_db(&[0..1, 1..2, 2..4]);
+    assert_eq!(db_split, db_serial);
+    assert_eq!(db_posts_p, db_posts_s);
+    let db_str = std::str::from_utf8(&db_serial).unwrap();
+    assert_eq!(db_str.matches("BL_ORD_ID:0").count(), 3);
+    assert_eq!(db_str.matches("alignment skipped").count(), 2);
+    assert_eq!(db_str.matches("<a name=BL_ORD_ID:0></a>").count(), 1);
+    assert_eq!(db_str.matches("<hsp>").count(), 2);
+}

@@ -1193,16 +1193,20 @@ fn write_std_segs<E: Encoder>(
                 } else {
                     start + len - 1
                 };
+                // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1565
                 if is_last && row == 0 {
                     if let Some((_, query_to_sub)) = last_seg_fuzz {
                         stop -= query_to_sub;
                     }
                 }
+                // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1565
                 let fuzz = if is_last && row == 1 {
                     last_seg_fuzz.map(|(alt, _)| alt.wrapping_add(offsets[1] as u32))
                 } else {
                     None
                 };
+                // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:344-355
+                // NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1538-1565
                 if start < 0 || fuzz.is_some() {
                     write_seq_interval_pos(
                         enc,

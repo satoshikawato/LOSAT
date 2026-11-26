@@ -23,13 +23,13 @@ pub(crate) use crate::core::composition_adjustment::smith_waterman_match::{
 
 /// `Blast_RedoOneMatchSmithWaterman` with a square matrix for the protein windows of BLASTP
 /// (`s_WindowsFromProteinAligns`): core's match body
-/// (`smith_waterman_match::redo_one_match_smith_waterman_from`) with BLASTP's scaled block
-/// (`lambda`, `params.log_k`, `kbp_gap[0]` of the redo's copy) and BLASTP's heaps. Without
-/// composition-based statistics (`-comp_based_stats 0`, item X4-c0) `unadjusted` holds the
-/// unscaled search matrix and no window is adjusted; with modes 1 to 3 `unadjusted` is `None`.
-/// `would_insert` answers `SwHeapAnswer` (the one-thread loop always `Known`; the parallel redo's
-/// jobs leave a test open with `Deferred`, which keeps the test's state in `kept`), and `resume`
-/// is such a state, from which the call finishes the match.
+/// (`smith_waterman_match::redo_one_match_smith_waterman`) with BLASTP's scaled block (`lambda`,
+/// `params.log_k`, `kbp_gap[0]` of the redo's copy) and BLASTP's heaps. BLASTP's options refuse
+/// `-comp_based_stats 0` with `-use_sw_tback` (item X4), so no window runs without an adjustment
+/// here (`unadjusted` is `None`). Through core's entry that can resume
+/// (`redo_one_match_smith_waterman_from`): `would_insert` answers `SwHeapAnswer` (the one-thread
+/// loop always `Known`; the parallel redo's jobs leave a test open with `Deferred`, which keeps the
+/// test's state in `kept`), and `resume` is such a state, from which the call finishes the match.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3602-3613
 #[allow(clippy::too_many_arguments)]
@@ -42,7 +42,6 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
     callbacks: &BlastRedoAlignCallbacks,
     composition_workspace: &mut BlastCompositionWorkspace,
     matrix_state: &mut Option<AdjustedProteinMatrix>,
-    unadjusted: Option<&AdjustedProteinMatrix>,
     cutoff_e: f64,
     resume: Option<&SwMatchResume>,
     would_insert: &mut dyn FnMut(usize, f64, i32) -> SwHeapAnswer,
@@ -59,7 +58,7 @@ pub(crate) fn redo_one_match_smith_waterman<'seq>(
         callbacks,
         composition_workspace,
         matrix_state,
-        unadjusted,
+        None,
         cutoff_e,
         resume,
         &mut |query_index, evalue, score| Ok(would_insert(query_index, evalue, score)),

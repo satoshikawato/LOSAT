@@ -154,6 +154,8 @@ FASTA files:
   `makeblastdb -dbtype nucl -blastdb_version 4`) are single- and two-sequence nucleotide databases of
   `LOSAT/tests/fasta/x2d2/{a0_r1,a0_r2,a0_r2_m,fm1_r0,fm1_r1,fm1_r2}.fna`, exercising frame +1 and -1 with 0, 1 and 2
   remainder bases past the frame's last codon for `-in_pssm -window_size 0` NULLB-start reporting.
+  `LOSAT/tests/fixtures/pssm/x2d_w10.asn.gz` is `x2d_d50.asn.gz` with row 10 `W` set to +10 and row 11 `V` to -10 so
+  ungapped NULLB-start alignments (`Sub(2)` / `Sub(1)`) map to an empty alignment under `-subject` (`eBadAlignment`).
 
 - The database `xs_w12w11` (rows `db.xs.*`, line RG item X-short; title `xs w12 w11 subjects`, `-blastdb_version 4`) is
   `LOSAT/tests/fasta/outfmt0/xs_w12w11_s.fna`: `w12` (`TGGTGGTGGTTT`, 12 bases) and `w11` (`TGGTGGTGGTT`, 11 bases),

@@ -127,8 +127,40 @@ fn negative_frame_db_and_subject() {
 
     let (ls, ps, ns) = run_prepare(-1, k2_script(), 57, true);
     assert!(!ns.scores_invalidated);
+    assert!(!ns.mapped_empty);
     assert_eq!(ls.hsp.score, 86);
     assert_eq!(ps.edit_script, vec![Sub(1), Ins(3), Del(3)]);
     assert_eq!(ps.align_length, 7);
     assert_eq!((ls.hsp.q_end, ls.hsp.s_end), (14, 18));
+}
+
+#[test]
+fn subject_remap_empty_alignment_sets_mapped_empty() {
+    // Negative frame, -subject, ungapped Sub(2): popping Sub(2) leaves no aligned segments.
+    let (_, ps_neg, ns_neg) = run_prepare(-1, vec![Sub(2)], 57, true);
+    assert!(ps_neg.edit_script.is_empty());
+    assert!(ns_neg.mapped_empty);
+    assert!(!ns_neg.scores_invalidated);
+
+    // Positive frame, -subject, rem == 0, k == 1, ungapped Sub(1): popping Sub(1) leaves empty.
+    let (_, ps_pos, ns_pos) = run_prepare(1, vec![Sub(1)], 57, true);
+    assert!(ps_pos.edit_script.is_empty());
+    assert!(ns_pos.mapped_empty);
+    assert!(ns_pos.scores_invalidated);
+
+    // Positive frame, -subject, rem == 1, k == 1, ungapped Sub(1): 1 base remains (not empty).
+    let (_, ps_rem1, ns_rem1) = run_prepare(1, vec![Sub(1)], 58, true);
+    assert_eq!(ps_rem1.edit_script, vec![Sub(1)]);
+    assert!(!ns_rem1.mapped_empty);
+    assert!(ns_rem1.translate_na_failure);
+
+    // Trailing gap after pop (e.g. [Sub(1), Ins(4), Del(4), Sub(1)]) preserves the gap segment.
+    let (_, ps_gap, ns_gap) = run_prepare(-1, vec![Sub(1), Ins(4), Del(4), Sub(1)], 57, true);
+    assert_eq!(ps_gap.edit_script, vec![Sub(1), Ins(4), Del(4)]);
+    assert!(!ns_gap.mapped_empty);
+
+    let exc = mapped_empty_alignment_exception();
+    assert_eq!(exc.site().file, "src/objects/seq/seq_align_mapper_base.cpp");
+    assert_eq!(exc.site().line, 2902);
+    assert_eq!(exc.site().kind, "CAnnotMapperException::eBadAlignment");
 }

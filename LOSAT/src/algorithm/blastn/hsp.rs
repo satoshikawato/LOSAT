@@ -288,14 +288,16 @@ impl BlastnOutputFormat {
 fn write_blastn_outfmt7_header<W: Write>(
     writer: &mut W,
     query_title: &[u8],
-    subject_title: &str,
+    subject_title: &[u8],
     num_hits: Option<usize>,
 ) -> io::Result<()> {
     writeln!(writer, "# BLASTN {}", crate::wording::REPORT_VERSION)?;
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1305-1308
     // The title's bytes (`write_outfmt7_query_line`).
     crate::report::outfmt6::write_outfmt7_query_line(writer, query_title)?;
-    writeln!(writer, "# Database: {subject_title}")?;
+    writer.write_all(b"# Database: ")?;
+    writer.write_all(subject_title)?;
+    writer.write_all(b"\n")?;
     let Some(num_hits) = num_hits else {
         return Ok(());
     };
@@ -998,7 +1000,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: crate::report::ostream::ReportW
     loads: &crate::report::db_subject::HitLoads,
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
-    subject_title: &str,
+    subject_title: &[u8],
     unsearched: &[bool],
     epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
@@ -1074,7 +1076,7 @@ pub(crate) fn write_query_rows<W: Write>(
     loads: &crate::report::db_subject::HitLoads,
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
-    subject_title: &str,
+    subject_title: &[u8],
     unsearched: &[bool],
     config: &OutputConfig,
     hsp_index: &mut HspIndex,
@@ -1156,7 +1158,7 @@ pub(crate) fn write_query_header<W: Write>(
     hit_list_opt: Option<&BlastnHitList>,
     output_format: BlastnOutputFormat,
     query_titles: &[Arc<[u8]>],
-    subject_title: &str,
+    subject_title: &[u8],
     unsearched: &[bool],
 ) -> io::Result<()> {
     if output_format == BlastnOutputFormat::TabularWithComments {

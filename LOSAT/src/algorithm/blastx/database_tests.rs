@@ -10,7 +10,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn open(name: &str) -> BlastxDatabase {
-    BlastxDatabase::open(&fixture(name), &ApplicationSettings::default())
+    BlastxDatabase::open(fixture(name), &ApplicationSettings::default())
         .unwrap_or_else(|error| panic!("{name}: {error:#}"))
 }
 
@@ -24,14 +24,14 @@ fn a_seq_id_variable_refuses_a_database_with_parsed_seqids_only() {
         seq_id_rank_variable: Some("SEQ_ID_AVOID_GI"),
         ..ApplicationSettings::default()
     };
-    let Err(error) = BlastxDatabase::open(&fixture("prot_ids_v4"), &settings) else {
+    let Err(error) = BlastxDatabase::open(fixture("prot_ids_v4"), &settings) else {
         panic!("a database with parsed Seq-ids opened with SEQ_ID_AVOID_GI")
     };
     assert_eq!(
         format!("{error:#}"),
         "the environment variable SEQ_ID_AVOID_GI, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's BLASTX"
     );
-    BlastxDatabase::open(&fixture("prot_v4"), &settings)
+    BlastxDatabase::open(fixture("prot_v4"), &settings)
         .expect("a database without parsed Seq-ids opens with SEQ_ID_AVOID_GI");
 }
 
@@ -71,7 +71,7 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
     let path = tests.join("db_search").join(name);
     BlastxDatabase {
         db: SeqDb::open_in(path.to_str().unwrap().as_bytes(), SeqType::Protein, &search).unwrap(),
-        name: name.to_string(),
+        name: name.as_bytes().to_vec(),
         taxdb: shared::TaxdbRun::default(),
         parsed_seqids: false,
         program: PROGRAM,

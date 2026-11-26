@@ -10,7 +10,6 @@ use anyhow::{bail, Context, Result};
 ))]
 use rayon::prelude::*;
 use std::io::Write;
-use std::path::Path;
 use std::sync::{
     atomic::{AtomicU64, Ordering as AtomicOrdering},
     Arc,
@@ -629,13 +628,6 @@ impl HardTable for BlastpSubjectScratch {
         self.diag_offset += by;
         Ok(())
     }
-}
-
-#[inline]
-fn path_label(path: &Path) -> String {
-    path.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1426
@@ -2359,7 +2351,7 @@ impl BlastpReport {
 /// The Seq-annot format of a `-outfmt` value (outfmt 8, 12), read as NCBI reads the value
 /// (`app::parse_formatting_string`, which drops a custom specification of these formats);
 /// `None` for the other formats.
-fn blastp_seqalign_format(outfmt: &str) -> Option<crate::report::serial::SerialFormat> {
+fn blastp_seqalign_format(outfmt: impl AsRef<[u8]>) -> Option<crate::report::serial::SerialFormat> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
     crate::report::serial::SerialFormat::of(crate::blastinput::app::ReportFormat::from_number(
         choice.number,
@@ -2413,14 +2405,15 @@ fn blastp_pairwise_view_of(number: i32) -> Option<crate::report::pairwise::Pairw
 /// for the other numbers.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2829
-fn blastp_text_format(outfmt: &str) -> std::result::Result<OutputFormat, String> {
+fn blastp_text_format(outfmt: impl AsRef<[u8]>) -> std::result::Result<OutputFormat, String> {
+    let outfmt = outfmt.as_ref();
     match crate::blastinput::app::parse_formatting_string(outfmt).map(|choice| choice.number) {
         Ok(0) => Ok(OutputFormat::Pairwise),
         Ok(6) => Ok(OutputFormat::Tabular),
         Ok(7) => Ok(OutputFormat::TabularWithComments),
         _ => Err(format!(
             "Unsupported output format: {}. Supported: 0, 6, 7",
-            OutputFormat::split_fields(outfmt).0
+            OutputFormat::split_fields(&String::from_utf8_lossy(outfmt)).0
         )),
     }
 }
@@ -2431,7 +2424,9 @@ fn blastp_text_format(outfmt: &str) -> std::result::Result<OutputFormat, String>
 /// (`FormatChoice::normalized`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2845-2851
-fn blastp_query_anchored_view(outfmt: &str) -> Option<crate::report::pairwise::PairwiseView> {
+fn blastp_query_anchored_view(
+    outfmt: impl AsRef<[u8]>,
+) -> Option<crate::report::pairwise::PairwiseView> {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
     blastp_pairwise_view_of(choice.number)
         .filter(|view| *view != crate::report::pairwise::PairwiseView::Pairwise)
@@ -2439,7 +2434,7 @@ fn blastp_query_anchored_view(outfmt: &str) -> Option<crate::report::pairwise::P
 
 /// Whether a `-outfmt` value is the BLAST archive (outfmt 11), read as NCBI reads it (a
 /// specification after the number is ignored).
-fn blastp_is_archive(outfmt: &str) -> bool {
+fn blastp_is_archive(outfmt: impl AsRef<[u8]>) -> bool {
     crate::blastinput::app::parse_formatting_string(outfmt).is_ok_and(|choice| {
         crate::blastinput::app::ReportFormat::from_number(choice.number)
             == Some(crate::blastinput::app::ReportFormat::ArchiveFormat)
@@ -2447,7 +2442,7 @@ fn blastp_is_archive(outfmt: &str) -> bool {
 }
 
 /// Whether a `-outfmt` value is BLAST XML (outfmt 5), read as NCBI reads it.
-fn blastp_is_xml(outfmt: &str) -> bool {
+fn blastp_is_xml(outfmt: impl AsRef<[u8]>) -> bool {
     crate::blastinput::app::parse_formatting_string(outfmt).is_ok_and(|choice| {
         crate::blastinput::app::ReportFormat::from_number(choice.number)
             == Some(crate::blastinput::app::ReportFormat::Xml)
@@ -2457,7 +2452,7 @@ fn blastp_is_xml(outfmt: &str) -> bool {
 /// The XML2 / JSON document of a `-outfmt` value (outfmt 13 to 16), read as NCBI reads it;
 /// `None` for the other formats. Outfmt 13 and 14 write files next to `-out`: only the command
 /// line reaches them (`resolve_for_formats` stops the other callers at NCBI's XInclude check).
-fn blastp_xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind> {
+fn blastp_xml2_kind(outfmt: impl AsRef<[u8]>) -> Option<crate::report::blast_xml2::Xml2Kind> {
     use crate::blastinput::app::ReportFormat;
     let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
     crate::report::blast_xml2::Xml2Kind::of(ReportFormat::from_number(choice.number)?)
@@ -2507,10 +2502,12 @@ fn write_blastp_outfmt7_header<W: Write>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:790-803
     if let Some(db) = context
         .database_name
-        .as_ref()
-        .or(context.subject_name.as_ref())
+        .as_deref()
+        .or(context.subject_name.as_deref())
     {
-        writeln!(writer, "# Database: {}", db)?;
+        writer.write_all(b"# Database: ")?;
+        writer.write_all(db)?;
+        writer.write_all(b"\n")?;
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1277-1278
     // A query of an unsearched batch has no Seq-align set, so no hit count is written.
@@ -4629,7 +4626,6 @@ pub fn run(
     args.write_verification = settings.write_verification.clone();
     args.read_verification = settings.read_verification.clone();
     use crate::blastinput::app;
-    use crate::blastinput::input_files;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:128-133
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
@@ -4642,7 +4638,8 @@ pub fn run(
         args.export_search_strategy.as_deref(),
         args.app.name(),
     )?;
-    let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+    let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt).into_owned();
+    let choice = app::early_format_choice(&outfmt_bytes, strategy_file.is_some())?;
     let format = choice.report_format(app::Program::Blastp, args.out.as_deref())?;
     // The BLAST archive (outfmt 11): its request, before anything is read or written.
     // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -4653,7 +4650,7 @@ pub fn run(
         format == Some(crate::blastinput::app::ReportFormat::ArchiveFormat),
         &options,
     )
-    .map(|handle| handle.with_outfmt_text(&args.outfmt));
+    .map(|handle| handle.with_outfmt_text(&outfmt_bytes));
     // The search strategy's request, with the archive's options handle.
     args.strategy = strategy_file.map(|file| {
         crate::report::archive::strategy::StrategyExport::for_args(
@@ -4736,7 +4733,6 @@ pub fn run(
     let query_file = if pssm_query(&args) {
         None
     } else {
-        input_files::check_utf8_file_name(&args.query, "query", args.app.name())?;
         // NCBI opens the query file inside `Run` too: its error is saved and an error archive
         // follows.
         match crate::report::archive::read::import::ImportRun::open_query(
@@ -4758,19 +4754,19 @@ pub fn run(
     // rpsblast's do not, so their `6 delim=@` is the default outfmt 6) is the spec's, the one
     // that the reports read (`tabular::custom_tabular_spec`, `TabularSpec::of_app`).
     // A value not read yet (`EarlyFormat::Deferred`) fails at the options' handlers below.
-    let outfmt = match choice.parsed() {
+    let outfmt: Vec<u8> = match choice.parsed() {
         Some(parsed)
             if parsed.delimiter.is_empty()
-                || super::tabular::custom_tabular_spec(&args.outfmt, args.app).is_none() =>
+                || super::tabular::custom_tabular_spec(&outfmt_bytes, args.app).is_none() =>
         {
             parsed.normalized()
         }
-        _ => args.outfmt.clone(),
+        _ => outfmt_bytes.clone(),
     };
     let mut stream = crate::cli::ReportStream::of_cli(
         out_file,
         args.app.post_name(),
-        &args.outfmt,
+        &outfmt_bytes,
         args.strategy.as_ref(),
     );
     let strategy = args.strategy.clone();
@@ -4845,8 +4841,12 @@ fn write_run_error_archive(
         return;
     };
     if let Ok(out_file) = open_out_file(args) {
-        let mut report =
-            crate::cli::ReportStream::of_cli(out_file, args.app.post_name(), &args.outfmt, None);
+        let mut report = crate::cli::ReportStream::of_cli(
+            out_file,
+            args.app.post_name(),
+            crate::utils::os_bytes::os_str_bytes(&args.outfmt),
+            None,
+        );
         let _ = crate::report::archive::write_error_archive_after_post(
             handle,
             error,
@@ -4862,7 +4862,7 @@ fn open_out_file(args: &BlastpArgs) -> Result<Option<std::fs::File>> {
     args.out
         .as_deref()
         .filter(|path| path.as_os_str() != "-")
-        .map(|path| crate::cli::create_out_file(path, Some(args.app.name())))
+        .map(crate::cli::create_out_file)
         .transpose()
 }
 
@@ -4889,7 +4889,6 @@ fn read_cli_subjects(
             let Some(subject_path) = args.subject.as_deref() else {
                 return Err(app::missing_subject_error());
             };
-            input_files::check_utf8_file_name(subject_path, "subject", args.app.name())?;
             input_files::open_input(subject_path, "subject", args.app.name())?
         }
     };
@@ -5910,9 +5909,9 @@ fn resolve_for_formats(
     let mut resolved_formats = Vec::with_capacity(outputs.formats.len());
     for (index, format) in outputs.formats.iter().enumerate() {
         let mut requested = args.clone();
-        requested.outfmt = format.outfmt.to_string();
+        requested.outfmt = crate::utils::os_bytes::os_string_from_bytes(format.outfmt.to_vec());
         let choice = crate::blastinput::app::early_format_choice(
-            &requested.outfmt,
+            format.outfmt,
             args.export_search_strategy.is_some(),
         )?;
         let program = crate::blastinput::app::Program::Blastp;
@@ -6843,7 +6842,7 @@ fn search(
             html_posts,
         } = &mut *outputs;
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the outputs' `-outfmt` values, in request order.
-        let outfmts: Vec<&str> = formats.iter().map(|format| format.outfmt).collect();
+        let outfmts: Vec<&[u8]> = formats.iter().map(|format| format.outfmt).collect();
         // EXPERIMENT (LOSAT_X_BPQBLOCK): the reports the blocks write, whose titles are checked
         // below.
         let x_pairwise = x_kinds.contains(&XBlockReport::Pairwise);
@@ -7454,7 +7453,7 @@ fn x_query_block_plan(
             subject_source.database().is_some() && (needs.all_deflines || needs.taxonomy);
         (!db_reads_more).then_some(spec.kind)
     };
-    let default_kind = |outfmt: &str| match blastp_text_format(outfmt) {
+    let default_kind = |outfmt: &[u8]| match blastp_text_format(outfmt) {
         Ok(OutputFormat::Tabular | OutputFormat::TabularWithComments) => {
             Some(XBlockReport::Tabular)
         }
@@ -7485,10 +7484,10 @@ fn x_query_block_plan(
         _ => None,
     };
     // A custom tabular report of outfmt 6 or 7 takes the default one's kind.
-    let kind_of = |outfmt: &str| match super::tabular::custom_tabular_spec(outfmt, args.app) {
+    let kind_of = |outfmt: &[u8]| match super::tabular::custom_tabular_spec(outfmt, args.app) {
         Some(spec) => match custom_kind(spec) {
-            Some(crate::report::tabular::TabularKind::Tabular) => default_kind("6"),
-            Some(crate::report::tabular::TabularKind::Commented) => default_kind("7"),
+            Some(crate::report::tabular::TabularKind::Tabular) => default_kind(b"6"),
+            Some(crate::report::tabular::TabularKind::Commented) => default_kind(b"7"),
             _ => None,
         },
         None => default_kind(outfmt),
@@ -8009,21 +8008,23 @@ fn x_block_shown_titles_allowed(
 }
 
 /// The `Database:` text of the pairwise reports of a local `-subject` search
-/// (`report::pairwise::scan_mode_definition` of `blastp_subject_tag`).
-fn blastp_database_name(args: &ResolvedBlastpArgs, subject_label: &str) -> String {
-    crate::report::pairwise::scan_mode_definition(&blastp_subject_tag(args, subject_label))
+/// (`report::pairwise::scan_mode_definition_bytes` of `blastp_subject_tag`).
+fn blastp_database_name(args: &ResolvedBlastpArgs, subject_label: &str) -> Vec<u8> {
+    crate::report::pairwise::scan_mode_definition_bytes(&blastp_subject_tag(args, subject_label))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:242-243
 // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:497-499
 /// The subject tag of the formatter (`m_SubjectTag`): `subject_label`, or the `-subject`
 /// argument; psiblast makes its formatter without one (the default `kEmptyStr`).
-fn blastp_subject_tag(args: &ResolvedBlastpArgs, subject_label: &str) -> String {
+fn blastp_subject_tag(args: &ResolvedBlastpArgs, subject_label: &str) -> Vec<u8> {
     match args.app {
         // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:182-184
-        BlastpApp::Psiblast | BlastpApp::Rpsblast => String::new(),
-        BlastpApp::Blastp if subject_label.is_empty() => args.subject.display().to_string(),
-        BlastpApp::Blastp => subject_label.to_string(),
+        BlastpApp::Psiblast | BlastpApp::Rpsblast => Vec::new(),
+        BlastpApp::Blastp if subject_label.is_empty() => {
+            crate::utils::os_bytes::os_str_bytes(args.subject.as_os_str()).into_owned()
+        }
+        BlastpApp::Blastp => subject_label.as_bytes().to_vec(),
     }
 }
 
@@ -8050,7 +8051,7 @@ fn write_pairwise_prologs(
                 &mut writer,
                 crate::wording::REPORT_VERSION,
                 args.app.ncbi_name(),
-                blastp_database_name(args, subject_label).as_bytes(),
+                &blastp_database_name(args, subject_label),
                 num_sequences,
                 total_letters,
                 pairwise_database.as_ref(),
@@ -8156,7 +8157,7 @@ fn write_reports_without_queries(
             OutputFormat::Pairwise => {
                 let report = BlastpPairwiseReport {
                     version: crate::wording::REPORT_VERSION.to_string(),
-                    database_name: blastp_database_name(args, subject_label).into(),
+                    database_name: blastp_database_name(args, subject_label),
                     database_num_sequences: num_sequences,
                     database_total_letters: total_db_len,
                     // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:194-229
@@ -8270,7 +8271,7 @@ fn preliminary_search_error(
     query_batches: &[seq_range::RangedBatch],
     query_batch_skipped: &[bool],
     first_batch: bool,
-    database_name: &str,
+    database_name: &[u8],
     text: &[u8],
 ) -> anyhow::Error {
     if !(first_batch || query_batch_skipped.first() == Some(&false)) {
@@ -8720,7 +8721,7 @@ fn unsearched_batches_then_engine_error(
     reports: &BlastpReports<'_>,
     query_batches: &[seq_range::RangedBatch],
     query_batch_skipped: &[bool],
-    database_name: &str,
+    database_name: &[u8],
     text: &[u8],
 ) -> anyhow::Error {
     let first_searched = query_batches
@@ -8737,7 +8738,7 @@ fn unsearched_batches_then_engine_error(
         let searched = if database_name.is_empty() {
             "the subjects".to_string()
         } else {
-            format!("the database {database_name}")
+            format!("the database {}", String::from_utf8_lossy(database_name))
         };
         return anyhow::anyhow!(
             "a search of {searched} that fails with NCBI BLAST+'s error \"{}\" after a first query batch that NCBI BLAST+ does not search is not supported by LOSAT's {}",
@@ -10028,7 +10029,7 @@ fn run_call(
     // The setup of the first searched batch fails: its error follows the outfmt 0 prolog and the
     // reports of the batches before it (`preliminary_search_error`).
     let setup_error =
-        |outputs: &mut ReportOutputs<'_>, first_batch: bool, database_name: &str, text: &str| {
+        |outputs: &mut ReportOutputs<'_>, first_batch: bool, database_name: &[u8], text: &str| {
             preliminary_search_error(
                 &args,
                 query_records,
@@ -10051,14 +10052,14 @@ fn run_call(
     let failure = ungapped_setup_failure(&call_in, &query_batches, &query_valid, subject_source);
     if let Some(failure) = failure {
         return Err(match failure {
-            UngappedSetupFailure::Engine(text) => setup_error(outputs, true, "", &text),
+            UngappedSetupFailure::Engine(text) => setup_error(outputs, true, b"", &text),
             UngappedSetupFailure::Refusal(error) => error,
         });
     }
 
     // The setup of the first searched batch before the call's search, in NCBI's order
     // (`split_steps::first_batch_setup`: a split batch's steps, the read of OID 0, the checks).
-    let first_error = |name: &str, text: &str| setup_error(outputs, query_chunk, name, text);
+    let first_error = |name: &[u8], text: &str| setup_error(outputs, query_chunk, name, text);
     let (reads, extent) = split_steps::first_batch_setup(
         &call_in,
         (subject_source, subjects),

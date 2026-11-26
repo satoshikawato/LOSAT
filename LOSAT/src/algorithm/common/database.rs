@@ -31,14 +31,14 @@ use crate::sequence::packed_subject::PackedNucleotide;
 /// registry entry `[BLAST] BLASTDB` (`settings.blastdb`, read from
 /// `NCBI_CONFIG__BLAST__BLASTDB`, the program's `.ini` file and `.ncbirc`).
 pub(crate) fn open_search_database(
-    name: &str,
+    name: &[u8],
     seqtype: SeqType,
     settings: &ApplicationSettings,
 ) -> Result<SeqDb, SeqDbError> {
     let path = SearchPath::from_environment(settings.blastdb.as_deref());
     // The errors of the alias files' counts depend on the list, and those of the headers come
     // after them (`restrict_database`).
-    let mut db = SeqDb::open_search_in(name.as_bytes(), seqtype, &path)?;
+    let mut db = SeqDb::open_search_in(name, seqtype, &path)?;
     db.fail_search_reads_with_oid_list();
     // The checks of NCBI's reads of the definition lines (`SERIAL_VERIFY_DATA_READ`).
     db.refuse_unchecked_reads(&settings.read_verification);
@@ -48,7 +48,7 @@ pub(crate) fn open_search_database(
 /// Opens the database of `-db name` (`open_search_database`) with the command line's
 /// errors (`database_error`; LOSAT's refusals name `program`).
 pub(crate) fn open_database(
-    name: &str,
+    name: &[u8],
     seqtype: SeqType,
     settings: &ApplicationSettings,
     program: &str,
@@ -79,7 +79,7 @@ pub(crate) fn open_database(
 /// fails only where a report or the prefetch looks it up (`FoundInstead::Failed`).
 pub(crate) fn restrict_database(
     db: &mut SeqDb,
-    name: &str,
+    name: &[u8],
     list: Option<&crate::seqdb::DbList>,
     mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
     diagnostics: &mut dyn std::io::Write,
@@ -247,7 +247,7 @@ pub(crate) fn note_archive_database_masking(
 /// is the search's masking (`None`: not masked).
 pub(crate) fn resolve_database_masking(
     db: &SeqDb,
-    db_name: &str,
+    db_name: &[u8],
     option: &crate::blastinput::db_mask::DbMaskOption,
     program: &str,
     app: &str,
@@ -983,7 +983,7 @@ pub(crate) fn pairwise_database_masked(
                 let algorithm = shown.map(|shown| &shown[index]);
                 DatabaseInfo {
                     definition: if record.title.is_empty() {
-                        record.name.as_bytes().to_vec()
+                        record.name.clone()
                     } else {
                         record.title.clone()
                     },
@@ -1105,9 +1105,9 @@ fn prints_report_sums(outfmt: i32) -> bool {
 /// sums: each format's refusal goes to that format's `FormatRefusal::check`, which fails the call
 /// (the command line's format) or that format alone, as a program's other checks of a format
 /// before its rows.
-pub(crate) fn check_formats_report_sums<'f, 'r>(
+pub(crate) fn check_formats_report_sums<'r, O: AsRef<[u8]>>(
     shown: impl FnOnce() -> PairwiseDatabase,
-    formats: impl IntoIterator<Item = (&'f str, &'r mut crate::api::local_blast::FormatRefusal)>,
+    formats: impl IntoIterator<Item = (O, &'r mut crate::api::local_blast::FormatRefusal)>,
     program: &str,
 ) -> Result<()> {
     let mut shown = Some(shown);

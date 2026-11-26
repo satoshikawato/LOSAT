@@ -276,7 +276,7 @@ fn context_block_is_the_gapped_block_or_the_contexts_own() {
         karlin_params: own,
     };
     let mut args = make_blastp_args();
-    args.comp_based_stats = "0".to_string();
+    args.comp_based_stats = std::ffi::OsString::from("0");
     let gapped = args.resolve().expect("gapped");
     args.ungapped = true;
     let ungapped = args.resolve().expect("ungapped");
@@ -311,10 +311,10 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
     let report = |extra: &[(&str, &str)], ungapped: bool| -> String {
         let mut args = make_blastp_args();
         args.ungapped = ungapped;
-        args.comp_based_stats = "0".to_string();
+        args.comp_based_stats = std::ffi::OsString::from("0");
         for &(name, value) in extra {
             match name {
-                "matrix" => args.matrix = Some(value.to_string()),
+                "matrix" => args.matrix = Some(std::ffi::OsString::from(value)),
                 "gapopen" => args.gap_open = Some(value.parse().unwrap()),
                 "gapextend" => args.gap_extend = Some(value.parse().unwrap()),
                 _ => unreachable!(),
@@ -328,7 +328,7 @@ fn a_run_without_queries_writes_the_ungapped_report_for_gap_costs_outside_the_ta
                 other_outfmts: &[],
                 html_posts: None,
                 formats: vec![FormatOutput {
-                    outfmt: "0",
+                    outfmt: b"0",
                     refusal: FormatRefusal::FailsCall,
                     sink: OutputSink::Writer(&mut sink),
                 }],
@@ -510,14 +510,14 @@ fn make_blastp_args() -> BlastpArgs {
         matrix: None,
         gap_open: None,
         gap_extend: None,
-        comp_based_stats: "2".to_string(),
+        comp_based_stats: std::ffi::OsString::from("2"),
         seg: None,
         soft_masking: None,
         lcase_masking: false,
         use_sw_tback: false,
         query_loc: None,
         subject_loc: None,
-        outfmt: "6".to_string(),
+        outfmt: std::ffi::OsString::from("6"),
         archive: None,
         export_search_strategy: None,
         import_search_strategy: None,
@@ -1347,7 +1347,7 @@ fn test_validate_requested_blastp_support_accepts_word_size_two() {
 fn test_validate_requested_blastp_support_takes_unified_p_modes() {
     for value in ["1u", "2u", "3U", "Du", "tu"] {
         let mut args = make_blastp_args();
-        args.comp_based_stats = value.to_string();
+        args.comp_based_stats = std::ffi::OsString::from(value);
         let resolved = args.resolve().expect("resolved blastp args");
         assert!(resolved.comp_based_stats.unified_p, "{value}");
         validate_requested_blastp_support(&resolved).expect(value);
@@ -1368,7 +1368,7 @@ fn test_validate_requested_blastp_support_takes_every_matrix() {
                 matrix.ncbi_name().to_lowercase(),
             ] {
                 let mut args = make_blastp_args();
-                args.matrix = Some(name.clone());
+                args.matrix = Some(std::ffi::OsString::from(&name));
                 args.gap_open = Some(gap_open);
                 args.gap_extend = Some(gap_extend);
                 let resolved = args.resolve().expect("resolved blastp args");
@@ -1381,7 +1381,7 @@ fn test_validate_requested_blastp_support_takes_every_matrix() {
         // there (psiblast takes the standard matrices only, blast_options.c:913-917).
         let mut args = make_blastp_args();
         args.app = BlastpApp::Psiblast;
-        args.matrix = Some(matrix.ncbi_name().to_string());
+        args.matrix = Some(std::ffi::OsString::from(matrix.ncbi_name()));
         if matrix == ScoringMatrix::Identity {
             let err = args.resolve().expect_err("psiblast IDENTITY");
             assert!(err
@@ -1414,7 +1414,7 @@ fn test_validate_requested_blastp_support_takes_every_matrix() {
     ] {
         let mut args = make_blastp_args();
         args.task = task.to_string();
-        args.matrix = Some("IDENTITY".to_string());
+        args.matrix = Some(std::ffi::OsString::from("IDENTITY"));
         args.word_size = word_size;
         let resolved = args.resolve().expect("resolved blastp args");
         validate_requested_blastp_support(&resolved).expect("IDENTITY's options");
@@ -1432,7 +1432,7 @@ fn test_validate_requested_blastp_support_takes_every_matrix() {
     }
     for word_size in [6, 7] {
         let mut args = make_blastp_args();
-        args.matrix = Some("identity".to_string());
+        args.matrix = Some(std::ffi::OsString::from("identity"));
         args.word_size = Some(word_size);
         let err = args.resolve().expect_err("IDENTITY word 6 and 7");
         assert!(
@@ -1501,9 +1501,9 @@ fn test_psi_contexts_take_the_search_matrix() {
     let resolved = |matrix: Option<&str>| {
         let mut args = make_blastp_args();
         args.app = BlastpApp::Psiblast;
-        args.seg = Some("no".to_string());
+        args.seg = Some(std::ffi::OsString::from("no"));
         if let Some(matrix) = matrix {
-            args.matrix = Some(matrix.to_string());
+            args.matrix = Some(std::ffi::OsString::from(matrix));
         }
         args.resolve().expect("resolved psiblast args")
     };
@@ -2628,7 +2628,7 @@ fn banks_filled_refusal_names_the_batch_of_the_table() {
         let mut args = make_blastp_args();
         args.task = "blastp-fast".to_string();
         // An ungapped search takes no composition adjustment.
-        args.comp_based_stats = "0".to_string();
+        args.comp_based_stats = std::ffi::OsString::from("0");
         args.ungapped = ungapped;
         args.resolve().expect("resolved blastp-fast args")
     };
@@ -2704,9 +2704,9 @@ fn x_blocks_contexts_are_the_builders_contexts() {
     for (task, matrix, word_size) in configs {
         let mut args = make_blastp_args();
         args.task = task.to_string();
-        args.seg = Some("yes".to_string());
+        args.seg = Some(std::ffi::OsString::from("yes"));
         args.lcase_masking = true;
-        args.matrix = Some(matrix.ncbi_name().to_string());
+        args.matrix = Some(std::ffi::OsString::from(matrix.ncbi_name()));
         args.word_size = word_size;
         let resolved = match args.resolve() {
             Ok(resolved) => resolved,
@@ -3111,8 +3111,8 @@ fn a_failed_lookup_fails_its_batch_after_the_posts_up_to_its_query() {
         crate::blastinput::app::ReportFormat::Tabular,
         &crate::blastinput::app::FormatChoice {
             number: 6,
-            spec: "qseqid sallacc".to_string(),
-            delimiter: String::new(),
+            spec: b"qseqid sallacc".to_vec(),
+            delimiter: Vec::new(),
         },
         crate::report::archive::options::RequestKind::Blastp,
     )

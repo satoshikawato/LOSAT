@@ -96,7 +96,7 @@ pub(super) struct TblastxTabular<'a, 'r> {
     /// The `# Query:` title of each query.
     pub query_titles: &'a [&'a [u8]],
     /// The `# Database:` name.
-    pub database: &'a str,
+    pub database: &'a [u8],
     /// The default report's tabular subject ids (`sseqid`, `sacc`, `saccver`), by subject index
     /// or rank (`tabular_subject_ids`, `ReportedSubjects::tabular_subject_ids`).
     pub subject_ids: &'a [crate::algorithm::common::tabular::SubjectId],
@@ -301,7 +301,7 @@ pub(super) fn write_tblastx_tabular(
         table.query_header(
             &mut buf,
             tab.query_titles[q_idx],
-            tab.database.as_bytes(),
+            tab.database,
             (!tab.unsearched[q_idx]).then_some(query_hits.len()),
         )?;
         writer.write_all(&buf)?;

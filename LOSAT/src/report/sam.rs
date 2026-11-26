@@ -43,12 +43,12 @@ pub struct SamSpec {
 impl SamSpec {
     /// The words of `spec` (split at every space; exactly `SQ` and `SR` count, anything else
     /// is ignored).
-    pub fn parse(spec: &str) -> Self {
+    pub fn parse(spec: impl AsRef<[u8]>) -> Self {
         let mut parsed = Self::default();
-        for word in spec.split(' ') {
+        for word in spec.as_ref().split(|&byte| byte == b' ') {
             match word {
-                "SR" => parsed.subject_as_reference = true,
-                "SQ" => parsed.sequence = true,
+                b"SR" => parsed.subject_as_reference = true,
+                b"SQ" => parsed.sequence = true,
                 _ => {}
             }
         }

@@ -52,7 +52,7 @@ pub(crate) struct BlastnTabular<'a> {
     /// `report::tabular::QueryCoveragePerHsp`).
     pub ungapped: bool,
     /// Outfmt 7's `# Database:` text.
-    pub database: &'a str,
+    pub database: &'a [u8],
     pub subjects: TabularSubjects<'a>,
     /// The letters of the subjects, which the rows read.
     pub letters: SubjectLetters<'a>,
@@ -174,7 +174,7 @@ pub(crate) fn write_blastn_tabular(
             tab.query_titles
                 .get(q_idx)
                 .map_or(&b"unknown"[..], |title| title.as_ref()),
-            tab.database.as_bytes(),
+            tab.database,
             (!tab.unsearched.get(q_idx).copied().unwrap_or(false))
                 .then(|| blastn_hsp_count(hit_list)),
         )?;

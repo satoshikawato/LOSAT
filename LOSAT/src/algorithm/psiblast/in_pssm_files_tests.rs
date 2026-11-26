@@ -47,8 +47,8 @@ fn pssm(id: ObjectId, columns: usize, rows: usize) -> PssmWithParameters {
 
 fn request(asn: bool, ascii: bool) -> PssmRequest {
     PssmRequest {
-        asn_path: asn.then(|| "f.asn".to_string()),
-        ascii_path: ascii.then(|| "f.txt".to_string()),
+        asn_path: asn.then(|| std::path::PathBuf::from("f.asn")),
+        ascii_path: ascii.then(|| std::path::PathBuf::from("f.txt")),
         save_each: false,
         pseudocount: 0,
         versions: Default::default(),

@@ -357,7 +357,7 @@ pub(super) fn write_structured_xml(
     hit_lists: &[Option<BlastnHitList>],
     query_lengths: &[usize],
     unsearched: &[bool],
-    subject_title: &str,
+    subject_title: &[u8],
     writer: &mut crate::cli::NcbiOstream<'_>,
     format_warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> Result<()> {
@@ -396,10 +396,13 @@ pub(super) fn write_structured_xml(
         })
         .collect();
     let version = format!("BLASTN {}", crate::wording::REPORT_VERSION);
+    let repeat_filter = report
+        .repeat_filter
+        .map(crate::utils::os_bytes::os_str_bytes);
     let filter = crate::report::blast_xml::filter::filter_string(
         report.dust,
         None,
-        report.repeat_filter,
+        repeat_filter.as_deref(),
         report.window_masker,
         report.soft_masking,
     );
@@ -485,7 +488,7 @@ pub(super) fn write_structured_xml(
             } else {
                 crate::report::blast_xml::REFERENCE_GAPPED_BLAST
             },
-            db_name: if is_database { subject_title } else { "" },
+            db_name: if is_database { subject_title } else { b"" },
             matrix: None,
             expect: report.expect,
             gap_open: report.gap_open,

@@ -148,7 +148,10 @@ fn the_options_of_ps11c_1_reach_blastps_arguments() {
     .unwrap()
     .into_blastp_args()
     .unwrap();
-    assert_eq!(args.seg.as_deref(), Some("10 1.8 2.1"));
+    assert_eq!(
+        args.seg.as_deref(),
+        Some(std::ffi::OsStr::new("10 1.8 2.1"))
+    );
     assert_eq!(args.soft_masking, Some(true));
     assert!(args.lcase_masking);
     assert_eq!(

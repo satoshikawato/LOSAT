@@ -370,7 +370,7 @@ pub(crate) enum ShownSubjects<'a> {
         parsed: &'a RecordsParsed,
     },
     Database {
-        name: &'a str,
+        name: &'a [u8],
         pairwise: &'a crate::report::pairwise::PairwiseDatabase,
         reported: &'a ReportedSubjects,
     },
@@ -1551,7 +1551,7 @@ fn pairwise_metadata(
             subjects.iter().map(|s| s.sequence.len() as i64).sum(),
         ),
         ShownSubjects::Database { name, pairwise, .. } => (
-            name.as_bytes().to_vec(),
+            name.to_vec(),
             pairwise.num_sequences,
             pairwise.total_letters,
         ),

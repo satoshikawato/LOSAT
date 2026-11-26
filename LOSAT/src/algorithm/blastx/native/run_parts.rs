@@ -73,7 +73,8 @@ impl RunSetup {
             args.export_search_strategy.as_deref(),
             program.upper,
         )?;
-        let choice = app::early_format_choice(&args.outfmt, strategy_file.is_some())?;
+        let outfmt_bytes = crate::utils::os_bytes::os_str_bytes(&args.outfmt);
+        let choice = app::early_format_choice(&outfmt_bytes, strategy_file.is_some())?;
         let format = choice.report_format(Program::Blastx, args.out.as_deref())?;
         // The BLAST archive (outfmt 11): its request, before anything is read or written.
         // The error archives follow the `-outfmt` text (`writes_error_archive`).
@@ -84,7 +85,7 @@ impl RunSetup {
             format == Some(app::ReportFormat::ArchiveFormat),
             &options_handle,
         )
-        .map(|handle| handle.with_outfmt_text(&args.outfmt));
+        .map(|handle| handle.with_outfmt_text(&outfmt_bytes));
         archive_slot.clone_from(&archive);
         // The search strategy's request, with the archive's options handle.
         let strategy = strategy_file.map(|file| {

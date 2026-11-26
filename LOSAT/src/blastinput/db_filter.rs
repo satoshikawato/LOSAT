@@ -8,11 +8,12 @@
 
 use crate::wording::DATABASE_ERROR;
 use std::collections::BTreeSet;
+use std::ffi::{OsStr, OsString};
 use std::io::Write;
 
 use anyhow::Result;
 
-use crate::blastinput::app::options_error;
+use crate::blastinput::app::{options_error, options_error_bytes};
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
 use crate::ncbi_str::{string_to_int, ALLOW_LEADING_SPACES, ALLOW_TRAILING_SPACES};
@@ -20,6 +21,7 @@ use crate::seqdb::file::DbFile;
 use crate::seqdb::lmdb_read::ReadError;
 use crate::seqdb::tax_sqlite::{QueryReadFailure, TaxonomySqlite};
 use crate::seqdb::{id_list, seqidlist, DbList, GiList, PigList, SearchPath, SeqidList, TaxidList};
+use crate::utils::os_bytes::os_str_bytes;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2257-2326
 // The exclusions among the list options, with `-subject` and (on the programs' `-subject_loc`)
@@ -34,25 +36,25 @@ use crate::seqdb::{id_list, seqidlist, DbList, GiList, PigList, SearchPath, Seqi
 #[derive(Debug, Clone, Default)]
 pub struct DbFilterArgs {
     /// `-gilist`: a file of GIs (text or binary).
-    pub gilist: Option<String>,
+    pub gilist: Option<OsString>,
     /// `-negative_gilist`: a file of GIs to leave out.
-    pub negative_gilist: Option<String>,
+    pub negative_gilist: Option<OsString>,
     /// `-seqidlist`: a file of Seq-ids (text, or binary from `blastdb_aliastool`).
-    pub seqidlist: Option<String>,
+    pub seqidlist: Option<OsString>,
     /// `-negative_seqidlist`: a file of Seq-ids to leave out.
-    pub negative_seqidlist: Option<String>,
+    pub negative_seqidlist: Option<OsString>,
     /// `-taxids`: taxids separated by commas.
-    pub taxids: Option<String>,
+    pub taxids: Option<OsString>,
     /// `-taxidlist`: a file of taxids, one per line.
-    pub taxidlist: Option<String>,
+    pub taxidlist: Option<OsString>,
     /// `-negative_taxids`: taxids separated by commas.
-    pub negative_taxids: Option<String>,
+    pub negative_taxids: Option<OsString>,
     /// `-negative_taxidlist`: a file of taxids, one per line.
-    pub negative_taxidlist: Option<String>,
+    pub negative_taxidlist: Option<OsString>,
     /// `-ipglist`: a file of IPGs/PIGs (text or binary; protein databases only).
-    pub ipglist: Option<String>,
+    pub ipglist: Option<OsString>,
     /// `-negative_ipglist`: a file of IPGs/PIGs to leave out (protein databases only).
-    pub negative_ipglist: Option<String>,
+    pub negative_ipglist: Option<OsString>,
     /// `-no_taxid_expansion`: the taxids alone, without their descendants.
     pub no_taxid_expansion: bool,
 }
@@ -135,20 +137,20 @@ pub(crate) const TAXONOMY_FILE: &str = "taxonomy4blast.sqlite3";
 #[derive(Clone, Copy)]
 enum SelectedList<'a> {
     Gi {
-        value: &'a str,
+        value: &'a OsStr,
         negative: bool,
     },
     Seqid {
-        value: &'a str,
+        value: &'a OsStr,
         negative: bool,
     },
     Taxid {
-        value: &'a str,
+        value: &'a OsStr,
         is_file: bool,
         negative: bool,
     },
     Pig {
-        value: &'a str,
+        value: &'a OsStr,
         negative: bool,
     },
 }
@@ -305,16 +307,21 @@ impl DbFilterArgs {
                 negative,
             } => (value, is_file, negative),
         };
+        let value = os_str_bytes(value);
         let ids: Vec<Vec<u8>> = if is_file {
-            let Some(file) = path.resolve_file(value.as_bytes()) else {
-                return Err(options_error(&format!("File is not acessible: {value}")));
+            let not_accessible = || {
+                options_error_bytes(
+                    &[b"File is not acessible: ".as_slice(), value.as_ref()].concat(),
+                )
+            };
+            let Some(file) = path.resolve_file(&value) else {
+                return Err(not_accessible());
             };
             let bytes = std::fs::read(crate::utils::os_bytes::path_of_bytes(&file))
-                .map_err(|_| options_error(&format!("File is not acessible: {value}")))?;
+                .map_err(|_| not_accessible())?;
             stream_lines(&bytes)
         } else {
             value
-                .as_bytes()
                 .split(|&byte| byte == b',')
                 .filter(|token| !token.is_empty())
                 .map(<[u8]>::to_vec)
@@ -391,19 +398,18 @@ impl DbFilterArgs {
     // of a file there that does not open. The reader's own errors (an empty file, a damaged binary
     // list) are `BLAST Database error: ...`, exit status 2.
     /// Reads a resolved list file (`SeqDB_ResolveDbPath`) with NCBI's `CFileException` mapping.
-    fn read_list_file(value: &str, path: &SearchPath) -> Result<Vec<u8>> {
-        seqidlist::read_resolved(value.as_bytes(), path).map_err(|error| {
-            match error.ncbi_exception() {
-                Some(exception) => anyhow::Error::from(NativeError::exception(exception)),
-                None => anyhow::Error::msg(error.to_string()),
-            }
+    fn read_list_file(value: &OsStr, path: &SearchPath) -> Result<Vec<u8>> {
+        let value = os_str_bytes(value);
+        seqidlist::read_resolved(&value, path).map_err(|error| match error.ncbi_exception() {
+            Some(exception) => anyhow::Error::from(NativeError::exception(exception)),
+            None => anyhow::Error::msg(error.to_string()),
         })
     }
 
     /// `CSeqDBFileGiList(fn, eGiList)` of the `-gilist` / `-negative_gilist` file.
     fn resolve_gi_list(
         &self,
-        value: &str,
+        value: &OsStr,
         negative: bool,
         path: &SearchPath,
     ) -> Result<Option<DbList>> {
@@ -421,7 +427,7 @@ impl DbFilterArgs {
     /// `CSeqDBFileGiList(fn, ePigList)` of the `-ipglist` / `-negative_ipglist` file.
     fn resolve_pig_list(
         &self,
-        value: &str,
+        value: &OsStr,
         negative: bool,
         path: &SearchPath,
     ) -> Result<Option<DbList>> {
@@ -439,7 +445,7 @@ impl DbFilterArgs {
     /// `CSeqDBFileGiList(fn, eSiList)` of the `-seqidlist` / `-negative_seqidlist` file.
     fn resolve_seqid_list(
         &self,
-        value: &str,
+        value: &OsStr,
         negative: bool,
         path: &SearchPath,
         warnings: &mut dyn Write,

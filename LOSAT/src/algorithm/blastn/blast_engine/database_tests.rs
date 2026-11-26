@@ -13,7 +13,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn open(name: &str) -> BlastnDatabase {
-    BlastnDatabase::open(&fixture(name), &ApplicationSettings::default())
+    BlastnDatabase::open(fixture(name), &ApplicationSettings::default())
         .unwrap_or_else(|error| panic!("{name}: {error:#}"))
 }
 
@@ -237,7 +237,7 @@ fn a_seq_id_variable_refuses_a_database_with_parsed_seqids_only() {
         format!("{error:#}"),
         "the environment variable SEQ_ID_PREFER_ACCESSION_OVER_GI, which changes the Seq-ids that NCBI BLAST+ chooses for a database with parsed Seq-ids, is not supported by LOSAT's BLASTN"
     );
-    BlastnDatabase::open(&path("tests/seqdb/db/nucl_v4"), &settings)
+    BlastnDatabase::open(path("tests/seqdb/db/nucl_v4"), &settings)
         .expect("a database without parsed Seq-ids opens with SEQ_ID_PREFER_ACCESSION_OVER_GI");
 }
 
@@ -558,7 +558,7 @@ fn database_numbers_come_from_the_index_files() {
     assert_eq!(shown.definition, b"nucleotide in volumes");
     assert_eq!(shown.databases[0].date, "Oct 12, 2026  4:12 PM");
     assert_eq!((shown.num_sequences, shown.total_letters), (12, 850));
-    assert_eq!(database.name(), fixture("nucl_mv"));
+    assert_eq!(database.name(), fixture("nucl_mv").as_bytes());
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:904-911
@@ -623,7 +623,7 @@ fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
     );
     // A protein database is not found as a nucleotide one.
     for name in ["no_such_database", "prot_v4"] {
-        let Err(error) = BlastnDatabase::open(&fixture(name), &settings) else {
+        let Err(error) = BlastnDatabase::open(fixture(name), &settings) else {
             panic!("{name} opened")
         };
         let (exit, message) = native(error);
@@ -1222,7 +1222,8 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
         &search,
     )
     .unwrap();
-    db.read_name_records(path.to_str().unwrap(), false).unwrap();
+    db.read_name_records(path.to_str().unwrap().as_bytes(), false)
+        .unwrap();
     let parsed_seqids = db.has_parsed_seqids().unwrap();
     BlastnDatabase {
         metadata: SubjectMetadata {
@@ -1230,7 +1231,7 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Bl
             db_num_seqs: db.num_seqs() as i32,
         },
         db,
-        name: name.to_string(),
+        name: name.as_bytes().to_vec(),
         taxdb: shared::TaxdbRun::default(),
         loaded_before_batch: Default::default(),
         parsed_seqids,

@@ -93,7 +93,7 @@ impl Search {
                 .iter()
                 .zip(sinks.iter_mut())
                 .map(|(outfmt, sink)| FormatOutput {
-                    outfmt,
+                    outfmt: outfmt.as_bytes(),
                     sink: OutputSink::Writer(sink),
                     refusal: first.take().unwrap_or(FormatRefusal::FailsAlone),
                 })

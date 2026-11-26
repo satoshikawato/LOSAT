@@ -1960,13 +1960,6 @@ impl ListedTitles<'_> {
         self.seen.numbered_from(self.seen_first)
     }
 
-    /// The subject index by which a check of the rows of the call's query `q_idx` takes the
-    /// subject of rank `rank` (`report::query_bioseq::SeenFrom::row`).
-    pub(super) fn seen_row(&self, q_idx: usize, rank: usize) -> usize {
-        self.seen()
-            .row(q_idx, self.listed.ordinals.get(rank).copied(), rank)
-    }
-
     /// Outfmt 1 to 4 of queries read without `-parse_deflines` (line RG T3a, review 2 D2): LOSAT's
     /// refusal of a subject with parsed Seq-ids of the final hit lists `hit_lists` whose Seq-align
     /// id is the generated id (`lcl|Query_N`) of a query of the batch that reports it, as NCBI's

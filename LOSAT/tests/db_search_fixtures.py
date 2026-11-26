@@ -1515,8 +1515,11 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
             out = expected_stdout(row)
             if sha256(out) != row["stdout_sha256"] or len(out) != int(row["stdout_bytes"]):
                 problems.append("frozen .out does not match the manifest")
-            if run.stdout != in_losat_words(out):
-                problems.append("stdout " + first_difference(in_losat_words(out), run.stdout))
+            expected_out, observed_out = in_losat_words(out), run.stdout
+            if is_sam_outfmt(row["outfmt"]):
+                expected_out, observed_out = strip_sam_cl(expected_out), strip_sam_cl(observed_out)
+            if observed_out != expected_out:
+                problems.append("stdout " + first_difference(expected_out, observed_out))
         elif run.stdout:
             problems.append(f"stdout is not empty ({len(run.stdout)} bytes)")
         if ncbi_stderr(row):

@@ -1,0 +1,1 @@
+- `blastp`: support `-use_sw_tback` with `-comp_based_stats 0` (and with `-matrix IDENTITY`, matching NCBI BLAST+ 2.17.0) at every thread count, running NCBI's Smith-Waterman redo in subject ordinal order with the unadjusted scoring matrix (`-ungapped -use_sw_tback` remains refused at the first searched batch).

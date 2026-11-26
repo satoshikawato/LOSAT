@@ -1,0 +1,20 @@
+1ab10
+1ab1 a0
+1ab1|a0
+1ab21
+1ab2 a1
+1ab2|a1
+1ab32
+1ab3 2
+1ab3|2
+1ab43
+1ab4 a3
+1ab4|a3
+1ab54
+1ab5  4
+1ab5| 4
+pdb|1ab1|a0
+pdb|1ab2|a1
+pdb|1ab3|2
+pdb|1ab4|a3
+pdb|1ab5| 4

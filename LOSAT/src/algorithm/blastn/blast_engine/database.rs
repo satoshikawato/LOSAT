@@ -1689,6 +1689,12 @@ pub(super) fn fetch_refusal(failed: (u32, crate::seqdb::SeqDbError)) -> anyhow::
 }
 
 impl BlastnDatabase {
+    /// Whether a load of a sequence with a positive taxid can write a text or throw in this run
+    /// (`shared::TaxdbRun::loads_write_texts`).
+    pub(super) fn loads_write_texts(&self) -> bool {
+        self.taxdb.loads_write_texts(&self.db)
+    }
+
     /// The titles of the sequences that the final hit lists `hit_lists` of a query batch name,
     /// read where NCBI makes the batch's Seq-aligns ([`read_titles`], into the titles of `reads`),
     /// after those of no Seq-align leave the lists ([`drop_unaligned`]) and after the batch's
@@ -1812,7 +1818,10 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
             .any(|format| format.tabular_reads_subject()),
         stops_at_failed_lookup: output_formats.iter().any(|format| {
             format.is_tabular()
-                && crate::report::tabular::stops_at_lookup_failure(format.tabular_spec())
+                && crate::report::tabular::stops_at_lookup_failure_for(
+                    format.tabular_spec(),
+                    crate::blastinput::app::Program::Blastn,
+                )
         }),
         stops_at_lineless: output_formats.iter().any(|format| {
             format.is_tabular()
@@ -2353,6 +2362,7 @@ pub(super) fn reported_subjects(
     batches: &[std::ops::Range<usize>],
     first_query: usize,
     gapped: bool,
+    seen: crate::report::query_bioseq::SeenFrom<'_>,
     pool: Option<&SearchPool<'_>>,
 ) -> Result<ReportedSubjects> {
     let mut ordinals: Vec<u32> = hit_lists
@@ -2397,6 +2407,32 @@ pub(super) fn reported_subjects(
         recorded.with_calls_before(database.taxdb.unrecorded_calls()),
         |ordinal| titled_parsed(titles, ordinal),
     );
+    let seen_all: std::collections::HashSet<u32> = if seen.any() {
+        ordinals
+            .iter()
+            .copied()
+            .filter(|&ordinal| {
+                seen.hides_ordinal(
+                    hit_lists
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(query, hit_list)| {
+                            hit_list
+                                .as_ref()?
+                                .hsplist_array
+                                .iter()
+                                .any(|hsp_list| {
+                                    !hsp_list.hsps.is_empty() && hsp_list.oid == ordinal
+                                })
+                                .then_some(query)
+                        }),
+                    ordinal,
+                )
+            })
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
     let rank = |ordinal: u32| -> u32 {
         ordinals
             .binary_search(&ordinal)
@@ -2446,6 +2482,7 @@ pub(super) fn reported_subjects(
                     false,
                     taxdb,
                     ordinal,
+                    seen_all.contains(&ordinal),
                     PROGRAM,
                 )?;
                 (

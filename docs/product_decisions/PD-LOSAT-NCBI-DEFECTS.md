@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.121
+- Version: 1.122
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -936,12 +936,45 @@
   error; line RG-KB item 9(b), Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07; numbered after 1.119 at the merge of dev bf0e63c3d; first 1.107,
   then 1.113, then 1.114, then 1.115, then 1.116, then 1.117, then 1.118);
-  1.121 2026-11-26 (approved exception 35, `losat blastdbcheck` alias count checks and
+  1.121 2026-11-24 (a database sequence whose Seq-align id is a pdb id whose handle has another
+  chain, which NCBI's data loader serves no sequence for: the empty Bioseq handle reproduced in
+  every report, rule 2, and the explicit rejections, rule 3, of its tabular `sacc` and `saccver`
+  in the class of 1.37, of its tabular sequence-reading rows without a subject-block field (where
+  NCBI stops with `CAlnException::eInvalidSeqId`, exit 255) or minus-strand translated-frame rows
+  with an alignment-block field and no subject-block field (where NCBI stops with
+  `CCoreException::eNullPtr`, exit 255), of its printed `-show_gis` description line,
+  whose GI NCBI never sets, and of NCBI's throw where another id of the sequence holds the
+  handle's id but no definition line does as NCBI's load reads the ids (where another definition
+  line holds it, the reports show that line's title as NCBI's, review 2); line RG-KB item 12, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07; first 1.92, then 1.93 at the merge of dev that
+  brought line NP item O4b2-4's 1.92, then 1.94 at the merge of dev that brought line RG item
+  D1c-1c's 1.93, then 1.95 for line NP item M4c-2's 1.94, which dev took after that merge, then
+  1.96 at the merge of dev 2a5889938 that brought line NP item M4b-3b's 1.95, then 1.97 at the
+  merge of dev 3d8c77b16 that brought line DBID item pfoff-4's 1.96, then 1.99 at the
+  merge of dev 4626ddd5d that brought line RG item X-short-bat's 1.97 and line RG item X-bpgap's
+  1.98, then 1.100 at the merge of dev 0dbeba38b that brought line RG item X-short-tbx-link's
+  1.99, then 1.103 at the merge of dev fbf312db0 that brought line RG items KC-11d's 1.100 and
+  D5c's 1.101 and psiblast line item PS10e's 1.102, then 1.104 for line RG item K10a's 1.103, which
+  dev took after that merge, then 1.106 at the merge of dev 17c46261c that brought line RG item
+  K10a's 1.103, line NP item M4b-T3's 1.104 and psiblast line item PS10b's 1.105, then 1.107 at
+  the merge of dev 22ac798e5 that brought line NP item M4b-3c part 2's 1.106, then 1.108 at the
+  merge of dev f2be0e496 that brought line NP item M (b)'s 1.107, then 1.109 at the merge of dev
+  10f846fa3 that brought line RG item X-short-bat-2's 1.108, then 1.111 at the merge of dev
+  924bf3be4 that brought line RG item D1c-2's 1.109 and line RG item X-short-bat-2's 1.110, then
+  1.113 at the merge of dev 245b7e2e3 that brought psiblast line item PS7c's 1.111 and line RG
+  item D3c-4's 1.112, then 1.114 at the merge of dev f17536f02 that brought psiblast line item
+  PS14's 1.113, then 1.115 at the merge of dev 42678f399 that brought line DBID item pfoff-7's
+  1.114, then 1.116 at the merge of dev c2544a7dd that brought line RG item G1's 1.115, then
+  1.117 at the merge of dev 00d811a41 that brought line RG item X-chunk's 1.116, then 1.118 at
+  the merge of dev 351661f13 that brought line WQA item D23's 1.117, then 1.120 at the merge of
+  dev bf0e63c3d that brought line RG item F2's 1.118 and 1.119, then 1.121 at the merge of dev
+  9f87bd3a2 that brought line RG-KB item 9(b)'s 1.120);
+  1.122 2026-11-26 (approved exception 35, `losat blastdbcheck` alias count checks and
   `-ends` OID arithmetic widened beyond NCBI's signed 32-bit/64-bit integer overflow,
   line RG-D2 items D2b-2..5; Owner 2026-11-25 17:54
-  JST, Q-D2b-OV=A; numbered after 1.120 at the merge of dev 9f87bd3a2 that brought 1.120
-  (line RG-KB item 9(b)); first 1.109, then 1.110, 1.113, 1.114, 1.115, 1.116,
-  1.117, 1.118, 1.120; exception 31 until 1.111 took 31, exception 32 until 1.115 took 32, and
+  JST, Q-D2b-OV=A; numbered after 1.121 at the merge of dev cb7044346 that brought 1.121
+  (line RG-KB item 12); first 1.109, then 1.110, 1.113, 1.114, 1.115, 1.116,
+  1.117, 1.118, 1.120, 1.121; exception 31 until 1.111 took 31, exception 32 until 1.115 took 32, and
   exception 33 until 1.118/1.119 took 33 and 34)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
@@ -2614,6 +2647,63 @@ file would differ, and NCBI's programs still could not open the database).
   NCBI error of outfmt 0 alone such as BLASTX's `Row is empty`), and a stream that fails alone
   after the host received a chunk of it (BLASTX's later query batch) is discarded by the host at
   the run's signal (`docs/web/abi_v2.md` §5, line RG T7-W).
+- A database sequence whose Seq-align id is a pdb id that its Seq-id handle holds with another
+  chain (version 1.121, 2026-11-24, line RG-KB item 12, Owner-delegated, standing instruction
+  2026-09-29, restated 2026-10-07). The handle normalizes a pdb id (`CSeq_id_PDB_Info::Normalize`,
+  `seq_id_tree.cpp:3381-3464`): where it rebuilds the id (a release date that normalizes, a
+  lower-case letter in the molecule, or a chain and chain-id that disagree) the chain becomes the
+  first byte of the chain-id, or the chain's low byte, read back as a signed char, and `GetSeqId`
+  (`:3293-3346`) gives back the stored id with that chain. NCBI's data loader looks the Seq-align
+  id up as that Seq-id and serves the sequence only where one of its stored ids compares equal to
+  it (`bdbloader.cpp:386-431`); `CPDB_seq_id::Match` compares the chains where both are set
+  (`PDB_seq_id.cpp:53-67`). So a stored chain outside -128 to 127 without a chain-id (321, -191,
+  383), or a chain-id whose first letter is not the chain with a rebuilt id (`1ab1`, chain 66 and
+  chain-id `A`), leaves the report's Bioseq handle empty, without an exception, where no other
+  definition line of the sequence holds the handle's id. Outfmt 0 writes the description line of
+  the `catch` without its links (`x_FillDeflineAndId` returns at once, `showdefline.cpp:388-394`):
+  `1AB1_A Unknown`, and `Sequence with id 1AB1_A no longer exists in database...alignment
+  skipped` for each alignment, no heading counted in the `-html` ranks after it
+  (`showalign.cpp:1952-1981`); outfmt 1 to 4 leave the subject out of the merged alignment and
+  write a line feed alone where every subject is left out (`:1997-2003`, `:2086-2110`); XML the
+  `Hit` of the `catch` (outfmt 5 `Unknown`, `Hit_len` 0, `blastxml_format.cpp:399-407`; XML2 and
+  JSON the `HitDescr` of the id alone and the sequence's own length,
+  `blastxml2_format.cpp:410-415`, as `GetSequenceLength` skips the comparison,
+  `bdbloader.cpp:312-319`) and the `Hsp` of the `catch` (the scores, the Seq-align's identities,
+  the coordinates 0 and no letters, `blastxml_format.cpp:142-165`, `blastxml2_format.cpp:130-153`);
+  the tabular formats the rows of a failed lookup above (`SetSubjectId` clears the subject id and
+  throws, or `GetBioseqLength` does, `tabular.cpp:833-875`); outfmt 18 no row
+  (`taxFormat.cpp:996-998`); psiblast's PSSM reads none of its letters. A release date
+  normalizes where it is a Date-std of year 1 to 4095, month 1 to 15, day 1 to 31, hour 0 to 30,
+  minute and second 0 to 62 and no season (`x_NormalizeDate`, `:3381-3405`). The same records with
+  a chain of 65 or none, a date of month 16 or a season, or a normalized chain that is the stored
+  one (chain 65 and chain-id `A` with a date of month 13), are served as before. LOSAT finds it from
+  the decoded Seq-ids alone (`ParsedSubject::scope_finds_none`, the handle's id
+  `seqid::mask_handle::pdb_handle_seq_id`) and writes these outputs in BLASTP, BLASTX, TBLASTN,
+  TBLASTX, BLASTN and psiblast (rows `db.pdbchain.only.*` and `db.pdbchain.norm.*`: a lower-case
+  molecule, a date of month 13 and a chain of 200 without a chain-id, and the dates and chain
+  that load). Where another id of the same sequence compares equal to the handle's id, NCBI's load
+  makes the Bioseq of the first definition line that holds it as `s_SeqDB_SeqIdIn` reads the ids,
+  which stops at the first id of the line that does not match (`seqdbvol.cpp:1328-1359`): another
+  definition line than the Seq-align id's (probes `e15_twoline` of review 1 of item 12 and `e15nt`
+  of review 2) makes the Bioseq of the reports of that line, and the reports read it in two ways.
+  Those that read the Bioseq's line take that line: its title is NCBI's description line's (outfmt
+  0 to 4), the generated title of the organism report (outfmt 18) and the generated title of a
+  line without one in the alignment's heading (`showalign.cpp:2250-2255`, `taxFormat.cpp:915-926`),
+  and its ids are the tabular `sseqid`, `sacc` and `saccver`, the labels of outfmt 1 to 4, the
+  SAM name and the `-html` link. Those that read the Bioseq's whole set of lines list the
+  sequence's own lines: the alignment's heading, the tabular `stitle`, `salltitles` and
+  `sallseqid`, and the XML `Hit` (outfmt 5, 15 and 16; `tabular.cpp:415-439`,
+  `showdefline.cpp:248-293`; probes `e15g` and `e15tu` of review 3). LOSAT takes the first group
+  from that Bioseq's line (`ParsedSubject::target`, the line of `DeflineSet::bioseq_defline` of
+  the handle's id; review 2, N3, where review 1 had refused the description line and the
+  organism report) and the second from the stored set, as NCBI does; no definition line (one
+  line with the chain 321 before the chain 65, `e15b_oneline`) makes NCBI's load throw, in every
+  format that reads the Bioseq or prefetches it (outfmt 0, 1, 2, 5, 6, 7, 10, 15, 16 and 18 of the
+  probe), which LOSAT refuses
+  (rule 3 below), while the Seq-annots and the archive (outfmt 8, 9, 11, 12) read nothing of it
+  and are NCBI's bytes. A handle whose id another sequence's definition line holds, where NCBI's
+  loader serves that sequence (`share1` of the probe), stays the refusal of a Seq-align id that
+  another sequence holds.
 - makeblastdb, an index file that a failed write left cut short (version 1.62, 2026-11-21, line LIB-O
   item O1e, Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07). NCBI opens the
   database it wrote and reads the index through its mapping, where bytes the file lacks read as
@@ -3418,7 +3508,56 @@ file would differ, and NCBI's programs still could not open the database).
   batch's prefetch is off (`DB contains no accession info.`, a version 5 list of databases with
   and without accession tables): the `catch` of the subject block leaves `m_SubjectId` empty
   before any row of the report loaded its subject, and `m_SubjectTaxId` unset; a later such row
-  prints what the last loaded row set.
+  prints what the last loaded row set. Since version 1.121 (line RG-KB item 12) also the rows of a
+  subject whose pdb Seq-align id NCBI's data loader serves no sequence for (rule 2 above): exit
+  status 255 after the row's earlier fields for `sacc`/`saccver`, and also exit status 255 in
+  `CAlnVec::GetBioseqHandle` (`CAlnException::eInvalidSeqId`) when no field of the subject block
+  (`reads_subject_bioseq`) is requested alongside a sequence-reading field (`qseq`, `sseq`, `btop`,
+  `positive`, `ppos`; outside BLASTN also `pident`, `nident`, `mismatch`), or in
+  `CAlignFormatUtil::GetFrame` (`CCoreException::eNullPtr`, `ncbiobj.cpp:1010`) in TBLASTN and
+  TBLASTX when a minus-strand subject alignment is reported with `sframe`/`frames`, an
+  alignment-block field, and no subject-block field (plus-strand rows compute `(start % 3) + 1`
+  without touching the handle); LOSAT's refusal before the batch's report.
+- `-show_gis` with outfmt 0 to 4 over a database sequence whose pdb Seq-align id NCBI's data loader
+  serves no sequence for (version 1.121, 2026-11-24, line RG-KB item 12, Owner-delegated, standing
+  instruction 2026-09-29, restated 2026-10-07): the description info of the empty Bioseq handle
+  keeps the GI it was allocated with (`x_GetDeflineInfo` sets no GI before `x_FillDeflineAndId`
+  returns, `showdefline.cpp:1576-1589`, `:388-394`), which the description line prints when it is
+  positive (`:886-892`): three runs of one search gave no GI, `gi|300995824|` and `gi|395411296|`.
+  LOSAT refuses (exit 1, "... whose outfmt 0 to 4 description line with -show_gis prints a GI that
+  NCBI BLAST+ 2.17.0 never sets ...") where a report prints the description line of such a
+  subject (within `-num_descriptions`, `common::database::refuse_described_lines`, as the refusal
+  of a description id longer than 65 bytes; row `db.pdbchain.only.blastp.0gs`); with
+  `-num_descriptions 0`, or where the subject's rank is past it, the output is NCBI's (row
+  `db.pdbchain.only.blastp.0g`).
+- A database sequence whose pdb Seq-align id's handle another id of the same sequence holds (rule
+  2 above; version 1.121, 2026-11-24, line RG-KB item 12, reviews 1 and 2, Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07). Where another definition line than the
+  Seq-align id's holds it, the reports show that line's title as NCBI's (rule 2 above; review 1
+  refused the description line and the organism report, review 2 writes them). Where no definition
+  line holds it as NCBI's load reads the ids, NCBI stops with "BLAST Database error: Error: oid
+  headers do not contain target gi/seq_id." (exit status 2, in the same bytes in each run, after
+  the prolog of outfmt 0 to 4, 15 and 16, before any byte of outfmt 5): LOSAT refuses (exit 1,
+  "... its load throws: BLAST Database error: Error: oid headers do not contain target
+  gi/seq_id.") in the formats that read the Bioseq or prefetch it
+  (`ParsedSubject::handle_load_refusal`), not NCBI's error and exit status: NCBI's throw comes
+  from the batch's prefetch, whose stop LOSAT makes in line DBID's `prefetch_stop`, which item 12
+  leaves to that line (open point of review 1, R6; line DBID's item pfoff-9 after item 12). Item
+  12 keys a pdb id by its handle in NCBI's scope (`defline_set::scope_keys`), so a query
+  `pdb|1AB1|A` read with `-parse_deflines` holds the Seq-align id of a sequence whose pdb id has
+  the chain 321 and no chain-id: the refusal of a sequence with the id of a query
+  (`common::database::refuse_id_of_a_query`, PD-LOSAT-DATABASE-SEARCH) covers it, since review 2
+  (N1) only in the formats in which NCBI's scope looks the sequence up by its Seq-align id (a
+  report that reads its Bioseq, or the batch's prefetch; psiblast every format where the call
+  makes a PSSM from the round, review 3, F1). The Seq-annots
+  and the archive (outfmt 8, 9, 11, 12) write NCBI's bytes, as on dev. NCBI shows the query's
+  Bioseq for the sequence in the reports that read it (`6 sseqid stitle` of probe `c321`:
+  `pdb|1AB1|A` and `N/A`), and since decision KB-12-1 (2026-11-25) so does LOSAT, from one owner
+  of the run's query Bioseqs (`report::query_bioseq`) that the tables and the organism report
+  read, for every sequence with the id of a query in BLASTP, BLASTN, BLASTX, TBLASTN, TBLASTX
+  and a psiblast call that makes no PSSM (PD-LOSAT-DATABASE-SEARCH): the query's ids,
+  `stitle` `N/A`, the query's length as `slen`, no taxonomy, and the query's line in the organism
+  report. The fields and formats that read the found Bioseq's letters keep the refusal.
 - makeblastdb `-mask_data` (version 1.52, 2026-11-18, line NP item M4a-1c, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07): a string of a binary mask file whose
   length passes the end of the file and is 1 GiB to 2^47 bytes. NCBI's reader reserves the
@@ -5031,7 +5170,7 @@ and their values of a nearby input are deterministic).
     `the_longest_intron_of_a_translated_search_follows_ncbis_branches`
     (`LOSAT/src/core/link_hsps_tests.rs`).
 
-## Approved exception 35 (`blastdbcheck` alias count checks and `-ends` OID arithmetic past signed overflow, version 1.121)
+## Approved exception 35 (`blastdbcheck` alias count checks and `-ends` OID arithmetic past signed overflow, version 1.122)
 
 Decided by the Owner on 2026-11-25 at 17:54 JST, 「Q-3C2-STALE=B Q-D2b-OV=A Q-KB9A-SPEED=A Q-AGVI-CAP2=A
 Q-AGVI-MODEL=A Q-CITE-ALL=B」 (`qbatch-20261125/ANSWERS.md` 2; `remaining-gaps-20261112/DECISIONS.md` OQ-1125).
@@ -5039,7 +5178,7 @@ The chosen option A reads 「A: 広い型で正確に計算し誤判定を出さ
 NCBI's signed wraparound; (C) refusing overflowing inputs.
 
 35. **`blastdbcheck` alias count checks and `-ends` OID arithmetic past signed 32-bit or
-    64-bit overflow (Owner 2026-11-25 17:54 JST, Q-D2b-OV=A, version 1.121).** NCBI BLAST+ 2.17.0
+    64-bit overflow (Owner 2026-11-25 17:54 JST, Q-D2b-OV=A, version 1.122).** NCBI BLAST+ 2.17.0
     computes `blastdbcheck`'s alias-file count guards (`FIRST_OID`, `LAST_OID`, `MAXOID`, `NSEQ`,
     `LENGTH`, `OIDLIST` combinations in `blastdbcheck.cpp:782-805`) and `-ends` OID bounds
     (`blastdbcheck.cpp:666-682`) in signed 32-bit `int` and 64-bit `Int8`, where

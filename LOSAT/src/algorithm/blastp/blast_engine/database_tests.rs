@@ -1375,12 +1375,16 @@ fn excluded_lists_leave_marks_of_their_places() {
     let listed = ListedSubjects::x_list(&database, &mut lists, &mut [], true).unwrap();
     assert_eq!(listed.ordinals, [0, 1, 2]);
     assert_eq!(oids(&lists), [vec![0, 1], vec![2]]);
-    let mark = |query, position, best_evalue| FetchExcludedMatch {
+    let mark = |query, position, ordinal, best_evalue| FetchExcludedMatch {
         query,
         position,
+        ordinal,
         best_evalue,
     };
-    assert_eq!(listed.fetch_excluded, [mark(0, 2, 0.04), mark(2, 0, 1e-9)]);
+    assert_eq!(
+        listed.fetch_excluded,
+        [mark(0, 2, 3, 0.04), mark(2, 0, 3, 1e-9)]
+    );
     // An ungapped search fetches no subject (`fetched` false): sx_frag stays in both lists, with
     // no mark (it leaves at the Seq-aligns, `drop_unaligned`).
     let mut lists = make();

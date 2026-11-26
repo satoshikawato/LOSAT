@@ -16,10 +16,12 @@
 //! `-db`. Where the switch must not act (scoring options without Karlin-Altschul
 //! values; a negative `CHUNK_SIZE`; the debug output) the `[X_STATS]` line names why and the bytes
 //! are the same too. The tabular reports with a field list or a delimiter and outfmt 10 and 20 are
-//! streamed alike. Where LOSAT refuses a sequence that a later batch reports (a stored title,
-//! ambiguity data, a parsed Seq-id, a taxonomy record, a subject's id), the switch writes the
-//! reports of the batches before and then the same refusal (drop-in DECISIONS 44): those reports
-//! begin the reports of the same search not refused. That the bytes equal NCBI's is the business
+//! streamed alike. Where LOSAT refuses a tabular row whose lookup fails (a subject's id or a
+//! failed lookup), both paths write the reports of the batches before and then the refusal, as
+//! NCBI does; where LOSAT refuses another sequence that a later batch reports (a stored title,
+//! ambiguity data, a parsed Seq-id, a taxonomy record), the switch writes the reports of the
+//! batches before and then the same refusal (drop-in DECISIONS 44): those reports begin the
+//! reports of the same search not refused. That the bytes equal NCBI's is the business
 //! of the blastn fixtures.
 
 use std::path::{Path, PathBuf};
@@ -304,11 +306,13 @@ fn same_two(
     (off, numbers)
 }
 
-/// A search that LOSAT refuses in a batch after the first (drop-in DECISIONS 44): without the
-/// switch the refusal comes before every report; with it (and with `LOSAT_X_STATS`, the counters'
-/// line taken out) after the reports of the batches before, with the same exit status and
-/// standard error ending as without it (the batches' query warnings may come first). Returns the
-/// off run, the run with the switch and its counters (the switch acts: `none`).
+/// A search that LOSAT refuses in a batch after the first (drop-in DECISIONS 44: stored title,
+/// ambiguity data, prefetch, parsed Seq-id, taxonomy record; tabular-id and failed-lookup refusals
+/// write the reports of the batches before in both paths): without the switch the refusal comes
+/// before every report; with it (and with `LOSAT_X_STATS`, the counters' line taken out) after the
+/// reports of the batches before, with the same exit status and standard error ending as without
+/// it (the batches' query warnings may come first). Returns the off run, the run with the switch
+/// and its counters (the switch acts: `none`).
 fn refused_late(
     what: &str,
     args: &[&str],
@@ -1185,9 +1189,9 @@ fn subjects_late(dir: &TempDir, name: &str, title: &[u8]) -> PathBuf {
 }
 
 /// A subject whose tabular id LOSAT refuses (`Subject_` and a byte in no encoding NCBI
-/// recognises), which a later batch reaches: without the switch the refusal comes before every
-/// report, with it after the rows of the batches before (drop-in DECISIONS 44), the rows of the
-/// same search with the subject titled otherwise. `outfmt` names the format.
+/// recognises), which a later batch reaches: both paths (without the switch and with it) write the
+/// rows of the batches before and then the refusal, as NCBI does, the rows of the same search with
+/// the subject titled otherwise. `outfmt` names the format.
 fn a_refused_subject_id_comes_after_the_batches_before(dir: &TempDir, query: &Path, outfmt: &str) {
     let refused = subjects_late(dir, "refused.fa", b"Subject_\x81 undecodable");
     let titled = subjects_late(dir, "titled.fa", b"LC738874part second");
@@ -1202,13 +1206,14 @@ fn a_refused_subject_id_comes_after_the_batches_before(dir: &TempDir, query: &Pa
         outfmt,
     ];
     let what = format!("Subject_ id, outfmt {outfmt}");
-    let (off, on, _) = refused_late(&what, &args, 4, &[]);
+    let (off, (_, reason)) = same_two(&what, &args, 4, &[], None);
+    assert_ne!(off.status, Some(0), "{what}: the refusal");
+    assert_eq!(reason, "none", "{what}: the switch acts");
     assert!(
         String::from_utf8_lossy(&off.stderr).contains("'Subject_'"),
         "{what}: {}",
         String::from_utf8_lossy(&off.stderr)
     );
-    assert!(off.report.is_empty(), "{what}: off, no row");
     // Outfmt 0 and 17 show the subject (and stream, with the off bytes).
     for (outfmt, threads) in [("0", 1), ("17", 4)].into_iter().filter(|_| outfmt == "6") {
         let mut shown = args;
@@ -1221,7 +1226,27 @@ fn a_refused_subject_id_comes_after_the_batches_before(dir: &TempDir, query: &Pa
     args[5] = titled.to_str().unwrap();
     let (reference, (_, reason)) = same_two(&what, &args, 4, &[], None);
     assert!(reference.status == Some(0) && reason == "none", "{what}");
-    reports_before(&what, &off, &on, &reference.report, &reference.stderr, None);
+    assert!(
+        !off.report.is_empty()
+            && off.report.len() < reference.report.len()
+            && reference.report.starts_with(&off.report),
+        "{what}: the reports of the batches before\n{}\n{}",
+        String::from_utf8_lossy(&off.report),
+        String::from_utf8_lossy(&reference.report)
+    );
+    let before_refusal = match off.stderr.strip_suffix(b"\n") {
+        Some(body) => match body.iter().rposition(|&byte| byte == b'\n') {
+            Some(pos) => &off.stderr[..=pos],
+            None => b"",
+        },
+        None => b"",
+    };
+    assert!(
+        reference.stderr.starts_with(before_refusal),
+        "{what}: the warnings of the batches before\n{}\n{}",
+        String::from_utf8_lossy(before_refusal),
+        String::from_utf8_lossy(&reference.stderr)
+    );
 }
 
 /// Where the switch must not act, it does not, and the bytes are the off path's: scoring options
@@ -1328,10 +1353,11 @@ fn where_the_switch_must_not_act_the_counters_name_why() {
 /// database, whose formatter warns for each query without `taxdb.bti`), with `-parse_deflines`,
 /// with `-db` (`stitle`, `sseq`, `staxids`, `sall*` and the names: the definition lines as the
 /// report decodes them, the taxonomy database's lookups and their texts), and on NCBI's errors in
-/// the first batch, where outfmt 20's line of the field names comes as without the switch. Where a
-/// later batch's report is refused (a subject's id, a stored title, a header or taxonomy record of
-/// a database with parsed Seq-ids) the refusal comes after the rows of the batches before
-/// (drop-in DECISIONS 44).
+/// the first batch, where outfmt 20's line of the field names comes as without the switch. A
+/// subject's tabular-id refusal in a later batch comes after the rows of the batches before in
+/// both paths; where a later batch's report is refused otherwise (a stored title, a header or
+/// taxonomy record of a database with parsed Seq-ids) the refusal comes after the rows of the
+/// batches before with the switch (drop-in DECISIONS 44).
 #[test]
 fn custom_tabular_reports_give_the_off_bytes() {
     let dir = TempDir::new("custom");

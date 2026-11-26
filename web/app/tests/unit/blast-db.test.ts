@@ -4,15 +4,25 @@ import type { EngineRunRequest } from 'losat/ports';
 import { Coordinator } from '../../src/application/coordinator';
 import { holdsInputs, SearchDraft } from '../../src/application/draft';
 import { ResultsBrowser } from '../../src/application/results';
+import { WINDOW_MASKER_FLAG, WINDOW_MASKER_TAXID_FLAG } from 'losat/domain';
 import {
   assembleSearchDirectory,
   databaseTaxonomy,
+  DB_HARD_MASK_FLAG,
+  DB_SOFT_MASK_FLAG,
+  dbMaskMissingMessage,
+  dbMaskPlaceholder,
+  dbMaskState,
   discoverBlastDatabaseNames,
   discoverBlastDatabases,
   duplicateRunFileMessage,
   FILTERING_DB_FLAG,
+  isWindowMaskerTaxidActive,
   matchingDatabases,
+  NO_TAXID_EXPANSION_FLAG,
+  NO_TAXID_EXPANSION_WM_CONFLICT,
   noMatchingDatabaseMessage,
+  noTaxidExpansionConflicts,
   normalizeRunPath,
   parseAliasMetadata,
   pickedFilePath,
@@ -231,6 +241,45 @@ describe('blast-db domain discovery & directory assembly', () => {
       'mydb',
     );
   });
+
+  it('resolves database masking state, placeholders, and -no_taxid_expansion conflicts (WW4)', () => {
+    expect(dbMaskState({})).toEqual({ mode: 'none', value: '' });
+    expect(dbMaskState({ [DB_SOFT_MASK_FLAG]: true })).toEqual({ mode: 'soft', flag: DB_SOFT_MASK_FLAG, value: '' });
+    expect(dbMaskState({ [DB_SOFT_MASK_FLAG]: '' })).toEqual({ mode: 'soft', flag: DB_SOFT_MASK_FLAG, value: '' });
+    expect(dbMaskState({ [DB_SOFT_MASK_FLAG]: ' ' })).toEqual({ mode: 'soft', flag: DB_SOFT_MASK_FLAG, value: ' ' });
+    expect(dbMaskState({ [DB_SOFT_MASK_FLAG]: '11' })).toEqual({ mode: 'soft', flag: DB_SOFT_MASK_FLAG, value: '11' });
+    expect(dbMaskState({ [DB_HARD_MASK_FLAG]: 'seg' })).toEqual({ mode: 'hard', flag: DB_HARD_MASK_FLAG, value: 'seg' });
+    // Soft takes precedence if both were somehow present (matching NCBI DbMaskArgs::option).
+    expect(dbMaskState({ [DB_SOFT_MASK_FLAG]: 'dust', [DB_HARD_MASK_FLAG]: '11' })).toEqual({
+      mode: 'soft',
+      flag: DB_SOFT_MASK_FLAG,
+      value: 'dust',
+    });
+    expect(dbMaskPlaceholder('nucleotide')).toBe('11 or dust');
+    expect(dbMaskPlaceholder('protein')).toBe('21 or seg');
+    expect(dbMaskMissingMessage('soft')).toBe('Enter a database soft mask algorithm ID or name.');
+    expect(dbMaskMissingMessage('hard')).toBe('Enter a database hard mask algorithm ID or name.');
+
+    expect(isWindowMaskerTaxidActive('blastn', {})).toBe(false);
+    expect(isWindowMaskerTaxidActive('blastn', { [WINDOW_MASKER_TAXID_FLAG]: true })).toBe(true);
+    expect(isWindowMaskerTaxidActive('blastn', { [WINDOW_MASKER_TAXID_FLAG]: '562' })).toBe(true);
+    expect(isWindowMaskerTaxidActive('blastn', { [WINDOW_MASKER_FLAG]: 'counts.obinary' })).toBe(false);
+    expect(isWindowMaskerTaxidActive('blastp', { [WINDOW_MASKER_TAXID_FLAG]: '562' })).toBe(false);
+
+    expect(
+      noTaxidExpansionConflicts({ program: 'blastn', values: { [WINDOW_MASKER_TAXID_FLAG]: '562' }, filterFiles: {} }),
+    ).toEqual([WINDOW_MASKER_TAXID_FLAG]);
+    expect(
+      noTaxidExpansionConflicts({ program: 'blastp', values: { [WINDOW_MASKER_TAXID_FLAG]: '562' }, filterFiles: {} }),
+    ).toEqual([]);
+    expect(
+      noTaxidExpansionConflicts({
+        program: 'blastn',
+        values: {},
+        filterFiles: { '-seqidlist': diskFile('s.txt', '1'), '-taxidlist': diskFile('t.txt', '9606'), '-ipglist': diskFile('i.txt', '1') },
+      }),
+    ).toEqual(['-seqidlist']);
+  });
 });
 
 describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db', () => {
@@ -278,7 +327,7 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
       runs: coordinator.state,
       verification: { ncbi: '2.17.0', sources: [], programs: {} },
     });
-    return { draft, coordinator, results, runCalls };
+    return { draft, coordinator, results, runCalls, engine };
   }
 
   async function waitCompleted(coordinator: Coordinator, runId: string): Promise<void> {
@@ -560,5 +609,180 @@ describe('SearchDraft, Coordinator & ResultsBrowser with -db and -filtering_db',
     expect(table.subjectLength[0]).toBe(12345);
     expect(approvedExceptions('tblastx', ['tblastx', '-query', 'q.fa', '-subject', 's.fa', '-db_gencode', '4'])).toHaveLength(1);
     expect(approvedExceptions('tblastx', ['tblastx', '-query', 'q.fa', '-db', 'mydb/nt', '-db_gencode', '4'])).toEqual([]);
+  });
+
+  it('wires -db_soft_mask and -db_hard_mask exclusively and preserves algorithm across mode switch (WW4)', async () => {
+    const { draft, coordinator, runCalls } = setup();
+    const maskPair = () => {
+      const fv = draft.state.get().database.filterValues;
+      return [fv[DB_SOFT_MASK_FLAG], fv[DB_HARD_MASK_FLAG]] as const;
+    };
+    pasteQuery(draft);
+    await pickNucDb(draft);
+    await draft.idle();
+    expectReady(draft);
+
+    // Turning on soft mask without an algorithm blocks run until filled.
+    const expectSoftMissing = () => expect(draft.readiness()).toBe(dbMaskMissingMessage('soft'));
+    draft.setDatabaseMask('soft');
+    await draft.idle();
+    expect(maskPair()).toEqual(['', undefined]);
+    expectSoftMissing();
+
+    // Typing a leading space keeps the raw text in the draft while still blocking run and omitting argv.
+    draft.setDatabaseMaskAlgorithm(' ');
+    await draft.idle();
+    expect(maskPair()).toEqual([' ', undefined]);
+    expect(dbMaskState(draft.state.get().database.filterValues).value).toBe(' ');
+    expectSoftMissing();
+    expect(draft.parameters().some(([flag]) => flag === DB_SOFT_MASK_FLAG)).toBe(false);
+
+    draft.setDatabaseMaskAlgorithm(' 11 ');
+    await draft.idle();
+    expectReady(draft);
+    expect(maskPair()).toEqual([' 11 ', undefined]);
+    expect(draft.parameters()).toContainEqual([DB_SOFT_MASK_FLAG, '11']);
+
+    // Switching to hard mask moves the value and removes -db_soft_mask.
+    draft.setDatabaseMask('hard');
+    await draft.idle();
+    expectReady(draft);
+    expect(maskPair()).toEqual([undefined, ' 11 ']);
+
+    // Submitting passes -db_hard_mask 11 (trimmed) in argv and never -db_soft_mask.
+    const runSearch = () => submitAndWait(draft, coordinator);
+    await runSearch();
+    expect(runCalls[0]!.argv).toContain(DB_HARD_MASK_FLAG);
+    expect(runCalls[0]!.argv).toContain('11');
+    expect(runCalls[0]!.argv).not.toContain(' 11 ');
+    expect(runCalls[0]!.argv).not.toContain(DB_SOFT_MASK_FLAG);
+
+    // Switching to FASTA mode omits DB masking flags from argv while keeping draft values.
+    draft.setSubjectSource('fasta');
+    pasteSubject(draft);
+    await draft.idle();
+    expectReady(draft);
+    await runSearch();
+    expect(runCalls[1]!.argv).not.toContain(DB_HARD_MASK_FLAG);
+    expect(runCalls[1]!.argv).not.toContain(DB_SOFT_MASK_FLAG);
+
+    // Returning to database mode restores -db_hard_mask; setting mode 'none' clears both.
+    draft.setSubjectSource('database');
+    draft.setDatabaseMask('none');
+    await draft.idle();
+    expectReady(draft);
+    expect(maskPair()).toEqual([undefined, undefined]);
+  });
+
+  it('handles BLASTN -db with -window_masker_db + -no_taxid_expansion and blocks -window_masker_taxid + -no_taxid_expansion (WW4)', async () => {
+    const ctx = setup();
+    const { draft, coordinator } = ctx;
+    const setNoExp = (on: boolean) => draft.setDatabaseFilter(NO_TAXID_EXPANSION_FLAG, on);
+    pasteQuery(draft);
+    await pickNucDb(draft);
+    setNoExp(true);
+    await draft.idle();
+    expectReady(draft);
+
+    // Compatible: -window_masker_db (file) + -no_taxid_expansion with -db.
+    draft.setFile(WINDOW_MASKER_FLAG, diskFile('mg1655_u9.obinary', 'WM'));
+    await draft.idle();
+    expectReady(draft);
+    await submitAndWait(draft, coordinator);
+    expect(ctx.runCalls[0]!.argv.slice(3)).toEqual([
+      '-db',
+      'nucdb/nt',
+      '-window_masker_db',
+      'mg1655_u9.obinary',
+      '-no_taxid_expansion',
+    ]);
+    expect(ctx.runCalls[0]!.windowMasker?.name).toBe('mg1655_u9.obinary');
+
+    // Incompatible: -window_masker_taxid + -no_taxid_expansion in -db mode.
+    draft.setFile(WINDOW_MASKER_FLAG, undefined);
+    draft.setField(WINDOW_MASKER_TAXID_FLAG, '562');
+    await draft.idle();
+    expect(draft.readiness()).toBe(NO_TAXID_EXPANSION_WM_CONFLICT);
+
+    // Clearing -no_taxid_expansion restores the normal WindowMasker taxid readiness check.
+    setNoExp(false);
+    await draft.idle();
+    expect(draft.readiness()).toBe('Download the counts for 562.');
+  });
+
+  it('lets engine validation refusal take precedence over missing counts when -window_masker_taxid conflicts with -no_taxid_expansion (WW4)', async () => {
+    const { draft, engine } = setup();
+    // Simulate a real-engine incompatibility refusal from validate().
+    const origValidate = engine.validate.bind(engine);
+    engine.validate = async (argv) => {
+      if (argv.includes(WINDOW_MASKER_TAXID_FLAG) && argv.includes(NO_TAXID_EXPANSION_FLAG)) {
+        return {
+          ok: false,
+          message: 'Error: Argument "window_masker_taxid". Incompatible with argument:  \'no_taxid_expansion\'',
+        };
+      }
+      return origValidate(argv);
+    };
+    pasteQuery(draft);
+    await pickNucDb(draft);
+    draft.setField(WINDOW_MASKER_TAXID_FLAG, '9606');
+    draft.setDatabaseFilter(NO_TAXID_EXPANSION_FLAG, true);
+    await draft.idle();
+    const validation = draft.state.get().validation;
+    expect(validation.state).toBe('invalid');
+    if (validation.state === 'invalid') {
+      expect(validation.message).toContain("Incompatible with argument:  'no_taxid_expansion'");
+    }
+    // readiness() does not hijack the engine refusal with "Download the counts for 562."
+    expect(draft.readiness()).toBeUndefined();
+    const submitted = await draft.submit();
+    expect(submitted.ok).toBe(false);
+    if (!submitted.ok) {
+      expect(submitted.message).toContain("Incompatible with argument:  'no_taxid_expansion'");
+    }
+    expect(draft.state.get().message?.text).toContain("Incompatible with argument:  'no_taxid_expansion'");
+  });
+
+  it('pins explicit argv order of all database filter text, boolean, and list-file flags in parameters() (WW4)', async () => {
+    const { draft } = setup();
+    draft.setProgram('blastp');
+    draft.setSubjectSource('database');
+    await draft.setSubjectDatabaseFiles([fileWithRelPath('protdb/p.pin', 'pin')]);
+    for (const [flag, val] of [
+      ['-taxids', '9606'],
+      ['-negative_taxids', '10090'],
+      [NO_TAXID_EXPANSION_FLAG, true],
+    ] as const) {
+      draft.setDatabaseFilter(flag, val);
+    }
+    draft.setDatabaseMask('soft', '21');
+    for (const [flag, name] of [
+      ['-negative_ipglist', 'neg_ipg.txt'],
+      ['-ipglist', 'ipg.txt'],
+      ['-negative_gilist', 'neg_gi.txt'],
+      ['-gilist', 'gi.txt'],
+      ['-negative_taxidlist', 'neg_tax.txt'],
+      ['-taxidlist', 'tax.txt'],
+      ['-negative_seqidlist', 'neg_seq.txt'],
+      ['-seqidlist', 'seq.txt'],
+    ] as const) {
+      draft.setDatabaseFilterFile(flag, diskFile(name, `${name}\n`));
+    }
+    await draft.idle();
+
+    expect(draft.parameters()).toEqual([
+      ['-taxids', '9606'],
+      ['-negative_taxids', '10090'],
+      ['-db_soft_mask', '21'],
+      ['-no_taxid_expansion', true],
+      ['-seqidlist', 'seq.txt'],
+      ['-negative_seqidlist', 'neg_seq.txt'],
+      ['-taxidlist', 'tax.txt'],
+      ['-negative_taxidlist', 'neg_tax.txt'],
+      ['-gilist', 'gi.txt'],
+      ['-negative_gilist', 'neg_gi.txt'],
+      ['-ipglist', 'ipg.txt'],
+      ['-negative_ipglist', 'neg_ipg.txt'],
+    ]);
   });
 });

@@ -67,6 +67,22 @@ describe('searchFormModel', () => {
     expect(tblastxModel.queryGencodes).toEqual(toProgramDescription(DESCRIBE.tblastx).queryGencodes);
     expect(tblastxModel.subjectGencodes).toEqual(toProgramDescription(DESCRIBE.tblastx).subjectGencodes);
   });
+
+  it('tracks -no_taxid_expansion only in BLAST database mode and clears it via clearNoTaxidExpansion (WW4)', async () => {
+    const draft = makeDraft();
+    const isNoExpActive = () => searchFormModel(draft, draft.state.get()).noTaxidExpansionActive;
+    await vi.waitFor(() => expect(draft.state.get().description).toBeDefined());
+    draft.setDatabaseFilter('-no_taxid_expansion', true);
+    // In FASTA subject mode, -no_taxid_expansion is not active.
+    expect(isNoExpActive()).toBe(false);
+
+    // In database mode, it becomes active and can be cleared via the FormModel action.
+    draft.setSubjectSource('database');
+    const activeModel = searchFormModel(draft, draft.state.get());
+    expect(activeModel.noTaxidExpansionActive).toBe(true);
+    activeModel.clearNoTaxidExpansion?.();
+    expect(isNoExpActive()).toBe(false);
+  });
 });
 
 describe('FormModel boolean select and tool-shaped models', () => {

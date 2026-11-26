@@ -1,0 +1,63 @@
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	1.96e-121	418
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	1.56e-98	341
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	2.21e-89	239
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	2.21e-89	93.2
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	2.53e-87	175
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	2.53e-87	150
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	6.52e-79	158
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	6.52e-79	127
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	6.52e-79	30.4
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	9.30e-44	124
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	9.30e-44	55.6
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	0.97	17.1
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	0.97	17.1
+q0	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	6.5	14.4
+q0	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	0.84	16.2
+q0	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	0.84	16.2
+q0	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	1.8	16.2
+q0	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	0.97	17.1
+q0	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	1.8	16.2
+q0	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	4.7	14.8
+q1	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	2.49e-112	387
+q1	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	3.19e-107	370
+q1	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	1.12e-92	245
+q1	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	1.12e-92	98.2
+q1	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	2.50e-80	281
+q1	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	6.36e-73	203
+q1	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	6.36e-73	73.9
+q1	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	1.58e-68	208
+q1	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	1.58e-68	54.2
+q1	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	0.51	18.0
+q1	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	0.27	18.0
+q1	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	0.27	16.2
+q1	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	0.27	14.4
+q1	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	1.8	16.2
+q1	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	9.0	13.9
+q1	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	1.8	16.2
+q1	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	1.8	16.2
+q2	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	0.19	18.0
+q2	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	0.19	17.1
+q2	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	4.7	14.8
+q2	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	6.5	14.4
+q2	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	0.27	18.9
+q2	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	0.37	18.5
+q2	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	1.8	16.2
+q2	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	4.7	14.8
+q3	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	2.30e-115	397
+q3	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	6.02e-99	343
+q3	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	5.56e-90	313
+q3	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	1.31e-88	161
+q3	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	1.31e-88	155
+q3	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	1.31e-88	31.8
+q3	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	1.75e-76	210
+q3	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	1.75e-76	79.0
+q3	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	3.00e-36	81.7
+q3	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	3.00e-36	73.0
+q3	ref|NP_000006.1|	Unknown;ref|NP_000006.1|	0	0;0	NP_000006	NP_000006.1	delta1	delta1<>delta2	10090	9606;10090	Homo sapiens;Mus musculus	0.077	20.8
+q3	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	0.97	17.1
+q3	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	2.2	15.7
+q3	ref|NP_000001.1|	ref|NP_000001.1|	0	0	NP_000001	NP_000001.1	alpha	alpha	9606	9606	Homo sapiens	2.2	14.8
+q3	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	1.8	16.2
+q3	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	2.5	15.7
+q3	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	6.5	14.4
+q3	ref|NP_000002.1|	ref|NP_000002.1|;Unknown	0	0;0	NP_000002	NP_000002.1	beta1	beta1<>beta2	9606	9606	Homo sapiens	8.9	13.9

@@ -26,6 +26,50 @@ pub struct PreliminaryHsp {
     pub s_gapped_start: i32,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1464-1537,2857-3035
+impl crate::core::blast_hits::ChunkMergeHsp for PreliminaryHsp {
+    fn merge_context(&self) -> i32 {
+        self.context as i32
+    }
+    fn merge_subject_frame(&self) -> i32 {
+        0
+    }
+    fn merge_q_start(&self) -> i32 {
+        self.q_start
+    }
+    fn merge_q_end(&self) -> i32 {
+        self.q_end
+    }
+    fn merge_s_start(&self) -> i32 {
+        self.s_start
+    }
+    fn merge_s_end(&self) -> i32 {
+        self.s_end
+    }
+    fn merge_score(&self) -> i32 {
+        self.score
+    }
+    fn merge_q_gapped_start(&self) -> i32 {
+        self.q_gapped_start
+    }
+    fn merge_s_gapped_start(&self) -> i32 {
+        self.s_gapped_start
+    }
+    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32) {
+        self.q_start = q_start;
+        self.q_end = q_end;
+        self.s_start = s_start;
+        self.s_end = s_end;
+    }
+    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32) {
+        self.q_gapped_start = q_gapped_start;
+        self.s_gapped_start = s_gapped_start;
+    }
+    fn set_merge_score(&mut self, score: i32) {
+        self.score = score;
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_itree.c:212-226
 fn tree_hsp(h: &PreliminaryHsp, batch: &PreparedQueryBatch) -> TreeHsp {
     let strand_context = h.context / 6 * 6 + if h.context % 6 < 3 { 0 } else { 3 };

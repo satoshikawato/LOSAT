@@ -1,0 +1,114 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_mol/s_sp_nucx_bn.fa).
+           1 sequences; 300 total letters
+
+
+
+Query= bnq query
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P99995.1 swissprot subject (nucleotide letters with E F L P Q I)      495     6e-145
+
+
+>P99995.1 swissprot subject (nucleotide letters with E F L P Q I)
+Length=300
+
+ Score = 495 bits (548),  Expect = 6e-145
+ Identities = 287/300 (96%), Gaps = 0/300 (0%)
+ Strand=Plus/Plus
+
+Query  1    TGTATATTCGGACTTGGCCTATCCACACAAGCGGTATTGAGGTGGAACGTTAGCGTTTGG  60
+            ||||||| |||||||||||||||||||||| |||||||||||||||||||||| ||||||
+Sbjct  1    TGTATATNCGGACTTGGCCTATCCACACAANCGGTATTGAGGTGGAACGTTAGNGTTTGG  60
+
+Query  61   TACTGTCGGCACGTACGCCTCGTGAGGCATACAACATTTTTCGTATCCGCGAGCATAAAT  120
+            |||||||||||||||| |||||||||||||||||||||| ||||||||||||||||||||
+Sbjct  61   TACTGTCGGCACGTACNCCTCGTGAGGCATACAACATTTNTCGTATCCGCGAGCATAAAT  120
+
+Query  121  GTTTCTAGCGTTTCCAGTTTTGACGGTACAtttttttttttttttttttttttttGCGGA  180
+            || |||||||||||||||||||||| |||||||||||||||||||||| |||||||||||
+Sbjct  121  GTNTCTAGCGTTTCCAGTTTTGACGNTACATTTTTTTTTTTTTTTTTTNTTTTTTGCGGA  180
+
+Query  181  TGATGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACTCGACGACCCTAGGATTTATA  240
+            ||||||||||| |||||||||||||||||||||| |||||||||||||||||||||| ||
+Sbjct  181  TGATGCAGCACNCTTCAGACCGGAAGCCGTCACGNCAACTCGACGACCCTAGGATTTNTA  240
+
+Query  241  TTGCACAGTTGGGGTCACACGCTGGGTGTAAGAGATATTCCGCGTGTCCCTGAACCTCTC  300
+            |||||||||||||||||||| |||||||||||||||||||||| ||||||||||||||||
+Sbjct  241  TTGCACAGTTGGGGTCACACNCTGGGTGTAAGAGATATTCCGCNTGTCCCTGAACCTCTC  300
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 83521
+
+
+Query= bnq2 second query
+
+Length=160
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+P99995.1 swissprot subject (nucleotide letters with E F L P Q I)      164     2e-45
+
+
+>P99995.1 swissprot subject (nucleotide letters with E F L P Q I)
+Length=300
+
+ Score = 164 bits (181),  Expect = 2e-45
+ Identities = 131/160 (82%), Gaps = 0/160 (0%)
+ Strand=Plus/Plus
+
+Query  1    TCGTATCCGCGAGCATAAATGTTTCTAGCGTTTCCAGTTTTGACTGTACATCTAACGACC  60
+            |||||||||||||||||||||| |||||||||||||||||||||  ||||| |       
+Sbjct  101  TCGTATCCGCGAGCATAAATGTNTCTAGCGTTTCCAGTTTTGACGNTACATTTTTTTTTT  160
+
+Query  61   GATCATGGGGCGGCAGCGGATGACGCAGCACTCTTCAGACCGGAAGCCGTCACGCCAACT  120
+              |  |         |||||||| ||||||| |||||||||||||||||||||| |||||
+Sbjct  161  TTTTTTTTNTTTTTTGCGGATGATGCAGCACNCTTCAGACCGGAAGCCGTCACGNCAACT  220
+
+Query  121  CGACGACCCCAGGATTTATATTGCACAGTTGGGGTCACAC  160
+            ||||||||| ||||||| ||||||||||||||||||||||
+Sbjct  221  CGACGACCCTAGGATTTNTATTGCACAGTTGGGGTCACAC  260
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 43500
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/pd_mol/s_sp_nucx_bn.fa).
+    Posted date:  Unknown
+  Number of letters in database: 300
+  Number of sequences in database:  1
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

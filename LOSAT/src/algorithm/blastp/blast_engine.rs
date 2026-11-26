@@ -9761,8 +9761,15 @@ fn ungapped_setup_failure(
             }));
         }
     }
-    // An ungapped search over a subject longer than NCBI's part length: LOSAT's refusal.
-    if args.ungapped && query_valid.iter().any(|valid| *valid) {
+    // An ungapped search over a subject longer than NCBI's part length: LOSAT's refusal
+    // (hard-masked databases split and merge long subjects via `db_masked::hard_chunks`).
+    if args.ungapped
+        && !args
+            .db_mask_resolved
+            .as_ref()
+            .is_some_and(|mask| mask.is_hard())
+        && query_valid.iter().any(|valid| *valid)
+    {
         let longest = match subject_source {
             BlastpSubjectSource::Fasta(records) => records
                 .iter()

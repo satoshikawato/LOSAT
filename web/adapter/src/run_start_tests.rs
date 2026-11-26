@@ -52,8 +52,8 @@ fn run_on(
     subject: &[u8],
 ) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
     let program = Program::parse(words[0]).unwrap();
-    let (query, _) = crate::store::register(words[0], 0, true, query).unwrap();
-    let (subject, _) = crate::store::register(words[0], 1, true, subject).unwrap();
+    let (query, _) = crate::store::register(words[0], 0, true, false, query).unwrap();
+    let (subject, _) = crate::store::register(words[0], 1, true, false, subject).unwrap();
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
     let result = crate::store::with_inputs(
         program,
@@ -85,7 +85,7 @@ fn run_db_of(words: &[&str]) -> (Result<(), String>, BTreeMap<u32, Vec<u8>>) {
         .find(|(program, _, _)| *program == words[0])
         .unwrap();
     let program = Program::parse(words[0]).unwrap();
-    let (query, _) = crate::store::register(words[0], 0, true, &input(query)).unwrap();
+    let (query, _) = crate::store::register(words[0], 0, true, false, &input(query)).unwrap();
     crate::emit::EMITTED.with(|emitted| emitted.borrow_mut().clear());
     let result = crate::store::with_inputs(
         program,

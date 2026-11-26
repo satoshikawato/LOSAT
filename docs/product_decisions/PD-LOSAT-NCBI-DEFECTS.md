@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.117
+- Version: 1.118
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -856,7 +856,19 @@
   re-splitting chunks apply only when every chunk holds a query; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.115 at the merge of dev that
   brought line RG item G1's 1.115; first 1.105, then 1.106, 1.107, 1.108, 1.113, 1.114 and 1.115);
-  1.117 2026-11-26 (the rule-2 explicit rejection of a stored definition-line title with a byte
+  1.117 2026-11-26 (all programs, command line and library API, line WQA item D23, Owner decision
+  `Q-D23=A` / `web-qa-20261119/DECISIONS.md` 49 of 2026-11-24: a `-logfile` naming an input file
+  read by the run — including `-query`, `-subject`, `.ncbirc` / `ncbi.ini`, `<program>.ini`,
+  `-conffile`, `-in`, `-ustat`, `-in_pssm`, `-in_msa`, `-gilist`, `-negative_gilist`, `-ipglist`,
+  `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist`, `-negative_taxidlist`,
+  `-window_masker_db`, `-window_masker_taxid` counts, `-import_search_strategy`, `-mask_data`,
+  `-taxid_map`, `-entry_batch`, `-ipg_batch`, `-ids`, `-exclude_ids`, `-i`, `rpsbproc` data files,
+  or a BLAST database alias, alias list, GI-mask, MegaBLAST index, or component file of `-db` /
+  `-filtering_db`, via relative paths, symlinks, hard links, or missing inputs that `-logfile`
+  would create — is refused before opening or creating the file, exit status 1, leaving existing
+  inputs unchanged, matching LOSAT Web's D19 rule; numbered after 1.116 at the merge of dev
+  f71a5cb85 that brought 1.116 (#1619); first 1.110, then 1.113, then 1.114, then 1.115, then 1.116);
+  1.118 2026-11-26 (the rule-2 explicit rejection of a stored definition-line title with a byte
   outside `' '` to `'~'`, of 1.10, narrowed to the cases that read the definition line outside
   a query batch's Seq-aligns: formats other than `-outfmt` 8, 9, 11 and 12, or 8, 9 and 12 with
   `PRE_FETCH_SEQS_LIMIT=2147483647`; `psiblast`, `rpsblast` and `rpstblastn` (except a query
@@ -868,8 +880,8 @@
   (including `psiblast`, `rpsblast` and `rpstblastn`), a query batch that ends at a header NCBI
   cannot read writes NCBI's `Error: (803.7)` messages for the titles read before it, then NCBI's
   error; line RG-KB item 9(b), Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; numbered after 1.116 at the merge of dev f71a5cb85; first 1.107,
-  then 1.113, then 1.114, then 1.115, then 1.116)
+  2026-09-29, restated 2026-10-07; numbered after 1.117 at the merge of dev 351661f13; first 1.107,
+  then 1.113, then 1.114, then 1.115, then 1.116, then 1.117)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1129,7 +1141,14 @@ Explicit rejections (rule 3):
 Kept as explicit rejections although NCBI's result is deterministic (rule 2's
 maintainer clause; decision D11): a query length plus `-window_size` above 2^31 - 1, where
 NCBI's `Int4` diagonal table wraps to one cell and no hit is found (BLASTP, TBLASTX;
-together with D8, every sum above 2^30 is rejected).
+together with D8, every sum above 2^30 is rejected); and (version 1.117, line WQA item D23,
+Owner decision `Q-D23=A` of 2026-11-24) a `-logfile` pointing to any input file read by the run
+(all programs, command line and library API, matching LOSAT Web's D19 rule): NCBI BLAST+ 2.17.0
+opens `-logfile` in append mode before loading configuration or reading inputs, which causes
+`tblastx -query q.fa -logfile q.fa` to read its own warnings back in an endless loop (growing
+`q.fa` to 10 GiB in 5 minutes in probe `s2-query`), corrupts `.ncbirc` on its second read
+(`s2-ncbirc-self`), and appends diagnostics into `-subject` and other inputs; LOSAT refuses any
+such `-logfile` before opening or creating the file (exit status 1, existing inputs unchanged).
 
 Reproduced as NCBI (rule 2): the out-of-range `double` to `Int4` conversions of
 `-threshold` and the X-drops (INT_MIN, decision D4); `-max_target_seqs` of 2147483624 or
@@ -4898,7 +4917,7 @@ Q-BM decodes it as NCBI does, as the Owner decided on 2026-11-16 (「推奨通�
   `bx.t3c.d.qid.f1`, `tx.t3c.d.qid.f1`): NCBI shows the query's title and letters for the
   id (its second lookup, by the display id, the query's title in that line).
 - A stored Seq-id with a byte outside ' ' to '~', and a stored title with such a byte in the
-  cases narrowed by version 1.117 (line RG-KB item 9(b), Owner-delegated: `psiblast`, `rpsblast`
+  cases narrowed by version 1.118 (line RG-KB item 9(b), Owner-delegated: `psiblast`, `rpsblast`
   and `rpstblastn`; a format other than `-outfmt` 8, 9, 11 and 12, or 8, 9 and 12 with
   `PRE_FETCH_SEQS_LIMIT=2147483647`; a search restricted by a seqid, GI or taxid list, an alias
   file with a list or an OID mask, or a volume with an OID mask type; a query batch whose headers

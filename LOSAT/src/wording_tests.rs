@@ -374,3 +374,114 @@ fn the_mapping_of_a_collapsed_message_is_the_collapsed_mapping() {
         );
     }
 }
+
+#[test]
+fn empty_message_exception_keeps_code_text() {
+    // Full windowmasker stderr (`k_falist_missing.err` / `k_emptyfile.err` / `k_ids_none.err`).
+    let ncbi_wm = concat!(
+        "computing the genome length\n",
+        "Error: (GenCountsException::empty genome) \n",
+        "Error: (106.16) Application's execution failed (GenCountsException::empty genome) \n",
+    );
+    let expected_wm = concat!(
+        "computing the genome length\n",
+        "Error: empty genome\n",
+        "Error: (106.16) Application's execution failed: empty genome\n",
+    );
+    assert_eq!(losat_text(ncbi_wm), expected_wm);
+    assert_eq!(losat_text(expected_wm), expected_wm);
+
+    // Trailing spaces before newline or EOF are trimmed when the message body is empty.
+    assert_eq!(
+        losat_text("Error: (GenCountsException::empty genome)   \n"),
+        "Error: empty genome\n"
+    );
+    let expected_bare = "Error: empty genome";
+    assert_eq!(
+        losat_text("Error: (GenCountsException::empty genome)   "),
+        expected_bare
+    );
+    assert_eq!(
+        losat_text("Error: (GenCountsException::empty genome)"),
+        expected_bare
+    );
+
+    // Inline glued empty-message exception, both with trailing space and at EOF.
+    let expected_glued = "Error: (106.16) Application's execution failed: empty genome";
+    assert_eq!(
+        losat_text(
+            "Error: (106.16) Application's execution failed (GenCountsException::empty genome) "
+        ),
+        expected_glued
+    );
+    assert_eq!(
+        losat_text(
+            "Error: (106.16) Application's execution failed (GenCountsException::empty genome)"
+        ),
+        expected_glued
+    );
+
+    // `NCBI C++ Exception:` with empty body: with `operator()`, with normal function, without
+    // function, glued to text before it, and with a second empty-message link in a chain.
+    let expected_empty_line = "Error: empty genome\n";
+    assert_eq!(
+        losat_text(
+            "Error: NCBI C++ Exception:\n    T0 \"f.cpp\", line 266: Error: (GenCountsException::empty genome) ncbi::CWinMaskCountsGenerator::operator()() - \n"
+        ),
+        expected_empty_line
+    );
+    assert_eq!(
+        losat_text(
+            "Error: NCBI C++ Exception:\n    T0 \"f.cpp\", line 10: Error: (Exception::open failed) ncbi::F::g() - \n"
+        ),
+        "Error: open failed\n"
+    );
+    assert_eq!(
+        losat_text(
+            "Error: NCBI C++ Exception:\n    T0 \"f.cpp\", line 10: Error: (GenCountsException::empty genome) \n"
+        ),
+        expected_empty_line
+    );
+    assert_eq!(
+        losat_text(
+            "Error: prefixNCBI C++ Exception:\n    T0 \"f.cpp\", line 10: Error: (GenCountsException::empty genome) \n"
+        ),
+        "Error: prefix: empty genome\n"
+    );
+    assert_eq!(
+        losat_text(
+            "Error: NCBI C++ Exception:\n    T0 \"a.cpp\", line 1: Error: (GenCountsException::empty genome) \n    T0 \"b.cpp\", line 2: Error: (Exception::open failed) \n"
+        ),
+        "Error: empty genome\n    open failed\n"
+    );
+
+    // Non-empty messages still strip `(<class>::<code>)` cleanly without keeping `<code>`.
+    assert_eq!(
+        losat_text("Error: (GenCountsException::empty genome) custom detail\n"),
+        "Error: custom detail\n"
+    );
+    assert_eq!(
+        losat_text(
+            "Error: (106.16) Application's execution failed (GenCountsException::empty genome) custom detail\n"
+        ),
+        "Error: (106.16) Application's execution failed: custom detail\n"
+    );
+
+    // `NcbiException::what()` and `report_default_ex()` keep `empty genome` when constructed with
+    // an empty message.
+    let exc = crate::ncbi_exception::NcbiException::new(
+        crate::ncbi_exception::ThrowSite {
+            file: "src/algo/winmask/win_mask_gen_counts.cpp",
+            line: 266,
+            kind: "GenCountsException::empty genome",
+            function: Some("ncbi::CWinMaskCountsGenerator::operator()"),
+        },
+        "",
+    );
+    assert_eq!(String::from_utf8(exc.what()).unwrap(), "empty genome\n");
+    assert_eq!(
+        String::from_utf8(exc.report_default_ex(106, 16, "Application's execution failed"))
+            .unwrap(),
+        "Error: empty genome\nError: (106.16) Application's execution failed: empty genome\n"
+    );
+}

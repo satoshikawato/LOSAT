@@ -1,7 +1,7 @@
 # Product Decision: CLI behaviour outside the search results
 
 - Decision ID: `PD-LOSAT-CLI-NONSEARCH-DIFFERENCES`
-- Version: 1.33 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
+- Version: 1.34 (pending: the Owner's review of exception 14 and of exception 12's prefixes, line NW2's pull request)
 - Date: 2026-10-02 (1.0); 1.1 the same day (exception 5, Session S07+++b); 1.2 the same day
   (the timing of a closed pipe, exceptions 3 and 5, Session S07+++b); 1.3 2026-10-03
   (exception 6, a standard output closed at the start, Session S08b); 1.4 2026-10-05 (NCBI
@@ -78,7 +78,10 @@
   1.33 2026-11-26 (`losat cleanup-blastdb-volumes.py` in the scope and in exception 14 for its
   `-version` line `cleanup-blastdb-volumes.py LOSAT 0.2.0` where NCBI prints `1.0`; line RG item
   D2c, RG DECISIONS D2c-1, D2c-2 and D2c-4; Owner-delegated, standing instruction 2026-09-29,
-  restated 2026-10-07)
+  restated 2026-10-07);
+  1.34 2026-11-26 (exception 12: when an exception's message is empty, keep `<code>` as the message
+  instead of leaving a blank error line, e.g. `GenCountsException::empty genome` -> `empty genome`;
+  line NW-EMP, Owner instruction of 2026-11-26)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++ (E2g), on the items
   that the BLASTN inventory (`docs/evidence/losat_web_e2g/INVENTORY.tsv`, moved to a release
   asset on 2026-10-23: [ARCHIVED.md](../evidence/losat_web_e2g/ARCHIVED.md); actions `S08` and
@@ -445,7 +448,9 @@ BLAST+.
      exception (`Error: (<class>::<code>) <message>`) drops the class and code, and inside a line
      (`Application's initialization failed (<class>::<code>) <message>`) they become `: `, as does a
      report glued to the text before it (NCBI's `<message>NCBI C++ Exception:` posts, which
-     read `<message>: <message>`);
+     read `<message>: <message>`); when an exception's message is empty (since version 1.34,
+     e.g. `GenCountsException::empty genome`), `<code>` is kept as the message so the error line is
+     not blank (`Error: empty genome`, `Application's execution failed: empty genome`);
      `(m_Pos = <n>)` reads `(position <n>)`;
    - LOSAT's refusals say `the option -logfile` where they said `the NCBI C++ Toolkit option
      -logfile`, and LOSAT Web's notices no longer call the running program BLAST+.

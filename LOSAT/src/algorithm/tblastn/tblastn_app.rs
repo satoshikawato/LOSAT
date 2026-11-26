@@ -1870,7 +1870,9 @@ fn search(
             )?;
         }
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
-        // The first batch fails after the outfmt 0 prolog (`formatter.PrintProlog()`).
+        // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:270-285
+        // The first batch fails after the outfmt 0 prolog (`formatter.PrintProlog()`), which
+        // names `PSITBLASTN` for a PSSM query (`-in_pssm`).
         write_first_batch_prologs(
             outputs,
             subject_path.map(|path| path.as_path()),
@@ -1878,7 +1880,7 @@ fn search(
             subject_letters,
             pairwise_database.as_ref(),
             args.tabular_taxdb.unwrap_or(false),
-            "TBLASTN",
+            pssm.as_ref().map_or("TBLASTN", |_| super::in_pssm::PROGRAM),
             resolved.html.as_deref(),
         )?;
     } else {

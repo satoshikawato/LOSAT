@@ -973,6 +973,8 @@ impl BlastpArgs {
             // 2.17.0 `-matrix BLOSUM45 -gapopen 15 -gapextend 2`: the engine's error,
             // line RG D3-1 review 4c `out_m/` m13-m15).
             matrix_name: &options.matrix_name,
+            gap_open: options.gap_open,
+            gap_extend: options.gap_extend,
             strategy: self.export_search_strategy.is_some(),
             database: self.db.is_some(),
             archive: self.archive.as_ref(),

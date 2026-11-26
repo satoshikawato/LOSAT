@@ -109,18 +109,21 @@ fn guess_format(bytes: &[u8]) -> PssmFileFormat {
     }
 }
 
-/// Who reads `-in_pssm`: the program that LOSAT's refusals name, the options' matrix, with
-/// which NCBI's PSSM engine computes the scores of a PSSM of frequency ratios only
-/// (`scores_from_freq_ratios`), and whether a search strategy's request holds the PSSM
-/// (`request`). psiblast reads with `PSIBLAST` (BLOSUM62: its `-in_pssm` refuses the other
-/// matrices, DECISIONS 11 of line PS); tblastn's PSI-TBLASTN with its own options
-/// (`algorithm::tblastn::in_pssm`, DECISIONS 35).
+/// Who reads `-in_pssm`: the program that LOSAT's refusals name, the options' matrix and gap costs
+/// (with which NCBI's PSSM engine computes the scores of a PSSM of frequency ratios only,
+/// `scores_from_freq_ratios`, and `PsiBlastAddAncillaryPssmData` fills its `rpsdbparams`,
+/// `with_computed_scores`), and whether a search strategy's request holds the PSSM (`request`).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PssmReader<'a> {
     /// The program of LOSAT's refusals (`PSIBLAST`, `TBLASTN`).
     pub(crate) program: &'static str,
     /// The options' matrix name (`opts.GetMatrixName()`).
     pub(crate) matrix_name: &'a str,
+    /// The options' gap costs (`opts.GetGapOpeningCost()`, `opts.GetGapExtensionCost()`), which
+    /// `PsiBlastAddAncillaryPssmData` writes into `params.rpsdbparams` of a PSSM whose scores the
+    /// constructor computes from frequency ratios only.
+    pub(crate) gap_open: i32,
+    pub(crate) gap_extend: i32,
     /// Whether the run writes a search strategy (`-export_search_strategy`) and searches a database
     /// (`-db`, not `-subject`): with both its request holds the PSSM (`super::pssm_request_written`),
     /// so the search keeps the PSSM as read (`PsiSearch::request`; only such a run pays for that
@@ -170,6 +173,8 @@ impl PssmReader<'static> {
     pub(crate) const PSIBLAST: Self = Self {
         program: "PSIBLAST",
         matrix_name: "BLOSUM62",
+        gap_open: 11,
+        gap_extend: 1,
         strategy: false,
         database: true,
         archive: None,
@@ -1129,7 +1134,13 @@ pub(crate) fn psi_search_and_object_of(
     }
     let mut pssm = pssm;
     if let Some(gapped) = computed {
-        with_computed_scores(&mut pssm, &search.pssm.rows, gapped);
+        with_computed_scores(
+            &mut pssm,
+            &search.pssm.rows,
+            gapped,
+            reader.gap_open,
+            reader.gap_extend,
+        );
     }
     let file = InPssmFile {
         object: pssm,
@@ -1190,36 +1201,30 @@ pub(crate) fn refuse_annot_defline(search: &PsiSearch, outfmt: i32, program: &st
     Ok(())
 }
 
-/// The scores of a PSSM of frequency ratios only, and the gapped values of its scaling:
-/// `PsiBlastComputePssmScores` runs the PSSM engine on the ratios (padded to 28 rows) of the
-/// query's letters as the search holds them (O as X), with the options' matrix (`reader`:
-/// BLOSUM62 for psiblast, which runs no other matrix with `-in_pssm`) and the gap costs 11/1 (the
-/// defaults of `CPsiBlastInputFreqRatios`), and keeps the scores and `lambda`, `kappa`, `h`; the
-/// ungapped values stay absent (`kbp_psi` then takes `kbp_std`'s, `PsiSearch::ungapped_karlin`).
-/// A matrix whose table has no 11/1 row stops the engine with NCBI's error (the inner `Err`,
-/// `CBlastException` "BLAST engine error" when the search is made); a matrix NCBI does not know
-/// is the options' error that follows the reading (`validate_protein_options`).
+/// The scores and gapped Karlin-Altschul block that `CPsiBlastImpl`'s constructor computes for a
+/// PSSM of frequency ratios only (`PsiBlastComputePssmScores`): NCBI's PSSM engine on the
+/// query's letters as the search holds them (O as X), with the options' matrix (`reader`) and the
+/// gap costs 11/1 (the defaults of `CPsiBlastInputFreqRatios`), and keeps the scores and
+/// `lambda`, `kappa`, `h`; the ungapped values stay absent (`kbp_psi` then takes `kbp_std`'s,
+/// `PsiSearch::ungapped_karlin`). A matrix whose table has no 11/1 row stops the engine with
+/// NCBI's first score-block error (`engine_score_block`: the ungapped invalid-query error for an
+/// all-X query, otherwise the gap-costs error; `CBlastException` "BLAST engine error" when the
+/// search is made); a matrix NCBI does not know or IDENTITY is the options' error that follows the
+/// reading (`validate_protein_options`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:466-485
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/pssm_engine.cpp:521-578
 fn scores_from_freq_ratios(
     letters: &[u8],
     freq_ratios: &[[f64; BLASTAA_SIZE]],
     reader: PssmReader<'_>,
 ) -> Result<std::result::Result<(Vec<[i32; BLASTAA_SIZE]>, crate::core::psi::KarlinBlk), String>> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:979-985
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3531-3561
-    // The engine's score block takes the matrix with the gap costs 11/1.
-    let matrix_name = reader.matrix_name.to_ascii_uppercase();
-    let Ok(matrix) = matrix_name.parse::<crate::config::ScoringMatrix>() else {
-        return Ok(Err(format!("{matrix_name} is not a supported matrix")));
-    };
-    if crate::stats::protein_options::karlin_blk_gapped_load_from_tables(11, 1, &matrix_name, false)
-        .is_err()
-    {
-        return Ok(Err(format!(
-            "Gap existence and extension values of 11 and 1 not supported for {matrix_name}"
-        )));
-    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:498-520
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2783-2790
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:3531-3562
+    // The engine's score block takes the options' matrix with the gap costs 11/1
+    // (`IPssmInput_Base::GetGapExistence/GetGapExtension`), computing ungapped parameters before
+    // gapped ones (`engine_score_block`).
     let query: Vec<u8> = letters
         .iter()
         .map(
@@ -1229,20 +1234,18 @@ fn scores_from_freq_ratios(
             },
         )
         .collect();
-    let spec = crate::config::ProteinScoringSpec {
-        matrix,
-        gap_open: 11,
-        gap_extend: 1,
+    let sbp = match engine_score_block(reader.matrix_name, 11, 1, &query)? {
+        Ok((_, Some(sbp))) => sbp,
+        // IDENTITY has no frequency ratios; psiblast and tblastn -in_pssm refuse it in
+        // `validate_protein_options` after reading the PSSM.
+        Ok((matrix, None)) => {
+            return Ok(Err(format!(
+                "{} is not a supported matrix",
+                matrix.ncbi_name()
+            )));
+        }
+        Err(message) => return Ok(Err(message)),
     };
-    let gapped = crate::stats::tables::lookup_protein_params(&spec);
-    let sbp = score_block(
-        spec.matrix,
-        crate::core::psi::KarlinBlk {
-            lambda: gapped.lambda,
-            k: gapped.k,
-            h: gapped.h,
-        },
-    )?;
     crate::core::psi::pssm_from_freq_ratios(&query, freq_ratios, &sbp)
         .map(Ok)
         .map_err(|_| {
@@ -1314,9 +1317,8 @@ impl InPssmFile {
 
 /// The scores and gapped values that `CPsiBlastImpl`'s constructor sets in a PSSM of frequency
 /// ratios only (`rows[position][residue]` and `gapped`, the PSSM engine's), with the frequency
-/// ratios padded to 28 rows when the file has fewer, and the gap costs of the search (BLOSUM62's
-/// 11 and 1: LOSAT's psiblast runs no other, `scores_from_freq_ratios`) in its
-/// parameters.
+/// ratios padded to 28 rows when the file has fewer, and the gap costs of the search
+/// (`opts.GetGapOpeningCost()`, `opts.GetGapExtensionCost()`) in its parameters.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:486-503
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/psiblast_aux_priv.cpp:440-463
@@ -1330,6 +1332,8 @@ pub(crate) fn with_computed_scores(
     pssm: &mut PssmWithParameters,
     rows: &[[i32; BLASTAA_SIZE]],
     gapped: KarlinBlk,
+    gap_open: i32,
+    gap_extend: i32,
 ) {
     let matrix = &mut pssm.pssm;
     let rows_n = usize::try_from(matrix.num_rows).unwrap_or(0);
@@ -1371,8 +1375,8 @@ pub(crate) fn with_computed_scores(
         .as_mut()
         .and_then(|params| params.rpsdbparams.as_mut())
     {
-        rps.gap_open = Some(11);
-        rps.gap_extend = Some(1);
+        rps.gap_open = Some(gap_open);
+        rps.gap_extend = Some(gap_extend);
     }
 }
 

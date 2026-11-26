@@ -709,6 +709,8 @@ class PsiblastOptions(TypedDict, total=False):
     """Number of database sequences to show alignments for Default = `250'"""
     line_length: int
     """Line length for formatting alignments Not applicable for outfmt > 4 Default = `60'"""
+    html: bool
+    """Produce HTML output?"""
     sorthits: int
     """Sorting option for hits: alignment view options: 0 = Sort by evalue, 1 = Sort by bit
     score, 2 = Sort by total score, 3 = Sort by percent identity, 4 = Sort by query coverage Not

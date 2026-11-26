@@ -156,9 +156,8 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   (`LOSAT/src/api/mod.rs:78-86`) names what a call reads of its process, and these formatter settings are not among
   them; the library's host, LOSAT Web, runs `-html` with an empty environment and a run directory of the files that
   the argv names (`docs/web/abi_v2.md` §3), so no Web run has them.
-- `check_wasm_threading.py`: a few rows by id, every psiblast row and blastx's rows of outfmt 5 and 13 to 16; no row of
-  outfmt 0 to 4 or 18 (the `-html` rows) of the blast programs (rpsblast and rpstblastn have none there) and no psiblast
-  `-html` row (psiblast refuses `-html`).
+- `check_wasm_threading.py`: a few rows by id, every psiblast row (`psiblast.html.tsv` included) and blastx's rows of outfmt 5 and 13 to 16; no row of
+  outfmt 0 to 4 or 18 (the `-html` rows) of the other blast programs (rpsblast and rpstblastn have none there).
 - The Rust tests that read this directory read named program files (`blastp.tsv`, `psiblast.tsv`, `blastx.tsv`,
   `tblastn.tsv`, `tblastx.tsv`) and select their own rows, never a family file such as `<program>.html.tsv`;
   `check_manifest_sizes.py` checks the size of every file.

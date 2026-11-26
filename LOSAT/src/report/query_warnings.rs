@@ -466,8 +466,8 @@ pub enum ReportPlace {
 /// far (`x_pairwise_par::at_place`, or a writer's own marks).
 pub type ReportHook<'r, W> = &'r mut dyn FnMut(ReportPlace, &mut W) -> io::Result<()>;
 
-/// A [`ReportHook`] that writes nothing: of a writer without `-html` that reads no subject
-/// through it (psiblast's headings), and of the tests of the writers.
+/// A [`ReportHook`] that writes nothing, for the tests of the writers.
+#[cfg(test)]
 pub fn no_places<W>(_place: ReportPlace, _writer: &mut W) -> io::Result<()> {
     Ok(())
 }
@@ -1065,6 +1065,35 @@ pub(crate) fn write_html_post<R: Write + ?Sized>(
     write_after(report, posts, text)
 }
 
+/// The run's diagnostics (`posts`) as a writer that flushes the report written so far (`report`)
+/// before each write ([`write_html_post`]): the posts that a program writes to its diagnostics
+/// between the report's bytes without a writer's place for them (BLASTX's reads of a batch's
+/// titles and its prefetch, before the batch's reports), which NCBI posts to `cerr`, tied to
+/// `cout`: after the report written before, the prolog that `-html` keeps in `cout`'s buffer too
+/// (`pairwise::flushes_after_prolog`; review 1 of line DBID pf7, H2).
+pub(crate) struct PostsAfterReport<'w> {
+    report: &'w mut dyn Write,
+    posts: &'w mut dyn Write,
+}
+
+impl<'w> PostsAfterReport<'w> {
+    /// The diagnostics `posts` after the report `report`.
+    pub(crate) fn new(report: &'w mut dyn Write, posts: &'w mut dyn Write) -> Self {
+        Self { report, posts }
+    }
+}
+
+impl Write for PostsAfterReport<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        write_html_post(self.report, self.posts, buf)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.posts.flush()
+    }
+}
+
 impl Drop for QueryWarnings<'_> {
     /// The texts of the reads that the report did not place (a writer that stopped early, or a
     /// read no writer marks) are written when the warnings end, so that standard error keeps
@@ -1282,25 +1311,6 @@ impl<'a> QueryWarnings<'a> {
             }
         }
         Ok(())
-    }
-
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:756-772 (cited at
-    // `common::database::TaxdbPrinter::batch_texts`)
-    /// Lines that NCBI writes where it prefetches the batch whose first query's report comes next,
-    /// after the posts written before that report (`before_query`): the XML2 and JSON formats'
-    /// taxonomy texts of the batch's prefetch (`TaxdbPrinter::batch_texts`), after the report
-    /// written so far is flushed. Nothing where `lines` is empty.
-    pub(crate) fn prefetch_lines(
-        &mut self,
-        report: &mut dyn Write,
-        lines: Vec<u8>,
-    ) -> io::Result<()> {
-        if lines.is_empty() {
-            return Ok(());
-        }
-        report.flush()?;
-        Posts::of_lines(lines).write(&mut *self.sink, self.archive)?;
-        self.sink.flush()
     }
 }
 

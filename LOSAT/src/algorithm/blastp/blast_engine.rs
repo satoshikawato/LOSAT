@@ -2220,12 +2220,12 @@ impl BlastpReport {
     }
 
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
-    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7; with
+    /// reports (outfmt 0 to 7 and 13 to 18, 10 and 20 as 6 and 7; with
     /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, and psiblast's archive 11,
-    /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
-    /// messages of that prefetch go with the query warnings. The archive of the other
-    /// applications fetches nothing; XML2 and JSON write the messages at each `Hit`
-    /// (`TaxdbPrinter`).
+    /// `database::prefetches_subjects`): as the call's first
+    /// report, the posts of that prefetch go with the query warnings. The archive of the other
+    /// applications fetches nothing; the XML2 and JSON `Hit`s write only the texts of their own
+    /// lookups (`database::RowLookups::Taxids`).
     fn prefetches_subjects(self, app: BlastpApp) -> bool {
         crate::algorithm::common::database::prefetches_subjects(Some(self.prefetch_format(app)))
     }
@@ -6700,10 +6700,10 @@ fn search(
                         XBlockReport::Tabular | XBlockReport::Pairwise | XBlockReport::Xml
                     ) && database.is_some_and(|database| database.taxdb_found())
                 };
-                // Outfmt 13 to 16 follow the same slot of NCBI's taxonomy cache through the loads
-                // of every batch (`read_reported_taxonomy`, `XmlBatchLoads`), whose refusal can
-                // come at a later block too: the search of all queries, which refuses before any
-                // byte.
+                // Outfmt 13 to 16 ask for the same refusal of NCBI's taxonomy cache at the first
+                // batch that reports a subject with a positive taxid (`read_reported_taxonomy`),
+                // which can be in a later block too: the search of all queries, which refuses
+                // before any byte.
                 let titles_allowed = |x_kind: XBlockReport| match (database, x_kind) {
                     (Some(database), _)
                         if (x_prefetch_taxids(x_kind)
@@ -10881,7 +10881,6 @@ fn run_call(
         subject_stitles: &subject_stitles,
         hit_lists: &hit_lists,
         hit_loads: &prefetched.hit_loads,
-        xml2_loads: &prefetched.xml2_loads,
         engine_counts: &engine_counts,
         pairwise_hits: &pairwise_hits,
         psiblast_hits_found: &psiblast_hits_found,

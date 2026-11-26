@@ -998,14 +998,19 @@ fn protein_shapes_of_overlapping_masks() {
     // merge overlap one slot past `hard_ranges` (blast_engine.c:579-580), so LOSAT refuses it
     // (`LastRangeOverlap`, matching BLASTN's B-d boundary). Out-of-order merges in middle ranges
     // and merges within a final range longer than `MAX_DBSEQ_LEN` are searched.
-    let last_overlap = Some(HardMaskShape::LastRangeOverlap {
+    let last_overlap = HardMaskShape::LastRangeOverlap {
         before: (250, 280),
         mask: (100, 130),
-    });
-    assert_eq!(of(&[(250, 280), (100, 130)], 300, two_hit), last_overlap);
-    assert_eq!(of(&[(250, 280), (100, 130)], 300, one_hit), last_overlap);
+    };
+    assert_eq!(
+        of(&[(250, 280), (100, 130)], 300, two_hit),
+        Some(last_overlap)
+    );
+    assert_eq!(
+        of(&[(250, 280), (100, 130)], 300, one_hit),
+        Some(last_overlap)
+    );
     assert!(last_overlap
-        .unwrap()
         .text()
         .contains("merges alignments across an overlap read past its list of ranges"));
     // Middle-range out-of-order merge (final mask at [260, 270) starts past earlier ends): allowed.

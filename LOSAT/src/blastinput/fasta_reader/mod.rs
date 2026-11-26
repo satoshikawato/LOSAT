@@ -695,6 +695,14 @@ impl<R: Read> FastaInputSource<R> {
         self.reader.lines.at_eof()
     }
 
+    /// The input this source reads, given back: the bytes its stream buffered are dropped, so the
+    /// caller puts the input's position where its next reading starts
+    /// (`algorithm::blastx::blast_xml::prescan_queries`, which reads the query file before the
+    /// search and hands the same open file to the search).
+    pub(crate) fn into_input(self) -> R {
+        self.reader.lines.into_input()
+    }
+
     /// The search whose records this source reads under `-parse_deflines`: a query and a subject
     /// with one id are compared (`crate::seqid::id_scope::IdScope`).
     pub fn set_id_scope(
@@ -740,7 +748,22 @@ impl<R: Read> FastaInputSource<R> {
         record.warnings = warnings;
         Ok(record)
     }
+
+    /// `next_sequence`, keeping `sequence` in upper case and returning its lowercase mask
+    /// intervals directly when `keep_masks` is set, without retaining the warnings already written
+    /// to `warn` (for `algorithm::blastx::input_source`).
+    pub(crate) fn next_sequence_upper(
+        &mut self,
+        keep_masks: bool,
+        warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
+    ) -> Result<UpperRecord, ReadError> {
+        self.reader.read_one_seq_upper(keep_masks, warn)
+    }
 }
+
+/// A FASTA record with upper-case letters and its lowercase mask intervals
+/// (`FastaInputSource::next_sequence_upper`).
+pub(crate) type UpperRecord = (FastaRecord, Vec<(i32, i32)>);
 
 /// All records of an input (`CBlastInput::GetAllSeqs`, the subjects): the messages go to
 /// `warn` as they are written; a reader error stops the reading.
@@ -798,21 +821,50 @@ pub fn read_subjects_map<R: Read, T>(
     source: &mut FastaInputSource<R>,
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
     warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
-    mut convert: impl FnMut(FastaRecord) -> anyhow::Result<T>,
+    convert: impl FnMut(FastaRecord) -> anyhow::Result<T>,
 ) -> anyhow::Result<Vec<T>> {
+    read_subjects_with(source, range, |source| source.next_sequence(warn), convert)
+}
+
+/// `read_subjects_map` reading each record with `FastaInputSource::next_sequence_upper` (upper-case
+/// letters and direct mask intervals, without copying warnings into the record).
+pub(crate) fn read_subjects_upper<R: Read, T>(
+    source: &mut FastaInputSource<R>,
+    range: Option<&crate::blastinput::seq_range::SequenceRange>,
+    keep_masks: bool,
+    warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
+    mut convert: impl FnMut(FastaRecord, Vec<(i32, i32)>) -> anyhow::Result<T>,
+) -> anyhow::Result<Vec<T>> {
+    read_subjects_with(
+        source,
+        range,
+        |source| source.next_sequence_upper(keep_masks, warn),
+        |(record, masks)| convert(record, masks),
+    )
+}
+
+fn read_subjects_with<R: Read, Raw, T>(
+    source: &mut FastaInputSource<R>,
+    range: Option<&crate::blastinput::seq_range::SequenceRange>,
+    mut next: impl FnMut(&mut FastaInputSource<R>) -> Result<Raw, ReadError>,
+    mut convert: impl FnMut(Raw) -> anyhow::Result<T>,
+) -> anyhow::Result<Vec<T>>
+where
+    Raw: HasSequenceLen,
+{
     use crate::blastinput::seq_range::{record_interval, RecordInterval};
     let mut records = Vec::new();
     while !source.end() {
-        match source.next_sequence(warn) {
-            Ok(record) => {
+        match next(source) {
+            Ok(raw) => {
                 if let Some(range) = range {
-                    if record_interval(range, record.sequence.len()) == RecordInterval::PastEnd {
+                    if record_interval(range, raw.sequence_len()) == RecordInterval::PastEnd {
                         return Err(crate::blastinput::app::options_error(
                             "Invalid from coordinate (greater than sequence length)",
                         ));
                     }
                 }
-                records.push(convert(record)?);
+                records.push(convert(raw)?);
             }
             Err(ReadError::Parse {
                 code: ParseErrorCode::Eof,
@@ -822,6 +874,22 @@ pub fn read_subjects_map<R: Read, T>(
         }
     }
     Ok(records)
+}
+
+trait HasSequenceLen {
+    fn sequence_len(&self) -> usize;
+}
+
+impl HasSequenceLen for FastaRecord {
+    fn sequence_len(&self) -> usize {
+        self.sequence.len()
+    }
+}
+
+impl HasSequenceLen for (FastaRecord, Vec<(i32, i32)>) {
+    fn sequence_len(&self) -> usize {
+        self.0.sequence.len()
+    }
 }
 
 /// The queries of an input read to its end, as NCBI's batches read them one record at a

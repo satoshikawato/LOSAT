@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Builds LOSAT/tests/db_search/idlist/: databases with the alias keys GILIST, TILIST and SEQIDLIST
-(line RG, series D, D1c-1; remaining-gaps-20261112/D/SURVEY_D1c.md), with NCBI BLAST+ 2.17.0's
-makeblastdb (comparison-only tooling, as the fixtures' NCBI outputs; LOSAT never runs NCBI).
+"""Builds LOSAT/tests/db_search/idlist/: databases with the alias keys GILIST, TILIST, SEQIDLIST and
+TAXIDLIST (line RG, series D, D1c-1 and D1c-2; remaining-gaps-20261112/D/SURVEY_D1c.md), with NCBI
+BLAST+ 2.17.0's makeblastdb (comparison-only tooling, as the fixtures' NCBI outputs; LOSAT never
+runs NCBI).
 
 Usage: make_idlist.py NCBI_BIN   (writes into the idlist directory next to this script; g.faa, g.map,
 n.fna, n.map, q.faa and nq.fna there are the committed sources, every other file is made again).
@@ -99,6 +100,28 @@ def ti_bin8(tis):
     return b"\xff\xff\xff\xfc" + struct.pack(">I", len(tis)) + b"".join(struct.pack(">q", t) for t in tis)
 
 
+def bsl_bin(ids, title="sq_v5", date="Nov 25, 2026  1:00 PM"):
+    """A version-0 binary Seq-id list (.bsl), as written by blastdb_aliastool -seqid_file_in."""
+    title_b = title.encode("ascii")
+    date_b = date.encode("ascii")
+    body = bytearray()
+    for raw in ids:
+        b = raw.encode("ascii")
+        assert len(b) < 255
+        body.append(len(b))
+        body.extend(b)
+    header_rest = (
+        struct.pack("<Q", len(ids))
+        + struct.pack("<I", len(title_b))
+        + title_b
+        + bytes([len(date_b)])
+        + date_b
+        + struct.pack("<Q", 0)
+    )
+    file_size = 1 + 8 + len(header_rest) + len(body)
+    return b"\x00" + struct.pack("<Q", file_size) + header_rest + bytes(body)
+
+
 LISTS = {
     # The searches' own -seqidlist files beside the alias files' lists (rows db.il.bp.gi.sl*, sq4.sl).
     "u_np101.txt": b"NP_000101.1\n",
@@ -148,8 +171,22 @@ LISTS = {
     "ti_a4.bin": ti_bin4([1020, 1050]),
     "ti_a8.bin": ti_bin8([1020, 1050]),
     "ti_bad.bin": gi_bin([1020]),
-    # A taxid list (version 4 reads none).
+    # A taxid list (version 4 reads none; version 5 reads it through LMDB).
     "tx_a.txt": b"9606\n",
+    # D1c-2: version 5 SEQIDLIST and TAXIDLIST files.
+    "sq_v5.bsl": bsl_bin(["NP_000103.1", "NP_000118.1", "P10102.1", "loc7"], title="sq_v5"),
+    "sq_v5_zero.bsl": bsl_bin([], title="sq_v5_zero"),
+    "sq_v5_ver.txt": b"NP_000103\nLOC7\nNP_000118.1\n",
+    "sq_v5_unp.txt": b"sp||\nNP_000103.1\n",
+    "tx_b.txt": b"10090\n7227\n",
+    "tx_big.txt": b"9606\n5000000000\n",
+    "tx_unk.txt": b"999999\n",
+    "tx_empty.txt": b"",
+    "tx_alpha.txt": b"9606\nabc\n",
+    "tx_hash.txt": b"#c\n9606\n",
+    "tx_n.txt": b"10090\n7955\n",
+    "u_1abc.txt": b"1ABC\n",
+    "u_np103v.txt": b"NP_000103\n",
     # An OID list of OIDs 1, 2 and 3 of g.
     "m123.msk": (13).to_bytes(4, "big") + bytes([0b0111_0000, 0]),
     # CLI -gilist / -negative_gilist / -ipglist / -negative_ipglist (D6).
@@ -253,8 +290,60 @@ ALIASES = {
     "n_gi.nal": "TITLE gi n\nDBLIST n\nGILIST gi_n.txt\n",
     "n4_sq.nal": "TITLE sq n v4\nDBLIST n4\nSEQIDLIST sq_n.txt\n",
     "n4_gi.nal": "TITLE gi n v4\nDBLIST n4\nGILIST gi_n.txt\n",
-    # PIG ISAM database with an alias GILIST (D6).
+    # D1c-2: version 5 SEQIDLIST and TAXIDLIST over g, gm, gu, ln, lx and n.
+    "g_sq.pal": "TITLE sq v5\nDBLIST g\nSEQIDLIST sq_a.txt\n",
+    "g_sql.pal": "TITLE sq v5 walk\nDBLIST g\nSEQIDLIST sq_a.txt\nNSEQ 4\nLENGTH 495\n",
+    "g_sqb.pal": "TITLE sq v5 bsl\nDBLIST g\nSEQIDLIST sq_v5.bsl\n",
+    "g_sqc.pal": "TITLE sq v5 forms\nDBLIST g\nSEQIDLIST sq_c.txt\n",
+    "g_sqd.pal": "TITLE sq v5 lower\nDBLIST g\nSEQIDLIST sq_d.txt\n",
+    "g_sqver.pal": "TITLE sq v5 ver\nDBLIST g\nSEQIDLIST sq_v5_ver.txt\n",
+    "g_squnp.pal": "TITLE sq v5 unparseable\nDBLIST g\nSEQIDLIST sq_v5_unp.txt\n",
+    "g_sqe.pal": "TITLE sq v5 empty\nDBLIST g\nSEQIDLIST sq_empty.txt\n",
+    "g_sqbe.pal": "TITLE sq v5 empty bsl\nDBLIST g\nSEQIDLIST sq_v5_zero.bsl\n",
+    "g_sqm.pal": f"TITLE sq v5 missing\nDBLIST g\nSEQIDLIST {MISSING}\n",
+    "g_sqml.pal": f"TITLE sq v5 missing walk\nDBLIST g\nSEQIDLIST {MISSING}\nNSEQ 4\nLENGTH 495\n",
+    "g_sq_gi.pal": "TITLE gi b and sq v5\nDBLIST g\nGILIST gi_b.txt\nSEQIDLIST sq_a.txt\n",
+    "g_sq_tx.pal": "TITLE sq and tx v5\nDBLIST g\nSEQIDLIST sq_a.txt\nTAXIDLIST tx_a.txt\n",
+    "g_sq_sib.pal": "TITLE sq v5 sib\nDBLIST g_sq g_gb\n",
+    "g_sq_bare.pal": "TITLE sq v5 bare\nDBLIST g_sq g\n",
+    "g_tx.pal": "TITLE tx v5\nDBLIST g\nTAXIDLIST tx_a.txt\n",
+    "g_txl.pal": "TITLE tx v5 walk\nDBLIST g\nTAXIDLIST tx_a.txt\nNSEQ 8\nLENGTH 999\n",
+    "g_txb.pal": "TITLE tx b v5\nDBLIST g\nTAXIDLIST tx_b.txt\n",
+    "g_txbig.pal": "TITLE tx big v5\nDBLIST g\nTAXIDLIST tx_big.txt\n",
+    "g_txunk.pal": "TITLE tx unk v5\nDBLIST g\nTAXIDLIST tx_unk.txt\n",
+    "g_txe.pal": "TITLE tx empty v5\nDBLIST g\nTAXIDLIST tx_empty.txt\n",
+    "g_txel.pal": "TITLE tx empty v5 walk\nDBLIST g\nTAXIDLIST tx_empty.txt\nNSEQ 4\nLENGTH 495\n",
+    "g_txalpha.pal": "TITLE tx alpha v5\nDBLIST g\nTAXIDLIST tx_alpha.txt\n",
+    "g_txhash.pal": "TITLE tx hash v5\nDBLIST g\nTAXIDLIST tx_hash.txt\n",
+    "g_txm.pal": f"TITLE tx missing v5\nDBLIST g\nTAXIDLIST {MISSING}\n",
+    "g_txml.pal": f"TITLE tx missing v5 walk\nDBLIST g\nTAXIDLIST {MISSING}\nNSEQ 4\nLENGTH 495\n",
+    "g_tx_gr.pal": "TITLE tx range\nDBLIST g\nTAXIDLIST tx_a.txt\nFIRST_OID 1\nLAST_OID 5\n",
+    "g_tx_go.pal": "TITLE tx oidlist\nDBLIST g\nTAXIDLIST tx_a.txt\nOIDLIST m123.msk\n",
+    "g_tx_nest.pal": "TITLE tx over tx\nDBLIST g_tx\nTAXIDLIST tx_b.txt\n",
+    "g_tx_sib.pal": "TITLE tx a or b\nDBLIST g_tx g_txb\n",
+    "g_tx_bare.pal": "TITLE tx bare\nDBLIST g_tx g\n",
+    "gm_sq.pal": "TITLE sq two volumes\nDBLIST gm\nSEQIDLIST sq_a.txt\n",
+    "gm_sq_v0.pal": "TITLE sq v0\nDBLIST gm.00\nSEQIDLIST sq_a.txt\n",
+    "gm_sq_v1.pal": "TITLE sq v1\nDBLIST gm.01\nSEQIDLIST sq_a.txt\n",
+    "gm_sq_v01.pal": "TITLE sq each vol\nDBLIST gm_sq_v0 gm_sq_v1\n",
+    "gm_sq_mix.pal": "TITLE sq v0 bare v1\nDBLIST gm_sq_v0 gm.01\n",
+    "gm_tx.pal": "TITLE tx two volumes\nDBLIST gm\nTAXIDLIST tx_a.txt\n",
+    "gm_tx_v0.pal": "TITLE tx v0\nDBLIST gm.00\nTAXIDLIST tx_a.txt\n",
+    "gm_tx_mix.pal": "TITLE tx v0 bare v1\nDBLIST gm_tx_v0 gm.01\n",
+    "gu_sq.pal": "TITLE sq over gu\nDBLIST gu\nSEQIDLIST sq_a.txt\n",
+    "gu_tx.pal": "TITLE tx over gu\nDBLIST gu\nTAXIDLIST tx_a.txt\n",
+    "ln_tx.pal": "TITLE tx over ln\nDBLIST ln\nTAXIDLIST tx_b.txt\n",
+    "lx_tx.pal": "TITLE tx over lx\nDBLIST lx\nTAXIDLIST tx_b.txt\n",
+    "n_sq.nal": "TITLE sq n v5\nDBLIST n\nSEQIDLIST sq_n.txt\n",
+    "n_sql.nal": "TITLE sq n v5 walk\nDBLIST n\nSEQIDLIST sq_n.txt\nNSEQ 2\nLENGTH 766\n",
+    "n_sqml.nal": f"TITLE sq n v5 missing walk\nDBLIST n\nSEQIDLIST {MISSING}\nNSEQ 2\nLENGTH 766\n",
+    "n_tx.nal": "TITLE tx n v5\nDBLIST n\nTAXIDLIST tx_n.txt\n",
+    "n_txl.nal": "TITLE tx n v5 walk\nDBLIST n\nTAXIDLIST tx_n.txt\nNSEQ 3\nLENGTH 1089\n",
+    "n_txml.nal": f"TITLE tx n v5 missing walk\nDBLIST n\nTAXIDLIST {MISSING}\nNSEQ 3\nLENGTH 1089\n",
+    # PIG ISAM database with alias GILIST (D6) and v5 SEQIDLIST / TAXIDLIST (D1c-2 R4).
     "gp_gi.pal": "TITLE gp gi\nDBLIST gp\nGILIST gi_b.txt\n",
+    "gp_sq.pal": "TITLE gp sq v5\nDBLIST gp\nSEQIDLIST sq_a.txt\n",
+    "gp_tx.pal": "TITLE gp tx v5\nDBLIST gp\nTAXIDLIST tx_a.txt\n",
 }
 
 

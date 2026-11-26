@@ -125,16 +125,20 @@ pub struct QueryChunk {
     pub overlap: i32,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:50-62
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:300-335
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:724-836
-pub fn split_queries(
+/// How NCBI splits a query batch: the number of chunks (1: not split), the evened chunk size and
+/// the batch's letters (`split_queries`, `chunk_stops`).
+struct ChunkPlan {
+    count: usize,
+    size: u64,
+    length: usize,
+}
+
+fn chunk_plan(
     records: &[FastaRecord],
     full: &PreparedQueryBatch,
     options: &ResolvedOptions,
     sizes: SplitSizes,
-) -> Result<Vec<QueryChunk>> {
+) -> ChunkPlan {
     let mut size = sizes.chunk_size;
     let length = records.iter().map(|r| r.sequence.len()).sum();
     // A batch of several queries is not split.
@@ -143,6 +147,123 @@ pub fn split_queries(
     if !options.gapped {
         count = 1;
     }
+    ChunkPlan {
+        count,
+        size,
+        length,
+    }
+}
+
+impl ChunkPlan {
+    /// The letters of chunk `index` of a split batch whose sizes `stops` passed.
+    fn range(&self, overlap: u64, index: usize) -> Range<usize> {
+        let step = (self.size - overlap) as usize;
+        let start = index * step;
+        let end = if index + 1 == self.count {
+            self.length
+        } else {
+            (start + self.size as usize).min(self.length)
+        };
+        start..end
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171,234-249,872-880
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-208
+    /// The stops of NCBI's search of a split batch before the setup of its first chunk, LOSAT's
+    /// refusals (`chunk_stops`):
+    /// - a negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below it, and
+    ///   NCBI does not even the chunk size of a translated query again, so the first of NCBI's
+    ///   `size_t` chunk ranges covers the batch and the chunks after it are left without a query:
+    ///   NCBI's query splitter dereferences their missing query vectors (a null pointer) before
+    ///   any chunk is set up;
+    /// - each chunk's setup builds its own query splitter with the same sizes; when it would split
+    ///   the chunk again (an overlap of half the chunk size or more), the release build skips the
+    ///   chunk's lookup table and the first chunk's search stops with a null reference, before its
+    ///   setup reads the database (2.17.0 probe of line RG item X-short-bat-2). This also covers a
+    ///   loop that ends before `count` chunks (a chunk then holds twice the step).
+    fn stops(&self, sizes: SplitSizes) -> Result<()> {
+        if self.count == 1 {
+            return Ok(());
+        }
+        if (self.size as i64) < 0 {
+            return Err(refusal(
+                "a query chunk without a query is not supported by LOSAT's BLASTX",
+            ));
+        }
+        if (0..self.count).any(|index| {
+            let mut chunk_size = self.size;
+            calculate_num_chunks(
+                &mut chunk_size,
+                sizes.overlap,
+                self.range(sizes.overlap, index).len(),
+                1,
+            ) > 1
+        }) {
+            return Err(refusal(
+                "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's BLASTX",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// The stops of NCBI's search of the query batch `records` (`full` its preparation) that `sizes`
+/// split, before any chunk's setup reads the subjects (`ChunkPlan::stops`): NCBI meets them
+/// before the database's errors (a database whose sequences cannot be read) and the setup's, so
+/// the search of a batch checks them first (`search::x_search_core`), after the reports of the
+/// batches before.
+pub fn chunk_stops(
+    records: &[FastaRecord],
+    full: &PreparedQueryBatch,
+    options: &ResolvedOptions,
+    sizes: SplitSizes,
+) -> Result<()> {
+    chunk_plan(records, full, options, sizes).stops(sizes)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:62-64
+/// NCBI splits the nucleotide query and translates each chunk, so an overlap that is not a
+/// multiple of 3 (which NCBI's own note requires for a translated query) starts the chunks after
+/// the first out of the query's reading frames, and NCBI then moves their HSPs onto contexts of
+/// other frames: LOSAT's refusal of the split `chunks` where a chunk after the first has a valid
+/// context. The caller refuses it where the search would read the subjects (with subjects in hand
+/// and a database whose sequences can be read); without one NCBI finds nothing to move, and the
+/// batch is reported as NCBI's (line RG item X-short-bat-2).
+pub fn out_of_frame(
+    chunks: &[QueryChunk],
+    sizes: SplitSizes,
+    options: &ResolvedOptions,
+) -> Option<anyhow::Error> {
+    let moved = chunks.len() > 1
+        && !sizes.overlap.is_multiple_of(3)
+        && chunks[1..].iter().any(|chunk| {
+            super::parameters::score_block_for(&chunk.prepared, options.scoring)
+                .iter()
+                .any(|p| p.valid)
+        });
+    moved.then(|| {
+        refusal(format!(
+            "OVERLAP_CHUNK_SIZE={}, which is not a multiple of 3, splits this query in chunks out of its reading frames (NCBI BLAST+ requires a multiple of 3 for a translated query); this is not supported by LOSAT's BLASTX",
+            sizes.overlap
+        ))
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:50-62
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:145-171
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:300-335
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_cxx.cpp:724-836
+/// The query chunks of the batch `records`, after its stops (`ChunkPlan::stops`). An overlap that
+/// is not a multiple of 3 is split as NCBI splits it; `out_of_frame` refuses those chunks.
+pub fn split_queries(
+    records: &[FastaRecord],
+    full: &PreparedQueryBatch,
+    options: &ResolvedOptions,
+    sizes: SplitSizes,
+) -> Result<Vec<QueryChunk>> {
+    let plan = chunk_plan(records, full, options, sizes);
+    let (count, length) = (plan.count, plan.length);
     if count == 1 {
         return Ok(vec![QueryChunk {
             #[cfg(test)]
@@ -153,49 +274,9 @@ pub fn split_queries(
             overlap: 0,
         }]);
     }
-    // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below it;
-    // NCBI's `size_t` chunk ranges then wrap (it stops with a CCoreException).
-    if (size as i64) < 0 {
-        return Err(refusal(
-            crate::algorithm::blastn::query_split::negative_split_refusal("BLASTX"),
-        ));
-    }
-    // NCBI splits the nucleotide query and translates each chunk, so an overlap that is not a
-    // multiple of 3 starts the chunks after the first out of the query's reading frames
-    // (split_query_aux_priv.cpp:62-64: "this value must be divisible by 3 to work with
-    // translated queries"), and NCBI then moves their HSPs onto contexts of other frames.
-    if !sizes.overlap.is_multiple_of(3) {
-        return Err(refusal(format!(
-            "OVERLAP_CHUNK_SIZE={}, which is not a multiple of 3, splits this query in chunks out of its reading frames (NCBI BLAST+ requires a multiple of 3 for a translated query); this is not supported by LOSAT's BLASTX",
-            sizes.overlap
-        )));
-    }
-    let step = (size - sizes.overlap) as usize;
-    let size = size as usize;
+    plan.stops(sizes)?;
     let overlap = (sizes.overlap / 3) as i32;
-    let range = |index: usize| {
-        let start = index * step;
-        let end = if index + 1 == count {
-            length
-        } else {
-            (start + size).min(length)
-        };
-        start..end
-    };
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:190-201
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-208
-    // Each chunk's setup builds its own query splitter with the same sizes; when it would split
-    // the chunk again (an overlap of half the chunk size or more), the release build skips the
-    // chunk's lookup table and stops with a null reference. This also covers a loop that ends
-    // before `count` chunks (a chunk then holds twice the step).
-    if (0..count).any(|index| {
-        let mut chunk_size = size as u64;
-        calculate_num_chunks(&mut chunk_size, sizes.overlap, range(index).len(), 1) > 1
-    }) {
-        return Err(refusal(
-            "an OVERLAP_CHUNK_SIZE so close to CHUNK_SIZE that NCBI BLAST+ would split a query chunk again (it then stops with a null reference) is not supported by LOSAT's BLASTX",
-        ));
-    }
+    let range = |index: usize| plan.range(sizes.overlap, index);
     // A chunk's query setup (translation, SEG) reads only its own slice of the query, so the chunks
     // can be prepared on the search pool; the corrections below still run in chunk order.
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-249
@@ -381,7 +462,6 @@ fn x_chunk_record(whole: &FastaRecord, start: usize, end: usize) -> FastaRecord 
         title: whole.title.clone(),
         sequence: whole.sequence[start..end].to_vec(),
         lowercase_masks: x_chunk_masks(whole, start, end),
-        warnings: whole.warnings.clone(),
         // Not the whole letters of a record cut to `-query_loc` for outfmt 11: one copy per chunk.
         source: whole
             .source

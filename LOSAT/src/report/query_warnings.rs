@@ -769,6 +769,7 @@ impl HitPosts {
             posts,
             cut,
             ends_run,
+            caught_at: _,
             cuts,
         } = posts;
         if self.document.is_empty() {
@@ -846,6 +847,32 @@ pub fn write_document_posts(
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let mut hits = HitPosts::default();
+    hits.document(posts);
+    write_hit_posts(report, &hits, 0, writer, warnings)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2230
+/// Writes `report`, the end of a structured document or a held report written there
+/// (`StructuredXml::finish`, `StructuredXml::unwritten`), whose writing returned `written`, as
+/// `write_document_posts`; where the held report raised an exception that NCBI's report function
+/// catches (`CaughtException`: the stream forms 15 and 16 leave the report out), the post of it
+/// by `program` (`blast_xml::writer::caught_post`) before the document's end where the epilog
+/// marks it (`DocumentPosts::caught_at`), else after the other posts. Any other error is
+/// returned and `report` is not written.
+pub fn write_document_end<D: crate::report::blast_xml::writer::StructuredXml + ?Sized>(
+    written: Result<()>,
+    report: &[u8],
+    document: &mut D,
+    program: &str,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
+    warnings: Option<&mut QueryWarnings<'_>>,
+) -> Result<()> {
+    let mut hits = HitPosts::default();
+    let caught = crate::report::blast_xml::writer::caught_post(written, &*document, program)?;
+    let mut posts = document.take_posts();
+    if let Some(post) = caught.and_then(|post| posts.place_caught(post)) {
+        hits.caught(post);
+    }
     hits.document(posts);
     write_hit_posts(report, &hits, 0, writer, warnings)
 }
@@ -1576,6 +1603,17 @@ pub fn invalid_residues_error(positions: &[usize]) -> Option<String> {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:532-543
 pub fn null_descriptor_error() -> String {
     setup_error(crate::ncbi_exception::NULL_POINTER)
+}
+
+/// The set-up's error of a query whose Seq-inst has no `length`: NCBI's
+/// `CBlastQuerySourceBioseqSet::GetBlastSequence` throws `"Cannot get sequence length"`, which
+/// `SetupQueries_OMF` catches as a warning of the query and invalidates its contexts, as
+/// `invalid_residues_error`'s.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/bioseq_extract_data_priv.cpp:317-321
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:609-652
+pub fn missing_length_error() -> String {
+    setup_error("Cannot get sequence length")
 }
 
 /// The text of the set-up's error of one query whose one message is `message`: its severity

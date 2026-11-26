@@ -14,13 +14,13 @@
 //! `std::bad_alloc` or another `std::exception` of a string's reserve, or LOSAT's refusal of what
 //! NCBI's process may or may not read by the host's memory. What a primitive posts while it reads
 //! (a byte of a VisibleString read as `#`, a UTF8String tag for a VisibleString) is handed to the
-//! caller in order (`StringPost`), which adds the stack trace that NCBI's message names.
+//! caller as it is made (`StringPost`), which adds the stack trace that NCBI's message names.
 
 use super::asn_text_reader::{
     AsnSource, AsnTextError, AsnTextErrorKind, EnumWord, MemberId, NcbiThrow, PointerType, Reader,
     FILL_BUFFER_EOF, FIND_NAME, FIND_VALUE, SKIP_WHITE_SPACE_EOF, UNEXPECTED_MEMBER,
 };
-use super::asn_types::read::Post;
+use super::asn_types::read::PostSink;
 use super::asn_types::Member;
 use super::encoder::StreamPosition;
 use super::object_frame::{text_frame_site, FrameKind};
@@ -216,6 +216,30 @@ impl Names {
         allocator: "makeblastdb",
         own_serial_message: false,
     };
+    /// A Seq-entry or Bioseq-set of makeblastdb's `-input_type asn1_txt` / `asn1_bin`.
+    pub(crate) const BIOSEQ: Names = Names {
+        document: "bioseq",
+        reader: "bioseq reader",
+        input: "file",
+        allocator: "makeblastdb",
+        own_serial_message: false,
+    };
+    /// Binary definition lines (`ASN1_BlastDefLine`) of a Bioseq.
+    pub(crate) const DEFLINE_HEADER: Names = Names {
+        document: "Blast-def-line-set",
+        reader: "Blast-def-line-set reader",
+        input: "header",
+        allocator: "makeblastdb",
+        own_serial_message: false,
+    };
+    /// The input of `losat rpsbproc`: `Blast4-archive` objects in ASN.1 text (`rpsbproc::archive`).
+    pub(crate) const ARCHIVE: Names = Names {
+        document: "archive",
+        reader: "rpsbproc",
+        input: "input",
+        allocator: "NCBI's rpsbproc",
+        own_serial_message: false,
+    };
     /// The bytes of a delayed member that a writer reads again (`CDelayBuffer::Update`). The read
     /// that kept them took them whole, so no length passes their end.
     pub(crate) const DELAYED: Names = Names {
@@ -299,9 +323,9 @@ fn host_dependent(length: u64, bytes: u64, what: Reserve, names: Names) -> Fail 
     ))
 }
 
-/// What reading a string posts, in the order NCBI posts it.
+/// What reading a string posts, given to the caller when NCBI posts it.
 #[derive(Debug)]
-pub(crate) enum StringPost {
+pub(crate) enum StringPost<'a> {
     /// The warning of a UTF8String tag for a VisibleString (binary, `ExpectStringTag`,
     /// objistrasnb.cpp:296-305; [`utf8_tag_message`]).
     Utf8Tag,
@@ -310,7 +334,7 @@ pub(crate) enum StringPost {
     BadChar {
         position: StreamPosition,
         byte: u8,
-        string: Vec<u8>,
+        string: &'a [u8],
     },
 }
 
@@ -421,6 +445,9 @@ pub(crate) trait Input {
     /// Whether the stream throws `eMissingValue` (the XML stream's ENUMERATED without its
     /// attribute), which `ReadWithSetFlagMember` takes for an OPTIONAL or DEFAULT member.
     const MISSING_VALUES: bool = false;
+    /// Whether the stream holds what it posts outside its strings until `drain_posts` (the XML
+    /// stream), which the object stack drains at the end of each value it reads.
+    const HELD_POSTS: bool = false;
     /// Whether the elements of a list of the type `element` are read in an element frame
     /// (`eFrameArrayElement`; the XML stream's only when the type will have no name,
     /// `WillHaveName`).
@@ -473,7 +500,7 @@ pub(crate) trait Input {
     /// Moves what the stream posted outside the strings it read (the XML stream posts each byte
     /// it replaces at once, also in the attributes it skips) to `posts`, in the order posted.
     #[inline(always)]
-    fn drain_posts(&mut self, _posts: &mut Vec<Post>) {}
+    fn drain_posts(&mut self, _posts: &mut dyn PostSink) {}
     /// `GetPosition()`: `line N` in text, `byte N` (from the start of the object) in binary.
     fn position(&self) -> StreamPosition;
     /// The state of a new object stream at the next byte (each object of a file is read by a
@@ -520,15 +547,16 @@ pub(crate) trait Input {
     fn read_real(&mut self) -> R<f64>;
     fn skip_real(&mut self) -> R<()>;
     /// `ReadString` (`ReadStringStore`) of a string of `kind`, appended to `out`, with what NCBI
-    /// posts while it reads it in `posts` (also when it then fails).
+    /// posts while it reads it given to `posts` when it is posted (also when the read then
+    /// fails).
     fn read_string(
         &mut self,
         kind: StringKind,
         out: &mut Vec<u8>,
-        posts: &mut Vec<StringPost>,
+        posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()>;
     /// `SkipString` (`SkipStringStore`).
-    fn skip_string(&mut self, kind: StringKind, posts: &mut Vec<StringPost>) -> R<()>;
+    fn skip_string(&mut self, kind: StringKind, posts: &mut dyn FnMut(StringPost<'_>)) -> R<()>;
     /// An OCTET STRING (`ReadBytes` of a `vector<char>`), `SkipByteBlock`.
     fn read_octets(&mut self) -> R<Vec<u8>>;
     fn skip_octets(&mut self) -> R<()>;
@@ -740,6 +768,24 @@ impl<S: AsnSource> TextInput<S> {
         let result = self.r.expect(c);
         result.map_err(|e| self.fail(e))
     }
+
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:443-455
+    /// Skips raw ASCII space, tab, newline and carriage return before the next object and peeks
+    /// the byte that starts it (`None` at end of input), releasing everything before it.
+    pub(crate) fn skip_raw_spaces_and_peek(&mut self) -> Option<u8> {
+        loop {
+            match self.r.src.byte_at(self.r.pos) {
+                Some(b' ' | b'\t' | b'\n' | b'\r') => {
+                    self.r.pos += 1;
+                    self.r.src.release_before(self.r.pos);
+                }
+                other => {
+                    self.r.src.release_before(self.r.pos);
+                    return other;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -937,12 +983,12 @@ impl<S: AsnSource> Input for TextInput<S> {
         &mut self,
         kind: StringKind,
         out: &mut Vec<u8>,
-        posts: &mut Vec<StringPost>,
+        posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()> {
         self.string(kind, Some(out), posts)
     }
 
-    fn skip_string(&mut self, kind: StringKind, posts: &mut Vec<StringPost>) -> R<()> {
+    fn skip_string(&mut self, kind: StringKind, posts: &mut dyn FnMut(StringPost<'_>)) -> R<()> {
         self.string(kind, None, posts)
     }
 
@@ -1059,7 +1105,7 @@ impl<S: AsnSource> TextInput<S> {
         &mut self,
         kind: StringKind,
         out: Option<&mut Vec<u8>>,
-        posts: &mut Vec<StringPost>,
+        posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()> {
         let skip = out.is_none();
         let mut none = Vec::new();
@@ -1068,11 +1114,11 @@ impl<S: AsnSource> TextInput<S> {
             out,
             kind != StringKind::Utf8,
             skip,
-            &mut |line, byte, piece| {
-                posts.push(StringPost::BadChar {
+            &mut |_, line, byte, piece| {
+                posts(StringPost::BadChar {
                     position: StreamPosition::Line(line as u64),
                     byte,
-                    string: piece.to_vec(),
+                    string: piece,
                 })
             },
         );

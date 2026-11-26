@@ -53,7 +53,6 @@ fn a_record_of_the_stored_letters_encodes_to_the_searched_bytes() {
             .map(|&residue| NCBISTDAA_TO_AMINOACID[usize::from(residue)])
             .collect(),
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,
@@ -89,7 +88,6 @@ fn one_query(lists: &[(usize, i32)]) -> Vec<BatchResults> {
         title: Vec::new(),
         sequence: b"ACGTACGTACGTACGTACGTACGTACGTAC".to_vec(),
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,

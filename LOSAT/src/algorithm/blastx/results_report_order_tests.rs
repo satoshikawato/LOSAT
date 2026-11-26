@@ -39,7 +39,6 @@ fn batch(hsps: Vec<Hsp>) -> BatchResults {
         title: Vec::new(),
         sequence: vec![b'A'; 60],
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,

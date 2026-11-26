@@ -1,0 +1,26 @@
+Seq-entry ::= set {
+  class genbank,
+  descr { source { org { taxname "Homo sapiens", db { { db "taxon", tag id 9606 } } } } },
+  seq-set {
+    set {
+      class nuc-prot,
+      seq-set {
+        seq {
+          id { local str "inherit_outer" },
+          descr { title "inherits 9606" },
+          inst { repr raw, mol dna, length 4,
+            seq-data iupacna "ACGT" }
+        },
+        seq {
+          id { local str "own_zero_blocks" },
+          descr {
+            title "own zero source blocks 9606",
+            source { org { taxname "Unknown sp." } }
+          },
+          inst { repr raw, mol dna,
+            length 4, seq-data iupacna "ACGT" }
+        }
+      }
+    }
+  }
+}

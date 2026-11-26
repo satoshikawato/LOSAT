@@ -1,0 +1,13 @@
+Seq-entry ::= seq {
+  id { local str "dloc2" },
+  descr { title "loc second" },
+  inst {
+    repr delta,
+    mol dna,
+    length 5,
+    ext delta {
+      literal { length 4, seq-data ncbi2na '1B'H },
+      loc whole local str "other"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+Bioseq-set ::= {
+  seq-set {
+    seq { id { local str "same" }, descr { title "one" }, inst { repr raw, mol dna, length 4, seq-data iupacna "ACGT" } },
+    seq { id { local str "same" }, descr { title "two" }, inst { repr raw, mol dna, length 4, seq-data iupacna "ACGG" } }
+  }
+}

@@ -885,6 +885,7 @@ fn row_stop_end_writes_the_bytes_before_and_refuses() {
         RowStop {
             subject: 1,
             reason: FAILED_LOOKUP_NULL_POINTER,
+            lineless: false,
         },
         failed_record_title(1, b"Subject_9"),
         "BLASTN",
@@ -924,6 +925,7 @@ fn a_load_that_throws_writes_the_kept_row() {
         id: b"gb|AAA00001.1|".to_vec(),
         gi: 7,
         accession: b"AAA00001".to_vec(),
+        lineless: false,
     }];
     let found = TabularSubject {
         id: b"gb|AAA00001.1|",
@@ -1202,6 +1204,7 @@ fn a_lookup_failing_after_the_first_definition_line_keeps_its_ids() {
         id: b"gb|AB000001.1|".to_vec(),
         gi: 0,
         accession: b"AB000001".to_vec(),
+        lineless: false,
     }];
     let subject = TabularSubject {
         id: b"gb|AB000001.1|",
@@ -1261,6 +1264,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
             subject_id: true,
             all_ids,
             bioseq: false,
+            lineless: false,
         };
         failed_lookup_stop(spec.as_ref(), failure, first).is_some()
     };
@@ -1278,6 +1282,7 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
         subject_id: false,
         all_ids: true,
         bioseq: false,
+        lineless: false,
     };
     assert!(failed_lookup_stop(Some(&spec("qseqid saccver sallseqid")), only_all, false).is_none());
     assert!(failed_lookup_stop(None, only_all, true).is_none());
@@ -1295,6 +1300,125 @@ fn failed_lookups_stop_where_ncbi_has_no_result() {
     assert_eq!(field(Some("qseqid staxid sacc"), failed, false), Some(2));
     assert_eq!(field(Some("qseqid sseqid staxid"), failed, false), None);
     assert_eq!(field(Some("qseqid sseqid evalue"), failed, true), None);
+}
+
+// Line RG D1c-1c-b PR 2b (NCBI BLAST+ 2.17.0 probe `D/logs/d1c1cb/probe`: `6 qseqid sallacc` exits
+// 255 after `<query>\t<the accessions of the lines before>;`): the `sallacc` of a subject with a
+// definition line without a Seq-id takes the label of that line's null best id at every row,
+// with no `catch`; the other fields have a result (`Unknown`, 0, `N/A`). LOSAT writes NCBI's
+// bytes before the stop and refuses the report there, naming the subject and the program.
+#[test]
+fn the_sallacc_of_a_line_without_a_seq_id_stops_at_every_row() {
+    let spec = |fields: &str| {
+        blastp_spec(
+            ReportFormat::Tabular,
+            &FormatChoice {
+                number: 6,
+                spec: fields.to_string(),
+                delimiter: String::new(),
+            },
+        )
+        .unwrap()
+    };
+    let lineless = LookupFailure {
+        lineless: true,
+        ..LookupFailure::default()
+    };
+    for first in [true, false] {
+        assert_eq!(
+            failed_lookup_stop(Some(&spec("qseqid sallacc")), lineless, first),
+            Some(LINELESS_ACCESSION_NULL_POINTER)
+        );
+        assert!(failed_lookup_stop(
+            Some(&spec("qseqid sallseqid sallgi salltitles saccver")),
+            lineless,
+            first
+        )
+        .is_none());
+        assert!(failed_lookup_stop(None, lineless, first).is_none());
+    }
+    assert!(may_stop_at_failed_lookup(Some(&spec("qseqid sallacc"))));
+    let all_ids = [
+        DeflineIds {
+            id: b"gb|AAA00001.1|".to_vec(),
+            gi: 0,
+            accession: b"AAA00001".to_vec(),
+            lineless: false,
+        },
+        DeflineIds {
+            id: b"Unknown".to_vec(),
+            gi: 0,
+            accession: Vec::new(),
+            lineless: true,
+        },
+    ];
+    let none = TabularTaxonomy::default();
+    let subject = TabularSubject {
+        id: b"gb|AAA00001.1|",
+        accession: b"AAA00001",
+        accession_version: b"AAA00001.1",
+        gi: 0,
+        all_ids: &all_ids,
+        length: 100,
+        titles: None,
+        taxonomy: &none,
+        names: None,
+        nucleotide: false,
+        qcovs: 100,
+        qcovus: -1,
+        lookup: SubjectLookup::Found,
+        index: 1,
+    };
+    let query = TabularQuery::of(b"q1", 100);
+    let hsp = TabularHsp {
+        q_start: 1,
+        q_end: 10,
+        s_start: 1,
+        s_end: 10,
+        evalue: 1e-5,
+        bit_score: 30.0,
+        score: 60,
+        length: 10,
+        gap_opens: 0,
+        gaps: 0,
+        num_ident: 10,
+        q_frame: 0,
+        s_frame: 0,
+        rows: None,
+        ops: &[],
+        qcovhsp: 10,
+    };
+    let s = spec("qseqid sallacc evalue");
+    let writer = TabularWriter::new(&s, "BLASTP 2.17.0+", None);
+    let mut rows = TabularRows::default();
+    let mut buf = Vec::new();
+    let stop = writer.row(&mut buf, &mut rows, &query, &subject, None, &hsp);
+    assert_eq!(buf, b"q1\tAAA00001;");
+    assert_eq!(
+        stop,
+        Some(RowStop {
+            subject: 1,
+            reason: LINELESS_ACCESSION_NULL_POINTER,
+            lineless: true,
+        })
+    );
+    let mut out = Vec::new();
+    let error = row_stop_end(
+        &mut out,
+        &buf,
+        stop.unwrap(),
+        failed_database_subject(1, None, true),
+        "BLASTP",
+        || {},
+    );
+    assert_eq!(out, b"q1\tAAA00001;");
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "database sequence 1 has a definition line without a Seq-id (a hand-edited database); \
+             {LINELESS_ACCESSION_NULL_POINTER}, which is not supported by LOSAT's BLASTP"
+        )
+    );
 }
 
 #[test]

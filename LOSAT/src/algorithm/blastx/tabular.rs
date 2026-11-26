@@ -36,9 +36,9 @@ use crate::report::serial::seqalign::{
     row_range_exception, std_seg_lengths_not_accurate, AlignRow,
 };
 use crate::report::tabular::{
-    coverage_percent, taxdb_warning_line, union_length, DeflineIds, QueryCoveragePerHsp,
-    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec,
-    TabularSubject, TabularTaxonomy, TabularWriter,
+    coverage_percent, union_length, DeflineIds, QueryCoveragePerHsp, SubjectLookup, TabularField,
+    TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec, TabularSubject,
+    TabularTaxonomy, TabularWriter,
 };
 
 /// outfmt 7's `# BLASTX 2.17.0+` line.
@@ -67,9 +67,9 @@ fn write_taxdb_warning(
     writer: &mut dyn Write,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
-    if spec.checks_taxdb() && !taxdb_found {
+    if let Some(line) = spec.formatter_warning(taxdb_found, program) {
         writer.flush()?;
-        diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
+        diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
     Ok(())
@@ -799,7 +799,12 @@ pub(super) fn write_blastx_tabular(
                                 writer,
                                 &buf,
                                 stop,
-                                super::report::stopped_subject(shown, subjects, stop.subject),
+                                super::report::stopped_subject(
+                                    shown,
+                                    subjects,
+                                    stop.subject,
+                                    stop.lineless,
+                                ),
                                 options.program().upper,
                                 || {
                                     if let Some(reads) = reads.as_mut() {

@@ -31,9 +31,9 @@ use crate::report::db_subject::ParsedSubject;
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, taxdb_warning_line, union_length, DeflineIds, QueryCoveragePerHsp,
-    SubjectLookup, TabularField, TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows,
-    TabularSpec, TabularSubject, TabularTaxonomy, TabularWriter,
+    coverage_percent, union_length, DeflineIds, QueryCoveragePerHsp, SubjectLookup, TabularField,
+    TabularHsp, TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularSubject,
+    TabularTaxonomy, TabularWriter,
 };
 
 /// What the report needs besides the final hit lists.
@@ -198,7 +198,7 @@ impl<'a> TabularSubjects<'a> {
     /// (`report::tabular::RowStop`) says of it: a `-subject` record's title
     /// (`failed_record_title`), or the database sequence and the load that throws
     /// (`failed_database_subject`).
-    pub(super) fn stopped_subject(&self, s_idx: usize) -> String {
+    pub(super) fn stopped_subject(&self, s_idx: usize, lineless: bool) -> String {
         match self {
             TabularSubjects::Records { records, .. } => {
                 crate::report::tabular::failed_record_title(s_idx, records[s_idx].shown_id())
@@ -211,6 +211,7 @@ impl<'a> TabularSubjects<'a> {
             } => crate::report::tabular::failed_database_subject(
                 oids.oid(ordinals[s_idx]),
                 loads.thrown(s_idx),
+                lineless,
             ),
         }
     }
@@ -446,8 +447,11 @@ pub(super) fn write_tabular_prolog_warning(
     program: &str,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
-    if spec.kind == TabularKind::CsvWithHeader && spec.checks_taxdb() && !taxdb_found {
-        diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
+    if let Some(line) = spec
+        .formatter_warning(taxdb_found, program)
+        .filter(|_| spec.kind == TabularKind::CsvWithHeader)
+    {
+        diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
     Ok(())
@@ -473,9 +477,9 @@ pub(super) fn write_tabular_without_queries(
 ) -> Result<()> {
     write_tabular_prolog(spec, writer)?;
     if spec.kind == TabularKind::Commented {
-        if spec.checks_taxdb() && !taxdb_found {
+        if let Some(line) = spec.formatter_warning(taxdb_found, program) {
             writer.flush()?;
-            diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
+            diagnostics.write_all(line.as_bytes())?;
             diagnostics.flush()?;
         }
         TabularWriter::new(spec, "", None).epilog(writer, 0)?;
@@ -503,9 +507,9 @@ pub(super) fn write_tabular_round_epilog(
     if spec.kind != TabularKind::Commented {
         return Ok(());
     }
-    if spec.checks_taxdb() && !taxdb_found {
+    if let Some(line) = spec.formatter_warning(taxdb_found, program) {
         writer.flush()?;
-        diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
+        diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
     TabularWriter::new(spec, "", None).epilog(writer, rounds)?;
@@ -674,8 +678,7 @@ fn write_tabular_rows<const RPS: bool>(
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
-    let taxdb_warning =
-        (spec.checks_taxdb() && !tab.taxdb_found).then(|| taxdb_warning_line(tab.app.ncbi_name()));
+    let taxdb_warning = spec.formatter_warning(tab.taxdb_found, tab.app.ncbi_name());
     let warn = |writer: &mut dyn Write, warnings: Option<&mut QueryWarnings<'_>>| -> Result<()> {
         if let (Some(line), Some(warnings)) = (taxdb_warning.as_deref(), warnings) {
             writer.flush()?;
@@ -874,7 +877,7 @@ fn write_tabular_rows<const RPS: bool>(
                         writer,
                         &buf,
                         stop,
-                        tab.subjects.stopped_subject(stop.subject),
+                        tab.subjects.stopped_subject(stop.subject, stop.lineless),
                         tab.app.name(),
                         || {
                             if let Some(warnings) = warnings.as_deref_mut() {

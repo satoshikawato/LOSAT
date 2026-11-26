@@ -17,8 +17,8 @@ use anyhow::Result;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::db_subject::ParsedSubject;
 use crate::report::tabular::{
-    taxdb_warning_line, DeflineIds, TabularField, TabularKind, TabularNames, TabularSpec,
-    TabularSubject, TabularTaxonomy, TabularWriter,
+    DeflineIds, TabularField, TabularKind, TabularNames, TabularSpec, TabularSubject,
+    TabularTaxonomy, TabularWriter,
 };
 use crate::seqdb::SeqDb;
 
@@ -278,9 +278,9 @@ impl<'a> TabularSubjects<'a> {
     /// What LOSAT's refusal at a row of subject `s_idx` where NCBI has no result
     /// (`report::tabular::RowStop`) says of it: a `-subject` record's title
     /// (`report::tabular::failed_record_title`), or the database sequence and the load that throws
-    /// (`report::tabular::failed_database_subject`).
+    /// or its definition line without a Seq-id (`report::tabular::failed_database_subject`).
     #[cold]
-    pub(crate) fn stopped_subject(&self, s_idx: usize) -> String {
+    pub(crate) fn stopped_subject(&self, s_idx: usize, lineless: bool) -> String {
         match *self {
             TabularSubjects::Records { records, .. } => {
                 crate::report::tabular::failed_record_title(s_idx, records[s_idx].shown_id())
@@ -293,6 +293,7 @@ impl<'a> TabularSubjects<'a> {
             } => crate::report::tabular::failed_database_subject(
                 oids.oid(ordinals[s_idx]),
                 loads.thrown(s_idx),
+                lineless,
             ),
         }
     }
@@ -606,9 +607,9 @@ pub(crate) fn write_tabular_prolog(
     if spec.kind != TabularKind::CsvWithHeader {
         return Ok(());
     }
-    if spec.checks_taxdb() && !taxdb_found {
+    if let Some(line) = spec.formatter_warning(taxdb_found, program) {
         writer.flush()?;
-        diagnostics.write_all(taxdb_warning_line(program).as_bytes())?;
+        diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
     TabularWriter::new(spec, program_version, None).prolog(writer)?;

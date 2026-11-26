@@ -74,9 +74,7 @@ use super::super::query_split::{
     splits, QueryChunk, SplitSizes,
 };
 use super::super::repeat_filter::MasksOutside;
-use super::super::scoring::{
-    check_greedy_gap_costs, check_losat_limits, check_scoring_options, ContextKarlin,
-};
+use super::super::scoring::{check_losat_limits, check_scoring_options, ContextKarlin};
 use super::super::seqalign::write_blastn_seqalign;
 use super::super::tracing as blastn_trace;
 use super::super::ungapped;
@@ -4771,6 +4769,7 @@ struct SamTarget<'a> {
 
 /// What the pairwise report, the hit records and the query warnings need besides the
 /// final hit list.
+#[derive(Clone)]
 struct BlastnReportInputs<'a> {
     queries: &'a [FastaRecord],
     /// Under `-parse_deflines`, the scopes of the call's queries, which say how the XML family
@@ -5234,6 +5233,7 @@ fn stopped_subject(report: &BlastnReportInputs<'_>, s_idx: usize) -> String {
         Some((ordinals, reader)) => crate::report::tabular::failed_database_subject(
             reader.oid_map().oid(ordinals[s_idx]),
             report.database_loads.thrown(s_idx),
+            false,
         ),
         None => crate::report::tabular::failed_record_title(
             s_idx,

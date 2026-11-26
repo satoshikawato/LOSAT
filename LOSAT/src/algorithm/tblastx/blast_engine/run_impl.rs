@@ -2875,6 +2875,7 @@ fn stopped_subject(run: &TblastxReportRun<'_>, s_idx: usize) -> String {
         Some(database) => crate::report::tabular::failed_database_subject(
             database.oids.oid(database.reported.ordinals[s_idx]),
             database.reported.loads.thrown(s_idx),
+            false,
         ),
         None => crate::report::tabular::failed_record_title(s_idx, run.subjects[s_idx].shown_id()),
     }
@@ -4468,7 +4469,13 @@ impl BatchReports<'_> {
                     tabular: formats.iter().any(|format| format.tabular_reads_subject()),
                     stops_at_failed_lookup: formats.iter().any(|format| {
                         format.is_tabular()
-                            && crate::report::tabular::may_stop_at_failed_lookup(
+                            && crate::report::tabular::stops_at_lookup_failure(
+                                format.tabular_spec(),
+                            )
+                    }),
+                    stops_at_lineless: formats.iter().any(|format| {
+                        format.is_tabular()
+                            && crate::report::tabular::stops_at_lineless_accession(
                                 format.tabular_spec(),
                             )
                     }),

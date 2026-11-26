@@ -904,6 +904,16 @@ impl TabularSpec {
         ])
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
+    /// The warning that the formatter NCBI makes for each query's report of this field list
+    /// writes when it is made (`x_CheckTaxDB`: `checks_taxdb` and no `taxdb.bti` found,
+    /// `taxdb_found`), as `program` (lower case) posts it: the one owner of that rule for the
+    /// report writers and for what a refused report writes before its refusal
+    /// (`FailedLookupRefusal::formatter_warning`).
+    pub fn formatter_warning(&self, taxdb_found: bool, program: &str) -> Option<String> {
+        (self.checks_taxdb() && !taxdb_found).then(|| taxdb_warning_line(program))
+    }
+
     /// Whether the report writes rows of fields: every tabular report but the organism report
     /// (outfmt 18), whose table shows the labels and titles of the subjects' definition lines
     /// (`report::tax_report`, taxFormat.cpp:935-976) and never a row's subject ids (`sseqid`,
@@ -952,11 +962,17 @@ impl TabularSpec {
 
     /// Whether a row of this report can stop where NCBI has no result (`failed_lookup_stop`):
     /// the report asks `sacc` or `saccver`, or `staxid` (a failed first row: `staxid` loads the
-    /// subject, whose load may throw, `FailedStage::Bioseq`). A report that cannot stop needs no
-    /// check of its rows before it is written.
+    /// subject, whose load may throw, `FailedStage::Bioseq`), or `sallacc` (a subject with a
+    /// definition line without a Seq-id, `LookupFailure::lineless`). A report that cannot stop
+    /// needs no check of its rows before it is written.
     pub fn may_stop_at_failed_lookup(&self) -> bool {
         self.writes_rows()
-            && self.has_any(&[SubjectAccession, SubjectAccessionVersion, SubjectTaxId])
+            && self.has_any(&[
+                SubjectAccession,
+                SubjectAccessionVersion,
+                SubjectTaxId,
+                SubjectAllAccessions,
+            ])
     }
 
     /// Whether the report looks every taxid of its subjects up in the taxonomy database, 0 too:
@@ -1015,12 +1031,25 @@ fn failed_lookup_stops(
 
 /// Why NCBI has no result for a tabular report of `spec` at a row whose subject lookups fail as
 /// `failure` says (`failed_lookup_stops`): the null pointer of `sacc` or `saccver`, else an
-/// uninitialised `staxid`; `None`: the report has a result (`TabularWriter::row`).
+/// uninitialised `staxid`, or the `sallacc` of a subject with a definition line without a Seq-id
+/// (`failure.lineless`, `LINELESS_ACCESSION_NULL_POINTER`); `None`: the report has a result
+/// (`TabularWriter::row`).
 pub fn failed_lookup_stop(
     spec: Option<&TabularSpec>,
     failure: LookupFailure,
     first: bool,
 ) -> Option<&'static str> {
+    if let Some(spec) = spec {
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:257-264
+        if failure.lineless
+            && !failure.bioseq
+            && spec.writes_rows()
+            && spec.has(SubjectAllAccessions)
+            && spec.failure_stage(failure).is_none()
+        {
+            return Some(LINELESS_ACCESSION_NULL_POINTER);
+        }
+    }
     let (null_pointer, taxid) = failed_lookup_stops(spec, failure, first);
     match spec {
         None => null_pointer.then_some(FAILED_LOOKUP_NULL_POINTER),
@@ -1045,18 +1074,18 @@ fn row_stop_field(
     failure: LookupFailure,
     first: bool,
 ) -> Option<(usize, &'static str)> {
-    let (null_pointer, taxid) = failed_lookup_stops(spec, failure, first);
+    let (stop_acc, stop_taxid) = failed_lookup_stops(spec, failure, first);
     let Some(spec) = spec else {
-        return null_pointer.then_some((1, FAILED_LOOKUP_NULL_POINTER));
+        return stop_acc.then_some((1, FAILED_LOOKUP_NULL_POINTER));
     };
     spec.fields
         .iter()
         .enumerate()
         .find_map(|(at, field)| match field {
-            SubjectAccession | SubjectAccessionVersion if null_pointer => {
+            SubjectAccession | SubjectAccessionVersion if stop_acc => {
                 Some((at, FAILED_LOOKUP_NULL_POINTER))
             }
-            SubjectTaxId if taxid => Some((at, FAILED_LOOKUP_UNSET_TAXID)),
+            SubjectTaxId if stop_taxid => Some((at, FAILED_LOOKUP_UNSET_TAXID)),
             _ => None,
         })
 }
@@ -1064,6 +1093,10 @@ fn row_stop_field(
 const FAILED_LOOKUP_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sacc or saccver of its row, which reads the accession of the subject's Bioseq that its load did not give (the default fields of outfmt 6, 7, 10 and 20 print saccver), and reports the addresses of its own binary";
 
 const FAILED_LOOKUP_UNSET_TAXID: &str = "NCBI BLAST+ prints an uninitialised staxid in the row when it is the first row of a query's report (a different number in each run)";
+
+/// The reason of `failed_lookup_stop` for the `sallacc` of a subject with a definition line
+/// without a Seq-id (`LookupFailure::lineless`).
+pub const LINELESS_ACCESSION_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sallacc of each row of such a sequence";
 
 /// Whether NCBI's run of a tabular report of `spec` (`None`: the default fields) ends where the
 /// first row of a query's report loads a subject whose load throws (`failed_lookup_stop` of
@@ -1079,6 +1112,22 @@ pub fn may_stop_at_failed_lookup(spec: Option<&TabularSpec>) -> bool {
     spec.is_none_or(TabularSpec::may_stop_at_failed_lookup)
 }
 
+/// Whether a tabular report of `spec` (`None`: the default fields) can stop at a row whose
+/// subject lookup throws (`sacc`, `saccver`, default fields, or `staxid`), apart from a
+/// lineless-only definition line (`stops_at_lineless_accession`).
+pub fn stops_at_lookup_failure(spec: Option<&TabularSpec>) -> bool {
+    spec.is_none_or(|spec| {
+        spec.writes_rows()
+            && spec.has_any(&[SubjectAccession, SubjectAccessionVersion, SubjectTaxId])
+    })
+}
+
+/// Whether a tabular report of `spec` (`None`: the default fields) stops at a subject that has a
+/// definition line without a Seq-id (`LookupFailure::lineless`, `failed_lookup_stop`: `sallacc`).
+pub fn stops_at_lineless_accession(spec: Option<&TabularSpec>) -> bool {
+    spec.is_some_and(|spec| spec.writes_rows() && spec.has(SubjectAllAccessions))
+}
+
 /// A row at which NCBI has no result (`failed_lookup_stop`: a null pointer that ends its run, or
 /// an uninitialised number), which its writer (`TabularWriter::row`, `TabularRows::default_stop`)
 /// wrote up to the field where NCBI stops: the caller ends the run there (`row_stop_end`).
@@ -1089,6 +1138,9 @@ pub struct RowStop {
     pub subject: usize,
     /// What NCBI does at the field (`failed_lookup_stop`).
     pub reason: &'static str,
+    /// Whether the stop is at the `sallacc` of a definition line without a Seq-id
+    /// (`LINELESS_ACCESSION_NULL_POINTER`, `failed_database_subject`).
+    pub lineless: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
@@ -1151,16 +1203,21 @@ pub fn failed_record_title(s_idx: usize, shown_id: &[u8]) -> String {
 
 /// What LOSAT's refusal at a row where NCBI has no result (`row_stop_end`) says of the database
 /// sequence `oid` whose lookup fails: where its load throws `thrown` (a batch whose prefetch is
-/// off, or fails at a lookup that throws on the id: `SubjectLookup::Throws`), that load; otherwise
-/// its title (`failed_database_title`).
+/// off, or fails at a lookup that throws on the id: `SubjectLookup::Throws`), that load; where
+/// `lineless` (a definition line without a Seq-id at `sallacc`), that line; otherwise its title
+/// (`failed_database_title`).
 pub fn failed_database_subject(
     oid: impl std::fmt::Display,
     thrown: Option<&crate::ncbi_exception::NcbiException>,
+    lineless: bool,
 ) -> String {
     match thrown {
         Some(exception) => format!(
             "database sequence {oid} has a Seq-align id whose lookup throws '{}' where NCBI BLAST+ 2.17.0 reads the reported sequences one by one (a batch whose prefetch PRE_FETCH_SEQS_LIMIT or the format turns off, or whose prefetch fails at a Seq-align id whose lookup throws on the id itself, with its warning Error pre-fetching sequence data)",
             String::from_utf8_lossy(exception.get_msg())
+        ),
+        None if lineless => format!(
+            "database sequence {oid} has a definition line without a Seq-id (a hand-edited database)"
         ),
         None => failed_database_title(oid),
     }
@@ -1241,6 +1298,8 @@ pub struct DeflineIds {
     pub id: Vec<u8>,
     pub gi: i64,
     pub accession: Vec<u8>,
+    /// Whether the definition line has no Seq-id (`x_PrintSubjectAllAccessions` stops there).
+    pub lineless: bool,
 }
 
 impl DeflineIds {
@@ -1255,6 +1314,7 @@ impl DeflineIds {
             id: word.to_vec(),
             gi: 0,
             accession: word.to_vec(),
+            lineless: false,
         }]
     }
 }
@@ -1529,6 +1589,7 @@ impl FailedLookup<'_> {
             subject_id: self.subject_id,
             all_ids: self.all_ids.is_some(),
             bioseq: false,
+            lineless: false,
         }
     }
 }
@@ -1559,6 +1620,10 @@ pub struct LookupFailure {
     /// Whether the load of the subject's Bioseq by its Seq-align id throws, before both
     /// (`SubjectLookup::Throws`: a lookup that fails on a file where the batch's prefetch is off).
     pub bioseq: bool,
+    /// Whether a definition line of the subject has no Seq-id
+    /// (`db_subject::ParsedSubject::has_lineless_line`): no lookup fails, but `sallacc` prints the
+    /// label of that line's best id, which is null (`failed_lookup_stop`).
+    pub lineless: bool,
 }
 
 impl LookupFailure {
@@ -1569,7 +1634,7 @@ impl LookupFailure {
         Self {
             subject_id: true,
             all_ids: database,
-            bioseq: false,
+            ..Self::default()
         }
     }
 
@@ -1679,7 +1744,14 @@ impl TabularRows {
     ) -> Option<(Vec<u8>, RowStop)> {
         let (at, reason) = row_stop_field(None, failure?, !self.started)?;
         debug_assert_eq!(at, 1);
-        Some(([query_id, b"\t"].concat(), RowStop { subject, reason }))
+        Some((
+            [query_id, b"\t"].concat(),
+            RowStop {
+                subject,
+                reason,
+                lineless: false,
+            },
+        ))
     }
 
     /// The subject whose `m_SubjectId` a row whose load throws prints (`FailedStage::Bioseq`): the
@@ -2049,8 +2121,7 @@ impl<'a> TabularWriter<'a> {
             return self.failed_row(out, rows, query, subject, kept, hsp, stage);
         }
         rows.found(subject.index);
-        self.found_row(out, query, subject, hsp);
-        None
+        self.found_row(out, query, subject, hsp)
     }
 
     /// The row of a subject whose lookup fails at `stage`: the fields before the catch (the
@@ -2164,6 +2235,7 @@ impl<'a> TabularWriter<'a> {
                 return Some(RowStop {
                     subject: subject.index,
                     reason,
+                    lineless: false,
                 });
             }
             if kept_by_failed_row(*field) {
@@ -2221,6 +2293,28 @@ impl<'a> TabularWriter<'a> {
                 SubjectAccession | SubjectAccessionVersion => {}
                 SubjectAllSeqIds => out.extend_from_slice(list(0)),
                 SubjectAllGis => out.extend_from_slice(list(1)),
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:257-264
+                // Where `x_SetSubjectIds` pushed a definition line without a Seq-id before the
+                // line that threw, `x_PrintSubjectAllAccessions` stops there with the same null
+                // pointer after the earlier lines' accessions and `;`.
+                SubjectAllAccessions
+                    if subject_set
+                        && lines.unwrap_or_default().iter().any(|line| line.lineless) =>
+                {
+                    for (n, line) in lines.unwrap_or_default().iter().enumerate() {
+                        if n > 0 {
+                            out.push(b';');
+                        }
+                        if line.lineless {
+                            return Some(RowStop {
+                                subject: subject.index,
+                                reason: LINELESS_ACCESSION_NULL_POINTER,
+                                lineless: true,
+                            });
+                        }
+                        out.extend_from_slice(&line.accession);
+                    }
+                }
                 SubjectAllAccessions => out.extend_from_slice(list(2)),
                 SubjectLength => push_num(out, if subject_set { subject.length } else { 0 }),
                 Evalue => out.extend_from_slice(format_evalue_ncbi_tabular(hsp.evalue).as_bytes()),
@@ -2252,7 +2346,7 @@ impl<'a> TabularWriter<'a> {
         query: &TabularQuery<'_>,
         subject: &TabularSubject<'_>,
         hsp: &TabularHsp<'_>,
-    ) {
+    ) -> Option<RowStop> {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:973-1027
         // (the identities and positives counted again from the rows, and the BTOP string). A pair
         // of letters is scored only by the matrix of a writer whose report prints the positives
@@ -2300,6 +2394,24 @@ impl<'a> TabularWriter<'a> {
                 SubjectAccession => out.extend_from_slice(subject.accession),
                 SubjectAccessionVersion => out.extend_from_slice(subject.accession_version),
                 SubjectGi => push_num(out, subject.gi),
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:257-264
+                // `x_PrintSubjectAllAccessions`: writes `;` and each earlier line's accession
+                // before `s_GetSeqIdListString` throws on a definition line without a Seq-id.
+                SubjectAllAccessions if !subject.all_ids.is_empty() => {
+                    for (n, ids) in subject.all_ids.iter().enumerate() {
+                        if n > 0 {
+                            out.push(b';');
+                        }
+                        if ids.lineless {
+                            return Some(RowStop {
+                                subject: subject.index,
+                                reason: LINELESS_ACCESSION_NULL_POINTER,
+                                lineless: true,
+                            });
+                        }
+                        out.extend_from_slice(&ids.accession);
+                    }
+                }
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:224-231
                 // `x_PrintSubjectAllGis` and `x_PrintSubjectAllAccessions` (tabular.cpp:238-264)
                 // are the same loop with `eGi` and `eAccession`.
@@ -2371,6 +2483,7 @@ impl<'a> TabularWriter<'a> {
             }
         }
         out.push(b'\n');
+        None
     }
 
     /// A field of `subject` that a row whose lookup fails keeps from the last row that found its

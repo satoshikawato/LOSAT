@@ -576,12 +576,14 @@ pub(super) fn stopped_subject(
     shown: &ShownSubjects<'_>,
     subjects: &[FastaRecord],
     oid: usize,
+    lineless: bool,
 ) -> String {
     match shown {
         ShownSubjects::Database { reported, .. } => {
             crate::report::tabular::failed_database_subject(
                 reported.oid(oid),
                 reported.loads().thrown(oid),
+                lineless,
             )
         }
         ShownSubjects::Fasta { .. } => {

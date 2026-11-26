@@ -1,0 +1,163 @@
+BLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: ln
+           4 sequences; 600 total letters
+
+
+
+Query= q0
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000001.1 alpha                                                     315     9e-117
+NP_000002.1 Unknown                                                   15.8    1.0   
+NP_000006.1 Unknown                                                   15.8    1.4   
+
+
+>NP_000001.1 alpha
+Length=150
+
+ Score = 315 bits (806),  Expect = 9e-117, Method: Compositional matrix adjust.
+ Identities = 150/150 (100%), Positives = 150/150 (100%), Gaps = 0/150 (0%)
+ Frame = +1
+
+Query  1    WTIPYCCPAGQSSINLPTKTSLMFPTNYQYIVKWISHYPKCERNRGGVLPKGVWFQWHRD  180
+            WTIPYCCPAGQSSINLPTKTSLMFPTNYQYIVKWISHYPKCERNRGGVLPKGVWFQWHRD
+Sbjct  1    WTIPYCCPAGQSSINLPTKTSLMFPTNYQYIVKWISHYPKCERNRGGVLPKGVWFQWHRD  60
+
+Query  181  WMMQFRYWNNQAPHQGFKQELEPGSLHRIGPFGFWSMDEYQKDILDEPIHWRHNYGWQCI  360
+            WMMQFRYWNNQAPHQGFKQELEPGSLHRIGPFGFWSMDEYQKDILDEPIHWRHNYGWQCI
+Sbjct  61   WMMQFRYWNNQAPHQGFKQELEPGSLHRIGPFGFWSMDEYQKDILDEPIHWRHNYGWQCI  120
+
+Query  361  SMDYQQKASIMIRAHVVQIPWWYCPWTWFY  450
+            SMDYQQKASIMIRAHVVQIPWWYCPWTWFY
+Sbjct  121  SMDYQQKASIMIRAHVVQIPWWYCPWTWFY  150
+
+
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 62500
+
+
+Query= q1
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000002.1 Unknown                                                   315     5e-117
+NP_000001.1 alpha                                                     15.8    1.0   
+NP_000006.1 Unknown                                                   15.8    1.3   
+
+
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+>NP_000001.1 alpha
+Length=150
+
+ Score = 15.8 bits (29),  Expect = 1.0, Method: Compositional matrix adjust.
+ Identities = 10/40 (25%), Positives = 14/40 (35%), Gaps = 4/40 (10%)
+ Frame = +1
+
+Query  55   TRWNARPPVCNRLSGCSISVVIPYASMHECHELMMRLLMY  174
+             +W +  P C R  G     V+P     + H   M    Y
+Sbjct  32   VKWISHYPKCERNRGG----VLPKGVWFQWHRDWMMQFRY  67
+
+
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 62500
+
+
+Query= q2
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000006.1 Unknown                                                   17.3    0.32 
+
+
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 62500
+
+
+Query= q3
+
+Length=450
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000006.1 Unknown                                                   317     7e-118
+NP_000001.1 alpha                                                     15.8    1.4   
+
+
+Sequence with id NP_000006 no longer exists in database...alignment skipped
+>NP_000001.1 alpha
+Length=150
+
+ Score = 15.8 bits (29),  Expect = 1.4, Method: Compositional matrix adjust.
+ Identities = 5/13 (38%), Positives = 8/13 (62%), Gaps = 0/13 (0%)
+ Frame = +1
+
+Query  379  DNYDCDILADAMY  417
+            D Y  DIL + ++
+Sbjct  98   DEYQKDILDEPIH  110
+
+
+
+Lambda      K        H        a         alpha
+   0.318    0.134    0.401    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 62500
+
+
+  Database: ln
+    Posted date:  Nov 23, 2026  5:10 PM
+  Number of letters in database: 600
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 12
+Window for multiple hits: 40

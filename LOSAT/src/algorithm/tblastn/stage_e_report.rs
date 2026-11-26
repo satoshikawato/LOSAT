@@ -360,7 +360,6 @@ pub(super) fn render(
             hard_masked,
         )?;
     }
-    let hitlists: &[KappaResultHitList] = hitlists;
     // `-in_pssm` with `-window_size 0`: an alignment whose traceback started on its frame's NULLB
     // (`search_gapped::x_traceback_start_past_frame`) is refused here, where NCBI reports it, and
     // not where NCBI drops it after its traceback (the hit list, `-max_target_seqs`).
@@ -417,6 +416,34 @@ pub(super) fn render(
         }
         return Ok(());
     }
+    // The tabular subject IDs, made before any format is written: a subject that NCBI
+    // writes part of a row for and then stops at (RP-20) is rejected first
+    // (`tabular_subject_ids`). The tabular formats 6, 7, 10 and 20 show them, not the organism
+    // report (`report::tabular::writes_rows`).
+    let shows_ids = |format: &crate::api::local_blast::FormatOutput<'_>| {
+        matches!(format_number(format.outfmt), 6 | 7 | 10 | 18 | 20)
+            && crate::report::tabular::writes_rows(
+                super::tabular::tabular_spec(format.outfmt).as_ref(),
+            )
+    };
+    let subject_ids = if outputs.formats.iter().any(shows_ids) {
+        match shown {
+            ShownSubjects::Fasta { .. } => tabular_subject_ids(subject_records),
+            ShownSubjects::Database { reported, oids, .. } => reported.tabular_subject_ids(
+                *oids,
+                outputs.formats.iter().any(|format| {
+                    shows_ids(format)
+                        && crate::report::tabular::reads_subject(
+                            super::tabular::tabular_spec(format.outfmt).as_ref(),
+                            crate::blastinput::app::Program::Tblastn,
+                        )
+                }),
+            )?,
+        }
+    } else {
+        Vec::new()
+    };
+    let hitlists: &[KappaResultHitList] = hitlists;
     let xml_is_xml2 = outputs
         .formats
         .iter()
@@ -455,33 +482,6 @@ pub(super) fn render(
         )?)
     } else {
         None
-    };
-    // The tabular subject IDs, made before any format is written: a subject that NCBI
-    // writes part of a row for and then stops at (RP-20) is rejected first
-    // (`tabular_subject_ids`). The tabular formats 6, 7, 10 and 20 show them, not the organism
-    // report (`report::tabular::writes_rows`).
-    let shows_ids = |format: &crate::api::local_blast::FormatOutput<'_>| {
-        matches!(format_number(format.outfmt), 6 | 7 | 10 | 18 | 20)
-            && crate::report::tabular::writes_rows(
-                super::tabular::tabular_spec(format.outfmt).as_ref(),
-            )
-    };
-    let subject_ids = if outputs.formats.iter().any(shows_ids) {
-        match shown {
-            ShownSubjects::Fasta { .. } => tabular_subject_ids(subject_records),
-            ShownSubjects::Database { reported, oids, .. } => reported.tabular_subject_ids(
-                *oids,
-                outputs.formats.iter().any(|format| {
-                    shows_ids(format)
-                        && crate::report::tabular::reads_subject(
-                            super::tabular::tabular_spec(format.outfmt).as_ref(),
-                            crate::blastinput::app::Program::Tblastn,
-                        )
-                }),
-            )?,
-        }
-    } else {
-        Vec::new()
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411:
     // The alignments are rendered once from the final result, for outfmt 0 and for
@@ -1121,6 +1121,7 @@ fn stopped_subject(
             crate::report::tabular::failed_database_subject(
                 oids.oid(reported.ordinals[s_idx]),
                 reported.loads.thrown(s_idx),
+                false,
             )
         }
         ShownSubjects::Fasta { .. } => {

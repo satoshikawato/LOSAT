@@ -1,0 +1,115 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: ln
+           4 sequences; 600 total letters
+
+Results from round 1
+
+
+Query= q1
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+NP_000002.1 Unknown                                                   315     4e-117
+NP_000001.1 alpha                                                     15.8    0.94  
+
+
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+>NP_000001.1 alpha
+Length=150
+
+ Score = 15.8 bits (29),  Expect = 0.94, Method: Compositional matrix adjust.
+ Identities = 10/40 (25%), Positives = 14/40 (35%), Gaps = 4/40 (10%)
+
+Query  19  TRWNARPPVCNRLSGCSISVVIPYASMHECHELMMRLLMY  58
+            +W +  P C R  G     V+P     + H   M    Y
+Sbjct  32  VKWISHYPKCERNRGG----VLPKGVWFQWHRDWMMQFRY  67
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.133    0.464    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 62500
+Results from round 2
+
+
+Query= q1
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+NP_000002.1 Unknown                                                   301     1e-111
+
+Sequences not found previously or not previously below threshold:
+
+NP_000001.1 alpha                                                     15.0    2.0  
+
+
+Sequence with id NP_000002 no longer exists in database...alignment skipped
+>NP_000001.1 alpha
+Length=150
+
+ Score = 15.0 bits (27),  Expect = 2.0, Method: Composition-based stats.
+ Identities = 5/14 (36%), Positives = 7/14 (50%), Gaps = 0/14 (0%)
+
+Query  20  RWNARPPVCNRLSG  33
+           +W +  P C R  G
+Sbjct  33  KWISHYPKCERNRG  46
+
+
+
+Lambda      K        H        a         alpha
+   0.315    0.137    0.524    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0418    0.140     1.90     42.6     43.6 
+
+Effective search space used: 62500
+
+Search has CONVERGED!
+
+
+  Database: ln
+    Posted date:  Nov 23, 2026  5:10 PM
+  Number of letters in database: 600
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

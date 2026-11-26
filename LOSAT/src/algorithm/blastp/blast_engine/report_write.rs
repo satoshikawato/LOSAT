@@ -1285,6 +1285,7 @@ pub(super) fn write_text(
         Some(titles) => crate::report::tabular::failed_database_subject(
             titles.oid(s_idx),
             view.hit_loads.thrown(s_idx),
+            false,
         ),
         None => crate::report::tabular::failed_record_title(
             s_idx,

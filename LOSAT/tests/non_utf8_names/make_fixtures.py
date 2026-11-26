@@ -182,9 +182,13 @@ def undated(d: bytes, path: bytes, data: bytes) -> bytes:
                 with open(idx_path, "rb") as index:
                     span = index_date(index.read())
                 dates += span[1] - span[0]
-        data = re.sub(
-            rb'"bytes-total": (\d+)', lambda m: b'"bytes-total": %d' % (int(m.group(1)) - dates), data, count=1
-        )
+        for key in (b"bytes-total", b"bytes-to-cache"):
+            data = re.sub(
+                rb'"' + key + rb'": (\d+)',
+                lambda m, k=key: b'"' + k + b'": %d' % (int(m.group(1)) - dates),
+                data,
+                count=1,
+            )
     if path.endswith(b".log"):
         data = re.sub(rb"(Building a new DB, current time: )[^\n]*", rb"\1{TIME}", data, count=1)
         data = re.sub(rb"( sequences in )[^ ]*( seconds\.)", rb"\1{SECONDS}\2", data, count=1)

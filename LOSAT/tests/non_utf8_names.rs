@@ -317,20 +317,21 @@ fn undated(d: &Path, path: &[u8], data: &[u8]) -> Vec<u8> {
                 dates += end - start;
             }
         }
-        let key = b"\"bytes-total\": ";
-        if let Some(at) = data.windows(key.len()).position(|w| w == key) {
-            let start = at + key.len();
-            let end = start
-                + data[start..]
-                    .iter()
-                    .take_while(|b| b.is_ascii_digit())
-                    .count();
-            let total: usize = std::str::from_utf8(&data[start..end])
-                .unwrap()
-                .parse()
-                .unwrap();
-            let total = (total - dates).to_string();
-            data = [&data[..start], total.as_bytes(), &data[end..]].concat();
+        for key in [b"\"bytes-total\": ".as_slice(), b"\"bytes-to-cache\": "] {
+            if let Some(at) = data.windows(key.len()).position(|w| w == key) {
+                let start = at + key.len();
+                let end = start
+                    + data[start..]
+                        .iter()
+                        .take_while(|b| b.is_ascii_digit())
+                        .count();
+                let total: usize = std::str::from_utf8(&data[start..end])
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                let total = (total - dates).to_string();
+                data = [&data[..start], total.as_bytes(), &data[end..]].concat();
+            }
         }
     }
     if path.ends_with(b".log") {

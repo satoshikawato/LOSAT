@@ -4092,32 +4092,57 @@ fn run_batch_loop(
                 ),
                 &mut reports.titles.borrow_mut(),
             );
+            // NCBI's reads of the titles where it makes the batch's Seq-aligns: each run of HSPs
+            // of one query and subject is one Seq-align set's subject, in `read_titles`' order.
+            let aligned = || {
+                let mut previous = None;
+                ordered.iter().filter_map(move |hsp| {
+                    let key = (hsp.hit.q_idx, hsp.hit.s_idx);
+                    (previous.replace(key) != Some(key)).then_some(hsp.hit.s_idx)
+                })
+            };
             match read {
                 // NCBI's warning of its first read of a UTF8String header follows the batch's
                 // reader messages and request posts (`warnings[start]`), before its prefetch.
                 Ok(read) => {
-                    if let Some(posts) = crate::algorithm::common::database::Utf8Read::post_of(
+                    let utf8 = crate::algorithm::common::database::Utf8Read::post_of(
                         read.as_ref(),
                         &database.db,
                         args.app().ncbi_name(),
-                    ) {
-                        warnings[start].append(&posts);
-                        batch_warnings.append(&posts);
+                    );
+                    if let Some(posts) = &utf8 {
+                        warnings[start].append(posts);
+                        batch_warnings.append(posts);
                     }
+                    // NCBI's posts of the titles that the batch's Seq-aligns read.
+                    let titled = crate::algorithm::common::database::batch_title_posts(
+                        &database.db,
+                        aligned(),
+                        utf8.is_some(),
+                        "TBLASTX",
+                    )?;
+                    warnings[start].append(&titled);
+                    batch_warnings.append(&titled);
                 }
                 Err(error) => {
-                    match error.downcast::<crate::blastinput::app::ErrorAfterBatchReports>() {
+                    use crate::blastinput::app::ErrorAfterBatchReports;
+                    match ErrorAfterBatchReports::after_seq_aligns(error, aligned())
+                        .downcast::<ErrorAfterBatchReports>()
+                    {
                         Ok(failure) => {
+                            // NCBI's warning of its first read of a UTF8String header, then the
+                            // posts of the titles that the Seq-aligns read before the failure.
+                            let utf8 = crate::algorithm::common::database::Utf8Read::post_of(
+                                failure.utf8.as_ref(),
+                                &database.db,
+                                args.app().ncbi_name(),
+                            );
+                            let titled =
+                                failure.title_posts(&database.db, utf8.is_some(), "TBLASTX")?;
                             reports.write_before_failed_batch(outputs, done, &warnings)?;
                             batch_warnings
                                 .write(&mut *outputs.diagnostics, args.archive.as_ref())?;
-                            if let Some(posts) =
-                                crate::algorithm::common::database::Utf8Read::post_of(
-                                    failure.utf8.as_ref(),
-                                    &database.db,
-                                    args.app().ncbi_name(),
-                                )
-                            {
+                            for posts in utf8.iter().chain([&titled]) {
                                 posts.write(&mut *outputs.diagnostics, args.archive.as_ref())?;
                             }
                             return Err(failure.error);
@@ -4704,6 +4729,12 @@ impl BatchReports<'_> {
                         ),
                     one_by_one: crate::algorithm::common::database::prefetch_may_be_off(
                         prefetch_format,
+                    ),
+                    titles: crate::algorithm::common::database::TitleReads::of_outfmts(
+                        crate::report::archive::options::RequestKind::Tblastx,
+                        formats.iter().map(|format| {
+                            format.report_format().map_or(-1, |format| format as i32)
+                        }),
                     ),
                 };
                 // The queries of each batch (`done.spans`, in the numbering of `hits`), whose

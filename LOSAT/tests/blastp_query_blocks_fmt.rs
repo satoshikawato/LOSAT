@@ -853,11 +853,12 @@ fn xml_titles_that_ncbi_cannot_make_leave_the_search_of_all_queries() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-// `-db`: one stored title with a Latin-1 byte, on a subject with hits (refused by outfmt 5, 8, 15
-// and 16) and on one without (all complete): the block search is not used, and the run ends as the
-// search of all queries does. One case per path (CI time): with hits outfmt 5 and 8 (one check,
-// `x_titles_read_allow_blocks`) and 15 (the titles with the taxids, `x_titles_taxids_allow_blocks`),
-// without hits 8 and 16; both checks are unit tests at one and four threads (`database.rs`).
+// `-db`: one stored title with a Latin-1 byte, on a subject with hits (refused by outfmt 5, 15 and
+// 16; outfmt 8 writes NCBI's 803.7 posts of its Seq-aligns, line RG-KB 9(b)) and on one without
+// (all complete): the block search is not used, and the run ends as the search of all queries does.
+// One case per path (CI time): with hits outfmt 5 and 8 (one check, `x_titles_read_allow_blocks`)
+// and 15 (the titles with the taxids, `x_titles_taxids_allow_blocks`), without hits 8 and 16; both
+// checks are unit tests at one and four threads (`database.rs`).
 #[test]
 fn a_database_title_outside_the_printable_range_leaves_the_search_of_all_queries() {
     let dir = std::env::temp_dir().join(format!("losat-bpqblockfmt-dbt-{}", std::process::id()));
@@ -889,13 +890,20 @@ fn a_database_title_outside_the_printable_range_leaves_the_search_of_all_queries
     );
     // (database text, marker, name, whether the search of all queries completes, its (outfmt,
     // threads))
-    let cases: [(&String, &str, &str, bool, Runs); 2] = [
+    let cases: [(&String, &str, &str, bool, Runs); 3] = [
         (
             &with_hit,
             "cafX",
             "a title on a subject with hits",
             false,
-            &[("5", 1), ("8", 4), ("15", 1)],
+            &[("5", 1), ("15", 1)],
+        ),
+        (
+            &with_hit,
+            "cafX",
+            "a title on a subject with hits in its Seq-aligns",
+            true,
+            &[("8", 4)],
         ),
         (
             &without_hit,

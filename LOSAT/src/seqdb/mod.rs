@@ -1255,7 +1255,23 @@ pub struct SeqDb {
     utf8_claimed: AtomicBool,
     /// Whether the loads modelled now are not NCBI's (`SeqDb::without_scope_utf8_loads`).
     scope_utf8_held: AtomicBool,
+    /// Whether a reader read the title of a reported sequence that holds a byte outside
+    /// ' ' ..= '~' (`SeqDb::note_replaced_title`): only then are the reads of NCBI's cache of
+    /// header records modelled (`header_cache`).
+    replaced_titles: AtomicBool,
+    /// The model of NCBI's cache of read header records (`SeqDb::read_header_record`), from the
+    /// first read of such a title on.
+    header_cache: std::sync::Mutex<HeaderCache>,
 }
+
+/// NCBI's cache of the header records that a volume read (`CSeqDBVol::m_DeflineCache`): by volume,
+/// 256 slots, the slot of a record that of its OID in the volume modulo 256, holding the OID of
+/// the record read last there (`None`: none yet). Allocated at its first read.
+#[derive(Debug, Default)]
+struct HeaderCache(std::collections::HashMap<usize, Box<[Option<u32>; HEADER_CACHE_SLOTS]>>);
+
+/// The slots of NCBI's cache of a volume's header records (`m_DeflineCache`, made with 256).
+const HEADER_CACHE_SLOTS: usize = 256;
 
 /// NCBI's counts of a database (`CSeqDBImpl::m_NumSeqs`, `m_TotalLength`, `m_MaxLength`,
 /// `m_MinLength`).
@@ -1481,7 +1497,7 @@ impl SeqDb {
     pub fn taxdb_found(&self) -> bool {
         self.search_path
             .as_ref()
-            .is_some_and(|path| path.resolve_file(b"taxdb.bti").is_some())
+            .is_some_and(|path| path.resolve_file(taxdb::INDEX_FILE.as_bytes()).is_some())
     }
 
     /// Whether the reports of the search show the headers it reads with `-show_gis`.
@@ -1920,6 +1936,8 @@ impl SeqDb {
             scope_utf8_ended: AtomicBool::new(false),
             utf8_claimed: AtomicBool::new(false),
             scope_utf8_held: AtomicBool::new(false),
+            replaced_titles: AtomicBool::new(false),
+            header_cache: Default::default(),
         };
         // A volume list that NCBI opens and whose OIDs it then gets wrong
         // (`SeqDbError::Unsupported`) is refused by the lookups that need them, not here.
@@ -3084,6 +3102,80 @@ impl SeqDb {
             .store(false, std::sync::atomic::Ordering::Relaxed);
         self.scope_utf8_ended
             .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Notes that a reader read a title that holds a byte outside ' ' ..= '~' (a reported
+    /// sequence's, `algorithm::common::database::HeaderReader`; a failed read's,
+    /// `ErrorAfterBatchReports::title_posts`; any sequence's in the check before a search,
+    /// `reports_may_refuse`): the reads of NCBI's cache of header records are modelled from here
+    /// on (`read_header_record`).
+    #[cold]
+    #[inline(never)]
+    pub fn note_replaced_title(&self) {
+        self.replaced_titles
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether a reader read such a title (`note_replaced_title`).
+    pub fn replaced_titles(&self) -> bool {
+        self.replaced_titles
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1979-1988
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2071-2080
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbgeneral.hpp:1184-1195
+    /// NCBI's read of the header record of the sequence at `at` through its volume's cache
+    /// (`x_GetFilteredHeader` on the main thread, where NCBI makes the Seq-aligns of a search's
+    /// results): whether it reads the record (`true`; the slot held another record, or none),
+    /// which then holds the slot, or finds it there. The model starts at the first read of a title
+    /// with a byte outside ' ' ..= '~' (`note_replaced_title`): every read after it leaves its
+    /// record in its slot, whether it was there or not, and that title's own first read is a read
+    /// of the record in any case, so the slots read before do not change an answer that matters.
+    #[cold]
+    #[inline(never)]
+    pub fn read_header_record(&self, at: SeqLocation) -> bool {
+        let mut cache = self
+            .header_cache
+            .lock()
+            .expect("the header cache is not poisoned");
+        let slots = cache
+            .0
+            .entry(at.volume)
+            .or_insert_with(|| Box::new([None; HEADER_CACHE_SLOTS]));
+        let slot = &mut slots[at.vol_oid as usize % HEADER_CACHE_SLOTS];
+        let read = *slot != Some(at.vol_oid);
+        *slot = Some(at.vol_oid);
+        read
+    }
+
+    /// The model of NCBI's cache of header records (`read_header_record`) back to a run's start,
+    /// for a search again of batches whose reads NCBI made once (BLASTP's batches before a failed
+    /// one).
+    #[cold]
+    #[inline(never)]
+    pub fn restart_header_reads(&self) {
+        self.header_cache
+            .lock()
+            .expect("the header cache is not poisoned")
+            .0
+            .clear();
+    }
+
+    /// What NCBI's read of the header record of the sequence at `at` posts for the bytes outside
+    /// ' ' ..= '~' of its titles (`seqid::ber::title_replaced_chars`), one text for each post,
+    /// with the post prefix `prefix` (`blastp`); none where the record cannot be read (its reader
+    /// fails elsewhere).
+    #[cold]
+    #[inline(never)]
+    pub fn title_posts_at(&self, at: SeqLocation, prefix: &str) -> Vec<Vec<u8>> {
+        let Ok(record) = self.volumes[at.volume].header_bytes(at.vol_oid) else {
+            return Vec::new();
+        };
+        crate::seqid::ber::title_replaced_chars(&record)
+            .iter()
+            .map(|replaced| replaced.post(Some(prefix)))
+            .collect()
     }
 
     /// Notes that a reader met a reported sequence whose Seq-align id the lookup gives first to

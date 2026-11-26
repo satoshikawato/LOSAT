@@ -60,6 +60,10 @@ use crate::algorithm::blastn::lookup::{DiscTemplates, XHeadFifo};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
+// EXPERIMENT (LOSAT_X_DCFOLDREG): the fold on a map of LOSAT_X_DCLATEST with the map in registers.
+#[path = "x_dc_fold_reg.rs"]
+mod fold_reg;
+
 /// No NCBI counterpart: reads LOSAT_X_PAIRPARDISC once (a strict-set switch since 2026-10-17: on
 /// unless it is `0`), for the parent's `takes_owner_chunks`; it does not change any value NCBI
 /// computes.
@@ -118,6 +122,16 @@ fn one_thread_on() -> bool {
 fn latest_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCLATEST"))
+}
+
+/// No NCBI counterpart: reads LOSAT_X_DCFOLDREG once (a strict-set switch since 2026-11-26: on
+/// unless it is `0`). With it the folds on the maps of LOSAT_X_DCLATEST (`fold_two_hit_latest`)
+/// run `fold_reg::fold_two_hit_reg`, which keeps the map in registers and makes each seed's
+/// decisions and inserts of `fold_two_hit_on` on `Latest` in the same order (`x_dc_fold_reg.rs`),
+/// so it does not change any value NCBI computes.
+fn reg_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DCFOLDREG"))
 }
 
 /// No NCBI counterpart: LOSAT_X_REACH for LOSAT_X_DCLATEST, which acts in the strips stage of the
@@ -627,6 +641,14 @@ impl FoldTable for Latest<'_> {
     #[inline(always)]
     fn retrieve(&mut self, diag: i32, s_off_pos: usize) -> (i32, bool) {
         self.found = self.map.find(diag, s_off_pos as i32);
+        #[cfg(test)]
+        self.map.note(latest::Event::Read {
+            diag,
+            s: s_off_pos as i32,
+            level: self.found.level,
+            saved: self.found.saved,
+            stash: self.found.in_stash(),
+        });
         (self.found.level, self.found.saved)
     }
 
@@ -646,6 +668,13 @@ impl FoldTable for Latest<'_> {
         s_off: i32,
         _window_size: i32,
     ) {
+        #[cfg(test)]
+        self.map.note(latest::Event::Put {
+            diag,
+            level,
+            saved: hit_saved,
+            s: s_off,
+        });
         let bound = self.seeds.bound(s_off as usize);
         self.map
             .put(self.found, diag, level, hit_saved, s_off, bound);
@@ -1014,7 +1043,10 @@ fn fold_two_hit_t<const PT: bool, const LEAN: bool, const MEMO: bool, const TRAC
 /// EXPERIMENT (LOSAT_X_DCLATEST): `fold_two_hit` on the map of the latest inserts `map` (the
 /// owner's, or with `PT` a partition's): the inserts change no `DiagHashTable`, and the fold brings
 /// in the map's bucket of the seed `latest::AHEAD` places ahead. The function of the fold on a
-/// map, `map` its argument (`fold_two_hit_on` inlined with `Latest`).
+/// map, `map` its argument (`fold_two_hit_on` inlined with `Latest`). EXPERIMENT
+/// (LOSAT_X_DCFOLDREG, `reg_on`): the same fold with the map in registers
+/// (`fold_reg::fold_two_hit_reg`), whose `TOW` is LOSAT_X_FOLDLEAN's early return of
+/// `type_of_word` (`LEAN` with equal word lengths, as `fold_two_hit_on` tests it per seed).
 #[allow(clippy::too_many_arguments)]
 fn fold_two_hit_latest<const PT: bool, const LEAN: bool>(
     x: &Inputs<'_>,
@@ -1027,6 +1059,35 @@ fn fold_two_hit_latest<const PT: bool, const LEAN: bool>(
     out: &mut part::PartOut,
     pos: &[u32],
 ) {
+    if reg_on() {
+        let two_stage = x.two_stage;
+        if LEAN && two_stage.word_length() == two_stage.lut_word_length() {
+            fold_reg::fold_two_hit_reg::<PT, true>(
+                x,
+                seeds,
+                map,
+                ungapped_hits,
+                timing,
+                scan_pause_ns,
+                counts,
+                out,
+                pos,
+            );
+        } else {
+            fold_reg::fold_two_hit_reg::<PT, false>(
+                x,
+                seeds,
+                map,
+                ungapped_hits,
+                timing,
+                scan_pause_ns,
+                counts,
+                out,
+                pos,
+            );
+        }
+        return;
+    }
     fold_two_hit_on::<PT, LEAN, _>(
         x,
         seeds,

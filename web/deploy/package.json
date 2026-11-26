@@ -1,0 +1,6 @@
+{
+  "name": "losat-web-deploy",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Workers Static Assets deployment configuration for LOSAT Web."
+}

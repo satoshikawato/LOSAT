@@ -3971,3 +3971,64 @@ fn prefetch_slot_plan_pins_only_prefix_before_first_empty_handle_in_compare_orde
 
     std::fs::remove_dir_all(&cwd).unwrap();
 }
+
+#[test]
+fn one_by_one_query_reads_stops_at_throw_and_collapses_joined_copies() {
+    use crate::report::db_subject::{
+        AfterThrow, FormatThrow, HitLoads, LoadsBefore, ParsedSubject, RunThrow,
+    };
+    use crate::seqid::defline_set::{BlastDefline, DeflineSet};
+    use crate::seqid::model::ParsedSeqId;
+
+    let cwd = empty_cwd("one_by_one_query_reads");
+    let throwing_db = db_search("t5/ppig1", None, &cwd);
+    let headers = HeaderReader::new(&throwing_db, false);
+    let ReportedHeader::Parsed(throwing) = read_header(&headers, 0, 0, "BLASTP").unwrap() else {
+        panic!("t5/ppig1 sequence 0 must be a parsed subject");
+    };
+    let make_gi = |gi: i64| {
+        ParsedSubject::new(DeflineSet::from(vec![BlastDefline {
+            ids: vec![ParsedSeqId::Gi(gi)],
+            ..BlastDefline::default()
+        }]))
+        .unwrap()
+    };
+    // Subjects: 0 = gi|1, 1 = gi|1 (adjacent copy of 0), 2 = throwing (t5/ppig1), 3 = gi|3.
+    let subjects = [make_gi(1), make_gi(1), (*throwing).clone(), make_gi(3)];
+    let parsed = |rank: usize| Some(&subjects[rank]);
+
+    // Query 0 hits [0, 1, 2(throws), 3]; Query 1 hits [3], so run-wide `loads.reached(3)` is
+    // true even though Query 0 stopped at rank 2 under `AfterThrow::EndsReport`.
+    let loads = HitLoads::of(
+        LoadsBefore::NONE,
+        FormatThrow::Writes(RunThrow::every_row(AfterThrow::EndsReport)),
+        [
+            (true, vec![Some(0), Some(1), Some(2), Some(3)]),
+            (true, vec![Some(3)]),
+        ],
+        parsed,
+        |_, _| 1,
+    );
+    assert!(loads.reached(3));
+    assert!(loads.thrown(2).is_some());
+
+    // XML2/JSON (`joins_copies = true`, `ends_on_throw = true`): collapses adjacent copy 1 and
+    // stops at throwing rank 2 without a phantom read of rank 3.
+    assert_eq!(
+        one_by_one_query_reads([0, 1, 2, 3], parsed, &loads, true, true),
+        vec![0, 2]
+    );
+    // BLAST XML (`joins_copies = true`, `ends_on_throw = false`): collapses adjacent copy 1 and
+    // continues to rank 3.
+    assert_eq!(
+        one_by_one_query_reads([0, 1, 2, 3], parsed, &loads, true, false),
+        vec![0, 2, 3]
+    );
+    // Tabular (`joins_copies = false`, `ends_on_throw = false`): reads every reached entry.
+    assert_eq!(
+        one_by_one_query_reads([0, 1, 2, 3], parsed, &loads, false, false),
+        vec![0, 1, 2, 3]
+    );
+
+    std::fs::remove_dir_all(&cwd).unwrap();
+}

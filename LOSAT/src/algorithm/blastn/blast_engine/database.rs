@@ -619,6 +619,7 @@ impl BlastnDatabase {
         first_query: usize,
         ungapped: bool,
         loads: &HitLoads,
+        joins_copies: bool,
     ) -> Result<crate::report::query_warnings::QueryReads> {
         let parsed = |oid: u32| match titles.get(&oid) {
             Some(ReportedHeader::Parsed(subject)) => Some(&**subject),
@@ -634,19 +635,25 @@ impl BlastnDatabase {
             )
             .subjects()
             .into_iter()
+            .filter(|&oid| loads.reached(oid))
             .map(|oid| oid as u32)
             .collect(),
-            None => hit_lists
-                .iter()
-                .flat_map(shown_lists)
-                .filter(|hsp_list| !hsp_list.hsps.is_empty())
-                .map(|hsp_list| hsp_list.oid)
-                .collect(),
-        };
-        let subjects = ordinals
+            None => shared::one_by_one_query_reads(
+                hit_lists
+                    .iter()
+                    .flat_map(shown_lists)
+                    .filter(|hsp_list| !hsp_list.hsps.is_empty())
+                    .map(|hsp_list| hsp_list.oid as usize),
+                |oid| titled_parsed(titles, oid),
+                loads,
+                joins_copies,
+                false,
+            )
             .into_iter()
-            .filter(|&oid| loads.reached(oid as usize))
-            .map(|oid| (oid, oid, parsed(oid)));
+            .map(|oid| oid as u32)
+            .collect(),
+        };
+        let subjects = ordinals.into_iter().map(|oid| (oid, oid, parsed(oid)));
         shared::subject_read_texts(&self.db, &self.taxdb, subjects, rows, PROGRAM)
     }
 
@@ -1978,6 +1985,9 @@ pub(super) struct QueryFetches<'a> {
     /// Whether the first format is a pairwise one, which places the texts in the order of its
     /// reads (`places`).
     pub(super) pairwise_first: bool,
+    /// Whether the first format joins adjacent copies of the same record into one `Hit`
+    /// (`Xml`, `Xml2`, `Json`, `Xml2S`, `JsonS`), reading only the first of the run.
+    pub(super) joins_copies: bool,
     /// Whether each HSP is a Seq-align (`seq_aligns_of`) and the search is gapped (`!ungapped`).
     pub(super) gapped: bool,
     /// The `-query_loc` offsets of the run's queries (for `pairwise_read_order`).
@@ -2058,6 +2068,7 @@ impl QueryFetches<'_> {
                             first + index,
                             !self.gapped,
                             &loads,
+                            self.joins_copies,
                         )?;
                     } else {
                         messages = self

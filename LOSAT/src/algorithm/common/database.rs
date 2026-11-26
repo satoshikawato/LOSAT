@@ -7649,6 +7649,56 @@ pub(crate) fn subject_read_texts<'s>(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:357-360
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:476-509
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1443-1451
+/// Filters a single query's one-by-one report subject keys (`ranks`, in hit-list order) to match
+/// the `Hit` reads NCBI actually makes:
+/// - When `joins_copies` is true (BLAST XML, XML2, JSON), drops adjacent keys that join the
+///   preceding `Hit` as the same record (`joins_as_copy`, matching `blast_xml::hit_ranges`).
+/// - Drops keys never reached by any report (`loads.reached(key)`).
+/// - When `ends_on_throw` is true (`AfterThrow::EndsReport` / `EndsRun`), truncates immediately
+///   after the first key whose lookup throws (`loads.thrown(key).is_some()`), so subjects after a
+///   throwing `Hit` in that query do not perform phantom taxonomy/slot loads even if a later query
+///   reaches them.
+pub(crate) fn one_by_one_query_reads<P>(
+    ranks: impl IntoIterator<Item = usize>,
+    parsed: impl Fn(usize) -> Option<P>,
+    loads: &crate::report::db_subject::HitLoads,
+    joins_copies: bool,
+    ends_on_throw: bool,
+) -> Vec<usize>
+where
+    P: std::ops::Deref<Target = crate::report::db_subject::ParsedSubject>,
+{
+    let mut out = Vec::new();
+    let mut previous: Option<usize> = None;
+    for rank in ranks {
+        if joins_copies {
+            let joins = previous.is_some_and(|before| {
+                before == rank
+                    || matches!(
+                        (parsed(before), parsed(rank)),
+                        (Some(earlier), Some(later))
+                            if crate::report::db_subject::joins_as_copy(&earlier, &later)
+                    )
+            });
+            previous = Some(rank);
+            if joins {
+                continue;
+            }
+        }
+        if !loads.reached(rank) {
+            continue;
+        }
+        out.push(rank);
+        if ends_on_throw && loads.thrown(rank).is_some() {
+            break;
+        }
+    }
+    out
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:819-838 (cited above)
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:380-386 (the `Hit`
 // asks `CSeqDB::GetTaxInfo` for each taxid that is not 0)

@@ -2506,7 +2506,7 @@ with `p4`'s mask one letter shorter, [0, 119)) and `pe_tailn` (`edge_tailn.asnt`
 is searched the same way, as BLASTN's `edge4`; its near input is `pe_e0tailn` ([0, 0) and [300, 399)). The near
 inputs store the letter that the shorter mask frees as `X` (`prot_p4x.faa`, `prot_p5x.faa`), so that it stays masked in
 the alignments and the composition-based statistics, as LOSAT reads the masked letters. `ph5`, `ph4` and
-`phmv` are the other hard-mask databases; `pe_unsorted` (masks out of order) is refused.
+`phmv` are the other hard-mask databases; `pe_unsorted` (masks `[250, 280)` then `[100, 130)` on `p5`) is refused because its final range `[130, 400)` overlaps the earlier range `[0, 250)` across NCBI's out-of-bounds overlap read (`LastRangeOverlap`), while `pe_unsorted_mid` (`edge_unsorted_mid.asnt`, adding trailing mask `[320, 340)` on `p5`) is searched and merged across its overlapping middle parts.
 
 `pshort` (resume 2 of PR 1, 2026-11-21; `pshort.faa`, `edge_short.asnt`, `qshort.faa`, `qshort.fna`, written by
 `ncbi-parity-20261019/M/m4b/probe3/make.py`, seed 20261121) holds four copies of one random protein without `W` but for
@@ -2904,6 +2904,15 @@ Rows `db.html.rps.*` and `db.html.rpstbn.*` (line RG T4c, 2026-11-24; `../db_sea
 quotes, profile 102 under `pdb|1ABC|A` and profile 103 under `gnl|CDD|103` with the entities `&amp;` and `&lt;b&gt;` in its title (`rps/build.sh`; its other
 files are the same as `rps_mini`'s), searched as `rps-gz:rps_mini!phr=hx.phr.gz!pin=hx.pin.gz!pdb=hx.pdb.gz!pos=hx.pos.gz`: the profile titles of an RPS
 database reach the links of NCBI's HTML formatter through a reader of their own.
+
+## `o4b2_9_*`: XML2/JSON damaged-taxdb prefetch remainder (line NP item O4b2-9)
+
+Built with official NCBI BLAST+ 2.17.0 `makeblastdb -dbtype prot -blastdb_version 5 -parse_seqids`:
+
+- `o4b2_9_r1_q.faa` and `o4b2_9_r1_silent_q.faa` (two queries: `q0` has a non-UTF-8 byte `0x80` in its title that triggers XML2's `CStringException` post, and `q1` hits `sN_nz_p` taxid 99990 in `nz_p` or slot-silent `sI_nz_pc` taxid 562 in `nz_pc`); `o4b2_9_r1_q.fna` is the nucleotide analogue for `nz_n` (`sN_nz_n`).
+- `o4b2_9_u8mid`, `o4b2_9_u8_q6.faa`, `o4b2_9_u8tie`, `o4b2_9_u8tie_q2.faa`, and `o4b2_9_r2_q2.faa`: `o4b2_9_u8mid` holds 6 sequences (`gi|2`, `gi|4`, `gi|7` taxid 99990; `gi|3`, `gi|6` taxid 150; dummy `ref|NP_000099.1|` taxid 562 for an accession LMDB table); `o4b2_9_u8_q6.faa` (`t5/hd_q0` first, then 5 queries matching `gi|2..gi|7`) pairs with `t5/pdo5_same` and `t5/pds5` (`gb|DUP00005.1|`, packed 5, UTF8String title `0x0c`) under `-max_target_seqs 1` to interleave `803.10` between slot 150 offset errors in prefetch handle order; `o4b2_9_u8tie` (`gi|1` packed 1 taxid 99990, `gi|9` taxid 150, dummy `ref|NP_000099.1|`) and `o4b2_9_u8tie_q2.faa` pair with `t5/pdo_same` and `t5/pds` (`gb|DUP00001.1|`, packed 1) for the packed-key address-order tie refusal; `o4b2_9_r2_q2.faa` (`q0` matching `gi|2` in `o4b2_9_u8mid`, `q1` matching `gnl|PIG|x001` in `t5/ppig1`) exercises `Error pre-fetching sequence data` alongside a colliding volume.
+- `o4b2_9_prestop1`, `o4b2_9_prestop2`, and `o4b2_9_prestop_q2.faa`: `q0` hits `gi|101` (99990), `gi|102` (150), and in `prestop1` also `gi|103` (99990), leaving 99990 (`prestop1`) or 150 (`prestop2`) in slot 150 at the end of batch 0; `q1` hits `gi|1` (99990), `gi|2` (150), `gi|3` (99990), and `ref|NP_000008.1|` (562), stopping at `tm_stop_u` (no accession table) in batch 1 with `BATCH_SIZE=1`.
+- `o4b2_9_h2` and `o4b2_9_h2_q3.faa`: three queries (`q0` hits `gi|1` taxid 99990, `ref|NP_000008.1|` taxid 562 which throws on `tm_stop_u`, and `gi|3` taxid 150; `q1` hits `gi|2` taxid 99990; `q2` hits `gi|3` taxid 150) checking that one-by-one XML2/JSON reads stop at the throwing `Hit` in `q0` and do not evict slot 150 before `q1`.
 
 Rows `db.html.ps.*` (line RG T4c2; `../db_search_manifest/psiblast.html.tsv`): `-html` in `psiblast` across rounds (`-num_iterations 0` to `3`),
 formats `0` to `4` and `18`, two-part description tables, `-in_pssm` and `-in_msa` queries, `-subject` registry rows, id kinds and special titles,

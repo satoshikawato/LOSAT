@@ -9945,10 +9945,17 @@ fn ungapped_setup_failure(
             }));
         }
     }
-    // An ungapped search over a subject longer than NCBI's part length: LOSAT's refusal.
+    // An ungapped search over a subject longer than NCBI's part length: LOSAT's refusal
+    // (hard-masked databases split and merge long subjects via `db_masked::hard_chunks`).
     // PHI-BLAST refuses such a subject too, after NCBI's errors of its setup
     // (`phi_hooks::phi_limits`).
-    if args.ungapped && query_valid.iter().any(|valid| *valid) {
+    if args.ungapped
+        && !args
+            .db_mask_resolved
+            .as_ref()
+            .is_some_and(|mask| mask.is_hard())
+        && query_valid.iter().any(|valid| *valid)
+    {
         if let Some((what, length)) = subject_source.longest_split() {
             return Some(UngappedSetupFailure::Refusal(too_long_subject_refusal(
                 &what, length,

@@ -30,6 +30,7 @@ LOSAT is written in pure Rust. Searching and building databases need nothing els
 | Databases and masks | [`blastdb_aliastool`](programs/blastdb_aliastool.md) | Makes alias files that combine databases or keep a list of their sequences; converts GI and sequence id lists to binary lists. |
 | Databases and masks | [`blastdbcheck`](programs/blastdbcheck.md) | Checks BLAST databases for damage: files, sequences, ISAM indexes, alias files, taxonomy ids. |
 | Databases and masks | [`cleanup-blastdb-volumes.py`](programs/cleanup-blastdb-volumes.md) | Removes orphaned BLAST database volume files not listed in a database's `.pal` or `.nal` alias file. |
+| Archives | [`blast_formatter`](programs/blast_formatter.md) | Writes the reports of a search again from its `-outfmt 11` BLAST archive, without searching again. |
 | Domain annotation | [`rpsbproc`](programs/rpsbproc.md) | Annotates conserved domains, sites and motifs from the `-outfmt 11` results of `rpsblast` and `rpstblastn` (see its page). |
 
 The search programs read BLAST databases (`-db`) and, except `rpsblast` and `rpstblastn` (as in NCBI), FASTA subjects (`-subject`). Each can read its query from the standard input (`-query -`).
@@ -46,7 +47,8 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 
 These are on the list for a later release:
 
-- the programs `deltablast` and `blast_formatter`, and `makeprofiledb -dbtype cobalt`;
+- the program `deltablast`, and `makeprofiledb -dbtype cobalt`;
+- `blast_formatter` output formats other than `8`, `9` and `12`, and archives in ASN.1 binary or XML;
 - `psiblast -phi_pattern` with more than one round, with `-html`, or with output formats other than `0`, `6`, `7`, `10` and `20`,
   and in the library and pylosat;
 - the `psiblast` output formats `13` to `16`.

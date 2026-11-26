@@ -124,6 +124,16 @@ enum Refused {
 /// argument is deleting its row. The build checks that each row names an argument of its program's
 /// XML, once.
 const REFUSED: &[(&str, &str, Refused)] = &[
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:123-129
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:530-545
+    // blast_formatter's `-rid` fetches the results of a search from NCBI's servers (line RG
+    // DECISIONS F3-5): refused where NCBI asks for them, after NCBI's errors of the argument without
+    // a value and of the empty value (`blast_formatter::refusals::Refusal::Rid`).
+    (
+        "blast_formatter",
+        "rid",
+        Refused::Run("the results of a search on NCBI's servers"),
+    ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:63-70
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:63-125
     // `-db` and `-dbsize` are implemented (`blastn/args.rs`), as are the X-drops,

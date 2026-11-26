@@ -620,6 +620,7 @@ pub(crate) fn read_ordinals(
     titles: &DatabaseTitles,
     pairwise: Option<crate::report::pairwise::PairwiseReading>,
     loads: &HitLoads,
+    joins_copies: bool,
 ) -> Vec<u32> {
     match pairwise {
         Some(reading) => pairwise_read_order(ordered, titles, reading)
@@ -628,7 +629,16 @@ pub(crate) fn read_ordinals(
             .filter(|&ordinal| loads.reached(ordinal))
             .map(|ordinal| ordinal as u32)
             .collect(),
-        None => shown.iter().map(|hsp| hsp.hit.s_idx).collect(),
+        None => shared::one_by_one_query_reads(
+            shown.iter().map(|hsp| hsp.hit.s_idx as usize),
+            |ordinal| titled_parsed(titles, ordinal),
+            loads,
+            joins_copies,
+            false,
+        )
+        .into_iter()
+        .map(|ordinal| ordinal as u32)
+        .collect(),
     }
 }
 

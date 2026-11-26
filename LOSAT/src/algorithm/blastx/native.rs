@@ -758,17 +758,19 @@ fn run_inner(
     // first read (`x_db_stream.rs`); the empty database's error belongs to the first batch with a
     // valid context (`Subjects::Unreadable`, `search_error`). No NCBI counterpart for the blocks:
     // NCBI maps the volume files.
+    let allow_long = options.db_mask.as_ref().is_some_and(|mask| mask.is_hard());
     let (x_longest, unreadable) = match &database {
         None => (None, None),
-        Some(database) => match database.x_open_stream() {
+        Some(database) => match database.x_open_stream_with_long(allow_long) {
             Ok(longest) => (Some(longest), None),
             Err(error) => (None, Some(error)),
         },
     };
     let x_stream = match (&database, x_longest) {
-        (Some(database), Some(longest)) => Some(super::x_db_stream::XStreamDb::new(
+        (Some(database), Some(longest)) => Some(super::x_db_stream::XStreamDb::new_with_long(
             database.x_seqdb(),
             longest,
+            allow_long,
         )),
         _ => None,
     };
@@ -1645,6 +1647,14 @@ pub(super) fn reported_batch(
             // The pairwise report (outfmt 0 to 4) reads the subjects that it shows as its writer
             // reads them.
             let pairwise = options.pairwise_reading();
+            let joins_copies = first_report.is_some_and(ReportFormat::joins_adjacent_copies);
+            let ends_on_throw = asks.throw.run().is_some_and(|run| {
+                matches!(
+                    run.after,
+                    crate::report::db_subject::AfterThrow::EndsReport
+                        | crate::report::db_subject::AfterThrow::EndsRun
+                )
+            });
             reported.fetch_by_query(
                 database,
                 results,
@@ -1653,6 +1663,7 @@ pub(super) fn reported_batch(
                 places,
                 row_lookups,
                 pairwise,
+                (options.shown_lists(), joins_copies, ends_on_throw),
             )?;
             if options.outfmt == 5 {
                 diagnostics.write_all(&reported.take_query_fetches())?;

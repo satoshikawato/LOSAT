@@ -46,7 +46,7 @@ fn install(dir: &Path) -> Output {
 }
 
 /// The programs that the binary links, in the order it lists them.
-const PROGRAMS: [&str; 20] = [
+const PROGRAMS: [&str; 21] = [
     "blastn",
     "blastp",
     "blastx",
@@ -67,6 +67,7 @@ const PROGRAMS: [&str; 20] = [
     "blastdb_aliastool",
     "blastdbcheck",
     "cleanup-blastdb-volumes.py",
+    "blast_formatter",
 ];
 
 /// The program names that `losat --install-shims` listed on standard output (one path per
@@ -302,6 +303,7 @@ fn top_level_help_names_every_program() {
             "blastdb_aliastool",
             "blastdbcheck",
             "cleanup-blastdb-volumes.py",
+            "blast_formatter",
         ] {
             let line = text
                 .lines()

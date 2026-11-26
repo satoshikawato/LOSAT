@@ -39,6 +39,50 @@ pub(super) struct GappedHsp {
     pub s_gapped_start: i32,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1464-1537,2857-3035
+impl crate::core::blast_hits::ChunkMergeHsp for GappedHsp {
+    fn merge_context(&self) -> i32 {
+        0
+    }
+    fn merge_subject_frame(&self) -> i32 {
+        i32::from(self.frame)
+    }
+    fn merge_q_start(&self) -> i32 {
+        self.q_start
+    }
+    fn merge_q_end(&self) -> i32 {
+        self.q_end
+    }
+    fn merge_s_start(&self) -> i32 {
+        self.s_start
+    }
+    fn merge_s_end(&self) -> i32 {
+        self.s_end
+    }
+    fn merge_score(&self) -> i32 {
+        self.score
+    }
+    fn merge_q_gapped_start(&self) -> i32 {
+        self.q_gapped_start
+    }
+    fn merge_s_gapped_start(&self) -> i32 {
+        self.s_gapped_start
+    }
+    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32) {
+        self.q_start = q_start;
+        self.q_end = q_end;
+        self.s_start = s_start;
+        self.s_end = s_end;
+    }
+    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32) {
+        self.q_gapped_start = q_gapped_start;
+        self.s_gapped_start = s_gapped_start;
+    }
+    fn set_merge_score(&mut self, score: i32) {
+        self.score = score;
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:503-536,583-605;
 // c++/include/algo/blast/core/blast_hits.h:126-143:
 // Keep the transferred script on the same Rust HSP through purge and pruning.
@@ -1588,8 +1632,15 @@ fn x_preliminary_protein_hsps_by_unit<
             if walked.is_some() && chunk.overlap_past_list && !per_frame.is_empty() {
                 x_check_hard_merge_overlap(subject, chunk, &per_frame, &unit_hsps)?;
             }
-            per_frame =
-                merge_adjusted_chunk(per_frame, unit_hsps, chunk, profile.hsp_num_max, !UNGAPPED)?;
+            per_frame = merge_adjusted_chunk(
+                per_frame,
+                unit_hsps,
+                chunk,
+                profile.hsp_num_max,
+                !UNGAPPED,
+                x_subject_oid_value(subject),
+                plan.subject.frames[frame_index].frame,
+            )?;
             #[cfg(test)]
             probe_push(|| {
                 PreliminaryEvent::Merged(
@@ -1822,14 +1873,19 @@ fn x_run_one_word_unit<S: super::score::TbnScore, const UNGAPPED: bool>(
     Ok(purge_preliminary_common_endpoints(results))
 }
 
-/// Database OID label of `target` for refusal messages (`"0"` for in-memory subjects).
-fn x_subject_oid(target: super::x_subject_store::XPrelimSubject<'_>) -> String {
+/// Database OID of `target` for refusal messages (`0` for in-memory subjects).
+fn x_subject_oid_value(target: super::x_subject_store::XPrelimSubject<'_>) -> u32 {
     match target {
         super::x_subject_store::XPrelimSubject::Stream(stream, ordinal, _) => {
-            stream.seqdb().oid(ordinal as u32).to_string()
+            stream.seqdb().oid(ordinal as u32).get()
         }
-        super::x_subject_store::XPrelimSubject::Nt(_) => "0".to_string(),
+        super::x_subject_store::XPrelimSubject::Nt(_) => 0,
     }
+}
+
+/// Database OID label of `target` for refusal messages (`"0"` for in-memory subjects).
+fn x_subject_oid(target: super::x_subject_store::XPrelimSubject<'_>) -> String {
+    x_subject_oid_value(target).to_string()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586
@@ -2389,6 +2445,47 @@ fn append_preliminary_hsps(
     selected
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-3035
+impl crate::core::blast_hits::ChunkMergeHsp for (usize, GappedHsp) {
+    fn merge_context(&self) -> i32 {
+        self.0 as i32
+    }
+    fn merge_subject_frame(&self) -> i32 {
+        self.1.merge_subject_frame()
+    }
+    fn merge_q_start(&self) -> i32 {
+        self.1.merge_q_start()
+    }
+    fn merge_q_end(&self) -> i32 {
+        self.1.merge_q_end()
+    }
+    fn merge_s_start(&self) -> i32 {
+        self.1.merge_s_start()
+    }
+    fn merge_s_end(&self) -> i32 {
+        self.1.merge_s_end()
+    }
+    fn merge_score(&self) -> i32 {
+        self.1.merge_score()
+    }
+    fn merge_q_gapped_start(&self) -> i32 {
+        self.1.merge_q_gapped_start()
+    }
+    fn merge_s_gapped_start(&self) -> i32 {
+        self.1.merge_s_gapped_start()
+    }
+    fn set_merge_bounds(&mut self, q_start: i32, q_end: i32, s_start: i32, s_end: i32) {
+        self.1.set_merge_bounds(q_start, q_end, s_start, s_end);
+    }
+    fn set_merge_gapped_start(&mut self, q_gapped_start: i32, s_gapped_start: i32) {
+        self.1
+            .set_merge_gapped_start(q_gapped_start, s_gapped_start);
+    }
+    fn set_merge_score(&mut self, score: i32) {
+        self.1.set_merge_score(score);
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:3037-3050:
 // Adjust subject offset, end and gapped_start before merging.
@@ -2400,6 +2497,8 @@ fn merge_adjusted_chunk(
     chunk: TranslatedChunk,
     hsp_num_max: usize,
     allow_gap: bool,
+    subject_oid: u32,
+    frame: i8,
 ) -> Result<Vec<(usize, GappedHsp)>> {
     let offset = i32::try_from(chunk.offset)?;
     for (_, hsp) in &mut incoming {
@@ -2419,139 +2518,24 @@ fn merge_adjusted_chunk(
     // The chunk's overlap (`TranslatedChunk::overlap`: 0 where it starts the hard range at
     // `hm_index`, else DBSEQ_CHUNK_OVERLAP).
     let overlap = i32::try_from(chunk.overlap)?;
-    Ok(merge_subject_chunk_hsps(
-        per_frame,
-        incoming,
+    let mut per_frame = per_frame;
+    crate::core::blast_hits::merge_subject_chunk_hsps(
+        &mut per_frame,
+        &mut incoming,
         offset,
         overlap,
         hsp_num_max,
         allow_gap,
-    ))
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1465-1537:
-// Compares start and end diagonals (query minus subject at each endpoint).
-// If either new endpoint falls inside the old HSP, computes the combined score density
-// as the sum of scores divided by the sum of query lengths, and takes the larger of
-// the truncated density-scaled merged query length and the old score.
-pub(super) fn merge_two_chunk_hsps(old: &mut GappedHsp, new: &GappedHsp, allow_gap: bool) -> bool {
-    if !allow_gap && old.s_start - new.s_start - old.q_start + new.q_start != 0 {
-        return false;
-    }
-    if old.frame != new.frame {
-        return false;
-    }
-    let contained =
-        |q: i32, s: i32| old.q_start <= q && q <= old.q_end && old.s_start <= s && s <= old.s_end;
-    if !contained(new.q_start, new.s_start) && !contained(new.q_end, new.s_end) {
-        return false;
-    }
-    let density = f64::from(old.score + new.score)
-        / f64::from((old.q_end - old.q_start) + (new.q_end - new.q_start));
-    old.q_start = old.q_start.min(new.q_start);
-    old.s_start = old.s_start.min(new.s_start);
-    old.q_end = old.q_end.max(new.q_end);
-    old.s_end = old.s_end.max(new.s_end);
-    if new.score > old.score {
-        old.q_gapped_start = new.q_gapped_start;
-        old.s_gapped_start = new.s_gapped_start;
-        old.score = new.score;
-    }
-    old.score = ((density * f64::from(old.q_end - old.q_start)) as i32).max(old.score);
-    true
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
-// Uses zero overlap when the chunk starts at the hard left boundary, otherwise `DBSEQ_CHUNK_OVERLAP`.
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-3035:
-// move overlap HSPs to the front, match equal contexts whose diagonals
-// differ by less than 10, merge, purge the consumed new HSPs, combine by score.
-// Input HSP coordinates must already include the chunk offset.
-#[allow(dead_code)]
-fn merge_subject_chunk_hsps(
-    mut old: Vec<(usize, GappedHsp)>,
-    mut incoming: Vec<(usize, GappedHsp)>,
-    split_offset: i32,
-    overlap: i32,
-    hsp_num_max: usize,
-    allow_gap: bool,
-) -> Vec<(usize, GappedHsp)> {
-    if incoming.is_empty() {
-        return old;
-    }
-    if old.is_empty() {
-        return incoming;
-    }
-    let mut old_overlap = 0;
-    for index in 0..old.len() {
-        if old[index].1.s_end > split_offset {
-            old.swap(old_overlap, index);
-            old_overlap += 1;
-        }
-    }
-    let mut new_overlap = 0;
-    for index in 0..incoming.len() {
-        if incoming[index].1.s_start < split_offset + overlap {
-            incoming.swap(new_overlap, index);
-            new_overlap += 1;
-        }
-    }
-    let mut incoming: Vec<Option<(usize, GappedHsp)>> = incoming.into_iter().map(Some).collect();
-    for old_index in 0..old_overlap {
-        for new_index in 0..new_overlap {
-            let Some((context, candidate)) = incoming[new_index] else {
-                continue;
-            };
-            if old[old_index].0 != context {
-                continue;
-            }
-            let old_end_diag = old[old_index].1.q_end - old[old_index].1.s_end;
-            let new_start_diag = candidate.q_start - candidate.s_start;
-            if (old_end_diag - new_start_diag).abs() < 10
-                && merge_two_chunk_hsps(&mut old[old_index].1, &candidate, allow_gap)
-            {
-                incoming[new_index] = None;
-            }
-        }
-    }
-    let mut incoming: Vec<_> = incoming.into_iter().flatten().collect();
-    let retained = old.len().saturating_add(incoming.len()).min(hsp_num_max);
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2762-2807, 1330-1382:
-    // on no cap, append then SortByScore if out of order;
-    // on cap, sort both lists and merge score order, preferring old on ties.
-    let sorted = |hsps: &mut Vec<(usize, GappedHsp)>| {
-        if hsps
-            .windows(2)
-            .any(|pair| compare_gapped_score(&pair[0].1, &pair[1].1).is_gt())
-        {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1379-1382
-            // Stable, as glibc's qsort under the pinned NCBI BLAST+ (TN-5).
-            hsps.sort_by(|a, b| compare_gapped_score(&a.1, &b.1));
-        }
-    };
-    if retained == old.len() + incoming.len() {
-        old.extend(incoming);
-        sorted(&mut old);
-        return old;
-    }
-    sorted(&mut old);
-    sorted(&mut incoming);
-    let mut selected = Vec::with_capacity(retained);
-    let mut old_index = 0;
-    let mut new_index = 0;
-    while selected.len() < retained {
-        if old_index < old.len()
-            && (new_index >= incoming.len()
-                || compare_gapped_score(&old[old_index].1, &incoming[new_index].1).is_le())
-        {
-            selected.push(old[old_index]);
-            old_index += 1;
-        } else {
-            selected.push(incoming[new_index]);
-            new_index += 1;
-        }
-    }
-    selected
+        |a, b| compare_gapped_score(&a.1, &b.1),
+    )
+    .map_err(|_| {
+        crate::algorithm::common::hard_chunk_scan::chunk_merge_undefined_refusal(
+            subject_oid,
+            Some(frame),
+            "TBLASTN",
+        )
+    })?;
+    Ok(per_frame)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1268-1317:

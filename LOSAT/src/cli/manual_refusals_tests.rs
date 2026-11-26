@@ -24,6 +24,8 @@
 //! - The NCBI executables are covered when `ENTRY_NAMES` holds them or a backticked name in the
 //!   sections `Programs LOSAT does not provide`, `On the list for a later release` and `Out of
 //!   scope...` is theirs.
+//! - blast_formatter's refusals (`crate::blast_formatter::refusals`, one list) are documented when
+//!   the lines of the section `blast_formatter` hold the words of each one.
 
 use super::*;
 
@@ -242,6 +244,29 @@ fn every_ncbi_executable_is_provided_or_listed_as_not_provided() {
         }
     }
     assert!(wrong.is_empty(), "\n{}\n", wrong.join("\n"));
+}
+
+#[test]
+fn every_blast_formatter_refusal_is_in_its_manual_section() {
+    let paragraph: Vec<&str> = primary_refusal_lines()
+        .into_iter()
+        .filter(|(heading, _)| *heading == "blast_formatter")
+        .map(|(_, line)| line)
+        .collect();
+    assert!(
+        !paragraph.is_empty(),
+        "the manual's \"What LOSAT refuses\" has no section `## blast_formatter`"
+    );
+    let mut missing = Vec::new();
+    for refusal in crate::blast_formatter::refusals::documented() {
+        let words = refusal.manual_words();
+        if !paragraph.iter().any(|line| line.contains(&words)) {
+            missing.push(format!(
+                "blast_formatter: {refusal:?} ({words}) is refused by LOSAT but the manual's section `## blast_formatter` does not name it"
+            ));
+        }
+    }
+    assert!(missing.is_empty(), "\n{}\n", missing.join("\n"));
 }
 
 /// The `-in_msa` refusals of an input that the code names by a cause (each `pub(crate)` constant

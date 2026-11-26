@@ -325,7 +325,15 @@ impl BlastxDatabase {
     /// where the longest is above `MAX_DBSEQ_LEN` or the index cannot be read, belong to the first
     /// query batch with a valid context, which the caller fails with it. The search checks each
     /// sequence where it first reads it (`XStreamDb::x_check`).
+    #[cfg(test)]
     pub(crate) fn x_open_stream(&self) -> Result<usize> {
+        self.x_open_stream_with_long(false)
+    }
+
+    /// What the search needs of the database before the first query batch, without reading its
+    /// sequences, allowing subjects longer than `MAX_DBSEQ_LEN` when `allow_long` is true
+    /// (`-db_hard_mask`, where the hard-chunk loop splits and merges them).
+    pub(crate) fn x_open_stream_with_long(&self, allow_long: bool) -> Result<usize> {
         if self.db.first_oid_read_fails() {
             return Err(PreliminaryReadError::from_static("Database memory map file error").into());
         }
@@ -339,7 +347,7 @@ impl BlastxDatabase {
             // search and do not contribute to the searchable longest sequence.
             let lengths = match self.db.x_protein_lengths_i32(first, end) {
                 Ok(lengths) if !lengths.is_empty() => lengths,
-                _ => return self.x_check_stores(),
+                _ => return x_check_whole_named(&self.db, self.program, allow_long),
             };
             longest = longest.max(
                 lengths
@@ -351,7 +359,7 @@ impl BlastxDatabase {
             );
             first += lengths.len() as u32;
         }
-        if longest > MAX_DBSEQ_LEN {
+        if !allow_long && longest > MAX_DBSEQ_LEN {
             return self.x_check_stores();
         }
         Ok(longest)
@@ -359,7 +367,7 @@ impl BlastxDatabase {
 
     /// The whole check of the database (`x_check_whole`).
     pub(crate) fn x_check_stores(&self) -> Result<usize> {
-        x_check_whole_named(&self.db, self.program)
+        x_check_whole_named(&self.db, self.program, false)
     }
 
     /// The opened database.
@@ -375,12 +383,12 @@ impl BlastxDatabase {
 /// `MAX_DBSEQ_LEN` (`x_open_stream`), and the error the run reports for a read or a check
 /// that fails during the search (`native::search_error`), whichever sequence the search's
 /// threads read first.
-pub(super) fn x_check_whole(db: &SeqDb) -> Result<usize> {
-    x_check_whole_named(db, PROGRAM)
+pub(super) fn x_check_whole(db: &SeqDb, allow_long: bool) -> Result<usize> {
+    x_check_whole_named(db, PROGRAM, allow_long)
 }
 
 /// `x_check_whole` of a run of the program `program` (`BlastxDatabase::program`).
-fn x_check_whole_named(db: &SeqDb, program: &str) -> Result<usize> {
+fn x_check_whole_named(db: &SeqDb, program: &str, allow_long: bool) -> Result<usize> {
     if db.first_oid_read_fails() {
         return Err(PreliminaryReadError::from_static("Database memory map file error").into());
     }
@@ -388,14 +396,14 @@ fn x_check_whole_named(db: &SeqDb, program: &str) -> Result<usize> {
     let mut first_too_long = None;
     shared::x_check_protein_stores(db, program, |ordinal, length| {
         longest = longest.max(length);
-        if length > MAX_DBSEQ_LEN && first_too_long.is_none() {
+        if !allow_long && length > MAX_DBSEQ_LEN && first_too_long.is_none() {
             first_too_long = Some((ordinal, length));
         }
     })?;
     // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
-    // NCBI searches a longer subject in overlapping parts, which BLASTX does not port (the
-    // same limit stops `-subject` in `search::search_core`); the refusal belongs to the
-    // first batch with a valid context, as the reader's errors.
+    // NCBI searches a longer subject in overlapping parts, which BLASTX does not port outside
+    // `-db_hard_mask` (the same limit stops `-subject` in `search::search_core`); the refusal
+    // belongs to the first batch with a valid context, as the reader's errors.
     if let Some((ordinal, length)) = first_too_long {
         return Err(too_long(
             format_args!("database sequence {}", db.oid(ordinal)),
@@ -1194,13 +1202,15 @@ impl ReportedSubjects {
         places: bool,
         row_lookups: shared::RowLookups,
         pairwise: Option<crate::report::pairwise::PairwiseReading>,
+        (cut, joins_copies, ends_on_throw): (usize, bool, bool),
     ) -> Result<()> {
         if rows == SubjectFetch::Never && shared::prefetch_always_off(format) {
             return Ok(());
         }
         for batch in batches {
-            for (index, lists) in batch.queries.iter().enumerate() {
-                let ranks: Vec<u32> = match pairwise {
+            for index in 0..batch.queries.len() {
+                let lists = batch.cut_lists(index, cut);
+                let ranks: Vec<usize> = match pairwise {
                     Some(reading) => pairwise_read_order(
                         lists,
                         batch.prepared.original_lengths[index],
@@ -1216,26 +1226,22 @@ impl ReportedSubjects {
                     )?
                     .subjects()
                     .into_iter()
-                    .map(|rank| rank as u32)
+                    .filter(|&rank| self.loads.reached(rank))
                     .collect(),
-                    None => lists
-                        .iter()
-                        .filter(|list| super::report::reads_list(list, gapped, rows))
-                        .map(|list| list.oid as u32)
-                        .collect(),
+                    None => shared::one_by_one_query_reads(
+                        lists
+                            .iter()
+                            .filter(|list| super::report::reads_list(list, gapped, rows))
+                            .map(|list| list.oid),
+                        |rank| self.parsed_subject(rank),
+                        &self.loads,
+                        joins_copies,
+                        ends_on_throw,
+                    ),
                 };
-                // Not a subject that no report reaches after one whose load throws
-                // (`HitLoads::reached`).
                 let subjects = ranks
                     .into_iter()
-                    .filter(|&rank| self.loads.reached(rank as usize))
-                    .map(|rank| {
-                        (
-                            rank,
-                            self.ordinals[rank as usize],
-                            self.parsed_subject(rank as usize),
-                        )
-                    });
+                    .map(|rank| (rank as u32, self.ordinals[rank], self.parsed_subject(rank)));
                 let reads = shared::subject_read_texts(
                     &database.db,
                     &database.taxdb,

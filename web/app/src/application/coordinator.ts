@@ -424,7 +424,19 @@ export class Coordinator {
         return { ok: false, reason: 'argv', message: uncheckedOptions(error) };
       }
       if (!validation.ok) return { ok: false, reason: 'argv', message: validation.message };
-      prepared.push({ request, number, queuedAt, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders: validation.dataLoaders });
+      prepared.push({
+        request,
+        number,
+        queuedAt,
+        argv,
+        queryName,
+        subjectName,
+        conffile,
+        dryRun,
+        prints,
+        dataLoaders: validation.dataLoaders,
+        parseDeflines: validation.parseDeflines,
+      });
     }
 
     // The snapshots hold what the runs need: the sources made here from text and files are
@@ -445,11 +457,11 @@ export class Coordinator {
     /** The bytes of the registry file of each snapshot, in their order. */
     const conffiles: Array<Blob | undefined> = [];
     const groupId = prepared.length > 1 ? this.deps.newRunId() : undefined;
-    for (const [index, { request, number, queuedAt, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders }] of prepared.entries()) {
+    for (const [index, { request, number, queuedAt, argv, queryName, subjectName, conffile, dryRun, prints, dataLoaders, parseDeflines }] of prepared.entries()) {
       let query: InputSnapshot;
       let subject: InputSnapshot;
-      // The engine's readers of the run's inputs, with the data loaders of its registry (line WQA's D16, 2026-11-20).
-      const reader = (role: 'query' | 'subject'): FastaReader => ({ program: request.program, role, dataLoaders });
+      // The engine's readers of the run's inputs, with its registry data loaders and `-parse_deflines` (line WQA's D16; line RG-XT item X7-5).
+      const reader = (role: 'query' | 'subject'): FastaReader => ({ program: request.program, role, dataLoaders, parseDeflines });
       try {
         // A run that prints the command line's help or version reads no input (line WQA's D14, 2026-11-20).
         // A database run (`-db`) has no FASTA subject input: its files are mounted read-only in `runDirectories`.
@@ -1157,6 +1169,8 @@ interface Prepared {
   readonly prints: PrintedKind | null;
   /** Whether the run reads its inputs with NCBI's data loaders on (the validation's verdict: `[BLAST] DATA_LOADERS` of its registry). */
   readonly dataLoaders: boolean;
+  /** Whether the run parses Seq-ids from deflines (the validation's verdict: `-parse_deflines`). */
+  readonly parseDeflines: boolean;
 }
 
 /** What one enqueueAll made: sources of text and files, and the cached run inputs of dataset revisions. */

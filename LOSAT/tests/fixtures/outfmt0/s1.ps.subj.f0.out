@@ -1,0 +1,149 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           2 sequences; 217 total letters
+
+Results from round 1
+
+
+Query= pq protein query one
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pir||A12345 pir subject                                               133     6e-46
+TI:12345 trace subject (protein letters)                              83.6    2e-26
+
+
+>pir||A12345 pir subject
+Length=110
+
+ Score = 133 bits (334),  Expect = 6e-46, Method: Compositional matrix adjust.
+ Identities = 68/110 (62%), Positives = 72/110 (65%), Gaps = 0/110 (0%)
+
+Query  31   VCSFKTEDFSTHGTIWKHCMWKCWDTSFPTSKSHCVTCTSQQQQQQQQQQQQQQQQEQFS  90
+            VC FKTED ST GT WKHCM KCWDT F TSK HC TC S++         Q+   + FS
+Sbjct  1    VCDFKTEDNSTFGTRWKHCMGKCWDTDFDTSKDHCATCESEKTLHGDHIITQRIAVDVFS  60
+
+Query  91   ANDWFCRWRFCFKGWLINPDVPCPTKVRVDTYLNCGCCEVWDKEITESDA  140
+            AN W CRW FCFK  LINP  PCPTK RVDTY NCGCC V  K  TES A
+Sbjct  61   ANLWRCRWCFCFKSGLINPYFPCPTKFRVDTYTNCGCCMVTGKVRTESKA  110
+
+
+>TI:12345 trace subject (protein letters)
+Length=107
+
+ Score = 83.6 bits (205),  Expect = 2e-26, Method: Compositional matrix adjust.
+ Identities = 78/149 (52%), Positives = 83/149 (56%), Gaps = 42/149 (28%)
+
+Query  1    AYTHGMRFCPKVKQQCTFYCMEQDNVTQVMVCSFKTEDFSTHGTIWKHCMWKCWDTSFPT  60
+            AYT GMR   K    CT YCM+      VMV S    D STHGT  KHCMWK WDTS   
+Sbjct  1    AYT-GMRCSVK----CTNYCMDW---VTVMVKS--KTDNSTHGTG-KHCMWKKWDTS---  46
+
+Query  61   SKSHCVTCTSQQQQQQQQQQQQQQQQEQFSANDWFCRWRFCFKGWLINPDVPCPTKVRVD  120
+            SKSHCV CTS                   SANDW CRWR C KGW  N DV   T VRVD
+Sbjct  47   SKSHCV-CTSAAA----------------SANDWNCRWR-CNKGW--NYDVC--TSVRVD  84
+
+Query  121  TYLNCGCCEVWDKEITESDAQNYIHEANA  149
+            TY NCGCC  WDK ++++   NY H ANA
+Sbjct  85   TYTNCGCC--WDKTMSDA---NYRH-ANA  107
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.130    0.473    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 23892
+Results from round 1
+
+
+Query= pq2 second query
+
+Length=110
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+pir||A12345 pir subject                                               184     6e-67
+TI:12345 trace subject (protein letters)                              62.4    1e-18
+
+
+>pir||A12345 pir subject
+Length=110
+
+ Score = 184 bits (467),  Expect = 6e-67, Method: Compositional matrix adjust.
+ Identities = 92/110 (84%), Positives = 93/110 (85%), Gaps = 0/110 (0%)
+
+Query  1    VCSFKTEDFSTFGTIWKHCMWKCWDTSFDTSKSHCATCTSEKTLYGDHIILQRIAVSVFS  60
+            VC FKTED STFGT WKHCM KCWDT FDTSK HCATC SEKTL+GDHII QRIAV VFS
+Sbjct  1    VCDFKTEDNSTFGTRWKHCMGKCWDTDFDTSKDHCATCESEKTLHGDHIITQRIAVDVFS  60
+
+Query  61   ANDWRCRWRFCFKSWLINPYVPCPTKVRVDTYLNCGCCEVTGKVITESKA  110
+            AN WRCRW FCFKS LINPY PCPTK RVDTY NCGCC VTGKV TESKA
+Sbjct  61   ANLWRCRWCFCFKSGLINPYFPCPTKFRVDTYTNCGCCMVTGKVRTESKA  110
+
+
+>TI:12345 trace subject (protein letters)
+Length=107
+
+ Score = 62.4 bits (150),  Expect = 1e-18, Method: Compositional matrix adjust.
+ Identities = 49/91 (54%), Positives = 50/91 (55%), Gaps = 26/91 (29%)
+
+Query  8   DFSTFGTIWKHCMWKCWDTSFDTSKSHCATCTSEKTLYGDHIILQRIAVSVFSANDWRCR  67
+           D ST GT  KHCMWK WDTS   SKSHC  CTS                +  SANDW CR
+Sbjct  28  DNSTHGTG-KHCMWKKWDTS---SKSHCV-CTS----------------AAASANDWNCR  66
+
+Query  68  WRFCFKSWLINPYVPCPTKVRVDTYLNCGCC  98
+           WR C K W    Y  C T VRVDTY NCGCC
+Sbjct  67  WR-CNKGW---NYDVC-TSVRVDTYTNCGCC  92
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.135    0.505    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 17390
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 217
+  Number of sequences in database:  2
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

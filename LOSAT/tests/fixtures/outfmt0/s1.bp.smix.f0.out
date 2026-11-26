@@ -1,0 +1,108 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set (Input: tests/fasta/html/pmix_ids.faa).
+           10 sequences; 1,330 total letters
+
+
+
+Query= pq protein query one
+
+Length=150
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+US5000000_1 patent subject                                            15.0    4.2  
+
+
+>US5000000_1 patent subject
+Length=150
+
+ Score = 15.0 bits (27),  Expect = 4.2, Method: Compositional matrix adjust.
+ Identities = 4/4 (100%), Positives = 4/4 (100%), Gaps = 0/4 (0%)
+
+Query  2    YTHG  5
+            YTHG
+Sbjct  127  YTHG  130
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.130    0.473    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 123600
+
+
+Query= pq2 second query
+
+Length=110
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+Q99999.1 two deflines first                                           15.8    1.4  
+US5000000_1 patent subject                                            13.9    6.6  
+
+
+>Q99999.1 two deflines first
+Length=100
+
+ Score = 15.8 bits (29),  Expect = 1.4, Method: Compositional matrix adjust.
+ Identities = 8/25 (32%), Positives = 12/25 (48%), Gaps = 2/25 (8%)
+
+Query  77   INPYVPCPTKVRVDTYLNCGCCEVT  101
+            +NPY  C  + RV+        E+T
+Sbjct  19   LNPY--CEIRSRVERPPRGRLAEIT  41
+
+
+>US5000000_1 patent subject
+Length=150
+
+ Score = 13.9 bits (24),  Expect = 6.6, Method: Compositional matrix adjust.
+ Identities = 3/6 (50%), Positives = 5/6 (83%), Gaps = 0/6 (0%)
+
+Query  78  NPYVPC  83
+           +P+ PC
+Sbjct  27  DPFFPC  32
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.135    0.505    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 86100
+
+
+  Database: User specified sequence set (Input: tests/fasta/html/pmix_ids.faa).
+    Posted date:  Unknown
+  Number of letters in database: 1,330
+  Number of sequences in database:  10
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

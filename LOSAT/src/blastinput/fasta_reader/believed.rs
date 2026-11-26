@@ -6,11 +6,13 @@
 //! `fQuickIDCheck` and `fAssumeNuc` or `fAssumeProt`).
 //!
 //! What NCBI's object manager does with these ids is not reproduced where it shows another
-//! sequence than the record's (`dropin-survey-20261029/DI7/DECISIONS.md` 7 and 8): LOSAT refuses
+//! sequence than the record's (`dropin-survey-20261029/DI7/DECISIONS.md` 8): LOSAT refuses
 //! such input. NCBI keeps the queries of a batch in one scope (every batch's with `-subject` and in
 //! outfmt 5) and finds a sequence again by its id, so of two queries with one id there it searches
 //! the first's letters twice, and it shows a database sequence with the id of such a query as that
 //! query (probe of 2026-10-30; per batch: series Q of line RG, Q1c, `query_batch::QueryScopes`).
+//! When an id's accession names the other molecule (`named_molecule`), LOSAT reproduces NCBI's
+//! deterministic reading (`fasta_reader::reader::FastaReader::parse_data_line`, line RG-XT item X7-5).
 
 use std::collections::HashSet;
 
@@ -48,6 +50,9 @@ pub struct BelievedIds {
     /// ids of a Bioseq that the reports show as a record without them, which only the record's
     /// Seq-id takes (`FastaRecord::keeping_bioseq_ids`, `RecordNames::seq_id`).
     pub shown: bool,
+    /// `CFastaReader::xSetSeqMol`: whether the defline's ids named protein (`Some(true)`),
+    /// nucleotide (`Some(false)`), or neither (`None`) when the record was read.
+    pub named_molecule: Option<bool>,
 }
 
 impl BelievedIds {
@@ -57,6 +62,13 @@ impl BelievedIds {
             .cloned()
             .expect("a defline parse gives at least one id");
         Self::with_alignment_id(ids, best, strand)
+    }
+
+    /// Records the molecule `CFastaReader::xSetSeqMol` inferred from the defline's parsed ids
+    /// (before `PostProcessIDs` replaces ranged ids with generated ones).
+    pub(crate) fn with_named_molecule(mut self, named_molecule: Option<bool>) -> Self {
+        self.named_molecule = named_molecule;
+        self
     }
 
     /// The ids `ids` (at least one) of a Bioseq that is the query as it is (the PSSM's of
@@ -100,6 +112,7 @@ impl BelievedIds {
             strand,
             shared: None,
             shown: true,
+            named_molecule: None,
         }
     }
 
@@ -393,6 +406,17 @@ pub(crate) fn named_molecule(ids: &[ParsedSeqId]) -> Option<bool> {
     None
 }
 
+/// `CFastaReader::xSetSeqMol` for a defline read under `-parse_deflines`: parses the defline's
+/// first word with `parse_believed_defline` and returns `named_molecule` of its ids, or
+/// `None` when the defline does not parse or names neither molecule.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:547-562
+pub fn defline_named_molecule(defline: &[u8], protein: bool) -> Option<bool> {
+    parse_believed_defline(defline, protein, "", 0, &mut |_| {})
+        .ok()
+        .and_then(|parsed| named_molecule(&parsed.ids))
+}
+
 /// `CFastaReader::x_NucOrProt`, in the reader's message about invalid letters: the molecule the
 /// accession named, nothing without one.
 ///
@@ -403,34 +427,6 @@ pub(crate) fn nuc_or_prot(named: Option<bool>) -> &'static str {
         Some(false) => "nucleotide ",
         None => "",
     }
-}
-
-/// Whether both readings of a data line give the same letters: those of a molecule named by the
-/// accession and those of the program's. The nucleotide reading drops what it does not know and
-/// reads `U` as `T`; every letter here reads the same in both, and blanks and digits are skipped by
-/// both. A line with another byte is LOSAT's refusal (`dropin-survey-20261029/DI7/DECISIONS.md` 7).
-pub(crate) fn reads_the_same_in_both(line: &[u8]) -> bool {
-    line.iter().all(|&byte| {
-        byte.is_ascii_whitespace()
-            || byte.is_ascii_digit()
-            || matches!(
-                byte.to_ascii_uppercase(),
-                b'A' | b'C'
-                    | b'G'
-                    | b'T'
-                    | b'R'
-                    | b'Y'
-                    | b'M'
-                    | b'K'
-                    | b'W'
-                    | b'S'
-                    | b'B'
-                    | b'D'
-                    | b'H'
-                    | b'V'
-                    | b'N'
-            )
-    })
 }
 
 /// LOSAT's refusal of a first word with a range (`x:10-40`) in a run that writes the BLAST archive:

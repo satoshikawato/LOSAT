@@ -5969,7 +5969,7 @@ impl TaxdbRun {
             .keeps_scope = keeps;
     }
 
-    /// Records whether the run's [`ScopeRecord`] keeps earlier batches' scopes across batches
+    /// Records whether the run's [`crate::report::db_subject::ScopeRecord`] keeps earlier batches' scopes across batches
     /// (`FormatThrow::record_keeps_scope`: `Some(false)` drops earlier batches on every new batch;
     /// `Some(true)` or `None` keeps them for outfmt 5 or unknown/multi-format calls).
     pub(crate) fn set_record_keeps_scope(&mut self, keeps: Option<bool>) {

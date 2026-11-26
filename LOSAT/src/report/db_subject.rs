@@ -1142,7 +1142,7 @@ impl ScopeRecord {
 
     /// Records the loads `loads` of the query batch `batch` (`None`: the loader's alone, as the
     /// loads before a stop), each by the subject's own Seq-align id: its lookup in `m_Ids`, then
-    /// the blob that it gives ([`ParsedSubject::loaded_blob`]), whose lines register every
+    /// the blob that it gives ([`ParsedSubject::loaded_blob_ref`]), whose lines register every
     /// handle where its blob id is new (where it is not, and the run has more than
     /// [`BLOBS_KEPT`] blob ids, they may register again), and its id resolves to it; an id whose
     /// lookup gives no blob (none, or a record whose lines do not hold it) resolves to no Bioseq

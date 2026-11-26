@@ -360,7 +360,6 @@ pub(super) fn render(
             hard_masked,
         )?;
     }
-    let hitlists: &[KappaResultHitList] = hitlists;
     // `-in_pssm` with `-window_size 0`: an alignment whose traceback started on its frame's NULLB
     // (`search_gapped::x_traceback_start_past_frame`) is refused here, where NCBI reports it, and
     // not where NCBI drops it after its traceback (the hit list, `-max_target_seqs`).
@@ -417,45 +416,6 @@ pub(super) fn render(
         }
         return Ok(());
     }
-    let xml_is_xml2 = outputs
-        .formats
-        .iter()
-        .any(|format| xml2_kind(format.outfmt).is_some());
-    // Every structured format is XML2 or JSON (outfmt 5 is not among them; the library takes
-    // several formats).
-    let xml_only_xml2 = outputs
-        .formats
-        .iter()
-        .filter(|format| is_structured_xml(format.outfmt))
-        .all(|format| xml2_kind(format.outfmt).is_some());
-    let xml = if outputs
-        .formats
-        .iter()
-        .any(|format| is_structured_xml(format.outfmt))
-    {
-        Some(super::blast_xml::prepare(
-            xml_values,
-            query_records,
-            subject_records,
-            subject_letters,
-            shown,
-            hitlists,
-            parameters,
-            ungapped_karlin,
-            query_validity,
-            query_batch_skipped,
-            scoring,
-            matrix_name,
-            seg_filter,
-            ranges,
-            xml_is_xml2,
-            xml_only_xml2,
-            xml_taxa,
-            pssm,
-        )?)
-    } else {
-        None
-    };
     // The tabular subject IDs, made before any format is written: a subject that NCBI
     // writes part of a row for and then stops at (RP-20) is rejected first
     // (`tabular_subject_ids`). The tabular formats 6, 7, 10 and 20 show them, not the organism
@@ -497,6 +457,7 @@ pub(super) fn render(
         ShownSubjects::Database { reported, .. } => &reported.loads,
     };
     // Each tabular format's refusal is that format's (`FormatRefusal::check`).
+    let mut lookup_stop = None;
     for format in outputs
         .formats
         .iter_mut()
@@ -529,11 +490,12 @@ pub(super) fn render(
                         s_idx,
                     )
                 },
-                |s_idx| match shown {
+                |s_idx, failure| match shown {
                     ShownSubjects::Database { reported, oids, .. } => {
                         crate::report::tabular::failed_database_subject(
                             oids.oid(reported.ordinals[s_idx]),
                             loads.thrown(s_idx),
+                            failure,
                         )
                     }
                     ShownSubjects::Fasta { .. } => crate::report::tabular::failed_record_title(
@@ -542,10 +504,134 @@ pub(super) fn render(
                     ),
                 },
                 "TBLASTN",
+                tabular.taxdb_found,
             );
-            format.refusal.check(checked)?;
+            if let Err(error) = format.refusal.check(checked) {
+                lookup_stop = Some(error);
+                break;
+            }
         }
     }
+    // A refusal that fails the call at a query batch after the first comes after the reports of
+    // the batches before, as NCBI's run stops in that batch's report
+    // (`FailedLookupRefusal::batch_start`): those queries' reports, without the epilog, then what
+    // NCBI writes to the standard error of the batch's reports up to the row
+    // (`FailedLookupRefusal::posts_before_stop`: each query's posts, its formatter's warning and
+    // its subject reads), then the refusal.
+    if let Some(error) = lookup_stop {
+        let before = crate::report::tabular::FailedLookupRefusal::batch_start(
+            &error,
+            batch_starts.iter().copied(),
+        );
+        if before > 0 {
+            let head = |len: usize| before.min(len);
+            let mut parameters_before = parameters.clone();
+            parameters_before.lengths.truncate(before);
+            parameters_before.cutoffs.truncate(before);
+            let archive_before = archive.map(|archive| super::archive::ArchiveRender {
+                handle: archive.handle,
+                spans: &archive.spans[..archive
+                    .spans
+                    .iter()
+                    .take_while(|span| span.start < before)
+                    .count()],
+            });
+            render(
+                outputs,
+                &query_records[..before],
+                subject_records,
+                subject_letters,
+                shown,
+                subject_set,
+                &mut hitlists[..before],
+                &parameters_before,
+                &ungapped_karlin[..head(ungapped_karlin.len())],
+                &query_validity[..head(query_validity.len())],
+                &query_batch_skipped[..head(query_batch_skipped.len())],
+                scoring,
+                matrix_name,
+                report_counts,
+                formatting,
+                genetic_code,
+                seg,
+                seg_filter,
+                mask_lowercase,
+                &query_posts[..head(query_posts.len())],
+                &query_reads[..head(query_reads.len())],
+                &ReportRanges {
+                    queries: ranges.queries,
+                    subjects: ranges.subjects,
+                    epilog: false,
+                    query_scopes: ranges.query_scopes,
+                },
+                xml_values,
+                xml_taxa,
+                out,
+                archive_before.as_ref(),
+                tabular,
+                pssm,
+                show_gis,
+                &batch_starts[..batch_starts
+                    .iter()
+                    .take_while(|&&start| start < before)
+                    .count()],
+            )?;
+        }
+        if let Some(refusal) = error.downcast_ref::<crate::report::tabular::FailedLookupRefusal>() {
+            let end = (refusal.set() + 1).min(query_posts.len());
+            refusal
+                .posts_before_stop(
+                    &query_posts[before.min(end)..end],
+                    query_reads.get(before..).unwrap_or_default(),
+                    |oid| oid as u32,
+                )
+                .write(
+                    &mut *outputs.diagnostics,
+                    archive.map(|archive| archive.handle),
+                )?;
+        }
+        return Err(error);
+    }
+    let hitlists: &[KappaResultHitList] = hitlists;
+    let xml_is_xml2 = outputs
+        .formats
+        .iter()
+        .any(|format| xml2_kind(format.outfmt).is_some());
+    // Every structured format is XML2 or JSON (outfmt 5 is not among them; the library takes
+    // several formats).
+    let xml_only_xml2 = outputs
+        .formats
+        .iter()
+        .filter(|format| is_structured_xml(format.outfmt))
+        .all(|format| xml2_kind(format.outfmt).is_some());
+    let xml = if outputs
+        .formats
+        .iter()
+        .any(|format| is_structured_xml(format.outfmt))
+    {
+        Some(super::blast_xml::prepare(
+            xml_values,
+            query_records,
+            subject_records,
+            subject_letters,
+            shown,
+            hitlists,
+            parameters,
+            ungapped_karlin,
+            query_validity,
+            query_batch_skipped,
+            scoring,
+            matrix_name,
+            seg_filter,
+            ranges,
+            xml_is_xml2,
+            xml_only_xml2,
+            xml_taxa,
+            pssm,
+        )?)
+    } else {
+        None
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411:
     // The alignments are rendered once from the final result, for outfmt 0 and for
     // the caller's hit records, in the order of the tabular rows.

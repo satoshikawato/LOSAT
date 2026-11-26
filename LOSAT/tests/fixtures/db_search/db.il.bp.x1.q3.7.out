@@ -1,0 +1,10 @@
+# BLASTP 2.17.0+
+# Query: x3
+# Database: tests/db_search/idlist/x1
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+x3	NP_000106.1	100.000	150	0	0	1	150	1	150	2.89e-118	319
+x3	NP_000104.1	38.462	13	8	0	52	64	48	60	1.8	15.8
+x3	NP_000101.1	28.000	25	18	0	30	54	2	26	2.5	15.4
+x3	NP_000107.1	66.667	6	2	0	66	71	26	31	4.8	14.6
+# BLAST processed 1 queries

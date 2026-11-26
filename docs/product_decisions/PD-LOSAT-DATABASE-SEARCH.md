@@ -122,9 +122,21 @@
   the maintainer's decision on its pull request; on 2026-11-23 line NP item M (b) read the
   Seq-locs of a mask file nested to any depth, which LOSAT refused past 400 levels, as makeblastdb
   reads them with a stack large enough (PD-LOSAT-NCBI-DEFECTS approved exception 28, the Owner's
-  「Q-MDEPTH=B」 of 2026-11-24); the rest of this history under the
-  maintainer's standing delegation (Owner-delegated, standing instruction 2026-09-29, restated
-  2026-10-07))
+  「Q-MDEPTH=B」 of 2026-11-24); on 2026-11-24 line RG item D1c-1c-b wrote the
+  sequences with a definition line without a Seq-id as NCBI writes them, which version 1.3 listed
+  as not compared: those whose lines all lack one get no Seq-align, and beside lines with Seq-ids
+  each format writes its `catch`, refused only at `sallacc` (NCBI's null pointer), in the organism
+  report (outfmt 18, which waits for the maintainer's answer to question Q-D1c1cb-18) and in
+  `rpsblast` and `rpstblastn`, not compared, and made LOSAT's refusal of a tabular row where NCBI
+  stops or prints an uninitialised `staxid` (these, and the `sacc`, `saccver` and `staxid` rows of
+  the tables) come after the reports of the query batches before in every program, as NCBI writes
+  them (BLASTP, psiblast, TBLASTN and TBLASTX wrote none of them before, BLASTN none where it writes
+  its reports after the loop), and after the failing batch's messages that NCBI writes to stderr
+  before that row (its reader messages, posts, and for each of its queries up to the row's its own
+  warnings, its formatter's taxdb warning and its subject reads up to the row; TBLASTN, TBLASTX and
+  BLASTN dropped its reader messages, every program the rest); the rest of this history
+  under the maintainer's standing delegation (Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07))
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
   database search campaign (decisions P1 to P4 below, each as recommended). The decision
   that version 1.0 left open, the thread count of the parity target, was taken by the
@@ -1207,10 +1219,39 @@ a result that LOSAT does not reproduce.
 | A Seq-align id or display id (row above) by which NCBI's scope finds a query read with `-parse_deflines` in the query batch that reports it (with outfmt 5, in any batch) as a weak match (`x_GetSeqMatch`): `sp||NAME` for `sp|P00001.1|NAME` and the other way, `gb|X.1|` for `gb|X|`, `pir||ABCD` for `pir|ABCD|` | the Seq-align id: every format; the display id: 0 to 4 in BLASTP, psiblast and rpsblast, 1 to 4 in BLASTN, BLASTX, TBLASTN and TBLASTX, where the table lists the sequence (as in the row above) | Shows the query's title and letters for it; for the display id the query's title in that line (not `gb|X|` for `gb|X.1|`, nor `pir|ABCD|` for `pir||ABCD`) | 2 |
 | In a query batch whose prefetch `PRE_FETCH_SEQS_LIMIT` turns off (0 or below, or a value below the batch's number of Seq-aligns): a Seq-align id that an id of another sequence matches weakly, as in the row above, in any letter case and across the alternatives (`tpg|X.1|NAME` and `prf||NAME`). In version 4 where the lookup of the Seq-align id or of its name alone finds such a sequence; in version 5 an accession without a version where the lookup finds a version of it, and any Seq-align id with a name or of `pir` or `prf` (version 5 keys a name only in its own letter case and only without an accession, and a `pir` or `prf` id by its FASTA text) | 0, 5, 6, 7, 10, 13 to 17, 20 | It reads the batch's reported sequences one by one (the prefetch of a batch loads each by its own id), and where it has read that other sequence first, it writes that sequence's names (in BLASTP also its identities; psiblast's PSSM also reads its letters) | 2 |
 | A stored title or Seq-id with a byte outside ' ' to '~' (makeblastdb stores `#` for such a byte) | every format | Prints `#` and an error message each time it reads the line, exit 0 | 2 |
-| A definition line without a Seq-id (makeblastdb writes none) that no list of the search erases (under any list, also one left without ids or taxids, NCBI's header read erases such a line and LOSAT does the same: rows `db.il.*.ln.*`) | every format | Not compared | |
+| A definition line without a Seq-id (makeblastdb writes none) that no list of the search erases, in a sequence with a Seq-id in another line (the paragraph below the table): the `sallacc` of each row of the sequence | 6, 7, 10, 20 with `sallacc` | Stops at the row's `sallacc` after its earlier fields (null pointer, exit 255) | 3 |
+| The same line in the organism report | 18 | Stops at that line for each HSP of the sequence and shows the lines before it once per HSP (Owner question Q-D1c1cb-18 of line RG item D1c-1c-b) | 2 |
+| The same line in `rpsblast` and `rpstblastn` | every format | Not compared | |
 | An outfmt 0 description id of 65 bytes or more | 0 | Pads the line without end, from 65 bytes with a title of 3 bytes or more, from 67 with any title | 3 |
 | A protein title of punctuation that `x_CleanAndCompress` reads past | 0; tabular formats for an `lcl|Subject_N` id | Crashes | 3 |
 | A title in no encoding that NCBI recognises (or the name in the taxonomy database from which NCBI makes an empty title, or which `x_AdjustProteinTitleSuffix` writes at the end of a protein title ending in ` [ ]`), for an `lcl|Subject_N` id: the rows that `SetSubjectId` cannot make (the subject Bioseq's ids hold that id), and the first row of a query's report that either `SetSubjectId` or `x_SetSubjectIds` cannot make (`sallseqid`, `sallgi` or `sallacc` of a sequence whose definition line with that id follows one with another id): `x_SetTaxInfo` comes after them in the same `try` and never runs (`tabular.cpp:839-854`) | 6, 7, 10, 20 with `sacc` or `saccver` (the default fields of 6, 7, 10); `staxid` in such a first row | Stops at the row's `sacc` or `saccver` (null pointer, exit 255); prints an uninitialised `staxid` | 3 |
+
+A definition line without a Seq-id (a hand-edited database: makeblastdb writes none; under any list,
+also one left without ids or taxids, NCBI's header read erases such a line and LOSAT does the same:
+rows `db.il.*.ln.*`) is NCBI's in BLASTP, psiblast, BLASTN, BLASTX, TBLASTN and TBLASTX, since line
+RG item D1c-1c-b. A sequence whose lines all lack one gets no Seq-align: its hits leave the report
+after the cut of the hit list, which they keep counting (rows `db.il.*.ln.q2*`, `db.il.*.lnn.*`). Beside
+lines with Seq-ids, each format's walk of the lines takes the best id of such a line, null, and its
+`catch` decides (rows `db.il.*.x1.*`, `db.il.bp.xw.*`, `db.il.*.ln.qa.*`, `db.il.*.pn.qa.*`): the
+outfmt 0 to 4 description line is the Seq-align id and `Unknown` (its GI with `-show_gis`; with
+`-html` an id link without a score link) where `GetDisplayIds` labels such a line before the line of
+the display id or the walk after the title meets it before the text passes 4096 bytes (a text of
+4096 bytes walks on, one of 4097 stops), and the heading of each HSP is the skipped id; outfmt 5's
+`Hit` is the Seq-align id's FASTA form, `Unknown`, `Unknown` and length 0 where a titled line without
+one (an empty title counts) follows the first titled line, its HSPs as always; XML2 and JSON keep
+the `HitDescr` of the lines before the first such line, with their taxonomy, and then the Seq-align
+id alone, with the sequence's length; the tabular formats print `Unknown` in `sallseqid`, 0 in
+`sallgi` and `N/A` for an untitled line in `salltitles`, and are refused only at `sallacc` (the
+table above), after the reports of the query batches before, which NCBI writes before it stops
+there (rows `db.il.*.qab1.rej.6`, `db.il.ps.ln.qa*.rej.6`, `db.il.bp.x1.q01b1.rej.6`; so does every
+refused tabular row where NCBI stops or prints an uninitialised `staxid`, in every program, BLASTN's
+reports written after the loop too: rows `db.il.bn.pn.qwb1.{dbs,chk,chkl}.rej.6`), and after what NCBI
+writes to stderr of the failing batch before that row: the batch's reader messages, its search
+strategy posts, its UTF8String warning, its prefetch texts, and for each of its queries up to the
+row's the query's own warnings, the taxdb warning of its formatter (a taxonomy name field without
+`taxdb.bti`) and, with the prefetch off, its subject reads up to the row (rows `db.il.*.qwb1.*.6`,
+`db.il.ps.ln.qwq.*.6`, `db.il.*.qo*.wrn.6`, `db.il.*.tx.rej.6`, `db.il.*.qwa.pf0.rej.6`; the rows
+marked `ncbi-stderr` compare that whole stderr with NCBI's).
 
 A sequence without parsed Seq-ids or with an `lcl|Subject_N` id whose title, or the name in the
 taxonomy database from which NCBI makes an empty title or the end of a protein title ending in ` [ ]`

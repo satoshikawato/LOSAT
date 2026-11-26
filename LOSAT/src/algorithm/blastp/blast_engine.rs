@@ -2261,6 +2261,65 @@ impl BlastpReport {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:296-310
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/psi_pssm_input.cpp:409-445
+    /// Whether the call's reports `formats` resolve the subjects' Seq-align ids in NCBI's scope
+    /// (`common::database::ParsedShown::resolves_subject`), where a query of the batch that holds
+    /// such an id takes the subject's place (`ListedTitles::refuse_ids_of_queries`): a report
+    /// reads their Bioseqs, or the batches' prefetch loads them (the first format's, unless
+    /// `PRE_FETCH_SEQS_LIMIT` turns it off for every batch). psiblast's rounds read the aligned
+    /// letters of the subjects from that scope for a PSSM, whatever the format, where the call
+    /// can make one (`psi_reads`, `psi_reads_scope`; review 3 of line RG-KB item 12, F1).
+    fn resolve_subjects(formats: &[BlastpReport], app: BlastpApp, psi_reads: bool) -> bool {
+        (app == BlastpApp::Psiblast && psi_reads)
+            || formats.iter().any(|format| format.reads_subjects())
+            || (formats
+                .first()
+                .is_some_and(|format| format.prefetches_subjects(app))
+                && !crate::algorithm::common::database::prefetch_always_off(
+                    report_prep::prefetch_format(app, formats),
+                ))
+    }
+
+    /// Whether the call reads its subjects' letters from NCBI's scope for a PSSM: psiblast's
+    /// `-in_pssm` (the archive of its rounds) or a round (`round`) that makes the PSSM of the next
+    /// round or the last one saved (`PsiRoundIo::may_make_next`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:296-310
+    fn psi_reads(
+        args: &ResolvedBlastpArgs,
+        round: Option<&crate::algorithm::psiblast::rounds::PsiRoundIo>,
+    ) -> bool {
+        args.psi_pssm.is_some()
+            || round.is_some_and(crate::algorithm::psiblast::rounds::PsiRoundIo::may_make_next)
+    }
+
+    /// Whether the call's reports `formats` of `app` show NCBI's bytes for a subject that the
+    /// scope finds as a query of its batch (`report::query_bioseq`): blastp's tables that read no
+    /// letter of the found Bioseq and its organism report (`query_bioseq::tabular_shows`), the
+    /// Seq-annots and the archive (which write the Seq-align id alone). The other formats, and
+    /// psiblast's calls that can make a PSSM (`psi_reads`, which reads the found Bioseq's letters)
+    /// or search one (`-in_pssm`), keep LOSAT's refusal.
+    fn shows_query_bioseqs(
+        formats: &[BlastpReport],
+        args: &ResolvedBlastpArgs,
+        psi_reads: bool,
+    ) -> bool {
+        use crate::report::query_bioseq::tabular_shows;
+        (args.app == BlastpApp::Blastp
+            || (args.app == BlastpApp::Psiblast && !psi_reads && args.psi_search.is_none()))
+            && formats.iter().all(|format| match *format {
+                BlastpReport::Seqalign(_) | BlastpReport::Archive => true,
+                BlastpReport::CustomTabular(spec) => {
+                    tabular_shows(Some(spec), crate::blastinput::app::Program::Blastp)
+                }
+                BlastpReport::Text(OutputFormat::Tabular | OutputFormat::TabularWithComments) => {
+                    tabular_shows(None, crate::blastinput::app::Program::Blastp)
+                }
+                _ => false,
+            })
+    }
+
     /// Whether the report is tabular (outfmt 6, 7, 10 and 20), which reads the tabular subject
     /// IDs (`report::tabular::writes_rows`: not the organism report).
     fn is_tabular(self) -> bool {
@@ -2613,19 +2672,31 @@ fn check_tabular_lookups(
             subject_ids,
             parsed,
             loads,
+            crate::blastinput::app::Program::Blastp,
         ) {
             continue;
         }
+        // A subject that the scope finds as a query fails no lookup (`SEEN_ROW`).
         let checked = crate::report::tabular::check_failed_lookups(
             spec,
-            hit_lists.iter().flatten().map(|hit_list| {
-                let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-                hit_list.hsplist_array[..count]
-                    .iter()
-                    .filter_map(|hsp_list| hsp_list.hsps.first())
-                    .map(|hsp| hsp.s_idx as usize)
-            }),
+            hit_lists
+                .iter()
+                .enumerate()
+                .filter_map(|(q_idx, hit_list)| Some((q_idx, hit_list.as_ref()?)))
+                .map(|(q_idx, hit_list)| {
+                    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                    hit_list.hsplist_array[..count]
+                        .iter()
+                        .filter_map(|hsp_list| hsp_list.hsps.first())
+                        .map(move |hsp| match listed_titles {
+                            Some(titles) => titles.seen_row(q_idx, hsp.s_idx as usize),
+                            None => hsp.s_idx as usize,
+                        })
+                }),
             |s_idx| {
+                if s_idx == crate::report::query_bioseq::SEEN_ROW {
+                    return None;
+                }
                 crate::algorithm::common::tabular::subject_lookup_failure(
                     spec,
                     subject_ids,
@@ -2640,6 +2711,7 @@ fn check_tabular_lookups(
                 Some(titles) => crate::report::tabular::failed_database_subject(
                     titles.oid(s_idx),
                     loads.thrown(s_idx),
+                    parsed.get(s_idx).and_then(Option::as_deref),
                     failure,
                 ),
                 None => crate::report::tabular::failed_record_title(
@@ -2647,6 +2719,7 @@ fn check_tabular_lookups(
                     subject_records[s_idx].shown_id(),
                 ),
             },
+            crate::blastinput::app::Program::Blastp,
             application,
             taxdb_found,
         );
@@ -5651,23 +5724,59 @@ fn check_shown_subject_titles(
     Ok(())
 }
 
-/// The titles that a pairwise report shows, checked where the subjects are a database's
-/// (`ListedTitles::check_shown_titles`, which takes the subjects whose load throws from `loads`)
-/// or a FASTA set's (`check_shown_subject_titles`).
+/// The titles that a pairwise report (`pairwise`) shows, the subjects of the final lists
+/// (`shown`), checked where the subjects are a database's (`ListedTitles::check_shown_titles`,
+/// which takes the subjects whose load throws from the view's `hit_loads`, then
+/// `ListedTitles::refuse_described_lines` of the subjects of the final hit lists whose
+/// description lines the report prints, `report_prep::described_in`: the first review of line
+/// RG-KB item 12) or a FASTA set's (`check_shown_subject_titles`, then the same refusals of the
+/// description lines of the records whose ids `-parse_deflines` read, the view's
+/// `listed_parsed`: the second review, N2). `rows_of` is `run_call`'s closure of the rows of a
+/// range of queries.
 fn check_pairwise_shown_titles(
-    listed_titles: Option<&database::ListedTitles<'_>>,
-    database: Option<&database::BlastpDatabase>,
+    view: &report_write::ReportView<'_>,
+    pairwise: crate::report::pairwise::PairwiseView,
+    rows_of: &impl Fn(std::ops::Range<usize>) -> Result<Vec<PairwiseHit>>,
     shown: &std::collections::BTreeSet<usize>,
-    subject_records: &[FastaRecord],
-    loads: &crate::report::db_subject::HitLoads,
 ) -> Result<()> {
-    match listed_titles {
-        Some(titles) => titles.check_shown_titles(
-            database.expect("listed titles are a database's"),
-            shown,
-            loads,
-        ),
-        None => check_shown_subject_titles(shown.iter().copied(), subject_records),
+    let described = report_prep::described_in(
+        pairwise,
+        view.args,
+        view.pairwise_hits,
+        rows_of,
+        view.listed_titles,
+        view.psi_found_before,
+    );
+    match view.listed_titles {
+        Some(titles) => {
+            titles.check_shown_titles(
+                view.database.expect("listed titles are a database's"),
+                shown,
+                view.hit_loads,
+            )?;
+            titles.refuse_described_lines(view.hit_lists, view.hit_loads, described)
+        }
+        None => {
+            check_shown_subject_titles(shown.iter().copied(), view.subject_records)?;
+            if view.listed_parsed.is_empty() {
+                return Ok(());
+            }
+            crate::algorithm::common::database::refuse_described_records(
+                view.hit_lists.len(),
+                |query| match &view.hit_lists[query] {
+                    Some(hit_list) => hit_list
+                        .hsplist_array
+                        .iter()
+                        .take(hit_list.hsplist_count)
+                        .filter_map(|hsp_list| hsp_list.hsps.first().map(|hsp| hsp.s_idx))
+                        .collect(),
+                    None => Vec::new(),
+                },
+                described,
+                view.listed_parsed,
+                view.args.app.name(),
+            )
+        }
     }
 }
 
@@ -9740,6 +9849,45 @@ fn query_xml_stats(
         .collect()
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:836-866
+// NCBI reference (598d8ae6): c++/src/app/blast/psiblast_app.cpp:296-310
+/// Resolves database subjects whose Seq-align id matches a `-parse_deflines` query Bioseq in the
+/// same scope, refusing formats where NCBI's scope reads letters of the query Bioseq as a subject.
+fn resolve_seen_queries(
+    listed_titles: Option<&mut database::ListedTitles<'_>>,
+    hit_lists: &[Option<BlastpHitList>],
+    query_records: &[FastaRecord],
+    args: &ResolvedBlastpArgs,
+    requested_formats: &[BlastpReport],
+    reports: &BlastpReports<'_>,
+    can_show: bool,
+) -> Result<()> {
+    let psi_reads = BlastpReport::psi_reads(args, reports.psi_round);
+    let (Some(titles), Some(scopes), true) = (
+        listed_titles,
+        reports.query_scopes,
+        BlastpReport::resolve_subjects(requested_formats, args.app, psi_reads),
+    ) else {
+        return Ok(());
+    };
+    let record = |query: usize| {
+        crate::report::query_bioseq::QueryRecordRef::of(
+            query_records.get(query.checked_sub(scopes.first())?)?,
+        )
+    };
+    let run = crate::report::query_bioseq::SeenRun {
+        shows: BlastpReport::shows_query_bioseqs(requested_formats, args, psi_reads) && can_show,
+        known: scopes.first()..if reports.last_call {
+            usize::MAX
+        } else {
+            scopes.first() + query_records.len()
+        },
+        record: &record,
+        protein: true,
+    };
+    titles.refuse_ids_of_queries(hit_lists, scopes, &run)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_call(
     args: ResolvedBlastpArgs,
@@ -10543,11 +10691,18 @@ fn run_call(
         &query_batches,
         report_prep::prefetch_format(args.app, &requested_formats),
     );
-    let listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
+    let mut listed_titles = reads.titles(listed_subjects.as_ref(), &hit_lists, x_listed_lean)?;
     report_prep::refuse_prefetch_environment(&setup, outputs, reads.utf8())?;
-    if let (Some(titles), Some(scopes)) = (listed_titles.as_ref(), reports.query_scopes) {
-        titles.refuse_ids_of_queries(&hit_lists, scopes)?;
-    }
+    resolve_seen_queries(
+        listed_titles.as_mut(),
+        &hit_lists,
+        query_records,
+        &args,
+        &requested_formats,
+        reports,
+        ranges.query_input.range_length.is_none()
+            && database.is_some_and(|database| !database.loads_write_texts()),
+    )?;
     let (subject_records, subject_titles, shown_subjects) =
         report_prep::shown_of(&listed_titles, subjects, subject_records, &subject_titles);
     let report_prep::ReportValues {
@@ -11077,7 +11232,7 @@ fn run_call(
         // (`FormatRefusal::check`) leaves them to the next. The shown subjects are those of the
         // final lists (the rows' subjects).
         let pairwise_shown: Option<std::collections::BTreeSet<usize>> = match outfmt {
-            BlastpReport::Pairwise(_) => {
+            BlastpReport::Pairwise(view) => {
                 let shown: std::collections::BTreeSet<usize> = hit_lists
                     .iter()
                     .flatten()
@@ -11085,13 +11240,7 @@ fn run_call(
                     .flat_map(|hsp_list| &hsp_list.hsps)
                     .map(|hsp| hsp.s_idx as usize)
                     .collect();
-                let checked = check_pairwise_shown_titles(
-                    listed_titles.as_ref(),
-                    database,
-                    &shown,
-                    subject_records,
-                    &prefetched.hit_loads,
-                );
+                let checked = check_pairwise_shown_titles(&report_view, view, &rows_of, &shown);
                 if !format.refusal.check(checked)? {
                     continue;
                 }

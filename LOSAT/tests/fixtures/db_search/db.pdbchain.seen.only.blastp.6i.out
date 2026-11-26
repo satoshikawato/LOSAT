@@ -1,0 +1,5 @@
+pdb|1AB1|A	Unknown	pdb|1AB3|	0	0	1AB3_	0	1.87e-173
+pdb|1AB1|A	pdb|1AB4|A	pdb|1AB4|A	0	0	1AB4_A	220	7.37e-173
+pdb|1AB1|A	pdb|1AB1|A	pdb|1AB1|A	0	0	1AB1_A	220	8.14e-173
+pdb|1AB1|A	Unknown	pdb|1AB1|A;pdb|1AB2|A	0	0;0	1AB1_A;1AB2_A	0	9.70e-173
+pdb|1AB1|A	pdb|1AB5| 	pdb|1AB5| 	0	0	1AB5	220	1.12e-172

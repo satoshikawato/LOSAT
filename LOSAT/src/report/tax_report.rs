@@ -344,12 +344,55 @@ pub trait TaxSubjects {
     /// LOSAT's refusal of a title of `subject` (`TaxTitle::Refused`), which names it.
     fn refused(&self, subject: usize, reason: &str) -> anyhow::Error;
 
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:996-998
     /// Whether the load of `subject` throws where its query's batch has its prefetch off
     /// (`db_subject::HitLoads::thrown`), or at every load where a file of the taxonomy database
     /// does not open and the load looks a positive taxid up
-    /// (`SubjectTable::with_loads_that_throw`): the report leaves its HSPs out (`organism_report`).
+    /// (`SubjectTable::with_loads_that_throw`), or gives an empty handle (a database sequence
+    /// whose Bioseq the scope does not get, `ParsedSubject::scope_finds_none`): the report leaves
+    /// its HSPs out (`organism_report`).
     fn throws(&self, _subject: usize) -> bool {
         false
+    }
+
+    /// Whether the report's read of `subject` loads it (`GetBioseqHandle`, `Step::Read`): not a
+    /// sequence that the scope finds as a query (`SeenSubjects`), which is in the scope.
+    fn loads(&self, _subject: usize) -> bool {
+        true
+    }
+}
+
+/// The subjects of one query's report where NCBI's scope finds a query's Bioseq for some of them
+/// (`report::query_bioseq`, `seen(subject)`): such a subject's one line is the query record's
+/// (`QueryBioseq::tax_deflines`), its read loads nothing and does not throw; its Seq-align id,
+/// which `same` compares, and its name in LOSAT's refusals are its own.
+struct SeenSubjects<'s> {
+    inner: &'s dyn TaxSubjects,
+    seen: &'s dyn Fn(usize) -> Option<&'s crate::report::query_bioseq::QueryBioseq>,
+}
+
+impl TaxSubjects for SeenSubjects<'_> {
+    fn deflines(&self, subject: usize) -> &[TaxDefline] {
+        match (self.seen)(subject) {
+            Some(bioseq) => bioseq.tax_deflines(),
+            None => self.inner.deflines(subject),
+        }
+    }
+
+    fn same(&self, previous: usize, subject: usize) -> bool {
+        self.inner.same(previous, subject)
+    }
+
+    fn refused(&self, subject: usize, reason: &str) -> anyhow::Error {
+        self.inner.refused(subject, reason)
+    }
+
+    fn throws(&self, subject: usize) -> bool {
+        (self.seen)(subject).is_none() && self.inner.throws(subject)
+    }
+
+    fn loads(&self, subject: usize) -> bool {
+        (self.seen)(subject).is_none() && self.inner.loads(subject)
     }
 }
 
@@ -551,6 +594,9 @@ impl TaxSubjects for SubjectTable<'_> {
             || self
                 .loads
                 .is_some_and(|loads| loads.thrown(subject).is_some())
+            || self
+                .parsed(subject)
+                .is_some_and(crate::report::db_subject::ParsedSubject::scope_finds_none)
     }
 }
 
@@ -898,19 +944,44 @@ pub struct TaxReport {
 impl TaxReport {
     /// The reports of the queries `queries` of a batch, of the subjects `subjects`, whose taxids
     /// the lookups `lookups` look up (`organism_report`).
+    #[cfg(test)]
     pub fn new(
+        queries: &[TaxQuery<'_>],
+        subjects: &dyn TaxSubjects,
+        lookups: TaxLookups,
+        html: bool,
+    ) -> Result<Self> {
+        Self::with_seen(queries, subjects, lookups, html, None)
+    }
+
+    /// `new`, where `seen(q_idx, subject)` gives the query Bioseq that NCBI's scope finds for
+    /// `subject` in the report of query `q_idx` (`report::query_bioseq`, `SeenSubjects`).
+    pub fn with_seen<'q>(
         queries: &[TaxQuery<'_>],
         subjects: &dyn TaxSubjects,
         mut lookups: TaxLookups,
         html: bool,
+        seen: Option<SeenBioseqs<'_, 'q>>,
     ) -> Result<Self> {
         let queries = queries
             .iter()
-            .map(|query| {
+            .enumerate()
+            .map(|(q_idx, query)| {
                 query
                     .hsps
                     .as_ref()
-                    .map(|hsps| organism_report(hsps, subjects, &mut lookups, html))
+                    .map(|hsps| match seen {
+                        Some(seen) => organism_report(
+                            hsps,
+                            &SeenSubjects {
+                                inner: subjects,
+                                seen: &|subject| seen(q_idx, subject),
+                            },
+                            &mut lookups,
+                            html,
+                        ),
+                        None => organism_report(hsps, subjects, &mut lookups, html),
+                    })
                     .transpose()
             })
             .collect::<Result<_>>()?;
@@ -1057,9 +1128,10 @@ pub fn write_report(
 /// `names` carries (`TaxLookups::new`) and the reports (`TaxReport::new`), all made before the
 /// batch's first byte; `loads` what the reports load of each subject (`None`: every subject).
 /// `program` names the program in LOSAT's refusals, and `app` the running application, NCBI's
-/// messages' prefix; `html`: `-html`.
+/// messages' prefix; `html`: `-html`; `seen`: the query Bioseqs that NCBI's scope finds for
+/// subjects (`TaxReport::with_seen`).
 #[allow(clippy::too_many_arguments)]
-pub fn report_batch<'a>(
+pub fn report_batch<'a, 'q>(
     queries: &[TaxQuery<'_>],
     parsed: &[Option<std::sync::Arc<crate::report::db_subject::ParsedSubject>>],
     plain: impl Fn(usize) -> TaxPlain<'a>,
@@ -1069,6 +1141,7 @@ pub fn report_batch<'a>(
     program: &str,
     app: &str,
     html: bool,
+    seen: Option<SeenBioseqs<'_, 'q>>,
 ) -> Result<TaxReport> {
     let table = SubjectTable::new(queries, parsed, plain, protein, loads, program)
         .with_loads_that_throw(
@@ -1076,8 +1149,19 @@ pub fn report_batch<'a>(
                 .and_then(TabularNames::report_db)
                 .is_some_and(|db| db.loads_throw),
         );
-    TaxReport::new(queries, &table, TaxLookups::new(names, program, app)?, html)
+    TaxReport::with_seen(
+        queries,
+        &table,
+        TaxLookups::new(names, program, app)?,
+        html,
+        seen,
+    )
 }
+
+/// The query Bioseq that NCBI's scope finds for a subject in the report of a query, by the
+/// batch's query and the subject's index (`report::query_bioseq::SeenFrom`).
+pub type SeenBioseqs<'s, 'q> =
+    &'s dyn Fn(usize, usize) -> Option<&'q crate::report::query_bioseq::QueryBioseq>;
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:979-1034
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:1040-1055
@@ -1112,7 +1196,9 @@ fn organism_report(
         if subjects.throws(hsp.subject) {
             continue;
         }
-        steps.push(Step::Read(hsp.subject));
+        if subjects.loads(hsp.subject) {
+            steps.push(Step::Read(hsp.subject));
+        }
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/taxFormat.cpp:956-957
         let evalue: std::rc::Rc<[u8]> = format_evalue_ncbi(hsp.evalue).into_bytes().into();
         let bit_score: std::rc::Rc<[u8]> = format_bitscore_ncbi(hsp.bit_score).into_bytes().into();

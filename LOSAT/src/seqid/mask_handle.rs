@@ -250,7 +250,8 @@ pub(crate) fn mask_handle_order(packed: i64) -> u64 {
 /// - a local string id; a general id's database, then its string tag;
 /// - a Textseq-id's accession only (a name keeps `first`'s case); a packed one (accession only)
 ///   takes `first`'s alternative (GenBank, EMBL and DDBJ are one tree);
-/// - a PDB id as a whole (molecule case, `chain` and `chain-id`, release date);
+/// - a PDB id as a whole (molecule case, `chain-id`, release date) but for its `chain`, the
+///   normalized one ([`pdb_handle_seq_id`]);
 /// - nothing of a patent or a `giim` id (`first` as it is); gi, gibbsq, gibbmt and local integer
 ///   ids are their number.
 pub(crate) fn handle_seq_id(first: &ParsedSeqId, id: &ParsedSeqId) -> ParsedSeqId {
@@ -271,6 +272,7 @@ pub(crate) fn handle_seq_id(first: &ParsedSeqId, id: &ParsedSeqId) -> ParsedSeqI
             ParsedSeqId::General(dbtag)
         }
         (ParsedSeqId::Patent(_) | ParsedSeqId::Giim(_), _) => first.clone(),
+        (_, ParsedSeqId::Pdb(own)) => ParsedSeqId::Pdb(pdb_handle_seq_id(own)),
         _ => match (first.textseq(), id.textseq()) {
             (Some(text), Some(own)) => {
                 let mut out = first.clone();
@@ -447,60 +449,92 @@ fn parse_digits(digits: &[u8]) -> i64 {
         .fold(0i64, |n, &c| n * 10 + i64::from(c - b'0'))
 }
 
-/// `CSeq_id_PDB_Info::Normalize` (seq_id_tree.cpp:3408-3464): an id with a release date that does
-/// not normalize is kept as it is; any other id loses its date, gets the molecule's 2nd-4th
-/// characters in upper case when the molecule has a lower-case letter, `chain_id` from `chain`
-/// (as a `char`) and `chain` from `chain_id[0]` (a signed char) when one of them is set
-/// (`chain` only for a 1-character `chain_id`). The tree compares the results with `Equals`
-/// (values and set flags; 3502-3523).
-fn push_pdb_normalized(key: &mut Vec<u8>, pdb: &PdbSeqId) {
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:3408-3464
+/// The PDB id that `CSeq_id_PDB_Info::Normalize` keys the tree with:
+/// `None` for an id with a release date that does not normalize, which is kept as it is; any other
+/// id loses its date, gets the molecule's 2nd-4th characters in upper case when the molecule has a
+/// lower-case letter, `chain_id` from `chain` (as a `char`) and `chain` from `chain_id[0]` (a
+/// signed char) when one of them is set (`chain` only for a 1-character `chain_id`). The tree
+/// compares the results with `Equals` (values and set flags; 3502-3523).
+fn pdb_normalized(pdb: &PdbSeqId) -> Option<PdbSeqId> {
     let date_packs = match &pdb.rel {
         None => true,
         Some(Date::Std(date)) => pdb_date_normalizes(date),
         Some(Date::Str(_)) => false,
     };
-    if let (false, Some(rel)) = (date_packs, &pdb.rel) {
-        key.push(b'R');
-        push_bytes(key, &pdb.mol);
-        push_opt_i32(key, pdb.chain);
-        push_date(key, rel);
-        push_opt_bytes(key, pdb.chain_id.as_deref());
-        return;
+    if !date_packs {
+        return None;
     }
     let has_chain = pdb.chain.is_some() || pdb.chain_id.as_ref().is_some_and(|c| c.len() == 1);
     let has_chain_id = pdb.chain_id.is_some() || pdb.chain.is_some();
     let need_upcase = pdb.mol.iter().any(u8::is_ascii_lowercase);
-    let (mol, chain, chain_id) = if pdb.rel.is_some()
-        || need_upcase
-        || pdb.chain.is_some() != has_chain
-        || pdb.chain_id.is_some() != has_chain_id
+    if pdb.rel.is_none()
+        && !need_upcase
+        && pdb.chain.is_some() == has_chain
+        && pdb.chain_id.is_some() == has_chain_id
     {
-        let mut mol = pdb.mol.clone();
-        if need_upcase {
-            mol.iter_mut()
-                .skip(1)
-                .take(3)
-                .for_each(u8::make_ascii_uppercase);
+        return Some(pdb.clone());
+    }
+    let mut mol = pdb.mol.clone();
+    if need_upcase {
+        mol.iter_mut()
+            .skip(1)
+            .take(3)
+            .for_each(u8::make_ascii_uppercase);
+    }
+    let chain_id = has_chain_id.then(|| {
+        pdb.chain_id
+            .clone()
+            .unwrap_or_else(|| vec![pdb.chain.unwrap_or(0) as u8])
+    });
+    let chain = has_chain.then(|| {
+        chain_id
+            .as_ref()
+            .and_then(|c| c.first())
+            .map_or(0, |&c| i32::from(c as i8))
+    });
+    Some(PdbSeqId {
+        mol,
+        chain,
+        rel: None,
+        chain_id,
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seq/seq_id_tree.cpp:3293-3346
+/// The Seq-id of the handle of the PDB id `pdb` (`CSeq_id_Handle::GetSeqId()`, which
+/// `GetPackedSeqId` makes from the normalized id, [`pdb_normalized`]): the members that `pdb`
+/// lacks are unset again and its molecule's case and release date come back, so the handle's
+/// Seq-id is `pdb` but for `chain`, the normalized one where `pdb` has a `chain`: a `chain` outside
+/// -128..=127 without a `chain-id` (the chain's low byte read back as a signed char), or a
+/// `chain` that is not `chain-id[0]` of an id that `Normalize` builds anew (a lower-case molecule
+/// letter, or a release date). The object manager looks the handle's Seq-id up, so a database whose stored id is
+/// `pdb` does not serve it where that differs (`ParsedSubject::scope_finds_none`).
+pub(crate) fn pdb_handle_seq_id(pdb: &PdbSeqId) -> PdbSeqId {
+    let mut handle = pdb.clone();
+    if let (Some(chain), Some(normalized)) = (handle.chain.as_mut(), pdb_normalized(pdb)) {
+        *chain = normalized.chain.unwrap_or(*chain);
+    }
+    handle
+}
+
+/// The key of a PDB id: the normalized id ([`pdb_normalized`]), or the id as it is (with its
+/// release date) where the date does not normalize.
+fn push_pdb_normalized(key: &mut Vec<u8>, pdb: &PdbSeqId) {
+    let Some(normalized) = pdb_normalized(pdb) else {
+        key.push(b'R');
+        push_bytes(key, &pdb.mol);
+        push_opt_i32(key, pdb.chain);
+        if let Some(rel) = &pdb.rel {
+            push_date(key, rel);
         }
-        let chain_id = has_chain_id.then(|| {
-            pdb.chain_id
-                .clone()
-                .unwrap_or_else(|| vec![pdb.chain.unwrap_or(0) as u8])
-        });
-        let chain = has_chain.then(|| {
-            chain_id
-                .as_ref()
-                .and_then(|c| c.first())
-                .map_or(0, |&c| i32::from(c as i8))
-        });
-        (mol, chain, chain_id)
-    } else {
-        (pdb.mol.clone(), pdb.chain, pdb.chain_id.clone())
+        push_opt_bytes(key, pdb.chain_id.as_deref());
+        return;
     };
     key.push(b'N');
-    push_bytes(key, &mol);
-    push_opt_i32(key, chain);
-    push_opt_bytes(key, chain_id.as_deref());
+    push_bytes(key, &normalized.mol);
+    push_opt_i32(key, normalized.chain);
+    push_opt_bytes(key, normalized.chain_id.as_deref());
 }
 
 /// `CSeq_id_PDB_Info::x_NormalizeDate` (seq_id_tree.cpp:3381-3405): year 1-4095, month 1-15,

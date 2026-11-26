@@ -123,6 +123,12 @@ impl BlastpDatabase {
         self.rps_units.as_ref()
     }
 
+    /// Whether a load of a sequence with a positive taxid can write a text or throw in this run
+    /// (`shared::TaxdbRun::loads_write_texts`).
+    pub(super) fn loads_write_texts(&self) -> bool {
+        self.taxdb.loads_write_texts(&self.db)
+    }
+
     /// NCBI's posts of the titles that the failed batch of `failure` read where it made its
     /// Seq-aligns, which posted NCBI's warning of a UTF8String header or not (`utf8_posted`;
     /// `ErrorAfterBatchReports::title_posts`).
@@ -1494,6 +1500,8 @@ impl ListedSubjects {
             parsed: parsed.by_rank,
             program: database.program,
             utf8: headers.first_utf8(),
+            seen: Default::default(),
+            seen_first: 0,
         })
     }
 }
@@ -1718,6 +1726,12 @@ pub(super) struct ListedTitles<'a> {
     /// where a VisibleString is expected (`shared::HeaderReader::first_utf8`): NCBI posts its
     /// warning there, once per process (`shared::Utf8Read::post`).
     pub(super) utf8: Option<shared::Utf8Read>,
+    /// The query Bioseqs that NCBI's scope finds for the reported subjects
+    /// (`report::query_bioseq`, filled by `refuse_ids_of_queries`), by the run's searched query
+    /// and the ordinal id.
+    seen: crate::report::query_bioseq::QueryBioseqs,
+    /// The run's searched query of the call's first query (`refuse_ids_of_queries`).
+    seen_first: usize,
 }
 
 /// The reported subjects with parsed Seq-ids of `ListedSubjects::read_titles`, by rank.
@@ -1774,15 +1788,19 @@ impl ListedTitles<'_> {
     /// With `-parse_deflines`, `common::database::refuse_id_of_a_query` of each subject with
     /// parsed Seq-ids of the final hit lists `hit_lists`, with the scope of the query whose list
     /// reaches it (`scopes`): the reports of each query batch ask for the batch's own, also of a
-    /// subject that a list of another batch reached first.
+    /// subject that a list of another batch reached first. Where the scope finds a query for the
+    /// subject and the reports show NCBI's bytes for it (`run`), that query is noted in `seen`
+    /// instead (`report::query_bioseq::note_or_refuse`).
     pub(super) fn refuse_ids_of_queries(
-        &self,
+        &mut self,
         hit_lists: &[Option<BlastpHitList>],
         scopes: crate::blastinput::query_batch::QueryScopesFrom<'_>,
+        run: &crate::report::query_bioseq::SeenRun<'_, '_>,
     ) -> Result<()> {
         if self.parsed.is_empty() {
             return Ok(());
         }
+        self.seen_first = scopes.first();
         for (query, hit_list) in hit_lists.iter().enumerate() {
             let Some(hit_list) = hit_list else {
                 continue;
@@ -1791,16 +1809,34 @@ impl ListedTitles<'_> {
             for hsp_list in &hit_list.hsplist_array[..count] {
                 let rank = hsp_list.oid as usize;
                 if let Some(subject) = &self.parsed[rank] {
-                    shared::refuse_id_of_a_query(
+                    let ordinal = self.listed.ordinals[rank];
+                    crate::report::query_bioseq::note_or_refuse(
+                        &mut self.seen,
                         subject,
-                        || self.oids.oid(self.listed.ordinals[rank]),
-                        scopes.of_query(query),
+                        || self.oids.oid(ordinal),
+                        scopes.first() + query,
+                        ordinal,
+                        scopes.run(),
+                        run,
                         self.program,
                     )?;
                 }
             }
         }
         Ok(())
+    }
+
+    /// The query Bioseqs that NCBI's scope finds for the reported subjects (`seen`), as the
+    /// reports of the call ask them (by the call's query).
+    pub(super) fn seen(&self) -> crate::report::query_bioseq::SeenFrom<'_> {
+        self.seen.numbered_from(self.seen_first)
+    }
+
+    /// The subject index by which a check of the rows of the call's query `q_idx` takes the
+    /// subject of rank `rank` (`report::query_bioseq::SeenFrom::row`).
+    pub(super) fn seen_row(&self, q_idx: usize, rank: usize) -> usize {
+        self.seen()
+            .row(q_idx, self.listed.ordinals.get(rank).copied(), rank)
     }
 
     /// Outfmt 1 to 4 of queries read without `-parse_deflines` (line RG T3a, review 2 D2): LOSAT's
@@ -1932,6 +1968,36 @@ impl ListedTitles<'_> {
             }
         }
         Ok(())
+    }
+
+    /// `common::database::refuse_described_lines` of the subjects with parsed Seq-ids of the
+    /// final hit lists `hit_lists` (`loads`: their loads in the pairwise reports, `HitLoads::load`
+    /// by rank): `described(query)` gives the subjects (by rank) whose description lines the
+    /// query's report shows (`report_prep::described_subjects`).
+    pub(super) fn refuse_described_lines(
+        &self,
+        hit_lists: &[Option<BlastpHitList>],
+        loads: &HitLoads,
+        described: impl FnMut(usize) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        shared::refuse_described_lines(
+            hit_lists.len(),
+            |query| match &hit_lists[query] {
+                Some(hit_list) => {
+                    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                    hit_list.hsplist_array[..count]
+                        .iter()
+                        .map(|hsp_list| hsp_list.oid)
+                        .collect()
+                }
+                None => Vec::new(),
+            },
+            described,
+            &self.parsed,
+            |rank| loads.load(rank as usize),
+            |rank| self.oids.oid(self.listed.ordinals[rank as usize]),
+            self.program,
+        )
     }
 
     /// The stored title of the subject of rank `rank` (empty for a subject in no final hit
@@ -2226,6 +2292,7 @@ impl ListedTitles<'_> {
         database: &BlastpDatabase,
         ranks: &[usize],
         taxids: bool,
+        scope: &dyn Fn() -> crate::blastinput::query_batch::QueryScope,
     ) -> Result<Vec<usize>> {
         // A failing prefetch may have loaded each other subject of the batch, beyond the cut too,
         // before its failure (`ReportRead::prefetch_fails`): where one of them holds an id that
@@ -2251,10 +2318,11 @@ impl ListedTitles<'_> {
                     |holder: crate::seqdb::DbSequence| loaded.contains(&holder.ordinal());
                 if let Some(holder) = subject.held_before((prefetched, any), (prefetched, any)) {
                     let reason = subject
-                        .fetched(
+                        .fetched_with_scope(
                             false,
                             false,
                             crate::report::db_subject::HitLoad::Held(holder),
+                            false,
                         )
                         .err()
                         .unwrap_or_default();
@@ -2271,11 +2339,14 @@ impl ListedTitles<'_> {
                 kept.push(rank);
                 continue;
             }
+            let seen_by_scope =
+                subject.load_throws() && scope().has_key(&subject.query_scope_keys().own);
             match shared::prefetch_reads(
                 &database.db,
                 self.listed.ordinals[rank],
                 subject,
                 taxids,
+                seen_by_scope,
                 self.program,
             )? {
                 Ok(Some(_)) => kept.push(rank),
@@ -2747,14 +2818,30 @@ impl ListedTitles<'_> {
     pub(super) fn check_prefetched(
         &self,
         database: &BlastpDatabase,
-        ranks: impl IntoIterator<Item = usize>,
+        batch_start: usize,
+        lists: &[Option<BlastpHitList>],
     ) -> Result<()> {
-        for rank in ranks {
+        let seen = self.seen();
+        for rank in Self::reported_ranks(lists) {
             if let Some(subject) = self.parsed_subject(rank) {
+                let ordinal = self.listed.ordinals[rank];
+                let seen_by_scope = seen.any()
+                    && seen.hides_ordinal(
+                        lists.iter().enumerate().filter_map(|(offset, hit_list)| {
+                            let hit_list = hit_list.as_ref()?;
+                            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                            hit_list.hsplist_array[..count]
+                                .iter()
+                                .any(|hsp_list| hsp_list.oid as usize == rank)
+                                .then_some(batch_start + offset)
+                        }),
+                        ordinal,
+                    );
                 shared::check_prefetched_parsed(
                     &database.db,
                     subject,
-                    self.listed.ordinals[rank],
+                    ordinal,
+                    seen_by_scope,
                     self.program,
                 )?;
             }
@@ -3005,23 +3092,36 @@ impl ListedTitles<'_> {
         }
         if fetched {
             let reads = Self::batch_reads(hit_lists, prefetch);
+            let seen = self.seen();
             for rank in Self::reported(hit_lists) {
                 if let Some(subject) = self.parsed_subject(rank) {
                     let one_by_one = reads.one_by_one(rank as u32);
                     let ordinal = self.listed.ordinals[rank];
+                    let seen_by_scope = seen.any()
+                        && seen.hides_ordinal(
+                            hit_lists
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(query, hit_list)| {
+                                    let hit_list = hit_list.as_ref()?;
+                                    let count =
+                                        hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+                                    hit_list.hsplist_array[..count]
+                                        .iter()
+                                        .any(|hsp_list| hsp_list.oid as usize == rank)
+                                        .then_some(query)
+                                }),
+                            ordinal,
+                        );
                     let sought = database.and_then(|database| {
                         shared::weak_sought(&database.db, subject, ordinal, one_by_one)
                     });
                     sought
                         .as_ref()
                         .unwrap_or(subject)
-                        .fetched(taxonomy, one_by_one, loads.load(rank))
+                        .fetched_with_scope(taxonomy, one_by_one, loads.load(rank), seen_by_scope)
                         .map_err(|reason| {
-                            shared::parsed_refusal(
-                                self.oids.oid(self.listed.ordinals[rank]),
-                                &reason,
-                                self.program,
-                            )
+                            shared::parsed_refusal(self.oids.oid(ordinal), &reason, self.program)
                         })?;
                     subject.check_printed_word(true, words).map_err(|problem| {
                         shared::parsed_refusal(

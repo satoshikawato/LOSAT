@@ -1,0 +1,17 @@
+
+                                          Tax BLAST report                                          
+
+Query= pdq query of the duplicated record
+
+Length=220
+
+                                           Organism Report                                           
+Accession                                 Description                                Score E-value 
+
+                                 uncultured bacterium () [bacteria]                                 
+ 1AB1_A    t1                                                                          462   3e-173  
+ 1AB2_A    t0                                                                          462   4e-173  
+
+                                    Bacillus sp. () [firmicutes]                                    
+ 1AB1_A    t1                                                                          462   3e-173  
+ 1AB2_A    t1                                                                          462   4e-173  

@@ -1151,6 +1151,9 @@ pub(super) fn write_custom_tabular(
             length: &subject_length,
             taxonomy: &taxonomy,
             loads: view.hit_loads,
+            seen: listed_titles
+                .as_ref()
+                .map_or_else(Default::default, database::ListedTitles::seen),
         },
         _ => tabular::TabularSubjects::Records {
             records: subject_records,

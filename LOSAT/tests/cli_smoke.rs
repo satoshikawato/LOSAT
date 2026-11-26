@@ -160,8 +160,8 @@ fn startup_trace_needs_the_diagnostics_feature() {
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
 // NCBI's handlers read the subjects and open the query before the options are checked, so a
 // missing file is reported first; LOSAT's rejection of an option that NCBI runs comes where
-// NCBI checks the options. The option here is `-use_sw_tback` without composition-based
-// statistics, which BLASTP still refuses (with them it runs: line RG item X4).
+// NCBI checks the options. The option here is `-evalue DBL_MAX` with composition-based statistics
+// (`protein_options_check::check_evalue_limit`), which BLASTP refuses where the search starts.
 #[test]
 fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     let missing_query = temp_path("missing_query", "faa");
@@ -171,7 +171,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         .arg(&missing_query)
         .arg("-subject")
         .arg(&missing_subject)
-        .args(["-use_sw_tback", "-comp_based_stats", "0"])
+        .args(["-evalue", "1.7976931348623157e308"])
         .output()
         .expect("run unsupported blastp");
     assert!(!output.status.success(), "a missing subject should fail");
@@ -181,8 +181,8 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         "the subject is read before the options are checked: {stderr}"
     );
 
-    let query = temp_path("swtback_query", "faa");
-    let subject = temp_path("swtback_subject", "faa");
+    let query = temp_path("dblmax_query", "faa");
+    let subject = temp_path("dblmax_subject", "faa");
     // Test protein: the first residues of E. coli AsnA (RefSeq NP_418200.1).
     std::fs::write(&query, ">q\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
     std::fs::write(&subject, ">s\nMKTAYIAKQRQISFVKSHFSRQ\n").unwrap();
@@ -191,7 +191,7 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
         .arg(&query)
         .arg("-subject")
         .arg(&subject)
-        .args(["-use_sw_tback", "-comp_based_stats", "0"])
+        .args(["-evalue", "1.7976931348623157e308"])
         .output()
         .expect("run unsupported blastp");
     // The same run without `-use_sw_tback`, whose report starts with the same prolog.
@@ -209,9 +209,8 @@ fn unsupported_blastp_option_fails_after_ncbis_file_checks() {
     assert!(!output.status.success(), "unsupported blastp should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains(
-            "-use_sw_tback without composition-based statistics (-comp_based_stats 0, and -matrix IDENTITY, which NCBI searches without them) is not supported by LOSAT's BLASTP yet"
-        ),
+        stderr.contains("an -evalue of DBL_MAX")
+            && stderr.contains("not supported by LOSAT's BLASTP"),
         "unsupported error should name program, option, and reason: {stderr}"
     );
     // The refusal comes where NCBI starts the search, after the outfmt 0 prolog that BLASTP writes
@@ -245,8 +244,7 @@ fn prolog_of(report: &[u8]) -> &[u8] {
 // NCBI BLAST+ 2.17.0's `blastp -ungapped -comp_based_stats 0 -use_sw_tback` reads the gapped
 // Karlin blocks that an ungapped search does not have and crashes at the traceback of each query
 // batch it searches (line NP, items O4b and O4b2-2): LOSAT refuses there, with the text that
-// BLASTX and TBLASTN refuse it with, not before the search (and not with the refusal of
-// `-use_sw_tback` without composition-based statistics above: NCBI crashes at the redo's set-up,
+// BLASTX and TBLASTN refuse it with, not before the search (NCBI crashes at the redo's set-up,
 // before any match is redone). A query without a valid context (only `X`) is not searched, and its run
 // is the run without `-use_sw_tback`. The NCBI bytes are the fixture rows `db.ung.sw.*`.
 #[test]

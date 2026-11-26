@@ -135,8 +135,11 @@ fn widths_of_a_query_that_is_not_a_protein() {
 }
 
 #[test]
-fn no_hsps_write_nothing() {
-    assert_eq!(rows_section(&[]), Ok(Vec::new()));
+fn empty_hsps_write_a_line_feed() {
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2000-2095
+    // When every aligned subject in a non-empty alignment set has no Bioseq handle,
+    // `DisplaySeqalign` skips every subject in the merge loop and writes `\n`.
+    assert_eq!(rows_section(&[]), line_feed());
 }
 
 #[test]

@@ -20,6 +20,7 @@ import {
   type KnownDefault,
   type PairRow,
 } from '../domain/parameters';
+import { NO_TAXID_EXPANSION_FLAG } from '../domain/blast-db';
 import { programById, type ParameterField, type ParameterSection } from '../domain/programs';
 import { refusedToolFields } from '../domain/tool-argv';
 import { allStageParameters, stageOptionParameters, toToolEngineOption, toToolParameterField } from '../domain/tools';
@@ -64,6 +65,10 @@ export interface FormModel {
   readonly counts?: CountsLoader;
   /** Optional shortcut on BLASTN's repeats row when Counts file is chosen. */
   onMakeCounts?(): void;
+  /** True when Database (`-db`) mode has `-no_taxid_expansion` checked (incompatible with BLASTN `-window_masker_taxid`). */
+  readonly noTaxidExpansionActive?: boolean;
+  /** Clears `-no_taxid_expansion` in Database filters so BLASTN `-window_masker_taxid` can run. */
+  clearNoTaxidExpansion?(): void;
   /** Local repeats database state/actions for BLASTN `-filtering_db` (RG-D4 W2). */
   readonly filteringDb?: DatabasePickDraft;
   setFilteringDbEnabled?(enabled: boolean): void;
@@ -140,6 +145,11 @@ export function searchFormModel(draft: SearchDraft, state: DraftState, extras: S
     setTaxid: (text) => draft.setTaxid(text),
     ...(extras.counts === undefined ? {} : { counts: extras.counts }),
     ...(extras.onMakeCounts === undefined ? {} : { onMakeCounts: extras.onMakeCounts }),
+    noTaxidExpansionActive:
+      state.program === 'blastn' &&
+      state.subjectSource === 'database' &&
+      state.database.filterValues[NO_TAXID_EXPANSION_FLAG] === true,
+    clearNoTaxidExpansion: () => draft.setDatabaseFilter(NO_TAXID_EXPANSION_FLAG, false),
     filteringDb: state.filteringDb,
     setFilteringDbEnabled: (enabled) => draft.setFilteringDbEnabled(enabled),
     setFilteringDbFiles: (picked) => void draft.setFilteringDbFiles(picked),

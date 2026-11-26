@@ -21,6 +21,11 @@ use super::alias::SearchPath;
 use super::file::mapped_length;
 use super::{SeqDb, SeqType};
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:549-575
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:355-363
+/// RPS-BLAST profile database file extensions beyond the protein BLAST volume files.
+pub(crate) const RPS_EXTENSIONS: [&str; 4] = ["rps", "loo", "aux", "freq"];
+
 /// `RPS_MAGIC_NUM`: the files of a 26-letter alphabet.
 ///
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_rps.h:43-44

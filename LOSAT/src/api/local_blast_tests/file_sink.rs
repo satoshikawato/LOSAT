@@ -205,7 +205,7 @@ fn outputs<'a>(
         formats: formats
             .into_iter()
             .map(|(outfmt, sink)| FormatOutput {
-                outfmt,
+                outfmt: outfmt.as_bytes(),
                 refusal: FormatRefusal::FailsCall,
                 sink,
             })

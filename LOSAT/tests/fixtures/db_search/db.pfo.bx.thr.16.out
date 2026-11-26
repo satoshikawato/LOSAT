@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastx</program>
+      <version>BLASTX 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/idlist/pw</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>1e-10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <query-gencode>1</query-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>qN</query-title>
+              <query-len>90</query-len>
+              <query-masking>
+                <Range>
+                  <from>0</from>
+                  <to>87</to>
+                </Range>
+                <Range>
+                  <from>1</from>
+                  <to>85</to>
+                </Range>
+                <Range>
+                  <from>2</from>
+                  <to>86</to>
+                </Range>
+              </query-masking>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <db-num>5</db-num>
+                  <db-len>264</db-len>
+                  <hsp-len>3</hsp-len>
+                  <eff-space>6474</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastx</program>
+      <version>BLASTX 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>tests/db_search/idlist/pw</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>1e-10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+          <query-gencode>1</query-gencode>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_5</query-id>
+              <query-title>qD</query-title>
+              <query-len>132</query-len>
+              <query-masking>
+                <Range>
+                  <from>6</from>
+                  <to>39</to>
+                </Range>
+                <Range>
+                  <from>10</from>
+                  <to>85</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|xyz|77</id>
+                      <accession>77</accession>
+                      <title>five</title>
+                    </HitDescr>
+                  </description>
+                  <len>44</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>61.2326</bit-score>
+                      <score>147</score>
+                      <evalue>6.23685e-20</evalue>
+                      <identity>30</identity>
+                      <positive>30</positive>
+                      <query-from>43</query-from>
+                      <query-to>132</query-to>
+                      <query-frame>1</query-frame>
+                      <hit-from>15</hit-from>
+                      <hit-to>44</hit-to>
+                      <align-len>30</align-len>
+                      <gaps>0</gaps>
+                      <qseq>QSTWAEPVTQEQKDALLKGVSEKLQAALDG</qseq>
+                      <hseq>QSTWAEPVTQEQKDALLKGVSEKLQAALDG</hseq>
+                      <midline>QSTWAEPVTQEQKDALLKGVSEKLQAALDG</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>5</db-num>
+                  <db-len>264</db-len>
+                  <hsp-len>10</hsp-len>
+                  <eff-space>7276</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

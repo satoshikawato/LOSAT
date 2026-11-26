@@ -17,6 +17,7 @@ import type { HspId, ResultsBrowser, ResultsState, SubjectEntry } from '../appli
 import { headingTitle } from '../domain/outfmt0';
 import { placeBox } from '../domain/plot-geometry';
 import { rulerTicks, scoreBin, SCORE_BINS } from '../domain/plot-scale';
+import { runInputRecords } from '../domain/run';
 import { formatCount } from './format';
 import './plots.css';
 
@@ -69,7 +70,7 @@ const popoverAt = ref({ left: 0, top: 0 });
 
 const loaded = computed(() => props.state.loaded);
 const subjects = computed(() => props.state.subjects);
-const record = computed(() => loaded.value?.run.snapshot.query.records[props.state.qIdx ?? -1]);
+const record = computed(() => (loaded.value === undefined ? undefined : runInputRecords(loaded.value.run, 'query')[props.state.qIdx ?? -1]));
 const queryLength = computed(() => Math.max(1, record.value?.length ?? 1));
 const drawnSubjects = computed(() => (showAll.value ? subjects.value : subjects.value.slice(0, FIRST_SUBJECTS)));
 

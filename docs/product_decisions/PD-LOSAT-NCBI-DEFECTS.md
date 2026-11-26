@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.113
+- Version: 1.114
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -807,11 +807,22 @@
   1.2 and 1.37); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
   after 1.111 at the merge of dev that brought line RG item X-short-bat-2's 1.110 (#1647) and
   psiblast line item PS7c's 1.111; first 1.105, then 1.106, 1.107, 1.108, 1.109 and 1.110);
-  1.113 2026-11-26 (approved exception 32, `losat blastdbcheck` alias count checks and
+  1.113 2026-11-26 (rule-3 rejections of `losat makeprofiledb -dbtype delta`, psiblast line item
+  PS14: profiles stored by row (`byRow TRUE`) or with `numRows < 28` and non-empty
+  `weightedResFreqsPerPos`, where NCBI's `x_CheckDelta` and `x_UpdateDelta` copy into an empty
+  `std::list::begin()`; an empty `numIndeptObsr` list, where NCBI dereferences `end()`; a
+  `weightedResFreqsPerPos` list whose length is not a multiple of 28 when `len / 28 ==
+  numIndeptObsr.len()` and every full column of 28 sums within 0.0001 of 1.0, where `x_ValidateCd`
+  increments past `end()`; `weightedResFreqsPerPos` or `numIndeptObsr` values whose scaled
+  conversion to `Uint4` is out of range or `NaN`; and a missing or unwritable `TMPDIR` where
+  NCBI's `CTmpFile` stops with a `mkstemp()` message containing its process ID; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.112 at the merge of dev
+  245b7e2e3; first 1.109, then 1.110);
+  1.114 2026-11-26 (approved exception 32, `losat blastdbcheck` alias count checks and
   `-ends`/`-stride` OID arithmetic widened beyond NCBI's signed 32-bit/64-bit integer overflow, and
   empty CDD profile files refused under rule 3, line RG-D2 items D2b-2..5; Owner 2026-11-25 17:54
-  JST, Q-D2b-OV=A; numbered after 1.112 at the merge of dev that brought 1.110 to 1.112; first
-  1.109, then 1.110, exception 31 until 1.111 took 31)
+  JST, Q-D2b-OV=A; numbered after 1.113 at the merge of dev that brought 1.113 (PS14); first
+  1.109, then 1.110, 1.113, exception 31 until 1.111 took 31)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -3953,6 +3964,24 @@ file would differ, and NCBI's programs still could not open the database).
     past `int` are written as NCBI writes them (rule 2: rows RL01 to RL04, RL06 and RL07).
   - A volume whose offsets or positions pass 2^31, or whose word table passes `Int4` bytes: NCBI's
     counters of them are `Int4`, and the files hold 32-bit fields, so no valid file can be defined.
+  - With `-dbtype delta` (version 1.113, 2026-11-26, psiblast line item PS14, Owner-delegated,
+    standing instruction 2026-09-29, restated 2026-10-07): profiles stored by row (`byRow TRUE`) or
+    with `numRows < 28` and non-empty `weightedResFreqsPerPos` (`makeprofiledb.cpp:1610-1647,
+    1763-1800`, where NCBI copies into an empty `std::list::begin()`, overwriting the list header
+    node; rows `QR16`, `QR17`); an empty `numIndeptObsr` list (`makeprofiledb.cpp:1659, 1803`,
+    where NCBI dereferences `end()`; row `QR18`); a `weightedResFreqsPerPos` list whose length is
+    not a multiple of 28 when `len / 28 == numIndeptObsr.len()` and every full column of 28 sums
+    within 0.0001 of 1.0 (`makeprofiledb.cpp:1720-1740`, where `x_ValidateCd` increments past
+    `end()`; row `QR19`; when an earlier full column fails the sum check, NCBI returns false
+    deterministically before reaching the partial tail, reproduced in rows `D33`-`D35`);
+    `weightedResFreqsPerPos` or `numIndeptObsr` values whose scaled conversion `(val * 1000)` or
+    `((val + 1) * 1000)` to `Uint4` is out of range or `NaN` (`makeprofiledb.cpp:1674, 1688`; rows
+    `QR20`-`QR22`); and a missing or unwritable temporary directory (`TMPDIR`) when `x_UpdateDelta`
+    creates its two temporary files (`makeprofiledb.cpp:1572-1575`, `ncbifile.cpp:6580-6599`, where
+    NCBI throws `mkstemp() failed for '...'` with the process and thread IDs in the message, which
+    changes from run to run). Delta 32-bit offset wrapping (`CurrFreqOffset += FreqBuff.size()`,
+    `CurrObsrOffset += ObsrBuff.size()`, `Uint4 num++`) is deterministic in NCBI and reproduced
+    with wrapping arithmetic.
 - The readers of GI-indexed masks, a damaged `.nog` (version 1.94, 2026-11-24, line NP item
   M4c-2, review S4 and N8; the rejection of a `MASKLIST` name that is not UTF-8 withdrawn in 1.103; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; the outcomes of a `.nog` cut short that NCBI
@@ -4733,7 +4762,7 @@ search past `Int4`)". Psiblast line item PS7c, fix round 1 (review B1).
     `LOSAT/src/stats/spouge_tests.rs` keeps the cutoffs: NCBI's arguments of these rows (gdb) and, for gapped
     Lambdas from 1e-300 to 1e300, below 0, 0, infinite and not a number, NCBI's search in 128-bit integers.
 
-## Approved exception 32 (`blastdbcheck` alias count checks and `-ends`/`-stride` OID arithmetic past signed overflow, version 1.113)
+## Approved exception 32 (`blastdbcheck` alias count checks and `-ends`/`-stride` OID arithmetic past signed overflow, version 1.114)
 
 Decided by the Owner on 2026-11-25 at 17:54 JST, 「Q-3C2-STALE=B Q-D2b-OV=A Q-KB9A-SPEED=A Q-AGVI-CAP2=A
 Q-AGVI-MODEL=A Q-CITE-ALL=B」 (`qbatch-20261125/ANSWERS.md` 2; `remaining-gaps-20261112/DECISIONS.md` OQ-1125).
@@ -4741,7 +4770,7 @@ The chosen option A reads 「A: 広い型で正確に計算し誤判定を出さ
 NCBI's signed wraparound; (C) refusing overflowing inputs.
 
 32. **`blastdbcheck` alias count checks and `-ends`/`-stride` OID arithmetic past signed 32-bit or
-    64-bit overflow (Owner 2026-11-25 17:54 JST, Q-D2b-OV=A, version 1.113).** NCBI BLAST+ 2.17.0
+    64-bit overflow (Owner 2026-11-25 17:54 JST, Q-D2b-OV=A, version 1.114).** NCBI BLAST+ 2.17.0
     computes `blastdbcheck`'s alias-file count guards (`FIRST_OID`, `LAST_OID`, `MAXOID`, `NSEQ`,
     `LENGTH`, `OIDLIST` combinations in `blastdbcheck.cpp:782-805`) and `-ends`/`-stride` OID bounds
     (`blastdbcheck.cpp:666-682`, `590-605`) in signed 32-bit `int` and 64-bit `Int8`, where

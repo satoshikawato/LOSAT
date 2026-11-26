@@ -40,4 +40,8 @@ describe('_headers', () => {
   it('rejects a header line outside any path rule', () => {
     expect(() => parseHeadersFile('  X-Test: 1\n')).toThrow(/malformed/);
   });
+
+  it('rejects duplicate path rules', () => {
+    expect(() => parseHeadersFile('/*\n  A: 1\n/*\n  B: 2\n')).toThrow(/duplicate/);
+  });
 });

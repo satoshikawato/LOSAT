@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fromText, inputLabel, leavesOut, leftOutIds, partText, worthSaying } from '../../src/domain/input-parts';
+import { fromText, inputLabel, leavesOut, leftOutIds, partText, readDifferenceText, worthSaying } from '../../src/domain/input-parts';
 
 // Line WQA's D22 (2026-11-23): the words that say which records an input leaves out.
 const part = (name: string, records: number, leftOut: string[], leftOutCount = leftOut.length) => ({ name, records, leftOut, leftOutCount });
@@ -44,5 +44,43 @@ describe('input parts', () => {
     expect(inputLabel({ name: 'losat-run1-blastn-20261123T101530Z.query.fa', from: [part('pasted text', 1, [])] })).toBe('pasted text');
     expect(inputLabel({ name: 'x', from: [part('a.fa', 2, []), part('b.fa', 1, [])] })).toBe('a.fa + b.fa');
     expect(inputLabel({ name: 'x', from: [part('q.fa', 2, ['r2'])] })).toBe('q.fa, some records left out');
+  });
+
+  it('explains when reading an assembled input as one file differs from the per-file tables (D17)', () => {
+    const table = [
+      { id: 'q1', length: 180 },
+      { id: 'q3', length: 180 },
+    ];
+    expect(readDifferenceText(table, undefined, 2)).toBeUndefined();
+    expect(readDifferenceText(table, [...table], 2)).toBeUndefined();
+    // Combined files with different record count:
+    expect(
+      readDifferenceText(
+        Array.from({ length: 5 }, (_, i) => ({ id: `q${i + 1}`, length: 180 })),
+        Array.from({ length: 6 }, (_, i) => ({ id: `q${i + 1}`, length: 180 })),
+        2,
+      ),
+    ).toBe('Read as one file, as the command line reads it, these give 6 records (5 when each file is read alone).');
+    // Single-file selection with different record count:
+    expect(readDifferenceText(table, [table[0]!], 1)).toBe(
+      'Read as one file, as the command line reads it, this selection gives 1 record (2 in the record table).',
+    );
+    // Single-file selection with same count, one record length differs:
+    expect(readDifferenceText(table, [table[0]!, { id: 'q3', length: 120 }], 1)).toBe(
+      'Read as one file, as the command line reads it, 1 record differs from the record table (record 2 (q3): length 120 instead of 180).',
+    );
+    // Combined files with same count, multiple records differ (including ID):
+    expect(
+      readDifferenceText(
+        table,
+        [
+          { id: 'q1cr', length: 120 },
+          { id: 'q3', length: 150 },
+        ],
+        2,
+      ),
+    ).toBe(
+      'Read as one file, as the command line reads it, 2 records differ from reading each file alone (first: record 1: "q1cr" (length 120) instead of "q1" (length 180)).',
+    );
   });
 });

@@ -113,8 +113,16 @@ impl TblastnDatabase {
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Nucleotide, settings, PROGRAM)?;
         // A database with parsed Seq-ids is read (line DBID, ID2b).
-        let parsed_seqids =
-            shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, PROGRAM)?;
+        let parsed_seqids = shared::restrict_database(
+            &mut db,
+            name,
+            list,
+            mask,
+            diagnostics,
+            settings,
+            PROGRAM,
+            PROGRAM,
+        )?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -216,6 +224,7 @@ impl TblastnDatabase {
             &self.name,
             option,
             PROGRAM,
+            PROGRAM.to_ascii_lowercase().as_str(),
             archive,
             strategy,
             &mut |text| match archive {

@@ -1,0 +1,118 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: mask probe v5
+Masked using: 'dust', options: 'window=64; level=20; linker=1'
+           5 sequences; 7,360 total letters
+
+
+
+Query= lcl|Query_1 ovr_n1 override nucleotide
+
+Length=200
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+s2 test subject s2                                                    18.5    0.34   2
+s3 test subject s3                                                    15.3    5.5    1
+s1 test subject s1                                                    15.3    5.5    1
+
+
+>s2 test subject s2
+Length=1500
+
+ Score = 18.5 bits (34),  Expect(2) = 0.34
+ Identities = 5/9 (56%), Positives = 6/9 (67%), Gaps = 0/9 (0%)
+ Frame = -2/+2
+
+Query  124  LQPWAHPVF  98
+            L PW  P+F
+Sbjct  32   LNPWPSPLF  58
+
+
+ Score = 16.6 bits (30),  Expect(2) = 0.34
+ Identities = 4/6 (67%), Positives = 6/6 (100%), Gaps = 0/6 (0%)
+ Frame = -3/+1
+
+Query  63   ICF*HG  46
+            +C+*HG
+Sbjct  112  VCY*HG  129
+
+
+ Score = 16.6 bits (30),  Expect = 2.1
+ Identities = 4/10 (40%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = +1/+1
+
+Query  124   MKGWENYCWP  153
+             ++ W N  WP
+Sbjct  1282  IRTWWNSTWP  1311
+
+
+ Score = 14.8 bits (26),  Expect = 7.5
+ Identities = 5/9 (56%), Positives = 7/9 (78%), Gaps = 0/9 (0%)
+ Frame = -2/+3
+
+Query  103  VFSGRPSLY  77
+            VFS  PS++
+Sbjct  456  VFSRGPSIF  482
+
+
+>s3 test subject s3
+Length=1360
+
+ Score = 15.3 bits (27),  Expect = 5.5
+ Identities = 6/14 (43%), Positives = 8/14 (57%), Gaps = 0/14 (0%)
+ Frame = +3/-2
+
+Query  117   GCNEGLGELLLARE  158
+             GC   +  LLL R+
+Sbjct  1137  GCEFIINRLLLNRD  1096
+
+
+>s1 test subject s1
+Length=3000
+
+ Score = 15.3 bits (27),  Expect = 5.5
+ Identities = 5/11 (45%), Positives = 8/11 (73%), Gaps = 0/11 (0%)
+ Frame = -2/+2
+
+Query  37    STLGLTIRGMC  5
+             ++LGL+  G C
+Sbjct  2132  NSLGLSSLGAC  2164
+
+
+ Score = 14.8 bits (26),  Expect = 7.5
+ Identities = 5/13 (38%), Positives = 7/13 (54%), Gaps = 0/13 (0%)
+ Frame = +3/+2
+
+Query  93    PENTGWAHGCNEG  131
+             P N   +  C+EG
+Sbjct  1562  PSNCRVSQCCDEG  1600
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 108238
+
+
+  Database: mask probe v5
+  Masked using: 'dust', options: 'window=64; level=20; linker=1'
+    Posted date:  Nov 14, 2026  5:20 AM
+  Number of letters in database: 7,360
+  Number of sequences in database:  5
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

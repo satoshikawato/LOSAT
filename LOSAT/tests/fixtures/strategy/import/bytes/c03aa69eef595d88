@@ -1,0 +1,230 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: snucdb
+           3 sequences; 576 total letters
+
+
+
+Query= lcl|Query_1 b1 sp1 plus
+
+Length=108
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sx1 plus strand gene                                                  98.7    1e-26  1
+sx2 minus strand gene                                                 60.2    6e-15  1
+sx3 no hits                                                           15.7    0.13   1
+
+
+>sx1 plus strand gene
+Length=218
+
+ Score = 98.7 bits (209),  Expect = 1e-26
+ Identities = 36/36 (100%), Positives = 36/36 (100%), Gaps = 0/36 (0%)
+ Frame = +1/+1
+
+Query  1    VFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSW  108
+            VFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSW
+Sbjct  49   VFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSW  156
+
+
+ Score = 67.5 bits (141),  Expect = 3e-17
+ Identities = 29/34 (85%), Positives = 31/34 (91%), Gaps = 0/34 (0%)
+ Frame = -2/-1
+
+Query  104  DIFAGQQ*FSQPFITAIGPSRIFGSSITFLLTAN  3
+            DIFAGQQ*FSQPFITA+GPS IFGSS+T  LTAN
+Sbjct  152  DIFAGQQ*FSQPFITAMGPSLIFGSSMTLRLTAN  51
+
+
+ Score = 58.3 bits (121),  Expect = 2e-14
+ Identities = 20/36 (56%), Positives = 24/36 (67%), Gaps = 0/36 (0%)
+ Frame = -1/-3
+
+Query  108  PRHICWPAVILPALHNRHWTVPYLRVVHHFSSDRKH  1
+            PRHICWPA+I PA HNRH  V    V+H  + D +H
+Sbjct  156  PRHICWPAIIFPAFHNRHGPVSDFWVIHDLTPDGEH  49
+
+
+ Score = 43.7 bits (89),  Expect = 5e-10
+ Identities = 18/34 (53%), Positives = 23/34 (68%), Gaps = 0/34 (0%)
+ Frame = +2/+2
+
+Query  2    CLRSEEK*WTTRRYGTVQWRL*RAGRITAGQQIC  103
+            C  S  + W T++  T  WRL*+AG+I AGQQIC
+Sbjct  50   CSPSGVRSWMTQKSETGPWRL*KAGKIIAGQQIC  151
+
+
+>sx2 minus strand gene
+Length=208
+
+ Score = 60.2 bits (125),  Expect = 6e-15
+ Identities = 22/25 (88%), Positives = 24/25 (96%), Gaps = 0/25 (0%)
+ Frame = +1/-1
+
+Query  16   RKVMDDPKIRDGPMAVMKGWENYCW  90
+            RKVMDDPKIRDGPMAVMK WE+YC+
+Sbjct  190  RKVMDDPKIRDGPMAVMKVWESYCF  116
+
+
+ Score = 44.1 bits (90),  Expect = 4e-10
+ Identities = 16/26 (62%), Positives = 18/26 (69%), Gaps = 0/26 (0%)
+ Frame = -1/+2
+
+Query  93   WPAVILPALHNRHWTVPYLRVVHHFS  16
+            +  V LP  HN HWTV YLRVVH+ S
+Sbjct  113  YETVTLPHFHNSHWTVSYLRVVHNLS  190
+
+
+ Score = 40.0 bits (81),  Expect = 6e-09
+ Identities = 18/24 (75%), Positives = 19/24 (79%), Gaps = 0/24 (0%)
+ Frame = -2/+3
+
+Query  89   QQ*FSQPFITAIGPSRIFGSSITF  18
+            +Q* S  FITAIGPS I GSSITF
+Sbjct  117  KQ*LSHTFITAIGPSLILGSSITF  188
+
+
+ Score = 35.0 bits (70),  Expect = 2e-07
+ Identities = 14/23 (61%), Positives = 17/23 (74%), Gaps = 0/23 (0%)
+ Frame = +2/-2
+
+Query  17   EK*WTTRRYGTVQWRL*RAGRIT  85
+            E+ WTT R  TVQW L*+ GR+T
+Sbjct  189  ERLWTTLR*ETVQWLL*KCGRVT  121
+
+
+ Score = 18.0 bits (34),  Expect = 0.028
+ Identities = 8/13 (62%), Positives = 8/13 (62%), Gaps = 0/13 (0%)
+ Frame = +3/-3
+
+Query  18   KSDGRPEDTGRSN  56
+            K  GRP D  RSN
+Sbjct  188  KGYGRP*DKRRSN  150
+
+
+>sx3 no hits
+Length=150
+
+ Score = 15.7 bits (28),  Expect = 0.13
+ Identities = 6/11 (55%), Positives = 8/11 (73%), Gaps = 0/11 (0%)
+ Frame = -2/-2
+
+Query  38   FGSSITFLLTA  6
+            +GS  T LLT+
+Sbjct  134  YGSCATSLLTS  102
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 3744
+
+
+Query= lcl|Query_2 b2 sp2 minus
+
+Length=108
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value  N
+
+sx2 minus strand gene                                                 92.3    1e-24  1
+sx1 plus strand gene                                                  48.7    2e-13  2
+
+
+>sx2 minus strand gene
+Length=208
+
+ Score = 92.3 bits (195),  Expect = 1e-24
+ Identities = 36/36 (100%), Positives = 36/36 (100%), Gaps = 0/36 (0%)
+ Frame = -1/-1
+
+Query  108  DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY  1
+            DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY
+Sbjct  175  DPKIRDGPMAVMKVWESYCFILHSIANMSAHVLMKY  68
+
+
+ Score = 47.8 bits (98),  Expect = 3e-11
+ Identities = 23/35 (66%), Positives = 27/35 (77%), Gaps = 0/35 (0%)
+ Frame = +2/+3
+
+Query  2    YFISTCALIFAMLCRIKQ*DSHTFITAMGPSRILG  106
+            YFI T A +FA+   +KQ* SHTFITA+GPS ILG
+Sbjct  69   YFIKT*ADMFAIEWSMKQ*LSHTFITAIGPSLILG  173
+
+
+ Score = 40.9 bits (83),  Expect = 4e-09
+ Identities = 15/36 (42%), Positives = 23/36 (64%), Gaps = 0/36 (0%)
+ Frame = +1/+2
+
+Query  1    IFHKHMCTHICYAMQDKTIRLPYFHYGHGAISNLRI  108
+            IFH  M  H+ Y ++ +T+ LP+FH  H  +S LR+
+Sbjct  68   IFH*DMS*HVRYRVEYETVTLPHFHNSHWTVSYLRV  175
+
+
+>sx1 plus strand gene
+Length=218
+
+ Score = 48.7 bits (100),  Expect(2) = 2e-13
+ Identities = 17/20 (85%), Positives = 19/20 (95%), Gaps = 0/20 (0%)
+ Frame = -1/+1
+
+Query  108  DPKIRDGPMAVMKVWESYCF  49
+            DPKIRDGPMAVMK WE+YC+
+Sbjct  79   DPKIRDGPMAVMKGWENYCW  138
+
+
+ Score = 21.2 bits (40),  Expect(2) = 2e-13
+ Identities = 9/11 (82%), Positives = 9/11 (82%), Gaps = 0/11 (0%)
+ Frame = -1/+1
+
+Query  33   ANMSAHVLMKY  1
+            ANMS  VLMKY
+Sbjct  142  ANMSWKVLMKY  174
+
+
+ Score = 28.6 bits (56),  Expect(2) = 3e-06
+ Identities = 13/19 (68%), Positives = 14/19 (74%), Gaps = 0/19 (0%)
+ Frame = +2/-1
+
+Query  50   KQ*DSHTFITAMGPSRILG  106
+            +Q* S  FITAMGPS I G
+Sbjct  137  QQ*FSQPFITAMGPSLIFG  81
+
+
+ Score = 16.2 bits (29),  Expect(2) = 3e-06
+ Identities = 7/11 (64%), Positives = 7/11 (64%), Gaps = 0/11 (0%)
+ Frame = +2/-1
+
+Query  2    YFISTCALIFA  34
+            YFI T   IFA
+Sbjct  173  YFIKTFQDIFA  141
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 3744
+
+
+  Database: snucdb
+    Posted date:  Oct 24, 2026  7:50 PM
+  Number of letters in database: 576
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { local str "Query_1" }, descr { user { type str "CFastaReader", data { { label str "DefLine", data str ">a one" } } }, title "a one" }, inst { repr raw, mol na, length 10, seq-data ncbi2na '1B1B1B'H } }
+      }
+    }

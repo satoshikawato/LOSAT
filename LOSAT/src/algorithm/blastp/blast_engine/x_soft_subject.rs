@@ -201,9 +201,44 @@ fn scan(
     }
 }
 
-// NCBI's longest subject chunk (`MAX_DBSEQ_LEN`, c++/include/algo/blast/core/blast_gapalign.h:54) and the overlap of two
-// subject chunks (`DBSEQ_CHUNK_OVERLAP`, blast_hits.h:192): the one copy of both macros.
-use crate::core::subject_split::{DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
+// NCBI's longest subject chunk (`MAX_DBSEQ_LEN`, c++/include/algo/blast/core/blast_gapalign.h:54), the overlap of two
+// subject chunks (`DBSEQ_CHUNK_OVERLAP`, blast_hits.h:192), and the one owner of `s_GetNextSubjectChunk` (`HardSplitState`).
+use crate::core::subject_split::{HardSplitState, DBSEQ_CHUNK_OVERLAP, MAX_DBSEQ_LEN};
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:280-310 (`s_GetNextSubjectChunk`)
+/// Cuts soft-mask scan ranges `ranges` (subject coordinates) to the chunk `[offset, offset +
+/// chunk_length)` in chunk-local coordinates into `out`, advancing `sm_index` as NCBI's
+/// `s_GetNextSubjectChunk` does (saturating at 0 when the first chunk has no overlapping range).
+/// Returns `false` when no range overlaps the chunk (`SUBJECT_SPLIT_NO_RANGE`).
+pub(super) fn cut_chunk_soft_ranges(
+    ranges: &[(i32, i32)],
+    sm_index: &mut usize,
+    offset: i32,
+    chunk_length: i32,
+    out: &mut Vec<(i32, i32)>,
+) -> bool {
+    let end_pos = offset + chunk_length;
+    let mut i = *sm_index;
+    while i < ranges.len() && ranges[i].1 < offset {
+        i += 1;
+    }
+    let first = i;
+    while i < ranges.len() && ranges[i].0 < end_pos {
+        i += 1;
+    }
+    *sm_index = i.saturating_sub(1);
+    out.clear();
+    if i == first {
+        return false;
+    }
+    for &(left, right) in &ranges[first..i] {
+        out.push((left - offset, right - offset));
+    }
+    out[0].0 = out[0].0.max(0);
+    let last = out.len() - 1;
+    out[last].1 = out[last].1.min(chunk_length);
+    true
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:246-310 (`s_GetNextSubjectChunk`)
 /// The words that NCBI's word finder scans in the chunks of a subject of `length` letters with the
@@ -225,36 +260,16 @@ fn chunk_scans(
         Some(previous) if first <= previous.1 + 1 => previous.1 = previous.1.max(last),
         _ => scans.push((first, last)),
     };
-    let mut next = 0;
-    let mut sm_index = 0;
-    while next < length {
-        let offset = next;
-        let chunk_length = if offset + (MAX_DBSEQ_LEN as i32) < length {
-            next = offset + MAX_DBSEQ_LEN as i32 - DBSEQ_CHUNK_OVERLAP as i32;
-            MAX_DBSEQ_LEN as i32
-        } else {
-            next = length;
-            length - offset
-        };
-        let mut i = sm_index;
-        while ranges[i].1 < offset {
-            i += 1;
-        }
-        let first = i;
-        while i < ranges.len() && ranges[i].0 < offset + chunk_length {
-            i += 1;
-        }
-        sm_index = i - 1;
-        if i == first {
+    let mut split = HardSplitState::default();
+    split.start(length as usize, vec![(0, length)], false);
+    let mut sm_index = 0usize;
+    let mut chunk: Vec<(i32, i32)> = Vec::new();
+    while let Some(hard) = split.next_chunk(DBSEQ_CHUNK_OVERLAP) {
+        let offset = hard.offset as i32;
+        let chunk_length = hard.length;
+        if !cut_chunk_soft_ranges(ranges, &mut sm_index, offset, chunk_length, &mut chunk) {
             continue;
         }
-        let mut chunk: Vec<(i32, i32)> = ranges[first..i]
-            .iter()
-            .map(|&(left, right)| (left - offset, right - offset))
-            .collect();
-        chunk[0].0 = chunk[0].0.max(0);
-        let end = chunk.len() - 1;
-        chunk[end].1 = chunk[end].1.min(chunk_length);
         let mut range = [0, chunk[0].0, chunk[0].1 - word_size];
         if clamps_scan_end && range[2] < range[1] {
             range[2] = range[1];

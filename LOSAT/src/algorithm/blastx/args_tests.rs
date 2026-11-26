@@ -320,3 +320,16 @@ fn resolved_options_request_kind_matches_rpstblastn_presence() {
         PrefetchFormat::of(8, RequestKind::Rpstblastn)
     );
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-175
+// A negative window (a search strategy's: the command line takes `-window_size` from 0) carries
+// the diagonal table's state from one subject to the next, which the threads' timing would decide
+// at `-num_threads` above 1: the search runs on one thread, as NCBI's `-num_threads 1`.
+#[test]
+fn a_negative_window_searches_on_one_thread() {
+    let mut args = parse(&["-num_threads", "4", "-window_size", "0"]);
+    for (window, threads) in [(40, 4), (0, 4), (-1, 1), (-40, 1), (i32::MIN, 1)] {
+        args.window_size = Some(window);
+        assert_eq!(args.resolve().unwrap().num_threads, threads, "{window}");
+    }
+}

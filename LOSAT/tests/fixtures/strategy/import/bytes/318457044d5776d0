@@ -1,0 +1,3 @@
+Warning: [blastn] The parameter -sorthsps is ignored for output formats != 0.
+Warning: [blastn] mt_mode cannot be overridden when using a search strategy
+Warning: [blastn] sorthsps cannot be overridden when using a search strategy

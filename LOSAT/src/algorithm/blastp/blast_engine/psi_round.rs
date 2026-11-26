@@ -875,7 +875,7 @@ fn write_round_epilogs(
             gap_open: args.scoring.gap_open,
             gap_extend: args.scoring.gap_extend,
             word_threshold: args.threshold,
-            window_size: args.window_size as i32,
+            window_size: args.window_size,
             gapped_karlin: crate::stats::lookup_protein_params(&args.scoring),
             gumbel: None,
             gapped: true,

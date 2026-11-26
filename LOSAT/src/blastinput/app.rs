@@ -38,6 +38,47 @@ pub fn options_error_bytes(message: &[u8]) -> anyhow::Error {
     .into()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1543-1548
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1824-1844
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1927-1947
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_local_priv.hpp:1320-1398
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/hspfilter_besthit.h:80-91
+/// The HSP filtering check of NCBI's hit saving options (`BlastHSPFilteringOptionsValidate`,
+/// after the hit list size, e-value and intron checks): the best hit filter's values, set by
+/// `best_hit_overhang` or `best_hit_score_edge` (the other one at its default, 0.1), must lie
+/// strictly between 0 and 0.5, and the best hit filter cannot run with culling (a
+/// `culling_limit` above 0: a smaller one sets no culling) in the preliminary stage, where both
+/// run. The command line's parser keeps every value inside (`-best_hit_*` above 0 and below
+/// 0.5, and either option excludes `-culling_limit`), so only an imported search strategy meets
+/// NCBI's error.
+pub fn check_hsp_filtering(
+    culling_limit: Option<i32>,
+    best_hit_overhang: Option<f64>,
+    best_hit_score_edge: Option<f64>,
+) -> anyhow::Result<()> {
+    match hsp_filtering_error(culling_limit, best_hit_overhang, best_hit_score_edge) {
+        Some(message) => Err(options_error(message)),
+        None => Ok(()),
+    }
+}
+
+/// The message of [`check_hsp_filtering`]'s error, for a program that raises NCBI's option
+/// errors itself (BLASTX's `SemanticOptionsError`).
+pub(crate) fn hsp_filtering_error(
+    culling_limit: Option<i32>,
+    best_hit_overhang: Option<f64>,
+    best_hit_score_edge: Option<f64>,
+) -> Option<&'static str> {
+    if best_hit_overhang.is_none() && best_hit_score_edge.is_none() {
+        return None;
+    }
+    let outside = |value: Option<f64>| value.is_some_and(|value| value <= 0.0 || value >= 0.5);
+    (outside(best_hit_overhang)
+        || outside(best_hit_score_edge)
+        || culling_limit.is_some_and(|limit| limit > 0))
+    .then_some("HSP Filtering options invalid")
+}
+
 /// NCBI's engine error of a traceback that fails (`engine_error`): the traceback's own setup of a
 /// split batch whose chunks found nothing (`blastn::query_split::UnmetChecks`), a failed
 /// Smith-Waterman redo of a batch (`sw_batch_failed_error`). The one text of BLASTN's, BLASTP's,
@@ -529,6 +570,38 @@ impl Program {
         }
     }
 
+    /// NCBI's name of the program, as its diagnostics prefix reads it (`Warning: [blastn] ...`).
+    pub fn ncbi_name(self) -> &'static str {
+        match self {
+            Program::Blastn => "blastn",
+            Program::Blastp => "blastp",
+            Program::Blastx => "blastx",
+            Program::Tblastn => "tblastn",
+            Program::Tblastx => "tblastx",
+        }
+    }
+
+    /// The query batch size that the program's application reads (`GetQueryBatchSize` of its
+    /// arguments, with an imported strategy's task set on them) when `BATCH_SIZE` is not set:
+    /// tblastx's and blastx's 10002 nucleotides (blastx's for any task of the application without
+    /// its multi-threaded mode, a TBLASTX one too), tblastn's 20000 and blastp's 10000 residues.
+    /// `None` for BLASTN's application, which asks without a default (its `CBatchSizeMixer`,
+    /// `query_batch::LoopBatchSizes::of_blastn_app`). A run's batches are its running
+    /// application's, also where it runs another program's options (`ImportRun::app`).
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastn_args.cpp:131-135
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:129-133
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:143-149
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input_aux.cpp:69-141
+    pub(crate) fn fixed_query_batch_size(self) -> Option<u32> {
+        match self {
+            Program::Blastn => None,
+            Program::Tblastx | Program::Blastx => Some(10002),
+            Program::Tblastn => Some(20000),
+            Program::Blastp => Some(10000),
+        }
+    }
+
     /// Whether NCBI's formatting arguments of the program have `eIsSAM` (blastn only).
     pub fn is_sam(self) -> bool {
         self == Program::Blastn
@@ -725,6 +798,34 @@ pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyh
     }
 }
 
+/// `formatting_handler_check` of a search that the program `engine` runs for the running
+/// application `app`: NCBI's checks read the running application's flags (`eIsSAM` of `app`), and
+/// the search is the strategy's (`engine`'s: tblastx running a blastn strategy, blastn running a
+/// tblastx one). A format that `app`'s handler accepts and LOSAT's `engine` does not write is
+/// LOSAT's refusal (`report_format`'s words): SAM of a translated search, except TBLASTX's, which
+/// BLASTN's application runs from a search strategy (`algorithm::tblastx::sam`). NCBI's SAM
+/// formatter converts the Std-seg alignments of that search into Dense-segs, which fails where the
+/// HSPs of one alignment change a row's strand (one exception post for each such alignment, no
+/// record for it); LOSAT writes the report as NCBI's formatter does.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2875-2878
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-753
+pub fn formatting_handler_check_of_run(
+    choice: &FormatChoice,
+    app: Program,
+    engine: Program,
+) -> anyhow::Result<()> {
+    formatting_handler_check(choice, app)?;
+    if choice.number == SAM && !engine.is_sam() && engine != Program::Tblastx {
+        anyhow::bail!(
+            "output format {} is not supported by LOSAT's {}",
+            choice.number,
+            engine.name()
+        );
+    }
+    Ok(())
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:225,1453-1460,1535-1553
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:494
 // NCBI reference (598d8ae6): c++/src/app/blast/rpsblast_app.cpp:119
@@ -736,22 +837,26 @@ pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyh
 /// `FMTCFG`, `NCBI`, `GETURL_DEBUG` and the file), read once per run where each program checks
 /// its formats (`formatting_handler_check`), so that LOSAT's refusal of the file comes before
 /// the first byte; `database` is the `-db` value as NCBI keeps it (`database_name()`, `None` for
-/// `-subject`). One function for every search program, taking the application's `RequestKind` so
-/// registry posts carry the application's name (`RequestKind::application`) and refusals name it
-/// in upper case; the links go where the option went (`PairwiseConfig::html`). NCBI calls
-/// `InitConfig` only from the id links of the report of formats 0 to 4, which share the
+/// `-subject`). One function for every search program: `app` is the running application whose
+/// name carries registry posts (`RequestKind::application`) and refusals in upper case, and
+/// `engine` is the program that runs the search (which gives the subjects' molecule,
+/// `RequestKind::subject_is_nucleotide`, differing from `app` when blastn, blastx or tblastx runs
+/// another program's strategy). The links go where the option went (`PairwiseConfig::html`). NCBI
+/// calls `InitConfig` only from the id links of the report of formats 0 to 4, which share the
 /// description table and its id links (`PrintOneResultSet` writes the table of the pairwise report
 /// and of the query-anchored ones alike): the organism report (outfmt 18) takes the option alone
 /// (`CBlastFormat::m_IsHTML`), so a run of it reads no file.
 pub(crate) fn html_links(
     html: bool,
     app: RequestKind,
+    engine: RequestKind,
     database: Option<&str>,
     formats: &[i32],
 ) -> anyhow::Result<Option<std::sync::Arc<crate::report::html_ids::HtmlLinks>>> {
     html_links_with(
         html,
         app,
+        engine,
         database,
         formats,
         crate::report::formatter_registry::FormatterNcbirc::read,
@@ -763,6 +868,7 @@ pub(crate) fn html_links(
 fn html_links_with(
     html: bool,
     app: RequestKind,
+    engine: RequestKind,
     database: Option<&str>,
     formats: &[i32],
     read_ncbirc: impl FnOnce(&str) -> Result<crate::report::formatter_registry::FormatterNcbirc, String>,
@@ -784,7 +890,7 @@ fn html_links_with(
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:225
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_program.c:53-54
             // `m_IsDbNa` (whether the subject database is nucleotide, `Blast_SubjectIsNucleotide`).
-            nucleotide: app.subject_is_nucleotide(),
+            nucleotide: engine.subject_is_nucleotide(),
         },
     )))
 }

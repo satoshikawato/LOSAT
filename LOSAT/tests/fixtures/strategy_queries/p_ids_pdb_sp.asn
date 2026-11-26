@@ -1,0 +1,5 @@
+Bioseq-set ::= {
+      seq-set {
+        seq { id { gi 99, swissprot { accession "P69905", version 2 }, pdb { mol "1ABC", chain-id "B" } }, descr { title "sp pdb" }, inst { repr raw, mol aa, length 4, seq-data ncbieaa "MKLV" } }
+      }
+    }

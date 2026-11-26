@@ -21,6 +21,7 @@ use crate::algorithm::blastn::blast_engine::QueryReading;
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, TreeHsp};
 use crate::algorithm::common::db_mask_search::SearchMask;
 use crate::algorithm::common::hard_chunk_walk::{HardTable, NcbiStart};
+use crate::algorithm::common::query_batch_tables::QueryBatchTables;
 use crate::algorithm::tblastx::blast_aascan::{
     s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
 };
@@ -283,6 +284,16 @@ struct BlastpSubjectScratch {
     offset_pairs: Vec<OffsetPair>,
     diag_array: Vec<DiagStruct>,
     diag_offset: i32,
+    // The diagonal offset of a search with a negative `-window_size` (a search strategy's: the
+    // command line takes none), which the one-hit scan of `BlastpPrelimKernel::search_subject_in_neg`
+    // reads and moves in 64 bits where NCBI's `Int4` would overflow; `diag_offset` is the offset of
+    // the searches with a window of 0 or more and does not move for it.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:36-66,162-172
+    neg_offset: i64,
+    // Per-batch carried diagonal rings (`QueryBatchTables`) for a multi-batch call with a negative
+    // `-window_size` (`None` for every non-negative window and every single-batch call); their
+    // shared 64-bit offset lives in `neg_offset`.
+    neg_batches: Option<QueryBatchTables>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:216-227
     init_hsps: Vec<InitHSP>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
@@ -503,6 +514,8 @@ impl BlastpSubjectScratch {
                     .expect("NCBI BLAST diagonal array size must fit in usize")
             ],
             diag_offset: window,
+            neg_offset: i64::from(window),
+            neg_batches: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:223-224
             init_hsps: x_ih_pool::own_array(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
@@ -2047,6 +2060,16 @@ fn blastp_for_each_offset_pair_of<F>(
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4209-4319
 fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
     let program = args.app.name();
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:137,162-172
+    // A negative `-window_size` (a search strategy's; the command line takes none) runs in
+    // BLASTP's scan, one-hit, on NCBI's one table; PSI-BLAST's and RPS-BLAST's scans (a later
+    // round's PSSM, the profiles' database) do not take it.
+    if args.window_size < 0 && args.app != BlastpApp::Blastp {
+        bail!(
+            "a -window_size of {} is not supported by LOSAT's {program}",
+            args.window_size
+        );
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:917-918
     // LOSAT's limits, checked where NCBI starts the search: the options that NCBI runs and
     // LOSAT's blastp engine does not implement. `-ungapped` is searched (series NP, O4b: the
@@ -4527,6 +4550,7 @@ pub fn run(
     mut args: BlastpArgs,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<()> {
+    // An `-import_search_strategy` was imported by the caller (`import::apply`), before the run.
     args.id_scope = args.parse_deflines.then(Default::default);
     // The run's `SERIAL_VERIFY_DATA_WRITE`, `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET`,
     // which `-in_pssm`'s reader reads (`BlastpArgs::write_verification`, `read_verification`).
@@ -4583,6 +4607,10 @@ pub fn run(
         }
         None => &mut stderr,
     };
+    // An imported strategy's warnings (`RecoverSearchStrategy`), before the program's own.
+    if let Some(import) = &args.import {
+        diagnostics.write_all(&import.warning_lines())?;
+    }
     // The taxid or seqid list (line DI-8): NCBI's handler of the database arguments
     // (`s_GetTaxIDList`, `CSeqDBFileGiList`) comes before the other option handlers
     // (`m_BlastDbArgs` is among the first of `CBlastpAppArgs`' `m_Args`, blastp_args.cpp:61-65)
@@ -4639,7 +4667,11 @@ pub fn run(
         input_files::check_utf8_file_name(&args.query, "query", args.app.name())?;
         // NCBI opens the query file inside `Run` too: its error is saved and an error archive
         // follows.
-        match input_files::open_input(&args.query, "query", args.app.name()) {
+        match crate::report::archive::read::import::ImportRun::open_query(
+            args.import.as_ref(),
+            &args.query,
+            args.app.name(),
+        ) {
             Ok(file) => Some(file),
             Err(error) => {
                 write_run_error_archive(&args, archive.as_ref(), &error);
@@ -4778,11 +4810,17 @@ fn read_cli_subjects(
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2553-2562
     // The handler of the database arguments reads the subjects (an empty subject set
     // fails there), before the query and the output are opened.
-    let Some(subject_path) = args.subject.as_deref() else {
-        return Err(app::missing_subject_error());
+    // An imported strategy's subject Bioseqs (`import::apply`) stand for `-subject`.
+    let subject_file = match args.import.as_ref().and_then(|run| run.subjects.as_ref()) {
+        Some(text) => crate::report::archive::read::import::ImportRun::input_of("subject", text)?,
+        None => {
+            let Some(subject_path) = args.subject.as_deref() else {
+                return Err(app::missing_subject_error());
+            };
+            input_files::check_utf8_file_name(subject_path, "subject", args.app.name())?;
+            input_files::open_input(subject_path, "subject", args.app.name())?
+        }
     };
-    input_files::check_utf8_file_name(subject_path, "subject", args.app.name())?;
-    let subject_file = input_files::open_input(subject_path, "subject", args.app.name())?;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2537-2545
     // The subject range is read after the subject file is opened, before it is read.
     let subject_range = seq_range::parse_optional_range(
@@ -4906,7 +4944,7 @@ fn open_search_database(
                     database.list_taxids(),
                     &database.statistics(),
                     false,
-                    rps || args.searchsp.is_some_and(|space| space > 0),
+                    rps || args.searchsp.is_some_and(|space| space != 0),
                     !rps && args.dbsize.is_some_and(|size| size > 0),
                     args.app.name(),
                 )?;
@@ -6276,6 +6314,7 @@ fn search(
             database.name(),
             option,
             args.app.name(),
+            args.app.ncbi_name(),
             archive,
             args.strategy.as_ref(),
             &mut |text| match archive {
@@ -6345,7 +6384,7 @@ fn search(
             args.app.name(),
             crate::blastinput::db_mask::HardScan::Protein {
                 word: args.word_size as i32,
-                window: args.window_size as i32,
+                window: args.window_size,
                 zero_words: searched_queries
                     .iter()
                     .any(|record| record.sequence.contains(&b'-')),
@@ -7239,8 +7278,11 @@ fn x_query_block_plan(
     // P-values without a search space given (`-searchsp`): the redo's set-up may refuse a query
     // batch (`redo_run::evalue_adjust_contexts`: a query before one without a search space, known
     // only once the queries are set up), after the reports of the batches before
-    // (`ErrorAfterBatchReports`). An ungapped search plans no blocks (`args.ungapped`).
+    // (`ErrorAfterBatchReports`). An ungapped search plans no blocks (`args.ungapped`). A search
+    // with a negative `-window_size` has its own blocks in the preliminary stage only
+    // (`x_prelim_block_plan`: one batch each, NCBI's diagonal table of each batch).
     if args.query_range.is_some()
+        || args.window_size < 0
         || args.psi_pssm.is_some()
         || args.psi_search.is_some()
         || args.rps_search.is_some()
@@ -7477,6 +7519,12 @@ fn x_prelim_block_plan(
         return None;
     }
     let query_batches = query_input.batches(batch_size);
+    // A negative `-window_size`: one block for each batch, whatever its letters.
+    if args.window_size < 0 {
+        let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
+        let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, 0, None)?;
+        return (blocks.len() > 1).then_some(blocks);
+    }
     let blocks = x_batch_blocks(args, queries, &query_batches)?;
     let (blocks, _) = x_word_blocks(args, queries, query_input, batch_size, &blocks, pool)?;
     (blocks.len() > 1).then_some(blocks)
@@ -7534,7 +7582,7 @@ fn x_block_search_refuses_nothing(
     let Ok(query_length) = i32::try_from(query_length) else {
         return false;
     };
-    let window = args.window_size as i32;
+    let window = args.window_size;
     if crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP").is_err() {
         return false;
     }
@@ -7859,9 +7907,9 @@ fn x_block_shown_titles_allowed(
 }
 
 /// The `Database:` text of the pairwise reports of a local `-subject` search
-/// (`blastp_scan_mode_definition` of `blastp_subject_tag`).
+/// (`report::pairwise::scan_mode_definition` of `blastp_subject_tag`).
 fn blastp_database_name(args: &ResolvedBlastpArgs, subject_label: &str) -> String {
-    blastp_scan_mode_definition(&blastp_subject_tag(args, subject_label))
+    crate::report::pairwise::scan_mode_definition(&blastp_subject_tag(args, subject_label))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:242-243
@@ -7874,17 +7922,6 @@ fn blastp_subject_tag(args: &ResolvedBlastpArgs, subject_label: &str) -> String 
         BlastpApp::Psiblast | BlastpApp::Rpsblast => String::new(),
         BlastpApp::Blastp if subject_label.is_empty() => args.subject.display().to_string(),
         BlastpApp::Blastp => subject_label.to_string(),
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:418-424
-/// The definition of a subject set in the pairwise report (`FillScanModeBlastDbInfo`), without
-/// its period, which the writers add (`ensure_trailing_period`).
-fn blastp_scan_mode_definition(tag: &str) -> String {
-    if tag.is_empty() {
-        "User specified sequence set".to_string()
-    } else {
-        format!("User specified sequence set (Input: {tag})")
     }
 }
 
@@ -8028,7 +8065,7 @@ fn write_reports_without_queries(
                     gap_open: args.scoring.gap_open,
                     gap_extend: args.scoring.gap_extend,
                     word_threshold: args.threshold,
-                    window_size: args.window_size as i32,
+                    window_size: args.window_size,
                     // None for an ungapped search, whose gap costs NCBI does not read
                     // (`call_setup::gapped_block`).
                     gapped_karlin: call_setup::gapped_block(args).unwrap_or_default(),
@@ -9036,7 +9073,7 @@ fn x_bplk16() -> bool {
 /// with a window (the fused two-hit loop scans it; the offset-pair scan of a search without one
 /// reads the 32-bit table) that is not a query chunk of a split batch (`x_chunk`).
 fn x_bplk16_for(args: &ResolvedBlastpArgs, x_chunk: bool) -> bool {
-    args.window_size != 0 && !x_chunk
+    args.window_size > 0 && !x_chunk
 }
 
 // No NCBI counterpart: LOSAT_X_BPLK16's table in the runtime lookup; it does not change any value
@@ -9543,6 +9580,19 @@ fn run_resolved_in_pool(
         call_requests: call.as_ref(),
         ..*reports
     };
+    // A negative `-window_size` (a search strategy's; the command line takes none): NCBI's one
+    // diagonal table passes from each subject to the next, so the call searches the subjects one
+    // after the other on one thread, in NCBI's one-thread order, at any `-num_threads`; every
+    // stage of `run_call`, a query chunk's and a block's calls included, takes this pool. A window of 0 or
+    // more keeps the caller's.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-172
+    let x_neg_window_pool;
+    let blastp_parallel_pool = if args.window_size < 0 {
+        x_neg_window_pool = crate::utils::threading::SearchPool::x_serial();
+        &x_neg_window_pool
+    } else {
+        blastp_parallel_pool
+    };
     let result = run_call(
         args,
         query_records,
@@ -9607,6 +9657,7 @@ fn ungapped_setup_failure(
             }));
         }
     }
+    // An ungapped search over a subject longer than NCBI's part length: LOSAT's refusal.
     if args.ungapped && query_valid.iter().any(|valid| *valid) {
         let longest = match subject_source {
             BlastpSubjectSource::Fasta(records) => records
@@ -9951,6 +10002,7 @@ fn run_call(
         diag_mask,
         total_query_span,
         x_soft_subjects,
+        neg_batch_layout,
     } = call_setup::scan_shape(
         &call_in,
         &lookup,
@@ -10000,6 +10052,7 @@ fn run_call(
         timing_enabled,
         timing: &timing,
         tree_without_end: &tree_without_end,
+        neg_batch_layout: &neg_batch_layout,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1498
     // The preliminary stage (`blast_engine/prelim_run.rs`): the choice of the pool and the call's

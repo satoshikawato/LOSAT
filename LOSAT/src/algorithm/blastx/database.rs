@@ -105,13 +105,22 @@ impl BlastxDatabase {
     /// with the command line's errors.
     #[cfg(test)]
     pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        Self::open_restricted(name, settings, None, None, &mut std::io::sink(), PROGRAM)
+        Self::open_restricted(
+            name,
+            settings,
+            None,
+            None,
+            &mut std::io::sink(),
+            PROGRAM,
+            "blastx",
+        )
     }
 
     /// `open` with the database restricted to the taxid or seqid list `list` of the command
     /// line, and with the id of the database mask `mask` checked (`-db_soft_mask`,
     /// `-db_hard_mask`; series NP, M4b) (`shared::restrict_database`, whose warnings go to
-    /// `diagnostics`).
+    /// `diagnostics`), for the application `app` (NCBI's lower-case name: the prefix of the
+    /// run's posts, which is not `program`'s where the run is another program's strategy).
     pub(crate) fn open_restricted(
         name: &str,
         settings: &ApplicationSettings,
@@ -119,18 +128,32 @@ impl BlastxDatabase {
         mask: Option<&crate::blastinput::db_mask::DbMaskOption>,
         diagnostics: &mut dyn std::io::Write,
         program: &'static str,
+        app: &'static str,
     ) -> Result<Self> {
         let mut db = shared::open_database(name, SeqType::Protein, settings, program)?;
         // A database with parsed Seq-ids is read (line DBID, ID2a).
-        let parsed_seqids =
-            shared::restrict_database(&mut db, name, list, mask, diagnostics, settings, program)?;
+        let parsed_seqids = shared::restrict_database(
+            &mut db,
+            name,
+            list,
+            mask,
+            diagnostics,
+            settings,
+            program,
+            app,
+        )?;
         Ok(Self {
             db,
             name: name.to_string(),
-            taxdb: shared::TaxdbRun::default(),
+            taxdb: shared::TaxdbRun::running(app),
             parsed_seqids,
             program,
         })
+    }
+
+    /// The prefix of the run's posts (`shared::TaxdbRun::prefix`): the running application's name.
+    pub(crate) fn post_prefix(&self) -> String {
+        self.taxdb.prefix(self.program)
     }
 
     /// Whether a list kept no sequence of the database (`SeqDb::filtered_empty`).
@@ -180,10 +203,10 @@ impl BlastxDatabase {
         self.taxdb.found(&self.db)
     }
 
-    /// NCBI's warning of a failed prefetch, which names the run's program
+    /// NCBI's warning of a failed prefetch, which names the running application `app`
     /// (`shared::prefetch_warning`).
-    pub(crate) fn prefetch_warning(&self) -> Vec<u8> {
-        shared::prefetch_warning(self.program)
+    pub(crate) fn prefetch_warning(&self, app: &str) -> Vec<u8> {
+        shared::prefetch_warning(app)
     }
 
     /// Whether a later query batch of an XML, XML2 or JSON run could still refuse a taxonomy
@@ -239,6 +262,7 @@ impl BlastxDatabase {
     pub(crate) fn resolve_mask_option(
         &self,
         option: &crate::blastinput::db_mask::DbMaskOption,
+        app: &str,
         archive: Option<&crate::report::archive::ArchiveHandle>,
         strategy: Option<&crate::report::archive::strategy::StrategyExport>,
         diagnostics: &mut dyn std::io::Write,
@@ -248,6 +272,7 @@ impl BlastxDatabase {
             &self.name,
             option,
             self.program,
+            app,
             archive,
             strategy,
             &mut |text| match archive {

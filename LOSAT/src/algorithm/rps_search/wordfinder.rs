@@ -324,21 +324,16 @@ fn scan<R: PssmRows>(
     }
 }
 
-/// Advances the bucket-sliding ring from `prev` to `bucket`, clearing the `RPS_BUCKET_SIZE` new
-/// diagonal slots for every bucket in `(prev + 1)..=bucket`.
-#[inline(always)]
-fn advance_bucket(table: &mut [u32], mask: usize, prev: &mut Option<usize>, bucket: usize) {
-    if let Some(prev_b) = *prev {
-        if bucket == prev_b {
-            return;
-        }
-        advance_bucket_cold(table, mask, prev_b, bucket);
-    }
-    *prev = Some(bucket);
-}
-
+/// Advances the bucket-sliding ring from `*prev` to `bucket`, clearing the `RPS_BUCKET_SIZE` new
+/// diagonal slots for every bucket in `(*prev + 1)..=bucket`. `*prev == usize::MAX` marks the
+/// first non-empty bucket of a query (whose ring entries are already stale via `diag_offset`).
 #[inline(never)]
-fn advance_bucket_cold(table: &mut [u32], mask: usize, prev_b: usize, bucket: usize) {
+fn advance_bucket_cold(table: &mut [u32], mask: usize, prev: &mut usize, bucket: usize) {
+    let prev_b = *prev;
+    *prev = bucket;
+    if prev_b == usize::MAX {
+        return;
+    }
     let gap = bucket - prev_b;
     let slots = table.len() >> RPS_BUCKET_BITS;
     if gap >= slots {
@@ -366,6 +361,8 @@ fn two_hit_block<R: PssmRows>(
 ) {
     let wordsize = RPS_WORDSIZE as i32;
     let window = params.window;
+    // Slice to `mask + 1` so `(coord & diag_mask) as usize` is statically in bounds.
+    let table = &mut table[..=diag_mask as usize];
     let RpsHits {
         entries,
         q_base,
@@ -446,6 +443,8 @@ fn one_hit_block<R: PssmRows, const Q_MINUS_S: bool>(
     init_hsps: &mut Vec<RpsInitHsp>,
 ) {
     let wordsize = RPS_WORDSIZE as i32;
+    // Slice to `mask + 1` so `(coord & diag_mask) as usize` is statically in bounds.
+    let table = &mut table[..=diag_mask as usize];
     let RpsHits {
         entries,
         q_base,
@@ -511,8 +510,8 @@ fn run_sliding<R: PssmRows, const TWO_HIT: bool>(
     let RpsWordScratch { diag, buckets } = scratch;
     let diag_offset = diag.offset;
     let diag_mask = (ring_len - 1) as i32;
-    let table = &mut diag.array[..ring_len];
-    let mut prev_bucket: Option<usize> = None;
+    let table = &mut diag.array[..=diag_mask as usize];
+    let mut prev_bucket = usize::MAX;
 
     // Group 0: scan `subject` for group 0's hits, recording overflow words and inline groups for
     // groups 1..num_groups.
@@ -614,12 +613,14 @@ fn drain_sliding_group<R: PssmRows, const TWO_HIT: bool>(
     diag_offset: i32,
     buckets: &mut RpsBuckets,
     mut cursor: RpsReadCursor,
-    prev_bucket: &mut Option<usize>,
+    prev_bucket: &mut usize,
     init_hsps: &mut Vec<RpsInitHsp>,
 ) {
     while let Some(hits) = buckets.next_block(&mut cursor) {
         let bucket = (hits.q_base >> RPS_BUCKET_BITS) as usize;
-        advance_bucket(table, diag_mask as usize, prev_bucket, bucket);
+        if bucket != *prev_bucket {
+            advance_bucket_cold(table, diag_mask as usize, prev_bucket, bucket);
+        }
         if TWO_HIT {
             two_hit_block(
                 params,
@@ -667,7 +668,7 @@ fn finish_multipass_group<R: PssmRows, const TWO_HIT: bool>(
     mut word_pos: usize,
     last_offset: i32,
     max_hits: i32,
-    prev_bucket: &mut Option<usize>,
+    prev_bucket: &mut usize,
     init_hsps: &mut Vec<RpsInitHsp>,
 ) {
     let s_len = subject.len();
@@ -678,7 +679,8 @@ fn finish_multipass_group<R: PssmRows, const TWO_HIT: bool>(
     let g_len = group_span.saturating_add(s_len).next_power_of_two();
     let g_mask = (g_len - 1) as i32;
     let mut g_table = vec![0u32; g_len];
-    if let Some(prev_b) = *prev_bucket {
+    if *prev_bucket != usize::MAX {
+        let prev_b = *prev_bucket;
         let carry_start = g0_q - (s_len as i32 - 1);
         let carry_end = ((prev_b + 1) << RPS_BUCKET_BITS) as i32;
         for d in carry_start..carry_end {
@@ -733,9 +735,10 @@ fn finish_multipass_group<R: PssmRows, const TWO_HIT: bool>(
     for d in tail_start..g1_q {
         table[(d & diag_mask) as usize] = g_table[(d & g_mask) as usize];
     }
-    *prev_bucket = Some(g1 - 1);
+    *prev_bucket = g1 - 1;
 }
 
+#[inline(never)]
 fn two_hit_sliding<R: PssmRows>(
     params: &RpsWordParams<'_>,
     rows: &R,
@@ -755,6 +758,7 @@ fn two_hit_sliding<R: PssmRows>(
     );
 }
 
+#[inline(never)]
 fn one_hit_sliding<R: PssmRows>(
     params: &RpsWordParams<'_>,
     rows: &R,
@@ -777,6 +781,8 @@ fn one_hit_sliding<R: PssmRows>(
 /// `s_BlastRPSWordFinder_TwoHit`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:331-426
+#[cold]
+#[inline(never)]
 fn two_hit<R: PssmRows>(
     params: &RpsWordParams<'_>,
     rows: &R,
@@ -828,6 +834,8 @@ fn two_hit<R: PssmRows>(
 /// two-hit finder's.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:657-703
+#[cold]
+#[inline(never)]
 fn one_hit<R: PssmRows>(
     params: &RpsWordParams<'_>,
     rows: &R,

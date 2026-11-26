@@ -348,22 +348,16 @@ impl RpsBuckets {
         let mut next = *word_pos;
         let mut index = word_index_start(subject, first);
         let mut group_hits = 0i32;
-        let mut s = first;
-        while s < end {
+        for s in first..end {
             index = next_word_index(index, subject, s);
             let word = index as usize;
             if table.pv[word / 64] & (1u64 << (word % 64)) == 0 {
-                s += 1;
                 continue;
-            }
-            if group_hits >= max_hits {
-                break;
             }
             let cell = &table.cells[word];
             let (taken, entry) = if cell[0] > RPS_HITS_PER_CELL {
                 // The words of cells with an overflow run and hits past group 0, in the order of the scan.
                 if words.get(next).is_none_or(|w| w.s_off != s as u32) {
-                    s += 1;
                     continue;
                 }
                 next += 1;
@@ -383,18 +377,22 @@ impl RpsBuckets {
                 (taken as u32, entries.get(taken).copied())
             };
             if entry.is_none_or(|entry| entry_q_off(entry) >= self.g1_q) {
-                s += 1;
                 continue;
             }
             let s_bits = self.entry_bits(s as u32);
             let (taken_after, _) = self.add_cell_hits(table, cell, taken, s_bits, self.g0);
-            group_hits += (taken_after - taken) as i32;
             if cell[0] > RPS_HITS_PER_CELL {
                 words[next - 1].taken = taken_after;
             }
-            s += 1;
+            group_hits += (taken_after - taken) as i32;
+            if group_hits >= max_hits {
+                *s_pos = s + 1;
+                *word_pos = next;
+                self.words = words;
+                return cursor;
+            }
         }
-        *s_pos = s;
+        *s_pos = end;
         *word_pos = next;
         self.words = words;
         cursor
@@ -801,14 +799,10 @@ pub(crate) fn scan_group0(
     let s_last = subject.len() as i32 - RPS_WORDSIZE as i32;
     let mut group_hits = 0i32;
     let mut index = word_index_start(subject, s_first);
-    let mut s = s_first;
-    while s <= s_last {
+    for s in s_first..=s_last {
         index = next_word_index(index, subject, s);
         let word = index as usize;
         if table.pv[word / 64] & (1u64 << (word % 64)) != 0 {
-            if group_hits >= max_hits {
-                break;
-            }
             let cell = &table.cells[word];
             let numhits = cell[0];
             let s_bits = buckets.entry_bits(s as u32);
@@ -825,11 +819,15 @@ pub(crate) fn scan_group0(
                 }
             }
             group_hits += taken as i32;
+            if group_hits >= max_hits {
+                *offset = s + 1;
+                buckets.scanned = (0, s + 1);
+                return group_hits;
+            }
         }
-        s += 1;
     }
-    *offset = s;
-    buckets.scanned = (0, s);
+    *offset = s_last + 1;
+    buckets.scanned = (0, s_last + 1);
     group_hits
 }
 

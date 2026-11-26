@@ -150,8 +150,11 @@ impl Write for Noted<'_> {
 }
 
 impl Diag<'_> {
-    /// Whether diagnostics go to `cerr` (no `-logfile`, `-logfile -`, or a file that could not be
-    /// opened): `cerr` is tied to `cout`, so streams writing to `cout` flush before each post.
+    /// Whether diagnostics go to `cerr` itself (no `-logfile`, `-logfile -`, or a file that could
+    /// not be opened): `cerr` is tied to `cout`, so streams writing to `cout` flush before each
+    /// post. A `-logfile` file (also `/dev/stderr`) is written through a file handle of its own
+    /// without the tie, and a library/Web run whose `-logfile` targets the run's stdout
+    /// (`self.stdout.is_some()`) has no `cerr` tie either.
     // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6492,7570-7610
     pub(crate) fn is_cerr(&self) -> bool {
         self.stdout.is_none() && matches!(self.target, DiagTarget::Stderr)
@@ -192,13 +195,6 @@ impl Diag<'_> {
             failed: &mut self.failed,
         };
         self.target.write_text(text, &mut stderr);
-    }
-
-    /// Whether the diagnostics go to `cerr` itself, which is tied to `cout`: each post flushes the
-    /// standard output first (a `-logfile` file, also `/dev/stderr`, is written through a file
-    /// handle of its own, without the tie).
-    pub(crate) fn tied_to_cout(&self) -> bool {
-        matches!(self.target, DiagTarget::Stderr)
     }
 
     /// Starts keeping a copy of the texts that `write_text` writes (the posts of a read that

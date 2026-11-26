@@ -283,7 +283,8 @@ impl<'o> Output<'o> {
         buf: &mut Vec<u8>,
         diag: &mut Diag,
     ) -> anyhow::Result<()> {
-        let tied = diag.tied_to_cout();
+        // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6492,7570-7610
+        let tied = diag.is_cerr();
         let (stream, is_stdout) = self.opened();
         let tie = tied && is_stdout;
         let mut object = ObjectOStream::new(OStreamBuffer::new(stream), None);
@@ -598,7 +599,8 @@ fn post_line(output: &mut Output<'_>, diag: &mut Diag, text: &[u8]) {
     if text.is_empty() {
         return;
     }
-    output.before_diagnostic(diag.tied_to_cout());
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6492,7570-7610
+    output.before_diagnostic(diag.is_cerr());
     diag.write_text(text);
 }
 

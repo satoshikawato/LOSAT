@@ -30,7 +30,7 @@ import {
   type SubjectSortKey,
   type ViewFilters,
 } from '../domain/result-index';
-import { isTerminal } from '../domain/run';
+import { isTerminal, runInputRecords } from '../domain/run';
 import { toolTakesValue } from '../domain/tools';
 import {
   toolOptionGrammar,
@@ -663,7 +663,7 @@ export class ResultsBrowser {
       });
       return;
     }
-    const subjectRecords = loaded.run.snapshot.subject.records;
+    const subjectRecords = runInputRecords(loaded.run, 'subject');
     const byScore = state.filters.maxEValue !== undefined || state.filters.minBitScore !== undefined;
     if (byScore) this.scores ??= shownScores(table, loaded.out6);
     const filtered = filterQuery(query, state.filters, this.scores ?? table, (subject) => [
@@ -719,7 +719,7 @@ export class ResultsBrowser {
     order: number,
     hspSort: SortSpec<HspSortKey>,
   ): SubjectEntry {
-    const record: RecordKey | undefined = loaded.run.snapshot.subject.records[shown.sIdx];
+    const record: RecordKey | undefined = runInputRecords(loaded.run, 'subject')[shown.sIdx];
     const first = all.rows[0]!;
     const firstRow = this.row(first);
     return {
@@ -767,7 +767,7 @@ export class ResultsBrowser {
   private queryEntries(loaded: LoadedRun, filters: ViewFilters): readonly QueryEntry[] {
     const text = (filters.queryText ?? '').toLowerCase();
     const entries: QueryEntry[] = [];
-    loaded.run.snapshot.query.records.forEach((record, qIdx) => {
+    runInputRecords(loaded.run, 'query').forEach((record, qIdx) => {
       const group = loaded.index.queries.get(qIdx);
       if (filters.queriesWithHitsOnly && group === undefined) return;
       const id = recordName(record.id, 'query', qIdx, loaded.run.record.shownIds);
@@ -843,7 +843,7 @@ export function noHspReason(state: ResultsState): NoHspReason | undefined {
   if (loaded === undefined) return undefined;
   if (loaded.run.snapshot.prints !== undefined) return `printed-${loaded.run.snapshot.prints}`;
   if (loaded.run.snapshot.dryRun === true) return 'dry-run';
-  if (loaded.run.snapshot.query.records.length === 0) return 'empty-query';
+  if (runInputRecords(loaded.run, 'query').length === 0) return 'empty-query';
   if (loaded.limits.maxTargetSeqs === 0) return 'no-tabular-hits';
   if (loaded.tabularError !== undefined) return 'no-tabular-output';
   if (state.queries.length === 0) return 'no-queries';

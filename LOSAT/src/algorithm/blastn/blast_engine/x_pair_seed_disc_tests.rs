@@ -1766,6 +1766,502 @@ fn a_chunk_whose_ranges_step_back_goes_to_the_chains() {
     assert!(to_chains > 0 && to_maps > 0);
 }
 
+/// EXPERIMENT (LOSAT_X_DCFOLDREG): what one fold call on a map did: its trace (`latest::Event`:
+/// each seed's retrieve and insert), the map after it (`DiagLatest::state`), its hits, its counts
+/// (seeds, skipped), what a partition's fold wrote to `out`, and its ungapped extensions
+/// (LOSAT_TIMING's count, without partitions).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[derive(PartialEq)]
+struct MapFold {
+    trace: Vec<latest::Event>,
+    state: latest::MapState,
+    hits: Vec<(u32, u32, u32, i32, i32, u32, u32, i32)>,
+    counts: (u64, u64),
+    out: (Vec<u64>, Vec<(u64, u32)>, Vec<u16>, u64),
+    extensions: u64,
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+impl MapFold {
+    /// Where `self` and `other` first differ (nothing when they are equal).
+    fn difference(&self, other: &MapFold) -> Option<String> {
+        if let Some(k) = (0..self.trace.len().max(other.trace.len()))
+            .find(|&k| self.trace.get(k) != other.trace.get(k))
+        {
+            return Some(format!(
+                "trace step {k}: {:?} against {:?}",
+                self.trace.get(k),
+                other.trace.get(k)
+            ));
+        }
+        let (a, b) = (&self.state, &other.state);
+        if let Some(k) = (0..a.0.len().max(b.0.len())).find(|&k| a.0.get(k) != b.0.get(k)) {
+            return Some(format!(
+                "bucket {k}: {:?} against {:?}",
+                a.0.get(k),
+                b.0.get(k)
+            ));
+        }
+        if a != b {
+            return Some(format!(
+                "map: stash {:?} bits {} shift {} entries {} top {} against stash {:?} bits {} shift {} entries {} top {}",
+                a.1, a.2, a.3, a.4, a.5, b.1, b.2, b.3, b.4, b.5
+            ));
+        }
+        if self.hits != other.hits {
+            return Some(format!("hits {:?} against {:?}", self.hits, other.hits));
+        }
+        if self != other {
+            return Some(format!(
+                "counts {:?} out {:?} extensions {} against counts {:?} out {:?} extensions {}",
+                self.counts, self.out, self.extensions, other.counts, other.out, other.extensions
+            ));
+        }
+        None
+    }
+}
+
+/// One fold call on `map` (with its trace) over `seeds`, seed `k` at place `pos[k]` of the stage
+/// (`PT`): `fold_reg::fold_two_hit_reg` with `TOW` = `LEAN` (`reg`; the word length of a
+/// discontiguous table is its lookup width), or the fold of LOSAT_X_DCFOLDREG=0, `fold_two_hit_on`
+/// on `Latest` with `LEAN`. Timed, so that the extensions are counted.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn map_fold<const PT: bool, const LEAN: bool>(
+    reg: bool,
+    x: &Inputs<'_>,
+    seeds: &[Seed],
+    pos: &[u32],
+    map: &mut DiagLatest,
+) -> MapFold {
+    assert_eq!(x.two_stage.word_length(), x.two_stage.lut_word_length());
+    map.trace = Some(Vec::new());
+    let timing = super::super::super::BlastnTiming::new();
+    let (mut hits, mut counts) = (Vec::new(), FoldCounts::default());
+    let mut out = part::PartOut::of_test_strip(false);
+    let pos = if PT { pos } else { &[] };
+    if reg {
+        fold_reg::fold_two_hit_reg::<PT, LEAN>(
+            x,
+            seeds,
+            map,
+            &mut hits,
+            Some(&timing),
+            &mut 0,
+            &mut counts,
+            &mut out,
+            pos,
+        );
+    } else {
+        fold_two_hit_on::<PT, LEAN, _>(
+            x,
+            seeds,
+            &mut Latest::new(x, map),
+            &mut hits,
+            Some(&timing),
+            &mut 0,
+            &mut counts,
+            &mut out,
+            pos,
+        );
+    }
+    MapFold {
+        trace: map.trace.take().expect("the trace"),
+        state: map.state(),
+        hits: hit_keys(&hits),
+        counts: (counts.seeds, counts.skipped),
+        out: out.recorded(),
+        extensions: timing.ungapped_calls.load(Ordering::Relaxed),
+    }
+}
+
+/// What the folds of `reg_agrees` met: seeds that found an entry (in a slot or the stash), found
+/// one in the stash, were rejected, were extended, and made a hit; the most buckets and stash
+/// entries a map had, and the stages that emptied it.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[derive(Clone, Copy, Debug, Default)]
+struct RegCover {
+    found: u64,
+    stash_found: u64,
+    stash_put: u64,
+    rejected: u64,
+    extended: u64,
+    hits: u64,
+    most_buckets: usize,
+    most_stash: usize,
+    calls: u64,
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+impl RegCover {
+    fn add(&mut self, f: &MapFold) {
+        let mut stashed = None;
+        for e in &f.trace {
+            match *e {
+                latest::Event::Read {
+                    diag,
+                    s,
+                    level,
+                    stash,
+                    ..
+                } => {
+                    self.found += u64::from(level != 0 || stash);
+                    self.stash_found += u64::from(stash);
+                    stashed = stash.then_some((diag, s));
+                }
+                latest::Event::Put { diag, s, .. } => {
+                    self.stash_put += u64::from(stashed == Some((diag, s)));
+                    stashed = None;
+                }
+            }
+        }
+        self.rejected += f.counts.1;
+        self.extended += f.extensions + f.out.3;
+        self.hits += f.hits.len() as u64;
+        self.most_buckets = self.most_buckets.max(f.state.0.len());
+        self.most_stash = self.most_stash.max(f.state.1.len());
+        self.calls += 1;
+    }
+
+    fn sum(mut self, o: RegCover) -> RegCover {
+        self.found += o.found;
+        self.stash_found += o.stash_found;
+        self.stash_put += o.stash_put;
+        self.rejected += o.rejected;
+        self.extended += o.extended;
+        self.hits += o.hits;
+        self.most_buckets = self.most_buckets.max(o.most_buckets);
+        self.most_stash = self.most_stash.max(o.most_stash);
+        self.calls += o.calls;
+        self
+    }
+}
+
+/// The hash offsets of `stages` chunks of `s_len` letters at window `w` from `first`, as NCBI moves
+/// the offset after each chunk (`advance_diag_table_offset`), with the second chunk's offset set
+/// just below a quarter of the largest Int4, so that the offset is cleared after it (and the maps
+/// are emptied at the next stage's start).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn stage_offsets(first: i32, w: usize, s_len: usize, stages: usize) -> Vec<i32> {
+    let mut hash = plain_table(w, first);
+    let mut offsets = Vec::new();
+    for stage in 0..stages {
+        if stage == 1 {
+            hash.offset = i32::MAX / 4 - 3;
+        }
+        offsets.push(hash.offset);
+        super::super::super::advance_diag_table_offset(
+            &mut 0,
+            w as i32,
+            s_len,
+            false,
+            &mut [],
+            &mut [],
+            &mut hash,
+        );
+    }
+    offsets
+}
+
+/// `fold_two_hit_reg` (`PT`, `TOW` = `LEAN`) against the fold of LOSAT_X_DCFOLDREG=0 on maps of
+/// their own: the stages at `offsets` (each map begun at the stage's first bound, `latest_bound`),
+/// each stage's `seeds` folded in calls cut at random places (one call, a few, or one seed per call
+/// for a stretch), and after every call the same trace (every retrieve and insert, seed by seed),
+/// map, hits, counts and `out`.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn reg_agrees<const PT: bool, const LEAN: bool>(
+    x0: &Inputs<'_>,
+    seeds: &[Seed],
+    offsets: &[i32],
+    rng: &mut Lcg,
+    at: &str,
+) -> RegCover {
+    let mut cover = RegCover::default();
+    let (mut map, mut reg_map) = (DiagLatest::default(), DiagLatest::default());
+    let pos: Vec<u32> = (0..seeds.len() as u32).collect();
+    for (stage, &offset) in offsets.iter().enumerate() {
+        let x = Inputs {
+            diag_offset: offset as isize,
+            ..*x0
+        };
+        let bound0 = latest_bound(&x).expect("a chunk with bounds");
+        map.begin(bound0);
+        reg_map.begin(bound0);
+        let n = seeds.len();
+        let mut cuts: Vec<usize> = match rng.below(3) {
+            0 => vec![],
+            1 => (0..1 + rng.below(8))
+                .map(|_| rng.below(n as u64) as usize)
+                .collect(),
+            _ => {
+                let from = rng.below(n as u64) as usize;
+                (from..(from + 40).min(n)).collect()
+            }
+        };
+        cuts.extend([0, n]);
+        cuts.sort_unstable();
+        cuts.dedup();
+        for (call, part) in cuts.windows(2).enumerate() {
+            let (from, to) = (part[0], part[1]);
+            let at =
+                format!("{at} PT {PT} LEAN {LEAN} stage {stage} call {call} seeds {from}..{to}");
+            let expected =
+                map_fold::<PT, LEAN>(false, &x, &seeds[from..to], &pos[from..to], &mut map);
+            let got =
+                map_fold::<PT, LEAN>(true, &x, &seeds[from..to], &pos[from..to], &mut reg_map);
+            if let Some(difference) = expected.difference(&got) {
+                panic!("{at}: {difference}");
+            }
+            cover.add(&expected);
+        }
+    }
+    cover
+}
+
+/// `reg_agrees` in the four instances the stage runs (`PT` either, `LEAN` either).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn reg_agrees_in_every_instance(
+    x0: &Inputs<'_>,
+    seeds: &[Seed],
+    offsets: &[i32],
+    rng: &mut Lcg,
+    at: &str,
+) -> RegCover {
+    reg_agrees::<false, true>(x0, seeds, offsets, rng, at)
+        .sum(reg_agrees::<false, false>(x0, seeds, offsets, rng, at))
+        .sum(reg_agrees::<true, true>(x0, seeds, offsets, rng, at))
+        .sum(reg_agrees::<true, false>(x0, seeds, offsets, rng, at))
+}
+
+// EXPERIMENT (LOSAT_X_DCFOLDREG): the fold with the map in registers makes every retrieve, decision
+// and insert of the fold on the map of LOSAT_X_DCFOLDREG=0, seed by seed, and leaves the same map,
+// hits and counts after every call, on the seeds of the stage (the reference scan's pairs) for
+// every template, at windows in the band 2w + 2 < wl, around the word length and above it, over
+// stages through the offset's clear, cut into calls at random places, in the four instances of the
+// stage (with and without partitions, with and without LOSAT_X_FOLDLEAN).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[test]
+fn the_fold_in_registers_makes_the_steps_of_the_fold_on_the_map() {
+    let mut rng = Lcg(0xF01D_4E65);
+    let mut case_no = 0;
+    let mut cover = RegCover::default();
+    for word_size in [11usize, 12] {
+        for word_type in [
+            DiscWordType::Coding,
+            DiscWordType::Optimal,
+            DiscWordType::TwoTemplates,
+        ] {
+            for template_length in [16usize, 18, 21] {
+                case_no += 1;
+                let c = make_case(&mut rng, 20_000);
+                let c = if case_no % 2 == 0 {
+                    mask_case(&mut rng, c)
+                } else {
+                    c
+                };
+                let lookup = build_disc_mb_lookup(
+                    &ctx_refs(&c),
+                    &c.offsets,
+                    word_size,
+                    template_length,
+                    word_type,
+                    &c.masks,
+                    c.concat.len(),
+                );
+                let wl = template_length;
+                let seeds = all_seeds(&c, &lookup, &inputs(&c, &lookup, 40, 40));
+                let mut windows = vec![1 + case_no % 6, wl + 1, 40];
+                windows.dedup();
+                for w in windows {
+                    let at = format!("case {case_no} wl {wl} w {w}");
+                    let x0 = inputs(&c, &lookup, 0, w);
+                    let offsets = stage_offsets(37 + rng.below(1000) as i32, w, c.s_len, 3);
+                    let got = reg_agrees_in_every_instance(&x0, &seeds, &offsets, &mut rng, &at);
+                    if w == 40 {
+                        assert!(got.hits > 20, "{at}: too few hits {got:?}");
+                        if case_no == 1 {
+                            // also cover below-cutoff extensions on real scan seeds
+                            let high_cutoffs = vec![10_000; c.contexts.len()];
+                            let x_hi = Inputs {
+                                cutoff_scores: &high_cutoffs,
+                                ..x0
+                            };
+                            cover = cover.sum(reg_agrees_in_every_instance(
+                                &x_hi,
+                                &seeds,
+                                &offsets,
+                                &mut rng,
+                                &format!("{at} high-cutoff"),
+                            ));
+                        }
+                    }
+                    cover = cover.sum(got);
+                }
+            }
+        }
+    }
+    assert!(
+        cover.found > 0 && cover.rejected > 0 && cover.extended > cover.hits && cover.hits > 0,
+        "{cover:?}"
+    );
+}
+
+/// Seeds of `c` (template length `wl`) for the map's edge cases: positions that mostly stay or step
+/// by 1 or 2, sometimes jump past every window, with bursts of up to 150 seeds at one position;
+/// diagonals from `crowd` (diagonals that share their home bucket up to a few doublings), seeds
+/// repeated on a recent diagonal (found, rejected, extended), and random ones. Each seed is a
+/// pair inside a context of the query and the subject (any pair can be extended).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn edge_seeds(rng: &mut Lcg, c: &Case, wl: usize, crowd: &[i32], n: usize) -> Vec<Seed> {
+    let context_of = |q: i64| -> Option<u32> {
+        c.contexts
+            .iter()
+            .position(|ctx| {
+                let start = i64::from(ctx.query_offset);
+                q >= start && q + wl as i64 <= start + ctx.len as i64
+            })
+            .map(|k| k as u32)
+    };
+    let mut seeds: Vec<Seed> = Vec::new();
+    let mut s = wl as i64;
+    let mut burst = 0;
+    while seeds.len() < n {
+        if burst > 0 {
+            burst -= 1;
+        } else {
+            match rng.below(100) {
+                0..=1 => burst = 50 + rng.below(100),
+                2..=4 => s += 50 + rng.below(150) as i64,
+                5..=49 => {}
+                _ => s += 1 + rng.below(2) as i64,
+            }
+        }
+        if s + wl as i64 > c.s_len as i64 {
+            break;
+        }
+        let diag = match rng.below(10) {
+            // a crowded diagonal that a pair at s can have (q = s - diag in the query)
+            0..=5 => {
+                let lo = crowd.partition_point(|&d| i64::from(d) <= s - c.concat.len() as i64);
+                let hi = crowd.partition_point(|&d| i64::from(d) <= s);
+                if lo == hi {
+                    continue;
+                }
+                i64::from(crowd[lo + rng.below((hi - lo) as u64) as usize])
+            }
+            // a diagonal of the last seeds
+            6..=7 if !seeds.is_empty() => {
+                let back = 1 + rng.below(seeds.len().min(30) as u64) as usize;
+                let seed = &seeds[seeds.len() - back];
+                i64::from(seed.s) - i64::from(seed.q)
+            }
+            _ => s - rng.below(c.concat.len() as u64) as i64,
+        };
+        let q = s - diag;
+        if let Some(context) = context_of(q) {
+            seeds.push(Seed {
+                context,
+                q: q as u32,
+                s: s as u32,
+                s_range: c.s_len as u32,
+            });
+        }
+    }
+    seeds
+}
+
+// EXPERIMENT (LOSAT_X_DCFOLDREG): as `the_fold_in_registers_makes_the_steps_of_the_fold_on_the_map`
+// on seeds made for the map's edges (`edge_seeds`): diagonals crowding one home bucket (full
+// buckets, the stash, puts over stash entries, the buckets doubled several times), bursts at one
+// position, jumps past the window, and seeds repeated on a diagonal (found, rejected, two hits).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[test]
+fn the_fold_in_registers_makes_the_steps_of_the_fold_on_the_map_at_its_edges() {
+    let mut rng = Lcg(0x0ED6_E5EE);
+    let mut cover = RegCover::default();
+    for (case_no, (word_size, word_type, template_length)) in [
+        (11usize, DiscWordType::Coding, 16usize),
+        (12, DiscWordType::Optimal, 18),
+        (11, DiscWordType::TwoTemplates, 21),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let c = make_case_with(&mut rng, 30_000, 20_000);
+        let lookup = build_disc_mb_lookup(
+            &ctx_refs(&c),
+            &c.offsets,
+            word_size,
+            template_length,
+            word_type,
+            &c.masks,
+            c.concat.len(),
+        );
+        let wl = template_length;
+        // the diagonals whose home is one bucket while the map has up to 2^7 buckets
+        let top = |d: i32| (d as u32).wrapping_mul(0x9E37_79B1) >> 25;
+        let want = top(5_000);
+        let crowd: Vec<i32> = (-(c.concat.len() as i32)..c.s_len as i32)
+            .filter(|&d| top(d) == want)
+            .collect();
+        assert!(crowd.len() > 400, "{}", crowd.len());
+        let seeds = edge_seeds(&mut rng, &c, wl, &crowd, 60_000);
+        for w in [1 + case_no % 6, wl - 1, wl + 1, 40, 64] {
+            let at = format!("edge case {case_no} wl {wl} w {w}");
+            let x0 = inputs(&c, &lookup, 0, w);
+            // the hash offset starts at the window and returns to it at the clear (`latest_bound`),
+            // so a stage's offset is never below it (below it, at w 64, the chunk has no bounds)
+            let first = (37 + rng.below(1000) as i32).max(w as i32);
+            let offsets = stage_offsets(first, w, c.s_len, 3);
+            cover = cover.sum(reg_agrees_in_every_instance(
+                &x0, &seeds, &offsets, &mut rng, &at,
+            ));
+        }
+    }
+    assert!(
+        cover.found > 0
+            && cover.rejected > 0
+            && cover.extended > 0
+            && cover.stash_found > 0
+            && cover.stash_put > 0
+            && cover.most_stash > 0
+            && cover.most_buckets >= 1 << 9,
+        "{cover:?}"
+    );
+}
+
 // EXPERIMENT (LOSAT_X_DCEMITHOIST): `DcPairs` and `scan_strip_disc_csr`'s `HOIST` instance against
 // `seed_of_pair` and the instance without `HOIST`, the code `LOSAT_X_DCEMITHOIST=0` runs.
 

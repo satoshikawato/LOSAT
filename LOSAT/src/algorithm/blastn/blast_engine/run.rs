@@ -4058,6 +4058,24 @@ impl QueryContextIndex {
         self.x_context_for_offset_ref(n)
     }
 
+    /// No NCBI counterpart: EXPERIMENT (LOSAT_X_DCEMITHOIST) the constant-time form as a value
+    /// (`x_ctx_o1::CtxO1::x_view`), `None` without one; for `x_context_with`.
+    fn x_view(&self) -> Option<x_ctx_o1::XView<'_>> {
+        self.x_o1.as_ref().map(x_ctx_o1::CtxO1::x_view)
+    }
+
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219
+    /// EXPERIMENT (LOSAT_X_DCEMITHOIST): `context_for_offset` with the constant-time form `form`
+    /// made once (`x_view`, or `x_ctx_o1::XNone` without one): the form's answer, else the
+    /// out-of-line forms, as `context_for_offset` asks them. The same answer for every `n`.
+    #[inline(always)]
+    fn x_context_with<G: x_ctx_o1::XCtxGet>(&self, form: &G, n: usize) -> usize {
+        match form.get(n) {
+            Some(context) => context,
+            None => self.x_context_for_offset_ref(n),
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243 (BSearchContextInfo)
     // The forms besides the constant-time one (LOSAT_X_CTXO1), out of line as `context_for_offset` was.
     #[inline(never)]

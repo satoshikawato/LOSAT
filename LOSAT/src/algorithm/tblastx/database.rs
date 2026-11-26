@@ -1101,6 +1101,12 @@ pub(crate) fn parsed_shown(
             .is_some_and(|format| format.prefetches_subjects())
             && !shared::prefetch_always_off(prefetch_format),
         one_by_one: shared::prefetch_may_be_off(prefetch_format),
+        titles: shared::TitleReads::of_outfmts(
+            crate::report::archive::options::RequestKind::Tblastx,
+            formats
+                .iter()
+                .map(|format| format.report_format().map_or(-1, |format| format as i32)),
+        ),
     }
 }
 
@@ -1189,8 +1195,10 @@ pub(crate) fn reported_subjects(
         let title = match header {
             ReportedHeader::Stored(stored) => {
                 shared::check_reported_title(
+                    &database.db,
+                    ordinal,
                     stored.replaced_bytes,
-                    || database.db.oid(ordinal),
+                    shown.titles,
                     PROGRAM,
                 )?;
                 if shown.pairwise {

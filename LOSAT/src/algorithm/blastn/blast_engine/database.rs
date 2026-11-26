@@ -1620,7 +1620,9 @@ impl BlastnDatabase {
     /// fetches (`fetched`: the first that read a UTF8String header). NCBI's warning of the batch's
     /// first read of such a header goes to the posts of `reads` (the batch's reader messages and
     /// request posts, before its prefetch), also where the read fails after it
-    /// (`shared::Utf8Read::of_read`). The error is `read_titles`'.
+    /// (`shared::Utf8Read::of_read`), then NCBI's posts of the titles that its Seq-aligns read
+    /// (`shared::batch_title_posts`, or those before a failed read,
+    /// `blastinput::app::ErrorAfterBatchReports::title_posts`). The error is `read_titles`'.
     pub(super) fn batch_titles(
         &self,
         (fetched, one_by_one): (Option<crate::seqdb::SeqLocation>, bool),
@@ -1631,12 +1633,36 @@ impl BlastnDatabase {
         let earlier = shared::EarlierUtf8::of_batch(0, fetched, aligned);
         let read = read_titles(self, hit_lists, (earlier, one_by_one), titles);
         let first = shared::Utf8Read::of_read(&read, Option::as_ref);
-        if let Some(warning) =
-            shared::Utf8Read::post_of(first, &self.db, &self.taxdb.prefix("blastn"))
-        {
-            posts.append(&warning);
+        let warning = shared::Utf8Read::post_of(first, &self.db, &self.taxdb.prefix("blastn"));
+        if let Some(warning) = &warning {
+            posts.append(warning);
         }
-        read.map(|_| ())
+        // NCBI's posts of the titles that the batch's Seq-aligns read, in `read_titles`' order.
+        let aligned = hit_lists.iter().flatten().flat_map(|hit_list| {
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            hit_list.hsplist_array[..count]
+                .iter()
+                .map(|hsp_list| hsp_list.oid)
+        });
+        if let Err(error) = read {
+            // A read that NCBI cannot make ends the batch's Seq-aligns: the posts of the reads
+            // before it come before its error.
+            let error =
+                crate::blastinput::app::ErrorAfterBatchReports::after_seq_aligns(error, aligned);
+            if let Some(failure) =
+                error.downcast_ref::<crate::blastinput::app::ErrorAfterBatchReports>()
+            {
+                posts.append(&failure.title_posts(&self.db, warning.is_some(), PROGRAM)?);
+            }
+            return Err(error);
+        }
+        posts.append(&shared::batch_title_posts(
+            &self.db,
+            aligned,
+            warning.is_some(),
+            PROGRAM,
+        )?);
+        Ok(())
     }
 }
 
@@ -1751,6 +1777,12 @@ pub(super) fn parsed_shown(output_formats: &[BlastnOutputFormat]) -> ParsedShown
             .is_some_and(|format| format.prefetches_subjects())
             && !shared::prefetch_always_off(prefetch_format(output_formats)),
         one_by_one: shared::prefetch_may_be_off(prefetch_format(output_formats)),
+        titles: shared::TitleReads::of_outfmts(
+            crate::report::archive::options::RequestKind::Blastn,
+            output_formats
+                .iter()
+                .map(|format| format.report_format() as i32),
+        ),
     }
 }
 
@@ -2346,7 +2378,13 @@ pub(super) fn reported_subjects(
             .with_context(|| format!("database sequence {} has no title read", db.oid(ordinal)))?;
         let (title, subject, source) = match header {
             ReportedHeader::Stored(stored) => {
-                shared::check_reported_title(stored.replaced_bytes, || db.oid(ordinal), PROGRAM)?;
+                shared::check_reported_title(
+                    db,
+                    ordinal,
+                    stored.replaced_bytes,
+                    shown.titles,
+                    PROGRAM,
+                )?;
                 if shown.pairwise {
                     stored.check_shown_source(|| db.oid(ordinal), PROGRAM)?;
                 }

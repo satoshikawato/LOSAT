@@ -394,6 +394,12 @@ impl PrintedIds {
             all: self.all || other.all,
         }
     }
+
+    /// Whether the report prints any subject id column whose word can come from `GenerateDefline`
+    /// (`sseqid`, `sacc`, `saccver`, `sallseqid`, `sallacc`).
+    pub fn any(self) -> bool {
+        self.subject || self.all
+    }
 }
 
 impl TabularNeeds {

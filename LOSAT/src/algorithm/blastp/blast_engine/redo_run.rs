@@ -1067,6 +1067,7 @@ pub(in crate::algorithm::blastp) fn sw_batch_failed(
         query: Some(batch_start),
         error,
         utf8,
+        title_reads: Vec::new(),
     }
     .into()
 }
@@ -1090,6 +1091,7 @@ pub(in crate::algorithm::blastp) fn sw_endless(
         query: Some(batch_start),
         utf8,
         error: crate::core::composition_adjustment::smith_waterman_match::sw_endless_error("blastp", "the e-value of a score of 0 passes the threshold, the match has several preliminary HSPs and the first query letter scores the subject's first letter above 0"),
+        title_reads: Vec::new(),
     }
     .into()
 }

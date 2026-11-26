@@ -1424,6 +1424,8 @@ async function checkLogfileRunFiles(engine, native, scratch) {
     { id: "s-wmdb-folder", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm/run.log" },
     { id: "s-wmdb-dir", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm" },
     { id: "s-wmdb-self", program: "blastn", query: ["q.fa", Q], subject: ["s.fa", S], work: {}, counts: { "wm/c.obinary": COUNTS }, extra: ["-window_masker_db", "wm/c.obinary"], logfile: "wm/c.obinary", expect: "refusal", cliRefuses: "wm/c.obinary" },
+    // D19b: `-db` missing alias file `.nal` refused at validate and run (CLI creates and reads it back).
+    { id: "s2-db-nal", program: "blastn", query: ["q.fa", Q], db: "db/wm", work: { "db/wm.nin": Buffer.from("") }, logfile: "db/wm.nal", expect: "refusal" },
   ];
   const { reactor, close, waitForWorkers } = await engine.open(workDir);
   try {
@@ -1441,7 +1443,10 @@ async function checkLogfileRunFiles(engine, native, scratch) {
       };
       // `/work` holds only the non-registered files (`c.work`), while the CLI directory holds everything.
       writeInto(workDir, c.work);
-      writeInto(cliDir, { [c.query[0]]: c.query[1], [c.subject[0]]: c.subject[1], ...c.work, ...c.registry, ...c.counts });
+      const cliInputs = c.db
+        ? { [c.query[0]]: c.query[1], ...c.work, ...c.registry, ...c.counts }
+        : { [c.query[0]]: c.query[1], [c.subject[0]]: c.subject[1], ...c.work, ...c.registry, ...c.counts };
+      writeInto(cliDir, cliInputs);
       const regHandles = [];
       for (const [kind, map] of [[2, c.registry], [1, c.counts]]) {
         for (const [name, bytes] of Object.entries(map || {})) {
@@ -1454,9 +1459,10 @@ async function checkLogfileRunFiles(engine, native, scratch) {
       }
       const qHandle = reactor.call("losat_web2_register", c.program, 0, 1, c.query[1]);
       assert.ok(qHandle.status > 0, `${label} query: ${qHandle.error}`);
-      const sHandle = reactor.call("losat_web2_register", c.program, 1, 1, c.subject[1]);
-      assert.ok(sHandle.status > 0, `${label} subject: ${sHandle.error}`);
-      const words = [c.program, "-query", c.query[0], "-subject", c.subject[0], ...T, ...(c.extra || []), "-logfile", c.logfile];
+      const sHandle = c.db ? { status: 0 } : reactor.call("losat_web2_register", c.program, 1, 1, c.subject[1]);
+      if (!c.db) assert.ok(sHandle.status > 0, `${label} subject: ${sHandle.error}`);
+      const targetArgs = c.db ? ["-db", c.db] : ["-subject", c.subject[0]];
+      const words = [c.program, "-query", c.query[0], ...targetArgs, ...T, ...(c.extra || []), "-logfile", c.logfile];
       const validated = reactor.call("losat_web2_validate", words.join("\0"));
       const run = reactor.call("losat_web2_run", words.join("\0"), qHandle.status, sHandle.status);
       if (waitForWorkers) await waitForWorkers();
@@ -1527,7 +1533,7 @@ async function checkLogfileRunFiles(engine, native, scratch) {
         assert.equal((run.streams.get(3) || Buffer.alloc(0)).toString(), cli.stderr.toString(), `${label}: stream 3`);
       }
       assert.equal(reactor.call("losat_web2_release", qHandle.status).status, 0);
-      assert.equal(reactor.call("losat_web2_release", sHandle.status).status, 0);
+      if (!c.db) assert.equal(reactor.call("losat_web2_release", sHandle.status).status, 0);
       for (const h of regHandles) assert.equal(reactor.call("losat_web2_file_release", h).status, 0);
     }
   } finally {

@@ -2909,6 +2909,33 @@ Rows `db.html.ps.*` (line RG T4c2; `../db_search_manifest/psiblast.html.tsv`): `
 formats `0` to `4` and `18`, two-part description tables, `-in_pssm` and `-in_msa` queries, `-subject` registry rows, id kinds and special titles,
 and formats `6`, `7` and `11` where `-html` is ignored, with the `rc/` directories and databases above.
 
+## Titles with bytes outside the visible ASCII range (line RG-KB item 9(b))
+
+`tchar/` (rows `db.tchar.*`): `tchar/make_tchar.py` (run from `LOSAT/` with the directory of NCBI's makeblastdb,
+and the stems to write, or none for all) writes the version 4 databases `tc_p`, `tc_b_p`, `tc_big_p`, `tc_big2_p`,
+`tc_x_p`, `tc_dmg_p`, `tc_ps_p`, `tc_u8_p` (proteins) and `tc_n`, `tc_b_n`, `tc_big_n`, `tc_big2_n`, `tc_x_n`,
+`tc_dmg_n`, `tc_ps_n`, `tc_u8_n` (their back-translations), the aliases `tc_alias_p.pal` and `tc_alias_n.nal`
+(`tc_*` then `tc_b_*`), `tc_bigal_p.pal` and `tc_bigal_n.nal` (`tc_big_*` then `tc_big2_*`) and the queries
+`tc_q1`, `tc_q2`, `tc_qslot` and `tc_qu8` (`.faa`, `.fna`). makeblastdb stores each byte outside ' '..'~' of a FASTA
+title as `#`; the script rewrites those stored titles to raw bytes (0x00, 0x01, 0x1B, 0x7F, 0x80, 0xC3 0xA9, 0xE9,
+0xFF; titles of 133, 300 and 1,100 bytes). `tc_big_*` holds 300 sequences, of which the OIDs 0, 1, 2, 3, 256 and 257
+have such bytes and hit the queries with OID 258 (clean): 0 and 256, 1 and 257, 2 and 258 share a slot of NCBI's
+cache of 256 header records per volume. `tc_qslot` reads 0 and 256 in both orders, then 2, 258 and 2 again, then 3
+twice (`-evalue 1e-10` keeps the random records out). `tc_big2_*` holds 300 sequences, OID 215 with 0xE9, which
+`tc_bigal_*` reads between the reads of `tc_big_*`'s OID 3 (215 is 3's slot by the alias's OIDs, 515, not by the
+volume's). `tc_dmg_*` holds OID 0 with 0xE9 and OID 1 whose title tag is rewritten to 0x1B (NCBI's error, exit 255,
+after the post of OID 0); `tc_ps_*` has parsed Seq-ids (`-parse_seqids`); `tc_u8_*` holds a UTF8String title,
+which `tc_qu8`'s first query reads (NCBI's warning 803.10), and titles with 0xE9 for the second query.
+NCBI BLAST+ 2.17.0 reads a reported subject's definition line where it makes the Seq-aligns of its query batch, and
+posts `Error: (803.7) [<program>] Blast-def-line-set.E.title` / `Bad char [0x..] in string at byte N` / the title, for
+each such byte in order, at each read that the cache does not answer (N is the position after the whole title in its
+record; the bytes before the posted one are already `#`). Outfmt 8, 9, 11 and 12 read the definition line there only
+(`PRE_FETCH_SEQS_LIMIT=2147483647` makes 8, 9 and 12 prefetch); the other formats read it again, which LOSAT refuses
+(the `losat-rejection` rows), except in a batch that fails at a header read, which reaches no formatter (`dmg.*`,
+including `psiblast` one-round and multi-round runs and `rpsblast`/`rpstblastn` against `rps_mini` with
+`rps/rps_mini_tchar_dmg.phr.gz`, where OID 2's title holds `0xE9` and OID 0's title tag is rewritten to `0x1B`;
+`rps/rps_mini_tchar.phr.gz` holds OID 2's `0xE9` alone for the `rpsblast` and `rpstblastn` `losat-rejection` rows).
+
 - `LOSAT/tests/fasta/xchunk/` (rows `db.xc.*` of `tests/db_search_manifest/blastn.xc.tsv`, line RG
   item X-chunk): slices of `HBA1` (`ENST00000320868.9`) from `taxfilter/tfn.fna` exercising
   BLASTN query-chunk stops and step order (`CHUNK_SIZE` / `OVERLAP_CHUNK_SIZE`), including empty

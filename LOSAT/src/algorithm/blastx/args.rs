@@ -453,6 +453,16 @@ impl ResolvedOptions {
         })
     }
 
+    /// The NCBI application (`options::RequestKind`): RPSTBLASTN when `rpstblastn` is set, else
+    /// BLASTX.
+    pub(crate) fn request_kind(&self) -> crate::report::archive::options::RequestKind {
+        if self.rpstblastn.is_some() {
+            crate::report::archive::options::RequestKind::Rpstblastn
+        } else {
+            crate::report::archive::options::RequestKind::Blastx
+        }
+    }
+
     /// The format as NCBI's prefetch of each query batch asks it
     /// (`common::database::PrefetchFormat`, the one owner of whether a batch prefetches): outfmt
     /// 10, 18 and 20 as the tabular 6, which NCBI prefetches for alike (`s_IsPrefetchFormat`).
@@ -462,10 +472,7 @@ impl ResolvedOptions {
                 10 | 18 | 20 => 6,
                 outfmt => i32::from(outfmt),
             },
-            match self.rpstblastn {
-                Some(_) => crate::report::archive::options::RequestKind::Rpstblastn,
-                None => crate::report::archive::options::RequestKind::Blastx,
-            },
+            self.request_kind(),
         )
     }
 }

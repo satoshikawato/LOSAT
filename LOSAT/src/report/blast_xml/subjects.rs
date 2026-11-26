@@ -92,8 +92,9 @@ pub struct SubjectNames {
     /// The taxids that the volume looks up when it fetches a subject with parsed Seq-ids
     /// (`ParsedSubject::volume_taxids`; empty for the others, whose one is `taxid`).
     pub volume_taxids: Vec<i32>,
-    /// `GenerateDefline` threw for the `-subject` record (`of_unknown`): outfmt 5 writes
-    /// `Hit_len` 0.
+    /// Outfmt 5's `catch` names the `Hit` (`of_unknown`): `GenerateDefline` threw for the
+    /// `-subject` record, or the walk of a database sequence's definition lines threw at one
+    /// without a Seq-id (`of_parsed`). Outfmt 5 writes `Hit_len` 0.
     pub defline_thrown: bool,
     /// The exception that NCBI's lookup of the database sequence's Seq-align id throws where its
     /// `Hit` loads it (`of_thrown`, `db_subject::HitLoad::Throws`): the writer of each document
@@ -233,31 +234,53 @@ impl SubjectNames {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:370-371
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:380-415,422-428
     /// The names of a database sequence with parsed Seq-ids (`ParsedSubject::xml_hit` and
     /// `hit_descriptions`): `Hit_id`, `Hit_def` and `Hit_accession` of outfmt 5, and the
     /// `HitDescr` of each definition line of XML2 and JSON with what the taxonomy database said
     /// about its taxid (`taxonomy[i]` for definition line `i`; empty where nothing was asked).
-    /// `GetTaxInfo` throws for a taxid that the taxonomy database does not know: the
+    /// The walk of the lines throws at a line without a Seq-id (the handle of its null best id,
+    /// before its taxid is looked up) and where `GetTaxInfo` does not know a taxid: the
     /// descriptions before that definition line stay, and the Seq-align id alone follows them.
+    /// Where outfmt 5's walk throws (`xml_hit` gives `None`), its `Hit` is the `catch`'s
+    /// (`of_unknown`: `Hit_len` 0), with the same XML2 descriptions and the real length there.
     /// A `Hit` whose lookup throws has the names of `of_thrown` (`HitNames::of`).
     pub fn of_parsed(subject: &ParsedSubject, taxonomy: &[HitTaxonomy]) -> Self {
-        let (id, title, accession) = subject.xml_hit();
         let mut descriptions = subject.hit_descriptions();
-        for (at, answer) in taxonomy.iter().enumerate().take(descriptions.len()) {
-            if matches!(answer, HitTaxonomy::NotFound(_)) {
-                descriptions.truncate(at);
-                descriptions.push(HitDescription {
-                    id: subject.alignment_fasta(),
-                    accession: Vec::new(),
-                    title: None,
-                    taxid: 0,
-                    taxonomy: answer.clone(),
-                });
-                break;
+        let lineless = subject
+            .deflines()
+            .iter()
+            .position(|defline| defline.ids.is_empty());
+        let mut stop = lineless.map(|at| (at, HitTaxonomy::Unnamed));
+        for at in 0..lineless.unwrap_or(descriptions.len()) {
+            match taxonomy.get(at) {
+                Some(answer @ HitTaxonomy::NotFound(_)) => {
+                    stop = Some((at, answer.clone()));
+                    break;
+                }
+                Some(answer) => descriptions[at].taxonomy = answer.clone(),
+                None => {}
             }
-            descriptions[at].taxonomy = answer.clone();
         }
+        if let Some((at, answer)) = stop {
+            descriptions.truncate(at);
+            descriptions.push(HitDescription {
+                id: subject.alignment_fasta(),
+                accession: Vec::new(),
+                title: None,
+                taxid: 0,
+                taxonomy: answer,
+            });
+        }
+        let volume_taxids = subject.volume_taxids();
+        let Some((id, title, accession)) = subject.xml_hit() else {
+            return SubjectNames {
+                descriptions,
+                volume_taxids,
+                ..Self::of_unknown(subject.alignment_fasta())
+            };
+        };
         SubjectNames {
             id,
             title,
@@ -265,7 +288,7 @@ impl SubjectNames {
             taxid: 0,
             taxonomy: HitTaxonomy::Unnamed,
             descriptions,
-            volume_taxids: subject.volume_taxids(),
+            volume_taxids,
             defline_thrown: false,
             lookup_throws: None,
         }

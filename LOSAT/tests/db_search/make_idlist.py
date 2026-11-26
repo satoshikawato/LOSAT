@@ -57,6 +57,22 @@ Databases (the `.pjs`/`.njs` metadata, with the build's paths and dates, are dro
 - `lm` (D1c-1c-b): `ln` with its first 30 letters made `Q` in every sequence and the SEG masks of `segmasker
   -parse_seqids` (algorithm 21) in the volume, the same lines rewritten without Seq-ids: blastdbcmd's masks of a
   sequence whose front line has none (NCBI's Seq-loc of the masks takes the null best id and throws).
+- `x1` (D1c-1c-b PR 2b): version 5 of x1.faa (7 proteins, taxids from x1.map), lines rewritten without Seq-ids
+  (`drop_seqids`, a title removed or emptied where said): OID 0 `ref|NP_000101.1| alpha`; OID 1 `gi|5|ref|NP_000102.1|
+  beta1` and a line `beta2` without one; OID 2 `ref|NP_000104.1| short`, `ref|NP_000105.1|` with a title of about 4300
+  bytes and a line `tail` without one (the description's walk passes 4096 bytes before it); OID 3 a line without a
+  Seq-id or a title, then `ref|NP_000106.1| delta2`; OID 4 `ref|NP_000107.1| e1` and a line without a Seq-id or a
+  title; OID 5 two lines without Seq-ids (no Seq-align); OID 6 `ref|NP_000110.1| g1` and a line without a Seq-id whose
+  title is empty. `x1q0.faa` to `x1q6.faa` hold each sequence as a query, `x1q01.faa` the first two.
+- `xw` (D1c-1c-b PR 2b): version 5 of xw.faa (2 proteins): `ref|...| short`, a line whose title makes the description
+  4096 bytes (OID 0) or 4097 bytes (OID 1) long, and a line `tail` rewritten without a Seq-id: NCBI's walk meets that
+  line after 4096 bytes and stops at it after 4097. `xwq0.faa`, `xwq1.faa` hold each sequence as a query.
+- `pn` (D1c-1c-b PR 2b): version 5 of ln.faa back-translated (nucleotides, taxids from ln.map), the lines of `ln`
+  rewritten without Seq-ids. `lnq0.faa`, `lnq1.faa` and `lnq3.faa` hold OIDs 0, 1 and 3 of ln.faa as queries, the
+  `.fna` files of the same names the same back-translated. OIDs 0 and 1 of ln.faa with a letter put after the 20th
+  of a query's line (`write_edited_queries`): `lnqw.faa` and the back-translated `lnqw.fna` an invalid `1` in q1
+  (NCBI's reader message), `lnqo0.faa` and `lnqo1.faa` an `O` in q0 or q1 (the query's own warning): the stderr
+  that NCBI writes before it stops at the sallacc of q1's subject.
 - `pw`, `nw` (line DBID pfoff-7): version 4 of pw.faa and of nw.fna (its back-translation) with parsed Seq-ids: gi 7001
   (`ref|NP_7001.1|`), then the general ids PIG|abc (gi 7001's letters with 4 changes), ti|xyz, BL_ORD_ID|zz and xyz|77,
   whose lookups as Seq-align ids throw on the id itself where the tag is a string (PIG, BL_ORD_ID: `CObject_id::GetId()`)
@@ -85,7 +101,8 @@ OUT = Path(__file__).resolve().parent / "idlist"
 SOURCES = {"g.faa", "g.map", "n.fna", "n.map", "q.faa", "nq.fna", "tz.faa", "pz.faa", "tq.faa", "cv0.faa",
            "cv1.faa", "ln.faa", "ln.map", "lnq.faa", "lx.faa", "lx.map", "lx2.map", "lxq.faa", "lt.faa", "lt.map",
            "ltq.faa", "lnn.fna", "lnn.map", "lnnq.fna", "lnnq.faa", "lr.faa", "ls.faa", "lrq.faa", "lrqw.faa",
-           "pw.faa", "nw.fna", "pwq.faa", "pwq.fna", "pwk.faa", "lnq2.faa"}
+           "pw.faa", "nw.fna", "pwq.faa", "pwq.fna", "pwk.faa", "lnq2.faa", "x1.faa", "x1.map",
+           "xw.faa"}
 
 # An absolute path that is not a file: printed as it is, the same on every machine.
 MISSING = "/losat-idlist-fixture-missing/none.txt"
@@ -419,10 +436,11 @@ def ber_encode(node):
     return bytes([tag, 0x80 | width]) + len(value).to_bytes(width, "big") + value
 
 
-def drop_seqids(base: Path, lines, kind="p"):
+def drop_seqids(base: Path, lines, kind="p", titles=None):
     """Empties the Seq-id list (member `seqid`, [1]) of the definition lines `lines` ({oid: {line}},
     0-based) of the version 5 volume `base` (.phr, or .nhr with `kind` "n"), with the header offsets of
-    its index (.pin, .nin: the same layout up to them)."""
+    its index (.pin, .nin: the same layout up to them). `titles` ({oid: {line: None or b""}}) removes the
+    title (member `title`, [0]) of those lines or empties it."""
     pin = bytearray(base.with_suffix(f".{kind}in").read_bytes())
     phr = base.with_suffix(f".{kind}hr").read_bytes()
     at = 12  # version, sequence type, volume number
@@ -443,6 +461,10 @@ def drop_seqids(base: Path, lines, kind="p"):
                 for i, member in enumerate(members):
                     if member[0] == 0xA1:
                         members[i] = (0xA1, [(member[1][0][0], [])])
+                title = (titles or {}).get(oid, {})
+                if line in title:
+                    members[:] = [member if member[0] != 0xA0 else (0xA0, [(member[1][0][0], title[line])])
+                                  for member in members if member[0] != 0xA0 or title[line] is not None]
             record = ber_encode(node)
         out += record
     starts.append(len(out))
@@ -497,7 +519,8 @@ def build_d1c1c(mk):
 
 
 def build_d1c1cb(ncbi: Path):
-    """The database of D1c-1c-b: lm (ln's lines without Seq-ids over a volume with SEG masks)."""
+    """The databases of D1c-1c-b: lm (ln's lines without Seq-ids over a volume with SEG masks), and x1, xw and pn
+    (PR 2b: lines without Seq-ids beside lines with them)."""
     lines = (OUT / "ln.faa").read_text().splitlines()
     (OUT / "lm.faa").write_text("\n".join(line if line.startswith(">") else "Q" * 30 + line[30:]
                                           for line in lines) + "\n")
@@ -507,6 +530,62 @@ def build_d1c1cb(ncbi: Path):
          "-parse_seqids", "-taxid_map", "ln.map", "-mask_data", "lm.asnb"])
     drop_seqids(OUT / "lm", {1: {1}, 2: {0}, 3: {0}})
     for name in ("lm.faa", "lm.asnb"):
+        (OUT / name).unlink()
+    build_x1(ncbi)
+    build_xw(ncbi)
+    build_pn(ncbi)
+
+
+def write_queries(source: str, names: dict[str, list[int]]):
+    """Query files of the records of `source`: each name gets the records of its indices (0-based), named
+    `x<index>` (an x1 or xw record) or `q<index>` (an ln record)."""
+    text = (OUT / source).read_text()
+    records = [record.split("\n", 1)[1] for record in text.split(">")[1:]]
+    tag = "q" if source.startswith("ln") else "x"
+    for name, indices in names.items():
+        (OUT / name).write_text("".join(f">{tag}{i}\n{records[i]}" for i in indices))
+
+
+def build_x1(ncbi: Path):
+    """The database x1 of D1c-1c-b PR 2b and its queries."""
+    run([str(ncbi / "makeblastdb"), "-in", "x1.faa", "-dbtype", "prot", "-out", "x1", "-title", "x1",
+         "-parse_seqids", "-taxid_map", "x1.map"])
+    drop_seqids(OUT / "x1", {1: {1}, 2: {2}, 3: {0}, 4: {1}, 5: {0, 1}, 6: {1}},
+                titles={3: {0: None}, 4: {1: None}, 6: {1: b""}})
+    write_queries("x1.faa", {**{f"x1q{i}.faa": [i] for i in range(7)}, "x1q01.faa": [0, 1]})
+
+
+def build_xw(ncbi: Path):
+    """The database xw of D1c-1c-b PR 2b (the 4096-byte limit of the description's walk) and its queries."""
+    run([str(ncbi / "makeblastdb"), "-in", "xw.faa", "-dbtype", "prot", "-out", "xw", "-title", "xw",
+         "-parse_seqids"])
+    drop_seqids(OUT / "xw", {0: {2}, 1: {2}})
+    write_queries("xw.faa", {"xwq0.faa": [0], "xwq1.faa": [1]})
+
+
+def build_pn(ncbi: Path):
+    """The database pn of D1c-1c-b PR 2b (ln's lines without Seq-ids in a nucleotide database) and its queries."""
+    back_translate(OUT / "ln.faa", OUT / "pn.fna")
+    run([str(ncbi / "makeblastdb"), "-in", "pn.fna", "-dbtype", "nucl", "-out", "pn", "-title", "pn",
+         "-parse_seqids", "-taxid_map", "ln.map"])
+    drop_seqids(OUT / "pn", {1: {1}, 2: {0}, 3: {0}}, "n")
+    (OUT / "pn.fna").unlink()
+    write_queries("ln.faa", {"lnq0.faa": [0], "lnq1.faa": [1], "lnq3.faa": [3]})
+    for name in ("lnq0", "lnq1", "lnq3"):
+        back_translate(OUT / f"{name}.faa", OUT / f"{name}.fna")
+    write_edited_queries()
+
+
+def write_edited_queries():
+    """The queries q0 and q1 of ln.faa with one letter put after the 20th of a query's line (`build_pn`)."""
+    write_queries("ln.faa", {"lnq01.faa": [0, 1]})
+    back_translate(OUT / "lnq01.faa", OUT / "lnq01.fna")
+    for source, name, query, letter in (("lnq01.faa", "lnqw.faa", 1, "1"), ("lnq01.fna", "lnqw.fna", 1, "1"),
+                                        ("lnq01.faa", "lnqo0.faa", 0, "O"), ("lnq01.faa", "lnqo1.faa", 1, "O")):
+        lines = (OUT / source).read_text().splitlines()
+        lines[2 * query + 1] = lines[2 * query + 1][:20] + letter + lines[2 * query + 1][20:]
+        (OUT / name).write_text("\n".join(lines) + "\n")
+    for name in ("lnq01.faa", "lnq01.fna"):
         (OUT / name).unlink()
 
 

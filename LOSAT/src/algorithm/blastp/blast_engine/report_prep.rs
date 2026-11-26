@@ -1483,11 +1483,6 @@ pub(super) fn report_values(
         && requested_formats
             .first()
             .is_some_and(|outfmt| !outfmt.reads_subjects());
-    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:673-678
-    // NCBI's prefetch reads the subject of every Seq-align of a batch's results, which are
-    // psiblast's before its formatter's cut: the subjects of the traceback hit lists, also those
-    // beyond `max_target_seqs` that no report shows. Their ranks, by query, for the prefetch
-    // (`ListedTitles::prefetched_ranks`).
     // For psiblast and rpsblast (`prunes_after_traceback`), Seq-aligns read every subject of the
     // traceback hit lists before `PruneSeqalign` cuts them to `-max_target_seqs`: note the first
     // subject rank with a replaced title byte per query before the cut (empty when no reader met
@@ -1504,6 +1499,11 @@ pub(super) fn report_values(
         }
         _ => Vec::new(),
     };
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:673-678
+    // NCBI's prefetch reads the subject of every Seq-align of a batch's results, which are
+    // psiblast's before its formatter's cut: the subjects of the traceback hit lists, also those
+    // beyond `max_target_seqs` that no report shows. Their ranks, by query, for the prefetch
+    // (`ListedTitles::prefetched_ranks`).
     let psiblast_prefetched: Option<Vec<Vec<usize>>> =
         (args.app.prunes_after_traceback() && batches_prefetch).then(|| {
             hit_lists

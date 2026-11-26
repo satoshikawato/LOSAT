@@ -26,7 +26,10 @@ LOSAT is written in pure Rust. Searching and building databases need nothing els
 | Databases and masks | [`segmasker`](programs/segmasker.md) | Finds low-complexity regions in protein sequences. |
 | Databases and masks | [`convert2blastmask`](programs/convert2blastmask.md) | Turns lower-case masking in FASTA into masking information for `makeblastdb`. |
 | Databases and masks | [`makembindex`](programs/makembindex.md) | Builds the MegaBLAST index of a nucleotide database. |
-| Databases and masks | [`makeprofiledb`](programs/makeprofiledb.md) | Builds a profile database for `rpsblast` and `rpstblastn` (such as CDD) from PSSM files. |
+| Databases and masks | [`makeprofiledb`](programs/makeprofiledb.md) | Builds a profile database for `rpsblast`, `rpstblastn` and DELTA-BLAST (such as CDD) from PSSM files (`-dbtype rps` and `-dbtype delta`). |
+| Databases and masks | [`blastdb_aliastool`](programs/blastdb_aliastool.md) | Makes alias files that combine databases or keep a list of their sequences; converts GI and sequence id lists to binary lists. |
+| Databases and masks | [`blastdbcheck`](programs/blastdbcheck.md) | Checks BLAST databases for damage: files, sequences, ISAM indexes, alias files, taxonomy ids. |
+| Databases and masks | [`cleanup-blastdb-volumes.py`](programs/cleanup-blastdb-volumes.md) | Removes orphaned BLAST database volume files not listed in a database's `.pal` or `.nal` alias file. |
 | Archives | [`blast_formatter`](programs/blast_formatter.md) | Writes the reports of a search again from its `-outfmt 11` BLAST archive, without searching again. |
 | Domain annotation | [`rpsbproc`](programs/rpsbproc.md) | Annotates conserved domains, sites and motifs from the `-outfmt 11` results of `rpsblast` and `rpstblastn` (see its page). |
 
@@ -44,14 +47,14 @@ The Rust library (`losat::api`) is the same crate, and the Python binding `pylos
 
 These are on the list for a later release:
 
-- the program `deltablast`, and `makeprofiledb -binary`, `-dbtype delta` and `-dbtype cobalt`;
+- the program `deltablast`, and `makeprofiledb -dbtype cobalt`;
+- `blast_formatter` output formats other than `8`, `9` and `12`, and archives in ASN.1 binary or XML;
 - `psiblast -phi_pattern`;
-- the `psiblast` output formats `1` to `4`, `12` to `16` and `18`, and the `tblastn -in_pssm` ones `12` to `16` and `18`;
-- `-html` in `psiblast`, `rpsblast` and `rpstblastn`.
+- the `psiblast` output formats `13` to `16`.
 
-LOSAT does not provide these NCBI programs: `blastdb_aliastool`, `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `blastdbcheck`, `legacy_blast.pl`, `update_blastdb.pl`, `get_species_taxids.sh` and `cleanup-blastdb-volumes.py`.
+LOSAT does not provide these NCBI programs: `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `legacy_blast.pl`, `update_blastdb.pl` and `get_species_taxids.sh`.
 
-Options that need NCBI's servers or its GI and IPG databases are not available: `-remote` and `-entrez_query` (all programs), `-gilist` and `-negative_gilist`, `-ipglist` and `-negative_ipglist`. `-import_search_strategy` runs in `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`; `psiblast`, `rpsblast` and `rpstblastn` refuse it.
+Options that need NCBI's servers are not available: `-remote` and `-entrez_query` (all programs). `-import_search_strategy` runs in `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`; `psiblast`, `rpsblast` and `rpstblastn` refuse it.
 
 ## How this manual is organised
 

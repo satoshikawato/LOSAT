@@ -238,6 +238,9 @@ pub const ENTREZ_QUERY: Field = Field::new("EntrezQuery", T::String);
 pub const FINAL_DB_SEQ: Field = Field::new("FinalDbSeq", T::Integer);
 pub const FIRST_DB_SEQ: Field = Field::new("FirstDbSeq", T::Integer);
 pub const GI_LIST: Field = Field::new("GiList", T::IntegerList);
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:444-456
+/// `GiList` written under `NCBI_STRICT_GI` as `big-integer-list` (`Int8` GIs).
+pub const GI_LIST_INT8: Field = Field::new("GiList", T::BigIntegerList);
 pub const DB_FILTERING_ALGORITHM_ID: Field = Field::new("DbFilteringAlgorithmId", T::Integer);
 pub const DB_FILTERING_ALGORITHM_KEY: Field = Field::new("DbFilteringAlgorithmKey", T::String);
 pub const SUBJECT_MASKING_TYPE: Field = Field::new("SubjectMaskingType", T::Integer);
@@ -245,6 +248,9 @@ pub const HSP_RANGE_MAX: Field = Field::new("HspRangeMax", T::Integer);
 pub const L_CASE_MASK: Field = Field::new("LCaseMask", T::QueryMask);
 pub const MATRIX_TABLE: Field = Field::new("MatrixTable", T::Matrix);
 pub const NEGATIVE_GI_LIST: Field = Field::new("NegativeGiList", T::IntegerList);
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/search_strategy.cpp:472-484
+/// `NegativeGiList` written under `NCBI_STRICT_GI` as `big-integer-list` (`Int8` GIs).
+pub const NEGATIVE_GI_LIST_INT8: Field = Field::new("NegativeGiList", T::BigIntegerList);
 pub const REQUIRED_END: Field = Field::new("RequiredEnd", T::Integer);
 pub const REQUIRED_START: Field = Field::new("RequiredStart", T::Integer);
 pub const TAXID_LIST: Field = Field::new("TaxidList", T::IntegerList);

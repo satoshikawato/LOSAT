@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{Seek, Write};
 
 use crate::ncbi_exception::{NcbiException, ThrowSite};
-use crate::report::db_subject::bioseq_facts;
+use crate::report::defline::bioseq_facts;
 use crate::report::defline::generate_bioseq_defline;
 use crate::report::serial::asn_types::view::V;
 use crate::seqid::label::{bioseq_fasta, fasta};

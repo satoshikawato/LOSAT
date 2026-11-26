@@ -117,7 +117,7 @@ fn erfc_ncbi(z: f64) -> f64 {
         return 2.0;
     }
     // Memo (was LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
-    // BLAST_SpougeEtoS (blast_stat.c:5236-5282) asks for the same arguments again
+    // BLAST_SpougeEtoS (blast_stat.c:5236-5269) asks for the same arguments again
     // for every subject of the same length; keep the last results per thread.
     // Boost (NCBI 598d8ae6 copy): c++/src/algo/blast/core/boost_erf.c:252-255
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5216-5216,5223-5223,5248-5254
@@ -494,6 +494,20 @@ pub fn blast_spouge_stoe(
     query_length: i32,
     subject_length: i32,
 ) -> f64 {
+    spouge_stoe_at(f64::from(score), kbp, gbp, query_length, subject_length)
+}
+
+/// `blast_spouge_stoe` at the score `y`, the double that NCBI's function makes of its `Int4` score:
+/// `blast_spouge_etos` reads it also at the scores past `Int4` of its widened search.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5176-5231
+#[inline]
+fn spouge_stoe_at(
+    y: f64,
+    kbp: &KarlinParams,
+    gbp: &BlastGumbelBlk,
+    query_length: i32,
+    subject_length: i32,
+) -> f64 {
     let scale_factor = kbp.lambda / gbp.lambda;
     let db_scale_factor = if gbp.db_length != 0 {
         (gbp.db_length as f64) / (subject_length as f64)
@@ -511,7 +525,6 @@ pub fn blast_spouge_stoe(
     let tau_hat = gbp.tau;
 
     let const_val = 0.398_942_280_401_432_7_f64;
-    let y = score as f64;
     let m = query_length as f64;
     let n = subject_length as f64;
 
@@ -534,7 +547,18 @@ pub fn blast_spouge_stoe(
     area * k * (-lambda * y).glibc_exp() * db_scale_factor
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5263
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5236-5269
+// The score of the e-value `evalue`, the hit-saving cutoff: NCBI's search, from NCBI's first upper
+// bound (its cast of the double, `ncbi_int4_from_double`: `INT_MIN` past `Int4`, then 2), with the
+// doubling of the upper bound (`b *= 2`) and the bisection's sum (`a + b`) in 64 bits where NCBI's
+// `Int4` arithmetic overflows (signed overflow, undefined behaviour: NCBI BLAST+ 2.17.0 never ends
+// there or goes on with a wrapped cutoff; PD-LOSAT-NCBI-DEFECTS approved exception 31, the Owner's
+// answer Q-PS7c-SPOUGE=B of 2026-11-24). A search inside `Int4` takes NCBI's steps and gives NCBI's
+// score. The lower bound `a` is a score whose e-value is above `evalue`, and no step lowers it:
+// once it passes 2^31 - 1 the cutoff is above every `Int4` score and the search ends with
+// `i32::MAX`, the cutoff of NCBI's context that saves nothing (blast_parameters.c:920). So the
+// doubling runs at most 31 times and the bisection at most 33 for every Lambda (also a negative
+// one, whose e-value grows with the score and so stays above `evalue`).
 pub fn blast_spouge_etos(
     evalue: f64,
     kbp: &KarlinParams,
@@ -542,24 +566,33 @@ pub fn blast_spouge_etos(
     query_length: i32,
     subject_length: i32,
 ) -> i32 {
-    let mut a = 0i32;
+    let stoe = |score: i64| {
+        // A score of the search is below 2^33, where a double holds every integer.
+        spouge_stoe_at(score as f64, kbp, gbp, query_length, subject_length)
+    };
+    let mut a = 0i64;
     let db_scale_factor = if gbp.db_length != 0 {
         gbp.db_length as f64
     } else {
         1.0
     };
     let e0 = evalue.max(f64::MIN_POSITIVE);
-    let mut b = ((db_scale_factor / e0).glibc_ln() / kbp.lambda) as i32;
-    if b < 2 {
-        b = 2;
-    }
+    let mut b = i64::from(
+        crate::core::blast_util::ncbi_int4_from_double(
+            (db_scale_factor / e0).glibc_ln() / kbp.lambda,
+        )
+        .max(2),
+    );
 
-    let mut e = blast_spouge_stoe(b, kbp, gbp, query_length, subject_length);
+    let mut e = stoe(b);
     if e > e0 {
         while e > e0 {
             a = b;
+            if a > i64::from(i32::MAX) {
+                return i32::MAX;
+            }
             b *= 2;
-            e = blast_spouge_stoe(b, kbp, gbp, query_length, subject_length);
+            e = stoe(b);
         }
     } else {
         a = 0;
@@ -567,7 +600,7 @@ pub fn blast_spouge_etos(
 
     while b - a > 1 {
         let c = (a + b) / 2;
-        e = blast_spouge_stoe(c, kbp, gbp, query_length, subject_length);
+        e = stoe(c);
         if e > e0 {
             a = c;
         } else {
@@ -575,7 +608,7 @@ pub fn blast_spouge_etos(
         }
     }
 
-    a
+    i32::try_from(a).unwrap_or(i32::MAX)
 }
 
 #[cfg(test)]

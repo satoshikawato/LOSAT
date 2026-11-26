@@ -84,8 +84,9 @@ def _literal(text: bytes, i: int, expected: bytes) -> int | None:
     return i + len(expected) if text.startswith(expected, i) else None
 
 
-def _tag(text: bytes, i: int) -> int | None:
-    """The end of `(<class>::<code>) ` at `i` and of the function after it (`<function>() - `)."""
+def _tag(text: bytes, i: int) -> tuple[int, bytes] | None:
+    """The end of `(<class>::<code>) ` at `i` and of the function after it (`<function>() - `),
+    with `<code>` (`wording::tag`)."""
     j = _literal(text, i, b"(")
     if j is None:
         return None
@@ -98,24 +99,38 @@ def _tag(text: bytes, i: int) -> int | None:
     k = _literal(text, k, b"::")
     if k is None:
         return None
+    code_start = k
     close = [p for p in (text.find(b")", k), text.find(b"\n", k)) if p >= 0]
     if not close:
         return None
-    k = _literal(text, min(close), b") ")
+    code_end = min(close)
+    code = text[code_start:code_end]
+    k = _literal(text, code_end, b")")
     if k is None:
         return None
+    if k == len(text) or text[k : k + 1] == b"\n":
+        return k, code
+    if text[k : k + 1] != b" ":
+        return None
+    k += 1
     f = k
     while f < len(text) and (text[f : f + 1].isalnum() and text[f] < 128 or text[f : f + 1] in (b"_", b":", b"~")):
         f += 1
     if f > k:
+        if text[k:f].endswith(b"::operator") and text.startswith(b"()", f):
+            f += 2
         end = _literal(text, f, b"() - ")
         if end is not None:
             k = end
-    return k
+        else:
+            end = _literal(text, f, b"() -")
+            if end is not None and (end == len(text) or text[end : end + 1] == b"\n"):
+                k = end
+    return k, code
 
 
-def _place(text: bytes, i: int) -> int | None:
-    """The end of `T<thread> "<file>", line <n>: <severity>: ` at `i` and of its tag."""
+def _place(text: bytes, i: int) -> tuple[int, bytes] | None:
+    """The end of `T<thread> "<file>", line <n>: <severity>: ` at `i` and of its tag, with `<code>`."""
     j = _digits(text, i + 1)
     j = j and _literal(text, j, b' "')
     if j is None:
@@ -135,6 +150,22 @@ def _place(text: bytes, i: int) -> int | None:
         return None
     j = _literal(text, w, b": ")
     return None if j is None else _tag(text, j)
+
+
+def _keep_code_if_empty(out: bytearray, text: bytes, i: int, code: bytes) -> int:
+    """`wording::keep_code_if_empty`: keep `code` when the message body after a removed tag or place
+    is empty on its line, and return the new index."""
+    j = i
+    while j < len(text) and text[j : j + 1] == b" ":
+        j += 1
+    next_place = text.startswith(b"T", j) and _place(text, j) is not None
+    if j == len(text) or text[j : j + 1] == b"\n" or next_place:
+        if code:
+            out += code
+            if next_place:
+                out += b" "
+        return j
+    return i
 
 
 def _glue(out: bytearray) -> None:
@@ -202,6 +233,20 @@ def _xmlhelp_version(out: bytearray, text: bytes, i: int) -> int | None:
     return m.end() if m else None
 
 
+_BAD_CHAR_LINE = re.compile(rb"Bad char \[0x([0-9A-F]{1,2})\] in string at (?:line|byte) [0-9]+[\n ]")
+
+
+def _quoted_piece(text: bytes, i: int) -> int | None:
+    """The end of a byte post's line and of the piece it quotes at `i`, when the piece (up to the next
+    line end) holds the byte (`wording::quoted_piece`), or None."""
+    m = _BAD_CHAR_LINE.match(text, i)
+    if not m:
+        return None
+    end = text.find(b"\n", m.end())
+    end = len(text) if end < 0 else end
+    return end if int(m.group(1), 16) in text[m.end():end] else None
+
+
 def losat_bytes(text: bytes) -> bytes:
     """LOSAT's text of NCBI's `text` (`wording::losat_bytes`)."""
     needles = (NCBI_USER_MANUAL_FOOTER, _HEADER, _NCBI_POSITION, b"::", NCBI_VERSION, b" error:", _RPSBPROC_TITLE,
@@ -211,6 +256,13 @@ def losat_bytes(text: bytes) -> bytes:
     out = bytearray()
     i = 0
     while i < len(text):
+        if text.startswith(b"B", i) and (not out or out[-1:] in (b"\n", b" ")):
+            # The piece that a byte's post quotes (the input's bytes) is copied as it is.
+            end = _quoted_piece(text, i)
+            if end is not None:
+                out += text[i:end]
+                i = end
+                continue
         if text.startswith(NCBI_VERSION, i) and out.endswith(bytes([_BER_VISIBLE_STRING, len(NCBI_VERSION)])):
             out[-1] = len(LOSAT_VERSION)
             out += LOSAT_VERSION
@@ -244,22 +296,25 @@ def losat_bytes(text: bytes) -> bytes:
             while j < len(text) and text[j] in b" \n":
                 j += 1
             if j > i + len(_HEADER):
-                end = _place(text, j) if text.startswith(b"T", j) else None
-                if end is not None:
+                found = _place(text, j) if text.startswith(b"T", j) else None
+                if found is not None:
+                    end, code = found
                     if out and out[-1:] not in (b" ", b"\n", b":"):
                         _glue(out)
-                    i = end
+                    i = _keep_code_if_empty(out, text, end, code)
                     continue
         if text.startswith(b"T", i) and out.endswith(b" "):
-            end = _place(text, i)
-            if end is not None:
-                i = end
+            found = _place(text, i)
+            if found is not None:
+                end, code = found
+                i = _keep_code_if_empty(out, text, end, code)
                 continue
         if text.startswith(b"(", i):
-            end = _tag(text, i)
-            if end is not None:
+            found = _tag(text, i)
+            if found is not None:
+                end, code = found
                 _glue(out)
-                i = end
+                i = _keep_code_if_empty(out, text, end, code)
                 continue
         if text.startswith(_NCBI_POSITION, i):
             out += _POSITION

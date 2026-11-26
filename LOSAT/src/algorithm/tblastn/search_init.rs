@@ -35,7 +35,7 @@ pub(super) struct Diagonals {
     window: i32,
 }
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:51-55
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
 /// The cells of a diagonal table: NCBI's `DiagStruct` in four bytes (`LOSAT_X_TBNDIAGPACK`: last_hit
 /// in bits 0-30, flag in bit 31, `x_tbn_hitbf::XDiagCell`), or the eight of `(last_hit, flag)`.
 #[derive(Debug, PartialEq)]
@@ -56,10 +56,15 @@ impl XDiagCells {
         matches!(self, Self::Packed(_))
     }
 
-    fn clear(&mut self) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:87-107
+    // `s_BlastDiagClear` sets every cell's `last_hit` to `-window` and clears `flag`. A packed
+    // table never runs a lead subject (its offsets and hits are non-negative), and for hits at
+    // subject offset 0 or more a cleared cell of 0 and one of `-window` give the same outcome:
+    // both lie at least a full window behind every hit when `offset == window`.
+    fn clear(&mut self, window: i32) {
         match self {
             Self::Packed(cells) => cells.fill(0),
-            Self::Pair(cells) => cells.fill((0, false)),
+            Self::Pair(cells) => cells.fill((-window, false)),
         }
     }
 }
@@ -119,13 +124,57 @@ impl Diagonals {
         }
     }
 
-    fn finish_frame(&mut self, subject_length: usize) {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:162-173
+    // `subject_length` is NCBI's Int4 chunk length (negative between overlapping hard masks).
+    fn finish_frame(&mut self, subject_length: i32) {
         if self.offset >= i32::MAX / 4 {
             self.offset = self.window;
-            self.entries.clear();
+            self.entries.clear(self.window);
         } else {
-            self.offset += subject_length as i32 + self.window;
+            self.offset = self
+                .offset
+                .wrapping_add(subject_length)
+                .wrapping_add(self.window);
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:40-66,87-107,131-144
+// Sets a lead subject's diagonal table (`Pair` cells) to NCBI's one-thread start offset and
+// unwritten-cell value (`TableStart::New`, series NP, M4b-T3).
+impl crate::algorithm::common::hard_chunk_walk::HardTable for Diagonals {
+    type Error = anyhow::Error;
+
+    fn ncbi_table(
+        &mut self,
+        start: crate::algorithm::common::hard_chunk_walk::NcbiStart,
+        window: i32,
+    ) {
+        debug_assert_eq!(window, self.window);
+        self.offset = start.offset;
+        match &mut self.entries {
+            XDiagCells::Pair(cells) => cells.fill((start.unwritten(self.window), false)),
+            XDiagCells::Packed(_) => {
+                debug_assert!(
+                    false,
+                    "packed diagonal table never runs a soft-mask lead or overlapping hard-mask subject"
+                );
+            }
+        }
+    }
+
+    fn clear_table(&mut self, window: i32) {
+        debug_assert_eq!(window, self.window);
+        self.offset = self.window;
+        self.entries.clear(self.window);
+    }
+
+    fn move_offset(&mut self, by: i32) -> anyhow::Result<()> {
+        self.offset = self
+            .offset
+            .checked_add(by)
+            .ok_or_else(|| anyhow::anyhow!("TBLASTN diagonal offset exceeds Int4"))?;
+        Ok(())
     }
 }
 
@@ -181,20 +230,46 @@ impl NegDiagonals {
         }
     }
 
-    /// The end of a WordFinder call over `subject_length` residues (`Blast_ExtendWordExit`): the
-    /// offset moves on by the length and the window, or, from a quarter of `INT4_MAX` on, back to the
-    /// window with every cell cleared to `-window` (`s_BlastDiagClear`).
-    pub(super) fn exit(&mut self, subject_length: usize) {
+    /// The end of a WordFinder call over `subject_length` residues (`Blast_ExtendWordExit`,
+    /// signed `Int4` as in NCBI, negative between overlapping hard masks): the offset moves on by
+    /// the length and the window, or, from a quarter of `INT4_MAX` on, back to the window with
+    /// every cell cleared to `-window` (`s_BlastDiagClear`).
+    pub(super) fn exit(&mut self, subject_length: i32) {
         if self.offset >= i64::from(i32::MAX / 4) {
             self.offset = i64::from(self.window);
             self.cells.fill(last_hit_31(-i64::from(self.window)));
         } else {
-            self.offset = self.offset.saturating_add(
-                i64::try_from(subject_length)
-                    .unwrap_or(i64::MAX)
-                    .saturating_add(i64::from(self.window)),
-            );
+            self.offset = self
+                .offset
+                .saturating_add(i64::from(subject_length).saturating_add(i64::from(self.window)));
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-518, 776-779
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:46-65
+/// TBLASTN's `(last_hit, flag)` diagonal ring as a
+/// [`DiagTable`](crate::algorithm::common::diag_entry::DiagTable) for
+/// `common::hard_chunk_scan::OneWord`.
+pub(super) struct TbnPairRing<'a> {
+    entries: &'a mut [(i32, bool)],
+    mask: i32,
+}
+
+impl crate::algorithm::common::diag_entry::DiagTable for TbnPairRing<'_> {
+    type Cell = (i32, bool);
+
+    #[inline(always)]
+    fn two_hit_entry(&mut self, q: i32, s: i32) -> (&mut (i32, bool), i32) {
+        (
+            &mut self.entries[(q.wrapping_sub(s) & self.mask) as usize],
+            0,
+        )
+    }
+
+    #[inline(always)]
+    fn one_hit_entry(&mut self, q: i32, s: i32) -> &mut (i32, bool) {
+        &mut self.entries[(s.wrapping_sub(q) & self.mask) as usize]
     }
 }
 
@@ -523,16 +598,41 @@ impl<'a> XTwoHit<'a> {
         )
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:608-609
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:614,807
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-172
     // The end of NCBI's WordFinder call for one (frame, chunk). Every entry the unit wrote holds
     // at most `offset + subject_length - 1`, so after the step each one lies more than a window
     // behind any hit of the next unit: its first hit on a diagonal only records `last_hit` and
     // clears `flag` (the tests of `pairs`), as on a table made afresh by `Diagonals::new`. The
     // next unit sees this instead of a new table.
-    /// End a unit of `subject_length` residues as NCBI does (the table is kept).
-    pub(super) fn exit(&mut self, subject_length: usize) {
+    /// End a unit of `subject_length` residues (NCBI's Int4, negative between overlapping hard
+    /// masks) as NCBI does (the table is kept).
+    pub(super) fn exit(&mut self, subject_length: i32) {
         self.diagonals.finish_frame(subject_length);
+    }
+
+    /// Current diagonal offset of the table (NCBI `diag_table->offset`).
+    pub(super) fn offset(&self) -> i32 {
+        self.diagonals.offset
+    }
+
+    /// Borrows the `(last_hit, flag)` diagonal ring with its current offset for `OneWord` (`None`
+    /// on a packed table).
+    pub(super) fn pair_ring(&mut self) -> Option<(TbnPairRing<'_>, i32)> {
+        let mask = self.diagonals.mask;
+        let offset = self.diagonals.offset;
+        match &mut self.diagonals.entries {
+            XDiagCells::Pair(entries) => Some((TbnPairRing { entries, mask }, offset)),
+            XDiagCells::Packed(_) => None,
+        }
+    }
+
+    /// Applies `start` to this word finder's diagonal table (`HardTable`, series NP, M4b-T3).
+    pub(super) fn apply_table_start(
+        &mut self,
+        start: crate::algorithm::common::hard_chunk_walk::TableStart,
+    ) -> anyhow::Result<()> {
+        start.apply(&mut self.diagonals, self.window)
     }
 
     /// No NCBI counterpart: hands the diagonal table back for `with_table`; it does not change
@@ -665,33 +765,35 @@ impl<'a> XTwoHit<'a> {
             let q = pair.q_off as i32;
             let s = pair.s_off as i32;
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-547
-            let index = ((q - s) & diagonals.mask) as usize;
+            let index = (q.wrapping_sub(s) & diagonals.mask) as usize;
             let cell = &mut cells[index];
             let (last_hit, flag) = cell.get();
             if flag {
-                if s + diagonals.offset < last_hit {
+                let s_diag = s.wrapping_add(diagonals.offset);
+                if s_diag < last_hit {
                     continue;
                 }
-                cell.set(s + diagonals.offset, false);
+                cell.set(s_diag, false);
                 continue;
             }
-            let previous = last_hit - diagonals.offset;
-            let diff = s - previous;
+            let previous = last_hit.wrapping_sub(diagonals.offset);
+            let diff = s.wrapping_sub(previous);
             if diff >= window {
-                cell.set_last_hit(s + diagonals.offset);
+                cell.set_last_hit(s.wrapping_add(diagonals.offset));
                 continue;
             }
             if diff < word_size_i32 {
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560-579:
+            // Unsigned comparison matches NCBI's Uint4 query offset check when diff exceeds q.
             let context = self.context_offsets.partition_point(|&offset| offset <= q) - 1;
-            if q - diff < self.context_offsets[context] {
-                cell.set_last_hit(s + diagonals.offset);
+            if (q.wrapping_sub(diff) as u32) < self.context_offsets[context] as u32 {
+                cell.set_last_hit(s.wrapping_add(diagonals.offset));
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:570-583,1089-1155:
-            let s_left_off = previous + word_size_i32;
+            let s_left_off = previous.wrapping_add(word_size_i32);
             let reference = || {
                 extend_two_hit(
                     self.matrix,
@@ -704,15 +806,14 @@ impl<'a> XTwoHit<'a> {
                     word_size,
                 )
             };
-            // A first hit before the chunk (masks stored out of order): the extension on the
-            // letters around the chunk. A word past the chunk's last letter of a first range raised
-            // to one word at its left (aa_ungapped.c:495-500) is never extended: it is the unit's
-            // first word scanned, so it starts its diagonal, and every later word of the unit
-            // starts at least a word before the chunk's end
-            // (`tblastx::blast_engine::word_finder::two_hit_one_hit` gives the reasons).
+            // Only a second hit before the chunk (`s` negative, masks stored out of order with
+            // `-db_soft_mask`) needs the letters around the chunk (`x_two_hit_around`). When `s`
+            // is inside the chunk and `s_left_off` is negative (also reached after overlapping
+            // hard masks where `x_around` is none), `extend_two_hit` and the fast walks handle
+            // negative `s_left_off` directly on `subject_sequence`.
             // EXPERIMENT (LOSAT_X_TBNUNGAP): the byte-table walks (`x_tbn_ungap`); `None` = an
             // extension outside the table's range, which runs the reference.
-            let result = if s_left_off < 0 {
+            let result = if s < 0 {
                 self.x_two_hit_around(walks, s_left_off, s, q, self.x_dropoffs[context])
             } else if self.x_ungap_fast {
                 walks
@@ -748,11 +849,14 @@ impl<'a> XTwoHit<'a> {
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-607
             if result.right_extend {
                 cell.set(
-                    result.s_last_off - (word_size_i32 - 1) + diagonals.offset,
+                    result
+                        .s_last_off
+                        .wrapping_sub(word_size_i32 - 1)
+                        .wrapping_add(diagonals.offset),
                     true,
                 );
             } else {
-                cell.set_last_hit(s + diagonals.offset);
+                cell.set_last_hit(s.wrapping_add(diagonals.offset));
             }
         }
     }
@@ -1136,7 +1240,12 @@ impl<'a> XTwoHit<'a> {
                     score: result.ungapped_data.score,
                 });
             }
-            cell.set_last_hit(result.s_last_off - (word_size_i32 - 1) + diagonals.offset);
+            cell.set_last_hit(
+                result
+                    .s_last_off
+                    .wrapping_sub(word_size_i32 - 1)
+                    .wrapping_add(diagonals.offset),
+            );
         }
         Ok(())
     }

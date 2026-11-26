@@ -1,0 +1,19 @@
+Seq-entry ::= set {
+  seq-set {
+    seq {
+      id { local str "sd_iupac" },
+      descr { title "iupacna" },
+      inst { repr raw, mol dna, length 8, seq-data iupacna "ACGTMRWS" }
+    },
+    seq {
+      id { local str "sd_2na" },
+      descr { title "ncbi2na" },
+      inst { repr raw, mol dna, length 8, seq-data ncbi2na '1BE4'H }
+    },
+    seq {
+      id { local str "sd_4na" },
+      descr { title "ncbi4na" },
+      inst { repr raw, mol dna, length 8, seq-data ncbi4na '1248F5A3'H }
+    }
+  }
+}

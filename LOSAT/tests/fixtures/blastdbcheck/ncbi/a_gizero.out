@@ -1,0 +1,19 @@
+Writing messages to <stdout> at verbosity (Detailed)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+Testing every 100-th OID.
+
+Testing 1 volume(s).
+ <RUN>/cases/a/p5
+ Result=SUCCESS. No errors reported for 1 volume(s).
+Testing 1 alias(es).
+ <RUN>/cases/a/gizero.pal
+  <RUN>/cases/a/gizero.pal / AliasFileTest:   [ERROR] file zero.gil referenced in keyword GILIST has zero length
+  <RUN>/cases/a/gizero.pal / AliasFileTest:   [ERROR] caught exception in initializing blastdb
+  <RUN>/cases/a/gizero.pal / AliasFileTest: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objtools/blast/seqdb_reader/seqdbcommon.cpp", line 864: Error: (CSeqDBException::eInvalid) BLASTDB::ncbi::s_SeqDB_IsBinaryNumericList() - Specified file is empty.
+
+ Result=FAILURE. 1 errors reported in 1 alias(es).
+
+Total errors: 2

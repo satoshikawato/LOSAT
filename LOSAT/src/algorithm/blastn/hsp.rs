@@ -174,13 +174,12 @@ impl BlastnOutputFormat {
     }
 
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
-    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6, 7 and 17; with
-    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as
-    /// the call's first report, the taxonomy database's messages of that prefetch go with the
-    /// query warnings.
+    /// reports (outfmt 0 to 7 and 13 to 18, 10 and 20 as 6 and 7; with
+    /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, `database::prefetches_subjects`): as the
+    /// call's first report, the posts of that prefetch go with the query warnings.
     pub(crate) fn prefetches_subjects(self) -> bool {
-        // The archive fetches nothing; XML2 and JSON write the messages at each `Hit`
-        // (`TaxdbPrinter`).
+        // The archive fetches nothing; the XML2 and JSON `Hit`s write only the texts of their own
+        // lookups (`database::RowLookups::Taxids`).
         crate::algorithm::common::database::prefetches_subjects(Some(self.prefetch_format()))
     }
 
@@ -974,7 +973,7 @@ impl<L: HitListEntry> HitList<L> {
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108
 #[allow(clippy::too_many_arguments)]
-pub fn write_output_blastn_hitlists_to_writer<W: Write>(
+pub fn write_output_blastn_hitlists_to_writer<W: crate::report::ostream::ReportWrite>(
     hit_lists: &[Option<BlastnHitList>],
     writer: &mut W,
     query_ids: &[Arc<[u8]>],
@@ -987,6 +986,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
+    left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
 ) -> io::Result<()> {
     let config = OutputConfig::ncbi_compat();
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411
@@ -1005,7 +1005,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
             Some(warnings) => warnings.subject_read(q_idx, s_idx, writer),
             None => Ok(()),
         };
-        write_query_rows(
+        let written = write_query_rows(
             writer,
             q_idx,
             hit_list_opt.as_ref(),
@@ -1020,7 +1020,22 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
             &mut hsp_index,
             probe.as_deref_mut(),
             &mut read,
-        )?;
+            left_of_record,
+        );
+        if let Err(error) = written {
+            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:124-127
+            // `~CBlastTabularInfo()` flushes the stream as the exception unwinds out of
+            // `CBlastFormat::PrintOneResultSet`, and no later subject is read.
+            if crate::ncbi_exception::NcbiException::of_io_error(&error).is_some() {
+                writer.ncbi_flush()?;
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    warnings.end_run();
+                }
+            }
+            return Err(error);
+        }
+        // `~CBlastTabularInfo` of the query's report flushes the stream.
+        writer.ncbi_flush()?;
     }
     write_tabular_epilog(writer, output_format, epilog)
 }
@@ -1048,6 +1063,7 @@ pub(crate) fn write_query_rows<W: Write>(
     hsp_index: &mut HspIndex,
     mut probe: Option<&mut FormatProbe<'_>>,
     read: crate::report::query_warnings::SubjectReadHook<'_, W>,
+    left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
 ) -> io::Result<()> {
     write_query_header(
         writer,
@@ -1109,6 +1125,7 @@ pub(crate) fn write_query_rows<W: Write>(
             config,
             hsp_index,
             probe.as_deref_mut(),
+            left_of_record,
         )?;
     }
     Ok(())
@@ -1152,8 +1169,19 @@ pub(crate) fn write_hsp_rows<W: Write>(
     config: &OutputConfig,
     hsp_index: &mut HspIndex,
     mut probe: Option<&mut FormatProbe<'_>>,
+    left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
 ) -> io::Result<()> {
     for hsp in hsps {
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:900-1060
+        // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:753-755
+        // Default `std` tabular fields include `pident`/`length`/`mismatch`/`gapopen`, so a `-db`
+        // HSP starting left of its query record throws `CAlnVec::x_GetSeqRightSeg()` here after
+        // earlier rows have been written.
+        if let Some((placements, ungapped)) = left_of_record {
+            if hsp.starts_left_of_record(placements.offset(hsp.q_idx as usize), ungapped) {
+                return Err(super::left_of_query::alnmap_empty_query_row(false).into_io_error());
+            }
+        }
         let query_id = query_ids
             .get(hsp.q_idx as usize)
             .map(|id| id.as_ref())
@@ -1229,7 +1257,7 @@ pub(crate) fn write_hsp_rows<W: Write>(
 }
 
 /// The line after the last query's lines (outfmt 7's count of queries, when `epilog`).
-pub(crate) fn write_tabular_epilog<W: Write>(
+pub(crate) fn write_tabular_epilog<W: crate::report::ostream::ReportWrite + ?Sized>(
     writer: &mut W,
     output_format: BlastnOutputFormat,
     epilog: Option<usize>,
@@ -1241,6 +1269,8 @@ pub(crate) fn write_tabular_epilog<W: Write>(
     if let (BlastnOutputFormat::TabularWithComments, Some(num_queries)) = (output_format, epilog) {
         // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1324
         writeln!(writer, "# BLAST processed {} queries", num_queries)?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
 
     Ok(())

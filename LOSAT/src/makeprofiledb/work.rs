@@ -1,34 +1,45 @@
 //! makeprofiledb's `Init` (`x_InitProgramParameters`), `Run` (`x_Run`, `x_MakeVol`, the alias
-//! file of several volumes) and the clean-up of its destructor, for `-dbtype rps`.
+//! file of several volumes) and the clean-up of its destructor, for `-dbtype rps` and
+//! `-dbtype delta`.
 
 use std::io::{Read, Write};
 use std::path::Path;
 
-use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::blastinput::ncbi_environment::{ApplicationSettings, ReadVerification};
 use crate::ncbi_app::args::Args;
 use crate::ncbi_app::files::{self, Cin, OutputFile};
 use crate::ncbi_app::Diag;
-use crate::report::run_files::OpenedFile;
 use crate::report::serial::asn_types::{Post, ReadError};
 use crate::report::serial::pssm::{PssmWithParameters, SeqData, SeqEntry};
 use crate::seqid::{BlastDefline, DeflineSet};
-use crate::utils::os_bytes::path_from_bytes;
+use crate::utils::os_bytes::{path_from_bytes, path_of_bytes};
+use crate::writedb::alias_file::{self, AliasError, FilterType, CLOCK_ERROR};
 use crate::writedb::bioseq::{self, Bioseq, ParsedIds};
 use crate::writedb::build_db::{create_directories, delete_blast_db};
-use crate::writedb::convert::{short_nucleotide_data, ShortNucleotideData};
+use crate::writedb::convert::{iupacna_high_byte, short_nucleotide_data, ShortNucleotideData};
 use crate::writedb::deflines::{bioseq_deflines, first_org_taxid, BioseqDeflinesError};
 use crate::writedb::files::{make_short_name, DbVersion};
+use crate::writedb::ofstream::OfStream;
 use crate::writedb::taxid_set::{TaxIdMapError, TaxIdSet};
 use crate::writedb::time::LocalTime;
 use crate::writedb::volume::Indices;
 use crate::writedb::writer::WriteDb;
 use crate::writedb::{Platform, WriteDbError};
 
+use super::delta::{self, DeltaCheck, DeltaError, DeltaVolume};
 use super::profile::{
     check_input_scoremat, fill_in_rps_db_parameters, query_length, update_rps_db_info,
     update_statistics, ProfileError, Scoremat,
 };
 use super::rps_files::{self, ProfileData, RpsError, RpsVolume, VolumeParams};
+
+/// Output database type built by makeprofiledb (`op_mode`).
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:187-193
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpMode {
+    Rps,
+    Delta,
+}
 
 /// The limit of each file of a volume's database (`SetMaxFileSize` of 4,000,000,000 bytes).
 const MAX_FILE_SIZE: u64 = 4_000_000_000;
@@ -105,6 +116,16 @@ impl From<ProfileError> for RunError {
     }
 }
 
+impl From<DeltaError> for RunError {
+    fn from(error: DeltaError) -> Self {
+        match error {
+            DeltaError::Input(message) => RunError::Input(message),
+            DeltaError::Exception(message) => RunError::Exception(message),
+            DeltaError::Rps(error) => error.into(),
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb.cpp:69-80 (the
 // exceptions of CWriteDB: `CWriteDBException`, a `CException`; `CSeqDBException` of LMDB)
 /// The writer's errors as makeprofiledb's handler reports them: its exceptions are
@@ -130,7 +151,9 @@ impl From<WriteDbError> for RunError {
             WriteDbError::CreationBytes(message) => RunError::Exception(message),
             WriteDbError::Exception(exception) => RunError::Exception(exception.get_msg().to_vec()),
             WriteDbError::Database(message) => RunError::SeqDb(message.into_bytes()),
-            WriteDbError::OutOfMemory | WriteDbError::InvalidArgument(_) => RunError::Unknown,
+            WriteDbError::OutOfMemory
+            | WriteDbError::InvalidArgument(_)
+            | WriteDbError::LengthError(_) => RunError::Unknown,
             WriteDbError::OrdinalIdWithoutIds => RunError::Refused(
                 "a query whose first definition line has no Seq-id, with -index false (NCBI's \
                  makeprofiledb writes its gnl|BL_ORD_ID id past the end of an empty list)"
@@ -142,6 +165,9 @@ impl From<WriteDbError> for RunError {
             WriteDbError::Io { path, source } => {
                 RunError::Failed(format!("{}: {source}", path.display()))
             }
+            // Only makeblastdb's log raises it (`writedb::build_db::endl`); makeprofiledb's
+            // writer never does.
+            WriteDbError::ClosedPipe => unreachable!("makeblastdb's closed log in makeprofiledb"),
         }
     }
 }
@@ -151,13 +177,19 @@ struct Params<'a> {
     /// The standard output (`cout`): the database writer's lines (`WriteDb::take_stdout`), and
     /// `m_LogFile` without a file of `-logfile`.
     stdout: &'a mut dyn Write,
-    /// `m_LogFile` when `-logfile` names a file (`None`: the standard output).
-    log_file: Option<OpenedFile>,
+    /// `m_LogFile` when `-logfile` names a file (`None`: the standard output), modelled with
+    /// NCBI's `std::ofstream` buffer (`OfStream`) so buffered exclusion lines and flushed lines
+    /// interact with `-logfile` diagnostics as in NCBI.
+    log_file: Option<OfStream>,
     /// The list of profile files (`m_InPssmList`), read whole.
     in_list: Vec<u8>,
-    title: String,
+    /// `-binary` (`m_binary_scoremat`): read profile files as ASN.1 binary (`MSerial_AsnBinary`).
+    binary: bool,
+    /// `-title` (its bytes; `-in` without it).
+    title: Vec<u8>,
     word_default_score_threshold: f64,
-    out_db_name: String,
+    out_db_name: Vec<u8>,
+    op_mode: OpMode,
     max_smp_files_per_vol: i32,
     create_index_file: bool,
     gap_open: i32,
@@ -165,17 +197,50 @@ struct Params<'a> {
     pssm_scale_factor: f64,
     matrix: String,
     use_model_threshold: bool,
+    obsr_threshold: f64,
+    exclude_invalid: bool,
     db_ver: DbVersion,
     taxids: TaxIdSet,
     user_taxids: bool,
+    /// The run's `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET`
+    /// (`ApplicationSettings::read_verification`), which the read of each profile checks
+    /// (`read_profile`).
+    read_verification: ReadVerification,
 }
 
 impl Params<'_> {
-    /// `m_LogFile`: the file of `-logfile`, or the standard output.
-    fn log(&mut self) -> &mut dyn Write {
+    /// Writes `line` followed by a newline and flushes `m_LogFile` (NCBI's `endl` stream manipulator).
+    fn log_line_flush(&mut self, line: &[u8]) {
         match &mut self.log_file {
-            Some(file) => file,
-            None => &mut *self.stdout,
+            Some(file) => {
+                file.insert(line);
+                file.endl();
+            }
+            None => {
+                let _ = self.stdout.write_all(line);
+                let _ = self.stdout.write_all(b"\n");
+                let _ = self.stdout.flush();
+            }
+        }
+    }
+
+    /// Writes `bytes` to `m_LogFile` without forcing a flush (as NCBI writes exclusion lines).
+    fn log_bytes(&mut self, bytes: &[u8]) {
+        match &mut self.log_file {
+            Some(file) => file.insert(bytes),
+            None => {
+                let _ = self.stdout.write_all(bytes);
+            }
+        }
+    }
+
+    /// Flushes `m_LogFile` at program end (matching `~CArgs` flushing `m_LogFile` after `Run`).
+    fn flush_log(&mut self) {
+        match &mut self.log_file {
+            Some(file) => file.flush(),
+            None => {
+                let _ = self.stdout.flush();
+            }
         }
     }
 }
@@ -196,7 +261,7 @@ fn init<'a>(
 ) -> Result<Params<'a>, InitEnd> {
     let log_file = if args.given("logfile") {
         match args.output_file("logfile", &mut *out) {
-            Ok(OutputFile::File(file)) => Some(file),
+            Ok(OutputFile::File(file)) => Some(OfStream::of_file(file)),
             Ok(OutputFile::Stdout(_)) => None,
             // LOSAT Web's refusal of a name that it does not write (`OpenFiles::create`), which
             // the files of the command line and the library never give.
@@ -207,7 +272,8 @@ fn init<'a>(
         None
     };
     let in_name = args
-        .as_string("in")
+        .os_value("in")
+        .ok_or_else(|| crate::ncbi_app::args::no_value("in"))
         .map_err(|error| diag.init_arg_exception(error))?;
     let mut in_file = files::open_input_file("in", in_name, input)
         .map_err(|error| diag.init_arg_exception(error))?;
@@ -217,20 +283,26 @@ fn init<'a>(
     let mut in_list = Vec::new();
     if let Err(error) = in_file.read_to_end(&mut in_list) {
         return Err(diag.refuse(&unsupported(&format!(
-            "an -in list that cannot be read (`{in_name}': {error}; NCBI's makeprofiledb reads \
-             it without end)"
+            "an -in list that cannot be read (`{}': {error}; NCBI's makeprofiledb reads it \
+             without end)",
+            in_name.to_string_lossy()
         ))));
     }
     drop(in_file);
-    let in_string = in_name.to_string();
+    let in_bytes = crate::utils::os_bytes::os_str_bytes(in_name);
+    let binary = args.flag("binary");
     let title = args
-        .value("title")
-        .map_or_else(|| in_string.clone(), str::to_string);
+        .bytes("title")
+        .map_or_else(|| in_bytes.to_vec(), std::borrow::Cow::into_owned);
     let word_default_score_threshold = args.double("threshold").expect("a default");
     let out_db_name = args
-        .value("out")
-        .map_or_else(|| in_string.clone(), str::to_string);
+        .bytes("out")
+        .map_or_else(|| in_bytes.to_vec(), std::borrow::Cow::into_owned);
     let max_smp_files_per_vol = args.integer("max_smp_vol").expect("a default");
+    let op_mode = match args.value("dbtype") {
+        Some("delta") => OpMode::Delta,
+        _ => OpMode::Rps,
+    };
     let create_index_file = args.boolean("index").expect("a default");
     let matrix = args.value("matrix").expect("a default").to_string();
     let (default_gap_open, default_gap_extend) =
@@ -239,6 +311,8 @@ fn init<'a>(
     let gap_open = args.integer("gapopen").unwrap_or(default_gap_open);
     let gap_extend = args.integer("gapextend").unwrap_or(default_gap_extend);
     let pssm_scale_factor = args.double("scale").expect("a default");
+    let obsr_threshold = args.double("obsr_threshold").expect("a default");
+    let exclude_invalid = args.boolean("exclude_invalid").expect("a default");
     let use_model_threshold = !args.flag("force");
     let db_ver = match args.integer("blastdb_version") {
         Some(4) => DbVersion::V4,
@@ -246,7 +320,7 @@ fn init<'a>(
     };
     let (taxids, user_taxids) = if let Some(taxid) = args.integer("taxid") {
         (TaxIdSet::with_global(taxid), true)
-    } else if let Some(name) = args.value("taxid_map") {
+    } else if let Some(name) = args.os_value("taxid_map") {
         let file = files::open_input_file("taxid_map", name, input)
             .map_err(|error| diag.init_arg_exception(error))?;
         let mut taxids = TaxIdSet::default();
@@ -270,8 +344,9 @@ fn init<'a>(
             }
             Err(TaxIdMapError::BlankLine(line)) => {
                 return Err(diag.refuse(&unsupported(&format!(
-                    "a -taxid_map line of white space only (line {line} of `{name}'; NCBI's \
-                     makeprofiledb crashes on it)"
+                    "a -taxid_map line of white space only (line {line} of `{}'; NCBI's \
+                     makeprofiledb crashes on it)",
+                    name.to_string_lossy()
                 ))))
             }
         }
@@ -283,9 +358,11 @@ fn init<'a>(
         stdout: out,
         log_file,
         in_list,
+        binary,
         title,
         word_default_score_threshold,
         out_db_name,
+        op_mode,
         max_smp_files_per_vol,
         create_index_file,
         gap_open,
@@ -293,9 +370,12 @@ fn init<'a>(
         pssm_scale_factor,
         matrix,
         use_model_threshold,
+        obsr_threshold,
+        exclude_invalid,
         db_ver,
         taxids,
         user_taxids,
+        read_verification: ReadVerification::default(),
     })
 }
 
@@ -310,7 +390,7 @@ fn post_seq_id_warning(diag: &mut Diag, warning: &crate::seqid::accguide::SeqIdW
 /// The state that makeprofiledb's destructor reads: the volumes made (`m_VolNames`), whether the
 /// build ended (`m_Done`) and the output's name.
 struct Built {
-    vol_names: Vec<String>,
+    vol_names: Vec<Vec<u8>>,
     done: bool,
 }
 
@@ -319,7 +399,7 @@ struct Built {
 /// its destructor; the exit status.
 pub(super) fn run(
     args: &Args,
-    _settings: &ApplicationSettings,
+    settings: &ApplicationSettings,
     input: &mut Cin<'_>,
     out: &mut dyn Write,
     diag: &mut Diag,
@@ -328,6 +408,7 @@ pub(super) fn run(
         Ok(params) => params,
         Err(status) => return status,
     };
+    params.read_verification = settings.read_verification.clone();
     if let Some(refusal) = refusal(args) {
         return diag.refuse(&refusal);
     }
@@ -335,12 +416,12 @@ pub(super) fn run(
         vol_names: Vec::new(),
         done: false,
     };
-    let status = match x_run(&mut params, &mut built, diag) {
+    let status = match x_run(&mut params, &mut built, settings, diag) {
         Ok(()) => 0,
         Err(error) => report(error, diag),
     };
-    let _ = params.log().flush();
-    destroy(&built, &params.out_db_name);
+    params.flush_log();
+    destroy(&built, &params.out_db_name, params.op_mode);
     status
 }
 
@@ -356,24 +437,20 @@ pub(super) fn dry_run(
 ) -> i32 {
     match init(args, input, out, diag) {
         Ok(mut params) => {
-            let _ = params.log().flush();
+            params.flush_log();
             0
         }
         Err(status) => status,
     }
 }
 
-/// LOSAT's refusals of a command line that NCBI's makeprofiledb reads: the binary profiles of
-/// `-binary` (their reader, row PS10b; its row of the refusals, `cli::run_refusal`) and the
-/// database types other than `rps` (row PS14).
+/// LOSAT's refusals of a command line that NCBI's makeprofiledb reads: database types other than
+/// `rps` and `delta` (`-dbtype cobalt`).
 fn refusal(args: &Args) -> Option<String> {
-    if args.flag("binary") {
-        return Some(crate::cli::run_refusal(super::PROGRAM, "binary"));
-    }
     match args.value("dbtype") {
-        Some("rps") | None => None,
+        Some("rps" | "delta") | None => None,
         Some(dbtype) => Some(unsupported(&format!(
-            "-dbtype {dbtype} (only -dbtype rps is built)"
+            "-dbtype {dbtype} (only -dbtype rps and -dbtype delta are built)"
         ))),
     }
 }
@@ -410,24 +487,31 @@ fn report(error: RunError, diag: &mut Diag) -> i32 {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:334-375
-/// makeprofiledb's destructor: after a build that did not end, the RPS files of every volume
-/// begun (and the alias file of several); after one that ended, the `.pog` file of each volume.
-fn destroy(built: &Built, out_db_name: &str) {
-    let remove = |name: String| {
-        crate::writedb::dir_entry::remove(Path::new(&name));
+/// makeprofiledb's destructor: after a build that did not end, the RPS (and for `-dbtype delta`,
+/// `.wcounts` and `.obsr`) files of every volume begun (and the alias file of several); after one
+/// that ended, the `.pog` file of each volume.
+fn destroy(built: &Built, out_db_name: &[u8], op_mode: OpMode) {
+    let remove = |name: &[u8], extension: &str| {
+        let path = [name, b".", extension.as_bytes()].concat();
+        crate::writedb::dir_entry::remove(&path_of_bytes(&path));
     };
     if !built.done {
         for name in &built.vol_names {
             for extension in ["rps", "loo", "aux", "freq"] {
-                remove(format!("{name}.{extension}"));
+                remove(name, extension);
+            }
+            if op_mode == OpMode::Delta {
+                for extension in ["wcounts", "obsr"] {
+                    remove(name, extension);
+                }
             }
         }
         if built.vol_names.len() > 1 {
-            remove(format!("{out_db_name}.pal"));
+            remove(out_db_name, "pal");
         }
     } else {
         for name in &built.vol_names {
-            remove(format!("{name}.pog"));
+            remove(name, "pog");
         }
     }
 }
@@ -436,14 +520,15 @@ fn destroy(built: &Built, out_db_name: &str) {
 /// `s_DeleteMakeprofileDb`: the RPS files of a database of the name (each extension of the
 /// single volume, else of the volumes `.00`, `.01`, ... while they are removed), then the
 /// database itself (`DeleteBlastDb`); whether the database was removed.
-fn delete_makeprofile_db(name: &str) -> Result<bool, RunError> {
+fn delete_makeprofile_db(name: &[u8]) -> Result<bool, RunError> {
+    let named = |suffix: String| path_of_bytes(&[name, suffix.as_bytes()].concat()).into_owned();
     for extension in [
         ".rps", ".loo", ".aux", ".freq", ".blocks", ".wcounts", ".obsr",
     ] {
-        if !crate::writedb::dir_entry::remove(Path::new(&format!("{name}{extension}"))) {
+        if !crate::writedb::dir_entry::remove(&named(extension.to_string())) {
             let mut index = 0u32;
-            while crate::writedb::dir_entry::remove(Path::new(&format!(
-                "{name}.{}{}{extension}",
+            while crate::writedb::dir_entry::remove(&named(format!(
+                ".{}{}{extension}",
                 index / 10,
                 index % 10
             ))) {
@@ -469,22 +554,80 @@ fn smp_filenames(list: &[u8]) -> Result<Vec<&[u8]>, RunError> {
     Ok(names)
 }
 
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1228-1263
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1511-1568
+/// `x_CreateDeltaList`: reads each profile in `smps`, validates scoremat and delta fields, logs
+/// exclusions to `m_LogFile`, and returns the surviving filenames.
+fn create_delta_list<'a>(
+    params: &mut Params<'_>,
+    diag: &mut Diag,
+    smps: &[&'a [u8]],
+) -> Result<Vec<&'a [u8]>, RunError> {
+    let mut delta_list = Vec::with_capacity(smps.len());
+    for &filename in smps {
+        let path = path_from_bytes(filename);
+        if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
+            return Err(RunError::Input([filename, b" does not exists"].concat()));
+        }
+        let (pssm_w_parameters, _) = read_profile(
+            &path,
+            filename,
+            params.binary,
+            &params.read_verification,
+            diag,
+        )?;
+        check_input_scoremat(&pssm_w_parameters, filename)?;
+        let seq_size = query_length(&pssm_w_parameters);
+        match delta::check_delta(
+            &pssm_w_parameters.pssm,
+            seq_size,
+            filename,
+            params.obsr_threshold,
+            params.exclude_invalid,
+        )? {
+            DeltaCheck::Included => delta_list.push(filename),
+            DeltaCheck::ExcludedObsr => {
+                params.log_bytes(
+                    &[
+                        filename,
+                        b" was excluded: due to too few independent observations\n",
+                    ]
+                    .concat(),
+                );
+            }
+            DeltaCheck::ExcludedInvalidCd => {
+                // Matches NCBI's spelling ("conatins") and trailing space before the newline.
+                params.log_bytes(
+                    &[filename, b" was excluded: it conatins an invalid CD \n"].concat(),
+                );
+            }
+        }
+    }
+    Ok(delta_list)
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1328-1364
 // `m_NumOfVols` is one more than the quotient of the count and the maximum, with C's division: a
 // maximum of 0 divides by zero (NCBI 2.17.0: SIGFPE), and so does a count of volumes of 0
 // (`num_seqs` is the count divided by `m_NumOfVols`); a negative count
 // makes no volume, no alias file and exit status 0.
 /// `x_Run`.
-fn x_run(params: &mut Params<'_>, built: &mut Built, diag: &mut Diag) -> Result<(), RunError> {
+fn x_run(
+    params: &mut Params<'_>,
+    built: &mut Built,
+    settings: &ApplicationSettings,
+    diag: &mut Diag,
+) -> Result<(), RunError> {
     create_directories(&params.out_db_name)?;
     if delete_makeprofile_db(&params.out_db_name)? {
-        let _ = params
-            .log()
-            .write_all(b"Deleted existing BLAST database with identical name.\n");
-        let _ = params.log().flush();
+        params.log_line_flush(b"Deleted existing BLAST database with identical name.");
     }
     let list = std::mem::take(&mut params.in_list);
     let smps = smp_filenames(&list)?;
+    let smps = if params.op_mode == OpMode::Delta {
+        create_delta_list(params, diag, &smps)?
+    } else {
+        smps
+    };
     let num_smps = i32::try_from(smps.len())
         .map_err(|_| RunError::Refused("a list of 2^31 profiles or more".to_string()))?;
     let max = params.max_smp_files_per_vol;
@@ -525,121 +668,137 @@ fn x_run(params: &mut Params<'_>, built: &mut Built, diag: &mut Diag) -> Result<
         }
     }
     if usize::try_from(num_of_vols).is_ok_and(|vols| vols == built.vol_names.len()) {
-        create_alias_file(params, built, diag)?;
+        create_alias_file(params, built, settings, diag)?;
         built.done = true;
     }
     Ok(())
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1865-1876
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb.cpp:284-303,305-328,358-414
-// The totals are those of NCBI's reader opening the new alias file (`CSeqDB`): a database name
-// that the reader splits (a space) does not open, and the alias file is removed.
-/// `x_CreateAliasFile`: the alias file of the volumes, its totals, and the log line.
-fn create_alias_file(params: &Params<'_>, built: &Built, diag: &mut Diag) -> Result<(), RunError> {
-    let now = LocalTime::now().ok_or_else(|| {
-        RunError::Failed("the clock cannot be read for the alias file's date".to_string())
-    })?;
-    let fname = format!("{}.pal", params.out_db_name);
-    let mut text = format!("#\n# Alias file created {}\n#\n", now.log_time()).into_bytes();
-    if !params.title.is_empty() {
-        text.extend_from_slice(format!("TITLE {}\n", params.title).as_bytes());
+// The volumes are named by their file names (`SeqDB_RemoveDirName`), without a list
+// (`eNoAliasFilterType`); the reader opens the new alias file on the database search path (the
+// current directory, `BLASTDB`, the registry's `[BLAST] BLASTDB`). The names and the title are
+// their bytes.
+/// `x_CreateAliasFile`: the alias file of the volumes, its totals, and the log line
+/// (`writedb::alias_file::create_alias_file`).
+fn create_alias_file(
+    params: &Params<'_>,
+    built: &Built,
+    settings: &ApplicationSettings,
+    diag: &mut Diag,
+) -> Result<(), RunError> {
+    let names: Vec<&[u8]> = built
+        .vol_names
+        .iter()
+        .map(|name| crate::seqdb::alias::base_name(name))
+        .collect();
+    let path = crate::seqdb::SearchPath::from_environment(settings.blastdb.as_deref());
+    let created = alias_file::create_alias_file(
+        &params.out_db_name,
+        &names,
+        crate::seqdb::SeqType::Protein,
+        b"",
+        &params.title,
+        FilterType::None,
+        &path,
+    );
+    match created {
+        Ok(line) => {
+            diag.post_bytes(&line);
+            Ok(())
+        }
+        Err(AliasError::SeqDb(text)) => Err(RunError::SeqDb(text)),
+        Err(AliasError::Reader(error)) => Err(RunError::Failed(
+            crate::algorithm::common::database::losat_reader_error(&error, super::PROGRAM),
+        )),
+        Err(AliasError::Clock) => Err(RunError::Failed(CLOCK_ERROR.to_string())),
     }
-    text.extend_from_slice(b"DBLIST ");
-    for name in &built.vol_names {
-        // `SeqDB_RemoveDirName`: the name after the platform's last path separator.
-        let base = name
-            .rsplit(std::path::MAIN_SEPARATOR)
-            .next()
-            .unwrap_or(name);
-        text.extend_from_slice(format!("\"{base}\" ").as_bytes());
+}
+
+/// Posts the messages emitted by the shared ASN.1 reader (`Post`) as makeprofiledb posts them:
+/// makeprofiledb leaves NCBI's diagnostic post level at its default (`eDiag_Error`), so warnings
+/// (`Post::Utf8Tag`, 803.10) are suppressed while errors (`Post::BadChar`, `Post::Error`,
+/// `Post::UnendedByteBlock`) are written with no application prefix.
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1381-1395
+fn post_asn_posts(diag: &mut Diag, posts: &[Post]) {
+    for post in posts {
+        match post {
+            Post::BadChar(replaced) => diag.post_replaced(std::slice::from_ref(replaced)),
+            Post::Error(text) => diag.err_post(text),
+            Post::Utf8Tag(_) => {}
+            other => diag.write_text(&other.line(None)),
+        }
     }
-    text.extend_from_slice(b"\n");
-    let _ = std::fs::write(&fname, &text);
-    let totals = std::env::current_dir()
-        .ok()
-        .and_then(|cwd| crate::seqdb::alias::SearchPath::new(&cwd, None, None).ok())
-        .and_then(|search| {
-            crate::seqdb::SeqDb::open_in(
-                &params.out_db_name,
-                crate::seqdb::SeqType::Protein,
-                &search,
-            )
-            .ok()
-        })
-        .map(|db| (db.num_seqs(), db.total_length()));
-    let Some((num_seqs, length)) = totals else {
-        crate::writedb::dir_entry::remove(Path::new(&fname));
-        return Err(RunError::SeqDb(
-            b"BLASTDB alias file creation failed.  Some referenced files may be missing".to_vec(),
-        ));
-    };
-    if num_seqs == 0 {
-        crate::writedb::dir_entry::remove(Path::new(&fname));
-        return Err(RunError::SeqDb(
-            b"No seqs in  were found in BLAST database".to_vec(),
-        ));
+}
+
+/// Maps an ASN.1 [`ReadError`] of root type `root_type` to makeprofiledb's `Run` error: a
+/// `CSerialException` or `CException`'s newest `GetMsg()`, the root object's `Frame type=` for
+/// `CEofException`, `Unknown` for `std::exception`, and `Refused` for LOSAT's reader limits or
+/// a check turned off by `read_verification` (`ReadVerification::refused`).
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1878-1904
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
+fn read_error_to_run_error(
+    error: ReadError,
+    root_type: &str,
+    input: &str,
+    read_verification: &ReadVerification,
+    refuse: impl FnOnce(String) -> String,
+) -> RunError {
+    match error {
+        ReadError::Serial(exception) => match read_verification.refused(&exception, input) {
+            Some(refused) => RunError::Refused(refused),
+            None => RunError::Exception(exception.get_msg().to_vec()),
+        },
+        ReadError::Exception(exception) => RunError::Exception(exception.get_msg().to_vec()),
+        ReadError::Eof => RunError::Exception(
+            format!(" Frame type= eFrameNamed, Object type= {root_type}").into_bytes(),
+        ),
+        ReadError::Std(_) | ReadError::OutOfMemory => RunError::Unknown,
+        ReadError::Unsupported(what) => RunError::Refused(refuse(what)),
     }
-    if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&fname) {
-        let _ = write!(file, "NSEQ {num_seqs}\nLENGTH {length}\n");
-    }
-    diag.post(&format!(
-        "Created protein BLAST (alias) database {} with {num_seqs} sequences",
-        params.out_db_name
-    ));
-    Ok(())
 }
 
 /// A profile file read: the reader's posts written, its errors as makeprofiledb's handler
 /// reports them.
-// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1381-1393
-// The read of `pssm` from `in_stream` in ASN.1 text (`MSerial_AsnText`): a `CSerialException`'s
-// message (`line N: ...`), the frame of the root object for a text that ends in it
-// (`CEofException`), the message of the newest exception of the reader's stack; a `std::exception`
-// is the handler's unknown one.
+// NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1381-1395
+// The read of `pssm` from `in_stream` in ASN.1 text (`MSerial_AsnText`) or binary
+// (`MSerial_AsnBinary` when `-binary` is set): a `CSerialException`'s message (`line N: ...` or
+// `byte N: ...`), the frame of the root object for an input that ends in it (`CEofException`),
+// the message of the newest exception of the reader's stack; a `std::exception` is the handler's
+// unknown one.
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
+// A mandatory member that the profile skips is NCBI's read error unless `SERIAL_VERIFY_DATA_READ`
+// turns the check off, which LOSAT refuses there (`read_verification`, `ReadVerification::refused`).
 fn read_profile(
     path: &Path,
     filename: &[u8],
+    binary: bool,
+    read_verification: &ReadVerification,
     diag: &mut Diag,
-) -> Result<PssmWithParameters, RunError> {
-    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1390-1394
+) -> Result<(PssmWithParameters, Vec<Post>), RunError> {
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeprofiledb.cpp:1386-1395
     // The file is read through a `CNcbiIfstream` whose open is not checked: a file that does not
     // open (no permission) reads as an empty stream, whose reader stops at once.
-    let text = std::fs::read(path).unwrap_or_default();
-    let read = crate::blastinput::pssm_text::read_pssm(&text);
-    for post in &read.posts {
-        match post {
-            Post::BadChar(replaced) => diag.post_replaced(std::slice::from_ref(replaced)),
-            Post::Error(text) => diag.err_post(text),
-            // Posts of a text reader's string and byte blocks (makeprofiledb's application has no
-            // diagnostic prefix, as `Diag::err_post`).
-            other => diag.write_text(&other.line(None)),
-        }
-    }
+    let bytes = std::fs::read(path).unwrap_or_default();
+    let read = crate::blastinput::pssm_text::read_profile(&bytes, binary);
+    post_asn_posts(diag, &read.posts);
     use crate::blastinput::pssm_text::PssmReadError;
+    let refuse = |what: String| {
+        format!(
+            "a profile that LOSAT's PSSM reader does not read ({}: {what})",
+            String::from_utf8_lossy(filename)
+        )
+    };
     match read.result {
-        Ok(pssm) => Ok(pssm),
-        // `GetMsg()` of the newest exception (the stream's position, or the rethrow of a member
-        // with a set flag), which `CATCH_ALL` prints after "ERROR: ".
-        Err(PssmReadError::Ncbi(ReadError::Serial(exception))) => {
-            Err(RunError::Exception(exception.get_msg().to_vec()))
-        }
-        Err(PssmReadError::Ncbi(ReadError::Eof)) => Err(RunError::Exception(
-            b" Frame type= eFrameNamed, Object type= PssmWithParameters".to_vec(),
+        Ok(pssm) => Ok((pssm, read.posts)),
+        Err(PssmReadError::Ncbi(error)) => Err(read_error_to_run_error(
+            error,
+            "PssmWithParameters",
+            "a profile (-in)",
+            read_verification,
+            refuse,
         )),
-        Err(PssmReadError::Ncbi(ReadError::Exception(exception))) => {
-            Err(RunError::Exception(exception.get_msg().to_vec()))
-        }
-        Err(PssmReadError::Ncbi(ReadError::Std(_) | ReadError::OutOfMemory)) => {
-            Err(RunError::Unknown)
-        }
-        Err(PssmReadError::Refused(what))
-        | Err(PssmReadError::Ncbi(ReadError::Unsupported(what))) => {
-            Err(RunError::Refused(format!(
-                "a profile that LOSAT's PSSM reader does not read ({}: {what})",
-                String::from_utf8_lossy(filename)
-            )))
-        }
+        Err(PssmReadError::Refused(what)) => Err(RunError::Refused(refuse(what))),
     }
 }
 
@@ -689,6 +848,8 @@ fn make_vol(
     };
     let mut rps = rps_files::open_volume(&db_name, smps.len(), volume_params)?;
     built.vol_names.push(db_name.clone());
+    let mut delta =
+        (params.op_mode == OpMode::Delta).then(|| delta::new_volume(&db_name, smps.len()));
     let now = LocalTime::now().ok_or_else(|| {
         RunError::Failed("the clock cannot be read for the database's date".to_string())
     })?;
@@ -704,15 +865,20 @@ fn make_vol(
     let mut output_db = WriteDb::new(
         &db_name,
         true,
-        params.title.as_bytes(),
+        &params.title,
         now.index_date().as_bytes(),
         MAX_FILE_SIZE,
         params.db_ver,
         Platform::host(),
         indices,
     );
+    output_db.set_diag_prefix(None);
     output_db.set_max_file_size(MAX_FILE_SIZE);
-    let result = add_profiles(params, diag, &mut rps, &mut output_db, smps);
+    let result = add_profiles(params, diag, &mut rps, delta.as_mut(), &mut output_db, smps)
+        .and_then(|()| match delta {
+            Some(delta) => delta.finish(diag, post_asn_posts).map_err(RunError::from),
+            None => Ok(()),
+        });
     // `output_db->Close()` after the loop, or the writer's destructor in the unwinding of an
     // error (`~CWriteDB_Impl` closes it), then the destructors of the writer's members.
     let closed = output_db.close();
@@ -777,28 +943,38 @@ fn aborts(first: RunError, then: &WriteDbError) -> RunError {
     if let RunError::Refused(_) = first {
         return first;
     }
+    let message = then.message();
+    let message = message.strip_suffix(b"\n").unwrap_or(&message);
     RunError::Refused(format!(
         "an error ({}) after which the database's writer stops with another ({}; NCBI's \
          makeprofiledb aborts there)",
         first.text(),
-        String::from_utf8_lossy(&then.message())
+        String::from_utf8_lossy(message)
     ))
 }
 
-/// The profiles of a volume added to its writer and its RPS files (the loop of `x_MakeVol`).
+/// The profiles of a volume added to its writer and its RPS (and delta) files (the loop of
+/// `x_MakeVol`).
 fn add_profiles(
     params: &mut Params<'_>,
     diag: &mut Diag,
     rps: &mut RpsVolume,
+    mut delta: Option<&mut DeltaVolume>,
     output_db: &mut WriteDb,
     smps: &[&[u8]],
 ) -> Result<(), RunError> {
-    for &filename in smps {
+    for (profile_index, &filename) in smps.iter().enumerate() {
         let path = path_from_bytes(filename);
         if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
             return Err(RunError::Input([filename, b" does not exists"].concat()));
         }
-        let mut pssm_w_parameters = read_profile(&path, filename, diag)?;
+        let (mut pssm_w_parameters, posts) = read_profile(
+            &path,
+            filename,
+            params.binary,
+            &params.read_verification,
+            diag,
+        )?;
         let sm = check_input_scoremat(&pssm_w_parameters, filename)?;
         // `seq_size`, the `int` of `GetQueryLength()`: negative past `INT_MAX` (`query_length`).
         let seq_size = query_length(&pssm_w_parameters);
@@ -845,7 +1021,7 @@ fn add_profiles(
         let pssm = &pssm_w_parameters.pssm;
         let final_data = pssm.final_data.as_ref().expect("final data");
         let by_row = pssm.by_row.unwrap_or(false);
-        let Ok(seq_size) = usize::try_from(seq_size) else {
+        let Ok(seq_size_usize) = usize::try_from(seq_size) else {
             return Err(
                 rps_files::negative_length_error(seq_size, by_row, &final_data.scores).into(),
             );
@@ -855,13 +1031,16 @@ fn add_profiles(
             .as_ref()
             .map_or(&[][..], |data| &data.freq_ratios[..]);
         rps.add_profile(&ProfileData {
-            seq_size,
+            seq_size: seq_size_usize,
             num_rows: pssm.num_rows as usize,
             by_row,
             scores: &final_data.scores,
             freq_ratios,
             kappa: final_data.kappa,
         })?;
+        if let Some(delta) = delta.as_deref_mut() {
+            delta.add_profile(profile_index, pssm, seq_size, filename, posts);
+        }
     }
     Ok(())
 }
@@ -899,16 +1078,26 @@ fn add_to_database(
     let Some(SeqEntry::Seq(query)) = &pssm_w_parameters.pssm.query else {
         unreachable!("check_input_scoremat found the query's Bioseq");
     };
-    let mut deflines = match &query.descr {
+    let (mut deflines, null_seqids) = match &query.descr {
         Some(descr) => {
-            let extracted = bioseq_deflines(&query.ids, descr).map_err(|error| match error {
+            let read = bioseq_deflines(&query.ids, descr);
+            post_asn_posts(diag, &read.posts);
+            let extracted = read.result.map_err(|error| match error {
                 BioseqDeflinesError::NoDeflines => {
                     RunError::Exception(b"Error: No deflines provided.".to_vec())
                 }
-                BioseqDeflinesError::BinaryHeader(reason) => RunError::Refused(format!(
-                    "binary definition lines (a user object ASN1_BlastDefLine) that LOSAT's \
-                     reader of database headers does not read ({reason})"
-                )),
+                BioseqDeflinesError::BinaryHeader(error) => read_error_to_run_error(
+                    error,
+                    "Blast-def-line-set",
+                    "binary definition lines (ASN1_BlastDefLine)",
+                    &params.read_verification,
+                    |what| {
+                        format!(
+                            "binary definition lines (a user object ASN1_BlastDefLine) that \
+                             LOSAT's reader does not read ({what})"
+                        )
+                    },
+                ),
                 BioseqDeflinesError::NullDescriptor => null_descriptor(),
             })?;
             // The binary definition lines are not encoded again here (`bin_hdr` is kept).
@@ -916,15 +1105,18 @@ fn add_to_database(
                 output_db.post_extracted_deflines(&extracted.set);
                 post_writer(diag, params.stdout, output_db);
             }
-            extracted.set
+            (extracted.set, extracted.null_seqids)
         }
-        None => DeflineSet {
-            deflines: vec![BlastDefline {
-                ids: query.ids.clone(),
-                ..BlastDefline::default()
-            }],
-            utf8: false,
-        },
+        None => (
+            DeflineSet {
+                deflines: vec![BlastDefline {
+                    ids: query.ids.clone(),
+                    ..BlastDefline::default()
+                }],
+                utf8: false,
+            },
+            Vec::new(),
+        ),
     };
     if !params.user_taxids {
         let first_id = query.ids.first();
@@ -944,7 +1136,13 @@ fn add_to_database(
             }
         }
     }
-    params.taxids.fix_tax_id(&mut deflines);
+    if params
+        .taxids
+        .fix_tax_id_checked(&mut deflines, &null_seqids)
+        .is_err()
+    {
+        return Err(null_descriptor());
+    }
     let inst = &query.inst;
     let seq_data = inst.seq_data.as_ref().map(|data| match data {
         SeqData::Iupacna(letters) => bioseq::SeqData::Iupacna(letters.clone()),
@@ -956,6 +1154,7 @@ fn add_to_database(
         SeqData::Other(_) => bioseq::SeqData::Other,
     });
     let length = inst.length.unwrap_or(0);
+    let iupacna_hi = seq_data.as_ref().and_then(iupacna_high_byte);
     let short = seq_data
         .as_ref()
         .and_then(|data| short_nucleotide_data(data, length));
@@ -971,12 +1170,24 @@ fn add_to_database(
             defline_field: Vec::new(),
             title_descr: None,
         }),
-        past_seq_pos: None,
+        delta_fix: None,
     };
     let added = output_db.add_sequence(bioseq);
     post_writer(diag, params.stdout, output_db);
     added?;
-    output_db.set_deflines(deflines);
+    output_db.set_deflines_with_null_seqids(deflines, null_seqids);
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:590-604
+    // NCBI reference (598d8ae6): c++/src/util/sequtil/sequtil_convert_imp.cpp:313-339
+    // Before `WriteDB_Ncbi4naToBinary`, `WriteDB_IupacnaToBinary` runs `x_ConvertIupacnaTo4na` on
+    // all `v.size()` bytes; its pair loop indexes the conversion table with a signed `char`, so
+    // any byte >= 0x80 in `0..(v.len() & !1)` reads before the table (undefined behaviour).
+    if let Some((index, byte)) = iupacna_hi {
+        return Err(RunError::Refused(format!(
+            "a profile whose query has an iupacna byte 0x{byte:02X} at position {index} (NCBI's \
+             makeprofiledb indexes its iupacna-to-ncbi4na table with a signed char and reads \
+             before the table)"
+        )));
+    }
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:158-180
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_impl.cpp:100-108,324-331
     // A sequence that the writer keeps (its molecule checked) is published at the next
@@ -1009,3 +1220,7 @@ fn add_to_database(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "work_tests.rs"]
+mod tests;

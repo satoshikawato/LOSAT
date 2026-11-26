@@ -71,7 +71,7 @@ Every format is the bytes of NCBI BLAST+ 2.17.0 `rpstblastn -num_threads 1`, at 
 
 ## What LOSAT refuses
 
-Not yet supported: `-html`; `rpstblastn` in the library API and in LOSAT Web.
+Not yet supported: `rpstblastn` in the library API and in LOSAT Web.
 
 Also refused:
 

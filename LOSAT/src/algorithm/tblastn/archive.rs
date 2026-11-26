@@ -12,7 +12,6 @@
 //! context of a batch is its first query (a first query without one gives both blocks the `-1`
 //! triple), and the batch's `EffectiveSearchSpace` option is that query's search space.
 
-use std::io::Write;
 use std::ops::Range;
 
 use anyhow::Result;
@@ -401,7 +400,7 @@ pub(super) fn write_tblastn_archives(
     render: &ArchiveRender<'_>,
     data: &ArchiveData<'_>,
     warnings: &mut QueryWarnings<'_>,
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
 ) -> Result<()> {
     let run = RunRecord {
         program: Program::Tblastn,

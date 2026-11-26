@@ -257,6 +257,9 @@ pub(super) struct ScanBatch<'a> {
     pub(super) window_size: usize,
     /// `PrelimBatch::neg_window`.
     pub(super) neg_window: i32,
+    /// The word finders that replace the scan of a chunk (`prelim_chunk_hits`), `None` for a
+    /// batch with neither.
+    pub(super) special_finders: Option<SpecialFinders<'a>>,
     pub(super) two_hits: bool,
     pub(super) offset_array_size: usize,
     pub(super) use_direct_lookup: bool,
@@ -288,6 +291,18 @@ pub(super) struct ScanBatch<'a> {
     pub(super) min_ungapped_score: i32,
     pub(super) timing_ref: Option<&'a BlastnTiming>,
     pub(super) timing_enabled: bool,
+}
+
+/// The word finders of a batch that replace the scan of a chunk (`prelim_chunk_hits`): the
+/// MegaBLAST database index's and that of a window below 0. A batch has them as one value
+/// (`ScanBatch::special_finders`), so that the chunks of a batch with neither test one value, as
+/// they tested the index alone.
+#[derive(Clone, Copy)]
+pub(super) struct SpecialFinders<'a> {
+    /// The index's seeds (`PrelimBatch::mb_index`).
+    pub(super) index: Option<&'a super::mb_index_seeds::IndexSeeds<'a>>,
+    /// A window below 0 (`PrelimBatch::neg_window`): the word finder of `neg_window.rs`.
+    pub(super) neg_window: bool,
 }
 
 impl<'a> ScanBatch<'a> {
@@ -332,6 +347,12 @@ impl<'a> ScanBatch<'a> {
             scan_range: batch.scan_range,
             window_size,
             neg_window: batch.neg_window,
+            special_finders: (batch.mb_index.is_some() || batch.neg_window != 0).then_some(
+                SpecialFinders {
+                    index: batch.mb_index,
+                    neg_window: batch.neg_window != 0,
+                },
+            ),
             two_hits,
             offset_array_size: batch.offset_array_size,
             use_direct_lookup: batch.use_direct_lookup,
@@ -419,13 +440,12 @@ pub(super) struct PrelimSubject<'a> {
 /// table's offset moved on. The list is in the subject's coordinates. `reuse_prelim_hits` is set for the owner's serial calls (not a chunk
 /// of a batch on the pool); the scratches are the subject's, or the pool worker's.
 ///
-/// `NEG`: a window below 0 (`PrelimBatch::neg_window`), whose chunks have the word finder of
-/// `neg_window.rs`; chosen once for the pass (`SubjectPasses::prelim_pass`), so that the chunks of
-/// every other search test nothing.
+/// The word finder of a batch with an index, or with a window below 0 (`PrelimBatch::neg_window`),
+/// replaces the scan (`ScanBatch::special_finders`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:487-500,522-527,555,560-563
 /// (one turn of the chunk loop of `s_BlastSearchEngineOneContext`)
-pub(super) fn prelim_chunk_hits<const UNGAPPED: bool, const NEG: bool>(
+pub(super) fn prelim_chunk_hits<const UNGAPPED: bool>(
     scan: &ScanBatch<'_>,
     subject: &PrelimSubject<'_>,
     chunk: &SubjectChunk,
@@ -441,36 +461,33 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool, const NEG: bool>(
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1727-1734
     // A batch searched with a MegaBLAST database index has the indexed word finder, which scans
     // a sequence of a database volume without an index as without the index.
-    if let Some(index) = batch.mb_index {
-        if index.is_indexed(subject.s_idx as u32) {
-            return super::mb_index_seeds::index_chunk_hits::<UNGAPPED>(
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1597-1695
+    // A window below 0 has the word finder of `neg_window.rs`, after the index's.
+    if let Some(special) = scan.special_finders {
+        if let Some(index) = special.index {
+            if index.is_indexed(subject.s_idx as u32) {
+                return super::mb_index_seeds::index_chunk_hits::<UNGAPPED>(
+                    scan,
+                    index,
+                    subject,
+                    chunk,
+                    gap_scratch,
+                    subject_scratch,
+                    reuse_prelim_hits,
+                );
+            }
+        }
+        if special.neg_window {
+            return super::neg_window::neg_chunk_hits::<UNGAPPED>(
                 scan,
-                index,
                 subject,
                 chunk,
+                soft_ranges,
                 gap_scratch,
                 subject_scratch,
                 reuse_prelim_hits,
             );
         }
-    }
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1597-1695
-    // A window below 0 has the word finder of `neg_window.rs` (an instance of its own).
-    debug_assert_eq!(
-        NEG,
-        scan.neg_window != 0,
-        "the pass's instance is its window's"
-    );
-    if NEG {
-        return super::neg_window::neg_chunk_hits::<UNGAPPED>(
-            scan,
-            subject,
-            chunk,
-            soft_ranges,
-            gap_scratch,
-            subject_scratch,
-            reuse_prelim_hits,
-        );
     }
     let &PrelimSubject {
         s_idx,
@@ -820,11 +837,7 @@ pub(super) fn prelim_chunk_hits<const UNGAPPED: bool, const NEG: bool>(
     // The chunk's HSP list from its initial hits (`chunk_hsp_list`), whose count sizes the next
     // batch; then the diagonal table's offset moves on after the chunk, also after a chunk
     // without an initial hit (`Blast_ExtendWordExit` runs inside the word finder, before
-    // NCBI's `continue`). A mixed search counts the initial hits of its scans by volume
-    // (`mb_index_seeds::IndexSeeds::check`).
-    if let Some(index) = batch.mb_index {
-        index.note_scanned_hits(s_idx as u32, subject_scratch.ungapped_hits.len());
-    }
+    // NCBI's `continue`).
     let chunk_prelim_hits = chunk_hsp_list::<UNGAPPED>(
         batch,
         subject,
@@ -1060,12 +1073,12 @@ fn batch_jobs<'a>(chunks: &'a [SubjectChunk], job_ends: &[usize]) -> Vec<&'a [Su
 /// `HARD`: the chunks come from the subject's hard ranges (a database sequence of a search with
 /// `-db_hard_mask`, `HardSplitState` in the worker's scratch; series NP, M4a-2b decision H1), else
 /// from `split_state` (`next_subject_chunk`); an instance of its own, so the other subjects' loops
-/// test nothing. `NEG`: the word finder of a window below 0 (`prelim_chunk_hits`).
+/// test nothing.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,578-593
 /// (the chunk loop of `s_BlastSearchEngineOneContext`)
 /// The chunk batches on the pool have no NCBI counterpart (NCBI's threads take whole subjects).
-pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool, const NEG: bool>(
+pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool>(
     scan: &ScanBatch<'_>,
     subject: &PrelimSubject<'_>,
     split_state: &mut SubjectSplitState,
@@ -1183,7 +1196,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool, con
                 let soft_ranges = split_state.soft_ranges.as_slice();
                 if jobs == 1 || x_serial_chunks {
                     for chunk in chunk_batch.iter() {
-                        let hits = prelim_chunk_hits::<UNGAPPED, NEG>(
+                        let hits = prelim_chunk_hits::<UNGAPPED>(
                             scan,
                             subject,
                             chunk,
@@ -1227,7 +1240,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool, con
                     let search_chunk =
                         |state: &mut (GapAlignScratch, SubjectScratch), chunk: &SubjectChunk| {
                             let (gap_scratch, subject_scratch) = state;
-                            let hits = prelim_chunk_hits::<UNGAPPED, NEG>(
+                            let hits = prelim_chunk_hits::<UNGAPPED>(
                                 scan,
                                 subject,
                                 chunk,
@@ -1308,7 +1321,7 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool, con
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-500
                     crate::utils::threading::report_stage("blastn", "subject_chunks", 1, false);
                     let soft_ranges = split_state.soft_ranges.as_slice();
-                    let hits = prelim_chunk_hits::<UNGAPPED, NEG>(
+                    let hits = prelim_chunk_hits::<UNGAPPED>(
                         scan,
                         subject,
                         &chunk,
@@ -1347,14 +1360,21 @@ pub(super) fn collect_subject_prelim<const UNGAPPED: bool, const HARD: bool, con
     combined_prelim_hits
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1432
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1354,1429-1432
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1677
 /// The shortest subject that the preliminary stage searches (the traceback skips the shorter
-/// ones too). NCBI skips only an empty subject; one shorter than a word has no word to scan
-/// (`BlastNaWordFinder`'s scan range ends below its start), so the scan's searches skip it, but
-/// the seeds of a MegaBLAST database index (`indexed`) can run past the end of a short sequence
-/// into the next one of the index's local id, so an indexed search searches it.
-pub(super) fn shortest_subject(effective_word_size: usize, indexed: bool) -> usize {
-    if indexed {
+/// ones too). NCBI skips only an empty subject (`min_subj_seq_length` is 1); one shorter than a
+/// word has no word to scan (`BlastNaWordFinder`'s scan range ends below its start), so a
+/// non-negative window's scan can skip it, but:
+/// - the seeds of a MegaBLAST database index (`indexed`) can run past the end of a short sequence
+///   into the next one of the index's local id, so an indexed search searches it;
+/// - with a negative window (`neg_window < 0`), `BlastNaWordFinder` still calls
+///   `Blast_ExtendWordExit` with the subject length, moving the carried diagonal table's offset by
+///   subject length plus window, which blocks later subjects' words, so any non-empty subject must
+///   reach `collect_subject_prelim` -> `neg_chunk_hits` (which exits on a short chunk while
+///   honoring masks and `-use_index`).
+pub(super) fn shortest_subject(effective_word_size: usize, indexed_or_neg: bool) -> usize {
+    if indexed_or_neg {
         1
     } else {
         effective_word_size
@@ -1379,7 +1399,7 @@ pub(super) fn shortest_subject(effective_word_size: usize, indexed: bool) -> usi
 /// `s_BlastSearchEngineCore` (:701-918) searches the subject's chunks
 /// (`s_BlastSearchEngineOneContext`), then sets the e-values of the subject's list and reaps it
 /// (:870-900).
-pub(super) fn prelim_subject<const UNGAPPED: bool, const NEG: bool>(
+pub(super) fn prelim_subject<const UNGAPPED: bool>(
     scan: &ScanBatch<'_>,
     subject_ctx: &SubjectCtx<'_>,
     subject: BlastnSubjectRef<'_>,
@@ -1403,7 +1423,7 @@ pub(super) fn prelim_subject<const UNGAPPED: bool, const NEG: bool>(
         s_len_full,
     } = subject_ctx;
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1662
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1647-1667
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:856-874
     // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1079-1089
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:812-826
@@ -1455,9 +1475,10 @@ pub(super) fn prelim_subject<const UNGAPPED: bool, const NEG: bool>(
     if s_len_full
         < shortest_subject(
             effective_word_size,
-            batch
-                .mb_index
-                .is_some_and(|index| index.is_indexed(s_idx as u32)),
+            scan.neg_window < 0
+                || batch
+                    .mb_index
+                    .is_some_and(|index| index.is_indexed(s_idx as u32)),
         )
     {
         if db_masked {
@@ -1517,7 +1538,7 @@ pub(super) fn prelim_subject<const UNGAPPED: bool, const NEG: bool>(
         hard_index: hard_index.as_ref(),
     };
     let mut combined_prelim_hits = if hard {
-        collect_subject_prelim::<UNGAPPED, true, NEG>(
+        collect_subject_prelim::<UNGAPPED, true>(
             scan,
             &prelim_subject,
             &mut split_state,
@@ -1525,7 +1546,7 @@ pub(super) fn prelim_subject<const UNGAPPED: bool, const NEG: bool>(
             subject_scratch,
         )
     } else {
-        collect_subject_prelim::<UNGAPPED, false, NEG>(
+        collect_subject_prelim::<UNGAPPED, false>(
             scan,
             &prelim_subject,
             &mut split_state,
@@ -1568,10 +1589,6 @@ pub(super) fn prelim_subject<const UNGAPPED: bool, const NEG: bool>(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:885-888,897-899
 /// (`s_BlastSearchEngineCore`) and :654,662-664 (`s_Blast_HSPListReapByPrelimEvalue`, :642-674)
-///
-/// Inlined into each instance of `prelim_subject` (`NEG`: one per window form), as into the one
-/// caller it had before the window below 0 had an instance of its own.
-#[inline(always)]
 pub(super) fn reap_prelim(batch: &PrelimBatch<'_>, combined_prelim_hits: &mut Vec<PrelimHit>) {
     let &PrelimBatch {
         query_eff_searchsp,
@@ -1610,9 +1627,6 @@ pub(super) fn reap_prelim(batch: &PrelimBatch<'_>, combined_prelim_hits: &mut Ve
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1492-1497,1521-1526,1534-1536
 /// (`BLAST_PreliminarySearchEngine`)
 /// The tab that indents line 1535 is written as spaces.
-///
-/// Inlined into each instance of `prelim_subject`, as `reap_prelim`.
-#[inline(always)]
 pub(super) fn finish_ungapped_prelim(
     batch: &PrelimBatch<'_>,
     subject: BlastnSubjectRef<'_>,

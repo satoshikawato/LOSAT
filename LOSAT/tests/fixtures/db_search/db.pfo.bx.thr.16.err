@@ -1,0 +1,10 @@
+Warning: [blastx] Error pre-fetching sequence data
+Error: [blastx] CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.strNCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objects/general/Object_id_.cpp", line 96: Error: (CInvalidChoiceSelection::eFail) CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str
+
+Error: [blastx] Cannot convert string 'xyz' to Int8NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/corelib/ncbistr.cpp", line 861: Error: (CStringException::eConvert) ncbi::NStr::StringToInt8() - Cannot convert string 'xyz' to Int8 (m_Pos = 0)
+
+Error: [blastx] CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.strNCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objects/general/Object_id_.cpp", line 96: Error: (CInvalidChoiceSelection::eFail) CObject_id::GetId(): Invalid choice selection: NCBI-General::Object-id.str
+

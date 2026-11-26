@@ -373,7 +373,7 @@ fn import_queries(
     match queries {
         Queries::Pssm(_) => {
             if matches!(program, "BLASTN" | "BLASTP" | "BLASTX" | "TBLASTX") {
-                Err(crate::blastinput::app::engine_error(&format!(
+                Err(crate::blastinput::app::engine_error(format!(
                     "PSSM found in saved strategy, but not supported for {}",
                     program_type_name(options.options.program)
                 )))
@@ -965,6 +965,11 @@ fn option_text(setter: &Setter) -> String {
                         .collect::<Vec<_>>()
                         .join(","),
                     ParamValue::StrandType(n) => n.to_string(),
+                    ParamValue::BigIntegerList(list) => list
+                        .iter()
+                        .map(i64::to_string)
+                        .collect::<Vec<_>>()
+                        .join(","),
                 };
                 format!("{} {value}", param.name())
             }
@@ -1638,7 +1643,7 @@ fn import_into<T: StrategyArgs>(start: &mut Start, mut kept: Kept) -> Result<Com
                 }
             }
             // Else the strategy's subjects. The Owner's decision F2-Q1 (2026-11-20 「Q1=C」,
-            // PD-LOSAT-NCBI-DEFECTS exception 28): they are searched once with the command line's
+            // PD-LOSAT-NCBI-DEFECTS exception 33): they are searched once with the command line's
             // `-num_threads`, as `-subject`'s records are, and the output is the `-num_threads 1`
             // output (NCBI searches them once per thread or aborts: its thread check reads only
             // the command line's `-subject`). The run keeps the threads: nothing here changes them

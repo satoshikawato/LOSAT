@@ -1,0 +1,23 @@
+# BLASTP 2.17.0+
+# Query: q0
+# Database: tests/db_search/idlist/ln
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q0	NP_000001.1	100.000	150	0	0	1	150	1	150	7.96e-117	315
+# BLASTP 2.17.0+
+# Query: q1
+# Database: tests/db_search/idlist/ln
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q1	NP_000002.1	100.000	150	0	0	1	150	1	150	4.45e-117	315
+# BLASTP 2.17.0+
+# Query: q2
+# Database: tests/db_search/idlist/ln
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: q3
+# Database: tests/db_search/idlist/ln
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 1 hits found
+q3	NP_000006.1	100.000	150	0	0	1	150	1	150	6.17e-118	317
+# BLAST processed 4 queries

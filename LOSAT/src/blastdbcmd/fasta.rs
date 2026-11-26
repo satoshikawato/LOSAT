@@ -28,6 +28,8 @@ pub(super) struct FastaFormatter {
     /// `CFastaOstream::m_PreviousWholeIds`: the FASTA strings of the ids written without a
     /// range.
     previous_whole_ids: HashSet<Vec<u8>>,
+    /// The bytes of the record being written, kept from one sequence to the next.
+    text: Vec<u8>,
 }
 
 impl FastaFormatter {
@@ -36,6 +38,7 @@ impl FastaFormatter {
             width,
             long_seqids,
             previous_whole_ids: HashSet::new(),
+            text: Vec::new(),
         }
     }
 
@@ -48,7 +51,7 @@ impl FastaFormatter {
         source: &Source,
         oid: u32,
         config: &Config,
-        target: Option<&str>,
+        target: Option<&[u8]>,
         out: &mut Output<'_, '_>,
     ) -> Result<(), Stop> {
         DbBioseq::with(source, oid, false, target, target_id, out, |bioseq, out| {
@@ -85,7 +88,8 @@ impl FastaFormatter {
         if no_ids && (range.is_some() || masks.as_ref().is_some_and(|masks| !masks.is_empty())) {
             return Err(super::retrieve::null_pointer());
         }
-        let mut text = Vec::new();
+        let mut text = std::mem::take(&mut self.text);
+        text.clear();
         if self.long_seqids {
             // The Bioseq's first source, from every line the filter keeps (the target's first),
             // names the organism of a title made from it: the long header's alone.
@@ -111,7 +115,9 @@ impl FastaFormatter {
         write_fasta_lines(&letters, self.width, &mut text);
         // `out` writes to an `ncbi_app::files::Ostream` (`retrieve::process`): a failed write
         // does nothing, as in NCBI's `ostream`; a closed pipe ends the retrieval.
-        out.write_all(&text).map_err(Stop::write)
+        let written = out.write_all(&text).map_err(Stop::write);
+        self.text = text;
+        written
     }
 
     // NCBI reference (598d8ae6): c++/src/objmgr/util/sequence.cpp:2927-2975
@@ -173,7 +179,7 @@ impl FastaFormatter {
 /// The id of a `-target_only` target as `GetBioseq` gets it: the GI of a number
 /// (`GetBioseq` with `oid` and `gi`, which `x_GetTaxDefline` makes a `CSeq_id` of type `e_Gi` with
 /// the number `gi`), else the Seq-id of the text.
-fn target_id(target: &str) -> Result<ParsedSeqId, Stop> {
+fn target_id(target: &[u8]) -> Result<ParsedSeqId, Stop> {
     match numeric_target(target) {
         Some(number) => Ok(ParsedSeqId::Gi(number)),
         None => parse_target(target),
@@ -360,7 +366,7 @@ fn generated_title(
     title: &[u8],
 ) -> Result<Vec<u8>, Stop> {
     let ids = &set.deflines[0].ids;
-    let mut bioseq_facts = crate::report::db_subject::bioseq_facts(ids);
+    let mut bioseq_facts = crate::report::defline::bioseq_facts(ids);
     bioseq_facts.local_annots_only = true;
     bioseq_facts.has_source = source_taxid.is_some();
     let from_source = bioseq_title_from_source(title, || bioseq_facts.clone());

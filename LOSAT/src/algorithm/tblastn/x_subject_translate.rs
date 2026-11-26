@@ -37,9 +37,10 @@ use crate::algorithm::common::translated_chunks::{
 use crate::algorithm::common::x_db_stream::x_frames_pooled;
 use crate::algorithm::tblastx::constants::SENTINEL_BYTE;
 use crate::algorithm::tblastx::translation::QueryFrame;
-use crate::core::blast_encoding::{iupacna_to_ncbi4na, NcbiRandom};
+use crate::core::blast_encoding::iupacna_to_ncbi4na;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::aa_char_to_ncbistdaa;
+use crate::utils::random_gen::NcbiRandom;
 use anyhow::{bail, Result};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -1416,7 +1417,7 @@ impl XW128 {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:595 (see `x_phase_words`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:592,598,606,611,616,622,627,631 (see `x_phase_words`)
     /// Entry `index` (0..64) of the 64-byte table `table`, held as four registers of 16 entries,
     /// for every byte of `index`.
     #[inline(always)]

@@ -1,4 +1,5 @@
 use super::*;
+use crate::report::tabular::taxdb_warning_line;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:348-357: outfmt 20's line of the field names, after the warning of its
 // formatter when `taxdb.bti` is not found and a plural name is shown.

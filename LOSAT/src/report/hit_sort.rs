@@ -67,14 +67,61 @@ pub(crate) struct HspScores {
     pub(crate) length: i64,
     pub(crate) query_from: u64,
     pub(crate) query_to: u64,
+    pub(crate) query_sort_start: i64,
     pub(crate) subject_from: u64,
 }
 
 impl HspScores {
     /// The values of the HSP of `hit` (its 1-based coordinates as the report shows them, from
-    /// <= to after `GetSeqRange`'s swap of a minus strand).
+    /// <= to after `GetSeqRange`'s swap of a minus strand, or the `TSeqPos` range of a BLASTN
+    /// `-db` HSP whose Seq-align query start is below 0).
     pub(crate) fn of(hit: &PairwiseHit) -> Self {
+        if let Some(left) = hit.left_of_record() {
+            return Self::of_left_of_record(
+                hit.hit.bit_score,
+                hit.hit.e_value,
+                hit.seqalign_num_ident,
+                hit.hit.length,
+                left,
+                (hit.hit.s_start, hit.hit.s_end),
+            );
+        }
         Self::of_hit(&hit.hit, hit.seqalign_num_ident)
+    }
+
+    // NCBI reference (598d8ae6): c++/include/objects/seqalign/Dense_diag.hpp:98-121
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1402-1430
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:2969-2992
+    /// `HspScores` of a BLASTN `-db` HSP whose Seq-align query start `start` is below 0 in record
+    /// coordinates (length `len`): `CDense_diag::GetSeqRange` on row 0 uses unsigned `TSeqPos`
+    /// (`from = start as u32`, `to = from + len - 1`, empty when `from + len` wraps across 0),
+    /// while `SortHspByMasterStartAscending` casts `min(from, to)` to signed `int`.
+    pub(crate) fn of_left_of_record(
+        bits: f64,
+        e_value: f64,
+        seqalign_num_ident: usize,
+        length: usize,
+        (start, query_len): (i32, u32),
+        subject: (usize, usize),
+    ) -> Self {
+        let zero_based = |position: usize| (position as u64).saturating_sub(1);
+        let from = start as u32;
+        let to = from.wrapping_add(query_len).wrapping_sub(1);
+        let (query_from, query_to) = match from.checked_add(query_len) {
+            Some(to_open) if to_open > from => (u64::from(from), u64::from(to_open - 1)),
+            // Empty `CRange<TSeqPos>`: skipped by `query_coverage`.
+            _ => (1, 0),
+        };
+        Self {
+            bits,
+            evalue: crate::report::serial::seqalign::seqalign_evalue(e_value),
+            num_ident: seqalign_num_ident as i64,
+            length: length as i64,
+            query_from,
+            query_to,
+            query_sort_start: i64::from(from.min(to) as i32),
+            subject_from: zero_based(subject.0.min(subject.1)),
+        }
     }
 
     /// The values of the HSP `h` of a report's hit list whose Seq-align carries the identities
@@ -109,12 +156,13 @@ impl HspScores {
             bits,
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1185-1190
             // The comparators read the Seq-align's E-value (`GetAlnScores`), 0 below 1e-180:
-            // two HSPs below it tie.
-            evalue: crate::report::serial::seqalign::seqalign_evalue(e_value),
+            // two HSPs below it tie; -1 where the Seq-align has none.
+            evalue: crate::report::serial::seqalign::seqalign_evalue_read(e_value),
             num_ident: seqalign_num_ident as i64,
             length: length as i64,
             query_from: zero_based(query.0.min(query.1)),
             query_to: zero_based(query.0.max(query.1)),
+            query_sort_start: zero_based(query.0.min(query.1)) as i64,
             subject_from: zero_based(subject.0.min(subject.1)),
         }
     }
@@ -228,10 +276,10 @@ pub(crate) fn hsp_by_score_descending(info1: &HspScores, info2: &HspScores) -> b
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1403-1431
 /// `SortHspByMasterStartAscending`.
 pub(crate) fn hsp_by_query_start_ascending(info1: &HspScores, info2: &HspScores) -> bool {
-    if info1.query_from == info2.query_from {
+    if info1.query_sort_start == info2.query_sort_start {
         info1.evalue < info2.evalue
     } else {
-        info1.query_from < info2.query_from
+        info1.query_sort_start < info2.query_sort_start
     }
 }
 
@@ -312,6 +360,7 @@ fn set_percent_identity(
 pub(crate) fn query_coverage<'a>(hsps: impl IntoIterator<Item = &'a HspScores>) -> u64 {
     let mut ranges: Vec<(u64, u64)> = hsps
         .into_iter()
+        .filter(|hsp| hsp.query_from <= hsp.query_to)
         .map(|hsp| (hsp.query_from, hsp.query_to))
         .collect();
     ranges.sort_unstable();

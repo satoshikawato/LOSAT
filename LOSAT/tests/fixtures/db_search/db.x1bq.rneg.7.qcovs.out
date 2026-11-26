@@ -1,0 +1,13 @@
+# BLASTN 2.17.0+
+# Query: q0
+# Database: tests/db_search/x1bq/rneg
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: qA
+# Database: tests/db_search/x1bq/rneg
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: qB
+# Database: tests/db_search/x1bq/rneg
+# Fields: query id, subject id, % query coverage per subject
+# 2 hits found

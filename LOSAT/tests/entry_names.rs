@@ -46,7 +46,7 @@ fn install(dir: &Path) -> Output {
 }
 
 /// The programs that the binary links, in the order it lists them.
-const PROGRAMS: [&str; 18] = [
+const PROGRAMS: [&str; 21] = [
     "blastn",
     "blastp",
     "blastx",
@@ -64,6 +64,9 @@ const PROGRAMS: [&str; 18] = [
     "makembindex",
     "makeprofiledb",
     "rpsbproc",
+    "blastdb_aliastool",
+    "blastdbcheck",
+    "cleanup-blastdb-volumes.py",
     "blast_formatter",
 ];
 
@@ -102,7 +105,11 @@ fn a_shim_prints_what_the_subcommand_prints() {
         // `makembindex: 2.17.0`).
         let version = run(shim(&dir, name), &["-version"]);
         assert!(version.status.success(), "{name}: {version:?}");
-        let first_line = format!("{name}: LOSAT {}\n", env!("CARGO_PKG_VERSION"));
+        let first_line = if name == "cleanup-blastdb-volumes.py" {
+            format!("{name} LOSAT {}\n", env!("CARGO_PKG_VERSION"))
+        } else {
+            format!("{name}: LOSAT {}\n", env!("CARGO_PKG_VERSION"))
+        };
         assert!(
             version.stdout.starts_with(first_line.as_bytes()),
             "{name}: {version:?}"
@@ -293,6 +300,9 @@ fn top_level_help_names_every_program() {
             "convert2blastmask",
             "makembindex",
             "makeprofiledb",
+            "blastdb_aliastool",
+            "blastdbcheck",
+            "cleanup-blastdb-volumes.py",
             "blast_formatter",
         ] {
             let line = text
@@ -451,10 +461,21 @@ fn refusals_by_name_have_one_form() {
             format!("Error: the NCBI BLAST+ option {option} is not supported by LOSAT's PROGRAM\n");
         assert!(forms.iter().all(|form| *form == expected), "{forms:?}");
     }
-    // blastx's other refusals by name (`-gilist`, `-ipglist`) have the same form
-    // (`-use_sw_tback` runs since line RG item X4b-2).
-    for option in ["-gilist", "-ipglist"] {
-        let output = run(losat(), &["blastx", "-query", "q.fa", option, "x"]);
+    // blastx's remaining refusal by name (`-entrez_query` with `-remote`) has the same form
+    // (`-gilist`, `-ipglist`, and `-import_search_strategy` run now).
+    {
+        let option = "-entrez_query";
+        let argv = [
+            "blastx",
+            "-query",
+            "q.fa",
+            "-db",
+            "d",
+            "-entrez_query",
+            "x",
+            "-remote",
+        ];
+        let output = run(losat(), &argv);
         assert_eq!(output.status.code(), Some(1), "{option} {output:?}");
         assert_eq!(
             String::from_utf8(output.stderr).unwrap(),

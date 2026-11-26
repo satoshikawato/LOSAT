@@ -9,6 +9,7 @@ import { computed, ref } from 'vue';
 import type { SessionCountsEntry } from '../application/coordinator';
 import type { ToolDraft, ToolDraftState } from '../application/tool-draft';
 import { stageBlockParameter, toToolParameterField } from '../domain/tools';
+import type { SavedCountsEntry } from '../ports/counts';
 import { formatBytes } from './format';
 import type { FormModel } from './form-model';
 import LosatLoader from './LosatLoader.vue';
@@ -20,6 +21,7 @@ const props = defineProps<{
   draft: ToolDraft;
   state: ToolDraftState;
   sessionCounts: readonly SessionCountsEntry[];
+  savedCounts: readonly SavedCountsEntry[];
   model: FormModel;
 }>();
 
@@ -82,8 +84,10 @@ function onInFiles(event: Event): void {
           prefix="convert"
           :source="state.convertSource"
           :session-counts="sessionCounts"
+          :saved-counts="savedCounts"
           file-aria-label="Choose counts file to convert"
           @select-session="(e) => draft.setConvertSession(e.runId, e.runNumber, e.key, e.name, e.size)"
+          @select-saved="(e) => draft.setConvertSaved(e.taxid, e.size)"
           @choose-file="(file) => draft.setConvertFile(file)"
           @clear="draft.clearConvert()"
         />
@@ -236,8 +240,10 @@ function onInFiles(event: Event): void {
         prefix="ustat"
         :source="state.ustatSource"
         :session-counts="sessionCounts"
+        :saved-counts="savedCounts"
         file-aria-label="Choose counts file for -ustat"
         @select-session="(e) => draft.setUstatSession(e.runId, e.runNumber, e.key, e.name, e.size)"
+        @select-saved="(e) => draft.setUstatSaved(e.taxid, e.size)"
         @choose-file="(file) => draft.setUstatFile(file)"
         @clear="draft.clearUstat()"
       />

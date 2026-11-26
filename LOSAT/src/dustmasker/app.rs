@@ -28,18 +28,15 @@ pub(super) fn run(
     };
     let integer = |name| args.integer(name).expect("an integer key with a default");
     let options = Options {
-        input: args.value("in").expect("-in has a default"),
-        infmt: args.value("infmt").expect("-infmt has a default"),
+        input: args.os_value("in").expect("-in has a default"),
+        infmt: args.bytes("infmt").expect("-infmt has a default"),
         outfmt: args.value("outfmt").expect("-outfmt has a default"),
         window: integer("window"),
         level: integer("level"),
         linker: integer("linker"),
         parse_seqids: args.flag("parse_seqids"),
         hard_masking: args.flag("hard_masking"),
-        blastdb_registry: match &settings.blastdb {
-            Ok(value) => Ok(value.as_deref()),
-            Err(reason) => Err(reason.as_str()),
-        },
+        database: settings.database(),
     };
     match work::run(&options, stdin, &mut output, diag) {
         Ok(()) => 0,

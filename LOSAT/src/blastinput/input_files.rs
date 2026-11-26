@@ -202,7 +202,7 @@ pub(crate) fn read_to_failure(input: &mut impl std::io::Read) -> Vec<u8> {
 /// open gets NCBI's error (`crate::cli::inaccessible`), and a file named `.gz`, `.bz2` or `.zst`
 /// (`compressed::compression_of_name`) is inflated into an unnamed temporary file first, which is
 /// returned in its place: the program then reads it exactly as it reads the plain file (the same
-/// lines and messages, the same readable-byte hint of `FastaStream::from_file`, the same second
+/// lines and messages, the same readable-byte hint of `fasta_reader::stream::FastaStream::from_file`, the same second
 /// handle of blastn's query stream and second reads of BLASTX's query), while the decoder holds
 /// its window. Concatenated members, streams and frames (bgzip, pbzip2, pzstd, `cat a.gz b.gz`)
 /// are read whole, and a `.gz` file as makeblastdb reads it (`compressed::GzipMembers`: a member's
@@ -268,7 +268,7 @@ fn inflation_directories(path: &std::path::Path) -> impl Iterator<Item = std::pa
 
 /// The directory of temporary files: `temp_dir()`.
 #[cfg(not(target_os = "wasi"))]
-fn temporary_directory() -> Option<std::path::PathBuf> {
+pub(crate) fn temporary_directory() -> Option<std::path::PathBuf> {
     #[allow(clippy::disallowed_methods)] // not WASI: `temp_dir()` is only called off WASI
     Some(std::env::temp_dir())
 }
@@ -277,7 +277,7 @@ fn temporary_directory() -> Option<std::path::PathBuf> {
 /// `library/std/src/sys/pal/wasip1/os.rs:119` of 1.92), where a host gives a module directories
 /// only by its preopens. The WASI command puts the inflated copy beside the input or refuses it.
 #[cfg(target_os = "wasi")]
-fn temporary_directory() -> Option<std::path::PathBuf> {
+pub(crate) fn temporary_directory() -> Option<std::path::PathBuf> {
     None
 }
 
@@ -342,7 +342,7 @@ pub(crate) fn temporary_output(role: &str) -> std::io::Result<std::fs::File> {
 /// as soon as it is open, on Windows it is hidden and deleted when its last handle closes
 /// (`FILE_FLAG_DELETE_ON_CLOSE`, shared for reading, writing and deletion so that `try_clone`
 /// and a second `open` of the handle keep working). It is readable and writable.
-fn unnamed_temporary_file(
+pub(crate) fn unnamed_temporary_file(
     directory: &std::path::Path,
     role: &str,
 ) -> std::io::Result<std::fs::File> {

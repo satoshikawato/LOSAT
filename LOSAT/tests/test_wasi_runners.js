@@ -51,9 +51,11 @@ const body = (instructions, locals = 0) => {
 // Entry/export/memory variations exercise Wasm ABI inspection only. `writes` appends that many
 // fd_write calls of 4,096 bytes to descriptor `fd` (standard output, or 2 for standard error)
 // after the worker part, exiting with the first nonzero WASI errno; a command that writes ends
-// with exit 0 after its writes (`status` is not used).
+// with exit 0 after its writes (`status` is not used). `abort`: the command ends with the trap of
+// `unreachable` (the module's abort, wasi_artifact.js `endOnAbortTrap`) after its writes; a
+// `worker` "abort" is a guest thread whose body is that trap.
 function command({ threaded, status = 0, worker = null, entry = "_start",
-  aliases = [], exportMemory = true, memoryLimits = [1, 0, 1], writes = 0, fd = 1 }) {
+  aliases = [], exportMemory = true, memoryLimits = [1, 0, 1], writes = 0, fd = 1, abort = false }) {
   const types = vector([
     [0x60, 1, 0x7f, 0],                 // proc_exit(i32)
     [0x60, 0, 0],                       // _start()
@@ -85,6 +87,7 @@ function command({ threaded, status = 0, worker = null, entry = "_start",
     if (worker !== "missing-export") exports.push([...name("wasi_thread_start"), 0, imported + 1]);
     bodies.push(body(worker === "trap"
       ? [...i32(-1), ...i32(0), ...i32(1), 0xfc, 11, 0] // OOB memory.fill
+      : worker === "abort" ? [0x00]                     // unreachable
       : [...i32(0), ...i32(1), 0xfe, 0x17, 2, 0,      // atomic store + notify
         ...i32(0), ...i32(1), 0xfe, 0, 2, 0, 0x1a]));
   }
@@ -103,6 +106,7 @@ function command({ threaded, status = 0, worker = null, entry = "_start",
       0x20, 1, ...i32(1), 0x6a, 0x22, 1, ...i32(writes), 0x49, 0x0d, 0,
       0x0b];
   }
+  if (abort) main = [...(writes ? main : []), 0x00];
   return Buffer.from([
     0, 97, 115, 109, 1, 0, 0, 0,
     ...section(1, types),
@@ -167,7 +171,7 @@ function run(options) {
     fs.writeFileSync(fixture, bytes);
     const runner = options.threaded ? "run_losat_wasi_threads.js" : "run_losat_wasi.js";
     const result = spawnSync(process.execPath, [path.join(__dirname, runner), fixture], {
-      env: hostEnv(), encoding: "utf8", timeout: 10000, killSignal: "SIGKILL",
+      env: hostEnv(), encoding: "utf8", timeout: options.timeout || 10000, killSignal: "SIGKILL",
     });
     assert.ifError(result.error);
     return result;
@@ -190,6 +194,28 @@ test("worker memory trap terminates the command while its main thread waits", ()
   const result = run({ threaded: true, worker: "trap" });
   assert.equal(result.signal, "SIGTERM", result.stderr);
   assert.match(result.stderr, /RuntimeError: memory access out of bounds/);
+});
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:160-163
+// The module's abort, a trap of `unreachable` (wasi_artifact.js `endOnAbortTrap`), ends the command
+// as the native command's abort ends: by SIGABRT, with the module's text on standard error and none
+// of the host's, on the main thread of either runner and on a guest thread. Another trap keeps its
+// report (the worker's memory trap above). The abort may dump core first, where the system takes
+// its time (WSL's crash capture: 4-10 s for each under load, 2026-11-23), so these runs get a
+// longer limit than the others.
+const ABORT_TIMEOUT_MS = 120000;
+for (const threaded of [false, true]) {
+  test(`${threaded ? "threaded" : "serial"} runner ends the module's abort by SIGABRT`, () => {
+    const result = run({ threaded, writes: 1, fd: 2, abort: true, timeout: ABORT_TIMEOUT_MS });
+    assert.equal(result.signal, "SIGABRT", result.stderr);
+    assert.equal(result.stderr, "\0".repeat(4096));
+  });
+}
+
+test("a guest thread's abort ends the command by SIGABRT while its main thread waits", () => {
+  const result = run({ threaded: true, worker: "abort", timeout: ABORT_TIMEOUT_MS });
+  assert.equal(result.signal, "SIGABRT", result.stderr);
+  assert.equal(result.stderr, "");
 });
 
 test("serial runner reports a rejected artifact and exits 1", () => {
@@ -384,6 +410,43 @@ test("artifact preparation preserves validation and ABI rejection", () => {
       /expected serial-command, got threaded-command/);
     assert.throws(() => inspect(command({ threaded: true, worker: "missing-export" })),
       /requires wasi_thread_start/);
+  }
+});
+
+// A command that LOSAT builds carries no Web ABI (feature `no-web-abi-v1`, line RG item K4i-3d):
+// the check of the artifacts LOSAT records refuses one that does; the runners still run it (a
+// command built before the feature), and reactors keep their exports.
+test("a recorded command with Web ABI exports is refused; the runners still prepare it", () => {
+  const { prepareArtifact, inspectArtifact, refuseWebAbiInCommand } = require("./wasi_artifact");
+  for (const threaded of [false, true]) {
+    const kind = `${threaded ? "threaded" : "serial"}-command`;
+    for (const name of ["losat_web_run_pair", "losat_web2_tool"]) {
+      const bytes = command({ threaded, aliases: [name] });
+      assert.equal(prepareArtifact(bytes, kind).identity.kind, kind);
+      assert.throws(() => refuseWebAbiInCommand(inspectArtifact(bytes, kind)),
+        new RegExp(`command exports the Web ABI: ${name}`));
+    }
+    assert.equal(refuseWebAbiInCommand(inspectArtifact(command({ threaded }), kind)).kind, kind);
+  }
+  const api = ["losat_web_run_pair", "losat_web_alloc", "losat_web_dealloc",
+    "losat_web_result_ptr", "losat_web_result_len", "losat_web_error_ptr", "losat_web_error_len"];
+  const reactor = inspectArtifact(command({ threaded: false, entry: "_initialize", aliases: api }), "serial-reactor");
+  assert.equal(refuseWebAbiInCommand(reactor).kind, "serial-reactor");
+  // The command line that LOSAT's build and release scripts call (`node wasi_artifact.js FILE KIND`).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-artifact-cli-"));
+  try {
+    const script = path.join(__dirname, "wasi_artifact.js");
+    const web = path.join(dir, "web.wasm"), plain = path.join(dir, "plain.wasm");
+    fs.writeFileSync(web, command({ threaded: false, aliases: ["losat_web_run_pair"] }));
+    fs.writeFileSync(plain, command({ threaded: false }));
+    const refused = spawnSync(process.execPath, [script, web, "serial-command"], { encoding: "utf8" });
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /command exports the Web ABI: losat_web_run_pair/);
+    const passed = spawnSync(process.execPath, [script, plain, "serial-command"], { encoding: "utf8" });
+    assert.equal(passed.status, 0, passed.stderr);
+    assert.equal(JSON.parse(passed.stdout).kind, "serial-command");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

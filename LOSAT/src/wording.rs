@@ -20,7 +20,11 @@
 //!   producer for every program.
 //!
 //! NCBI's diagnostic codes such as `(106.15)`, the message bodies, the exit statuses and every
-//! other byte of the search outputs stay NCBI's.
+//! other byte of the search outputs stay NCBI's, and so do the bytes that a message quotes from
+//! the input: the piece of a string that a byte's post quotes (`Bad char [0x<hex>] in string at
+//! <position>`, then the piece that holds the byte, `ReplacedChar::message`) is copied as it is
+//! (an archive's `ident "2.17.0+"` quoted from an input made by NCBI stays NCBI's version;
+//! `quoted_piece`).
 //!
 //! [`losat_text`] is also the one mapping from NCBI's frozen bytes to LOSAT's (AGENTS.md rule 8):
 //! LOSAT's text is `losat_text` of NCBI's, so every comparison of LOSAT's output or messages with
@@ -44,12 +48,14 @@
 //! - [`NCBI_USER_MANUAL_FOOTER`] becomes [`USER_MANUAL_FOOTER`].
 //! - `NCBI C++ Exception:`, the white space after it and the place of the first exception
 //!   (`T0 "<file>", line <n>: <severity>: (<class>::<code>) ` and NCBI's function
-//!   `<function>() - ` when the report names one) are left out: the line keeps the message.
+//!   `<function>() - ` when the report names one) are left out: the line keeps the message, or
+//!   `<code>` when the message is empty.
 //! - The place of each further exception of the chain (after a space: its indentation, or the
 //!   space of a message whose white space is collapsed, as in an archive's message) is left out
 //!   the same way, so each further message keeps its indentation.
 //! - Any other `(<class>::<code>) ` (and the function after it) is left out after a colon or at
-//!   the start of a line; elsewhere it becomes `: `.
+//!   the start of a line; elsewhere it becomes `: `. When the message after it is empty, `<code>`
+//!   takes its place.
 //! - `(m_Pos = <n>)` becomes `(position <n>)`.
 //!
 //! [`losat_output_bytes`], the mapping of a whole frozen output or standard error, also moves
@@ -171,15 +177,7 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
     let position = NCBI_POSITION.as_bytes();
     let version = NCBI_VERSION.as_bytes();
     let title = RPSBPROC_TITLE.as_bytes();
-    if !(contains(text, footer)
-        || contains(text, header)
-        || contains(text, position)
-        || contains(text, b"::")
-        || contains(text, version)
-        || contains(text, b" error:")
-        || contains(text, title)
-        || contains(text, XMLHELP_PROGRAM))
-    {
+    if !maps(text) {
         return Cow::Borrowed(text);
     }
     let mut out = Vec::with_capacity(text.len());
@@ -187,6 +185,13 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
     let mut changed = false;
     while i < text.len() {
         let rest = &text[i..];
+        if rest[0] == b'B' && matches!(out.last(), None | Some(b'\n' | b' ')) {
+            if let Some(quoted) = quoted_piece(rest) {
+                out.extend_from_slice(&rest[..quoted]);
+                i += quoted;
+                continue;
+            }
+        }
         // A binary (BER) archive's `ident`: a VisibleString (tag 26) of NCBI's length, whose length
         // byte becomes LOSAT's.
         if rest.starts_with(version) && out.ends_with(&[BER_VISIBLE_STRING, version.len() as u8]) {
@@ -252,7 +257,7 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
                 j += 1;
             }
             if j > header.len() {
-                if let Some(place) = place(&rest[j..]) {
+                if let Some((place_len, code)) = place(&rest[j..]) {
                     // A report glued to the text before it (`Object type= BlastOutput2NCBI C++
                     // Exception:`) is set off by `: `, as a tag inside a line is; after a space
                     // (`[blastn] NCBI C++ Exception:`) nothing stands for it.
@@ -262,23 +267,27 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
                     {
                         glue(&mut out);
                     }
-                    i += j + place;
+                    let end = j + place_len;
+                    let skip = keep_code_if_empty(&mut out, &rest[end..], code);
+                    i += end + skip;
                     changed = true;
                     continue;
                 }
             }
         }
         if rest[0] == b'T' && out.last() == Some(&b' ') {
-            if let Some(place) = place(rest) {
-                i += place;
+            if let Some((place_len, code)) = place(rest) {
+                let skip = keep_code_if_empty(&mut out, &rest[place_len..], code);
+                i += place_len + skip;
                 changed = true;
                 continue;
             }
         }
         if rest[0] == b'(' {
-            if let Some(tag) = tag(rest) {
+            if let Some((tag_len, code)) = tag(rest) {
                 glue(&mut out);
-                i += tag;
+                let skip = keep_code_if_empty(&mut out, &rest[tag_len..], code);
+                i += tag_len + skip;
                 changed = true;
                 continue;
             }
@@ -297,6 +306,46 @@ pub fn losat_bytes(text: &[u8]) -> Cow<'_, [u8]> {
     } else {
         Cow::Borrowed(text)
     }
+}
+
+/// The texts that [`losat_bytes`] maps or that its rules start from: a text that holds none of
+/// them is LOSAT's as it is.
+const MAPPED: [&[u8]; 8] = [
+    NCBI_USER_MANUAL_FOOTER.as_bytes(),
+    NCBI_EXCEPTION_HEADER.as_bytes(),
+    NCBI_POSITION.as_bytes(),
+    b"::",
+    NCBI_VERSION.as_bytes(),
+    b" error:",
+    RPSBPROC_TITLE.as_bytes(),
+    XMLHELP_PROGRAM,
+];
+
+/// The texts of [`MAPPED`] that each byte starts, as bits (bit `k`: `MAPPED[k]`).
+const MAPPED_FIRST: [u8; 256] = {
+    let mut first = [0u8; 256];
+    let mut i = 0;
+    while i < MAPPED.len() {
+        first[MAPPED[i][0] as usize] |= 1 << i;
+        i += 1;
+    }
+    first
+};
+
+/// Whether `text` holds a text of [`MAPPED`]: one pass over its bytes, where a byte starts texts
+/// only those are compared (a post of many quoted bytes is read once, not once per text).
+fn maps(text: &[u8]) -> bool {
+    text.iter().enumerate().any(|(i, &b)| {
+        let mut starts = MAPPED_FIRST[b as usize];
+        while starts != 0 {
+            let k = starts.trailing_zeros() as usize;
+            if text[i..].starts_with(MAPPED[k]) {
+                return true;
+            }
+            starts &= starts - 1;
+        }
+        false
+    })
 }
 
 /// The member of an ASN.1 text archive that holds a message (`Blast4-error.message`).
@@ -710,6 +759,41 @@ fn xmlhelp_version(out: &[u8], text: &[u8]) -> Option<usize> {
     Some(i + literal(&text[i..], b"</version>")?)
 }
 
+/// The length of a byte post's line and of the piece it quotes at the start of `text`, when the
+/// line (`Bad char [0x<hex>] in string at line <n>` or `byte <n>`, one or two hex digits in upper
+/// case, `ReplacedChar::message`) is followed by a line end or a space (a collapsed message) and
+/// the piece, the text after it up to the next line end, holds that byte: the input's bytes, which
+/// stay as they are. A skipped string's post quotes no piece, and the text after it is another's
+/// (it does not hold the byte), mapped as any.
+fn quoted_piece(text: &[u8]) -> Option<usize> {
+    let hex = text.strip_prefix(b"Bad char [0x")?;
+    let close = hex.iter().take(3).position(|&b| b == b']')?;
+    let digits = &hex[..close];
+    if digits.is_empty()
+        || !digits
+            .iter()
+            .all(|&b| matches!(b, b'0'..=b'9' | b'A'..=b'F'))
+    {
+        return None;
+    }
+    let byte = u8::from_str_radix(std::str::from_utf8(digits).ok()?, 16).ok()?;
+    let at = hex[close..].strip_prefix(b"] in string at ")?;
+    let number = at
+        .strip_prefix(b"line ")
+        .or_else(|| at.strip_prefix(b"byte "))?;
+    let n = number.iter().take_while(|b| b.is_ascii_digit()).count();
+    if n == 0 || !matches!(number.get(n), Some(b'\n' | b' ')) {
+        return None;
+    }
+    let start = text.len() - number.len() + n + 1;
+    let piece = &text[start..];
+    let piece = &piece[..piece
+        .iter()
+        .position(|&b| b == b'\n')
+        .unwrap_or(piece.len())];
+    piece.contains(&byte).then_some(start + piece.len())
+}
+
 /// The length of NCBI's rpsbproc banner `<title> v0.5.1` at the start of `text`.
 fn rpsbproc_banner(text: &[u8]) -> Option<usize> {
     let mut i = literal(text, RPSBPROC_TITLE.as_bytes())?;
@@ -743,9 +827,29 @@ fn glue(out: &mut Vec<u8>) {
     }
 }
 
+/// When the message body `after` a removed tag or place is empty on its line (end of input,
+/// end of line after any spaces, or the place of a further exception in a collapsed chain),
+/// writes `code` to `out` (with a trailing space before a collapsed next place) and returns the
+/// number of spaces in `after` to skip. Returns 0 without writing when the message is non-empty.
+fn keep_code_if_empty(out: &mut Vec<u8>, after: &[u8], code: &[u8]) -> usize {
+    let spaces = after.iter().take_while(|&&b| b == b' ').count();
+    let trimmed = &after[spaces..];
+    let next_place = trimmed.starts_with(b"T") && place(trimmed).is_some();
+    if trimmed.is_empty() || trimmed[0] == b'\n' || next_place {
+        if !code.is_empty() {
+            out.extend_from_slice(code);
+            if next_place {
+                out.push(b' ');
+            }
+        }
+        return spaces;
+    }
+    0
+}
+
 /// The length of the place of an exception at the start of `text`:
-/// `T<thread> "<file>", line <n>: <severity>: ` and its [`tag`].
-fn place(text: &[u8]) -> Option<usize> {
+/// `T<thread> "<file>", line <n>: <severity>: ` and its [`tag`], with the tag's `<code>`.
+fn place(text: &[u8]) -> Option<(usize, &[u8])> {
     let mut i = literal(text, b"T")?;
     i += digits(&text[i..])?;
     i += literal(&text[i..], b" \"")?;
@@ -762,12 +866,15 @@ fn place(text: &[u8]) -> Option<usize> {
     }
     i += word;
     i += literal(&text[i..], b": ")?;
-    Some(i + tag(&text[i..])?)
+    let (tag_len, code) = tag(&text[i..])?;
+    Some((i + tag_len, code))
 }
 
 /// The length of `(<class>::<code>) ` at the start of `text` and of the function after it
-/// (`<function>() - `), where `<class>` is a class of NCBI's exceptions.
-fn tag(text: &[u8]) -> Option<usize> {
+/// (`<function>() - `), where `<class>` is a class of NCBI's exceptions, and the `<code>` slice
+/// between `::` and `)`. At the end of a line or of `text` (a collapsed message with an empty
+/// body) the trailing space after `)` or `-` may be absent.
+fn tag(text: &[u8]) -> Option<(usize, &[u8])> {
     let mut i = literal(text, b"(")?;
     let class = text[i..]
         .iter()
@@ -783,18 +890,34 @@ fn tag(text: &[u8]) -> Option<usize> {
     }
     i += class;
     i += literal(&text[i..], b"::")?;
-    i += text[i..].iter().position(|&b| b == b')' || b == b'\n')?;
-    i += literal(&text[i..], b") ")?;
+    let code_start = i;
+    let code_len = text[i..].iter().position(|&b| b == b')' || b == b'\n')?;
+    let code = &text[code_start..code_start + code_len];
+    i += code_len;
+    i += literal(&text[i..], b")")?;
+    match text.get(i) {
+        Some(b' ') => i += 1,
+        None | Some(b'\n') => return Some((i, code)),
+        Some(_) => return None,
+    }
     let function = text[i..]
         .iter()
         .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b':' | b'~'))
         .count();
     if function > 0 {
-        if let Some(end) = literal(&text[i + function..], b"() - ") {
-            i += function + end;
+        let mut f = i + function;
+        if text[i..f].ends_with(b"::operator") && text[f..].starts_with(b"()") {
+            f += 2;
+        }
+        if let Some(end) = literal(&text[f..], b"() - ") {
+            i = f + end;
+        } else if let Some(end) = literal(&text[f..], b"() -") {
+            if matches!(text.get(f + end), None | Some(b'\n')) {
+                i = f + end;
+            }
         }
     }
-    Some(i)
+    Some((i, code))
 }
 
 fn digits(text: &[u8]) -> Option<usize> {

@@ -309,7 +309,7 @@ impl BatchCount {
 
 /// The ids of the query records of one scope (`QueryScopes`): the keys of each id
 /// (`seqid::defline_set::scope_keys`, and the own kind of `id_scope::version_keys` and
-/// `id_scope::name_keys`).
+/// `id_scope::name_keys`) and their forms (`forms`).
 #[derive(Clone, Debug, Default)]
 pub(crate) struct QueryScope {
     keys: std::collections::HashSet<u64>,
@@ -319,6 +319,9 @@ pub(crate) struct QueryScope {
     first_records: std::collections::HashMap<u64, (usize, usize)>,
     /// The records of the batches added to the scope before the one being added.
     records: usize,
+    /// The forms of the scope's ids (`id_scope::match_form`), by which an earlier id may be one of
+    /// a record's in another form (`add_version_form`).
+    forms: u8,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
@@ -352,13 +355,14 @@ enum Meets {
 impl QueryScope {
     /// Adds the ids `ids` of a query record (`record`: its number in the scope and its letters), or
     /// LOSAT's refusal of a record whose id another record of the scope has
-    /// (`believed::duplicate_id`).
+    /// (`believed::duplicate_id`). Whether an earlier id of the scope may be one of `ids` in
+    /// another form (`add_version_form`).
     fn add(
         &mut self,
         ids: &[crate::seqid::ParsedSeqId],
         record: (usize, usize),
         program: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         if let Some(refusal) = crate::blastinput::fasta_reader::believed::duplicate_id(
             ids,
             &mut self.keys,
@@ -368,12 +372,12 @@ impl QueryScope {
             return Err(refusal);
         }
         // `duplicate_id` keeps the version's kind of two BLASTN queries only.
-        self.keys.extend(
-            ids.iter()
-                .filter_map(|id| crate::seqid::id_scope::version_keys(id).map(|(own, _)| own)),
-        );
+        let mut other_form = false;
+        for id in ids {
+            other_form |= self.add_version_form(id);
+        }
         self.note_first(ids, record);
-        Ok(())
+        Ok(other_form)
     }
 
     /// Notes `record` (its number in the scope and its letters) for the keys of `ids` that no
@@ -431,9 +435,15 @@ impl QueryScope {
 
     /// Adds the ids `ids` of a record (its number in the scope and its letters) whatever the scope
     /// holds (a record after LOSAT's refusal in its batch, `QueryScopes::add_batch_records`).
-    fn add_after_refusal(&mut self, ids: &[crate::seqid::ParsedSeqId], record: (usize, usize)) {
-        self.add_ids(ids);
+    /// Whether an earlier id of the scope may be one of `ids` in another form (`add_version_form`).
+    fn add_after_refusal(
+        &mut self,
+        ids: &[crate::seqid::ParsedSeqId],
+        record: (usize, usize),
+    ) -> bool {
+        let other_form = self.add_ids(ids);
         self.note_first(ids, record);
+        other_form
     }
 
     /// Adds the ids `ids` of query records (`BelievedIds`), whatever ids the scope has
@@ -523,23 +533,47 @@ impl QueryScope {
         scope
     }
 
-    /// Adds the keys that `add_ids_of` keeps of each of the Seq-ids `ids`.
-    fn add_ids(&mut self, ids: &[crate::seqid::ParsedSeqId]) {
+    /// Adds the keys that `add_ids_of` keeps of each of the Seq-ids `ids`. Whether an earlier id
+    /// of the scope may be one of `ids` in another form (`add_version_form`).
+    fn add_ids(&mut self, ids: &[crate::seqid::ParsedSeqId]) -> bool {
         let mut keys = Vec::new();
+        let mut other_form = false;
         for id in ids {
             keys.clear();
             crate::seqid::defline_set::scope_keys(id, &mut keys);
             self.keys.extend(keys.iter().copied());
             self.keys
                 .extend(crate::seqid::id_scope::name_keys(id).map(|(own, _)| own));
-            self.keys
-                .extend(crate::seqid::id_scope::version_keys(id).map(|(own, _)| own));
+            other_form |= self.add_version_form(id);
         }
+        other_form
     }
 
-    /// Adds the keys of the queries of `other`.
+    /// Adds the own kind of `id_scope::version_keys` of the Seq-id `id`, and its form (`forms`).
+    /// Whether an earlier id of the scope may be `id` in another form, which `CSeq_id::Match` can
+    /// take for it though `scope_keys` tells them apart (`id_scope::match_form`): its accession
+    /// with the other kind of `version_keys`, asked only where the scope has ids of that form; for
+    /// a PDB Seq-id, any of another form. A scope keeps nothing more per id for it.
+    fn add_version_form(&mut self, id: &crate::seqid::ParsedSeqId) -> bool {
+        use crate::seqid::id_scope::{version_key, MATCH_FORMS_ACCESSION, MATCH_FORMS_PDB};
+        let form = crate::seqid::id_scope::match_form(id);
+        if form & MATCH_FORMS_ACCESSION == 0 {
+            // A PDB Seq-id, or one without an accession: no `version_keys`.
+            let other_form = form != 0 && self.forms & MATCH_FORMS_PDB & !form != 0;
+            self.forms |= form;
+            return other_form;
+        }
+        let other_form = self.forms & MATCH_FORMS_ACCESSION & !form != 0
+            && version_key(id, false).is_some_and(|other| self.keys.contains(&other));
+        self.forms |= form;
+        self.keys.extend(version_key(id, true));
+        other_form
+    }
+
+    /// Adds the keys and the forms of the queries of `other`.
     pub(crate) fn extend(&mut self, other: &QueryScope) {
         self.keys.extend(other.keys.iter().copied());
+        self.forms |= other.forms;
     }
 }
 
@@ -669,43 +703,104 @@ pub(crate) struct QueryScopes {
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2392 (cited at
 // `blast_xml::matrix::XmlMatrixFailure`)
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:713-719
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2393-2413
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:462-463 (a query's
 // Seq-id: the best of its record's ids)
-/// The Seq-ids of a run's searched queries as NCBI's XML2 and JSON formatter meets them where it
-/// holds a query's report (`XmlMatrixFailure::SecondQueryOrEnd`): it accumulates the results whose
-/// query Seq-id matches that of the run's first searched query, and the first result of a Seq-id
-/// that does not match makes the held report. A query's Seq-id is the best of its record's ids
-/// (`BelievedIds::best`), and two match as `CSeq_id::Match` finds them (`seqid::defline_set::
-/// compare` gives `Sic::Yes`), whatever the scope holds: a record whose ids are all an earlier
-/// record's (`Meets::Repeat`) may still be of another Seq-id (`>emb|A1.1|ref|NP_1.1|` then
-/// `>ref|NP_1.1|`, review F2 of line RG-KB item 7). The run's, not a batch's.
+/// The Seq-ids of a run's searched queries as NCBI's XML family formatter (outfmt 5, 13 to 16)
+/// meets them (`QueryScopes::xml_show`, `QueryScopes::xml_failing_query`). A query's Seq-id is the
+/// best of its record's ids (`BelievedIds::best`), and two match as `CSeq_id::Match` finds them
+/// (`seqid::defline_set::compare` gives `Sic::Yes`), whatever the scope holds: a record whose ids
+/// are all an earlier record's (`Meets::Repeat`) may still be of another Seq-id
+/// (`>emb|A1.1|ref|NP_1.1|` then `>ref|NP_1.1|`, review F2 of line RG-KB item 7), and two records
+/// that the scope tells apart may match (`ref|NP_1.1|` and `ref|NP_1|`, `pdb|1ABC|A` and
+/// `pdb|1ABC|`; line RG-KB item 7c).
+///
+/// - The label: NCBI shows the result of a query with the id, title and length of the first query
+///   of the result's batch whose Seq-id matches the result's (`labels`: where that is an earlier
+///   query).
+/// - The held report (the XML2 and JSON documents of a `-subject` search): NCBI accumulates the
+///   results whose Seq-id matches that of the held report's first result (`lead`), across
+///   batches, into one report (`joins`); the first result of a Seq-id that does not match makes
+///   the held report and leads the next. The run's first such result is NCBI's `F` (`second`,
+///   `XmlMatrixFailure::SecondQueryOrEnd`).
+///
+/// Only the queries that match an earlier one are listed: a run whose Seq-ids all differ keeps
+/// nothing per query, and compares a query's Seq-id with another only where the scope allows a
+/// match (`Meets`, or another form of an earlier id, `QueryScope::add_version_form`; a query of a
+/// batch with the lead of an earlier batch while the held report is that batch's). The run's, not
+/// a batch's.
 #[derive(Debug, Default)]
 struct HeldIds {
-    /// Once a batch added the run's first searched query: its Seq-id (`None`: a query without ids
-    /// of its own, whose local id no other query has).
-    first: Option<Option<crate::seqid::ParsedSeqId>>,
+    /// Once a batch added the run's first searched query: the first searched query of the held
+    /// report of the last query noted, and its Seq-id (`None`: a query without ids of its own,
+    /// whose local id no other query has).
+    lead: Option<(usize, Option<crate::seqid::ParsedSeqId>)>,
     /// The run's first searched query whose Seq-id does not match the first's (NCBI's `F`).
     second: Option<usize>,
+    /// The searched queries whose result joins the held report of the queries before it,
+    /// ascending.
+    joins: Vec<usize>,
+    /// Each searched query whose result shows an earlier searched query of its batch, ascending.
+    labels: Vec<Label>,
 }
 
+/// A searched query whose result shows an earlier searched query of its batch (`HeldIds::labels`).
+#[derive(Debug)]
+struct Label {
+    query: usize,
+    /// The earlier query whose id, title and length the result shows.
+    shown: usize,
+}
+
+/// The lead of the held report as the queries of a batch meet it (`HeldIds::note`): `None` while
+/// it is the lead of an earlier batch (`HeldIds::lead`), then a query of the batch and its Seq-id,
+/// borrowed from the batch's records (`HeldIds::lead` takes it at the batch's end).
+type BatchLead<'r> = Option<(usize, Option<&'r crate::seqid::ParsedSeqId>)>;
+
 impl HeldIds {
-    /// Notes the searched query `query` of the run with the ids `believed` (`None`: no ids of its
-    /// own); whether it is the run's first.
-    fn note(
+    /// Notes the searched query `query` with the Seq-id `id` (`None`: no ids of its own), which
+    /// an earlier searched query of its batch may match where `candidate` (its ids meet the scope
+    /// other than `Meets::New`, or `QueryScope::add_version_form`); `earlier` gives the Seq-ids of
+    /// the searched queries of its batch before it, in order, the first being the run's query
+    /// `batch_start`. Whether it is the run's first.
+    fn note<'r>(
         &mut self,
-        believed: Option<&crate::blastinput::fasta_reader::believed::BelievedIds>,
+        lead: &mut BatchLead<'r>,
         query: usize,
+        id: Option<&'r crate::seqid::ParsedSeqId>,
+        candidate: bool,
+        earlier: impl Iterator<Item = Option<&'r crate::seqid::ParsedSeqId>>,
+        batch_start: usize,
     ) -> bool {
-        let id = believed.map(|believed| &believed.best);
-        let Some(first) = &self.first else {
-            self.first = Some(id.cloned());
-            return true;
+        let matches = |a: Option<&crate::seqid::ParsedSeqId>,
+                       b: Option<&crate::seqid::ParsedSeqId>| {
+            a.zip(b).is_some_and(|(a, b)| {
+                crate::seqid::defline_set::compare(a, b) == crate::seqid::defline_set::Sic::Yes
+            })
         };
-        let matches = |first: &crate::seqid::ParsedSeqId, id: &crate::seqid::ParsedSeqId| {
-            crate::seqid::defline_set::compare(first, id) == crate::seqid::defline_set::Sic::Yes
+        if candidate {
+            if let Some(shown) = earlier
+                .enumerate()
+                .find_map(|(n, other)| matches(other, id).then_some(n))
+            {
+                let shown = batch_start + shown;
+                self.labels.push(Label { query, shown });
+            }
+        }
+        let joins = match (&*lead, &self.lead) {
+            (Some((_, lead_id)), _) => candidate && matches(*lead_id, id),
+            (None, Some((_, lead_id))) => matches(lead_id.as_ref(), id),
+            (None, None) => {
+                *lead = Some((query, id));
+                return true;
+            }
         };
-        if self.second.is_none() && !first.as_ref().zip(id).is_some_and(|(a, b)| matches(a, b)) {
-            self.second = Some(query);
+        if joins {
+            self.joins.push(query);
+        } else {
+            self.second.get_or_insert(query);
+            *lead = Some((query, id));
         }
         false
     }
@@ -766,6 +861,19 @@ impl XmlFailingQuery {
     pub(crate) fn fails_at_end(self, searched: usize) -> bool {
         searched > 0 && self.query.is_none_or(|query| query >= searched)
     }
+}
+
+/// How NCBI's XML family formatter (outfmt 5, 13 to 16) shows the result of a searched query, as
+/// the one owner of the rule decides it for every program (`QueryScopes::xml_show`, `HeldIds`;
+/// the default without `-parse_deflines`, whose queries' local ids are their own).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct XmlShow {
+    /// The earlier searched query of the result's batch whose id, title and length the result
+    /// shows (the run's number; the call's with `QueryScopesFrom::xml_show`); `None`: its own.
+    pub(crate) label: Option<usize>,
+    /// Whether the result joins the held report of the queries before it where the XML2 and JSON
+    /// documents hold their reports (`blast_xml::XmlQuery::joins_held`).
+    pub(crate) joins_held: bool,
 }
 
 /// How NCBI's set-up of a refused batch reads one of the batch's records (`ScopeRefusal`), where
@@ -1019,6 +1127,27 @@ impl QueryScopes {
         XmlFailingQuery { query }
     }
 
+    /// How NCBI's XML family formatter shows the result of the run's searched query `query`, of
+    /// the batches added (`scopes`: the run's scopes, `None` without `-parse_deflines`), the one
+    /// answer of every program (`XmlShow`, `HeldIds`).
+    pub(crate) fn xml_show(scopes: Option<&Self>, query: usize) -> XmlShow {
+        let Some(held) = scopes.map(|scopes| &scopes.held) else {
+            return XmlShow::default();
+        };
+        if held.labels.is_empty() && held.joins.is_empty() {
+            return XmlShow::default();
+        }
+        let label = held
+            .labels
+            .binary_search_by_key(&query, |label| label.query)
+            .ok()
+            .map(|at| held.labels[at].shown);
+        XmlShow {
+            label,
+            joins_held: held.joins.binary_search(&query).is_ok(),
+        }
+    }
+
     /// With `QueryScopeSpan::Run`, `whole_run`: the ids of every query of the run (`QueryScope::
     /// add_ids_of`), which `of_query` gives. A reader that gives the batches one at a time
     /// (BLASTX's) collects them before the search, where NCBI writes outfmt 5 after the last batch:
@@ -1082,6 +1211,7 @@ impl QueryScopes {
                 Option<&'r crate::blastinput::fasta_reader::believed::BelievedIds>,
                 usize,
             ),
+            IntoIter: Clone,
         >,
         first_searched: usize,
     ) -> anyhow::Result<()> {
@@ -1113,7 +1243,9 @@ impl QueryScopes {
     /// `db.pd.q1c.bp.avglong.subj.6`). Else the batch is refused before its set-up (line WQA D10
     /// round 6, 2026-11-20; review 4 of D10, M1). The refusal also tells whether the run's XML
     /// failure takes it (`ScopeRefusal::xml_takes`, `HeldIds::reaches`), and the searched queries'
-    /// Seq-ids are noted for the held reports (`HeldIds`).
+    /// Seq-ids are noted for the XML family formats (`HeldIds`; `records` is walked again from the
+    /// batch's start only for a query whose ids may match an earlier one: `Meets` other than
+    /// `Meets::New`, or another form of an earlier id, `QueryScope::add_version_form`).
     pub(crate) fn add_batch_records<'r>(
         &mut self,
         records: impl IntoIterator<
@@ -1122,6 +1254,7 @@ impl QueryScopes {
                 usize,
                 bool,
             ),
+            IntoIter: Clone,
         >,
         first_searched: usize,
     ) -> anyhow::Result<()> {
@@ -1153,15 +1286,16 @@ impl QueryScopes {
         // that LOSAT can follow there.
         let mut reads = Some(Vec::new());
         let mut records_read = 0;
-        // The searched queries of the batch so far, and whether the batch holds the run's first.
+        // The searched queries of the batch so far, whether the batch holds the run's first, and
+        // the held report's lead as they meet it.
         let mut searched = 0;
         let mut holds_first = false;
-        for (place, (believed, length, is_searched)) in records.into_iter().enumerate() {
+        let mut lead: BatchLead<'r> = None;
+        let records = records.into_iter();
+        let batch_records = records.clone();
+        for (place, (believed, length, is_searched)) in records.enumerate() {
             records_read = place + 1;
-            if is_searched {
-                holds_first |= self.held.note(believed, first_searched + searched);
-                searched += 1;
-            }
+            let meets = believed.map(|believed| scope.meets(&believed.ids, self.program));
             let read = |meets: Meets| match meets {
                 _ if !is_searched => Some(SetUpRead::Skipped),
                 Meets::New => Some(SetUpRead::Own),
@@ -1171,27 +1305,49 @@ impl QueryScopes {
                 }
                 _ => None,
             };
-            let Some(believed) = believed else {
-                if let Some(reads) = reads.as_mut() {
-                    reads.extend(read(Meets::New));
-                }
-                continue;
-            };
-            let follows = read(scope.meets(&believed.ids, self.program));
-            reads = reads.zip(follows).map(|(mut reads, follows)| {
-                reads.push(follows);
-                reads
-            });
-            let record = (before + place, length);
-            if message.is_some() {
-                scope.add_after_refusal(&believed.ids, record);
-            } else if let Err(error) = scope.add(&believed.ids, record, self.program) {
-                // `duplicate_id` stopped at the id it refuses: the record's other keys.
-                scope.add_after_refusal(&believed.ids, record);
-                message = Some(error.to_string());
+            // Whether an earlier id of the scope may be one of the record's in another form.
+            let mut other_form = false;
+            if let (Some(believed), Some(meets)) = (believed, meets) {
+                let follows = read(meets);
+                reads = reads.zip(follows).map(|(mut reads, follows)| {
+                    reads.push(follows);
+                    reads
+                });
+                let record = (before + place, length);
+                other_form = if message.is_some() {
+                    scope.add_after_refusal(&believed.ids, record)
+                } else {
+                    match scope.add(&believed.ids, record, self.program) {
+                        Ok(other_form) => other_form,
+                        Err(error) => {
+                            // `duplicate_id` stopped at the id it refuses: the record's other keys.
+                            message = Some(error.to_string());
+                            scope.add_after_refusal(&believed.ids, record)
+                        }
+                    }
+                };
+            } else if let Some(reads) = reads.as_mut() {
+                reads.extend(read(Meets::New));
+            }
+            if is_searched {
+                let id = believed.map(|believed| &believed.best);
+                let candidate = other_form || (id.is_some() && meets != Some(Meets::New));
+                let earlier = batch_records
+                    .clone()
+                    .take(place)
+                    .filter(|&(_, _, searched)| searched)
+                    .map(|(believed, _, _)| believed.map(|believed| &believed.best));
+                let query = first_searched + searched;
+                holds_first |=
+                    self.held
+                        .note(&mut lead, query, id, candidate, earlier, first_searched);
+                searched += 1;
             }
         }
         scope.records += records_read;
+        if let Some((query, id)) = lead {
+            self.held.lead = Some((query, id.cloned()));
+        }
         let Some(message) = message else {
             return Ok(());
         };
@@ -1254,6 +1410,80 @@ impl<'a> QueryScopesFrom<'a> {
     pub(crate) fn run(&self) -> &'a QueryScopes {
         self.scopes
     }
+
+    /// `QueryScopes::xml_show` of the call's query `query`, its label numbered as the call numbers
+    /// its queries (a call holds whole batches, so the label is one of its queries).
+    pub(crate) fn xml_show(&self, query: usize) -> XmlShow {
+        let show = QueryScopes::xml_show(Some(self.scopes), self.first + query);
+        XmlShow {
+            label: show.label.map(|label| {
+                debug_assert!(label >= self.first, "a call holds whole batches");
+                label.saturating_sub(self.first)
+            }),
+            ..show
+        }
+    }
+}
+
+/// `QueryScopesFrom::xml_show` of the call's query `query` where the call has the run's scopes
+/// (`None` without `-parse_deflines`: the default).
+pub(crate) fn xml_show_of(scopes: Option<QueryScopesFrom<'_>>, query: usize) -> XmlShow {
+    scopes.map_or_else(XmlShow::default, |scopes| scopes.xml_show(query))
+}
+
+/// The call's query whose id, title and length NCBI's XML family formats show for the call's query
+/// `query` (`XmlShow::label`, else the query itself): the record whose texts decide where NCBI's
+/// XML stream cuts the result's outfmt 5 report (`blast_xml::names::iteration_cut_before_hits`).
+pub(crate) fn xml_shown_of(scopes: Option<QueryScopesFrom<'_>>, query: usize) -> usize {
+    xml_show_of(scopes, query).label.unwrap_or(query)
+}
+
+/// Where the held report of the last of a call's `queries` starts (`blast_xml::written_queries`):
+/// that query, or the first of the queries before it whose results it joins
+/// (`XmlShow::joins_held`), 0 where it starts in an earlier call; the last query without the run's
+/// scopes (`None` without `-parse_deflines`).
+pub(crate) fn held_start_of(scopes: Option<QueryScopesFrom<'_>>, queries: usize) -> usize {
+    let mut start = queries.saturating_sub(1);
+    if let Some(scopes) = scopes {
+        while start > 0 && scopes.xml_show(start).joins_held {
+            start -= 1;
+        }
+    }
+    start
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-719
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2362-2413
+/// Whether the names of the call's query `query` (`0..reports`) are never shown by any of the
+/// call's written reports (`0..reports`; `holds_back`: the call writes `-subject` XML2/JSON held
+/// reports alone, where a joining result shows the held report's lead instead of its own batch
+/// label): no `QueryText` title is then generated or refused for it
+/// (`blast_xml::names::labelled_query_text`). Ordinary runs (no labels and no joins) return
+/// `false` without per-query work.
+pub(crate) fn names_unshown_in(
+    scopes: Option<QueryScopesFrom<'_>>,
+    reports: usize,
+    holds_back: bool,
+    query: usize,
+) -> bool {
+    let Some(scopes) = scopes else {
+        return false;
+    };
+    let held = &scopes.scopes.held;
+    if held.labels.is_empty() && held.joins.is_empty() {
+        return false;
+    }
+    let show = scopes.xml_show(query);
+    if show.label.is_none() && !(holds_back && show.joins_held) {
+        return false;
+    }
+    let abs = scopes.first + query;
+    let end = scopes.first + reports;
+    !held.labels.iter().any(|label| {
+        label.shown == abs
+            && label.query < end
+            && !(holds_back && held.joins.binary_search(&label.query).is_ok())
+    })
 }
 
 /// The query batches as NCBI's batch loop reads them, up to the batch that stops the run.

@@ -23,7 +23,7 @@ use crate::report::pairwise::{
     write_tblastn_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport, PairwiseConfig,
     PairwiseDatabase, PairwiseHit,
 };
-use crate::report::row_letters::{stored_gap_columns, QueryLetters, RowSide};
+use crate::report::row_letters::QueryLetters;
 use crate::sequence::packed_subject::SubjectNt;
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
@@ -242,7 +242,8 @@ pub(super) fn xml_matrix_failure(
         formats.iter().map(|format| format.outfmt),
         matrix_name,
         !database,
-        pssm,
+        super::in_pssm::program_type(pssm)
+            .is_some_and(crate::report::record::ProgramType::is_iterative),
     )
 }
 
@@ -350,9 +351,9 @@ pub(super) fn render(
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1572-1577:
     // Sorts each HSP list by E-value (`Blast_HSPListSortByEvalue`) during Seq-align conversion.
+    // `-subject`'s Seq-loc mapper maps the HSPs then, once, before any format reads them.
     for hitlist in hitlists.iter_mut() {
-        hitlist.sort_hsps_for_report();
-        hitlist.drop_zero_score_hsps();
+        hitlist.put_in_report_order(matches!(shown, ShownSubjects::Fasta { .. }));
     }
     // A PSSM query's Bioseq letters where they are not its record's, which the reports read; its
     // counts are the rows' where its reports read other letters than its search and a report
@@ -370,7 +371,6 @@ pub(super) fn render(
             hard_masked,
         )?;
     }
-    let hitlists: &[KappaResultHitList] = hitlists;
     // `-in_pssm` with `-window_size 0`: an alignment whose traceback started on its frame's NULLB
     // (`search_gapped::x_traceback_start_past_frame`) is refused here, where NCBI reports it, and
     // not where NCBI drops it after its traceback (the hit list, `-max_target_seqs`).
@@ -427,45 +427,6 @@ pub(super) fn render(
         }
         return Ok(());
     }
-    let xml_is_xml2 = outputs
-        .formats
-        .iter()
-        .any(|format| xml2_kind(format.outfmt).is_some());
-    // Every structured format is XML2 or JSON (outfmt 5 is not among them; the library takes
-    // several formats).
-    let xml_only_xml2 = outputs
-        .formats
-        .iter()
-        .filter(|format| is_structured_xml(format.outfmt))
-        .all(|format| xml2_kind(format.outfmt).is_some());
-    let xml = if outputs
-        .formats
-        .iter()
-        .any(|format| is_structured_xml(format.outfmt))
-    {
-        Some(super::blast_xml::prepare(
-            xml_values,
-            query_records,
-            subject_records,
-            subject_letters,
-            shown,
-            hitlists,
-            parameters,
-            ungapped_karlin,
-            query_validity,
-            query_batch_skipped,
-            scoring,
-            matrix_name,
-            seg_filter,
-            ranges,
-            xml_is_xml2,
-            xml_only_xml2,
-            xml_taxa,
-            pssm,
-        )?)
-    } else {
-        None
-    };
     // The tabular subject IDs, made before any format is written: a subject that NCBI
     // writes part of a row for and then stops at (RP-20) is rejected first
     // (`tabular_subject_ids`). The tabular formats 6, 7, 10 and 20 show them, not the organism
@@ -507,6 +468,7 @@ pub(super) fn render(
         ShownSubjects::Database { reported, .. } => &reported.loads,
     };
     // Each tabular format's refusal is that format's (`FormatRefusal::check`).
+    let mut lookup_stop = None;
     for format in outputs
         .formats
         .iter_mut()
@@ -539,11 +501,12 @@ pub(super) fn render(
                         s_idx,
                     )
                 },
-                |s_idx| match shown {
+                |s_idx, failure| match shown {
                     ShownSubjects::Database { reported, oids, .. } => {
                         crate::report::tabular::failed_database_subject(
                             oids.oid(reported.ordinals[s_idx]),
                             loads.thrown(s_idx),
+                            failure,
                         )
                     }
                     ShownSubjects::Fasta { .. } => crate::report::tabular::failed_record_title(
@@ -552,10 +515,134 @@ pub(super) fn render(
                     ),
                 },
                 "TBLASTN",
+                tabular.taxdb_found,
             );
-            format.refusal.check(checked)?;
+            if let Err(error) = format.refusal.check(checked) {
+                lookup_stop = Some(error);
+                break;
+            }
         }
     }
+    // A refusal that fails the call at a query batch after the first comes after the reports of
+    // the batches before, as NCBI's run stops in that batch's report
+    // (`FailedLookupRefusal::batch_start`): those queries' reports, without the epilog, then what
+    // NCBI writes to the standard error of the batch's reports up to the row
+    // (`FailedLookupRefusal::posts_before_stop`: each query's posts, its formatter's warning and
+    // its subject reads), then the refusal.
+    if let Some(error) = lookup_stop {
+        let before = crate::report::tabular::FailedLookupRefusal::batch_start(
+            &error,
+            batch_starts.iter().copied(),
+        );
+        if before > 0 {
+            let head = |len: usize| before.min(len);
+            let mut parameters_before = parameters.clone();
+            parameters_before.lengths.truncate(before);
+            parameters_before.cutoffs.truncate(before);
+            let archive_before = archive.map(|archive| super::archive::ArchiveRender {
+                handle: archive.handle,
+                spans: &archive.spans[..archive
+                    .spans
+                    .iter()
+                    .take_while(|span| span.start < before)
+                    .count()],
+            });
+            render(
+                outputs,
+                &query_records[..before],
+                subject_records,
+                subject_letters,
+                shown,
+                subject_set,
+                &mut hitlists[..before],
+                &parameters_before,
+                &ungapped_karlin[..head(ungapped_karlin.len())],
+                &query_validity[..head(query_validity.len())],
+                &query_batch_skipped[..head(query_batch_skipped.len())],
+                scoring,
+                matrix_name,
+                report_counts,
+                formatting,
+                genetic_code,
+                seg,
+                seg_filter,
+                mask_lowercase,
+                &query_posts[..head(query_posts.len())],
+                &query_reads[..head(query_reads.len())],
+                &ReportRanges {
+                    queries: ranges.queries,
+                    subjects: ranges.subjects,
+                    epilog: false,
+                    query_scopes: ranges.query_scopes,
+                },
+                xml_values,
+                xml_taxa,
+                out,
+                archive_before.as_ref(),
+                tabular,
+                pssm,
+                show_gis,
+                &batch_starts[..batch_starts
+                    .iter()
+                    .take_while(|&&start| start < before)
+                    .count()],
+            )?;
+        }
+        if let Some(refusal) = error.downcast_ref::<crate::report::tabular::FailedLookupRefusal>() {
+            let end = (refusal.set() + 1).min(query_posts.len());
+            refusal
+                .posts_before_stop(
+                    &query_posts[before.min(end)..end],
+                    query_reads.get(before..).unwrap_or_default(),
+                    |oid| oid as u32,
+                )
+                .write(
+                    &mut *outputs.diagnostics,
+                    archive.map(|archive| archive.handle),
+                )?;
+        }
+        return Err(error);
+    }
+    let hitlists: &[KappaResultHitList] = hitlists;
+    let xml_is_xml2 = outputs
+        .formats
+        .iter()
+        .any(|format| xml2_kind(format.outfmt).is_some());
+    // Every structured format is XML2 or JSON (outfmt 5 is not among them; the library takes
+    // several formats).
+    let xml_only_xml2 = outputs
+        .formats
+        .iter()
+        .filter(|format| is_structured_xml(format.outfmt))
+        .all(|format| xml2_kind(format.outfmt).is_some());
+    let xml = if outputs
+        .formats
+        .iter()
+        .any(|format| is_structured_xml(format.outfmt))
+    {
+        Some(super::blast_xml::prepare(
+            xml_values,
+            query_records,
+            subject_records,
+            subject_letters,
+            shown,
+            hitlists,
+            parameters,
+            ungapped_karlin,
+            query_validity,
+            query_batch_skipped,
+            scoring,
+            matrix_name,
+            seg_filter,
+            ranges,
+            xml_is_xml2,
+            xml_only_xml2,
+            xml_taxa,
+            pssm,
+        )?)
+    } else {
+        None
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1411:
     // The alignments are rendered once from the final result, for outfmt 0 and for
     // the caller's hit records, in the order of the tabular rows.
@@ -806,6 +893,7 @@ pub(super) fn render(
                             genetic_code,
                             matrix: scoring.matrix,
                             program_version: super::tabular::program_version(pssm.is_some()),
+                            query_other_coding: pssm.and_then(|psi| psi.query_other_coding),
                         },
                         hitlists,
                         &mut writer,
@@ -827,6 +915,7 @@ pub(super) fn render(
                     ranges,
                     probe.as_mut(),
                     warnings.as_mut(),
+                    pssm.and_then(|psi| psi.query_other_coding),
                 )?,
                 number @ 0..=4 => write_pairwise(
                     &mut writer,
@@ -960,7 +1049,7 @@ pub(super) fn render(
 // CBlastTabularInfo::PrintNumProcessed appends the final query count.
 #[allow(clippy::too_many_arguments)]
 fn write_tabular(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     // The program of outfmt 7's first line (`TBLASTN`, `PSITBLASTN`).
     program: &str,
     comments: bool,
@@ -974,6 +1063,9 @@ fn write_tabular(
     ranges: &ReportRanges<'_>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
+    // A PSSM query of the molecule `other` (`PsiSearch::query_other_coding`): the default fields
+    // read its letters, which throw at the first row (`report::tabular::query_sequence_end`).
+    query_other_coding: Option<i32>,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-224:
     // a skipped batch has a null align set for each query it contains.
@@ -1049,6 +1141,13 @@ fn write_tabular(
                 "TBLASTN report payload count mismatch"
             );
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+                if let Some(coding) = query_other_coding {
+                    return Err(crate::report::tabular::query_sequence_end(
+                        &mut *writer,
+                        &[],
+                        coding,
+                    ));
+                }
                 if thrown {
                     if let Some(probe) = probe.as_mut() {
                         writer.flush()?;
@@ -1082,8 +1181,16 @@ fn write_tabular(
                     oid,
                     (hsp.q_start + 1, hsp.q_end, s_start, s_end),
                 )?;
+                // The columns inside the query row's range (a Smith-Waterman alignment's end gaps
+                // in the query's row are left out), as every table counts them.
+                let counts = crate::report::serial::seqalign::AlignLengths {
+                    length: payload.align_length,
+                    gaps: payload.gap_letters,
+                    gap_opens: payload.gap_opens,
+                }
+                .within_query_range(&payload.edit_script);
                 let percent =
-                    format_percent_identity_ncbi(payload.report_num_ident, payload.align_length, 3);
+                    format_percent_identity_ncbi(payload.report_num_ident, counts.length, 3);
                 let bits = format_bitscore_ncbi(payload.bit_score);
                 let evalue = format_evalue_ncbi_tabular(linked.evalue);
                 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1100-1108:
@@ -1108,9 +1215,9 @@ fn write_tabular(
                     writer,
                     "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                     percent,
-                    payload.align_length,
+                    counts.length,
                     payload.report_mismatches,
-                    payload.gap_opens,
+                    counts.gap_opens,
                     q_start,
                     q_end,
                     s_start,
@@ -1127,12 +1234,16 @@ fn write_tabular(
                 hsp_index += 1;
             }
         }
+        // `~CBlastTabularInfo` of the query's report flushes the stream.
+        writer.ncbi_flush()?;
     }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:342
     // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
     // writes no epilog.
     if comments && ranges.epilog {
         writeln!(writer, "# BLAST processed {} queries", query_records.len())?;
+        // The epilog's `CBlastTabularInfo` flushes the stream in its destructor.
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -1270,7 +1381,7 @@ fn pairwise_hits(
     let mut row_masks = crate::report::query_anchored::HspMasks::default();
     for (q_idx, hitlist) in hitlists.iter().enumerate() {
         let query = query_records[q_idx].seq();
-        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1541-1557:
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1547-1556,1581:
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:294
         // A PSSM query's search (`CPsiBlastImpl::Run`, psiblast_impl.cpp:120-170) never sets the
         // filtered regions: its alignments show no masks. The others show NCBI's list
@@ -1397,15 +1508,10 @@ fn pairwise_hits(
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1765-1810 sets the HSP
                     // linked count; showalign.cpp:3595-3598 prints sum_n.
                     sum_n: Some(linked.num),
+                    // No reader of these rows needs their gap residues (a PSSM query's): their
+                    // end gaps come from the edit script (`pairwise::row_spans`).
                     subject_stored_gaps: Vec::new(),
-                    // A PSSM query's gap residues (`row_letters::stored_gap_columns`).
-                    query_stored_gaps: stored_gap_columns(
-                        query,
-                        b'-',
-                        usize::try_from(hsp.q_start)?,
-                        &payload.edit_script,
-                        RowSide::Query,
-                    ),
+                    query_stored_gaps: Vec::new(),
                     query_case: query_letters.case(),
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:519-531
                     // The Seq-align's `num_ident` (`tabular.rs`, the outfmt 8 / 11 / 12
@@ -1413,6 +1519,7 @@ fn pairwise_hits(
                     // SEG-masked letter is a mismatch there and an identity in the rows
                     // (`report_num_ident`).
                     seqalign_num_ident: usize::try_from(payload.num_ident)?,
+                    query_left_of_record: false,
                 });
                 // The model of the reads sorts by `hsp_scores` without the rows
                 // (`TblastnDatabase::subject_read_texts`): the row's values where the records'
@@ -1437,7 +1544,7 @@ fn pairwise_hits(
 // AcknowledgeBlastQuery; x_DisplayDeflines; DisplaySeqalign;
 #[allow(clippy::too_many_arguments)]
 fn write_pairwise(
-    writer: &mut impl Write,
+    writer: &mut impl crate::report::ostream::ReportWrite,
     hits: &[PairwiseHit],
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
@@ -1571,6 +1678,19 @@ fn write_pairwise(
         view,
         html: html
             .map(|links| crate::report::html_ids::HtmlReport::new(links, shown.report_oids())),
+        // A PSSM query of the molecule `other` (`PsiSearch::query_other_coding`), whose letters
+        // NCBI's alignment display cannot read.
+        unreadable_query: pssm.and_then(|psi| psi.query_other_coding).map(|_| {
+            crate::report::pairwise::UnreadableQuery {
+                oids: matches!(shown, ShownSubjects::Database { .. }).then(|| {
+                    shown
+                        .report_oids()
+                        .into_iter()
+                        .map(|oid| oid.get())
+                        .collect()
+                }),
+            }
+        }),
         ..PairwiseConfig::default()
     };
     // A subject set's subjects are all loaded.
@@ -1603,8 +1723,10 @@ fn write_pairwise(
             ShownSubjects::Database { reported, .. } => &reported.loads,
         },
     )
-    // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`).
-    .map_err(crate::cli::NativeError::of_writer)?;
+    // A subject whose load throws may end the run there (`x_pairwise_par::alignment_end`); a
+    // sort or the description table may stop at a query row that starts with a gap
+    // (`EmptyRowsStop`, `TblastnSections::head`).
+    .map_err(crate::report::pairwise::empty_rows_stop)?;
     Ok(())
 }
 
@@ -1671,8 +1793,8 @@ pub(super) fn recounts_shown_counts(
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:996-1022 (cited at
-// `blastp::blast_engine::build_pairwise_hits`) and c++/include/objtools/align_format/
-// tabular.hpp:543-547
+// `blastp::blast_engine::build_pairwise_hits`) and
+// c++/include/objtools/align_format/tabular.hpp:476-480
 /// The report counts (`report_num_ident`, `report_mismatches`) of the HSPs
 /// of `hitlists`, counted again from their rows (`aligned_sequences`) for a query whose reports
 /// read other letters than its search (`QueryLetters::shows_other_letters`: a PSSM query's Bioseq

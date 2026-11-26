@@ -63,10 +63,14 @@ fn open_with_taxdb(name: &str, taxdb: Option<&str>, cwd: &std::path::Path) -> Tb
     use crate::seqdb::alias::SearchPath;
     let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let taxdb = taxdb.map(|variant| tests.join("seqdb/taxdb").join(variant));
-    let search =
-        SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None).unwrap();
+    let search = SearchPath::new(cwd, taxdb.as_deref().map(std::path::Path::as_os_str), None);
     let path = tests.join("db_search").join(name);
-    let db = SeqDb::open_in(path.to_str().unwrap(), SeqType::Nucleotide, &search).unwrap();
+    let db = SeqDb::open_in(
+        path.to_str().unwrap().as_bytes(),
+        SeqType::Nucleotide,
+        &search,
+    )
+    .unwrap();
     TblastxDatabase {
         parsed: db.has_parsed_seqids().unwrap(),
         db,
@@ -201,6 +205,41 @@ fn a_report_of_any_sequence_that_could_be_refused_is_found() {
             (None, Some(Joined)),
         ]
     );
+    let parallel =
+        crate::utils::threading::with_search_pool(4, "TBLASTX", |pool| Ok(answers(pool))).unwrap();
+    assert_eq!(serial, parallel);
+}
+
+// Review of D1c-1c-b PR 2b: a database sequence with a definition line without a Seq-id
+// (`tests/db_search/idlist/pn`) only refuses tabular formats that print `sallacc`
+// (`stops_at_lineless`), not default or `sacc`/`staxid` field lists (`stops_at_failed_lookup`).
+#[test]
+#[cfg_attr(
+    not(feature = "parallel"),
+    ignore = "needs threads: a build without the parallel feature has none"
+)]
+fn a_lineless_defline_only_refuses_report_streaming_when_sallacc_is_shown() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/idlist/pn");
+    let database = TblastxDatabase::open(path.to_str().unwrap(), &ApplicationSettings::default())
+        .unwrap_or_else(|error| panic!("pn: {error:#}"));
+    let without_sallacc = ParsedShown {
+        tabular: true,
+        stops_at_failed_lookup: true,
+        ..ParsedShown::default()
+    };
+    let with_sallacc = ParsedShown {
+        tabular: true,
+        stops_at_lineless: true,
+        ..ParsedShown::default()
+    };
+    let answers = |pool: &crate::utils::threading::SearchPool<'_>| {
+        (
+            database.reports_may_refuse(without_sallacc, false, None, pool),
+            database.reports_may_refuse(with_sallacc, false, None, pool),
+        )
+    };
+    let serial = answers(&crate::utils::threading::SearchPool::x_serial());
+    assert_eq!(serial, (None, Some(shared::ReportRefusal::Headers)));
     let parallel =
         crate::utils::threading::with_search_pool(4, "TBLASTX", |pool| Ok(answers(pool))).unwrap();
     assert_eq!(serial, parallel);

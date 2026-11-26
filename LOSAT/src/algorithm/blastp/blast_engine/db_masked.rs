@@ -35,6 +35,7 @@
 
 use std::sync::Mutex;
 
+use super::call_setup::query_batch_layout;
 use super::prelim_kernel::BlastpPrelimKernel;
 use super::{
     blastp_context_idx_for_query_offset_with_bounds, blastp_save_init_hsp,
@@ -255,46 +256,6 @@ impl<'a> BlastpDbMasking<'a> {
             }
         }
         scratch.db_mask = Some(masked);
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1004
-// The concatenated query of a batch runs from its first context to the end of its last one (a
-// sentinel between each two); its table's ring is the power of two just at least that length
-// plus the window.
-/// NCBI's query batches of a call (`query_batches`, by query) as places in the call's
-/// concatenated query (`contexts`, in query order): each batch's first offset and its
-/// concatenated length, for the batches that have a context. A query chunk's search is one
-/// batch of all its contexts, as is a call whose batches have none.
-fn query_batch_layout(
-    query_batches: &[RangedBatch],
-    contexts: &[QueryContext],
-    query_chunk: bool,
-) -> Vec<(i32, i32)> {
-    let end_of = |context: &QueryContext| context.frame_base + context.aa_len as i32;
-    let whole = || {
-        let start = contexts.first().map_or(0, |context| context.frame_base);
-        vec![(start, contexts.last().map_or(start, end_of) - start)]
-    };
-    if query_chunk {
-        return whole();
-    }
-    let first = |q_idx: usize| contexts.partition_point(|context| (context.q_idx as usize) < q_idx);
-    let layout: Vec<(i32, i32)> = query_batches
-        .iter()
-        .filter_map(|batch| {
-            let (from, to) = (first(batch.searched.start), first(batch.searched.end));
-            (from < to).then(|| {
-                let start = contexts[from].frame_base;
-                (start, end_of(&contexts[to - 1]) - start)
-            })
-        })
-        .collect();
-    if layout.is_empty() {
-        whole()
-    } else {
-        layout
     }
 }
 
@@ -651,7 +612,6 @@ fn join_chunk_hits(
 /// own letters by [`BlastpPrelimKernel::search_subject_in_neg`], a shorter one only moving the
 /// offset ([`BlastpPrelimKernel::neg_window_exit_of`]). No table of its own and no move of the
 /// offset apart: the table's state is NCBI's.
-#[allow(clippy::too_many_arguments)]
 fn neg_window_chunks(
     kernel: &BlastpPrelimKernel<'_>,
     scratch: &mut BlastpSubjectScratch,

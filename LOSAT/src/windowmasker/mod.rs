@@ -1,7 +1,7 @@
 //! `losat windowmasker`: NCBI BLAST+ 2.17.0 windowmasker 1.0.0 (`CWinMaskApplication`), the
 //! masker of over-represented and low-complexity regions of nucleotide sequences by the counts
 //! of their units (WindowMasker, `utils::winmask`) and, with `-dust`, the symmetric DUST
-//! algorithm. Its command line is NCBI's (`ncbi_app`), not clap's: `main` hands it the words
+//! algorithm. Its command line is NCBI's (`ncbi_app`): `main` hands it the words
 //! after `windowmasker`. Its three modes are the making of a counts file (`-mk_counts`, with
 //! `-checkdup` its check for duplicated sequences), the conversion of a counts file to another
 //! format (`-convert`) and the masking with a counts file (`-ustat`). The work of its `Run` is in
@@ -15,7 +15,7 @@ mod ids;
 mod sdust;
 mod work;
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
 
 use crate::ncbi_app::Tool;
@@ -118,15 +118,38 @@ pub(crate) fn run_in(
 pub(crate) fn check_in(
     words: &[OsString],
     files: &crate::report::run_files::RunFiles,
+    out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
     crate::ncbi_app::run_in(
         &TOOL,
         words,
         files,
-        (&mut std::io::empty(), &mut std::io::sink(), err),
+        (&mut std::io::empty(), out, err),
         app::check,
     )
+}
+
+// No NCBI counterpart: LOSAT Web reads `-logfile` and `-out` against the input names the run
+// opens for reading, so a write name equal to a missing input is refused instead of diverging
+// from the command line, which creates the file and then reads it back (line WQA D19 round R2).
+/// The input file names that a `windowmasker` run with `words` opens for reading:
+/// `(for_logfile, for_out)`.
+/// - `for_logfile`: every file that the run opens after the application start opens `-logfile`:
+///   `-in` (unless `-` or `-infmt blastdb`; split on `,` for `-mk_counts` without `-fa_list true`),
+///   `-ustat` (in masking mode), `-ids` and `-exclude_ids` (when not `-convert`).
+/// - `for_out`: the subset that the command line opens and reads after opening `-out` in a way
+///   that changes the run when the file is missing: `-in` (split on `,`, unless `-` or
+///   `-infmt blastdb`) of `-mk_counts` without `-fa_list true`, and `-ustat` of masking.
+pub(crate) fn read_files<S: AsRef<OsStr>>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    let (for_log, for_out, _databases) = crate::report::log_inputs::windowmasker_read_parts(words);
+    let encode = |paths: Vec<std::path::PathBuf>| -> Vec<Vec<u8>> {
+        paths
+            .into_iter()
+            .map(|p| p.into_os_string().into_encoded_bytes())
+            .collect()
+    };
+    (encode(for_log), encode(for_out))
 }
 
 #[cfg(test)]

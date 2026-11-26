@@ -86,7 +86,6 @@ path = "tests/thread_memory.rs"
 
 [dependencies]
 anyhow = "1.0"
-clap = { version = "4.5", features = ["derive"] }
 rayon = { version = "1.11", optional = true }
 indicatif = "0.18"
 rustc-hash = "2.1"
@@ -115,15 +114,18 @@ ruzstd = "0.9"
 # (`utils::mapped_file`, as NCBI's `CMemoryFile`), and `fs` for the write-permission
 # test of makeblastdb's output directory (`access`, which NCBI's `euidaccess` calls,
 # `writedb::build_db::check_access_write`). `try_close` reports the error of the
-# `close` system call that the output files of makeblastdb can have (`writedb::ofstream`). No BLAST behavior, foreign algorithm, NCBI runtime/build
+# `close` system call that the output files of makeblastdb can have (`writedb::ofstream`), and
+# `termios` queries stdout's terminal column width (`tcgetwinsize`) for
+# `cleanup-blastdb-volumes.py`'s `argparse` wrapping. No BLAST behavior, foreign algorithm, NCBI runtime/build
 # dependency or libc-auxv feature (the pure-Rust runtime boundary,
 # tests/check_pure_rust_runtime_boundary.py, allows no direct libc call). A caret requirement
 # like every other dependency: Cargo.lock fixes the exact version for every build from this
 # repository (CI and the release with --locked), and Dependabot moves it.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1.6", default-features = false, features = ["std", "param", "mm", "fs", "stdio", "try_close"] }
+rustix = { version = "1.1.6", default-features = false, features = ["std", "param", "mm", "fs", "stdio", "termios", "try_close"] }
 
-# Windows file-handle type (`GetFileType`, `GetConsoleMode`) for the stream-position test of
+# Windows file-handle type (`GetFileType`, `GetConsoleMode`, `GetConsoleScreenBufferInfo` for
+# `cleanup-blastdb-volumes.py`'s stdout column width) for the stream-position test of
 # `IsIStreamEmpty` (`input_files::has_stream_position`), the read-only file mappings of the
 # RPS-BLAST profile files (`utils::mapped_file`: `CreateFileMappingW`, whose signature names
 # `SECURITY_ATTRIBUTES`, and `MapViewOfFile`), and the system time zone and character types that
@@ -140,10 +142,21 @@ windows-sys = { version = "0.61", default-features = false, features = ["Win32_F
 [target.'cfg(not(windows))'.dependencies]
 jiff = { version = "0.2.46", default-features = false, features = ["alloc"] }
 
+# LOSAT Web's ABI v1 (`web_v1_argv`, frozen, plan TD-1) reads its words with its copy of the clap
+# command that LOSAT's command line had when v1 was frozen, so that v1's messages stay; the
+# programs read their arguments with NCBI's argument reader (`cli::reader`, line RG item K4i-3c),
+# and the native builds link no clap; nor does the WASI command line, which leaves ABI v1 out
+# (feature `no-web-abi-v1`, line RG item K4i-3d). Its tests run natively (dev-dependencies). No
+# derive.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+clap = "4.5"
+
 # The unit tests of `writedb::windows_zone` compare UCRT's system zones with the POSIX rules that
-# jiff reads (`writedb::local_offset::offset_from_posix_tz`), on Windows too.
+# jiff reads (`writedb::local_offset::offset_from_posix_tz`), on Windows too; the tests of ABI v1
+# (`web_v1_argv`) read with clap's command, as above.
 [dev-dependencies]
 jiff = { version = "0.2.46", default-features = false, features = ["alloc"] }
+clap = "4.5"
 
 [features]
 default = ["parallel"]
@@ -168,6 +181,14 @@ blastx-worker-probe = []
 # blast_hits.c:675-733); this feature forces the Wasm build to use the matching
 # Rust scalar path even when the target enables simd128.
 tblastx-wasm-scalar = []
+# Leaves LOSAT Web's ABI v1 (`losat_web_*`, docs/web/abi_v1.md: the exports `web_api` and their
+# argument reader `web_v1_argv`, with clap) out of a wasm32 build. The WASI command line
+# (`--bin losat`) selects it, so that `losat.wasm` exports no `losat_web_*` and links no clap (line
+# RG item K4i-3d). Every wasm32 build without it keeps ABI v1, as before: the Web's modules
+# (web/adapter), LOSAT's reactors (`--lib`) and gbdraw's serial module, which is built
+# `--lib --no-default-features` (plan TD-1). No effect on other targets (build.rs sets
+# `losat_web_abi_v1` only on wasm32). No NCBI counterpart.
+no-web-abi-v1 = []
 
 [profile.release]
 lto = true

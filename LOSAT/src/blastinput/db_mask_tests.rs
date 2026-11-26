@@ -754,7 +754,11 @@ fn shape_of(
 #[test]
 fn translated_hard_masks_in_order_are_searched_also_where_a_frame_restarts_at_its_start() {
     use std::cell::Cell;
-    let scan = HardScan::Translated { min_length: 17 };
+    let scan = HardScan::Translated {
+        word: 5,
+        window: 40,
+        zero_words: false,
+    };
     let shape = |masks: &[(u32, u32)], length: usize| {
         HardMaskShape::of_scan(masks, None, &|| Some(length), scan, None).unwrap()
     };
@@ -936,7 +940,7 @@ fn protein_shapes_of_the_hard_masks() {
 /// `DiagonalWalk::start`), `WordPastEnd` where a short chunk's one word read past the sentinel can
 /// change a result; `PartsOutOfOrder` where a chunk that can hold
 /// alignments starts before the end of an earlier one, `Inverted` for a mask that ends before it
-/// starts; in the other programs `Unsorted` for every overlap, as before.
+/// starts; in BLASTN `Unsorted` for every overlap, as before.
 #[test]
 fn protein_shapes_of_overlapping_masks() {
     let two_hit = HardScan::Protein {
@@ -1031,20 +1035,28 @@ fn protein_shapes_of_overlapping_masks() {
         inverted.unwrap().text(),
         "has a mask, [50, 40), that ends before it starts, which makeblastdb does not write"
     );
-    // BLASTN and the translated programs refuse every overlap and every mask out of order.
+    // BLASTN refuses every overlap and every mask out of order; translated programs search
+    // overlapping masks in start order and keep refusing masks out of start order or inverted.
     let unsorted = |before, mask| Some(HardMaskShape::Unsorted { before, mask });
     let blastn = HardScan::Nucleotide { scanned_word: 11 };
-    let translated = HardScan::Translated { min_length: 11 };
-    for scan in [blastn, translated] {
-        assert_eq!(
-            of(&[(40, 60), (55, 70)], 240, scan),
-            unsorted((40, 60), (55, 70))
-        );
-        assert_eq!(
-            of(&[(250, 280), (100, 130)], 300, scan),
-            unsorted((250, 280), (100, 130))
-        );
-    }
+    let translated = HardScan::Translated {
+        word: 3,
+        window: 40,
+        zero_words: false,
+    };
+    assert_eq!(
+        of(&[(40, 60), (55, 70)], 240, blastn),
+        unsorted((40, 60), (55, 70))
+    );
+    assert_eq!(
+        of(&[(250, 280), (100, 130)], 300, blastn),
+        unsorted((250, 280), (100, 130))
+    );
+    assert_eq!(of(&[(40, 60), (55, 70)], 240, translated), None);
+    assert_eq!(
+        of(&[(250, 280), (100, 130)], 300, translated),
+        unsorted((250, 280), (100, 130))
+    );
 }
 
 /// The start of a sequence among the searched ones (`NcbiStart`, `None`: after the others): a
@@ -1191,5 +1203,107 @@ fn protein_shapes_of_random_masks() {
     assert!(
         out_of_order > 1_000 && searched > 500 && parts > 100,
         "{out_of_order} {searched} {parts}"
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:221-276, 805-830
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1518-1538
+/// `HardMaskShape::of_scan`, `translated_walked`, and the new refusal shape for
+/// `HardScan::Translated` (series NP, M4b-3c part 2): masks that overlap or nest in start order
+/// (and equal starts) are accepted, out-of-start-order and inverted masks stay refused as
+/// `Unsorted`, `PastEnd` checks every mask's end (not only the last), BLASTN still refuses every
+/// overlap, and `translated_walked` marks sequences with a negative frame chunk.
+#[test]
+fn translated_overlapping_masks_narrowed_and_walked() {
+    let translated = HardScan::Translated {
+        word: 3,
+        window: 40,
+        zero_words: false,
+    };
+    let blastn = HardScan::Nucleotide { scanned_word: 11 };
+    let of = |masks: &[(u32, u32)], length: usize, scan: HardScan| {
+        HardMaskShape::of_scan(masks, None, &|| Some(length), scan, None).unwrap()
+    };
+
+    // Overlapping, nested, and equal-start masks in start order are accepted for translated scans.
+    assert_eq!(of(&[(120, 180), (165, 240)], 720, translated), None);
+    assert_eq!(of(&[(120, 600), (180, 300)], 720, translated), None);
+    assert_eq!(of(&[(120, 300), (120, 200)], 720, translated), None);
+    assert_eq!(of(&[(120, 200), (120, 300)], 720, translated), None);
+
+    // BLASTN keeps refusing every overlap.
+    assert_eq!(
+        of(&[(120, 180), (165, 240)], 720, blastn),
+        Some(HardMaskShape::Unsorted {
+            before: (120, 180),
+            mask: (165, 240),
+        })
+    );
+
+    // Out-of-start-order and inverted masks stay refused as `Unsorted`.
+    assert_eq!(
+        of(&[(300, 360), (120, 180)], 720, translated),
+        Some(HardMaskShape::Unsorted {
+            before: (300, 360),
+            mask: (120, 180),
+        })
+    );
+    assert_eq!(
+        of(&[(180, 120)], 720, translated),
+        Some(HardMaskShape::Unsorted {
+            before: (180, 120),
+            mask: (180, 120),
+        })
+    );
+
+    // `PastEnd` checks every mask's end (not only the last, which may nest inside an earlier one).
+    assert_eq!(
+        of(&[(120, 800), (180, 300)], 720, translated),
+        Some(HardMaskShape::PastEnd {
+            start: 120,
+            end: 800,
+            length: 720,
+        })
+    );
+    let reads = std::cell::Cell::new(0);
+    let read_len = || {
+        reads.set(reads.get() + 1);
+        Some(720)
+    };
+    assert_eq!(
+        HardMaskShape::of_scan(
+            &[(120, 800), (180, 300)],
+            Some((717, 720)),
+            &read_len,
+            translated,
+            None,
+        ),
+        Ok(Some(HardMaskShape::PastEnd {
+            start: 120,
+            end: 800,
+            length: 720,
+        }))
+    );
+    assert_eq!(reads.get(), 1);
+
+    // `translated_walked` marks negative frame chunks (previous mask end / 3 above next start / 3).
+    assert!(!translated_walked(&[]));
+    assert!(!translated_walked(&[(120, 180)]));
+    assert!(!translated_walked(&[(120, 180), (180, 240)]));
+    assert!(!translated_walked(&[(120, 182), (180, 240)]));
+    assert!(translated_walked(&[(120, 183), (180, 240)]));
+    assert!(translated_walked(&[(120, 600), (180, 300)]));
+
+    // Refusal message for `NoChunkingWithOverlaps`.
+    let no_chunking = HardMaskShape::NoChunkingWithOverlaps {
+        frame: 2,
+        start: 3,
+        end: 717,
+    };
+    assert_eq!(
+        no_chunking.text(),
+        "has masks that overlap and reading frame 2's part from its start running to the frame's \
+         end at the mask [3, 717), which NCBI BLAST+ 2.17.0 searches as the whole frame past the \
+         later masks"
     );
 }

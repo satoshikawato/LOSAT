@@ -86,5 +86,79 @@ What they are: NCBI BLAST+ 2.17.0 `makeprofiledb` runs that `tests/makeprofiledb
   builds the definition lines from the descriptors before it looks at the ids, so it dereferences the element
   there too.
 
+- Rows `B01`-`B22`, `BE01`-`BE12`, `RB04`, `RB04m`, `RB04b`, `RB08`-`RB29` (row PS10b, frozen on
+  2026-11-25 with the official NCBI BLAST+ 2.17.0 `makeprofiledb` and `rpsblast` binaries):
+  - `B01`-`B09`: `-binary` on ASN.1 BER binary PSSMs (`pc`/`pe`/`pf` scored, `c1`/`c2`/`c3` CDD,
+    `fc`/`fe` frequency-ratio-only IMPALA path), multi-volume (`-max_smp_vol 2`), `-index false`,
+    `-blastdb_version 4`, `-scale`/`-threshold`/`-gapopen`/`-gapextend`, `-logfile`, `-dryrun`;
+    `rps/B01.{6,0}` and `rps/B03.{6,0}` are NCBI `rpsblast` outputs on the `-binary`-built DBs.
+  - `B10`-`B22`: short-form definite length (`B10`, valid), long-form definite length (`B11`,
+    reproducing NCBI's `error while reading freqRatios`), `byRow TRUE` (`B12`), binary defline
+    inside binary `.smp` (`B13`), `UTF8String` tag (`B14`, suppressed warning), bad visible chars
+    in binary title (`B15`, 803.7 posts), `StringStore` `ncbieaa`/`iupacaa` bytes `>= 0x80` and
+    `< 0x20` (`B16`, `B17`), odd-length `iupacna` overhang byte `>= 0x80` (`B18`), `iupacna`
+    control byte `< 0x20` (`B19`), `mol na` with `iupacna` `>= 0x80` (`B20`, NCBI molecule error
+    first), `params NULL` (`B21`), BER special REAL `0` / `-0.0` (`B22`).
+  - `BE01`-`BE12`: `-binary` errors (text with `-binary`, binary without `-binary`, mixed binary
+    and text with leftovers, empty, truncated `30 80`, missing mandatory `pssm`, mid-file
+    truncation with leftovers, unknown member `[9]`, bad tag inside `numRows`, huge string 2^63,
+    huge octet string 2^62 with 803.4 post, `@1` pointer overflow).
+  - `RB04`, `RB04m`, `RB04b`, `RB08`-`RB29`: damaged and edge-case binary definition lines
+    (`ASN1_BlastDefLine`) decoded through the shared table-driven BER reader (`Blast-def-line-set`):
+    `0xDEADBEEF` (`RB04`, mid-list `RB04m`, in binary `.smp` `RB04b`), truncated `30` (`RB08`),
+    missing `seqid` (`RB09`), overflowing `taxid` (`RB10`), bad visible chars in title and Seq-id
+    (`RB11`, 803.7 posts), bad visible char followed by syntax error (`RB12`), `NULL`
+    `Blast-def-line` (`RB13`), `UTF8String` tag (`RB14`), huge string 2^63 (`RB15`), `:Blast-def-line`
+    and `:Seq-id` pointer forms with definite length and trailing bytes (`RB16`), and `NULL`
+    `Seq-id` elements carried to NCBI's exact failing point: `-blastdb_version 4` (`RB17`, `RB18`
+    with `-taxid 9606`: 802.5 post + `byte 15` error, rc 255), non-empty `-taxid_map` in v4 and v5
+    (`RB19`, `RB20`: `Attempt to access NULL pointer.`, rc 255), varied `NULL` positions (1st
+    defline 2nd Seq-id `RB21` byte 28; 2nd defline 1st Seq-id `RB22` byte 56; 2nd defline 2nd
+    Seq-id `RB23` byte 69), `-index false` replacing the first slot with `gnl|BL_ORD_ID|0` in v4
+    and v5 (`RB24`, `RB25`: rc 0; 2nd Seq-id `RB26` byte 49), `org` descriptor populating the map
+    in v5 (`RB27`: `Attempt to access NULL pointer.`, rc 255), v5 after a valid profile (`RB28`:
+    802.5 + `byte 15`, rc 255, 9 files), and bad visible char before `NULL` `Seq-id` (`RB29`:
+    803.7 + 802.5 + `byte 17`, rc 255).
+  - `l_QR08.lst`-`l_QR15.lst` (no `cases.tsv` row; tested as refusals): `iupacna` byte `>= 0x80`
+    in pair positions (`QR08`-`QR10`), `:Seq-interval` other-type pointer in binary (`QR11`) and
+    ASN.1 text (`QR14`, where NCBI 2.17.0 prints `class not found: Seq-interval`, rc 255), `NULL`
+    `Seq-id` inside `ASN1_BlastDefLine` in v5 with 0 prior OIDs (`QR12`: none, `-taxid 9606`, and
+    empty `-taxid_map`, where NCBI aborts rc 134), 1 GiB string length past EOF (`QR13`), and
+    `NULL` `Seq-id` followed by a missing input file in v5 and v4 (`QR15`, where `Close` throws in
+    the unwinding of the input error and NCBI aborts rc 134).
+
+- Rows `D01`-`D36` (row PS14, frozen on 2026-11-26 with the official NCBI BLAST+ 2.17.0
+  `makeprofiledb` and `rpsblast` binaries; each row run twice with zero difference):
+  - `D01`-`D07`: `-dbtype delta` on CDD scoremats (`c1`, `c2`, `c3`) in v5 (`D01`), v4 (`D02`),
+    `-index false` (`D03`), `-binary` (`D04`, `c1.smp.bin`-`c3.smp.bin`), multi-volume `-max_smp_vol
+    2` (`D05`), `-taxid 9606` (`D06`), and `-taxid_map` (`D07`); `rps/D01.{6,0}` and
+    `rps/D04.{6,0}` are NCBI `rpsblast` outputs with `rps/qcdd.faa` on the built delta databases.
+  - `D08`-`D09`: missing `weightedResFreqsPerPos` (`D08`, `pc.smp`, rc 1) and missing
+    `numIndeptObsr` (`D09`, rc 1).
+  - `D10`-`D17`: `-obsr_threshold` exact boundary `5.0 + 1.0 == 6.0` vs `4.9999 + 1.0 < 6.0`
+    (`D10`, and still excluded with `-exclude_invalid false` in `D11`), `x_ValidateCd` column-sum
+    epsilon `1.0001` vs `1.00011` (`D12` excluded with NCBI's `it conatins an invalid CD `, `D13`
+    kept with `-exclude_invalid false`), `obsr < 1.0` at `-obsr_threshold 0` (`D14` excluded, `D15`
+    kept), `-obsr_threshold -10 -exclude_invalid false` with `obsr = -0.5` (`D16`, valid `Uint4`
+    `500`), and `.obsr` run-length compression boundaries relative to run head with
+    `obsr.len() != seq_size` (`D17`).
+  - `D18`-`D20`: all profiles excluded via `-obsr_threshold 10000` in v5 (`D18`), v4 (`D19`), and
+    `-max_smp_vol -1` (`D20`): `Empty database`, rc 1, no files left.
+  - `D21`-`D23`: column count mismatch (`D21`, and still rc 255 with `-exclude_invalid false` in
+    `D22`), and mismatch skipped when excluded earlier by `-obsr_threshold 100` (`D23`).
+  - `D24`-`D27`: frequency-ratio-only delta profile (`D24`), bad visible characters (`803.7`: 1x
+    for excluded, 3x for included across NCBI's three read passes, `D25`), Pass-2 scaling mismatch
+    cleaning up `.wcounts`/`.obsr`/RPS files (`D26`), and Pass-1 error after exclusion (`D27`).
+  - `D28`-`D32`: `-logfile` with exclusions (`D28`), multi-volume alias (`D29`), and Pass-1 error
+    (`D30`, matching `std::ofstream` buffered flushing); multi-volume split after exclusion (`D31`,
+    4 inputs with 1 excluded -> 1+2 volumes); and Pass-2 duplicate `Seq-id` cleanup (`D32`).
+  - `D33`-`D35`: partial trailing column (29 entries) whose first full column sums to 0 (`d_partial_badcol0.smp`), where NCBI's `x_ValidateCd` returns false at column 0 before reaching the partial tail: default excluded -> `Empty database` (`D33`, rc 1), `-exclude_invalid false` -> valid database (`D34`, rc 0, 244 B `.wcounts`), and followed by `c1.smp` -> exclusion line plus normal `c1` database (`D35`, rc 0).
+  - `D36`: `-blastdb_version 4 -out out/<248 x n>` (Unix `NAME_MAX = 255`: `.rps`/`.freq` open, `.wcounts` fails in `x_WrapUpDelta` after Pass 2 with `Failed to open output .wcounts file`, rc 2, leaving the v4 protein DB files `.pin/.phr/.psq/.psd/.psi/.pog` on disk).
+  - `l_QR16.lst`-`l_QR22.lst` (no `cases.tsv` row; tested as refusals alongside `-dbtype cobalt`):
+    `byRow TRUE` (`QR16`), `numRows 26` with weighted frequencies (`QR17`), empty `numIndeptObsr`
+    (`QR18`), partial trailing column of 29 entries whose full column sums to 1.0 (`QR19`), and
+    out-of-range / NaN floats (`QR20`-`QR22`: `obsr = -2`, `weightedResFreqsPerPos = -0.5`,
+    `obsr = NaN`).
+
 The whole oracle (248 cases) is compared by `compare.py` of the survey; these rows are the part kept in the
-repository (about 1.2 MB).
+repository.

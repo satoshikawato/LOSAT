@@ -381,41 +381,319 @@ fn the_error_of_a_record_without_residues() {
     );
 }
 
-/// A record of 4,294,967,296 letters or more, counting its gaps, is refused (NCBI's length is
-/// a 32-bit `TSeqPos`; line RG DECISIONS K3-6, K3-8), with nothing allocated for its gaps; the
-/// records before it are read, and the refusal names the record.
+/// A record of 4,294,967,296 letters or more, counting its gaps (NCBI's length is a 32-bit
+/// `TSeqPos`; line RG DECISIONS K3-6, K3-8, KC-11d), reads as NCBI's object manager reads it:
+/// the first (length modulo 2^32) letters, the gap lines as runs of `N` or `X`; gaps that sum to
+/// a multiple of 2^32 stay pieces, which read as `N` or `X` where the map resolves them and
+/// throw where a gap is 4294967295 or a piece ends past 32 bits. Bytes of dustmasker and
+/// segmasker 2.17.0 (the official release, remaining-gaps-20261112/K/kc/p11d/p2/local).
 #[test]
-fn a_record_past_32_bits_is_refused() {
-    for (input, protein, length) in [
+fn a_record_past_32_bits() {
+    let letters = |run: &Run| -> Vec<String> {
+        run.records
+            .iter()
+            .map(|record| String::from_utf8(record.letters.clone()).unwrap())
+            .collect()
+    };
+    // The run of `N` is made, then cut to the length, 0.
+    let read = run(b">a\nACGT\n>b\nA\n>?4294967295\n", false, false);
+    assert!(read.error.is_none(), "{:?}", read.error);
+    assert_eq!(letters(&read), ["ACGT", ""]);
+    // Cut to 1 (the protein's `X` after it are not read).
+    let read = run(
+        b">a\nMKV\n>b\nM\n>?4294967295\n>?4294967295\nKK\n",
+        true,
+        false,
+    );
+    assert!(read.error.is_none(), "{:?}", read.error);
+    assert_eq!(letters(&read), ["MKV", "M"]);
+    // Gaps that sum to 2^32: pieces, read as N or X (dustmasker -outfmt fasta:
+    // `ACGTACGTACGTnnnnnnnn` and `nnnnnn`; segmasker: `XXXXXX`).
+    let read = run(
+        b">a\nACGTACGTACGT\n>?2147483648\n>?2147483648\nACGTaaaa\n>b\nacgtAC\n",
+        false,
+        false,
+    );
+    assert!(read.error.is_none(), "{:?}", read.error);
+    assert_eq!(letters(&read), ["ACGTACGTACGTNNNNNNNN", "ACGTAC"]);
+    let read = run(b">a\n>?2147483648\n>?2147483648\nACGTAC\n", false, false);
+    assert_eq!(letters(&read), ["NNNNNN"]);
+    let read = run(b">a\n>?2147483648\n>?2147483648\nMKVLAG\n", true, false);
+    assert_eq!(letters(&read), ["XXXXXX"]);
+    let read = run(b">a\nMKVL\n>?4294967283\n>?13\nQQQQ\n", true, false);
+    assert_eq!(letters(&read), ["MKVLXXXX"]);
+    // Read in order, a gap of 4294967295 after the length is not reached, and a piece that ends
+    // at 4294967295 is read (dustmasker 2.17.0 on ws, remaining-gaps-20261112/K/kc/p11d/p3:
+    // fa1n `>a` without masks, fb1n `>a` 10 - 14).
+    let read = run(
+        b">a\nACGTACGTAC\n>?4294967295\n>?1\n>b\nACGT\n",
+        false,
+        false,
+    );
+    assert!(read.error.is_none(), "{:?}", read.error);
+    assert_eq!(letters(&read), ["ACGTACGTAC", "ACGT"]);
+    let read = run(
+        b">a\nACGTACGTAC\n>?4294967285\n>?11\nACGTA\n>b\nACGT\n",
+        false,
+        false,
+    );
+    assert!(read.error.is_none(), "{:?}", read.error);
+    assert_eq!(letters(&read), ["ACGTACGTACNNNNN", "ACGT"]);
+    // A gap of 4294967295 within the length, and a piece that ends past 32 bits, throw
+    // (`Invalid sequence length`, `Sequence position overflow`); the records before are read.
+    for (input, protein, error, length) in [
         (
-            &b">a\nACGT\n>b\nA\n>?4294967295\n"[..],
+            &b">z\nACGT\n>a\nACGTacgtACGT\n>?4294967295\n>?1\nACGTaaaa\n"[..],
             false,
-            4_294_967_296u64,
+            SeqMapError::InvalidLength,
+            20,
         ),
         (
-            &b">a\nACGT\n>b\nAC\n>?4294967295\n>?1\nA\n"[..],
+            b">z\nACGT\n>a\nACGTACGT\n>?1\n>?4294967295\nACGT\n",
             false,
-            4_294_967_299,
+            SeqMapError::InvalidLength,
+            12,
         ),
         (
-            &b">a\nMKV\n>b\nM\n>?4294967295\n>?4294967295\nKK\n"[..],
+            b">z\nACGT\n>a\nACGTACGTAC\n>?4294967290\n>?6\nACGTAAAA\n",
+            false,
+            SeqMapError::PositionOverflow,
+            18,
+        ),
+        (
+            b">z\nMKVL\n>a\nMKVLMKVLMK\n>?4294967290\n>?6\nQQQQ\n",
             true,
-            8_589_934_593,
+            SeqMapError::PositionOverflow,
+            14,
+        ),
+        // segmasker's range test also resolves the piece after the length, and a piece that
+        // ends at 4294967295 (segmasker 2.17.0 on ws, p11d/p3 fa1p, fa2p, fb1p: "cannot get
+        // seq-data in range: 0-10", "0-8", "0-15").
+        (
+            b">z\nMKVL\n>a\nMKVLMKVLMK\n>?4294967295\n>?1\n>b\nMKVL\n",
+            true,
+            SeqMapError::InvalidLength,
+            10,
+        ),
+        (
+            b">z\nMKVL\n>a\nMKVL\n>?2147483649\n>?4294967295\n>?2147483648\nQQQQ\n",
+            true,
+            SeqMapError::InvalidLength,
+            8,
+        ),
+        (
+            b">z\nMKVL\n>a\nMKVLMKVLMK\n>?4294967285\n>?11\nMKVLA\n",
+            true,
+            SeqMapError::PositionOverflow,
+            15,
         ),
     ] {
         let read = run(input, protein, false);
         assert_eq!(read.records.len(), 1);
-        let Some(MaskReadError::Refused(what)) = &read.error else {
+        let Some(MaskReadError::SeqMap {
+            error: found,
+            first_segment,
+            length: found_length,
+        }) = read.error
+        else {
             panic!("{:?}", read.error)
         };
-        assert!(
-            what.contains(&format!(
-                "(lcl|2: {} letters;",
-                crate::ncbi_str::with_commas(length)
-            )),
-            "{what}"
-        );
+        assert_eq!((found, first_segment, found_length), (error, false, length));
     }
+    // A gap of 4294967295 first throws where the first segment is looked up.
+    let read = run(b">a\n>?4294967295\n>?1\nMKVL\n", true, false);
+    assert!(
+        matches!(
+            read.error,
+            Some(MaskReadError::SeqMap {
+                error: SeqMapError::InvalidLength,
+                first_segment: true,
+                length: 4,
+            })
+        ),
+        "{:?}",
+        read.error
+    );
+    // A raw sequence of 4294967295 letters (`kInvalidSeqPos`, a protein: a nucleotide one is
+    // `ReadError::PackOverflow`) throws at once; one letter fewer is read (its letters are not
+    // built here: 4 GiB).
+    let raw = |length| SeqInst::Raw {
+        length,
+        seq_data: SeqData::Ncbieaa(Vec::new()),
+    };
+    for read in [SeqMapRead::Sequential, SeqMapRead::Range] {
+        assert_eq!(
+            seq_map_error(&raw(4_294_967_295), read),
+            Some(SeqMapFault {
+                error: SeqMapError::InvalidLength,
+                first_segment: true,
+            })
+        );
+        assert_eq!(seq_map_error(&raw(4_294_967_294), read), None);
+    }
+    assert_eq!(
+        String::from_utf8(seq_map_exception(SeqMapError::InvalidLength).ncbi_what()).unwrap(),
+        format!(
+            "NCBI C++ Exception:\n    T0 \"{}/src/objmgr/seq_map.cpp\", line 367: Error: \
+             (CSeqMapException::eSeqDataError) Invalid sequence length\n",
+            crate::ncbi_exception::NCBI_BUILD_ROOT
+        )
+    );
+    assert_eq!(
+        String::from_utf8(seq_vector_exception(14).ncbi_what()).unwrap(),
+        format!(
+            "NCBI C++ Exception:\n    T0 \"{}/src/objmgr/seq_vector_ci.cpp\", line 731: Error: \
+             (CSeqVectorException::eSeqDataError) ncbi::objects::CSeqVector_CI::GetSeqData() - \
+             CSeqVector_CI::GetSeqData: cannot get seq-data in range: 0-14\n",
+            crate::ncbi_exception::NCBI_BUILD_ROOT
+        )
+    );
+}
+
+/// Past 2^32 residues (here past 64) the record keeps those since its position last wrapped,
+/// and an append of `AssembleSeq` from past them is `std::out_of_range` (line RG DECISIONS
+/// KC-11d).
+#[test]
+fn residues_past_32_bits() {
+    let read = |input: &[u8]| {
+        let mut reader = MaskFastaReader::new(input, false, false)
+            .unwrap()
+            .with_seq_pos_modulus(64);
+        let mut records = Vec::new();
+        let error = loop {
+            match reader.next(&mut |_| {}) {
+                Ok(Some(record)) => records.push(String::from_utf8(record.letters).unwrap()),
+                Ok(None) => break None,
+                Err(error) => break Some(error),
+            }
+        };
+        (records, error)
+    };
+    let mut input = b">a\n".to_vec();
+    input.extend(
+        b"A".repeat(60)
+            .chunks(10)
+            .flat_map(|line| [line, b"\n"].concat()),
+    );
+    input.extend_from_slice(b"ACGTAC\nGGGG\n>b\nAC\n");
+    let (records, error) = read(&input);
+    assert!(error.is_none());
+    assert_eq!(records, ["ACGGGG", "AC"]);
+    // A gap at 20, past the 12 kept, and one at 71 (7): the runs after the residues.
+    let mut input = b">a\n".to_vec();
+    input.extend(
+        b"A".repeat(20)
+            .chunks(10)
+            .flat_map(|line| [line, b"\n"].concat()),
+    );
+    input.extend_from_slice(b">?3\n");
+    input.extend(
+        b"C".repeat(51)
+            .chunks(10)
+            .flat_map(|line| [line, b"\n"].concat()),
+    );
+    input.extend_from_slice(b">?2\nGGGGG\n");
+    assert_eq!(read(&input).0, ["CCCCCCCGGGGGNNNNN"]);
+    // Gaps at 20 and 30, past the 6 kept.
+    let mut input = b">a\n".to_vec();
+    input.extend(
+        b"A".repeat(20)
+            .chunks(10)
+            .flat_map(|line| [line, b"\n"].concat()),
+    );
+    input.extend_from_slice(b">?3\nCCCCCCCCCC\n>?4\n");
+    input.extend(
+        b"G".repeat(40)
+            .chunks(10)
+            .flat_map(|line| [line, b"\n"].concat()),
+    );
+    let (records, error) = read(&input);
+    assert!(records.is_empty());
+    let Some(MaskReadError::Std(what)) = error else {
+        panic!("{error:?}")
+    };
+    assert_eq!(
+        what,
+        "basic_string::append: __pos (which is 20) > this->size() (which is 6)"
+    );
+}
+
+/// A record whose residues reach a multiple of 2^32 (here 64) at the end of a line holds none,
+/// so the next data line is tested as a first one (`CheckDataLine`; dustmasker 2.17.0 on ws,
+/// p11d/p3 b6n: 2^32 letters then `@@@@@@@@` is "Near line 71582791, there's a line that
+/// doesn't look like plausible data").
+#[test]
+fn a_data_line_after_32_bits_is_tested_again() {
+    let mut input = b">a\n".to_vec();
+    input.extend(
+        b"A".repeat(64)
+            .chunks(10)
+            .flat_map(|line| [line, b"\n"].concat()),
+    );
+    input.extend_from_slice(b"@@@@\n");
+    let mut reader = MaskFastaReader::new(&input[..], false, false)
+        .unwrap()
+        .with_seq_pos_modulus(64);
+    let Err(MaskReadError::Ncbi(exception)) = reader.next(&mut |_| {}) else {
+        panic!("not the format error")
+    };
+    let what = String::from_utf8(exception.ncbi_what()).unwrap();
+    assert!(
+        what.contains(
+            "CFastaReader: Near line 9, there's a line that doesn't look like plausible data"
+        ),
+        "{what}"
+    );
+}
+
+/// NCBI packs a nucleotide piece into a segment whose byte count is a 32-bit `(length + 3) / 4`
+/// (NCBI2na) or `(length + 1) / 2` (NCBI4na); where that wraps to 0 it crashes, and LOSAT
+/// refuses the record (here at 2^6: NCBI2na from 61 bases, NCBI4na at 63; dustmasker and
+/// makeblastdb 2.17.0 on ws, p11d/p3 b4n and b5n: 4294967295 letters of `ACGT` and of `ACGTN`
+/// end with SIGSEGV).
+#[test]
+fn a_piece_packed_into_0_bytes_is_refused() {
+    let read = |input: Vec<u8>, protein: bool| {
+        let mut reader = MaskFastaReader::new(&input[..], protein, false)
+            .unwrap()
+            .with_seq_pos_modulus(64);
+        reader
+            .next(&mut |_| {})
+            .map(|record| record.map(|record| record.letters.len()))
+    };
+    let record = |parts: &[&[u8]]| {
+        let mut input = b">a\n".to_vec();
+        for part in parts {
+            input.extend_from_slice(part);
+            input.push(b'\n');
+        }
+        input
+    };
+    let refused = |result: Result<Option<usize>, MaskReadError>| matches!(result, Err(MaskReadError::Refused(what)) if what == pack_overflow_what());
+    let acgt = |n: usize| b"ACGT".repeat(16)[..n].to_vec();
+    let acgtn = |n: usize| b"ACGTN".repeat(13)[..n].to_vec();
+    // One NCBI2na piece: refused from 61 bases, read below.
+    assert!(refused(read(record(&[&acgt(61)]), false)));
+    assert!(refused(read(record(&[&acgt(63)]), false)));
+    assert_eq!(read(record(&[&acgt(60)]), false).unwrap(), Some(60));
+    // One NCBI4na piece: refused at 63 bases only.
+    assert!(refused(read(record(&[&acgtn(63)]), false)));
+    assert_eq!(read(record(&[&acgtn(62)]), false).unwrap(), Some(62));
+    // A piece of a delta whose gaps sum to 2^32, and a substituted record.
+    assert!(refused(read(record(&[&acgt(61), b">?32", b">?32"]), false)));
+    assert!(refused(read(
+        record(&[&acgt(30), b">?3", &acgt(30)]),
+        false
+    )));
+    assert_eq!(
+        read(record(&[&acgt(30), b">?3", &acgt(29)]), false).unwrap(),
+        Some(62)
+    );
+    // A protein is stored unpacked.
+    assert_eq!(
+        read(record(&[&b"MKVL".repeat(16)[..63]]), true).unwrap(),
+        Some(63)
+    );
 }
 
 struct FailingRead<'a>(&'a [u8]);

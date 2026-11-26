@@ -270,7 +270,7 @@ impl Column {
     /// The column `col_id` of volume `index`, titled `title`, with both byte orders.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        dbname: &str,
+        dbname: &[u8],
         protein: bool,
         index: u32,
         col_id: usize,
@@ -350,11 +350,11 @@ impl Column {
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_column.cpp:84-91
     /// `ListFiles` of `files` with the second argument true: the files of a column that holds data.
-    pub(crate) fn list_files(&self, files: &mut Vec<String>) {
+    pub(crate) fn list_files(&self, files: &mut Vec<Vec<u8>>) {
         if self.data.data_length != 0 {
-            files.push(self.index.file.filename().to_string());
-            files.push(self.data.file.filename().to_string());
-            files.push(self.data2.file.filename().to_string());
+            files.push(self.index.file.filename().to_vec());
+            files.push(self.data.file.filename().to_vec());
+            files.push(self.data2.file.filename().to_vec());
         }
     }
 }

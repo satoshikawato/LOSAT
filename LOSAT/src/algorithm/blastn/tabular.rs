@@ -27,8 +27,8 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::common::GapEditOp;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, taxdb_warning_line, union_length, QueryCoveragePerHsp, TabularHsp,
-    TabularKind, TabularNames, TabularQuery, TabularRows, TabularSpec, TabularWriter,
+    coverage_percent, union_length, QueryCoveragePerHsp, TabularHsp, TabularKind, TabularNames,
+    TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
 use crate::utils::lower_bound::lower_bound_by;
 
@@ -92,8 +92,11 @@ pub(crate) fn write_tabular_prolog_warning(
     app: crate::blastinput::app::Program,
     diagnostics: &mut dyn Write,
 ) -> Result<()> {
-    if spec.kind == TabularKind::CsvWithHeader && spec.checks_taxdb() && !taxdb_found {
-        diagnostics.write_all(taxdb_warning_line(app.ncbi_name()).as_bytes())?;
+    if let Some(line) = spec
+        .formatter_warning(taxdb_found, app.ncbi_name())
+        .filter(|_| spec.kind == TabularKind::CsvWithHeader)
+    {
+        diagnostics.write_all(line.as_bytes())?;
         diagnostics.flush()?;
     }
     Ok(())
@@ -106,7 +109,7 @@ pub(crate) fn write_tabular_prolog_warning(
 pub(crate) fn write_blastn_tabular(
     tab: &BlastnTabular<'_>,
     hit_lists: &[Option<BlastnHitList>],
-    writer: &mut dyn Write,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
     mut warnings: Option<&mut QueryWarnings<'_>>,
     mut probe: Option<&mut FormatProbe<'_>>,
 ) -> Result<()> {
@@ -129,8 +132,7 @@ pub(crate) fn write_blastn_tabular(
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
-    let taxdb_warning =
-        (spec.checks_taxdb() && !tab.taxdb_found).then(|| taxdb_warning_line(tab.app.ncbi_name()));
+    let taxdb_warning = spec.formatter_warning(tab.taxdb_found, tab.app.ncbi_name());
     let warn = |writer: &mut dyn Write, warnings: Option<&mut QueryWarnings<'_>>| -> Result<()> {
         if let (Some(line), Some(warnings)) = (taxdb_warning.as_deref(), warnings) {
             writer.flush()?;
@@ -181,10 +183,38 @@ pub(crate) fn write_blastn_tabular(
         }
         let Some(hit_list) = hit_list else {
             writer.write_all(&buf)?;
+            // `~CBlastTabularInfo` of the query's report flushes the stream.
+            writer.ncbi_flush()?;
             continue;
         };
         // The query's formatter (`TabularRows`).
         let mut rows = TabularRows::default();
+        let q_offset = tab.query_records.record(q_idx).map_or(0, |r| r.offset);
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:811-825
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:632-658
+        // `InsertSubjectScores` computes `qcovs` / `qcovus` over the query's pruned hits after the
+        // query header and before any row is formatted; a gapped (`Dense-seg`) class N HSP throws
+        // `CDense_seg::GetSeqStop(): Row is empty`.
+        if !tab.ungapped && (needs.qcovs || needs.qcovus) {
+            if let Some(exception) = super::left_of_query::gapped_insert_subject_scores_throw(
+                hit_list,
+                q_offset,
+                query_length,
+                needs.qcovs,
+                needs.qcovus,
+            ) {
+                return Err(crate::report::tabular::run_end(
+                    writer,
+                    &buf,
+                    &exception,
+                    || {
+                        if let Some(warnings) = warnings.as_deref_mut() {
+                            warnings.end_run();
+                        }
+                    },
+                ));
+            }
+        }
         for hsp_list in &hit_list.hsplist_array {
             let Some(first) = hsp_list.hsps.first() else {
                 continue;
@@ -196,18 +226,25 @@ pub(crate) fn write_blastn_tabular(
             // subject once).
             let qcovs = if needs.qcovs {
                 query_ranges.clear();
-                query_ranges.extend(
-                    hsp_list
-                        .hsps
-                        .iter()
-                        .map(|hsp| (hsp.q_start as u64 - 1, hsp.q_end as u64 - 1)),
-                );
+                query_ranges.extend(hsp_list.hsps.iter().filter_map(|hsp| {
+                    if hsp.starts_left_of_record(q_offset, tab.ungapped) {
+                        super::left_of_query::non_empty_record_query_range(
+                            hsp,
+                            q_offset,
+                            tab.ungapped,
+                        )
+                    } else {
+                        let from = hsp.q_start.min(hsp.q_end).saturating_sub(1) as u64;
+                        let to = hsp.q_start.max(hsp.q_end).saturating_sub(1) as u64;
+                        Some((from, to))
+                    }
+                }));
                 coverage_percent(union_length(&mut query_ranges), query_length)
             } else {
                 -1
             };
             let qcovus = if needs.qcovus {
-                uniq_subject_coverage(&hsp_list.hsps, query_length)
+                uniq_subject_coverage(&hsp_list.hsps, query_length, q_offset, tab.ungapped)
             } else {
                 -1
             };
@@ -274,6 +311,26 @@ pub(crate) fn write_blastn_tabular(
                         warnings.sink.flush()?;
                     }
                 }
+                // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:877-1095
+                // After the subject block (when subject lookup fails, NCBI returns early at line
+                // 877), an HSP whose query row starts below 0 in record coordinates throws
+                // `eInvalidDenseg` whenever the field list inspects row 0 through `CAlnVec`.
+                if !table.fails(&subject) && hsp.starts_left_of_record(q_offset, tab.ungapped) {
+                    if let Some(exception) =
+                        super::left_of_query::tabular_exception(spec, hsp.num_ident)
+                    {
+                        return Err(crate::report::tabular::run_end(
+                            writer,
+                            &buf,
+                            &exception,
+                            || {
+                                if let Some(warnings) = warnings.as_deref_mut() {
+                                    warnings.end_run();
+                                }
+                            },
+                        ));
+                    }
+                }
                 // A row whose subject's load throws prints none of its letters.
                 if needs.rows && !subject.throws() {
                     xml_rows_into(
@@ -285,7 +342,7 @@ pub(crate) fn write_blastn_tabular(
                     )
                     .context("BLASTN tabular rows of a final HSP")?;
                 }
-                let span = (hsp.q_end - hsp.q_start + 1) as i32;
+                let span = hsp.internal_q_end_0 - hsp.internal_q_offset_0;
                 let row = tabular_hsp(
                     hsp,
                     qcovhsp.of_hsp(span, span),
@@ -311,11 +368,13 @@ pub(crate) fn write_blastn_tabular(
             }
         }
         writer.write_all(&buf)?;
+        writer.ncbi_flush()?;
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236
     if let (TabularKind::Commented, Some(num_queries)) = (spec.kind, tab.epilog) {
         warn(&mut *writer, warnings)?;
         table.epilog(writer, num_queries)?;
+        writer.ncbi_flush()?;
     }
     Ok(())
 }
@@ -356,9 +415,9 @@ fn tabular_hsp<'r>(
         // NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnvec.cpp:288-297
         // A BLASTN alignment (X-drop or greedy) starts and ends with a substitution, so its rows
         // have no end gaps: a `-` at a row's end fills a segment past the query's end (an HSP that
-        // NCBI keeps outside its query context, `pairwise::context_letters`), the gap character.
-        end_gaps: false,
-        stored_gaps: [&[], &[]],
+        // NCBI keeps outside its query context, `pairwise::context_letters`), the gap character
+        // (`TabularHsp::ops`: no script).
+        ops: &[],
         qcovhsp,
     }
 }
@@ -368,12 +427,19 @@ fn tabular_hsp<'r>(
 /// covered.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastfmtutil.cpp:646-657
-fn uniq_subject_coverage(hsps: &[BlastnHsp], query_length: usize) -> i32 {
+fn uniq_subject_coverage(
+    hsps: &[BlastnHsp],
+    query_length: usize,
+    q_offset: usize,
+    ungapped: bool,
+) -> i32 {
     if query_length == 0 {
         return -1;
     }
-    // `uniq_coverage`, an `int`, of the `TSeqPos` length.
-    let covered = uniq_seq_coverage(hsps) as i32;
+    // `uniq_coverage`, an `int`, of the `TSeqPos` length. Any gapped class N throw was already
+    // raised by `gapped_insert_subject_scores_throw` before the subject loop.
+    let covered = uniq_seq_coverage(hsps, q_offset, ungapped)
+        .expect("gapped qcovus throw handled before subject loop") as i32;
     if covered == 0 {
         return -1;
     }
@@ -523,8 +589,25 @@ fn subject_range(hsp: &BlastnHsp) -> SeqRange {
 }
 
 /// The query range of an HSP's Seq-align (`GetSeqRange` of row 0: the query always ascending).
-fn query_range(hsp: &BlastnHsp) -> SeqRange {
-    SeqRange::new(hsp.q_start as u32 - 1, hsp.q_end as u32 - 1)
+///
+/// NCBI reference (598d8ae6): c++/include/objects/seqalign/Dense_diag.hpp:98-121
+/// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:162-169
+fn query_range(hsp: &BlastnHsp, q_offset: usize, ungapped: bool) -> SeqRange {
+    if !hsp.starts_left_of_record(q_offset, ungapped) {
+        let from = hsp.q_start.min(hsp.q_end).saturating_sub(1) as u32;
+        let to = hsp.q_start.max(hsp.q_end).saturating_sub(1) as u32;
+        return SeqRange::new(from, to);
+    }
+    let (from, to) = super::left_of_query::record_query_u32_range(hsp, q_offset, ungapped);
+    let range = SeqRange::new(from, to);
+    if range.is_empty() {
+        SeqRange {
+            from: u32::MAX,
+            to_open: u32::MAX,
+        }
+    } else {
+        range
+    }
 }
 
 /// The query position (record coordinates, 0-based) in the column of the HSP's alignment that
@@ -535,7 +618,10 @@ fn query_range(hsp: &BlastnHsp) -> SeqRange {
 /// (`s_CollectSeqAlignData`; the columns are the edit script's).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/alnmgr/alnmap.cpp:663-686
-fn query_position(hsp: &BlastnHsp, subject_pos: u32) -> i64 {
+fn query_position(hsp: &BlastnHsp, subject_pos: u32, q_offset: usize, ungapped: bool) -> i64 {
+    if hsp.starts_left_of_record(q_offset, ungapped) {
+        return -1;
+    }
     let subject_first = hsp.s_start.min(hsp.s_end) as i64 - 1;
     let target = i64::from(subject_pos) - subject_first;
     let ungapped = [GapEditOp::Sub(
@@ -573,18 +659,29 @@ fn query_position(hsp: &BlastnHsp, subject_pos: u32) -> i64 {
 
 /// `GetUniqSeqCoverage` of one subject's HSPs in the Seq-align order: the query letters that
 /// the HSPs cover, where a part of an HSP whose subject letters an HSP before it covered does
-/// not count (its query positions mapped through the alignment's columns).
+/// not count (its query positions mapped through the alignment's columns). Returns
+/// `Err(dense_seg_empty_row_stop())` when a gapped (`!ungapped`) class N HSP enters a whole-range
+/// `GetSeqRange` branch on row 0 (`first` or an HSP with no subject overlap against earlier HSPs).
 ///
 /// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4838-4896
+/// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:235-237
 /// A query gap in the column of a part's first or last subject letter gives NCBI the position
-/// -1, which the `TSeqPos` range keeps as 2^32 - 1 (the same arithmetic here). LOSAT's BLASTN
-/// alignments are always gapped Dense-segs (no Dense-diag).
-fn uniq_seq_coverage(hsps: &[BlastnHsp]) -> u32 {
+/// -1, which the `TSeqPos` range keeps as 2^32 - 1 (the same arithmetic here).
+pub(super) fn uniq_seq_coverage(
+    hsps: &[BlastnHsp],
+    q_offset: usize,
+    ungapped: bool,
+) -> std::result::Result<u32, crate::ncbi_exception::NcbiException> {
     let Some((first, rest)) = hsps.split_first() else {
-        return 0;
+        return Ok(0);
     };
+    if !ungapped && first.starts_left_of_record(q_offset, false) {
+        return Err(super::left_of_query::dense_seg_empty_row_stop());
+    }
     let mut subject_ranges = RangeCollection(vec![subject_range(first)]);
-    let mut query_ranges = RangeCollection(vec![query_range(first).fix_minus_strand()]);
+    let mut query_ranges = RangeCollection(vec![
+        query_range(first, q_offset, ungapped).fix_minus_strand()
+    ]);
     for hsp in rest {
         let align_subject = subject_range(hsp);
         let mut parts = RangeCollection(vec![align_subject]);
@@ -595,13 +692,16 @@ fn uniq_seq_coverage(hsps: &[BlastnHsp]) -> u32 {
             continue;
         }
         if parts.0[0] == align_subject {
-            query_ranges.combine_with(query_range(hsp).fix_minus_strand());
+            if !ungapped && hsp.starts_left_of_record(q_offset, false) {
+                return Err(super::left_of_query::dense_seg_empty_row_stop());
+            }
+            query_ranges.combine_with(query_range(hsp, q_offset, ungapped).fix_minus_strand());
             subject_ranges.combine_with(align_subject);
         } else {
             for part in parts.0 {
                 // `SetFrom` and `SetTo` of a `TSignedSeqPos` into the `TSeqPos` range.
-                let from = query_position(hsp, part.from) as u32;
-                let to = query_position(hsp, part.to()) as u32;
+                let from = query_position(hsp, part.from, q_offset, ungapped) as u32;
+                let to = query_position(hsp, part.to(), q_offset, ungapped) as u32;
                 let query_part = SeqRange {
                     from,
                     to_open: to.wrapping_add(1),
@@ -611,7 +711,7 @@ fn uniq_seq_coverage(hsps: &[BlastnHsp]) -> u32 {
             }
         }
     }
-    query_ranges.covered_length()
+    Ok(query_ranges.covered_length())
 }
 
 #[cfg(test)]

@@ -34,7 +34,7 @@
 //! the `CUtilException` of NCBI's input buffer (`Fail::Exception`), which the stack's frames
 //! report line by line.
 
-use super::read::{Post, NO_TYPE};
+use super::read::{Post, PostSink, NO_TYPE};
 use super::{type_info, EnumValue, Kind, Member};
 use crate::ncbi_exception::{NcbiException, ThrowSite};
 use crate::ncbi_str::is_space;
@@ -930,6 +930,7 @@ impl<S: AsnSource> Input for XmlInput<S> {
     const NAMED_TYPES: bool = true;
     const ARRAY_FRAMES: bool = false;
     const MISSING_VALUES: bool = true;
+    const HELD_POSTS: bool = true;
 
     /// `WillHaveName`: the element of a list has the frame of an element when its type has no
     /// name (the table's element of a list of `CRef<>`s is the pointed type).
@@ -1003,8 +1004,10 @@ impl<S: AsnSource> Input for XmlInput<S> {
         self.frames.truncate(depth);
     }
 
-    fn drain_posts(&mut self, posts: &mut Vec<Post>) {
-        posts.append(&mut self.posts);
+    fn drain_posts(&mut self, posts: &mut dyn PostSink) {
+        for post in self.posts.drain(..) {
+            posts.post(post);
+        }
     }
 
     /// `GetPosition()`: the line of NCBI's input buffer (which only `SkipEndOfLine` counts).
@@ -1268,7 +1271,7 @@ impl<S: AsnSource> Input for XmlInput<S> {
         &mut self,
         _kind: StringKind,
         out: &mut Vec<u8>,
-        _posts: &mut Vec<StringPost>,
+        _posts: &mut dyn FnMut(StringPost<'_>),
     ) -> R<()> {
         step!(self, {
             let closed = self.x.end_opening_tag_self_closed();
@@ -1283,7 +1286,7 @@ impl<S: AsnSource> Input for XmlInput<S> {
 
     /// `SkipString`: the text up to the next tag (`ReadEscapedChar`, which replaces nothing).
     // NCBI reference (598d8ae6): c++/src/serial/objistrxml.cpp:2710-2723
-    fn skip_string(&mut self, _kind: StringKind, _posts: &mut Vec<StringPost>) -> R<()> {
+    fn skip_string(&mut self, _kind: StringKind, _posts: &mut dyn FnMut(StringPost<'_>)) -> R<()> {
         step!(self, {
             let data = self.x.begin_data();
             self.lex(data)?;

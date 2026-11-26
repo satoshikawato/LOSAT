@@ -95,7 +95,7 @@
 //! diagonal and no cell for any other diagonal. Only the strips folds of LOSAT_X_PAIRPARDISC keep
 //! and read the memo: each of their stages makes it again from the bounds at its start
 //! (`x_lv2_reset`: no latest insert, `other` the bucket's bound), so the reference fold
-//! (`extend_offset_pairs`: a chunk without a pool with LOSAT_X_BNDCONE `0`, a masked chunk, and
+//! (`extend_offset_pairs`: a chunk without a pool with LOSAT_X_BNDCONE `0`, and
 //! every worker with many subjects) runs the code before the switch and need not keep it.
 //!
 //! Why the output is the same:
@@ -291,6 +291,15 @@ impl LvSeeds {
         let bound = s_off_pos as i64 + self.add;
         debug_assert!((1..=i32::MAX as i64).contains(&bound));
         bound as i32
+    }
+
+    /// EXPERIMENT (LOSAT_X_DCFOLDREG): `bound` of a position that lies in `lo..=hi`, without the
+    /// test of the range: for a fold that checked once that all its positions have a bound
+    /// (`x_dc_fold_reg.rs`).
+    #[inline(always)]
+    pub(super) fn bound_in(&self, s_off_pos: i32) -> i32 {
+        debug_assert!(s_off_pos >= 0 && self.bound(s_off_pos as usize) != i32::MIN);
+        (i64::from(s_off_pos) + self.add) as i32
     }
 
     /// Tests only: the decisions of `s_BlastnDiagHashExtendInitialHit` that read the retrieve

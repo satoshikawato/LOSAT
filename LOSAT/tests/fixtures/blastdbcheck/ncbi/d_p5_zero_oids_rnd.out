@@ -1,0 +1,14 @@
+Writing messages to <stdout> at verbosity (Minutiae)
+ISAM testing is ENABLED.
+Legacy testing is DISABLED.
+TaxID testing is DISABLED.
+By default, testing 200 randomly sampled OIDs.
+
+Testing 1 volume(s).
+ <RUN>/cases/d_p5_zero_oids/p5
+  <RUN>/cases/d_p5_zero_oids/p5 / Sample:   [ERROR] empty volume
+ Result=FAILURE. 1 errors reported in 1 volume(s).
+Testing 0 alias(es).
+ Result=SUCCESS. No errors reported for 0 alias(es).
+
+Total errors: 1

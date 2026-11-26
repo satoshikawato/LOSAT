@@ -1,0 +1,5 @@
+Seq-entry ::= seq {
+  id { local str "x1" },
+  descr { title "ignored", user { type str "ASN1_BlastDefLine", data { { label str "ASN1_BlastDefLine", data oss { '3080DEADBEEF'H } } } } },
+  inst { repr raw, mol aa, length 6, seq-data ncbieaa "MKVLAW" }
+}

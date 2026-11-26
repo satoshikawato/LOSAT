@@ -131,9 +131,9 @@ pub(super) fn requested_reports(
             if let Some(kind) = blastp_xml2_kind(format.outfmt) {
                 return Ok(BlastpReport::Xml2(kind));
             }
-            // The query-anchored outfmt 1 to 4: BLASTP's (`Program::writes`), rpsblast's too
-            // (item PS15a-2); psiblast refuses them (line PS item PS15b).
-            if let Some(view) = blastp_query_anchored_view(args.app, format.outfmt) {
+            // The query-anchored outfmt 1 to 4: BLASTP's (`Program::writes`), rpsblast's (item
+            // PS15a-2) and psiblast's (item PS15b-2, each round's section).
+            if let Some(view) = blastp_query_anchored_view(format.outfmt) {
                 return Ok(BlastpReport::Pairwise(view));
             }
             // Outfmt 0, and outfmt 6 and 7 of the `std` fields and a tab (`custom_tabular_spec`
@@ -1157,7 +1157,7 @@ pub(super) fn prelim_cutoffs(
         args.comp_based_stats.is_enabled(),
         !args.ungapped,
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1008-1018
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:1001-1017
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:926-940
     // `params->prelim_evalue` is `evalue` without a Gumbel block (blast_parameters.c:931-935).
@@ -1372,6 +1372,47 @@ pub(super) struct BlastpScanShape<'a> {
     pub(super) diag_mask: i32,
     pub(super) total_query_span: i32,
     pub(super) x_soft_subjects: Option<&'a [Vec<(i32, i32)>]>,
+    pub(super) neg_batch_layout: Vec<(i32, i32)>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1004
+// The concatenated query of a batch runs from its first context to the end of its last one (a
+// sentinel between each two); its table's ring is the power of two just at least that length
+// plus the window.
+/// NCBI's query batches of a call (`query_batches`, by query) as places in the call's
+/// concatenated query (`contexts`, in query order): each batch's first offset and its
+/// concatenated length, for the batches that have a context. A query chunk's search is one
+/// batch of all its contexts, as is a call whose batches have none.
+pub(super) fn query_batch_layout(
+    query_batches: &[RangedBatch],
+    contexts: &[QueryContext],
+    query_chunk: bool,
+) -> Vec<(i32, i32)> {
+    let end_of = |context: &QueryContext| context.frame_base + context.aa_len as i32;
+    let whole = || {
+        let start = contexts.first().map_or(0, |context| context.frame_base);
+        vec![(start, contexts.last().map_or(start, end_of) - start)]
+    };
+    if query_chunk {
+        return whole();
+    }
+    let first = |q_idx: usize| contexts.partition_point(|context| (context.q_idx as usize) < q_idx);
+    let layout: Vec<(i32, i32)> = query_batches
+        .iter()
+        .filter_map(|batch| {
+            let (from, to) = (first(batch.searched.start), first(batch.searched.end));
+            (from < to).then(|| {
+                let start = contexts[from].frame_base;
+                (start, end_of(&contexts[to - 1]) - start)
+            })
+        })
+        .collect();
+    if layout.is_empty() {
+        whole()
+    } else {
+        layout
+    }
 }
 
 /// The call's `BlastpScanShape`, with the refusal of a window that the diagonal table cannot hold;
@@ -1433,24 +1474,22 @@ pub(super) fn scan_shape<'a>(
         crate::utils::xreach::x_reach!("LOSAT_X_BPUNGAPSENT", false);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:36-66,162-172
-    // A negative `-window_size` (a search strategy's): the diagonal table of each NCBI query batch
-    // keeps what the subjects before left in it, so the batches are not one table. The
-    // preliminary stage plans a block for each batch (`x_prelim_block_plan`); where it cannot
-    // (an ungapped search, a batch without a searched query, a call of the batches before a
-    // failing one) a call of more than one batch is LOSAT's refusal. A query chunk of a split
-    // batch and a block are one table's call.
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:216,257
+    // A negative `-window_size` (a search strategy's): each NCBI query batch has its own diagonal
+    // table (`BLAST_DiagTable`) that carries state from one subject to the next. Where the
+    // preliminary stage did not split the call into one block per batch (`x_blocks` None, e.g.
+    // ungapped search, sum-stats, a batch without a searched query, or batches before a failing
+    // later batch), record each searched batch's `(start, length)` in `concatenated_query` so
+    // `search_subject_in_neg` runs one carried ring per batch via `QueryBatchTables`.
+    let mut neg_batch_layout: Vec<(i32, i32)> = Vec::new();
     if window < 0 && x_blocks.is_none() && x_block_inputs.is_none() && !query_chunk {
-        let searched_batches = ranges
-            .query_input
-            .batches(args.query_batch_size()?)
-            .iter()
-            .filter(|batch| !batch.searched.is_empty())
-            .count();
-        if searched_batches > 1 {
-            anyhow::bail!(
-                "a -window_size of {window} with queries in more than one NCBI query batch is not supported by LOSAT's {}",
-                args.app.name()
-            );
+        let query_batches = ranges.query_input.batches(args.query_batch_size()?);
+        let layout = query_batch_layout(&query_batches, contexts, false);
+        if layout.len() > 1 {
+            for &(_, length) in &layout {
+                crate::blastinput::app::check_diag_table_window(length, window, "BLASTP")?;
+            }
+            neg_batch_layout = layout;
         }
     }
     let offset_array_size = blastp_offset_array_size(lookup.longest_chain());
@@ -1482,5 +1521,6 @@ pub(super) fn scan_shape<'a>(
         diag_mask,
         total_query_span,
         x_soft_subjects,
+        neg_batch_layout,
     })
 }

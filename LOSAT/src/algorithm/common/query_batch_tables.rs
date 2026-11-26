@@ -80,7 +80,7 @@ impl QueryBatchTables {
             rings,
             offset: window,
             fill: DiagStruct::default(),
-            mark: 0,
+            mark: 1,
         }
     }
 
@@ -152,6 +152,8 @@ impl QueryBatchTables {
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-518, 776-779
 // The diagonal of a hit in the offsets of its batch's search.
 impl DiagTable for QueryBatchTables {
+    type Cell = DiagStruct;
+
     fn two_hit_entry(&mut self, q: i32, s: i32) -> (&mut DiagStruct, i32) {
         let (ring, start) = self.ring_of(q);
         let index = (q.wrapping_sub(start).wrapping_sub(s) & ring.mask) as usize;

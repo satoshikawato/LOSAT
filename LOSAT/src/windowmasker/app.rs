@@ -67,7 +67,7 @@ pub(super) fn check(
         exclusive_id_lists(args).and_then(|()| {
             let lists = ["ids", "exclude_ids"]
                 .iter()
-                .any(|name| !args.value(name).unwrap_or_default().is_empty());
+                .any(|name| !args.os_value(name).unwrap_or_default().is_empty());
             if lists {
                 // `id_lists` reads the list before `mk_counts` refuses -infmt seqids.
                 Ok(())
@@ -82,6 +82,19 @@ pub(super) fn check(
     } else {
         Err(no_mode())
     };
+    let checked = checked.and_then(|()| {
+        let out = args.os_value("out").unwrap_or_default();
+        let to_stdout = out == "-"
+            || (out.is_empty()
+                && (args.flag("mk_counts") || args.flag("convert"))
+                && args.value("sformat") == Some("ascii"));
+        if !to_stdout {
+            if let Some(reason) = args.files().refused_output(out) {
+                return Err(Failure::Refused(unsupported(&reason)));
+            }
+        }
+        Ok(())
+    });
     match checked {
         Ok(()) => 0,
         Err(failure) => report(failure, diag),
@@ -122,8 +135,8 @@ fn options<'a>(args: &'a Args, settings: &'a ApplicationSettings) -> Options<'a>
     };
     let dust = args.boolean("dust").expect("-dust has a default");
     Options {
-        ustat: args.value("ustat").expect("-ustat is given"),
-        input: args.value("in").expect("-in has a default"),
+        ustat: args.os_value("ustat").expect("-ustat is given"),
+        input: args.os_value("in").expect("-in has a default"),
         infmt: args.value("infmt").expect("-infmt has a default"),
         outfmt: args.value("outfmt").expect("-outfmt has a default"),
         parse_seqids: args.flag("parse_seqids"),
@@ -133,10 +146,7 @@ fn options<'a>(args: &'a Args, settings: &'a ApplicationSettings) -> Options<'a>
             args.integer("dust_level")
                 .expect("-dust_level has a default")
         }),
-        blastdb_registry: match &settings.blastdb {
-            Ok(value) => Ok(value.as_deref()),
-            Err(reason) => Err(reason.as_str()),
-        },
+        database: settings.database(),
     }
 }
 
@@ -160,7 +170,7 @@ fn masking_run(
                 381,
                 "CWinMaskConfigException::can not open input stream",
                 CONFIG,
-                options.input,
+                crate::utils::os_bytes::os_str_bytes(options.input),
             ))
         })?)
     };
@@ -188,7 +198,7 @@ fn masking_run(
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/winmask/win_mask_config.cpp:412
 fn exclusive_id_lists(args: &Args) -> Result<(), Failure> {
-    let given = |name| !args.value(name).unwrap_or_default().is_empty();
+    let given = |name| !args.os_value(name).unwrap_or_default().is_empty();
     if given("ids") && given("exclude_ids") {
         return Err(Failure::Ncbi(config_exception(
             412,
@@ -215,9 +225,9 @@ fn id_lists(
     diag: &mut Diag,
 ) -> Result<IdLists, Failure> {
     exclusive_id_lists(args)?;
-    let ids = args.value("ids").unwrap_or_default();
-    let exclude_ids = args.value("exclude_ids").unwrap_or_default();
-    let mut list = |name: &str, line: u32| -> Result<Option<IdSet>, Failure> {
+    let ids = args.os_value("ids").unwrap_or_default();
+    let exclude_ids = args.os_value("exclude_ids").unwrap_or_default();
+    let mut list = |name: &std::ffi::OsStr, line: u32| -> Result<Option<IdSet>, Failure> {
         if name.is_empty() {
             return Ok(None);
         }

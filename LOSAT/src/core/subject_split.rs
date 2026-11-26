@@ -56,7 +56,8 @@ pub struct HardChunk {
     /// `subject->length`: NCBI's `Int4` `right - offset`, the chunk's letters where its hard range
     /// is in order, 0 for a range of no letters (a mask at 0, masks that touch) and negative for an
     /// inverted range (the end of a mask past the start of the next: masks that overlap or nest,
-    /// which only the protein programs search, series NP, M4b-3b). [`HardChunk::letters`] is the
+    /// searched by the protein programs in any order, series NP M4b-3b, and by the translated
+    /// programs in start order, M4b-3c part 2). [`HardChunk::letters`] is the
     /// letters a chunk holds.
     pub length: i32,
     /// `residual`: the letters before the chunk's hard range (`next % COMPRESSION_RATIO`),
@@ -139,7 +140,7 @@ impl HardSplitState {
     /// `Int4` arithmetic: the hard range of masks that overlap or nest, or are out of the order of
     /// their start, runs from the end of one mask back to the start of the next, and its chunk's
     /// length is negative, as NCBI's (the word finders then move the diagonal offset back by it;
-    /// BLASTN and the translated programs refuse such masks before the search,
+    /// BLASTN refuses every overlap and the translated programs refuse masks out of start order,
     /// `HardMaskShape::Unsorted`).
     pub fn next_chunk(&mut self, chunk_overlap: usize) -> Option<HardChunk> {
         if self.next >= self.full_right {

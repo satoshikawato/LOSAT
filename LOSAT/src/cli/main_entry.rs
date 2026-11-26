@@ -70,9 +70,18 @@ fn run_main_entry() -> Result<()> {
     }
     // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcmd.cpp:1295-1298
     // `losat blastdbcmd` reads its command line with NCBI's argument reader
-    // (`ncbi_app::args`), not clap's: the words after `blastdbcmd` go to it as they are.
+    // (`ncbi_app::args`): the words after `blastdbcmd` go to it as they are.
     // An executable called `blastn` is `losat blastn` (`cli::entry_argv`).
     let argv: Vec<std::ffi::OsString> = crate::cli::entry_argv(std::env::args_os());
+    // NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py:159-161
+    // `cleanup-blastdb-volumes.py` is a standalone Python script in NCBI BLAST+, not an NCBI C++
+    // Toolkit application, so it runs before `ApplicationStart`.
+    if argv
+        .get(1)
+        .is_some_and(|word| word == "cleanup-blastdb-volumes.py")
+    {
+        std::process::exit(crate::cleanup_blastdb_volumes::run(&argv[2..]));
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_usage_report.cpp:84-86
     // Every NCBI BLAST+ program's application but the maskers' (dustmasker, segmasker,
     // windowmasker) has a usage
@@ -134,13 +143,23 @@ fn run_main_entry() -> Result<()> {
     if let Some(start) = started("makeprofiledb") {
         std::process::exit(crate::makeprofiledb::run(&argv[2..], start));
     }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdb_aliastool.cpp:704-707
+    // `losat blastdb_aliastool` too.
+    if let Some(start) = started("blastdb_aliastool") {
+        std::process::exit(crate::blastdb_aliastool::run(&argv[2..], start));
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp:1555-1559
+    // `losat blastdbcheck` too.
+    if let Some(start) = started("blastdbcheck") {
+        std::process::exit(crate::blastdbcheck::run(&argv[2..], start));
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_formatter.cpp:588-592
     // `losat blast_formatter` too.
     if let Some(start) = started("blast_formatter") {
         std::process::exit(crate::blast_formatter::run(&argv[2..], start));
     }
-    // No NCBI counterpart: makes those names (`cli::install_shims`). Read before clap, as the
-    // top level has no options of its own.
+    // No NCBI counterpart: makes those names (`cli::install_shims`). Read before the top level
+    // (`cli::top_level`), which has no options of its own.
     if argv
         .get(1)
         .is_some_and(|word| crate::cli::INSTALL_SHIMS_WORDS.iter().any(|w| word == w))
@@ -173,10 +192,28 @@ fn run_main_entry() -> Result<()> {
     // The diagnostics go to the file of `-logfile`, which NCBI reads anywhere before `--`
     // (`ncbi_environment::log_file`), opened before `-version`: `blastn -version -logfile F`
     // makes F, with the usage report's messages.
+    // Line WQA D23 (`Q-D23=A`): refuse a `-logfile` pointing to any input file read by this run
+    // before opening or creating it, preventing input corruption and endless read loops.
+    let argv_is_rpsbproc = argv.get(1).is_some_and(|word| word == "rpsbproc");
     let mut target = match &start {
-        Some(_) => {
-            use crate::blastinput::ncbi_environment::{diag_target, log_file};
-            diag_target(log_file(&argv[2..]))
+        Some(start) => {
+            let refusal_name = crate::cli::reader::tool(start.program())
+                .map_or(start.program(), |tool| tool.refusal_name);
+            match crate::report::run_files::RunFiles::Disk.log_target_for(
+                &argv[2..],
+                start,
+                crate::blastinput::ncbi_environment::log_file(&argv[2..]),
+            ) {
+                Ok((target, _)) => target,
+                Err(reason) => {
+                    let message = crate::seqmasks_io::run::unsupported(&reason, refusal_name);
+                    if argv_is_rpsbproc {
+                        exit_rpsbproc(crate::rpsbproc::Outcome::Refused(message.into_bytes()));
+                        return Ok(());
+                    }
+                    return Err(anyhow::Error::msg(message));
+                }
+            }
         }
         None => crate::blastinput::ncbi_environment::DiagTarget::Stderr,
     };
@@ -186,7 +223,6 @@ fn run_main_entry() -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp:926-1001 (`-version` and the full
     // versions are read before the program's arguments and before the configuration load,
     // `cli::ncbi_version_request`).
-    let argv_is_rpsbproc = argv.get(1).is_some_and(|word| word == "rpsbproc");
     if let Some(text) = crate::cli::ncbi_version_request(argv.iter().cloned()) {
         if argv_is_rpsbproc {
             crate::rpsbproc::write_stdout(&text);
@@ -207,16 +243,15 @@ fn run_main_entry() -> Result<()> {
             Err(reason) => return Err(anyhow::Error::msg(reason)),
         }
     }
-    // The top level (`losat`, `losat -h`, `losat --version`, a word that names no program) is
-    // clap's.
+    // The top level (`losat`, `losat -h`, `losat --version`, a word that names no program):
+    // LOSAT's own (`cli::top_level`).
     let Some(start) = start else {
-        let error = crate::cli::top_level_error(&argv);
-        let message = crate::cli::top_level_message(&error);
-        match error.use_stderr() {
-            true => write_dropping_errors(&mut std::io::stderr(), &message),
-            false => write_dropping_errors(&mut crate::cli::standard_output(), &message),
+        let top_level = crate::cli::top_level(&argv);
+        match top_level.error {
+            true => write_dropping_errors(&mut std::io::stderr(), &top_level.text),
+            false => write_dropping_errors(&mut crate::cli::standard_output(), &top_level.text),
         }
-        std::process::exit(error.exit_code());
+        std::process::exit(top_level.status);
     };
     let tool = crate::cli::reader::tool(start.program())
         .expect("a program of ENTRY_NAMES that is not on `ncbi_app` is on the reader");
@@ -241,6 +276,7 @@ fn run_main_entry() -> Result<()> {
         &mut crate::cli::standard_output(),
         &mut diag,
         Some(crate::cli::xml_help_text),
+        &crate::report::run_files::OpenFiles::disk(),
     );
     let args = match read {
         Ok(args) => args,
@@ -262,12 +298,12 @@ fn run_main_entry() -> Result<()> {
         start.settings().map_err(anyhow::Error::msg)?;
         return Ok(());
     }
-    // LOSAT's refusals of what it does not run (`reader::refusal_after_read`), then clap's
-    // conversion of the arguments that NCBI's reader read (`reader::convert`): LOSAT's errors, on
+    // LOSAT's refusals of what it does not run (`reader::refusal_after_read`), then the program's
+    // options of the arguments that NCBI's reader read (`reader::options`): LOSAT's errors, on
     // the terminal's standard error (`Error: ` and the text, exit status 1; line RG DECISIONS 32).
     let command = match crate::cli::reader::refusal_after_read(tool, &args) {
         Some(refusal) => Err(refusal),
-        None => crate::cli::reader::convert(tool, &args, false),
+        None => crate::cli::reader::options(tool, &args, false),
     };
     let command = match command {
         Ok(command) => command,
@@ -324,7 +360,7 @@ fn run_main_entry() -> Result<()> {
         _ => drop(target),
     }
     if startup_trace {
-        eprintln!("[startup] after clap parse");
+        eprintln!("[startup] after the options are read");
     }
     // The search programs write an error's text before its error archive, where NCBI's
     // `CATCH_ALL` posts it (`cli::post_native_error`).

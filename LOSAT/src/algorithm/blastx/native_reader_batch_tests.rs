@@ -6,7 +6,6 @@ fn record(letters: usize) -> FastaRecord {
         title: Vec::new(),
         sequence: vec![b'A'; letters],
         lowercase_masks: Vec::new(),
-        warnings: Vec::new(),
         source: None,
         around: None,
         skipped: None,
@@ -18,6 +17,7 @@ fn unit_results(queries: usize, skipped: bool) -> Vec<BatchResults> {
     let records: Vec<_> = (0..queries).map(|_| record(30)).collect();
     vec![BatchResults {
         query_ordinal: 0,
+        in_report_order: false,
         queries: vec![Vec::new(); queries],
         prepared: super::super::query_setup::prepare_queries(
             &records,
@@ -129,4 +129,98 @@ fn the_units_results_are_the_reader_batchs() {
         .unwrap();
     assert_eq!(results.len(), 2);
     assert!(results.iter().all(|r| r.search_skipped));
+}
+
+/// A unit of several places gives them back when its scan ends (`x_flow`, line NP item M4b-3b fix
+/// round 8): three reader batches of 4 places each on 4 places are scanned one at a time, the next
+/// one's search starts during the batch end of the one before it (each batch end here waits for
+/// it), and the reports are written in the reader's order.
+#[test]
+fn a_unit_gives_back_its_places_when_its_scan_ends() {
+    use std::sync::{Condvar, Mutex};
+    const UNITS: usize = 3;
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .expect("a pool of 4 threads");
+    let batches: Vec<Vec<FastaRecord>> = (0..UNITS)
+        .map(|index| {
+            let mut query = record(30);
+            query.internal_id = index.to_string();
+            vec![query]
+        })
+        .collect();
+    // The units whose search started, and the number whose scan has not ended.
+    let started = (Mutex::new((Vec::<usize>::new(), 0usize)), Condvar::new());
+    let written = Mutex::new(Vec::<usize>::new());
+    let result = pool.install(|| {
+        let split = |queries: &[FastaRecord]| {
+            vec![XUnit {
+                batch: std::sync::Arc::new(queries.to_vec()),
+                range: 0..queries.len(),
+                last: true,
+                places: 4,
+                prep: None,
+            }]
+        };
+        let prepare = |_: &[FastaRecord],
+                       _: Option<&std::sync::Arc<ReaderBatchShape>>|
+         -> Result<UnitPrep> { unreachable!("no unit is prepared ahead") };
+        let search = |unit: &XUnit, _alone: bool, scan_end: &dyn Fn()| {
+            let index: usize = unit.batch[0].internal_id.parse().expect("a unit's number");
+            let (lock, wake) = &started;
+            {
+                let mut state = lock.lock().expect("the units started");
+                state.0.push(index);
+                state.1 += 1;
+                assert_eq!(state.1, 1, "unit {index} scans beside another");
+                wake.notify_all();
+            }
+            lock.lock().expect("the units started").1 -= 1;
+            scan_end();
+            if index + 1 < UNITS {
+                let state = lock.lock().expect("the units started");
+                let (state, waited) = wake
+                    .wait_timeout_while(state, std::time::Duration::from_secs(60), |state| {
+                        !state.0.contains(&(index + 1))
+                    })
+                    .expect("the units started");
+                drop(state);
+                assert!(
+                    !waited.timed_out(),
+                    "unit {} waited for the batch end of unit {index}",
+                    index + 1
+                );
+            }
+            Ok(unit_results(1, false))
+        };
+        let mut read = |deliver: &mut dyn FnMut(&[FastaRecord]) -> Result<()>,
+                        _: &mut dyn FnMut(&[u8]) -> Result<()>|
+         -> Result<()> {
+            for batch in &batches {
+                deliver(batch)?;
+            }
+            Ok(())
+        };
+        x_flow(
+            2 * UNITS,
+            0,
+            usize::MAX,
+            4,
+            &mut read,
+            &split,
+            &prepare,
+            &search,
+            &mut |batch: &[FastaRecord], _, _, results: Result<Vec<BatchResults>>| {
+                results?;
+                let index = batch[0].internal_id.parse().expect("a unit's number");
+                written.lock().expect("the units written").push(index);
+                Ok(())
+            },
+            &mut |_: &[u8]| Ok(()),
+        )
+    });
+    result.expect("the flow's run");
+    assert_eq!(*written.lock().unwrap(), [0, 1, 2]);
+    assert_eq!(started.0.lock().unwrap().0, [0, 1, 2]);
 }

@@ -20,7 +20,7 @@ use anyhow::Result;
 use super::evalue::EvalueStats;
 use super::gapalign::{pssm_gapped_alignment_with_traceback, PssmGapScratch};
 use super::rows::QueryPssm;
-use super::traceback0::final_hsp;
+use super::traceback0::{final_hsp, TraceReads};
 use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
 use crate::algorithm::blastp::hsp::{
     fill_results_from_compo_heaps, BlastCompoHeap, BlastpHitList, BlastpHsp, BlastpHspList,
@@ -38,9 +38,9 @@ use crate::core::composition_adjustment::compo_scale::{
 };
 use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, get_nucl_length, get_seq_frame, get_translated_length,
-    test_near_identical, windows_from_translated_aligns, BlastCompoAlignment,
-    BlastCompoAlignmentContext, BlastCompoSequenceData, EMatrixAdjustRule,
-    MINIMUM_LENGTH_NEAR_IDENTICAL, WINDOW_BORDER,
+    test_near_identical, test_near_identical_on_copy, windows_from_translated_aligns,
+    BlastCompoAlignment, BlastCompoAlignmentContext, BlastCompoSequenceData, EMatrixAdjustRule,
+    NearIdenticalCopy, MINIMUM_LENGTH_NEAR_IDENTICAL, WINDOW_BORDER,
 };
 use crate::core::link_hsps::{link_in_place, EvenGapLinkParams, LinkContext, LinkHsp};
 use crate::stats::KarlinParams;
@@ -53,9 +53,9 @@ pub(crate) const SCALING_FACTOR: f64 = 32.0;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:2396-2399
 const NEAR_IDENTICAL_BITS_PER_POSITION: f64 = 1.74;
 
-// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/compo_mode_condition.h
-// and redo_alignment.c:41-58
-// NCBI reference (598d8ae6): c++/include/algo/blast/composition_adjustment/redo_alignment.h:43
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:46,63-64
+// (LOCAL_LN2 and EVALUE_STRETCH)
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:955
 const KAPPA_BIT_TOL: f64 = 2.0;
 const LOCAL_LN2: f64 = std::f64::consts::LN_2; // the same f64 as NCBI's literal
 
@@ -156,6 +156,9 @@ pub(crate) struct RedoRun<'a> {
     /// rows' best scores), and the first sum that was above it.
     bound_check: bool,
     bound_exceeded: Option<i64>,
+    /// RPS-BLAST: what the redo asks of its profile where NCBI's reads leave the data
+    /// (`with_profile_reads`).
+    profile_reads: Option<&'a dyn TraceReads>,
 }
 
 /// `BlastCompo_Alignment`: an incoming (preliminary) alignment, scaled, or a redone one with its
@@ -188,6 +191,23 @@ impl Align {
             match_start: hsp.subject_start,
             match_end: hsp.subject_end,
             frame: hsp.subject_frame,
+            edit_script: Vec::new(),
+        }
+    }
+
+    /// The alignment that a redo does not make (`RedoRun::starts_in_rows`): score 0, below every
+    /// cutoff of the redo, so no list keeps it. Out of the redo's loops.
+    #[cold]
+    #[inline(never)]
+    fn not_made(rule: EMatrixAdjustRule) -> Self {
+        Align {
+            score: 0,
+            rule,
+            query_start: 0,
+            query_end: 0,
+            match_start: 0,
+            match_end: 0,
+            frame: 0,
             edit_script: Vec::new(),
         }
     }
@@ -273,6 +293,7 @@ impl<'a> RedoRun<'a> {
             scratch,
             bound_check: false,
             bound_exceeded: None,
+            profile_reads: None,
         }
     }
 
@@ -310,6 +331,63 @@ impl<'a> RedoRun<'a> {
     /// The first sum of best row scores above `INT4_MAX` that an adjusted matrix had.
     pub(crate) fn bound_exceeded(&self) -> Option<i64> {
         self.bound_exceeded
+    }
+
+    /// The run of an RPS-BLAST profile, whose `.psq` letters (the redo's query) can be fewer than
+    /// the columns of its preliminary alignments, asking `reads` (the profile's, as the traceback
+    /// without composition-based statistics does): the near-identical walk reads the query's copy
+    /// as NCBI's does (`test_near_identical_on_copy`) and reports a read past it
+    /// (`TraceReads::copy_read_past`), and each alignment's start is asked before it is made
+    /// (`TraceReads::starts`); the profile keeps the first such read (LOSAT's refusal of the query
+    /// batch). With the letters of a consistent profile neither happens.
+    pub(crate) fn with_profile_reads(mut self, reads: &'a dyn TraceReads) -> Self {
+        self.profile_reads = Some(reads);
+        self
+    }
+
+    /// `s_TestNearIdentical` of the window's first alignment `align` on the subject `subject`
+    /// (from offset 0) and the run's query copy and words: on slices (`test_near_identical`), or
+    /// as NCBI reads the copy of an RPS-BLAST profile (`with_profile_reads`).
+    fn near_identical(
+        &self,
+        subject: &BlastCompoSequenceData,
+        align: &BlastCompoAlignment,
+    ) -> bool {
+        let Some(reads) = self.profile_reads else {
+            return test_near_identical(
+                subject,
+                0,
+                &self.query_data,
+                0,
+                Some(&self.query_words),
+                align,
+            );
+        };
+        let read_past = std::cell::Cell::new(false);
+        let identical = test_near_identical_on_copy(
+            subject,
+            0,
+            NearIdenticalCopy::new(&self.query_data, &self.query_words, &read_past),
+            0,
+            align,
+        );
+        if read_past.get() {
+            reads.copy_read_past();
+        }
+        identical
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1924-1946
+    /// Whether the redone alignment of the preliminary HSP `hsp` is made (`s_RedoOneAlignment`
+    /// starts at its `gapped_start`, whose row NCBI's left extension reads first): with
+    /// `with_profile_reads`, as the profile answers its start (`TraceReads::starts`, read D: not
+    /// at or past the matrix's `L_pin` rows, nor after the profile's first fault).
+    #[inline]
+    fn starts_in_rows(&self, hsp: &BlastpPreliminaryHsp) -> bool {
+        match self.profile_reads {
+            None => true,
+            Some(reads) => profile_starts(reads, hsp),
+        }
     }
 
     /// The matrix and the alignment scratch, for the next run (RPS-BLAST redoes one profile
@@ -634,6 +712,25 @@ pub(crate) struct RedoMatch<'a> {
 }
 
 impl RedoMatch<'_> {
+    /// Reaps redone HSPs whose E-value exceeds `-evalue` (keeping NaN E-values, because C's
+    /// greater-than test is false for NaN) and verifies that the list's `best_evalue` is at most
+    /// `-evalue`, returning the first surviving HSP's scaled score or `None` when none passes.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1976-2005
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:437-443
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3687
+    #[inline(always)]
+    fn reap_by_expect(&self, redone: &mut Vec<Redone>, best_evalue: f64) -> Option<i32> {
+        redone.retain(|hsp| hsp.e_value <= self.expect_value || hsp.e_value.is_nan());
+        let first = redone.first()?;
+        // The list's best E-value must be at most `-evalue`: NaN E-values (a PSSM whose gapped
+        // block gives them) pass the reaping above but leave it at `INT4_MAX`.
+        if best_evalue > self.expect_value {
+            return None;
+        }
+        Some(first.align.score)
+    }
+
     /// The redo of one match (the HSPs of the query and one subject): `Blast_RedoOneMatch`, then
     /// `s_HSPListFromDistinctAlignments`, `s_HitlistReapContained`, `s_HitlistEvaluateAndPurge`,
     /// and for a list whose best e-value passes `-evalue`, `s_HSPListNormalizeScores` and
@@ -684,12 +781,9 @@ impl RedoMatch<'_> {
                 best_evalue
             }
         };
-        redone.retain(|hsp| hsp.e_value <= self.expect_value);
-        let first = redone.first()?;
-        let best_score = first.align.score;
-        // NCBI's test that `best_evalue` is at most `hitParams->options->expect_value` passes: the
-        // list keeps an HSP, whose e-value is at most `-evalue`, and `best_evalue` is the smallest
-        // of all.
+        let best_score = self.reap_by_expect(&mut redone, best_evalue)?;
+        // The list passed NCBI's test that `best_evalue` is at most
+        // `hitParams->options->expect_value` (above).
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:102-116
         let template = &hsps[0];
         let mut hsp_list = BlastpHspList {
@@ -933,9 +1027,7 @@ impl RedoMatch<'_> {
                 best_evalue
             }
         };
-        redone.retain(|hsp| hsp.e_value <= self.expect_value);
-        let first = redone.first()?;
-        let best_score = first.align.score;
+        let best_score = self.reap_by_expect(&mut redone, best_evalue)?;
         let template = &hsps[0];
         let mut hsp_list = BlastpHspList {
             oid,
@@ -1180,14 +1272,7 @@ impl RedoMatch<'_> {
                     context: None,
                     next: None,
                 };
-                test_near_identical(
-                    &BlastCompoSequenceData::from_ncbistdaa(subject),
-                    0,
-                    &run.query_data,
-                    0,
-                    Some(&run.query_words),
-                    &align,
-                )
+                run.near_identical(&BlastCompoSequenceData::from_ncbistdaa(subject), &align)
             };
             if !test_identical {
                 let intervals =
@@ -1213,6 +1298,9 @@ impl RedoMatch<'_> {
         rule: EMatrixAdjustRule,
         subject: &[u8],
     ) -> Align {
+        if !run.starts_in_rows(hsp) {
+            return Align::not_made(rule);
+        }
         let traced = pssm_gapped_alignment_with_traceback(
             &run.matrix,
             subject,
@@ -1341,15 +1429,7 @@ fn frame_range<C: RedoInstance>(
             data_offset: 1,
             length: length as i32 + 1,
         };
-        let test_identical = near_identical
-            && test_near_identical(
-                &data,
-                0,
-                &run.query_data,
-                0,
-                Some(&run.query_words),
-                &window_align.compo(None),
-            );
+        let test_identical = near_identical && run.near_identical(&data, &window_align.compo(None));
         buffer = data.buffer;
         if !test_identical {
             seg_subject(&mut buffer[1..1 + frame_length], subject_maybe_biased);
@@ -1382,6 +1462,13 @@ fn window_composition<C: RedoInstance>(
     read_aa_composition(&letters[left..right])
 }
 
+/// The profile's answer for the gapped start of the preliminary HSP `hsp`
+/// (`RedoRun::starts_in_rows`, `TraceReads::starts`), out of the redo's loops.
+#[inline(never)]
+fn profile_starts(reads: &dyn TraceReads, hsp: &BlastpPreliminaryHsp) -> bool {
+    reads.starts(usize::try_from(hsp.gapped_query_start).unwrap_or(usize::MAX))
+}
+
 /// `s_RedoOneAlignment` in a window of a translated subject: the gapped alignment of the
 /// preliminary HSP `hsp` from its gapped start on the window's letters (in `data`,
 /// `frame_range`'s buffer; `end - begin` of them, none where the window ends before it begins:
@@ -1397,6 +1484,9 @@ fn redo_window_alignment(
     data: &[u8],
     window: SubjectWindow,
 ) -> Align {
+    if !run.starts_in_rows(hsp) {
+        return Align::not_made(rule);
+    }
     let traced = pssm_gapped_alignment_with_traceback(
         &run.matrix,
         &data[1 + window.begin as usize..],

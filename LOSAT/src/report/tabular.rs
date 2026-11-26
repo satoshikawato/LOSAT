@@ -1048,7 +1048,7 @@ pub fn failed_lookup_stop(
     }
 }
 
-const FAILED_LOOKUP_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sacc or saccver of its row (the default fields of outfmt 6, 7, 10 and 20 print saccver)";
+const FAILED_LOOKUP_NULL_POINTER: &str = "NCBI BLAST+ stops with a null pointer exception (exit 255) at the sacc or saccver of its row, which reads the accession of the subject's Bioseq that its load did not give (the default fields of outfmt 6, 7, 10 and 20 print saccver), and reports the addresses of its own binary";
 
 /// The reason of `failed_lookup_stop` for the `sallacc` of a subject with a definition line
 /// without a Seq-id (`LookupFailure::lineless`).
@@ -1219,9 +1219,10 @@ pub fn failed_record_title(s_idx: usize, shown_id: &[u8]) -> String {
 }
 
 /// What `check_failed_lookups` says of the database sequence `oid` whose lookup fails as `failure`
-/// says: where its load throws `thrown` (a batch whose prefetch is off, `SubjectLookup::Throws`),
-/// that load; where no lookup fails and a definition line has no Seq-id
-/// (`LookupFailure::lineless`), that line; otherwise its title (`failed_database_title`).
+/// says: where its load throws `thrown` (a batch whose prefetch is off, or fails at a lookup that
+/// throws on the id: `SubjectLookup::Throws`), that load; where no lookup fails and a definition
+/// line has no Seq-id (`LookupFailure::lineless`), that line; otherwise its title
+/// (`failed_database_title`).
 pub fn failed_database_subject(
     oid: impl std::fmt::Display,
     thrown: Option<&crate::ncbi_exception::NcbiException>,
@@ -1229,7 +1230,7 @@ pub fn failed_database_subject(
 ) -> String {
     match thrown {
         Some(exception) => format!(
-            "database sequence {oid} has a Seq-align id whose lookup throws '{}' in a batch whose prefetch PRE_FETCH_SEQS_LIMIT turns off, where NCBI BLAST+ 2.17.0 reads the reported sequences one by one",
+            "database sequence {oid} has a Seq-align id whose lookup throws '{}' where NCBI BLAST+ 2.17.0 reads the reported sequences one by one (a batch whose prefetch PRE_FETCH_SEQS_LIMIT or the format turns off, or whose prefetch fails at a Seq-align id whose lookup throws on the id itself, with its warning Error pre-fetching sequence data)",
             String::from_utf8_lossy(exception.get_msg())
         ),
         None if failure.lineless && !failure.subject_id && !failure.all_ids => format!(

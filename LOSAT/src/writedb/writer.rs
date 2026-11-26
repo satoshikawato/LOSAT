@@ -635,7 +635,7 @@ impl WriteDb {
         self.publish_inner(None)
     }
 
-    fn publish_inner(&mut self, mut cout: Option<&mut Cout<'_>>) -> Result<(), WriteDbError> {
+    fn publish_inner(&mut self, cout: Option<&mut Cout<'_>>) -> Result<(), WriteDbError> {
         let Some(pending) = self.pending.take() else {
             return Ok(());
         };
@@ -682,7 +682,7 @@ impl WriteDb {
                 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_convert.cpp:464-466
                 // `WriteDB_Ncbi4naToBinary` writes `ib=...,n4sz=...` to `cout` with `endl` before
                 // the volume is opened or written: on a closed pipe, SIGPIPE ends NCBI right here.
-                if let Some(cout) = cout.as_deref_mut() {
+                if let Some(cout) = cout {
                     let text = std::mem::take(&mut self.stdout);
                     if !text.is_empty() {
                         cout.insert(&text);

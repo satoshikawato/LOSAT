@@ -266,61 +266,66 @@ pub(crate) fn word_finder(
     subject: &[u8],
     init_hsps: &mut Vec<RpsInitHsp>,
 ) {
-    match params.rows.whole() {
-        Some(rows) => scan(params, &rows, scratch, subject, init_hsps),
-        None => word_finder_other_length(params, scratch, subject, init_hsps),
+    if subject.len() >= RPS_WORDSIZE {
+        let ncbi = scratch.diag.ncbi_len;
+        let ring = bucket_ring_length(subject.len());
+        let use_sliding = ncbi > 0
+            && (scratch.diag.num_rows as u64).saturating_add(subject.len() as u64) <= ncbi as u64
+            && ring < ncbi as u64;
+        if use_sliding {
+            let ring_len = ring as usize;
+            if scratch.diag.array.len() < ring_len {
+                scratch.diag.array.resize(ring_len, 0);
+            }
+            match params.rows.whole() {
+                Some(rows) => {
+                    if params.window > 0 {
+                        two_hit_sliding(params, &rows, scratch, subject, ring_len, init_hsps);
+                    } else {
+                        one_hit_sliding(params, &rows, scratch, subject, ring_len, init_hsps);
+                    }
+                }
+                None => word_finder_sliding_other(params, scratch, subject, ring_len, init_hsps),
+            }
+        } else {
+            word_finder_full(params, scratch, subject, init_hsps);
+        }
     }
     scratch.diag.exit(subject.len() as i32);
 }
 
-/// `word_finder`'s scan with an `Lc` that is not the rows' count: the extensions' bound below
-/// the rows (`RpsRows::length`) or NCBI's step past them (`RpsRows::past`, an `Lc` above them).
+/// Bucket-sliding finder when `Lc` is not the rows' count (`RpsRows`).
 #[cold]
 #[inline(never)]
-fn word_finder_other_length(
+fn word_finder_sliding_other(
     params: &RpsWordParams<'_>,
     scratch: &mut RpsWordScratch,
     subject: &[u8],
+    ring_len: usize,
     init_hsps: &mut Vec<RpsInitHsp>,
 ) {
-    scan(params, &params.rows, scratch, subject, init_hsps);
+    if params.window > 0 {
+        run_sliding_fast::<_, true>(params, &params.rows, scratch, subject, ring_len, init_hsps);
+    } else {
+        run_sliding_fast::<_, false>(params, &params.rows, scratch, subject, ring_len, init_hsps);
+    }
 }
 
-/// The two-hit or the one-hit finder (`-window_size` 0), whose extensions read `rows`.
-///
-/// Uses the bucket-sliding diagonal ring whenever NCBI's full table has no diagonal collisions
-/// (`num_rows + subject.len() <= ncbi_len`) and the ring is strictly smaller than `ncbi_len`;
-/// otherwise uses NCBI's full table so any diagonal wrap-around matches NCBI exactly.
-#[inline(always)]
-fn scan<R: PssmRows>(
+/// Full-table finder (used when diagonals wrap modulo NCBI's length or the ring is not smaller
+/// than NCBI's table). Uses `RpsRows` so `RpsRowsWhole` keeps a single call site on the hot
+/// sliding path.
+#[cold]
+#[inline(never)]
+fn word_finder_full(
     params: &RpsWordParams<'_>,
-    rows: &R,
     scratch: &mut RpsWordScratch,
     subject: &[u8],
     init_hsps: &mut Vec<RpsInitHsp>,
 ) {
-    if subject.len() < RPS_WORDSIZE {
-        return;
-    }
-    let ncbi = scratch.diag.ncbi_len;
-    let ring = bucket_ring_length(subject.len());
-    let use_sliding = ncbi > 0
-        && (scratch.diag.num_rows as u64).saturating_add(subject.len() as u64) <= ncbi as u64
-        && ring < ncbi as u64;
-    if use_sliding {
-        let ring_len = ring as usize;
-        if scratch.diag.array.len() < ring_len {
-            scratch.diag.array.resize(ring_len, 0);
-        }
-        if params.window > 0 {
-            two_hit_sliding(params, rows, scratch, subject, ring_len, init_hsps);
-        } else {
-            one_hit_sliding(params, rows, scratch, subject, ring_len, init_hsps);
-        }
-    } else if params.window > 0 {
-        two_hit(params, rows, scratch, subject, init_hsps);
+    if params.window > 0 {
+        two_hit(params, &params.rows, scratch, subject, init_hsps);
     } else {
-        one_hit(params, rows, scratch, subject, init_hsps);
+        one_hit(params, &params.rows, scratch, subject, init_hsps);
     }
 }
 
@@ -490,35 +495,51 @@ fn one_hit_block<R: PssmRows, const Q_MINUS_S: bool>(
     }
 }
 
-/// Group-major, bucket-sliding word finder (both two-hit and one-hit, parameterized by `TWO_HIT`):
-/// scans each group of buckets over the entire subject and slides the `ring_len` diagonal ring
-/// bucket by bucket. Because no two distinct diagonals collide in NCBI's table when this runs,
-/// every diagonal sees the exact same hit sequence in ascending `s` order as NCBI's scan, and
-/// `sort_init_hsps_by_score` produces the exact same sorted `init_hsps`.
+/// Group-major, bucket-sliding word finder (fast single-pass path): scans `subject` with
+/// `scan_subject`, and whenever all hits across the volume fit within `MAX_SCAN_HITS` (every
+/// normal query), walks groups `0..buckets.groups()` using `RpsBuckets::start_group` (exact
+/// single-pass `fill_group`) on the `ring_len` diagonal ring. If total hits exceed
+/// `MAX_SCAN_HITS`, delegates to the cold multi-pass group handler.
 #[inline(always)]
-fn run_sliding<R: PssmRows, const TWO_HIT: bool>(
+fn run_sliding_fast<R: PssmRows, const TWO_HIT: bool>(
     params: &RpsWordParams<'_>,
     rows: &R,
     scratch: &mut RpsWordScratch,
     subject: &[u8],
     ring_len: usize,
-    max_hits: i32,
     init_hsps: &mut Vec<RpsInitHsp>,
 ) {
     let wordsize = RPS_WORDSIZE as i32;
     let last_offset = subject.len() as i32 - wordsize;
     let RpsWordScratch { diag, buckets } = scratch;
+    let mut first_offset = 0i32;
+    scan_subject(
+        &params.table,
+        subject,
+        &mut first_offset,
+        buckets,
+        MAX_SCAN_HITS,
+    );
+    if first_offset <= last_offset {
+        run_sliding_multipass::<TWO_HIT>(
+            params,
+            scratch,
+            subject,
+            ring_len,
+            MAX_SCAN_HITS,
+            init_hsps,
+        );
+        return;
+    }
     let diag_offset = diag.offset;
     let diag_mask = (ring_len - 1) as i32;
     let table = &mut diag.array[..=diag_mask as usize];
     let mut prev_bucket = usize::MAX;
-
-    // Group 0: scan `subject` for group 0's hits, recording overflow words and inline groups for
-    // groups 1..num_groups.
-    let mut s = 0i32;
-    scan_group0(&params.table, subject, &mut s, buckets, max_hits);
-    let cursor = buckets.start_group(&params.table, subject, 0);
-    if s > last_offset {
+    for group in 0..buckets.groups() {
+        if !buckets.needs_pass(group) {
+            continue;
+        }
+        let cursor = buckets.start_group(&params.table, subject, group);
         drain_sliding_group::<R, TWO_HIT>(
             params,
             rows,
@@ -531,8 +552,51 @@ fn run_sliding<R: PssmRows, const TWO_HIT: bool>(
             &mut prev_bucket,
             init_hsps,
         );
+    }
+}
+
+/// Cold group-major, bucket-sliding fallback when a query's total hits across all groups exceed
+/// `max_hits` (`MAX_SCAN_HITS`): scans group 0 with `scan_group0` and later groups with
+/// `fill_group_bounded`, switching any group that itself exceeds `max_hits` to
+/// `finish_multipass_group`. Always uses `&params.rows` (`RpsRows`) so `RpsRowsWhole` keeps a
+/// single hot call site.
+#[cold]
+#[inline(never)]
+fn run_sliding_multipass<const TWO_HIT: bool>(
+    params: &RpsWordParams<'_>,
+    scratch: &mut RpsWordScratch,
+    subject: &[u8],
+    ring_len: usize,
+    max_hits: i32,
+    init_hsps: &mut Vec<RpsInitHsp>,
+) {
+    let rows = &params.rows;
+    let wordsize = RPS_WORDSIZE as i32;
+    let last_offset = subject.len() as i32 - wordsize;
+    let RpsWordScratch { diag, buckets } = scratch;
+    let diag_offset = diag.offset;
+    let diag_mask = (ring_len - 1) as i32;
+    let table = &mut diag.array[..=diag_mask as usize];
+    let mut prev_bucket = usize::MAX;
+
+    let mut s = 0i32;
+    scan_group0(&params.table, subject, &mut s, buckets, max_hits);
+    let cursor = buckets.start_group(&params.table, subject, 0);
+    if s > last_offset {
+        drain_sliding_group::<_, TWO_HIT>(
+            params,
+            rows,
+            subject,
+            table,
+            diag_mask,
+            diag_offset,
+            buckets,
+            cursor,
+            &mut prev_bucket,
+            init_hsps,
+        );
     } else {
-        finish_multipass_group::<R, TWO_HIT>(
+        finish_multipass_group::<_, TWO_HIT>(
             params,
             rows,
             subject,
@@ -551,7 +615,6 @@ fn run_sliding<R: PssmRows, const TWO_HIT: bool>(
         );
     }
 
-    // Remaining groups in ascending order.
     let num_groups = buckets.groups();
     for group in 1..num_groups {
         if !buckets.needs_pass(group) {
@@ -568,7 +631,7 @@ fn run_sliding<R: PssmRows, const TWO_HIT: bool>(
             max_hits,
         );
         if s > last_offset {
-            drain_sliding_group::<R, TWO_HIT>(
+            drain_sliding_group::<_, TWO_HIT>(
                 params,
                 rows,
                 subject,
@@ -581,7 +644,7 @@ fn run_sliding<R: PssmRows, const TWO_HIT: bool>(
                 init_hsps,
             );
         } else {
-            finish_multipass_group::<R, TWO_HIT>(
+            finish_multipass_group::<_, TWO_HIT>(
                 params,
                 rows,
                 subject,
@@ -747,15 +810,7 @@ fn two_hit_sliding<R: PssmRows>(
     ring_len: usize,
     init_hsps: &mut Vec<RpsInitHsp>,
 ) {
-    run_sliding::<R, true>(
-        params,
-        rows,
-        scratch,
-        subject,
-        ring_len,
-        MAX_SCAN_HITS,
-        init_hsps,
-    );
+    run_sliding_fast::<R, true>(params, rows, scratch, subject, ring_len, init_hsps);
 }
 
 #[inline(never)]
@@ -767,15 +822,7 @@ fn one_hit_sliding<R: PssmRows>(
     ring_len: usize,
     init_hsps: &mut Vec<RpsInitHsp>,
 ) {
-    run_sliding::<R, false>(
-        params,
-        rows,
-        scratch,
-        subject,
-        ring_len,
-        MAX_SCAN_HITS,
-        init_hsps,
-    );
+    run_sliding_fast::<R, false>(params, rows, scratch, subject, ring_len, init_hsps);
 }
 
 /// `s_BlastRPSWordFinder_TwoHit`.

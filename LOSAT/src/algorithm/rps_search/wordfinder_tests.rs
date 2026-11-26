@@ -425,9 +425,8 @@ fn bucket_sliding_ring_matches_full_table_for_two_hit_and_one_hit() {
             let mut mp_hits = Vec::new();
             let ring_len = bucket_ring_length(query.len()) as usize;
             if window > 0 {
-                run_sliding::<_, true>(
+                run_sliding_multipass::<true>(
                     &params,
-                    &params.rows,
                     &mut mp_scratch,
                     query,
                     ring_len,
@@ -435,9 +434,8 @@ fn bucket_sliding_ring_matches_full_table_for_two_hit_and_one_hit() {
                     &mut mp_hits,
                 );
             } else {
-                run_sliding::<_, false>(
+                run_sliding_multipass::<false>(
                     &params,
-                    &params.rows,
                     &mut mp_scratch,
                     query,
                     ring_len,

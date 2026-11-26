@@ -88,7 +88,6 @@ fn pssm_extend_left<R: PssmRows>(
 /// `s_BlastAaExtendOneHit` with `use_pssm`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1036-1085
-#[inline]
 pub(crate) fn pssm_extend_one_hit<R: PssmRows>(
     rows: &R,
     subject: &[u8],
@@ -147,7 +146,6 @@ pub(crate) fn pssm_extend_one_hit<R: PssmRows>(
 /// `s_BlastAaExtendTwoHit` with `use_pssm`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1104-1157
-#[inline]
 pub(crate) fn pssm_extend_two_hit<R: PssmRows>(
     rows: &R,
     subject: &[u8],

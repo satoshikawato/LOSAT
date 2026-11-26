@@ -321,13 +321,58 @@ impl RpsBuckets {
         subject: &[u8],
         group: usize,
     ) -> RpsReadCursor {
-        let mut s_pos = self.scanned.0;
-        let mut word_pos = 0usize;
-        self.fill_group_bounded(table, subject, group, &mut s_pos, &mut word_pos, i32::MAX)
+        let cursor = self.open_group(group);
+        let (first, end) = self.scanned;
+        let g0_q = (self.g0 as u32) << BUCKET_BITS;
+        let mut words = std::mem::take(&mut self.words);
+        let mut next = 0;
+        let mut index = word_index_start(subject, first);
+        for s in first..end {
+            index = next_word_index(index, subject, s);
+            let word = index as usize;
+            if table.pv[word / 64] & (1u64 << (word % 64)) == 0 {
+                continue;
+            }
+            let cell = &table.cells[word];
+            let (taken, entry) = if cell[0] > RPS_HITS_PER_CELL {
+                // The words of cells with an overflow run and hits past group 0, in the order of the scan.
+                if words.get(next).is_none_or(|w| w.s_off != s as u32) {
+                    continue;
+                }
+                next += 1;
+                let taken = words[next - 1].taken;
+                let entry = match taken {
+                    0 => Some(cell[1]),
+                    _ if taken as i32 >= cell[0] => None,
+                    _ => {
+                        let start = cell[2] as usize / std::mem::size_of::<i32>();
+                        Some(table.overflow[start + taken as usize - 1])
+                    }
+                };
+                (taken, entry)
+            } else {
+                let entries = &cell[1..=cell[0] as usize];
+                let taken = entries.partition_point(|&entry| entry_q_off(entry) < g0_q);
+                (taken as u32, entries.get(taken).copied())
+            };
+            if entry.is_none_or(|entry| entry_q_off(entry) >= self.g1_q) {
+                continue;
+            }
+            let s_bits = self.entry_bits(s as u32);
+            let (taken, _) = self.add_cell_hits(table, cell, taken, s_bits, self.g0);
+            if cell[0] > RPS_HITS_PER_CELL {
+                words[next - 1].taken = taken;
+            }
+        }
+        self.words = words;
+        cursor
     }
 
     /// `fill_group` for positions `*s_pos..self.scanned.1` starting at `self.words[*word_pos..]`,
-    /// stopping before the next word once hits placed into `group`'s buckets reach `max_hits`.
+    /// stopping after the word whose hits into `group`'s buckets reach `max_hits` (cold multipass
+    /// fallback when a query's total hits across all groups exceed `MAX_SCAN_HITS`).
+    #[cold]
+    #[inline(never)]
     pub(crate) fn fill_group_bounded(
         &mut self,
         table: &RpsTable<'_>,
@@ -781,6 +826,8 @@ pub(crate) fn scan_subject(
 /// all groups), so normal queries finish group 0 in a single pass. When `*offset > 0` (a
 /// subsequent pass of group 0), appends to `buckets.words` and `buckets.reached` so later groups
 /// see the entire subject.
+#[cold]
+#[inline(never)]
 pub(crate) fn scan_group0(
     table: &RpsTable<'_>,
     subject: &[u8],

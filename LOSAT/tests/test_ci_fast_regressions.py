@@ -190,6 +190,10 @@ class DbSearchFixtureTests(unittest.TestCase):
                     else:
                         self.assertLessEqual(cut, int(source["stdout_bytes"]), r["row_id"])
                         self.assertEqual(r["stdout_bytes"], str(cut), r["row_id"])
+                # A rejection row's frozen stderr is NCBI's up to its exception report (`ncbi-stderr`), or none.
+                err = db_fixtures.FROZEN / f"{r['row_id']}.err"
+                self.assertEqual(db_fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["row_id"])
+                self.assertTrue(db_fixtures.ncbi_stderr(r) or not err.exists(), r["row_id"])
                 if r["stdout_bytes"]:
                     self.assertTrue((db_fixtures.FROZEN / f"{db_fixtures.frozen_id(r)}.out").exists(), r["row_id"])
                     data = db_fixtures.expected_stdout(r)
@@ -245,6 +249,8 @@ class DbSearchFixtureTests(unittest.TestCase):
         self.assertTrue(db_fixtures.under_valgrind({"covers": "RG-J2A: windows past the buffers | ncbi-valgrind"}))
         self.assertTrue(db_fixtures.under_valgrind({"covers": "a | ncbi-valgrind | ncbi-near: db.x"}))
         self.assertFalse(db_fixtures.under_valgrind({"covers": "ncbi-valgrind"}))
+        self.assertTrue(db_fixtures.ncbi_stderr({"covers": "a | expect: b | ncbi-stderr"}))
+        self.assertFalse(db_fixtures.ncbi_stderr({"covers": "ncbi-stderr"}))
         self.assertFalse(db_fixtures.under_valgrind({"covers": "frozen under ncbi-valgrind, see | the row"}))
         self.assertFalse(db_fixtures.under_valgrind({"covers": "ncbi-near: db.x | expect: valgrind"}))
         self.assertTrue(db_fixtures.valgrind_messages(b"Warning\n==1234== Invalid read of size 1\n"))
@@ -1317,7 +1323,7 @@ class WasmDbTotalRowsTests(unittest.TestCase):
         rows = db_fixtures.read_manifest()[1]
         expected = [row["row_id"] for row in rows if row["kind"] == "ncbi" and 2**32 <= alias_length(row) < 2**63]
         self.assertEqual(sorted(watcher.DB_TOTAL_ROWS), sorted(expected))
-        self.assertEqual(len(set(watcher.DB_TOTAL_ROWS)), 25)
+        self.assertEqual(len(set(watcher.DB_TOTAL_ROWS)), 28)
         # The watcher selects each row by `--only` (a prefix of the row id): it names that row alone.
         for row_id in watcher.DB_TOTAL_ROWS:
             self.assertEqual([row["row_id"] for row in rows if row["row_id"].startswith(row_id)], [row_id])

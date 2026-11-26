@@ -955,11 +955,23 @@ impl RpsVolumeSetup {
         volume: &Volume,
         cbs: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
+        self.open_in_pool(volume, cbs, None, false)
+    }
+
+    /// `open` with a search pool for parallel `.loo` hit checking (`RpsVolumeFiles::open_for_in_pool`)
+    /// and optional `.loo` remap after the check (`drop_loo_pages`).
+    pub(crate) fn open_in_pool(
+        &mut self,
+        volume: &Volume,
+        cbs: bool,
+        pool: Option<&crate::utils::threading::SearchPool<'_>>,
+        drop_loo_pages: bool,
+    ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
         let path = canonical_volume_path(volume.base());
         if self.checked.contains(&path) {
             return self.reopen(volume, cbs);
         }
-        let files = match self.files(volume, cbs, true)? {
+        let files = match self.files_in_pool(volume, cbs, true, pool, drop_loo_pages)? {
             Ok(files) => files,
             Err(error) => return Ok(Err(error)),
         };
@@ -1021,6 +1033,17 @@ impl RpsVolumeSetup {
         cbs: bool,
         check_hits: bool,
     ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
+        self.files_in_pool(volume, cbs, check_hits, None, false)
+    }
+
+    fn files_in_pool(
+        &self,
+        volume: &Volume,
+        cbs: bool,
+        check_hits: bool,
+        pool: Option<&crate::utils::threading::SearchPool<'_>>,
+        drop_loo_pages: bool,
+    ) -> Result<std::result::Result<RpsVolumeFiles, RpsVolumeError>> {
         let num_seqs = volume.num_oids();
         let lengths = (0..num_seqs)
             .map(|oid| volume.protein_length(oid))
@@ -1029,7 +1052,13 @@ impl RpsVolumeSetup {
                 crate::algorithm::common::database::database_error(error, self.program)
             })?;
         let opened = if check_hits {
-            RpsVolumeFiles::open_for(volume.base(), &lengths, self.program)
+            RpsVolumeFiles::open_for_in_pool(
+                volume.base(),
+                &lengths,
+                self.program,
+                pool,
+                drop_loo_pages,
+            )
         } else {
             let regroup = self
                 .regrouped

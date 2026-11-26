@@ -3,9 +3,10 @@
 //! table (`.loo`) and the concatenated profile scores (`.rps`). The sequence part of the volume
 //! (the consensus sequences and their deflines) is an ordinary protein volume read by
 //! [`super::SeqDb`]. The `.loo` and `.rps` files are mapped (`utils::mapped_file`), never read
-//! into the heap (but the rows of a 26-column `.rps`, which are widened to 28); the checks that
-//! read every hit of the `.loo` or every row of the `.rps` read the file through a small buffer,
-//! so that the search's resident set holds only the pages that its queries read.
+//! into the heap (but the rows of a 26-column `.rps`, which are widened to 28); `.rps` score-bound
+//! checks read through a small buffer, and `.loo` hit checks walk the mapping (in parallel when a
+//! search pool is given) so the search reuses the faulted pages, optionally remapping `.loo`
+//! afterward when a search wants only query-touched pages resident.
 //!
 //! The files are opened in NCBI's order, with NCBI's errors (`RpsOpenError::Ncbi`, which a
 //! search reports as `BLAST engine error: <text>` with exit status 3); every inconsistency on
@@ -263,44 +264,6 @@ fn overflow_run(cell: &[i32; 4], overflow_len: usize) -> Option<std::ops::Range<
     (end <= overflow_len).then_some(start..end)
 }
 
-/// The overflow array of a `.loo` file read for `check_cells` in pieces of at least
-/// `OverflowReader::PIECE` bytes: a run outside the bytes held starts a new piece at the run, so
-/// that runs laid out one after another (in the cells' order) come out of a few large reads, not
-/// one read for each cell (29 volumes of CDD hold about 32 k cells each).
-struct OverflowReader<'a> {
-    file: &'a FreqSource,
-    /// The array's first byte in the file and the byte after its last entry.
-    start: u64,
-    end: u64,
-    /// The file's bytes from `held_at` on.
-    bytes: Vec<u8>,
-    held_at: u64,
-}
-
-impl OverflowReader<'_> {
-    const PIECE: u64 = 1 << 20;
-
-    /// The native-endian entries `entries` of the array (inside it) into `out`.
-    fn run(&mut self, entries: std::ops::Range<usize>, out: &mut Vec<i32>) -> std::io::Result<()> {
-        let from = self.start + 4 * entries.start as u64;
-        let to = self.start + 4 * entries.end as u64;
-        if from < self.held_at || to > self.held_at + self.bytes.len() as u64 {
-            let len = (to - from).max(Self::PIECE).min(self.end - from);
-            self.bytes.resize(len as usize, 0);
-            self.file.read_at(&mut self.bytes, from)?;
-            self.held_at = from;
-        }
-        let at = (from - self.held_at) as usize;
-        out.clear();
-        out.extend(
-            self.bytes[at..at + (to - from) as usize]
-                .chunks_exact(4)
-                .map(|word| i32::from_ne_bytes([word[0], word[1], word[2], word[3]])),
-        );
-        Ok(())
-    }
-}
-
 /// A cell's hits (`cell_hits`) for `check_cells`: whether every entry lies in the rows (`entry - 2
 /// < rows_limit` unsigned), and `ungrouped` set when the hits are not in groups of
 /// `RPS_GROUP_BUCKETS` buckets in order (the answer of `list_is_grouped`, which a test holds this
@@ -459,7 +422,20 @@ impl RpsVolumeFiles {
         lengths: &[u32],
         program: &str,
     ) -> Result<Self, RpsVolumeFault> {
-        Self::open_checking(base, lengths, program, true, false)
+        Self::open_checking(base, lengths, program, true, false, None, false)
+    }
+
+    /// `open_for` running the `.loo` hit check across `pool` when available, and optionally
+    /// remapping `.loo` after the check (`drop_loo_pages`) so pages not read by subsequent queries
+    /// do not stay resident (DELTA-BLAST's single-query iterations on a large domain volume).
+    pub(crate) fn open_for_in_pool(
+        base: &Path,
+        lengths: &[u32],
+        program: &str,
+        pool: Option<&crate::utils::threading::SearchPool<'_>>,
+        drop_loo_pages: bool,
+    ) -> Result<Self, RpsVolumeFault> {
+        Self::open_checking(base, lengths, program, true, false, pool, drop_loo_pages)
     }
 
     /// `open_for` of files that `open_for` has checked in this run (series PR, item PS12s, D6):
@@ -473,7 +449,7 @@ impl RpsVolumeFiles {
         program: &str,
         regroup: bool,
     ) -> Result<Self, RpsVolumeFault> {
-        Self::open_checking(base, lengths, program, false, regroup)
+        Self::open_checking(base, lengths, program, false, regroup, None, false)
     }
 
     /// `open_for`, the table's hits checked (`check_cells`) when `check_hits`; the cells regrouped
@@ -484,6 +460,8 @@ impl RpsVolumeFiles {
         program: &str,
         check_hits: bool,
         regroup: bool,
+        pool: Option<&crate::utils::threading::SearchPool<'_>>,
+        drop_loo_pages: bool,
     ) -> Result<Self, RpsVolumeFault> {
         if cfg!(target_endian = "big") {
             return Err(RpsOpenError::Refused(format!(
@@ -654,16 +632,8 @@ impl RpsVolumeFiles {
         if files.cells().is_none() || files.overflow().is_none() {
             return Err(refused(".loo file is shorter than its backbone").into());
         }
-        // The table's hits are read from the file, not through the mapping: a check that touched
-        // every page of the mapping would leave the whole `.loo` in the resident set for the
-        // search (1.1 GB for CDD's), where NCBI's search maps in only the pages its queries read.
-        let hits = if check_hits {
-            Some(FreqSource::open(&with(".loo")).map_err(|_| refused(".loo file cannot be read"))?)
-        } else {
-            None
-        };
         let ungrouped = files
-            .check_cells(num_rows, hits.as_ref())
+            .check_cells(num_rows, check_hits, pool)
             .map_err(|what| refused(&what))?;
         if ungrouped || regroup {
             let (cells, overflow) = (
@@ -672,6 +642,12 @@ impl RpsVolumeFiles {
             );
             files.regrouped =
                 regroup_cells(cells, overflow, RPS_GROUP_BUCKETS).map_err(|what| refused(&what))?;
+        }
+        if check_hits && drop_loo_pages && files.regrouped.is_none() {
+            // Unmap the pages touched by `check_cells` and remap cleanly so only pages touched
+            // by the search itself become resident (e.g. DELTA-BLAST single-query iterations).
+            let fresh = map(".loo")?;
+            files.loo = fresh;
         }
         if alphabet == 26 {
             files.narrow = Some(files.widen_rows(num_rows));
@@ -833,62 +809,86 @@ impl RpsVolumeFiles {
 
     /// Every hit of the table names a position whose word lies in the concatenated rows
     /// (`entry - 2` from 0, `entry` before the last row), every overflow run lies in the
-    /// overflow array, no cell holds more hits than a scan can take; the presence bits. The
-    /// hits are checked where `hits` is the `.loo` file to read them from (`OverflowReader`, not
-    /// through the mapping). Returns whether some cell lists its hits not in groups of
-    /// buckets in order (`list_is_grouped`; false when `hits` is `None`).
+    /// overflow array, no cell holds more hits than a scan can take; the presence bits. Walks the
+    /// mapped `.loo` directly (in parallel across `pool` when available) so the search reuses the
+    /// faulted pages without extra syscalls or user-space copies. Returns whether some cell lists
+    /// its hits not in groups of buckets in order (`list_is_grouped`; false when `check_hits` is
+    /// false).
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:162-173
-    fn check_cells(&mut self, num_rows: usize, hits: Option<&FreqSource>) -> Result<bool, String> {
+    fn check_cells(
+        &mut self,
+        num_rows: usize,
+        check_hits: bool,
+        pool: Option<&crate::utils::threading::SearchPool<'_>>,
+    ) -> Result<bool, String> {
         let cells = self.cells().expect("checked by the caller");
-        let overflow_len = self.overflow().expect("checked by the caller").len();
-        let overflow_start = (self.backbone_start + (RPS_BACKBONE_SIZE + 1) * 16) as u64;
-        let mut reader = hits.map(|file| OverflowReader {
-            file,
-            start: overflow_start,
-            end: overflow_start + 4 * overflow_len as u64,
-            bytes: Vec::new(),
-            held_at: 0,
-        });
+        let overflow = self.overflow().expect("checked by the caller");
         // `entry >= RPS_WORDSIZE - 1 && entry < num_rows` as one unsigned compare of `entry - 2`
         // (a negative entry wraps above any bound under 2^31 - 2).
         let rows_limit = u32::try_from(num_rows.saturating_sub(RPS_WORDSIZE - 1))
             .unwrap_or(u32::MAX)
             .min(i32::MAX as u32 - 1);
-        let mut pv = vec![0u64; RPS_BACKBONE_SIZE / 64];
+        let check_word = |word: usize| -> Result<(u64, bool), String> {
+            let base = word * 64;
+            let mut bits = 0u64;
+            let mut ungrouped = false;
+            for offset in 0..64 {
+                let index = base + offset;
+                let cell = &cells[index];
+                let num_used = cell[0];
+                if num_used <= 0 {
+                    continue;
+                }
+                bits |= 1u64 << offset;
+                if !check_hits {
+                    continue;
+                }
+                if num_used > RPS_MAX_SCAN_HITS {
+                    return Err(format!(
+                        ".loo word {index} has {num_used} hits, more than one scan takes (NCBI BLAST+ does not end)"
+                    ));
+                }
+                let Some((head, run)) = cell_hits(cell, overflow) else {
+                    return Err(format!(
+                        ".loo word {index} names a position outside the profiles' rows"
+                    ));
+                };
+                if !hits_in_rows_and_groups(head, run, rows_limit, &mut ungrouped) {
+                    return Err(format!(
+                        ".loo word {index} names a position outside the profiles' rows"
+                    ));
+                }
+            }
+            Ok((bits, ungrouped))
+        };
+        let words = RPS_BACKBONE_SIZE / 64;
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if check_hits && pool.is_some_and(|pool| pool.enabled() && pool.threads() > 1) {
+            use rayon::prelude::*;
+            let results: Vec<Result<(u64, bool), String>> = pool
+                .expect("checked above")
+                .install(|| (0..words).into_par_iter().map(check_word).collect());
+            let mut pv = Vec::with_capacity(words);
+            let mut ungrouped = false;
+            for result in results {
+                let (bits, chunk_ungrouped) = result?;
+                pv.push(bits);
+                ungrouped |= chunk_ungrouped;
+            }
+            self.pv = pv;
+            return Ok(ungrouped);
+        }
+        let _ = pool;
+        let mut pv = Vec::with_capacity(words);
         let mut ungrouped = false;
-        let mut run = Vec::new();
-        for (index, cell) in cells.iter().enumerate().take(RPS_BACKBONE_SIZE) {
-            let num_used = cell[0];
-            if num_used <= 0 {
-                continue;
-            }
-            pv[index / 64] |= 1u64 << (index % 64);
-            let Some(reader) = reader.as_mut() else {
-                continue;
-            };
-            if num_used > RPS_MAX_SCAN_HITS {
-                return Err(format!(
-                    ".loo word {index} has {num_used} hits, more than one scan takes (NCBI BLAST+ does not end)"
-                ));
-            }
-            let outside =
-                || format!(".loo word {index} names a position outside the profiles' rows");
-            // The cell's hits (`cell_hits`), each inside the rows, and whether their groups of
-            // buckets never decrease (`list_is_grouped`; one compare per hit in this walk).
-            let head = if num_used <= RPS_HITS_PER_CELL {
-                run.clear();
-                &cell[1..=num_used as usize]
-            } else {
-                let entries = overflow_run(cell, overflow_len).ok_or_else(outside)?;
-                reader
-                    .run(entries, &mut run)
-                    .map_err(|_| ".loo file cannot be read".to_string())?;
-                &cell[1..2]
-            };
-            if !hits_in_rows_and_groups(head, &run, rows_limit, &mut ungrouped) {
-                return Err(outside());
-            }
+        for word in 0..words {
+            let (bits, chunk_ungrouped) = check_word(word)?;
+            pv.push(bits);
+            ungrouped |= chunk_ungrouped;
         }
         self.pv = pv;
         Ok(ungrouped)

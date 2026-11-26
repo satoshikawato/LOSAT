@@ -433,7 +433,7 @@ pub(super) fn call_scoring(args: &ResolvedBlastpArgs) -> Result<BlastpScoring> {
     // (`pssm_hooks::pssm_prelim`).
     if !args.ungapped && args.psi_search.is_none() {
         crate::core::x_drop::check_gapped_x_dropoffs(
-            args.app.name(),
+            args.program_name(),
             x_drop_bits,
             (x_drop_gapped, x_drop_gapped_final),
             (args.scoring.gap_open, args.scoring.gap_extend),
@@ -844,7 +844,7 @@ fn check_setup_count(args: &ResolvedBlastpArgs, setup_numbers: (i64, i32)) -> Re
         setup_total,
         setup_count,
         args.has_gumbel(),
-        args.app.name(),
+        args.program_name(),
     )
 }
 
@@ -967,7 +967,7 @@ pub(super) fn call_search_spaces<'s>(
                                 num_subjects,
                                 context_block(args, gapped_params, ctx),
                                 options_searchsp,
-                                args.app.name(),
+                                args.program_name(),
                             )?
                             .length_adjustment,
                         )
@@ -988,7 +988,7 @@ pub(super) fn call_search_spaces<'s>(
                 eff_db_length,
                 num_subjects,
                 context_block(args, gapped_params, ctx),
-                args.app.name(),
+                args.program_name(),
             )?;
             exact_search_spaces.push(Some(exact));
             Ok(space)
@@ -1018,7 +1018,7 @@ pub(super) fn call_search_spaces<'s>(
             options_searchsp,
             false,
             context_block(args, gapped_params, ctx),
-            args.app.name(),
+            args.program_name(),
         )
     };
     // A query chunk's search reads the whole batch's option spaces by its own context index
@@ -1061,7 +1061,7 @@ pub(super) fn call_search_spaces<'s>(
                         num_subjects,
                         context_block(args, gapped_params, ctx),
                         option_spaces[ctx_idx],
-                        args.app.name(),
+                        args.program_name(),
                     )?;
                     spaces[ctx_idx] = SearchSpace {
                         effective_space: lengths.eff_searchsp as f64,
@@ -1274,7 +1274,7 @@ fn one_subject<const UNGAPPED: bool>(
             option_spaces[ctx_idx],
             false,
             block_of::<UNGAPPED>(gapped_params, ctx),
-            args.app.name(),
+            args.program_name(),
         )?;
         search_spaces[ctx_idx] = SearchSpace {
             effective_space: lengths.eff_searchsp as f64,

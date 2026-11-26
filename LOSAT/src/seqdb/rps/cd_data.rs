@@ -23,12 +23,11 @@ pub(crate) const CD_ALPHABET: usize = 28;
 /// NCBI reference (598d8ae6): c++/include/algo/blast/api/cdd_pssm_input.hpp:104-106
 const OBSERVATION_SCALE: f64 = 1000.0;
 
-/// One of the two files: its positioned reader, its length and its profile count.
+/// One of the two files: its positioned reader and its length.
 struct CdFile {
     source: FreqSource,
     /// The file's length in bytes when it was opened.
     len: u64,
-    num_profiles: usize,
     /// The file's extension (`.wcounts` or `.obsr`).
     extension: &'static str,
     /// The file's name in messages (`<volume path><extension>`).
@@ -37,10 +36,13 @@ struct CdFile {
 
 impl CdFile {
     /// Opens `<base><extension>`: NCBI's errors for a file that cannot be mapped and for a wrong
-    /// magic number; a file shorter than its header (NCBI reads past it) is LOSAT's refusal.
+    /// magic number; a file shorter than its 4-byte magic number (NCBI crashes on an empty file or
+    /// reads past a 1-to-3-byte file) is LOSAT's refusal. The profile count and offset table are
+    /// read only when a hit domain asks for them (`profile_offsets`), matching NCBI's open.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:255-264
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:386-400
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/rps_aux.cpp:427-449
     fn open(base: &Path, extension: &'static str, program: &str) -> Result<Self, RpsOpenError> {
         let volume = canonical_volume_path(base);
         let shown_bytes = [&volume[..], extension.as_bytes()].concat();
@@ -56,14 +58,13 @@ impl CdFile {
                 .concat(),
             )
         })?;
-        let too_short = || {
+        let mut magic_bytes = [0u8; 4];
+        source.read_at(&mut magic_bytes, 0).map_err(|_| {
             RpsOpenError::Refused(format!(
-                "a profile database whose {extension} file is shorter than its header (NCBI BLAST+ reads past it) is not supported by LOSAT's {program}"
+                "a profile database whose {extension} file is shorter than its 4-byte magic number (NCBI BLAST+ crashes on an empty file or reads past it) is not supported by LOSAT's {program}"
             ))
-        };
-        let mut header = [0u8; 8];
-        source.read_at(&mut header, 0).map_err(|_| too_short())?;
-        let magic = i32::from_le_bytes([header[0], header[1], header[2], header[3]]);
+        })?;
+        let magic = i32::from_le_bytes(magic_bytes);
         if magic != RPS_MAGIC_NUM && magic != RPS_MAGIC_NUM_28 {
             return Err(RpsOpenError::Ncbi(
                 [
@@ -74,32 +75,51 @@ impl CdFile {
                 .concat(),
             ));
         }
-        let num_profiles = i32::from_le_bytes([header[4], header[5], header[6], header[7]]);
-        let num_profiles = usize::try_from(num_profiles).map_err(|_| too_short())?;
-        let len = source.len().map_err(|_| too_short())? as u64;
-        let file = Self {
+        let len = source.len().map_err(|_| {
+            RpsOpenError::Refused(format!(
+                "a profile database whose {extension} file is shorter than its 4-byte magic number (NCBI BLAST+ crashes on an empty file or reads past it) is not supported by LOSAT's {program}"
+            ))
+        })? as u64;
+        Ok(Self {
             source,
             len,
-            num_profiles,
             extension,
             shown,
-        };
-        let offsets_end = 8 + 4 * (num_profiles as u64 + 1);
-        if file.len < offsets_end {
-            return Err(too_short());
-        }
-        Ok(file)
+        })
     }
 
-    /// The offsets of the profile `oid` and of the next: its data's first and one past its last.
-    fn profile_offsets(&self, oid: usize, program: &str) -> Result<(u64, u64), RpsOpenError> {
+    /// Reads the profile count and checks the offset table of `<base><extension>`, returning the
+    /// profile count and byte offset where profile data starts.
+    fn header_layout(&self, program: &str) -> Result<(usize, u64), RpsOpenError> {
+        let too_short = || {
+            RpsOpenError::Refused(format!(
+                "a profile database whose {} file is shorter than its header (NCBI BLAST+ reads past it) is not supported by LOSAT's {program}",
+                self.extension,
+            ))
+        };
+        let mut count_bytes = [0u8; 4];
+        self.source
+            .read_at(&mut count_bytes, 4)
+            .map_err(|_| too_short())?;
+        let num_profiles = i32::from_le_bytes(count_bytes);
+        let num_profiles = usize::try_from(num_profiles).map_err(|_| too_short())?;
+        let data_start = 8 + 4 * (num_profiles as u64 + 1);
+        if self.len < data_start {
+            return Err(too_short());
+        }
+        Ok((num_profiles, data_start))
+    }
+
+    /// The data start and offsets of the profile `oid` and of the next: `(data_start, first, next)`.
+    fn profile_offsets(&self, oid: usize, program: &str) -> Result<(u64, u64, u64), RpsOpenError> {
+        let (num_profiles, data_start) = self.header_layout(program)?;
         let inconsistent = || {
             RpsOpenError::Refused(format!(
                 "a profile database whose {} file does not hold the profile of a hit domain (NCBI BLAST+ reads past it) is not supported by LOSAT's {program}",
                 self.extension,
             ))
         };
-        if oid >= self.num_profiles {
+        if oid >= num_profiles {
             return Err(inconsistent());
         }
         let mut pair = [0u8; 8];
@@ -109,21 +129,22 @@ impl CdFile {
         let first = i32::from_le_bytes([pair[0], pair[1], pair[2], pair[3]]);
         let next = i32::from_le_bytes([pair[4], pair[5], pair[6], pair[7]]);
         match (u64::try_from(first), u64::try_from(next)) {
-            (Ok(first), Ok(next)) if first <= next => Ok((first, next)),
+            (Ok(first), Ok(next)) if first <= next => Ok((data_start, first, next)),
             _ => Err(inconsistent()),
         }
     }
 
-    /// The byte offset where the data of the profiles starts.
-    fn data_start(&self) -> u64 {
-        8 + 4 * (self.num_profiles as u64 + 1)
-    }
-
     /// `count` little-endian `Uint4` values from value index `from` of the data.
-    fn read_u32s(&self, from: u64, count: usize, program: &str) -> Result<Vec<u32>, RpsOpenError> {
+    fn read_u32s(
+        &self,
+        data_start: u64,
+        from: u64,
+        count: usize,
+        program: &str,
+    ) -> Result<Vec<u32>, RpsOpenError> {
         let mut bytes = vec![0u8; count * 4];
         self.source
-            .read_at(&mut bytes, self.data_start() + from * 4)
+            .read_at(&mut bytes, data_start + from * 4)
             .map_err(|_| self.shorter(program))?;
         Ok(bytes
             .chunks_exact(4)
@@ -132,8 +153,8 @@ impl CdFile {
     }
 
     /// The number of values of the data that the file holds from value index `from` on.
-    fn values_from(&self, from: u64) -> u64 {
-        ((self.len.saturating_sub(self.data_start())) / 4).saturating_sub(from)
+    fn values_from(&self, data_start: u64, from: u64) -> u64 {
+        ((self.len.saturating_sub(data_start)) / 4).saturating_sub(from)
     }
 
     /// LOSAT's refusal of a file shorter than the profiles that a read needs.
@@ -197,8 +218,8 @@ pub(crate) struct CdHitData<'a> {
     files: &'a CdProfileFiles,
     oid: usize,
     end: usize,
-    /// The profile's first and next row in `.wcounts`.
-    offsets: Option<(u64, u64)>,
+    /// The data start, first and next row of the profile in `.wcounts`.
+    offsets: Option<(u64, u64, u64)>,
     /// The counts of the columns `counts_from..` (`CD_ALPHABET` per column).
     counts: Vec<u32>,
     counts_from: usize,
@@ -210,9 +231,10 @@ impl CdHitData<'_> {
     /// The columns `from..to` of the hit's profile.
     ///
     /// The counts of a column sum in `Uint4` (wrapping, as C's does) and each count divides by the
-    /// sum; the observations come from the run-length pairs (a value and a number of columns)
-    /// that the profile's data holds. NCBI's range checks are assertions that a release build
-    /// drops: a range beyond the profile's data (reading outside it in NCBI) is LOSAT's refusal.
+    /// sum (yielding NaN when the sum is 0, as NCBI's division does); the observations come from
+    /// the run-length pairs (a value and a number of columns) that the profile's data holds.
+    /// NCBI's range checks are assertions that a release build drops: a range beyond the profile's
+    /// data (reading outside it in NCBI) is LOSAT's refusal.
     ///
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/cdd_pssm_input.cpp:804-846
     /// NCBI reference (598d8ae6): c++/src/algo/blast/api/cdd_pssm_input.cpp:852-889
@@ -224,7 +246,7 @@ impl CdHitData<'_> {
                 "a profile database whose {file} file holds fewer columns than a domain hit covers (NCBI BLAST+ reads past them) is not supported by LOSAT's {program}"
             ))
         };
-        let (first, next) = match self.offsets {
+        let (data_start, first, next) = match self.offsets {
             Some(offsets) => offsets,
             None => {
                 let offsets = files.wcounts.profile_offsets(self.oid, program)?;
@@ -244,13 +266,14 @@ impl CdHitData<'_> {
             // the file hold.
             let in_file = files
                 .wcounts
-                .values_from((first + from as u64) * CD_ALPHABET as u64)
+                .values_from(data_start, (first + from as u64) * CD_ALPHABET as u64)
                 / CD_ALPHABET as u64;
             if (to - from) as u64 > in_file {
                 return Err(files.wcounts.shorter(program));
             }
             let last = (self.end.min((rows - 1) as usize).max(to) - from).min(in_file as usize);
             self.counts = files.wcounts.read_u32s(
+                data_start,
                 (first + from as u64) * CD_ALPHABET as u64,
                 last * CD_ALPHABET,
                 program,
@@ -262,12 +285,6 @@ impl CdHitData<'_> {
         let mut wfreqs = Vec::with_capacity(to - from);
         for row in counts.chunks_exact(CD_ALPHABET) {
             let sum = row.iter().fold(0u32, |sum, &count| sum.wrapping_add(count));
-            if sum == 0 {
-                // NCBI divides by zero and goes on with NaN frequencies.
-                return Err(RpsOpenError::Refused(format!(
-                    "a profile database whose .wcounts file has a column of zero counts inside a profile is not supported by LOSAT's {program}"
-                )));
-            }
             let mut freqs = [0.0; CD_ALPHABET];
             for (freq, &count) in freqs.iter_mut().zip(row) {
                 *freq = f64::from(count) / f64::from(sum);
@@ -275,8 +292,9 @@ impl CdHitData<'_> {
             wfreqs.push(freqs);
         }
         if self.observations.is_none() {
-            let (first, next) = files.obsr.profile_offsets(self.oid, program)?;
+            let (obsr_start, first, next) = files.obsr.profile_offsets(self.oid, program)?;
             self.observations = Some(files.obsr.read_u32s(
+                obsr_start,
                 first,
                 usize::try_from(next - first).unwrap_or(usize::MAX),
                 program,

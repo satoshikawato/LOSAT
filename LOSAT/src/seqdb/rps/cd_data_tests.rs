@@ -190,12 +190,70 @@ fn a_wrong_magic_number_is_ncbis_error() {
 }
 
 #[test]
-fn a_file_shorter_than_its_header_is_refused() {
+fn a_file_shorter_than_four_bytes_is_refused_and_short_valid_magic_opens_until_hit() {
     let dir = scratch("short");
     let base = write_files(&dir);
+    // 0-byte and 3-byte files cannot hold the 4-byte magic number.
+    std::fs::write(dir.join("cd.obsr"), []).unwrap();
+    assert!(matches!(
+        CdProfileFiles::open(&base, "DELTABLAST"),
+        Err(RpsOpenError::Refused(_))
+    ));
     std::fs::write(dir.join("cd.obsr"), [0u8; 3]).unwrap();
     assert!(matches!(
         CdProfileFiles::open(&base, "DELTABLAST"),
         Err(RpsOpenError::Refused(_))
     ));
+    // A 4-byte file with a wrong magic number gets NCBI's corrupt-magic error at open.
+    std::fs::write(dir.join("cd.obsr"), [0u8; 4]).unwrap();
+    assert!(matches!(
+        CdProfileFiles::open(&base, "DELTABLAST"),
+        Err(RpsOpenError::Ncbi(_))
+    ));
+    // A 4-byte file with a valid magic number opens cleanly (NCBI exits 0 when no domain hits),
+    // and is refused only when a hit reads its header/profile offsets.
+    std::fs::write(dir.join("cd.obsr"), (RPS_MAGIC_NUM_28 as u32).to_le_bytes()).unwrap();
+    let files = CdProfileFiles::open(&base, "DELTABLAST").unwrap();
+    assert!(matches!(
+        columns(&files, 0, 0, 1),
+        Err(RpsOpenError::Refused(_))
+    ));
+    // Same for a 4-byte `.wcounts` with valid magic and a 20-byte truncated header.
+    let base = write_files(&dir);
+    std::fs::write(
+        dir.join("cd.wcounts"),
+        (RPS_MAGIC_NUM_28 as u32).to_le_bytes(),
+    )
+    .unwrap();
+    let files = CdProfileFiles::open(&base, "DELTABLAST").unwrap();
+    assert!(matches!(
+        columns(&files, 0, 0, 1),
+        Err(RpsOpenError::Refused(_))
+    ));
+    let mut header20 = words(&[RPS_MAGIC_NUM_28 as u32, 10, 0, 1, 2]);
+    assert_eq!(header20.len(), 20);
+    std::fs::write(dir.join("cd.wcounts"), &header20).unwrap();
+    let files = CdProfileFiles::open(&base, "DELTABLAST").unwrap();
+    assert!(matches!(
+        columns(&files, 0, 0, 1),
+        Err(RpsOpenError::Refused(_))
+    ));
+    header20.clear();
+}
+
+#[test]
+fn a_zero_count_column_gives_nan_frequencies() {
+    let dir = scratch("zerocount");
+    let base = write_files(&dir);
+    let mut profile = vec![0u32; CD_ALPHABET * 2];
+    // Column 0 is all zeros (sum 0 -> 0.0/0.0 = NaN); column 1 is the trailing zero sentinel.
+    std::fs::write(
+        dir.join("cd.wcounts"),
+        file(RPS_MAGIC_NUM_28, &[profile.clone()], CD_ALPHABET),
+    )
+    .unwrap();
+    profile.clear();
+    let files = CdProfileFiles::open(&base, "DELTABLAST").unwrap();
+    let got = columns(&files, 0, 0, 1).unwrap();
+    assert!(got.wfreqs[0].iter().all(|f| f.is_nan()));
 }

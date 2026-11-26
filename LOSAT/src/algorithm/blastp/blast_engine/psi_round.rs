@@ -103,7 +103,20 @@ pub(super) fn search_rounds(
     };
     if batches.searched_done == 0 {
         // As `search`: the first batch's stop after the prolog, or the reports of no query.
-        if let Some((_, error)) = batches.stop.as_ref() {
+        if let Some((warnings, error)) = batches.stop.as_ref() {
+            // NCBI reference (598d8ae6): c++/src/app/blast/deltablast_app.cpp:288-329
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:83-90
+            // When NCBI already built a query factory for deltablast's first batch (`stop_batch`
+            // is `Some`), `CDeltaBlast::Run` opens `-rpsdb` and checks the domain search options
+            // before the query splitter (`CHUNK_SIZE`) and before `BlastSetup_Validate`
+            // (`Sequence contains no data` / `Bad argument to function detected`).
+            if let Some(delta) = args.delta.as_deref().filter(|_| batches.stop_batch.is_some()) {
+                refuse_before_output(args, subject_source)?;
+                write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+                outputs.diagnostics.write_all(warnings)?;
+                delta.open_domain_side(&mut *outputs.diagnostics)?;
+                return Err(batches.stop.expect("stop").1);
+            }
             // The request of a batch that NCBI made a query factory of, before any output; NCBI's
             // stream that throws while it writes the request (`encoder::NullElement`) ends the
             // run after the prolog (psiblast_app.cpp:506, 340).
@@ -235,7 +248,7 @@ fn refuse_before_output(
     let subjects = subject_source.fasta_records().len();
     if subject_source.database().is_none() && subjects > 1 && subjects > args.max_target_seqs {
         bail!(
-            "-subject with more records than -max_target_seqs ({}) is not supported by LOSAT's DELTABLAST (NCBI BLAST+ keeps the best subjects of the set in its first search)",
+            "-subject with more records than the hit-list limit (-max_target_seqs, -num_descriptions, or -num_alignments: {}) is not supported by LOSAT's DELTABLAST (NCBI BLAST+ keeps the best subjects of the set in its first search)",
             args.max_target_seqs
         );
     }
@@ -746,6 +759,17 @@ fn search_delta_batch(
             // The library's records of the round (`FormatObserver::round_begin`).
             if let Some(observer) = outputs.observer.as_deref_mut() {
                 observer.round_begin(query, 1);
+            }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:150-156
+            // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:425
+            // `CPsiBlast::Run` meets an empty `-db` or unopenable `.psq` here, after the domain
+            // search and CDD PSSM, and before `SavePssmToFile` or report formatting.
+            if let Some(failure) = call
+                .call_source
+                .database()
+                .and_then(|db| crate::algorithm::common::database::PsiSearchReadFailure::of(db.seqdb()))
+            {
+                return Err(failure.error(args.app.name()));
             }
             let formatted = *calls + held.len();
             let searched = search_call(

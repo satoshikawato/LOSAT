@@ -15,7 +15,7 @@ With the NCBI names installed (see [Coming from NCBI BLAST+](../from-ncbi-blast.
 
 - **Query.** A protein FASTA file with `-query` (`-query -` reads the standard input). It can hold several queries.
 - **Database or subject.** `-db` names a protein BLAST database (see [BLAST databases](../databases.md)). `-subject` searches a protein FASTA file instead, and `-subject_loc START-STOP` searches part of the subject.
-- **Domain database.** `-rpsdb NAME` names the database of conserved domains (default `cdd_delta`). LOSAT finds it as it finds `-db`: in the current folder, then in the folders of `BLASTDB`. It must be a DELTA-BLAST domain database: NCBI's `cdd_delta`, which you can download from NCBI's FTP site (`blast/db/cdd_delta.tar.gz`), or one made by NCBI's `makeprofiledb -dbtype delta`. Besides the files of an RPS database it needs the `.freq`, `.wcounts` and `.obsr` files; where one is missing you get NCBI's error. See [BLAST databases](../databases.md).
+- **Domain database.** `-rpsdb NAME` names the database of conserved domains (default `cdd_delta`). LOSAT finds it as it finds `-db`: in the current folder, then in the folders of `BLASTDB`. It must be a DELTA-BLAST domain database: NCBI's `cdd_delta`, which you can download from NCBI's FTP site (`blast/db/cdd_delta.tar.gz`), or one built by `losat makeprofiledb -dbtype delta` or NCBI's `makeprofiledb -dbtype delta`. Besides the files of an RPS database it needs the `.freq`, `.wcounts` and `.obsr` files; where one is missing you get NCBI's error. See [BLAST databases](../databases.md).
 - **Database filters.** `-taxids`, `-taxidlist`, `-negative_taxids`, `-negative_taxidlist`, `-no_taxid_expansion`, `-seqidlist` and `-negative_seqidlist` keep every round to the sequences they select.
 
 ## Rounds and PSSMs
@@ -26,11 +26,11 @@ Round 1 searches the PSSM of the conserved domains that the domain database find
 
 The PSSM files are written as in `psiblast`; the PSSM of round 1 is the PSSM of the domains:
 
-- `-out_pssm FILE` and `-out_ascii_pssm FILE` get the PSSM at the start of each later round.
+- `-out_pssm FILE` and `-out_ascii_pssm FILE` get the PSSM of the domains first at every `-num_iterations` (one round included), then each later round's PSSM.
 - `-save_pssm_after_last_round` also saves the PSSM built from the last round's hits.
 - `-save_each_pssm` saves the PSSM of every round as `FILE.1`, `FILE.2` and so on.
 
-`-comp_based_stats` takes 0 to 3 (default 1; `psiblast`'s default is 2) and NCBI's letters (`D`, `d`, `T` and `t` mean 1, `F` and `f` mean 0). Later rounds run mode 2 and mode 3 as mode 1, and LOSAT prints NCBI's warning, as `psiblast` does.
+`-comp_based_stats` takes 0 to 3 (default 1; `psiblast`'s default is 2) and NCBI's letters (`D`, `d`, `T` and `t` mean 1, `F` and `f` mean 0). Because round 1 already searches a PSSM, every round (round 1 included) runs mode 2 and mode 3 as mode 1, and LOSAT prints NCBI's warning once on the first PSSM search, as NCBI BLAST+ does.
 
 ## Common options
 
@@ -65,10 +65,11 @@ The other options of NCBI's `deltablast` that `psiblast` also has work as they d
 
 `losat deltablast` writes `-outfmt 0`, `6` and `7`. Formats 6 and 7 take a custom field list, for example `-outfmt "6 qseqid sseqid evalue"`. With `-outfmt 0`, the report shows each round. With `-outfmt 7`, the comment lines count rounds. See [Output formats](../output-formats.md).
 
-The output is the same as NCBI BLAST+ 2.17.0's `deltablast -num_threads 1` (standard output, error messages, exit status and PSSM files), at every thread count. The program line says `DELTABLAST (LOSAT 0.2.0)`, and error messages start with `LOSAT ...`, as in the other programs.
+The output is the same as NCBI BLAST+ 2.17.0's `deltablast -num_threads 1` (standard output, error messages, exit status and PSSM files), at every thread count, apart from the tied-domain-hit order noted below. The program line says `DELTABLAST (LOSAT 0.2.0)`, and error messages start with `LOSAT ...`, as in the other programs.
 
 ## Differences from NCBI BLAST+
 
+- **Domain hits that tie in E-value.** Before building a query's round-1 PSSM, LOSAT sorts the domain hits with a stable sort, so two hits of the same domain with equal E-value keep their order from the domain search. NCBI's `deltablast` sorts them with its C++ library's unstable sort, which can trim overlapping hits of that domain differently and change the query's PSSM and search results. See [Differences from NCBI BLAST+](../differences.md#deltablast-domain-hits-that-tie).
 - `deltablast` is not in LOSAT Web (the browser refuses it, as it refuses `psiblast`), and not in the library API or `pylosat`.
 
 ## What LOSAT refuses
@@ -84,7 +85,7 @@ Also refused:
 - `-remote`, `-entrez_query` and `-import_search_strategy`.
 - `-use_sw_tback`.
 - A domain database of several volumes.
-- A `-subject` file with more records than `-max_target_seqs`.
+- A `-subject` file with more records than the hit-list limit (`-max_target_seqs`, `-num_descriptions`, or `-num_alignments`).
 - Some runs of several queries, where NCBI crashes.
 
 See [What LOSAT refuses](../refusals.md#deltablast) for the full list.

@@ -14,7 +14,7 @@
 mod cd_stages;
 mod stages;
 
-pub(crate) use cd_stages::{create_pssm_from_cdd, CdCell, CdColumn, PsiCdMsa};
+pub(crate) use cd_stages::{create_pssm_from_cdd, validate_cd_msa, CdCell, CdColumn, PsiCdMsa};
 
 use crate::utils::matrix::BLASTAA_SIZE;
 

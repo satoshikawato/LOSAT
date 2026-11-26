@@ -740,6 +740,14 @@ pub struct ResolvedBlastpArgs {
 }
 
 impl ResolvedBlastpArgs {
+    /// Program name for LOSAT's refusal messages: `"DELTABLAST"` during `deltablast`'s domain
+    /// search (`RpsSearch::domain_search`), otherwise `self.app.name()`.
+    pub(crate) fn program_name(&self) -> &'static str {
+        self.rps_search
+            .as_deref()
+            .map_or_else(|| self.app.name(), |rps| rps.program())
+    }
+
     /// Whether the search has a Gumbel block (the finite-size correction): not with `-searchsp`
     /// or `OLD_FSC` (`old_fsc`), and not in an ungapped search, whose score block frees it.
     ///

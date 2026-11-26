@@ -367,7 +367,11 @@ impl DeltablastArgs {
             num_threads: 1,
             mt_mode: None,
         };
-        rps.into_blastp_args()
+        let mut blastp = rps.into_blastp_args()?;
+        if let Some(rps) = blastp.rps.as_mut() {
+            rps.domain_search = true;
+        }
+        Ok(blastp)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:837-870

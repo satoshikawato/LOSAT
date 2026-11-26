@@ -57,7 +57,7 @@ pub(crate) struct PsiCdMsa {
 }
 
 impl PsiCdMsa {
-    fn column(&self, domain: usize, position: usize) -> Option<&CdColumn> {
+    pub(crate) fn column(&self, domain: usize, position: usize) -> Option<&CdColumn> {
         self.rows[domain][position]
             .index()
             .map(|index| &self.columns[index])

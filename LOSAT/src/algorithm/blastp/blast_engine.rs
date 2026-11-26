@@ -4792,10 +4792,14 @@ fn open_search_database(
             let (keeps_scope, separate_xml2) = crate::report::db_subject::FormatThrow::scope_flags(
                 outputs.formats.first().map(|format| format.outfmt),
             );
+            let program = resolved
+                .rps_search
+                .as_deref()
+                .map_or_else(|| args.app.name(), |rps| rps.program());
             let database = database::BlastpDatabase::open_restricted(
                 name,
                 settings,
-                args.app.name(),
+                program,
                 list,
                 resolved.db_mask.as_ref(),
                 outputs.diagnostics,
@@ -4831,7 +4835,7 @@ fn open_search_database(
                     false,
                     rps || args.searchsp.is_some_and(|space| space > 0),
                     !rps && args.dbsize.is_some_and(|size| size > 0),
-                    args.app.name(),
+                    resolved.program_name(),
                 )?;
             }
             // rpsblast: what the application and each batch's RPS set-up set in the options
@@ -4851,7 +4855,7 @@ fn open_search_database(
                     .formats
                     .iter_mut()
                     .map(|format| (format.outfmt, &mut format.refusal)),
-                args.app.name(),
+                resolved.program_name(),
             )?;
             Some(database)
         }
@@ -6364,22 +6368,18 @@ fn search(
                 query_scopes,
             ),
         ),
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:83-156
         // deltablast's batches are NCBI's (`read_deltablast_query_batches`); a query whose letters
-        // give no Karlin-Altschul parameters stops its batch at its domain search
-        // (`delta_hooks`), so only the first read of the database stops a batch here.
-        BlastpApp::Deltablast => psiblast_stop_at_invalid_query(
-            &args,
-            (query_records, &query_input),
+        // give no Karlin-Altschul parameters stops at `cdd_pssm` (`delta_hooks`), and an empty or
+        // unopenable `-db` fails inside `CPsiBlast::Run` (`search_delta_batch`) only after the
+        // domain search opens `-rpsdb` and checks its options.
+        BlastpApp::Deltablast => crate::blastinput::query_batch::read_deltablast_query_batches(
+            query_records,
             &searched_queries,
-            database,
-            crate::blastinput::query_batch::read_deltablast_query_batches(
-                query_records,
-                &searched_queries,
-                &query_input,
-                reading,
-                batch_size,
-                query_scopes,
-            ),
+            &query_input,
+            reading,
+            batch_size,
+            query_scopes,
         ),
     };
     // psiblast `-in_pssm`: the object manager's stop as the query joins the scope, NCBI's check of

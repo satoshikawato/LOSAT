@@ -263,9 +263,10 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 | `-export_search_strategy` | Refused: not yet supported. |
 | `-use_sw_tback` | Refused, as in `psiblast` (NCBI runs it). |
 | A domain database (`-rpsdb`) of several volumes | Refused before anything is written. NCBI searches it. |
-| `-subject` with more records than `-max_target_seqs` | Refused before anything is written. NCBI's first search keeps only the best subjects of the whole set, which LOSAT does not do yet. |
+| `-subject` with more records than the hit-list limit (`-max_target_seqs`, `-num_descriptions`, or `-num_alignments`) | Refused before anything is written. NCBI's first search keeps only the best subjects of the whole set, which LOSAT does not do yet. |
 | A query whose letters give no Karlin-Altschul parameters (a query of `X` alone, for example) read together with other queries (with one round, and with `-num_iterations 0`, NCBI reads queries together up to 10,000 letters; with 2 or more rounds, one query at a time) | Refused. NCBI crashes. Such a query alone, or with 2 or more rounds, gets NCBI's error (`LOSAT engine error: NULL alignments`, exit status 3), as in NCBI. |
 | `-save_pssm_after_last_round` with one round, when the first of the queries read together has no alignments | Refused, after the PSSM files that NCBI writes before it. NCBI stops with a null pointer exception. |
+| A damaged `.wcounts` or `.obsr` file in `-rpsdb` (shorter than its 4-byte magic number at open; or, when a domain hit reads it, shorter than its header or profile data, missing the hit profile's offsets, holding fewer columns than the hit covers, or having a zero-count `.wcounts` column aligned to a non-`X` query residue) | Refused. NCBI crashes on an empty file, reads past a short file or profile, or converts NaN to an integer with undefined behaviour. Missing files and wrong 4-byte magic numbers give NCBI's own errors. |
 
 For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, or reads uninitialised memory), see [Rare and pathological inputs](refusals-edge-cases.md#deltablast).
 
@@ -521,8 +522,9 @@ For the inputs below, NCBI BLAST+ 2.17.0's Python script exits with a Python tra
 - `makeprofiledb -dbtype cobalt`.
 - `psiblast -phi_pattern`.
 - The `psiblast` output formats `13` to `16`.
-- `deltablast`: `-show_domain_hits`, `-query_loc`, the output formats other than `0`, `6` and `7`, `-html` and `-export_search_strategy`.
-- `-html` in `psiblast` and `deltablast`.
+- `-html` in `psiblast`.
+
+Not yet supported in `deltablast` (see [`deltablast`](#deltablast) above): `-show_domain_hits`, `-query_loc`, the output formats other than `0`, `6` and `7`, `-html` and `-export_search_strategy`.
 
 ## Out of scope: they need NCBI's servers
 

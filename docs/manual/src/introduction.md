@@ -50,8 +50,9 @@ These are on the list for a later release:
 - the program `blast_formatter`, and `makeprofiledb -dbtype cobalt`;
 - `psiblast -phi_pattern`;
 - the `psiblast` output formats `13` to `16`;
-- `deltablast -show_domain_hits`, `-query_loc`, the output formats other than `0`, `6` and `7`, and `-export_search_strategy`;
-- `-html` in `psiblast` and `deltablast`.
+- `-html` in `psiblast`.
+
+Not yet supported in `deltablast`: `-show_domain_hits`, `-query_loc`, `-html`, `-export_search_strategy`, and output formats other than `0`, `6` and `7` (see [deltablast](programs/deltablast.md)).
 
 LOSAT does not provide these NCBI programs: `blast_formatter_vdb`, `blast_vdb_cmd`, `blastn_vdb`, `tblastn_vdb`, `legacy_blast.pl`, `update_blastdb.pl` and `get_species_taxids.sh`.
 

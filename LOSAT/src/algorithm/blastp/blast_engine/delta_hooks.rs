@@ -28,7 +28,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::blastinput::seq_range;
 use crate::common::GapEditOp;
-use crate::core::psi::create_pssm_from_cdd;
+use crate::core::psi::{create_pssm_from_cdd, validate_cd_msa};
 use crate::seqdb::rps::CdProfileFiles;
 use crate::seqid::model::{Dbtag, ObjectId, ParsedSeqId};
 
@@ -135,6 +135,17 @@ impl DeltaRun {
                 );
             }
         }
+        Ok(())
+    }
+
+    /// Opens `-rpsdb` and checks the domain search options (`-domain_inclusion_ethresh`), as
+    /// `CDeltaBlast::x_FindDomainHits` does before the query splitter and query setup checks.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/deltablast.cpp:83-90,195-215
+    pub(super) fn open_domain_side(
+        &self,
+        diagnostics: &mut (dyn std::io::Write + Send),
+    ) -> Result<()> {
+        let _ = self.side(diagnostics)?;
         Ok(())
     }
 
@@ -316,6 +327,32 @@ impl DeltaRun {
             bail!(
                 "a query whose letters give Karlin-Altschul parameters with the domain search's matrix but not with -matrix is not supported by LOSAT's DELTABLAST"
             );
+        }
+        // Validate the CD alignment before checking zero-count `.wcounts` columns so NCBI's own
+        // `BadProfile` errors (e.g. `iobsr < 1e-4`) come first.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_psi_priv.c:895-903,2245-2248,2438-2440
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/ncbi_math.c:437-441
+        validate_cd_msa(&msa).map_err(|error| {
+            engine_error(crate::algorithm::psiblast::pssm::error_code_to_string(
+                error,
+            ))
+        })?;
+        // A `.wcounts` column whose counts sum to 0 yields NaN frequencies (0.0 divided by 0.0).
+        // On a query `X` residue (NCBISTDAA 21), `_PSIComputeFreqRatiosFromCDs` sets frequency
+        // ratios to 0 without using `wfreqs` (defined). On any other query residue, NaN reaches
+        // `BLAST_Nint`, converting NaN to `long` (undefined behaviour in C).
+        for domain in 0..msa.rows.len() {
+            for (pos, &residue) in msa.query.iter().enumerate() {
+                if residue != 21
+                    && msa
+                        .column(domain, pos)
+                        .is_some_and(|col| col.wfreqs[0].is_nan())
+                {
+                    bail!(
+                        "a profile database whose .wcounts file has a column of zero counts aligned to a non-X query residue (NCBI BLAST+ converts NaN to integer with undefined behaviour) is not supported by LOSAT's DELTABLAST"
+                    );
+                }
+            }
         }
         let pssm = create_pssm_from_cdd(&msa, 0, &sbp).map_err(|error| {
             engine_error(crate::algorithm::psiblast::pssm::error_code_to_string(

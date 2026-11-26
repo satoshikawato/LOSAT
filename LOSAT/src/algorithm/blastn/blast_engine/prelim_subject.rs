@@ -1014,7 +1014,7 @@ fn batch_jobs<'a>(chunks: &'a [SubjectChunk], job_ends: &[usize]) -> Vec<&'a [Su
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1526
-// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.117 (rule 3): records the earliest subject OID whose
+// PD-LOSAT-NCBI-DEFECTS 1.21 / 1.118 (rule 3): records the earliest subject OID whose
 // subject-chunk merge produces an undefined scaled score (outside `Int4`) or zero length sum.
 #[cold]
 #[inline(never)]

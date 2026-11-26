@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.117
+- Version: 1.118
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -548,7 +548,7 @@
   ends before it starts (`Inverted`); not yet ported, as the range longer than 5,000,000 letters:
   masks out of order whose parts NCBI merges across an overlap (`PartsOutOfOrder`) and such a short
   part whose alignments meet another part's in that merge (`short_chunk_merge_refusal`), line NP item
-  M4b-3d (both ported in version 1.117, leaving only the final-chunk overlap read past the list of
+  M4b-3d (both ported in version 1.118, leaving only the final-chunk overlap read past the list of
   ranges as an explicit rejection under rule 3); TBLASTN and TBLASTX unchanged; line NP item M4b-3b, the Owner's decision of 2026-11-21
   (「すべて推奨通りで」, M4b, overlap = A); Owner-delegated, standing instruction 2026-09-29, restated
   2026-10-07, for the rejections; numbered after 1.94 as the next free numbers
@@ -857,7 +857,19 @@
   re-splitting chunks apply only when every chunk holds a query; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.115 at the merge of dev that
   brought line RG item G1's 1.115; first 1.105, then 1.106, 1.107, 1.108, 1.113, 1.114 and 1.115);
-  1.117 2026-11-26 (BLASTP and BLASTX `-db_hard_mask`, line NP item M4b-3d: `PartsOutOfOrder`, hard
+  1.117 2026-11-26 (all programs, command line and library API, line WQA item D23, Owner decision
+  `Q-D23=A` / `web-qa-20261119/DECISIONS.md` 49 of 2026-11-24: a `-logfile` naming an input file
+  read by the run — including `-query`, `-subject`, `.ncbirc` / `ncbi.ini`, `<program>.ini`,
+  `-conffile`, `-in`, `-ustat`, `-in_pssm`, `-in_msa`, `-gilist`, `-negative_gilist`, `-ipglist`,
+  `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist`, `-negative_taxidlist`,
+  `-window_masker_db`, `-window_masker_taxid` counts, `-import_search_strategy`, `-mask_data`,
+  `-taxid_map`, `-entry_batch`, `-ipg_batch`, `-ids`, `-exclude_ids`, `-i`, `rpsbproc` data files,
+  or a BLAST database alias, alias list, GI-mask, MegaBLAST index, or component file of `-db` /
+  `-filtering_db`, via relative paths, symlinks, hard links, or missing inputs that `-logfile`
+  would create — is refused before opening or creating the file, exit status 1, leaving existing
+  inputs unchanged, matching LOSAT Web's D19 rule; numbered after 1.116 at the merge of dev
+  f71a5cb85 that brought 1.116 (#1619); first 1.110, then 1.113, then 1.114, then 1.115, then 1.116);
+  1.118 2026-11-26 (BLASTP and BLASTX `-db_hard_mask`, line NP item M4b-3d: `PartsOutOfOrder`, hard
   ranges longer than 5,000,000 residues (`LongRange`), and in-bounds `short_chunk_merge_refusal`
   ported under rule 4 via the shared `core::blast_hits::merge_subject_chunk_hsps` helper; explicit
   rejection, rule 3, of `HardMaskShape::LastRangeOverlap` (before the search) and
@@ -871,8 +883,8 @@
   TBLASTN, reading frame) extended to BLASTP and BLASTX `-db_hard_mask`, TBLASTN subject-chunk
   merges (both frames longer than 5,000,000 residues and `-db_hard_mask`), and BLASTN subject-chunk
   and query-chunk merges (scaled score leaving `Int4`); Owner-delegated, standing instruction
-  2026-09-29, restated 2026-10-07; numbered after 1.116 at the merge of dev f71a5cb85 that brought
-  line RG item X-chunk's 1.116; first 1.113, then 1.114, then 1.115, then 1.116)
+  2026-09-29, restated 2026-10-07; numbered after 1.117 at the merge of dev 351661f13 that brought
+  line WQA item D23's 1.117; first 1.113, then 1.114, then 1.115, then 1.116, then 1.117)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1132,7 +1144,14 @@ Explicit rejections (rule 3):
 Kept as explicit rejections although NCBI's result is deterministic (rule 2's
 maintainer clause; decision D11): a query length plus `-window_size` above 2^31 - 1, where
 NCBI's `Int4` diagonal table wraps to one cell and no hit is found (BLASTP, TBLASTX;
-together with D8, every sum above 2^30 is rejected).
+together with D8, every sum above 2^30 is rejected); and (version 1.117, line WQA item D23,
+Owner decision `Q-D23=A` of 2026-11-24) a `-logfile` pointing to any input file read by the run
+(all programs, command line and library API, matching LOSAT Web's D19 rule): NCBI BLAST+ 2.17.0
+opens `-logfile` in append mode before loading configuration or reading inputs, which causes
+`tblastx -query q.fa -logfile q.fa` to read its own warnings back in an endless loop (growing
+`q.fa` to 10 GiB in 5 minutes in probe `s2-query`), corrupts `.ncbirc` on its second read
+(`s2-ncbirc-self`), and appends diagnostics into `-subject` and other inputs; LOSAT refuses any
+such `-logfile` before opening or creating the file (exit status 1, existing inputs unchanged).
 
 Reproduced as NCBI (rule 2): the out-of-range `double` to `Int4` conversions of
 `-threshold` and the X-drops (INT_MIN, decision D4); `-max_target_seqs` of 2147483624 or
@@ -3064,7 +3083,7 @@ file would differ, and NCBI's programs still could not open the database).
   (since version 1.40, as the refusal of an extension past a query frame's end; before, they were
   written only where the reports were streamed). Every other merge of such HSPs is NCBI's (`Int4`
   lengths, a density that may be negative or raised by a negative length, an HSP of length 0
-  that absorbs another and becomes positive). Version 1.117 (2026-11-26, line NP item M4b-3d,
+  that absorbs another and becomes positive). Version 1.118 (2026-11-26, line NP item M4b-3d,
   Owner-delegated, rule 3) extends the same rule-3 refusal (`chunk_merge_undefined_refusal`, typed
   `ShortChunkSeedRefusal` via the shared `core::blast_hits::merge_two_chunk_hsps` /
   `merge_subject_chunk_hsps`) to BLASTP and BLASTX `-db_hard_mask` `-ungapped -window_size 0`
@@ -4120,7 +4139,7 @@ file would differ, and NCBI's programs still could not open the database).
     TAIR10 0, the UniRef50 sample 0.
   - `HardMaskShape::LastRangeOverlap` (before the search) and
     `hard_chunk_scan::last_range_overlap_merge_refusal` (during the search, for short `OneWord`
-    chunks) (version 1.117, 2026-11-26, line NP item M4b-3d, Owner-delegated, rule 3): version 1.117
+    chunks) (version 1.118, 2026-11-26, line NP item M4b-3d, Owner-delegated, rule 3): version 1.118
     ported NCBI's `Blast_HSPListsMerge` across overlapping subject chunks for BLASTP and BLASTX
     `-db_hard_mask` (ranges longer than 5,000,000 letters and out-of-order masks whose parts overlap
     when NCBI reads the merge overlap in bounds, replacing version 1.95's unported `PartsOutOfOrder`
@@ -4140,7 +4159,7 @@ file would differ, and NCBI's programs still could not open the database).
     Out-of-order merges in middle ranges and long-range merges are searched byte-for-byte
     (`db.pmask.{bp,bx}.hard.pe_unsorted_mid.*`, `LOSAT/tests/protein_db_hard_long.rs`).
     `hard_chunk_scan::chunk_merge_undefined_refusal` refuses a chunk-overlap merge whose query
-    lengths sum to 0 or whose scaled score leaves `Int4` (version 1.21 extended in version 1.117 to
+    lengths sum to 0 or whose scaled score leaves `Int4` (version 1.21 extended in version 1.118 to
     BLASTP and BLASTX `-db_hard_mask`, TBLASTN subject-chunk merges, and BLASTN subject/query-chunk
     merges). Counts of `LastRangeOverlap`: TAIR10 0, the UniRef50 sample 0.
   - `HardMaskShape::Inverted`, before the search: a mask that ends before it starts, which makeblastdb

@@ -73,6 +73,8 @@ mod library_html_posts;
 mod library_out_taxdb;
 #[path = "../llvm_profile.rs"]
 mod llvm_profile;
+#[path = "../logfile_self_ref.rs"]
+mod logfile_self_ref;
 #[path = "../makeblastdb_closed_pipe.rs"]
 mod makeblastdb_closed_pipe;
 #[path = "../makeblastdb_failed_index.rs"]

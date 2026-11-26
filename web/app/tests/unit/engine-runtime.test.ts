@@ -16,7 +16,7 @@ import {
   reopening,
   toProgramDescription,
 } from 'losat';
-import { INFLATED_TOO_LARGE } from 'losat/ports';
+import { INFLATED_TOO_LARGE, InputMismatchError } from 'losat/ports';
 import { parseToolDescription } from 'losat/domain';
 import { findReactors } from '../../build/reactors';
 import { WINDOWMASKER_USAGE_ORDER } from '../../src/domain/tools';
@@ -565,6 +565,55 @@ describe.skipIf(reactors === undefined)('responses of more than 1 MiB from the s
     expect(registered.records).toHaveLength(25_000);
     expect(registered.records[24_999]).toEqual({ id: 'record_24999', length: 32 });
     instance.abi.release(registered.handle);
+  }, 60_000);
+
+  it('accepts register records for assembled inputs and returns readRecords, while rejecting non-assembled mismatches (D17)', async () => {
+    const mod = new WebAssembly.Module(reactors!.serial.bytes as BufferSource);
+    const runtime = new EngineRuntime({
+      serial: async () => mod,
+      threads: async () => {
+        throw new Error('unused');
+      },
+      builds: { serial: 'serial', threads: 'threads' },
+      main: NO_LINKS,
+      use: undefined,
+    });
+    const encoder = new TextEncoder();
+    const queryBytes = encoder.encode('>q1\nACGTTGCAACGTACGTACGT\n>q2\nTTTTTTTTCCCCCCCCGGGG\n');
+    const subjectBytes = encoder.encode('>s1\nACGTTGCAACGTACGTACGT\n');
+    const staleTable = [
+      { id: 'q1', length: 20 },
+      { id: 'q2', length: 99 },
+    ];
+    const runWith = async (assembled: boolean) => {
+      const channel = new MessageChannel();
+      try {
+        return await runtime.run(
+          {
+            type: 'run',
+            generation: 1,
+            runId: assembled ? 'r-assembled' : 'r-plain',
+            program: 'blastn',
+            argv: ['blastn', '-query', 'q.fa', '-subject', 's.fa'],
+            threads: 1,
+            query: { bytes: queryBytes, records: staleTable, key: 'q', ...(assembled ? { assembled: true } : {}) },
+            subject: { bytes: subjectBytes, records: [{ id: 's1', length: 20 }], key: 's' },
+            output: channel.port1,
+          },
+          () => undefined,
+        );
+      } finally {
+        channel.port2.close();
+      }
+    };
+    await expect(runWith(false)).rejects.toBeInstanceOf(InputMismatchError);
+    const result = await runWith(true);
+    expect(result.readRecords).toEqual({
+      query: [
+        { id: 'q1', length: 20 },
+        { id: 'q2', length: 20 },
+      ],
+    });
   }, 60_000);
 });
 

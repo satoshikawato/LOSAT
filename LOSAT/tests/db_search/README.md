@@ -1511,7 +1511,9 @@ A272-A366 and A447 on (`tests/blastdbcmd_alias_keys.rs`). `u_np101.txt`, `u_p101
 `u_np103_1.txt`, `u_np103_2.txt`, `u_np103_amb.txt` and `u_1abc.txt` are the searches' own `-seqidlist` files beside the
 alias files' lists (`g_sqamb0`/`g_sqamb1`/`g_sqamb2` hold `NP_000103`, `NP_000103.1` and `NP_000103.2` in three orders
 for the rule-3 strict-weak-ordering refusal rows; `g_squns` holds `NP_000118.1` and `NP_000103.1` unsorted without an
-equivalent pair).
+equivalent pair). `pw` and `nw` (version 4, line DBID pfoff-7) hold general ids whose lookups throw on the id itself
+(`gnl|PIG|abc`, `gnl|ti|xyz`, `gnl|BL_ORD_ID|zz`), for the rows `db.pfo.<program>.thr.*` with the queries `pwq.faa` and
+`pwq.fna`.
 
 ## Ungapped nucleotide databases (line NP, O4a-1)
 
@@ -2857,3 +2859,7 @@ Rows `db.html.rps.*` and `db.html.rpstbn.*` (line RG T4c, 2026-11-24; `../db_sea
 quotes, profile 102 under `pdb|1ABC|A` and profile 103 under `gnl|CDD|103` with the entities `&amp;` and `&lt;b&gt;` in its title (`rps/build.sh`; its other
 files are the same as `rps_mini`'s), searched as `rps-gz:rps_mini!phr=hx.phr.gz!pin=hx.pin.gz!pdb=hx.pdb.gz!pos=hx.pos.gz`: the profile titles of an RPS
 database reach the links of NCBI's HTML formatter through a reader of their own.
+
+Rows `db.html.ps.*` (line RG T4c2; `../db_search_manifest/psiblast.html.tsv`): `-html` in `psiblast` across rounds (`-num_iterations 0` to `3`),
+formats `0` to `4` and `18`, two-part description tables, `-in_pssm` and `-in_msa` queries, `-subject` registry rows, id kinds and special titles,
+and formats `6`, `7` and `11` where `-html` is ignored, with the `rc/` directories and databases above.

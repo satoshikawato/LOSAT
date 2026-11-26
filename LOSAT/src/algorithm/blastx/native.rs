@@ -828,6 +828,11 @@ fn run_inner(
             }
         };
         let asks = ReportedAsks::of(&options);
+        // The posts before the batch's reports (the reads of its titles, its prefetch and its
+        // reads' texts) come after the report written so far, `-html`'s prolog too (review 1 of
+        // line DBID pf7, H2).
+        let mut posts =
+            crate::report::query_warnings::PostsAfterReport::new(&mut *writer, &mut *diagnostics);
         let titles = match &database {
             Some(database) => batch_titles(
                 database,
@@ -835,7 +840,7 @@ fn run_inner(
                 results,
                 options.gapped,
                 asks,
-                &mut *diagnostics,
+                &mut posts,
             )
             .inspect_err(drop_held)?,
             None => None,
@@ -859,7 +864,7 @@ fn run_inner(
                         .as_ref()
                         .map(|scopes| scopes.numbered_from(queries_before)),
                     &crate::algorithm::common::database::PrefetchQueries::new(0, &scope),
-                    diagnostics,
+                    &mut posts,
                 )
                 .inspect_err(drop_held)?;
                 batch_scopes.reported(queries);
@@ -1248,6 +1253,40 @@ pub(super) fn batch_prefetch(
 }
 
 impl BatchPrefetch {
+    /// How the batch's reports read its subjects (`ReportedSubjects::for_batch`, for the walk of
+    /// their loads and their reads' texts): one by one where the prefetch is off, throws at an
+    /// unranged row before it loads anything (`fails`), or fails at a subject of `titles` whose
+    /// lookup throws on the id (`ReportRead::prefetch_fails`: after the subjects that it may have
+    /// loaded); the answer of `common::database::BatchPrefetch` (the one producer, of the batch
+    /// alone; review 1 of line DBID pf7, M2), in the scope of the batch numbered `batch` (its first
+    /// query in the run).
+    pub(super) fn report_read(
+        &self,
+        titles: &super::database::BatchTitles,
+        batch: usize,
+    ) -> crate::report::db_subject::ReportRead {
+        if self.fails {
+            return crate::report::db_subject::ReportRead {
+                one_by_one: true,
+                batch: Some(batch),
+                prefetch_fails: false,
+            };
+        }
+        crate::algorithm::common::database::BatchPrefetch::of(
+            self.format,
+            1,
+            0,
+            &[],
+            |_| self.seq_aligns,
+            |_| {
+                crate::algorithm::common::database::BatchPrefetch::prefetch_fails_among(
+                    titles.parsed_subjects().map(Some),
+                )
+            },
+        )
+        .report_read(0, batch)
+    }
+
     /// What NCBI's BLAST database data loader loaded for the batch, the run's record
     /// (`ReportedSubjects::note_loaded`): `common::database::batch_loads` of its Seq-aligns (every
     /// subject of its Seq-aligns where its prefetch is on, else what the first format's rows read,
@@ -1361,8 +1400,9 @@ pub(super) fn reported_batch(
         return Ok(ReportedSubjects::default());
     };
     let prefetch = batch_prefetch(results, options, super::empty_rows::SubjectLoc::Whole);
-    let prefetch_fails = prefetch.fails;
-    let unfetched = prefetch.off || prefetch_fails;
+    // The prefetch reads nothing where it is off or throws at an unranged row first.
+    let unfetched = prefetch.off || prefetch.fails;
+    let read = prefetch.report_read(&titles, queries_before);
     let x_t = super::x_timing::lap();
     let reported = ReportedSubjects::for_batch(
         database,
@@ -1379,13 +1419,12 @@ pub(super) fn reported_batch(
         asks.taxonomy,
         asks.words,
         asks.prefetched && !unfetched,
-        unfetched,
+        read,
         options.shown_lists(),
         (
             asks.throw,
             // The pairwise report reads the subjects that it shows as its writer reads them.
             options.pairwise_reading(),
-            queries_before,
         ),
     );
     super::x_timing::run(XRun::Titles, x_t);
@@ -1418,21 +1457,35 @@ pub(super) fn reported_batch(
     // lookups of the taxonomy names come with the rows (`tabular`).
     let prefetch_format = options.prefetch_format();
     let mut reported = reported;
-    if prefetch_fails {
+    if prefetch.fails {
         diagnostics.write_all(&database.prefetch_warning())?;
     }
     // Where the prefetch fails at a subject with parsed Seq-ids, NCBI writes its warning after
     // the taxonomy texts (`ReportedSubjects::batch_prefetch`), with or without `taxdb.bti`.
     let taxdb_found = database.taxdb_found();
     if prefetches_subjects(Some(prefetch_format)) && (taxdb_found || database.parsed_seqids()) {
-        // Where `PRE_FETCH_SEQS_LIMIT` turns the batch's prefetch off
-        // (`prefetch_off`, above), each query's report fetches the
-        // subjects it shows, after the query's own warnings
-        // (`ReportedSubjects::fetch_by_query`), where the format's rows read
-        // their Bioseqs (`TabularSpec::subject_fetch`).
-        // No prefetch; without `taxdb.bti` the reports' fetches look nothing up nor, but where a
-        // lookup reads a UTF8String header (`load_read_texts`), post a warning.
-        if unfetched && (taxdb_found || database.db.scope_utf8_seen()) {
+        if !unfetched {
+            // A lookup that fails on a file stops the run here, after the reports of the
+            // batches before and this batch's reader messages (`shared::batch_prefetch`).
+            let messages = reported
+                .batch_prefetch(
+                    database,
+                    results,
+                    options.gapped,
+                    &prefetch_queries
+                        .where_reports_unchanged_by_load_throws(!asks.changed_by_load_throws),
+                )
+                .map_err(reported_error)?;
+            messages.write(diagnostics, None)?;
+        }
+        // Where the batch's reports load the subjects one by one (`read`, the one answer: the
+        // prefetch is off, or failed, after its posts above; review 1 of line DBID pf7, H1), each
+        // query's report fetches the subjects it shows, after the query's own warnings
+        // (`ReportedSubjects::fetch_by_query`), where the format's rows read their Bioseqs
+        // (`TabularSpec::subject_fetch`): the texts of the reads of the loads that a failed
+        // prefetch did not make. Without `taxdb.bti` the reports' fetches look nothing up nor,
+        // but where a lookup reads a UTF8String header (`load_read_texts`), post a warning.
+        if read.one_by_one && (taxdb_found || database.db.scope_utf8_seen()) {
             let rows = options
                 .tabular
                 .map_or(crate::report::tabular::SubjectFetch::Every, |spec| {
@@ -1469,19 +1522,6 @@ pub(super) fn reported_batch(
             if options.outfmt == 5 {
                 diagnostics.write_all(&reported.take_query_fetches())?;
             }
-        } else if !unfetched {
-            // A lookup that fails on a file stops the run here, after the reports of the
-            // batches before and this batch's reader messages (`shared::batch_prefetch`).
-            let messages = reported
-                .batch_prefetch(
-                    database,
-                    results,
-                    options.gapped,
-                    &prefetch_queries
-                        .where_reports_unchanged_by_load_throws(!asks.changed_by_load_throws),
-                )
-                .map_err(reported_error)?;
-            messages.write(diagnostics, None)?;
         }
     }
     // The XML2 and JSON formats: the taxonomy of the `Hit`s, after the batch's prefetch or its

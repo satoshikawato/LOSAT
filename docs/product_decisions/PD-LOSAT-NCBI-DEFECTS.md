@@ -825,10 +825,18 @@
   the formats then load the batch's sequences one by one, as with the prefetch off (1.47, 1.50,
   1.71 and 1.96), with `Error: ` and the exception's text and exit status 255 where a format stops
   at it; the rejection of 1.10 stays for such a sequence's tabular row that prints `sacc` or
-  `saccver` (NCBI's null pointer exception, with addresses of its binary), outfmt 17, a holder that
-  NCBI's scope or data loader gives for the id, and a weak match of another sequence that a report
-  of such a batch reads; line DBID item pfoff-7, Owner-delegated, standing instruction 2026-09-29,
-  restated 2026-10-07; numbered after 1.113 on origin/dev; first 1.101, then 1.103, then 1.106, then 1.108, then 1.109)
+  `saccver` (NCBI's null pointer exception, with addresses of its binary), outfmt 17 and a holder
+  that NCBI's scope or data loader gives for the id, and the batch's other sequences are refused as
+  where the prefetch is off (a Seq-align id that an id of another sequence of the database matches
+  weakly, or that a version 5 database cannot list; review 1 of item pf7, M1); line DBID item pfoff-7, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07; numbered after 1.113 (psiblast line item PS14); first 1.101, then 1.103 at the
+  merge of dev that brought line RG item KC-11d's 1.100, exception 30's 1.101 and psiblast line
+  item PS10e's 1.102, then 1.104 at the merge of dev that brought line RG item K10a's 1.103, then
+  1.106 at the merge of dev that brought line NP item M4b-T3's 1.104 and psiblast line item PS10b's
+  1.105, then 1.107 at the merge of dev that brought line NP item M4b-3c part 2's 1.106, then 1.108
+  at the merge of dev that brought line NP item M (b)'s 1.107, then 1.109 at the merge of dev that
+  brought line RG item X-short-bat-2's 1.108, then 1.113 at the merge of dev that brought 1.109 to
+  1.112, then 1.114 at the merge of dev that brought psiblast line item PS14's 1.113)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:

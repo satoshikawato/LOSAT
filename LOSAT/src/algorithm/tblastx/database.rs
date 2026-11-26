@@ -932,18 +932,23 @@ pub(crate) fn pairwise_reading(
 }
 
 /// What one query's report of the hits `ordered` (in report order) loads where its batch's
-/// prefetch is off (`RunLoads::loads` of that report alone, by ordinal id, after the reports
-/// before it in the run, `run`; `identities`: [`hit_identities`]): the subjects of its reads one
-/// by one (`run_impl`'s texts of a batch whose prefetch is off), not one whose load throws, nor
-/// one that no report reaches after it. `pairwise`: how a pairwise report reads them
-/// (`pairwise_keys`); `batch`: the first query in the call of the report's query batch, whose
-/// scope it reads in; the reports come after the loads of the calls before on `database`
-/// (`hit_loads`).
+/// reports load one by one (`RunLoads::loads` of that report alone, by ordinal id, after the
+/// reports before it in the run, `run`; `identities`: [`hit_identities`]): the subjects of its
+/// reads one by one (`run_impl`'s texts of a batch whose prefetch is off or fails,
+/// `prefetch_fails`: after the failed prefetch, which may have loaded the batch's other subjects,
+/// `ReportRead::prefetch_fails`), not one whose load throws, nor one that no report reaches after
+/// it. `pairwise`: how a pairwise report reads them (`pairwise_keys`); `batch`: the first query in
+/// the call of the report's query batch, whose scope it reads in; the reports come after the
+/// loads of the calls before on `database` (`hit_loads`).
 pub(crate) fn report_loads(
     (database, run): (&TblastxDatabase, &crate::report::db_subject::RunLoads),
     ordered: &[TblastxHsp],
     titles: &DatabaseTitles,
-    (pairwise, batch): (Option<crate::report::pairwise::PairwiseReading>, usize),
+    (pairwise, batch, prefetch_fails): (
+        Option<crate::report::pairwise::PairwiseReading>,
+        usize,
+        bool,
+    ),
     identities: impl Fn(&TblastxHsp) -> usize,
 ) -> HitLoads {
     // A subject's HSPs follow each other: one `Hit`.
@@ -961,7 +966,7 @@ pub(crate) fn report_loads(
     let read = crate::report::db_subject::ReportRead {
         one_by_one: true,
         batch: Some(batch),
-        prefetch_fails: false,
+        prefetch_fails,
     };
     run.loads(
         database.taxdb.calls_before(),
@@ -1012,8 +1017,9 @@ pub(crate) fn prefetch_format(
 /// (`shared::BatchPrefetch::of`): `spans` are the
 /// queries of each batch, whose Seq-aligns `seq_aligns_of` counts and whose prefetch fails where
 /// one of their subjects' lookup throws on the id (`titles`). The one producer of the prefetch
-/// that the reports' loads read (`hit_loads`; `reported_subjects`).
-fn batches_prefetch(
+/// that the reports' loads read (`hit_loads`; `reported_subjects`; `run_impl`'s reads of a batch,
+/// one batch with `spans` empty).
+pub(crate) fn batches_prefetch(
     format: shared::PrefetchFormat,
     (ordered, titles): (&[TblastxHsp], &DatabaseTitles),
     queries: usize,

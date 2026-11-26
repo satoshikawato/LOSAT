@@ -802,6 +802,10 @@ pub(super) struct ReportedSubjects {
     /// rank): the refusals, the names (`blast_xml::prepare`), the taxonomy reads (`read_taxids`)
     /// and the stop's record of the loads (`prefetch_stop_error`) take it.
     pub(super) loads: HitLoads,
+    /// Whether the batch of each query prefetches, and whether its prefetch fails
+    /// (`shared::BatchPrefetch::of`, the one producer, by the call's query index): the batch loop's
+    /// reads of a batch whose reports load one by one (`BatchPrefetch::loads_one_by_one`) take it.
+    pub(super) prefetch: shared::BatchPrefetch,
     /// Whether the search is gapped: the Seq-aligns that NCBI's prefetch counts are one for each
     /// HSP, else one for each subject (`seq_aligns_of`).
     pub(super) gapped: bool,
@@ -1307,6 +1311,7 @@ pub(super) fn reported_subjects(
         parsed,
         sources,
         loads,
+        prefetch,
         gapped,
     })
 }

@@ -63,6 +63,9 @@ Databases (the `.pjs`/`.njs` metadata, with the build's paths and dates, are dro
   or not a number (ti); NCBI's prefetch of a batch fails there (`Error pre-fetching sequence data`) and its formats load
   the subjects one by one. `pwq.faa` (and `pwq.fna`, back-translated) holds a query without hits, then one query per
   sequence after the first (the PIG|abc query hits gi 7001 second).
+- `pwk` (review 1 of line DBID pf7, M1): version 4 of pwk.faa with parsed Seq-ids: PIG|abc, `ref|NP_7001.1|` (no gi)
+  and `sp|P69905.2|HBA_HUMAN` (pw's third sequence), whose name gives it weak keys: in the batch whose prefetch fails
+  at PIG|abc the formats load it one by one, and no other sequence's id matches it weakly.
 - `gp` (D6): version 5 of g.faa with parsed Seq-ids, taxids from g.map, and a PIG ISAM (`gp.ppi`, `gp.ppd`)
   mapping PIGs 1001, 1002, 1005 and 2147483649 (>= 2^31) to OIDs 0, 2, 5 and 10, leaving the other OIDs without
   a PIG; `gpx` is `gp` again with its `.ppd` 64 zero bytes longer than its index says (uninitialised PIG ISAM).
@@ -82,7 +85,7 @@ OUT = Path(__file__).resolve().parent / "idlist"
 SOURCES = {"g.faa", "g.map", "n.fna", "n.map", "q.faa", "nq.fna", "tz.faa", "pz.faa", "tq.faa", "cv0.faa",
            "cv1.faa", "ln.faa", "ln.map", "lnq.faa", "lx.faa", "lx.map", "lx2.map", "lxq.faa", "lt.faa", "lt.map",
            "ltq.faa", "lnn.fna", "lnn.map", "lnnq.fna", "lnnq.faa", "lr.faa", "ls.faa", "lrq.faa", "lrqw.faa",
-           "lnq2.faa", "pw.faa", "nw.fna", "pwq.faa", "pwq.fna"}
+           "pw.faa", "nw.fna", "pwq.faa", "pwq.fna", "pwk.faa", "lnq2.faa"}
 
 # An absolute path that is not a file: printed as it is, the same on every machine.
 MISSING = "/losat-idlist-fixture-missing/none.txt"
@@ -363,8 +366,8 @@ def ti_isam(base: Path, num_oids: int, pad: int = 0):
 
 
 def build_pf7(mk):
-    """The databases of line DBID pfoff-7: pw, nw."""
-    for name, source, kind in (("pw", "pw.faa", "prot"), ("nw", "nw.fna", "nucl")):
+    """The databases of line DBID pfoff-7: pw, nw, and pwk of its review 1."""
+    for name, source, kind in (("pw", "pw.faa", "prot"), ("nw", "nw.fna", "nucl"), ("pwk", "pwk.faa", "prot")):
         run([mk, "-in", source, "-dbtype", kind, "-out", name, "-title", name, "-parse_seqids",
              "-blastdb_version", "4"])
 

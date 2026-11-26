@@ -4519,6 +4519,9 @@ pub struct HitLoads {
     /// The subjects for which a load gives another sequence (`HitLoad::Shown`).
     shown: std::collections::HashMap<usize, ShownInstead>,
     unread: std::collections::HashSet<usize>,
+    /// The subjects that a batch's failed prefetch may have loaded (`ReportRead::prefetch_fails`)
+    /// and that no report reaches: loaded, but read by no report (`HitLoads::reached`).
+    prefetched_only: std::collections::HashSet<usize>,
     /// Why the run's formats refuse a lookup that throws (`FormatThrow::Refused`).
     refused: Option<ThrowRefusal>,
     /// The number of the reports given that NCBI's run reaches, where a report's load ended it
@@ -4563,7 +4566,7 @@ impl CallReads {
 impl HitLoads {
     /// The loads of the query reports `reports`, in the order of the reports: whether the
     /// query's batch has its prefetch off, so that its report loads each subject where it reaches
-    /// it (`one_by_one`, `common::database::BatchPrefetch::reads_one_by_one`), and the subject key
+    /// it (`one_by_one`, `common::database::BatchPrefetch::loads_one_by_one`), and the subject key
     /// of each of its HSP lists (or HSPs) in the report's order (`None` for an entry that shows
     /// nothing). Each load asks NCBI's places ([`ScopeWalk`], after the loads `before` of the
     /// run: its record of the batches, rounds and calls before these reports; [`LoadsBefore::none`]
@@ -4679,9 +4682,12 @@ impl HitLoads {
         let mut loaded = std::collections::HashSet::new();
         let mut passed = std::collections::HashSet::new();
         // The subjects of the reports of each batch whose prefetch fails, which that prefetch may
-        // have loaded before its failure (`ReportRead::prefetch_fails`).
+        // have loaded before its failure (`ReportRead::prefetch_fails`), and those of them noted
+        // (`failed_prefetched`): loaded for the holders and the run's record, but read only where
+        // a report reaches them (review 1 of line DBID pf7, H1).
         let mut failed_prefetches: std::collections::HashMap<Option<usize>, Vec<usize>> =
             Default::default();
+        let mut failed_prefetched = std::collections::HashSet::new();
         for (report, (read, keys)) in reports.iter().enumerate() {
             if read.prefetch_fails {
                 let subjects = failed_prefetches.entry(read.batch).or_default();
@@ -4706,11 +4712,11 @@ impl HitLoads {
             walk.enter(read.batch);
             // The batch's prefetch, which the run reaches, may have loaded every subject of the
             // batch whose load does not throw before it failed (`ScopeWalk::failed_prefetch`).
-            if let Some(prefetched) = failed_prefetches
+            if let Some(keys) = failed_prefetches
                 .remove(&read.batch)
                 .filter(|_| read.prefetch_fails && !ended.get())
             {
-                loaded.extend(loads.failed_prefetch(walk, prefetched, &parsed));
+                failed_prefetched.extend(loads.failed_prefetch(walk, keys, &parsed));
             }
             if !read.one_by_one {
                 // A batch's prefetch loads every subject of its reports before them, and the
@@ -4852,14 +4858,16 @@ impl HitLoads {
             let answers = walk.bulk(keys.iter().filter_map(|&key| Some((key, parsed(key)?))));
             loads.prefetched.extend(answers);
         }
-        loads.unread = passed
+        let (prefetched_only, unread) = passed
             .into_iter()
             .filter(|key| {
                 !loaded.contains(key)
                     && !loads.throws.contains_key(key)
                     && !loads.shown.contains_key(key)
             })
-            .collect();
+            .partition(|key| failed_prefetched.contains(key));
+        loads.prefetched_only = prefetched_only;
+        loads.unread = unread;
         loads
     }
 
@@ -5179,6 +5187,7 @@ impl HitLoads {
                 .filter_map(|(old, shown)| Some((key(old)?, shown)))
                 .collect(),
             unread: self.unread.into_iter().filter_map(&key).collect(),
+            prefetched_only: self.prefetched_only.into_iter().filter_map(&key).collect(),
             refused: self.refused,
             reached: self.reached,
             prefetched: self
@@ -5228,9 +5237,12 @@ impl HitLoads {
     /// a subject for which a load gives another sequence (`HitLoad::Shown`), which
     /// `ParsedSubject::fetched` refuses with the words of that sequence (the reads of the taxonomy
     /// texts, which BLASTN and TBLASTX make before they ask `fetched`, would refuse it with the
-    /// words of its lookup).
+    /// words of its lookup); nor a subject that only a batch's failed prefetch may have loaded,
+    /// which no report reaches ([`HitLoads::reached`]): no row, `Hit` or name of it is written, so
+    /// none looks it up.
     pub fn loaded(&self, key: usize) -> bool {
         matches!(self.load(key), HitLoad::Loaded | HitLoad::Refused(_))
+            && !self.prefetched_only.contains(&key)
     }
 
     /// Whether NCBI's run reaches the report `report` of those given (counted from 0): false for
@@ -5251,8 +5263,11 @@ impl HitLoads {
     /// though nothing of the subject is loaded (`loaded`: no taxonomy text, no definition line).
     /// A subject for which a load gives another sequence (`HitLoad::Shown`) is reached too:
     /// `ParsedSubject::fetched` refuses it, so no read is written.
+    /// A subject that a batch's failed prefetch may have loaded is loaded (`load`), but reached
+    /// only where a report reaches it: one shown only after a `Hit` that threw is read by no
+    /// report, and its texts are the prefetch's or none (review 1 of line DBID pf7, H1).
     pub fn reached(&self, key: usize) -> bool {
-        self.load(key) != HitLoad::Unread
+        self.load(key) != HitLoad::Unread && !self.prefetched_only.contains(&key)
     }
 
     /// The exception that the `Hit` of the subject `key` throws (`HitLoad::Throws`).

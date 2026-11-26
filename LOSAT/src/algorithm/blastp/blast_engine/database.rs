@@ -2007,7 +2007,7 @@ impl ListedTitles<'_> {
             .iter()
             .find(|span| {
                 !span.is_empty()
-                    && !prefetch.reads_one_by_one(span.start)
+                    && prefetch.prefetches(span.start)
                     && ranks((*span).clone()).into_iter().any(|rank| {
                         self.parsed_subject(rank)
                             .is_some_and(|subject| subject.prefetch_stops().is_some())
@@ -2169,9 +2169,10 @@ impl ListedTitles<'_> {
     /// throws (`shared::TaxdbRun::load_throws`), a read whose load looks such a taxid up
     /// (`shared::blob_taxids`) gets none, with parsed Seq-ids or without. `prefetch`: whether
     /// each query's batch prefetches (the round's), which reads them all by their own ids before
-    /// the PSSM; one whose prefetch is off reads them one by one (`ParsedSubject::pssm_read`'s
-    /// `one_by_one`). `taxids`: whether the batches look the subjects' taxids up (`taxdb.bti` on
-    /// the search path); only then, and only for the queries whose batch reads one by one, does
+    /// the PSSM; one whose prefetch is off or fails reads them one by one
+    /// (`shared::BatchPrefetch::loads_one_by_one`, `ParsedSubject::pssm_read`'s `one_by_one`).
+    /// `taxids`: whether the batches look the subjects' taxids up (`taxdb.bti` on the search
+    /// path); only then, and only for the queries whose batch loads one by one, does
     /// `pssm_load_texts` make the PSSM's loads of a query, from its hit list after the
     /// formatter's cut (`cut`: the length of each query's list after it, `prune_by_size`;
     /// `usize::MAX` for none), with what that cut drops and the blobs of the reads that do not
@@ -2188,7 +2189,7 @@ impl ListedTitles<'_> {
         let mut reads = PssmReads::default();
         // The queries whose PSSM's reads can load a sequence that the batch did not read before
         // (`pssm_load_texts`).
-        let keeps_loads = |query: usize| taxids && prefetch.reads_one_by_one(query);
+        let keeps_loads = |query: usize| taxids && prefetch.loads_one_by_one(query);
         let any_loads = (0..hit_lists.len()).any(keeps_loads);
         // Every load of a sequence with a positive taxid throws (`shared::TaxdbRun::load_throws`):
         // the read of such a subject gets no letters, with parsed Seq-ids or without.
@@ -2241,7 +2242,7 @@ impl ListedTitles<'_> {
                     }
                 } else {
                     read.insert(hsp_list.oid as usize);
-                    if prefetch.reads_one_by_one(query) {
+                    if prefetch.loads_one_by_one(query) {
                         if reads.one_by_one.len() <= query {
                             reads.one_by_one.resize_with(query + 1, Vec::new);
                         }
@@ -2758,8 +2759,10 @@ impl ListedTitles<'_> {
     /// `hit_lists` are in the order of the reports. `loads`: what the reports do at each
     /// subject's `Hit` (`hit_loads`, the one answer: a `Hit` that throws, a subject that no
     /// report loads, one for which NCBI's places give another sequence).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn check_parsed_reports(
         &self,
+        _database: Option<&BlastpDatabase>,
         hit_lists: &[Option<BlastpHitList>],
         fetched: bool,
         joined: bool,
@@ -2815,8 +2818,8 @@ impl ListedTitles<'_> {
 
     /// What the XML2 and JSON reports of the final hit lists `hit_lists` (in the order of the
     /// reports) do at each subject's `Hit`, by rank (`HitLoads::of`, the one answer of the
-    /// call): `prefetch` tells by query whether its batch reads one by one
-    /// (`BatchPrefetch::reads_one_by_one`); the `Hit`s are those that `blast_xml::write_blastp_xml`
+    /// call): `prefetch` tells by query whether its batch loads one by one
+    /// (`BatchPrefetch::report_read`); the `Hit`s are those that `blast_xml::write_blastp_xml`
     /// makes, of the lists with HSPs. `run`: what the run's formats do after a subject whose
     /// lookup throws (the call's answer, `FormatThrow::of_outfmts` and `FormatThrow::of_search`;
     /// every subject is loaded where it writes nothing, `FormatThrow::run`), at the rows that load
@@ -3387,10 +3390,10 @@ impl PssmReads {
     /// LOSAT's refusal of the reads, where a PSSM is made (`-out_pssm` and `-out_ascii_pssm`, and
     /// a round that makes the next round's PSSM).
     /// The included subjects with parsed Seq-ids, by rank, that the PSSM of the call's query
-    /// `query` reads by their Seq-align ids where its batch reads one by one (prefetch off:
-    /// `shared::BatchPrefetch::reads_one_by_one`), before the cut: loads of NCBI's BLAST
+    /// `query` reads by their Seq-align ids where its batch loads one by one (prefetch off or
+    /// failing: `shared::BatchPrefetch::loads_one_by_one`), before the cut: loads of NCBI's BLAST
     /// database data loader that no prefetch made (`shared::TaxdbRun::note_loaded`; where the
-    /// prefetch is on, it loaded them first). Empty for the other queries, where no PSSM reads
+    /// prefetch is on and does not fail, it loaded them first). Empty for the other queries, where no PSSM reads
     /// are made, and where no prefetch of the run can stop (`shared::TaxdbRun::prefetch_can_stop`:
     /// nothing reads them then).
     pub(super) fn one_by_one(&self, query: usize) -> &[usize] {

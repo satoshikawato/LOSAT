@@ -2254,7 +2254,7 @@ pub(crate) fn prefetch_always_off(format: PrefetchFormat) -> bool {
 /// reads them so in outfmt 8, 9 and 11: review 5 of line DBID pfoff-4, H2 and H3). That matters for a call whose
 /// reports read nothing of the subjects ([`ParsedShown::prefetched`], refused by
 /// [`check_prefetched_parsed`]) and for the weak matches of NCBI's scope, which only such
-/// reads make ([`BatchPrefetch::reads_one_by_one`], walked by
+/// reads make ([`BatchPrefetch::loads_one_by_one`], walked by
 /// [`crate::report::db_subject::ScopeWalk`]). A batch whose prefetch runs and fails at a subject
 /// whose lookup throws on the id (`ParsedSubject::prefetch_fails`, [`batch_prefetch`]'s warning)
 /// leaves its later loads to its reports, which load its subjects one by one too
@@ -2380,15 +2380,11 @@ impl BatchPrefetch {
         }
     }
 
-    /// Whether the batch of the call's query `query` may read the query's subjects one by one
-    /// with its prefetch off: its prefetch is off, or the query is of no batch (taken both ways,
-    /// as in [`BatchPrefetch::reads`]). The reads whose taxonomy texts the reports write: the
-    /// prefetch of a batch whose prefetch fails wrote the texts of its loads, or was refused
-    /// ([`batch_prefetch`]); where the loads throw or match weakly, [`loads_one_by_one`].
-    ///
-    /// [`loads_one_by_one`]: BatchPrefetch::loads_one_by_one
-    pub(crate) fn reads_one_by_one(&self, query: usize) -> bool {
-        self.batch_of(query) != Some(true)
+    /// Whether the prefetch of the batch of the call's query `query` runs (it may fail: a lookup
+    /// that throws on the id ends its loads, one that fails on a file stops the run there,
+    /// [`batch_prefetch`]); not for a query of no batch.
+    pub(crate) fn prefetches(&self, query: usize) -> bool {
+        self.batch_of(query) == Some(true)
     }
 
     /// Whether the batch of the call's query `query` prefetches and its prefetch fails at a
@@ -2404,13 +2400,16 @@ impl BatchPrefetch {
     }
 
     /// Whether the reports of the batch of the call's query `query` may load the query's subjects
-    /// one by one ([`BatchPrefetch::reads_one_by_one`]), also after a prefetch that fails at a
-    /// subject whose lookup throws on the id (NCBI's prefetch catches it and ends its loads): the
-    /// one answer of where a subject's load throws (`ParsedSubject::lookup_throws`) and where
-    /// NCBI's scope can match an id weakly ([`BatchPrefetch::report_read`], the pairwise reports'
-    /// reads, [`BatchPrefetch::reads`]).
+    /// one by one: its prefetch is off, or the query is of no batch (taken both ways, as in
+    /// [`BatchPrefetch::reads`]), or its prefetch fails at a subject whose lookup throws on the id
+    /// (NCBI's prefetch catches it and ends its loads; the reports load the subjects it did not).
+    /// The one answer of every reader of the reports' loads (review 1 of line DBID pf7, H1 and
+    /// M2): where a subject's load throws (`ParsedSubject::lookup_throws`), where NCBI's scope can
+    /// match an id weakly ([`BatchPrefetch::report_read`], [`BatchPrefetch::reads`]), the texts of
+    /// the reports' reads (each program's report model, after the batch's prefetch where it runs:
+    /// the loads that a failed prefetch never made write theirs there) and psiblast's PSSM reads.
     pub(crate) fn loads_one_by_one(&self, query: usize) -> bool {
-        self.reads_one_by_one(query) || self.prefetch_fails(query)
+        !self.prefetches(query) || self.prefetch_fails(query)
     }
 
     /// How the report of the call's query `query` reads its subjects, for the walk of the
@@ -6101,10 +6100,10 @@ impl TaxdbRun {
     /// ([`SeqDb::visit_defline_set_taxids`] in ranges of [`crate::seqdb::HEADER_RANGE_SEQS`]), made
     /// only for such a damaged taxonomy database and once for the run; a header whose taxids do
     /// not decode is left to the lookups of the batches, which fail on it where it is reported.
-    /// `(path of taxdb.bti, reason)` of the refusal of the fetches whose order LOSAT does not
-    /// follow there; a batch's prefetch ([`prefetch_slot_plan`]) and the reports' reads
-    /// ([`load_read_texts`]) follow NCBI's order, the XML2 and JSON reports' too (they prefetch as
-    /// the other formats, [`prefetches_subjects`]).
+    /// `(path of taxdb.bti, reason)` for the taxonomy cache collision, where a batch's prefetch
+    /// ([`prefetch_slot_plan`]) and the reports' reads ([`load_read_texts`]) follow NCBI's order,
+    /// the XML2 and JSON reports' too (they prefetch as the other formats,
+    /// [`prefetches_subjects`]), and refuse what that order does not decide.
     fn cache_collision(&self, db: &SeqDb) -> Option<&(std::path::PathBuf, String)> {
         self.collision
             .get_or_init(|| {
@@ -6143,7 +6142,8 @@ impl TaxdbRun {
 
     /// LOSAT's refusal of a fetch of the run where NCBI's taxonomy cache would repeat the offset
     /// error ([`TaxdbRun::cache_collision`]), as a reader's refusal ([`TaxonomyRefusal`]) that names
-    /// `program`; `Ok` for any other run. The callers ask it only where NCBI fetches a subject.
+    /// `program`; `Ok` for any other run. Used for secondary XML2/JSON taxonomy reads
+    /// (`separate_xml2`, [`read_reported_taxonomy`]).
     fn refuse_cache_collision(&self, db: &SeqDb, program: &str) -> Result<()> {
         match self.cache_collision(db) {
             Some((path, message)) => Err(taxdb_error(

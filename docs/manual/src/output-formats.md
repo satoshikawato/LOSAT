@@ -44,7 +44,7 @@ A value that NCBI rejects gets NCBI's error. A format that NCBI writes but a LOS
 
 `-num_descriptions`, `-num_alignments`, `-line_length`, `-sorthits` and `-sorthsps` shape these formats. For formats above `4` they are ignored with a warning, as in NCBI.
 
-With `-html`, `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `rpsblast` and `rpstblastn` write formats `0` to `4` as the HTML page that NCBI BLAST+ writes: a sequence id with an accession links to its record at NCBI. Format `18` is written as NCBI's HTML too (see below); the other formats are the same as without `-html`.
+With `-html`, `blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`, `psiblast`, `rpsblast` and `rpstblastn` write formats `0` to `4` as the HTML page that NCBI BLAST+ writes: a sequence id with an accession links to its record at NCBI. Format `18` is written as NCBI's HTML too (see below); the other formats are the same as without `-html`.
 
 ## Tabular and custom fields (6, 7, 10, 20)
 

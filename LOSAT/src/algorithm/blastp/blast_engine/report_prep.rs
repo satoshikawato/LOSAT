@@ -390,6 +390,7 @@ pub(super) fn prefetch_reported_subjects(
         // the cut, where a PSSM is made; a reported subject that no PSSM reads and no format reads is
         // written as NCBI writes it (a `giim` id in rounds with `6 qseqid`, line DBID pssmrows).
         titles.check_parsed_reports(
+            database,
             reported_lists,
             format_plans.iter().any(|outfmt| outfmt.reads_subjects()),
             format_plans.iter().any(|outfmt| match outfmt {
@@ -657,7 +658,76 @@ pub(super) fn prefetch_reported_subjects(
                 crate::algorithm::common::database::Utf8Read::reach(utf8_read, &batch.searched, db);
                 let lists = &hit_lists[batch.searched.clone()];
                 let seq_aligns = batch_seq_aligns(batch.searched.clone());
-                if crate::algorithm::common::database::prefetch_off(prefetch_format, seq_aligns) {
+                // Where the batch's prefetch runs, its posts (below); where its reports load the
+                // subjects one by one, with no prefetch or after one that fails, each query's reads (the
+                // one answer, `BatchPrefetch::loads_one_by_one`: a prefetch that fails at a subject whose
+                // lookup throws on the id leaves to the reports the loads it did not make; review 1 of
+                // line DBID pf7, H1).
+                let one_by_one = batch_prefetch.loads_one_by_one(batch.searched.start);
+                if reports_model
+                    && !crate::algorithm::common::database::prefetch_off(
+                        prefetch_format,
+                        seq_aligns,
+                    )
+                {
+                    // The taxonomy texts, and NCBI's warning where the prefetch fails at a subject
+                    // whose lookup fails (`ListedTitles::batch_prefetch`), also without `taxdb.bti`.
+                    let prefetched = |query: usize| {
+                        prefetch_posts
+                            .iter()
+                            .find(|(first, _)| *first == query)
+                            .map(|(_, posts)| posts)
+                    };
+                    let xml_before = xml_cuts.reports_before(subject_reads.queries(), &prefetched);
+                    let scope = || batch_scope(&batch.searched);
+                    let queries = crate::algorithm::common::database::PrefetchQueries::new(
+                        batch.searched.start,
+                        &scope,
+                    )
+                    .after_xml_reports(xml_before.as_ref())
+                    .where_reports_unchanged_by_load_throws(reports_unchanged_by_load_throws);
+                    let messages = match psiblast_prefetched.as_ref() {
+                        Some(ranks) => {
+                            let prefetched = titles.prefetched_ranks(
+                                database,
+                                &ranks[batch.searched.clone()].concat(),
+                                (prefetch_taxids, &hit_loads),
+                            )?;
+                            titles.batch_prefetch(
+                                database,
+                                loaded(batch.searched.start),
+                                prefetched,
+                                &queries,
+                            )?
+                        }
+                        None => {
+                            if !prefetch_taxids && prefetch_only {
+                                titles.check_prefetched(
+                                    database,
+                                    database::ListedTitles::reported_ranks(lists),
+                                    &hit_loads,
+                                )?;
+                            }
+                            titles.batch_prefetch(
+                                database,
+                                loaded(batch.searched.start),
+                                database::ListedTitles::reported_ranks(lists),
+                                &queries,
+                            )?
+                        }
+                    };
+                    // The rows of a batch whose reports load one by one open it with each query's
+                    // reads (below).
+                    if prefetch_taxids && !one_by_one {
+                        open_for_rows(lists)?;
+                    }
+                    // After the reader's messages of the batch, in its first query
+                    // (`query_warnings::query_posts`).
+                    if !messages.is_empty() {
+                        prefetch_posts.push((batch.searched.start, messages));
+                    }
+                }
+                if one_by_one {
                     let report_loads = prefetch_taxids || scope_loads;
                     if !report_loads && !pssm_loads {
                         reset_batch_scope();
@@ -742,66 +812,6 @@ pub(super) fn prefetch_reported_subjects(
                             }
                         }
                     }
-                    reset_batch_scope();
-                    continue;
-                }
-                if !reports_model {
-                    reset_batch_scope();
-                    continue;
-                }
-                // The taxonomy texts, and NCBI's warning where the prefetch fails at a subject
-                // whose lookup fails (`ListedTitles::batch_prefetch`), also without `taxdb.bti`.
-                let prefetched = |query: usize| {
-                    prefetch_posts
-                        .iter()
-                        .find(|(first, _)| *first == query)
-                        .map(|(_, posts)| posts)
-                };
-                let xml_before = xml_cuts.reports_before(subject_reads.queries(), &prefetched);
-                let scope = || batch_scope(&batch.searched);
-                let queries = crate::algorithm::common::database::PrefetchQueries::new(
-                    batch.searched.start,
-                    &scope,
-                )
-                .after_xml_reports(xml_before.as_ref())
-                .where_reports_unchanged_by_load_throws(reports_unchanged_by_load_throws);
-                let messages = match psiblast_prefetched.as_ref() {
-                    Some(ranks) => {
-                        let prefetched = titles.prefetched_ranks(
-                            database,
-                            &ranks[batch.searched.clone()].concat(),
-                            (prefetch_taxids, &hit_loads),
-                        )?;
-                        titles.batch_prefetch(
-                            database,
-                            loaded(batch.searched.start),
-                            prefetched,
-                            &queries,
-                        )?
-                    }
-                    None => {
-                        if !prefetch_taxids && prefetch_only {
-                            titles.check_prefetched(
-                                database,
-                                database::ListedTitles::reported_ranks(lists),
-                                &hit_loads,
-                            )?;
-                        }
-                        titles.batch_prefetch(
-                            database,
-                            loaded(batch.searched.start),
-                            database::ListedTitles::reported_ranks(lists),
-                            &queries,
-                        )?
-                    }
-                };
-                if prefetch_taxids {
-                    open_for_rows(lists)?;
-                }
-                // After the reader's messages of the batch, in its first query
-                // (`query_warnings::query_posts`).
-                if !messages.is_empty() {
-                    prefetch_posts.push((batch.searched.start, messages));
                 }
                 reset_batch_scope();
             }

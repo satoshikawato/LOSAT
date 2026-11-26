@@ -274,13 +274,13 @@ impl ArchiveBatch<'_> {
                             false,
                             crate::report::tabular::PrintedIds::default(),
                             false,
-                            false,
+                            crate::report::db_subject::ReportRead {
+                                one_by_one: false,
+                                batch: Some(queries_before),
+                                prefetch_fails: false,
+                            },
                             usize::MAX,
-                            (
-                                crate::report::db_subject::FormatThrow::Unread,
-                                None,
-                                queries_before,
-                            ),
+                            (crate::report::db_subject::FormatThrow::Unread, None),
                         )
                         .map_err(reported_error)?,
                     };

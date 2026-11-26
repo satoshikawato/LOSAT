@@ -9107,66 +9107,60 @@ fn run_in_pool(
                 // later batch's refusal comes after the reports of the batches before, as the
                 // stream's other refusals of a batch's reported subjects; without it every
                 // report is written after the loop, so the refusal comes before any report.
-                let prefetch = if crate::algorithm::common::database::prefetch_off(
-                    database::prefetch_format(&output_formats),
-                    seq_aligns,
-                ) {
-                    if !taxdb_found && !database.db.scope_utf8_seen() {
-                        // No prefetch, and the reports' fetches look nothing up nor post a warning.
+                // The reports load the batch's subjects one by one where its prefetch is off or
+                // fails at a subject whose lookup throws on the id (the one answer,
+                // `shared::BatchPrefetch::loads_one_by_one`): after such a prefetch, its posts, then
+                // the texts of the reads of the loads that it did not make (review 1 of line DBID
+                // pf7, H1).
+                let format = database::prefetch_format(&output_formats);
+                let read = database::batches_prefetch(
+                    format,
+                    (&batch_hit_lists, &titles),
+                    0,
+                    &[],
+                    !args.ungapped,
+                )
+                .report_read(0, 0);
+                // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
+                // A batch without Seq-aligns prefetches no sequence.
+                let prefetch =
+                    if crate::algorithm::common::database::prefetch_off(format, seq_aligns)
+                        || seq_aligns == 0
+                    {
                         Ok(Posts::new())
                     } else {
-                        fetches
-                            .batch(
-                                &batch_hit_lists,
-                                start,
-                                first_rows != crate::report::tabular::SubjectFetch::Never,
-                                &mut query_reads,
-                            )
-                            .map(|messages| {
-                                query_fetches = messages;
-                                Posts::new()
-                            })
-                    }
-                } else if seq_aligns == 0 {
-                    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:768-772
-                    // A batch without Seq-aligns prefetches no sequence.
-                    fetches
-                        .rows_open(&batch_hit_lists, None)
-                        .map(|()| Posts::new())
-                } else {
-                    // Outfmt 5 first: whether NCBI's XML stream cut a report of the batches
-                    // before (`shared::XmlCuts`), asked only where the batch's prefetch stops, by
-                    // the record of their loads (`LoadedBefore`: a cut report loads nothing) and
-                    // the texts that the cut reports left (`shared::XmlReportsBefore`).
-                    // The record that the report shows (`query_batch::xml_shown_of`).
-                    let shown_scopes = query_scopes.as_ref().map(|s| s.numbered_from(0));
-                    let xml_cut = |query: usize| {
-                        let shown =
-                            crate::blastinput::query_batch::xml_shown_of(shown_scopes, query);
-                        queries
-                            .before(&kept, start)
-                            .searched
-                            .get(shown)
-                            .is_some_and(|record| {
-                                crate::report::blast_xml::names::iteration_cut_before_hits(
-                                    record.local_id.as_bytes(),
-                                    record.warning_id(),
-                                    record.believed(),
-                                    &record.title,
-                                    false,
-                                )
-                            })
-                    };
-                    // The posts before each query's report: those of the prefetch of the
-                    // batch it begins (`warnings`, the batches before this one).
-                    let prefetched = |query: usize| warnings.get(query);
-                    let xml_cuts = crate::algorithm::common::database::XmlCuts::of(
-                        matches!(output_formats.first(), Some(BlastnOutputFormat::Xml)),
-                        &xml_cut,
-                    );
-                    let xml_before = xml_cuts.reports_before(&query_reads, &prefetched);
-                    database
-                        .batch_prefetch(
+                        // Outfmt 5 first: whether NCBI's XML stream cut a report of the batches
+                        // before (`shared::XmlCuts`), asked only where the batch's prefetch stops, by
+                        // the record of their loads (`LoadedBefore`: a cut report loads nothing) and
+                        // the texts that the cut reports left (`shared::XmlReportsBefore`).
+                        // The record that the report shows (`query_batch::xml_shown_of`).
+                        let shown_scopes = query_scopes.as_ref().map(|s| s.numbered_from(0));
+                        let xml_cut = |query: usize| {
+                            let shown =
+                                crate::blastinput::query_batch::xml_shown_of(shown_scopes, query);
+                            queries
+                                .before(&kept, start)
+                                .searched
+                                .get(shown)
+                                .is_some_and(|record| {
+                                    crate::report::blast_xml::names::iteration_cut_before_hits(
+                                        record.local_id.as_bytes(),
+                                        record.warning_id(),
+                                        record.believed(),
+                                        &record.title,
+                                        false,
+                                    )
+                                })
+                        };
+                        // The posts before each query's report: those of the prefetch of the
+                        // batch it begins (`warnings`, the batches before this one).
+                        let prefetched = |query: usize| warnings.get(query);
+                        let xml_cuts = crate::algorithm::common::database::XmlCuts::of(
+                            matches!(output_formats.first(), Some(BlastnOutputFormat::Xml)),
+                            &xml_cut,
+                        );
+                        let xml_before = xml_cuts.reports_before(&query_reads, &prefetched);
+                        database.batch_prefetch(
                             (&titles, &run_loads),
                             database::LoadedBefore {
                                 hits: &hit_lists,
@@ -9179,11 +9173,24 @@ fn run_in_pool(
                             !args.ungapped,
                             &prefetch_queries.after_xml_reports(xml_before.as_ref()),
                         )
-                        .and_then(|messages| {
-                            fetches.rows_open(&batch_hit_lists, None)?;
-                            Ok(messages)
-                        })
-                };
+                    };
+                let prefetch = prefetch.and_then(|posts| {
+                    if !read.one_by_one {
+                        fetches.rows_open(&batch_hit_lists, None)?;
+                    } else if taxdb_found || database.db.scope_utf8_seen() {
+                        // Else the reports' fetches look nothing up nor post a warning.
+                        query_fetches = fetches.batch(
+                            &batch_hit_lists,
+                            start,
+                            (
+                                first_rows != crate::report::tabular::SubjectFetch::Never,
+                                read.prefetch_fails,
+                            ),
+                            &mut query_reads,
+                        )?;
+                    }
+                    Ok(posts)
+                });
                 Some(prefetch)
             } else {
                 None

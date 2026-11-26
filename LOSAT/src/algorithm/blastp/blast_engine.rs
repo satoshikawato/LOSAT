@@ -2220,12 +2220,12 @@ impl BlastpReport {
     }
 
     /// Whether NCBI prefetches the subjects that each query batch reports before the batch's
-    /// reports and the report shows no taxonomy of them (outfmt 0, 5, 6 and 7; with
+    /// reports (outfmt 0 to 7 and 13 to 18, 10 and 20 as 6 and 7; with
     /// `PRE_FETCH_SEQS_LIMIT=2147483647` also 8, 9 and 12, and psiblast's archive 11,
-    /// `database::prefetches_subjects`): as the call's first report, the taxonomy database's
-    /// messages of that prefetch go with the query warnings. The archive of the other
-    /// applications fetches nothing; XML2 and JSON write the messages at each `Hit`
-    /// (`TaxdbPrinter`).
+    /// `database::prefetches_subjects`): as the call's first
+    /// report, the posts of that prefetch go with the query warnings. The archive of the other
+    /// applications fetches nothing; the XML2 and JSON `Hit`s write only the texts of their own
+    /// lookups (`database::RowLookups::Taxids`).
     fn prefetches_subjects(self, app: BlastpApp) -> bool {
         crate::algorithm::common::database::prefetches_subjects(Some(self.prefetch_format(app)))
     }

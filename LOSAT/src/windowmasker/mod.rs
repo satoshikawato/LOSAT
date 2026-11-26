@@ -142,69 +142,14 @@ pub(crate) fn check_in(
 ///   that changes the run when the file is missing: `-in` (split on `,`, unless `-` or
 ///   `-infmt blastdb`) of `-mk_counts` without `-fa_list true`, and `-ustat` of masking.
 pub(crate) fn read_files<S: AsRef<OsStr>>(words: &[S]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
-    let mut mk_counts = false;
-    let mut convert = false;
-    let mut fa_list = false;
-    let mut infmt_blastdb = false;
-    let mut input: Option<Vec<u8>> = None;
-    let mut ustat: Option<Vec<u8>> = None;
-    let mut ids: Option<Vec<u8>> = None;
-    let mut exclude_ids: Option<Vec<u8>> = None;
-    crate::ncbi_app::args::scan_argv("windowmasker", words, |name, value| match (name, value) {
-        ("mk_counts", None) => mk_counts = true,
-        ("convert", None) => convert = true,
-        ("fa_list", Some(v)) => {
-            fa_list = v
-                .to_str()
-                .and_then(crate::ncbi_str::string_to_bool)
-                .unwrap_or(false);
-        }
-        ("infmt", Some(v)) => infmt_blastdb = v == "blastdb",
-        ("in", Some(v)) => input = Some(v.as_encoded_bytes().to_vec()),
-        ("ustat", Some(v)) => ustat = Some(v.as_encoded_bytes().to_vec()),
-        ("ids", Some(v)) => ids = Some(v.as_encoded_bytes().to_vec()),
-        ("exclude_ids", Some(v)) => exclude_ids = Some(v.as_encoded_bytes().to_vec()),
-        _ => {}
-    });
-    let mut for_log = Vec::new();
-    let mut for_out = Vec::new();
-    let push_in = |out: &mut Vec<Vec<u8>>, bytes: &[u8]| {
-        if !bytes.is_empty() && bytes != b"-" {
-            out.push(bytes.to_vec());
-        }
+    let (for_log, for_out, _databases) = crate::report::log_inputs::windowmasker_read_parts(words);
+    let encode = |paths: Vec<std::path::PathBuf>| -> Vec<Vec<u8>> {
+        paths
+            .into_iter()
+            .map(|p| p.into_os_string().into_encoded_bytes())
+            .collect()
     };
-    let push_path = |out: &mut Vec<Vec<u8>>, bytes: &[u8]| {
-        if !bytes.is_empty() {
-            out.push(bytes.to_vec());
-        }
-    };
-    if let Some(ref raw_in) = input {
-        if !infmt_blastdb {
-            if mk_counts && !convert && !fa_list {
-                for part in raw_in.split(|&b| b == b',') {
-                    push_in(&mut for_log, part);
-                    push_in(&mut for_out, part);
-                }
-            } else {
-                push_in(&mut for_log, raw_in);
-            }
-        }
-    }
-    if !mk_counts && !convert {
-        if let Some(ref u) = ustat {
-            push_path(&mut for_log, u);
-            push_path(&mut for_out, u);
-        }
-    }
-    if !convert {
-        if let Some(ref list) = ids {
-            push_path(&mut for_log, list);
-        }
-        if let Some(ref list) = exclude_ids {
-            push_path(&mut for_log, list);
-        }
-    }
-    (for_log, for_out)
+    (encode(for_log), encode(for_out))
 }
 
 #[cfg(test)]

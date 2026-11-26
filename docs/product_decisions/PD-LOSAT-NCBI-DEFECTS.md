@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.117
+- Version: 1.118
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -856,11 +856,23 @@
   re-splitting chunks apply only when every chunk holds a query; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; numbered after 1.115 at the merge of dev that
   brought line RG item G1's 1.115; first 1.105, then 1.106, 1.107, 1.108, 1.113, 1.114 and 1.115);
-  1.117 2026-11-24 (the tabular rows of 1.37, 1.50 and 1.114, and `sallacc` of a database sequence
+  1.117 2026-11-26 (all programs, command line and library API, line WQA item D23, Owner decision
+  `Q-D23=A` / `web-qa-20261119/DECISIONS.md` 49 of 2026-11-24: a `-logfile` naming an input file
+  read by the run — including `-query`, `-subject`, `.ncbirc` / `ncbi.ini`, `<program>.ini`,
+  `-conffile`, `-in`, `-ustat`, `-in_pssm`, `-in_msa`, `-gilist`, `-negative_gilist`, `-ipglist`,
+  `-negative_ipglist`, `-seqidlist`, `-negative_seqidlist`, `-taxidlist`, `-negative_taxidlist`,
+  `-window_masker_db`, `-window_masker_taxid` counts, `-import_search_strategy`, `-mask_data`,
+  `-taxid_map`, `-entry_batch`, `-ipg_batch`, `-ids`, `-exclude_ids`, `-i`, `rpsbproc` data files,
+  or a BLAST database alias, alias list, GI-mask, MegaBLAST index, or component file of `-db` /
+  `-filtering_db`, via relative paths, symlinks, hard links, or missing inputs that `-logfile`
+  would create — is refused before opening or creating the file, exit status 1, leaving existing
+  inputs unchanged, matching LOSAT Web's D19 rule; numbered after 1.116 at the merge of dev
+  f71a5cb85 that brought 1.116 (#1619); first 1.110, then 1.113, then 1.114, then 1.115, then 1.116);
+  1.118 2026-11-24 (the tabular rows of 1.37, 1.50 and 1.114, and `sallacc` of a database sequence
   with a definition line without a Seq-id, at which NCBI stops with its null pointer or prints an
   uninitialised taxid: NCBI's bytes before the stop are written, then the refusal of rule 3, in
   every program, through one owner of the rows' stops; line RG-KB item 18b, Owner-delegated,
-  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.116; first 1.100, then
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.117; first 1.100, then
   1.101 at the merge of dev that brought line RG item X-short-tbx-link's 1.99 and line RG item
   KC-11d's 1.100, then 1.104 at the merge of dev of 2026-11-25 that brought line RG item D5c's
   1.101, psiblast line item PS10e's 1.102 and line RG item K10a's 1.103, then 1.108 at the merge
@@ -872,7 +884,8 @@
   of 2026-11-26 that brought psiblast line item PS14's 1.113, then 1.115 at the merge of dev of
   2026-11-26 that brought line DBID item pfoff-7's 1.114, then 1.116 at the merge of dev of
   2026-11-26 that brought line RG item G1's 1.115, then 1.117 at the merge of dev of 2026-11-26
-  that brought line RG item X-chunk's 1.116)
+  that brought line RG item X-chunk's 1.116, then 1.118 at the merge of dev of 2026-11-26 that
+  brought line WQA item D23's 1.117)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -1132,7 +1145,14 @@ Explicit rejections (rule 3):
 Kept as explicit rejections although NCBI's result is deterministic (rule 2's
 maintainer clause; decision D11): a query length plus `-window_size` above 2^31 - 1, where
 NCBI's `Int4` diagonal table wraps to one cell and no hit is found (BLASTP, TBLASTX;
-together with D8, every sum above 2^30 is rejected).
+together with D8, every sum above 2^30 is rejected); and (version 1.117, line WQA item D23,
+Owner decision `Q-D23=A` of 2026-11-24) a `-logfile` pointing to any input file read by the run
+(all programs, command line and library API, matching LOSAT Web's D19 rule): NCBI BLAST+ 2.17.0
+opens `-logfile` in append mode before loading configuration or reading inputs, which causes
+`tblastx -query q.fa -logfile q.fa` to read its own warnings back in an endless loop (growing
+`q.fa` to 10 GiB in 5 minutes in probe `s2-query`), corrupts `.ncbirc` on its second read
+(`s2-ncbirc-self`), and appends diagnostics into `-subject` and other inputs; LOSAT refuses any
+such `-logfile` before opening or creating the file (exit status 1, existing inputs unchanged).
 
 Reproduced as NCBI (rule 2): the out-of-range `double` to `Int4` conversions of
 `-threshold` and the X-drops (INT_MIN, decision D4); `-max_target_seqs` of 2147483624 or
@@ -3336,14 +3356,14 @@ file would differ, and NCBI's programs still could not open the database).
   (`tabular.cpp:262-268`; the member is not initialised, a different number in each run), and
   `sallacc` of a database sequence with a definition line without a Seq-id (`tabular.cpp:257-264`,
   same null pointer after earlier lines' accessions and `;`). Since
-  version 1.117 (line RG-KB item 18b) LOSAT writes NCBI's bytes up to the stop, in every program:
+  version 1.118 (line RG-KB item 18b) LOSAT writes NCBI's bytes up to the stop, in every program:
   the rows before it and the row's fields before that field, each after its delimiter (`Print`
   writes the delimiter before each field, `tabular.cpp:1100-1108`; NCBI's stream is flushed as
   the formatter is destroyed), and then refuses (exit 1): NCBI's stack trace names the paths of
   its build and install and the addresses of its run, and the uninitialised number differs from
   run to run, so no program can write either. NCBI's run ends at the null pointer, so no later
   row, query or batch is written; after the uninitialised number NCBI goes on (exit 0). Before
-  1.117 LOSAT refused before the query batch's report, and before 1.37 every such subject; its
+  1.118 LOSAT refused before the query batch's report, and before 1.37 every such subject; its
   output was a prefix of NCBI's then too (probe of line RG-KB item 18b: blastp, psiblast, blastx,
   tblastn, tblastx and blastn). A failed lookup does not depend on the other
   subjects: one alone, the first, the last or two give the same rows. Since version 1.50 (line

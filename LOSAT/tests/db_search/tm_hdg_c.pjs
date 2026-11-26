@@ -1,0 +1,25 @@
+{
+  "version": "1.2",
+  "dbname": "tm_hdg_c",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "tm hdg c",
+  "number-of-letters": 130,
+  "number-of-sequences": 1,
+  "last-updated": "2026-11-25T14:01:00",
+  "number-of-volumes": 1,
+  "number-of-taxids": 1,
+  "bytes-total": 49546,
+  "bytes-to-cache": 236,
+  "files": [
+    "tm_hdg_c.pdb",
+    "tm_hdg_c.phr",
+    "tm_hdg_c.pin",
+    "tm_hdg_c.pog",
+    "tm_hdg_c.pos",
+    "tm_hdg_c.pot",
+    "tm_hdg_c.psq",
+    "tm_hdg_c.ptf",
+    "tm_hdg_c.pto"
+  ]
+}

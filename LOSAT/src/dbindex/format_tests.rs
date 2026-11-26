@@ -31,7 +31,7 @@ fn super_headers_and_volume_counts_read_as_ncbi() {
         num_seq: 6,
         num_vol: 2,
     };
-    header.save(shd.to_str().unwrap().as_bytes());
+    assert!(!header.save(shd.to_str().unwrap().as_bytes()));
     assert_eq!(SuperHeader::load(&shd), Some(header));
     let mut bytes = std::fs::read(&shd).unwrap();
     bytes[4] = 2;
@@ -60,4 +60,32 @@ fn super_headers_and_volume_counts_read_as_ncbi() {
     }
     assert_eq!(volume_oids(&dir.join("none")), VolumeOids::Undefined);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn super_header_save_reports_closed_pipe_and_ignores_other_write_errors() {
+    struct FailWriter(std::io::ErrorKind);
+    impl std::io::Write for FailWriter {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from(self.0))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::from(self.0))
+        }
+    }
+
+    let header = SuperHeader {
+        num_seq: 6,
+        num_vol: 2,
+    };
+    let mut bytes = Vec::new();
+    assert!(!header.save_to(&mut bytes));
+    assert_eq!(bytes.len(), SUPER_HEADER_SIZE as usize);
+    assert_eq!(words(&bytes), [0, 1, 6, 2]);
+
+    let mut closed = FailWriter(std::io::ErrorKind::BrokenPipe);
+    assert_eq!(header.save_to(&mut closed), cfg!(not(windows)));
+
+    let mut full = FailWriter(std::io::ErrorKind::WriteZero);
+    assert!(!header.save_to(&mut full));
 }

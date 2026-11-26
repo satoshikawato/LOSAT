@@ -57,6 +57,18 @@ pub(super) struct ContextCutoffs {
     pub(super) option_spaces: Option<Vec<i64>>,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:946-951,1001-1014
+// NCBI reference (598d8ae6): c++/src/app/blast/tblastx_app.cpp:176-209
+/// Wraps a batch's search space overflow (`SearchSpaceOverflow`) so that it fails the batch after
+/// the reports of the batches before (`ErrorAfterBatchReports`).
+#[cold]
+#[inline(never)]
+pub(super) fn search_space_overflow(
+    overflow: crate::stats::setup::SearchSpaceOverflow,
+) -> anyhow::Error {
+    anyhow::Error::new(ErrorAfterBatchReports::new(overflow.into()))
+}
+
 /// The average subject length check (an error after the reports of the batches before), then the
 /// cutoff score, length adjustment and effective search space of every context, the queries'
 /// report statistics and the smallest-Lambda block of the linking cutoffs.
@@ -104,7 +116,7 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     // `stats::setup::setup_subject_length`: the total divided by `num_seqs`, cast to `Int4` and
     // then to `Uint4`, is 0 (a negative `NSEQ` passes; one of 2^31 fails).
     if crate::stats::setup::setup_subject_length(total_length, num_seqs as i32, None).is_none() {
-        return Err(ErrorAfterBatchReports(
+        return Err(ErrorAfterBatchReports::new(
             crate::cli::NativeError {
                 exit: 3,
                 message: format!(
@@ -159,10 +171,12 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
     // `stats::setup::preliminary_option_space`): the preliminary stage's option spaces, which
     // its setup reads in place of its own where they differ (`SubjectSetNumbers::
     // preliminary_spaces_differ`), and the statistics of each subject read (`subject_cutoffs`).
-    let option_spaces = numbers.preliminary_spaces(contexts_ref.iter().map(|ctx| {
-        let query_length = if ctx.is_valid { ctx.aa_len as i64 } else { 0 };
-        (query_length, &ctx.karlin_params)
-    }))?;
+    let option_spaces = numbers
+        .preliminary_spaces(contexts_ref.iter().map(|ctx| {
+            let query_length = if ctx.is_valid { ctx.aa_len as i64 } else { 0 };
+            (query_length, &ctx.karlin_params)
+        }))
+        .map_err(search_space_overflow)?;
     let preliminary_spaces = option_spaces
         .as_deref()
         .filter(|_| numbers.preliminary_spaces_differ());
@@ -203,18 +217,20 @@ pub(super) fn context_cutoffs(inputs: &CutoffInputs<'_>) -> Result<ContextCutoff
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:821-847
         // =======================================================================
         // `-dbsize` replaces the database length here only (`SubjectSetNumbers`).
-        let eff_lengths = numbers.context_lengths(
-            query_len_aa,
-            ctx_params, // tblastx uses per-context ungapped params (kbp_gap is NULL)
-        )?;
+        let eff_lengths = numbers
+            .context_lengths(
+                query_len_aa,
+                ctx_params, // tblastx uses per-context ungapped params (kbp_gap is NULL)
+            )
+            .map_err(search_space_overflow)?;
         if let Some(report) = report_searchsp_per_context.as_mut() {
             report.push(eff_lengths.eff_searchsp);
         }
         // The preliminary stage's lengths, with its option space where it differs.
         let eff_lengths = match preliminary_spaces {
-            Some(spaces) => {
-                numbers.context_lengths_with(query_len_aa, ctx_params, spaces[ctx_idx])?
-            }
+            Some(spaces) => numbers
+                .context_lengths_with(query_len_aa, ctx_params, spaces[ctx_idx])
+                .map_err(search_space_overflow)?,
             None => eff_lengths,
         };
         let eff_searchsp = eff_lengths.eff_searchsp;

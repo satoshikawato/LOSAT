@@ -91,6 +91,9 @@ pub(crate) mod makeprofiledb;
 pub(crate) mod blastdb_aliastool;
 // NCBI reference (598d8ae6): c++/src/app/blastdb/blastdbcheck.cpp: the check of BLAST databases and alias files.
 pub(crate) mod blastdbcheck;
+// NCBI reference (598d8ae6): c++/src/app/blast/cleanup-blastdb-volumes.py: removes orphaned BLAST
+// database volume files not listed in a database's alias file.
+pub(crate) mod cleanup_blastdb_volumes;
 // NCBI reference (598d8ae6): c++/src/corelib/ncbiapp.cpp and c++/src/corelib/ncbiargs.cpp: the application and argument reader of
 // blastdbcmd, dustmasker, segmasker, windowmasker, convert2blastmask, makembindex, makeprofiledb,
 // blastdb_aliastool and blastdbcheck.

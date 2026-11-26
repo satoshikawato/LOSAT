@@ -35,6 +35,8 @@ mod blastdbcmd_several_names;
 mod blastn_mb_index_fixtures;
 #[path = "../blastx_library_db_hold.rs"]
 mod blastx_library_db_hold;
+#[path = "../cleanup_blastdb_volumes_fixtures.rs"]
+mod cleanup_blastdb_volumes_fixtures;
 #[path = "../cli_smoke.rs"]
 mod cli_smoke;
 #[path = "../compressed_clut_pairs.rs"]
@@ -85,12 +87,16 @@ mod makeblastdb_output_streams;
 mod makeblastdb_past_32_bits;
 #[path = "../makeblastdb_rename_lock.rs"]
 mod makeblastdb_rename_lock;
+#[path = "../makembindex_closed_pipe.rs"]
+mod makembindex_closed_pipe;
 #[path = "../makembindex_fixtures.rs"]
 mod makembindex_fixtures;
 #[path = "../makeprofiledb_fixtures.rs"]
 mod makeprofiledb_fixtures;
 #[path = "../masker_fixtures.rs"]
 mod masker_fixtures;
+#[path = "../memb_bit.rs"]
+mod memb_bit;
 #[path = "../ncbi_lookup_paths.rs"]
 mod ncbi_lookup_paths;
 #[path = "../ncbi_toolkit_dryrun.rs"]
@@ -165,6 +171,10 @@ mod search_environment;
 mod seq_id_first_line;
 #[path = "../seqalign_samples.rs"]
 mod seqalign_samples;
+#[path = "../serial_verify_read.rs"]
+mod serial_verify_read;
+#[path = "../strategy_stream_f1c1.rs"]
+mod strategy_stream_f1c1;
 #[path = "../suite_layout.rs"]
 mod suite_layout;
 #[path = "../syntax_cases_cli.rs"]

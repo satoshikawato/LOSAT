@@ -769,6 +769,7 @@ impl HitPosts {
             posts,
             cut,
             ends_run,
+            caught_at: _,
             cuts,
         } = posts;
         if self.document.is_empty() {
@@ -846,6 +847,32 @@ pub fn write_document_posts(
     warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     let mut hits = HitPosts::default();
+    hits.document(posts);
+    write_hit_posts(report, &hits, 0, writer, warnings)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2230
+/// Writes `report`, the end of a structured document or a held report written there
+/// (`StructuredXml::finish`, `StructuredXml::unwritten`), whose writing returned `written`, as
+/// `write_document_posts`; where the held report raised an exception that NCBI's report function
+/// catches (`CaughtException`: the stream forms 15 and 16 leave the report out), the post of it
+/// by `program` (`blast_xml::writer::caught_post`) before the document's end where the epilog
+/// marks it (`DocumentPosts::caught_at`), else after the other posts. Any other error is
+/// returned and `report` is not written.
+pub fn write_document_end<D: crate::report::blast_xml::writer::StructuredXml + ?Sized>(
+    written: Result<()>,
+    report: &[u8],
+    document: &mut D,
+    program: &str,
+    writer: &mut dyn crate::report::ostream::ReportWrite,
+    warnings: Option<&mut QueryWarnings<'_>>,
+) -> Result<()> {
+    let mut hits = HitPosts::default();
+    let caught = crate::report::blast_xml::writer::caught_post(written, &*document, program)?;
+    let mut posts = document.take_posts();
+    if let Some(post) = caught.and_then(|post| posts.place_caught(post)) {
+        hits.caught(post);
+    }
     hits.document(posts);
     write_hit_posts(report, &hits, 0, writer, warnings)
 }
@@ -1215,6 +1242,17 @@ impl<'a> QueryWarnings<'a> {
     /// is flushed; a failed flush returns before them. Then the query's later lines go to the
     /// format's receiver (`with_later`), without a flush: they are no part of the diagnostics.
     pub fn before_query(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {
+        let result = self.before_query_inner(index, report);
+        if result.is_err() {
+            // A failed write (report failure or strategy write fault) ends NCBI's run before any
+            // later query's reads happen: keep `Drop` from dumping unread `ReadCursor` texts.
+            self.end_run();
+        }
+        result
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6493
+    fn before_query_inner(&mut self, index: usize, report: &mut dyn Write) -> io::Result<()> {
         let placed = before_report(
             self.reads.as_mut(),
             self.before.get(index),
@@ -1222,16 +1260,22 @@ impl<'a> QueryWarnings<'a> {
             report,
             &mut *self.sink,
         )?;
-        match placed {
-            Some(posts) if posts.has_text() => {
-                report.flush()?;
-                posts.write(&mut *self.sink, self.archive)?;
-                self.sink.flush()
+        if let Some(posts) = placed {
+            // Flush `report` once before the first non-empty diagnostic byte written to
+            // `self.sink` (matching NCBI's `cerr.tie(&cout)`): ordinary warnings, `803.7`
+            // replaced-byte posts, and strategy write-failure diagnostics flush `report` before
+            // writing, while a silent `Post::Request` leaves `report` unflushed (NCBI's
+            // `SaveSearchStrategy` does not flush `cout`).
+            let mut tied = TiedDiagnostics {
+                report,
+                sink: &mut *self.sink,
+                flushed: false,
+            };
+            posts.write(&mut tied, self.archive)?;
+            if tied.flushed {
+                tied.sink.flush()?;
             }
-            // A search strategy request's mark alone shows nothing (`Posts::request`).
-            Some(posts) => posts.write(&mut *self.sink, self.archive),
-            None => Ok(()),
-        }?;
+        }
         // The query's result warnings of a format after a structured first one (`with_later`).
         if let Some((posts, receiver)) = self.later.as_mut() {
             if let Some(posts) = posts.get(index) {
@@ -1257,6 +1301,39 @@ impl<'a> QueryWarnings<'a> {
         }
         report.flush()?;
         Posts::of_lines(lines).write(&mut *self.sink, self.archive)?;
+        self.sink.flush()
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6476-6493
+/// Diagnostics writer that flushes `report` once before the first non-empty write to `sink`,
+/// matching NCBI's `cerr.tie(&cout)` so bytes still held in a formatter's buffer reach the report
+/// stream before any diagnostic (`803.7`, strategy write failure, or query warning) is written,
+/// while leaving `report` unflushed when a request mark writes no diagnostics.
+struct TiedDiagnostics<'a> {
+    report: &'a mut dyn Write,
+    sink: &'a mut dyn Write,
+    flushed: bool,
+}
+
+impl Write for TiedDiagnostics<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if !buf.is_empty() && !self.flushed {
+            self.report.flush()?;
+            self.flushed = true;
+        }
+        self.sink.write(buf)
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        if !buf.is_empty() && !self.flushed {
+            self.report.flush()?;
+            self.flushed = true;
+        }
+        self.sink.write_all(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
         self.sink.flush()
     }
 }
@@ -1545,6 +1622,17 @@ pub fn invalid_residues_error(positions: &[usize]) -> Option<String> {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:532-543
 pub fn null_descriptor_error() -> String {
     setup_error(crate::ncbi_exception::NULL_POINTER)
+}
+
+/// The set-up's error of a query whose Seq-inst has no `length`: NCBI's
+/// `CBlastQuerySourceBioseqSet::GetBlastSequence` throws `"Cannot get sequence length"`, which
+/// `SetupQueries_OMF` catches as a warning of the query and invalidates its contexts, as
+/// `invalid_residues_error`'s.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/bioseq_extract_data_priv.cpp:317-321
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:609-652
+pub fn missing_length_error() -> String {
+    setup_error("Cannot get sequence length")
 }
 
 /// The text of the set-up's error of one query whose one message is `message`: its severity

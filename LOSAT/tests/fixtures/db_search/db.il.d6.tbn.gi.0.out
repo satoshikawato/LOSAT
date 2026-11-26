@@ -1,0 +1,502 @@
+TBLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: n
+           6 sequences; 2,170 total letters
+
+
+
+Query= q0
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB000204.1 n three                                                    15.0    0.75 
+AB000206.1 n five                                                     13.9    1.9  
+
+
+>AB000204.1 n three
+Length=376
+
+ Score = 15.0 bits (27),  Expect = 0.75, Method: Compositional matrix adjust.
+ Identities = 4/10 (40%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = -2
+
+Query  30   IVKWISHYPK  39
+            +V W+ H P 
+Sbjct  204  LVCWVDHQPN  175
+
+
+>AB000206.1 n five
+Length=398
+
+ Score = 13.9 bits (24),  Expect = 1.9, Method: Compositional matrix adjust.
+ Identities = 4/16 (25%), Positives = 9/16 (56%), Gaps = 0/16 (0%)
+ Frame = +2
+
+Query  56  WHRDWMMQFRYWNNQA  71
+           W R+W+ +     ++A
+Sbjct  35  WAREWVQRVSRIKSRA  82
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.140    0.513    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+Query= q1
+
+Length=100
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.330    0.134    0.519    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+Query= q2
+
+Length=100
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.329    0.139    0.478    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+Query= q3
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB000202.1 n one alt                                                  15.0    0.70 
+
+
+>AB000202.1 n one alt
+Length=337
+
+ Score = 15.0 bits (27),  Expect = 0.70, Method: Compositional matrix adjust.
+ Identities = 4/8 (50%), Positives = 6/8 (75%), Gaps = 0/8 (0%)
+ Frame = -3
+
+Query  79   PGKKSHCD  86
+            PG  ++CD
+Sbjct  326  PGDLANCD  303
+
+
+ Score = 12.7 bits (21),  Expect = 4.6, Method: Compositional matrix adjust.
+ Identities = 4/8 (50%), Positives = 4/8 (50%), Gaps = 0/8 (0%)
+ Frame = -3
+
+Query  79   PGKKSHCD  86
+            PG    CD
+Sbjct  242  PGSYLGCD  219
+
+
+
+Lambda      K        H        a         alpha
+   0.322    0.134    0.435    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+Query= q4
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB000202.1 n one alt                                                  15.0    0.85 
+
+
+>AB000202.1 n one alt
+Length=337
+
+ Score = 15.0 bits (27),  Expect = 0.85, Method: Compositional matrix adjust.
+ Identities = 5/10 (50%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = +1
+
+Query  43   RLFWIPRMSN  52
+            R  W PR+S 
+Sbjct  196  RGMWSPRLSQ  225
+
+
+ Score = 14.2 bits (25),  Expect = 1.6, Method: Compositional matrix adjust.
+ Identities = 6/10 (60%), Positives = 7/10 (70%), Gaps = 0/10 (0%)
+ Frame = -1
+
+Query  89   SDNYDCDILA  98
+            +DNY   ILA
+Sbjct  253  TDNYLGPILA  224
+
+
+ Score = 12.3 bits (20),  Expect = 7.0, Method: Compositional matrix adjust.
+ Identities = 3/12 (25%), Positives = 5/12 (42%), Gaps = 0/12 (0%)
+ Frame = +2
+
+Query  46   WIPRMSNDARRC  57
+            W+  +    R C
+Sbjct  89   WVYPLQQKRRTC  124
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.140    0.487    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+Query= q5
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB000206.1 n five                                                     15.4    0.65 
+AB000204.1 n three                                                    11.9    8.9  
+
+
+>AB000206.1 n five
+Length=398
+
+ Score = 15.4 bits (28),  Expect = 0.65, Method: Compositional matrix adjust.
+ Identities = 6/12 (50%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
+ Frame = +3
+
+Query  16   NTTHYGLTCYTY  27
+            N  HY  T +TY
+Sbjct  72   NRAHYS*TIFTY  107
+
+
+ Score = 11.9 bits (19),  Expect = 9.7, Method: Compositional matrix adjust.
+ Identities = 5/15 (33%), Positives = 6/15 (40%), Gaps = 0/15 (0%)
+ Frame = -3
+
+Query  6    YLSYMANSSGNTTHY  20
+            YLS  +       HY
+Sbjct  240  YLSAKSRCGQCLRHY  196
+
+
+>AB000204.1 n three
+Length=376
+
+ Score = 11.9 bits (19),  Expect = 8.9, Method: Compositional matrix adjust.
+ Identities = 5/13 (38%), Positives = 5/13 (38%), Gaps = 0/13 (0%)
+ Frame = -1
+
+Query  22   LTCYTYDKEHRVS  34
+            L C      HR S
+Sbjct  313  LNCLLIIL*HRAS  275
+
+
+
+Lambda      K        H        a         alpha
+   0.326    0.140    0.452    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+Query= q6
+
+Length=100
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.314    0.131    0.406    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+Query= q7
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB000206.1 n five                                                     16.5    0.23 
+
+
+>AB000206.1 n five
+Length=398
+
+ Score = 16.5 bits (31),  Expect = 0.23, Method: Compositional matrix adjust.
+ Identities = 3/13 (23%), Positives = 7/13 (54%), Gaps = 0/13 (0%)
+ Frame = +2
+
+Query  27  DYYRMWEHMWINK  39
+             +R+W   W+ +
+Sbjct  20  SMFRLWAREWVQR  58
+
+
+ Score = 16.2 bits (30),  Expect = 0.35, Method: Compositional matrix adjust.
+ Identities = 9/27 (33%), Positives = 12/27 (44%), Gaps = 7/27 (26%)
+ Frame = +2
+
+Query  14   PSHTECDQRI-------AEFDYYRMWE  33
+            P+HT C Q +       + F   R WE
+Sbjct  296  PNHTRCWQVVKPEGLKGSSFLNLRAWE  376
+
+
+
+Lambda      K        H        a         alpha
+   0.326    0.143    0.533    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+Query= q8
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB000204.1 n three                                                    13.9    1.9  
+
+
+>AB000204.1 n three
+Length=376
+
+ Score = 13.9 bits (24),  Expect = 1.9, Method: Compositional matrix adjust.
+ Identities = 5/12 (42%), Positives = 7/12 (58%), Gaps = 0/12 (0%)
+ Frame = +2
+
+Query  89   IDLSHNHHHVPN  100
+            +D + NH   PN
+Sbjct  335  LDANRNHFISPN  370
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.134    0.458    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+Query= q9
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB000206.1 n five                                                     13.5    2.6  
+
+
+>AB000206.1 n five
+Length=398
+
+ Score = 13.5 bits (23),  Expect = 2.6, Method: Compositional matrix adjust.
+ Identities = 5/13 (38%), Positives = 6/13 (46%), Gaps = 0/13 (0%)
+ Frame = +2
+
+Query  78  KQGSQQDKETTWA  90
+           +QG  Q     WA
+Sbjct  2   RQGPSQSMFRLWA  40
+
+
+
+Lambda      K        H        a         alpha
+   0.323    0.132    0.442    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+Query= q10
+
+Length=100
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.132    0.475    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+Query= q11
+
+Length=100
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H        a         alpha
+   0.324    0.135    0.494    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+Query= q12
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB000202.1 n one alt                                                  15.8    0.48 
+
+
+>AB000202.1 n one alt
+Length=337
+
+ Score = 15.8 bits (29),  Expect = 0.48, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 6/12 (50%), Gaps = 0/12 (0%)
+ Frame = -2
+
+Query  17   AVFKNWMMGWFR  28
+            A    W++ W R
+Sbjct  255  AQITTWVLSWLR  220
+
+
+ Score = 12.3 bits (20),  Expect = 5.8, Method: Compositional matrix adjust.
+ Identities = 4/10 (40%), Positives = 6/10 (60%), Gaps = 0/10 (0%)
+ Frame = +3
+
+Query  88   KGFWVGIDMN  97
+            +GF    D+N
+Sbjct  144  RGF*ATTDVN  173
+
+
+
+Lambda      K        H        a         alpha
+   0.325    0.141    0.522    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+Query= q13
+
+Length=100
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+AB000204.1 n three                                                    15.8    0.37 
+AB000202.1 n one alt                                                  13.1    4.1  
+
+
+>AB000204.1 n three
+Length=376
+
+ Score = 15.8 bits (29),  Expect = 0.37, Method: Compositional matrix adjust.
+ Identities = 7/15 (47%), Positives = 8/15 (53%), Gaps = 0/15 (0%)
+ Frame = +1
+
+Query  75  HNWNGTKRFGFIFHI  89
+             W G  RFG I+ I
+Sbjct  28  RRWIGCNRFGGIWKI  72
+
+
+>AB000202.1 n one alt
+Length=337
+
+ Score = 13.1 bits (22),  Expect = 4.1, Method: Compositional matrix adjust.
+ Identities = 4/7 (57%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+ Frame = +2
+
+Query  70   KNMCTHN  76
+            +NM  HN
+Sbjct  290  RNMACHN  310
+
+
+
+Lambda      K        H        a         alpha
+   0.330    0.137    0.526    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 25353
+
+
+  Database: n
+    Posted date:  Nov 22, 2026  8:11 PM
+  Number of letters in database: 2,170
+  Number of sequences in database:  6
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 13
+Window for multiple hits: 40

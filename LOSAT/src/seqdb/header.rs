@@ -161,7 +161,12 @@ pub fn decode_full_in(record: &[u8], path: &Path, set: &mut DeflineSet) -> Resul
 /// Whether the `Blast-def-line-set` `record` holds a Seq-id in any of its definition lines: read
 /// up to the first `seqid` list that is not empty, every other member skipped by its length (no
 /// Seq-id or title is decoded). An empty record counts as holding one (no read of NCBI's was seen
-/// on it; LOSAT reads it as before). The reader's error of a record that is no valid encoding up
+/// on it; LOSAT reads it as before), and so does a line whose members are not those NCBI's read
+/// takes in order: one without the `seqid` member, which is mandatory, or with a member out of
+/// order. NCBI's read of such a set fails there (`objistr.cpp` ExpectedMember, the read check of
+/// `SERIAL_VERIFY_DATA_READ`), which the full read of the record reports where NCBI does: NCBI's
+/// error, or LOSAT's refusal under a setting that turns the check off
+/// (`SeqDb::refuse_unchecked_reads`). The reader's error of a record that is no valid encoding up
 /// to there.
 pub fn holds_a_seqid(record: &[u8], path: &Path) -> Result<bool, SeqDbError> {
     if record.is_empty() {
@@ -177,6 +182,8 @@ fn seqid_in_set(record: &[u8]) -> Result<bool, BerError> {
     while !ber.at_end(set_end)? {
         ber.expect_tag(TAG_SEQUENCE, "Blast-def-line")?;
         let defline_end = ber.open()?;
+        // The number of the member before (none: the title's 0 may come first).
+        let mut last: Option<u32> = None;
         while !ber.at_end(defline_end)? {
             let tag = ber.tag()?;
             if tag.class != TAG_CONTEXT_CONSTRUCTED || tag.number > u32::from(DEFLINE_LAST_MEMBER) {
@@ -185,8 +192,14 @@ fn seqid_in_set(record: &[u8]) -> Result<bool, BerError> {
                     tag.class, tag.number
                 )));
             }
+            let seqid = u32::from(DEFLINE_SEQID);
+            let skips_seqid = last.map_or(0, |number| number + 1) <= seqid && tag.number > seqid;
+            if last.is_some_and(|number| tag.number <= number) || skips_seqid {
+                return Ok(true);
+            }
+            last = Some(tag.number);
             let member_end = ber.open()?;
-            if tag.number == u32::from(DEFLINE_SEQID) {
+            if tag.number == seqid {
                 ber.expect_tag(TAG_SEQUENCE, "the Seq-id list")?;
                 let list_end = ber.open()?;
                 if !ber.at_end(list_end)? {
@@ -196,6 +209,9 @@ fn seqid_in_set(record: &[u8]) -> Result<bool, BerError> {
             while !ber.at_end(member_end)? {
                 ber.skip_value(0)?;
             }
+        }
+        if last.is_none_or(|number| number < u32::from(DEFLINE_SEQID)) {
+            return Ok(true);
         }
     }
     Ok(false)

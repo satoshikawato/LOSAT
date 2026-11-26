@@ -16,7 +16,7 @@
 //! variant's 0-based position in its ASN.1 SEQUENCE or CHOICE (absent OPTIONAL members still
 //! count), which only the binary encoder writes (its context tag `[tag]`).
 
-pub use super::out_buffer::Stream;
+pub use super::out_buffer::{BufferPiece, Stream};
 use super::out_buffer::{OutBuffer, Piece};
 
 /// An error that NCBI's object stream raises while it writes a value, which LOSAT reports
@@ -257,9 +257,8 @@ impl NullElement {
             self.site(),
             format!("{}: {}", self.position, Self::MESSAGE),
         );
-        for frame in self.frames.iter().rev() {
-            exception.add_frame_info(frame);
-        }
+        let names: Vec<&str> = self.frames.iter().rev().map(String::as_str).collect();
+        exception.add_frame_infos(&names);
         exception
     }
 }
@@ -280,11 +279,16 @@ impl ReplacedChar {
     /// (the hex digits in upper case without padding, `NumericToString` of `c` in base 16) and the
     /// string when there is one.
     pub fn message(&self) -> Vec<u8> {
-        let mut message = format!(
+        use std::io::Write;
+        // One buffer of the message's length (the text between the trace and the string, with a
+        // position of 20 digits, is under 64 bytes).
+        let mut message = Vec::with_capacity(self.trace.len() + 64 + self.string.len());
+        write!(
+            message,
             "{}\nBad char [0x{:X}] in string at {}",
             self.trace, self.byte, self.position
         )
-        .into_bytes();
+        .expect("a write to a Vec");
         if !self.string.is_empty() {
             message.push(b'\n');
             message.extend_from_slice(&self.string);
@@ -659,6 +663,7 @@ impl<E: Encoder> Traced<E> {
 }
 
 /// A frame of NCBI's object stack that shows in its path (`object_stack_trace`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StackStep<'a> {
     /// `eFrameClassMember` or `eFrameChoiceVariant` with its member's name.
     Member(&'a str),
@@ -703,10 +708,17 @@ impl<E: Encoder, P> Traced<E, P> {
     }
 
     /// The writes of NCBI's buffer of the document to its output so far (`OutBuffer::pieces`):
-    /// NCBI's insertions of it into the report's stream; none for a stream without a model of its
-    /// buffer.
-    pub fn pieces(&self) -> &[usize] {
+    /// NCBI's insertions of it into its output stream with the bytes left behind in the buffer;
+    /// none for a stream without a model of its buffer.
+    pub fn pieces(&self) -> &[BufferPiece] {
         self.buffer.as_ref().map_or(&[], OutBuffer::pieces)
+    }
+
+    /// The byte sizes of [`Self::pieces`], in order (`OutBuffer::piece_sizes`).
+    pub fn piece_sizes(&self) -> Vec<usize> {
+        self.buffer
+            .as_ref()
+            .map_or_else(Vec::new, OutBuffer::piece_sizes)
     }
 
     /// The stream's position at the first of those writes (`OutBuffer::first_write`).
@@ -822,6 +834,16 @@ impl<E: Encoder, P> Traced<E, P> {
         };
         let offsets: Vec<usize> = posts.iter().map(|&at| at - start).collect();
         buffer.put(piece, &held[start..], &offsets, &mut written);
+        let byte_block_from = buffer.byte_block_from();
+        let has_byte_block = byte_block_from < buffer.pieces().len();
+        if has_byte_block {
+            let trace = self.stack_trace();
+            if let Some(buffer) = self.buffer.as_mut() {
+                for bp in &mut buffer.pieces_mut()[byte_block_from..] {
+                    bp.byte_block_trace = Some(trace.clone());
+                }
+            }
+        }
         written
     }
 
@@ -873,8 +895,8 @@ impl<E: Encoder, P> Traced<E, P> {
         let ends: Vec<u64> = self
             .pieces()
             .iter()
-            .map(|&piece| {
-                end += piece as u64;
+            .map(|piece| {
+                end += piece.size as u64;
                 end
             })
             .filter(|&end| end > self.handed && end < target)

@@ -4,7 +4,7 @@
 import type { ParameterDescription } from 'losat/ports';
 import { registryName } from '../application/conffile';
 import type { CountsLoader } from '../application/counts';
-import type { DraftState, SearchDraft } from '../application/draft';
+import type { DatabasePickDraft, DraftState, SearchDraft } from '../application/draft';
 import type { ToolDraft, ToolDraftState } from '../application/tool-draft';
 import {
   fieldList,
@@ -64,6 +64,12 @@ export interface FormModel {
   readonly counts?: CountsLoader;
   /** Optional shortcut on BLASTN's repeats row when Counts file is chosen. */
   onMakeCounts?(): void;
+  /** Local repeats database state/actions for BLASTN `-filtering_db` (RG-D4 W2). */
+  readonly filteringDb?: DatabasePickDraft;
+  setFilteringDbEnabled?(enabled: boolean): void;
+  setFilteringDbFiles?(files: readonly File[]): void;
+  selectFilteringDb?(name: string): void;
+  clearFilteringDb?(): void;
   pairOf?(row: string | undefined, fields: readonly ParameterField[]): PairRow | undefined;
   pairList?(pair: PairRow): readonly string[];
   pairValue?(pair: PairRow): string;
@@ -134,6 +140,11 @@ export function searchFormModel(draft: SearchDraft, state: DraftState, extras: S
     setTaxid: (text) => draft.setTaxid(text),
     ...(extras.counts === undefined ? {} : { counts: extras.counts }),
     ...(extras.onMakeCounts === undefined ? {} : { onMakeCounts: extras.onMakeCounts }),
+    filteringDb: state.filteringDb,
+    setFilteringDbEnabled: (enabled) => draft.setFilteringDbEnabled(enabled),
+    setFilteringDbFiles: (picked) => void draft.setFilteringDbFiles(picked),
+    selectFilteringDb: (name) => draft.selectFilteringDb(name),
+    clearFilteringDb: () => draft.clearFilteringDb(),
     pairOf: (row, fields) => {
       const pair = pairRows(program).find((entry) => entry.row === row);
       return pair !== undefined && fields.length === 2 && fields.every((field) => pair.flags.includes(field.flag)) ? pair : undefined;

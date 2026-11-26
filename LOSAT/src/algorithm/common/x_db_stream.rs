@@ -211,6 +211,10 @@ pub(crate) struct XDbStream<'a> {
     /// (`word`, `window`, recorded starts or walk error). Never populated for searches without a
     /// lead sequence.
     lead_starts: OnceLock<(usize, i32, std::result::Result<HardStarts, XLeadWalkError>)>,
+    /// With `-db_hard_mask` (series NP, M4b-3c part 2), the diagonal-table starts computed by
+    /// `ResolvedMask::check_losat_limits` when the database contains overlapping masks (`None`
+    /// when no walk ran).
+    hard_starts: Option<HardStarts>,
     /// With `-db_hard_mask`, the sequences as the stages after the preliminary one read them
     /// (`read_stage`), by ordinal id, while something holds them.
     masked_stores: XSharedReads<PackedNucleotide>,
@@ -244,6 +248,7 @@ impl<'a> XDbStream<'a> {
             blocks: XSharedReads::new(),
             mask: None,
             lead_starts: OnceLock::new(),
+            hard_starts: None,
             masked_stores: XSharedReads::new(),
             #[cfg(any(feature = "parallel", test))]
             cuts: Mutex::new(Vec::new()),
@@ -265,6 +270,22 @@ impl<'a> XDbStream<'a> {
     /// The database masking of the search (`with_mask`).
     pub(crate) fn mask(&self) -> Option<SearchMask> {
         self.mask
+    }
+
+    /// Attaches the `-db_hard_mask` diagonal-table starts from `ResolvedMask::translated_starts`
+    /// (`None` when the database has no overlapping masks).
+    pub(crate) fn with_hard_starts(mut self, hard_starts: Option<HardStarts>) -> Self {
+        self.hard_starts = hard_starts;
+        self
+    }
+
+    /// The `-db_hard_mask` diagonal-table start for sequence `ordinal`, if this sequence runs in
+    /// order on its own table (a walked sequence or a sequence that meets unwritten entries or
+    /// clears inside it in NCBI's one-thread search; `None` for all other sequences).
+    pub(crate) fn hard_start(&self, ordinal: usize) -> Option<NcbiStart> {
+        let starts = self.hard_starts.as_ref()?;
+        let ordinal = u32::try_from(ordinal).ok()?;
+        starts.of(ordinal)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-483,804-855,
@@ -667,7 +688,9 @@ impl<'a> XDbStream<'a> {
                 ),
                 self.program,
             ),
-            Some(_) => shared::PreliminaryReadError("Database memory map file error").into(),
+            Some(_) => {
+                shared::PreliminaryReadError::from_static("Database memory map file error").into()
+            }
         };
         Err(XReadError(error).into())
     }

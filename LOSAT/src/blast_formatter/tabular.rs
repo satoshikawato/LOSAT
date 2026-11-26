@@ -21,9 +21,9 @@ use anyhow::Result;
 use super::refusals::Refusal;
 use super::PROGRAM;
 use crate::algorithm::common::database::{
-    database_error, parsed_refusal, prefetch_messages, prefetch_warning, read_header,
-    subject_taxonomy,
-    tabular_names, HeaderReader, ReportedHeader, StoredTitle, TaxdbRun, TaxdbSetting,
+    database_error, parsed_refusal, prefetch_messages, prefetch_warning_of, read_header,
+    subject_taxonomy, tabular_names, HeaderReader, ReportedHeader, StoredTitle, TaxdbRun,
+    TaxdbSetting,
 };
 use crate::algorithm::common::tabular::{SubjectId, SubjectValues, TabularSubjects};
 use crate::blastinput::app::FormatChoice;
@@ -35,9 +35,9 @@ use crate::report::archive::bioseq::SeqLocStrand;
 use crate::report::archive::read::options::{BuiltOptions, EProgram, Setter};
 use crate::report::archive::read::queries::{bioseq_letters, RenderError};
 use crate::report::archive::read::request::{Bioseq, Queries, Request};
+use crate::report::archive::read::{seq_align_id, Stop};
 use crate::report::db_subject::ParsedSubject;
 use crate::report::serial::asn_types::view::V;
-use crate::report::archive::read::{seq_align_id, Stop};
 use crate::report::serial::seqalign_read::{read_set, ReadAlign, ReadStop};
 use crate::report::tabular::{
     check_failed_lookups, failed_database_title, failed_record_title, taxdb_warning_line_of,
@@ -48,6 +48,7 @@ use crate::report::tabular_seqalign::{
     reads_letters, row_hsp, row_plan, row_scores, subject_scores, RowBuffers, RowContext,
     RowLetters, RowPlan, SubjectScores,
 };
+use crate::seqdb::lookup::SeqidLookup;
 use crate::seqdb::{NucleotideAmbiguity, SeqDb, SeqType};
 use crate::seqid::defline_set::{compare, match_keys, Sic};
 use crate::seqid::model::ObjectId;
@@ -293,19 +294,35 @@ impl IdIndex {
         }
     }
 
+    /// The items whose ids hold `id` (`holds` of an item confirms a candidate), in order, reusing
+    /// caller-owned scratch buffers `keys` and `found`.
+    fn holders_into(
+        &self,
+        id: &ParsedSeqId,
+        holds: impl Fn(usize) -> bool,
+        keys: &mut Vec<u64>,
+        found: &mut Vec<usize>,
+    ) {
+        keys.clear();
+        found.clear();
+        match_keys(id, keys);
+        for key in keys.iter() {
+            if let Some(items) = self.0.get(key) {
+                found.extend_from_slice(items);
+            }
+        }
+        if found.len() > 1 {
+            found.sort_unstable();
+            found.dedup();
+        }
+        found.retain(|&item| holds(item));
+    }
+
     /// The items whose ids hold `id` (`holds` of an item confirms a candidate), in order.
     fn holders(&self, id: &ParsedSeqId, holds: impl Fn(usize) -> bool) -> Vec<usize> {
         let mut keys = Vec::new();
-        match_keys(id, &mut keys);
-        let mut found: Vec<usize> = keys
-            .iter()
-            .filter_map(|key| self.0.get(key))
-            .flatten()
-            .copied()
-            .collect();
-        found.sort_unstable();
-        found.dedup();
-        found.retain(|&item| holds(item));
+        let mut found = Vec::new();
+        self.holders_into(id, holds, &mut keys, &mut found);
         found
     }
 }
@@ -365,9 +382,9 @@ impl SubjectSource {
 }
 
 /// The object's subjects in the order of their first Seq-align, with the Seq-align subject ids
-/// found for each.
+/// found for each, and the database's lookup and header reader kept open for the object.
 #[derive(Default)]
-struct Subjects {
+struct Subjects<'db> {
     sources: Vec<SubjectSource>,
     /// The Seq-align subject ids found, each with its subject index, by position.
     keys: Vec<(ParsedSeqId, usize)>,
@@ -375,22 +392,37 @@ struct Subjects {
     key_ids: IdIndex,
     /// The subject index of each sequence (`SubjectSource::sequence`).
     by_sequence: HashMap<(u8, usize), usize>,
+    /// Index in `keys` of the most recently matched subject id (consecutive HSPs of one subject).
+    last: Option<usize>,
+    /// One `SeqidLookup` and `HeaderReader` opened lazily for the whole object.
+    db_readers: Option<(SeqidLookup<'db>, HeaderReader<'db>)>,
+    scratch_keys: Vec<u64>,
+    scratch_found: Vec<usize>,
 }
 
-impl Subjects {
+impl<'db> Subjects<'db> {
     /// The subject index of the Seq-align subject id `id`, found where no Seq-align before had
     /// it.
     fn index_of(
         &mut self,
-        inputs: &ObjectInputs<'_>,
+        inputs: &ObjectInputs<'db>,
         scope: &ScopeBioseqs<'_, '_>,
         id: &ParsedSeqId,
     ) -> Result<usize> {
+        if let Some(at) = self.last {
+            if compare(&self.keys[at].0, id) == Sic::Yes {
+                return Ok(self.keys[at].1);
+            }
+        }
         let keys = &self.keys;
-        let found = self
-            .key_ids
-            .holders(id, |at| compare(&keys[at].0, id) == Sic::Yes);
-        if let Some(&at) = found.first() {
+        self.key_ids.holders_into(
+            id,
+            |at| compare(&keys[at].0, id) == Sic::Yes,
+            &mut self.scratch_keys,
+            &mut self.scratch_found,
+        );
+        if let Some(&at) = self.scratch_found.first() {
+            self.last = Some(at);
             return Ok(self.keys[at].1);
         }
         let source = match scope.queries_holding(id).as_slice() {
@@ -410,7 +442,17 @@ impl Subjects {
                         ))
                     }
                 },
-                Some((name, db)) => database_subject(name, db, id)?,
+                Some((name, db)) => {
+                    if self.db_readers.is_none() {
+                        let lookup = db
+                            .seqid_lookup()
+                            .map_err(|error| database_error(error, PROGRAM))?;
+                        let headers = HeaderReader::new(db, false);
+                        self.db_readers = Some((lookup, headers));
+                    }
+                    let (lookup, headers) = self.db_readers.as_ref().expect("opened above");
+                    database_subject(name, db, lookup, headers, id)?
+                }
             },
         };
         let sources = &mut self.sources;
@@ -421,8 +463,10 @@ impl Subjects {
                 sources.push(source);
                 sources.len() - 1
             });
-        self.key_ids.add(self.keys.len(), id);
+        let key_at = self.keys.len();
+        self.key_ids.add(key_at, id);
         self.keys.push((id.clone(), index));
+        self.last = Some(key_at);
         Ok(index)
     }
 }
@@ -439,10 +483,13 @@ fn holds<'i>(ids: impl IntoIterator<Item = &'i ParsedSeqId>, id: &ParsedSeqId) -
 /// NCBI's ask of its servers (`Refusal::Database`); a lookup that throws, a header with a
 /// UTF8String, and a parsed header whose Seq-align id NCBI's lookup may not give as it is
 /// (`ParsedSubject::found`, `unfetchable`, `other_holder`, or an id other than `id`) are refused.
-fn database_subject(name: &[u8], db: &SeqDb, id: &ParsedSeqId) -> Result<SubjectSource> {
-    let lookup = db
-        .seqid_lookup()
-        .map_err(|error| database_error(error, PROGRAM))?;
+fn database_subject(
+    name: &[u8],
+    db: &SeqDb,
+    lookup: &SeqidLookup<'_>,
+    headers: &HeaderReader<'_>,
+    id: &ParsedSeqId,
+) -> Result<SubjectSource> {
     let oid = match lookup.seqid_to_oid(id) {
         Ok(Some(oid)) => oid,
         Ok(None) => {
@@ -461,8 +508,7 @@ fn database_subject(name: &[u8], db: &SeqDb, id: &ParsedSeqId) -> Result<Subject
             "a database sequence whose header holds a UTF8String",
         ));
     }
-    let headers = HeaderReader::new(db, false);
-    let header = read_header(&headers, ordinal, 0, PROGRAM)?;
+    let header = read_header(headers, ordinal, 0, PROGRAM)?;
     if let ReportedHeader::Parsed(subject) = &header {
         let plain = subject.found().is_none()
             && !subject.unfetchable()
@@ -576,7 +622,9 @@ impl BioseqRecords {
                 SubjectSource::Database { .. } => {
                     records.ids.push(None);
                     records.parsed.push(None);
-                    records.records.push(FastaRecord::new(String::new(), b"", b""));
+                    records
+                        .records
+                        .push(FastaRecord::new(String::new(), b"", b""));
                     records.lengths.push(0);
                     records.protein.push(false);
                     continue;
@@ -621,9 +669,8 @@ impl BioseqRecords {
                 }
                 (1, [ParsedSeqId::Local(local)]) => {
                     let text = match local {
-                        ObjectId::Str(text) => String::from_utf8(text.clone()).map_err(|_| {
-                            refused("a subject Bioseq whose local id is not UTF-8")
-                        })?,
+                        ObjectId::Str(text) => String::from_utf8(text.clone())
+                            .map_err(|_| refused("a subject Bioseq whose local id is not UTF-8"))?,
                         ObjectId::Id(n) => n.to_string(),
                     };
                     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:522-532
@@ -863,7 +910,7 @@ pub(super) fn print_object(
     };
     let taxdb_found = match inputs.database {
         Some((_, db)) => inputs.taxdb.found(db),
-        None => subject_taxonomy(Some(&TaxdbSetting::of(inputs.settings)), PROGRAM, [&spec])?
+        None => subject_taxonomy(Some(&TaxdbSetting::of(inputs.settings)), [&spec])
             .found
             .unwrap_or(false),
     };
@@ -1010,8 +1057,13 @@ pub(super) fn print_object(
         row_subjects.push(runs);
     }
     // The row where NCBI's exception comes after its subject's values were read (its letters).
-    if let (Some(NcbiStop { subject: Some(s_idx), .. }), Some(runs)) =
-        (&stop, row_subjects.last_mut())
+    if let (
+        Some(NcbiStop {
+            subject: Some(s_idx),
+            ..
+        }),
+        Some(runs),
+    ) = (&stop, row_subjects.last_mut())
     {
         if runs.last() != Some(s_idx) {
             runs.push(*s_idx);
@@ -1030,17 +1082,24 @@ pub(super) fn print_object(
     )?;
     let db = inputs.database.map(|(_, db)| db);
     let entries = subject_entries(db, &spec, &subjects.sources, &records, &printed)?;
+    let lookup_program = if blastn {
+        crate::blastinput::app::Program::Blastn
+    } else {
+        crate::blastinput::app::Program::Blastp
+    };
     check_failed_lookups(
         Some(&spec),
         row_subjects.iter().map(|runs| runs.iter().copied()),
         |s_idx| lookup_failure(entry_of(&entries, s_idx)),
-        |s_idx| match &subjects.sources[s_idx] {
+        |s_idx, _failure| match &subjects.sources[s_idx] {
             SubjectSource::Database { oid, .. } => failed_database_title(oid),
             SubjectSource::Bioseq(at) | SubjectSource::Query(at) => {
                 failed_record_title(*at, records.records[s_idx].shown_id())
             }
         },
+        lookup_program,
         PROGRAM,
+        taxdb_found,
     )?;
     let taxonomies: Vec<TabularTaxonomy> = entries
         .iter()
@@ -1089,7 +1148,7 @@ pub(super) fn print_object(
 
     print_prolog(sink)?;
     if prefetches && !prefetched {
-        sink.post(&prefetch_warning(PROGRAM));
+        sink.post(&prefetch_warning_of(None));
     }
     sink.post(&load_texts);
     let Ok(iteration) = inputs.iteration else {
@@ -1160,7 +1219,9 @@ pub(super) fn print_object(
                 // The row whose letters throw read its subject's values first.
                 if let Some(s_idx) = subject {
                     let entry = entry_of(&entries, s_idx);
-                    let shown = entry.values.subject(names.as_ref(), entry.nucleotide, -1, -1);
+                    let shown = entry
+                        .values
+                        .subject(names.as_ref(), entry.nucleotide, -1, -1);
                     post_row_texts(sink, &mut out, names.as_ref(), &spec, &writer, &shown)?;
                 }
                 // `CBlastTabularInfo`'s destructor flushes the rows before the exception.
@@ -1305,21 +1366,27 @@ struct PrePass<'p, 'b, 'r> {
     checked: HashSet<(u8, usize)>,
 }
 
-impl PrePass<'_, '_, '_> {
+impl<'p> PrePass<'p, '_, '_> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:749-1096
     /// The reads of the row of `align` in `SetFields`' order: its scores, its query (`GetSeq_id`
     /// of row 0, among the request's queries), its subject (row 1, `Subjects::index_of`), the
     /// coverage and Dense-seg that it reads (`row_plan`), and where it reads letters
     /// (`reads_letters`) those of its query and of a subject that is a Bioseq of the request
     /// (each Bioseq once; a database subject's at the row). The row's query and subject index.
-    fn row(&mut self, align: &ReadAlign<'_>, subjects: &mut Subjects) -> Result<(u32, u32), RowEnd> {
+    fn row(
+        &mut self,
+        align: &ReadAlign<'_>,
+        subjects: &mut Subjects<'p>,
+    ) -> Result<(u32, u32), RowEnd> {
         if matches!(align.variant(), "std" | "disc") {
             return Err(RowEnd::Refusal(refused(
                 "Std-seg or discontinuous Seq-aligns (those of a translated search)",
             )));
         }
         let scores = row_scores(align, self.spec).map_err(end_of)?;
-        let query_id = align.seq_id(0).map_err(|stop| end_of(ReadStop::Stop(stop)))?;
+        let query_id = align
+            .seq_id(0)
+            .map_err(|stop| end_of(ReadStop::Stop(stop)))?;
         let q_idx = match self.scope.queries_holding(query_id).as_slice() {
             [at] => *at,
             _ => {
@@ -1328,7 +1395,9 @@ impl PrePass<'_, '_, '_> {
                 )))
             }
         };
-        let id = align.seq_id(1).map_err(|stop| end_of(ReadStop::Stop(stop)))?;
+        let id = align
+            .seq_id(1)
+            .map_err(|stop| end_of(ReadStop::Stop(stop)))?;
         let s_idx = subjects
             .index_of(self.inputs, self.scope, id)
             .map_err(RowEnd::Refusal)?;

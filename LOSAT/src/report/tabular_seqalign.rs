@@ -159,7 +159,10 @@ impl RowPlan {
     /// segments (inclusive, plus strand, whatever their strands), `None` where it reads none
     /// (`reads_letters`).
     pub(crate) fn subject_range(&self, ctx: &RowContext<'_>) -> Option<(u32, u32)> {
-        let ds = self.ds.as_ref().filter(|_| reads_letters(ctx.spec, ctx.no_fetch))?;
+        let ds = self
+            .ds
+            .as_ref()
+            .filter(|_| reads_letters(ctx.spec, ctx.no_fetch))?;
         let mut range: Option<(u32, u32)> = None;
         for (seg, &len) in ds.lens.iter().enumerate() {
             let Ok(start) = u32::try_from(ds.starts[seg * 2 + 1]) else {
@@ -204,11 +207,14 @@ pub(crate) fn row_hsp<'r>(
         return Ok(hsp);
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:943-952
+    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:644-681
+    // `CDense_seg::Reverse` flips each strand in place without reversing the strands vector, so
+    // the reversed Dense-seg's first-segment strands are `ds.strands` flipped.
     let denseg = Denseg::pair(
         [SeqKey::Query, SeqKey::Subject(0)],
         &ds.starts,
         &ds.lens,
-        ds.pair_strands(),
+        ds.strands,
         ds.first_minus,
     );
     let RowBuffers {
@@ -359,9 +365,11 @@ pub(crate) fn subject_scores(
     }
     let named = |align: &ReadAlign<'_>, kind: usize| -> Result<Option<i32>, ReadStop> {
         match align.named_int(names[kind])? {
-            Some(value) => Ok(Some(i32::try_from(value).map_err(|_| {
-                ReadStop::Unsupported("a coverage past the int range")
-            })?)),
+            Some(value) => {
+                Ok(Some(i32::try_from(value).map_err(|_| {
+                    ReadStop::Unsupported("a coverage past the int range")
+                })?))
+            }
             None => Ok(None),
         }
     };
@@ -401,7 +409,7 @@ pub(crate) fn subject_scores(
                 } else {
                     uniq_seq_coverage(group)? as i32
                 };
-                if covered != 0 {
+                if covered > 0 {
                     inserted[left][kind] = Some(crate::report::tabular::coverage_percent(
                         covered as usize,
                         query_length as usize,

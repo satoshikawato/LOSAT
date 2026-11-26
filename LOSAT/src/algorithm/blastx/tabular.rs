@@ -713,7 +713,9 @@ pub(super) fn write_blastx_tabular(
                                 q_end: mapped.q_end,
                                 s_start: mapped.s_start,
                                 s_end: mapped.s_end,
-                                evalue: crate::report::serial::seqalign::seqalign_evalue_read(evalue),
+                                evalue: crate::report::serial::seqalign::seqalign_evalue_read(
+                                    evalue,
+                                ),
                                 bit_score,
                                 score,
                                 length: mapped.length(),
@@ -738,7 +740,9 @@ pub(super) fn write_blastx_tabular(
                                 q_end: 0,
                                 s_start: 0,
                                 s_end: 0,
-                                evalue: crate::report::serial::seqalign::seqalign_evalue_read(evalue),
+                                evalue: crate::report::serial::seqalign::seqalign_evalue_read(
+                                    evalue,
+                                ),
                                 bit_score,
                                 score,
                                 length: 0,
@@ -783,7 +787,9 @@ pub(super) fn write_blastx_tabular(
                                 q_end: i64::from(a.qend),
                                 s_start: i64::from(a.sstart),
                                 s_end: i64::from(a.send),
-                                evalue: crate::report::serial::seqalign::seqalign_evalue_read(evalue),
+                                evalue: crate::report::serial::seqalign::seqalign_evalue_read(
+                                    evalue,
+                                ),
                                 bit_score,
                                 score,
                                 length: a.qseq.len(),

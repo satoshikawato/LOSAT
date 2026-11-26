@@ -77,9 +77,13 @@ fn a_gi_score_name_converts_as_ncbis_replace_and_int8() {
     assert_eq!(gi_of_name(b"gi:+-5"), None);
 }
 
+// NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:644-681
+// `CDense_seg::Reverse` flips each strand in place without reversing the strands vector, so the
+// first segment's strands remain the pair flipped when `first_minus` is set.
 #[test]
-fn a_reversed_dense_seg_takes_its_last_segments_strands() {
-    let text = "Seq-align ::= { type partial, dim 2, segs denseg { dim 2, numseg 2, ids { local str \
+fn a_reversed_dense_seg_keeps_its_first_segments_strands_for_flipping() {
+    let text =
+        "Seq-align ::= { type partial, dim 2, segs denseg { dim 2, numseg 2, ids { local str \
         \"q1\", local str \"s1\" }, starts { 0, 100, 60, 160 }, lens { 60, 60 }, strands { minus, \
         plus, plus, minus } } }";
     let align = value(text);
@@ -87,5 +91,4 @@ fn a_reversed_dense_seg_takes_its_last_segments_strands() {
     let ds = read[0].dense_seg().unwrap();
     assert!(ds.first_minus);
     assert_eq!(ds.strands, [Strand::Minus, Strand::Plus]);
-    assert_eq!(ds.pair_strands(), [Strand::Plus, Strand::Minus]);
 }

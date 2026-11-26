@@ -52,32 +52,18 @@ pub(crate) struct AlnScores {
 
 /// The Dense-seg of two rows that the tabular formats build of a Seq-align
 /// (tabular.cpp:925-941): its segments' starts (two per segment, -1 for a gap) and lengths, and
-/// the strands of its first segment (`GetSeqStrand`: plus where the Dense-seg has none) and of
-/// its last.
+/// the strands of its first segment (`GetSeqStrand`: plus where the Dense-seg has none;
+/// `CDense_seg::Reverse`, Dense_seg.cpp:644-681, flips the strands vector in place without
+/// reversing segment order, so the reversed Dense-seg's first-segment strands are the flipped
+/// `strands`).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PairDenseg {
     pub(crate) starts: Vec<i32>,
     pub(crate) lens: Vec<u32>,
     pub(crate) strands: [Strand; 2],
-    /// The strands of the last segment (plus where the Dense-seg has none).
-    pub(crate) last_strands: [Strand; 2],
     /// Whether the Dense-seg has strands and its first is minus: the tabular formats reverse it
     /// then (tabular.cpp:943-952).
     pub(crate) first_minus: bool,
-}
-
-impl PairDenseg {
-    // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_seg.cpp:643-680
-    /// The strands that `CAlnMap` reads of the Dense-seg as the tabular formats read it (before
-    /// `Denseg::pair` reverses them where `first_minus`): the first segment's, or where the
-    /// Dense-seg is reversed the last segment's, which `Reverse` makes the first.
-    pub(crate) fn pair_strands(&self) -> [Strand; 2] {
-        if self.first_minus {
-            self.last_strands
-        } else {
-            self.strands
-        }
-    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:3160-3212
@@ -319,11 +305,9 @@ impl<'a> ReadAlign<'a> {
             }
         }
         let row_strand = |at: usize| strands.get(at).map_or(Strand::Plus, |&s| strand(s));
-        let last = 2 * (numseg - 1);
         Ok(PairDenseg {
             first_minus: strands.first() == Some(&2),
             strands: [row_strand(0), row_strand(1)],
-            last_strands: [row_strand(last), row_strand(last + 1)],
             starts,
             lens,
         })

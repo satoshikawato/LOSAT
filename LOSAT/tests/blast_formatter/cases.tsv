@@ -198,3 +198,28 @@ of6_deltablast	-archive in/delta.asn -outfmt 6
 of6_pd_general_query	-archive in/pdq.asn -outfmt 6
 refused_tabular_bl2seq_legacy_7	BL2SEQ_LEGACY=1 -archive in/bn.asn -outfmt 7
 refused_tabular_locations	-archive in/pdq_acc.asn -outfmt 6
+of6_bit_nan	-archive in/bit_nan.asn -outfmt 6
+of6_bit_pinf	-archive in/bit_pinf.asn -outfmt '6 std score'
+of6_bit_ninf	-archive in/bit_ninf.asn -outfmt 6
+of7_minus_all	-archive in/minus.asn -outfmt '7 std sstrand sframe frames qseq sseq btop qcovs qcovus qcovhsp'
+of10_minus	-archive in/minus.asn -outfmt 10
+of6_minus_all	-archive in/minus.asn -outfmt '6 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_minus_subj	-archive in/minus_subj.asn -outfmt '6 std sstrand qseq sseq btop qcovs qcovus'
+of7_zero	-archive in/zero.asn -outfmt 7
+of6_zero	-archive in/zero.asn -outfmt 6
+of10_zero	-archive in/zero.asn -outfmt 10
+of20_zero	-archive in/zero.asn -outfmt 20
+of6_qcovus_wrap	-archive in/qcovus_wrap.asn -outfmt '6 std qcovs qcovus'
+of7_qcovus_wrap	-archive in/qcovus_wrap.asn -outfmt '7 qseqid sseqid qcovs qcovus qcovhsp sseq'
+of6_missing_scores	-archive in/missing_scores.asn -outfmt '6 std score'
+of7_ids1_q2	-archive in/ids1_q2.asn -outfmt 7
+of6_ids1_q2	-archive in/ids1_q2.asn -outfmt 6
+of20_ids1_q2	-archive in/ids1_q2.asn -outfmt 20
+of7_ids1_subj	-archive in/ids1_subj.asn -outfmt 7
+of6_strands_pm	-archive in/strands_pm.asn -outfmt '6 std sstrand qseq sseq btop'
+of6_strands_mp	-archive in/strands_mp.asn -outfmt '6 std sstrand qseq sseq btop'
+of6_gi_ok	-archive in/gi_ok.asn -outfmt 6
+of7_self_subj_all	-archive in/self_subj.asn -outfmt '7 qseqid qgi qacc qaccver qlen sseqid sallseqid sgi sallgi sacc saccver sallacc slen qstart qend sstart send qseq sseq evalue bitscore score length pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop sstrand qcovs qcovhsp qcovus stitle salltitles'
+of6_self_subj_pd	-archive in/self_subj.asn -outfmt '6 std stitle sallseqid staxid sseq' -parse_deflines
+of6_two_ids	-archive in/two_ids.asn -outfmt '6 std sseqid sallseqid stitle qcovs'
+of7_two_ids	-archive in/two_ids.asn -outfmt 7

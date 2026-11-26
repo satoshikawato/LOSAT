@@ -2457,8 +2457,12 @@ impl<'a> TabularWriter<'a> {
                 SubjectAllGis => out.extend_from_slice(list(1)),
                 SubjectAllAccessions => out.extend_from_slice(list(2)),
                 SubjectLength => push_num(out, if subject_set { subject.length } else { 0 }),
-                Evalue => write_evalue_ncbi_tabular_raw(out, hsp.evalue).expect("a Vec takes every byte"),
-                BitScore => write_bitscore_ncbi(out, hsp.bit_score).expect("a Vec takes every byte"),
+                Evalue => {
+                    write_evalue_ncbi_tabular_raw(out, hsp.evalue).expect("a Vec takes every byte")
+                }
+                BitScore => {
+                    write_bitscore_ncbi(out, hsp.bit_score).expect("a Vec takes every byte")
+                }
                 Score => push_num(out, hsp.score),
                 PercentIdentical => out.extend_from_slice(b"0.000"),
                 PercentPositives => out.extend_from_slice(b"0.00"),
@@ -2556,8 +2560,12 @@ impl<'a> TabularWriter<'a> {
                     hsp.ops,
                     AlignRow::Subject,
                 ),
-                Evalue => write_evalue_ncbi_tabular_raw(out, hsp.evalue).expect("a Vec takes every byte"),
-                BitScore => write_bitscore_ncbi(out, hsp.bit_score).expect("a Vec takes every byte"),
+                Evalue => {
+                    write_evalue_ncbi_tabular_raw(out, hsp.evalue).expect("a Vec takes every byte")
+                }
+                BitScore => {
+                    write_bitscore_ncbi(out, hsp.bit_score).expect("a Vec takes every byte")
+                }
                 Score => push_num(out, hsp.score),
                 AlignmentLength => push_num(out, hsp.length),
                 PercentIdentical => out.extend_from_slice(

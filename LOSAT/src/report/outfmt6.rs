@@ -312,7 +312,11 @@ pub(crate) fn write_bitscore_ncbi<W: Write + ?Sized>(
 /// set (the NaN of NCBI's reader of `NOT-A-NUMBER` in an archive, blast_formatter), else `nan`,
 /// right-aligned.
 fn write_nan<W: Write + ?Sized>(writer: &mut W, value: f64, width: usize) -> io::Result<()> {
-    let text = if value.is_sign_negative() { "-nan" } else { "nan" };
+    let text = if value.is_sign_negative() {
+        "-nan"
+    } else {
+        "nan"
+    };
     write!(writer, "{text:>width$}")
 }
 

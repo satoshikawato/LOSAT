@@ -94,6 +94,44 @@ pub(crate) fn seqalign_evalue(evalue: f64) -> f64 {
         evalue
     }
 }
+/// The E-value and the bit score that a Seq-align of an HSP whose search made `evalue` and
+/// `bit_score` carries: the E-value after `seqalign_evalue` (every value below 1e-180, a negative
+/// one too, is 0), which leaves a NaN, the E-value the Seq-align lacks (`seqalign_evalue_absent`),
+/// and the bit score where it is 0 or above, else the readers' default -1
+/// (`CAlignFormatUtil::GetAlnScores`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1185-1197
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:820-826
+pub(crate) fn seqalign_scores(evalue: f64, bit_score: f64) -> (f64, f64) {
+    (
+        seqalign_evalue(evalue),
+        if bit_score >= 0.0 { bit_score } else { -1.0 },
+    )
+}
+
+/// Whether the Seq-align of an HSP lacks its E-value `evalue`, a NaN (NCBI writes a value of 0 or
+/// above only, and every other value is 0 or above after `seqalign_evalue`). The lists of every
+/// program carry the absent E-value as the NaN that the search made (a PSSM whose gapped block
+/// is not valid gives it), so a list's value means the same whatever filled it: the one test of
+/// the writers that omit it (the ASN.1 scores) and of `seqalign_evalue_read`.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1185-1190
+pub(crate) fn seqalign_evalue_absent(evalue: f64) -> bool {
+    evalue.is_nan()
+}
+
+/// The E-value that a reader of an HSP's Seq-align takes (`GetAlnScores`, the XML's `Hsp_evalue`,
+/// the report's columns and comparators): -1 where the Seq-align lacks it
+/// (`seqalign_evalue_absent`), else `seqalign_evalue`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:820-826
+pub(crate) fn seqalign_evalue_read(evalue: f64) -> f64 {
+    if seqalign_evalue_absent(evalue) {
+        -1.0
+    } else {
+        seqalign_evalue(evalue)
+    }
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1203, 1490-1496
 /// The `num_ident` score of an HSP's Seq-align (`s_AddScoresToSeqAlign`), from the engine's
@@ -265,6 +303,34 @@ pub(crate) fn protein_row_segments(hit: &crate::common::Hit, segments: &mut Segm
     };
     // A protein row's strand is unknown: the lengths are not read.
     collect_seq_align_data(&record, 0, 0, false, false, segments);
+}
+
+/// The Dense-seg segment of a BLASTN `-db` HSP whose Seq-align query start `query_start` lies
+/// below 0 in record coordinates (`CreateDensegFromDendiag`, align_format_util.cpp:1149-1208):
+/// one segment with the negative query start (which `CAlnMix` treats as a gap on row 0) and the
+/// positive subject start.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:1149-1208
+pub(crate) fn nucleotide_left_of_record_segments(
+    hit: &crate::common::Hit,
+    (query_start, query_len): (i32, u32),
+    segments: &mut Segments,
+) -> crate::report::query_anchored::HspStrands {
+    let minus = hit.query_frame < 0;
+    let s_low = hit.s_start.min(hit.s_end) as i32 - 1;
+    segments.starts.clear();
+    segments.lens.clear();
+    segments.strands.clear();
+    segments.starts.extend([query_start, s_low]);
+    segments.lens.push(query_len as i32);
+    segments.strands.extend([
+        if minus { Strand::Minus } else { Strand::Plus },
+        Strand::Plus,
+    ]);
+    crate::report::query_anchored::HspStrands {
+        query_minus: minus,
+        ..Default::default()
+    }
 }
 
 /// The Dense-seg segments of a BLASTN hit whose coordinates are in its records (`Hit::q_start` to
@@ -825,10 +891,9 @@ fn write_score_list<E: Encoder>(enc: &mut E, hsp: &HspRecord<'_>, query_length: 
     if hsp.num > 1 {
         write_score_int(enc, "sum_n", hsp.num);
     }
-    let evalue = seqalign_evalue(hsp.evalue);
-    if evalue >= 0.0 {
+    if !seqalign_evalue_absent(hsp.evalue) {
         let score_type = if hsp.num <= 1 { "e_value" } else { "sum_e" };
-        write_score_real(enc, score_type, evalue);
+        write_score_real(enc, score_type, seqalign_evalue(hsp.evalue));
     }
     if hsp.bit_score >= 0.0 {
         write_score_real(enc, "bit_score", hsp.bit_score);
@@ -1576,9 +1641,23 @@ fn write_seq_align_dendiag<E: Encoder>(
         enc.member("starts", 2);
         enc.begin_list(false);
         enc.element();
-        enc.int(q_start + query.offset);
+        // NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:51-59
+        // NCBI reference (598d8ae6): c++/src/objects/seqalign/Dense_diag.cpp:72-90
+        // `Dense-diag.starts` stores unsigned `TSeqPos` (`u32`): a start below 0 after
+        // `OffsetRow` wraps modulo 2^32.
+        let q_pos = q_start.wrapping_add(query.offset);
+        if q_pos < 0 {
+            enc.big_int(i64::from(q_pos as u32));
+        } else {
+            enc.int(q_pos);
+        }
         enc.element();
-        enc.int(s_start + subject.offset);
+        let s_pos = s_start.wrapping_add(subject.offset);
+        if s_pos < 0 {
+            enc.big_int(i64::from(s_pos as u32));
+        } else {
+            enc.int(s_pos);
+        }
         enc.end_list();
         enc.end_member();
         enc.member("len", 3);

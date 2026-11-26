@@ -366,7 +366,7 @@ fn generated_title(
     title: &[u8],
 ) -> Result<Vec<u8>, Stop> {
     let ids = &set.deflines[0].ids;
-    let mut bioseq_facts = crate::report::db_subject::bioseq_facts(ids);
+    let mut bioseq_facts = crate::report::defline::bioseq_facts(ids);
     bioseq_facts.local_annots_only = true;
     bioseq_facts.has_source = source_taxid.is_some();
     let from_source = bioseq_title_from_source(title, || bioseq_facts.clone());

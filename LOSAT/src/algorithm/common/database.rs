@@ -480,10 +480,11 @@ pub(crate) fn check_setup_count(
     Ok(())
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:240-251
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:240-256
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
 /// A reader error while the preliminary search reads the sequences: NCBI's search stage
-/// replaces the reader's text (`SeqDbError::ncbi_search_message`), and the application
+/// replaces a `CSeqDBException` (`SeqDbError::ncbi_search_message`) and wraps any other known
+/// `std::exception` (`SeqDbError::ncbi_preliminary_message`), and the application
 /// reports `BLAST engine error: <text>` with exit status 3. The error is kept apart from
 /// the others (`PreliminaryReadError`), because NCBI has written the outfmt 0 prolog and
 /// read the query batch before it.
@@ -494,7 +495,7 @@ pub(crate) fn search_read_error(error: SeqDbError, program: &str) -> anyhow::Err
 /// [`search_read_error`] of an error that its owner keeps (`seqdb::MaskBlock`: the masks that the
 /// preliminary search reads with each sequence, seqsrc_seqdb.cpp:318-321).
 pub(crate) fn search_read_error_of(error: &SeqDbError, program: &str) -> anyhow::Error {
-    match error.ncbi_search_message() {
+    match error.ncbi_preliminary_message() {
         Some(text) => PreliminaryReadError(text).into(),
         None => anyhow::Error::msg(losat_reader_error(error, program)),
     }
@@ -683,13 +684,25 @@ fn stored_parts(
 }
 
 /// NCBI's error of a database file that cannot be read during the preliminary search
-/// (`search_read_error`), with the text after `BLAST engine error: `.
+/// (`search_read_error`), with the bytes after `BLAST engine error: `.
 #[derive(Debug)]
-pub(crate) struct PreliminaryReadError(pub(crate) &'static str);
+pub(crate) struct PreliminaryReadError(pub(crate) std::borrow::Cow<'static, [u8]>);
+
+impl PreliminaryReadError {
+    /// A static ASCII text of `CLocalBlast`'s preliminary search error.
+    pub(crate) const fn from_static(text: &'static str) -> Self {
+        Self(std::borrow::Cow::Borrowed(text.as_bytes()))
+    }
+
+    /// The bytes after `BLAST engine error: `.
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
 
 impl std::fmt::Display for PreliminaryReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{ENGINE_ERROR} {}", self.0)
+        write!(f, "{ENGINE_ERROR} {}", String::from_utf8_lossy(&self.0))
     }
 }
 

@@ -202,7 +202,7 @@ pub(crate) fn read_to_failure(input: &mut impl std::io::Read) -> Vec<u8> {
 /// open gets NCBI's error (`crate::cli::inaccessible`), and a file named `.gz`, `.bz2` or `.zst`
 /// (`compressed::compression_of_name`) is inflated into an unnamed temporary file first, which is
 /// returned in its place: the program then reads it exactly as it reads the plain file (the same
-/// lines and messages, the same readable-byte hint of `FastaStream::from_file`, the same second
+/// lines and messages, the same readable-byte hint of `fasta_reader::stream::FastaStream::from_file`, the same second
 /// handle of blastn's query stream and second reads of BLASTX's query), while the decoder holds
 /// its window. Concatenated members, streams and frames (bgzip, pbzip2, pzstd, `cat a.gz b.gz`)
 /// are read whole, and a `.gz` file as makeblastdb reads it (`compressed::GzipMembers`: a member's

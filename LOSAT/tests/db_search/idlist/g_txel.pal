@@ -1,0 +1,5 @@
+TITLE tx empty v5 walk
+DBLIST g
+TAXIDLIST tx_empty.txt
+NSEQ 4
+LENGTH 495

@@ -3,6 +3,7 @@
 pub mod args;
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:319-326
 pub mod input;
+pub(crate) mod input_source;
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:577-587
 pub mod query_setup;
 pub(crate) mod reader_batch;

@@ -1,0 +1,5 @@
+TITLE tx v5 walk
+DBLIST g
+TAXIDLIST tx_a.txt
+NSEQ 8
+LENGTH 999

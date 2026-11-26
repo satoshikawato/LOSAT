@@ -116,6 +116,14 @@ pub struct XmlQuery<'a> {
     /// region of a plus frame in `Search_query-masking` and masks with the regions of frame 0
     /// or the HSP's translated frame.
     pub masks: &'a [QueryMask],
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2363-2389
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xml2format.cpp:95-110
+    /// Whether the result joins the held report of the queries before it where the XML2 and JSON
+    /// documents hold their reports (`blast_xml2::Xml2Document::holds_back`; the one owner's
+    /// answer, `query_batch::XmlShow::joins_held`): NCBI adds the result's `Search` to that
+    /// report, shown with the id, title and length of the report's first `Search` and masked by
+    /// its masks. Read by no other document.
+    pub joins_held: bool,
 }
 
 /// A subject with HSPs (a `Hit`).

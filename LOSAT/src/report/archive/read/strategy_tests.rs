@@ -384,7 +384,7 @@ fn the_crafted_files_of_the_survey_end_as_ncbis() {
     assert!(checked >= 60, "{checked} cases");
 }
 
-/// F2-Q1 (Owner 2026-11-20 「Q1=C」, PD-LOSAT-NCBI-DEFECTS exception 31): the import keeps the
+/// F2-Q1 (Owner 2026-11-20 「Q1=C」, PD-LOSAT-NCBI-DEFECTS exception 32): the import keeps the
 /// command line's `-num_threads` for the strategy's subjects, which the run searches once with
 /// them (`tests/import_search_strategy.rs` checks that the bytes are the `-num_threads 1` ones),
 /// also where blastn runs a TBLASTX strategy.

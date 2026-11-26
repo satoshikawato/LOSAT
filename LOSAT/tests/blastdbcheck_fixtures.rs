@@ -49,8 +49,9 @@ const AWAITING_ZERO_PAGE: [&str; 6] = [
 /// Rows of an alias file whose count checks overflow a signed integer in NCBI's binary, where
 /// the overflow's result (undefined in C) decides the check; LOSAT must refuse them (as above)
 /// until the Owner decides the exception (Q-D2B-OV). An overflow that decides nothing gives NCBI's
-/// result (a_ov3).
-const AWAITING_Q_D2B_OV: [&str; 2] = ["a_ov1", "a_ov2"];
+/// result (a_ov3). `-dir .` of the alias rows (`a_dir`, `a_dir_v1`) now gets past `membx.pal`
+/// and `taxmiss.pal` and meets `ov1.pal`.
+const AWAITING_Q_D2B_OV: [&str; 4] = ["a_ov1", "a_ov2", "a_dir", "a_dir_v1"];
 
 /// Rows of `-cdd_delta`, which LOSAT refuses until row RG-D2b ports its test of a CDD database's
 /// headers (the next PR of the row).
@@ -68,11 +69,6 @@ const AWAITING_CDD_DELTA: [&str; 12] = [
     "c_two",
     "c_two_v4",
 ];
-
-/// Rows whose alias files hold keys that LOSAT's database reader refuses until line RG-D reads
-/// them: `MEMB_BIT` (D1d) and `TAXIDLIST` over a version 5 database (D1c-2,
-/// `seqdb::alias::refuse_v5_lists`); `-dir .` of the alias rows meets both.
-const AWAITING_READER: [&str; 4] = ["a_membx", "a_taxmiss", "a_dir", "a_dir_v1"];
 
 /// `tests/fixtures/blastdbcheck`.
 fn fixtures() -> PathBuf {
@@ -477,12 +473,11 @@ fn text(bytes: &[u8]) -> String {
 }
 
 /// Every list of rows that LOSAT must refuse.
-const REFUSAL_LISTS: [&[&str]; 5] = [
+const REFUSAL_LISTS: [&[&str]; 4] = [
     &LOSAT_REFUSES,
     &AWAITING_ZERO_PAGE,
     &AWAITING_Q_D2B_OV,
     &AWAITING_CDD_DELTA,
-    &AWAITING_READER,
 ];
 
 fn must_refuse(name: &str) -> bool {

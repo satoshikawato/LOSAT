@@ -85,19 +85,25 @@ impl BlastpApp {
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1066-1133
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:707-711
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2358-2362
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:873-901
     /// How the formatter of the output format `outfmt` cuts the app's hit lists: the one owner of
     /// this rule for the search (`report_prep::report_values` reads it of the first format) and
     /// for the library's grouping of formats into searches (`api::run::search_groups`), since a
-    /// search's lists are cut once for all its reports. `WriteArchive` cuts nothing; psiblast's
-    /// XML formatter cuts the round's results themselves before the round's PSSM and inclusion set
-    /// are made (`TrimSeqAlign`); the other formats of psiblast and rpsblast cut a copy after them
-    /// (`PruneSeqalign`); the lists of the other apps are never longer than the formats show.
+    /// search's lists are cut once for all its reports. `WriteArchive` and the organism report
+    /// (`x_PrintTaxReport`, outfmt 18) cut nothing; psiblast's XML formatter and its XML2 and JSON
+    /// formatters (outfmt 13 to 16) cut the round's results themselves before the round's PSSM and
+    /// inclusion set are made (`TrimSeqAlign`); the other formats of psiblast and rpsblast cut a
+    /// copy after them (`PruneSeqalign`); the lists of the other apps are never longer than the
+    /// formats show.
     pub fn list_cut(self, outfmt: i32) -> ListCut {
-        use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, XML};
+        use crate::blastinput::app::output_format::{
+            ARCHIVE_FORMAT, JSON, TAX_FORMAT, XML, XML2_S,
+        };
         match (self, outfmt) {
             _ if !self.prunes_after_traceback() => ListCut::Uncut,
-            (_, ARCHIVE_FORMAT) => ListCut::Uncut,
-            (BlastpApp::Psiblast, XML) => ListCut::BeforePssm,
+            (_, ARCHIVE_FORMAT | TAX_FORMAT) => ListCut::Uncut,
+            (BlastpApp::Psiblast, XML | JSON..=XML2_S) => ListCut::BeforePssm,
             _ => ListCut::AfterPssm,
         }
     }

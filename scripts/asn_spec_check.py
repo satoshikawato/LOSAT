@@ -99,12 +99,11 @@ def kind_of_args(args: str, aliases: dict[str, tuple[str, str]]) -> Optional[str
         return "String:Store"
     if "STL_CHAR_vector" in args:
         return "Octets"
+    # `BigInt, ()`: `SERIAL_REF_BigInt`, an Int8 (serial/serialimpl.hpp:114-116).
+    if re.search(r"\bBigInt\b", args):
+        return "Integer"
     if "(ENUM," in args:
         return "Enumerated|Integer"
-    if re.search(r"\bBigInt\b", args):
-        # NCBI reference (598d8ae6): c++/include/serial/serialimpl.hpp:114-116
-        # The BigInt type of a generated member is an `Int8`.
-        return "Integer"
     if re.search(r"\bC_\w+", args):
         return "class:anon"
     m = re.search(r"STD, \(([^)]*)\)", args)
@@ -161,22 +160,24 @@ def kind_agrees(mine: str, ncbi: str) -> bool:
 
 
 BASE_CLASS = re.compile(r"^class (?:NCBI_\w+ )?C(\w+)_Base\b", re.M)
-HEADERS_BY_CLASS: dict[str, list[Path]] = {}
+HEADERS: dict[Path, dict[str, list[Path]]] = {}
 
 
 def generated_headers(include: Path, type_name: str) -> list[Path]:
-    """The generated headers of `type_name`: `<Type>_.hpp`, or, for a name that datatool shortens
-    in its file names (`Blast4-queue-search-request`: `Blast4_queue_search_reques_.hpp`), the
-    header that declares its class `C<Type>_Base`."""
-    base = type_name.replace("-", "_")
-    found = sorted(include.glob(f"*/{base}_.hpp"))
-    if found:
-        return found
-    if not HEADERS_BY_CLASS:
+    """The generated header of `type_name`: `<Type>_.hpp`, or, where datatool shortened the file
+    name (`Blast4-queue-search-request` is `Blast4_queue_search_reques_.hpp`), the header that
+    declares its class `C<Type>_Base`."""
+    stem = type_name.replace("-", "_")
+    direct = sorted(include.glob(f"*/{stem}_.hpp"))
+    if direct:
+        return direct
+    if include not in HEADERS:
+        index: dict[str, list[Path]] = {}
         for path in sorted(include.glob("*/*_.hpp")):
             for m in BASE_CLASS.finditer(path.read_text(encoding="latin-1")):
-                HEADERS_BY_CLASS.setdefault(m.group(1), []).append(path)
-    return HEADERS_BY_CLASS.get(base, [])
+                index.setdefault(m.group(1), []).append(path)
+        HEADERS[include] = index
+    return HEADERS[include].get(stem, [])
 
 
 def header_constants(include: Path, type_name: str) -> dict[str, int]:

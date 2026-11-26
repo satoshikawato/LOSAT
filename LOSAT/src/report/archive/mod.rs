@@ -53,8 +53,12 @@ pub use writer::{
     KaBlock, RequestInputs, SearchedContext0,
 };
 
-/// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes.
+/// The Karlin-Altschul block of the results (`Blast4-ka-block`) that `params` makes: the missing
+/// one (-1) for a block that the ancillary data does not keep (`stats::tables::ancillary_kept`).
 pub(crate) fn ka_block(params: &KarlinParams, gapped: bool) -> KaBlock {
+    if !crate::stats::tables::ancillary_kept(params.lambda) {
+        return KaBlock::missing(gapped);
+    }
     KaBlock {
         lambda: params.lambda,
         k: params.k,

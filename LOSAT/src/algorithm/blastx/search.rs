@@ -9,7 +9,7 @@ use super::{
     query_setup::{unit_ranges, PreparedQueryBatch},
     reader_batch::{prepare_reader_batch, UnitPrep},
     seed::{BxLookup, Diagonals},
-    split::{split_queries, split_sizes, QueryChunk},
+    split::{self, split_queries, split_sizes, QueryChunk},
     subjects::Subjects,
 };
 use anyhow::{ensure, Result};
@@ -254,6 +254,13 @@ fn x_search_core(
             sink.unsearched_batch(range.start, &full, &full_params)?;
             continue;
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:232-236
+        // NCBI's search of a batch that it splits stops at its chunks first (`split::chunk_stops`:
+        // chunks left without a query, a first chunk that would be split again), before the
+        // database's errors and the setup's below (2.17.0 probe of line RG item X-short-bat-2:
+        // also on a database whose sequences cannot be read), after the reports of the batches
+        // before.
+        split::chunk_stops(queries, &full, options, sizes)?;
         // NCBI reads the database's sequences in the preliminary search of the first batch
         // with a valid context (batches without one are not searched, above). The subjects are
         // checked there too, after the split sizes and the setup of the queries, whose errors
@@ -313,6 +320,14 @@ fn x_search_core(
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:219-222
         sink.batch_start(range.start, &full, &full_params)?;
         let mut chunks = split_queries(queries, &full, options, sizes)?;
+        // An overlap that is not a multiple of 3 moves the HSPs of the chunks after the first onto
+        // other frames: refused where the search would read the subjects, with a subject in hand
+        // and sequences that can be read (else NCBI's report or its read error stays).
+        if let Some(refusal) = split::out_of_frame(&chunks, sizes, options) {
+            if !subjects.is_empty() && subjects.sequence_file_read_error().is_none() {
+                return Err(refusal);
+            }
+        }
         // The statistics of each subject read the options' spaces of the whole query by each
         // chunk's context index (`s_GetEffectiveSearchSpaceForContext`, blast_setup.c:676-697).
         if subjects.per_subject() {

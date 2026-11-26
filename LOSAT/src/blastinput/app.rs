@@ -113,7 +113,7 @@ pub fn query_error(message: &str) -> anyhow::Error {
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275,289-291,300-302 (TBLASTX's
-// loop is the same, tblastx_app.cpp:176-207)
+// loop is the same, tblastx_app.cpp:176-207; BLASTN's loop, blastn_app.cpp:295-318)
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
 /// An error of a query batch's search that comes after the reports of the batches before, for
 /// every program: NCBI searches a batch and prints its reports before it reads the next one, so
@@ -131,10 +131,12 @@ pub fn query_error(message: &str) -> anyhow::Error {
 /// the run has not posted it, and returns the error it holds, its message unchanged: TBLASTX's
 /// (`tblastx::blast_engine::run_impl`, the X2c form, the Owner's decision of 2026-11-16 on line
 /// RG's Q-X2c: "the results of the query batches before are written"), TBLASTN's
-/// (`tblastn::tblastn_app::batch_failure`), BLASTX's (`blastx::native`), BLASTN's titles and
-/// prefetch, and BLASTP's, psiblast's and rpsblast's (`blastp::blast_engine::search`, which
-/// searches all batches together and then the batches before the failing one again alone, so it
-/// needs `query`). Any other refusal of a batch's search comes before the run's first byte.
+/// (`tblastn::tblastn_app::batch_failure`), BLASTX's (`blastx::native`), BLASTN's
+/// (`blastn::blast_engine::run::run_in_pool`: its titles and prefetch, and its set-up failures
+/// and database search errors, `context_statistics::setup_failure` and `database_search_error`),
+/// and BLASTP's, psiblast's and rpsblast's (`blastp::blast_engine::search`, which searches all
+/// batches together and then the batches before the failing one again alone, so it needs
+/// `query`). Any other refusal of a batch's search comes before the run's first byte.
 #[derive(Debug)]
 pub(crate) struct ErrorAfterBatchReports {
     pub(crate) error: anyhow::Error,

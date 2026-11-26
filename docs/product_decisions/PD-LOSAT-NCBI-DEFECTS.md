@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.114
+- Version: 1.115
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -818,11 +818,30 @@
   NCBI's `CTmpFile` stops with a `mkstemp()` message containing its process ID; Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.112 at the merge of dev
   245b7e2e3; first 1.109, then 1.110);
-  1.114 2026-11-26 (approved exception 32, `losat blastdbcheck` alias count checks and
+  1.114 2026-11-25 (a Seq-align id whose lookup throws on the id itself, a string tag of `PIG` or
+  `BL_ORD_ID` (`gnl|BL_ORD_ID|0`, which makeblastdb stores with a text tag) or a `ti` tag that is
+  not a number, is written as NCBI writes it with the prefetch on or off: NCBI's prefetch of the
+  batch catches the exception, writes `Error pre-fetching sequence data` and ends its loads, and
+  the formats then load the batch's sequences one by one, as with the prefetch off (1.47, 1.50,
+  1.71 and 1.96), with `Error: ` and the exception's text and exit status 255 where a format stops
+  at it; the rejection of 1.10 stays for such a sequence's tabular row that prints `sacc` or
+  `saccver` (NCBI's null pointer exception, with addresses of its binary), outfmt 17 and a holder
+  that NCBI's scope or data loader gives for the id, and the batch's other sequences are refused as
+  where the prefetch is off (a Seq-align id that an id of another sequence of the database matches
+  weakly, or that a version 5 database cannot list; review 1 of item pf7, M1); line DBID item pfoff-7, Owner-delegated, standing instruction 2026-09-29,
+  restated 2026-10-07; numbered after 1.113 (psiblast line item PS14); first 1.101, then 1.103 at the
+  merge of dev that brought line RG item KC-11d's 1.100, exception 30's 1.101 and psiblast line
+  item PS10e's 1.102, then 1.104 at the merge of dev that brought line RG item K10a's 1.103, then
+  1.106 at the merge of dev that brought line NP item M4b-T3's 1.104 and psiblast line item PS10b's
+  1.105, then 1.107 at the merge of dev that brought line NP item M4b-3c part 2's 1.106, then 1.108
+  at the merge of dev that brought line NP item M (b)'s 1.107, then 1.109 at the merge of dev that
+  brought line RG item X-short-bat-2's 1.108, then 1.113 at the merge of dev that brought 1.109 to
+  1.112, then 1.114 at the merge of dev that brought psiblast line item PS14's 1.113);
+  1.115 2026-11-26 (approved exception 32, `losat blastdbcheck` alias count checks and
   `-ends` OID arithmetic widened beyond NCBI's signed 32-bit/64-bit integer overflow,
   line RG-D2 items D2b-2..5; Owner 2026-11-25 17:54
-  JST, Q-D2b-OV=A; numbered after 1.113 at the merge of dev that brought 1.113 (PS14); first
-  1.109, then 1.110, 1.113, exception 31 until 1.111 took 31)
+  JST, Q-D2b-OV=A; numbered after 1.114 at the merge of dev that brought 1.114 (DBID pfoff-7);
+  first 1.109, then 1.110, 1.113, 1.114, exception 31 until 1.111 took 31)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -4762,7 +4781,7 @@ search past `Int4`)". Psiblast line item PS7c, fix round 1 (review B1).
     `LOSAT/src/stats/spouge_tests.rs` keeps the cutoffs: NCBI's arguments of these rows (gdb) and, for gapped
     Lambdas from 1e-300 to 1e300, below 0, 0, infinite and not a number, NCBI's search in 128-bit integers.
 
-## Approved exception 32 (`blastdbcheck` alias count checks and `-ends` OID arithmetic past signed overflow, version 1.114)
+## Approved exception 32 (`blastdbcheck` alias count checks and `-ends` OID arithmetic past signed overflow, version 1.115)
 
 Decided by the Owner on 2026-11-25 at 17:54 JST, 「Q-3C2-STALE=B Q-D2b-OV=A Q-KB9A-SPEED=A Q-AGVI-CAP2=A
 Q-AGVI-MODEL=A Q-CITE-ALL=B」 (`qbatch-20261125/ANSWERS.md` 2; `remaining-gaps-20261112/DECISIONS.md` OQ-1125).
@@ -4770,7 +4789,7 @@ The chosen option A reads 「A: 広い型で正確に計算し誤判定を出さ
 NCBI's signed wraparound; (C) refusing overflowing inputs.
 
 32. **`blastdbcheck` alias count checks and `-ends` OID arithmetic past signed 32-bit or
-    64-bit overflow (Owner 2026-11-25 17:54 JST, Q-D2b-OV=A, version 1.114).** NCBI BLAST+ 2.17.0
+    64-bit overflow (Owner 2026-11-25 17:54 JST, Q-D2b-OV=A, version 1.115).** NCBI BLAST+ 2.17.0
     computes `blastdbcheck`'s alias-file count guards (`FIRST_OID`, `LAST_OID`, `MAXOID`, `NSEQ`,
     `LENGTH`, `OIDLIST` combinations in `blastdbcheck.cpp:782-805`) and `-ends` OID bounds
     (`blastdbcheck.cpp:666-682`) in signed 32-bit `int` and 64-bit `Int8`, where

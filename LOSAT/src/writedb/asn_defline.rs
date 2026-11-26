@@ -1778,7 +1778,7 @@ fn extract_qual_comment_fallback(feat: &Value) -> Vec<u8> {
 
 /// Extracts a `CompactLoc` iteratively from a `Seq-loc` `Value`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:88-115,481-513
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:88-115,300-513
 fn extract_loc(root: &Value, interner: &mut SeqIdInterner) -> CompactLoc {
     let s = dschema();
     let mut out = CompactLoc {
@@ -1786,12 +1786,52 @@ fn extract_loc(root: &Value, interner: &mut SeqIdInterner) -> CompactLoc {
         ..CompactLoc::default()
     };
 
-    let mut stack = vec![root];
+    let mut stack = Vec::new();
+    let mut mix_child_one_id = Vec::new();
+    let mut child_empties = Vec::new();
+    if let Some((choice, inner)) = as_choice(root) {
+        if choice == s.seqloc_mix {
+            if let Some(items) = as_list(inner) {
+                mix_child_one_id.reserve(items.len());
+                for item in items {
+                    let start = out.pieces.len();
+                    child_empties.clear();
+                    extract_loc_pieces(item, interner, &mut out, &mut stack, &mut child_empties);
+                    mix_child_one_id.push(pieces_and_empties_are_one_id(
+                        &out.pieces[start..],
+                        &child_empties,
+                    ));
+                }
+            }
+        } else {
+            extract_loc_pieces(root, interner, &mut out, &mut stack, &mut child_empties);
+        }
+    }
+    let child_flags = (!mix_child_one_id.is_empty()).then_some(mix_child_one_id.as_slice());
+    out.strand = compute_top_strand(root, &out.pieces, child_flags);
+    out.deferred_strand = deferred_top_strand(root, &out.pieces, child_flags);
+    out
+}
+
+fn extract_loc_pieces<'a>(
+    root: &'a Value,
+    interner: &mut SeqIdInterner,
+    out: &mut CompactLoc,
+    stack: &mut Vec<&'a Value>,
+    empties: &mut Vec<Option<HandleKey>>,
+) {
+    let s = dschema();
+    stack.clear();
+    stack.push(root);
     while let Some(loc) = stack.pop() {
         let Some((choice, inner)) = as_choice(loc) else {
             continue;
         };
-        if choice == s.seqloc_whole {
+        if choice == s.seqloc_empty {
+            if let Value::SeqId(sid) = inner {
+                empties.push(interner.key_only(sid));
+            }
+        } else if choice == s.seqloc_whole {
             if let Value::SeqId(sid) = inner {
                 let (key, fasta) = interner.key_and_fasta(sid);
                 if out.first_id_fasta.is_none() {
@@ -1806,15 +1846,15 @@ fn extract_loc(root: &Value, interner: &mut SeqIdInterner) -> CompactLoc {
                 });
             }
         } else if choice == s.seqloc_int {
-            push_seq_int(inner, interner, &mut out);
+            push_seq_int(inner, interner, out);
         } else if choice == s.seqloc_packed_int {
             if let Some(ints) = as_list(inner) {
                 for iv in ints {
-                    push_seq_int(iv, interner, &mut out);
+                    push_seq_int(iv, interner, out);
                 }
             }
         } else if choice == s.seqloc_pnt {
-            push_seq_pnt(inner, interner, &mut out);
+            push_seq_pnt(inner, interner, out);
         } else if choice == s.seqloc_packed_pnt {
             let strand = match inner.member(s.packed_pnt_strand) {
                 Some(Value::Enum(v)) => *v,
@@ -1881,16 +1921,13 @@ fn extract_loc(root: &Value, interner: &mut SeqIdInterner) -> CompactLoc {
             }
         } else if choice == s.seqloc_bond {
             if let Some(a) = inner.member(s.seqbond_a) {
-                push_seq_pnt(a, interner, &mut out);
+                push_seq_pnt(a, interner, out);
             }
             if let Some(b) = inner.member(s.seqbond_b) {
-                push_seq_pnt(b, interner, &mut out);
+                push_seq_pnt(b, interner, out);
             }
         }
     }
-    out.strand = compute_top_strand(root, &out.pieces);
-    out.deferred_strand = deferred_top_strand(root, &out.pieces);
-    out
 }
 
 fn push_seq_int(iv: &Value, interner: &mut SeqIdInterner, out: &mut CompactLoc) {
@@ -1958,7 +1995,7 @@ fn push_seq_pnt(pt: &Value, interner: &mut SeqIdInterner, out: &mut CompactLoc) 
 /// `sequence::GetStrand` + `s_GetStrand` for ORF CDS labels and `TestForOverlap64`.
 ///
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:393-513
-fn compute_top_strand(loc: &Value, pieces: &[LocPiece]) -> i32 {
+fn compute_top_strand(loc: &Value, pieces: &[LocPiece], mix_child_one_id: Option<&[bool]>) -> i32 {
     let s = dschema();
     let Some((choice, inner)) = as_choice(loc) else {
         return 0;
@@ -1988,14 +2025,18 @@ fn compute_top_strand(loc: &Value, pieces: &[LocPiece]) -> i32 {
     if !pieces_are_one_id(pieces) {
         return 0;
     }
-    eval_s_get_strand(loc)
+    eval_s_get_strand(loc, mix_child_one_id)
 }
 
 /// Candidate `s_GetStrand` for multi-`Seq-id` complex locations (`packed-int`, `mix`, `bond`)
 /// whose `IsOneBioseq` check requires `id_to_bioseq` synonym resolution in `build_indices`.
 ///
-/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:325-389,481-513
-fn deferred_top_strand(loc: &Value, pieces: &[LocPiece]) -> Option<i32> {
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:325-389,450-513
+fn deferred_top_strand(
+    loc: &Value,
+    pieces: &[LocPiece],
+    mix_child_one_id: Option<&[bool]>,
+) -> Option<i32> {
     let s = dschema();
     let (choice, _) = as_choice(loc)?;
     if choice == s.seqloc_int
@@ -2007,13 +2048,32 @@ fn deferred_top_strand(loc: &Value, pieces: &[LocPiece]) -> Option<i32> {
     {
         return None;
     }
-    Some(eval_s_get_strand(loc))
+    let st = eval_s_get_strand(loc, mix_child_one_id);
+    (st != 0).then_some(st)
 }
 
 fn pieces_are_one_id(pieces: &[LocPiece]) -> bool {
+    pieces_and_empties_are_one_id(pieces, &[])
+}
+
+/// Scope-free `IsOneBioseq` check over a subtree's extracted pieces and `empty` IDs.
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:300-389
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_loc.cpp:3541-3630
+fn pieces_and_empties_are_one_id(pieces: &[LocPiece], empties: &[Option<HandleKey>]) -> bool {
     let mut first: Option<&HandleKey> = None;
     for p in pieces {
         let Some(k) = p.id_key.as_ref() else {
+            return false;
+        };
+        match first {
+            None => first = Some(k),
+            Some(prev) if prev != k => return false,
+            _ => {}
+        }
+    }
+    for e in empties {
+        let Some(k) = e.as_ref() else {
             return false;
         };
         match first {
@@ -2026,11 +2086,21 @@ fn pieces_are_one_id(pieces: &[LocPiece]) -> bool {
 }
 
 /// Iterative evaluation of `s_GetStrand` (`seq_loc_util.cpp:393-477`).
-fn eval_s_get_strand(root: &Value) -> i32 {
+///
+/// When `mix_child_one_id` is provided, direct children of the top-level `mix` (depth 1) that are
+/// complex (`packed-int`, `mix`, `bond`) must pass the scope-free `IsOneBioseq` check because
+/// `s_GetStrand` invokes `GetStrand` on each child without a `CScope` (`seq_loc_util.cpp:458,504`).
+///
+/// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:393-513
+fn eval_s_get_strand(root: &Value, mix_child_one_id: Option<&[bool]>) -> i32 {
     let s = dschema();
     let mut stack: Vec<(&[Value], usize, i32, bool)> = Vec::new();
     let mut cur = root;
     loop {
+        let child_multi_id = stack.len() == 1
+            && mix_child_one_id
+                .and_then(|flags| flags.get(stack[0].1 - 1).copied())
+                .is_some_and(|one| !one);
         let result = match as_choice(cur) {
             Some((c, inner)) if c == s.seqloc_int => match inner.member(s.seqint_strand) {
                 Some(Value::Enum(v)) => *v,
@@ -2048,56 +2118,66 @@ fn eval_s_get_strand(root: &Value) -> i32 {
                 }
             }
             Some((c, inner)) if c == s.seqloc_bond => {
-                let mut a_strand = inner
-                    .member(s.seqbond_a)
-                    .and_then(|a| a.member(s.seqpnt_strand))
-                    .and_then(|v| match v {
-                        Value::Enum(x) => Some(*x),
-                        _ => None,
-                    })
-                    .unwrap_or(0);
-                let mut b_strand = inner
-                    .member(s.seqbond_b)
-                    .and_then(|b| b.member(s.seqpnt_strand))
-                    .and_then(|v| match v {
-                        Value::Enum(x) => Some(*x),
-                        _ => None,
-                    })
-                    .unwrap_or(0);
-                if a_strand == 0 && b_strand != 0 {
-                    a_strand = b_strand;
-                } else if a_strand != 0 && b_strand == 0 {
-                    b_strand = a_strand;
-                }
-                if a_strand != b_strand {
-                    255
+                if child_multi_id {
+                    0
                 } else {
-                    a_strand
+                    let mut a_strand = inner
+                        .member(s.seqbond_a)
+                        .and_then(|a| a.member(s.seqpnt_strand))
+                        .and_then(|v| match v {
+                            Value::Enum(x) => Some(*x),
+                            _ => None,
+                        })
+                        .unwrap_or(0);
+                    let mut b_strand = inner
+                        .member(s.seqbond_b)
+                        .and_then(|b| b.member(s.seqpnt_strand))
+                        .and_then(|v| match v {
+                            Value::Enum(x) => Some(*x),
+                            _ => None,
+                        })
+                        .unwrap_or(0);
+                    if a_strand == 0 && b_strand != 0 {
+                        a_strand = b_strand;
+                    } else if a_strand != 0 && b_strand == 0 {
+                        b_strand = a_strand;
+                    }
+                    if a_strand != b_strand {
+                        255
+                    } else {
+                        a_strand
+                    }
                 }
             }
             Some((c, inner)) if c == s.seqloc_packed_int => {
-                let mut strand = 0i32;
-                let mut strand_set = false;
-                if let Some(ints) = as_list(inner) {
-                    for iv in ints {
-                        let istrand = match iv.member(s.seqint_strand) {
-                            Some(Value::Enum(x)) => *x,
-                            _ => 0,
-                        };
-                        if !advance_strand_state(&mut strand, &mut strand_set, istrand) {
-                            strand = 255;
-                            break;
+                if child_multi_id {
+                    0
+                } else {
+                    let mut strand = 0i32;
+                    let mut strand_set = false;
+                    if let Some(ints) = as_list(inner) {
+                        for iv in ints {
+                            let istrand = match iv.member(s.seqint_strand) {
+                                Some(Value::Enum(x)) => *x,
+                                _ => 0,
+                            };
+                            if !advance_strand_state(&mut strand, &mut strand_set, istrand) {
+                                strand = 255;
+                                break;
+                            }
                         }
                     }
+                    strand
                 }
-                strand
             }
             Some((c, inner)) if c == s.seqloc_mix => {
-                if let Some(items) = as_list(inner) {
-                    if let Some((next_idx, next_val)) = next_non_empty_mix_item(items, 0, s) {
-                        stack.push((items, next_idx + 1, 0, false));
-                        cur = next_val;
-                        continue;
+                if !child_multi_id {
+                    if let Some(items) = as_list(inner) {
+                        if let Some((next_idx, next_val)) = next_non_empty_mix_item(items, 0, s) {
+                            stack.push((items, next_idx + 1, 0, false));
+                            cur = next_val;
+                            continue;
+                        }
                     }
                 }
                 0

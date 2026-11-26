@@ -58,6 +58,9 @@ pub mod seqidlist;
 pub mod tax_files;
 pub mod tax_sqlite;
 pub mod taxdb;
+
+/// Result of reading a [`SequenceBlock`].
+pub type SeqBlockResult = Result<SequenceBlock, SeqDbError>;
 pub mod volume;
 
 pub use filter::{DbList, GiList, ListWarning, PigList, SeqidList, TaxidList};
@@ -2720,7 +2723,7 @@ impl SeqDb {
         Ok((volume, self.volume_starts[range.volume] + range.first))
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:339-344,699-707
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
     /// Sets whether multithreaded DB-split scans stop at the first OID whose `GetSequence` length
     /// is negative (mirroring NCBI's `CSeqDBImpl::x_FillSeqBuffer` when `m_NumThreads` is positive).
     pub fn set_mt_stop_at_negative(&mut self, stop: bool) {
@@ -2786,10 +2789,7 @@ impl SeqDb {
 
     /// Reads the nucleotide sequences of `range` for a search
     /// (`Volume::read_nucleotide_search_block_mt`), honoring [`Self::mt_stop_at_negative`].
-    pub fn read_nucleotide_search_block(
-        &self,
-        range: BlockRange,
-    ) -> Result<SequenceBlock, SeqDbError> {
+    pub fn read_nucleotide_search_block(&self, range: BlockRange) -> SeqBlockResult {
         let (volume, first_oid) = self.volume_and_first_oid(range)?;
         volume.read_nucleotide_search_block_mt(
             range.first,
@@ -2802,18 +2802,12 @@ impl SeqDb {
 
     /// Reads the one nucleotide sequence `ordinal` for search traceback or retrieval
     /// (`Volume::read_nucleotide_search_block_mt` with `stop_at_negative = false`).
-    pub fn read_nucleotide_search_sequence(
-        &self,
-        ordinal: u32,
-    ) -> Result<SequenceBlock, SeqDbError> {
+    pub fn read_nucleotide_search_sequence(&self, ordinal: u32) -> SeqBlockResult {
         self.read_nucleotide_search_sequence_at(self.find_volume(ordinal)?)
     }
 
     /// [`Self::read_nucleotide_search_sequence`] at `at`.
-    pub fn read_nucleotide_search_sequence_at(
-        &self,
-        at: SeqLocation,
-    ) -> Result<SequenceBlock, SeqDbError> {
+    pub fn read_nucleotide_search_sequence_at(&self, at: SeqLocation) -> SeqBlockResult {
         self.volumes[at.volume].read_nucleotide_search_block_mt(
             at.vol_oid,
             at.vol_oid + 1,
@@ -2942,7 +2936,7 @@ impl SeqDb {
         &self,
         range: BlockRange,
         kept: &mut Vec<u8>,
-    ) -> Result<SequenceBlock, SeqDbError> {
+    ) -> SeqBlockResult {
         let (volume, first_oid) = self.volume_and_first_oid(range)?;
         volume.x_read_protein_search_block_into_mt(
             range.first,
@@ -2960,7 +2954,7 @@ impl SeqDb {
         &self,
         range: BlockRange,
         kept: &mut Vec<u8>,
-    ) -> Result<SequenceBlock, SeqDbError> {
+    ) -> SeqBlockResult {
         let (volume, first_oid) = self.volume_and_first_oid(range)?;
         volume.x_read_nucleotide_search_block_into_mt(
             range.first,
@@ -2974,10 +2968,7 @@ impl SeqDb {
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): [`Self::read_nucleotide_search_sequence`] with the bytes
     /// in a buffer that glibc maps from 1 MiB on.
-    pub fn x_read_nucleotide_search_sequence_mapped(
-        &self,
-        ordinal: u32,
-    ) -> Result<SequenceBlock, SeqDbError> {
+    pub fn x_read_nucleotide_search_sequence_mapped(&self, ordinal: u32) -> SeqBlockResult {
         let at = self.find_volume(ordinal)?;
         self.volumes[at.volume].x_read_nucleotide_search_block_mapped(
             at.vol_oid,

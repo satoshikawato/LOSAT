@@ -11,7 +11,7 @@ use super::header::{
     decode_defline_taxids, decode_deflines_as, decode_full, decode_full_in, holds_a_seqid, Defline,
 };
 use super::index::IndexFile;
-use super::{SeqDbError, SeqType, XDbIdxRead};
+use super::{SeqBlockResult, SeqDbError, SeqType, XDbIdxRead};
 use crate::blastinput::ncbi_environment::ReadVerification;
 
 /// One volume of a database (`NAME.pin` / `.psq` / `.phr`, or the `n` files).
@@ -811,7 +811,7 @@ impl Volume {
         first_ordinal: u32,
         first_oid: u32,
         stop_at_negative: bool,
-    ) -> Result<SequenceBlock, SeqDbError> {
+    ) -> SeqBlockResult {
         self.read_nucleotide_search_block_in(
             first,
             end,
@@ -830,7 +830,7 @@ impl Volume {
         first_oid: u32,
         kept: &mut Vec<u8>,
         stop_at_negative: bool,
-    ) -> Result<SequenceBlock, SeqDbError> {
+    ) -> SeqBlockResult {
         self.read_nucleotide_search_block_in(
             first,
             end,
@@ -847,7 +847,7 @@ impl Volume {
         end: u32,
         first_ordinal: u32,
         first_oid: u32,
-    ) -> Result<SequenceBlock, SeqDbError> {
+    ) -> SeqBlockResult {
         self.read_nucleotide_search_block_in(
             first,
             end,
@@ -866,7 +866,7 @@ impl Volume {
         first_oid: u32,
         buffer: BlockBuffer<'_>,
         stop_at_negative: bool,
-    ) -> Result<SequenceBlock, SeqDbError> {
+    ) -> SeqBlockResult {
         assert!(
             self.index.seqtype == SeqType::Nucleotide,
             "nucleotide search block of a protein volume"

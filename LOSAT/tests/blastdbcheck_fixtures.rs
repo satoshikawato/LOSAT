@@ -777,13 +777,7 @@ fn zero_page_cross_program_parity() {
         .unwrap()
         .set_len(nsq_len / 2)
         .unwrap();
-    let out = run_ok(
-        &d,
-        "blastdbcmd",
-        &[
-            "-db", "n4", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o %l %t",
-        ],
-    );
+    let out = run_ok(&d, "blastdbcmd", N4_DBCMD_FMT);
     assert_eq!(
         text(&out),
         "0 120 n one\n1 90 n two predicted\n2 148 n three\n3 80 n four\n"
@@ -797,6 +791,13 @@ fn zero_page_cross_program_parity() {
 
     let _ = fs::remove_dir_all(&root);
 }
+
+const N4_DBCMD: &[&str] = &["-db", "n4", "-dbtype", "nucl", "-entry", "all"];
+const N4_DBCMD_FMT: &[&str] = &[
+    "-db", "n4", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o %l %t",
+];
+const N4_CHECK: &[&str] = &["-db", "n4", "-dbtype", "nucl", "-full"];
+const N4_CHECK_V3: &[&str] = &["-db", "n4", "-dbtype", "nucl", "-full", "-verbosity", "3"];
 
 /// Loads a frozen NCBI BLAST+ 2.17.0 cross-program fixture (`nonasc_xprog/<name>.{out,err,rc}`)
 /// translated into LOSAT wording.
@@ -1153,18 +1154,8 @@ fn nonasc_cross_program_parity() {
     cp_db(&d_ambeq, "n4", true);
     poke(d_ambeq.join("n4.nin"), 100, "00000020");
     for (name, sub, args) in [
-        (
-            "n4_ambeq_dbcmd",
-            "blastdbcmd",
-            vec!["-db", "n4", "-dbtype", "nucl", "-entry", "all"],
-        ),
-        (
-            "n4_ambeq_dbcmd_fmt",
-            "blastdbcmd",
-            vec![
-                "-db", "n4", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o %l %t",
-            ],
-        ),
+        ("n4_ambeq_dbcmd", "blastdbcmd", N4_DBCMD.to_vec()),
+        ("n4_ambeq_dbcmd_fmt", "blastdbcmd", N4_DBCMD_FMT.to_vec()),
         (
             "n4_ambeq_blastn_t1",
             "blastn",
@@ -1209,16 +1200,8 @@ fn nonasc_cross_program_parity() {
                 "4",
             ],
         ),
-        (
-            "n4_ambeq_check",
-            "blastdbcheck",
-            vec!["-db", "n4", "-dbtype", "nucl", "-full"],
-        ),
-        (
-            "n4_ambeq_check_v3",
-            "blastdbcheck",
-            vec!["-db", "n4", "-dbtype", "nucl", "-full", "-verbosity", "3"],
-        ),
+        ("n4_ambeq_check", "blastdbcheck", N4_CHECK.to_vec()),
+        ("n4_ambeq_check_v3", "blastdbcheck", N4_CHECK_V3.to_vec()),
     ] {
         let got = run_losat_sub(&root, &d_ambeq, sub, &args);
         let want = load_nonasc_expected(name);
@@ -1232,18 +1215,8 @@ fn nonasc_cross_program_parity() {
     cp_db(&d_ambgt, "n4", true);
     poke(d_ambgt.join("n4.nin"), 100, "0000003b");
     for (name, sub, args) in [
-        (
-            "n4_ambgt_dbcmd",
-            "blastdbcmd",
-            vec!["-db", "n4", "-dbtype", "nucl", "-entry", "all"],
-        ),
-        (
-            "n4_ambgt_dbcmd_fmt",
-            "blastdbcmd",
-            vec![
-                "-db", "n4", "-dbtype", "nucl", "-entry", "all", "-outfmt", "%o %l %t",
-            ],
-        ),
+        ("n4_ambgt_dbcmd", "blastdbcmd", N4_DBCMD.to_vec()),
+        ("n4_ambgt_dbcmd_fmt", "blastdbcmd", N4_DBCMD_FMT.to_vec()),
         (
             "n4_ambgt_blastn_t1",
             "blastn",
@@ -1258,16 +1231,8 @@ fn nonasc_cross_program_parity() {
                 "1",
             ],
         ),
-        (
-            "n4_ambgt_check",
-            "blastdbcheck",
-            vec!["-db", "n4", "-dbtype", "nucl", "-full"],
-        ),
-        (
-            "n4_ambgt_check_v3",
-            "blastdbcheck",
-            vec!["-db", "n4", "-dbtype", "nucl", "-full", "-verbosity", "3"],
-        ),
+        ("n4_ambgt_check", "blastdbcheck", N4_CHECK.to_vec()),
+        ("n4_ambgt_check_v3", "blastdbcheck", N4_CHECK_V3.to_vec()),
     ] {
         let got = run_losat_sub(&root, &d_ambgt, sub, &args);
         let want = load_nonasc_expected(name);
@@ -1313,10 +1278,7 @@ fn nonasc_cross_program_parity() {
     cp_db(&d_amb0, "n4", true);
     poke(d_amb0.join("n4.nin"), 96, "00000000");
     for (sub, args) in [
-        (
-            "blastdbcmd",
-            vec!["-db", "n4", "-dbtype", "nucl", "-entry", "all"],
-        ),
+        ("blastdbcmd", N4_DBCMD.to_vec()),
         (
             "blastn",
             vec![
@@ -1343,10 +1305,7 @@ fn nonasc_cross_program_parity() {
                 "4",
             ],
         ),
-        (
-            "blastdbcheck",
-            vec!["-db", "n4", "-dbtype", "nucl", "-full"],
-        ),
+        ("blastdbcheck", N4_CHECK.to_vec()),
     ] {
         let got = run_losat_sub(&root, &d_amb0, sub, &args);
         assert_refused(&format!("n4_amb0_eq_0_{sub}"), got);

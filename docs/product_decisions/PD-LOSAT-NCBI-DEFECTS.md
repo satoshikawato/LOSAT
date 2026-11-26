@@ -1,7 +1,7 @@
 # Product Decision: NCBI BLAST+ behaviour that is a defect
 
 - Decision ID: `PD-LOSAT-NCBI-DEFECTS`
-- Version: 1.113
+- Version: 1.114
 - Date: 2026-10-02 (1.0); 1.1 the same day (the three confirmations below, Session S07+++b);
   1.2 2026-10-03 (exception 2 for TBLASTX and TBLASTN, Session S08b); 1.3 2026-10-05
   (BLASTP, TBLASTN and TBLASTX of stage E2e: exception 3 and the items below, Session S08+b);
@@ -807,7 +807,18 @@
   1.2 and 1.37); Owner-delegated, standing instruction 2026-09-29, restated 2026-10-07; numbered
   after 1.111 at the merge of dev that brought line RG item X-short-bat-2's 1.110 (#1647) and
   psiblast line item PS7c's 1.111; first 1.105, then 1.106, 1.107, 1.108, 1.109 and 1.110);
-  1.113 2026-11-24 (a database sequence whose Seq-align id is a pdb id whose handle has another
+  1.113 2026-11-26 (rule-3 rejections of `losat makeprofiledb -dbtype delta`, psiblast line item
+  PS14: profiles stored by row (`byRow TRUE`) or with `numRows < 28` and non-empty
+  `weightedResFreqsPerPos`, where NCBI's `x_CheckDelta` and `x_UpdateDelta` copy into an empty
+  `std::list::begin()`; an empty `numIndeptObsr` list, where NCBI dereferences `end()`; a
+  `weightedResFreqsPerPos` list whose length is not a multiple of 28 when `len / 28 ==
+  numIndeptObsr.len()` and every full column of 28 sums within 0.0001 of 1.0, where `x_ValidateCd`
+  increments past `end()`; `weightedResFreqsPerPos` or `numIndeptObsr` values whose scaled
+  conversion to `Uint4` is out of range or `NaN`; and a missing or unwritable `TMPDIR` where
+  NCBI's `CTmpFile` stops with a `mkstemp()` message containing its process ID; Owner-delegated,
+  standing instruction 2026-09-29, restated 2026-10-07; numbered after 1.112 at the merge of dev
+  245b7e2e3; first 1.109, then 1.110);
+  1.114 2026-11-24 (a database sequence whose Seq-align id is a pdb id whose handle has another
   chain, which NCBI's data loader serves no sequence for: the empty Bioseq handle reproduced in
   every report, rule 2, and the explicit rejections, rule 3, of its tabular `sacc` and `saccver`
   in the class of 1.37, of its tabular sequence-reading or translated-frame rows without a
@@ -832,7 +843,8 @@
   10f846fa3 that brought line RG item X-short-bat-2's 1.108, then 1.111 at the merge of dev
   924bf3be4 that brought line RG item D1c-2's 1.109 and line RG item X-short-bat-2's 1.110, then
   1.113 at the merge of dev 245b7e2e3 that brought psiblast line item PS7c's 1.111 and line RG
-  item D3c-4's 1.112)
+  item D3c-4's 1.112, then 1.114 at the merge of dev f17536f02 that brought psiblast line item
+  PS14's 1.113)
 - Status: Accepted by the maintainer on 2026-10-02, in Session S07+++b (E2g), on the
   NCBI BLAST+ 2.17.0 behaviours that the BLASTN inventory
   (`docs/evidence/losat_web_e2g/INVENTORY.tsv`; moved to a release asset on 2026-10-23:
@@ -2493,7 +2505,7 @@ file would differ, and NCBI's programs still could not open the database).
   after the host received a chunk of it (BLASTX's later query batch) is discarded by the host at
   the run's signal (`docs/web/abi_v2.md` §5, line RG T7-W).
 - A database sequence whose Seq-align id is a pdb id that its Seq-id handle holds with another
-  chain (version 1.113, 2026-11-24, line RG-KB item 12, Owner-delegated, standing instruction
+  chain (version 1.114, 2026-11-24, line RG-KB item 12, Owner-delegated, standing instruction
   2026-09-29, restated 2026-10-07). The handle normalizes a pdb id (`CSeq_id_PDB_Info::Normalize`,
   `seq_id_tree.cpp:3381-3464`): where it rebuilds the id (a release date that normalizes, a
   lower-case letter in the molecule, or a chain and chain-id that disagree) the chain becomes the
@@ -3341,7 +3353,7 @@ file would differ, and NCBI's programs still could not open the database).
   batch's prefetch is off (`DB contains no accession info.`, a version 5 list of databases with
   and without accession tables): the `catch` of the subject block leaves `m_SubjectId` empty
   before any row of the report loaded its subject, and `m_SubjectTaxId` unset; a later such row
-  prints what the last loaded row set. Since version 1.113 (line RG-KB item 12) also the rows of a
+  prints what the last loaded row set. Since version 1.114 (line RG-KB item 12) also the rows of a
   subject whose pdb Seq-align id NCBI's data loader serves no sequence for (rule 2 above): exit
   status 255 after the row's earlier fields for `sacc`/`saccver`, and also exit status 255 in
   `CAlnVec::GetBioseqHandle` (`CAlnException::eInvalidSeqId`) or `CAlignFormatUtil::GetFrame`
@@ -3350,7 +3362,7 @@ file would differ, and NCBI's programs still could not open the database).
   outside BLASTN also `pident`, `nident`, `mismatch`) or, in TBLASTN and TBLASTX, `sframe`/`frames`
   with an alignment-block field; LOSAT's refusal before the batch's report.
 - `-show_gis` with outfmt 0 to 4 over a database sequence whose pdb Seq-align id NCBI's data loader
-  serves no sequence for (version 1.113, 2026-11-24, line RG-KB item 12, Owner-delegated, standing
+  serves no sequence for (version 1.114, 2026-11-24, line RG-KB item 12, Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07): the description info of the empty Bioseq handle
   keeps the GI it was allocated with (`x_GetDeflineInfo` sets no GI before `x_FillDeflineAndId`
   returns, `showdefline.cpp:1576-1589`, `:388-394`), which the description line prints when it is
@@ -3362,7 +3374,7 @@ file would differ, and NCBI's programs still could not open the database).
   `-num_descriptions 0`, or where the subject's rank is past it, the output is NCBI's (row
   `db.pdbchain.only.blastp.0g`).
 - A database sequence whose pdb Seq-align id's handle another id of the same sequence holds (rule
-  2 above; version 1.113, 2026-11-24, line RG-KB item 12, reviews 1 and 2, Owner-delegated,
+  2 above; version 1.114, 2026-11-24, line RG-KB item 12, reviews 1 and 2, Owner-delegated,
   standing instruction 2026-09-29, restated 2026-10-07). Where another definition line than the
   Seq-align id's holds it, the reports show that line's title as NCBI's (rule 2 above; review 1
   refused the description line and the organism report, review 2 writes them). Where no definition
@@ -4078,6 +4090,24 @@ file would differ, and NCBI's programs still could not open the database).
     past `int` are written as NCBI writes them (rule 2: rows RL01 to RL04, RL06 and RL07).
   - A volume whose offsets or positions pass 2^31, or whose word table passes `Int4` bytes: NCBI's
     counters of them are `Int4`, and the files hold 32-bit fields, so no valid file can be defined.
+  - With `-dbtype delta` (version 1.113, 2026-11-26, psiblast line item PS14, Owner-delegated,
+    standing instruction 2026-09-29, restated 2026-10-07): profiles stored by row (`byRow TRUE`) or
+    with `numRows < 28` and non-empty `weightedResFreqsPerPos` (`makeprofiledb.cpp:1610-1647,
+    1763-1800`, where NCBI copies into an empty `std::list::begin()`, overwriting the list header
+    node; rows `QR16`, `QR17`); an empty `numIndeptObsr` list (`makeprofiledb.cpp:1659, 1803`,
+    where NCBI dereferences `end()`; row `QR18`); a `weightedResFreqsPerPos` list whose length is
+    not a multiple of 28 when `len / 28 == numIndeptObsr.len()` and every full column of 28 sums
+    within 0.0001 of 1.0 (`makeprofiledb.cpp:1720-1740`, where `x_ValidateCd` increments past
+    `end()`; row `QR19`; when an earlier full column fails the sum check, NCBI returns false
+    deterministically before reaching the partial tail, reproduced in rows `D33`-`D35`);
+    `weightedResFreqsPerPos` or `numIndeptObsr` values whose scaled conversion `(val * 1000)` or
+    `((val + 1) * 1000)` to `Uint4` is out of range or `NaN` (`makeprofiledb.cpp:1674, 1688`; rows
+    `QR20`-`QR22`); and a missing or unwritable temporary directory (`TMPDIR`) when `x_UpdateDelta`
+    creates its two temporary files (`makeprofiledb.cpp:1572-1575`, `ncbifile.cpp:6580-6599`, where
+    NCBI throws `mkstemp() failed for '...'` with the process and thread IDs in the message, which
+    changes from run to run). Delta 32-bit offset wrapping (`CurrFreqOffset += FreqBuff.size()`,
+    `CurrObsrOffset += ObsrBuff.size()`, `Uint4 num++`) is deterministic in NCBI and reproduced
+    with wrapping arithmetic.
 - The readers of GI-indexed masks, a damaged `.nog` (version 1.94, 2026-11-24, line NP item
   M4c-2, review S4 and N8; the rejection of a `MASKLIST` name that is not UTF-8 withdrawn in 1.103; Owner-delegated, standing
   instruction 2026-09-29, restated 2026-10-07; the outcomes of a `.nog` cut short that NCBI

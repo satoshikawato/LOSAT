@@ -117,30 +117,32 @@ fn apply_list(
     let mut warnings = Vec::new();
     let restricted = db.restrict(list, &mut warnings);
     let prefix = app.to_ascii_lowercase();
-    // The lines keep the bytes of a seqid list's words (probe R3 of line LIB-B).
     for warning in warnings {
-        let line = match warning {
-            crate::seqdb::ListWarning::Log(text) => text,
-            crate::seqdb::ListWarning::Posted(text) => {
-                format!("Warning: [{prefix}] {text}").into_bytes()
-            }
-            crate::seqdb::ListWarning::Error(text) => {
-                [format!("Error: [{prefix}] ").as_bytes(), &text].concat()
-            }
-            crate::seqdb::ListWarning::SeqId(warning) => {
-                let mut line = Vec::new();
-                crate::writedb::fasta_source::defline_ids::post_seq_id_warning_of(
-                    &prefix,
-                    warning,
-                    &mut |text| line.extend_from_slice(text),
-                );
-                line
-            }
-        };
-        diagnostics.write_all(&line)?;
-        diagnostics.write_all(b"\n")?;
+        diagnostics.write_all(&list_warning_line(warning, Some(&prefix)))?;
     }
     restricted.map_err(|error| database_error(error, program))
+}
+
+/// A warning of `SeqDb::restrict` as NCBI posts it, with its line feed: after the diagnostic
+/// prefix `[prefix] ` of the application, or none where it sets none (blast_formatter's `Run`).
+/// The lines keep the bytes of a seqid list's words (probe R3 of line LIB-B).
+pub(crate) fn list_warning_line(
+    warning: crate::seqdb::ListWarning,
+    prefix: Option<&str>,
+) -> Vec<u8> {
+    let tag = prefix.map(|p| format!("[{p}] ")).unwrap_or_default();
+    let mut line = match warning {
+        crate::seqdb::ListWarning::Log(text) => text,
+        crate::seqdb::ListWarning::Posted(text) => format!("Warning: {tag}{text}").into_bytes(),
+        crate::seqdb::ListWarning::Error(text) => {
+            [format!("Error: {tag}").as_bytes(), &text].concat()
+        }
+        crate::seqdb::ListWarning::SeqId(warning) => {
+            crate::writedb::fasta_source::defline_ids::seq_id_warning_line(prefix, warning)
+        }
+    };
+    line.push(b'\n');
+    line
 }
 
 /// Tells the BLAST archive of the run (`archive`, `None` without one) and its search strategy
@@ -8196,6 +8198,58 @@ pub(crate) fn subject_read_texts<'s>(
         LoadsOrder::Reads,
         program,
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:357-360
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:476-509
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1432-1444
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:750-763
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:877-890
+/// Filters a single query's one-by-one report subject keys (`ranks`, in hit-list order) to match
+/// the `Hit` reads NCBI actually makes:
+/// - When `joins_copies` is true (BLAST XML, XML2, JSON), drops adjacent keys that join the
+///   preceding `Hit` as the same record (`joins_as_copy`, matching `blast_xml::hit_ranges`).
+/// - Drops keys never reached by any report (`loads.reached(key)`).
+/// - When `ends_on_throw` is true (`AfterThrow::EndsReport` / `EndsRun`), truncates immediately
+///   after the first key whose lookup throws (`loads.thrown(key).is_some()`), so subjects after a
+///   throwing `Hit` in that query do not perform phantom taxonomy/slot loads even if a later query
+///   reaches them.
+pub(crate) fn one_by_one_query_reads<P>(
+    ranks: impl IntoIterator<Item = usize>,
+    parsed: impl Fn(usize) -> Option<P>,
+    loads: &crate::report::db_subject::HitLoads,
+    joins_copies: bool,
+    ends_on_throw: bool,
+) -> Vec<usize>
+where
+    P: std::ops::Deref<Target = crate::report::db_subject::ParsedSubject>,
+{
+    let mut out = Vec::new();
+    let mut previous: Option<usize> = None;
+    for rank in ranks {
+        if joins_copies {
+            let joins = previous.is_some_and(|before| {
+                before == rank
+                    || matches!(
+                        (parsed(before), parsed(rank)),
+                        (Some(earlier), Some(later))
+                            if crate::report::db_subject::joins_as_copy(&earlier, &later)
+                    )
+            });
+            previous = Some(rank);
+            if joins {
+                continue;
+            }
+        }
+        if !loads.reached(rank) {
+            continue;
+        }
+        out.push(rank);
+        if ends_on_throw && loads.thrown(rank).is_some() {
+            break;
+        }
+    }
+    out
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:819-838 (cited above)

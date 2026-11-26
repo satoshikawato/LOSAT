@@ -7,4 +7,4 @@
   `-filtering_db`, including relative paths, symlinks, hard links, and missing inputs that
   `-logfile` would create) is now refused with exit status 1 before opening or creating the file,
   leaving existing inputs unchanged, matching LOSAT Web's rule and preventing input corruption and
-  NCBI BLAST+ 2.17.0's endless read-back loop (`PD-LOSAT-NCBI-DEFECTS` 1.116).
+  NCBI BLAST+ 2.17.0's endless read-back loop (`PD-LOSAT-NCBI-DEFECTS` 1.117).

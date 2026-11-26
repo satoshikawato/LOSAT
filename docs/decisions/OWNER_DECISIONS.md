@@ -429,7 +429,7 @@ entry's number in that log. 137 entries: 22 Owner, 3 Owner in part,
 
 | Entry | Date | Kind | Owner's words | Decision | Scope | Cited in |
 | --- | --- | --- | --- | --- | --- | --- |
-| 49 | 2026-11-24 | Owner | 「Q-D23=A」 | Refuse `-logfile` pointing to any input file read by the run on the command line and library API under the same rule as LOSAT Web D19, preventing input corruption and NCBI's endless read-back loop. | CLI and library `-logfile` self-reference refusal (D23) | `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md:850`, `LOSAT/src/report/log_inputs.rs:1` |
+| 49 | 2026-11-24 | Owner | 「Q-D23=A」 | Refuse `-logfile` pointing to any input file read by the run on the command line and library API under the same rule as LOSAT Web D19, preventing input corruption and NCBI's endless read-back loop. | CLI and library `-logfile` self-reference refusal (D23) | `docs/product_decisions/PD-LOSAT-NCBI-DEFECTS.md:859`, `LOSAT/src/report/log_inputs.rs:1` |
 
 ### `web-sx-blastx-20261102`: line SX
 

@@ -176,7 +176,7 @@ Published tools and workflow managers run unchanged with LOSAT under the NCBI na
   - [Introduction](docs/manual/src/introduction.md) • [Quick start](docs/manual/src/quick-start.md) • [Common workflows](docs/manual/src/workflows.md) • [Installation](docs/manual/src/installation.md)
   - [Coming from NCBI BLAST+](docs/manual/src/from-ncbi-blast.md) • [Upgrading from LOSAT v0.1](docs/manual/src/from-losat-v0-1.md) • [Threads, speed and memory](docs/manual/src/performance.md)
   - [Differences from NCBI BLAST+](docs/manual/src/differences.md) • [What LOSAT refuses](docs/manual/src/refusals.md) • [Databases](docs/manual/src/databases.md) • [Output formats](docs/manual/src/output-formats.md) • [Environment variables](docs/manual/src/environment.md) • [LOSAT Web](docs/manual/src/web.md)
-- **Not in v0.2.0:** `deltablast`, `makeprofiledb -dbtype cobalt`, `blast_formatter`, and `psiblast -phi_pattern` beyond its first round (and with `-html`); options that need NCBI's servers (`-remote`, `-entrez_query`) and `-import_search_strategy`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
+- **Not in v0.2.0:** `deltablast`, `makeprofiledb -dbtype cobalt`, `blast_formatter`, and `psiblast -phi_pattern` beyond its first round (and with `-html`); options that need NCBI's servers (`-remote`, `-entrez_query`) and `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`. LOSAT stops with an error naming the option before it searches. See [What LOSAT refuses](docs/manual/src/refusals.md).
 - [v0.2.0 release record](docs/release/v0.2.0.md) • [Contributing](CONTRIBUTING.md)
 
 ## Citation & References

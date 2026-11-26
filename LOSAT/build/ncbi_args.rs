@@ -132,19 +132,16 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // (`algorithm::blastn::repeat_filter`, line RG item D4) and `-best_hit_overhang` /
     // `-best_hit_score_edge` (series NP O6a).
     ("blastn", "entrez_query", Refused::Read(None)),
-    ("blastn", "import_search_strategy", Refused::Read(None)),
     ("blastn", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastp_args.cpp:44-50
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-2, psiblast's
     // too).
     ("blastp", "entrez_query", Refused::Read(None)),
-    ("blastp", "import_search_strategy", Refused::Read(None)),
     ("blastp", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:62-66
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
     // `-use_sw_tback` (line RG item X4b-2, #1500).
     ("blastx", "entrez_query", Refused::Read(None)),
-    ("blastx", "import_search_strategy", Refused::Read(None)),
     ("blastx", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1156-1164
     // The arguments that blastp's engine does not run either (blastp's rows; psiblast has no
@@ -165,14 +162,15 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     ),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpsblast_args.cpp:85-127 (cited at
     // `algorithm::rpsblast::args`)
-    // The remote options and `-import_search_strategy` of every program.
+    // The remote options and `-import_search_strategy` (which the five search programs run, line
+    // RG item F2).
     ("rpsblast", "entrez_query", Refused::Read(None)),
     ("rpsblast", "import_search_strategy", Refused::Read(None)),
     ("rpsblast", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/rpstblastn_args.cpp:44-110 (cited
     // at `algorithm::rpstblastn::args`)
-    // The remote options and `-import_search_strategy` of every program. The
-    // composition-based statistics of a later item are refused once per run
+    // The remote options and `-import_search_strategy` (which the five search programs run, line
+    // RG item F2). The composition-based statistics of a later item are refused once per run
     // (`rpstblastn::search::TranslatedRpsSearch::check_options`).
     ("rpstblastn", "entrez_query", Refused::Read(None)),
     ("rpstblastn", "import_search_strategy", Refused::Read(None)),
@@ -186,12 +184,10 @@ const REFUSED: &[(&str, &str, Refused)] = &[
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3), as is
     // `-use_sw_tback` (line RG item X4b-1, #1481).
     ("tblastn", "entrez_query", Refused::Read(None)),
-    ("tblastn", "import_search_strategy", Refused::Read(None)),
     ("tblastn", "remote", Refused::Read(None)),
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastx_args.cpp:44-50
     // `-best_hit_overhang` / `-best_hit_score_edge` are implemented (series NP O6a-3).
     ("tblastx", "entrez_query", Refused::Read(None)),
-    ("tblastx", "import_search_strategy", Refused::Read(None)),
     ("tblastx", "remote", Refused::Read(None)),
 ];
 

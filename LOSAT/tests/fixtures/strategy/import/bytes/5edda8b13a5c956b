@@ -1,0 +1,195 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: arch_snucl
+           2 sequences; 965 total letters
+
+
+
+Query= lcl|Query_1 qn1 query nucleotide one
+
+Length=480
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+sn1 subject nucleotide alpha                                          608     3e-178
+sn2 subject nucleotide beta reverse                                   448     6e-130
+
+
+>sn1 subject nucleotide alpha
+Length=488
+
+ Score = 608 bits (329),  Expect = 3e-178
+ Identities = 394/425 (93%), Gaps = 6/425 (1%)
+ Strand=Plus/Plus
+
+Query  31   ATGTGGATGGAACACTCCGTGCTAAAAGCA  60
+            |||||||||||||||||||||||| |||||
+Sbjct  46   ATGTGGATGGAACACTCCGTGCTAGAAGCA  75
+
+Query  61   AATTTTGCCGTGCTTCGTAAAGTGATGGAC  90
+            | ||||||||||||||||||||||||||||
+Sbjct  76   ATTTTTGCCGTGCTTCGTAAAGTGATGGAC  105
+
+Query  91   GACCCGAAAATACGGGATGGGCCCATGGCT  120
+            ||||||||||||||||||||||||||||||
+Sbjct  106  GACCCGAAAATACGGGATGGGCCCATGGCT  135
+
+Query  121  GTAATGAAGGGCTGGGAGAACTATTGCTGG  150
+            | ||||||||||||||||||||||||||||
+Sbjct  136  GCAATGAAGGGCTGGGAGAACTATTGCTGG  165
+
+Query  151  CCCGCGAATATGAGCTGGAAAGTCCTTATG  180
+            ||||||||||| ||||||||||||||||||
+Sbjct  166  CCCGCGAATATAAGCTGGAAAGTCCTTATG  195
+
+Query  181  AAGTATGAGTTTTCCTCCGATATCCACCCT  210
+            |||| |||||||||||||||||||||||||
+Sbjct  196  AAGTTTGAGTTTTCCTCCGATATCCACCCT  225
+
+Query  211  TGCAATTTATGGATTTGCTGGATCCCTAAG  240
+            ||||||||||| ||||||||    ||||||
+Sbjct  226  TGCAATTTATGCATTTGCTG----CCTAAG  251
+
+Query  241  GAGATGGCAACCCCAGGATGGTGGAAGACG  270
+            || ||||||| |||||||| || |||||||
+Sbjct  252  GATATGGCAAACCCAGGATTGTCGAAGACG  281
+
+Query  271  GATACGTTGCATATGGCAGAAATGGGTCTG  300
+            ||||||||||||| | ||| ||||||||||
+Sbjct  282  GATACGTTGCATAGGTCAGCAATGGGTCTG  311
+
+Query  301  TGGATGCATAAGTATCCCAAGTGTATGTGT  330
+            |||| ||||||| ||| |||| ||||||||
+Sbjct  312  TGGAGGCATAAGCATCTCAAGGGTATGTGT  341
+
+Query  331  GTAA--TGGTGAGATTCACAGATCAATCTC  358
+            ||||  |||||||| |||||||||||||||
+Sbjct  342  GTAACGTGGTGAGAATCACAGATCAATCTC  371
+
+Query  359  TCCGGCATTGGAAAATTAACCATGACGCTA  388
+            |||||||||| |||  ||||||||||||||
+Sbjct  372  TCCGGCATTGCAAACCTAACCATGACGCTA  401
+
+Query  389  ACTTTGAGAAACTTAAGATCTTCCACTACA  418
+            |||  |||||| |||||||||||||| |||
+Sbjct  402  ACTGCGAGAAATTTAAGATCTTCCACAACA  431
+
+Query  419  TGGTGGGTCATGGGAGAACAGCATCTGAGG  448
+            ||||||||||||||||||||||||||||||
+Sbjct  432  TGGTGGGTCATGGGAGAACAGCATCTGAGG  461
+
+Query  449  GCAAC  453
+            |||||
+Sbjct  462  GCAAC  466
+
+
+>sn2 subject nucleotide beta reverse
+Length=477
+
+ Score = 448 bits (242),  Expect = 6e-130
+ Identities = 361/418 (86%), Gaps = 9/418 (2%)
+ Strand=Plus/Minus
+
+Query  36   GATGGAACACTCCGTGCTAAAAGCAAATTT  65
+            ||||||||||||||||||||||||||||||
+Sbjct  452  GATGGAACACTCCGTGCTAAAAGCAAATTT  423
+
+Query  66   TGCCGTGCTTCGTAAAGTGATGGACGACCC  95
+            ||||| |||| || ||||||||||||| ||
+Sbjct  422  TGCCGGGCTTAGTGAAGTGATGGACGATCC  393
+
+Query  96   GAAAATACGGGATGGGCCCATGGCTGTAAT  125
+             ||||||| | ||||||| |||||||||||
+Sbjct  392  CAAAATACAGTATGGGCCAATGGCTGTAAT  363
+
+Query  126  GAAGGGCTGGGAGAACTATTGCTGGCCCGC  155
+            |||||||  |||| ||||||||  ||||||
+Sbjct  362  GAAGGGCATGGAGCACTATTGCCCGCCCGC  333
+
+Query  156  GAATATGAGCTGGAAAGTCCTTATGA--AG  183
+             ||| ||||||||||||||| ||||   ||
+Sbjct  332  TAATCTGAGCTGGAAAGTCCGTATGTTTAG  303
+
+Query  184  TA-TGAGTTTTCCTCCGATATCCACCCTTG  212
+            |  || |||||| |||||||||||| ||||
+Sbjct  302  TTTTGGGTTTTCATCCGATATCCACGCTTG  273
+
+Query  213  CAATTTATGGATTTGCTGGATCCCTAAGGA  242
+            |||||| ||| |||||| |||||||||| |
+Sbjct  272  CAATTTGTGGCTTTGCTCGATCCCTAAGTA  243
+
+Query  243  GATGGCAACCCCAGGATGGTGGAAGACGGA  272
+            |||||||  |||||||| | ||||| || |
+Sbjct  242  GATGGCACTCCCAGGATTGGGGAAGTCGAA  213
+
+Query  273  TACGTTGCATATGGCAGAAATGGGTCTGTG  302
+            ||||| |  |    ||||||  |||| |||
+Sbjct  212  TACGTGG--T----CAGAAAACGGTCCGTG  189
+
+Query  303  GATGCATAAGTATCCCAAGTGTATGTGTGT  332
+            ||||||||||||||||||||||| ||||||
+Sbjct  188  GATGCATAAGTATCCCAAGTGTAAGTGTGT  159
+
+Query  333  AATGGTGAGATTCACAGATCAATCTCTCCG  362
+            |  |||| |||||||| || | |||||| |
+Sbjct  158  ACAGGTGTGATTCACAAATTACTCTCTCTG  129
+
+Query  363  GCATTGGAAAATTAACCATGACGCTAACTT  392
+            ||| |||||||||| |||||||||||||| 
+Sbjct  128  GCAATGGAAAATTAGCCATGACGCTAACTG  99
+
+Query  393  TGAGAAACTTAAGATCTTCCACTACATGGT  422
+            |||||||||||||||| |||||||||||||
+Sbjct  98   TGAGAAACTTAAGATCCTCCACTACATGGT  69
+
+Query  423  GGGTCATGGGAGAACAGCATCTGAGGGC  450
+            ||||||||||||||||||| ||||||||
+Sbjct  68   GGGTCATGGGAGAACAGCAGCTGAGGGC  41
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 440388
+
+
+Query= lcl|Query_2 qn2 unrelated nucleotide (no hits expected)
+
+Length=90
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 75600
+
+
+  Database: arch_snucl
+    Posted date:  Oct 22, 2026  11:14 PM
+  Number of letters in database: 965
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

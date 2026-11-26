@@ -227,7 +227,7 @@ fn the_search_space_option_carries_over_unsearched_batches() {
 /// The `EffectiveSearchSpace` option among a request's sets.
 pub(super) fn search_space(sets: &[options::Param]) -> Option<i64> {
     sets.iter()
-        .find(|param| param.name == "EffectiveSearchSpace")
+        .find(|param| param.name() == "EffectiveSearchSpace")
         .map(|param| match param.value {
             options::ParamValue::BigInteger(space) => space,
             ref other => panic!("EffectiveSearchSpace {other:?}"),
@@ -243,19 +243,13 @@ fn the_handle_sets_fold_in_ncbis_order() {
     let handle = OptionsHandle::default();
     handle
         .set_search_sets(
-            vec![Param {
-                name: "CompositionBasedStats",
-                value: ParamValue::Integer(0),
-            }],
+            vec![Param::new(
+                fields::COMPOSITION_BASED_STATS,
+                ParamValue::Integer(0),
+            )],
             vec![
-                Param {
-                    name: "DbLength",
-                    value: ParamValue::BigInteger(560),
-                },
-                Param {
-                    name: "MatrixName",
-                    value: ParamValue::Str("BLOSUM62".to_string()),
-                },
+                Param::new(fields::DB_LENGTH, ParamValue::BigInteger(560)),
+                Param::new(fields::MATRIX_NAME, ParamValue::Str("BLOSUM62".to_string())),
             ],
             Vec::new(),
         )
@@ -268,7 +262,7 @@ fn the_handle_sets_fold_in_ncbis_order() {
         handle
             .request_sets(carry)
             .iter()
-            .map(|param| param.name)
+            .map(|param| param.name())
             .collect()
     };
     assert_eq!(names(&carry), ["CompositionBasedStats"]);
@@ -310,17 +304,17 @@ fn the_after_batch_sets_follow_the_search_space() {
         .set_search_sets(
             Vec::new(),
             Vec::new(),
-            vec![Param {
-                name: "CompositionBasedStats",
-                value: ParamValue::Integer(0),
-            }],
+            vec![Param::new(
+                fields::COMPOSITION_BASED_STATS,
+                ParamValue::Integer(0),
+            )],
         )
         .unwrap();
     let names = |carry: &HandleCarry| -> Vec<&'static str> {
         handle
             .request_sets(carry)
             .iter()
-            .map(|param| param.name)
+            .map(|param| param.name())
             .collect()
     };
     let mut carry = HandleCarry::default();

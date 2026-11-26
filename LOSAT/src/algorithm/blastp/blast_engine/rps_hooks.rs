@@ -113,12 +113,10 @@ pub(super) fn note_handle_sets(
     args: &ResolvedBlastpArgs,
     database: &database::BlastpDatabase,
 ) -> Result<()> {
+    use crate::report::archive::fields;
     use crate::report::archive::options::{Param, ParamValue};
     let before_batches = (rps.requested_cbs != 0 && !args.comp_based_stats.is_enabled())
-        .then_some(Param {
-            name: "CompositionBasedStats",
-            value: ParamValue::Integer(0),
-        })
+        .then(|| Param::new(fields::COMPOSITION_BASED_STATS, ParamValue::Integer(0)))
         .into_iter()
         .collect();
     // The volumes' matrix and gap costs as the first volume's files read them (the search sets the
@@ -409,7 +407,7 @@ pub(super) fn rps_search(
         // `run_call` checked): LOSAT's refusal (`RpsUnit::check_engine_length`; none where no
         // query is searched).
         if searches {
-            unit.check_engine_length(args.window_size as i32, "RPSBLAST")?;
+            unit.check_engine_length(args.window_size, "RPSBLAST")?;
         }
         let masked: Vec<Option<Vec<u8>>> = run
             .contexts
@@ -518,7 +516,7 @@ pub(super) fn rps_search(
             sbp: sbp.as_ref(),
             hitlist_size: args.traceback_hitlist_size(),
             prelim_hitlist_size: run.prelim_hitlist_size,
-            window: args.window_size as i32,
+            window: args.window_size,
             // The unit's concatenated length `Lc` (an alias file's `LENGTH` and `NSEQ` over one
             // volume).
             concat_length: unit.concat_length(),

@@ -57,7 +57,7 @@ fn render(inputs: &OptionInputs, database: Option<&str>) -> Vec<String> {
     let mut listed: Vec<String> = request
         .algorithm
         .iter()
-        .map(|param| format!("{}={:?}", param.name, param.value))
+        .map(|param| format!("{}={:?}", param.name(), param.value))
         .collect();
     if let Some(step) = request.step_number {
         listed.push(format!("Web_StepNumber=Integer({step})"));
@@ -814,6 +814,12 @@ fn every_tblastn_argument_with_a_pssm_query_is_recorded_as_ncbi_records_it() {
         (
             "export_search_strategy",
             &["-export_search_strategy", "s.asn"],
+            &[],
+        ),
+        // An imported strategy is read by the run (`import::apply`), not recorded.
+        (
+            "import_search_strategy",
+            &["-import_search_strategy", "s.asn"],
             &[],
         ),
         (

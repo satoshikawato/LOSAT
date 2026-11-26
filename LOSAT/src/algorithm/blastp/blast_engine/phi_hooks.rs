@@ -394,14 +394,15 @@ fn phi_limits(
 #[cold]
 #[inline(never)]
 pub(super) fn note_handle_sets(handle: &crate::report::archive::OptionsHandle) -> Result<()> {
+    use crate::report::archive::fields;
     use crate::report::archive::options::{Param, ParamValue};
     handle.set_search_sets(
         Vec::new(),
         Vec::new(),
-        vec![Param {
-            name: "CompositionBasedStats",
-            value: ParamValue::Integer(0),
-        }],
+        vec![Param::new(
+            fields::COMPOSITION_BASED_STATS,
+            ParamValue::Integer(0),
+        )],
     )
 }
 

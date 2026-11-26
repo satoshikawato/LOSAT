@@ -1,0 +1,5 @@
+Warning: [tblastx] The parameter -line_length is not applicable for output formats > 4 .
+Warning: [tblastx] line_length cannot be overridden when using a search strategy
+Warning: [tblastx] seg cannot be overridden when using a search strategy
+Warning: [tblastx] soft_masking cannot be overridden when using a search strategy
+Warning: [tblastx] soft_masking cannot be overridden when using a search strategy

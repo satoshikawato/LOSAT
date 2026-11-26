@@ -97,6 +97,8 @@ export const ROLE_SUBJECT = 1;
 export const FILE_WINDOW_MASKER_COUNTS = 1;
 /** The kind of a named input file (`file_begin`, ABI v2 §4): a registry file of NCBI's application start, the file of `-conffile`. */
 export const FILE_REGISTRY = 2;
+/** The kind of a named input file (`file_begin`, ABI v2 §4): a search strategy file, the file of `-import_search_strategy` (line RG item F2-4). */
+export const FILE_SEARCH_STRATEGY = 3;
 /** Bytes of a named input file given to the engine at a time, through one buffer of engine memory (`loadFile`). */
 export const FILE_CHUNK_BYTES = 8 * 1024 * 1024;
 
@@ -215,9 +217,10 @@ function registeredInput(input: RecordsResponse): RegisteredInput {
  * The *file* JSON of `file_end` (ABI v2 §9). The contents of the file do not fail `file_end`: a
  * counts file that BLASTN cannot read has `stat_type` other than `obinary` and `binary`, or an
  * `error`, and the run that names it reports the CLI's own message; the start of `validate` and
- * `run` reads a registry file (kind 2) and reports it where the CLI does.
+ * `run` reads a registry file (kind 2) and reports it where the CLI does; the import of `validate`,
+ * `register_inputs` and `run` reads a search strategy file (kind 3) as the CLI's import reads it.
  */
-export type FileInfo = CountsFileInfo | RegistryFileInfo;
+export type FileInfo = CountsFileInfo | RegistryFileInfo | StrategyFileInfo;
 
 interface FileInfoOfAnyKind {
   readonly handle: number;
@@ -238,6 +241,11 @@ export interface CountsFileInfo extends FileInfoOfAnyKind {
 /** The *file* JSON of a registry file (kind 2). */
 export interface RegistryFileInfo extends FileInfoOfAnyKind {
   readonly kind: 'registry';
+}
+
+/** The *file* JSON of a search strategy file (kind 3). */
+export interface StrategyFileInfo extends FileInfoOfAnyKind {
+  readonly kind: 'search_strategy';
 }
 
 /** Memory of the instance for the chunks of a file, taken once and used for every chunk (`chunkBuffer`). */
@@ -641,8 +649,8 @@ export class ReactorAbi {
 export type FileLoader = Pick<ReactorAbi, 'stoppedBy' | 'fileBegin' | 'chunkBuffer' | 'fileChunk' | 'fileEnd' | 'fileRelease' | 'freeChunkBuffer'>;
 
 /**
- * Gives the engine a named input file (ABI v2 §4: a WindowMasker counts file, kind 1, or a registry
- * file, kind 2) and returns its *file* JSON: `file_begin` with the file's size, its bytes in chunks of
+ * Gives the engine a named input file (ABI v2 §4: a WindowMasker counts file, kind 1, a registry
+ * file, kind 2, or a search strategy file, kind 3) and returns its *file* JSON: `file_begin` with the file's size, its bytes in chunks of
  * at most `FILE_CHUNK_BYTES` read from the Blob one at a time and given through one buffer of engine
  * memory taken once, `file_end`. A file that the engine refuses (a chunk or its end), or that cannot
  * be read (`FileReadError`, with the browser's reason), is released, unless the instance stopped, so

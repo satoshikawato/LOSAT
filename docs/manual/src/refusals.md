@@ -50,7 +50,7 @@ There is one section for each program, and one for the five search programs toge
 | Option or feature | Programs affected | Status in v0.2.0 |
 | :--- | :--- | :--- |
 | `-remote`, `-entrez_query` | All search programs | Out of scope (needs NCBI servers) |
-| `-import_search_strategy` | All search programs | Out of scope (needs NCBI servers) |
+| `-import_search_strategy` | `psiblast`, `rpsblast`, `rpstblastn`; strategy files in binary or XML form | Not yet supported (text strategy files run in the five search programs) |
 | `-use_sw_tback` | `psiblast`, `rpstblastn` (with CBS), `blastp` (with `-comp_based_stats 0` / `IDENTITY`), `blastp`, `blastx` and `tblastn` with `-ungapped` (at the first query batch that is searched), `tblastn -in_pssm` (when a match is found) | Refused |
 | `-ungapped` | `rpstblastn` (without CBS), `tblastn -in_pssm` | Refused (`rpstblastn` with CBS gives NCBI error) |
 | `-use_index true` | `blastn` | Index searches run, with indexes of only some volumes, two-hit (`-window_size` above 0) and `-db_hard_mask` too; refused for damaged or mismatched index volumes |
@@ -64,7 +64,14 @@ These refusals apply to `blastn`, `blastp`, `blastx`, `tblastn` and `tblastx`.
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-import_search_strategy` | Refused. `psiblast`, `rpsblast` and `rpstblastn` refuse it too. |
+| `-import_search_strategy` with a strategy file in binary or XML form | Refused: not yet supported. Strategy files in text form, the form that `-export_search_strategy` writes, work. |
+| `-import_search_strategy` with queries given as a list of locations, a GI list, a PHI-BLAST pattern, or a PSI-BLAST, RPS-BLAST or PSSM search | Refused: not yet supported. |
+| `-import_search_strategy` with an option that the program does not have or refuses on its command line | Refused (for example composition-based statistics in `blastn`). The strategy's options that the program's command line runs run as there, the database mask, `-subject_besthit`, `-filtering_db` and the MegaBLAST index included. |
+| `-import_search_strategy` with a MegaBLAST database index (`-use_index true`, in the strategy or on the command line) outside a `blastn` search of a database | Refused: not yet supported. |
+| `-import_search_strategy` with the strategy of another program | Refused, except `blastn` and `blastx` running a `tblastx` strategy and `tblastx` running a `blastn` or `blastx` one, which run as NCBI runs them. Between the other programs NCBI stops with an error or reads the query as the wrong molecule. |
+| `-import_search_strategy` with a negative `WindowSize` (a hand-edited strategy: `-window_size` takes 0 or more) | Runs as NCBI runs it, in the five programs: the one-hit search over NCBI's diagonal table, which passes from one subject to the next, so LOSAT writes NCBI's `-num_threads 1` result at every thread count, and the refusals of `-window_size 0` apply to it too. |
+| `-import_search_strategy` with a value outside the range of the command line's option (a hand-edited strategy) | Runs as NCBI runs it, or stops with NCBI's error (for example `HSP Filtering options invalid` for a `BestHitOverhang` or `BestHitScoreEdge` outside 0 to 0.5, or with `Culling`). After an import the command line's rules do not apply: a strategy that sets a matrix or a word size without the threshold, the window or the gap costs keeps the task's values, as in NCBI. Refused: a genetic code that has no table (NCBI crashes), composition-based statistics outside 0 to 3 (NCBI crashes on 4; -1 turns some steps of NCBI's search on and others off), `UnifiedP` above 0 in `tblastn`, or without `CompositionBasedStats`, a `WordSize` of 1 in `blastp`, `blastx` and `tblastn` (NCBI builds a lookup table of one letter), a pair of gapped extension and traceback algorithms other than dynamic programming and megablast's greedy pair (NCBI crashes on some pairs and runs its jumper or Smith-Waterman extension on others), a `StrandOption` that contradicts `-strand`, and the values that the command line refuses too (an infinite `EvalueThreshold` in `blastp`, `blastx` and `tblastn`, a NaN one in `blastx`, a `MatchReward` below 1 with a penalty other than 0). |
+| `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn` | Refused. |
 | `-export_search_strategy -` (standard output) | Refused where NCBI writes its request into the report: at NCBI's first request (after its prolog and the first batch of queries is read, before the search). The report until there is NCBI's (its prolog, written before the refusal), and a run that NCBI ends before that point (an empty query, a database error, an error of an option or of `-outfmt`, a first query record it cannot read, a `-query_loc` past the end, `BATCH_SIZE=abc`, a PSSM run with `-subject`, a standard output that fails at the prolog, such as `/dev/full`) ends as in NCBI, with its error and exit status. Any file or device path works, including `/dev/stdout`, the same file as `-out`, symlinks, and failing devices such as `/dev/full` or a file at its size limit (matching NCBI's diagnostics, error archives, and exit status). NCBI's warnings from before its formatter come before the refusal. |
 | `-export_search_strategy` with a file name that is not UTF-8 | Refused. |
 | `-export_search_strategy` with `-dbsize` and a list that keeps no sequence of the database | Refused. |
@@ -91,7 +98,7 @@ For rare and pathological inputs (where NCBI BLAST+ crashes, loops, overflows, o
 
 | Option or value | What happens |
 | :--- | :--- |
-| `-reward 0` with a penalty other than 0 | Refused (exit status 1). The message is shown below the table. `-reward 0 -penalty 0` (the scores of `-task rmblastn`) runs. |
+| `-reward 0` with a penalty other than 0, and a negative reward (a search strategy's `MatchReward`; `-reward` takes 0 or more) | Refused (exit status 1): no query has Karlin-Altschul values (NCBI writes a warning for each query and no hits). The message is shown below the table. `-reward 0 -penalty 0` (the scores of `-task rmblastn`) runs. |
 | `-reward 0 -penalty 0` with `-task megablast` and its greedy extension (without `-no_greedy`; also with `-ungapped` when the gap costs are 0 and 0) | Refused. NCBI divides by zero (exit status 136) or does not finish. |
 | `-use_index true` with a new-style index volume of 36 to 39 bytes or one without read access, an empty first index volume, or an `-index_name` volume range whose loop NCBI never ends (a first volume of 0 or more with a negative last one, such as `oidx,,0,-1`, or a last one of -1) | Refused. NCBI reads such a header undefined, crashes on the empty volume, or never finishes the loop. |
 | `-use_index true` with an index volume whose parts do not fit together (a list, offset or local id outside its sections, an Nmer length of 0, a stride of 32,768 or more), an index not made from the database (a sequence with more chunks than the index has), a seed of the index that starts at or past the last letter of its sequence, or an old-style index (`-index_name`) of fewer sequences than the database when the search runs more than one query batch or query chunk | Refused. NCBI reads past such an index's sections or past the sequence, crashes, or gives a result that depends on the order of its threads. With the old-style index NCBI stops with an error in its second search of the index (a later query batch or query chunk); LOSAT writes the same output of the batches before and refuses there. Other searches with an index give NCBI's output, two-hit searches (`-window_size` above 0) included. When NCBI finds no index, cannot read the header of the first index volume, or the word size is below the index's minimum, LOSAT writes NCBI's error lines and warning and searches without the index, as NCBI does. With an index of only some volumes of `-db`, LOSAT searches every query batch with the index (see [Differences from NCBI BLAST+](differences.md#blastn--use_index-true-with-an-index-of-only-some-volumes)); with `-db_hard_mask`, it reads the index as if the masked letters matched nothing (see [Differences from NCBI BLAST+](differences.md#blastn--use_index-true-with--db_hard_mask)). |
@@ -512,14 +519,15 @@ For the inputs below, NCBI BLAST+ 2.17.0's Python script exits with a Python tra
 
 - The programs `deltablast` and `blast_formatter`.
 - `makeprofiledb -dbtype cobalt`.
-- `psiblast -phi_pattern` with more than one round or with output formats other than `0`, `6`, `7`, `10` and `20`, and in
+- `psiblast -phi_pattern` with more than one round, with `-html`, or with output formats other than `0`, `6`, `7`, `10` and `20`, and in
   the library and pylosat.
 - The `psiblast` output formats `13` to `16`.
+- `-import_search_strategy` in `psiblast`, `rpsblast` and `rpstblastn`, and strategy files in binary or XML form.
 
 ## Out of scope: they need NCBI's servers
 
 - `-remote` and `-entrez_query`: all programs.
-- `-import_search_strategy`: all programs that take it.
+- `-import_search_strategy`: `psiblast`, `rpsblast`, and `rpstblastn`.
 
 ## See also
 

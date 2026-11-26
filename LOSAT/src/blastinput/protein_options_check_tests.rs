@@ -20,6 +20,9 @@ fn psiblast_takes_word_sizes_below_5_and_the_standard_matrices() {
             psi_tblastn: false,
             phi: false,
             x_dropoff: None,
+            culling_limit: None,
+            best_hit_overhang: None,
+            best_hit_score_edge: None,
         })
         .map_err(|error| error.to_string())
     };

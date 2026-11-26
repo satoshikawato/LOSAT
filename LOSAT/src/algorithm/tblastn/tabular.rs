@@ -270,6 +270,7 @@ pub(super) fn write_tblastn_tabular(
             false,
             names,
             PROGRAM,
+            PROGRAM,
             &queries,
             writer,
             warnings,

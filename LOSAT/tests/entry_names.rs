@@ -459,17 +459,20 @@ fn refusals_by_name_have_one_form() {
             format!("Error: the NCBI BLAST+ option {option} is not supported by LOSAT's PROGRAM\n");
         assert!(forms.iter().all(|form| *form == expected), "{forms:?}");
     }
-    // blastx's remaining refusals by name (`-import_search_strategy`, `-entrez_query` with
-    // `-remote`) have the same form (`-gilist` and `-ipglist` run now).
-    for (option, extra) in [
-        (
-            "-import_search_strategy",
-            &["-import_search_strategy", "x"][..],
-        ),
-        ("-entrez_query", &["-entrez_query", "x", "-remote"][..]),
-    ] {
-        let mut argv = vec!["blastx", "-query", "q.fa", "-db", "d"];
-        argv.extend_from_slice(extra);
+    // blastx's remaining refusal by name (`-entrez_query` with `-remote`) has the same form
+    // (`-gilist`, `-ipglist`, and `-import_search_strategy` run now).
+    {
+        let option = "-entrez_query";
+        let argv = [
+            "blastx",
+            "-query",
+            "q.fa",
+            "-db",
+            "d",
+            "-entrez_query",
+            "x",
+            "-remote",
+        ];
         let output = run(losat(), &argv);
         assert_eq!(output.status.code(), Some(1), "{option} {output:?}");
         assert_eq!(

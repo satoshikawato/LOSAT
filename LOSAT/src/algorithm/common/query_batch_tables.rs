@@ -80,7 +80,7 @@ impl QueryBatchTables {
             rings,
             offset: window,
             fill: DiagStruct::default(),
-            mark: 0,
+            mark: 1,
         }
     }
 

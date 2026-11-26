@@ -1,0 +1,4 @@
+@HD	VN:1.2	SO:coordinate	GO:reference
+@SQ	SN:Query_2	LN:129
+@PG	ID:0	VN:2.17.0+	PN:tblastx
+BL_ORD_ID:1	0	Query_2	13	255	67H108M33H	*	0	0	*	*	NM:i:0

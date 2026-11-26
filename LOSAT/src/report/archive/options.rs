@@ -14,6 +14,7 @@
 //! `S/DESIGN_OF8.md` section 2.2 lists the classes; the unit tests of the programs' adapters
 //! replay every option list that NCBI wrote in the design's probes.
 
+use super::fields::{self, Field, ValueType};
 use crate::blastinput::app::Program;
 
 /// The value of a recorded parameter (`Blast4-value`).
@@ -33,16 +34,58 @@ pub enum ParamValue {
     Str(String),
     /// `integer-list`.
     IntegerList(Vec<i32>),
+    /// `strand-type` (`Blast4-strand-type`: forward 1, reverse 2, both 3).
+    StrandType(i32),
     // NCBI reference (598d8ae6): c++/src/objects/blast/blast.asn:512,529
     /// `big-integer-list` (`Blast4-value` choice 12, `SEQUENCE OF BigInt`).
     BigIntegerList(Vec<i64>),
 }
 
-/// A recorded parameter (`Blast4-parameter`).
+impl ParamValue {
+    /// The `Blast4-value` alternative of the value.
+    pub fn value_type(&self) -> ValueType {
+        match self {
+            ParamValue::Evalue(_) => ValueType::Cutoff,
+            ParamValue::Integer(_) => ValueType::Integer,
+            ParamValue::BigInteger(_) => ValueType::BigInteger,
+            ParamValue::Boolean(_) => ValueType::Boolean,
+            ParamValue::Real(_) => ValueType::Real,
+            ParamValue::Str(_) => ValueType::String,
+            ParamValue::IntegerList(_) => ValueType::IntegerList,
+            ParamValue::StrandType(_) => ValueType::StrandType,
+            ParamValue::BigIntegerList(_) => ValueType::BigIntegerList,
+        }
+    }
+}
+
+/// A recorded parameter (`Blast4-parameter`): a field of the registry (`fields`) with a value of
+/// the field's type, so that NCBI's `CBlast4Field::Match` takes every parameter LOSAT writes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Param {
-    pub name: &'static str,
+    field: Field,
     pub value: ParamValue,
+}
+
+impl Param {
+    pub fn new(field: Field, value: ParamValue) -> Param {
+        debug_assert_eq!(
+            value.value_type(),
+            field.value_type(),
+            "the value of {} is not of its field's type",
+            field.name()
+        );
+        Param { field, value }
+    }
+
+    /// The parameter's field.
+    pub fn field(&self) -> Field {
+        self.field
+    }
+
+    /// The parameter's name.
+    pub fn name(&self) -> &'static str {
+        self.field.name()
+    }
 }
 
 /// A filtering option as the command line gives it (`-seg`, `-dust`).
@@ -196,14 +239,8 @@ impl RequestKind {
     fn constructor_calls(self) -> Vec<Param> {
         let psi = || {
             vec![
-                Param {
-                    name: "InclusionThreshold",
-                    value: ParamValue::Real(0.002),
-                },
-                Param {
-                    name: "PseudoCountWeight",
-                    value: ParamValue::Integer(0),
-                },
+                Param::new(fields::INCLUSION_THRESHOLD, ParamValue::Real(0.002)),
+                Param::new(fields::PSEUDO_COUNT, ParamValue::Integer(0)),
             ]
         };
         match self {
@@ -211,18 +248,9 @@ impl RequestKind {
             RequestKind::PsiTblastn => {
                 let mut calls = psi();
                 calls.extend([
-                    Param {
-                        name: "SmithWatermanMode",
-                        value: ParamValue::Boolean(false),
-                    },
-                    Param {
-                        name: "DbGeneticCode",
-                        value: ParamValue::Integer(1),
-                    },
-                    Param {
-                        name: "WordThreshold",
-                        value: ParamValue::Integer(13),
-                    },
+                    Param::new(fields::SMITH_WATERMAN_MODE, ParamValue::Boolean(false)),
+                    Param::new(fields::DB_GENETIC_CODE, ParamValue::Integer(1)),
+                    Param::new(fields::WORD_THRESHOLD, ParamValue::Integer(13)),
                 ]);
                 calls
             }
@@ -304,6 +332,13 @@ pub struct OptionInputs {
     /// psiblast's `-num_iterations`: the request's `Web_StepNumber` with `-db`
     /// (`ArchiveRequest::step_number`).
     pub num_iterations: Option<i32>,
+    /// An imported strategy's parameters as its setters record them, in the file's order
+    /// (`CBlastOptionsBuilder::GetSearchOptions`): they replace the command line's classes.
+    pub imported: Option<Vec<Param>>,
+    /// NCBI's name of the running application where it is not the kind's: the application of
+    /// a command line that imports another program's strategy, whose posts all carry its prefix
+    /// (`ArchiveRequest::application`); `None`: the kind's own (`RequestKind::application`).
+    pub application: Option<&'static str>,
     /// psiblast's `-ignore_msa_master` (`CPsiBlastArgs`, always recorded).
     pub ignore_msa_master: bool,
     /// psiblast's `-phi_pattern`: the pattern as the file gives it (`phi_search::file`), of
@@ -361,6 +396,8 @@ impl OptionInputs {
             pseudocount: 0,
             gap_trigger: 22.0,
             num_iterations: None,
+            imported: None,
+            application: None,
             ignore_msa_master: false,
             phi_pattern: None,
         }
@@ -407,45 +444,48 @@ fn is_default_word_threshold(kind: RequestKind, value: i32) -> bool {
 /// The setters of the task (`CBlastOptionsFactory::Create` of `task` outside defaults mode).
 fn task_calls(task: &str) -> Vec<Param> {
     use ParamValue::{Boolean, Evalue, Integer, Str};
-    let p = |name, value| Param { name, value };
+    let p = Param::new;
     match task {
         "blastn-short" => vec![
-            p("EvalueThreshold", Evalue(1000.0)),
-            p("MatchReward", Integer(1)),
-            p("MismatchPenalty", Integer(-3)),
-            p("WordSize", Integer(7)),
-            p("DustFiltering", Boolean(false)),
-            p("SegFiltering", Boolean(false)),
-            p("RepeatFiltering", Boolean(false)),
+            p(fields::EVALUE_THRESHOLD, Evalue(1000.0)),
+            p(fields::MATCH_REWARD, Integer(1)),
+            p(fields::MISMATCH_PENALTY, Integer(-3)),
+            p(fields::WORD_SIZE, Integer(7)),
+            p(fields::DUST_FILTERING, Boolean(false)),
+            p(fields::SEG_FILTERING, Boolean(false)),
+            p(fields::REPEAT_FILTERING, Boolean(false)),
             // `ClearFilterOptions` ends with `SetMaskAtHash` set to false (api/blast_options_cxx.cpp:1022-1031).
-            p("MaskAtHash", Boolean(false)),
+            p(fields::MASK_AT_HASH, Boolean(false)),
         ],
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_handle.cpp:365-370
         "rmblastn" => vec![
-            p("MatchReward", Integer(0)),
-            p("MismatchPenalty", Integer(0)),
+            p(fields::MATCH_REWARD, Integer(0)),
+            p(fields::MISMATCH_PENALTY, Integer(0)),
         ],
         "dc-megablast" => vec![
-            p("MBTemplateType", Integer(0)),
-            p("MBTemplateLength", Integer(18)),
-            p("WordSize", Integer(11)),
-            p("WindowSize", Integer(40)),
+            p(fields::MB_TEMPLATE_TYPE, Integer(0)),
+            p(fields::MB_TEMPLATE_LENGTH, Integer(18)),
+            p(fields::WORD_SIZE, Integer(11)),
+            p(fields::WINDOW_SIZE, Integer(40)),
         ],
         "blastp-fast" | "tblastn-fast" | "blastx-fast" => {
-            vec![p("WordSize", Integer(5)), p("WordThreshold", Integer(20))]
+            vec![
+                p(fields::WORD_SIZE, Integer(5)),
+                p(fields::WORD_THRESHOLD, Integer(20)),
+            ]
         }
         "blastp-short" => vec![
-            p("EvalueThreshold", Evalue(20000.0)),
-            p("MatrixName", Str("PAM30".to_string())),
-            p("GapOpeningCost", Integer(9)),
-            p("GapExtensionCost", Integer(1)),
-            p("WordSize", Integer(2)),
-            p("WordThreshold", Integer(16)),
-            p("DustFiltering", Boolean(false)),
-            p("SegFiltering", Boolean(false)),
-            p("RepeatFiltering", Boolean(false)),
+            p(fields::EVALUE_THRESHOLD, Evalue(20000.0)),
+            p(fields::MATRIX_NAME, Str("PAM30".to_string())),
+            p(fields::GAP_OPENING_COST, Integer(9)),
+            p(fields::GAP_EXTENSION_COST, Integer(1)),
+            p(fields::WORD_SIZE, Integer(2)),
+            p(fields::WORD_THRESHOLD, Integer(16)),
+            p(fields::DUST_FILTERING, Boolean(false)),
+            p(fields::SEG_FILTERING, Boolean(false)),
+            p(fields::REPEAT_FILTERING, Boolean(false)),
             // `ClearFilterOptions` ends with `SetMaskAtHash` set to false (api/blast_options_cxx.cpp:1022-1031).
-            p("MaskAtHash", Boolean(false)),
+            p(fields::MASK_AT_HASH, Boolean(false)),
         ],
         _ => Vec::new(),
     }
@@ -571,18 +611,23 @@ pub struct ParamList {
 }
 
 impl ParamList {
-    /// A `Set*` call.
-    pub fn set(&mut self, name: &'static str, value: ParamValue) {
-        match self.params.iter_mut().find(|param| param.name == name) {
-            Some(param) => param.value = value,
-            None => self.params.push(Param { name, value }),
+    /// A `Set*` call: the parameter of the same name is replaced (`x_AttachValue` compares names).
+    pub fn set(&mut self, field: Field, value: ParamValue) {
+        let param = Param::new(field, value);
+        match self
+            .params
+            .iter_mut()
+            .find(|recorded| recorded.name() == field.name())
+        {
+            Some(recorded) => *recorded = param,
+            None => self.params.push(param),
         }
     }
 
-    fn get(&self, name: &str) -> Option<&ParamValue> {
+    fn get(&self, field: Field) -> Option<&ParamValue> {
         self.params
             .iter()
-            .find(|param| param.name == name)
+            .find(|param| param.name() == field.name())
             .map(|param| &param.value)
     }
 
@@ -602,15 +647,18 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
     use ParamValue::{BigInteger, Boolean, Evalue, Integer, Real, Str};
     let kind = inputs.kind;
     let mut list = ParamList::default();
-    list.set("EvalueThreshold", Evalue(10.0));
+    list.set(fields::EVALUE_THRESHOLD, Evalue(10.0));
     for param in kind.constructor_calls() {
-        list.set(param.name, param.value);
+        list.set(param.field(), param.value);
     }
     // PSI-TBLASTN's handle is not the task's (`RequestKind`: tblastn_args.cpp:138-149).
     if kind != RequestKind::PsiTblastn {
         for param in task_calls(&inputs.task) {
-            list.set(param.name, param.value);
+            list.set(param.field(), param.value);
         }
+    }
+    if let Some(imported) = &inputs.imported {
+        return replayed_options(list, imported, inputs);
     }
     let matrix = inputs.matrix.clone().unwrap_or_else(|| {
         if inputs.task == "blastp-short" {
@@ -636,83 +684,83 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
         match class {
             Class::Db => {
                 if let Some(size) = inputs.dbsize {
-                    list.set("DbLength", BigInteger(size));
+                    list.set(fields::DB_LENGTH, BigInteger(size));
                 }
             }
             Class::Generic => {
                 if let Some(evalue) = inputs.evalue {
-                    list.set("EvalueThreshold", Evalue(evalue));
+                    list.set(fields::EVALUE_THRESHOLD, Evalue(evalue));
                 }
                 if let Some(open) = inputs.gapopen {
-                    list.set("GapOpeningCost", Integer(open));
+                    list.set(fields::GAP_OPENING_COST, Integer(open));
                 } else if inputs.matrix.is_some() {
-                    list.set("GapOpeningCost", Integer(matrix_gaps(&matrix).0));
+                    list.set(fields::GAP_OPENING_COST, Integer(matrix_gaps(&matrix).0));
                 }
                 if let Some(extend) = inputs.gapextend {
-                    list.set("GapExtensionCost", Integer(extend));
+                    list.set(fields::GAP_EXTENSION_COST, Integer(extend));
                 } else if inputs.matrix.is_some() {
-                    list.set("GapExtensionCost", Integer(matrix_gaps(&matrix).1));
+                    list.set(fields::GAP_EXTENSION_COST, Integer(matrix_gaps(&matrix).1));
                 }
                 if let Some(xdrop) = inputs.xdrop_gap {
-                    list.set("GapXDropoff", Real(xdrop));
+                    list.set(fields::GAP_X_DROPOFF, Real(xdrop));
                 }
                 if let Some(xdrop) = inputs.xdrop_gap_final {
-                    list.set("GapXDropoffFinal", Real(xdrop));
+                    list.set(fields::GAP_X_DROPOFF_FINAL, Real(xdrop));
                 }
                 if let Some(word_size) = inputs.word_size {
                     if protein_query && word_size > 4 {
                         threshold_set_by_word_size = true;
-                        list.set("WordThreshold", Integer(19));
+                        list.set(fields::WORD_THRESHOLD, Integer(19));
                         if word_size > 5 {
-                            list.set("WordThreshold", Integer(21));
+                            list.set(fields::WORD_THRESHOLD, Integer(21));
                         }
                         if word_size > 6 {
-                            list.set("WordThreshold", Integer(20));
+                            list.set(fields::WORD_THRESHOLD, Integer(20));
                         }
                     }
-                    list.set("WordSize", Integer(word_size));
+                    list.set(fields::WORD_SIZE, Integer(word_size));
                 }
                 if let Some(searchsp) = inputs.searchsp {
-                    list.set("EffectiveSearchSpace", BigInteger(searchsp));
+                    list.set(fields::EFFECTIVE_SEARCH_SPACE, BigInteger(searchsp));
                 }
                 if let Some(identity) = inputs.perc_identity {
-                    list.set("PercentIdentity", Real(identity));
+                    list.set(fields::PERCENT_IDENTITY, Real(identity));
                 }
                 if let Some(coverage) = inputs.qcov_hsp_perc {
-                    list.set("QueryCovHspPerc", Real(coverage));
+                    list.set(fields::QUERY_COV_HSP_PERC, Real(coverage));
                 }
                 if let Some(max_hsps) = inputs.max_hsps {
-                    list.set("MaxHspsPerSubject", Integer(max_hsps));
+                    list.set(fields::MAX_HSPS_PER_SUBJECT, Integer(max_hsps));
                 }
                 if let Some(sum_stats) = inputs.sum_stats {
-                    list.set("SumStatistics", Boolean(sum_stats));
+                    list.set(fields::SUM_STATISTICS_MODE, Boolean(sum_stats));
                 }
             }
             Class::Nucl => {
                 if let Some(penalty) = inputs.penalty {
-                    list.set("MismatchPenalty", Integer(penalty));
+                    list.set(fields::MISMATCH_PENALTY, Integer(penalty));
                 }
                 if let Some(reward) = inputs.reward {
-                    list.set("MatchReward", Integer(reward));
+                    list.set(fields::MATCH_REWARD, Integer(reward));
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:681-685
                 // Both enumerators are 0 (blast_options.h: eDynProgScoreOnly, eDynProgTbck).
                 if inputs.no_greedy {
-                    list.set("GapExtnAlgorithm", Integer(0));
-                    list.set("GapTracebackAlgorithm", Integer(0));
+                    list.set(fields::GAP_EXTN_ALGORITHM, Integer(0));
+                    list.set(fields::GAP_TRACEBACK_ALGORITHM, Integer(0));
                 }
             }
             Class::Dmb => {
                 if let Some(kind) = inputs.template_type {
-                    list.set("MBTemplateType", Integer(kind));
+                    list.set(fields::MB_TEMPLATE_TYPE, Integer(kind));
                 }
                 if let Some(length) = inputs.template_length {
-                    list.set("MBTemplateLength", Integer(length));
+                    list.set(fields::MB_TEMPLATE_LENGTH, Integer(length));
                 }
             }
             Class::Filtering => {
                 list.set(
-                    "MaskAtHash",
+                    fields::MASK_AT_HASH,
                     Boolean(inputs.soft_masking.unwrap_or(kind == RequestKind::Blastn)),
                 );
                 if kind != RequestKind::Blastn {
@@ -736,31 +784,31 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                         },
                     );
                     match seg {
-                        Filter::No => list.set("SegFiltering", Boolean(false)),
-                        Filter::Yes => list.set("SegFiltering", Boolean(true)),
+                        Filter::No => list.set(fields::SEG_FILTERING, Boolean(false)),
+                        Filter::Yes => list.set(fields::SEG_FILTERING, Boolean(true)),
                         Filter::Seg {
                             window,
                             locut,
                             hicut,
                         } => {
-                            list.set("SegFilteringWindow", Integer(window));
-                            list.set("SegFilteringLocut", Real(locut));
-                            list.set("SegFilteringHicut", Real(hicut));
+                            list.set(fields::SEG_FILTERING_WINDOW, Integer(window));
+                            list.set(fields::SEG_FILTERING_LOCUT, Real(locut));
+                            list.set(fields::SEG_FILTERING_HICUT, Real(hicut));
                         }
                         Filter::Dust { .. } => {}
                     }
                 } else if let Some(dust) = inputs.dust.clone() {
                     match dust {
-                        Filter::No => list.set("DustFiltering", Boolean(false)),
-                        Filter::Yes => list.set("DustFiltering", Boolean(true)),
+                        Filter::No => list.set(fields::DUST_FILTERING, Boolean(false)),
+                        Filter::Yes => list.set(fields::DUST_FILTERING, Boolean(true)),
                         Filter::Dust {
                             level,
                             window,
                             linker,
                         } => {
-                            list.set("DustFilteringLevel", Integer(level));
-                            list.set("DustFilteringWindow", Integer(window));
-                            list.set("DustFilteringLinker", Integer(linker));
+                            list.set(fields::DUST_FILTERING_LEVEL, Integer(level));
+                            list.set(fields::DUST_FILTERING_WINDOW, Integer(window));
+                            list.set(fields::DUST_FILTERING_LINKER, Integer(linker));
                         }
                         Filter::Seg { .. } => {}
                     }
@@ -770,29 +818,29 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                 // (`SetRepeatFilteringDB`: the name as given, an empty one too; the handler sets
                 // no `RepeatFiltering` boolean.)
                 if let Some(database) = &inputs.filtering_db {
-                    list.set("RepeatFilteringDB", Str(database.clone()));
+                    list.set(fields::REPEAT_FILTERING_DB, Str(database.clone()));
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:1357-1363
                 // (`SetWindowMaskerTaxId`, called by the filtering handler before it reads
                 // `-window_masker_db`, blast_args.cpp:437-444: the taxid 0 is no parameter.)
                 if let Some(taxid) = inputs.window_masker_taxid.filter(|&taxid| taxid != 0) {
-                    list.set("WindowMaskerTaxId", Integer(taxid));
+                    list.set(fields::WINDOW_MASKER_TAX_ID, Integer(taxid));
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:446-459
                 if let Some(database) = &inputs.window_masker_db {
-                    list.set("WindowMaskerDatabase", Str(database.clone()));
+                    list.set(fields::WINDOW_MASKER_DATABASE, Str(database.clone()));
                 }
             }
             Class::Matrix => {
                 if let Some(name) = &inputs.matrix {
-                    list.set("MatrixName", Str(name.clone()));
+                    list.set(fields::MATRIX_NAME, Str(name.clone()));
                 }
             }
             Class::Threshold => {
                 if let Some(threshold) = inputs.threshold {
-                    list.set("WordThreshold", Integer(threshold));
+                    list.set(fields::WORD_THRESHOLD, Integer(threshold));
                 } else {
-                    let current = list.get("WordThreshold").cloned();
+                    let current = list.get(fields::WORD_THRESHOLD).cloned();
                     // The threshold that `blastp-short` records (16) is not the options'
                     // value (the handle's 11) until a word size above 4 sets one: the class
                     // then replaces it with the matrix's suggestion (probe `opt_short_matrix`).
@@ -816,34 +864,34 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                             RequestKind::Blastx => 1,
                             _ => 0,
                         };
-                        list.set("WordThreshold", Integer(value));
+                        list.set(fields::WORD_THRESHOLD, Integer(value));
                     }
                 }
             }
             Class::Hsp => {
                 if let Some(limit) = inputs.culling_limit {
-                    list.set("Culling", Integer(limit));
+                    list.set(fields::CULLING_LIMIT, Integer(limit));
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3338-3349
                 // Each when given, after `Culling` (they exclude each other) and before
                 // `UseSubjectBestHit` (NCBI BLAST+ 2.17.0, line NP O6a's probe).
                 if let Some(overhang) = inputs.best_hit_overhang {
-                    list.set("BestHitOverhang", Real(overhang));
+                    list.set(fields::BEST_HIT_OVERHANG, Real(overhang));
                 }
                 if let Some(score_edge) = inputs.best_hit_score_edge {
-                    list.set("BestHitScoreEdge", Real(score_edge));
+                    list.set(fields::BEST_HIT_SCORE_EDGE, Real(score_edge));
                 }
                 if inputs.subject_besthit {
-                    list.set("UseSubjectBestHit", Boolean(true));
+                    list.set(fields::SUBJECT_BEST_HIT, Boolean(true));
                 }
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:485-498
             // The RPS searches have no suggestion (`p9.rps.tk.f6`, `p9.rtn.nq4.f6`).
             Class::Window => {
                 if let Some(size) = inputs.window_size {
-                    list.set("WindowSize", Integer(size));
+                    list.set(fields::WINDOW_SIZE, Integer(size));
                 } else if kind != RequestKind::Blastn && !kind.is_rps() {
-                    list.set("WindowSize", Integer(suggested_window(&matrix)));
+                    list.set(fields::WINDOW_SIZE, Integer(suggested_window(&matrix)));
                 }
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_options_cxx.cpp:2619-2632
@@ -854,23 +902,28 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
             // run's options handle (`blastn::blast_engine::mb_index::note_index_use`).
             Class::MbIndex => {
                 if let Some(name) = &inputs.mb_index_name {
-                    list.set("ForceMbIndex", Boolean(false));
+                    list.set(fields::FORCE_MB_INDEX, Boolean(false));
                     if !name.is_empty() {
-                        list.set("MbIndexName", Str(name.clone()));
+                        list.set(fields::MB_INDEX_NAME, Str(name.clone()));
                     }
                 }
             }
-            Class::Gapped => list.set("UngappedMode", Boolean(inputs.ungapped)),
-            Class::Intron => list.set("LongestIntronLength", Integer(inputs.max_intron_length)),
-            Class::QueryGeneticCode => list.set("QueryGeneticCode", Integer(inputs.query_gencode)),
+            Class::Gapped => list.set(fields::GAPPED_MODE, Boolean(inputs.ungapped)),
+            Class::Intron => list.set(
+                fields::LONGEST_INTRON_LENGTH,
+                Integer(inputs.max_intron_length),
+            ),
+            Class::QueryGeneticCode => {
+                list.set(fields::QUERY_GENETIC_CODE, Integer(inputs.query_gencode))
+            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1050-1055
             // PSI-TBLASTN (`ePSITblastn`) keeps the constructor's code 1 in its place.
             Class::DbGeneticCode => {
                 if kind != RequestKind::PsiTblastn {
-                    list.set("DbGeneticCode", Integer(inputs.db_gencode));
+                    list.set(fields::DB_GENETIC_CODE, Integer(inputs.db_gencode));
                 }
             }
-            Class::Formatting => list.set("HitlistSize", Integer(inputs.hitlist_size)),
+            Class::Formatting => list.set(fields::HITLIST_SIZE, Integer(inputs.hitlist_size)),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:879-885
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:866-869
             // `UnifiedP` is BLASTP's only (psiblast's handle is `ePSIBlast`); `-use_sw_tback` is
@@ -881,30 +934,58 @@ pub fn algorithm_options(inputs: &OptionInputs) -> Vec<Param> {
                 } else {
                     inputs.comp_based_stats
                 };
-                list.set("CompositionBasedStats", Integer(mode));
+                list.set(fields::COMPOSITION_BASED_STATS, Integer(mode));
                 if kind == RequestKind::Blastp && inputs.unified_p && inputs.comp_based_stats != 0 {
-                    list.set("UnifiedP", Integer(1));
+                    list.set(fields::UNIFIED_P, Integer(1));
                 }
-                list.set("SmithWatermanMode", Boolean(inputs.use_sw_tback));
+                list.set(fields::SMITH_WATERMAN_MODE, Boolean(inputs.use_sw_tback));
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1073-1078
             // The argument has a default (22), so it is always set.
-            Class::GapTrigger => list.set("GapTrigger", Real(inputs.gap_trigger)),
+            Class::GapTrigger => list.set(fields::GAP_TRIGGER, Real(inputs.gap_trigger)),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1329-1331
-            Class::PsiBlast => list.set("IgnoreMsaMaster", Boolean(inputs.ignore_msa_master)),
+            Class::PsiBlast => {
+                list.set(fields::IGNORE_MSA_MASTER, Boolean(inputs.ignore_msa_master))
+            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1113-1119
             // Both have defaults: set in the places of the constructor's.
             Class::PssmEngine => {
-                list.set("PseudoCountWeight", Integer(inputs.pseudocount));
-                list.set("InclusionThreshold", Real(inputs.inclusion_ethresh));
+                list.set(fields::PSEUDO_COUNT, Integer(inputs.pseudocount));
+                list.set(fields::INCLUSION_THRESHOLD, Real(inputs.inclusion_ethresh));
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1382-1411
             // The pattern as read (`SetPHIPattern`).
             Class::Phi => {
                 if let Some(pattern) = &inputs.phi_pattern {
-                    list.set("PHIPattern", Str(pattern.clone()));
+                    list.set(fields::PHI_PATTERN, Str(pattern.clone()));
                 }
             }
+        }
+    }
+    list.into_params()
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3811-3828
+/// The options of an imported strategy: the handle `CBlastOptionsFactory::Create` makes for the
+/// strategy's program (`list`), each setter of the file replayed over it in the file's order,
+/// then the classes `SetOptionsForSavedStrategy` extracts again: `CFormattingArgs` sets the
+/// hitlist size, `CBlastDatabaseArgs` the command line's `-dbsize` (`dbsize` holds it, or the
+/// strategy's value, which then keeps its place) and `CMbIndexArgs` the index.
+fn replayed_options(mut list: ParamList, imported: &[Param], inputs: &OptionInputs) -> Vec<Param> {
+    for param in imported {
+        list.set(param.field(), param.value.clone());
+    }
+    list.set(
+        fields::HITLIST_SIZE,
+        ParamValue::Integer(inputs.hitlist_size),
+    );
+    if let Some(size) = inputs.dbsize {
+        list.set(fields::DB_LENGTH, ParamValue::BigInteger(size));
+    }
+    if let Some(name) = &inputs.mb_index_name {
+        list.set(fields::FORCE_MB_INDEX, ParamValue::Boolean(false));
+        if !name.is_empty() {
+            list.set(fields::MB_INDEX_NAME, ParamValue::Str(name.clone()));
         }
     }
     list.into_params()

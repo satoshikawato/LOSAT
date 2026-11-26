@@ -13,13 +13,13 @@
 //! of a round serially (no `LOSAT_X_PAIRWISEPAR` pieces).
 
 use super::{
-    blastp_family_program, database_description_label, write_blast_database_header,
-    write_blastp_database_header_spacing, write_blastp_query_footer_spacing,
-    write_blastp_query_header, write_database_subject_alignments_part, write_decorated_alignment,
-    write_description_table, write_hsp_info, write_no_hits_found, write_prolog, write_spaces,
-    write_subject_alignments_part, write_tblastn_unsearched_query_footer_spacing,
-    BlastpPairwiseQuery, BlastpPairwiseReport, DatabaseHeading, PairwiseConfig, PairwiseDatabase,
-    PairwiseHit, PlainRows, RowDecoration,
+    blastp_family_program, database_description_label, shown_hsp, table_scores,
+    write_blast_database_header, write_blastp_database_header_spacing,
+    write_blastp_query_footer_spacing, write_blastp_query_header,
+    write_database_subject_alignments_part, write_decorated_alignment, write_description_table,
+    write_hsp_info, write_no_hits_found, write_prolog, write_spaces, write_subject_alignments_part,
+    write_tblastn_unsearched_query_footer_spacing, BlastpPairwiseQuery, BlastpPairwiseReport,
+    DatabaseHeading, PairwiseConfig, PairwiseDatabase, PairwiseHit, PlainRows, RowDecoration,
 };
 use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::report::ostream::{DisplaySeqalign, ReportWrite};
@@ -352,7 +352,10 @@ impl RoundSections<'_> {
         writeln!(writer)
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:586-611
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:756-848
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:1004-1011,1101,1134
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4261-4309
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:86-87
     /// One part: for the repeat pass the two lines of the Score/E header, then the part's line
     /// and a blank line, then its rows (`write_description_table`'s rows and widths, every row of
@@ -366,16 +369,14 @@ impl RoundSections<'_> {
         repeat_pass: bool,
         place: ReportHook<'_, W>,
     ) -> io::Result<()> {
-        let rows: Vec<(u32, &PairwiseHit, f64)> = part
+        let rows: Vec<(u32, Option<&PairwiseHit>, f64)> = part
             .iter()
             .map(|(s_idx, hits)| {
-                let mut best = hits[0];
-                for hit in hits {
-                    if hit.hit.bit_score > best.hit.bit_score {
-                        best = hit;
-                    }
-                }
-                (*s_idx, best, hits.iter().map(|hit| hit.hit.bit_score).sum())
+                (
+                    *s_idx,
+                    shown_hsp(hits),
+                    hits.iter().map(|hit| hit.hit.bit_score).sum(),
+                )
             })
             .collect();
         // `write_description_table`'s widths (showdefline.cpp:1059-1142, cited there).
@@ -383,8 +384,9 @@ impl RoundSections<'_> {
         let mut max_evalue = "Value".len();
         let mut max_total = "Total".len();
         for (index, (_, best, total)) in rows.iter().enumerate() {
-            max_score = max_score.max(format_bitscore_ncbi(best.hit.bit_score).len());
-            max_evalue = max_evalue.max(format_evalue_ncbi(best.hit.e_value).len());
+            let (bits, e_value) = table_scores(*best);
+            max_score = max_score.max(format_bitscore_ncbi(bits).len());
+            max_evalue = max_evalue.max(format_evalue_ncbi(e_value).len());
             let total_len = format_bitscore_ncbi(*total).len();
             if index + 1 == rows.len() {
                 if max_total < total_len {
@@ -415,11 +417,12 @@ impl RoundSections<'_> {
             // Each line loads its subject (`write_description_table`).
             place(ReportPlace::Load(*s_idx), writer)?;
             self.label(group, *s_idx).write_cut(writer)?;
+            let (bits, e_value) = table_scores(*best);
             writeln!(
                 writer,
                 "  {:<max_score$}  {:<max_evalue$}",
-                format_bitscore_ncbi(best.hit.bit_score),
-                format_evalue_ncbi(best.hit.e_value)
+                format_bitscore_ncbi(bits),
+                format_evalue_ncbi(e_value)
             )?;
         }
         Ok(())

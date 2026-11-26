@@ -63,7 +63,9 @@ databases of the inflated directory, not paths. `freeze` and `check` refuse to s
   array of a batch's heaps, with the near input that follows each query batch by queries without a hit, where
   they add no byte: outfmt 6, or a batch that fails and writes nothing; exception 29: `-db_hard_mask` with
   overlapping masks after which NCBI's word hits reach diagonal entries of another subject, with the near database
-  that holds a spacer of `X` between the two subjects under an alias with the database's statistics). The row has no
+  that holds a spacer of `X` between the two subjects under an alias with the database's statistics; exception 31:
+  a PSSM file's gapped Lambda for which NCBI's search for the hit-saving cutoff never ends, with the near Lambda
+  8e-9 whose search stays inside Int4, in outfmt 7, which prints neither Lambda). The row has no
   frozen files of its own; `freeze` does not run NCBI for it and copies ROW_ID's columns (`near_row`). ROW_ID is
   an `ncbi` row of the same outfmt without a near row of its own, and an `ncbi` row takes all of its bytes.
 - a `ncbi` row whose `covers` cell has a part ` | ncbi-valgrind`: the frozen bytes are NCBI's run under valgrind

@@ -1590,6 +1590,29 @@ fn html_rows_put_each_mask_of_the_rows_list_in_a_span() {
     assert!(HtmlRowMasks::new(None, 0).of(0).is_none());
 }
 
+// Line PS item PS7c (review B3): the HSP whose values the description table and `-sorthits`'
+// identity show is the first that raises the highest bit score from 0 (`GetSeqAlignSetCalcParams`):
+// a first HSP of a NaN or negative bit score does not hide a later one above 0, and a subject
+// without one shows 0.0 and 0.0 and an identity of 0 over 1.
+#[test]
+fn the_shown_hsp_raises_the_highest_bit_score_from_zero() {
+    let hit = |bit_score: f64, num_ident: usize| {
+        PairwiseHit::from(Hit {
+            bit_score,
+            num_ident,
+            ..make_hit()
+        })
+    };
+    let (nan, negative, five, five_again) =
+        (hit(f64::NAN, 1), hit(-1.0, 2), hit(5.0, 3), hit(5.0, 4));
+    let shown = |hits: &[&PairwiseHit]| shown_hsp(hits).map(|hit| hit.hit.num_ident);
+    assert_eq!(shown(&[&nan, &five]), Some(3));
+    assert_eq!(shown(&[&negative, &five, &five_again]), Some(3));
+    assert_eq!(shown(&[&nan, &negative]), None);
+    assert_eq!(table_scores(shown_hsp(&[&nan, &negative])), (0.0, 0.0));
+    assert_eq!(table_scores(shown_hsp(&[&nan, &five])), (5.0, 1e-50));
+}
+
 // Review R2 finding 4: with `-html` and a skipped database heading, a later part of a subject
 // (`LOSAT_X_PAIRWISEPAR`) that opens with class N HSPs must write their `alignment skipped` lines
 // before retrying the heading and placing its HTML posts at the part's first non-class-N HSP; a

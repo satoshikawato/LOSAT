@@ -18,6 +18,10 @@
 //! 100-199), step back, and its chunk goes to the chains (`x_pair_seed_disc.rs`
 //! `latest_ranges_ascend`, counted as `back=` on the `[TIMING] x_dc_latest:` line), the other four
 //! take the maps.
+//! EXPERIMENT (LOSAT_X_DCFOLDREG, `x_dc_fold_reg.rs`, also in the strict set): the fold on the maps
+//! with the map in registers. The tests named `dc_fold_reg_*` compare the default with
+//! `LOSAT_X_DCFOLDREG=0` on the same searches (and with `LOSAT_X_FOLDLEAN=0`, whose fold calls
+//! `type_of_word` for every seed) and check `reg_calls=` on `[TIMING] x_dc_latest:`.
 //! This test compares the default with `=0` only and runs no NCBI BLAST+. That the `=0` bytes
 //! equal NCBI's is the business of the fixture suites.
 
@@ -28,6 +32,7 @@ mod reach_support;
 
 const SWITCH: &str = "LOSAT_X_DCLATEST";
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_DCLATEST", "0");
+const REG_OFF: (&str, &str) = ("LOSAT_X_DCFOLDREG", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -258,8 +263,8 @@ fn dc_megablast_ungapped() {
     check(&query, &subject, &["-ungapped"], true);
 }
 
-/// The counts `stages=` and `back=` of the `[TIMING] x_dc_latest:` line in `stderr`.
-fn latest_counts(stderr: &str) -> (u64, u64) {
+/// The counts `stages=`, `back=` and `reg_calls=` of the `[TIMING] x_dc_latest:` line in `stderr`.
+fn latest_counts_all(stderr: &str) -> (u64, u64, u64) {
     let line = stderr
         .lines()
         .find_map(|line| line.strip_prefix("[TIMING] x_dc_latest:"))
@@ -270,7 +275,13 @@ fn latest_counts(stderr: &str) -> (u64, u64) {
             .and_then(|n| n.parse().ok())
             .unwrap_or_else(|| panic!("{name} in {line}"))
     };
-    (field("stages="), field("back="))
+    (field("stages="), field("back="), field("reg_calls="))
+}
+
+/// The counts `stages=` and `back=` of the `[TIMING] x_dc_latest:` line in `stderr`.
+fn latest_counts(stderr: &str) -> (u64, u64) {
+    let (stages, back, _) = latest_counts_all(stderr);
+    (stages, back)
 }
 
 /// `stderr` without the `[TIMING]` lines.
@@ -352,4 +363,114 @@ fn dc_megablast_db_several_subjects() {
     let dir = TestDir::new("db");
     let query = s5_repeats(&dir);
     check_db(&query, &["-dust", "no"], (true, false), 5, 0);
+}
+
+/// `check` for `LOSAT_X_DCFOLDREG` with extra `vars` in both runs: byte-identical output and
+/// non-timing stderr, `reg_calls > 0` by default and `reg_calls == 0` with `=0`.
+fn check_reg(vars: &[(&str, &str)], query: &Path, subject: &Path, args: &[&str], hits: bool) {
+    for threads in [1, 4] {
+        let at = format!("DCFOLDREG {vars:?} {args:?} threads {threads}");
+        let mut off_vars = vars.to_vec();
+        off_vars.extend([REG_OFF, ("LOSAT_TIMING", "1")]);
+        let (expected, expected_stderr) =
+            search(query, ("-subject", subject), args, threads, &off_vars);
+        assert_eq!(!expected.is_empty(), hits, "{at}: hits");
+        assert_eq!(
+            latest_counts_all(&expected_stderr).2,
+            0,
+            "{at}: =0 reg_calls"
+        );
+        let reach = reach_support::Reach::new("dcfoldreg");
+        let mut on_vars = vars.to_vec();
+        on_vars.extend([reach.var(), ("LOSAT_TIMING", "1")]);
+        let (report, stderr) = search(query, ("-subject", subject), args, threads, &on_vars);
+        assert!(report == expected, "{at}: default differs");
+        assert_eq!(
+            without_timing(&stderr),
+            without_timing(&expected_stderr),
+            "{at}"
+        );
+        assert!(latest_counts_all(&stderr).2 > 0, "{at}: reg_calls == 0");
+        assert_eq!(
+            reach.sides(SWITCH),
+            (true, false),
+            "{at}: sides of {SWITCH}"
+        );
+        assert!(
+            reach.sides("LOSAT_X_PAIRPARDISC").0,
+            "{at}: strips stage did not run"
+        );
+        let stage = if threads == 1 {
+            "LOSAT_X_BNDCONE"
+        } else {
+            "LOSAT_X_PAIRPARFOLD"
+        };
+        assert!(reach.sides(stage).0, "{at}: {stage} did not run");
+    }
+}
+
+// EXPERIMENT (LOSAT_X_DCFOLDREG): the fold with the map in registers against `=0` at the default
+// window and one above the word length (hits, so extended seeds), in the band (no hit), with
+// LOSAT_X_FOLDLEAN=0 (`type_of_word` for every seed), on a masked subject and `-ungapped`.
+#[test]
+fn dc_fold_reg_subjects() {
+    let dir = TestDir::new("fold-reg");
+    let query = lc874_9800(&dir);
+    let subject = fasta("LC738868.fasta");
+    check_reg(&[], &query, &subject, &[], true);
+    check_reg(&[], &query, &subject, &["-window_size", "24"], true);
+    check_reg(&[], &query, &subject, &["-window_size", "4"], false);
+    check_reg(&[("LOSAT_X_FOLDLEAN", "0")], &query, &subject, &[], true);
+    check_reg(&[], &query, &subject, &["-ungapped"], true);
+    let lower = lc868_lower(&dir);
+    check_reg(&[], &query, &lower, &["-lcase_masking"], true);
+}
+
+// EXPERIMENT (LOSAT_X_DCFOLDREG): on the database edge1 with `-db_soft_mask 11`, the four chunks
+// on the maps take the fold in registers (`reg_calls > 0`) and s5's chunk, whose ranges step back,
+// takes the chains (`back=1`).
+#[test]
+fn dc_fold_reg_db_soft_mask_out_of_order() {
+    let dir = TestDir::new("fold-reg-db");
+    let query = s5_repeats(&dir);
+    let db = edge1();
+    for ungapped in [false, true] {
+        let mut args = vec!["-db_soft_mask", "11", "-dust", "no"];
+        if ungapped {
+            args.push("-ungapped");
+        }
+        let at = format!("DCFOLDREG {args:?}");
+        let (expected, expected_stderr) = search(
+            &query,
+            ("-db", db.as_path()),
+            &args,
+            1,
+            &[REG_OFF, ("LOSAT_TIMING", "1")],
+        );
+        assert!(!expected.is_empty(), "{at}: no hits");
+        assert_eq!(
+            latest_counts_all(&expected_stderr).2,
+            0,
+            "{at}: =0 reg_calls"
+        );
+        let reach = reach_support::Reach::new("dcfoldreg-db");
+        let (report, stderr) = search(
+            &query,
+            ("-db", db.as_path()),
+            &args,
+            1,
+            &[reach.var(), ("LOSAT_TIMING", "1")],
+        );
+        assert!(report == expected, "{at}: default differs");
+        assert_eq!(
+            without_timing(&stderr),
+            without_timing(&expected_stderr),
+            "{at}"
+        );
+        assert_eq!(reach.sides(SWITCH), (true, true), "{at}: sides of {SWITCH}");
+        let (stages, back, reg_calls) = latest_counts_all(&stderr);
+        assert_eq!((stages, back), (4, 1), "{at}: x_dc_latest counts");
+        assert!(reg_calls > 0, "{at}: reg_calls == 0");
+        assert!(reach.sides("LOSAT_X_BNDCONE").0, "{at}: no serial stage");
+    }
 }

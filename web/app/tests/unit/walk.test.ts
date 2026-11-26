@@ -134,45 +134,46 @@ describe('walk model', () => {
   });
 
   it('searches the included records, and joins inputs with a line end where one has none', () => {
-    const source = (value: string, excluded: number[] = []): ModelSource => ({ origin: 'file', name: 'f', bytes: text(value), excluded: { nucleotide: new Set(excluded) } });
-    expect(decode(includedBytes(source('>a\nAC\n>b\nGT\n>c\nTT\n', [1]), 'nucleotide'))).toBe('>a\nAC\n>c\nTT\n');
-    // Another reading of the same source has its own records left out (none here).
-    expect(decode(includedBytes(source('>a\nAC\n>b\nGT\n', [1]), 'protein'))).toBe('>a\nAC\n>b\nGT\n');
-    expect(decode(joinedBytes([source('>a\nAC'), source('>b\nGT\n'), source('>c\nTT\n', [0]), source('>d\nCC\n')], 'nucleotide'))).toBe('>a\nAC\n>b\nGT\n>d\nCC\n');
+    const source = (value: string, excluded: number[] = []): ModelSource => ({ origin: 'file', name: 'f', bytes: text(value), excluded: new Set(excluded) });
+    expect(decode(includedBytes(source('>a\nAC\n>b\nGT\n>c\nTT\n', [1])))).toBe('>a\nAC\n>c\nTT\n');
+    expect(decode(joinedBytes([source('>a\nAC'), source('>b\nGT\n'), source('>c\nTT\n', [0]), source('>d\nCC\n')]))).toBe('>a\nAC\n>b\nGT\n>d\nCC\n');
+    // Pure-CR streams keep CR separators (matching data-service.ts assembleRunInput, D17).
+    expect(decode(joinedBytes([source('>a\rAC'), source('>b\rGT\r')]))).toBe('>a\rAC\r>b\rGT\r');
+    expect(decode(joinedBytes([source('>a\rAC\r'), source('>b\nGT\n')]))).toBe('>a\rAC\r>b\nGT\n');
+    expect(decode(joinedBytes([source('>a\nAC\r'), source('>b\nGT\n')]))).toBe('>a\nAC\r\n>b\nGT\n');
   });
 
   it('names the inputs that the user gave, and leaves the made ones (pasted text, several together) to the run\'s own name', () => {
     let model = withPaste(emptyModel(), 'query', '>q\nAC\n');
-    expect(expectedInputs(model.query, 'nucleotide', [0]).map((input) => input.name)).toEqual([undefined]);
+    expect(expectedInputs(model.query, [0]).map((input) => input.name)).toEqual([undefined]);
     model = withFiles(model, 'query', [{ name: 'a.fa', bytes: text('>a\nGG\n') }]);
-    expect(expectedInputs(model.query, 'nucleotide', [0, 1]).map((input) => input.name)).toEqual([undefined]);
-    expect(expectedInputs(model.query, 'nucleotide', [1]).map((input) => input.name)).toEqual(['a.fa']);
+    expect(expectedInputs(model.query, [0, 1]).map((input) => input.name)).toEqual([undefined]);
+    expect(expectedInputs(model.query, [1]).map((input) => input.name)).toEqual(['a.fa']);
     model = withMode(model, 'query', 'separate');
-    expect(expectedInputs(model.query, 'nucleotide', [0, 1]).map((input) => input.name)).toEqual([undefined, 'a.fa']);
+    expect(expectedInputs(model.query, [0, 1]).map((input) => input.name)).toEqual([undefined, 'a.fa']);
     // Apart, an input whose records are all left out is no run of its own.
-    const apart = withIncluded(model, 'query', 'nucleotide', 1, 0, false);
-    expect(expectedInputs(apart.query, 'nucleotide', [0, 1]).map((input) => input.name)).toEqual([undefined]);
-    expect(expectedInputs(withMode(apart, 'query', 'combined').query, 'nucleotide', [0, 1]).map((input) => input.name)).toEqual([undefined]);
-    model = withIncluded(withPaste(model, 'query', '>q\nAC\n>r\nGT\n'), 'query', 'nucleotide', 0, 0, false);
-    expect(decode(expectedInputs(model.query, 'nucleotide', [0])[0]!.bytes)).toBe('>r\nGT\n');
+    const apart = withIncluded(model, 'query', 1, 0, false);
+    expect(expectedInputs(apart.query, [0, 1]).map((input) => input.name)).toEqual([undefined]);
+    expect(expectedInputs(withMode(apart, 'query', 'combined').query, [0, 1]).map((input) => input.name)).toEqual([undefined]);
+    model = withIncluded(withPaste(model, 'query', '>q\nAC\n>r\nGT\n'), 'query', 0, 0, false);
+    expect(decode(expectedInputs(model.query, [0])[0]!.bytes)).toBe('>r\nGT\n');
     expect(withPaste(model, 'query', '').query.sources.map((source) => source.name)).toEqual(['a.fa']);
   });
 
   // Line WQA's D22, review round 3 (M1): the model says which inputs are the user's files and which the page makes.
   it('marks an input as made (pasted, several, or with records left out) or as the user\'s file as given', () => {
     let model = withFiles(emptyModel(), 'query', [{ name: 'a.fa', bytes: text('>a\nAC\n>b\nGT\n') }]);
-    expect(expectedInputs(model.query, 'nucleotide', [0]).map(({ name, made }) => ({ name, made }))).toEqual([{ name: 'a.fa', made: false }]);
-    const left = withIncluded(model, 'query', 'nucleotide', 0, 1, false);
+    expect(expectedInputs(model.query, [0]).map(({ name, made }) => ({ name, made }))).toEqual([{ name: 'a.fa', made: false }]);
+    const left = withIncluded(model, 'query', 0, 1, false);
     // The run names the file of the records (the walk builds the name from its own record of the run): the model gives none.
-    expect(expectedInputs(left.query, 'nucleotide', [0]).map(({ name, made, from }) => ({ name, made, from }))).toEqual([
+    expect(expectedInputs(left.query, [0]).map(({ name, made, from }) => ({ name, made, from }))).toEqual([
       { name: undefined, made: true, from: { file: 'a.fa', leftOutIds: ['b'], included: 1, total: 2 } },
     ]);
-    // Included again, and in the other reading: the user's file.
-    expect(expectedInputs(withIncluded(left, 'query', 'nucleotide', 0, 1, true).query, 'nucleotide', [0])[0]!.made).toBe(false);
-    expect(expectedInputs(left.query, 'protein', [0])[0]!.made).toBe(false);
+    // Included again: the user's file.
+    expect(expectedInputs(withIncluded(left, 'query', 0, 1, true).query, [0])[0]!.made).toBe(false);
     model = withPaste(model, 'query', '>q\nAC\n');
-    expect(expectedInputs(model.query, 'nucleotide', [0, 1]).map(({ made }) => made)).toEqual([true]);
-    expect(expectedInputs(withMode(model, 'query', 'separate').query, 'nucleotide', [0, 1]).map(({ name, made }) => ({ name, made }))).toEqual([
+    expect(expectedInputs(model.query, [0, 1]).map(({ made }) => made)).toEqual([true]);
+    expect(expectedInputs(withMode(model, 'query', 'separate').query, [0, 1]).map(({ name, made }) => ({ name, made }))).toEqual([
       { name: undefined, made: true },
       { name: 'a.fa', made: false },
     ]);

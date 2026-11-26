@@ -354,6 +354,7 @@ fn the_pairwise_reads_are_those_of_the_writers_rows() {
         crate::algorithm::blastn::pairwise::QueryRecords::new(&queries, &query_input, &queries, 0),
         crate::algorithm::blastn::x_subject_store::SubjectLetters::new(&subjects, None),
         &masks,
+        false,
     );
     let rows = pairwise_hits(&hit_lists, &rows, None, None).unwrap();
     for hits in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
@@ -367,13 +368,177 @@ fn the_pairwise_reads_are_those_of_the_writers_rows() {
                     },
                 };
                 assert_eq!(
-                    pairwise_read_order(&hit_lists, reading, |_| None),
+                    pairwise_read_order(&hit_lists, |_| 0, false, reading, |_| None),
                     crate::report::x_pairwise_par::writer_reads(
                         &rows,
                         |_, _| false,
                         reading,
                         false,
                         None
+                    ),
+                    "{reading:?}"
+                );
+            }
+        }
+    }
+}
+
+// Review R2 finding 1: for an ungapped `-query_loc` search with one HSP lifted to >= 0 by the
+// `-query_loc` shift and one HSP still below 0 in record coordinates, `blastn_hsp_scores` equals
+// `HspScores::of` of the writer's shifted rows and `pairwise_read_order` matches `writer_reads`
+// across every sort (including `-sorthits 4` query coverage and `-sorthsps 2`) and count.
+#[test]
+fn ungapped_query_loc_read_order_matches_writer_for_lifted_and_class_n_hsps() {
+    use crate::algorithm::blastn::left_of_query::blastn_hsp_scores;
+    use crate::algorithm::blastn::pairwise::{pairwise_hits, DisplayMasks, QueryRecords, Rows};
+    use crate::algorithm::blastn::x_subject_store::SubjectLetters;
+    use crate::blastinput::fasta_reader::FastaRecord;
+    use crate::blastinput::seq_range::{Placements, QueryInput, RecordPlacement};
+    use crate::report::hit_sort::HspScores;
+
+    // Query record of 400 letters searched on `-query_loc 101-400` (offset = 100, searched = 300).
+    let full_letters = vec![b'A'; 400];
+    let full_query = FastaRecord::new("q", b"q", &full_letters);
+    let searched_query = FastaRecord::new("q", b"q", &full_letters[100..400]);
+    let full_queries = [full_query];
+    let searched_queries = [searched_query];
+    let subject_letters = vec![b'A'; 300];
+    let subjects: Vec<FastaRecord> = (0..3)
+        .map(|_| FastaRecord::new("s", b"s", &subject_letters))
+        .collect();
+
+    let offset = 100usize;
+    let placements = Placements(vec![RecordPlacement {
+        offset,
+        length: 400,
+    }]);
+    let query_input = QueryInput {
+        placements: placements.clone(),
+        ordinals: vec![0],
+        input_lengths: vec![400],
+        skipped: vec![false],
+        range_length: Some(300),
+    };
+
+    let make_ungapped = |s_idx: u32, bits: f64, q_off: i32, q_end: i32| {
+        let len = (q_end - q_off) as usize;
+        let mut hsp = test_hsp(s_idx, (bits * 2.0) as i32);
+        hsp.bit_score = bits;
+        hsp.e_value = 1e-10;
+        hsp.length = len;
+        hsp.num_ident = len;
+        hsp.query_length = 300;
+        hsp.internal_q_offset_0 = q_off;
+        hsp.internal_q_end_0 = q_end;
+        hsp.q_start = (q_off + 1).max(0) as usize;
+        hsp.q_end = q_end.max(0) as usize;
+        hsp.s_start = 1;
+        hsp.s_end = len;
+        hsp.internal_s_offset_0 = 0;
+        hsp.internal_s_end_0 = len;
+        hsp.gap_info = None;
+        hsp
+    };
+
+    // Subject 0: lifted HSP (start -5 -> +95 in record, len 60) + normal HSP (start 10 -> +110, len 40).
+    // Subject 1: normal HSP (start 0 -> +100, len 50) + class N HSP (start -105 -> -5 in record, len 40, wraps -> empty).
+    // Subject 2: class N HSP (start -250 -> -150 in record, len 30, non-wrapping unsigned range).
+    let list = |oid: u32, hsps: Vec<BlastnHsp>| BlastnHspList {
+        oid,
+        query_index: 0,
+        best_evalue: hsps[0].e_value,
+        hsps,
+    };
+    let mut unshifted_hit_list = BlastnHitList::new(10);
+    unshifted_hit_list.hsplist_array = vec![
+        list(
+            0,
+            vec![
+                make_ungapped(0, 50.0, -5, 55),
+                make_ungapped(0, 45.0, 10, 50),
+            ],
+        ),
+        list(
+            1,
+            vec![
+                make_ungapped(1, 55.0, 0, 50),
+                make_ungapped(1, 40.0, -105, -65),
+            ],
+        ),
+        list(2, vec![make_ungapped(2, 48.0, -250, -220)]),
+    ];
+    unshifted_hit_list.hsplist_count = 3;
+    let unshifted_lists = [Some(unshifted_hit_list.clone())];
+
+    // Shift a copy as `run::shift_to_records` does before calling `pairwise_hits`.
+    let mut shifted_hit_list = unshifted_hit_list;
+    for hsp_list in &mut shifted_hit_list.hsplist_array {
+        for hsp in &mut hsp_list.hsps {
+            if hsp.seqalign_query_start() < 0 {
+                let start = hsp.record_query_start(offset, true);
+                let len = i64::from(hsp.internal_q_end_0) - i64::from(hsp.internal_q_offset_0);
+                hsp.q_start = (start + 1).max(0) as usize;
+                hsp.q_end = (start + len).max(0) as usize;
+            } else {
+                hsp.q_start += offset;
+                hsp.q_end += offset;
+            }
+        }
+    }
+    let shifted_lists = [Some(shifted_hit_list)];
+    let masks = DisplayMasks {
+        query: &[Vec::new()],
+        query_offsets: &placements,
+        subject: None,
+        database: None,
+    };
+    let rows_builder = Rows::new(
+        QueryRecords::new(&searched_queries, &query_input, &full_queries, 0),
+        SubjectLetters::new(&subjects, None),
+        &masks,
+        true,
+    );
+    let writer_rows = pairwise_hits(&shifted_lists, &rows_builder, None, None).unwrap();
+
+    // Every HSP's model `HspScores` matches `HspScores::of` of the writer's row directly.
+    let model_scores: Vec<HspScores> = unshifted_lists[0]
+        .as_ref()
+        .unwrap()
+        .hsplist_array
+        .iter()
+        .flat_map(|list| &list.hsps)
+        .map(|hsp| blastn_hsp_scores(hsp, offset, true))
+        .collect();
+    let writer_scores: Vec<HspScores> = writer_rows.iter().map(HspScores::of).collect();
+    assert_eq!(model_scores, writer_scores);
+    assert!(!writer_rows[0].query_left_of_record);
+    assert!(writer_rows[3].query_left_of_record);
+    assert!(writer_rows[4].query_left_of_record);
+
+    for hits in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
+        for hsps in [None, Some(0), Some(1), Some(2), Some(3), Some(4)] {
+            for (descriptions, alignments) in [(0, 0), (1, 2), (2, 1), (500, 500)] {
+                let reading = crate::report::pairwise::PairwiseReading {
+                    sort: crate::report::hit_sort::ReportSort { hits, hsps },
+                    shown: crate::report::db_subject::Shown {
+                        descriptions,
+                        alignments,
+                    },
+                };
+                assert_eq!(
+                    pairwise_read_order(
+                        &unshifted_lists,
+                        |q| placements.offset(q),
+                        true,
+                        reading,
+                        |_| None,
+                    ),
+                    crate::report::x_pairwise_par::writer_reads(
+                        &writer_rows,
+                        |_, _| false,
+                        reading,
+                        false,
+                        None,
                     ),
                     "{reading:?}"
                 );
@@ -858,6 +1023,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
     .unwrap();
     // A list left without HSPs (its HSPs had score 0) is not reported.
     hit_lists[2].as_mut().unwrap().hsplist_array[1].hsps.clear();
+    let placements = crate::blastinput::seq_range::Placements::default();
     let reported = reported_subjects(
         &database,
         &titles,
@@ -865,6 +1031,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         true,
         (ParsedShown::default(), prefetch_format(&[])),
         (crate::report::db_subject::FormatThrow::Unread, None),
+        &placements,
         &[],
         0,
         true,
@@ -922,6 +1089,7 @@ fn reported_subjects_are_renamed_to_ranks_with_their_stored_records() {
         false,
         (ParsedShown::default(), prefetch_format(&[])),
         (crate::report::db_subject::FormatThrow::Unread, None),
+        &placements,
         &[],
         0,
         true,
@@ -954,6 +1122,7 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
     let mut titles = DatabaseTitles::new();
     let mut clean = vec![hit_list(vec![(0, 1e-9)], 1)];
     read_titles(&database, &clean, (Default::default(), false), &mut titles).unwrap();
+    let placements = crate::blastinput::seq_range::Placements::default();
     reported_subjects(
         &database,
         &titles,
@@ -961,6 +1130,7 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         false,
         (ParsedShown::default(), prefetch_format(&[])),
         (crate::report::db_subject::FormatThrow::Unread, None),
+        &placements,
         &[],
         0,
         true,
@@ -977,6 +1147,7 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         false,
         (ParsedShown::default(), prefetch_format(&[])),
         (crate::report::db_subject::FormatThrow::Unread, None),
+        &placements,
         &[],
         0,
         true,

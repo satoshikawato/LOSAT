@@ -347,6 +347,14 @@ impl ResolvedOptions {
         ProgramName::of(&self.rpstblastn)
     }
 
+    /// The program type of the run's results where BLASTX does not name it
+    /// (`report::record::RunRecord::program_type`): RPSTBLASTN's for an RPSTBLASTN run.
+    pub(crate) fn program_type(&self) -> Option<crate::report::record::ProgramType> {
+        self.rpstblastn
+            .is_some()
+            .then_some(crate::report::record::ProgramType::RpsTblastn)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:78-81 (cited at
     // `report::tabular::TabularSpec::std`)
     /// The report the tabular writer writes (`tabular::write_blastx_tabular`): `tabular`, or for

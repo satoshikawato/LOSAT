@@ -231,7 +231,8 @@ pub(super) fn xml_matrix_failure(
         formats.iter().map(|format| format.outfmt),
         matrix_name,
         !database,
-        pssm,
+        super::in_pssm::program_type(pssm)
+            .is_some_and(crate::report::record::ProgramType::is_iterative),
     )
 }
 
@@ -732,6 +733,7 @@ pub(super) fn render(
                             genetic_code,
                             matrix: scoring.matrix,
                             program_version: super::tabular::program_version(pssm.is_some()),
+                            query_other_coding: pssm.and_then(|psi| psi.query_other_coding),
                         },
                         hitlists,
                         &mut writer,
@@ -753,6 +755,7 @@ pub(super) fn render(
                     ranges,
                     probe.as_mut(),
                     warnings.as_mut(),
+                    pssm.and_then(|psi| psi.query_other_coding),
                 )?,
                 number @ 0..=4 => write_pairwise(
                     &mut writer,
@@ -900,6 +903,9 @@ fn write_tabular(
     ranges: &ReportRanges<'_>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
+    // A PSSM query of the molecule `other` (`PsiSearch::query_other_coding`): the default fields
+    // read its letters, which throw at the first row (`report::tabular::query_sequence_end`).
+    query_other_coding: Option<i32>,
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:177-224:
     // a skipped batch has a null align set for each query it contains.
@@ -978,6 +984,13 @@ fn write_tabular(
                 "TBLASTN report payload count mismatch"
             );
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
+                if let Some(coding) = query_other_coding {
+                    return Err(crate::report::tabular::query_sequence_end(
+                        &mut *writer,
+                        &[],
+                        coding,
+                    ));
+                }
                 // A row where NCBI has no result ends the run after the bytes before its stop.
                 if let Some((written, stop)) = rows.default_stop(query.shown_id(), failure, oid) {
                     return Err(crate::report::tabular::row_stop_end(
@@ -1387,6 +1400,7 @@ fn pairwise_hits(
                     // SEG-masked letter is a mismatch there and an identity in the rows
                     // (`report_num_ident`).
                     seqalign_num_ident: usize::try_from(payload.num_ident)?,
+                    query_left_of_record: false,
                 });
                 // The model of the reads sorts by `hsp_scores` without the rows
                 // (`TblastnDatabase::subject_read_texts`): the row's values where the records'
@@ -1545,6 +1559,19 @@ fn write_pairwise(
         view,
         html: html
             .map(|links| crate::report::html_ids::HtmlReport::new(links, shown.report_oids())),
+        // A PSSM query of the molecule `other` (`PsiSearch::query_other_coding`), whose letters
+        // NCBI's alignment display cannot read.
+        unreadable_query: pssm.and_then(|psi| psi.query_other_coding).map(|_| {
+            crate::report::pairwise::UnreadableQuery {
+                oids: matches!(shown, ShownSubjects::Database { .. }).then(|| {
+                    shown
+                        .report_oids()
+                        .into_iter()
+                        .map(|oid| oid.get())
+                        .collect()
+                }),
+            }
+        }),
         ..PairwiseConfig::default()
     };
     // A subject set's subjects are all loaded.

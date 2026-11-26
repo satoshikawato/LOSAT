@@ -489,7 +489,9 @@ impl ShownSubjects<'_> {
 /// a document that holds each report back never writes the last query's
 /// (`blast_xml::written_queries`). `xml_matrix`: where the run's XML formats fail for a matrix
 /// name NCBI's XML does not know (`blast_xml::xml_matrix_failure`, decided once for the run, at the
-/// run's query of `QueryScopes::xml_failing_query`).
+/// run's query of `QueryScopes::xml_failing_query`). `query_scopes`: under `-parse_deflines`, the
+/// run's scopes of the batch's queries, how NCBI's XML family formats show each query's result
+/// (`QueryScopesFrom::xml_show`).
 /// `pool`: the run's pool where no search runs on it while the batch is written
 /// (`native::BatchRender`), whose threads format the pairwise reports (`x_pairwise_par::write`).
 pub(crate) fn render_queries(
@@ -504,6 +506,7 @@ pub(crate) fn render_queries(
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
     xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
+    query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
     sort_lists(batches, SubjectLoc::of(shown));
@@ -519,6 +522,7 @@ pub(crate) fn render_queries(
         stops,
         xml2,
         xml_matrix,
+        query_scopes,
         pool,
         None,
     )
@@ -601,6 +605,7 @@ pub(super) fn render_queries_with(
     stops: bool,
     xml2: Option<&mut super::blast_xml::RunXml2>,
     xml_matrix: Option<crate::blastinput::query_batch::XmlFailingQuery>,
+    query_scopes: Option<crate::blastinput::query_batch::QueryScopesFrom<'_>>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
     local: Option<LocalReport<'_, '_>>,
 ) -> Result<()> {
@@ -671,6 +676,7 @@ pub(super) fn render_queries_with(
             queries_before,
             stops,
             xml_matrix,
+            query_scopes,
         );
     }
     if let Some(xml2) = xml2 {
@@ -686,6 +692,7 @@ pub(super) fn render_queries_with(
             queries_before,
             stops,
             xml_matrix,
+            query_scopes,
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
@@ -1160,6 +1167,7 @@ pub(super) fn pairwise_hits(
                         // not those of the rows (`a.identity`), which the display's translation
                         // and the subject's stored gap characters make.
                         seqalign_num_ident: hsp.identity,
+                        query_left_of_record: false,
                     });
                     // The model of the reads sorts by `hsp_scores` of the batch's query length
                     // without the rows (`ReportedSubjects::fetch_by_query`): the row's values

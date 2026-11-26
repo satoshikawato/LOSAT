@@ -1,0 +1,1 @@
+Seq-entry ::= seq { id { local str "lenzero" }, descr { title "zero length" }, inst { repr raw, mol dna, length 0, seq-data iupacna "" } }

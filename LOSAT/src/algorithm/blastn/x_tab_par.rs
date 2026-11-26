@@ -114,15 +114,18 @@ pub(crate) fn write_output<W: crate::report::ostream::ReportWrite>(
     epilog: Option<usize>,
     probe: Option<&mut FormatProbe<'_>>,
     warnings: Option<&mut QueryWarnings<'_>>,
+    left_of_record: Option<(&crate::blastinput::seq_range::Placements, bool)>,
 ) -> io::Result<Option<crate::report::tabular::RowStop>> {
     match pool {
-        // The serial writer writes the rows of subjects whose load throws or whose id fails, and
-        // the rows that stop (`write_output_blastn_hitlists_to_writer`).
+        // The serial writer writes the rows of subjects whose load throws or whose id fails, the
+        // rows that stop (`write_output_blastn_hitlists_to_writer`), and reports with a `-db` HSP
+        // starting left of its query record.
         Some(pool)
             if probe.is_none()
                 && !super::tracing::enabled()
                 && !loads.any_throws()
-                && !subject_ids.iter().any(Option::is_none) =>
+                && !subject_ids.iter().any(Option::is_none)
+                && left_of_record.is_none() =>
         {
             if !hit_lists.is_empty() {
                 crate::utils::xreach::x_reach!("LOSAT_X_BNTABPAR", true);
@@ -159,6 +162,7 @@ pub(crate) fn write_output<W: crate::report::ostream::ReportWrite>(
                 epilog,
                 probe,
                 warnings,
+                left_of_record,
             )
         }
     }
@@ -312,6 +316,7 @@ fn write_on_pool<W: crate::report::ostream::ReportWrite>(
                 subject_ids,
                 &config,
                 &mut hsp_index,
+                None,
                 None,
             )?;
             rows -= take;

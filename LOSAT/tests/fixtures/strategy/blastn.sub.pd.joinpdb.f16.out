@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastn</program>
+      <version>BLASTN 2.17.0+</version>
+      <reference>Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), &quot;A greedy algorithm for aligning DNA sequences&quot;, J Comput Biol 2000; 7(1-2):203-14.</reference>
+      <search-target>
+        <Target>
+          <subjects>s1</subjects>
+          <subjects>s2</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <expect>10</expect>
+          <sc-match>1</sc-match>
+          <sc-mismatch>-2</sc-mismatch>
+          <gap-open>0</gap-open>
+          <gap-extend>0</gap-extend>
+          <filter>L;m;</filter>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>1ABC_A</query-id>
+              <query-title>first</query-title>
+              <query-len>150</query-len>
+              <hits></hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>9</hsp-len>
+                  <eff-space>43992</eff-space>
+                  <kappa>0.46</kappa>
+                  <lambda>1.28</lambda>
+                  <entropy>0.85</entropy>
+                </Statistics>
+              </stat>
+              <message>No hits found</message>
+            </Search>
+            <Search>
+              <query-id>1ABC_A</query-id>
+              <query-title>first</query-title>
+              <query-len>150</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>s1</id>
+                      <title>subject</title>
+                    </HitDescr>
+                  </description>
+                  <len>180</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>316.897</bit-score>
+                      <score>171</score>
+                      <evalue>2.14552e-91</evalue>
+                      <identity>177</identity>
+                      <query-from>1</query-from>
+                      <query-to>180</query-to>
+                      <query-strand>Plus</query-strand>
+                      <hit-from>1</hit-from>
+                      <hit-to>180</hit-to>
+                      <hit-strand>Plus</hit-strand>
+                      <align-len>180</align-len>
+                      <gaps>0</gaps>
+                      <qseq>ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAATTTGCTCAATATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAATTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTCCGAAATTTATTGGT</qseq>
+                      <hseq>ATGGATATTGTTTGGTCTACCTTTTCTGCTCGTATTCAGTTTGCTCAGTATGTTCCGCCGAAAATTATTCGTTTTACCTGGCATAATCATCCGTCTCTGGAAGGTTGGAATGGTCGTCAGTTTTATGATATTGGTGAAAATACCGGTATGTTTCGTCTGGGTTTTCCGAAATTTATTGGT</hseq>
+                      <midline>|||||||||||||||||||||||||||||||||||||| |||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>9</hsp-len>
+                  <eff-space>53352</eff-space>
+                  <kappa>0.46</kappa>
+                  <lambda>1.28</lambda>
+                  <entropy>0.85</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

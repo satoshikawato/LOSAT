@@ -216,6 +216,7 @@ fn run(
             epilog,
             None,
             Some(&mut warnings),
+            None,
         )
         .map(|stop| assert_eq!(stop, None)),
     }
@@ -413,6 +414,7 @@ fn a_format_observer_keeps_the_serial_writer() {
             &case.unsearched,
             None,
             probe.as_mut(),
+            None,
             None,
         )
         .unwrap();

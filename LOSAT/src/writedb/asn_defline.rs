@@ -1709,9 +1709,10 @@ fn extract_qual_comment_fallback(feat: &Value) -> Vec<u8> {
 /// NCBI reference (598d8ae6): c++/src/objmgr/util/seq_loc_util.cpp:88-115,481-513
 fn extract_loc(root: &Value, interner: &mut SeqIdInterner) -> CompactLoc {
     let s = dschema();
-    let mut out = CompactLoc::default();
-    out.is_complex =
-        matches!(as_choice(root), Some((c, _)) if c == s.seqloc_mix || c == s.seqloc_packed_int);
+    let mut out = CompactLoc {
+        is_complex: matches!(as_choice(root), Some((c, _)) if c == s.seqloc_mix || c == s.seqloc_packed_int),
+        ..CompactLoc::default()
+    };
 
     let mut stack = vec![root];
     while let Some(loc) = stack.pop() {

@@ -92,5 +92,5 @@ line (the Owner, 2026-11-21).
 (exit status 1, `Error: ` ... `not supported by LOSAT`) instead of NCBI's bytes because NCBI crashes or never ends
 (`d_p4_psq_zero`, `d_p5_psq_zero`, `c_rps0`, `d_p4_psd_cut`, `r_garbage`, `r_garbage2`, `stride0`, `strideneg`).
 `APPROVED_WIDENED_OVERFLOW` (`a_ov1`, `a_ov2`, `a_dir`, `a_dir_v1`, `ends_intmin`) names rows covered by approved
-exception 35 of `PD-LOSAT-NCBI-DEFECTS` (version 1.122, `Q-D2b-OV=A`), where LOSAT widens signed arithmetic and avoids
+exception 35 of `PD-LOSAT-NCBI-DEFECTS` (version 1.123, `Q-D2b-OV=A`), where LOSAT widens signed arithmetic and avoids
 NCBI's signed overflow. NCBI's frozen result stays beside every row for provenance.

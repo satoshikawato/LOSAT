@@ -169,13 +169,20 @@ pub(crate) const VECTOR_RESERVE_LENGTH_ERROR: &str = "vector::reserve";
 /// What LOSAT's own messages call the document that a reader reads, the reader, the input that a
 /// length can pass the end of, and the part of NCBI's program that allocates what a length asks
 /// for (the lexical layer's refusals, `asn_text_reader::Reader::new`, and [`reserve`]'s): the one
-/// owner of those words for each caller.
+/// owner of those words for each caller; and whether NCBI's program reads the objects of a file
+/// with one object stream (`one_stream`).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Names {
     pub(crate) document: &'static str,
     pub(crate) reader: &'static str,
     pub(crate) input: &'static str,
     pub(crate) allocator: &'static str,
+    /// Whether NCBI's program reads all the objects of a file with one object stream, whose line
+    /// count goes on from one object to the next (blast_formatter's archive reader: observed,
+    /// line RG item F3, agent C6, 2026-11-23, a bad byte of an archive's second object posted
+    /// with the line of the file), instead of a new stream for each object
+    /// (`read::ObjectStream`, `Input::new_object`).
+    pub(crate) one_stream: bool,
     /// Whether the program reports every `CSerialException` of the read with a message of its own
     /// (psiblast's and tblastn's "Unrecognized format for PSSM", `CPsiBlastArgs`), so that what
     /// the exception says does not show (`read::TypedReader::other_type`).
@@ -189,6 +196,7 @@ impl Names {
         reader: "PSSM reader",
         input: "input",
         allocator: "NCBI's reader",
+        one_stream: false,
         own_serial_message: true,
     };
     /// A profile file of makeprofiledb (`-in`, ASN.1 text or `-binary`). makeprofiledb prints the
@@ -198,6 +206,7 @@ impl Names {
         reader: "PSSM reader",
         input: "file",
         allocator: "makeprofiledb",
+        one_stream: false,
         own_serial_message: false,
     };
     /// Binary definition lines (`ASN1_BlastDefLine` user object) of makeprofiledb.
@@ -206,6 +215,7 @@ impl Names {
         reader: "binary definition lines reader",
         input: "binary header",
         allocator: "makeprofiledb",
+        one_stream: false,
         own_serial_message: false,
     };
     /// A mask data file of makeblastdb's `-mask_data`.
@@ -214,6 +224,7 @@ impl Names {
         reader: "mask data reader",
         input: "file",
         allocator: "makeblastdb",
+        one_stream: false,
         own_serial_message: false,
     };
     /// A Seq-entry or Bioseq-set of makeblastdb's `-input_type asn1_txt` / `asn1_bin`.
@@ -222,6 +233,7 @@ impl Names {
         reader: "bioseq reader",
         input: "file",
         allocator: "makeblastdb",
+        one_stream: false,
         own_serial_message: false,
     };
     /// Binary definition lines (`ASN1_BlastDefLine`) of a Bioseq.
@@ -230,6 +242,7 @@ impl Names {
         reader: "Blast-def-line-set reader",
         input: "header",
         allocator: "makeblastdb",
+        one_stream: false,
         own_serial_message: false,
     };
     /// The input of `losat rpsbproc`: `Blast4-archive` objects in ASN.1 text (`rpsbproc::archive`).
@@ -238,6 +251,7 @@ impl Names {
         reader: "rpsbproc",
         input: "input",
         allocator: "NCBI's rpsbproc",
+        one_stream: false,
         own_serial_message: false,
     };
     /// The bytes of a delayed member that a writer reads again (`CDelayBuffer::Update`). The read
@@ -247,6 +261,7 @@ impl Names {
         reader: "delayed member reader",
         input: "member's bytes",
         allocator: "NCBI's reader",
+        one_stream: false,
         own_serial_message: false,
     };
     /// A search strategy file of `-import_search_strategy` (`report::archive::read::import`). The
@@ -258,7 +273,21 @@ impl Names {
         reader: "search strategy reader",
         input: "input",
         allocator: "NCBI's reader",
+        one_stream: false,
         own_serial_message: false,
+    };
+    /// A BLAST archive of blast_formatter's `-archive` (`report::archive::read`). blast_formatter
+    /// reports every `CSerialException` of the read as "Invalid input format for BLAST Archive."
+    /// (exit status 1), a value of another class (`:Object-id`, `:No-such-type`, `:Seq-entry`) in
+    /// the messages, the algorithm options and the alignments too (NCBI 2.17.0, line RG item F3,
+    /// agent C8, 2026-11-24).
+    pub(crate) const BLAST_ARCHIVE: Names = Names {
+        document: "ASN.1 text",
+        reader: "ASN.1 text reader",
+        input: "input",
+        allocator: "NCBI's reader",
+        one_stream: true,
+        own_serial_message: true,
     };
     /// The documents of the tests of the readers.
     #[cfg(test)]
@@ -267,6 +296,7 @@ impl Names {
         reader: "test reader",
         input: "input",
         allocator: "NCBI's reader",
+        one_stream: false,
         own_serial_message: true,
     };
 }
@@ -516,12 +546,12 @@ pub(crate) trait Input {
     fn position(&self) -> StreamPosition;
     /// The state of a new object stream at the next byte (each object of a file is read by a
     /// stream of its own in NCBI: its line count, or its byte count and data limits, start
-    /// again).
+    /// again), or, in text, of the one stream of a program that reads all the objects of a file
+    /// with it (`Names::one_stream`: the line count goes on).
     fn new_object(&mut self);
     /// `EndOfData()`: whether no object follows (binary: no byte left; text: nothing but white
-    /// space and comments, or what `SkipWhiteSpace` stops at). Only the tests read several
-    /// objects of one stream so far; makeblastdb's Seq-entry input will (line RG item D3c-3b).
-    #[cfg(test)]
+    /// space and comments, or what `SkipWhiteSpace` stops at): blast_formatter's archive reader
+    /// asks it before each object (`report::archive::read::ArchiveReader`).
     fn end_of_data(&mut self) -> bool;
     /// The depth of NCBI's object stack (`GetStackDepth()`), which the text reader's
     /// `SkipWhiteSpace` asks at the end of the text.
@@ -610,6 +640,8 @@ pub(crate) struct TextInput<S: AsnSource> {
     block_start: bool,
     /// `GetStackDepth()` (`Input::set_stack_depth`).
     depth: usize,
+    /// `Names::one_stream`: the line count goes on at a new object.
+    one_stream: bool,
 }
 
 /// A `ThrowError` of `CObjectIStreamAsn` (objistrasn.cpp) at `line` of `function`.
@@ -659,6 +691,7 @@ impl<S: AsnSource> TextInput<S> {
             r: Reader::new(src, names.document, names.reader),
             block_start: false,
             depth: 0,
+            one_stream: names.one_stream,
         }
     }
 
@@ -815,17 +848,18 @@ impl<S: AsnSource> Input for TextInput<S> {
         StreamPosition::Line(self.r.line as u64)
     }
 
-    /// The state of a new `CObjectIStreamAsn` at the next byte: line 1, no block started. The
-    /// bytes before it are not read again (a stream keeps about one object, not the objects
-    /// before it).
+    /// The state of a new `CObjectIStreamAsn` at the next byte: line 1, no block started; with
+    /// `one_stream`, the one stream's state: no block started, the line count going on. The bytes
+    /// before it are not read again (a stream keeps about one object, not the objects before it).
     fn new_object(&mut self) {
-        self.r.line = 1;
+        if !self.one_stream {
+            self.r.line = 1;
+        }
         self.block_start = false;
         self.r.src.release_before(self.r.pos);
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:98-109
-    #[cfg(test)]
     fn end_of_data(&mut self) -> bool {
         self.r.skip_white_space().is_err()
     }

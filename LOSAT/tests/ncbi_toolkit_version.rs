@@ -61,7 +61,7 @@ fn run_in(dir: &Path, program: &str, words: &[&str]) -> Output {
 /// NCBI's is `<program>: 2.17.0+` (rpsbproc
 /// `0.5.1`, the maskers `1.0.0`, makembindex `2.17.0`), probes `vf`, and its XML and JSON
 /// `version_info` have NCBI's numbers; LOSAT's have LOSAT's), and an option of each that takes a value.
-const PROGRAMS: [(&str, &str); 19] = [
+const PROGRAMS: [(&str, &str); 20] = [
     ("blastn", "-out"),
     ("blastp", "-out"),
     ("blastx", "-out"),
@@ -81,6 +81,7 @@ const PROGRAMS: [(&str, &str); 19] = [
     ("makeprofiledb", "-out"),
     ("blastdb_aliastool", "-out"),
     ("blastdbcheck", "-db"),
+    ("blast_formatter", "-out"),
 ];
 
 /// LOSAT's package: its version, and its numbers in the XML and JSON.
@@ -295,7 +296,7 @@ fn the_full_versions_come_before_the_configuration() {
 }
 
 /// The library's tools (`api::run_makeblastdb`, `run_blastdbcmd`, `run_dustmasker`,
-/// `run_segmasker`, `run_windowmasker`, `run_convert2blastmask`, `run_makembindex`) run NCBI's
+/// `run_segmasker`, `run_windowmasker`, `run_convert2blastmask`, `run_makembindex`, `run_blast_formatter`) run NCBI's
 /// application start as the command line does: they print the versions to their output (line RG item E1w-2 for makeblastdb). The search
 /// programs of the library return reports, and refuse the words (`cli::version_word_refusal`), which
 /// name the Web engine's ABI v2 among the places that print them where it runs the program (line
@@ -328,6 +329,7 @@ fn the_library_s_tools_print_the_versions_as_the_command_line() {
                 | "windowmasker"
                 | "convert2blastmask"
                 | "makembindex"
+                | "blast_formatter"
         );
         for word in [
             "-version",

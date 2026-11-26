@@ -624,9 +624,12 @@ impl RpsVolumeFiles {
         if files.cells().is_none() || files.overflow().is_none() {
             return Err(refused(".loo file is shorter than its backbone").into());
         }
-        let ungrouped = files
-            .check_cells(num_rows, check_hits, pool)
-            .map_err(|what| refused(&what))?;
+        let ungrouped = if check_hits && drop_loo_pages {
+            files.check_cells_buffered(&with(".loo"), num_rows)
+        } else {
+            files.check_cells(num_rows, check_hits, pool)
+        }
+        .map_err(|what| refused(&what))?;
         if ungrouped || regroup {
             let (cells, overflow) = (
                 files.cells().expect("checked above"),
@@ -634,12 +637,6 @@ impl RpsVolumeFiles {
             );
             files.regrouped =
                 regroup_cells(cells, overflow, RPS_GROUP_BUCKETS).map_err(|what| refused(&what))?;
-        }
-        if check_hits && drop_loo_pages && files.regrouped.is_none() {
-            // Unmap the pages touched by `check_cells` and remap cleanly so only pages touched
-            // by the search itself become resident (e.g. DELTA-BLAST single-query iterations).
-            let fresh = map(".loo")?;
-            files.loo = fresh;
         }
         if alphabet == 26 {
             files.narrow = Some(files.widen_rows(num_rows));
@@ -881,6 +878,78 @@ impl RpsVolumeFiles {
             let (bits, chunk_ungrouped) = check_word(word)?;
             pv.push(bits);
             ungrouped |= chunk_ungrouped;
+        }
+        self.pv = pv;
+        Ok(ungrouped)
+    }
+
+    /// `check_cells` for DELTA-BLAST (`drop_loo_pages`): reads the `.loo` overflow array through
+    /// a 1 MiB sliding file buffer (`FreqSource`) so the check never faults unused `.loo` pages
+    /// into the resident set (`VmHWM` on single-query iterations stays below NCBI). Produces the
+    /// exact same `pv`, `ungrouped` flag, and refusal messages as `check_cells`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:162-173
+    fn check_cells_buffered(&mut self, loo_path: &Path, num_rows: usize) -> Result<bool, String> {
+        let Ok(source) = FreqSource::open(loo_path) else {
+            return self.check_cells(num_rows, true, None);
+        };
+        let cells = self.cells().expect("checked by the caller");
+        let overflow_start = self.backbone_start + (RPS_BACKBONE_SIZE + 1) * 16;
+        let overflow_len = self.loo.len().saturating_sub(overflow_start) / 4;
+        let rows_limit = u32::try_from(num_rows.saturating_sub(RPS_WORDSIZE - 1))
+            .unwrap_or(u32::MAX)
+            .min(i32::MAX as u32 - 1);
+        const WINDOW_WORDS: usize = 256 * 1024;
+        let mut raw = Vec::<u8>::new();
+        let mut buf = Vec::<i32>::new();
+        let (mut win_start, mut win_end) = (0usize, 0usize);
+        let mut pv = vec![0u64; RPS_BACKBONE_SIZE / 64];
+        let mut ungrouped = false;
+        for (index, cell) in cells.iter().enumerate().take(RPS_BACKBONE_SIZE) {
+            let num_used = cell[0];
+            if num_used <= 0 {
+                continue;
+            }
+            pv[index / 64] |= 1u64 << (index % 64);
+            if num_used > RPS_MAX_SCAN_HITS {
+                return Err(format!(
+                    ".loo word {index} has {num_used} hits, more than one scan takes (NCBI BLAST+ does not end)"
+                ));
+            }
+            let ok = if num_used <= RPS_HITS_PER_CELL {
+                let head = &cell[1..=num_used as usize];
+                hits_in_rows_and_groups(head, &[], rows_limit, &mut ungrouped)
+            } else {
+                let Some(range) = overflow_run(cell, overflow_len) else {
+                    return Err(format!(
+                        ".loo word {index} names a position outside the profiles' rows"
+                    ));
+                };
+                if range.start < win_start || range.end > win_end {
+                    let count = WINDOW_WORDS
+                        .max(range.len())
+                        .min(overflow_len - range.start);
+                    let byte_offset = (overflow_start + range.start * 4) as u64;
+                    raw.resize(count * 4, 0);
+                    source.read_at(&mut raw, byte_offset).map_err(|_| {
+                        format!(".loo word {index} names a position outside the profiles' rows")
+                    })?;
+                    buf.clear();
+                    buf.extend(
+                        raw.chunks_exact(4)
+                            .map(|w| i32::from_le_bytes([w[0], w[1], w[2], w[3]])),
+                    );
+                    win_start = range.start;
+                    win_end = range.start + count;
+                }
+                let run = &buf[range.start - win_start..range.end - win_start];
+                hits_in_rows_and_groups(&cell[1..2], run, rows_limit, &mut ungrouped)
+            };
+            if !ok {
+                return Err(format!(
+                    ".loo word {index} names a position outside the profiles' rows"
+                ));
+            }
         }
         self.pv = pv;
         Ok(ungrouped)

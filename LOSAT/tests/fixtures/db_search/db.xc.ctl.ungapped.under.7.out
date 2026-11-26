@@ -1,0 +1,21 @@
+# BLASTN 2.17.0+
+# Query: q1
+# Database: tests/db_search/taxfilter/tfn
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+q1	ENST00000251595.11	100.000	50	0	0	1	50	1	50	5.14e-23	92.7
+q1	ENST00000320868.9	100.000	50	0	0	1	50	1	50	5.14e-23	92.7
+q1	ENST00000292901.8	100.000	11	0	0	34	44	222	232	0.15	21.4
+q1	ENST00000335295.4	100.000	11	0	0	34	44	47	57	0.15	21.4
+# BLASTN 2.17.0+
+# Query: q90
+# Database: tests/db_search/taxfilter/tfn
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+q90	ENST00000251595.11	100.000	90	0	0	1	90	101	190	9.99e-45	165
+q90	ENST00000320868.9	100.000	90	0	0	1	90	101	190	9.99e-45	165
+q90	ENST00000652335.1	80.303	66	13	0	19	84	461	526	1.26e-13	62.5
+q90	ENSDART00000125092.4	76.087	46	11	0	31	76	185	230	2.27e-05	35.1
+q90	ENSDART00000113098.5	86.364	22	3	0	55	76	233	254	0.004	27.8
+q90	ENSDART00000066384.5	100.000	11	0	0	46	56	543	533	0.31	21.4
+# BLAST processed 2 queries

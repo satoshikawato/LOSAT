@@ -666,27 +666,59 @@ impl Write for SharedOut<'_, '_> {
     }
 }
 
+/// Shared state of [`TiedOut`]: the caller's writer and whether any non-empty write has occurred
+/// since the last flush (matching NCBI's `basic_filebuf::sync`, which makes no write when empty).
+struct TiedState<'b> {
+    out: &'b mut dyn Write,
+    dirty: bool,
+}
+
+impl TiedState<'_> {
+    fn flush_if_dirty(&mut self) -> std::io::Result<()> {
+        if !self.dirty {
+            return Ok(());
+        }
+        self.dirty = false;
+        self.out.flush()
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/corelib/ncbidiag.cpp:6695-6696
 /// A caller's standard-output writer wrapped in a `RefCell` so `Diag::before_text` can flush it
 /// before a `cerr` write (`TextPlace::StandardError`) in a library run, matching NCBI's `cerr` tie
 /// to `cout` without flushing on every insertion.
-struct TiedOut<'a, 'b>(&'a RefCell<&'b mut dyn Write>);
+struct TiedOut<'a, 'b>(&'a RefCell<TiedState<'b>>);
 
 impl Write for TiedOut<'_, '_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.borrow_mut().write(buf)
+        let mut state = self.0.borrow_mut();
+        let n = state.out.write(buf)?;
+        if n > 0 {
+            state.dirty = true;
+        }
+        Ok(n)
     }
 
     fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-        self.0.borrow_mut().write_all(buf)
+        let mut state = self.0.borrow_mut();
+        state.out.write_all(buf)?;
+        if !buf.is_empty() {
+            state.dirty = true;
+        }
+        Ok(())
     }
 
     fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
-        self.0.borrow_mut().write_vectored(bufs)
+        let mut state = self.0.borrow_mut();
+        let n = state.out.write_vectored(bufs)?;
+        if n > 0 {
+            state.dirty = true;
+        }
+        Ok(n)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.0.borrow_mut().flush()
+        self.0.borrow_mut().flush_if_dirty()
     }
 }
 
@@ -737,8 +769,8 @@ fn run_app(
                     (target, None, None),
                 )
             } else {
-                let shared = RefCell::new(out);
-                let tie_stdout = || shared.borrow_mut().flush();
+                let shared = RefCell::new(TiedState { out, dirty: false });
+                let tie_stdout = || shared.borrow_mut().flush_if_dirty();
                 let mut tied_out = TiedOut(&shared);
                 run_app_target(
                     tool,

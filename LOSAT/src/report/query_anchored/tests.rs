@@ -770,8 +770,11 @@ Subject_2  97   .........................................................  153
     );
 }
 
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2086-2110
+// A merge of no HSPs (every aligned subject without a Bioseq, line RG-KB item 12) writes the line
+// feed before the frames' loop, whose empty mixes throw.
 #[test]
-fn no_hsps_write_nothing() {
+fn no_hsps_write_a_line_feed() {
     let probe = probe("qa", 1, &[]);
     let mut out = Vec::new();
     write_section(
@@ -786,7 +789,7 @@ fn no_hsps_write_nothing() {
         &probe,
     )
     .expect("the section");
-    assert!(out.is_empty());
+    assert_eq!(out, b"\n");
 }
 
 /// One record as the query and as its only subject (`-parse_deflines`): the subject is the query's

@@ -1550,8 +1550,30 @@ pub(super) fn reported_batch(
         reported.read_db_masks(database, mask.id)?;
     }
     if let Some(scopes) = query_scopes {
-        reported.refuse_ids_of_queries(results, options.gapped, scopes)?;
+        // The reader batch's queries (`queries`): the scope's span, to the run's last searched
+        // query where the span is the last (`QueryScopes::span_of`).
+        let first = scopes.first();
+        let record = |query: usize| {
+            let record = queries.get(query.checked_sub(first)?)?;
+            Some(crate::report::query_bioseq::QueryRecordRef {
+                believed: record.believed()?,
+                title: &record.title,
+                length: record.sequence.len(),
+            })
+        };
+        let run = crate::report::query_bioseq::SeenRun {
+            shows: super::report::shows_query_bioseqs(options) && !database.loads_write_texts(),
+            known: first..if scopes.run().span_of(first).end == usize::MAX {
+                usize::MAX
+            } else {
+                first + queries.len()
+            },
+            record: &record,
+            protein: false,
+        };
+        reported.refuse_ids_of_queries(results, options.gapped, scopes, &run)?;
     }
+    reported.check_handle_loads(database, results, options.gapped)?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
     // Before the reports of a batch NCBI fetches every subject that the batch
     // reports, and with `taxdb.bti` on the search path the taxonomy database

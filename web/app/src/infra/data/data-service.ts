@@ -80,7 +80,9 @@ const BLOCK_NAMES: Readonly<Record<OutputStream, string>> = {
   [DIAGNOSTICS_STREAM]: 'diagnostics',
 };
 const LF = 0x0a;
+const CR = 0x0d;
 const NEWLINE = new Uint8Array([LF]);
+const CR_NEWLINE = new Uint8Array([CR]);
 
 /** The bytes of each stream of a run: those of its outputs (`openRun`), the HSP records and the diagnostics. */
 type Lengths = Partial<Record<OutputStream, number>>;
@@ -182,7 +184,7 @@ export class DataService implements DataGateway {
     const { records, reader_error: stop } = await this.deps.scanner.scan(reader, readChunks(file, this.chunkBytes));
     checkRecordTable(records, file.size, stop?.offset);
     const hashes = await this.hashRecords(file, records);
-    return this.keep({
+    const revision = this.keep({
       revisionId: this.deps.newToken(),
       sourceId,
       parser,
@@ -190,37 +192,52 @@ export class DataService implements DataGateway {
       excluded: Object.freeze([]),
       ...(stop === undefined ? {} : { readerError: Object.freeze({ offset: stop.offset, defline: stop.defline, message: stop.message }) }),
     });
+    return revision;
   }
 
   async reviseDataset(revisionId: string, excluded: readonly number[]): Promise<DatasetRevision> {
     const base = this.revision(revisionId);
-    return this.keep({
+    const revision = this.keep({
       ...base,
       revisionId: this.deps.newToken(),
       excluded: normalizeExclusion(excluded, base.records.length),
     });
+    return revision;
   }
 
   async buildRunInput(revisionIds: readonly string[]): Promise<RunInput> {
-    const { bytes, records } = await this.runInputBytes(revisionIds);
-    return { bytes, sha256: await this.deps.digest(bytes), records };
+    const { bytes, records, assembled } = await this.assembleRunInput(revisionIds);
+    return {
+      bytes,
+      sha256: await this.deps.digest(bytes),
+      records,
+      ...(assembled ? { assembled: true } : {}),
+    };
   }
 
   /**
-   * The bytes and record keys of a run input, without its SHA-256. A source whose reading ends with
+   * Assembles the bytes of a run input from its dataset revisions. A source whose reading ends with
    * the reader's error (`DatasetRevision.readerError`) keeps the bytes from the error on after its
    * included records, so that the run meets the error as the command line meets it in the file, and
-   * ends the input: the engine reads no record after it (line WQA's D10, 2026-11-19).
+   * ends the input: the engine reads no record after it (line WQA's D10, 2026-11-19). Between parts,
+   * a pure-CR stream stays in CR mode so joining CR files without a trailing CR does not switch
+   * NCBI's line reader to mixed mode (line WQA's D17).
    */
-  private async runInputBytes(revisionIds: readonly string[]): Promise<Omit<RunInput, 'sha256'>> {
+  private async assembleRunInput(
+    revisionIds: readonly string[],
+  ): Promise<{ readonly bytes: Uint8Array; readonly records: readonly RecordKey[]; readonly assembled: boolean }> {
     if (revisionIds.length === 0) throw new Error('a run input needs at least one dataset revision');
     const parts: Uint8Array[] = [];
     const records: RecordKey[] = [];
+    let assembled = revisionIds.length > 1;
+    let hasLf = false;
+    let hasCr = false;
     for (const revisionId of revisionIds) {
       const revision = this.revision(revisionId);
       const file = this.source(revision.sourceId);
       const included = includedRecords(revision);
       const stop = revision.readerError?.offset;
+      if (revision.excluded.length > 0) assembled = true;
       const bytes =
         revision.excluded.length === 0
           ? await readRange(file, 0, file.size)
@@ -229,26 +246,39 @@ export class DataService implements DataGateway {
               ...(stop === undefined ? [] : [[stop, file.size] as const]),
             ]);
       const previous = parts[parts.length - 1];
-      if (bytes.length > 0 && previous !== undefined && previous[previous.length - 1] !== LF) {
-        parts.push(NEWLINE);
+      if (bytes.length > 0 && previous !== undefined) {
+        const last = previous[previous.length - 1];
+        if (last !== LF) {
+          if (!hasLf && hasCr) {
+            if (last !== CR) parts.push(CR_NEWLINE);
+          } else {
+            parts.push(NEWLINE);
+            hasLf = true;
+          }
+        }
       }
-      if (bytes.length > 0) parts.push(bytes);
-      // One by one: spreading a large table into push() overflows the call stack.
+      if (bytes.length > 0) {
+        parts.push(bytes);
+        if (!hasLf && bytes.includes(LF)) hasLf = true;
+        if (!hasCr && bytes.includes(CR)) hasCr = true;
+      }
       for (const record of included) records.push(recordKey(record));
       if (stop !== undefined) break;
     }
-    return { bytes: concatBytes(parts), records: Object.freeze(records) };
+    return { bytes: concatBytes(parts), records: Object.freeze(records), assembled };
   }
 
   async checkInput(reader: FastaReader, revisionIds: readonly string[]): Promise<InputCheck> {
-    const { bytes } = await this.runInputBytes(revisionIds);
+    const { bytes } = await this.assembleRunInput(revisionIds);
     return this.deps.checker.check(reader, bytes);
   }
 
   async dropSource(sourceId: string): Promise<void> {
     this.sources.delete(sourceId);
     for (const [revisionId, revision] of this.revisions) {
-      if (revision.sourceId === sourceId) this.revisions.delete(revisionId);
+      if (revision.sourceId === sourceId) {
+        this.revisions.delete(revisionId);
+      }
     }
   }
 

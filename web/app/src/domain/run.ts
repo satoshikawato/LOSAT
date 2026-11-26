@@ -50,8 +50,13 @@ export interface InputSnapshot {
    * `records` are the run's input.
    */
   readonly revisionIds: readonly string[];
-  /** ID and length of each record in `bytes`; the engine checks them at `register`. */
+  /** ID and length of each record from the per-file record tables; the engine checks them at `register`. */
   readonly records: readonly RecordKey[];
+  /**
+   * Whether `bytes` was assembled from parts (several sources joined, or a source with records
+   * left out; line WQA's D17). Absent for a single unmodified source.
+   */
+  readonly assembled?: boolean;
 }
 
 /**
@@ -200,6 +205,26 @@ export interface RunRecord {
    * 2026-11-19).
    */
   readonly diagnostics?: string;
+  /**
+   * The records that the engine actually read at `register` for an assembled input
+   * (`InputSnapshot.assembled`) when reading the assembled bytes as one file differs from the
+   * per-file record tables (`InputSnapshot.records`; line WQA's D17). Absent when they agree.
+   */
+  readonly readRecords?: {
+    readonly query?: readonly RecordKey[];
+    readonly subject?: readonly RecordKey[];
+  };
+}
+
+/**
+ * The records that a run actually searched for `role`: the engine's own reading when an assembled
+ * input read differently as one file (`RunRecord.readRecords`), otherwise the snapshot's record table.
+ */
+export function runInputRecords(
+  run: { readonly snapshot: RunSnapshot; readonly record: RunRecord },
+  role: 'query' | 'subject',
+): readonly RecordKey[] {
+  return run.record.readRecords?.[role] ?? run.snapshot[role].records;
 }
 
 export function isTerminal(status: RunStatus): boolean {

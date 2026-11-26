@@ -32,8 +32,8 @@ use crate::config::ScoringMatrix;
 use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::tabular::{
-    coverage_percent, taxdb_warning_line, union_length, QueryCoveragePerHsp, TabularField,
-    TabularHsp, TabularKind, TabularQuery, TabularRows, TabularSpec, TabularWriter,
+    coverage_percent, union_length, QueryCoveragePerHsp, TabularField, TabularHsp, TabularKind,
+    TabularQuery, TabularRows, TabularSpec, TabularWriter,
 };
 use crate::utils::genetic_code::GeneticCode;
 
@@ -227,8 +227,7 @@ pub(super) fn write_tblastx_tabular(
     // NCBI makes a formatter for each query's report and for outfmt 7's epilog, and each warns
     // when the field list asks for a name of the taxonomy database that it cannot find.
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:139-158
-    let taxdb_warning =
-        (spec.checks_taxdb() && !taxdb_found).then(|| taxdb_warning_line("tblastx"));
+    let taxdb_warning = spec.formatter_warning(taxdb_found, "tblastx");
     let warn = |writer: &mut dyn Write, warnings: Option<&mut QueryWarnings<'_>>| -> Result<()> {
         if let (Some(line), Some(warnings)) = (taxdb_warning.as_deref(), warnings) {
             writer.flush()?;
@@ -456,8 +455,8 @@ pub(super) fn write_tblastx_tabular(
                     q_frame,
                     s_frame,
                     rows: rows_read.then_some((qrow.as_slice(), srow.as_slice())),
-                    end_gaps: true,
-                    stored_gaps: [&[], &[]],
+                    // An ungapped HSP: no script, no end gap.
+                    ops: &[],
                     qcovhsp: qcovhsp.of_hsp(
                         i32::try_from(hit.sort_query_end - hit.sort_query_offset)?,
                         i32::try_from(q_high - q_low + 1)?,

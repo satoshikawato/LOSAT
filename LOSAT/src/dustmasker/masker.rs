@@ -2,7 +2,8 @@
 //! are and the pieces between them go through one `CSymDustMasker` (`utils::dust`).
 
 use crate::utils::byte_search::{equal_bytes_16, gather_high_bits};
-use crate::utils::dust::{DustMasker, NcbiLfgRandom};
+use crate::utils::dust::DustMasker;
+use crate::utils::random_gen::NcbiRandom;
 
 /// A masked interval: the first and the last position (`CSymDustMasker::TMaskedInterval`,
 /// two `TSeqPos`).
@@ -152,7 +153,7 @@ fn dust(
     seq: &[u8],
     start: u32,
     stop: u32,
-    rng: &mut NcbiLfgRandom,
+    rng: &mut NcbiRandom,
 ) -> Vec<Interval> {
     duster
         .mask_range(seq, start as usize, stop as usize, rng)
@@ -175,7 +176,7 @@ pub(super) fn dust_masks_skip_ns(
     linker: u32,
 ) -> Vec<Interval> {
     let duster = DustMasker::new(level, window as usize, linker as usize);
-    let mut rng = NcbiLfgRandom::new();
+    let mut rng = NcbiRandom::default();
     let last = (seq.len() - 1) as u32;
     let n_runs = long_n_runs(window, seq);
     if n_runs.is_empty() {

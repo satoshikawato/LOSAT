@@ -49,9 +49,12 @@ pub(super) fn program_type(pssm: bool) -> Option<crate::report::record::ProgramT
 /// frequency ratios only are made with the options' matrix (`matrix_name`); `strategy` and
 /// `database` are whether the run writes a search strategy and searches `-db`
 /// (`PssmReader::strategy`); `write_verification` is the run's `SERIAL_VERIFY_DATA_WRITE`
-/// (`PssmReader::write_verification`); the messages of NCBI's reader go to `diagnostics`.
+/// (`PssmReader::write_verification`), `read_verification` its `SERIAL_VERIFY_DATA_READ` and
+/// `SERIAL_VERIFY_DATA_GET` (`PssmReader::read_verification`); the messages of NCBI's reader go
+/// to `diagnostics`.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/tblastn_args.cpp:125-130
+#[allow(clippy::too_many_arguments)]
 pub(super) fn read(
     path: &Path,
     matrix_name: &str,
@@ -59,6 +62,7 @@ pub(super) fn read(
     database: bool,
     archive: Option<&crate::report::archive::ArchiveHandle>,
     write_verification: Option<&crate::blastinput::ncbi_environment::WriteVerification>,
+    read_verification: &crate::blastinput::ncbi_environment::ReadVerification,
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<PsiSearch> {
     let (search, _file) = read_in_pssm(
@@ -71,6 +75,7 @@ pub(super) fn read(
             archive,
             write_verification,
             out_pssm: false,
+            read_verification: Some(read_verification),
         },
         diagnostics,
     )?;
@@ -92,9 +97,9 @@ pub(super) fn check_db_gencode(code: u8) -> Result<()> {
 }
 
 /// LOSAT's refusals of a PSI-TBLASTN search, after NCBI's checks of the options and the opening of
-/// the database, before anything is written: NCBI's crash of `-mt_mode 1` (DECISIONS 35 Q4), the
-/// output formats other than 0 to 10 and 20 (item PS15b of line PS: 11 crashes NCBI, with a report
-/// that changes from run to run; 12 to 16 and 18 are item PS15b-2's).
+/// the database, before anything is written: NCBI's crash of `-mt_mode 1` (DECISIONS 35 Q4) and
+/// the archive, outfmt 11 (item PS15b of line PS: it crashes NCBI, with a report that changes from
+/// run to run). Every other format is written (item PS15b-2).
 pub(super) fn check_limits(
     args: &TblastnArgs,
     resolved: &ResolvedTblastnArgs,
@@ -147,9 +152,6 @@ pub(super) fn check_limits(
         bail!(
             "output format 11 with -in_pssm is not supported by LOSAT's TBLASTN (NCBI BLAST+ 2.17.0's tblastn stops with a C++ exception whose report changes from run to run)"
         );
-    }
-    if searched && !matches!(outfmt, 0..=10 | 20) {
-        bail!("output format {outfmt} with -in_pssm is not supported by LOSAT's TBLASTN yet");
     }
     Ok(())
 }

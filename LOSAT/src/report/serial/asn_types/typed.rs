@@ -6,17 +6,57 @@
 //! for a part it does not build: `value`).
 //!
 //! A typed reader recurses as the type nests; the types it is given nest a bounded number of
-//! levels but for a `Seq-loc` of `mix` and `equiv`, whose depth the typed read's limit bounds
-//! (`read::TYPED_MAX_DEPTH`). It reads (never skips) types that have neither a delayed member
-//! nor a hook of NCBI's classes (`super::hooks`). Each call names its type, so the XML stream's
-//! frames and tags of a named type (`TypedReader::begin_names`), of a list and of its elements
-//! (`Input::ARRAY_FRAMES`, `Input::element_frame`, `Input::end_element`) are those of the generic
-//! reader.
+//! levels, but for a CHOICE whose variants are lists of it (a `Seq-loc` of `mix` and `equiv`),
+//! which `nest` reads to any depth with its levels on the heap, as NCBI reads it with a stack large
+//! enough (PD-LOSAT-NCBI-DEFECTS exception 28). It reads (never skips) types that have neither a
+//! delayed member nor a hook of NCBI's classes (`super::hooks`). Each call names its type, so the
+//! XML stream's frames and tags of a named type (`TypedReader::begin_names`), of a list and of
+//! its elements (`Input::ARRAY_FRAMES`, `Input::element_frame`, `Input::end_element`) are those
+//! of the generic reader.
 
-use super::read::{alias_target, is_missing_value, set_flag_error, Pointee, TypedReader, NO_TYPE};
+use super::read::{
+    alias_target, is_missing_value, set_flag_error, Pointee, PostSink, TypedReader, NO_TYPE,
+};
 use super::{resolved, type_info, Kind, Member, Value, DELAYED};
 use crate::report::serial::asn_input::{Input, R};
 use crate::report::serial::object_frame::FrameKind;
+
+/// What [`TypedReader::nest`] hands the reader of a nest, in the order of the file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NestPart {
+    /// The value of the variant at `index` (of the type `ty`), one that is not a list of the
+    /// CHOICE: the reader reads it, in its variant's frame.
+    Value(usize, u16),
+    /// An element of a list of the CHOICE: a value of the CHOICE begins.
+    Enter,
+    /// The value that the last `Enter` began was read.
+    Leave,
+    /// An element of the list of the variant at `index` stated as `NULL` (an empty `CRef<>`):
+    /// nothing to read.
+    Null(usize),
+}
+
+/// A level of the nest that [`TypedReader::nest`] reads (`TypedReader::nest`, on the heap): the
+/// list variant of the CHOICE whose elements are being read, whether the element being read was
+/// stated as `:Type` (in `ReadPointer`'s named frame, which its end leaves), and the named frames
+/// of the CHOICE and of the list's type (`begin_names`: the XML stream's, `Input::NAMED_TYPES`;
+/// none in the others).
+#[derive(Clone, Copy, Debug)]
+pub(super) struct NestLevel {
+    variant: u16,
+    other: bool,
+    names: u8,
+    list_names: u8,
+}
+
+/// Where [`TypedReader::nest`] stands: at the start of a value of the CHOICE, at the next element
+/// of the innermost list, or after the end of a value of the CHOICE.
+#[derive(Clone, Copy)]
+enum NestStep {
+    Begin,
+    Element,
+    End,
+}
 
 /// `$read` (an expression of the reader `$r`) in the named frames of the type `$ty`
 /// (`begin_names`: the XML stream's `ReadNamedType`, `Input::NAMED_TYPES`); the text and binary
@@ -34,7 +74,7 @@ macro_rules! in_names {
     };
 }
 
-impl<I: Input> TypedReader<I> {
+impl<I: Input, P: PostSink> TypedReader<I, P> {
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1380-1397 (`ReadClassSequential`;
     // the binary stream's, objistrasnb.cpp:1210-1233, is the same with its own `BeginClass`)
     // NCBI reference (598d8ae6): c++/include/serial/impl/objistrimpl.hpp:84-109
@@ -63,7 +103,7 @@ impl<I: Input> TypedReader<I> {
         let Kind::Sequence(span) = type_info(ty).kind else {
             unreachable!("{} is a SEQUENCE", type_info(ty).name())
         };
-        self.push(FrameKind::Class, ty, false)?;
+        self.push(FrameKind::Class, ty, false);
         let result = self.class_contents(span.members(), read);
         self.pop(result)
     }
@@ -77,7 +117,7 @@ impl<I: Input> TypedReader<I> {
         read: &mut impl FnMut(&mut Self, usize, u16) -> R<()>,
     ) -> R<()> {
         self.inp.begin_class()?;
-        self.push(FrameKind::ClassMember, NO_TYPE, false)?;
+        self.push(FrameKind::ClassMember, NO_TYPE, false);
         let read = self.class_members(members, read);
         let pos = self.pop(read)?;
         for member in &members[pos..] {
@@ -159,39 +199,44 @@ impl<I: Input> TypedReader<I> {
         let Kind::Choice(span) = type_info(ty).kind else {
             unreachable!("{} is a CHOICE", type_info(ty).name())
         };
-        self.push(FrameKind::Choice, ty, false)?;
-        let value = self.choice_contents(span.members(), read);
+        let variants = span.members();
+        let index = self.choice_begin(ty, variants)?;
+        let value = read(self, index, variants[index].ty);
+        self.choice_end(value)
+    }
+
+    /// The start of the CHOICE `ty` (of the variants `variants`) to its variant's value: the
+    /// choice frame, `BeginChoice`, the variant frame, `BeginChoiceVariant` named in it; the
+    /// variant's index. An error leaves the frames pushed here before it returns. `choice` and
+    /// `nest` begin each CHOICE here.
+    #[inline(always)]
+    fn choice_begin(&mut self, ty: u16, variants: &'static [Member]) -> R<usize> {
+        self.push(FrameKind::Choice, ty, false);
+        if let Err(fail) = self.inp.begin_choice() {
+            return self.pop(Err(fail));
+        }
+        self.push(FrameKind::ChoiceVariant, NO_TYPE, false);
+        match self.inp.begin_variant(variants) {
+            Ok(index) => {
+                self.set_member(&variants[index]);
+                Ok(index)
+            }
+            Err(fail) => {
+                let left = self.pop(Err(fail));
+                self.pop(left)
+            }
+        }
+    }
+
+    /// The end of a CHOICE that `choice_begin` began, after its variant's value `value`:
+    /// `EndChoiceVariant`, the variant frame left, `EndChoice`, the choice frame left (an error
+    /// leaves them instead).
+    #[inline(always)]
+    fn choice_end<T>(&mut self, value: R<T>) -> R<T> {
+        let value = value.and_then(|value| self.inp.end_variant().map(|()| value));
+        let value = self.pop(value);
+        let value = value.and_then(|value| self.inp.end_choice().map(|()| value));
         self.pop(value)
-    }
-
-    /// `BeginChoice`, the variant in its frame, `EndChoice`.
-    #[inline(always)]
-    fn choice_contents<T>(
-        &mut self,
-        variants: &'static [Member],
-        read: impl FnOnce(&mut Self, usize, u16) -> R<T>,
-    ) -> R<T> {
-        self.inp.begin_choice()?;
-        self.push(FrameKind::ChoiceVariant, NO_TYPE, false)?;
-        let value = self.variant(variants, read);
-        let value = self.pop(value)?;
-        self.inp.end_choice()?;
-        Ok(value)
-    }
-
-    /// `BeginChoiceVariant`, named in the variant frame, its value, `EndChoiceVariant`.
-    #[inline(always)]
-    fn variant<T>(
-        &mut self,
-        variants: &'static [Member],
-        read: impl FnOnce(&mut Self, usize, u16) -> R<T>,
-    ) -> R<T> {
-        let index = self.inp.begin_variant(variants)?;
-        let variant = &variants[index];
-        self.set_member(variant);
-        let value = read(self, index, variant.ty)?;
-        self.inp.end_variant()?;
-        Ok(value)
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1318-1346
@@ -219,32 +264,46 @@ impl<I: Input> TypedReader<I> {
         let Kind::List { element, set, refs } = type_info(ty).kind else {
             unreachable!("{} is a SEQUENCE OF or SET OF", type_info(ty).name())
         };
-        if !I::ARRAY_FRAMES {
-            return self.list_contents(element, set, refs, read);
-        }
-        self.push(FrameKind::Array, NO_TYPE, false)?;
-        let result = self.list_contents(element, set, refs, read);
-        self.pop(result)
+        self.list_begin(element, set)?;
+        let result = self.elements(element, refs, read);
+        self.list_end(element, result)
     }
 
-    /// `BeginContainer`, the elements in their frame (`Input::element_frame`), `EndContainer`.
+    /// The start of a SEQUENCE OF or (`set`) SET OF of `element`s to its elements: the array frame
+    /// (`Input::ARRAY_FRAMES`), `BeginContainer`, the element frame (`Input::element_frame`). An
+    /// error leaves the frame pushed here before it returns. `list` and `nest` begin each list
+    /// here.
     #[inline(always)]
-    fn list_contents(
-        &mut self,
-        element: u16,
-        set: bool,
-        refs: bool,
-        read: &mut impl FnMut(&mut Self, Option<u16>) -> R<()>,
-    ) -> R<()> {
-        self.inp.begin_container(set)?;
-        if !I::element_frame(element) {
-            self.elements(element, refs, read)?;
-            return self.inp.end_container();
+    fn list_begin(&mut self, element: u16, set: bool) -> R<()> {
+        if I::ARRAY_FRAMES {
+            self.push(FrameKind::Array, NO_TYPE, false);
         }
-        self.push(FrameKind::ArrayElement, NO_TYPE, false)?;
-        let result = self.elements(element, refs, read);
-        self.pop(result)?;
-        self.inp.end_container()
+        if let Err(fail) = self.inp.begin_container(set) {
+            if I::ARRAY_FRAMES {
+                return self.pop(Err(fail));
+            }
+            return Err(fail);
+        }
+        if I::element_frame(element) {
+            self.push(FrameKind::ArrayElement, NO_TYPE, false);
+        }
+        Ok(())
+    }
+
+    /// The end of a list of `element`s that `list_begin` began, after its elements (`elements`):
+    /// the element frame left, `EndContainer`, the array frame left (an error leaves them
+    /// instead).
+    #[inline(always)]
+    fn list_end(&mut self, element: u16, elements: R<()>) -> R<()> {
+        let mut result = elements;
+        if I::element_frame(element) {
+            result = self.pop(result);
+        }
+        let result = result.and_then(|()| self.inp.end_container());
+        if I::ARRAY_FRAMES {
+            return self.pop(result);
+        }
+        result
     }
 
     /// Each element (`BeginContainerElement`) read by `read`.
@@ -255,12 +314,7 @@ impl<I: Input> TypedReader<I> {
         refs: bool,
         read: &mut impl FnMut(&mut Self, Option<u16>) -> R<()>,
     ) -> R<()> {
-        while self.inp.begin_element()? {
-            let pointee = if refs {
-                self.begin_pointer(element, false)?
-            } else {
-                Pointee::This
-            };
+        while let Some(pointee) = self.element_begin(element, refs)? {
             match pointee {
                 Pointee::Null => read(self, None)?,
                 Pointee::This => read(self, Some(element))?,
@@ -272,6 +326,192 @@ impl<I: Input> TypedReader<I> {
             self.inp.end_element()?;
         }
         Ok(())
+    }
+
+    /// `BeginContainerElement` of a list of `element`s, and where the element's value is: an
+    /// element of a list of `CRef<>`s (`refs`) takes the pointer forms (`begin_pointer`); `None`
+    /// at the end of the list. `elements` and `nest` begin each element here.
+    #[inline(always)]
+    fn element_begin(&mut self, element: u16, refs: bool) -> R<Option<Pointee>> {
+        if !self.inp.begin_element()? {
+            return Ok(None);
+        }
+        if !refs {
+            return Ok(Some(Pointee::This));
+        }
+        self.begin_pointer(element, false).map(Some)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1482-1500
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:1245-1274
+    // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:955-1000
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1173-1198
+    /// A value of the CHOICE `ty` whose variants at `nests` are lists of the CHOICE (`Seq-loc`'s
+    /// `mix` and `equiv`), nested to any depth: NCBI reads it by recursion, `ReadChoiceSimple`,
+    /// `ReadContainer` (text and binary) and, for an element stated as `:Type`, `ReadPointer`'s
+    /// named frame, each level a few frames of the stack of its thread. Here the levels are kept
+    /// on the heap (`self.nest`) and each frame on the object stack, begun and ended by the steps
+    /// of `choice` and `list` (`begin_names`, `choice_begin`, `choice_end`, `list_begin`,
+    /// `element_begin`, `end_pointer`, `end_element`, `list_end`, `end_names`), so that a nest is
+    /// read to any depth with LOSAT's stack as it is.
+    /// `read` reads the value of every other variant (`NestPart::Value`, in its variant's frame)
+    /// and is told where a value of the CHOICE begins and ends in a list (`Enter`, `Leave`) and of
+    /// an element stated as `NULL` (`Null`). An error leaves the frames of every open level from
+    /// the innermost out (`unwind`), as it leaves NCBI's recursion: the frames of the levels above
+    /// the error each add what they add to it.
+    /// A value that is not a list (most of them: an interval, a `packed-int`) is read by the
+    /// steps of `choice` alone (`nest_begin`); the levels begin at its first list.
+    pub(crate) fn nest(
+        &mut self,
+        ty: u16,
+        nests: impl Fn(usize) -> bool,
+        mut read: impl FnMut(&mut Self, NestPart) -> R<()>,
+    ) -> R<()> {
+        let named = ty;
+        let ty = alias_target(ty);
+        let Kind::Choice(span) = type_info(ty).kind else {
+            unreachable!("{} is a CHOICE", type_info(ty).name())
+        };
+        let variants = span.members();
+        let depth = self.depth();
+        match self.nest_begin(named, ty, variants, &nests, &mut read) {
+            Ok(false) => return Ok(()),
+            Ok(true) => {}
+            Err(fail) => return Err(self.unwind(depth, fail)),
+        }
+        let levels = self.nest.len() - 1;
+        let result = self.nest_steps(named, ty, variants, &nests, &mut read, levels);
+        self.nest.truncate(levels);
+        result.map_err(|fail| self.unwind(depth, fail))
+    }
+
+    /// The start of a value of the CHOICE `ty` (named `named`) in a nest: its named frames and
+    /// `choice_begin`; a variant that is not a list read to the end of the value (`false`), or, for
+    /// a list, its named frames and `list_begin`, as a new level of `self.nest` (`true`). An error
+    /// can leave frames pushed here on the stack, which `nest` leaves (`unwind`).
+    #[inline(always)]
+    fn nest_begin(
+        &mut self,
+        named: u16,
+        ty: u16,
+        variants: &'static [Member],
+        nests: &impl Fn(usize) -> bool,
+        read: &mut impl FnMut(&mut Self, NestPart) -> R<()>,
+    ) -> R<bool> {
+        let names = self.names_begin(named)?;
+        let index = self.choice_begin(ty, variants)?;
+        if !nests(index) {
+            let value = read(self, NestPart::Value(index, variants[index].ty));
+            let value = self.choice_end(value);
+            self.names_end(names, value)?;
+            return Ok(false);
+        }
+        let list_names = self.names_begin(variants[index].ty)?;
+        let (element, set, _) = Self::nest_list(ty, variants, index);
+        self.list_begin(element, set)?;
+        self.nest.push(NestLevel {
+            variant: index as u16,
+            other: false,
+            names,
+            list_names,
+        });
+        Ok(true)
+    }
+
+    /// The element type, `set` and `refs` of the list of the variant `variant` of the CHOICE `ty`
+    /// (of the variants `variants`) in a nest: a list of the CHOICE itself.
+    #[inline(always)]
+    fn nest_list(ty: u16, variants: &'static [Member], variant: usize) -> (u16, bool, bool) {
+        let list = alias_target(variants[variant].ty);
+        let Kind::List { element, set, refs } = type_info(list).kind else {
+            unreachable!("{} is a SEQUENCE OF or SET OF", type_info(list).name())
+        };
+        debug_assert_eq!(alias_target(element), ty, "a list of the CHOICE itself");
+        (element, set, refs)
+    }
+
+    /// The steps of `nest` above its `base` levels, from the first element of the innermost list to
+    /// the end of its value or an error, which leaves the frames of the open levels on the stack.
+    #[inline(always)]
+    fn nest_steps(
+        &mut self,
+        named: u16,
+        ty: u16,
+        variants: &'static [Member],
+        nests: &impl Fn(usize) -> bool,
+        read: &mut impl FnMut(&mut Self, NestPart) -> R<()>,
+        base: usize,
+    ) -> R<()> {
+        let mut step = NestStep::Element;
+        loop {
+            step = match step {
+                NestStep::Begin => {
+                    if self.nest_begin(named, ty, variants, nests, read)? {
+                        NestStep::Element
+                    } else {
+                        NestStep::End
+                    }
+                }
+                NestStep::Element => {
+                    let level = self.nest.len() - 1;
+                    let variant = usize::from(self.nest[level].variant);
+                    let (element, _, refs) = Self::nest_list(ty, variants, variant);
+                    match self.element_begin(element, refs)? {
+                        Some(Pointee::Null) => {
+                            read(self, NestPart::Null(variant))?;
+                            self.inp.end_element()?;
+                            NestStep::Element
+                        }
+                        Some(pointee) => {
+                            self.nest[level].other = pointee == Pointee::Other;
+                            read(self, NestPart::Enter)?;
+                            NestStep::Begin
+                        }
+                        None => {
+                            let NestLevel {
+                                names, list_names, ..
+                            } = self.nest[level];
+                            let result = self.list_end(element, Ok(()));
+                            self.names_end(list_names, result)?;
+                            self.nest.pop();
+                            let result = self.choice_end(Ok(()));
+                            self.names_end(names, result)?;
+                            NestStep::End
+                        }
+                    }
+                }
+                NestStep::End => {
+                    if self.nest.len() == base {
+                        return Ok(());
+                    }
+                    read(self, NestPart::Leave)?;
+                    if self.nest[self.nest.len() - 1].other {
+                        self.end_pointer(Ok(()))?;
+                    }
+                    self.inp.end_element()?;
+                    NestStep::Element
+                }
+            };
+        }
+    }
+
+    /// `begin_names` of the type `ty` in a stream with named frames (`Input::NAMED_TYPES`, as
+    /// `in_names!`): how many it pushed; none in the others.
+    #[inline(always)]
+    fn names_begin(&mut self, ty: u16) -> R<u8> {
+        if I::NAMED_TYPES {
+            return self.begin_names(ty, false);
+        }
+        Ok(0)
+    }
+
+    /// `end_names` of the `count` frames of `names_begin`, after `result` (as `in_names!`).
+    #[inline(always)]
+    fn names_end<T>(&mut self, count: u8, result: R<T>) -> R<T> {
+        if I::NAMED_TYPES {
+            return self.end_names(count, result);
+        }
+        result
     }
 
     /// An INTEGER of the type `ty`, read as the C++ storage of its member (`ReadStd`).

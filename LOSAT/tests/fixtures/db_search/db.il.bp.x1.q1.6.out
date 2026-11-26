@@ -1,0 +1,5 @@
+x1	gi|5|ref|NP_000102.1|	gi|5|ref|NP_000102.1|;Unknown	5	5;0	NP_000102	NP_000102.1	beta1	beta1<>beta2	9606	9606;10090	Homo sapiens;Mus musculus	1.99e-118	319
+x1	ref|NP_000110.1|	ref|NP_000110.1|;Unknown	0	0;0	NP_000110	NP_000110.1	g1	g1<>N/A	9606	9606;10090	Homo sapiens;Mus musculus	2.2	15.4
+x1	ref|NP_000110.1|	ref|NP_000110.1|;Unknown	0	0;0	NP_000110	NP_000110.1	g1	g1<>N/A	9606	9606;10090	Homo sapiens;Mus musculus	5.2	14.6
+x1	ref|NP_000110.1|	ref|NP_000110.1|;Unknown	0	0;0	NP_000110	NP_000110.1	g1	g1<>N/A	9606	9606;10090	Homo sapiens;Mus musculus	6.8	14.2
+x1	ref|NP_000101.1|	ref|NP_000101.1|	0	0	NP_000101	NP_000101.1	alpha	alpha	9606	9606	Homo sapiens	3.0	15.0

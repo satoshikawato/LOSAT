@@ -149,7 +149,7 @@ fn run_masks(
         args.os_value("in").expect("-in has a default"),
         parse_seqids,
         prints_title(outfmt),
-        settings.blastdb.as_deref(),
+        settings.database(),
         stdin,
     )?;
     let mut output = args.output_file("out", out).map_err(file_failure)?;
@@ -268,7 +268,7 @@ fn reader<'a>(
     input: &std::ffi::OsStr,
     parse_seqids: bool,
     title_printed: bool,
-    registry: Option<&[u8]>,
+    database: crate::blastinput::ncbi_environment::DatabaseSettings<'_>,
     stdin: &'a mut Cin<'_>,
 ) -> Result<Source<'a>, Failure> {
     match infmt {
@@ -282,7 +282,7 @@ fn reader<'a>(
         "blastdb" => MaskBdbReader::open(
             &crate::utils::os_bytes::os_str_bytes(input),
             SeqType::Protein,
-            registry,
+            database,
             title_printed,
             super::PROGRAM,
         )

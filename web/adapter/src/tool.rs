@@ -12,7 +12,7 @@ use std::io::{self, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use losat::web_adapter::{FileReceiver, FileStream, RunFiles, PROGRAMS};
+use losat::web_adapter::{windowmasker_read_files, FileReceiver, FileStream, RunFiles, PROGRAMS};
 
 use crate::emit::{
     emit, StreamWriter, CHUNK, FRAME_BEGIN, FRAME_BYTES, FRAME_END, FRAME_TRUNCATE,
@@ -44,7 +44,7 @@ pub fn run(words: &[&str]) -> Result<(), String> {
     let mut out = StreamWriter::new(STREAM_PRINTED);
     let status = losat::web_adapter::run_windowmasker(
         arguments,
-        &RunFiles::Receiver(Arc::new(ToolFiles::default())),
+        &RunFiles::Receiver(Arc::new(ToolFiles::for_args(arguments))),
         &mut io::empty(),
         &mut out,
         &mut Diagnostics,
@@ -84,10 +84,24 @@ impl Write for Diagnostics {
 }
 
 /// The files of a tool run, which go to stream 12 as they are written (`FileReceiver::open`),
-/// numbered in the order the run opens them.
+/// numbered in the order the run opens them, carrying the run's read input names so `-logfile`
+/// and `-out` naming a missing input the CLI reads back are refused.
 #[derive(Default)]
 struct ToolFiles {
     next: AtomicU32,
+    read: Vec<Vec<u8>>,
+    out_read: Vec<Vec<u8>>,
+}
+
+impl ToolFiles {
+    fn for_args(arguments: &[&str]) -> Self {
+        let (read, out_read) = windowmasker_read_files(arguments);
+        Self {
+            next: AtomicU32::new(0),
+            read,
+            out_read,
+        }
+    }
 }
 
 impl FileReceiver for ToolFiles {
@@ -98,6 +112,14 @@ impl FileReceiver for ToolFiles {
 
     fn open(&self, name: &[u8]) -> Option<Box<dyn FileStream>> {
         Some(Box::new(self.opened(name)))
+    }
+
+    fn read_files(&self) -> &[Vec<u8>] {
+        &self.read
+    }
+
+    fn output_read_files(&self) -> &[Vec<u8>] {
+        &self.out_read
     }
 }
 

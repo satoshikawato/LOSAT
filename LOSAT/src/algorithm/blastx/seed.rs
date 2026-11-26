@@ -496,11 +496,20 @@ fn x_compressed_lookup(
     }
     .ok_or_else(|| anyhow::anyhow!("unsupported BLASTX compressed lookup"))?
     .map(Lookup::Compressed)
-    .map_err(|()| {
-        anyhow::anyhow!(
-            "-threshold {threshold} with the compressed lookup table of -word_size {word} is not supported by LOSAT's BLASTX: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap"
-        )
-    })
+    .map_err(|_| x_banks_filled(threshold, word))
+}
+
+/// LOSAT's refusal of a query batch whose neighboring words fill NCBI's 1024 overflow banks of the
+/// compressed table, past which NCBI writes and corrupts its heap. NCBI builds the table in the
+/// batch's search, after the reports of the batches before, so the refusal comes after them
+/// (`blastinput::app::ErrorAfterBatchReports`, as TBLASTN's): LOSAT's refusal (exit status 1),
+/// not an error of NCBI's engine (line RG item X-short-bat-2).
+#[cold]
+fn x_banks_filled(threshold: f64, word: impl std::fmt::Display) -> anyhow::Error {
+    crate::blastinput::app::ErrorAfterBatchReports::new(anyhow::anyhow!(
+        "-threshold {threshold} with the compressed lookup table of -word_size {word} is not supported by LOSAT's BLASTX: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap"
+    ))
+    .into()
 }
 
 /// No NCBI counterpart: the word length of either form of the compressed table. Not inlined, so
@@ -728,12 +737,7 @@ impl Lookup {
                     XCompressedLookup::Flat(table) => XBxCompressedLookup::Wide(table),
                 }))
             })
-            .map_err(|()| {
-                anyhow::anyhow!(
-                    "-threshold {} with the compressed lookup table of -word_size {word} is not supported by LOSAT's BLASTX: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
-                    options.threshold
-                )
-            });
+            .map_err(|_| x_banks_filled(options.threshold, word));
         }
         ensure!(
             (2..=4).contains(&word),

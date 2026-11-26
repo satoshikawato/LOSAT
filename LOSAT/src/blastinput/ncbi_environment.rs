@@ -13,8 +13,10 @@ use super::ncbi_registry::{
     running_error_reading_post, running_syntax_error_notice, syntax_error_notice, Layer,
     RegistryEntry, RegistryRead,
 };
+use crate::ncbi_exception::NcbiException;
 use crate::ncbi_str::string_to_bool;
 use crate::report::diag_log::{Posts, CRITICAL, ERROR, WARNING};
+use crate::report::serial::object_frame::DataCheck;
 
 /// Registry entries (section, name; case-insensitive) that change no output of a search with
 /// `-subject`: the database and data-loader settings, the data directory, the directory of
@@ -490,14 +492,7 @@ fn unix_program_name(
             app_path = path_env
                 .split(|&byte| byte == b':')
                 .filter(|dir| !dir.is_empty())
-                .map(|dir| {
-                    let mut candidate = dir.to_vec();
-                    if !candidate.ends_with(b"/") {
-                        candidate.push(b'/');
-                    }
-                    candidate.extend_from_slice(base);
-                    candidate
-                })
+                .map(|dir| PathRules::Unix.make_path(dir, base))
                 .find(|candidate| is_file(candidate))
                 .unwrap_or_default();
         }
@@ -532,11 +527,28 @@ impl PathRules {
         Self::Unix
     };
 
-    /// `DIR_SEPARATOR`.
-    fn separator(self) -> u8 {
+    /// `DIR_SEPARATOR` (`CDirEntry::GetPathSeparator`).
+    pub(crate) fn separator(self) -> u8 {
         match self {
             Self::Unix => b'/',
             Self::Windows => b'\\',
+        }
+    }
+
+    /// `DIR_SEPARATOR` as a UTF-8 string slice.
+    fn separator_str(self) -> &'static str {
+        match self {
+            Self::Unix => "/",
+            Self::Windows => "\\",
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/util/util_misc.cpp:141-145
+    /// `kDelim` (path-list delimiter for `g_FindDataFile`): `:` on Unix, `;` on Windows.
+    fn list_delimiter(self) -> u8 {
+        match self {
+            Self::Unix => b':',
+            Self::Windows => b';',
         }
     }
 
@@ -548,6 +560,12 @@ impl PathRules {
     /// Whether `byte` is one of `ALL_SEPARATORS` (`CDirEntry::IsPathSeparator`).
     fn is_separator(self, byte: u8) -> bool {
         self.is_dir_separator(byte) || (self == Self::Windows && byte == b':')
+    }
+
+    /// Whether `path` needs a trailing `DIR_SEPARATOR` (`CDirEntry::AddTrailingPathSeparator`):
+    /// non-empty and not ending with one of `ALL_SEPARATORS`.
+    fn needs_trailing_separator(self, path: &[u8]) -> bool {
+        path.last().is_some_and(|&byte| !self.is_separator(byte))
     }
 
     /// `CDirEntry::DeleteTrailingPathSeparator`: `path` without its trailing `DIR_SEPARATORS`
@@ -562,7 +580,7 @@ impl PathRules {
     /// `CDirEntry::Reset`: the path of the `CDirEntry` made from it, without its trailing separators, but a
     /// lone separator and (Windows) a disk's name of 2 or 3 bytes (`C:`, `C:\`) kept: `//` and
     /// `///` are empty, a path that no directory has.
-    fn reset(self, path: &[u8]) -> &[u8] {
+    pub(crate) fn reset(self, path: &[u8]) -> &[u8] {
         if path.len() == 1 && self.is_separator(path[0]) {
             return path;
         }
@@ -576,7 +594,7 @@ impl PathRules {
     /// `GetDir` of the `CDirEntry` of `path`: the directory of `path` as `reset` leaves it, up to and with
     /// its last separator (`SplitPath`); `./` (Windows `.\`) for a path without one; empty for an
     /// empty one.
-    fn dir(self, path: &[u8]) -> Vec<u8> {
+    pub(crate) fn dir(self, path: &[u8]) -> Vec<u8> {
         let path = self.reset(path);
         match path.iter().rposition(|&byte| self.is_separator(byte)) {
             Some(at) => path[..=at].to_vec(),
@@ -585,6 +603,71 @@ impl PathRules {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:358-377
+    /// The base and the extension of `path` as `SplitPath` cuts its name (the bytes after its
+    /// last separator) at the name's last `.`: the extension keeps its `.`; a name without one
+    /// has an empty extension.
+    pub(crate) fn base_and_ext(self, path: &[u8]) -> (&[u8], &[u8]) {
+        let name_at = path
+            .iter()
+            .rposition(|&byte| self.is_separator(byte))
+            .map_or(0, |at| at + 1);
+        let name = &path[name_at..];
+        match name.iter().rposition(|&byte| byte == b'.') {
+            Some(dot) => name.split_at(dot),
+            None => (name, &name[name.len()..]),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:455-462
+    /// `CDirEntry::AddTrailingPathSeparator`: `path` with `DIR_SEPARATOR` after it unless it is
+    /// empty or ends with one of `ALL_SEPARATORS`.
+    pub(crate) fn add_trailing_separator(self, path: &[u8]) -> Vec<u8> {
+        let mut path = path.to_vec();
+        if self.needs_trailing_separator(&path) {
+            path.push(self.separator());
+        }
+        path
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:413-430
+    /// `CDirEntry::MakePath` of a directory and a name: the name after the directory with its
+    /// trailing separator (`add_trailing_separator`); the name alone after an empty directory.
+    /// An absolute name is joined as any other.
+    pub(crate) fn make_path(self, dir: &[u8], name: &[u8]) -> Vec<u8> {
+        let mut path = self.add_trailing_separator(dir);
+        path.extend_from_slice(name);
+        path
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:413-430, 455-462
+    /// `make_path` on OS strings: joins `dir` and `name` with `DIR_SEPARATOR` unless `dir` is
+    /// empty or ends with one of `ALL_SEPARATORS`, preserving non-UTF-8 bytes on Unix and WTF-8
+    /// on Windows.
+    fn make_path_os(self, dir: &OsStr, name: &OsStr) -> PathBuf {
+        let mut path = OsString::with_capacity(dir.len() + 1 + name.len());
+        path.push(dir);
+        if self.needs_trailing_separator(dir.as_encoded_bytes()) {
+            path.push(self.separator_str());
+        }
+        path.push(name);
+        PathBuf::from(path)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1330-1378
+    /// Joins OS-string `parts` with `DIR_SEPARATOR` (`CDirEntry::GetPathSeparator`) unconditionally,
+    /// as `BlastFindMatrixPath` appends separators to `BLASTMAT`, `"nt"` and `"data"`.
+    fn join_os(self, parts: &[&OsStr]) -> PathBuf {
+        let sep = OsStr::new(self.separator_str());
+        let mut path = OsString::new();
+        for (index, part) in parts.iter().enumerate() {
+            if index > 0 {
+                path.push(sep);
+            }
+            path.push(part);
+        }
+        PathBuf::from(path)
+    }
     /// `s_Win_IsDiskPath`: `X:` and a separator. A byte past the end is the string's NUL.
     fn is_disk_path(path: &[u8]) -> bool {
         let at = |index: usize| path.get(index).copied().unwrap_or(0);
@@ -628,10 +711,7 @@ impl PathRules {
                 return Some([cwd.get(..3).unwrap_or(cwd), path].concat());
             }
         }
-        let mut joined = crate::ncbi_str::truncate_spaces(cwd).to_vec();
-        if joined.last().is_some_and(|&byte| !self.is_separator(byte)) {
-            joined.push(self.separator());
-        }
+        let mut joined = self.add_trailing_separator(crate::ncbi_str::truncate_spaces(cwd));
         let mut part = crate::ncbi_str::truncate_spaces(path);
         if !joined.is_empty() && part.first() == Some(&self.separator()) {
             part = &part[1..];
@@ -1064,6 +1144,9 @@ pub struct ApplicationSettings {
     /// `SERIAL_VERIFY_DATA_WRITE` when its value changes what NCBI's object streams write; only
     /// the runs that write what it changes have to refuse to run then (`WriteVerification`).
     pub write_verification: Option<WriteVerification>,
+    /// `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET` where they turn NCBI's checks off;
+    /// only a run whose input fails the check has to refuse to run then (`ReadVerification`).
+    pub read_verification: ReadVerification,
     /// The value of the registry entry `[BLAST] MAX_SEQID_LENGTH` in the first layer that has
     /// the entry (the environment, then the program's `.ini` file, then `.ncbirc`), an empty
     /// value too: `registry.Get` answers from that layer, and an empty value there hides the
@@ -1124,11 +1207,10 @@ impl WriteVerification {
     /// nothing (a value that is not UTF-8 is none of the six words).
     pub fn of(value: &OsStr) -> Option<Self> {
         let text = value.to_str()?;
-        let is = |word: &&str| text.eq_ignore_ascii_case(word);
-        let off = ["NO", "NEVER", "DEFVALUE", "DEFVALUE_ALWAYS"]
+        let off = verification_off(text);
+        let blast_xml_changed = ["ALWAYS", "DEFVALUE_ALWAYS"]
             .iter()
-            .any(is);
-        let blast_xml_changed = ["ALWAYS", "DEFVALUE_ALWAYS"].iter().any(is);
+            .any(|word| text.eq_ignore_ascii_case(word));
         (off || blast_xml_changed).then(|| Self {
             value: text.to_owned(),
             off,
@@ -1174,6 +1256,114 @@ impl WriteVerification {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:257-287
+// NCBI reference (598d8ae6): c++/src/serial/objostr.cpp:233-262
+// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:180-221
+/// Whether `value` of `SERIAL_VERIFY_DATA_READ`, `SERIAL_VERIFY_DATA_GET` or
+/// `SERIAL_VERIFY_DATA_WRITE` turns NCBI's check of the data off: `NO`, `NEVER`, `DEFVALUE` or
+/// `DEFVALUE_ALWAYS`, without case. Every other value (`YES`, `ALWAYS`, an empty one, any other
+/// word) keeps NCBI's default, the check (NCBI BLAST+ 2.17.0, probe D3c-3d `probeA` for the read
+/// and get variables, D3c-3c review `probeF` for the write one). The one owner of the words for
+/// the three variables (`WriteVerification`, `ReadVerification`, rpsbproc's refusal).
+pub fn verification_off(value: &str) -> bool {
+    ["NO", "NEVER", "DEFVALUE", "DEFVALUE_ALWAYS"]
+        .iter()
+        .any(|word| value.eq_ignore_ascii_case(word))
+}
+
+/// `SERIAL_VERIFY_DATA_READ` and `SERIAL_VERIFY_DATA_GET` where their value turns NCBI's check
+/// off (`verification_off`). NCBI reads each variable only while the registry parameter of its
+/// own (`[SERIAL] VERIFY_DATA_READ`, `VERIFY_DATA_GET`) is unset; LOSAT refuses those
+/// parameters' registry forms at every value (`rejected_variable`).
+///
+/// NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1032-1045
+/// NCBI reference (598d8ae6): c++/src/serial/serialobject.cpp:266-306
+/// The read check stops a read where a mandatory member is missing ("member X expected"); off,
+/// NCBI posts "member X is missing" and reads on with the member unset. The get check stops the
+/// getter of a member that is not set ("Attempt to get unassigned member"); off, the getter gives
+/// the member's default. Neither changes anything else: every input that NCBI reads without these
+/// errors gives the same output with every value (probes D3c-3d `probeA`, `probeB`, `probeC`:
+/// 58 inputs of every program with such a reader: the search programs, makeblastdb,
+/// makeprofiledb, blastdbcmd, the maskers and makembindex). Where NCBI's check
+/// stops a run, the same run with the check off goes on in ways LOSAT does not follow (an unset
+/// member that later code reads, another exception, makeblastdb `-input_type blastdb` stopping
+/// with an error while it writes the database): LOSAT refuses the run there (`ReadVerification::refused`), where the check
+/// would have stopped it, after what NCBI writes before that point.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ReadVerification {
+    /// The value of `SERIAL_VERIFY_DATA_READ` when it turns the read check off.
+    read: Option<String>,
+    /// The value of `SERIAL_VERIFY_DATA_GET` when it turns the get check off.
+    get: Option<String>,
+}
+
+impl ReadVerification {
+    /// The setting of the values `read` of `SERIAL_VERIFY_DATA_READ` and `get` of
+    /// `SERIAL_VERIFY_DATA_GET` (`None`: the variable is not set; a value that is not UTF-8 is
+    /// none of NCBI's words).
+    pub fn of(read: Option<&OsStr>, get: Option<&OsStr>) -> Self {
+        let off = |value: Option<&OsStr>| {
+            value
+                .and_then(OsStr::to_str)
+                .filter(|text| verification_off(text))
+                .map(str::to_owned)
+        };
+        Self {
+            read: off(read),
+            get: off(get),
+        }
+    }
+
+    /// Whether the setting turns the read check off (`SERIAL_VERIFY_DATA_READ`): the only check
+    /// that a database's header records meet (`seqdb::SeqDb::refuse_unchecked_reads`).
+    pub(crate) fn turns_read_check_off(&self) -> bool {
+        self.read.is_some()
+    }
+
+    /// What LOSAT refuses (the noun phrase before "is not supported by LOSAT's PSIBLAST") where
+    /// NCBI's check threw `exception` while it read `what` (an input: "a PSSM (-in_pssm)"), when
+    /// the setting turns that check off: the variable and its value, with the input and what the
+    /// check found. `None` for an exception of no check (`DataCheck::of`) and for a check that
+    /// the setting keeps: the run reports NCBI's error then. The one test of every reader's and
+    /// getter's error that depends on these variables.
+    pub(crate) fn refused(&self, exception: &NcbiException, what: &str) -> Option<String> {
+        Some(match DataCheck::of(exception)? {
+            DataCheck::Read => format!(
+                "the environment variable SERIAL_VERIFY_DATA_READ={} with {what} that lacks a \
+                 mandatory member",
+                self.read.as_ref()?
+            ),
+            DataCheck::Get => format!(
+                "the environment variable SERIAL_VERIFY_DATA_GET={} with {what} of which NCBI \
+                 BLAST+ gets a member that is not set",
+                self.get.as_ref()?
+            ),
+        })
+    }
+}
+
+/// What a program's reader of a database takes of its application settings
+/// (`ApplicationSettings::database`): the search path's registry entry and the checks of NCBI's
+/// reads of the definition lines.
+#[derive(Clone, Copy, Debug)]
+pub struct DatabaseSettings<'a> {
+    /// `ApplicationSettings::blastdb` as the search path takes it (`seqdb::SearchPath::
+    /// from_environment`): the bytes of the registry entry, `None` without one.
+    pub registry: Option<&'a [u8]>,
+    /// `ApplicationSettings::read_verification` (`seqdb::SeqDb::refuse_unchecked_reads`).
+    pub read_verification: &'a ReadVerification,
+}
+
+impl ApplicationSettings {
+    /// The settings of a program's reader of a database (`DatabaseSettings`).
+    pub fn database(&self) -> DatabaseSettings<'_> {
+        DatabaseSettings {
+            registry: self.blastdb.as_deref(),
+            read_verification: &self.read_verification,
+        }
+    }
+}
+
 impl Default for ApplicationSettings {
     /// No registry entry and no variable: both data loaders on, no `[BLAST] BLASTDB`.
     ///
@@ -1184,6 +1374,7 @@ impl Default for ApplicationSettings {
             blastdb: None,
             seq_id_rank_variable: None,
             write_verification: None,
+            read_verification: ReadVerification::default(),
             max_seqid_length: Ok(None),
             matrix_search: MatrixSearch::default(),
             window_masker_registry: Ok(WindowMaskerRegistry::default()),
@@ -1252,44 +1443,36 @@ impl MatrixSearch {
 }
 
 /// `ApplicationSettings::matrix_file` with `is_file` (`CFile::Exists`: a file, links followed)
-/// and `is_dir` (`CDir::Exists`).
+/// and `is_dir` (`CDir::Exists`), using the host platform's `PathRules`.
 fn find_matrix_file(
     name: &str,
     search: &MatrixSearch,
     is_file: &dyn Fn(&Path) -> bool,
     is_dir: &dyn Fn(&Path) -> bool,
 ) -> Result<Option<PathBuf>, String> {
+    find_matrix_file_with_rules(PathRules::HOST, name, search, is_file, is_dir)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:1301-1385
+// NCBI reference (598d8ae6): c++/src/util/util_misc.cpp:139-179
+/// `find_matrix_file` under explicit `PathRules` (`PathRules::HOST` at runtime, Unix and Windows
+/// in tests).
+fn find_matrix_file_with_rules(
+    rules: PathRules,
+    name: &str,
+    search: &MatrixSearch,
+    is_file: &dyn Fn(&Path) -> bool,
+    is_dir: &dyn Fn(&Path) -> bool,
+) -> Result<Option<PathBuf>, String> {
     let upper = name.to_ascii_uppercase();
-    // `kDelim` (util_misc.cpp:141-145), `CFile::GetPathSeparator` and the separators of
-    // `AddTrailingPathSeparator` (ncbifile.cpp:105-120, 455-462).
-    let (delimiter, separator, separators): (char, &str, &[u8]) = if cfg!(windows) {
-        (';', "\\", b":/\\")
-    } else {
-        (':', "/", b"/")
-    };
-    let concat = |parts: &[&OsStr]| -> PathBuf {
-        let mut path = OsString::new();
-        parts.iter().for_each(|part| path.push(part));
-        PathBuf::from(path)
-    };
     let found = |path: PathBuf| is_file(&path).then_some(path);
-    // `IsAbsolutePath` (ncbifile.cpp:508-523, `s_Win_IsDiskPath` and `s_Win_IsNetworkPath` on
-    // Windows).
-    let bytes = upper.as_bytes();
-    let slash = |byte: u8| byte == b'/' || byte == b'\\';
-    let absolute = if cfg!(windows) {
-        (bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && slash(bytes[2]))
-            || (bytes.len() >= 2 && slash(bytes[0]) && slash(bytes[1]))
-    } else {
-        bytes.first() == Some(&b'/')
-    };
     let mut dirs: Vec<OsString> = Vec::new();
-    if absolute {
+    if rules.is_absolute(upper.as_bytes()) {
         dirs.push(OsString::new());
     } else {
         if let Some(data_path) = &search.data_path {
             dirs.extend(
-                split_os(data_path, delimiter)
+                split_os(data_path, rules.list_delimiter())
                     .into_iter()
                     .filter(|dir| !dir.is_empty()),
             );
@@ -1300,24 +1483,17 @@ fn find_matrix_file(
             }
         }
     }
+    let upper = OsStr::new(&upper);
     for dir in &dirs {
-        // `MakePath` of `dir` and `name`: a separator between them unless the directory ends with one.
-        let between = match dir.as_encoded_bytes().last() {
-            Some(last) if !separators.contains(last) => separator,
-            _ => "",
-        };
-        let candidate = concat(&[dir, OsStr::new(between), OsStr::new(&upper)]);
-        if let Some(file) = found(candidate) {
+        if let Some(file) = found(rules.make_path_os(dir, upper)) {
             return Ok(Some(file));
         }
     }
-    let separator = OsStr::new(separator);
-    let upper = OsStr::new(&upper);
     if let Some(blastmat) = search.blastmat.as_deref() {
         if is_dir(Path::new(blastmat)) {
             for candidate in [
-                concat(&[blastmat, separator, upper]),
-                concat(&[blastmat, separator, OsStr::new("nt"), separator, upper]),
+                rules.join_os(&[blastmat, upper]),
+                rules.join_os(&[blastmat, OsStr::new("nt"), upper]),
             ] {
                 if let Some(file) = found(candidate) {
                     return Ok(Some(file));
@@ -1325,17 +1501,17 @@ fn find_matrix_file(
             }
         }
     }
-    Ok(found(concat(&[OsStr::new("data"), separator, upper])))
+    Ok(found(rules.join_os(&[OsStr::new("data"), upper])))
 }
 
-/// `value` split at each `delimiter`, empty parts kept.
-fn split_os(value: &OsStr, delimiter: char) -> Vec<OsString> {
+/// `value` split at each ASCII `delimiter`, empty parts kept.
+fn split_os(value: &OsStr, delimiter: u8) -> Vec<OsString> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
         value
             .as_bytes()
-            .split(|&byte| char::from(byte) == delimiter)
+            .split(|&byte| byte == delimiter)
             .map(|part| OsStr::from_bytes(part).to_os_string())
             .collect()
     }
@@ -1343,7 +1519,7 @@ fn split_os(value: &OsStr, delimiter: char) -> Vec<OsString> {
     {
         value
             .to_string_lossy()
-            .split(delimiter)
+            .split(char::from(delimiter))
             .map(OsString::from)
             .collect()
     }
@@ -2752,6 +2928,10 @@ fn settings_of(
             .find(|name| env(name).is_some()),
         write_verification: env("SERIAL_VERIFY_DATA_WRITE")
             .and_then(|value| WriteVerification::of(&value)),
+        read_verification: ReadVerification::of(
+            env("SERIAL_VERIFY_DATA_READ").as_deref(),
+            env("SERIAL_VERIFY_DATA_GET").as_deref(),
+        ),
         max_seqid_length: max_seqid_length.transpose(),
         matrix_search: MatrixSearch {
             data_path: env("NCBI_DATA_PATH"),

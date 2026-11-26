@@ -26,12 +26,14 @@
 
 mod data_size;
 mod double;
+pub(crate) mod mask;
 pub(crate) mod utf8;
 
 pub use data_size::string_to_uint8_data_size;
 pub(crate) use double::{
     string_to_double, string_to_double_posix, string_to_double_posix_or_local, NCBI_NAN,
 };
+pub(crate) use mask::matches_mask;
 
 use std::borrow::Cow;
 

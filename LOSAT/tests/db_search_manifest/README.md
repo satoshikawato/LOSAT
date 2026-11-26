@@ -20,8 +20,10 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   `ncbi` row ROW_ID, NCBI's run of a near input (the mask one letter shorter, in TBLASTN and TBLASTX the fewest bases
   after which every reading frame keeps a letter after its part, for exception 21 with the freed letters stored as `X`
   or `N`; for exception 3 the same volume with zero bytes after its last memory page; for exception 19 the hit list
-  size 1073741798; for exception 27 the database with the short mask dropped and its bases stored as `N`), where
-  NCBI's own run of the row reaches an approved NCBI defect (PD-LOSAT-NCBI-DEFECTS exceptions 13, 21, 3, 19 and 27); `freeze` copies ROW_ID's columns and runs nothing.
+  size 1073741798; for exception 27 the database with the short mask dropped and its bases stored as `N`; for
+  exception 31 a PSSM file's gapped Lambda of 8e-9, in outfmt 7, which prints no Lambda), where NCBI's own run of the
+  row reaches an approved NCBI defect (PD-LOSAT-NCBI-DEFECTS exceptions 13, 21, 3, 19, 27 and 31); `freeze` copies
+  ROW_ID's columns and runs nothing.
 - `kind ncbi` with a part ` | ncbi-valgrind` of covers: the frozen bytes are NCBI's run under valgrind memcheck, where
   NCBI's native run reads past its buffers (PD-LOSAT-NCBI-DEFECTS exception 3) and may crash or vary; `freeze` runs
   such a row only with `--valgrind CMD` (for example `--valgrind "valgrind -q --log-file=/dev/null"`) and otherwise
@@ -134,8 +136,9 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   the `[LOCAL_ID] TOOL_URL` link (`db_name`), and an absolute path would put the checkout's path into the frozen bytes.
   Not taken: absolute paths (bytes of one machine), paths relative to DIR in the cells (every reader counts on paths
   relative to LOSAT/), a temporary directory with copies of the files (absolute paths again), a new column (a new
-  header for every file and every reader). A `cwd=` row with a PSSM, alignment, standard-input or `none:` query, an `rps-gz:` db cell, a
-  `files` column or a path under `tests/` in extra_args (an argument that would not be rebased) is refused. `freeze`
+  header for every file and every reader). A `cwd=` row with a PSSM, alignment, standard-input or `none:` query, a
+  `files` column or a path under `tests/` in extra_args (an argument that would not be rebased) is refused; an `rps-gz:`
+  db cell is taken (its names are databases of the inflated directory, not paths). `freeze`
   and `check` refuse to start when `LOSAT/.ncbirc` exists (it would change every row).
 
 ## Who runs which rows
@@ -150,8 +153,8 @@ and for the rows of outfmt 13 and 14 and psiblast's PSSM files two more, files a
   (`LOSAT/src/api/mod.rs:78-86`) names what a call reads of its process, and these formatter settings are not among
   them; the library's host, LOSAT Web, runs `-html` with an empty environment and a run directory of the files that
   the argv names (`docs/web/abi_v2.md` §3), so no Web run has them.
-- `check_wasm_threading.py`: a few rows by id, every psiblast row and blastx's rows of outfmt 5 and 13 to 16; no row of
-  outfmt 0 to 4 or 18 (the `-html` rows) and no psiblast `-html` row (psiblast refuses `-html`).
+- `check_wasm_threading.py`: a few rows by id, every psiblast row (`psiblast.html.tsv` included) and blastx's rows of outfmt 5 and 13 to 16; no row of
+  outfmt 0 to 4 or 18 (the `-html` rows) of the other blast programs (rpsblast and rpstblastn have none there).
 - The Rust tests that read this directory read named program files (`blastp.tsv`, `psiblast.tsv`, `blastx.tsv`,
   `tblastn.tsv`, `tblastx.tsv`) and select their own rows, never a family file such as `<program>.html.tsv`;
   `check_manifest_sizes.py` checks the size of every file.

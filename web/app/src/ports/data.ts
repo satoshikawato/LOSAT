@@ -22,8 +22,13 @@ export interface RunInput {
   readonly bytes: Uint8Array;
   /** Lower-case hex SHA-256 of `bytes`. */
   readonly sha256: string;
-  /** ID and length of each record in `bytes`. */
+  /** ID and length of each record from the per-file record tables, in order. */
   readonly records: readonly RecordKey[];
+  /**
+   * Whether `bytes` was assembled from parts (several sources joined, or a source with records
+   * left out; line WQA's D17). Absent for a single unmodified source.
+   */
+  readonly assembled?: boolean;
 }
 
 export interface DatasetStore {
@@ -46,7 +51,11 @@ export interface DatasetStore {
   /**
    * The engine input made of the included records of the revisions, in order. A revision
    * that includes every record contributes its source unchanged; a newline is added after
-   * a source that does not end with one when another follows (plan §5.3).
+   * a source that does not end with one when another follows (plan §5.3; a CR-only stream
+   * keeps CR so NCBI's line reader stays in CR mode, line WQA's D17). `records` comes from
+   * the revisions' record tables without rescanning `bytes`; when assembled from multiple
+   * sources or a record selection, `assembled` is true so the engine's `register` may report
+   * its own reading if line-reader state across parts changes what it reads.
    */
   buildRunInput(revisionIds: readonly string[]): Promise<RunInput>;
   /**

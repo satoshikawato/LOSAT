@@ -145,3 +145,98 @@ NE24	-in in/l_zs_varset.lst -out db
 NE25	-in in/l_zs_pop.lst -out db
 NE26	-in in/l_zs_clin.lst -out db
 NE27	-in in/l_e_noid_oss_null.lst -out db
+B01	-binary -in in/l_bp3.lst -out db
+B02	-binary -in in/l_bc3.lst -out db
+B03	-binary -in in/l_bf2.lst -out db
+B04	-binary -in in/l_bp3.lst -out db -max_smp_vol 2
+B05	-binary -in in/l_bp3.lst -out db -index false
+B06	-binary -in in/l_bp3.lst -out db -blastdb_version 4
+B07	-binary -in in/l_bp3.lst -out db -scale 200 -threshold 10.5 -gapopen 10 -gapextend 2
+B08	-binary -in in/l_bp3.lst -out db -logfile mpdb.log
+B09	-binary -in in/l_bp3.lst -out db -dryrun
+B10	-binary -in in/l_bsdef.lst -out db
+B11	-binary -in in/l_bldef.lst -out db
+B12	-binary -in in/l_bbyrow.lst -out db
+B13	-binary -in in/l_bbh1.lst -out db
+B14	-binary -in in/l_butf8.lst -out db
+B15	-binary -in in/l_bbadvis.lst -out db
+B16	-binary -in in/l_bstorehi.lst -out db
+B17	-binary -in in/l_biupacaa_hi.lst -out db
+B18	-binary -in in/l_bna_ovh.lst -out db
+B19	-binary -in in/l_bna_ctrl.lst -out db
+B20	-binary -in in/l_bna_molna_hi.lst -out db
+B21	-binary -in in/l_bnullp.lst -out db
+B22	-binary -in in/l_breal0.lst -out db
+BE01	-binary -in in/l_p3.lst -out db
+BE02	-in in/l_bp3.lst -out db
+BE03	-binary -in in/l_bmix.lst -out db
+BE04	-binary -in in/l_bempty.lst -out db
+BE05	-binary -in in/l_b3080.lst -out db
+BE06	-binary -in in/l_b30800000.lst -out db
+BE07	-binary -in in/l_btrunc_mid.lst -out db
+BE08	-binary -in in/l_bunk.lst -out db
+BE09	-binary -in in/l_bbadtag.lst -out db
+BE10	-binary -in in/l_bstr2p63.lst -out db
+BE11	-binary -in in/l_boct2p62.lst -out db
+BE12	-binary -in in/l_bpat.lst -out db
+RB04	-in in/l_bhbad.lst -out db
+RB04m	-in in/l_bhbad_mid.lst -out db
+RB04b	-binary -in in/l_bbhbad.lst -out db
+RB08	-in in/l_bheof30.lst -out db
+RB09	-in in/l_bhmissid.lst -out db
+RB10	-in in/l_bhovftax.lst -out db
+RB11	-in in/l_bhbadvis.lst -out db
+RB12	-in in/l_bhbaderr.lst -out db
+RB13	-in in/l_bhnull.lst -out db
+RB14	-in in/l_bhutf8.lst -out db
+RB15	-in in/l_bhhuge.lst -out db
+RB16	-in in/l_bhptr.lst -out db
+RB17	-blastdb_version 4 -in in/l_QR12.lst -out db
+RB18	-blastdb_version 4 -taxid 9606 -in in/l_QR12.lst -out db
+RB19	-blastdb_version 4 -taxid_map in/tmap_nullid.txt -in in/l_QR12.lst -out db
+RB20	-taxid_map in/tmap_nullid.txt -in in/l_QR12.lst -out db
+RB21	-blastdb_version 4 -in in/l_bhnullid_s2.lst -out db
+RB22	-blastdb_version 4 -in in/l_bhnullid_d2.lst -out db
+RB23	-blastdb_version 4 -in in/l_bhnullid_d2s2.lst -out db
+RB24	-blastdb_version 4 -index false -in in/l_QR12.lst -out db
+RB25	-index false -in in/l_QR12.lst -out db
+RB26	-blastdb_version 4 -index false -in in/l_bhnullid_s2.lst -out db
+RB27	-in in/l_bhnullid_org.lst -out db
+RB28	-in in/l_bhnullid_after.lst -out db
+RB29	-blastdb_version 4 -in in/l_bhnullid_badvis.lst -out db
+D01	-dbtype delta -in in/l_D01.lst -out db
+D02	-dbtype delta -blastdb_version 4 -in in/l_D01.lst -out db
+D03	-dbtype delta -index false -in in/l_D01.lst -out db
+D04	-dbtype delta -binary -title T -in in/l_D04.lst -out db
+D05	-dbtype delta -max_smp_vol 2 -in in/l_D01.lst -out db
+D06	-dbtype delta -taxid 9606 -in in/l_D01.lst -out db
+D07	-dbtype delta -taxid_map in/d_tax.map -in in/l_D01.lst -out db
+D08	-dbtype delta -in in/l_D08.lst -out db
+D09	-dbtype delta -in in/l_D09.lst -out db
+D10	-dbtype delta -in in/l_D10.lst -out db
+D11	-dbtype delta -exclude_invalid false -in in/l_D10.lst -out db
+D12	-dbtype delta -in in/l_D12.lst -out db
+D13	-dbtype delta -exclude_invalid false -in in/l_D12.lst -out db
+D14	-dbtype delta -obsr_threshold 0 -in in/l_D14.lst -out db
+D15	-dbtype delta -obsr_threshold 0 -exclude_invalid false -in in/l_D14.lst -out db
+D16	-dbtype delta -obsr_threshold -10 -exclude_invalid false -in in/l_D16.lst -out db
+D17	-dbtype delta -in in/l_D17.lst -out db
+D18	-dbtype delta -obsr_threshold 10000 -in in/l_D01.lst -out db
+D19	-dbtype delta -blastdb_version 4 -obsr_threshold 10000 -in in/l_D01.lst -out db
+D20	-dbtype delta -max_smp_vol -1 -obsr_threshold 10000 -in in/l_D01.lst -out db
+D21	-dbtype delta -in in/l_D21.lst -out db
+D22	-dbtype delta -exclude_invalid false -in in/l_D21.lst -out db
+D23	-dbtype delta -obsr_threshold 100 -in in/l_D23.lst -out db
+D24	-dbtype delta -in in/l_D24.lst -out db
+D25	-dbtype delta -in in/l_D25.lst -out db
+D26	-dbtype delta -in in/l_D26.lst -out db
+D27	-dbtype delta -in in/l_D27.lst -out db
+D28	-dbtype delta -logfile run.log -in in/l_D28.lst -out db
+D29	-dbtype delta -logfile run.log -max_smp_vol 2 -in in/l_D29.lst -out db
+D30	-dbtype delta -logfile run.log -in in/l_D27.lst -out db
+D31	-dbtype delta -max_smp_vol 2 -in in/l_D29.lst -out db
+D32	-dbtype delta -in in/l_D32.lst -out db
+D33	-dbtype delta -in in/l_D33.lst -out db
+D34	-dbtype delta -exclude_invalid false -in in/l_D33.lst -out db
+D35	-dbtype delta -in in/l_D35.lst -out db
+D36	-dbtype delta -blastdb_version 4 -in in/l_D36.lst -out out/nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn

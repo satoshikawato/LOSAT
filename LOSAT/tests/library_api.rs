@@ -2267,10 +2267,10 @@ fn a_pssm_query_is_the_command_lines() {
     assert!(outcome.reports[0].bytes == stdout);
     assert!(std::fs::read(&api_file).unwrap() == std::fs::read(&cli_file).unwrap());
     // Each format is checked as the command line checks it alone: psiblast's `-in_pssm` writes
-    // outfmt 0, 5 to 11 and 20 (`in_pssm::check_in_pssm_options`; the others are item PS15b-2's),
-    // whatever the order of the formats.
+    // outfmt 0 to 12, 18 and 20 (`in_pssm::check_in_pssm_options`; the XML2 and JSON documents
+    // are the second part of item PS15b-2), whatever the order of the formats.
     let search = validate(Program::Psiblast, &[]).unwrap();
-    for formats in [&["6", "1"][..], &["1", "6"], &["0", "15"]] {
+    for formats in [&["6", "16"][..], &["16", "6"], &["0", "15"]] {
         let error =
             run_collect(&search, Inputs::pssm_database(&pssm, &database), formats).unwrap_err();
         assert!(
@@ -3780,5 +3780,78 @@ fn a_help_word_is_the_tools_output_and_the_searchs_error() {
             Err(Error::Argv(help)) => assert_eq!(help, cli.stdout, "blastp {word}"),
             other => panic!("blastp {word}: {other:?}"),
         }
+    }
+}
+
+/// A Smith-Waterman alignment of `-use_sw_tback` whose query row starts with 95 gaps (f101, 190
+/// letters of nest from its 96th, against nest; line RG item X4b-gap): the records' length, gap
+/// openings and gaps are the table's, which count only the columns in the query row's range
+/// (190, 0, 0), for `-subject` (BLASTX and TBLASTN map the HSP, BLASTP keeps its end gaps) and
+/// for `-db` (where every HSP keeps them), each report the command line's.
+#[test]
+fn a_query_row_that_starts_with_gaps_counts_as_the_table() {
+    let options: &[&str] = &["-use_sw_tback"];
+    let check = |context: &str, outcome: &Outcome, cli: Vec<u8>| {
+        let table = &outcome.reports[0].bytes;
+        assert!(*table == cli, "{context}: the report");
+        let rows = rows(table);
+        assert_eq!(rows.len(), outcome.hsps.len(), "{context}");
+        for (hsp, row) in outcome.hsps.iter().zip(rows) {
+            check_columns(context, hsp, &table[row]);
+        }
+        assert!(
+            outcome
+                .hsps
+                .iter()
+                .any(|hsp| (hsp.length, hsp.gap_open, hsp.gaps) == (190, 0, 0)),
+            "{context}: the alignment of f101"
+        );
+    };
+    for (program, query, subject) in [
+        (Program::Blastp, "swgap/f101.faa", "rps/nest.faa"),
+        (Program::Blastx, "swgap/f101.fna", "rps/nest.faa"),
+        (Program::Tblastn, "swgap/f101.faa", "rps/nest_p.fna"),
+    ] {
+        let case = Case {
+            program,
+            query,
+            subject,
+            options,
+            formats: &[COLUMNS],
+        };
+        let context = format!("{program} -subject");
+        let (query, subject) = (fixture(query), fixture(subject));
+        let outcome = api(&case, &query, &subject, &[]);
+        check(&context, &outcome, cli(&case, &query, &subject, COLUMNS).0);
+    }
+    for (program, query, db) in [
+        (
+            Program::Blastp,
+            "fasta/swgap/f101.faa",
+            "db_search/swgap/nestaa",
+        ),
+        (
+            Program::Blastx,
+            "fasta/swgap/f101.fna",
+            "db_search/swgap/nestaa",
+        ),
+        (
+            Program::Tblastn,
+            "fasta/swgap/f101.faa",
+            "db_search/swgap/nestp",
+        ),
+    ] {
+        let case = DatabaseCase {
+            program,
+            query,
+            db,
+            options,
+        };
+        let context = format!("{program} -db");
+        let (_, records, search) = case.read();
+        let (db, query_name) = (engine_tests(db), engine_tests(query));
+        let inputs = Inputs::database(&records, &db).named(&query_name, "ignored");
+        let outcome = run_collect(&search, inputs, &[COLUMNS]).unwrap();
+        check(&context, &outcome, case.cli(COLUMNS));
     }
 }

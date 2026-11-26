@@ -1,0 +1,129 @@
+<HTML>
+<HEAD><TITLE>BLAST Search Results</TITLE></HEAD>
+<BODY BGCOLOR="#FFFFFF" LINK="#0000FF" VLINK="#660099" ALINK="#660099">
+<PRE>
+
+<b>PSIBLAST 2.17.0+</b>
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=9254694&dopt=Citation">Reference</a>:</b>
+Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer,
+Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997),
+"Gapped BLAST and PSI-BLAST: a new generation of protein database
+search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=16218944&dopt=Citation">Reference for
+compositional score matrix adjustment</a>:</b>
+Stephen F. Altschul, John C. Wootton, E. Michael Gertz, Richa
+Agarwala, Aleksandr Morgulis, Alejandro A. Sch&auml;ffer, and Yi-Kuo
+Yu (2005) "Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+<b><a
+href="https://www.ncbi.nlm.nih.gov/entrez/query.fcgi?db=PubMed&cmd=R
+etrieve&list_uids=11452024&dopt=Citation">Reference for
+composition-based statistics starting in round 2</a>:</b>
+Alejandro A. Sch&auml;ffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           86 sequences; 66,738 total letters
+
+Results from round 1
+
+
+<b>Query=</b> YP_009220601.1 TK-TMK, chimeric thymidine and thymidylate kinase
+[White spot syndrome virus]
+
+Length=398
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+BDT63550.1 thymidine kinase [Pasiphaea japonica whispovirus]          <a href=#Subject_53>132</a>     3e-39
+BDT63500.1 wsv172-like protein [Pasiphaea japonica whispovirus]       <a href=#Subject_3>23.1</a>    2.2  
+BDT63566.1 hypothetical protein [Pasiphaea japonica whispovirus]      <a href=#Subject_69>22.3</a>    3.6  
+BDT63556.1 wsv447-like protein [Pasiphaea japonica whispovirus]       <a href=#Subject_59>22.3</a>    4.3  
+BDT63523.1 wsv011-like protein [Pasiphaea japonica whispovirus]       <a href=#Subject_26>21.9</a>    5.1  
+BDT63528.1 wsv192-like protein [Pasiphaea japonica whispovirus]       <a href=#Subject_31>21.9</a>    5.3  
+BDT63554.1 wsv440-like protein [Pasiphaea japonica whispovirus]       <a href=#Subject_57>21.6</a>    6.2  
+BDT63529.1 wsv332-like protein [Pasiphaea japonica whispovirus]       <a href=#Subject_32>21.2</a>    8.7  
+
+
+
+Query_1     10    TMAGRVELVTGPMFAGKSTYLKNIYQQENGGNKHCLFVKHSLETRYGCGTGTIVTHAGEV  69
+Subject_53  4     .NI.KIH..I........STIIK...KKIKMQ.R.V.I..VKDN....ELTET...S.QT  63
+Subject_59  1808                                               ..VKLLA..EMM.HE  1822
+Subject_57  173        .A.L..AAAG.CGV.SDSAQ.SSFN.SWT..LFHNNK..K                 212
+
+Query_1     70    IEGCTTVSSIKELISVLPEVVDVILIDEGQFFTDLVLVNRLADKGKRIVIAALDGTSDQQ  129
+Subject_53  64    .RD.VAT.V---.SY.DTSNY.Y.F.......S..ATCKDW.I....VTV.....NYE..  121
+                                                     \                        
+                                                     |                        
+                                                     G
+Subject_59  1823  FAS.L.SDMRMNMYNGVGS...ILS...EERYSIIISI.KFIL.NIKD.L            1873
+                                             \                                
+                                             |                                
+                                             N
+
+Query_1     130   MFSPIHKLLPYTNSIVKLASKCMICKIDTKEAPFTVRFGNDNDNNVICVGGAEMYAAACR  189
+Subject_53  122   L.PSVI..I.ICDK.E..SAV....SLTK.YL.YNNTGDD.HHKYDM....T.T.C.V.I  186
+                                           \                                  
+                                           |                                  
+                                       NKNEA
+Subject_3   374                                                  .P.LSDV.GQEFK  386
+
+Query_1     190   DCYKKINKKKNKGKLVVLEGGDRCGKSTQAKLLLTNKNSPLYGGEYMCFPDRSSHTGKLI  249
+Subject_53  187   G.                                                            188
+Subject_3   387   NL.E.YE.---E..VRI---------.IE.RK..H.LA.AKL.TPFI..K...N.       435
+                                                            \        \        
+                                                            |        |        
+                                                           ET     TINY
+Subject_69  273                                        H.KF.P..WIY..PSL.NLS..   294
+Subject_26  484              .F.VN..PD..Q..N.GE.H.F..                           512
+                                               \                              
+                                               |                              
+                                           YESMT
+
+Query_1     250   NDYLTKKIELDDHAAHLLFSANRWEVCSKIKQLLDDGIHVVMDRYYYSGIVFSLARGVDT  309
+Subject_31  100                                                          ..NN.  104
+Subject_32  291                 .YMM..RH.VQSGDC...F.----YTIFV.FI..A             321
+
+Query_1     310   VEWCSAS  316
+Subject_31  105   D....L.  111
+
+
+Lambda      K        H        a         alpha
+   0.320    0.137    0.406    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20272584
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 66,738
+  Number of sequences in database:  86
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40
+</PRE>
+</BODY>
+</HTML>

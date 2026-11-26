@@ -30,9 +30,17 @@ import {
   type SubjectSortKey,
   type ViewFilters,
 } from '../domain/result-index';
-import { isTerminal } from '../domain/run';
+import { isTerminal, runInputRecords } from '../domain/run';
 import { toolTakesValue } from '../domain/tools';
-import { verificationBadge, type Badge, type OptionGrammar, type VerificationTable } from '../domain/verification';
+import {
+  toolOptionGrammar,
+  toolVerificationBadge,
+  verificationBadge,
+  type Badge,
+  type OptionGrammar,
+  type ToolOptionGrammar,
+  type VerificationTable,
+} from '../domain/verification';
 import type { RunStore } from '../ports/data';
 import { isToolRun, type AnyRunView, type AppState, type RunView, type ToolRunView } from './coordinator';
 import { Store } from './store';
@@ -154,6 +162,8 @@ export interface ResultsState {
   readonly loaded?: LoadedRun;
   /** The selected tool run (WindowMasker), when a tool run is open in Results. */
   readonly toolRun?: ToolRunView;
+  /** The support badge of the selected completed tool run; none for help/version or failed runs. */
+  readonly toolBadge?: Badge;
   /**
    * The options' grammar of the run's mode (`describe`: which options take a value), for its
    * command; also for a run without results. Undefined until the engine has described it.
@@ -231,7 +241,7 @@ export class ResultsBrowser {
   private headingReads = new Map<number, Promise<string | undefined>>();
   /** The options' grammar of each mode that the engine has described (one engine build: it does not change). */
   private readonly grammars = new Map<ProgramId, OptionGrammar>();
-  private readonly toolGrammars = new Map<string, OptionGrammar>();
+  private readonly toolGrammars = new Map<string, ToolOptionGrammar>();
 
   /** The table the verification badges come from (generated at build time). */
   get verification(): VerificationTable {
@@ -250,7 +260,11 @@ export class ResultsBrowser {
         const hasOutputs = run.status === 'completed' || (run.status === 'failed' && run.record.exitStatus !== undefined);
         if (phase === 'unavailable' && hasOutputs) void this.open(runId);
         else if (phase === 'unavailable') this.set({ toolRun: run, message: unavailableMessage(run) });
-        else if (phase === 'ready') this.set({ toolRun: run });
+        else if (phase === 'ready') {
+          const grammar = this.toolGrammars.get(run.snapshot.tool);
+          const toolBadge = grammar === undefined ? undefined : this.computeToolBadge(run, grammar);
+          this.set({ toolRun: run, toolBadge });
+        }
         return;
       }
       if (phase !== 'unavailable') return;
@@ -280,12 +294,14 @@ export class ResultsBrowser {
       const ready =
         isTerminal(run.status) &&
         (run.status === 'completed' || (run.status === 'failed' && run.record.exitStatus !== undefined));
+      const toolBadge = ready && grammar !== undefined ? this.computeToolBadge(run, grammar) : undefined;
       this.state.set({
         ...INITIAL,
         filters,
         runId,
         phase: ready ? 'ready' : 'unavailable',
         toolRun: run,
+        ...(toolBadge === undefined ? {} : { toolBadge }),
         ...(ready ? {} : { message: unavailableMessage(run) }),
         ...(grammar === undefined ? {} : { grammar }),
       });
@@ -376,23 +392,43 @@ export class ResultsBrowser {
     );
   }
 
+  private computeToolBadge(run: ToolRunView, grammar: ToolOptionGrammar): Badge | undefined {
+    if (run.status !== 'completed' || run.snapshot.prints !== undefined) return undefined;
+    return toolVerificationBadge(
+      {
+        tool: run.snapshot.tool,
+        argv: run.snapshot.argv,
+        runtimePath: run.record.runtimePath,
+        grammar,
+      },
+      this.deps.verification,
+    );
+  }
+
   private describeToolGrammar(token: number, tool: string): void {
-    const fallback: OptionGrammar = { takesValue: toolTakesValue(undefined) };
-    const apply = (grammar: OptionGrammar): void => {
-      if (token === this.loadToken) this.set({ grammar });
+    const fallback: ToolOptionGrammar = { takesValue: toolTakesValue(undefined) };
+    const apply = (grammar: ToolOptionGrammar, fromDescribe: boolean): void => {
+      if (token !== this.loadToken) return;
+      const run = this.state.get().toolRun;
+      // Only a grammar built from the engine's -xmlhelp (`toolOptionGrammar`) knows which options
+      // take values and their defaults; the fallback is for CommandText only and gives no badge.
+      const toolBadge =
+        fromDescribe && run !== undefined && this.state.get().phase === 'ready'
+          ? this.computeToolBadge(run, grammar)
+          : undefined;
+      this.set({ grammar, toolBadge });
     };
     if (this.deps.describeTool === undefined) {
-      this.toolGrammars.set(tool, fallback);
-      apply(fallback);
+      apply(fallback, false);
       return;
     }
     this.deps.describeTool(tool).then(
       (description) => {
-        const grammar: OptionGrammar = { takesValue: toolTakesValue(description) };
+        const grammar = toolOptionGrammar(description);
         this.toolGrammars.set(tool, grammar);
-        apply(grammar);
+        apply(grammar, true);
       },
-      () => apply(fallback),
+      () => apply(fallback, false),
     );
   }
 
@@ -627,7 +663,7 @@ export class ResultsBrowser {
       });
       return;
     }
-    const subjectRecords = loaded.run.snapshot.subject.records;
+    const subjectRecords = runInputRecords(loaded.run, 'subject');
     const byScore = state.filters.maxEValue !== undefined || state.filters.minBitScore !== undefined;
     if (byScore) this.scores ??= shownScores(table, loaded.out6);
     const filtered = filterQuery(query, state.filters, this.scores ?? table, (subject) => [
@@ -642,7 +678,12 @@ export class ResultsBrowser {
       filtered.subjects.map((subject) => unfiltered.get(subject.sIdx)!),
       state.subjectSort,
       table,
-      (sIdx) => subjectRecords[sIdx]?.length ?? 0,
+      (sIdx) => {
+        const recordLength = subjectRecords[sIdx]?.length;
+        if (recordLength !== undefined) return recordLength;
+        const first = unfiltered.get(sIdx)?.rows[0];
+        return first === undefined ? 0 : (table.subjectLength[first] ?? 0);
+      },
     );
     const subjects = sorted.map((all) => this.subjectEntry(loaded, shown.get(all.sIdx)!, all, order.get(all.sIdx)!, state.hspSort));
     const selected = subjects.find((s) => s.sIdx === state.sIdx);
@@ -678,14 +719,15 @@ export class ResultsBrowser {
     order: number,
     hspSort: SortSpec<HspSortKey>,
   ): SubjectEntry {
-    const record: RecordKey | undefined = loaded.run.snapshot.subject.records[shown.sIdx];
+    const record: RecordKey | undefined = runInputRecords(loaded.run, 'subject')[shown.sIdx];
     const first = all.rows[0]!;
+    const firstRow = this.row(first);
     return {
       sIdx: shown.sIdx,
-      recordId: record?.id ?? '',
-      length: record?.length ?? 0,
+      recordId: record?.id ?? firstRow.sseqid,
+      length: record?.length ?? loaded.index.table.subjectLength[first] ?? 0,
       order,
-      first: this.row(first),
+      first: firstRow,
       hspCount: all.rows.length,
       rows: sortHsps(shown.rows, hspSort, loaded.index.table),
       inOutfmt0: out0SubjectRange(loaded.index.table, first) !== undefined,
@@ -725,7 +767,7 @@ export class ResultsBrowser {
   private queryEntries(loaded: LoadedRun, filters: ViewFilters): readonly QueryEntry[] {
     const text = (filters.queryText ?? '').toLowerCase();
     const entries: QueryEntry[] = [];
-    loaded.run.snapshot.query.records.forEach((record, qIdx) => {
+    runInputRecords(loaded.run, 'query').forEach((record, qIdx) => {
       const group = loaded.index.queries.get(qIdx);
       if (filters.queriesWithHitsOnly && group === undefined) return;
       const id = recordName(record.id, 'query', qIdx, loaded.run.record.shownIds);
@@ -801,7 +843,7 @@ export function noHspReason(state: ResultsState): NoHspReason | undefined {
   if (loaded === undefined) return undefined;
   if (loaded.run.snapshot.prints !== undefined) return `printed-${loaded.run.snapshot.prints}`;
   if (loaded.run.snapshot.dryRun === true) return 'dry-run';
-  if (loaded.run.snapshot.query.records.length === 0) return 'empty-query';
+  if (runInputRecords(loaded.run, 'query').length === 0) return 'empty-query';
   if (loaded.limits.maxTargetSeqs === 0) return 'no-tabular-hits';
   if (loaded.tabularError !== undefined) return 'no-tabular-output';
   if (state.queries.length === 0) return 'no-queries';

@@ -15,7 +15,7 @@ use crate::blastinput::report_counts::FormattingArgs;
 // Composition-based statistics (modes 1 to 3, the default 1) run the redo of `rps_search::redo`
 // with the database's frequency ratios, or without them where the database has none (NCBI then
 // searches with mode 0), and with `-use_sw_tback` NCBI's Smith-Waterman redo (PS11c-3); the
-// argument that LOSAT does not run yet (`-html`, PS15a) is refused by the parser (its row of
+// remote options and `-import_search_strategy` are refused by the parser (their rows of
 // `ncbi_app::args::refusal`).
 #[derive(Debug, Clone)]
 pub struct RpsblastArgs {
@@ -42,6 +42,9 @@ pub struct RpsblastArgs {
     pub comp_based_stats: String,
     pub outfmt: String,
     pub show_gis: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2692-2693
+    // NCBI's `CBlastFormat::m_IsHTML` (blast_format.cpp:90,224), for `-outfmt` 0 to 4 and 18.
+    pub html: bool,
     pub num_descriptions: Option<usize>,
     pub num_alignments: Option<usize>,
     // `-line_length`, `-sorthits` and `-sorthsps` (NCBI's formatting handler,
@@ -111,6 +114,7 @@ impl RpsblastArgs {
             comp_based_stats: args.option_or_default("comp_based_stats")?,
             outfmt: args.option_or_default("outfmt")?,
             show_gis: args.flag("show_gis"),
+            html: args.flag("html"),
             num_descriptions: args.given_option("num_descriptions")?,
             num_alignments: args.given_option("num_alignments")?,
             formatting: FormattingArgs::from_args(args)?,
@@ -162,8 +166,7 @@ impl RpsblastArgs {
             db_mask: Default::default(),
             dbsize: self.dbsize,
             show_gis: self.show_gis,
-            // `-html` is not a psiblast, rpsblast or rpstblastn option (`cli::reader::named_refusal`).
-            html: false,
+            html: self.html,
             parse_deflines: self.parse_deflines,
             id_scope: None,
             searchsp: self.searchsp,
@@ -223,6 +226,7 @@ impl RpsblastArgs {
             taxdb_setting: None,
             matrix_search: None,
             write_verification: None,
+            read_verification: Default::default(),
             inclusion_ethresh: None,
             gap_trigger: None,
             sum_stats: false,

@@ -296,11 +296,13 @@ impl DeflineSet {
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:165-197
-// NCBI dereferences the best id of an empty list (accession kinds); every definition line
-// that makeblastdb writes has an id, and LOSAT writes `Unknown` for none. `eGi` prints a
+// The full id of an empty list (a definition line without a Seq-id, which makeblastdb never
+// writes) is the empty string, which `Unknown` replaces; NCBI takes the label of the null best
+// id of an empty list for the accession kinds and stops, so a `sallacc` of such a line is
+// refused before the report (`report::tabular::LookupFailure::lineless`). `eGi` prints a
 // number: the tabular `sgi` and `sallgi` are `BlastDefline::gi` of the definition lines, as
 // `seq_id_list` replaces no GI (`report::db_subject::ParsedSubject::tabular_gi`,
-// `all_tabular_ids`).
+// `all_tabular_ids`; 0 for a line without a Seq-id).
 /// The tabular id of `kind` of the id list `ids` (`s_GetSeqIdListString`): `Unknown` for an
 /// empty result. The subject fields (`sseqid`, `sacc`, `saccver`) take the ids of the subject
 /// Bioseq's definition line (`bioseq_defline`) after `seq_id_list`.
@@ -869,6 +871,118 @@ pub(crate) fn ordered_key(id: &ParsedSeqId) -> Vec<u8> {
         }
     }
     key
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Seq_id.cpp:486-522
+// NCBI reference (598d8ae6): c++/include/objects/seqloc/Seq_id.hpp:588-592
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:24-45
+// NCBI reference (598d8ae6): c++/src/objects/general/Dbtag.cpp:176-183
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Patent_seq_id.cpp:60-67
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:160-216
+/// `CSeq_id::CompareOrdered` (`*a < *b`): the order of two Seq-ids in NCBI's
+/// `CConstRefCSeqId_LessThan` map (used by `s_ExtractSeqidsAndRanges` and preserved by
+/// `CScope_Impl::GetBioseqHandles` via `RestoreOrder`). Returns `None` only when NCBI falls back
+/// to object pointer addresses (two non-matching `patent` ids with the same `seqid`).
+pub(crate) fn compare_ordered(a: &ParsedSeqId, b: &ParsedSeqId) -> Option<std::cmp::Ordering> {
+    use std::cmp::Ordering;
+    let choice = a.alternative().cmp(&b.alternative());
+    if choice != Ordering::Equal {
+        return Some(choice);
+    }
+    match (a, b) {
+        (ParsedSeqId::Local(x), ParsedSeqId::Local(y)) => Some(cmp_object_id_ordered(x, y)),
+        (ParsedSeqId::Gibbsq(x), ParsedSeqId::Gibbsq(y))
+        | (ParsedSeqId::Gibbmt(x), ParsedSeqId::Gibbmt(y)) => Some(x.cmp(y)),
+        (ParsedSeqId::Giim(x), ParsedSeqId::Giim(y)) => Some(x.id.cmp(&y.id)),
+        (ParsedSeqId::Gi(x), ParsedSeqId::Gi(y)) => Some(x.cmp(y)),
+        (ParsedSeqId::General(x), ParsedSeqId::General(y)) => {
+            Some(cmp_nocase(&x.db, &y.db).then_with(|| cmp_object_id_ordered(&x.tag, &y.tag)))
+        }
+        (ParsedSeqId::Pdb(x), ParsedSeqId::Pdb(y)) => Some(cmp_pdb_ordered(x, y)),
+        (ParsedSeqId::Patent(x), ParsedSeqId::Patent(y)) => match x.seqid.cmp(&y.seqid) {
+            Ordering::Equal => patent_match(x, y).then_some(Ordering::Equal),
+            ord => Some(ord),
+        },
+        _ => match (a.textseq(), b.textseq()) {
+            (Some(x), Some(y)) => Some(cmp_textseq_ordered(x, y)),
+            _ => Some(Ordering::Equal),
+        },
+    }
+}
+
+/// ASCII case-insensitive byte comparison (`NStr::CompareNocase`, ncbistr.cpp:198-216).
+fn cmp_nocase(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
+    a.iter()
+        .map(u8::to_ascii_lowercase)
+        .cmp(b.iter().map(u8::to_ascii_lowercase))
+}
+
+/// Optional ASCII case-insensitive byte comparison (`None` before `Some`).
+fn cmp_opt_nocase(a: Option<&Vec<u8>>, b: Option<&Vec<u8>>) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a, b) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Greater,
+        (Some(x), Some(y)) => cmp_nocase(x, y),
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/general/Object_id.cpp:145-161
+// NCBI reference (598d8ae6): c++/src/objects/general/general.asn:78-80
+/// `CObject_id::Compare`: integer tags (`e_Id`) sort before string tags (`e_Str`).
+fn cmp_object_id_ordered(a: &ObjectId, b: &ObjectId) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (object_id_number(a), object_id_number(b)) {
+        (Some(x), Some(y)) => x.cmp(&y),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => match (a, b) {
+            (ObjectId::Str(x), ObjectId::Str(y)) => cmp_nocase(x, y),
+            _ => Ordering::Equal,
+        },
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/Textseq_id.cpp:178-225
+/// `CTextseq_id::Compare`: accession, then version (stopping when both are set), then name.
+fn cmp_textseq_ordered(a: &TextseqId, b: &TextseqId) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let acc = cmp_opt_nocase(a.accession.as_ref(), b.accession.as_ref());
+    if acc != Ordering::Equal {
+        return acc;
+    }
+    let ver = a.version.cmp(&b.version);
+    if ver != Ordering::Equal {
+        return ver;
+    }
+    if a.accession.is_some() && a.version.is_some() {
+        return Ordering::Equal;
+    }
+    cmp_opt_nocase(a.name.as_ref(), b.name.as_ref())
+}
+
+// NCBI reference (598d8ae6): c++/src/objects/seqloc/PDB_seq_id.cpp:70-91
+/// `CPDB_seq_id::Compare`: case-insensitive molecule, then case-sensitive effective chain id.
+fn cmp_pdb_ordered(a: &PdbSeqId, b: &PdbSeqId) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let mol = cmp_nocase(&a.mol, &b.mol);
+    if mol != Ordering::Equal {
+        return mol;
+    }
+    let a_byte = a.chain.map(|chain| [chain as u8]);
+    let b_byte = b.chain.map(|chain| [chain as u8]);
+    let a_chain: &[u8] = match (&a.chain_id, &a_byte) {
+        (Some(id), _) => id,
+        (None, Some(byte)) => byte,
+        (None, None) => &[],
+    };
+    let b_chain: &[u8] = match (&b.chain_id, &b_byte) {
+        (Some(id), _) => id,
+        (None, Some(byte)) => byte,
+        (None, None) => &[],
+    };
+    a_chain.cmp(b_chain)
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqloc/PDB_seq_id.cpp:53-67

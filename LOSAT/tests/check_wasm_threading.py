@@ -77,12 +77,18 @@ def fixtures(directory):
 
 # The -db rows whose alias files declare a total of 2^32 letters or more (LOSAT/tests/db_search/dbcounts:
 # LENGTH 4294967296000000000 in l4295, 4294967295999999999 in l4294, 68719476736 and 98784247808 in
-# avg2p32), which the WASI commands run (`main`, "db-total").
+# avg2p32; LOSAT/tests/db_search/aliaskeys: 4611686018427387904 in n_nseq0_l62 and 4611686018427387907 in
+# n_nseq1_l62p3), which the WASI commands run (`main`, "db-total").
 DB_TOTAL_ROWS = ["db.cnt.l4295.bn", "db.cnt.avg2p32.bn", "db.cnt.l4295.bp.0", "db.cnt.l4295.bp.5",
                  "db.cnt.l4295.bp.15", "db.cnt.l4294.bp.0", "db.cnt.avg2p32.bp_c0", "db.cnt.avg2p32.tx",
                  "db.cnt.avg2p32.mb.split.6", "db.cnt.avg2p32.mb.split.0", "db.cnt.avg2p32.mb.split.7",
                  "db.cnt.avg2p32.mb.split.b1.7", "db.cnt.avg2p32.mb.split.nq", "db.cnt.avg2p32.mb.whole.6",
-                 "db.cnt.avg2p32.mo00.split.6", "db.cnt.avg2p32.mo52.split.6"]
+                 "db.cnt.avg2p32.mo00.split.6", "db.cnt.avg2p32.mo52.split.6",
+                 "db.cnt.avg2p32.g3.split.6", "db.cnt.avg2p32.g3.split.0", "db.cnt.avg2p32.g3.split.b1.7",
+                 "db.cnt.avg2p32.g3.split.mo00.6", "db.cnt.avg2p32.g3.split.mb40k.6",
+                 "db.ak.bn.nseq0.l62.alln.7", "db.ak.tbn.nseq0.l62.allx.7",
+                 "db.ak.tbn.nseq1.l62p3.allx.7", "db.ak.tbx.nseq1.l62p3.alln.7",
+                 "db.xc.dup.split.avg.7", "db.xc.gapvalid.avg.7", "db.xc.ord.neggap.avg.7"]
 
 
 # NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:1098-1108

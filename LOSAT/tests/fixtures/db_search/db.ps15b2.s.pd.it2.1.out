@@ -1,0 +1,229 @@
+PSIBLAST 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for compositional score matrix adjustment: Stephen F.
+Altschul, John C. Wootton, E. Michael Gertz, Richa Agarwala,
+Aleksandr Morgulis, Alejandro A. Schaffer, and Yi-Kuo Yu (2005)
+"Protein database searches using compositionally adjusted
+substitution matrices", FEBS J. 272:5101-5109.
+
+
+Reference for composition-based statistics starting in round 2:
+Alejandro A. Schaffer, L. Aravind, Thomas L. Madden, Sergei
+Shavirin, John L. Spouge, Yuri I. Wolf, Eugene V. Koonin, and
+Stephen F. Altschul (2001), "Improving the accuracy of PSI-BLAST
+protein database searches with composition-based statistics and
+other refinements", Nucleic Acids Res. 29:2994-3005.
+
+
+
+Database: User specified sequence set.
+           3 sequences; 221 total letters
+
+Results from round 1
+
+
+Query= qp1 query protein one
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qp1 query protein one                                                 293     7e-109
+qp2 unrelated protein                                                 12.3    4.4   
+
+
+
+qp1  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+qp1  1    ............................................................  60
+qp2  24   L.K..LTFQ                                                     32
+qp2  33                                     .C..F.                      38
+
+qp1  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+qp1  61   ............................................................  120
+
+qp1  121  FEKLKIFHYMVGHGRTASEG  140
+qp1  121  ....................  140
+
+
+Lambda      K        H        a         alpha
+   0.325    0.135    0.500    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20910
+Results from round 2
+
+
+Query= qp1 query protein one
+
+Length=140
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+qp1 query protein one                                                 274     1e-101
+
+Sequences not found previously or not previously below threshold:
+
+qp2 unrelated protein                                                 13.5    1.6  
+
+
+
+qp1  1    MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP  60
+qp1  1    ............................................................  60
+qp2  33                                     .C..F.                      38
+
+qp1  61   CNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDAN  120
+qp1  61   ............................................................  120
+
+qp1  121  FEKLKIFHYMVGHGRTASEG  140
+qp1  121  ....................  140
+
+
+Lambda      K        H        a         alpha
+   0.322    0.144    0.549    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0440    0.140     1.90     42.6     43.6 
+
+Effective search space used: 20910
+
+Search has CONVERGED!
+Results from round 1
+
+
+Query= qp2 unrelated protein
+
+Length=45
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qp2 unrelated protein                                                 96.3    7e-34
+qp1 query protein one                                                 12.3    1.4  
+
+
+
+qp2  1   IRRNWKMVCRYVPYLEEDMEAWMLWKEHLTFQWCNYFWTDVVKSE  45
+qp2  1   .............................................  45
+qp1  45     S..VLMK.--EFSS.IHPCN....MA.PG.W.---..TL     83
+                                  \                   
+                                  |                   
+                              ICWIP
+qp1  1                          M.M..SVLK               9
+qp1  35                                  .E..C.         40
+
+
+Lambda      K        H        a         alpha
+   0.328    0.137    0.542    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 6984
+Results from round 2
+
+
+Query= qp2 unrelated protein
+
+Length=45
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+Sequences used in model and found again:
+
+qp2 unrelated protein                                                 72.4    2e-24
+
+Sequences not found previously or not previously below threshold:
+
+qp1 query protein one                                                 13.4    0.59 
+
+
+
+qp2  1   IRRNWKMVCRYVPYLEEDMEAWMLWKEHLTFQWCNYFWTDVVKSE  45
+qp2  1   .............................................  45
+qp1  35                                  .E..C.         40
+
+
+Lambda      K        H        a         alpha
+   0.326    0.146    0.591    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0448    0.140     1.90     42.6     43.6 
+
+Effective search space used: 6984
+
+Search has CONVERGED!
+Results from round 1
+
+
+Query= qnone no hits
+
+Length=36
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qnone no hits                                                         17.7    0.006
+
+
+
+qnone  1   GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG  36
+qnone  1   ....................................  36
+
+
+Lambda      K        H        a         alpha
+   0.304    0.171    0.587    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 5516
+Results from round 2
+
+
+Query= qnone no hits
+
+Length=36
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+qnone no hits                                                         48.2    5e-15
+
+
+
+qnone  1   GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG  36
+qnone  1   ....................................  36
+
+
+Lambda      K        H        a         alpha
+   0.303    0.169    0.577    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0518    0.140     1.90     42.6     43.6 
+
+Effective search space used: 5516
+
+
+  Database: User specified sequence set.
+    Posted date:  Unknown
+  Number of letters in database: 221
+  Number of sequences in database:  3
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

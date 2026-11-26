@@ -308,8 +308,9 @@ pub struct SubjectNumbers {
     /// negative for an alias file's `LENGTH` of 0 or of 2^63 or more), a FASTA set's total.
     pub gumbel_total: i64,
     /// `BlastSeqSrcGetMinSeqLen` (blast_setup.c:969-973): a database's `GetMinLength`
-    /// (`SeqDb::min_length`), a FASTA set's shortest record raised to `BLAST_SEQSRC_MINLENGTH`.
-    pub shortest: usize,
+    /// (`SeqDb::min_length`, signed 32-bit `Int4`), a FASTA set's shortest record raised to
+    /// `BLAST_SEQSRC_MINLENGTH`.
+    pub shortest: i32,
     /// `BlastSeqSrcGetAvgSeqLen` (blast_engine.c:1372-1374, the word parameters): a database's
     /// `GetTotalLength` divided by the larger of 1 and `GetNumSeqs` (`SeqDb::average_length`, no `STATS_*` key), a
     /// FASTA set's total over its records.
@@ -327,7 +328,8 @@ impl SubjectNumbers {
             total: length as i64,
             count: 1,
             gumbel_total: length as i64,
-            shortest: length.max(super::subjects::BLAST_SEQSRC_MINLENGTH),
+            shortest: i32::try_from(length.max(super::subjects::BLAST_SEQSRC_MINLENGTH))
+                .unwrap_or(i32::MAX),
             average: length as i32,
             request_count: 1,
         }
@@ -370,7 +372,7 @@ pub fn subject_parameters(
     let Some(n) = crate::stats::setup::setup_subject_length(
         db_length,
         db_count,
-        gumbel_block_used.then_some((i32::try_from(shortest).unwrap_or(i32::MAX), false)),
+        gumbel_block_used.then_some((shortest, false)),
     ) else {
         bail!(crate::stats::setup::SUBJECT_LENGTH_TOO_SHORT);
     };

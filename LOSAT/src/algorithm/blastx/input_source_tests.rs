@@ -596,7 +596,6 @@ fn blastx_other_molecule_accession_follows_ncbis_reading() {
         while !source.end() {
             match source.next_sequence_upper(true, &mut |warning| {
                 warnings.extend_from_slice(warning);
-                warnings.push(b'\n');
                 Ok(())
             }) {
                 Ok((record, masks)) => records.push(from_upper(record, masks)),

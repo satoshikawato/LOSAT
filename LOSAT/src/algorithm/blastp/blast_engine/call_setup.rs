@@ -1373,7 +1373,46 @@ pub(super) struct BlastpScanShape<'a> {
     pub(super) total_query_span: i32,
     pub(super) x_soft_subjects: Option<&'a [Vec<(i32, i32)>]>,
     pub(super) neg_batch_layout: Vec<(i32, i32)>,
-    pub(super) neg_batch_of_ctx: Vec<usize>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1004
+// The concatenated query of a batch runs from its first context to the end of its last one (a
+// sentinel between each two); its table's ring is the power of two just at least that length
+// plus the window.
+/// NCBI's query batches of a call (`query_batches`, by query) as places in the call's
+/// concatenated query (`contexts`, in query order): each batch's first offset and its
+/// concatenated length, for the batches that have a context. A query chunk's search is one
+/// batch of all its contexts, as is a call whose batches have none.
+pub(super) fn query_batch_layout(
+    query_batches: &[RangedBatch],
+    contexts: &[QueryContext],
+    query_chunk: bool,
+) -> Vec<(i32, i32)> {
+    let end_of = |context: &QueryContext| context.frame_base + context.aa_len as i32;
+    let whole = || {
+        let start = contexts.first().map_or(0, |context| context.frame_base);
+        vec![(start, contexts.last().map_or(start, end_of) - start)]
+    };
+    if query_chunk {
+        return whole();
+    }
+    let first = |q_idx: usize| contexts.partition_point(|context| (context.q_idx as usize) < q_idx);
+    let layout: Vec<(i32, i32)> = query_batches
+        .iter()
+        .filter_map(|batch| {
+            let (from, to) = (first(batch.searched.start), first(batch.searched.end));
+            (from < to).then(|| {
+                let start = contexts[from].frame_base;
+                (start, end_of(&contexts[to - 1]) - start)
+            })
+        })
+        .collect();
+    if layout.is_empty() {
+        whole()
+    } else {
+        layout
+    }
 }
 
 /// The call's `BlastpScanShape`, with the refusal of a window that the diagonal table cannot hold;
@@ -1440,34 +1479,17 @@ pub(super) fn scan_shape<'a>(
     // table (`BLAST_DiagTable`) that carries state from one subject to the next. Where the
     // preliminary stage did not split the call into one block per batch (`x_blocks` None, e.g.
     // ungapped search, sum-stats, a batch without a searched query, or batches before a failing
-    // later batch), record each searched batch's `(start, length)` in `concatenated_query` and
-    // map each context to its batch so `search_subject_in_neg` runs one carried table per batch.
+    // later batch), record each searched batch's `(start, length)` in `concatenated_query` so
+    // `search_subject_in_neg` runs one carried ring per batch via `QueryBatchTables`.
     let mut neg_batch_layout: Vec<(i32, i32)> = Vec::new();
-    let mut neg_batch_of_ctx: Vec<usize> = Vec::new();
     if window < 0 && x_blocks.is_none() && x_block_inputs.is_none() && !query_chunk {
         let query_batches = ranges.query_input.batches(args.query_batch_size()?);
-        let first_ctx = |q_idx: usize| contexts.partition_point(|ctx| (ctx.q_idx as usize) < q_idx);
-        let mut layout: Vec<(i32, i32, usize, usize)> = Vec::new();
-        for batch in &query_batches {
-            let (from, to) = (
-                first_ctx(batch.searched.start),
-                first_ctx(batch.searched.end),
-            );
-            if from < to {
-                let start = contexts[from].frame_base;
-                let end = contexts[to - 1].frame_base + contexts[to - 1].aa_len as i32;
-                layout.push((start, end - start, from, to));
-            }
-        }
+        let layout = query_batch_layout(&query_batches, contexts, false);
         if layout.len() > 1 {
-            neg_batch_of_ctx.resize(contexts.len(), 0);
-            for (batch_idx, &(start, length, from, to)) in layout.iter().enumerate() {
+            for &(_, length) in &layout {
                 crate::blastinput::app::check_diag_table_window(length, window, "BLASTP")?;
-                neg_batch_layout.push((start, length));
-                for slot in &mut neg_batch_of_ctx[from..to] {
-                    *slot = batch_idx;
-                }
             }
+            neg_batch_layout = layout;
         }
     }
     let offset_array_size = blastp_offset_array_size(lookup.longest_chain());
@@ -1500,6 +1522,5 @@ pub(super) fn scan_shape<'a>(
         total_query_span,
         x_soft_subjects,
         neg_batch_layout,
-        neg_batch_of_ctx,
     })
 }

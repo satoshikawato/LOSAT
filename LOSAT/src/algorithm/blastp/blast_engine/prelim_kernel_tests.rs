@@ -87,9 +87,7 @@ fn a_negative_window_clears_the_table_at_a_quarter_of_the_int4_range() {
         neg_window_exit(limit - 1, -40, 100),
         (limit - 1 + 100 - 40, false)
     );
-    assert_eq!(neg_window_cleared_last_hit(-40), 40);
-    let mut entry = DiagStruct::default();
-    entry.set_last_hit(neg_window_cleared_last_hit(-40));
+    let entry = DiagStruct::clear(-40);
     assert_eq!((entry.last_hit(), entry.flag()), (40, 0));
 }
 
@@ -112,8 +110,33 @@ fn a_negative_window_stores_31_bits_wraps_where_ncbi_does_and_widens_where_it_ov
         neg_window_exit(least, i32::MIN, 300),
         (2 * least + 300, false)
     );
-    let mut entry = DiagStruct::default();
-    entry.set_last_hit(neg_window_cleared_last_hit(i32::MIN));
+    let entry = DiagStruct::clear(i32::MIN);
     assert_eq!(entry.last_hit(), 0);
     assert_eq!(neg_window_last_hit(7, 3, least), (5 + least) as i32);
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2857-3035 (`Blast_HSPListsMerge`)
+#[test]
+fn merge_prelim_subject_chunks_joins_overlapping_hsp_across_split() {
+    let mut first = hsp((10, 80), 120);
+    first.subject_start = 4_999_880;
+    first.subject_end = 4_999_950;
+    first.gapped_subject_start = 4_999_880;
+    let mut second = hsp((40, 120), 140);
+    second.subject_start = 4_999_910;
+    second.subject_end = 4_999_990;
+    second.gapped_subject_start = 4_999_910;
+    let mut combined = vec![first];
+    let mut incoming = vec![second];
+    merge_prelim_subject_chunks(&mut combined, &mut incoming, 4_999_900, 100, true);
+    assert_eq!(combined.len(), 1);
+    assert_eq!(
+        (
+            combined[0].query_start,
+            combined[0].query_end,
+            combined[0].subject_start,
+            combined[0].subject_end
+        ),
+        (10, 120, 4_999_880, 4_999_990)
+    );
 }

@@ -21,6 +21,7 @@ use crate::algorithm::blastn::blast_engine::QueryReading;
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, TreeHsp};
 use crate::algorithm::common::db_mask_search::SearchMask;
 use crate::algorithm::common::hard_chunk_walk::{HardTable, NcbiStart};
+use crate::algorithm::common::query_batch_tables::QueryBatchTables;
 use crate::algorithm::tblastx::blast_aascan::{
     s_blast_aa_scan_subject_one_range, BlastOffsetPair as OffsetPair,
 };
@@ -279,18 +280,6 @@ struct BlastpPrelimValues<'a> {
     sum_stats: Option<&'a BlastpSumStats>,
 }
 
-/// One NCBI query batch's carried diagonal table for a negative `-window_size` when a single
-/// `run_call` searches queries from more than one NCBI query batch (ungapped search, a batch
-/// without a searched query, or a call of the batches before a failing later batch).
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:36-66,87-106,162-172
-struct NegBatchTable {
-    start: i32,
-    entries: Vec<DiagStruct>,
-    mask: i32,
-    offset: i64,
-}
-
 struct BlastpSubjectScratch {
     offset_pairs: Vec<OffsetPair>,
     diag_array: Vec<DiagStruct>,
@@ -301,9 +290,10 @@ struct BlastpSubjectScratch {
     // the searches with a window of 0 or more and does not move for it.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:36-66,162-172
     neg_offset: i64,
-    // Per-batch carried diagonal tables for a multi-batch call with a negative `-window_size`
-    // (empty for every non-negative window and every single-batch call).
-    neg_batches: Vec<NegBatchTable>,
+    // Per-batch carried diagonal rings (`QueryBatchTables`) for a multi-batch call with a negative
+    // `-window_size` (`None` for every non-negative window and every single-batch call); their
+    // shared 64-bit offset lives in `neg_offset`.
+    neg_batches: Option<QueryBatchTables>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:216-227
     init_hsps: Vec<InitHSP>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
@@ -525,7 +515,7 @@ impl BlastpSubjectScratch {
             ],
             diag_offset: window,
             neg_offset: i64::from(window),
-            neg_batches: Vec::new(),
+            neg_batches: None,
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:223-224
             init_hsps: x_ih_pool::own_array(),
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3524-3527
@@ -9922,7 +9912,6 @@ fn run_call(
         total_query_span,
         x_soft_subjects,
         neg_batch_layout,
-        neg_batch_of_ctx,
     } = call_setup::scan_shape(
         &call_in,
         &lookup,
@@ -9973,7 +9962,6 @@ fn run_call(
         timing: &timing,
         tree_without_end: &tree_without_end,
         neg_batch_layout: &neg_batch_layout,
-        neg_batch_of_ctx: &neg_batch_of_ctx,
     };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1498
     // The preliminary stage (`blast_engine/prelim_run.rs`): the choice of the pool and the call's

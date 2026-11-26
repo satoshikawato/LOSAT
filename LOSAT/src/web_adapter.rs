@@ -136,9 +136,9 @@ pub fn search_database_read_files(
     };
     let mut out = Vec::new();
     let push_db = |out: &mut Vec<Vec<u8>>, db: &str, db_type: crate::seqdb::SeqType| {
-        let trimmed = crate::seqdb::db_argument_name(db);
+        let trimmed = crate::seqdb::db_argument_name_bytes(db.as_bytes());
         out.extend(crate::seqdb::alias::database_lookup_files(
-            trimmed.as_bytes(),
+            trimmed,
             db_type,
             blastdb.as_deref(),
         ));

@@ -7336,7 +7336,7 @@ pub(crate) enum OutfmtTaxdbUse {
 /// Parsed `-outfmt` report format and optional tabular specification for `app`, shared by
 /// [`outfmt_taxdb_use`] and [`outfmts_need_subject_taxdb`].
 fn parse_outfmt_for_taxdb(
-    outfmt: &str,
+    outfmt: impl AsRef<[u8]>,
     app: crate::report::archive::options::RequestKind,
 ) -> Option<(
     crate::blastinput::app::ReportFormat,
@@ -7361,7 +7361,7 @@ fn parse_outfmt_for_taxdb(
 /// databases without `-parse_seqids` from `GenerateDefline`, which uses `taxdb` when a sequence's
 /// stored title is empty, so they return [`OutfmtTaxdbUse::WhenPresent`].
 pub(crate) fn outfmt_taxdb_use(
-    outfmt: &str,
+    outfmt: impl AsRef<[u8]>,
     app_kind: crate::report::archive::options::RequestKind,
     is_db: bool,
 ) -> OutfmtTaxdbUse {
@@ -7397,8 +7397,8 @@ pub(crate) fn outfmt_taxdb_use(
 /// Whether any format in `outfmts` looks every taxid up for a `-subject` search (`x_CheckTaxDB`
 /// plural names or outfmt 18, `TabularSpec::looks_up_every_taxid`), shared by
 /// `api::run::taxdb_setting`.
-pub(crate) fn outfmts_need_subject_taxdb<'a>(
-    outfmts: impl IntoIterator<Item = &'a str>,
+pub(crate) fn outfmts_need_subject_taxdb<O: AsRef<[u8]>>(
+    outfmts: impl IntoIterator<Item = O>,
     kind: crate::report::archive::options::RequestKind,
 ) -> bool {
     outfmts.into_iter().any(|outfmt| {
@@ -7412,7 +7412,7 @@ pub(crate) fn outfmts_need_subject_taxdb<'a>(
 /// Whether a `-db` search with `-outfmt` `outfmt` prefetches reported subjects (`prefetch_messages`,
 /// outfmt 0..=7 and 17): when `taxdb.btd` already exists on disk in a search directory, creating a
 /// `taxdb.bti` log file beside it causes `TaxDb::open` to read that file during prefetch.
-pub(crate) fn outfmt_prefetches_taxdb(outfmt: &str) -> bool {
+pub(crate) fn outfmt_prefetches_taxdb(outfmt: impl AsRef<[u8]>) -> bool {
     let Ok(choice) = crate::blastinput::app::parse_formatting_string(outfmt) else {
         return false;
     };

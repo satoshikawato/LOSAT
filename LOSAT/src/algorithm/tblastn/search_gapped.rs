@@ -1211,15 +1211,16 @@ fn x_preliminary_protein_hsps_by_unit<
     // overlapping masks or a sequence that meets unwritten entries / clears inside it) runs all
     // six frames' units in order on a fresh `(last_hit, flag)` diagonal table initialized to its
     // `TableStart::New` offset.
+    let walked = match subject {
+        super::x_subject_store::XPrelimSubject::Stream(stream, ordinal, _) => {
+            stream.hard_start(ordinal)
+        }
+        super::x_subject_store::XPrelimSubject::Nt(_) => None,
+    };
     let hard_start = if ONE_HIT && profile.window < 0 {
         None
     } else {
-        match subject {
-            super::x_subject_store::XPrelimSubject::Stream(stream, ordinal, _) => {
-                stream.hard_start(ordinal)
-            }
-            super::x_subject_store::XPrelimSubject::Nt(_) => None,
-        }
+        walked
     };
     let x_in_order = hard_start.is_some()
         || plan.subject.units.iter().any(|(_, _, ranges)| {
@@ -1584,7 +1585,7 @@ fn x_preliminary_protein_hsps_by_unit<
                 continue;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:572-586:
-            if chunk.overlap_past_list && !per_frame.is_empty() {
+            if walked.is_some() && chunk.overlap_past_list && !per_frame.is_empty() {
                 x_check_hard_merge_overlap(subject, chunk, &per_frame, &unit_hsps)?;
             }
             per_frame =

@@ -436,3 +436,222 @@ fn blastp_negative_window_searches_subject_over_5m_residues_as_ncbi() {
         }
     }
 }
+
+/// PR #1640 R2 blocker: TBLASTN `-db_hard_mask 11` over a database containing an unmasked
+/// 15,600,003-bp nucleotide sequence (translated frame > 5,000,000 residues, with a 140-aa query
+/// encoded across frame +1's 4,999,900..5,000,000 chunk overlap) and a dust-masked record must
+/// merge the long frame's chunks as NCBI BLAST+ 2.17.0 at 1 and 4 threads rather than refusing it
+/// as an overlapping-mask merge.
+#[test]
+fn tblastn_db_hard_mask_merges_frame_over_5m_residues_as_ncbi() {
+    // MT19937 seeded with 1640 matching Python's choice over ACGT.
+    struct Mt19937 {
+        mt: [u32; 624],
+        idx: usize,
+    }
+    impl Mt19937 {
+        fn seed(key: u32) -> Self {
+            let mut mt = [0u32; 624];
+            mt[0] = 19_650_218;
+            for mti in 1..624 {
+                mt[mti] = 1_812_433_253u32
+                    .wrapping_mul(mt[mti - 1] ^ (mt[mti - 1] >> 30))
+                    .wrapping_add(mti as u32);
+            }
+            let (mut i, mut j) = (1usize, 0usize);
+            for _ in 0..624 {
+                mt[i] = (mt[i] ^ ((mt[i - 1] ^ (mt[i - 1] >> 30)).wrapping_mul(1_664_525)))
+                    .wrapping_add(key)
+                    .wrapping_add(j as u32);
+                i += 1;
+                j += 1;
+                if i >= 624 {
+                    mt[0] = mt[623];
+                    i = 1;
+                }
+                if j >= 1 {
+                    j = 0;
+                }
+            }
+            for _ in 0..623 {
+                mt[i] = (mt[i] ^ ((mt[i - 1] ^ (mt[i - 1] >> 30)).wrapping_mul(1_566_083_941)))
+                    .wrapping_sub(i as u32);
+                i += 1;
+                if i >= 624 {
+                    mt[0] = mt[623];
+                    i = 1;
+                }
+            }
+            mt[0] = 0x8000_0000;
+            Self { mt, idx: 624 }
+        }
+
+        fn next_u32(&mut self) -> u32 {
+            if self.idx >= 624 {
+                for kk in 0..624 {
+                    let y = (self.mt[kk] & 0x8000_0000) | (self.mt[(kk + 1) % 624] & 0x7fff_ffff);
+                    let mag = if (y & 1) != 0 { 0x9908_b0df } else { 0 };
+                    self.mt[kk] = self.mt[(kk + 397) % 624] ^ (y >> 1) ^ mag;
+                }
+                self.idx = 0;
+            }
+            let mut y = self.mt[self.idx];
+            self.idx += 1;
+            y ^= y >> 11;
+            y ^= (y << 7) & 0x9d2c_5680;
+            y ^= (y << 15) & 0xefc6_0000;
+            y ^= y >> 18;
+            y
+        }
+
+        fn next_base(&mut self) -> u8 {
+            loop {
+                let v = (self.next_u32() >> 29) as usize;
+                if v < 4 {
+                    return b"ACGT"[v];
+                }
+            }
+        }
+    }
+
+    let motif = "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
+    let codon = |aa: u8| -> &'static [u8; 3] {
+        match aa {
+            b'A' => b"GCT",
+            b'R' => b"CGT",
+            b'N' => b"AAT",
+            b'D' => b"GAT",
+            b'C' => b"TGT",
+            b'Q' => b"CAA",
+            b'E' => b"GAA",
+            b'G' => b"GGT",
+            b'H' => b"CAT",
+            b'I' => b"ATT",
+            b'L' => b"CTG",
+            b'K' => b"AAA",
+            b'M' => b"ATG",
+            b'F' => b"TTT",
+            b'P' => b"CCT",
+            b'S' => b"TCT",
+            b'T' => b"ACT",
+            b'W' => b"TGG",
+            b'Y' => b"TAT",
+            b'V' => b"GTT",
+            _ => unreachable!("unexpected amino acid"),
+        }
+    };
+
+    let dir = TempDir::new("tbn_hard_long5m");
+    let mut rng = Mt19937::seed(1640);
+    let mut seq: Vec<u8> = (0..15_600_003).map(|_| rng.next_base()).collect();
+    let mut nt = Vec::with_capacity(motif.len() * 3);
+    for &aa in motif.as_bytes() {
+        nt.extend_from_slice(codon(aa));
+    }
+    let pos = 4_999_880 * 3;
+    seq[pos..pos + nt.len()].copy_from_slice(&nt);
+
+    let mut lc = Vec::with_capacity(800);
+    lc.extend((0..300).map(|_| rng.next_base()));
+    lc.extend(std::iter::repeat_n(b'A', 200));
+    lc.extend((0..300).map(|_| rng.next_base()));
+
+    let long_fna = dir.path().join("long.fna");
+    let lc_fna = dir.path().join("lc.fna");
+    let q_faa = dir.path().join("q.faa");
+    let lc_asnb = dir.path().join("lc.asnb");
+    let db_dir = dir.path().join("db");
+    std::fs::create_dir_all(&db_dir).expect("mkdir db");
+    let db = db_dir.join("long");
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&long_fna).expect("create long.fna");
+        f.write_all(b">long1\n").expect("write");
+        f.write_all(&seq).expect("write");
+        f.write_all(b"\n>lc1\n").expect("write");
+        f.write_all(&lc).expect("write");
+        f.write_all(b"\n").expect("write");
+        let mut f = std::fs::File::create(&lc_fna).expect("create lc.fna");
+        f.write_all(b">lc1\n").expect("write");
+        f.write_all(&lc).expect("write");
+        f.write_all(b"\n").expect("write");
+        std::fs::write(&q_faa, format!(">q1\n{motif}\n")).expect("write q.faa");
+    }
+
+    let dust = Command::new(BIN)
+        .current_dir(engine())
+        .args([
+            "dustmasker",
+            "-in",
+            lc_fna.to_str().expect("utf8"),
+            "-infmt",
+            "fasta",
+            "-parse_seqids",
+            "-outfmt",
+            "maskinfo_asn1_bin",
+            "-out",
+            lc_asnb.to_str().expect("utf8"),
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("dustmasker");
+    assert!(dust.status.success(), "dustmasker: {dust:?}");
+
+    let mk = Command::new(BIN)
+        .current_dir(engine())
+        .args([
+            "makeblastdb",
+            "-in",
+            long_fna.to_str().expect("utf8"),
+            "-dbtype",
+            "nucl",
+            "-parse_seqids",
+            "-mask_data",
+            lc_asnb.to_str().expect("utf8"),
+            "-out",
+            db.to_str().expect("utf8"),
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .expect("makeblastdb");
+    assert!(mk.status.success(), "makeblastdb: {mk:?}");
+
+    // Frozen NCBI BLAST+ 2.17.0 bytes (`tblastn -query q.faa -db db/long -db_hard_mask 11 -outfmt 6`).
+    let want_out = concat!(
+        "q1\tlong1\t100.000\t140\t0\t0\t1\t140\t14999641\t15000060\t3.78e-93\t293\n",
+        "q1\tlong1\t24.194\t62\t43\t1\t12\t69\t11606142\t11606327\t1.3\t27.7\n",
+        "q1\tlong1\t42.308\t26\t15\t0\t114\t139\t12996911\t12996834\t6.6\t25.8\n",
+        "q1\tlc1\t33.333\t27\t18\t0\t22\t48\t51\t131\t4.6\t25.8\n",
+    );
+    for threads in ["1", "4"] {
+        let out = Command::new(BIN)
+            .current_dir(engine())
+            .args([
+                "tblastn",
+                "-query",
+                q_faa.to_str().expect("utf8"),
+                "-db",
+                db.to_str().expect("utf8"),
+                "-db_hard_mask",
+                "11",
+                "-outfmt",
+                "6",
+                "-num_threads",
+                threads,
+            ])
+            .stdin(Stdio::null())
+            .output()
+            .expect("tblastn");
+        assert_eq!(out.status.code(), Some(0), "tblastn t={threads}: {out:?}");
+        assert!(
+            out.stderr.is_empty(),
+            "tblastn t={threads} stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            want_out,
+            "tblastn t={threads} stdout differs from NCBI 2.17.0"
+        );
+    }
+}

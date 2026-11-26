@@ -8,10 +8,14 @@ use std::sync::OnceLock;
 
 use super::file::DbFile;
 use super::filter::{entries_accessions_to_oids, LmdbEntry};
-use super::isam::{seqdb_simplify_seqid, SeqDbIdType, SimplifiedAccession, StringIsam};
+use super::isam::{
+    seqdb_simplify_seqid, SeqDbIdType, SimplifiedAccession, SimplifyError, StringIsam,
+};
 use super::isam_num::{ListIsam, NumericIsam, Opened};
 use super::lmdb_read::Env;
 use super::{SeqDb, SeqDbError, SeqType};
+use crate::ncbi_exception::NcbiException;
+use crate::seqid::model::ObjectId;
 use crate::seqid::{label, ParsedSeqId};
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2724-2728
@@ -231,27 +235,7 @@ impl IdLookup<'_> {
             return Ok(Vec::new());
         }
         let seqtype = self.db.seqtype;
-        let protein = seqtype == SeqType::Protein;
-        // NCBI reads the index of a volume whose files fail `x_InitSearch` all the same
-        // (`x_FindIndexBounds` in the constructor) and crashes (probe I of line BDC: an empty,
-        // short or garbage index, another version or type, a data file of another length).
-        let string_isam = || {
-            opened(&self.isams.strings[at], || {
-                let Some(isam) = StringIsam::open_existing(volume.base(), protein)? else {
-                    return Ok(None);
-                };
-                if !isam.is_initialized() {
-                    return Err(SeqDbError::NcbiCrashes {
-                        path: volume.base().to_path_buf(),
-                        message: "a string ISAM whose header does not fit its files".to_string(),
-                    });
-                }
-                if self.isams.index_in_memory {
-                    return Ok(Some(isam.keep_index()?));
-                }
-                Ok(Some(isam))
-            })
-        };
+        let string_isam = || self.string_isam(at);
         let local = |oids: Vec<u32>| oids.into_iter().map(|oid| oid as i32).collect();
         let found = |oid: Option<i32>| oid.into_iter().collect();
         Ok(match simplified.id_type {
@@ -319,6 +303,55 @@ impl IdLookup<'_> {
             }
             SeqDbIdType::Oid => vec![simplified.num_id as i32],
         })
+    }
+
+    /// The string ISAM of the volume `at`, a volume with sequences, opened at its first use.
+    /// NCBI reads the index of a volume whose files fail `x_InitSearch` all the same
+    /// (`x_FindIndexBounds` in the constructor) and crashes (probe I of line BDC: an empty, short
+    /// or garbage index, another version or type, a data file of another length).
+    fn string_isam(&self, at: usize) -> Result<Option<&StringIsam>, SeqDbError> {
+        let volume = &self.db.volumes[at];
+        let protein = self.db.seqtype == SeqType::Protein;
+        opened(&self.isams.strings[at], || {
+            let Some(isam) = StringIsam::open_existing(volume.base(), protein)? else {
+                return Ok(None);
+            };
+            if !isam.is_initialized() {
+                return Err(SeqDbError::NcbiCrashes {
+                    path: volume.base().to_path_buf(),
+                    message: "a string ISAM whose header does not fit its files".to_string(),
+                });
+            }
+            if self.isams.index_in_memory {
+                return Ok(Some(isam.keep_index()?));
+            }
+            Ok(Some(isam))
+        })
+    }
+
+    /// The OIDs under the key `key` (as given: no other form tried, no version stripped, no
+    /// header read) in the string ISAMs of the volumes of a version 4 database, the volumes in
+    /// order, each OID once, the search's list's OIDs only: LOSAT's own search of the sequences
+    /// that hold an id that NCBI's lookup throws on (`SeqidLookup::thrown_id_oids`).
+    fn string_key_oids(&self, key: &[u8]) -> Result<Vec<u32>, SeqDbError> {
+        let mut oids = Vec::new();
+        for at in 0..self.db.volumes.len() {
+            if self.db.volumes[at].num_oids() == 0 {
+                continue;
+            }
+            let Some(isam) = self.string_isam(at)? else {
+                continue;
+            };
+            let vol_start = self.db.volume_starts[at];
+            for oid in isam.string_to_oids(key, true, false)?.oids {
+                if let Some(oid) = oid.checked_add(vol_start).filter(|&oid| self.visible(oid)) {
+                    if !oids.contains(&oid) {
+                        oids.push(oid);
+                    }
+                }
+            }
+        }
+        Ok(oids)
     }
 
     /// The GI ISAM of the volume `at` (`x_OpenGiFile`).
@@ -708,18 +741,62 @@ impl SeqidLookup<'_> {
         self.volumes.db.is_version5() && !bl_ord_id && is_string_id(seqid)
     }
 
-    /// The message of the exception that NCBI's lookup of `seqid` throws on the id itself, before
-    /// it reads a file: `SeqDB_SimplifyAccession`'s (a string tag of `BL_ORD_ID` or `PIG`, a `ti`
-    /// that is not a number, a `CSeqIdException`), which is no `CSeqDBException` (NCBI's
-    /// prefetch catches it with its warning, `common::database::batch_prefetch`, where it rethrows
-    /// the exception of a file). `None` where the lookup reads the files.
-    pub fn throws_on_id(&self, seqid: &ParsedSeqId) -> Option<String> {
+    /// The exception that NCBI's lookup of `seqid` throws on the id itself, before it reads a
+    /// file: `SeqDB_SimplifySeqid`'s (a string tag of `BL_ORD_ID` or `PIG`, `CObject_id::GetId`'s
+    /// `CInvalidChoiceSelection`; a `ti` that is not a number, `NStr::StringToInt8`'s
+    /// `CStringException`; a `CSeqIdException`), which is no `CSeqDBException`: NCBI's prefetch
+    /// catches it with its warning (`common::database::batch_prefetch`), where it rethrows the
+    /// exception of a file, and `CATCH_ALL` ends a run with it as `Error: ` and its `what()`, exit
+    /// status 255 (`cli::NativeError::exception`; probe t7 of line DBID pfoff-7). `None` where the
+    /// lookup reads the files.
+    pub fn throws_on_id(&self, seqid: &ParsedSeqId) -> Option<NcbiException> {
         if self.keys_in_lmdb(seqid) {
             return None;
         }
-        seqdb_simplify_seqid(seqid)
-            .err()
-            .map(|error| error.to_string())
+        match seqdb_simplify_seqid(seqid).err()? {
+            SimplifyError::SeqId(error) => Some(error.exception()),
+            SimplifyError::Exception(exception) => Some(exception),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_isam.cpp:580-587
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/writedb_lmdb.cpp:178-193
+    // makeblastdb keys a general id in a version 4 string ISAM by its FASTA text in lower case and,
+    // for a string tag, by the tag in lower case (a sparse database by the tag alone); in a version
+    // 5 LMDB file by its content text (`PIG:abc`) and that text in upper case.
+    /// The OIDs of the sequences that may hold an id that NCBI's scope takes for `seqid`, a
+    /// Seq-align id whose lookup throws on the id ([`SeqidLookup::throws_on_id`]), the search's
+    /// list's OIDs only: LOSAT's own search under the keys that makeblastdb writes for such an id
+    /// (version 4: its FASTA text and its tag, in lower case; version 5: its content text as
+    /// written and in upper case), a superset that the caller keeps to the sequences whose
+    /// definition lines hold such an id (`common::database::HeaderReader::failed_holders`).
+    pub fn thrown_id_oids(&self, seqid: &ParsedSeqId) -> Result<Vec<u32>, SeqDbError> {
+        let mut oids = Vec::new();
+        let mut add = |found: Vec<u32>| {
+            for oid in found {
+                if !oids.contains(&oid) {
+                    oids.push(oid);
+                }
+            }
+        };
+        if self.volumes.db.is_version5() {
+            let mut key = Vec::new();
+            label::content(seqid, true, &mut key);
+            add(self.lmdb_oids(&key)?);
+            key.make_ascii_uppercase();
+            add(self.lmdb_oids(&key)?);
+            return Ok(oids);
+        }
+        let mut key = Vec::new();
+        label::fasta(seqid, &mut key);
+        key.make_ascii_lowercase();
+        add(self.volumes.string_key_oids(&key)?);
+        if let ParsedSeqId::General(dbtag) = seqid {
+            if let ObjectId::Str(tag) = &dbtag.tag {
+                add(self.volumes.string_key_oids(&tag.to_ascii_lowercase())?);
+            }
+        }
+        Ok(oids)
     }
 
     /// `CSeqDBImpl::SeqidToOids`: the OIDs that NCBI's lookup of the Seq-id `seqid` gives, in its

@@ -101,6 +101,7 @@ pub(crate) fn write_blastp_seqalign(
     write_hit_list_seqaligns(
         format,
         &run,
+        "blastp",
         hit_lists,
         queries,
         writer,

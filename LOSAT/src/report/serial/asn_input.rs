@@ -249,6 +249,17 @@ impl Names {
         allocator: "NCBI's reader",
         own_serial_message: false,
     };
+    /// A search strategy file of `-import_search_strategy` (`report::archive::read::import`). The
+    /// import has no message of its own for a `CSerialException`: a value of another class
+    /// (`:name`) is LOSAT's refusal (`read::TypedReader::other_type`), as in the other files that
+    /// LOSAT reads without such a message.
+    pub(crate) const STRATEGY: Names = Names {
+        document: "search strategy",
+        reader: "search strategy reader",
+        input: "input",
+        allocator: "NCBI's reader",
+        own_serial_message: false,
+    };
     /// The documents of the tests of the readers.
     #[cfg(test)]
     pub(crate) const TEST: Names = Names {
@@ -804,10 +815,13 @@ impl<S: AsnSource> Input for TextInput<S> {
         StreamPosition::Line(self.r.line as u64)
     }
 
-    /// The state of a new `CObjectIStreamAsn` at the next byte: line 1, no block started.
+    /// The state of a new `CObjectIStreamAsn` at the next byte: line 1, no block started. The
+    /// bytes before it are not read again (a stream keeps about one object, not the objects
+    /// before it).
     fn new_object(&mut self) {
         self.r.line = 1;
         self.block_start = false;
+        self.r.src.release_before(self.r.pos);
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:98-109

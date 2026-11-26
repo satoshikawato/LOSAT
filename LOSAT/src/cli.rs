@@ -3,7 +3,7 @@
 
 use crate::blastinput::ncbi_environment::DiagTarget;
 use crate::ncbi_app::args::Refusal;
-use crate::wording::{DATABASE_ERROR, QUERY_OPTIONS_ERROR};
+use crate::wording::{DATABASE_ERROR, ENGINE_ERROR, OPTIONS_ERROR, QUERY_OPTIONS_ERROR};
 use std::{ffi::OsString, fmt};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:47-49
@@ -316,6 +316,40 @@ pub(crate) fn top_level(argv: &[OsString]) -> TopLevel {
         text,
         error,
         status: if error { 2 } else { 0 },
+    }
+}
+
+/// The arguments that a program's command line gave, by NCBI's names, each with the text of its
+/// value (empty for a flag), in the order of the command line: what the import of a search
+/// strategy compares with NCBI's defaults (`report::archive::read::import::NcbiArguments`, which
+/// keeps them by name, as NCBI's `CArgs` holds them). Read from NCBI's argument reader
+/// (`ncbi_app::args::Args::given_values`) only for a command line that gives
+/// `-import_search_strategy`: the only reader. Every read of an argv makes its own (a default
+/// argument list read later does not replace them).
+#[derive(Debug, Clone, Default)]
+pub struct GivenArguments {
+    list: Vec<(String, String)>,
+}
+
+impl GivenArguments {
+    /// The arguments that `args` gave, when they give `-import_search_strategy`; else none.
+    pub(crate) fn from_args(args: &crate::ncbi_app::args::Args) -> Self {
+        if !args.given("import_search_strategy") {
+            return Self::default();
+        }
+        let list = args
+            .given_values()
+            .map(|(name, value)| {
+                let text = value.map(|value| value.to_string_lossy().into_owned());
+                (name.to_string(), text.unwrap_or_default())
+            })
+            .collect();
+        Self { list }
+    }
+
+    /// The arguments given, as `(name, text)`.
+    pub(crate) fn list(&self) -> &[(String, String)] {
+        &self.list
     }
 }
 
@@ -697,6 +731,34 @@ impl NativeError {
     /// `common::database::database_error`'s). The one producer of these reports: an exception of
     /// NCBI's that LOSAT raises where NCBI throws it becomes this error.
     pub(crate) fn exception(e: &crate::ncbi_exception::NcbiException) -> NativeError {
+        // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:216-229
+        // NCBI reference (598d8ae6): c++/include/algo/blast/api/remote_blast.hpp:63-64
+        // `CATCH_ALL`'s clause of `CBlastException`, which also catches its subclass
+        // `CRemoteBlastException`.
+        if e.kind().starts_with("CBlastException::")
+            || e.kind().starts_with("CRemoteBlastException::")
+        {
+            let msg = e.get_msg();
+            let has = |text: &[u8]| msg.windows(text.len()).any(|part| part == text);
+            return if e.kind() == "CBlastException::eInvalidOptions" {
+                NativeError {
+                    exit: 1,
+                    message: [OPTIONS_ERROR.as_bytes(), b" ", msg, b"\n"].concat(),
+                }
+            } else if has(b"Out of memory") || has(b"Failed to allocate") {
+                // The message names an allocation that failed: exit status 4
+                // (`BLAST_OUT_OF_MEMORY`), the report of `out_of_memory` with the message.
+                NativeError {
+                    exit: 4,
+                    message: [crate::wording::OUT_OF_MEMORY.as_bytes(), b": ", msg, b"\n"].concat(),
+                }
+            } else {
+                NativeError {
+                    exit: 3,
+                    message: [ENGINE_ERROR.as_bytes(), b" ", msg, b"\n"].concat(),
+                }
+            };
+        }
         if e.kind().starts_with("CSeqDBException::") {
             return NativeError {
                 exit: 2,

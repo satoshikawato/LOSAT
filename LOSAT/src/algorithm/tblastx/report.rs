@@ -1314,7 +1314,11 @@ pub(crate) enum TblastxOutputFormat {
     Xml2(crate::report::blast_xml2::Xml2Kind),
     /// The BLAST archive (outfmt 11, `tblastx/archive.rs`): one document per query batch.
     Archive,
-    /// A value that TBLASTX does not write (17, and a value that NCBI cannot read), which the
+    /// SAM (outfmt 17, `tblastx/sam.rs`), which only BLASTN's application writes: a TBLASTX search
+    /// strategy that it runs (a TBLASTX run itself fails at its formatting handler, `app::
+    /// formatting_handler_check`). The document is written at the end of the run.
+    Sam(crate::report::sam::SamSpec),
+    /// A value that TBLASTX does not write (a value that NCBI cannot read), which the
     /// command line, the library and LOSAT Web refuse before the search
     /// (`ReportFormat::writes`, `app::report_format`): its writer refuses it, no report is
     /// written for it.
@@ -1367,6 +1371,7 @@ impl TblastxOutputFormat {
                 | Self::Xml
                 | Self::Xml2(_)
                 | Self::Archive
+                | Self::Sam(_)
                 | Self::CustomTabular(_)
                 | Self::Unsupported
         )
@@ -1418,7 +1423,7 @@ impl TblastxOutputFormat {
     /// The format as the first format of a TBLASTX run that NCBI's prefetch of each query batch
     /// asks (`common::database::PrefetchFormat`, the one owner of whether a batch prefetches).
     pub(crate) fn prefetch_format(self) -> crate::algorithm::common::database::PrefetchFormat {
-        use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, END_VALUE, JSON, XML};
+        use crate::blastinput::app::output_format::{ARCHIVE_FORMAT, END_VALUE, JSON, SAM, XML};
         crate::algorithm::common::database::PrefetchFormat::of(
             match self {
                 // `s_IsPrefetchFormat` takes 1 to 4 as 0 (DECISIONS T3-4).
@@ -1435,6 +1440,7 @@ impl TblastxOutputFormat {
                     _ => 6,
                 },
                 Self::Seqalign(serial) => serial.outfmt(),
+                Self::Sam(_) => SAM,
                 // The XML2 and JSON documents prefetch as each of 13 to 16 does.
                 Self::Xml2(_) => JSON,
                 Self::Archive => ARCHIVE_FORMAT,
@@ -1457,6 +1463,12 @@ impl TblastxOutputFormat {
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:770-786
 pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
     let choice = crate::blastinput::app::parse_formatting_string(outfmt);
+    // SAM reads its custom specification (`SQ`, `SR`) and ignores a delimiter.
+    if let Ok(choice) = &choice {
+        if choice.number == crate::blastinput::app::output_format::SAM {
+            return TblastxOutputFormat::Sam(crate::report::sam::SamSpec::parse(&choice.spec));
+        }
+    }
     // Only a value with a custom specification, or outfmt 10 or 20, reads the field list;
     // outfmt 18 (the organism report) is written from the same hit list.
     if let Ok(choice) = &choice {

@@ -1801,6 +1801,59 @@ pub(crate) fn ungapped_segments(
     }
 }
 
+/// A subject's Std-segs whose rows change a strand from one Std-seg to the next, which
+/// `CreateDensegFromStdseg` cannot make into a Dense-seg (`translated_segments`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct InconsistentStrands;
+
+/// The Dense-seg that NCBI's SAM formatter makes of the Seq-align of a translated ungapped
+/// search's subject (`CreateDensegFromStdseg`): one segment per Std-seg (the HSPs, in the Seq-align's
+/// order), whose rows' starts and lengths are the Std-segs' nucleotide intervals
+/// (`ungapped_interval`, as `write_seq_align_diags` writes them) minus the range starts that the
+/// caller adds, and whose rows' strands are the first Std-seg's. Both rows of a segment have the
+/// same length, so no width is determined. The conversion throws where a row's strand differs from
+/// one Std-seg to the next (the HSPs of one subject lie on different strands of the same
+/// sequence): `Err`, with `segments` left unfinished. The SAM formatter reads the segments as it
+/// reads those of the other searches (`report::sam`).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:740-900
+/// NCBI reference (598d8ae6): c++/src/objects/seqalign/Seq_align.cpp:815-830
+pub(crate) fn translated_segments(
+    query: &QueryRecord<'_>,
+    subject: &SubjectRecord<'_>,
+    hsps: &[HspRecord<'_>],
+    segments: &mut Segments,
+) -> Result<(), InconsistentStrands> {
+    segments.starts.clear();
+    segments.lens.clear();
+    segments.strands.clear();
+    let mut row_strands = [Strand::Unknown; 2];
+    for (seg, hsp) in hsps.iter().enumerate() {
+        let (q_from, q_to) =
+            ungapped_interval(hsp.q_offset, hsp.q_end, hsp.q_frame, query.searched_length);
+        let (s_from, _) = ungapped_interval(
+            hsp.s_offset,
+            hsp.s_end,
+            hsp.s_frame,
+            subject.searched_length,
+        );
+        for (row, frame) in [hsp.q_frame, hsp.s_frame].into_iter().enumerate() {
+            let strand = Strand::of_frame(frame);
+            if seg == 0 || row_strands[row] == Strand::Unknown {
+                row_strands[row] = strand;
+            } else if row_strands[row] != strand {
+                return Err(InconsistentStrands);
+            }
+        }
+        segments.starts.extend([q_from, s_from]);
+        segments.lens.push(q_to - q_from + 1);
+    }
+    for _ in hsps {
+        segments.strands.extend(row_strands);
+    }
+    Ok(())
+}
+
 /// The two Seq-intervals of the Std-seg of an ungapped HSP of length 0 (BLASTX's one-hit word
 /// finder with `-window_size 0`, `algorithm::blastx::empty_rows`), whose rows start at `from`
 /// (query, subject) and end one before (`to = from - 1`, in NCBI's unsigned `TSeqPos`: a row
@@ -2027,7 +2080,7 @@ fn write_seq_align_gapped<E: Encoder>(
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1417-1431
 /// (Every other program, `else // Translated search`, makes Std-segs. RPS-BLAST, which LOSAT's
 /// reports of this writer do not include, makes Dense-diags too.)
-fn untranslated(program: Program) -> bool {
+pub(crate) fn untranslated(program: Program) -> bool {
     !query_is_translated(program) && !subject_is_translated(program)
 }
 
@@ -2211,6 +2264,7 @@ pub fn write_query(
 pub(crate) fn write_query_to(
     format: SerialFormat,
     run: &RunRecord<'_>,
+    app: &str,
     query: &QueryRecord<'_>,
     subjects: &[SubjectRecord<'_>],
     hsps: &[HspRecord<'_>],
@@ -2239,7 +2293,7 @@ pub(crate) fn write_query_to(
         Ok(false) => {}
         Err(SeqAlignError::Serial(SerialError::NonVisibleChar(byte))) => {
             writer.site(Site::Serial { whole: false })?;
-            write_query_posting(format, byte, &document, buf, writer, diagnostics)?;
+            write_query_posting(format, byte, app, &document, buf, writer, diagnostics)?;
             writer.ncbi_flush()?;
             writer.site(Site::Report)?;
         }
@@ -2321,15 +2375,15 @@ struct QueryDocument<'r, 'a> {
 fn write_query_posting(
     format: SerialFormat,
     byte: u8,
+    app: &str,
     document: &QueryDocument<'_, '_>,
     buf: &mut Vec<u8>,
     writer: &mut dyn ReportWrite,
     diagnostics: &mut dyn Write,
 ) -> anyhow::Result<()> {
     buf.clear();
-    let prefix = RequestKind::from(document.run.program).application();
     let post = |replaced: &ReplacedChar| {
-        diagnostics.write_all(&replaced.post(Some(prefix)))?;
+        diagnostics.write_all(&replaced.post(Some(app)))?;
         diagnostics.flush()
     };
     match format {
@@ -2376,6 +2430,7 @@ fn write_traced<E: Encoder>(
 pub(crate) fn write_hit_list_seqaligns<'a, L>(
     format: SerialFormat,
     run: &RunRecord<'_>,
+    app: &str,
     hit_lists: &'a [Option<L>],
     queries: &QueryNames<'_>,
     writer: &mut dyn ReportWrite,
@@ -2395,6 +2450,7 @@ pub(crate) fn write_hit_list_seqaligns<'a, L>(
         write_query_to(
             format,
             run,
+            app,
             &queries.record(q_idx),
             &subject_records,
             &hsp_records,

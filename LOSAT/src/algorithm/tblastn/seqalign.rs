@@ -84,6 +84,7 @@ pub(super) fn write_tblastn_seqalign(
         write_query_to(
             format,
             &run,
+            "tblastn",
             &query,
             &subjects,
             &hsps,

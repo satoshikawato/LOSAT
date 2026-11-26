@@ -54,7 +54,18 @@ pub(super) enum ShownSubjects<'a> {
 }
 
 impl ShownSubjects<'_> {
-    /// The name after `# Database: ` (outfmt 7) and in the pairwise report of a subject set.
+    /// The name in the pairwise report (`report::pairwise::scan_mode_definition`: an imported
+    /// strategy's subjects, an empty tag, name no input).
+    pub(super) fn pairwise_name(&self) -> String {
+        match self {
+            Self::Fasta { path, .. } => {
+                crate::report::pairwise::scan_mode_definition(&path.display().to_string())
+            }
+            Self::Database { name, .. } => name.to_string(),
+        }
+    }
+
+    /// The name after `# Database: ` (outfmt 7) of a subject set or a database.
     pub(super) fn name(&self) -> String {
         match self {
             Self::Fasta { path, .. } => {
@@ -1736,7 +1747,7 @@ fn write_pairwise(
     }
     let report = BlastpPairwiseReport {
         version: crate::wording::REPORT_VERSION.into(),
-        database_name: shown.name().into(),
+        database_name: shown.pairwise_name().into(),
         database_num_sequences: num_sequences,
         database_total_letters: total_nt,
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2267

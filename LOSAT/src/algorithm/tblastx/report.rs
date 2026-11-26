@@ -1396,6 +1396,7 @@ impl TblastxOutputFormat {
             Self::Xml => Some(ReportFormat::Xml),
             Self::Xml2(kind) => Some(kind.report_format()),
             Self::Archive => Some(ReportFormat::ArchiveFormat),
+            Self::Sam(_) => Some(ReportFormat::Sam),
             Self::Unsupported => None,
         }
     }

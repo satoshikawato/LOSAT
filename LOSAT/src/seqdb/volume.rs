@@ -826,8 +826,7 @@ impl Volume {
         }
         if all_positive
             || (all_non_negative
-                && u64::from(seq_offsets[seq_offsets.len() - 1])
-                    <= self.seq_file()?.readable_len())
+                && u64::from(seq_offsets[seq_offsets.len() - 1]) <= self.seq_file()?.readable_len())
         {
             return self.read_checked_block_with_offsets(
                 first_ordinal,

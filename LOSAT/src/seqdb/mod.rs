@@ -1586,6 +1586,7 @@ impl SeqDb {
         seqtype: SeqType,
         path: &SearchPath,
     ) -> Result<DbReadPaths, SeqDbError> {
+        use crate::writedb::build_db::{LMDB_EXTENSIONS, VOLUME_EXTENSIONS};
         let tree = alias::resolve_in(name, seqtype, path)?;
         let volumes = Self::sort_volume_set(tree.volumes.into_iter().collect());
         let mut alias_files = std::collections::BTreeSet::new();
@@ -1600,12 +1601,7 @@ impl SeqDb {
         for alias in &alias_files {
             files.insert(alias.clone());
             if let Some(stem) = strip_ascii_suffix(alias, alias_suffix) {
-                push_mol_extensions(
-                    &mut files,
-                    stem,
-                    mol,
-                    &crate::writedb::build_db::LMDB_EXTENSIONS,
-                );
+                push_mol_extensions(&mut files, stem, mol, &LMDB_EXTENSIONS);
                 files.insert([stem, b".", mol, b"js"].concat());
             }
         }
@@ -1616,18 +1612,8 @@ impl SeqDb {
             }
         }
         for volume in &volumes {
-            push_mol_extensions(
-                &mut files,
-                volume,
-                mol,
-                &crate::writedb::build_db::VOLUME_EXTENSIONS,
-            );
-            push_mol_extensions(
-                &mut files,
-                volume,
-                mol,
-                &crate::writedb::build_db::LMDB_EXTENSIONS,
-            );
+            push_mol_extensions(&mut files, volume, mol, &VOLUME_EXTENSIONS);
+            push_mol_extensions(&mut files, volume, mol, &LMDB_EXTENSIONS);
             if seqtype == SeqType::Protein {
                 for ext in rps::RPS_EXTENSIONS {
                     files.insert([volume.as_slice(), b".", ext.as_bytes()].concat());

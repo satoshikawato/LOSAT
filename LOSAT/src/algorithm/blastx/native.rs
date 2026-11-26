@@ -874,7 +874,7 @@ fn run_inner(
                 results,
                 options.gapped,
                 asks,
-                &mut posts,
+                (&mut posts, None),
             )
             .inspect_err(drop_held)?,
             None => None,
@@ -1056,6 +1056,9 @@ pub(super) struct ReportedAsks {
     /// Whether a report writes otherwise where every load of a subject with a positive taxid
     /// throws (not `report::db_subject::unchanged_by_load_throws`), for the batches' prefetch.
     changed_by_load_throws: bool,
+    /// What the reports read of a definition line besides the Seq-aligns
+    /// (`common::database::TitleReads`; by default the prefetch or a formatter).
+    titles: crate::algorithm::common::database::TitleReads,
 }
 
 impl ReportedAsks {
@@ -1119,6 +1122,23 @@ impl ReportedAsks {
                     crate::blastinput::app::Program::Blastx,
                 )
             }),
+            titles: crate::algorithm::common::database::TitleReads::of_outfmts(
+                options.request_kind(),
+                [i32::from(options.outfmt)],
+            ),
+        }
+    }
+
+    /// What the BLAST archive (outfmt 11) asks, written from the batch's Seq-aligns: nothing of
+    /// the reported sequences but their titles' reads by the Seq-aligns
+    /// (`common::database::TitleReads::SeqAligns` for BLASTX; `Reports` for RPSTBLASTN).
+    pub(super) fn of_archive(options: &super::args::ResolvedOptions) -> Self {
+        Self {
+            titles: crate::algorithm::common::database::TitleReads::of_outfmts(
+                options.request_kind(),
+                [11],
+            ),
+            ..Self::default()
         }
     }
 
@@ -1135,10 +1155,14 @@ impl ReportedAsks {
             .map(Self::of)
             .reduce(Self::or)
             .unwrap_or_default();
+        let app = options.first().map_or(
+            crate::report::archive::options::RequestKind::Blastx,
+            super::args::ResolvedOptions::request_kind,
+        );
         asks.throw = asks.throw.of_search(
             others,
             crate::blastinput::app::Program::Blastx,
-            crate::report::archive::options::RequestKind::Blastx,
+            app,
             options.iter().any(|options| options.html.is_some()),
         );
         asks.prefetched = options
@@ -1147,6 +1171,10 @@ impl ReportedAsks {
         asks.one_by_one = options
             .first()
             .is_some_and(|options| Self::of(options).one_by_one);
+        asks.titles = crate::algorithm::common::database::TitleReads::of_outfmts(
+            app,
+            options.iter().map(|options| i32::from(options.outfmt)),
+        );
         asks
     }
 
@@ -1165,6 +1193,11 @@ impl ReportedAsks {
             one_by_one: self.one_by_one || other.one_by_one,
             throw: self.throw.and(other.throw),
             changed_by_load_throws: self.changed_by_load_throws || other.changed_by_load_throws,
+            titles: if self.titles == other.titles {
+                self.titles
+            } else {
+                crate::algorithm::common::database::TitleReads::Reports
+            },
         }
     }
 }
@@ -1191,14 +1224,20 @@ fn reported_error(error: anyhow::Error) -> anyhow::Error {
 /// read (the batch's search failed with that error).
 /// NCBI's warning of its first read of a UTF8String header (`BatchTitles::utf8`, or that of the
 /// failed read) is written to `diagnostics` there: after the batch's reader messages and request
-/// posts, before its prefetch.
+/// posts, before its prefetch; then NCBI's posts of the titles that the batch's Seq-aligns read
+/// (`common::database::batch_title_posts`, or those before a failed read,
+/// `ErrorAfterBatchReports::title_posts`), each one message of the run's BLAST archive (`archive`,
+/// `diag_log::Posts::write`).
 pub(super) fn batch_titles(
     database: &BlastxDatabase,
     search_subjects: Subjects<'_>,
     results: &mut [BatchResults],
     gapped: bool,
     asks: ReportedAsks,
-    diagnostics: &mut dyn Write,
+    (diagnostics, archive): (
+        &mut dyn Write,
+        Option<&crate::report::archive::ArchiveHandle>,
+    ),
 ) -> Result<Option<super::database::BatchTitles>> {
     use super::x_timing::Run as XRun;
     if matches!(search_subjects, Subjects::Unreadable) {
@@ -1218,18 +1257,52 @@ pub(super) fn batch_titles(
         database,
         results,
         gapped,
-        asks.pairwise,
+        (asks.pairwise, asks.titles),
         (earlier, asks.one_by_one),
     );
     super::x_timing::run(XRun::Titles, x_t);
-    if let Some(posts) = Utf8Read::post_of(
+    let utf8 = Utf8Read::post_of(
         Utf8Read::of_read(&titles, |titles| titles.utf8.as_ref()),
         &database.db,
         &database.post_prefix(),
-    ) {
+    );
+    if let Some(posts) = &utf8 {
         posts.write(diagnostics, None)?;
     }
-    titles.map(Some).map_err(reported_error)
+    // NCBI's posts of the titles that the batch's Seq-aligns read, in `read_titles`' order.
+    let aligned = results.iter().flat_map(|batch| {
+        batch.queries.iter().flat_map(|lists| {
+            lists
+                .iter()
+                .filter(move |list| super::report::reported(list, gapped))
+                .filter_map(|list| u32::try_from(list.oid).ok())
+        })
+    });
+    let titles = match titles {
+        Ok(titles) => titles,
+        Err(error) => {
+            // A read that NCBI cannot make ends the batch's Seq-aligns: the posts of the reads
+            // before it come before its error.
+            let error =
+                crate::blastinput::app::ErrorAfterBatchReports::after_seq_aligns(error, aligned);
+            if let Some(failure) =
+                error.downcast_ref::<crate::blastinput::app::ErrorAfterBatchReports>()
+            {
+                failure
+                    .title_posts(&database.db, utf8.is_some(), database.program)?
+                    .write(diagnostics, archive)?;
+            }
+            return Err(reported_error(error));
+        }
+    };
+    crate::algorithm::common::database::batch_title_posts(
+        &database.db,
+        aligned,
+        utf8.is_some(),
+        database.program,
+    )?
+    .write(diagnostics, archive)?;
+    Ok(Some(titles))
 }
 
 /// What NCBI's prefetch (`BlastFormatter_PreFetchSequenceData`, cited at `reported_batch`) does

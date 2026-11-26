@@ -1592,7 +1592,9 @@ fn listed_subjects_are_read_by_ordinal_and_renamed_to_ranks() {
             &HitLoads::default(),
         )
         .unwrap();
-    titles.check_reported_titles(&hit_lists).unwrap();
+    titles
+        .check_reported_titles(&database, &hit_lists, shared::TitleReads::Reports)
+        .unwrap();
 }
 
 // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles are the records' titles, rank by rank,
@@ -1655,7 +1657,8 @@ fn lean_titles_are_the_records_titles_and_letters() {
         &HitLoads::default(),
     )
     .unwrap();
-    lean.check_reported_titles(&hit_lists).unwrap();
+    lean.check_reported_titles(&database, &hit_lists, shared::TitleReads::Reports)
+        .unwrap();
     assert_eq!(lean.stitles(), records.stitles());
     // Titles, flags and every letter against the stored residues.
     x_assert_same_titles_and_letters(&lean, &records);
@@ -1771,8 +1774,9 @@ fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
 }
 
 // NCBI BLAST+ 2.17.0 writes `Error: (803.7) [blastp] Blast-def-line-set.E.title`,
-// `Bad char [0xE9] in string at byte 21` and the stored title to standard error
-// each time its formatter reads such a definition line (`check_reported_titles`).
+// `Bad char [0xE9] in string at byte 24` and the stored title to standard error
+// each time it reads such a definition line past SeqDB's header cache
+// (`check_reported_titles`, `title_posts`).
 // (A path in the system's temporary directory or in an error text: Unix spelling.)
 #[cfg(unix)]
 #[test]
@@ -1810,7 +1814,9 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
     let titles = listed
         .read_titles(&database, &hit_lists, (&[0], false))
         .unwrap();
-    titles.check_reported_titles(&hit_lists).unwrap();
+    titles
+        .check_reported_titles(&database, &hit_lists, shared::TitleReads::Reports)
+        .unwrap();
     // The subject with the bad byte: read as `#`, and rejected when it is reported.
     let mut bad = BlastpHitList::new(10);
     bad.update(list(9));
@@ -1821,7 +1827,9 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         .read_titles(&database, &hit_lists, (&[0], false))
         .unwrap();
     assert_eq!(titles.records()[1].title(), b"p10 l#st protein");
-    let error = titles.check_reported_titles(&hit_lists).unwrap_err();
+    let error = titles
+        .check_reported_titles(&database, &hit_lists, shared::TitleReads::Reports)
+        .unwrap_err();
     assert!(
         format!("{error:#}")
             .starts_with("database sequence 9 has a stored title with a byte outside ' ' to '~'"),
@@ -1833,8 +1841,30 @@ fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
         .x_read_titles_lean(&database, &hit_lists, (&[0], false))
         .unwrap();
     assert_eq!(lean.title(1), b"p10 l#st protein");
-    let lean_error = lean.check_reported_titles(&hit_lists).unwrap_err();
+    let lean_error = lean
+        .check_reported_titles(&database, &hit_lists, shared::TitleReads::Reports)
+        .unwrap_err();
     assert_eq!(format!("{lean_error:#}"), format!("{error:#}"));
+    // Where only the Seq-aligns read the definition lines (outfmt 8, 9, 11 and 12), NCBI's
+    // posts are written instead: one per bad byte at the first read of the subject, none at a
+    // read that SeqDB's header cache answers.
+    titles
+        .check_reported_titles(&database, &hit_lists, shared::TitleReads::SeqAligns)
+        .unwrap();
+    let posts = titles
+        .title_posts(&database, &hit_lists, [&(0..1)])
+        .unwrap();
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].0, 0);
+    assert_eq!(
+        posts[0].1.text(),
+        b"Error: (803.7) [blastp] Blast-def-line-set.E.title\nBad char [0xE9] in string at \
+          byte 24\np10 l\xe9st protein\n"
+    );
+    assert!(titles
+        .title_posts(&database, &hit_lists, [&(0..1)])
+        .unwrap()
+        .is_empty());
     drop(database);
     std::fs::remove_dir_all(&dir).unwrap();
 }

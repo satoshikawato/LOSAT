@@ -1019,3 +1019,44 @@ fn a_taxonomy_file_that_does_not_open_throws_at_every_lookup() {
     assert_eq!(db.open_messages(), [MSG_WRONG_MAGIC]);
     mode(&dir.join("taxdb.btd"), 0o644);
 }
+
+#[test]
+fn lookup_files_includes_bti_and_paired_btd_when_bti_exists() {
+    use crate::algorithm::common::database::OutfmtTaxdbUse;
+    let dir = TempDir::unique("taxdb-lookup-files");
+    let dir_bytes = dir.as_os_str().as_encoded_bytes();
+    let has_path = |list: &[Vec<u8>], path: &std::path::Path| {
+        let want = path.as_os_str().as_encoded_bytes();
+        list.iter().any(|p| p.as_slice() == want)
+    };
+    let lookup = |u, btd| super::lookup_files_for_use(Some(dir_bytes), u, btd);
+    // Without taxdb.bti in `dir`, Always lists taxdb.bti (not taxdb.btd), while WhenPresent and
+    // None return empty (when no taxdb exists on disk).
+    let without = super::lookup_files(Some(dir_bytes));
+    let dir_bti = dir.join("taxdb.bti");
+    let dir_btd = dir.join("taxdb.btd");
+    assert!(without.iter().any(|p| p == b"taxdb.bti"));
+    assert!(has_path(&without, &dir_bti));
+    assert!(!has_path(&without, &dir_btd));
+    assert!(lookup(OutfmtTaxdbUse::WhenPresent, true).is_empty());
+    assert!(lookup(OutfmtTaxdbUse::None, true).is_empty());
+    // When only taxdb.btd exists in `dir`, prefetch / WhenPresent lists its paired taxdb.bti.
+    std::fs::write(&dir_btd, [0u8; 32]).unwrap();
+    let with_btd_only = lookup(OutfmtTaxdbUse::None, true);
+    assert!(has_path(&with_btd_only, &dir_bti));
+    assert!(!with_btd_only.iter().any(|p| p == b"taxdb.bti"));
+    assert!(lookup(OutfmtTaxdbUse::None, false).is_empty());
+    std::fs::remove_file(&dir_btd).unwrap();
+    // Once taxdb.bti exists in `dir`, both Always and WhenPresent list cwd taxdb.bti (shadow) and
+    // dir's paired taxdb.btd, while None remains empty.
+    std::fs::write(&dir_bti, [0u8; 32]).unwrap();
+    let with = super::lookup_files(Some(dir_bytes));
+    assert!(has_path(&with, &dir_btd));
+    let when_present = lookup(OutfmtTaxdbUse::WhenPresent, false);
+    assert!(when_present.iter().any(|p| p == b"taxdb.bti"));
+    assert!(has_path(&when_present, &dir_btd));
+    assert!(
+        lookup(OutfmtTaxdbUse::None, true).is_empty(),
+        "None stays empty when taxdb.bti exists"
+    );
+}

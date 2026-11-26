@@ -818,7 +818,7 @@ fn write_run(
                 results,
                 search_options.gapped,
                 asks,
-                &mut *diagnostics,
+                (&mut *diagnostics, archive),
             )?,
             None => None,
         };

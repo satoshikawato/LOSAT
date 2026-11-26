@@ -1379,6 +1379,30 @@ impl TblastxOutputFormat {
         )
     }
 
+    /// The `-outfmt` format of the report (`ReportFormat`), or `None` for `Unsupported`.
+    pub(crate) fn report_format(self) -> Option<crate::blastinput::app::ReportFormat> {
+        use crate::blastinput::app::ReportFormat;
+        use crate::report::tabular::TabularKind;
+        match self {
+            Self::Pairwise(view) => ReportFormat::from_number(view.outfmt()),
+            Self::Tabular => Some(ReportFormat::Tabular),
+            Self::TabularWithComments => Some(ReportFormat::TabularWithComments),
+            Self::CustomTabular(spec) => Some(match spec.kind {
+                TabularKind::Tabular => ReportFormat::Tabular,
+                TabularKind::Commented => ReportFormat::TabularWithComments,
+                TabularKind::Csv => ReportFormat::CommaSeparatedValues,
+                TabularKind::CsvWithHeader => ReportFormat::CommaSeparatedValuesWithHeader,
+                TabularKind::TaxReport => ReportFormat::TaxFormat,
+            }),
+            Self::Seqalign(serial) => ReportFormat::from_number(serial.outfmt()),
+            Self::Xml => Some(ReportFormat::Xml),
+            Self::Xml2(kind) => Some(kind.report_format()),
+            Self::Archive => Some(ReportFormat::ArchiveFormat),
+            Self::Sam(_) => Some(ReportFormat::Sam),
+            Self::Unsupported => None,
+        }
+    }
+
     /// Whether the format is BLAST XML (5) or one of its XML2 / JSON siblings (15, 16), which
     /// are made from the same records and refuse the same names.
     pub(crate) fn is_structured_xml(self) -> bool {

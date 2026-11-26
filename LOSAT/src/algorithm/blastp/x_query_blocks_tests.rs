@@ -238,6 +238,7 @@ fn the_xml_checks_agree_with_the_writers_functions() {
             true,
             &[Vec::new()],
             |_| false,
+            |_| false,
         )
         .is_ok()
     };

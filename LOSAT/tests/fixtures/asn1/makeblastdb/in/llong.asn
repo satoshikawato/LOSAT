@@ -1,0 +1,1 @@
+Seq-entry ::= seq { id { local str "llong" }, descr { title "length longer" }, inst { repr raw, mol dna, length 8, seq-data iupacna "ACGT" } }

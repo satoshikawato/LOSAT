@@ -711,9 +711,12 @@ pub(super) fn check_search_limits(args: &ResolvedTblastnArgs) -> Result<()> {
             crate::core::x_drop::gapped_x_dropoffs(
                 args.xdrop_gap,
                 args.xdrop_gap_final,
-                args.pssm
-                    .as_deref()
-                    .map_or(gapped.lambda, |psi| psi.gapped_karlin(&gapped).lambda),
+                crate::core::x_drop::extension_lambda(
+                    &args
+                        .pssm
+                        .as_deref()
+                        .map_or(gapped, |psi| psi.gapped_karlin(&gapped)),
+                ),
             ),
             (args.gap_open, args.gap_extend),
             args.composition_mode == CompositionMode::NoCompositionBasedStats

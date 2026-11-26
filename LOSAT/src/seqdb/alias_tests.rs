@@ -202,3 +202,437 @@ fn the_stored_header_keeps_the_lines_the_type_erases() {
     let db = open("ompy", SeqType::Protein).unwrap();
     assert!((0..8).all(|oid| !db.erases_a_line_of_oid(oid).unwrap()));
 }
+
+fn memb_fixtures() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/memb_bit/db")
+}
+
+fn open_memb(name: &str, seqtype: SeqType) -> Result<SeqDb, SeqDbError> {
+    SeqDb::open(memb_fixtures().join(name).to_str().unwrap(), seqtype)
+}
+
+const MB1_LINES: [(u32, usize); 6] = [(0, 1), (1, 2), (2, 0), (3, 0), (4, 0), (5, 0)];
+const MEMB_CONFLICT: Option<&[u8]> = Some(b"MEMB_BIT error: conflicting bit found.");
+
+#[test]
+fn memb_bit_selects_defline_memberships_and_tracks_filters_header_sets() {
+    let db0 = open_memb("mb_0", SeqType::Protein).unwrap();
+    assert!(!db0.drops_lineless_hits());
+    assert!(!db0.filters_header_sets(db0.location_of(0).unwrap()));
+    assert_eq!(
+        lines(&db0),
+        [(0, 2), (1, 2), (2, 1), (3, 1), (4, 2), (5, 1)]
+    );
+
+    let db1 = open_memb("mb_1", SeqType::Protein).unwrap();
+    assert!(db1.drops_lineless_hits());
+    assert!(db1.filters_header_sets(db1.location_of(0).unwrap()));
+    assert_eq!(lines(&db1), MB1_LINES);
+    assert_eq!(
+        (0..6)
+            .map(|oid| db1.erases_a_line_of_oid(oid).unwrap())
+            .collect::<Vec<_>>(),
+        [true, false, true, true, true, true]
+    );
+
+    // OID 1 dl1 carries memberships {1, 2}: only front() (1) is tested, so bit 2 erases it.
+    let db2 = open_memb("mb_2", SeqType::Protein).unwrap();
+    assert_eq!(
+        lines(&db2),
+        [(0, 1), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0)]
+    );
+
+    // Bits 31 and 32 (INT_MIN = 0x8000_0000) work on OID 4.
+    let db31 = open_memb("mb_31", SeqType::Protein).unwrap();
+    let db32 = open_memb("mb_32", SeqType::Protein).unwrap();
+    assert_eq!(db31.defline_set(4).unwrap().deflines.len(), 1);
+    assert_eq!(db32.defline_set(4).unwrap().deflines.len(), 1);
+    assert_eq!(
+        db32.defline_set(4).unwrap().deflines[0].title.as_deref(),
+        Some(b"seq4_dl0 bit32".as_slice())
+    );
+    assert_eq!(
+        db31.defline_set(4).unwrap().deflines[0].title.as_deref(),
+        Some(b"seq4_dl1 bit31".as_slice())
+    );
+}
+
+#[test]
+fn memb_bit_conflicts_and_parse_order_match_ncbi() {
+    // Parse order in ComputeMasks: SEQIDLIST before MEMB_BIT before TAXIDLIST.
+    let err_si = open_memb("ord_si_mb", SeqType::Protein).unwrap_err();
+    assert!(
+        err_si.to_string().contains("has multiple SEQID lists"),
+        "{err_si}"
+    );
+    let err_tx = open_memb("ord_mb_tx", SeqType::Protein).unwrap_err();
+    assert!(
+        err_tx
+            .to_string()
+            .contains("Cannot convert string 'abc' to Uint8"),
+        "{err_tx}"
+    );
+
+    // Deferred conflict without NeedTotalsScan: open succeeds, build_oid_list fails.
+    let db = open_memb("conflict_plain", SeqType::Protein).unwrap();
+    let err = db.build_oid_list().unwrap_err();
+    assert_eq!(err.ncbi_message().as_deref(), MEMB_CONFLICT);
+    let site = super::super::throw_site(b"MEMB_BIT error: conflicting bit found.").unwrap();
+    assert_eq!(
+        (site.file, site.line, site.function),
+        (
+            "include/objtools/blast/seqdb_reader/impl/seqdbvol.hpp",
+            881,
+            None
+        )
+    );
+
+    // Parent 0 over child 1 conflicts; parent 1 over child 0 succeeds.
+    let db_0_1 = open_memb("nest_0_1", SeqType::Protein).unwrap();
+    assert_eq!(
+        db_0_1
+            .build_oid_list()
+            .unwrap_err()
+            .ncbi_message()
+            .as_deref(),
+        MEMB_CONFLICT
+    );
+    let db_1_0 = open_memb("nest_1_0", SeqType::Protein).unwrap();
+    assert!(db_1_0.build_oid_list().is_ok());
+    assert_eq!(lines(&db_1_0), MB1_LINES);
+
+    // Conflict with NeedTotalsScan (GILIST without NSEQ+LENGTH): fails at open.
+    let err_gi = open_memb("conflict_gi", SeqType::Protein).unwrap_err();
+    assert_eq!(err_gi.ncbi_message().as_deref(), MEMB_CONFLICT);
+}
+
+#[test]
+fn memb_bit_past_32_refuses_memberships_and_masklist_builds_oid_list() {
+    let dir = crate::utils::test_dir::temp_dir().join(format!(
+        "losat-memb33-{}",
+        crate::utils::test_dir::process_id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let alias = dir.join("mb33.pal");
+    std::fs::write(
+        &alias,
+        format!(
+            "DBLIST {}\nMEMB_BIT 33\n",
+            memb_fixtures().join("pm5").display()
+        ),
+    )
+    .unwrap();
+    let db = SeqDb::open(dir.join("mb33").to_str().unwrap(), SeqType::Protein).unwrap();
+    // OID 2 has no memberships: deterministically erased without UB.
+    assert_eq!(db.defline_set(2).unwrap().deflines.len(), 0);
+    // OID 0 carries memberships: refused explicitly.
+    let err = db.defline_set(0).unwrap_err();
+    assert!(
+        matches!(&err, SeqDbError::Unsupported { message, .. } if message.contains("past the 32 bits")),
+        "{err}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    // MASKLIST + conflicting MEMB_BIT under NSEQ+LENGTH: read_mask_block reports OID-list error.
+    let nog_cc = memb_fixtures().join("nogless").join("cc");
+    let db_cc = SeqDb::open(nog_cc.to_str().unwrap(), SeqType::Nucleotide).unwrap();
+    let range = db_cc.next_block(0, u64::MAX).unwrap();
+    let mut block = super::super::MaskBlock::default();
+    db_cc.read_mask_block(range, 0, &mut block);
+    let err = block.ranges(0).unwrap_err();
+    assert_eq!(err.error().ncbi_message().as_deref(), MEMB_CONFLICT);
+}
+
+#[test]
+fn v5_compare_seq_id_and_set_ops_match_ncbi_semantics() {
+    use super::{compare_seq_id, set_difference_by, set_intersection_by, validate_compare_seqids};
+
+    let cmp = |a: &[u8], b: &[u8]| {
+        compare_seq_id(
+            a,
+            Some(b"test.txt"),
+            "an alias file's SEQIDLIST",
+            b,
+            None,
+            "the search's -seqidlist",
+        )
+    };
+
+    // Versioned vs unversioned: equal under s_CompareSeqId (neither is less than the other).
+    assert!(!cmp(b"NP_000103.1", b"NP_000103").unwrap());
+    assert!(!cmp(b"NP_000103", b"NP_000103.1").unwrap());
+    // Distinct versions order lexicographically.
+    assert!(cmp(b"NP_000103.1", b"NP_000103.2").unwrap());
+    assert!(!cmp(b"NP_000103.2", b"NP_000103.1").unwrap());
+    // Local ids compare case-insensitively under CSeq_id::Compare.
+    assert!(!cmp(b"loc7", b"LOC7").unwrap());
+    assert!(!cmp(b"LOC7", b"loc7").unwrap());
+    // Unparseable FASTA form raises NCBI's CSeqIdException error.
+    assert!(cmp(b"sp||", b"NP_000103.1").is_err());
+
+    // Lists without differently spelled equivalent ids pass the strict-weak-ordering guard and
+    // sort uniquely by bytewise `<` (matching NCBI's std::sort + set_intersection/set_difference).
+    let mut a = vec![
+        b"NP_000118.1".to_vec(),
+        b"NP_000103".to_vec(),
+        b"LOC7".to_vec(),
+    ];
+    let mut b = vec![
+        b"loc7".to_vec(),
+        b"NP_000103.1".to_vec(),
+        b"P10102.1".to_vec(),
+    ];
+    a.sort_unstable();
+    b.sort_unstable();
+    validate_compare_seqids(a.as_slice(), Some(b"test.txt"), "an alias file's SEQIDLIST").unwrap();
+    validate_compare_seqids(b.as_slice(), None, "the search's -seqidlist").unwrap();
+
+    let mut less_lr = |x: &[u8], y: &[u8]| cmp(x, y);
+    let mut less_rl = |x: &[u8], y: &[u8]| cmp(x, y);
+    let inter =
+        set_intersection_by(a.as_slice(), b.as_slice(), &mut less_lr, &mut less_rl).unwrap();
+    assert_eq!(inter, vec![b"NP_000103".as_slice()]);
+    // Single-element case-different local ids compare equal directly.
+    let single_lhs = [b"LOC7".to_vec()];
+    let single_rhs = [b"loc7".to_vec()];
+    assert_eq!(
+        set_intersection_by(
+            single_lhs.as_slice(),
+            single_rhs.as_slice(),
+            &mut less_lr,
+            &mut less_rl
+        )
+        .unwrap(),
+        vec![b"LOC7".as_slice()]
+    );
+
+    let diff = set_difference_by(a.as_slice(), b.as_slice(), &mut less_lr, &mut less_rl).unwrap();
+    assert_eq!(diff, vec![b"LOC7".as_slice(), b"NP_000118.1".as_slice()]);
+
+    // Multiset semantics of std::set_difference: duplicate entries are preserved when not deduped.
+    let dup_lhs = [b"NP_000103.1".to_vec(), b"NP_000103.1".to_vec()];
+    let dup_rhs = [b"NP_000103.1".to_vec()];
+    let dup_diff = set_difference_by(
+        dup_lhs.as_slice(),
+        dup_rhs.as_slice(),
+        &mut less_lr,
+        &mut less_rl,
+    )
+    .unwrap();
+    assert_eq!(dup_diff, vec![b"NP_000103.1".as_slice()]);
+}
+
+#[test]
+fn v5_rejects_non_strict_weak_equivalent_seqid_pairs() {
+    use super::validate_compare_seqids;
+
+    let check = |ids: &[&[u8]]| {
+        let mut owned: Vec<Vec<u8>> = ids.iter().map(|s| s.to_vec()).collect();
+        owned.sort_unstable();
+        validate_compare_seqids(
+            owned.as_slice(),
+            Some(b"test.txt"),
+            "an alias file's SEQIDLIST",
+        )
+    };
+
+    // Unversioned + versioned pairs (all three permutations from the review probe), case-variant
+    // local/accession pairs, cross-database accession pairs, and chainless/chained PDB pairs must
+    // be explicitly refused.
+    for pair in [
+        &[
+            b"NP_000103".as_slice(),
+            b"NP_000103.1".as_slice(),
+            b"NP_000103.2".as_slice(),
+        ][..],
+        &[b"NP_000103.2", b"NP_000103", b"NP_000103.1"],
+        &[b"NP_000103.1", b"NP_000103.2", b"NP_000103"],
+        &[b"LOC7", b"loc7"],
+        &[b"NP_000103.1", b"np_000103.1"],
+        &[b"gb|AB000001.1|", b"emb|AB000001.1|"],
+        &[b"pdb|1ABC|A", b"pdb|1ABC|"],
+        &[b"123", b"gi|123"],
+        &[b"loc7", b"lcl|loc7"],
+    ] {
+        let err = check(pair).unwrap_err();
+        let text = err.to_error().to_string();
+        assert!(
+            text.contains("holds two differently spelled Seq-ids"),
+            "unexpected error for {pair:?}: {text}"
+        );
+    }
+
+    // Distinct versions without the unversioned form, unsorted non-equivalent ids, bare GI vs
+    // local integer (`123` parses as GI under `fParse_AnyRaw`), single-entry lists, and identical
+    // bytewise duplicates (even unparseable ones, where s_CompareSeqId short-circuits id1 == id2)
+    // are allowed.
+    for ok in [
+        &[][..],
+        &[b"NP_000103".as_slice()],
+        &[b"NP_000118.1", b"NP_000103.1"],
+        &[b"NP_000103.2", b"NP_000103.1", b"LOC7"],
+        &[b"123", b"lcl|123"],
+        &[b"NP_000103.1", b"NP_000103.1"],
+        &[b"sp||", b"sp||"],
+    ] {
+        assert!(check(ok).is_ok(), "unexpected refusal for {ok:?}");
+    }
+
+    // One common exception text across all unparseable entries raises NCBI's CSeqIdException
+    // (including two distinct NUL-prefixed tokens whose C-string `what()` is identical).
+    for unparseable in [
+        &[b"sp||".as_slice(), b"NP_000103.1".as_slice()][..],
+        &[b"NP_000103", b"NP_000103.1", b"sp||"],
+        &[b"\x00aaa", b"\x00bbb", b"NP_000103.1"],
+    ] {
+        let err = check(unparseable).unwrap_err().to_error();
+        assert!(err.ncbi_exception().is_some(), "{unparseable:?}: {err}");
+    }
+
+    // Two or more distinct exception texts depend on the C++ library's sort order and are refused
+    // identically across all input permutations.
+    for multi_exc in [
+        &[
+            b"sp||".as_slice(),
+            b"tr||".as_slice(),
+            b"NP_000103.1".as_slice(),
+        ][..],
+        &[b"tr||", b"sp||", b"NP_000103.1"],
+        &[b"NP_000103.1", b"sp||", b"tr||"],
+        &[b"NP_000103.1", b"tr||", b"sp||"],
+        &[b"\x00aaa", b"PM\x00bbb"],
+    ] {
+        let err = check(multi_exc).unwrap_err().to_error().to_string();
+        assert!(
+            err.contains("fail NCBI's `s_CompareSeqId` with different exceptions"),
+            "{multi_exc:?}: {err}"
+        );
+    }
+
+    // A Seq-id that posts a warning alongside an unparseable token is refused (step 1 before
+    // step 3) regardless of whether the warning sorts before or after the unparseable token.
+    // `AAAAA01P000001` (5+8 with protein flag `P` and division 0) posts accguide warning 11.
+    for warn_and_bad in [
+        [b"AAAAA01P000001".as_slice(), b"sp||".as_slice()],
+        [b"\x00bad".as_slice(), b"AAAAA01P000001".as_slice()],
+    ] {
+        let err = check(&warn_and_bad).unwrap_err().to_error().to_string();
+        assert!(
+            err.contains("posts a Seq-id warning"),
+            "{warn_and_bad:?}: {err}"
+        );
+    }
+
+    // End-to-end SeqDb::restrict_seqids checks over the idlist fixtures:
+    // 1. Without a search seqid list, an alias SEQIDLIST with equivalent spellings opens normally.
+    let idlist = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/idlist");
+    let open_id =
+        |name: &str| SeqDb::open(idlist.join(name).to_str().unwrap(), SeqType::Protein).unwrap();
+    let read_list = |name: &str, negative: bool| {
+        let bytes = std::fs::read(idlist.join(name)).unwrap();
+        let mut warns = Vec::new();
+        let file = super::super::seqidlist::read_si_list(&bytes, &mut warns).unwrap();
+        super::super::filter::SeqidList { negative, file }
+    };
+    for alias in ["g_sqamb0", "g_sqamb1", "g_sqamb2"] {
+        let db = open_id(alias);
+        assert_eq!(lines(&db), [(1, 1)], "{alias}");
+        // 2. With -seqidlist or -negative_seqidlist, the ambiguous alias SEQIDLIST is refused.
+        for (list_name, negative) in [
+            ("u_np103v.txt", false),
+            ("u_np103_1.txt", false),
+            ("u_np103_2.txt", false),
+            ("u_p10102.txt", true),
+        ] {
+            let mut db = open_id(alias);
+            let mut warnings = Vec::new();
+            let err = db
+                .restrict_seqids(&read_list(list_name, negative), &mut warnings)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("an alias file's SEQIDLIST holds two differently spelled Seq-ids"),
+                "{alias} + {list_name} (neg={negative}): {err}"
+            );
+        }
+    }
+    // 3. Clean alias SEQIDLIST + ambiguous -seqidlist is refused without naming the alias file
+    // path, while ambiguous -negative_seqidlist succeeds (NCBI sorts negative_seqidlist with `<`).
+    let mut db = open_id("g_sq");
+    let mut warnings = Vec::new();
+    let err = db
+        .restrict_seqids(&read_list("u_np103_amb.txt", false), &mut warnings)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.starts_with(
+            "unsupported database: the search's -seqidlist holds two differently spelled Seq-ids"
+        ),
+        "{err}"
+    );
+    assert!(
+        !err.contains("sq_v5.txt"),
+        "must not name alias path: {err}"
+    );
+    let mut db = open_id("g_sq");
+    let mut warnings = Vec::new();
+    db.restrict_seqids(&read_list("u_np103_amb.txt", true), &mut warnings)
+        .unwrap();
+    assert_eq!(lines(&db), [(0, 1), (6, 1), (13, 1)]);
+}
+
+#[test]
+fn v5_alias_seqidlist_and_taxidlist_filter_oids_and_lines() {
+    let idlist = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/db_search/idlist");
+    let open_id = |name: &str, seqtype: SeqType| {
+        SeqDb::open(idlist.join(name).to_str().unwrap(), seqtype).unwrap()
+    };
+
+    // v5 SEQIDLIST selects the same OIDs and keeps only matching deflines.
+    let db_sq = open_id("g_sq", SeqType::Protein);
+    assert_eq!(lines(&db_sq), [(0, 1), (1, 1), (6, 1), (13, 1)]);
+    assert!(db_sq.drops_lineless_hits());
+
+    // Binary .bsl SEQIDLIST selects the exact same OIDs and lines as text.
+    let db_sqb = open_id("g_sqb", SeqType::Protein);
+    assert_eq!(lines(&db_sqb), [(0, 1), (1, 1), (6, 1), (13, 1)]);
+
+    // v5 TAXIDLIST selects OIDs with taxid 9606 and keeps only taxid-9606 deflines.
+    let db_tx = open_id("g_tx", SeqType::Protein);
+    let tx_oids: Vec<u32> = (0..db_tx.num_seqs()).map(|i| db_tx.oid(i).get()).collect();
+    assert_eq!(tx_oids, [0, 1, 3, 5, 6, 7, 10, 13]);
+    assert_eq!(db_tx.defline_set(0).unwrap().deflines.len(), 1);
+    assert!(db_tx.drops_lineless_hits());
+
+    // Combined SEQIDLIST + TAXIDLIST in one node ORs OIDs into Pass 2's f_bits and keeps lines
+    // matching either list (OID 0 keeps both its P10102.1 and taxid-9606 lines).
+    let db_sq_tx = open_id("g_sq_tx", SeqType::Protein);
+    assert_eq!(
+        lines(&db_sq_tx),
+        [
+            (0, 2),
+            (1, 1),
+            (3, 1),
+            (5, 1),
+            (6, 1),
+            (7, 1),
+            (10, 1),
+            (13, 1)
+        ]
+    );
+
+    // Version 5 TAXIDLIST over mismatched lookup/header taxids (lx): selects OIDs 1, 2, 3,
+    // erases every line of OIDs 1 and 2, and marks them as dropped hits.
+    let db_lx = open_id("lx_tx", SeqType::Protein);
+    assert_eq!(lines(&db_lx), [(1, 0), (2, 0), (3, 1)]);
+    assert!(!db_lx.keeps_line(0).unwrap());
+    assert!(!db_lx.keeps_line(1).unwrap());
+    assert!(db_lx.keeps_line(2).unwrap());
+
+    // Nucleotide v5 SEQIDLIST (LMDB acc2oid is case-sensitive, so lowercase ab000207.1 misses)
+    // and TAXIDLIST.
+    let db_nsq = open_id("n_sq", SeqType::Nucleotide);
+    assert_eq!(lines(&db_nsq), [(1, 1)]);
+    let db_ntx = open_id("n_tx", SeqType::Nucleotide);
+    assert_eq!(lines(&db_ntx), [(0, 1), (2, 1), (3, 1)]);
+}

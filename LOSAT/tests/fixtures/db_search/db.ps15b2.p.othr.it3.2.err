@@ -1,0 +1,4 @@
+Warning: [psiblast] q1 t: Composition-based score adjustment conditioned on sequence properties and unconditional composition-based score adjustment is not supported with PSSMs, resetting to default value of standard composition-based statistics 
+Error: NCBI C++ Exception:
+    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/objtools/alnmgr/alnsegments.cpp", line 168: Error: (CAlnException::eMergeFailure) ncbi::objects::CAlnMixSegments::Build() - CAlnMixSegments::Build(): Internal error: Infinite loop detected.
+

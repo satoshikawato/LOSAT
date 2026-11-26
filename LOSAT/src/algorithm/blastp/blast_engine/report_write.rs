@@ -645,6 +645,7 @@ pub(super) fn write_xml(
             .psi_search
             .as_ref()
             .and_then(|search| search.query_other_coding),
+        query_scopes: reports.query_scopes,
     };
     // The rows of the queries' HSPs (`query_rows`), one query at a time: the document
     // reads their letters query by query and formats them serially, so a window of
@@ -689,6 +690,9 @@ pub(super) fn write_xml(
                 },
                 query_gencode: None,
                 db_gencode: None,
+                // psiblast is an iterative search (`ProgramType::is_iterative`; its XML2 and
+                // JSON documents are refused, `psiblast::args::writes_outfmt`).
+                program_type: args.app.program_type(),
             };
             let mut document = crate::report::blast_xml2::Xml2Writer::for_run(
                 kind,
@@ -1021,6 +1025,9 @@ pub(super) fn write_pairwise(
                         .as_ref()
                         .map(|found| found.found.as_slice()),
                 },
+                anchored_sequences.as_ref().map(|sequences| {
+                    sequences as &dyn crate::report::query_anchored::ReportSequences
+                }),
             )
             .map_err(crate::cli::NativeError::of_writer)?;
             continue;

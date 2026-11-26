@@ -1,0 +1,3 @@
+usage: cleanup-blastdb-volumes.py [-h] -db DB -dbtype {prot,nucl} [-dry-run]
+                                  [-version] [-verbose]
+cleanup-blastdb-volumes.py: error: unrecognized arguments: --

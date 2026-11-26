@@ -1,0 +1,1 @@
+Seq-entry ::= seq { id { local str "plen" }, descr { title "prot length" }, inst { repr raw, mol aa, length 2, seq-data iupacaa "MKVL" } }

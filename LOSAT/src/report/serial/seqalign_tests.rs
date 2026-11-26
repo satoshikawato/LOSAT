@@ -1538,6 +1538,29 @@ fn the_pieces_of_a_seq_annot_cover_it_and_both_json_models_agree() {
     }
 }
 
+// Line PS item PS7c: the E-value and bit score that a Seq-align carries (`seqalign_scores`): an
+// E-value is 0 below 1e-180 (a negative one too) and stays the NaN that marks it missing
+// (`seqalign_evalue_absent`, which its readers take as -1), a bit score is missing below 0 and
+// the readers' -1 then.
+#[test]
+fn a_seqalign_lacks_a_nan_or_negative_score() {
+    use super::seqalign::{seqalign_evalue_absent, seqalign_evalue_read, seqalign_scores};
+    assert_eq!(seqalign_scores(1e-200, 5.0), (0.0, 5.0));
+    assert_eq!(seqalign_scores(0.25, 0.0), (0.25, 0.0));
+    let (absent, bits) = seqalign_scores(f64::NAN, f64::NAN);
+    assert!(seqalign_evalue_absent(absent));
+    assert_eq!((seqalign_evalue_read(absent), bits), (-1.0, -1.0));
+    assert_eq!(seqalign_scores(-1.0, -3.5), (0.0, -1.0));
+    assert_eq!(
+        seqalign_scores(f64::INFINITY, f64::INFINITY),
+        (f64::INFINITY, f64::INFINITY)
+    );
+    assert_eq!(
+        seqalign_scores(f64::NEG_INFINITY, f64::NEG_INFINITY),
+        (0.0, -1.0)
+    );
+}
+
 // Line DBID pfoff-4: BLAST XML's `catch` of an HSP whose subject's lookup throws writes the
 // Seq-align's identities as `GetAlnScores` reads them: the count, or -1 where the Seq-align has
 // no `num_ident` (a count below 0; psiblast's 0, which NCBI sets to -1 first), the one rule of
@@ -1606,6 +1629,23 @@ fn pssm_searches_name_their_type_and_psiblast_omits_zero_identities() {
     assert!(tblastn.contains("str \"psitblastn\""), "{tblastn}");
     assert!(tblastn.contains("int 11"), "{tblastn}");
     assert!(tblastn.contains("num_ident"), "{tblastn}");
+}
+
+// Line PS item PS7c (review S3): the absent E-value is the NaN of the lists of every program,
+// which the readers take as -1; every other value goes through `seqalign_evalue` (a value below
+// 1e-180, a negative one too, is 0), a computed -1 too.
+#[test]
+fn an_absent_evalue_is_a_nan_that_the_readers_take_as_minus_1() {
+    use super::seqalign::{seqalign_evalue_absent, seqalign_evalue_read, seqalign_scores};
+    assert!(seqalign_evalue_absent(f64::NAN));
+    assert!(!seqalign_evalue_absent(-1.0));
+    assert_eq!(seqalign_evalue_read(f64::NAN), -1.0);
+    assert_eq!(seqalign_evalue_read(-1.0), 0.0);
+    assert_eq!(seqalign_evalue_read(-3.5), 0.0);
+    assert_eq!(seqalign_evalue_read(1e-200), 0.0);
+    assert_eq!(seqalign_evalue_read(0.25), 0.25);
+    assert!(seqalign_scores(f64::NAN, -2.0).0.is_nan());
+    assert_eq!(seqalign_scores(-1.0, -2.0), (0.0, -1.0));
 }
 
 /// The Dense-seg of a translated HSP's rows (`translated_row_segments`, NCBI's

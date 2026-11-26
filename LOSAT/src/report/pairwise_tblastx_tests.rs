@@ -171,6 +171,7 @@ fn tblastx_hit(sum_n: i32) -> PairwiseHit {
         query_stored_gaps: Vec::new(),
         query_case: Default::default(),
         seqalign_num_ident: 60,
+        query_left_of_record: false,
     }
 }
 
@@ -1239,6 +1240,9 @@ fn a_subject_whose_load_throws_is_unknown_and_its_alignments_are_skipped() {
         None,
         DatabaseHeading::loaded(parsed[1].as_deref().unwrap(), false, 2, true),
         false,
+        &parsed,
+        None,
+        1,
         &hits[&1],
         &[1, 2],
         0..2,
@@ -1413,6 +1417,7 @@ fn a_blastp_report_written_in_windows_is_the_report_written_at_once() {
                     number: 2,
                     found_before,
                 },
+                None,
             )
             .unwrap();
         };
@@ -1535,6 +1540,7 @@ fn an_unreadable_query_writes_one_line_for_each_hsp_with_the_subjects_id() {
                 number,
                 found_before: None,
             },
+            None,
         )
         .unwrap();
         String::from_utf8(out).unwrap()
@@ -1583,4 +1589,127 @@ fn an_unreadable_query_writes_one_line_for_each_hsp_with_the_subjects_id() {
         lines(&readable).is_empty() && readable.contains(" Score = "),
         "{readable}"
     );
+}
+
+// NCBI BLAST+ 2.17.0 psiblast two-part description table (`psiblast_round::write_part`) uses the
+// same shown-HSP rule as the main description table (`shown_hsp` / `table_scores`): start from 0.0,
+// keep the first HSP with a strictly higher bit score, and show 0.0 / 0.0 when every HSP of a
+// subject has bit score <= 0 or NaN (PR #1638 review item 1).
+#[test]
+fn psiblast_round_two_part_table_shows_zero_when_all_bit_scores_are_negative() {
+    let karlin = KarlinParams {
+        lambda: 0.267,
+        k: 0.041,
+        h: 0.14,
+        ..KarlinParams::default()
+    };
+    let queries = [BlastpPairwiseQuery {
+        query_name: Vec::new(),
+        query_length: 61,
+        ungapped_karlin: karlin,
+        effective_search_space: 1_000_000,
+        valid: true,
+        batch_skipped: false,
+    }];
+    let query_titles: Vec<Arc<[u8]>> = vec![Arc::from(&b"q"[..])];
+    let subject_titles: Vec<Arc<[u8]>> = vec![
+        Arc::from(&b"neg_repeat"[..]),
+        Arc::from(&b"neg_new"[..]),
+        Arc::from(&b"pos_new"[..]),
+    ];
+    let parsed: Vec<Option<Arc<crate::report::db_subject::ParsedSubject>>> = vec![None, None, None];
+    let hit = |s_idx: u32, bit_score: f64, e_value: f64| {
+        let mut pairwise = PairwiseHit::from(Hit {
+            identity: 100.0,
+            length: 10,
+            mismatch: 0,
+            gapopen: 0,
+            q_start: 1,
+            q_end: 10,
+            s_start: 1,
+            s_end: 10,
+            e_value,
+            bit_score,
+            num_ident: 10,
+            query_frame: 0,
+            query_length: 61,
+            q_idx: 0,
+            s_idx,
+            raw_score: 50,
+            sort_query_offset: 0,
+            sort_query_end: 0,
+            sort_subject_offset: 0,
+            sort_subject_end: 0,
+            has_sort_offsets: false,
+            gap_info: None,
+            num_positives: 10,
+        });
+        pairwise.query_seq = Some("MKVLAAGIVG".to_string());
+        pairwise.subject_seq = Some("MKVLAAGIVG".to_string());
+        pairwise.subject_length = Some(185);
+        pairwise
+    };
+    let hits = [
+        hit(0, -1.0, 1e-5),
+        hit(0, -1.0, 2e-3),
+        hit(1, -1.0, 3e-4),
+        hit(2, 42.5, 1e-9),
+    ];
+    let report = BlastpPairwiseReport {
+        version: "PSIBLAST (test)".to_string(),
+        database_name: b"db".to_vec(),
+        database_num_sequences: 3,
+        database_total_letters: 555,
+        matrix_name: Some("BLOSUM62".to_string()),
+        gap_open: 11,
+        gap_extend: 1,
+        word_threshold: 0.0,
+        window_size: 40,
+        gapped_karlin: karlin,
+        gumbel: None,
+        gapped: true,
+        show_linked_set_size: false,
+        num_descriptions: 500,
+        num_alignments: 250,
+    };
+    let config = PairwiseConfig {
+        program: "psiblast".to_string(),
+        ..PairwiseConfig::default()
+    };
+    let mut out = Vec::new();
+    psiblast_round::write_psiblast_round_report(
+        &hits,
+        0..1,
+        &mut out,
+        &config,
+        &queries,
+        &query_titles,
+        &subject_titles,
+        &parsed,
+        &[],
+        &crate::report::db_subject::HitLoads::default(),
+        &report,
+        None,
+        None,
+        None,
+        psiblast_round::ReportRound {
+            number: 2,
+            found_before: Some(&[true, false, false]),
+        },
+        None,
+    )
+    .unwrap();
+    let text = String::from_utf8(out).unwrap();
+    let row = |name: &str| -> String {
+        text.lines()
+            .find(|line| line.starts_with(name))
+            .unwrap_or_else(|| panic!("missing row for {name} in:\n{text}"))
+            .to_string()
+    };
+    fn tokens(line: &str) -> Vec<&str> {
+        line.split_whitespace().collect()
+    }
+    assert_eq!(tokens(&row("neg_repeat")), vec!["neg_repeat", "0.0", "0.0"]);
+    assert_eq!(tokens(&row("neg_new")), vec!["neg_new", "0.0", "0.0"]);
+    assert_eq!(tokens(&row("pos_new")), vec!["pos_new", "42.5", "1e-09"]);
 }

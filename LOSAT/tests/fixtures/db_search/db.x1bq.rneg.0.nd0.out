@@ -1,0 +1,128 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: tests/db_search/x1bq/rneg_s.fna
+           2 sequences; 4,310 total letters
+
+
+
+Query= q0
+
+Length=60
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 210112
+
+
+Query= qA
+
+Length=60
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 210112
+
+
+Query= qB
+
+Length=30
+
+
+Sequence with id BL_ORD_ID:0 no longer exists in database...alignment skipped
+>s_norm
+Length=110
+
+ Score = 56.5 bits (30),  Expect = 8e-13
+ Identities = 30/30 (100%), Gaps = 0/30 (0%)
+ Strand=Plus/Minus
+
+Query  1   AATGGGTGTACGTATCGTTACGCTGGAATG  30
+           ||||||||||||||||||||||||||||||
+Sbjct  70  AATGGGTGTACGTATCGTTACGCTGGAATG  41
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 85800
+
+
+Query= qM
+
+Length=30
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 85800
+
+
+Query= qC
+
+Length=4200
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 17899152
+
+
+  Database: tests/db_search/x1bq/rneg_s.fna
+    Posted date:  Nov 25, 2026  4:21 PM
+  Number of letters in database: 4,310
+  Number of sequences in database:  2
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5
